@@ -10,7 +10,7 @@ import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau
 import {
   activeChatId,
   connectPickedFolder,
-  declineCookieBanner,
+  expectDesktopSurfaceBoundary,
   expectLauncher2Turn,
   expectModelBuilt,
   expectSignedIn,
@@ -70,7 +70,7 @@ test('builds an openrscad model on disk from the project chat', async () => {
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-    await declineCookieBanner(page);
+    await expectDesktopSurfaceBoundary(page);
     await expectSignedIn(page);
 
     await selectKernel(page, 'OpenSCAD');

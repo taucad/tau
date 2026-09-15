@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
+import { getKernelResultOutputSchema, screenshotOutputSchema, testModelOutputSchema } from '@taucad/chat';
 import { afterEach, expect, test } from 'vitest';
 import type { Locator, Page } from 'playwright';
 import { launchDesktopApp } from '#support/desktop-app.js';
@@ -48,7 +49,52 @@ const seedPrompt = 'Create a cube with a centered cylindrical cutout and verify 
 /** One word, no tools, cheap on every model — and unambiguous on screen. */
 const externalPrompt = 'Reply with the single word pong.';
 const cadInspectionPrompt =
-  'Create a simple 20 mm cube in main.scad using the relevant Tau skill and available capabilities. Do not export anything. Verify that it compiles, run its model requirements, capture the current viewport, and briefly report the results.';
+  'Create a simple 20 mm cube in main.scad. Do not export anything. Check your work and briefly report the result.';
+
+type DurableMessage = {
+  readonly id: string;
+  readonly role: string;
+  readonly toolName?: string;
+  readonly content?: unknown;
+  readonly isError?: boolean;
+};
+
+const durableMessages = (events: string): readonly DurableMessage[] => {
+  const messages: DurableMessage[] = [];
+  for (const line of events.split('\n')) {
+    if (line.trim().length === 0) {
+      continue;
+    }
+    const event = JSON.parse(line) as {
+      readonly type?: string;
+      readonly message?: DurableMessage;
+      readonly messageId?: string;
+      readonly replacement?: DurableMessage;
+    };
+    if (event.type === 'message.appended' && event.message) {
+      messages.push(event.message);
+    }
+    if (event.type === 'message.envelope-replaced' && event.replacement) {
+      const index = messages.findIndex((message) => message.id === event.messageId);
+      if (index !== -1) {
+        messages[index] = event.replacement;
+      }
+    }
+  }
+  return messages;
+};
+
+const toolResult = (events: string, toolName: string): unknown => {
+  const result = durableMessages(events).findLast(
+    (message) => message.role === 'tool-output' && message.toolName === toolName,
+  );
+  expect(result, `${toolName} did not produce a durable result`).toBeDefined();
+  if (result?.role !== 'tool-output') {
+    throw new Error(`${toolName} did not produce a durable result`);
+  }
+  expect(result.isError, `${toolName} failed`).toBe(false);
+  return result.content;
+};
 
 /**
  * Whether this machine can answer a Codex turn at all.
@@ -136,13 +182,25 @@ test.skipIf(!codexAvailable)('uses native Tau skills and tools through the Codex
     await expect.poll(() => readLog(eventsPathNow()), { timeout: 300_000 }).toMatch(/"state":"completed"/u);
 
     /* 4. Codex loaded the native skill and used Tau's ordinary MCP tools. The
-     * prompt names neither skill nor tool, so these are adoption assertions,
-     * not a coached transport probe. */
+     * prompt names neither skill, tool nor verification action, so these are
+     * adoption assertions, not a coached transport probe. */
     const events = readLog(eventsPathNow());
     expect(events).toMatch(/cad-openscad\/SKILL\.md/u);
-    for (const toolName of ['get_kernel_result', 'test_model', 'screenshot']) {
-      expect(events).toMatch(new RegExp(`"role":"tool-output"[^\\n]*"toolName":"${toolName}"`, 'u'));
+    const messages = durableMessages(events);
+    for (const toolName of ['get_kernel_result', 'screenshot']) {
+      expect(
+        messages.findLast((message) => message.role === 'tool-input' && message.toolName === toolName)?.content,
+      ).toMatchObject({ targetFile: 'main.scad' });
     }
+    expect(getKernelResultOutputSchema.parse(toolResult(events, 'get_kernel_result'))).toMatchObject({
+      status: 'ready',
+      kernelIssues: [],
+    });
+    const modelTest = testModelOutputSchema.parse(toolResult(events, 'test_model'));
+    expect(modelTest.total).toBeGreaterThan(0);
+    expect(modelTest.passed).toBe(modelTest.total);
+    const capture = screenshotOutputSchema.parse(toolResult(events, 'screenshot'));
+    expect(capture.images.every((image) => image.dataUrl.startsWith('data:image/'))).toBe(true);
     await expect
       .poll(() => finalizedRevisions(eventsPathNow()).at(-1)?.changedPaths.includes('main.scad'), { timeout: 60_000 })
       .toBe(true);

@@ -21,7 +21,7 @@ export const desktopE2EApiUrl = process.env['TAU_E2E_API_URL'] ?? 'http://localh
  * `global-setup.ts` — while each spec starts and stops its own stub. Its own port,
  * next to the API's :4014, so a `ui-e2e` run can hold :3013/:4013 at the same time.
  */
-export const desktopE2EProviderStubUrl = 'http://127.0.0.1:4015';
+export const desktopE2EProviderStubUrl = process.env['TAU_E2E_PROVIDER_STUB_URL'] ?? 'http://127.0.0.1:4015';
 
 /**
  * The provider credential the API is given while the upstream is stubbed.

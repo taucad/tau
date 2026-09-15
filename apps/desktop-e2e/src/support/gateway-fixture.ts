@@ -168,6 +168,11 @@ export const startGatewayFixture = async (
     void (async () => {
       try {
         const requestPath = new URL(request.url ?? '/', 'http://desktop-provider-stub.invalid').pathname;
+        if (request.method === 'GET' && requestPath === '/health/live') {
+          response.writeHead(200, { 'content-type': 'application/json' });
+          response.end('{"status":"ok"}');
+          return;
+        }
         if (request.method !== 'POST' || requestPath !== upstreamPath) {
           throw new Error(`Unexpected provider upstream request: ${request.method ?? 'unknown'} ${requestPath}`);
         }

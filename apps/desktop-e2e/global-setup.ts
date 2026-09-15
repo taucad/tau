@@ -111,6 +111,18 @@ export const setup = async (): Promise<() => void> => {
   environment['TAU_API_URL'] = desktopE2EApiUrl;
   environment['TAU_FRONTEND_URL'] = desktopE2EFrontendUrl;
   environment['TAU_TEST_MODE'] = 'true';
+  /* `TAU_GIT_ROOT` defaults to `.tau-git`, resolved against the API's cwd
+   * (`apps/api` here), so without this every run that pushes writes bare
+   * repositories into the source tree — 825 MB of them by the time W18's review
+   * counted (W18 review R7, defects review R12). `out/test-results` is this
+   * tier's own log home and is gitignored. Kept at teardown: a push that lands
+   * wrongly is only diagnosable from the volume it landed on. */
+  environment['TAU_GIT_ROOT'] = resolve(import.meta.dirname, '../../out/test-results/desktop-e2e/git-root');
+  /* P50, for the two-client tier only: the local `git http-backend` fixture
+   * charter AC18 is written around lives on `127.0.0.1`, which the proxy
+   * refuses by default. `apps/api-e2e` must never set this — three of its rows
+   * assert exactly those refusals. */
+  environment['TAU_GIT_REMOTE_ALLOW_PRIVATE'] = '1';
   /* D16/D19: the deterministic tier drives the *real* gateway — admission,
    * qualification, the catalog→supplier rewrite and metering all run — and only the
    * last hop lands on this suite's own stub. Process environment beats
@@ -133,6 +145,7 @@ export const setup = async (): Promise<() => void> => {
    * server-side is otherwise invisible from the Electron side of the glass. */
   const logDirectory = resolve(import.meta.dirname, '../../out/test-results/desktop-e2e');
   mkdirSync(logDirectory, { recursive: true });
+  mkdirSync(environment['TAU_GIT_ROOT'], { recursive: true });
   const apiLog = createWriteStream(resolve(logDirectory, 'api.log'), { flags: 'w' });
   // Nest also loads .env from cwd. Completed-package tests use the fixture's
   // private directory so neither Node nor Nest can read real API credentials.

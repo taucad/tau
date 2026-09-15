@@ -72,6 +72,12 @@ export const startUiServer = async (): Promise<UiServer> => {
   environment['TAU_API_URL'] = desktopE2EApiUrl;
   environment['TAU_WEBSOCKET_URL'] = desktopE2EApiUrl.replace(/^http/u, 'ws');
   environment['TAU_FRONTEND_URL'] = url;
+  /* P50's client half: `gitRemoteUrlProblem(url, { allowPrivate })` reads this
+   * through `ClientEnvironment`, and without it the Connect dialog refuses the
+   * `http://127.0.0.1:<port>` address charter AC18's `git http-backend` fixture
+   * lives on — before any request is made. Set only here, never in
+   * `apps/api-e2e`, whose proxy-refusal rows invert under it. */
+  environment['TAU_GIT_REMOTE_ALLOW_PRIVATE'] = '1';
 
   const logDirectory = resolve(workspaceRoot, 'out/test-results/desktop-e2e');
   mkdirSync(logDirectory, { recursive: true });

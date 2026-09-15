@@ -195,6 +195,7 @@ export const launchDesktopApp = async (options: {
        * `SectionViewTestBridge` — the viewport-framing observable. `ui-e2e`
        * sets the same variable on its UI server for the same reason. */
       TAU_DEBUG: process.env['TAU_DEBUG'] ?? 'true',
+      TAU_S3_ENDPOINT: process.env['TAU_S3_ENDPOINT'] ?? 'http://localhost:9000',
       ...(options.useProductionEndpointDefaults
         ? {}
         : {
@@ -208,9 +209,10 @@ export const launchDesktopApp = async (options: {
       ...options.env,
     },
   });
+  const child = application.process();
 
-  application.process().stdout?.on('data', (chunk: unknown) => output.push(String(chunk)));
-  application.process().stderr?.on('data', (chunk: unknown) => output.push(String(chunk)));
+  child.stdout?.on('data', (chunk: unknown) => output.push(String(chunk)));
+  child.stderr?.on('data', (chunk: unknown) => output.push(String(chunk)));
 
   /* Anything that throws between `launch` and the returned session would
    * otherwise strand a live Electron — and a stranded shell keeps polling the
@@ -241,7 +243,7 @@ export const launchDesktopApp = async (options: {
       }, pickedDirectory);
     }
   } catch (error) {
-    application.process().kill('SIGKILL');
+    child.kill('SIGKILL');
     /* The shell's own output is the only account of why it went away, and the
      * caller has no session to read it from. */
     throw new Error(`The desktop shell did not survive launch.\n${output.join('')}`, { cause: error });
@@ -269,7 +271,12 @@ export const launchDesktopApp = async (options: {
     await mkdir(directory, { recursive: true });
     if (tracing) {
       tracing = false;
-      await page.context().tracing.stop({ path: join(directory, 'trace.zip') });
+      /* A quit-path failure can close the renderer before diagnostics run;
+       * retain Home/process/event logs even when its trace can no longer stop. */
+      await page
+        .context()
+        .tracing.stop({ path: join(directory, 'trace.zip') })
+        .catch(() => undefined);
     }
     await page
       .screenshot({ path: join(directory, 'screenshot.png'), fullPage: true, timeout: 10_000 })
@@ -315,7 +322,6 @@ export const launchDesktopApp = async (options: {
         .tracing.stop()
         .catch(() => undefined);
     }
-    const child = application.process();
     const exited =
       child.exitCode === null && child.signalCode === null
         ? new Promise<void>((resolve) => {

@@ -28,6 +28,16 @@ test('binds every model response to an operation identity', async () => {
   expect(fixture.supplierModels).toStrictEqual([gatewayFixtureSupplierModelId]);
 });
 
+test('answers provider liveness without consuming a model round', async () => {
+  fixture = await startGatewayFixture();
+
+  const response = await fetch(`${desktopE2EProviderStubUrl}/health/live`);
+
+  expect(response.status).toBe(200);
+  await expect(response.json()).resolves.toStrictEqual({ status: 'ok' });
+  expect(fixture.gatewayRequests).toStrictEqual([]);
+});
+
 test('refuses a request the gateway did not rewrite to the supplier id', async () => {
   fixture = await startGatewayFixture();
 

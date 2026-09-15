@@ -20,9 +20,6 @@ import type { ProjectSessionCloseReason, ProjectSessionState } from '#machines/p
 /** The browser holds at most eight live projects (OQ-W25, operator ruling). */
 export const browserLiveProjectBudget = 8;
 
-/** How long quit waits for every session's `closing` before it cuts (F12). */
-export const sessionsQuitBoundMilliseconds = 15_000;
-
 /** Why a policy refused to close a project. @public */
 export type SessionsCloseRefusal = 'running' | 'dirty' | 'unpushed';
 
@@ -47,7 +44,6 @@ export type SessionsMachineInput = Readonly<{
   idleWindowMilliseconds?: number;
   startBoundMilliseconds?: number;
   closeFlushMilliseconds?: number;
-  quitBoundMilliseconds?: number;
 }>;
 
 /** Serializable state owned by sessionsMachine, plus its child refs. @public */
@@ -56,7 +52,6 @@ export type SessionsMachineContext = Readonly<{
   idleWindowMilliseconds: number;
   startBoundMilliseconds: number;
   closeFlushMilliseconds: number;
-  quitBoundMilliseconds: number;
   refs: Readonly<Record<string, ActorRefFrom<typeof projectSessionMachine>>>;
   status: Readonly<Record<string, SessionsProjectStatus>>;
   /**
@@ -105,7 +100,7 @@ export type SessionsMachineEvent =
 export type SessionsMachineEmitted =
   | { readonly type: 'liveSetChanged'; readonly projectIds: readonly string[] }
   | { readonly type: 'budgetRefused'; readonly projectId: string; readonly suggestions: readonly string[] }
-  | { readonly type: 'quiesced' };
+  | { readonly type: 'quiesced'; readonly forced: boolean };
 
 /** The app's sessions registry actor. @public */
 export type SessionsActorRef = ActorRefFrom<typeof sessionsMachine>;
@@ -173,7 +168,6 @@ export const sessionsMachine = setup({
     emitted: {} as SessionsMachineEmitted,
   },
   actors: { projectSession: projectSessionMachine },
-  delays: { quitBound: ({ context }) => context.quitBoundMilliseconds },
   guards: {
     isLive: ({ context, event }) => 'projectId' in event && context.refs[event.projectId] !== undefined,
     hasRoom: ({ context }) => Object.keys(context.refs).length < context.budget,
@@ -228,7 +222,6 @@ export const sessionsMachine = setup({
     idleWindowMilliseconds: input.idleWindowMilliseconds ?? 30 * 60 * 1000,
     startBoundMilliseconds: input.startBoundMilliseconds ?? 30_000,
     closeFlushMilliseconds: input.closeFlushMilliseconds ?? 5000,
-    quitBoundMilliseconds: input.quitBoundMilliseconds ?? sessionsQuitBoundMilliseconds,
     refs: {},
     status: {},
     touchOrder: {},
@@ -374,12 +367,15 @@ export const sessionsMachine = setup({
         }
       }),
       always: [{ guard: 'isQuiet', target: 'quiesced' }],
-      after: { quitBound: 'quiesced' },
-      on: { quitAnyway: 'quiesced' },
+      on: { quitAnyway: 'forced' },
     },
     quiesced: {
       type: 'final',
-      entry: emit({ type: 'quiesced' }),
+      entry: emit({ type: 'quiesced', forced: false }),
+    },
+    forced: {
+      type: 'final',
+      entry: emit({ type: 'quiesced', forced: true }),
     },
   },
 });

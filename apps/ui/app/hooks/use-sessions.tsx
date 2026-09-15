@@ -86,8 +86,8 @@ function SessionsQuitHold(): React.JSX.Element | undefined {
   const pending = useSelector(actor, (state) => sessionsPendingRevisions(state.context));
 
   useEffect(() => {
-    const subscription = actor.on('quiesced', () => {
-      reportDesktopQuiesced();
+    const subscription = actor.on('quiesced', (event) => {
+      reportDesktopQuiesced(event.forced);
       setHeld(false);
     });
     return () => {
@@ -97,6 +97,10 @@ function SessionsQuitHold(): React.JSX.Element | undefined {
 
   useEffect(() => {
     return onDesktopQuitRequested(() => {
+      if (actor.getSnapshot().status === 'done') {
+        reportDesktopQuiesced(false);
+        return;
+      }
       setHeld(true);
       actor.send({ type: 'quit' });
     });

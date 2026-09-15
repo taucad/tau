@@ -59,7 +59,7 @@ const harness = (options?: { readonly budget?: number; readonly closeNever?: boo
   });
 
   const actor = createActor(sessionsMachine.provide({ actors: { projectSession } }), {
-    input: { ...(options?.budget === undefined ? {} : { budget: options.budget }), quitBoundMilliseconds: 1000 },
+    input: { ...(options?.budget === undefined ? {} : { budget: options.budget }) },
   });
   const emitted: SessionsMachineEmitted[] = [];
   for (const type of ['liveSetChanged', 'budgetRefused', 'quiesced'] as const) {
@@ -289,7 +289,7 @@ describe('sessionsMachine', async () => {
 
     expect(closed.stopped).toEqual(['projA', 'projB']);
     expect(closed.actor.getSnapshot().matches('quiesced')).toBe(true);
-    expect(closed.emitted).toContainEqual({ type: 'quiesced' });
+    expect(closed.emitted).toContainEqual({ type: 'quiesced', forced: false });
     closed.actor.stop();
 
     const stuck = harness({ closeNever: true });
@@ -299,19 +299,20 @@ describe('sessionsMachine', async () => {
     expect(stuck.actor.getSnapshot().matches('quitting')).toBe(true);
 
     stuck.actor.send({ type: 'quitAnyway' });
-    expect(stuck.actor.getSnapshot().matches('quiesced')).toBe(true);
+    expect(stuck.actor.getSnapshot().matches('forced')).toBe(true);
+    expect(stuck.emitted).toContainEqual({ type: 'quiesced', forced: true });
     stuck.actor.stop();
   });
 
-  it('quiesces at the bound when a session never finishes closing', async () => {
+  it('does not claim quiescence when a session never finishes closing', async () => {
     const { actor, emitted } = harness({ closeNever: true });
     await openIdle(actor, 'projA');
     actor.send({ type: 'quit' });
 
     await vi.advanceTimersByTimeAsync(1100);
 
-    expect(actor.getSnapshot().matches('quiesced')).toBe(true);
-    expect(emitted).toContainEqual({ type: 'quiesced' });
+    expect(actor.getSnapshot().matches('quitting')).toBe(true);
+    expect(emitted).not.toContainEqual(expect.objectContaining({ type: 'quiesced' }));
     actor.stop();
   });
 

@@ -1001,7 +1001,7 @@ describe('sessions composition', () => {
     await settle();
 
     expect(sessionsActor.getSnapshot().matches('quiesced')).toBe(true);
-    expect(emitted).toContainEqual({ type: 'quiesced' });
+    expect(emitted).toContainEqual({ type: 'quiesced', forced: false });
     /* Quit runs the closing with the sync flush, per session, before it is
      * quiesced — never a bare stop (D31). */
     expect(workerFrames.filter((frame) => frame.type === 'computeStoreRelease')).toHaveLength(2);
@@ -1373,7 +1373,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     });
     await settle();
 
-    expect(freshStore.sessionsActor.getSnapshot().matches('quiesced')).toBe(true);
+    expect(freshStore.sessionsActor.getSnapshot().matches('forced')).toBe(true);
     expect(answers).toEqual(['quiesced']);
     expect(view.queryByRole('status')).toBeNull();
 

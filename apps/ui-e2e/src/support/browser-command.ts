@@ -61,7 +61,11 @@ type Session = {
 
 const sessions = new Map<string, Session>();
 const hostFixtureProcesses = new Map<string, ChildProcess>();
-const outputRoot = resolve('out/test-results/vitest-browser/apps/ui-e2e/test-output');
+const outputRoot = resolve(
+  import.meta.dirname,
+  '../../../..',
+  'out/test-results/vitest-browser/apps/ui-e2e/test-output',
+);
 
 const tauApiUrl = process.env['TAU_E2E_API_URL'] ?? 'http://localhost:4000';
 const execFileAsync = promisify(execFile);
@@ -592,6 +596,7 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<[script?: readonly
   // models catalog is control-plane and is stubbed with the real catalog rows
   // so provider-aware wire gating sees genuine provider ids without a live API.
   const { isModelListEntryEnabled, modelList, modelListEntryToModel } =
+    // eslint-disable-next-line @nx/enforce-module-boundaries -- This e2e-only catalog stub deliberately uses the API's real rows.
     await import('../../../api/app/api/models/model.constants.js');
   const catalog = Object.values(modelList)
     .flatMap((entries) => Object.values(entries))
@@ -1126,7 +1131,9 @@ export const uiEmulateForcedColors: BrowserCommand<[forcedColors: 'active' | 'no
 export const uiClickTarget: BrowserCommand<
   [selector: string, options?: TargetClickOptions, surface?: TargetSurface]
 > = async (commandContext, selector, options, surface) => {
-  await pageFor(sessionFor(commandContext), surface).locator(selector).click(options);
+  const { touch = false, ...clickOptions } = options ?? {};
+  const locator = pageFor(sessionFor(commandContext), surface).locator(selector);
+  await (touch ? locator.tap() : locator.click(clickOptions));
 };
 
 export const uiFillTarget: BrowserCommand<[selector: string, value: string, surface?: TargetSurface]> = async (

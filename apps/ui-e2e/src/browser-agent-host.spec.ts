@@ -127,9 +127,28 @@ const readActiveProjectTree = async (backend: ActiveBackend): Promise<Readonly<R
     : readProjectTree(project);
 };
 
-/** Materialized run trees under `.tau/workspaces/run_<id>/tree` exist only in branch mode. */
+/**
+ * Materialized run trees, in the layout that replaced `.tau/workspaces` (S7).
+ *
+ * A linked checkout is `.tau/checkouts/<checkoutId>/tree/…`; the retired
+ * `.tau/workspaces/run_<id>/tree` spelling is written by nothing (W14 review
+ * R2, and `chat-workspace-authority-provider.tsx:24` — "There is no
+ * materialized workspace any more and no claim file"). Branch mode is the only
+ * placement that materializes one at all.
+ */
 const runTreePaths = (tree: Readonly<Record<string, string>>): readonly string[] =>
-  Object.keys(tree).filter((path) => /^\/\.tau\/workspaces\/run_[^/]+\/tree\//u.test(path));
+  Object.keys(tree).filter((path) => /^\/\.tau\/checkouts\/[^/]+\/tree\//u.test(path));
+
+/**
+ * Settled turns, as the chat's own durable log records them.
+ *
+ * There is no publication file. A settlement is a `turn.finalized` record in
+ * `.tau/chats/<id>/events.jsonl` carrying the revision it recorded and the
+ * paths it changed (`agent-host-event-projection.ts:288`), which is the same
+ * fact the retired `.tau/workspaces/publications/<id>.json` used to hold.
+ */
+const settledTurns = (tree: Readonly<Record<string, string>>): readonly LogEvent[] =>
+  eventLog(tree).filter((event) => event.type === 'turn.finalized');
 
 const waitForPublishedTree = async (
   backend: ActiveBackend,
@@ -142,8 +161,7 @@ const waitForPublishedTree = async (
         tree = await readActiveProjectTree(backend);
         return (
           tree['/browser-host-proof.txt'] === 'created by the browser agent host\n' &&
-          Object.keys(tree).filter((path) => path.startsWith('/.tau/workspaces/publications/')).length >=
-            minimumPublications
+          settledTurns(tree).length >= minimumPublications
         );
       },
       { timeout: 60_000 },
@@ -166,6 +184,9 @@ type LogEvent = {
   readonly type: string;
   readonly state?: string;
   readonly storageDurability?: string;
+  /** `turn.finalized` only: the revision the settlement recorded, and its paths. */
+  readonly revisionId?: string;
+  readonly changedPaths?: readonly string[];
   readonly detail?: { readonly message?: string; readonly code?: string; readonly status?: number };
 };
 
@@ -200,17 +221,20 @@ const expectNoSettlementFailures = async (): Promise<void> => {
   expect(consoleMessages.filter(({ text }) => text.includes('exact run settlement failed'))).toEqual([]);
 };
 
+/**
+ * The turn was recorded authoritatively — S7's layout, not the retired one.
+ *
+ * The old assertion read `.tau/workspaces/publications/<id>.json` and checked
+ * its `publication.status === 'updated'` against `headRevisionId`; that file
+ * has no writer. What carries the same guarantee now is the settlement record
+ * in the chat's durable log: a revision id (the cut was recorded and the branch
+ * head moved to it) and the paths that turn changed.
+ */
 const assertPublication = (tree: Readonly<Record<string, string>>): void => {
-  const publicationPath = Object.keys(tree).find((path) => path.startsWith('/.tau/workspaces/publications/'));
-  expect(publicationPath).toBeDefined();
-  const publication = JSON.parse(tree[publicationPath!]!) as {
-    readonly changedPaths: readonly string[];
-    readonly revisionId: string;
-    readonly publication: { readonly status: string; readonly headRevisionId?: string };
-  };
-  expect(publication.changedPaths).toContain('browser-host-proof.txt');
-  expect(publication.publication.status).toBe('updated');
-  expect(publication.publication.headRevisionId).toBe(publication.revisionId);
+  const settled = settledTurns(tree).at(-1);
+  expect(settled).toBeDefined();
+  expect(settled?.revisionId).toBeDefined();
+  expect(settled?.changedPaths).toContain('browser-host-proof.txt');
 };
 
 describe.each([
@@ -339,15 +363,21 @@ describe('storage ladder', () => {
   });
 });
 
-/** The one claim the seeded chat holds, parsed from the live project tree. */
-const seededClaim = async (): Promise<
-  { readonly admitted: boolean; readonly runId?: string; readonly mode?: string } | undefined
-> => {
+/**
+ * The lease the seeded chat's turn holds while it runs (S7).
+ *
+ * The retired `.tau/workspaces/claims/<id>.json` is written by nothing. Its
+ * successor is the turn's lease at `.tau/runs/<runId>.json` — taken before the
+ * turn is allowed to run and retired once it settles — so polling this to
+ * `undefined` asserts what the claim assertion asserted: the seeded turn
+ * finished and left nothing held.
+ */
+const seededLease = async (): Promise<{ readonly runId?: string; readonly chatId?: string } | undefined> => {
   const tree = await readActiveProjectTree('home');
-  const claim = Object.entries(tree).find(([path]) => path.startsWith('/.tau/workspaces/claims/'));
-  return claim === undefined
+  const lease = Object.entries(tree).find(([path]) => /^\/\.tau\/runs\/[^/]+\.json$/u.test(path));
+  return lease === undefined
     ? undefined
-    : (JSON.parse(claim[1]) as { readonly admitted: boolean; readonly runId?: string; readonly mode?: string });
+    : (JSON.parse(lease[1]) as { readonly runId?: string; readonly chatId?: string });
 };
 
 describe('seeded first turn', () => {
@@ -374,7 +404,7 @@ describe('seeded first turn', () => {
     // Admission is the contract under test: a seeded turn used to leave its
     // claim `{ admitted: false }` forever, so settlement never published and the
     // next submit hit the admission wait.
-    await expect.poll(seededClaim, { timeout: 60_000, interval: 250 }).toMatchObject({
+    await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toMatchObject({
       mode: 'local',
       admitted: true,
     });
@@ -384,7 +414,7 @@ describe('seeded first turn', () => {
     // never bound a run, and "New project → first prompt" produced nothing.
     // A claim alone proves nothing: an API-placed dispatch admits one too.
     await expect.poll(readGatewayRequestCount, { timeout: 60_000 }).toBe(1);
-    await expect.poll(seededClaim, { timeout: 60_000, interval: 250 }).toMatchObject({
+    await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toMatchObject({
       runId: expect.stringMatching(/^req_/u) as unknown,
     });
     await target.expectVisible(selectors.getByText(partialText, { exact: true }), 120_000);
@@ -400,7 +430,7 @@ describe('seeded first turn', () => {
         .map(({ state }) => state),
     ).toEqual(['admitted', 'running', 'completed']);
     // Settlement releases the claim it admitted; a retained one blocks the next turn.
-    await expect.poll(seededClaim, { timeout: 60_000, interval: 250 }).toBeUndefined();
+    await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toBeUndefined();
     // A released claim proves settlement finished, not that it finished first
     // time: the retry budget is per effect instance, so a failing settlement
     // still publishes once the effect re-runs. The console is the only place
@@ -447,15 +477,9 @@ describe('durable log reattach after a reload', () => {
       )
       .toBe(true);
     await expect
-      .poll(
-        async () =>
-          Object.keys(await readActiveProjectTree('home')).filter((path) =>
-            path.startsWith('/.tau/workspaces/publications/'),
-          ).length,
-        { timeout: 120_000 },
-      )
+      .poll(async () => settledTurns(await readActiveProjectTree('home')).length, { timeout: 120_000 })
       .toBeGreaterThan(0);
-    await expect.poll(seededClaim, { timeout: 60_000, interval: 250 }).toBeUndefined();
+    await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toBeUndefined();
     await assertNoApiRunCalls();
   });
 
@@ -493,7 +517,7 @@ describe('durable log reattach after a reload', () => {
     await target.type(composer, 'Create the browser-host proof file.');
     await target.click(selectors.getByCss('button:has(svg.lucide-arrow-up)').last());
     await expect.poll(readGatewayRequestCount, { timeout: 120_000 }).toBeGreaterThan(priorRequests);
-    await expect.poll(seededClaim, { timeout: 60_000, interval: 250 }).toMatchObject({ admitted: true });
+    await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toMatchObject({ admitted: true });
   });
 });
 

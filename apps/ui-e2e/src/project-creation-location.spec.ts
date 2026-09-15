@@ -91,6 +91,41 @@ const expectManifest = (
 };
 
 describe('project creation locations', () => {
+  test('restores the Home draft across reload and clears it before navigation after create', async ({ skip }) => {
+    skip(server.browser !== 'chromium', 'File System Access workflows run in Chromium.');
+    await installProjectCreationFixture({
+      pickerFixture: 'home-composer-record',
+      projectName: 'Composer Record Project',
+    });
+    await openHomepage();
+    await selectReplicad();
+    const editor = editorFor();
+    await target.fill(editor, 'Persist this Home composer draft');
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 300);
+    });
+
+    await target.reload();
+    await target.expectVisible(editorFor(), 60_000);
+    expect(await target.textContent(editorFor())).toBe('Persist this Home composer draft');
+    const eventBaseline = await target.events();
+    await target.press(editorFor(), 'Enter');
+    await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
+    await target.expectVisible(selectors.getByRole('button', { name: 'Toggle Workbench lane' }).first(), 60_000);
+    const events = await target.events();
+    const projectProviderErrors = [
+      ...events.pageErrors.slice(eventBaseline.pageErrors.length),
+      ...events.consoleMessages.slice(eventBaseline.consoleMessages.length).map(({ text }) => text),
+    ].filter((message) => message.includes('useProject must be used within a ProjectProvider'));
+    expect(projectProviderErrors).toEqual([]);
+
+    await openHomepage();
+    expect(await target.textContent(editorFor())).toBe('');
+    const state = await readProjectStorageState();
+    expect(state.configs).toHaveLength(1);
+    expect(JSON.stringify(state)).not.toMatch(/homepage_main_chat_resource|chat_homepage_main/u);
+  });
+
   test('uses Home on first-use homepage creation and writes Home OPFS bytes', async ({ skip }) => {
     skip(server.browser !== 'chromium', 'File System Access workflows run in Chromium.');
     await installProjectCreationFixture({

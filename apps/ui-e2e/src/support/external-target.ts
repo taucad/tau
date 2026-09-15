@@ -44,6 +44,7 @@ export type TargetState = {
   readonly value?: string;
   readonly visible: boolean;
 };
+export type TargetWorker = Readonly<{ identity: string; url: string }>;
 export type TargetDiagnostics = {
   readonly consoleMessages: ReadonlyArray<{
     readonly text: string;
@@ -124,6 +125,7 @@ declare module 'vitest/browser' {
     uiAddCookies(cookies: readonly TargetCookie[]): Promise<void>;
     uiAddInitScript(source: string, argument?: unknown): Promise<void>;
     uiCaptureTargetDiagnostics(): Promise<TargetDiagnostics>;
+    uiTargetWorkers(urlSubstring?: string, surface?: TargetSurface): Promise<readonly TargetWorker[]>;
     uiChooseTargetFile(
       triggerSelector: string,
       file: {
@@ -314,6 +316,9 @@ export const sampleCameraDuringClick = <Camera>(selector: TargetSelector, frameC
   server.commands.uiSampleCameraDuringClick(selectorFor(selector), frameCount) as Promise<Camera[]>;
 export const openSecondary = (path: string): Promise<void> => server.commands.uiOpenSecondaryTarget(path);
 export const closeSecondary = (): Promise<void> => server.commands.uiCloseSecondaryTarget();
+/** The dedicated workers the page is running, by stable instance identity and script URL (V21). */
+export const workers = (urlSubstring?: string, surface?: TargetSurface): Promise<readonly TargetWorker[]> =>
+  server.commands.uiTargetWorkers(urlSubstring, surface);
 export const cookies = (): Promise<TargetCookie[]> => server.commands.uiCookies();
 export const addCookies = (values: readonly TargetCookie[]): Promise<void> => server.commands.uiAddCookies(values);
 export const authenticateTauTestUser = (account: TargetTauTestAccount): Promise<void> =>

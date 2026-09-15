@@ -278,6 +278,86 @@ describe('billing database protections and real command', () => {
     }
   });
 
+  it('should provision an exact supplier budget proposal idempotently and reject drift', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tau-billing-budgets-'));
+    const file = join(directory, 'budgets.json');
+    const proposal = {
+      schemaVersion: 1,
+      environment: 'prod-eu',
+      funding: [
+        { id: 'command-spend-funding', kind: 'spend', scope: 'command', fundedLifetime: '500000000000000' },
+        { id: 'command-risk-funding', kind: 'risk', scope: 'command', fundedLifetime: '500000000000000' },
+      ],
+      budgets: [
+        {
+          id: 'command-spend',
+          fundingId: 'command-spend-funding',
+          kind: 'spend',
+          scope: 'command',
+          periodStart: '2026-01-01T00:00:00.000Z',
+          periodEnd: '2030-01-01T00:00:00.000Z',
+          quantum: 'pico_usd',
+          approvedCap: '500000000000000',
+        },
+        {
+          id: 'command-risk',
+          fundingId: 'command-risk-funding',
+          kind: 'risk',
+          scope: 'command',
+          periodStart: '2026-01-01T00:00:00.000Z',
+          periodEnd: '2030-01-01T00:00:00.000Z',
+          quantum: 'pico_usd',
+          approvedCap: '500000000000000',
+        },
+      ],
+    };
+    const environment = Object.fromEntries([
+      ['PATH', process.env['PATH']],
+      ['BILLING_DATABASE_URL', databaseUrl],
+      ['BILLING_ENVIRONMENT', 'prod-eu'],
+      ['TAU_CLOUD_ENABLED', 'true'],
+    ]);
+    const run = () =>
+      spawnSync(
+        process.execPath,
+        [
+          resolve(import.meta.dirname, '../../dist/billing-command.js'),
+          'provision-budgets',
+          '--environment',
+          'prod-eu',
+          '--file',
+          file,
+        ],
+        {
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the child receives only string variables
+          env: environment as NodeJS.ProcessEnv,
+          encoding: 'utf8',
+        },
+      );
+    try {
+      writeFileSync(file, JSON.stringify(proposal));
+      expect(run()).toMatchObject({ status: 0, stderr: '' });
+      expect(JSON.parse(run().stdout)).toEqual({
+        environment: 'prod-eu',
+        budgets: ['command-spend', 'command-risk'],
+      });
+      writeFileSync(
+        file,
+        JSON.stringify({
+          ...proposal,
+          budgets: proposal.budgets.map((budget) =>
+            budget.kind === 'spend' ? { ...budget, approvedCap: '499999999999999' } : budget,
+          ),
+        }),
+      );
+      const drift = run();
+      expect(drift.status).toBe(1);
+      expect(drift.stderr).toContain('Existing billing budget differs from proposal: command-spend');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('should enforce financial constraints and deny runtime mutation of immutable facts', async () => {
     const account = randomUUID();
     const otherAccount = randomUUID();

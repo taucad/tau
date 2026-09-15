@@ -396,7 +396,11 @@ export async function dispatchStripeLegOnce(stripe: Stripe, leg: StripeCreateLeg
     }
     case 'payment_intent': {
       assertPaymentIntentRequest(leg.request, leg.onSessionSaveConsent === true, leg.automaticReload === true);
-      return { kind: leg.kind, object: await stripe.paymentIntents.create(leg.request, options) };
+      return {
+        kind: leg.kind,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Stripe owns this request field name.
+        object: await stripe.paymentIntents.create({ ...leg.request, payment_method_types: ['card'] }, options),
+      };
     }
     case 'portal': {
       return { kind: leg.kind, object: await stripe.billingPortal.sessions.create(leg.request, options) };

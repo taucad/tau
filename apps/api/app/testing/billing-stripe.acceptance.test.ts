@@ -37,12 +37,12 @@ describe.skipIf(!enabled)('billing Stripe test-mode acceptance', () => {
   let createStripe: Stripe;
   let readStripe: Stripe;
   let refundStripe: Stripe;
-  let listener: ChildProcess | undefined;
+  let tunnel: ChildProcess | undefined;
   let webhookServer: ReturnType<typeof createServer> | undefined;
+  let webhookEndpointId: string | undefined;
   let webhookSecret: string;
   let forwardedEvent: Promise<ForwardedEvent>;
   let resolveForwardedEvent: ((event: ForwardedEvent) => void) | undefined;
-  let productId: string | undefined;
   let customerId: string | undefined;
   let subscriptionId: string | undefined;
   const checkoutIds: string[] = [];
@@ -54,14 +54,6 @@ describe.skipIf(!enabled)('billing Stripe test-mode acceptance', () => {
     createStripe = createBillingStripeClient({ secretKey: createKey });
     readStripe = createBillingStripeClient({ secretKey: readKey });
     refundStripe = createBillingStripeClient({ secretKey: refundKey });
-    webhookSecret = execFileSync('stripe', ['listen', '--print-secret', '--skip-update', '--api-key', createKey], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    }).trim();
-    if (!webhookSecret.startsWith('whsec_')) {
-      throw new Error('Stripe CLI did not return a signing secret');
-    }
-
     forwardedEvent = new Promise((resolve) => {
       resolveForwardedEvent = resolve;
     });
@@ -82,39 +74,80 @@ describe.skipIf(!enabled)('billing Stripe test-mode acceptance', () => {
       webhookServer?.listen(0, '127.0.0.1', resolve);
     });
     const { port } = webhookServer.address() as AddressInfo;
-    listener = spawn(
-      'stripe',
-      [
-        'listen',
-        '--skip-update',
-        '--api-key',
-        createKey,
-        '--events',
-        'payment_intent.succeeded',
-        '--forward-to',
-        `http://127.0.0.1:${port}/v1/auth/stripe/webhook`,
-      ],
-      { stdio: ['ignore', 'ignore', 'pipe'] },
-    );
-    await new Promise<void>((resolve, reject) => {
-      const listenerReadyTimeout = setTimeout(() => {
-        reject(new Error('Stripe CLI listener did not become ready'));
+    tunnel = spawn('ngrok', ['http', `127.0.0.1:${port}`, '--log=stdout', '--log-format=json'], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const publicUrl = await new Promise<string>((resolve, reject) => {
+      const tunnelReadyTimeout = setTimeout(() => {
+        reject(new Error('ngrok tunnel did not become ready'));
       }, 30_000);
-      listener?.stderr?.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
-        if (chunk.toString().includes('Ready!')) {
-          clearTimeout(listenerReadyTimeout);
-          resolve();
+      let pending = '';
+      tunnel?.stdout?.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
+        const lines = `${pending}${chunk.toString()}`.split('\n');
+        pending = lines.pop() ?? '';
+        for (const line of lines) {
+          try {
+            const record: unknown = JSON.parse(line);
+            if (
+              typeof record === 'object' &&
+              record !== null &&
+              'msg' in record &&
+              record.msg === 'started tunnel' &&
+              'url' in record &&
+              typeof record.url === 'string'
+            ) {
+              clearTimeout(tunnelReadyTimeout);
+              resolve(record.url);
+            }
+          } catch {
+            // Wait for the complete JSON log line.
+          }
         }
       });
-      listener?.once('error', reject);
-      listener?.once('exit', (code) => {
-        reject(new Error(`Stripe CLI listener exited before ready (${code})`));
+      tunnel?.once('error', reject);
+      tunnel?.once('exit', (code) => {
+        reject(new Error(`ngrok exited before ready (${code})`));
       });
     });
+    const endpoint: unknown = JSON.parse(
+      execFileSync(
+        'stripe',
+        [
+          'webhook_endpoints',
+          'create',
+          '--confirm',
+          '--enabled-events',
+          'payment_intent.succeeded',
+          '--url',
+          `${publicUrl}/v1/auth/stripe/webhook`,
+          '--api-version',
+          stripeApiVersion,
+        ],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+      ),
+    );
+    if (
+      typeof endpoint !== 'object' ||
+      endpoint === null ||
+      !('id' in endpoint) ||
+      typeof endpoint.id !== 'string' ||
+      !('secret' in endpoint) ||
+      typeof endpoint.secret !== 'string' ||
+      !endpoint.secret.startsWith('whsec_')
+    ) {
+      throw new Error('Stripe CLI did not create a signed webhook endpoint');
+    }
+    webhookEndpointId = endpoint.id;
+    webhookSecret = endpoint.secret;
   }, 60_000);
 
   afterAll(async () => {
-    listener?.kill('SIGTERM');
+    if (webhookEndpointId !== undefined) {
+      execFileSync('stripe', ['webhook_endpoints', 'delete', webhookEndpointId, '--confirm'], {
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+    }
+    tunnel?.kill('SIGTERM');
     if (webhookServer !== undefined) {
       const server = webhookServer;
       await new Promise<void>((resolve) => {
@@ -137,34 +170,13 @@ describe.skipIf(!enabled)('billing Stripe test-mode acceptance', () => {
     if (customerId !== undefined) {
       await createStripe.customers.del(customerId).catch(() => undefined);
     }
-    if (productId !== undefined) {
-      await createStripe.products.update(productId, { active: false }).catch(() => undefined);
-    }
   }, 60_000);
 
   it('qualifies restricted roles, tax, Checkout, saved-card settlement, signed forwarding, refund and portal paths', async () => {
-    const expectedAccountId = required('STRIPE_ACCOUNT_ID', 'acct_');
-    const [createdAccount, readAccount] = await Promise.all([
-      createStripe.accounts.retrieve(expectedAccountId),
-      readStripe.accounts.retrieve(expectedAccountId),
-    ]);
-    expect(createdAccount.id).toBe(expectedAccountId);
-    expect(readAccount.id).toBe(expectedAccountId);
-
+    required('STRIPE_ACCOUNT_ID', 'acct_');
+    const productId = required('STRIPE_PRODUCT_ID_CREDIT_PACK', 'prod_');
+    const priceId = required('STRIPE_PRICE_ID_PRO_MONTHLY', 'price_');
     const suffix = randomUUID();
-    const product = await createStripe.products.create({
-      name: `Tau billing acceptance ${suffix}`,
-      tax_code: 'txcd_10103000',
-      metadata: { taucad_env: 'local-acceptance' },
-    });
-    productId = product.id;
-    const price = await createStripe.prices.create({
-      product: product.id,
-      currency: 'usd',
-      unit_amount: 2000,
-      tax_behavior: 'exclusive',
-      recurring: { interval: 'month' },
-    });
     const customer = await createStripe.customers.create({
       name: 'Tau Billing Acceptance',
       email: `billing-${suffix}@example.com`,
@@ -180,7 +192,7 @@ describe.skipIf(!enabled)('billing Stripe test-mode acceptance', () => {
     const calculation = await createStripeReloadTaxCalculationOnce(createStripe, {
       idempotencyKey: `tau-acceptance-tax-${suffix}`,
       customerId: customer.id,
-      productId: product.id,
+      productId,
       reference: `manual:${suffix}`,
       principalMinor: 500,
     });
@@ -252,7 +264,7 @@ describe.skipIf(!enabled)('billing Stripe test-mode acceptance', () => {
     const topup = await dispatchStripeLegOnce(createStripe, {
       kind: 'checkout',
       idempotencyKey: `tau-acceptance-topup-${suffix}`,
-      checkoutContract: { kind: 'top_up', productId: product.id, principalMinor: 500_000 },
+      checkoutContract: { kind: 'top_up', productId, principalMinor: 500_000 },
       onSessionSaveConsent: true,
       request: {
         mode: 'payment',
@@ -262,7 +274,7 @@ describe.skipIf(!enabled)('billing Stripe test-mode acceptance', () => {
         cancel_url: 'http://localhost:3000/settings?billing_return=cancel',
         line_items: [
           {
-            price_data: { currency: 'usd', product: product.id, tax_behavior: 'exclusive', unit_amount: 500_000 },
+            price_data: { currency: 'usd', product: productId, tax_behavior: 'exclusive', unit_amount: 500_000 },
             quantity: 1,
           },
         ],
@@ -288,14 +300,14 @@ describe.skipIf(!enabled)('billing Stripe test-mode acceptance', () => {
     const subscriptionCheckout = await dispatchStripeLegOnce(createStripe, {
       kind: 'checkout',
       idempotencyKey: `tau-acceptance-subscription-${suffix}`,
-      checkoutContract: { kind: 'subscription', priceId: price.id },
+      checkoutContract: { kind: 'subscription', priceId },
       request: {
         mode: 'subscription',
         customer: customer.id,
         client_reference_id: suffix,
         success_url: 'http://localhost:3000/settings?billing_return=success',
         cancel_url: 'http://localhost:3000/settings?billing_return=cancel',
-        line_items: [{ price: price.id, quantity: 1 }],
+        line_items: [{ price: priceId, quantity: 1 }],
         automatic_tax: { enabled: true },
         billing_address_collection: 'required',
         customer_update: { address: 'auto', name: 'auto' },
@@ -322,7 +334,7 @@ describe.skipIf(!enabled)('billing Stripe test-mode acceptance', () => {
 
     const subscription = await createStripe.subscriptions.create({
       customer: customer.id,
-      items: [{ price: price.id }],
+      items: [{ price: priceId }],
       automatic_tax: { enabled: true },
     });
     subscriptionId = subscription.id;

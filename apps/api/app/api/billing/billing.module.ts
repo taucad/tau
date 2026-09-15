@@ -82,10 +82,12 @@ const providerUpstreamFetch =
     },
     {
       provide: BillingAccountClosureService,
-      inject: [DatabaseService, stripeReadClientKey, ConfigService],
+      inject: [DatabaseService, stripeReadClientKey, stripeClientKey, ConfigService],
+      // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest resolves four distinct provider tokens.
       useFactory(
         database: DatabaseService,
         sourceStripe: Stripe,
+        protectedStripe: Stripe,
         config: ConfigService<Environment, true>,
       ): BillingAccountClosureService {
         const parsed = financialEnvironmentSchema.safeParse(config.get('BILLING_ENVIRONMENT', { infer: true }));
@@ -98,6 +100,7 @@ const providerUpstreamFetch =
                 {
                   database: database.database,
                   sourceStripe,
+                  protectedStripe,
                   environment,
                   stripeAccountId: config.get('STRIPE_ACCOUNT_ID', { infer: true }),
                   livemode: config.get('STRIPE_LIVEMODE', { infer: true }),

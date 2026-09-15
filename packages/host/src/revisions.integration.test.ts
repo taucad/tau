@@ -300,7 +300,9 @@ describe.runIf(hasGit)('a disk host that cannot record', () => {
         .toBe(1);
     } finally {
       process.env['PATH'] = previousPath;
-      await missing?.release();
+      if (missing !== undefined) {
+        await expect(missing.release()).rejects.toThrow('checkout was not ready');
+      }
     }
     const unavailable = events.find((event) => event.type === 'revision.unavailable');
     expect(unavailable).toMatchObject({ missing: ['git', 'git-lfs'] });
@@ -425,7 +427,9 @@ for (const row of ports) {
       });
       await expect.poll(() => held.revisions.status().branch, { timeout: 10_000 }).toBe('isolated-run');
       const linkedStatusResponse: unknown = await held.revisions.channel.request({ command: 'status' });
-      const linkedStatus = linkedStatusResponse as Readonly<{ status: RevisionStatusProjection }>;
+      const linkedStatus = linkedStatusResponse as Readonly<{
+        status: RevisionStatusProjection;
+      }>;
       expect(linkedStatus.status.checkoutRoot).toMatch(/^\/checkouts\//u);
       expect(linkedStatus.status.branches.find((branch) => branch.name === 'main')?.checkoutRoot).toBe(
         '/projects/project-1',
@@ -737,6 +741,8 @@ for (const row of ports) {
       await expect(startTurn(launcher, { chatId: 'chat-1', runId: 'run-1' })).rejects.toMatchObject({
         code: 'REVISION_PREPARE_FAILED',
       });
+      launchers.splice(launchers.indexOf(launcher), 1);
+      await expect(launcher.close()).rejects.toThrow('checkout was not ready');
     }, 30_000);
 
     it('answers a turn that ended before its lease with the reason, not with the bound (W19-b-a2)', async () => {
@@ -784,6 +790,8 @@ for (const row of ports) {
         code: 'REVISION_PREPARE_FAILED',
         message: expect.stringContaining('out of space') as unknown as string,
       });
+      launchers.splice(launchers.indexOf(launcher), 1);
+      await expect(launcher.close()).rejects.toThrow('out of space');
       /* The test's own bound is the pin: 20 s is shorter than the host's
        * `admissionMilliseconds`, so a run that only the timer settles fails
        * here rather than passing slowly. */
@@ -1047,10 +1055,10 @@ describe.runIf(hasGit)('the disk-host default', () => {
           status: 'refused',
           reason: 'This project has nothing on Tau Cloud yet.',
         });
-        /* Nothing of a project arrived: what is on disk is the store's own
-           control files, which `port.init` writes for any project. */
+        /* Nothing of a project arrived: what is on disk is only the store and
+           durable-sync control directories created for any opened project. */
         const present = await readdir(second);
-        expect(present.filter((entry) => !entry.startsWith('.git'))).toStrictEqual([]);
+        expect(present.filter((entry) => entry !== '.tau' && !entry.startsWith('.git'))).toStrictEqual([]);
       } finally {
         await revisions.close();
         delete process.env['TAU_CONFIG_DIR'];

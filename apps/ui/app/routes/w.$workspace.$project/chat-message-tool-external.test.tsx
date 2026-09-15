@@ -165,13 +165,15 @@ describe('the external tool-call renderer', () => {
     expect(screen.queryByText(/Received unknown part/)).not.toBeInTheDocument();
   });
 
-  it('should not repeat the tool-kind verb when Codex includes it in the title', async () => {
-    const part = await partFromLog(
-      listFilesRows.map((row) => ({ ...row, call: { ...row.call, title: "Read file '/workspace/main.py'" } })),
-    );
+  it.each([
+    { kind: 'read', title: "Read file '/workspace/main.py'", expected: "Read file '/workspace/main.py'" },
+    { kind: 'search', title: "Search for 'make_bezier'", expected: "Searched for 'make_bezier'" },
+    { kind: 'search', title: 'Searchlight', expected: 'Searched Searchlight' },
+  ])('should not repeat a whole tool-kind verb in $title', async ({ kind, title, expected }) => {
+    const part = await partFromLog(listFilesRows.map((row) => ({ ...row, call: { ...row.call, kind, title } })));
 
     renderExternal(part);
-    expect(screen.getByRole('button', { name: "Read file '/workspace/main.py'" })).toBeVisible();
+    expect(screen.getByRole('button', { name: expected })).toBeVisible();
     expect(screen.queryByRole('button', { name: /Read Read/u })).not.toBeInTheDocument();
   });
 

@@ -238,7 +238,8 @@ export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUI
 
   const displayVerb = isLoading ? activeVerb : verb;
   const lowerLabel = label.toLowerCase();
-  const repeatedVerb = [verb, activeVerb].find((candidate) => {
+  const titleVerbs = facts.kind === 'search' ? [verb, activeVerb, 'Search'] : [verb, activeVerb];
+  const repeatedVerb = titleVerbs.find((candidate) => {
     const lowerCandidate = candidate.toLowerCase();
     return lowerLabel === lowerCandidate || lowerLabel.startsWith(`${lowerCandidate} `);
   });

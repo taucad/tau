@@ -260,6 +260,10 @@ export function BillingSettings(): React.JSX.Element {
                   held for active work
                 </span>
               ) : undefined}
+              {BigInt(availableBalance.netBalanceCreditAtoms) >= 0n &&
+              BigInt(availableBalance.eligibleAvailableCreditAtoms) === 0n ? (
+                <span>No credits yet. Add credits to start using AI.</span>
+              ) : undefined}
             </CardContent>
           </SettingsSectionCard>
         </SettingsItem>

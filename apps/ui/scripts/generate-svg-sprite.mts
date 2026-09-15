@@ -41,7 +41,7 @@ const generateSvgSprite = async (): Promise<void> => {
     paymentIconIds.has(relative(rawDirectory, iconPath).slice(0, -4)),
   );
   const baseIconPaths = iconPaths.filter((iconPath) => !paymentIconPaths.includes(iconPath));
-  const [{ data, result }, { result: paymentResult }] = await Promise.all([
+  const [{ result }, { result: paymentResult }] = await Promise.all([
     compileSprite(baseIconPaths, 'sprite.svg'),
     compileSprite(paymentIconPaths, 'payment-sprite.svg'),
   ]);

@@ -20,9 +20,12 @@ release_command = 'node /app/dist/billing-command.js migrate --environment stagi
 app = 'node /app/dist/main.js'
 # One worker opens at most one PostgreSQL connection (billing-command postgres max: 1).
 billing-recovery = 'node /app/dist/billing-command.js recover-llm-worker --environment staging --limit 100 --poll-milliseconds 5000'
-# One read-only Stripe/DB worker recovers payment sources every minute and runs
-# the independent journal sweep every fifteenth poll.
-billing-operations = 'node /app/dist/billing-command.js billing-operations-worker --environment staging --limit 100 --poll-milliseconds 60000'
+# One Stripe/DB worker fulfils webhook-queued payment sources every five seconds and runs
+# the independent journal sweep every fifteen minutes.
+billing-operations = 'node /app/dist/billing-command.js billing-operations-worker --environment staging --limit 100 --poll-milliseconds 5000'
+# One collection-authority worker executes consented automatic reload charges; without it
+# an enabled reload consent never charges. It refuses to start outside Stripe test mode.
+billing-reload = 'node /app/dist/billing-command.js billing-reload-worker --environment staging --limit 100 --poll-milliseconds 15000'
 
 [env]
 NODE_ENV = 'production'
@@ -89,7 +92,7 @@ timeout = "2s"
 [[metrics]]
 port = 9464
 path = "/metrics"
-processes = ['app', 'billing-recovery', 'billing-operations']
+processes = ['app', 'billing-recovery', 'billing-operations', 'billing-reload']
 
 [[vm]]
 memory = '1gb'
@@ -108,3 +111,9 @@ memory = '256mb'
 cpu_kind = 'shared'
 cpus = 1
 processes = ['billing-operations']
+
+[[vm]]
+memory = '256mb'
+cpu_kind = 'shared'
+cpus = 1
+processes = ['billing-reload']

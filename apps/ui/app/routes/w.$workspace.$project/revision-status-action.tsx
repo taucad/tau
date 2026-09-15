@@ -6,6 +6,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useRevisions } from '#hooks/use-revisions.js';
 import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { useChats } from '#hooks/use-chats.js';
 
 /**
  * The workbench's checkout, in one always-on header chip (S29, A19).
@@ -22,10 +23,11 @@ import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-works
  * @returns The chip, or nothing before the project's root has answered.
  */
 export function RevisionStatusAction(): React.JSX.Element | undefined {
-  const { branch, headRevisionId, revisions } = useRevisions();
+  const { branch, headRevisionId, revisions, isDirty } = useRevisions();
   const status = useRevisionStatus();
   const commands = useRevisionCommands();
-  const { editorRef } = useProject();
+  const { editorRef, projectId } = useProject();
+  const { chats } = useChats(projectId);
   const { openPanel } = useProjectWorkspace();
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
 
@@ -39,12 +41,10 @@ export function RevisionStatusAction(): React.JSX.Element | undefined {
 
   const head = revisions.find((revision) => revision.revisionId === headRevisionId);
   const revisionName = head?.n === undefined ? undefined : `Rev ${String(head.n)}`;
-  /* Which branch the focused chat works on is already in the projection: a
-   * branch row carries the chats placed on it, so no second reader is needed. */
+  const accessibleStatus = `${line}${revisionName === undefined ? '' : `, ${revisionName}`}${isDirty ? ', Modified' : ''}`;
+  const chatCheckoutId = chats.find((chat) => chat.id === focusedChatId)?.checkoutId;
   const chatBranch =
-    focusedChatId === undefined
-      ? undefined
-      : status.branches.find((row) => row.leaseChatIds.includes(focusedChatId))?.name;
+    chatCheckoutId === undefined ? undefined : status.branches.find((row) => row.checkoutId === chatCheckoutId)?.name;
   const hasDiverged = chatBranch !== undefined && chatBranch !== line;
 
   return (
@@ -54,18 +54,14 @@ export function RevisionStatusAction(): React.JSX.Element | undefined {
           <Button
             variant='ghost'
             size='sm'
-            className='gap-1.5 px-2'
-            aria-label={
-              revisionName === undefined
-                ? `Open Revisions. You are on ${line}.`
-                : `Open Revisions. You are on ${line}, ${revisionName}.`
-            }
+            className='max-w-full gap-1.5 px-2 text-xs'
+            aria-label={`Open Revisions. You are on ${accessibleStatus}.`}
             onClick={() => {
               openPanel('revisions');
             }}
           >
             <GitBranch aria-hidden className='size-3.5 shrink-0' />
-            <span className='hidden max-w-32 truncate @xl/viewer:inline'>{line}</span>
+            <span className='max-w-24 truncate'>{line}</span>
             {revisionName === undefined ? null : (
               <>
                 <span aria-hidden className='hidden text-muted-foreground @xl/viewer:inline'>
@@ -74,6 +70,7 @@ export function RevisionStatusAction(): React.JSX.Element | undefined {
                 <span className='font-mono'>{revisionName}</span>
               </>
             )}
+            {isDirty ? <span className='text-muted-foreground'>· Modified</span> : null}
           </Button>
         </TooltipTrigger>
         <TooltipContent>Open Revisions</TooltipContent>
@@ -85,7 +82,7 @@ export function RevisionStatusAction(): React.JSX.Element | undefined {
           className='px-2 text-muted-foreground'
           aria-label={`Follow chat, which is working on ${chatBranch}`}
           onClick={() => {
-            commands.followChat(focusedChatId);
+            if (chatCheckoutId !== undefined) commands.pinTo(chatCheckoutId);
           }}
         >
           Follow chat

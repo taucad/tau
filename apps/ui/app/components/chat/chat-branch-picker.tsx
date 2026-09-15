@@ -5,6 +5,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useProject } from '#hooks/use-project.js';
+import { useChats } from '#hooks/use-chats.js';
 import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
 import { NewBranchForm } from '#routes/w.$workspace.$project/revision-branches.js';
 
@@ -36,6 +37,8 @@ export function ChatBranchPicker(): React.JSX.Element | undefined {
 
 function BranchPicker(): React.JSX.Element | undefined {
   const { session } = useChatComposer();
+  const { projectId } = useProject();
+  const { chats, patchChat } = useChats(projectId);
   const status = useRevisionStatus();
   const commands = useRevisionCommands();
   const chatId = session?.activeChatId;
@@ -49,18 +52,21 @@ function BranchPicker(): React.JSX.Element | undefined {
       !isBusy &&
       status?.branches.some((row) => row.name === createdBranch.current) === true
     ) {
-      commands.switchTo(createdBranch.current);
+      const created = status.branches.find((row) => row.name === createdBranch.current);
+      if (chatId !== undefined && created?.checkoutId !== undefined) {
+        void patchChat(chatId, 'checkoutId', created.checkoutId);
+      }
       createdBranch.current = undefined;
     }
-  }, [commands, isBusy, status?.branches]);
+  }, [chatId, isBusy, patchChat, status?.branches]);
 
   if (status?.branch === undefined) {
     return undefined;
   }
 
-  const chatBranch =
-    chatId === undefined ? undefined : status.branches.find((row) => row.leaseChatIds.includes(chatId))?.name;
-  const branch = chatBranch ?? status.branch;
+  const checkoutId = chats.find((chat) => chat.id === chatId)?.checkoutId;
+  const chatBranch = status.branches.find((row) => row.checkoutId === checkoutId)?.name;
+  const branch = checkoutId === undefined ? status.branch : chatBranch;
   const selectedBranch = status.branches.find((row) => row.name === branch);
 
   return (
@@ -90,8 +96,9 @@ function BranchPicker(): React.JSX.Element | undefined {
           );
         }}
         onSelect={(name) => {
-          if (name !== branch) {
-            commands.switchTo(name);
+          const selected = status.branches.find((row) => row.name === name);
+          if (chatId !== undefined && selected?.checkoutId !== undefined && selected.checkoutId !== checkoutId) {
+            void patchChat(chatId, 'checkoutId', selected.checkoutId);
           }
         }}
         footer={
@@ -116,15 +123,19 @@ function BranchPicker(): React.JSX.Element | undefined {
             variant='outline'
             size='sm'
             data-slot='chat-branch-picker'
-            aria-label={`Work in ${branch}. Choose a branch.`}
-            className='h-7 rounded-full text-muted-foreground hover:text-foreground @max-[22rem]:w-7'
+            aria-label={
+              branch === undefined ? 'Branch unavailable. Choose a branch.' : `Work in ${branch}. Choose a branch.`
+            }
+            className='h-7 max-w-32 rounded-full text-muted-foreground hover:text-foreground'
           >
-            <GitBranch aria-hidden className='size-4 @[22rem]:hidden' />
-            <span className='hidden max-w-24 truncate text-xs @[22rem]:block'>{branch}</span>
+            <GitBranch aria-hidden className='size-4 shrink-0' />
+            <span className='max-w-20 truncate text-xs'>{branch ?? 'Unavailable'}</span>
           </Button>
         </TooltipTrigger>
       </ComboBoxResponsive>
-      <TooltipContent>Works in {branch}</TooltipContent>
+      <TooltipContent>
+        {branch === undefined ? 'Choose an available branch before continuing.' : `Works in ${branch}`}
+      </TooltipContent>
     </Tooltip>
   );
 }

@@ -1775,7 +1775,9 @@ export const WorkbenchDockview = memo(function ({
         return;
       }
       const marker =
-        headRevisionNumber === undefined ? 'Baseline' : `R${String(headRevisionNumber)}${isDirty ? '*' : ''}`;
+        headRevisionNumber === undefined
+          ? 'No revisions yet'
+          : `Rev ${String(headRevisionNumber)}${isDirty ? ' · Modified' : ''}`;
       revisionsPanel.api.setTitle(canReturnToLatest ? `Revisions · ${marker}` : 'Revisions');
     };
 

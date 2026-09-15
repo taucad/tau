@@ -18,10 +18,12 @@ import { useRevisionChanges, useRevisions } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import { useRevisionClient, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
-import { clearTurnOutcome, useLatestTurnOutcome } from '#routes/w.$workspace.$project/revision-outcomes.js';
+import { clearTurnOutcome, useTurnOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { useChats } from '#hooks/use-chats.js';
 import { useProject } from '#hooks/use-project.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
+import { useSelector } from '@xstate/react';
+import { useProjectManager } from '#hooks/use-project-manager.js';
 
 /**
  * The Revisions pane (S26, A18, A29).
@@ -74,17 +76,18 @@ export function ChatRevisions({
  * *Save revision* is W6's (`Mod+S` and the `save` trigger), so what is here is
  * the state and the two restore verbs, which exist today.
  */
-function WhereYouAre(): React.JSX.Element {
+function WhereYouAre({ onOpenSync }: { readonly onOpenSync: () => void }): React.JSX.Element {
+  const { projectId } = useProject();
   const { branch, headRevisionId, revisions, isDirty, canReturnToLatest } = useRevisions();
   const status = useRevisionStatus();
   const { returnToLatest, restore, isBusy } = useRestoreToPoint();
-  const outcome = useLatestTurnOutcome();
+  const outcomes = useTurnOutcomes(projectId);
   const head = revisions.find((revision) => revision.revisionId === headRevisionId);
   const revisionName = head?.n === undefined ? undefined : `Rev ${String(head.n)}`;
 
   return (
     <section aria-labelledby='revision-where-heading' className='flex flex-col gap-2'>
-      <h3 id='revision-where-heading' className='sr-only'>
+      <h3 id='revision-where-heading' className='text-xs font-medium text-muted-foreground'>
         Where you are
       </h3>
       <div className='flex flex-wrap items-center gap-2'>
@@ -104,9 +107,9 @@ function WhereYouAre(): React.JSX.Element {
       </div>
 
       {isDirty ? (
-        <div className='flex items-center justify-between gap-2'>
-          <span className='flex items-center gap-1.5 text-xs text-warning'>
-            <Pencil aria-hidden className='size-3' />
+        <div className='flex flex-wrap items-center justify-between gap-2'>
+          <span className='flex items-center gap-1.5 text-xs'>
+            <Pencil aria-hidden className='size-3 text-warning' />
             {revisionName === undefined ? 'Modified' : `Modified since ${revisionName}`}
           </span>
           {headRevisionId === undefined ? null : (
@@ -124,6 +127,16 @@ function WhereYouAre(): React.JSX.Element {
         </div>
       ) : null}
 
+      {status?.remote.kind === 'none' ? (
+        <div className='flex flex-wrap items-center gap-2 text-xs text-muted-foreground'>
+          <span>Not backed up</span>
+          <Button size='xs' variant='outline' onClick={onOpenSync}>
+            <Cloud aria-hidden className='size-3' />
+            Connect Tau Cloud
+          </Button>
+        </div>
+      ) : null}
+
       {canReturnToLatest ? (
         <Button size='sm' variant='outline' className='gap-1.5 self-start' disabled={isBusy} onClick={returnToLatest}>
           <RotateCcw aria-hidden className='size-3' />
@@ -135,9 +148,9 @@ function WhereYouAre(): React.JSX.Element {
           part of it — but a conflicted merge saved everything it was asked to,
           on the source branch, so counting it as a failed save says the opposite
           of what happened (review R5). The two are named separately. */}
-      {status !== undefined && status.attention - status.conflicts.length > 0 ? (
-        <p role='alert' className='flex items-center gap-2 text-xs text-destructive'>
-          <AlertTriangle aria-hidden className='size-3.5 shrink-0' />
+      {outcomes.length === 0 && status !== undefined && status.attention - status.conflicts.length > 0 ? (
+        <p role='alert' className='flex items-center gap-2 text-xs'>
+          <AlertTriangle aria-hidden className='size-3.5 shrink-0 text-destructive' />
           <span>
             {status.attention - status.conflicts.length === 1
               ? 'One change could not be saved. Try again from the file that failed.'
@@ -146,31 +159,25 @@ function WhereYouAre(): React.JSX.Element {
         </p>
       ) : null}
 
-      {status !== undefined && status.conflicts.length > 0 ? (
-        <p role='alert' className='text-amber-600 flex items-center gap-2 text-xs'>
-          <AlertTriangle aria-hidden className='size-3.5 shrink-0' />
-          <span>
-            {status.conflicts.length === 1
-              ? `${status.conflicts[0]?.branch ?? 'A branch'} needs resolution. Nothing else changed.`
-              : `${String(status.conflicts.length)} branches need resolution. Nothing else changed.`}
-          </span>
-        </p>
-      ) : null}
-
-      {/* W5 review R5: a turn that recorded nothing used to end in silence. */}
-      {outcome === undefined ? null : (
-        <div role='alert' className='flex items-start gap-2 text-xs text-destructive'>
-          <AlertTriangle aria-hidden className='mt-0.5 size-3.5 shrink-0' />
+      {outcomes.map((outcome) => (
+        <div key={outcome.turnId} role='alert' className='flex items-start gap-2 text-xs'>
+          <AlertTriangle aria-hidden className='mt-0.5 size-3.5 shrink-0 text-destructive' />
           <span className='flex-1'>
             {outcome.kind === 'conflicted'
-              ? 'The last change needs your attention: two versions changed the same files.'
-              : `Nothing was saved for the last change.${outcome.reason === undefined ? '' : ` ${outcome.reason}`}`}
+              ? 'This change needs your attention: two versions changed the same files.'
+              : `Nothing was saved for this change.${outcome.reason === undefined ? '' : ` ${outcome.reason}`}`}
           </span>
-          <Button size='xs' variant='ghost' onClick={clearTurnOutcome}>
+          <Button
+            size='xs'
+            variant='ghost'
+            onClick={() => {
+              clearTurnOutcome(projectId, outcome.turnId);
+            }}
+          >
             Dismiss
           </Button>
         </div>
-      )}
+      ))}
     </section>
   );
 }
@@ -181,17 +188,21 @@ function HistoryRow({
   isModified,
   isBusy,
   onRestore,
+  onTag,
+  onDeleteTag,
 }: {
   readonly revision: RevisionCard;
   readonly isActive: boolean;
   readonly isModified: boolean;
   readonly isBusy: boolean;
   readonly onRestore: () => void;
+  readonly onTag: (name: string) => Promise<void>;
+  readonly onDeleteTag: (name: string) => Promise<void>;
 }): React.JSX.Element {
   const changes = useRevisionChanges(revision);
   return (
-    <li className='rounded-xl border border-border/70 bg-card'>
-      <div className='border-b border-border/60 px-3 py-2 text-xs text-muted-foreground'>
+    <li className='relative border-l border-border pl-3 before:absolute before:top-4 before:-left-1 before:size-2 before:rounded-full before:bg-muted-foreground'>
+      <div className='px-3 py-2 text-xs text-muted-foreground'>
         <p className='text-sm text-foreground'>{revision.summary}</p>
         <p className='mt-0.5'>
           {revision.actor}
@@ -211,10 +222,49 @@ function HistoryRow({
         compareAgainst={isActive && isModified ? 'checkout' : 'parent'}
         onRestore={onRestore}
         onDiscard={onRestore}
+        onTag={onTag}
+        onDeleteTag={onDeleteTag}
+        appearance='rail'
       />
     </li>
   );
 }
+
+type HistoryGroup =
+  | Readonly<{ kind: 'revision'; revision: RevisionCard }>
+  | Readonly<{ kind: 'autosaves'; revisions: readonly RevisionCard[] }>;
+
+/** Fold only consecutive, unnamed idle cuts; meaningful revisions stay visible. */
+export const groupRevisionHistory = (
+  revisions: readonly RevisionCard[],
+  headRevisionId: string | undefined,
+): readonly HistoryGroup[] => {
+  const groups: HistoryGroup[] = [];
+  for (const revision of revisions) {
+    const foldable =
+      revision.revisionId !== headRevisionId &&
+      (revision.tags?.length ?? 0) === 0 &&
+      revision.turnId === undefined &&
+      !revision.conflicted &&
+      (revision.trigger === 'idle' || revision.trigger === 'hidden' || revision.trigger === 'close');
+    const previous = groups.at(-1);
+    if (foldable && previous?.kind === 'autosaves') {
+      groups[groups.length - 1] = {
+        kind: 'autosaves',
+        revisions: [...previous.revisions, revision],
+      };
+    } else if (foldable) {
+      groups.push({ kind: 'autosaves', revisions: [revision] });
+    } else {
+      groups.push({ kind: 'revision', revision });
+    }
+  }
+  return groups.map((group) =>
+    group.kind === 'autosaves' && group.revisions.length === 1
+      ? { kind: 'revision', revision: group.revisions[0]! }
+      : group,
+  );
+};
 
 /**
  * The marker text the worker materialized, by revision and path.
@@ -240,7 +290,11 @@ function useConflictTexts(): Readonly<Record<string, ConflictMaterialization>> {
       }
       setTexts((current) => ({
         ...current,
-        [`${entry.revisionId}\u0000${entry.path}`]: { text: entry.text, ours: entry.ours, theirs: entry.theirs },
+        [`${entry.revisionId}\u0000${entry.path}`]: {
+          text: entry.text,
+          ours: entry.ours,
+          theirs: entry.theirs,
+        },
       }));
     });
   }, [client]);
@@ -249,8 +303,10 @@ function useConflictTexts(): Readonly<Record<string, ConflictMaterialization>> {
 }
 
 export function RevisionsPanelBody(): React.JSX.Element {
-  const { projectId } = useProject();
-  const { revisions, headRevisionId, isDirty, branch } = useRevisions();
+  const { projectId, projectRef } = useProject();
+  const project = useSelector(projectRef, (snapshot) => snapshot.context.project);
+  const { updateProject } = useProjectManager();
+  const { revisions, headRevisionId, branch, branchFacts = new Map(), isLoading } = useRevisions();
   const status = useRevisionStatus();
   const commands = useRevisionCommands();
   const { restore, isBusy } = useRestoreToPoint();
@@ -258,13 +314,55 @@ export function RevisionsPanelBody(): React.JSX.Element {
   /* A29: *Sync* appears when a remote exists, or when the person opens it. */
   const [isConnectOpen, setIsConnectOpen] = useState(false);
   const chatNames = useMemo(() => Object.fromEntries(chats.map((chat) => [chat.id, chat.name])), [chats]);
+  const chatCheckoutIds = useMemo(() => Object.fromEntries(chats.map((chat) => [chat.id, chat.checkoutId])), [chats]);
   const branches = status?.branches ?? [];
   const conflictTexts = useConflictTexts();
+  const historyGroups = groupRevisionHistory(revisions, headRevisionId);
+  const recentHistory = historyGroups.slice(0, 8);
+  const earlierHistory = historyGroups.slice(8);
+  const renderHistoryGroup = (group: HistoryGroup): React.JSX.Element => {
+    if (group.kind === 'autosaves') {
+      return (
+        <li key={group.revisions[0]!.revisionId} className='border-l border-border pl-3'>
+          <details>
+            <summary className='cursor-pointer py-2 text-xs text-muted-foreground'>
+              {group.revisions.length} autosaves
+            </summary>
+            <ol className='flex list-none flex-col gap-2'>
+              {group.revisions.map((revision) => renderHistoryGroup({ kind: 'revision', revision }))}
+            </ol>
+          </details>
+        </li>
+      );
+    }
+    const { revision } = group;
+    const isActive = headRevisionId === revision.revisionId;
+    return (
+      <HistoryRow
+        key={revision.revisionId}
+        revision={revision}
+        isActive={isActive}
+        isModified={false}
+        isBusy={isBusy}
+        onRestore={() => {
+          restore(revision.revisionId);
+        }}
+        onTag={async (name) => {
+          await commands.tag({ name, revisionId: revision.revisionId });
+        }}
+        onDeleteTag={commands.deleteTag}
+      />
+    );
+  };
 
   return (
     <div data-slot='revisions-panel-body' className='size-full min-h-0 overflow-hidden bg-sidebar'>
       <div className='flex size-full scroll-shadows-y flex-col gap-3 overflow-y-auto p-3 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'>
-        <WhereYouAre />
+        <WhereYouAre
+          onOpenSync={() => {
+            setIsConnectOpen(true);
+          }}
+        />
 
         {/* A29: one branch is not a choice, so the region does not exist yet. */}
         {branches.length > 1 ? (
@@ -272,6 +370,8 @@ export function RevisionsPanelBody(): React.JSX.Element {
             branches={branches}
             currentBranch={branch}
             chatNames={chatNames}
+            chatCheckoutIds={chatCheckoutIds}
+            branchFacts={branchFacts}
             /* A verb waiting on a person is still in flight: re-enabling the
                rows while its question is open invites a second verb on top of
                the first (review R4). */
@@ -295,31 +395,35 @@ export function RevisionsPanelBody(): React.JSX.Element {
           <h3 id='revision-history-heading' className='text-xs font-medium text-muted-foreground'>
             History
           </h3>
-          {revisions.length === 0 ? (
+          {isLoading ? (
+            <div
+              role='status'
+              aria-busy='true'
+              className='min-h-24 rounded-xl border bg-card p-4 text-sm text-muted-foreground'
+            >
+              Loading history…
+            </div>
+          ) : revisions.length === 0 ? (
             <PanelEmptyState
               icon={History}
               title='No revisions yet'
-              description='Agent changes will appear here.'
-              className='m-0 rounded-xl border bg-card'
+              description='Saved changes will appear here.'
+              className='[container-type:inline-size] m-0 h-auto min-h-44 w-full rounded-xl border bg-card'
             />
           ) : (
-            <ol aria-label='Revision history' className='flex list-none flex-col gap-2'>
-              {revisions.map((revision) => {
-                const isActive = headRevisionId === revision.revisionId;
-                return (
-                  <HistoryRow
-                    key={revision.revisionId}
-                    revision={revision}
-                    isActive={isActive}
-                    isModified={isActive && isDirty}
-                    isBusy={isBusy}
-                    onRestore={() => {
-                      restore(revision.revisionId);
-                    }}
-                  />
-                );
-              })}
-            </ol>
+            <>
+              <ol aria-label='Recent revision history' className='flex list-none flex-col gap-2'>
+                {recentHistory.map(renderHistoryGroup)}
+              </ol>
+              {earlierHistory.length === 0 ? null : (
+                <details>
+                  <summary className='cursor-pointer py-2 text-xs font-medium text-muted-foreground'>Earlier</summary>
+                  <ol aria-label='Earlier revision history' className='flex list-none flex-col gap-2'>
+                    {earlierHistory.map(renderHistoryGroup)}
+                  </ol>
+                </details>
+              )}
+            </>
           )}
         </section>
 
@@ -333,20 +437,12 @@ export function RevisionsPanelBody(): React.JSX.Element {
             onDisconnect={commands.disconnectRemote}
             onCancel={commands.cancelRemote}
             onSync={commands.syncNow}
-          />
-        ) : (
-          <Button
-            size='sm'
-            variant='outline'
-            className='gap-1.5 self-start'
-            onClick={() => {
-              setIsConnectOpen(true);
+            syncChats={project?.syncChats !== false}
+            onSyncChatsChange={(enabled) => {
+              void updateProject(projectId, { syncChats: enabled });
             }}
-          >
-            <Cloud aria-hidden className='size-3.5' />
-            Back up to Tau Cloud
-          </Button>
-        )}
+          />
+        ) : null}
       </div>
     </div>
   );

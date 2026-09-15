@@ -41,6 +41,8 @@ export type RevisionCard = {
   /** The turn this revision recorded, when a turn did. */
   readonly turnId: string | undefined;
   readonly conflicted: boolean;
+  readonly tags?: readonly string[];
+  readonly trigger: RevisionRow['trigger'];
   /**
    * Paths the settling host attested, for a card whose revision is not in this
    * page's graph. Otherwise the diff is asked of the graph on demand.
@@ -62,6 +64,10 @@ export type RevisionsView = {
   /** The checkout sits behind the newest revision on its branch. */
   readonly canReturnToLatest: boolean;
   readonly isLoading: boolean;
+  readonly branchFacts?: ReadonlyMap<
+    string,
+    Readonly<{ revisionNumber: number | undefined; ahead: number; behind: number }>
+  >;
 };
 
 const emptyView: RevisionsView = {
@@ -72,6 +78,7 @@ const emptyView: RevisionsView = {
   isDirty: false,
   canReturnToLatest: false,
   isLoading: false,
+  branchFacts: new Map(),
 };
 
 const cardOf = (row: RevisionRow): RevisionCard => ({
@@ -82,6 +89,8 @@ const cardOf = (row: RevisionRow): RevisionCard => ({
   actor: row.actor,
   turnId: row.turnId,
   conflicted: row.conflicted,
+  tags: row.tags,
+  trigger: row.trigger,
 });
 
 /** Host-attested settlements this tab holds for the project on screen. */
@@ -104,6 +113,8 @@ const useHostFinalizedTurns = (projectId: string): readonly FinalizedRevision[] 
                   actor: '',
                   turnId: settlement.turnId,
                   conflicted: false,
+                  tags: [],
+                  trigger: 'turn',
                   changedPaths: settlement.changedPaths,
                 },
               },
@@ -158,6 +169,14 @@ export function useRevisions(): RevisionsView {
       staleTime: Number.POSITIVE_INFINITY,
     })),
   });
+  const branchRows = useQueries({
+    queries: (status?.branches ?? []).map((entry) => ({
+      queryKey: ['revision-log', projectId, entry.name, entry.head ?? ''],
+      enabled: client !== undefined && entry.head !== undefined,
+      queryFn: async () => client?.log({ branch: entry.name }) ?? [],
+      staleTime: Number.POSITIVE_INFINITY,
+    })),
+  });
 
   return useMemo(() => {
     if (client === undefined || branch === undefined) {
@@ -184,6 +203,17 @@ export function useRevisions(): RevisionsView {
         byTurnId.set(card.turnId, card);
       }
     }
+    const selectedIds = new Set((rows ?? []).map((row) => row.revisionId));
+    const branchFacts = new Map<string, { revisionNumber: number | undefined; ahead: number; behind: number }>();
+    for (const [index, entry] of (status?.branches ?? []).entries()) {
+      const branchLog = branchRows[index]?.data ?? [];
+      const branchIds = new Set(branchLog.map((row) => row.revisionId));
+      branchFacts.set(entry.name, {
+        revisionNumber: branchLog[0]?.revisionNumber,
+        ahead: branchLog.filter((row) => !selectedIds.has(row.revisionId)).length,
+        behind: (rows ?? []).filter((row) => !branchIds.has(row.revisionId)).length,
+      });
+    }
     return {
       revisions,
       byTurnId,
@@ -192,9 +222,13 @@ export function useRevisions(): RevisionsView {
       isDirty: status?.dirty ?? false,
       canReturnToLatest:
         headRevisionId !== undefined && revisions.length > 0 && revisions[0]?.revisionId !== headRevisionId,
-      isLoading: isPending || settledBranchRows.some((query) => query.isPending),
+      isLoading:
+        isPending ||
+        settledBranchRows.some((query) => query.isPending) ||
+        branchRows.some((query, index) => status?.branches[index]?.head !== undefined && query.isPending),
+      branchFacts,
     };
-  }, [branch, client, finalized, headRevisionId, isPending, rows, settledBranchRows, status?.dirty]);
+  }, [branch, branchRows, client, finalized, headRevisionId, isPending, rows, settledBranchRows, status]);
 }
 
 /**
@@ -246,10 +280,17 @@ export function useRevisionFileComparison(
   revisionId: string | undefined,
   path: string | undefined,
   against?: 'checkout',
-): Readonly<{ original: string; modified: string; isLoading: boolean }> {
+): Readonly<{
+  original: string;
+  modified: string;
+  isLoading: boolean;
+  isLoaded: boolean;
+  error: string | undefined;
+  retry: () => void;
+}> {
   const client = useRevisionClient();
   const status = useRevisionStatus();
-  const { data, isPending } = useQuery({
+  const { data, isPending, error, refetch } = useQuery({
     queryKey: [
       'revision-compare',
       revisionId ?? '',
@@ -269,5 +310,14 @@ export function useRevisionFileComparison(
      * session; the working side is re-read every time it is opened. */
     staleTime: against === 'checkout' ? 0 : Number.POSITIVE_INFINITY,
   });
-  return { original: data?.original ?? '', modified: data?.modified ?? '', isLoading: isPending };
+  return {
+    original: data?.original ?? '',
+    modified: data?.modified ?? '',
+    isLoading: isPending,
+    isLoaded: data !== undefined,
+    error: error instanceof Error ? error.message : undefined,
+    retry: () => {
+      void refetch();
+    },
+  };
 }

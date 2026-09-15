@@ -6,12 +6,14 @@
  * stuck producer cannot disable the explicit save gesture forever.
  */
 
+import { useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { waitFor } from 'xstate';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionCommands } from '#hooks/use-revision-status.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
+import { toast } from '#components/ui/sonner.js';
 
 /** The workbench-wide *Save revision* gesture. @public */
 export const saveRevisionKeyCombination = {
@@ -32,18 +34,14 @@ const saveFlushTimeoutMilliseconds = 10_000;
  * @param props - `isFocused`: whether this project is the one the person is looking at.
  * @returns Nothing rendered.
  */
-export function RevisionSaveShortcut({ isFocused = true }: { readonly isFocused?: boolean }): ReactNode {
+export function useSaveRevisionRequest(): () => Promise<void> {
   const { projectRef, editorRef } = useProject();
   const { saveRevision } = useRevisionCommands();
-
-  /* A save is exactly what someone means while typing in the editor, and
-   * `scope: 'global'` means the same thing with a dialog open. */
-  useKeybinding(
-    saveRevisionKeyCombination,
-    async () => {
-      editorRef.send({ type: 'flushNow' });
-      projectRef.send({ type: 'flushNow' });
-      await Promise.allSettled([
+  return useCallback(async () => {
+    editorRef.send({ type: 'flushNow' });
+    projectRef.send({ type: 'flushNow' });
+    try {
+      await Promise.all([
         waitFor(editorRef, (state) => state.matches({ ready: { storing: 'idle' } }), {
           timeout: saveFlushTimeoutMilliseconds,
         }),
@@ -52,9 +50,20 @@ export function RevisionSaveShortcut({ isFocused = true }: { readonly isFocused?
         }),
       ]);
       saveRevision('save');
-    },
-    { enabled: isFocused, scope: 'global' },
-  );
+    } catch (error) {
+      toast.error('Revision not saved', {
+        description: error instanceof Error ? error.message : 'The editor could not finish saving its files.',
+      });
+    }
+  }, [editorRef, projectRef, saveRevision]);
+}
+
+export function RevisionSaveShortcut({ isFocused = true }: { readonly isFocused?: boolean }): ReactNode {
+  const save = useSaveRevisionRequest();
+
+  /* A save is exactly what someone means while typing in the editor, and
+   * `scope: 'global'` means the same thing with a dialog open. */
+  useKeybinding(saveRevisionKeyCombination, save, { enabled: isFocused, scope: 'global' });
 
   return null;
 }

@@ -262,6 +262,11 @@ export const createHostRevisionClient = (input: {
     return response.result;
   };
   const send = (request: WorkerRevisionCommand): void => {
+    // Only a browser-owned replica adopts host settlements. This client already
+    // reads that host's authoritative revision stream; never echo its heads back.
+    if (request.command === 'adoptHostFinalized') {
+      return;
+    }
     // async-iife: bootstrap -- a machine verb reports its settled state on the revision stream.
     void (async (): Promise<void> => {
       try {
@@ -368,11 +373,8 @@ export const createHostRevisionClient = (input: {
     },
     close,
     quiesce: async () => {
-      try {
-        await ask({ command: 'quiesce' });
-      } finally {
-        close();
-      }
+      await ask({ command: 'quiesce' });
+      close();
     },
   };
 };
@@ -603,11 +605,6 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       if (closing === undefined) {
         return;
       }
-      cancelPendingRequests();
-      channel = undefined;
-      connectionGeneration += 1;
-      status = undefined;
-      projectedChatIds.clear();
       nextRequestId += 1;
       const id = nextRequestId;
       const answer = Promise.withResolvers<WorkerRevisionResult>();
@@ -630,13 +627,17 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       } satisfies WorkerRevisionRequest);
       try {
         await answer.promise;
-      } catch {
-        /* A worker that cannot answer has not lost the revision: the durable
-         * queue is what the next open retries from (D28). */
-      } finally {
-        closing.port2.removeEventListener('message', receiveClose);
+        cancelPendingRequests();
+        if (channel === closing) {
+          channel = undefined;
+          connectionGeneration += 1;
+          status = undefined;
+          projectedChatIds.clear();
+        }
         closing.port2.close();
         listeners.emit();
+      } finally {
+        closing.port2.removeEventListener('message', receiveClose);
       }
     },
   };

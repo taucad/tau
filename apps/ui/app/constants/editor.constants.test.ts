@@ -23,6 +23,7 @@ describe('editor constants – panel consistency', () => {
       'converter',
       'details',
       'share',
+      'revisions',
     ]);
     expect(defaultPanelState.desktopLayout).toEqual({
       chatOpen: true,
@@ -229,7 +230,7 @@ describe('graphics view settings parsing', () => {
       startPoint: [1, 2, 3],
       endPoint: [4, 5, 6],
     });
-    expect(settings.pinnedMeasurements?.[0]?.distance).toBeCloseTo(5.196_152);
+    expect(settings.pinnedMeasurements?.[0]?.distance).toBeCloseTo(Math.sqrt(27));
   });
 
   it('should omit empty component display state', () => {

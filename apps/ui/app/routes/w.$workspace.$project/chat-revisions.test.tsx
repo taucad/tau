@@ -13,10 +13,19 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import type { RevisionRow } from '@taucad/revisions';
-import { RevisionsPanelBody } from '#routes/w.$workspace.$project/chat-revisions.js';
+import { RevisionsPanelBody, groupRevisionHistory } from '#routes/w.$workspace.$project/chat-revisions.js';
+import type { RevisionCard } from '#hooks/use-revisions.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 
-vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));
+const projectSnapshot = { context: { project: { syncChats: true } } };
+const projectRef = {
+  getSnapshot: () => projectSnapshot,
+  subscribe: () => ({ unsubscribe: () => undefined }),
+};
+vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p', projectRef }) }));
+vi.mock('#hooks/use-project-manager.js', () => ({
+  useProjectManager: () => ({ updateProject: vi.fn() }),
+}));
 /* Monaco and Shiki are the editor's, not this pane's: the conflict rows are
  * asserted by their verbs and the bytes they hand back (P43). */
 vi.mock('#components/code/code-editor.client.js', () => ({
@@ -38,7 +47,7 @@ vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
   getHostFinalizedTurns: () => settlements,
   subscribeHostFinalizedTurns: () => () => undefined,
 }));
-const chats = [{ id: 'chat-1', name: 'Optimize bracket' }];
+const chats = [{ id: 'chat-1', name: 'Optimize bracket', checkoutId: 'co-2' }];
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats }) }));
 
 const row = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): RevisionRow => ({
@@ -69,6 +78,31 @@ beforeEach(() => {
 });
 
 describe('Revisions pane', () => {
+  it('folds only consecutive unnamed autosaves', () => {
+    const card = (
+      revisionId: string,
+      trigger: RevisionCard['trigger'],
+      tags: readonly string[] = [],
+    ): RevisionCard => ({
+      revisionId,
+      n: 1,
+      createdAt: 1,
+      summary: '',
+      actor: 'You',
+      turnId: undefined,
+      conflicted: false,
+      tags,
+      trigger,
+    });
+    const groups = groupRevisionHistory(
+      [card('head', 'idle'), card('a', 'hidden'), card('b', 'close'), card('named', 'idle', ['v1'])],
+      'head',
+    );
+
+    expect(groups.map((group) => group.kind)).toStrictEqual(['revision', 'autosaves', 'revision']);
+    expect(groups[1]).toMatchObject({ kind: 'autosaves', revisions: [{ revisionId: 'a' }, { revisionId: 'b' }] });
+  });
+
   it('renders exactly one "Current" for a projection with two branches', async () => {
     revisionStatusHarness.rows = [
       row({ revisionId: 'rev-4', revisionNumber: 4 }),
@@ -172,8 +206,8 @@ describe('Revisions pane', () => {
     /* AC14's promise, in the one sentence a person reads first. */
     expect(screen.getByText(/main is untouched until you choose/u)).toBeInTheDocument();
     /* A22: a parametric file has no markers to read, so it is choose-one only. */
-    expect(screen.getByRole('button', { name: 'Open src/bracket.ts' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Open params/wall.json' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit src/bracket.ts manually' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit params/wall.json manually' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Compare params/wall.json' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Merge into main' })).toBeDisabled();
   });
@@ -206,7 +240,7 @@ describe('Revisions pane', () => {
     };
 
     renderPane();
-    expect(await screen.findByRole('button', { name: 'Keep theirs in src/bracket.ts' })).toHaveAttribute(
+    expect(await screen.findByRole('button', { name: 'Keep bracket-fillet in src/bracket.ts' })).toHaveAttribute(
       'aria-pressed',
       'true',
     );
@@ -246,13 +280,13 @@ describe('Revisions pane', () => {
     };
 
     renderPane();
-    await user.click(await screen.findByRole('button', { name: 'Keep mine in src/bracket.ts' }));
+    await user.click(await screen.findByRole('button', { name: 'Keep main in src/bracket.ts' }));
 
     expect(revisionStatusHarness.commands.resolveFile).toHaveBeenCalledWith('rev-c', 'src/bracket.ts', 'mine');
   });
 
   /* The materialized text needs one product consumer, or the marker renderer
-   * is a path nothing walks. *Open* asks for it; the card shows the hunks a
+   * is a path nothing walks. *Edit manually* asks for it; the card shows the hunks a
    * person is choosing between (W10; the editable editor mode is the editor
    * lane's, and `resolvedInEditor` is already the verb it will send). */
   it('shows the conflicting lines the worker materialized', async () => {
@@ -283,7 +317,7 @@ describe('Revisions pane', () => {
     };
 
     renderPane();
-    await user.click(await screen.findByRole('button', { name: 'Open src/bracket.ts' }));
+    await user.click(await screen.findByRole('button', { name: 'Edit src/bracket.ts manually' }));
 
     expect(revisionStatusHarness.commands.openConflictInEditor).toHaveBeenCalledWith('rev-c', 'src/bracket.ts');
 
@@ -340,7 +374,7 @@ describe('Revisions pane', () => {
     };
 
     renderPane();
-    await user.click(screen.getByRole('button', { name: 'Switch' }));
+    await user.click(screen.getByRole('button', { name: 'Switch to bracket-fillet' }));
 
     expect(revisionStatusHarness.commands.switchTo).toHaveBeenCalledWith('bracket-fillet');
   });
@@ -365,7 +399,7 @@ describe('Revisions pane', () => {
     renderPane();
     await user.click(screen.getByRole('button', { name: 'New branch' }));
     await user.type(screen.getByRole('textbox', { name: 'Name for the new branch' }), 'enclosure-v2');
-    await user.click(screen.getByRole('button', { name: 'Create' }));
+    await user.click(screen.getByRole('button', { name: 'Create branch' }));
 
     expect(revisionStatusHarness.commands.createBranch).toHaveBeenCalledWith('enclosure-v2');
   });
@@ -410,7 +444,7 @@ describe('Revisions pane', () => {
     renderPane();
     expect(screen.queryByRole('radio', { name: 'Tau Cloud' })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Back up to Tau Cloud' }));
+    await user.click(screen.getByRole('button', { name: 'Connect Tau Cloud' }));
 
     expect(screen.getByRole('radio', { name: 'Tau Cloud' })).toBeInTheDocument();
   });
@@ -458,11 +492,12 @@ describe('Revisions pane', () => {
     };
 
     render(<RevisionsPanelBody />, { wrapper });
-    await user.click(screen.getByRole('button', { name: 'Rename bracket-fillet' }));
+    await user.click(screen.getByRole('button', { name: 'Actions for bracket-fillet' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Rename bracket-fillet' }));
     const field = screen.getByRole('textbox', { name: 'New name for bracket-fillet' });
     await user.clear(field);
     await user.type(field, 'enclosure-v2');
-    await user.click(screen.getByRole('button', { name: 'Rename bracket-fillet' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(revisionStatusHarness.commands.renameBranch).toHaveBeenCalledWith('bracket-fillet', 'enclosure-v2');
   });

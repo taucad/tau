@@ -1,11 +1,18 @@
-import { useState } from 'react';
-import { AlertTriangle, Check, FileText, GitBranch, GitCompare, Pencil, Plus } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { AlertTriangle, Check, FileText, GitBranch, GitCompare, MoreHorizontal, Pencil, Plus } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
-import { Input } from '@taucad/ui/components/input';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@taucad/ui/components/dropdown-menu';
 import { cn } from '@taucad/ui/utils/cn';
 import { DiffViewer } from '#components/code/diff-viewer.js';
 import { RevisionConflictEditor } from '#routes/w.$workspace.$project/revision-conflict-editor.js';
+import { InlineTextEditor } from '#components/inline-text-editor.js';
 import type { RevisionBranchFacet, RevisionConflictFacet } from '@taucad/revisions/project-revisions-machine';
 
 /**
@@ -45,37 +52,24 @@ export function NewBranchForm({
         New branch
       </Button>
       {draft === undefined ? null : (
-        <form
-          className='flex items-center gap-2'
-          onSubmit={(event) => {
-            event.preventDefault();
-            const name = draft.trim();
-            if (name === '') {
-              return;
-            }
+        <InlineTextEditor
+          key='new-branch'
+          value=''
+          placeholder='enclosure-v2'
+          ariaLabel='Name for the new branch'
+          saveLabel='Create branch'
+          isDisabled={isBusy}
+          shouldStartEditing
+          shouldSubmitOnBlur={false}
+          className='h-7'
+          onSave={(name) => {
             onCreate(name);
             setDraft(undefined);
           }}
-        >
-          <Input
-            autoFocus
-            aria-label='Name for the new branch'
-            placeholder='enclosure-v2'
-            value={draft}
-            className='h-7'
-            onChange={(event) => {
-              setDraft(event.target.value);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                setDraft(undefined);
-              }
-            }}
-          />
-          <Button size='sm' type='submit' disabled={isBusy || draft.trim() === ''}>
-            Create
-          </Button>
-        </form>
+          onEditingChange={(editing) => {
+            if (!editing) setDraft(undefined);
+          }}
+        />
       )}
     </div>
   );
@@ -120,7 +114,23 @@ function ConflictCard({
      the button and the marker a person may open all say one word (I12). */
   const target = into ?? conflict.labels?.ours ?? 'the other branch';
   const count = conflict.paths.length;
-  const [comparing, setComparing] = useState<string>();
+  const [modes, setModes] = useState<Readonly<Record<string, 'compare' | 'edit'>>>({});
+  const [materializationErrors, setMaterializationErrors] = useState<Readonly<Record<string, boolean>>>({});
+  useEffect(() => {
+    const pending = Object.keys(modes).filter(
+      (path) => conflictTexts[`${conflict.revisionId}\u0000${path}`] === undefined && !materializationErrors[path],
+    );
+    if (pending.length === 0) return undefined;
+    const timeout = setTimeout(() => {
+      setMaterializationErrors((current) => ({
+        ...current,
+        ...Object.fromEntries(pending.map((path) => [path, true])),
+      }));
+    }, 10_000);
+    return () => {
+      clearTimeout(timeout);
+    };
+  }, [conflict.revisionId, conflictTexts, materializationErrors, modes]);
 
   return (
     <div className='flex flex-col gap-2 pl-5'>
@@ -132,33 +142,32 @@ function ConflictCard({
           const materialized = conflictTexts[`${conflict.revisionId}\u0000${path}`];
           return (
             <li key={path} className='flex flex-col gap-1'>
-              <div className='flex items-center gap-2'>
+              <div className='flex flex-wrap items-center gap-2'>
                 <FileText aria-hidden className='size-3.5 shrink-0 text-muted-foreground' />
-                <span className='truncate font-mono text-xs'>{path}</span>
-                <span className='flex-1' />
+                <span className='min-w-0 flex-1 basis-40 truncate font-mono text-xs'>{path}</span>
                 <Button
                   size='xs'
                   variant={side === 'mine' ? 'secondary' : 'ghost'}
                   aria-pressed={side === 'mine'}
-                  aria-label={`Keep mine in ${path}`}
+                  aria-label={`Keep ${conflict.labels?.ours ?? 'mine'} in ${path}`}
                   disabled={conflict.busy}
                   onClick={() => {
                     onKeepSide(conflict.revisionId, path, 'mine');
                   }}
                 >
-                  Keep mine
+                  {`Keep ${conflict.labels?.ours ?? 'mine'}`}
                 </Button>
                 <Button
                   size='xs'
                   variant={side === 'theirs' ? 'secondary' : 'ghost'}
                   aria-pressed={side === 'theirs'}
-                  aria-label={`Keep theirs in ${path}`}
+                  aria-label={`Keep ${conflict.labels?.theirs ?? 'theirs'} in ${path}`}
                   disabled={conflict.busy}
                   onClick={() => {
                     onKeepSide(conflict.revisionId, path, 'theirs');
                   }}
                 >
-                  Keep theirs
+                  {`Keep ${conflict.labels?.theirs ?? 'theirs'}`}
                 </Button>
                 {/* Both read the same materialization, so both are offered only
                   where there is text to read: a parametric or binary conflict is
@@ -168,33 +177,48 @@ function ConflictCard({
                     size='xs'
                     variant='ghost'
                     aria-label={`Compare ${path}`}
-                    aria-pressed={comparing === path}
+                    aria-pressed={modes[path] === 'compare'}
                     onClick={() => {
-                      setComparing((current) => (current === path ? undefined : path));
+                      setModes((current) => ({
+                        ...current,
+                        [path]: 'compare',
+                      }));
+                      setMaterializationErrors((current) => ({
+                        ...current,
+                        [path]: false,
+                      }));
                       onOpenConflict(conflict.revisionId, path);
                     }}
                   >
                     <GitCompare aria-hidden className='size-3' />
+                    Compare
                   </Button>
                 ) : null}
                 {openable ? (
                   <Button
                     size='xs'
                     variant='ghost'
-                    aria-label={`Open ${path}`}
+                    aria-label={`Edit ${path} manually`}
+                    aria-pressed={modes[path] === 'edit'}
                     disabled={conflict.busy}
                     onClick={() => {
+                      setModes((current) => ({ ...current, [path]: 'edit' }));
+                      setMaterializationErrors((current) => ({
+                        ...current,
+                        [path]: false,
+                      }));
                       onOpenConflict(conflict.revisionId, path);
                     }}
                   >
                     <Pencil aria-hidden className='size-3' />
+                    Edit manually
                   </Button>
                 ) : null}
               </div>
               {/* *Open* is the editable mode: the markers in a buffer with no file
                 behind them, because a conflicted revision's tree holds no marker
                 byte and never will (A22, P43). */}
-              {materialized?.text === undefined ? null : (
+              {modes[path] === 'edit' && materialized?.text !== undefined ? (
                 <RevisionConflictEditor
                   path={path}
                   text={materialized.text}
@@ -203,11 +227,34 @@ function ConflictCard({
                     onResolveInEditor(conflict.revisionId, path, content);
                   }}
                 />
-              )}
+              ) : null}
               {/* A27/D19's third *Compare* surface. The markers say what the two
                 sides are; this says it the way the History rows already do, and
                 it is the same component (review R9). */}
-              {comparing === path ? (
+              {modes[path] !== undefined && materialized === undefined && !materializationErrors[path] ? (
+                <p role='status' aria-busy='true' className='px-2 py-1 text-xs text-muted-foreground'>
+                  Loading {modes[path] === 'compare' ? 'comparison' : 'editor'} for {path}…
+                </p>
+              ) : null}
+              {materializationErrors[path] ? (
+                <div role='alert' className='flex flex-wrap items-center gap-2 px-2 py-1 text-xs'>
+                  <span>{`Could not load ${path}. Your choices are unchanged.`}</span>
+                  <Button
+                    size='xs'
+                    variant='outline'
+                    onClick={() => {
+                      setMaterializationErrors((current) => ({
+                        ...current,
+                        [path]: false,
+                      }));
+                      onOpenConflict(conflict.revisionId, path);
+                    }}
+                  >
+                    Retry
+                  </Button>
+                </div>
+              ) : null}
+              {modes[path] === 'compare' && materialized !== undefined ? (
                 <DiffViewer
                   originalContent={materialized?.ours ?? ''}
                   modifiedContent={materialized?.theirs ?? ''}
@@ -219,7 +266,12 @@ function ConflictCard({
           );
         })}
       </ul>
-      <div className='flex items-center justify-between gap-2'>
+      {!conflict.ready ? (
+        <p className='text-xs text-muted-foreground'>
+          {`${String(conflict.paths.filter((path) => path.side === undefined).length)} file${conflict.paths.filter((path) => path.side === undefined).length === 1 ? '' : 's'} still need a choice before the merge can finish.`}
+        </p>
+      ) : null}
+      <div className='flex flex-wrap items-center justify-between gap-2'>
         <Button
           size='xs'
           variant='ghost'
@@ -254,7 +306,11 @@ function ConflictCard({
  *
  * @public
  */
-export type ConflictMaterialization = Readonly<{ text: string; ours: string; theirs: string }>;
+export type ConflictMaterialization = Readonly<{
+  text: string;
+  ours: string;
+  theirs: string;
+}>;
 
 export type RevisionBranchesProps = {
   /** Every branch the project has, from the `RevisionStatus` projection. */
@@ -263,6 +319,17 @@ export type RevisionBranchesProps = {
   readonly currentBranch: string | undefined;
   /** Chat names by id, for the chips that say who is working where. */
   readonly chatNames: Readonly<Record<string, string>>;
+  /** Durable chat placement by chat id. */
+  readonly chatCheckoutIds: Readonly<Record<string, string | undefined>>;
+  /** Graph-derived context by branch name. */
+  readonly branchFacts: ReadonlyMap<
+    string,
+    Readonly<{
+      revisionNumber: number | undefined;
+      ahead: number;
+      behind: number;
+    }>
+  >;
   /**
    * Every branch whose head is a conflicted revision (A22, AC14). The branch's
    * own row becomes its *Needs resolution* card; a branch with no entry here
@@ -319,6 +386,8 @@ export function RevisionBranches({
   branches,
   currentBranch,
   chatNames,
+  chatCheckoutIds,
+  branchFacts,
   conflicts,
   isBusy,
   onSwitch,
@@ -334,7 +403,7 @@ export function RevisionBranches({
   conflictTexts,
   className,
 }: RevisionBranchesProps): React.JSX.Element {
-  const [renaming, setRenaming] = useState<Readonly<{ branch: string; draft: string }>>();
+  const [renaming, setRenaming] = useState<string>();
 
   return (
     <section aria-labelledby='revision-branches-heading' className={cn('flex flex-col gap-2', className)}>
@@ -349,6 +418,10 @@ export function RevisionBranches({
         {branches.map((branch) => {
           const isCurrent = branch.name === currentBranch;
           const conflict = conflicts.find((entry) => entry.branch === branch.name);
+          const fact = branchFacts.get(branch.name);
+          const placedChats = Object.entries(chatCheckoutIds).filter(
+            ([, checkoutId]) => checkoutId === branch.checkoutId,
+          );
           return (
             <li
               key={branch.name}
@@ -358,113 +431,119 @@ export function RevisionBranches({
               aria-current={isCurrent ? 'true' : undefined}
               className={cn(
                 'group/branch flex flex-col gap-2 rounded-md px-1 py-1.5',
-                conflict === undefined ? 'hover:bg-muted/50' : 'border-amber-500/40 bg-amber-500/10 border px-2 py-2',
+                conflict === undefined ? 'hover:bg-muted/50' : 'border-warning/40 bg-warning/10 border px-2 py-2',
                 isCurrent && conflict === undefined ? 'bg-muted/40' : undefined,
               )}
             >
-              <div className='flex items-center gap-2'>
+              <div className='flex flex-wrap items-center gap-2'>
                 <GitBranch aria-hidden className='size-3.5 shrink-0 text-muted-foreground' />
-                {renaming?.branch === branch.name ? (
-                  <form
-                    className='flex flex-1 items-center gap-2'
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      const name = renaming.draft.trim();
-                      setRenaming(undefined);
-                      if (name !== '' && name !== branch.name) {
-                        onRename(branch.name, name);
-                      }
-                    }}
-                  >
-                    <Input
-                      autoFocus
-                      aria-label={`New name for ${branch.name}`}
-                      value={renaming.draft}
-                      className='h-6'
-                      onChange={(event) => {
-                        setRenaming({ branch: branch.name, draft: event.target.value });
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Escape') {
-                          setRenaming(undefined);
-                        }
-                      }}
-                    />
-                    <Button size='xs' type='submit' aria-label={`Rename ${branch.name}`} disabled={isBusy}>
-                      Save
-                    </Button>
-                  </form>
-                ) : (
-                  <span className='truncate text-sm font-medium'>{branch.name}</span>
+                <InlineTextEditor
+                  key={`${branch.name}:${renaming === branch.name ? 'editing' : 'idle'}`}
+                  value={branch.name}
+                  ariaLabel={`New name for ${branch.name}`}
+                  isDisabled={isBusy}
+                  shouldStartEditing={renaming === branch.name}
+                  shouldSubmitOnBlur={false}
+                  variant='ghost'
+                  className='h-7 max-w-full min-w-24 flex-1'
+                  onSave={(name) => {
+                    onRename(branch.name, name);
+                    setRenaming(undefined);
+                  }}
+                  onEditingChange={(editing) => {
+                    if (!editing) setRenaming(undefined);
+                  }}
+                  renderDisplay={(name) => <span className='truncate text-sm font-medium'>{name}</span>}
+                />
+                {fact?.revisionNumber === undefined ? null : (
+                  <span className='shrink-0 text-xs text-muted-foreground'>Rev {fact.revisionNumber}</span>
                 )}
-                {/* ponytail: no `Rev N` per row. The ordinal is a first-parent
-                  walk of *that* branch (I3), so a row that showed one would cost
-                  a `log(branch)` per branch on every render; the canvas's number
-                  arrives with the ahead/behind read, which is one graph question
-                  for both. */}
-                {branch.leaseChatIds.map((chatId) => (
+                {branch.checkoutRoot?.startsWith('/checkouts/') === true ? (
+                  <Badge variant='outline' className='shrink-0 font-normal'>
+                    Linked
+                  </Badge>
+                ) : branch.checkoutId === undefined ? (
+                  <Badge variant='outline' className='shrink-0 font-normal'>
+                    Remote only
+                  </Badge>
+                ) : null}
+                {fact !== undefined && (fact.ahead > 0 || fact.behind > 0) ? (
+                  <span className='shrink-0 text-xs text-muted-foreground'>
+                    {fact.ahead > 0 ? `${fact.ahead} ahead` : ''}
+                    {fact.ahead > 0 && fact.behind > 0 ? ' · ' : ''}
+                    {fact.behind > 0 ? `${fact.behind} behind` : ''}
+                  </span>
+                ) : null}
+                {placedChats.map(([chatId]) => (
                   <Badge key={chatId} variant='secondary' className='max-w-32 shrink-0 truncate font-normal'>
                     {chatNames[chatId] ?? 'Chat'}
                   </Badge>
                 ))}
                 {conflict === undefined ? null : (
-                  <Badge className='border-amber-500/40 bg-amber-500/15 text-amber-700 dark:text-amber-400 shrink-0 gap-1'>
-                    <AlertTriangle aria-hidden />
+                  <Badge variant='outline' className='shrink-0 gap-1 border-warning/40 bg-warning/10'>
+                    <AlertTriangle aria-hidden className='text-warning' />
                     Needs resolution
                   </Badge>
                 )}
-                <span className='flex-1' />
-                {isCurrent ? (
-                  <Check aria-hidden className='size-3.5 shrink-0 text-primary' />
-                ) : conflict === undefined ? (
-                  <span className='flex shrink-0 items-center gap-1 opacity-0 group-hover/branch:opacity-100 focus-within:opacity-100'>
+                <span className='ml-auto flex shrink-0 items-center gap-1'>
+                  {isCurrent ? <Check aria-hidden className='size-3.5 shrink-0 text-primary' /> : null}
+                  {!isCurrent && conflict === undefined ? (
                     <Button
                       size='xs'
                       variant='ghost'
                       disabled={isBusy}
+                      aria-label={`Switch to ${branch.name}`}
                       onClick={() => {
                         onSwitch(branch.name);
                       }}
                     >
                       Switch
                     </Button>
-                    {currentBranch === undefined ? null : (
+                  ) : null}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
                       <Button
-                        size='xs'
+                        size='icon-xs'
                         variant='ghost'
+                        aria-label={`Actions for ${branch.name}`}
                         disabled={isBusy}
-                        onClick={() => {
-                          onMerge(branch.name);
+                      >
+                        <MoreHorizontal aria-hidden />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align='end'>
+                      {currentBranch === undefined || isCurrent ? null : (
+                        <DropdownMenuItem
+                          onSelect={() => {
+                            onMerge(branch.name);
+                          }}
+                        >
+                          {`Merge ${branch.name} into ${currentBranch}`}
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuItem
+                        onSelect={() => {
+                          setRenaming(branch.name);
                         }}
                       >
-                        {`Merge into ${currentBranch}`}
-                      </Button>
-                    )}
-                    {renaming?.branch === branch.name ? null : (
-                      <Button
-                        size='xs'
-                        variant='ghost'
-                        disabled={isBusy}
-                        aria-label={`Rename ${branch.name}`}
-                        onClick={() => {
-                          setRenaming({ branch: branch.name, draft: branch.name });
-                        }}
-                      >
-                        Rename
-                      </Button>
-                    )}
-                    <Button
-                      size='xs'
-                      variant='ghost'
-                      disabled={isBusy}
-                      onClick={() => {
-                        onDiscard(branch.name, branch.checkoutId);
-                      }}
-                    >
-                      Discard
-                    </Button>
-                  </span>
-                ) : null}
+                        {`Rename ${branch.name}`}
+                      </DropdownMenuItem>
+                      {isCurrent ? null : (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            variant='destructive'
+                            onSelect={() => {
+                              onDiscard(branch.name, branch.checkoutId);
+                            }}
+                          >
+                            {`Discard branch changes from ${branch.name}`}
+                          </DropdownMenuItem>
+                        </>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </span>
               </div>
               {conflict === undefined ? null : (
                 <ConflictCard

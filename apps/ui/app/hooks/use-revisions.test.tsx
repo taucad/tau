@@ -15,6 +15,7 @@ import type { ReactNode } from 'react';
 import type { RevisionRow } from '@taucad/revisions';
 import type { TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { useRevisionChanges, useRevisionFileComparison, useRevisions } from '#hooks/use-revisions.js';
+import type { RevisionCard } from '#hooks/use-revisions.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));
@@ -75,6 +76,15 @@ describe('useRevisions', () => {
     expect(result.current.canReturnToLatest).toBe(false);
   });
 
+  it('settles an empty branch instead of treating its disabled history query as loading', async () => {
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+    expect(result.current.revisions).toEqual([]);
+  });
+
   it('offers Return to latest only while the checkout sits behind the branch tip', async () => {
     revisionStatusHarness.rows = [
       row({ revisionId: 'rev-2', revisionNumber: 2 }),
@@ -103,6 +113,28 @@ describe('useRevisions', () => {
     await waitFor(() => {
       expect(result.current.isDirty).toBe(true);
     });
+  });
+
+  it('derives each branch revision number and divergence from graph history', async () => {
+    const base = row({ revisionId: 'base', revisionNumber: 1 });
+    revisionStatusHarness.rows = [row({ revisionId: 'main-2', revisionNumber: 2 }), base];
+    revisionStatusHarness.rowsByBranch.set('feature', [row({ revisionId: 'feature-2', revisionNumber: 2 }), base]);
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      headRevisionId: 'main-2',
+      branches: [
+        { name: 'main', head: 'main-2', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        { name: 'feature', head: 'feature-2', checkoutId: 'co-2', checkoutRoot: '/checkouts/co-2', leaseChatIds: [] },
+      ],
+    };
+
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.branchFacts?.get('feature')).toEqual({ revisionNumber: 2, ahead: 1, behind: 1 });
+    });
+    expect(result.current.branchFacts?.get('main')).toEqual({ revisionNumber: 2, ahead: 0, behind: 0 });
   });
 
   it('carries a card for a turn a remote host settled, which this graph does not hold', async () => {
@@ -262,7 +294,7 @@ describe('useRevisionChanges', () => {
       { path: 'main.scad', kind: 'modified' },
       { path: 'part.scad', kind: 'added' },
     ];
-    const card = {
+    const card: RevisionCard = {
       revisionId: 'rev-1',
       n: 1,
       createdAt: 0,
@@ -270,6 +302,7 @@ describe('useRevisionChanges', () => {
       actor: '',
       turnId: 'u1',
       conflicted: false,
+      trigger: 'turn',
     };
 
     const { result } = renderHook(() => useRevisionChanges(card), { wrapper });
@@ -303,7 +336,7 @@ describe('useRevisionChanges', () => {
 
   it('serves a remote settlement from the paths its host attested, without asking a graph that lacks it', async () => {
     revisionStatusHarness.diff = [{ path: 'never-read.scad', kind: 'modified' }];
-    const card = {
+    const card: RevisionCard = {
       revisionId: 'rev-remote',
       n: undefined,
       createdAt: 0,
@@ -311,6 +344,7 @@ describe('useRevisionChanges', () => {
       actor: '',
       turnId: 'u9',
       conflicted: false,
+      trigger: 'turn',
       changedPaths: ['main.scad'],
     };
 

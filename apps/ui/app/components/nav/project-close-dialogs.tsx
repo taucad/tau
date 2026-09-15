@@ -56,8 +56,8 @@ export function CloseProjectDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>{`Stop ${pluralize(row.runs, 'agent')} and close ${name}?`}</AlertDialogTitle>
           <AlertDialogDescription>
-            Their work so far is saved as revisions. Unpushed changes are backed up first. You can reopen the project
-            any time.
+            Their work so far is saved locally as revisions. If backup is unavailable, it stays queued for the next
+            connection. You can reopen the project any time.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

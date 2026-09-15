@@ -1,4 +1,4 @@
-import { Box, Code2, Info, MessageCircleIcon, SlidersHorizontal, Download, Files, Share2 } from 'lucide-react';
+import { Box, Code2, Info, MessageCircleIcon, SlidersHorizontal, Download, Files, History, Share2 } from 'lucide-react';
 import { TabsList, TabsTrigger } from '@taucad/ui/components/tabs';
 import { cn } from '@taucad/ui/utils/cn';
 import type { MobilePanelId } from '#constants/editor.constants.js';
@@ -44,6 +44,11 @@ export const chatTabs = [
     label: 'Share',
     icon: <Share2 />,
   },
+  {
+    id: 'revisions',
+    label: 'History',
+    icon: <History />,
+  },
 ] as const satisfies Array<{ id: MobilePanelId; label: string; icon: React.ReactNode }>;
 
 export function ChatInterfaceNav({ className }: { readonly className?: string }): React.ReactNode {
@@ -51,7 +56,7 @@ export function ChatInterfaceNav({ className }: { readonly className?: string })
     <TabsList
       enableAnimation={false}
       className={cn(
-        'w-full border-t bg-sidebar',
+        'w-full justify-start overflow-x-auto border-t bg-sidebar',
         'gap-0.25 rounded-t-xl rounded-b-none p-0.5 text-muted-foreground! [&_svg]:size-4! [&_svg]:text-muted-foreground',
         className,
       )}
@@ -62,7 +67,7 @@ export function ChatInterfaceNav({ className }: { readonly className?: string })
           enableAnimation={false}
           value={tab.id}
           className={cn(
-            'flex flex-col items-center justify-center gap-0.5 pb-0.5 text-[10px]',
+            'flex min-w-12 flex-1 flex-col items-center justify-center gap-0.5 pb-0.5 text-[10px]',
             'rounded-lg border border-transparent transition-[color,background-color,border-color] duration-200 ease-linear',
             'data-[state=active]:border-border',
             'data-[state=active]:bg-accent',

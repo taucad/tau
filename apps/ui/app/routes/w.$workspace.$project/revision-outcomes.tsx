@@ -1,4 +1,4 @@
-import { useEffect, useRef, useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Topic } from '@taucad/events';
 import { toast } from '#components/ui/sonner.js';
@@ -8,6 +8,7 @@ import type { WorkerRevisionEvent } from '#machines/file-manager.worker.revision
 
 /** A turn that ended without recording a revision, as a surface reads it. @public */
 export type TurnOutcomeNotice = Readonly<{
+  projectId: string;
   kind: 'conflicted' | 'failed';
   turnId: string;
   chatId: string;
@@ -15,16 +16,20 @@ export type TurnOutcomeNotice = Readonly<{
 }>;
 
 const topic = new Topic<void>({ name: 'revision-turn-outcomes' });
-let latest: TurnOutcomeNotice | undefined;
+const outcomes = new Map<string, TurnOutcomeNotice[]>();
+const noOutcomes: readonly TurnOutcomeNotice[] = Object.freeze([]);
 
 /** Forget the notice a surface has acted on. @public */
-export const clearTurnOutcome = (): void => {
-  latest = undefined;
+export const clearTurnOutcome = (projectId: string, turnId?: string): void => {
+  outcomes.set(
+    projectId,
+    turnId === undefined ? [] : (outcomes.get(projectId) ?? []).filter((notice) => notice.turnId !== turnId),
+  );
   topic.emit();
 };
 
 /**
- * The last turn that ended without a revision, or `undefined`.
+ * The turns that ended without a revision for one project.
  *
  * A module store rather than component state: the toast and the pane's
  * attention line are two surfaces for one fact, and two subscriptions to the
@@ -33,18 +38,19 @@ export const clearTurnOutcome = (): void => {
  * @returns The notice, until a surface clears it.
  * @public
  */
-export const useLatestTurnOutcome = (): TurnOutcomeNotice | undefined =>
+export const useTurnOutcomes = (projectId: string): readonly TurnOutcomeNotice[] =>
   useSyncExternalStore(
     (listener) => topic.subscribe(listener),
-    () => latest,
-    () => undefined,
+    () => outcomes.get(projectId) ?? noOutcomes,
+    () => noOutcomes,
   );
 
-const noticeOf = (event: WorkerRevisionEvent): TurnOutcomeNotice | undefined => {
+const noticeOf = (projectId: string, event: WorkerRevisionEvent): TurnOutcomeNotice | undefined => {
   if (event.type === 'turn.finalized' || event.type === 'chats.projected') {
     return undefined;
   }
   return {
+    projectId,
     kind: event.type === 'turn.conflicted' ? 'conflicted' : 'failed',
     turnId: event.turnId,
     chatId: event.chatId,
@@ -69,21 +75,6 @@ export function RevisionOutcomes(): undefined {
   const client = useRevisionClient();
   const { projectId } = useProject();
   const queryClient = useQueryClient();
-  const currentProjectIdRef = useRef<string | undefined>(undefined);
-
-  /* The store is the document's, not the project's: a notice left behind by the
-   * project a person just closed would render over the next one they open
-   * (review R13). */
-  useEffect(() => {
-    if (currentProjectIdRef.current !== projectId) {
-      currentProjectIdRef.current = projectId;
-      clearTurnOutcome();
-    }
-    return () => {
-      clearTurnOutcome();
-    };
-  }, [projectId]);
-
   useEffect(() => {
     if (client === undefined) {
       return undefined;
@@ -100,11 +91,12 @@ export function RevisionOutcomes(): undefined {
         }
         return;
       }
-      const notice = noticeOf(event);
+      const notice = noticeOf(projectId, event);
       if (notice === undefined) {
         return;
       }
-      latest = notice;
+      const current = outcomes.get(projectId) ?? [];
+      outcomes.set(projectId, [...current.filter((entry) => entry.turnId !== notice.turnId), notice]);
       topic.emit();
       if (notice.kind === 'conflicted') {
         toast.error('That change needs your attention', {
@@ -112,7 +104,9 @@ export function RevisionOutcomes(): undefined {
         });
         return;
       }
-      toast.error('Nothing was saved for that change', { description: notice.reason });
+      toast.error('Nothing was saved for that change', {
+        description: notice.reason,
+      });
     });
   }, [client, projectId, queryClient]);
 

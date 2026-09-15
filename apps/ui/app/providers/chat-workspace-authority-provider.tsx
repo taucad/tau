@@ -14,6 +14,7 @@ import type {
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import { useChats } from '#hooks/use-chats.js';
 import type { FileSystemClientFacade } from '#hooks/use-file-manager.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import { useProject } from '#hooks/use-project.js';
@@ -417,6 +418,7 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
   const { projectId } = useProject();
   const fileManager = useFileManager();
   const { invalidateProjectedChats } = useProjectManager();
+  const { chats } = useChats(projectId);
   const chatSessions = useChatSessionStore();
   const { rootDirectory, proxy: providerIdentity } = fileManager.fileManagerRef.getSnapshot().context;
   const state = getBrowserWorkspaceAuthority({
@@ -541,11 +543,12 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         const leaseTurnId = options?.turnId ?? runId;
         state.placing.set(chatId, leaseTurnId);
         const conflict = state.conflicts.get(chatId);
+        const checkoutId = conflict?.checkoutId ?? chats.find((chat) => chat.id === chatId)?.checkoutId;
         const placement = await revisions.admitTurn({
           turnId: leaseTurnId,
           chatId,
           runId,
-          ...(conflict?.checkoutId === undefined ? {} : { checkoutId: conflict.checkoutId }),
+          ...(checkoutId === undefined ? {} : { checkoutId }),
         });
         const preparedFileSystems = await createPreparedWorkspaceFileSystems(state.rootedFileSystem);
         const prepared: PreparedChatWorkspace = Object.freeze({
@@ -582,7 +585,7 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         state.pending.delete(chatId);
       }
     },
-    [notify, projectId, revisions, state],
+    [chats, notify, projectId, revisions, state],
   );
 
   const update = useCallback(

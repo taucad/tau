@@ -7,7 +7,7 @@
  * disk before it does.
  */
 
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -19,8 +19,10 @@ const saveRevision = vi.fn<(trigger?: 'save' | 'hidden' | 'close') => void>(() =
   sent.push('saveRevision');
 });
 const waitForStore = vi.fn(async () => undefined);
+const toastError = vi.hoisted(() => vi.fn());
 
 vi.mock('xstate', () => ({ waitFor: waitForStore }));
+vi.mock('#components/ui/sonner.js', () => ({ toast: { error: toastError } }));
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => {
@@ -57,6 +59,9 @@ beforeEach(() => {
   sent.length = 0;
   nextProjectId = 0;
   saveRevision.mockClear();
+  waitForStore.mockReset();
+  waitForStore.mockResolvedValue(undefined);
+  toastError.mockReset();
 });
 
 describe('the workbench save shortcut', () => {
@@ -113,6 +118,22 @@ describe('the workbench save shortcut', () => {
       </KeyboardProvider>,
     );
 
+    expect(saveRevision).not.toHaveBeenCalled();
+  });
+
+  it('records nothing when either file flush fails', async () => {
+    waitForStore.mockRejectedValueOnce(new Error('Editor flush timed out'));
+    render(
+      <KeyboardProvider>
+        <RevisionSaveShortcut />
+      </KeyboardProvider>,
+    );
+
+    await userEvent.keyboard('{Control>}s{/Control}');
+
+    await waitFor(() => {
+      expect(toastError).toHaveBeenCalledWith('Revision not saved', { description: 'Editor flush timed out' });
+    });
     expect(saveRevision).not.toHaveBeenCalled();
   });
 });

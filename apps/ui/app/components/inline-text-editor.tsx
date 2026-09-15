@@ -22,6 +22,8 @@ type InlineTextEditorProps = {
   readonly value: string;
   readonly onSave: (value: string) => Promise<void> | void;
   readonly placeholder?: string;
+  readonly ariaLabel?: string;
+  readonly saveLabel?: string;
   readonly isDisabled?: boolean;
   readonly shouldSubmitOnBlur?: boolean;
   readonly shouldAutoSelectOnFocus?: boolean;
@@ -35,6 +37,8 @@ export function InlineTextEditor({
   value,
   onSave,
   placeholder,
+  ariaLabel,
+  saveLabel = 'Save',
   isDisabled,
   shouldSubmitOnBlur = true,
   shouldAutoSelectOnFocus = true,
@@ -91,6 +95,7 @@ export function InlineTextEditor({
             type='text'
             value={editValue}
             placeholder={placeholder}
+            aria-label={ariaLabel}
             className={cn(inlineTextEditorVariants({ variant }))}
             onChange={(event) => {
               setEditValue(event.target.value);
@@ -129,7 +134,7 @@ export function InlineTextEditor({
             className='h-full'
             disabled={!editValue.trim() || editValue === value}
           >
-            Save
+            {saveLabel}
           </Button>
         </form>
       ) : (

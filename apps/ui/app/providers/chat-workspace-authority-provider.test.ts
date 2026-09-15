@@ -41,7 +41,7 @@ const hookState = vi.hoisted(() => ({
 }));
 const revisionRoot = vi.hoisted(() => ({
   commands: [] as WorkerRevisionCommand[],
-  admitted: [] as Array<{ turnId: string; chatId: string; runId: string }>,
+  admitted: [] as Array<{ turnId: string; chatId: string; runId: string; checkoutId?: string }>,
   refuse: undefined as string | undefined,
   /** Set by a test to keep an admission in flight while the page sends. */
   hold: undefined as PromiseWithResolvers<void> | undefined,
@@ -55,6 +55,8 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectId: hookState.projectId }),
 }));
+let chats = [{ id: 'chat_1', checkoutId: 'checkout-durable' }];
+vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats }) }));
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({ invalidateProjectedChats: hookState.invalidateProjectedChats }),
 }));
@@ -70,7 +72,7 @@ vi.mock('#hooks/use-revision-status.js', () => ({
       return () => revisionRoot.eventListeners.delete(listener);
     },
     subscribeToasts: () => () => undefined,
-    admitTurn: async (input: { turnId: string; chatId: string; runId: string }) => {
+    admitTurn: async (input: { turnId: string; chatId: string; runId: string; checkoutId?: string }) => {
       revisionRoot.admitted.push(input);
       await revisionRoot.hold?.promise;
       if (revisionRoot.refuse !== undefined) {
@@ -190,6 +192,7 @@ beforeEach(() => {
   revisionRoot.commands.length = 0;
   revisionRoot.admitted.length = 0;
   revisionRoot.refuse = undefined;
+  chats = [{ id: 'chat_1', checkoutId: 'checkout-durable' }];
   browserWorkspaceAuthorityTestApi.reset();
 });
 
@@ -209,7 +212,12 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
     const prepared = await act(async () => result.current.prepare('chat_1', { turnId: 'turn_1' }));
 
     expect(revisionRoot.admitted).toEqual([
-      { turnId: 'turn_1', chatId: 'chat_1', runId: expect.stringMatching(/^run_/u) as unknown as string },
+      {
+        turnId: 'turn_1',
+        chatId: 'chat_1',
+        runId: expect.stringMatching(/^run_/u) as unknown as string,
+        checkoutId: 'checkout-durable',
+      },
     ]);
     expect(prepared.runId).toBe(revisionRoot.admitted[0]?.runId);
     expect(prepared.execution).toEqual({

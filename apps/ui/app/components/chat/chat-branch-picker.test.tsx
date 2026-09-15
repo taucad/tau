@@ -34,6 +34,10 @@ const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Elem
   <TooltipProvider>{children}</TooltipProvider>
 );
 
+const patchChat = vi.fn();
+let chats = [{ id: 'chat-1', checkoutId: 'live' }];
+vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats, patchChat }) }));
+
 const twoBranches = [
   { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
   {
@@ -50,6 +54,8 @@ beforeEach(() => {
   revisionStatusHarness.reset();
   activeChatId = 'chat-1';
   project = { projectId: 'p' };
+  chats = [{ id: 'chat-1', checkoutId: 'live' }];
+  patchChat.mockReset();
 });
 
 describe('ChatBranchPicker', () => {
@@ -60,7 +66,7 @@ describe('ChatBranchPicker', () => {
     await user.click(screen.getByRole('button', { name: 'Work in main. Choose a branch.' }));
     await user.click(screen.getByRole('button', { name: 'New branch' }));
     await user.type(screen.getByRole('textbox', { name: 'Name for the new branch' }), 'bracket-fillet');
-    await user.click(screen.getByRole('button', { name: 'Create' }));
+    await user.click(screen.getByRole('button', { name: 'Create branch' }));
 
     expect(revisionStatusHarness.commands.createBranch).toHaveBeenCalledWith('bracket-fillet');
     await waitFor(() => {
@@ -74,7 +80,7 @@ describe('ChatBranchPicker', () => {
     await user.click(screen.getByRole('button', { name: 'Work in main. Choose a branch.' }));
     await user.click(screen.getByRole('button', { name: 'New branch' }));
     await user.type(screen.getByRole('textbox', { name: 'Name for the new branch' }), 'bracket-fillet');
-    await user.click(screen.getByRole('button', { name: 'Create' }));
+    await user.click(screen.getByRole('button', { name: 'Create branch' }));
 
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
@@ -101,12 +107,13 @@ describe('ChatBranchPicker', () => {
     view.rerender(<ChatBranchPicker />);
 
     await waitFor(() => {
-      expect(revisionStatusHarness.commands.switchTo).toHaveBeenCalledWith('bracket-fillet');
+      expect(patchChat).toHaveBeenCalledWith('chat-1', 'checkoutId', 'co-2');
     });
   });
 
   it('names the branch this chat works in, and switches to the one a person picks', async () => {
     const user = userEvent.setup();
+    chats = [{ id: 'chat-1', checkoutId: 'co-2' }];
     revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main', branches: twoBranches };
 
     render(<ChatBranchPicker />, { wrapper });
@@ -114,7 +121,7 @@ describe('ChatBranchPicker', () => {
     await user.type(screen.getByPlaceholderText('Search branches...'), 'main');
     await user.click(screen.getByRole('option', { name: 'main' }));
 
-    expect(revisionStatusHarness.commands.switchTo).toHaveBeenCalledWith('main');
+    expect(patchChat).toHaveBeenCalledWith('chat-1', 'checkoutId', 'live');
   });
 
   it('falls back to the workbench branch for a chat that has not run yet', () => {
@@ -136,6 +143,17 @@ describe('ChatBranchPicker', () => {
     render(<ChatBranchPicker />, { wrapper });
 
     expect(screen.getByRole('button', { name: 'Work in main. Choose a branch.' })).toBeInTheDocument();
+  });
+
+  it('does not claim a deleted chat checkout is the workbench and allows explicit recovery', async () => {
+    const user = userEvent.setup();
+    chats = [{ id: 'chat-1', checkoutId: 'deleted-checkout' }];
+    render(<ChatBranchPicker />, { wrapper });
+    expect(screen.queryByRole('button', { name: 'Work in main. Choose a branch.' })).not.toBeInTheDocument();
+    expect(patchChat).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Branch unavailable. Choose a branch.' }));
+    await user.click(screen.getByRole('option', { name: 'main' }));
+    expect(patchChat).toHaveBeenCalledWith('chat-1', 'checkoutId', 'live');
   });
 
   it('says nothing at all before the project root has answered', () => {

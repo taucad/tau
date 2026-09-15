@@ -65,6 +65,7 @@ const mobilePanelByWorkbenchPanel: Partial<Record<WorkbenchPanelId, MobilePanelI
   export: 'converter',
   share: 'share',
   details: 'details',
+  revisions: 'revisions',
 };
 
 export function ProjectWorkspaceProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {

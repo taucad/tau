@@ -14,7 +14,7 @@ import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.j
 import {
   clearTurnOutcome,
   RevisionOutcomes,
-  useLatestTurnOutcome,
+  useTurnOutcomes,
 } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import type { WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
 
@@ -57,7 +57,7 @@ vi.mock('#components/ui/sonner.js', () => ({
 
 /** Reads the same store the pane's attention line reads. */
 function Latest(): React.JSX.Element {
-  const outcome = useLatestTurnOutcome();
+  const outcome = useTurnOutcomes('p').at(-1);
   return <span data-testid='latest'>{outcome === undefined ? 'none' : `${outcome.kind}:${outcome.turnId}`}</span>;
 }
 
@@ -85,7 +85,7 @@ beforeEach(() => {
   revisionStatusHarness.reset();
   errors.length = 0;
   projectedChats = [];
-  clearTurnOutcome();
+  clearTurnOutcome('p');
 });
 
 afterEach(() => {

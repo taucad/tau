@@ -73,6 +73,7 @@ export {
   chatRefName,
   chatRefPrefix,
   projectChats,
+  readChatRecord,
   replayChatSegment,
   writeChatRef,
 } from '#chat-ref.js';

@@ -26,7 +26,7 @@ import { packager } from '@electron/packager';
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { parseMacosPackageMode } from './macos-package-mode.mjs';
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
-import { copyRuntimeClosure } from './runtime-closure.mjs';
+import { copyGeoSpecNative, copyRuntimeClosure } from './runtime-closure.mjs';
 
 type PackageMetadata = {
   readonly name: string;
@@ -242,6 +242,10 @@ await Promise.all([
   copyRuntimePackage('libassimp-darwin-arm64', libassimpDarwinArm64),
   copyRuntimePackage('nanoraster', nanoraster),
   copyRuntimePackage('nanoraster-darwin-arm64', nanorasterDarwinArm64),
+  copyGeoSpecNative(
+    await realpath(resolve(desktopRoot, 'node_modules/@taucad/geospec-engine')),
+    resolve(stageRoot, 'node_modules'),
+  ),
   writeFile(
     resolve(stageRoot, 'package.json'),
     `${JSON.stringify(

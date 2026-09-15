@@ -76,8 +76,11 @@ const host = createServicesHost({
   },
   /* The reply half of main's quit hold (W19): every project this utility serves
    * has taken its close cut and settled its sync. */
-  quiesced: () => {
-    parentPort.postMessage({ type: 'quiesced' });
+  quiesced: (error) => {
+    parentPort.postMessage({
+      type: error === undefined ? 'quiesced' : 'quiesce-failed',
+      ...(error === undefined ? {} : { error }),
+    });
   },
   agentHostReleased: (requestId, error) => {
     parentPort.postMessage({

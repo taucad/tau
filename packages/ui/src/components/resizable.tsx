@@ -53,7 +53,8 @@ const resizableHandleVariants = cva(
     'after:absolute after:inset-y-0 after:left-1/2 after:z-10 after:w-[1px] after:-translate-x-1/2 after:bg-border after:transition-[width,height] after:duration-200 after:ease-in-out data-[resize-handle-state=drag]:after:transition-all data-[resize-handle-state=hover]:after:transition-all',
     'data-[resize-handle-state=drag]:after:w-[3px] data-[resize-handle-state=hover]:after:w-[3px]',
     'data-[resize-handle-state=drag]:after:bg-neutral/50',
-    'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:outline-none',
+    // The handle is 0px wide, so an inset outline would have nothing to paint on.
+    'focus-visible:focus-outline-outside',
     // Vertical specific styles
     'data-[panel-group-direction=vertical]:h-0 data-[panel-group-direction=vertical]:w-full',
     'data-[panel-group-direction=vertical]:after:left-0 data-[panel-group-direction=vertical]:after:h-[1px] data-[panel-group-direction=vertical]:after:w-full data-[panel-group-direction=vertical]:after:-translate-y-1/2 data-[panel-group-direction=vertical]:after:translate-x-0',

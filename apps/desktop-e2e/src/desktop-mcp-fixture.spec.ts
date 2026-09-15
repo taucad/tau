@@ -124,21 +124,38 @@ test('serves the utility MCP endpoint to an agent it spawned', async () => {
     /* 3. The normalized ACP call uses the same native CAD card as a Tau turn,
      * instead of the generic external-tool disclosure. */
     await expectVisible(page.getByText('Tested 1 requirement', { exact: true }), 60_000);
+    await expect.poll(() => readFileSync(eventsPath, 'utf8'), { timeout: 60_000 }).toContain('"state":"completed"');
 
     /* 4. The real desktop banner returns the exact standing option the user
      * chose. The fixture echoes that id from the ACP response, while the durable
      * interrupt proves the UI did not merely dismiss itself locally. */
-    const priorLog = readFileSync(eventsPath, 'utf8');
-    await submitPrompt(page, 'approval round trip');
-    await expectVisible(page.getByRole('region', { name: 'Approval required' }), 60_000);
-    await page.getByRole('button', { name: 'Always allow', exact: true }).click();
-    await expect
-      .poll(() => readFileSync(eventsPath, 'utf8').slice(priorLog.length), { timeout: 60_000 })
-      .toMatch(/"phase":"resolved".*"optionId":"allow-always"/u);
-    await expect
-      .poll(() => readFileSync(eventsPath, 'utf8').slice(priorLog.length), { timeout: 60_000 })
-      .toMatch(/"role":"tool-output".*"optionId":"allow-always"/u);
-    await expect.poll(async () => page.getByRole('region', { name: 'Approval required' }).count()).toBe(0);
+    for (const [name, optionId] of [
+      ['Allow', 'allow'],
+      ['Allow for this session', 'allow-session'],
+      ['Always allow', 'allow-always'],
+    ]) {
+      const priorLog = readFileSync(eventsPath, 'utf8');
+      // oxlint-disable-next-line no-await-in-loop -- each choice resolves a separate real ACP permission request.
+      await submitPrompt(page, 'approval round trip');
+      // oxlint-disable-next-line no-await-in-loop -- wait for this request before selecting its exact offered option.
+      await expectVisible(page.getByRole('region', { name: 'Approval required' }), 60_000);
+      // oxlint-disable-next-line no-await-in-loop -- user choices are ordered turns.
+      await page.getByRole('button', { name, exact: true }).click();
+      // oxlint-disable-next-line no-await-in-loop -- the durable outcome must belong to this turn.
+      await expect
+        .poll(() => readFileSync(eventsPath, 'utf8').slice(priorLog.length), { timeout: 60_000 })
+        .toMatch(new RegExp(`"phase":"resolved".*"optionId":"${optionId}"`, 'u'));
+      // oxlint-disable-next-line no-await-in-loop -- adapter echo proves the selected option crossed the wire.
+      await expect
+        .poll(() => readFileSync(eventsPath, 'utf8').slice(priorLog.length), { timeout: 60_000 })
+        .toMatch(new RegExp(`"role":"tool-output".*"optionId":"${optionId}"`, 'u'));
+      // oxlint-disable-next-line no-await-in-loop -- settle the current banner before starting the next turn.
+      await expect.poll(async () => page.getByRole('region', { name: 'Approval required' }).count()).toBe(0);
+      // oxlint-disable-next-line no-await-in-loop -- a resolved tool is not yet a settled turn.
+      await expect
+        .poll(() => readFileSync(eventsPath, 'utf8').slice(priorLog.length), { timeout: 60_000 })
+        .toContain('"state":"completed"');
+    }
 
     /* 5. Still an external turn: the gateway saw nothing. */
     expect(fixture.gatewayRequests.length).toBe(gatewayCallsBefore);

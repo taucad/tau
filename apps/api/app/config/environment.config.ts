@@ -168,7 +168,7 @@ const environmentSchemaBase = z.object({
   STRIPE_SECRET_KEY: z
     .string()
     .default('')
-    .describe('Stripe API secret key (sk_test_... in staging, sk_live_... in prod); empty = billing disabled'),
+    .describe('Restricted Stripe create key (rk_test_... in staging, rk_live_... in prod); empty = billing disabled'),
   STRIPE_READ_SECRET_KEY: z.string().default(''),
   STRIPE_ACCOUNT_ID: z.string().default(''),
   STRIPE_LIVEMODE: z
@@ -313,7 +313,7 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
     }
     const stripeMode = data.STRIPE_LIVEMODE ? 'live' : 'test';
     const stripeIdentifiers = [
-      ['STRIPE_SECRET_KEY', data.STRIPE_SECRET_KEY, [`sk_${stripeMode}_`, `rk_${stripeMode}_`]],
+      ['STRIPE_SECRET_KEY', data.STRIPE_SECRET_KEY, [`rk_${stripeMode}_`]],
       ['STRIPE_READ_SECRET_KEY', data.STRIPE_READ_SECRET_KEY, [`rk_${stripeMode}_`]],
       ['STRIPE_ACCOUNT_ID', data.STRIPE_ACCOUNT_ID, 'acct_'],
       ['STRIPE_WEBHOOK_SECRET', data.STRIPE_WEBHOOK_SECRET, 'whsec_'],
@@ -325,6 +325,13 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
       if (value && !prefixes.some((prefix) => value.startsWith(prefix))) {
         context.addIssue({ code: 'custom', message: `${key} does not match Stripe ${stripeMode} mode`, path: [key] });
       }
+    }
+    if (data.STRIPE_SECRET_KEY && data.STRIPE_SECRET_KEY === data.STRIPE_READ_SECRET_KEY) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Stripe create and read keys must be separate restricted credentials',
+        path: ['STRIPE_READ_SECRET_KEY'],
+      });
     }
   }
 
@@ -427,11 +434,6 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
       message: 'DATABASE_RUNTIME_ROLE is required in production',
       path: ['DATABASE_RUNTIME_ROLE'],
     });
-  }
-  for (const key of githubRepositoryKeys) {
-    if (!data[key]) {
-      context.addIssue({ code: 'custom', message: `${key} is required in production`, path: [key] });
-    }
   }
 });
 

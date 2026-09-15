@@ -544,6 +544,7 @@ export const agentChannelLiveEventSchema = z.strictObject({
       type: z.enum(['text-delta', 'thinking-delta']),
       ...liveEventBase,
       delta: z.string(),
+      offset: z.number().int().nonnegative().optional(),
     }),
     z.strictObject({
       type: z.literal('text-end'),

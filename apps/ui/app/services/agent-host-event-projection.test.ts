@@ -87,6 +87,68 @@ it('should keep external reasoning open across an interleaved tool result', asyn
   expect(parts.filter((part) => part.type === 'reasoning').map((part) => part.text)).toEqual(['checking complete']);
 });
 
+it.each(['text', 'thinking'] as const)(
+  'should reconcile %s checkpoints and live frames in either delivery order',
+  async (kind) => {
+    const identity = { chatId: 'chat', runId: base.runId, messageId: 'block', contentIndex: 0 };
+    const live: AgentLiveEvent[] = [
+      { ...identity, type: kind === 'text' ? 'text-start' : 'thinking-start' },
+      { ...identity, type: kind === 'text' ? 'text-delta' : 'thinking-delta', delta: 'hello', offset: 0 },
+      { ...identity, type: kind === 'text' ? 'text-delta' : 'thinking-delta', delta: ' world', offset: 5 },
+      { ...identity, type: kind === 'text' ? 'text-end' : 'thinking-end', content: 'hello world' },
+    ];
+    const durable = (text: string, final = false): AgentLogEvent => ({
+      ...base,
+      type: 'message.appended',
+      message: {
+        id: 'block',
+        role: 'assistant',
+        content: [kind === 'text' ? { type: 'text', text } : { type: 'thinking', thinking: text }],
+        metadata: { tauInternal: { origin: 'external', streamState: final ? 'final' : 'checkpoint' } },
+      },
+    });
+    // The daemon delivers durable and live frames on independent subscriptions.
+    for (const events of [
+      [live[0], durable('hello'), live[1], live[2], durable('hello world', true), live[3]],
+      [live[0], live[1], live[2], durable('hello'), durable('hello world', true), live[3]],
+      [durable('hello world', true), ...live],
+      [...live, durable('hello world', true), durable('hello world', true)],
+    ]) {
+      const blocks = new Map();
+      const chunks = events.flatMap((event) => {
+        if (!event) {
+          throw new Error('Missing fixture frame');
+        }
+        return 'leaderEpoch' in event ? projectAgentHostEvent(event, blocks) : projectAgentHostLiveEvent(event, blocks);
+      });
+      const errors: unknown[] = [];
+      let parts: MyUIMessage['parts'] = [];
+      const stream = new ReadableStream<UIMessageChunk>({
+        start(controller) {
+          for (const chunk of chunks) {
+            controller.enqueue(chunk);
+          }
+          controller.close();
+        },
+      });
+      // oxlint-disable-next-line no-await-in-loop -- consume each independent arrival-order fixture to its terminal SDK state.
+      for await (const message of readUIMessageStream<MyUIMessage>({
+        stream,
+        onError: (error) => errors.push(error),
+      })) {
+        parts = message.parts;
+      }
+      expect(errors).toEqual([]);
+      const text = parts.flatMap((part) =>
+        (part.type === 'text' && kind === 'text') || (part.type === 'reasoning' && kind === 'thinking')
+          ? [part.text]
+          : [],
+      );
+      expect(text).toEqual(['hello world']);
+    }
+  },
+);
+
 describe('projectAgentHostEvent', () => {
   it('reconstructs the durable user turn from append and history-commit events', () => {
     const message = {
@@ -167,7 +229,10 @@ describe('projectAgentHostEvent', () => {
       { type: 'reasoning-end', id: 'assistant-live:thinking:1' },
       { type: 'finish-step' },
     ]);
-    expect(streamedBlocks).toEqual(new Map());
+    expect([...streamedBlocks.values()]).toEqual([
+      { type: 'text', content: 'Browser host started the change.', closed: true },
+      { type: 'thinking', content: 'Inspecting the workspace.', closed: true },
+    ]);
   });
 
   it('keeps an ACP checkpoint open and continues one block after an unseen prefix', () => {

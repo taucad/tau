@@ -604,6 +604,7 @@ export class PublicationsService {
       project: projectSummary,
       currentPublication: {
         id: publication.id,
+        tag: publication.tag,
         title: publication.title,
         description: publication.description,
         visibility: publication.visibility as ProjectShareCurrentPublication['visibility'],

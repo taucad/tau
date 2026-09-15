@@ -13,6 +13,9 @@ import { financialEnvironmentSchema } from '@taucad/billing';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { BillingJournalReconciliationService } from '#api/billing/billing-journal-reconciliation.service.js';
+import { BillingCashReconciliationService } from '#api/billing/billing-cash-reconciliation.service.js';
+import { BillingPurchaseReconciliationService } from '#api/billing/billing-purchase-reconciliation.service.js';
+import { BillingSupplierReconciliationService } from '#api/billing/billing-supplier-reconciliation.service.js';
 import { registerBillableModelMeterContracts } from '#api/billing/billable-model-qualification.js';
 import { runBillingPolicyCommand } from '#api/billing/billing-policy.command.js';
 import { installBillingProtections } from '#database/billing-protections.js';
@@ -48,6 +51,7 @@ async function main(): Promise<void> {
     lifecycle: 'tau_billing_runtime',
     'recover-payments': 'tau_billing_runtime',
     'billing-operations-worker': 'tau_billing_runtime',
+    'billing-reload-worker': 'tau_billing_runtime',
     'recover-llm': 'tau_billing_runtime',
     'recover-llm-worker': 'tau_billing_runtime',
     'reconcile-journal': 'tau_billing_runtime',
@@ -436,18 +440,52 @@ async function main(): Promise<void> {
           cash,
         );
         const { sdk } = await import('#telemetry/otel.js');
-        const journal = new BillingJournalReconciliationService(database, new MetricsService(), {
+        const sourceConfig = {
           environment: billingEnvironment,
           stripeAccountId,
           livemode: livemode === 'true',
-        });
+        };
+        const journal = new BillingJournalReconciliationService(database, new MetricsService(), sourceConfig);
+        const cashScans = new BillingCashReconciliationService(database, sourceStripe, sourceConfig);
+        const purchaseScans = new BillingPurchaseReconciliationService(database, sourceStripe, sourceConfig);
+        const supplier = new BillingSupplierReconciliationService(database, sourceConfig);
+        // Each scheduled job owns its failure: one provider or data fault must not stop the others.
+        const runJob = async (event: string, run: () => Promise<unknown>): Promise<void> => {
+          const jobStartedAt = Date.now();
+          try {
+            const report = await run();
+            console.log(
+              JSON.stringify(
+                { event, environment, report, durationMilliseconds: Date.now() - jobStartedAt },
+                (_key, value: unknown) => (typeof value === 'bigint' ? value.toString() : value),
+              ),
+            );
+          } catch (error) {
+            console.error(
+              JSON.stringify({
+                event,
+                environment,
+                outcome: 'failed',
+                failureKind: error instanceof Error ? error.name : 'UnknownError',
+                durationMilliseconds: Date.now() - jobStartedAt,
+              }),
+            );
+          }
+        };
         const shutdown = new AbortController();
         const stop = (): void => {
           shutdown.abort();
         };
         process.once('SIGINT', stop);
         process.once('SIGTERM', stop);
-        let poll = 0;
+        // The journal sweep keeps a fixed 15-minute cadence independent of the payment poll interval.
+        const journalSweepIntervalMilliseconds = 15 * 60_000;
+        let lastSweepAt = Number.NEGATIVE_INFINITY;
+        // Independent source reconciliation is hourly; its window is the previous complete UTC day.
+        const scanIntervalMilliseconds = 60 * 60_000;
+        const dayMilliseconds = 24 * 60 * 60_000;
+        // Start one cadence in: boot stays free of provider I/O, and restarts do not re-scan immediately.
+        let lastScanAt = Date.now();
         try {
           while (!shutdown.signal.aborted) {
             const startedAt = Date.now();
@@ -475,10 +513,11 @@ async function main(): Promise<void> {
                 }),
               );
             }
-            if (poll % 15 === 0) {
+            if (Date.now() - lastSweepAt >= journalSweepIntervalMilliseconds) {
               const reconciliationStartedAt = Date.now();
+              lastSweepAt = reconciliationStartedAt;
               try {
-                // oxlint-disable-next-line no-await-in-loop -- the independent sweep runs every fifteenth recovery poll
+                // oxlint-disable-next-line no-await-in-loop -- the independent sweep runs every fifteen minutes
                 const report = await journal.runSweep({ batchLimit: 200 });
                 console.log(
                   JSON.stringify({
@@ -500,7 +539,148 @@ async function main(): Promise<void> {
                 );
               }
             }
-            poll += 1;
+            // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
+            await runJob('billing.reload_expiry', async () =>
+              payments.expireReloadRecoveries({ environment: billingEnvironment, limit }),
+            );
+            // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
+            await runJob('billing.renewal_recovery', async () =>
+              payments.recoverRenewalOffers({ environment: billingEnvironment, limit }),
+            );
+            if (Date.now() - lastScanAt >= scanIntervalMilliseconds) {
+              lastScanAt = Date.now();
+              // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
+              await runJob('billing.supplier_sweep', async () =>
+                supplier.sweepSupplierUsage({ pageSize: 100, unresolvedMaximumAge: dayMilliseconds }),
+              );
+              // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
+              await runJob('billing.source_reconciliation', async () => {
+                const windowEnd = new Date(Math.floor(Date.now() / dayMilliseconds) * dayMilliseconds);
+                const windowStart = new Date(windowEnd.getTime() - dayMilliseconds);
+                // The scan row is idempotent per window, so an hourly retry resumes the same durable cursors.
+                const scanId = await cashScans.createScan({
+                  environment: billingEnvironment,
+                  currency: 'usd',
+                  windowStart,
+                  windowEnd,
+                  lookbackStart: new Date(windowStart.getTime() - dayMilliseconds),
+                });
+                const cash = await cashScans.runScan({ scanId, maximumPagesPerStream: 20 });
+                const purchase = await purchaseScans.runScan({
+                  scanId,
+                  maximumObligations: 100,
+                  maximumGrants: 100,
+                  maximumSubscriptions: 100,
+                });
+                return { scanId, cash: cash.status, purchases: purchase.status };
+              });
+            }
+            try {
+              // oxlint-disable-next-line no-await-in-loop -- the continuous worker deliberately sleeps between polls
+              await wait(pollMilliseconds, undefined, { signal: shutdown.signal });
+            } catch {
+              break;
+            }
+          }
+        } finally {
+          process.removeListener('SIGINT', stop);
+          process.removeListener('SIGTERM', stop);
+          await sdk.shutdown();
+        }
+        break;
+      }
+      case 'billing-reload-worker': {
+        if (
+          args.length !== 7 ||
+          args[1] !== '--environment' ||
+          args[3] !== '--limit' ||
+          !/^[1-9][0-9]{0,2}$/u.test(args[4]!) ||
+          Number(args[4]) > 100 ||
+          args[5] !== '--poll-milliseconds' ||
+          !/^[1-9][0-9]{3,5}$/u.test(args[6]!) ||
+          Number(args[6]) > 300_000
+        ) {
+          throw new Error(
+            'Usage: billing-reload-worker --environment ENVIRONMENT --limit 1..100 --poll-milliseconds 1000..300000',
+          );
+        }
+        const secretKey = process.env.STRIPE_SECRET_KEY;
+        const readSecretKey = process.env.STRIPE_READ_SECRET_KEY;
+        const stripeAccountId = process.env.STRIPE_ACCOUNT_ID;
+        const livemode = String(process.env.STRIPE_LIVEMODE);
+        const monthlyPriceId = process.env.STRIPE_PRICE_ID_PRO_MONTHLY;
+        const topupProductId = process.env.STRIPE_PRODUCT_ID_CREDIT_PACK;
+        if (!secretKey || !readSecretKey || !stripeAccountId || !monthlyPriceId || !topupProductId) {
+          throw new Error('Separate collection and read Stripe keys, account and catalog identifiers are required');
+        }
+        // The API composes collection only in explicit test mode; a live worker would charge an unqualified catalog.
+        // Both refusals are permanent, so they fail the boot rather than letting the loop spin on ForbiddenException.
+        if (livemode !== 'false') {
+          throw new Error('Automatic reload collection requires explicit Stripe test mode');
+        }
+        if (environment.startsWith('prod-')) {
+          throw new Error('Automatic reload collection is not enabled for production environments');
+        }
+        const limit = Number(args[4]);
+        const pollMilliseconds = Number(args[6]);
+        const billingEnvironment = financialEnvironmentSchema.parse(environment);
+        const fixtureUrl = process.env['BILLING_STRIPE_FIXTURE_URL'];
+        const stripe = createBillingStripeClient({ secretKey, fixtureUrl });
+        const sourceStripe = createBillingStripeClient({ secretKey: readSecretKey, fixtureUrl });
+        const database = { database: drizzle(client, { schema }) };
+        const policy = new BillingPolicyService(database);
+        const ledger = new CreditLedgerService(database, policy);
+        const config = { environment: billingEnvironment, stripeAccountId, livemode: false };
+        const cash = new BillingCashService(database, stripe, sourceStripe, ledger, config);
+        const payments = new BillingPaymentsService(
+          database,
+          stripe,
+          sourceStripe,
+          {
+            ...config,
+            // Reload charges never build redirect URLs; the hosted origin belongs to the API process.
+            uiOrigin: 'https://unused.invalid',
+            webhookSecret: '',
+            collection: { kind: 'stripe_test', monthlyPriceId, topupProductId },
+          },
+          policy,
+          ledger,
+          cash,
+        );
+        const { sdk } = await import('#telemetry/otel.js');
+        const shutdown = new AbortController();
+        const stop = (): void => {
+          shutdown.abort();
+        };
+        process.once('SIGINT', stop);
+        process.once('SIGTERM', stop);
+        try {
+          while (!shutdown.signal.aborted) {
+            const startedAt = Date.now();
+            try {
+              // oxlint-disable-next-line no-await-in-loop -- one worker serializes reload charges on one DB connection
+              const worked = await payments.processReloadWork({ environment: billingEnvironment, limit });
+              console.log(
+                JSON.stringify({
+                  event: 'billing.reload_work_batch',
+                  environment,
+                  processed: worked.processed.length,
+                  pending: worked.pending.length,
+                  failed: worked.failed.length,
+                  durationMilliseconds: Date.now() - startedAt,
+                }),
+              );
+            } catch (error) {
+              console.error(
+                JSON.stringify({
+                  event: 'billing.reload_work_batch',
+                  environment,
+                  outcome: 'failed',
+                  failureKind: error instanceof Error ? error.name : 'UnknownError',
+                  durationMilliseconds: Date.now() - startedAt,
+                }),
+              );
+            }
             try {
               // oxlint-disable-next-line no-await-in-loop -- the continuous worker deliberately sleeps between polls
               await wait(pollMilliseconds, undefined, { signal: shutdown.signal });

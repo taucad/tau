@@ -3788,7 +3788,11 @@ export class BillingPaymentsService {
       expand: ['invoice_settings.default_payment_method'],
     });
     if (customer.deleted) throw new ConflictException({ code: 'customer_deleted' });
-    const value = customer.invoice_settings.default_payment_method;
+    // Same preference as resolveDefaultCard (the card shown is the card charged): the invoice default,
+    // else the most recent saved card. Hosted Checkout saves cards without setting an invoice default.
+    const value =
+      customer.invoice_settings.default_payment_method ??
+      (await this.sourceStripe.paymentMethods.list({ customer: customerId, type: 'card', limit: 1 })).data[0];
     const id = typeof value === 'string' ? value : value?.id;
     if (id === undefined) throw new ConflictException({ code: 'saved_card_not_found' });
     const method =

@@ -77,6 +77,14 @@ let paymentStatus: 'requires_action' | 'succeeded' = 'succeeded';
 let paymentIntentFixtureId = 'pi_foundation_paid';
 let paymentChargeFixtureId = 'ch_foundation_paid';
 let ambiguousCustomerSearch = false;
+// Hosted Checkout saves a card without setting the customer's invoice default.
+let customerInvoiceDefaultCard = true;
+const foundationCard = {
+  id: 'pm_foundation',
+  object: 'payment_method',
+  type: 'card',
+  card: { brand: 'visa', last4: '4242' },
+};
 let invoiceFixture:
   | {
       invoiceId: string;
@@ -268,119 +276,125 @@ const server = createServer((request, response) => {
             livemode: false,
             metadata: latestCustomerMetadata,
             invoice_settings: {
-              default_payment_method: {
-                id: 'pm_foundation',
-                object: 'payment_method',
-                customer: latestCustomerId,
-                type: 'card',
-                card: { brand: 'visa', last4: '4242' },
-              },
+              default_payment_method: customerInvoiceDefaultCard
+                ? { ...foundationCard, customer: latestCustomerId }
+                : null,
             },
           }
-        : url.pathname === '/v1/payment_intents' && paymentIntent !== undefined
-          ? paymentIntent
-          : url.pathname === `/v1/payment_intents/${paymentIntentFixtureId}` && paymentIntent !== undefined
+        : url.pathname === '/v1/payment_methods'
+          ? {
+              object: 'list',
+              data: [{ ...foundationCard, customer: latestCustomerId }],
+              has_more: false,
+              url: '/v1/payment_methods',
+            }
+          : url.pathname === '/v1/payment_intents' && paymentIntent !== undefined
             ? paymentIntent
-            : invoice !== undefined && url.pathname === `/v1/invoices/${invoice.invoiceId}`
-              ? invoiceObject
-              : invoice !== undefined && url.pathname === `/v1/invoices/${invoice.invoiceId}/lines`
-                ? {
-                    object: 'list',
-                    data: [invoiceLine],
-                    has_more: false,
-                    url: `/v1/invoices/${invoice.invoiceId}/lines`,
-                  }
-                : invoice !== undefined && url.pathname === '/v1/invoice_payments'
+            : url.pathname === `/v1/payment_intents/${paymentIntentFixtureId}` && paymentIntent !== undefined
+              ? paymentIntent
+              : invoice !== undefined && url.pathname === `/v1/invoices/${invoice.invoiceId}`
+                ? invoiceObject
+                : invoice !== undefined && url.pathname === `/v1/invoices/${invoice.invoiceId}/lines`
                   ? {
                       object: 'list',
-                      data: invoice.paid
-                        ? [
-                            {
-                              id: `inpay_${invoice.invoiceId}`,
-                              object: 'invoice_payment',
-                              amount_paid: 2000,
-                              currency: 'usd',
-                              payment: { type: 'payment_intent', payment_intent: invoicePaymentIntentId },
-                              status: 'paid',
-                              status_transitions: { canceled_at: null, paid_at: 1_788_650_100 },
-                            },
-                          ]
-                        : [],
+                      data: [invoiceLine],
                       has_more: false,
-                      url: '/v1/invoice_payments',
+                      url: `/v1/invoices/${invoice.invoiceId}/lines`,
                     }
-                  : invoice !== undefined && url.pathname === `/v1/subscriptions/${invoice.subscriptionId}`
+                  : invoice !== undefined && url.pathname === '/v1/invoice_payments'
                     ? {
-                        id: invoice.subscriptionId,
-                        object: 'subscription',
-                        customer: invoice.customerId,
-                        livemode: false,
-                        status: invoice.subscriptionStatus ?? 'active',
-                        cancel_at_period_end: false,
-                        canceled_at: invoice.subscriptionStatus === 'canceled' ? 1_788_650_200 : null,
-                        ended_at: invoice.subscriptionStatus === 'canceled' ? 1_788_650_200 : null,
-                        items: {
-                          object: 'list',
-                          data: [{ id: 'si_foundation', price: { id: 'price_monthly', product: 'prod_monthly' } }],
-                          has_more: false,
-                          url: '/v1/subscription_items',
-                        },
+                        object: 'list',
+                        data: invoice.paid
+                          ? [
+                              {
+                                id: `inpay_${invoice.invoiceId}`,
+                                object: 'invoice_payment',
+                                amount_paid: 2000,
+                                currency: 'usd',
+                                payment: { type: 'payment_intent', payment_intent: invoicePaymentIntentId },
+                                status: 'paid',
+                                status_transitions: { canceled_at: null, paid_at: 1_788_650_100 },
+                              },
+                            ]
+                          : [],
+                        has_more: false,
+                        url: '/v1/invoice_payments',
                       }
-                    : url.pathname === `/v1/payment_intents/${invoicePaymentIntentId}` && invoice !== undefined
+                    : invoice !== undefined && url.pathname === `/v1/subscriptions/${invoice.subscriptionId}`
                       ? {
-                          id: invoicePaymentIntentId,
-                          object: 'payment_intent',
-                          amount: 2000,
-                          amount_capturable: 0,
-                          amount_received: 2000,
-                          created: 1_788_650_000,
-                          currency: 'usd',
+                          id: invoice.subscriptionId,
+                          object: 'subscription',
                           customer: invoice.customerId,
-                          latest_charge: invoiceChargeId,
                           livemode: false,
-                          metadata: {},
-                          payment_method: 'pm_invoice',
-                          status: 'succeeded',
+                          status: invoice.subscriptionStatus ?? 'active',
+                          cancel_at_period_end: false,
+                          canceled_at: invoice.subscriptionStatus === 'canceled' ? 1_788_650_200 : null,
+                          ended_at: invoice.subscriptionStatus === 'canceled' ? 1_788_650_200 : null,
+                          items: {
+                            object: 'list',
+                            data: [{ id: 'si_foundation', price: { id: 'price_monthly', product: 'prod_monthly' } }],
+                            has_more: false,
+                            url: '/v1/subscription_items',
+                          },
                         }
-                      : url.pathname === `/v1/charges/${invoiceChargeId}` && invoice !== undefined
+                      : url.pathname === `/v1/payment_intents/${invoicePaymentIntentId}` && invoice !== undefined
                         ? {
-                            id: invoiceChargeId,
-                            object: 'charge',
+                            id: invoicePaymentIntentId,
+                            object: 'payment_intent',
                             amount: 2000,
-                            amount_captured: 2000,
-                            amount_refunded: 0,
-                            created: 1_788_650_001,
+                            amount_capturable: 0,
+                            amount_received: 2000,
+                            created: 1_788_650_000,
                             currency: 'usd',
                             customer: invoice.customerId,
+                            latest_charge: invoiceChargeId,
                             livemode: false,
-                            paid: true,
-                            payment_intent: invoicePaymentIntentId,
+                            metadata: {},
                             payment_method: 'pm_invoice',
-                            payment_method_details: { card: { brand: 'visa', last4: '4242' } },
-                            refunded: false,
                             status: 'succeeded',
                           }
-                        : url.pathname === `/v1/charges/${paymentChargeFixtureId}`
+                        : url.pathname === `/v1/charges/${invoiceChargeId}` && invoice !== undefined
                           ? {
-                              id: paymentChargeFixtureId,
+                              id: invoiceChargeId,
                               object: 'charge',
-                              amount: 537,
-                              amount_captured: 537,
+                              amount: 2000,
+                              amount_captured: 2000,
                               amount_refunded: 0,
                               created: 1_788_650_001,
                               currency: 'usd',
-                              customer: paymentFixture?.customerId,
+                              customer: invoice.customerId,
                               livemode: false,
                               paid: true,
-                              payment_intent: paymentIntentFixtureId,
-                              payment_method: 'pm_foundation',
+                              payment_intent: invoicePaymentIntentId,
+                              payment_method: 'pm_invoice',
                               payment_method_details: { card: { brand: 'visa', last4: '4242' } },
                               refunded: false,
                               status: 'succeeded',
                             }
-                          : {
-                              error: { message: `Missing fixture for ${url.pathname}`, type: 'invalid_request_error' },
-                            };
+                          : url.pathname === `/v1/charges/${paymentChargeFixtureId}`
+                            ? {
+                                id: paymentChargeFixtureId,
+                                object: 'charge',
+                                amount: 537,
+                                amount_captured: 537,
+                                amount_refunded: 0,
+                                created: 1_788_650_001,
+                                currency: 'usd',
+                                customer: paymentFixture?.customerId,
+                                livemode: false,
+                                paid: true,
+                                payment_intent: paymentIntentFixtureId,
+                                payment_method: 'pm_foundation',
+                                payment_method_details: { card: { brand: 'visa', last4: '4242' } },
+                                refunded: false,
+                                status: 'succeeded',
+                              }
+                            : {
+                                error: {
+                                  message: `Missing fixture for ${url.pathname}`,
+                                  type: 'invalid_request_error',
+                                },
+                              };
   const responseBody = body ?? {
     error: { message: `Incomplete fixture for ${url.pathname}`, type: 'invalid_request_error' },
   };
@@ -672,6 +686,25 @@ describe('billing payments PostgreSQL foundation', () => {
     expect(await database.select().from(billingPurchase).where(eq(billingPurchase.accountId, accountId))).toHaveLength(
       0,
     );
+  });
+
+  it('charges a Checkout-saved card that is not the invoice default', async () => {
+    const userId = randomUUID();
+    await database
+      .insert(user)
+      .values({ id: userId, name: 'Checkout Saved Card', email: `${userId}@test.invalid`, emailVerified: true });
+    customerInvoiceDefaultCard = false;
+    try {
+      const prepared = await payments.prepareTopup(userId, {
+        requestId: randomUUID(),
+        returnPath: '/settings/billing',
+        amountMinor: '537',
+        method: 'saved_card',
+      });
+      expect(prepared.frozen?.paymentMethod).toMatchObject({ brand: 'visa', last4: '4242' });
+    } finally {
+      customerInvoiceDefaultCard = true;
+    }
   });
 
   it('retains verified cash as paid_unfulfilled when its grant fails and grants it once on recovery', async () => {

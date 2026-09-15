@@ -28,7 +28,10 @@ import { refusalText } from '#commands/agent/client.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolvePath(here, '../../../..');
-const binPath = resolvePath(repoRoot, 'packages/cli/src/bin.ts');
+const binPath = resolvePath(
+  repoRoot,
+  process.env['TAU_E2E_CLI_BUILT'] === 'true' ? 'packages/cli/dist/bin/tau.mjs' : 'packages/cli/src/bin.ts',
+);
 const agentToken = 'integration-agent-token-at-least-32-characters';
 /** The ACP agent the daemon advertises as `codex` under `NODE_ENV=test`. */
 const fakeAcpAgent = resolvePath(repoRoot, 'packages/host/src/acp/fixtures/fake-agent.ts');
@@ -163,6 +166,7 @@ const startServe = async (options: {
   readonly configDirectory: string;
   readonly relayUrl: URL;
   readonly gatewayUrl: URL;
+  readonly liveCodex?: boolean;
 }): Promise<{ readonly url: URL; readonly kill: (signal?: NodeJS.Signals) => Promise<void> }> => {
   const environment = childEnvironment(undefined);
   environment['TAU_CONFIG_DIR'] = options.configDirectory;
@@ -171,7 +175,11 @@ const startServe = async (options: {
   environment['CONSOLA_LEVEL'] = '4';
   /* Honoured only under `NODE_ENV=test`: the daemon then advertises the
    * deterministic ACP fixture as `codex`, so `--agent` has something to reach. */
-  environment['TAU_ACP_ADAPTER_OVERRIDE'] = `${fakeAcpAgent}:codex`;
+  if (options.liveCodex) {
+    delete environment['TAU_ACP_ADAPTER_OVERRIDE'];
+  } else {
+    environment['TAU_ACP_ADAPTER_OVERRIDE'] = `${fakeAcpAgent}:codex`;
+  }
 
   const child: ChildProcess = spawn(
     process.execPath,
@@ -308,6 +316,69 @@ const jsonRecords = (stdout: string): ReadonlyArray<Record<string, unknown>> =>
     .map((line) => JSON.parse(line) as Record<string, unknown>);
 
 describe('tau agent (scripted command projections)', () => {
+  it.skipIf(process.env['TAU_ACP_LIVE_TESTS'] !== 'true')(
+    'runs two live Codex turns through the scripted CLI',
+    async () => {
+      const workspace = await mkdtemp(join(tmpdir(), 'tau-agent-live-ws-'));
+      const configDirectory = await mkdtemp(join(tmpdir(), 'tau-agent-live-cfg-'));
+      disposers.push(async () => {
+        await rm(workspace, { recursive: true, force: true });
+        await rm(configDirectory, { recursive: true, force: true });
+      });
+      await writeFile(
+        join(configDirectory, 'host.json'),
+        JSON.stringify({ v: 1, deviceId: 'device-live', credential: 'integration-device-credential-32-chars-min' }),
+      );
+      const relayUrl = await startStubRelay();
+      const gateway = await startStubGateway();
+      const { url: origin } = await startServe({
+        workspace,
+        configDirectory,
+        relayUrl,
+        gatewayUrl: gateway.url,
+        liveCodex: true,
+      });
+      const model = process.env['TAU_ACP_LIVE_CODEX_MODEL'] ?? 'gpt-5.6-sol';
+      const first = await tau({
+        origin,
+        args: [
+          'agent',
+          'run',
+          'chat-live-cli',
+          'Remember the nonce copper-seahorse-41. Reply only remembered.',
+          '--agent=codex',
+          `--model=${model}`,
+        ],
+      });
+      expect(first.code, first.stderr).toBe(0);
+      expect(first.stdout).toContain('completed');
+      const second = await tau({
+        origin,
+        args: [
+          'agent',
+          'run',
+          'chat-live-cli',
+          'Reply only with the nonce from my previous message.',
+          '--agent=codex',
+          `--model=${model}`,
+        ],
+      });
+      expect(second.code, second.stderr).toBe(0);
+      expect(second.stdout).toContain('copper-seahorse-41');
+      const log = await readFile(join(workspace, '.tau/chats/chat-live-cli/events.jsonl'), 'utf8');
+      expect(log.match(/"state":"completed"/gu)).toHaveLength(2);
+      expect(log).toContain(`"model":"${model}"`);
+      expect(log).toContain('"agentId":"codex"');
+      const refused = await tau({
+        origin,
+        args: ['agent', 'run', 'chat-live-cli', 'Reply pong.', '--agent=codex', '--model=no-such-model'],
+      });
+      expect(refused.code).toBe(3);
+      expect(refused.stderr).toContain('EXTERNAL_AGENT_MODEL_UNAVAILABLE');
+    },
+    300_000,
+  );
+
   it('should drive a run, tail it as NDJSON, steer it, cancel it, and resolve its approvals', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'tau-agent-cli-ws-'));
     const configDirectory = await mkdtemp(join(tmpdir(), 'tau-agent-cli-cfg-'));

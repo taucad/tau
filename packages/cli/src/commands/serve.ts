@@ -22,6 +22,17 @@ const runtimeChildModulePath = (): string =>
     new URL(import.meta.url.endsWith('.ts') ? '../host-runtime-child.ts' : './host-runtime-child.mjs', import.meta.url),
   );
 
+const tauCloudEnabled = (): boolean => {
+  const value = process.env['TAU_CLOUD_ENABLED'];
+  if (value === undefined || value === 'false') {
+    return false;
+  }
+  if (value === 'true') {
+    return true;
+  }
+  throw new TypeError('TAU_CLOUD_ENABLED must be exactly true or false');
+};
+
 const computeStoreWorkerModulePath = (): string =>
   fileURLToPath(
     new URL(
@@ -144,6 +155,7 @@ const agentOptions = (args: {
   }
   return {
     workspaceRoot: resolve(args.workspace ?? process.cwd()),
+    tauCloudEnabled: tauCloudEnabled(),
     /* The gateway lives on the Tau API, which is also the relay origin unless
      * the operator points somewhere else (a stub, or a self-hosted API). */
     gatewayBaseUrl: args.gateway ?? args.relay,

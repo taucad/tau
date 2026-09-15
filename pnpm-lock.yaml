@@ -567,7 +567,7 @@ overrides:
   vitest: 4.1.11
 
 patchedDependencies:
-  '@agentclientprotocol/codex-acp@1.7.0': f0adb3089a276921833da2046856051ecec59f43076f5a14c4434bc01b5efaaa
+  '@agentclientprotocol/codex-acp@1.7.0': 99a07675210cf2a287b283d61c52cb6ba21a44c34fe2d1305e0b7b12732da3de
   '@ai-sdk/langchain@2.0.181': 4db10f07aa138655b17d3bcb1e56ae99b2584a8f8dd1241aeca7f30b4937fa1d
   '@earendil-works/pi-ai@0.84.4': dd55914697dc49afdfe797aec6cccdbe322039df0d00752178219a2c18ead6ba
   '@kittycad/lib@2.0.48': 8d1f46d38811b73bcc38ba26f4eba9f1d9e32be6bd271ba35c1c6365f6fe04a9
@@ -1666,7 +1666,7 @@ importers:
         version: 0.70.0(@anthropic-ai/sdk@0.103.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))
       '@agentclientprotocol/codex-acp':
         specifier: 'catalog:'
-        version: 1.7.0(patch_hash=f0adb3089a276921833da2046856051ecec59f43076f5a14c4434bc01b5efaaa)
+        version: 1.7.0(patch_hash=99a07675210cf2a287b283d61c52cb6ba21a44c34fe2d1305e0b7b12732da3de)
       '@anthropic-ai/sandbox-runtime':
         specifier: 'catalog:'
         version: 0.0.75
@@ -1700,6 +1700,9 @@ importers:
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../libs/filesystem
+      '@taucad/geospec-engine':
+        specifier: workspace:*
+        version: link:../../packages/geospec-engine
       '@taucad/gltf':
         specifier: workspace:*
         version: link:../../packages/plugins/gltf
@@ -2900,7 +2903,7 @@ importers:
         version: 0.70.0(@anthropic-ai/sdk@0.103.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))
       '@agentclientprotocol/codex-acp':
         specifier: 'catalog:'
-        version: 1.7.0(patch_hash=f0adb3089a276921833da2046856051ecec59f43076f5a14c4434bc01b5efaaa)
+        version: 1.7.0(patch_hash=99a07675210cf2a287b283d61c52cb6ba21a44c34fe2d1305e0b7b12732da3de)
       '@taucad/agent-host':
         specifier: workspace:*
         version: link:../agent-host
@@ -26601,7 +26604,7 @@ snapshots:
       - '@anthropic-ai/sdk'
       - '@modelcontextprotocol/sdk'
 
-  '@agentclientprotocol/codex-acp@1.7.0(patch_hash=f0adb3089a276921833da2046856051ecec59f43076f5a14c4434bc01b5efaaa)':
+  '@agentclientprotocol/codex-acp@1.7.0(patch_hash=99a07675210cf2a287b283d61c52cb6ba21a44c34fe2d1305e0b7b12732da3de)':
     dependencies:
       '@agentclientprotocol/sdk': 1.4.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
       '@openai/codex': 0.148.0

@@ -14,6 +14,7 @@ export type TargetClickOptions = {
   readonly button?: 'left' | 'middle' | 'right';
   readonly force?: boolean;
   readonly position?: { readonly x: number; readonly y: number };
+  readonly touch?: boolean;
   readonly timeout?: number;
 };
 export type TargetMouseOptions = { readonly steps?: number };
@@ -112,6 +113,7 @@ export type TargetWebGpuQualificationReport = Readonly<{
 declare module 'vitest' {
   export interface ProvidedContext {
     webGpuProfile: TargetWebGpuProfile;
+    acpLiveEnabled: boolean;
   }
 }
 
@@ -185,7 +187,7 @@ declare module 'vitest/browser' {
     uiScrollTarget(selector: string, surface?: TargetSurface): Promise<void>;
     uiSetViewport(viewport: TargetViewport, surface?: TargetSurface): Promise<void>;
     uiStartHostFixture(): Promise<string>;
-    uiStartTauServeFixture(options?: { readonly externalAgents?: boolean }): Promise<TargetTauServeFixture>;
+    uiStartTauServeFixture(options?: { readonly externalAgents?: boolean | 'codex' }): Promise<TargetTauServeFixture>;
     uiStopTauServeFixture(): Promise<void>;
     uiReleaseTauServeGateway(): Promise<void>;
     uiReadTauServeFile(relativePath: string): Promise<string | undefined>;
@@ -413,7 +415,7 @@ export const startHostFixture = (): Promise<string> => server.commands.uiStartHo
 
 /** AV-4 (rung 1): a real `tau serve` daemon serving the real serve-mode SPA. */
 export const startTauServeFixture = (
-  options: { readonly externalAgents?: boolean } = {},
+  options: { readonly externalAgents?: boolean | 'codex' } = {},
 ): Promise<TargetTauServeFixture> => server.commands.uiStartTauServeFixture(options);
 export const stopTauServeFixture = (): Promise<void> => server.commands.uiStopTauServeFixture();
 export const releaseTauServeGateway = (): Promise<void> => server.commands.uiReleaseTauServeGateway();

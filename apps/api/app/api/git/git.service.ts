@@ -13,6 +13,7 @@ import { createGunzip } from 'node:zlib';
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -25,7 +26,8 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { Environment } from '#config/environment.config.js';
 import { DatabaseService } from '#database/database.service.js';
 import { project, projectGit, projectGitLfsObject } from '#database/schema.js';
-import { BillingService } from '#api/billing/billing.service.js';
+import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
+import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
 import {
   isDumbHttpPath,
   isProjectRepositoryId,
@@ -82,15 +84,22 @@ export type GitLfsObjectRecord = GitLfsObjectState & {
   readonly projectId: string;
   readonly createdAt: Date;
   readonly finalizedAt: Date | undefined;
+  readonly unreachableAt: Date | undefined;
 };
 
 export type GitLfsReservation =
-  | { readonly status: 'reserved'; readonly objects: readonly GitLfsObjectState[] }
+  | {
+      readonly status: 'reserved';
+      readonly objects: readonly GitLfsObjectState[];
+    }
   | {
       readonly status: 'quota';
       readonly shortfallBytes: number;
       readonly remainingBytes: number;
-      readonly files: ReadonlyArray<{ readonly oid: string; readonly size: number }>;
+      readonly files: ReadonlyArray<{
+        readonly oid: string;
+        readonly size: number;
+      }>;
     };
 
 const gitExecutable = 'git';
@@ -126,13 +135,16 @@ export class GitRepositoryService implements OnApplicationBootstrap {
    * reservations also take a PostgreSQL advisory lock for retry/restart safety.
    */
   readonly #activeStorageOwners = new Set<string>();
+  /** Push, snapshot, and destructive retention are mutually exclusive per repository. */
+  readonly #activeRepositoryOperations = new Set<string>();
   readonly #root: string;
   #activeChildren = 0;
 
   public constructor(
     private readonly configService: ConfigService<Environment, true>,
     private readonly databaseService: DatabaseService,
-    private readonly billingService: BillingService,
+    @Inject(commercialEntitlementsKey)
+    private readonly entitlementsService: CommercialEntitlementsService,
     private readonly storage: ObjectStorageService,
   ) {
     this.#root = path.resolve(this.configService.get('TAU_GIT_ROOT', { infer: true }));
@@ -167,7 +179,10 @@ export class GitRepositoryService implements OnApplicationBootstrap {
    */
   public repositoryPath(projectId: string): string {
     if (!isProjectRepositoryId(projectId)) {
-      throw new NotFoundException({ code: 'INVALID_REPOSITORY', message: 'Repository not found' });
+      throw new NotFoundException({
+        code: 'INVALID_REPOSITORY',
+        message: 'Repository not found',
+      });
     }
     return path.join(this.#root, `${projectId}.git`);
   }
@@ -198,7 +213,7 @@ export class GitRepositoryService implements OnApplicationBootstrap {
       });
     }
 
-    const entitlements = await this.billingService.getEntitlements(row.ownerId);
+    const entitlements = await this.entitlementsService.getEntitlements(row.ownerId);
     if (args.mode !== 'read' && !entitlements.canSyncFiles) {
       throw new ForbiddenException({
         code: 'GIT_SYNC_NOT_ENTITLED',
@@ -206,7 +221,9 @@ export class GitRepositoryService implements OnApplicationBootstrap {
       });
     }
 
-    const limit = storageLimitBytesByTier[entitlements.tier];
+    const limit =
+      entitlements.storageLimitBytes ??
+      (entitlements.tier === undefined ? storageLimitBytesByTier.pro : storageLimitBytesByTier[entitlements.tier]);
     const usage = await this.readOwnerUsage(row.ownerId);
     const remainingBytes = Math.max(0, limit - usage.storageBytes - usage.lfsBytes);
     if (args.mode === 'write' && remainingBytes === 0) {
@@ -255,7 +272,11 @@ export class GitRepositoryService implements OnApplicationBootstrap {
       })
       .from(projectGitLfsObject)
       .where(and(eq(projectGitLfsObject.projectId, projectId), inArray(projectGitLfsObject.oid, [...new Set(oids)])));
-    return rows.map((row) => ({ oid: row.oid, size: row.size, finalized: row.finalizedAt !== null }));
+    return rows.map((row) => ({
+      oid: row.oid,
+      size: row.size,
+      finalized: row.finalizedAt !== null,
+    }));
   }
 
   /** Every reservation for nightly backup and retention reconciliation. */
@@ -266,6 +287,7 @@ export class GitRepositoryService implements OnApplicationBootstrap {
         size: projectGitLfsObject.sizeBytes,
         createdAt: projectGitLfsObject.createdAt,
         finalizedAt: projectGitLfsObject.finalizedAt,
+        unreachableAt: projectGitLfsObject.unreachableAt,
       })
       .from(projectGitLfsObject)
       .where(eq(projectGitLfsObject.projectId, projectId));
@@ -276,14 +298,29 @@ export class GitRepositoryService implements OnApplicationBootstrap {
       finalized: row.finalizedAt !== null,
       createdAt: row.createdAt,
       finalizedAt: row.finalizedAt ?? undefined,
+      unreachableAt: row.unreachableAt ?? undefined,
     }));
+  }
+
+  /** Persist the start (or end) of one finalized object's unreachable period. */
+  public async markLfsObjectReachability(
+    record: GitLfsObjectRecord,
+    reachable: boolean,
+    observedAt: Date,
+  ): Promise<void> {
+    await this.databaseService.database
+      .update(projectGitLfsObject)
+      .set({
+        unreachableAt: reachable ? null : (record.unreachableAt ?? observedAt),
+      })
+      .where(and(eq(projectGitLfsObject.projectId, record.projectId), eq(projectGitLfsObject.oid, record.oid)));
   }
 
   /**
    * Retire one unchanged reservation and its bytes under the same owner gate
    * used by upload admission. The object is deleted before quota is released.
    */
-  public async retireLfsObject(record: GitLfsObjectRecord): Promise<boolean> {
+  public async retireLfsObject(record: GitLfsObjectRecord, now = new Date()): Promise<boolean> {
     const owners = await this.databaseService.database
       .select({ ownerId: project.ownerId })
       .from(project)
@@ -293,8 +330,10 @@ export class GitRepositoryService implements OnApplicationBootstrap {
     if (ownerId === undefined) {
       return false;
     }
-    const release = this.claimStorageOwner(ownerId);
+    const releaseRepository = this.claimRepositoryOperation(record.projectId);
+    let release: (() => void) | undefined;
     try {
+      release = this.claimStorageOwner(ownerId);
       return await this.databaseService.database.transaction(async (transaction) => {
         await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ownerId}, 0))`);
         const held = await transaction
@@ -302,6 +341,7 @@ export class GitRepositoryService implements OnApplicationBootstrap {
             size: projectGitLfsObject.sizeBytes,
             createdAt: projectGitLfsObject.createdAt,
             finalizedAt: projectGitLfsObject.finalizedAt,
+            unreachableAt: projectGitLfsObject.unreachableAt,
           })
           .from(projectGitLfsObject)
           .where(and(eq(projectGitLfsObject.projectId, record.projectId), eq(projectGitLfsObject.oid, record.oid)))
@@ -314,6 +354,24 @@ export class GitRepositoryService implements OnApplicationBootstrap {
           current.createdAt.getTime() !== record.createdAt.getTime() ||
           current.finalizedAt?.getTime() !== record.finalizedAt?.getTime()
         ) {
+          return false;
+        }
+        const reachable = await this.reachableLfsOids(record.projectId);
+        if (reachable.has(record.oid)) {
+          if (current.unreachableAt !== null) {
+            await transaction
+              .update(projectGitLfsObject)
+              .set({ unreachableAt: null })
+              .where(and(eq(projectGitLfsObject.projectId, record.projectId), eq(projectGitLfsObject.oid, record.oid)));
+          }
+          return false;
+        }
+        const eligible =
+          current.finalizedAt === null
+            ? now.getTime() - current.createdAt.getTime() >= 24 * 60 * 60 * 1000
+            : current.unreachableAt !== null &&
+              now.getTime() - current.unreachableAt.getTime() >= 30 * 24 * 60 * 60 * 1000;
+        if (!eligible) {
           return false;
         }
         await this.storage.deleteBlob({
@@ -334,7 +392,8 @@ export class GitRepositoryService implements OnApplicationBootstrap {
         return true;
       });
     } finally {
-      release();
+      release?.();
+      releaseRepository();
     }
   }
 
@@ -349,8 +408,10 @@ export class GitRepositoryService implements OnApplicationBootstrap {
     if (ownerId === undefined) {
       return false;
     }
-    const release = this.claimStorageOwner(ownerId);
+    const releaseRepository = this.claimRepositoryOperation(projectId);
+    let release: (() => void) | undefined;
     try {
+      release = this.claimStorageOwner(ownerId);
       return await this.databaseService.database.transaction(async (transaction) => {
         await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ownerId}, 0))`);
         const reserved = await transaction
@@ -361,9 +422,27 @@ export class GitRepositoryService implements OnApplicationBootstrap {
         if (reserved.length > 0) {
           return false;
         }
-        await this.storage.deleteBlob({ namespace: 'blobs', key: gitLfsObjectKey(projectId, oid), tier: 'private' });
+        if ((await this.reachableLfsOids(projectId)).has(oid)) {
+          return false;
+        }
+        await this.storage.deleteBlob({
+          namespace: 'blobs',
+          key: gitLfsObjectKey(projectId, oid),
+          tier: 'private',
+        });
         return true;
       });
+    } finally {
+      release?.();
+      releaseRepository();
+    }
+  }
+
+  /** Run one repository snapshot while pushes and retention deletion are excluded. */
+  public async withRepositoryMaintenance<T>(projectId: string, work: () => Promise<T>): Promise<T> {
+    const release = this.claimRepositoryOperation(projectId);
+    try {
+      return await work();
     } finally {
       release();
     }
@@ -487,7 +566,10 @@ export class GitRepositoryService implements OnApplicationBootstrap {
       return await this.databaseService.database.transaction(async (transaction) => {
         await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${args.access.ownerId}, 0))`);
         const rows = await transaction
-          .select({ size: projectGitLfsObject.sizeBytes, finalizedAt: projectGitLfsObject.finalizedAt })
+          .select({
+            size: projectGitLfsObject.sizeBytes,
+            finalizedAt: projectGitLfsObject.finalizedAt,
+          })
           .from(projectGitLfsObject)
           .where(and(eq(projectGitLfsObject.projectId, args.access.projectId), eq(projectGitLfsObject.oid, args.oid)))
           .limit(1)
@@ -618,7 +700,17 @@ export class GitRepositoryService implements OnApplicationBootstrap {
     /** Releases the owner-wide storage admission when receive-pack exits. */
     releaseStorageAdmission?: () => void;
   }): Readable {
+    let releaseRepository: (() => void) | undefined;
+    if (args.accountFor !== undefined) {
+      try {
+        releaseRepository = this.claimRepositoryOperation(args.accountFor);
+      } catch (error) {
+        args.releaseStorageAdmission?.();
+        throw error;
+      }
+    }
     if (this.#activeChildren >= maximumConcurrentChildren) {
+      releaseRepository?.();
       args.releaseStorageAdmission?.();
       throw new ServiceUnavailableException({
         code: 'GIT_BUSY',
@@ -647,6 +739,7 @@ export class GitRepositoryService implements OnApplicationBootstrap {
         },
       );
     } catch (error) {
+      releaseRepository?.();
       args.releaseStorageAdmission?.();
       throw error;
     }
@@ -667,6 +760,7 @@ export class GitRepositoryService implements OnApplicationBootstrap {
     });
     child.on('close', (code) => {
       this.#activeChildren -= 1;
+      releaseRepository?.();
       args.releaseStorageAdmission?.();
       if (code !== 0) {
         this.#logger.warn(
@@ -690,7 +784,15 @@ export class GitRepositoryService implements OnApplicationBootstrap {
       }
     });
 
-    this.track(this.pipeRequestBody({ body: args.body, child, gzipped: args.gzipped, service: args.service, request }));
+    this.track(
+      this.pipeRequestBody({
+        body: args.body,
+        child,
+        gzipped: args.gzipped,
+        service: args.service,
+        request,
+      }),
+    );
 
     return child.stdout;
   }
@@ -727,7 +829,7 @@ export class GitRepositoryService implements OnApplicationBootstrap {
    * fail-closed reading: a stale figure refuses too much, never too little.
    *
    * A single file that vanishes between `readdir` and `stat` is still counted as
-   * zero, because it really is gone — `git gc --auto` runs in `post-receive`.
+   * zero, because it really is gone.
    *
    * @param repositoryPath - The bare repository to measure.
    * @returns Its size in bytes.
@@ -865,24 +967,68 @@ export class GitRepositoryService implements OnApplicationBootstrap {
     };
   }
 
+  private claimRepositoryOperation(projectId: string): () => void {
+    if (this.#activeRepositoryOperations.has(projectId)) {
+      throw new ServiceUnavailableException({
+        code: 'GIT_REPOSITORY_BUSY',
+        message: 'Another repository maintenance operation is in flight; retry shortly.',
+      });
+    }
+    this.#activeRepositoryOperations.add(projectId);
+    return () => {
+      this.#activeRepositoryOperations.delete(projectId);
+    };
+  }
+
   private async refreshRecordRetentionRoots(repositoryPath: string): Promise<void> {
     const listed = Buffer.from(
-      await this.run(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/tau/chats/'], repositoryPath),
+      await this.run(
+        [
+          'for-each-ref',
+          '--format=%(refname) %(objectname)',
+          'refs/tau/chats/',
+          'refs/tau/evidence/',
+          'refs/tau/artifacts/',
+        ],
+        repositoryPath,
+      ),
     ).toString('utf8');
-    const chatReferences = listed
+    const recordReferences = listed
       .split('\n')
       .map((line) => line.slice(0, line.indexOf(' ')))
       .filter((ref) => ref !== '');
     let matching = '';
-    if (chatReferences.length > 0) {
-      try {
-        const bytes = await this.run(
-          ['grep', '-h', '-I', '-E', String.raw`[0-9a-f]{40}([0-9a-f]{24})?`, ...chatReferences, '--'],
-          repositoryPath,
-        );
-        matching = Buffer.from(bytes).toString('utf8');
-      } catch {
-        // No record contains a revision id.
+    if (recordReferences.length > 0) {
+      const versions = [
+        ...new Set(
+          Buffer.from(await this.run(['rev-list', ...recordReferences], repositoryPath))
+            .toString('utf8')
+            .split('\n')
+            .filter((oid) => oid !== ''),
+        ),
+      ];
+      for (let offset = 0; offset < versions.length; offset += 256) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- bounded argv batches keep record-history scans below OS limits.
+          const bytes = await this.run(
+            [
+              'grep',
+              '-h',
+              '-I',
+              '-E',
+              String.raw`[0-9a-f]{40}([0-9a-f]{24})?`,
+              ...versions.slice(offset, offset + 256),
+              '--',
+            ],
+            repositoryPath,
+          );
+          matching += Buffer.from(bytes).toString('utf8');
+        } catch (error) {
+          if (!(error instanceof Error && /\bexited 1:\s*$/u.test(error.message))) {
+            throw error;
+          }
+          // Git grep uses exit 1 for a verified no-match result.
+        }
       }
     }
     const candidates = [...new Set(matching.match(/\b[\da-f]{40}(?:[\da-f]{24})?\b/gu) ?? [])];

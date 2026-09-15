@@ -1,4 +1,5 @@
-import { mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -82,7 +83,10 @@ describe('GitBackupService', () => {
         checksumSha256: string;
       }) => {
         multipartParts.get(args.uploadId)?.push(args.body.byteLength);
-        return { etag: `part-${String(args.partNumber)}`, checksumSha256: args.checksumSha256 };
+        return {
+          etag: `part-${String(args.partNumber)}`,
+          checksumSha256: args.checksumSha256,
+        };
       },
       completeMultipartUpload: async (args: { uploadId: string }) => {
         const key = multipartKeys.get(args.uploadId);
@@ -180,7 +184,7 @@ describe('GitBackupService', () => {
     expect(await readFile(path.join(restored, 'part.ts'), 'utf8')).toBe('export const depth = 4;\n');
   });
 
-  it('creates server-local retention roots for revision ids embedded in chat records', async () => {
+  it('retains revision ids from every supported record family and its reachable history', async () => {
     const clone = path.join(workspace, 'clone');
     const main = Buffer.from(await repositories.run(['rev-parse', 'HEAD'], clone))
       .toString('utf8')
@@ -191,12 +195,20 @@ describe('GitBackupService', () => {
       ['-c', 'user.email=test@tau.new', '-c', 'user.name=Tau Test', 'commit', '-m', 'chat record'],
       clone,
     );
+    await writeFile(path.join(clone, 'chat.json'), JSON.stringify({ status: 'superseded' }));
+    await repositories.run(['add', 'chat.json'], clone);
+    await repositories.run(
+      ['-c', 'user.email=test@tau.new', '-c', 'user.name=Tau Test', 'commit', '-m', 'new record tip'],
+      clone,
+    );
     await repositories.run(
       [
         'push',
         '--receive-pack=env TAU_GIT_PUSH_ADMITTED=1 git-receive-pack',
         'origin',
         'HEAD:refs/tau/chats/chat-retention',
+        'HEAD:refs/tau/evidence/export-retention',
+        'HEAD:refs/tau/artifacts/artifact-retention',
       ],
       clone,
     );
@@ -216,6 +228,7 @@ describe('GitBackupService', () => {
   it('streams a bundle larger than the removed 256 MiB cap through bounded multipart parts', async () => {
     const bytes = 256 * 1024 * 1024 + 1;
     const fakeRepositories = {
+      withRepositoryMaintenance: async <T>(_projectId: string, work: () => Promise<T>) => work(),
       repositoryPath: () => workspace,
       reachableLfsOids: async () => new Set<string>(),
       listLfsObjects: async () => [],
@@ -243,6 +256,7 @@ describe('GitBackupService', () => {
   it('aborts an interrupted multipart snapshot and retries the same daily key', async () => {
     const bytes = 33 * 1024 * 1024;
     const fakeRepositories = {
+      withRepositoryMaintenance: async <T>(_projectId: string, work: () => Promise<T>) => work(),
       repositoryPath: () => workspace,
       reachableLfsOids: async () => new Set<string>(),
       listLfsObjects: async () => [],
@@ -294,6 +308,7 @@ describe('GitBackupService', () => {
     stored.set(sourceKey, payload);
     storedSizes.set(sourceKey, payload.byteLength);
     const fakeRepositories = {
+      withRepositoryMaintenance: async <T>(_projectId: string, work: () => Promise<T>) => work(),
       repositoryPath: () => workspace,
       reachableLfsOids: async () => new Set([oid]),
       listLfsObjects: async () => [
@@ -304,6 +319,7 @@ describe('GitBackupService', () => {
           finalized: true,
           createdAt: new Date(),
           finalizedAt: new Date(),
+          unreachableAt: undefined,
         },
       ],
       run: async (args: readonly string[]) => {
@@ -323,12 +339,113 @@ describe('GitBackupService', () => {
     expect(copied?.[1]).toStrictEqual(payload);
   });
 
+  it('restores supported refs and reachable LFS bytes into an empty repository', async () => {
+    const projectId = 'proj_lfs_restore';
+    const repositoryPath = await repositories.ensureRepository(projectId);
+    const clone = path.join(workspace, 'lfs-source');
+    await repositories.run(['clone', repositoryPath, clone], workspace);
+    await repositories.run(['lfs', 'install', '--local'], clone);
+    const payload = new TextEncoder().encode('restorable large-object bytes');
+    const oid = createHash('sha256').update(payload).digest('hex');
+    await writeFile(path.join(clone, '.gitattributes'), '*.bin filter=lfs diff=lfs merge=lfs -text\n');
+    await writeFile(path.join(clone, 'part.bin'), payload);
+    await repositories.run(['add', '.'], clone);
+    await repositories.run(
+      ['-c', 'user.email=test@tau.new', '-c', 'user.name=Tau Test', 'commit', '-m', 'LFS restore fixture'],
+      clone,
+    );
+    await repositories.run(['update-ref', 'refs/tau/chats/restore', 'HEAD'], clone);
+    await repositories.run(
+      [
+        'push',
+        '--receive-pack=env TAU_GIT_PUSH_ADMITTED=1 git-receive-pack',
+        'origin',
+        'HEAD:refs/heads/main',
+        'refs/tau/chats/restore',
+      ],
+      clone,
+    );
+
+    const sourceKey = gitLfsObjectKey(projectId, oid);
+    stored.set(sourceKey, payload);
+    storedSizes.set(sourceKey, payload.byteLength);
+    vi.mocked(repositories.listLfsObjects).mockResolvedValue([
+      {
+        projectId,
+        oid,
+        size: payload.byteLength,
+        finalized: true,
+        createdAt: new Date(),
+        finalizedAt: new Date(),
+        unreachableAt: undefined,
+      },
+    ]);
+    try {
+      await expect(backups.snapshot(projectId)).resolves.toBe(true);
+    } finally {
+      vi.mocked(repositories.listLfsObjects).mockResolvedValue([]);
+    }
+
+    const bundleKey = [...stored.keys()].find(
+      (key) => key.startsWith(`git-backups/${projectId}/`) && key.endsWith('.bundle'),
+    );
+    const backedUpLfs = [...stored.entries()].find(
+      ([key]) => key.startsWith(`git-backups/${projectId}/`) && key.endsWith(`/lfs/${oid}`),
+    );
+    expect(bundleKey).toBeDefined();
+    expect(backedUpLfs?.[1]).toStrictEqual(payload);
+    const bundlePath = path.join(workspace, `${projectId}.bundle`);
+    await writeFile(bundlePath, stored.get(bundleKey ?? '') ?? new Uint8Array());
+
+    const restored = path.join(workspace, 'lfs-restored');
+    await repositories.run(['init', '--initial-branch=restore', restored], workspace);
+    await repositories.run(
+      [
+        '-c',
+        'filter.lfs.smudge=',
+        '-c',
+        'filter.lfs.required=false',
+        'fetch',
+        bundlePath,
+        'refs/heads/*:refs/heads/*',
+        'refs/tau/*:refs/tau/*',
+      ],
+      restored,
+    );
+    await repositories.run(
+      ['-c', 'filter.lfs.smudge=', '-c', 'filter.lfs.required=false', 'checkout', '-f', 'main'],
+      restored,
+    );
+    const objectPath = path.join(restored, '.git', 'lfs', 'objects', oid.slice(0, 2), oid.slice(2, 4), oid);
+    await mkdir(path.dirname(objectPath), { recursive: true });
+    await writeFile(objectPath, backedUpLfs?.[1] ?? new Uint8Array());
+    await repositories.run(['lfs', 'install', '--local'], restored);
+    await repositories.run(['lfs', 'checkout'], restored);
+
+    expect(await readFile(path.join(restored, 'part.bin'))).toStrictEqual(Buffer.from(payload));
+    const sourceRefs = Buffer.from(
+      await repositories.run(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/tau/'], repositoryPath),
+    ).toString('utf8');
+    const restoredRefs = Buffer.from(
+      await repositories.run(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/tau/'], restored),
+    ).toString('utf8');
+    expect(restoredRefs.trim()).toBe(sourceRefs.trim());
+  }, 30_000);
+
   it('retains reachable and in-flight LFS objects while collecting only expired proof', async () => {
     const now = new Date('2026-09-15T00:00:00.000Z');
     const old = new Date('2026-07-01T00:00:00.000Z');
     const fresh = new Date('2026-09-14T23:30:00.000Z');
     const records = [
-      { projectId: 'proj_gc', oid: '1'.repeat(64), size: 1, finalized: false, createdAt: old, finalizedAt: undefined },
+      {
+        projectId: 'proj_gc',
+        oid: '1'.repeat(64),
+        size: 1,
+        finalized: false,
+        createdAt: old,
+        finalizedAt: undefined,
+        unreachableAt: undefined,
+      },
       {
         projectId: 'proj_gc',
         oid: '2'.repeat(64),
@@ -336,14 +453,32 @@ describe('GitBackupService', () => {
         finalized: false,
         createdAt: fresh,
         finalizedAt: undefined,
+        unreachableAt: undefined,
       },
-      { projectId: 'proj_gc', oid: '3'.repeat(64), size: 3, finalized: true, createdAt: old, finalizedAt: old },
-      { projectId: 'proj_gc', oid: '4'.repeat(64), size: 4, finalized: true, createdAt: old, finalizedAt: old },
+      {
+        projectId: 'proj_gc',
+        oid: '3'.repeat(64),
+        size: 3,
+        finalized: true,
+        createdAt: old,
+        finalizedAt: old,
+        unreachableAt: undefined,
+      },
+      {
+        projectId: 'proj_gc',
+        oid: '4'.repeat(64),
+        size: 4,
+        finalized: true,
+        createdAt: old,
+        finalizedAt: old,
+        unreachableAt: old,
+      },
     ] as const;
     const retired: string[] = [];
     const fakeRepositories = {
       reachableLfsOids: async () => new Set(['3'.repeat(64)]),
       listLfsObjects: async () => records,
+      markLfsObjectReachability: async () => undefined,
       retireLfsObject: async (record: { oid: string }) => {
         retired.push(record.oid);
         return true;
@@ -357,7 +492,11 @@ describe('GitBackupService', () => {
     const storage = {
       listBlobs: async () => [
         { key: `git-lfs/proj_gc/${orphan}`, size: 5, lastModified: old },
-        { key: `git-lfs/proj_gc/${'6'.repeat(64)}`, size: 6, lastModified: fresh },
+        {
+          key: `git-lfs/proj_gc/${'6'.repeat(64)}`,
+          size: 6,
+          lastModified: fresh,
+        },
       ],
     } as unknown as ObjectStorageService;
     const service = new GitBackupService(configService, fakeRepositories, storage);

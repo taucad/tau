@@ -82,28 +82,34 @@ export class GitBackupService implements OnModuleInit, OnModuleDestroy {
     if (already !== undefined) {
       return false;
     }
-    const repositoryPath = this.repositories.repositoryPath(projectId);
-    const workspace = await mkdtemp(path.join(tmpdir(), 'tau-git-bundle-'));
-    const bundlePath = path.join(workspace, `${projectId}.bundle`);
-    try {
-      // An empty repository has nothing to bundle; git says so and exits non-zero.
-      await this.repositories.reachableLfsOids(projectId);
-      await this.repositories.run(['bundle', 'create', bundlePath, '--all'], repositoryPath);
-      const info = await stat(bundlePath);
-      const stagingKey = `${key}.uploading`;
-      await this.storeFile(stagingKey, bundlePath, info.size);
-      await this.backupLfs(projectId, at);
-      await this.objectStorage.copyBlob({
-        namespace: 'blobs',
-        sourceKey: stagingKey,
-        destinationKey: key,
-        tier: 'private',
-      });
-      await this.objectStorage.deleteBlob({ namespace: 'blobs', key: stagingKey, tier: 'private' });
-      return true;
-    } finally {
-      await rm(workspace, { recursive: true, force: true });
-    }
+    return this.repositories.withRepositoryMaintenance(projectId, async () => {
+      const repositoryPath = this.repositories.repositoryPath(projectId);
+      const workspace = await mkdtemp(path.join(tmpdir(), 'tau-git-bundle-'));
+      const bundlePath = path.join(workspace, `${projectId}.bundle`);
+      try {
+        // An empty repository has nothing to bundle; git says so and exits non-zero.
+        const reachable = await this.repositories.reachableLfsOids(projectId);
+        await this.repositories.run(['bundle', 'create', bundlePath, '--all'], repositoryPath);
+        const info = await stat(bundlePath);
+        const stagingKey = `${key}.uploading`;
+        await this.storeFile(stagingKey, bundlePath, info.size);
+        await this.backupLfs(projectId, at, reachable);
+        await this.objectStorage.copyBlob({
+          namespace: 'blobs',
+          sourceKey: stagingKey,
+          destinationKey: key,
+          tier: 'private',
+        });
+        const published = await this.objectStorage.headBlob({ namespace: 'blobs', key, tier: 'private' });
+        if (published?.size !== info.size) {
+          throw new Error('The repository bundle copy could not be verified.');
+        }
+        await this.objectStorage.deleteBlob({ namespace: 'blobs', key: stagingKey, tier: 'private' });
+        return true;
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
+      }
+    });
   }
 
   /** Remove only expired reservations or finalized bytes proven unreachable. */
@@ -116,14 +122,22 @@ export class GitBackupService implements OnModuleInit, OnModuleDestroy {
     for (const record of records) {
       const oldPending =
         !record.finalized && now.getTime() - record.createdAt.getTime() >= pendingRetentionMilliseconds;
+      const isReachable = reachable.has(record.oid);
+      if (record.finalized) {
+        if (isReachable || record.unreachableAt === undefined) {
+          // oxlint-disable-next-line no-await-in-loop -- one durable observation per object.
+          await this.repositories.markLfsObjectReachability(record, isReachable, now);
+          continue;
+        }
+      }
       const oldUnreferenced =
         record.finalized &&
-        !reachable.has(record.oid) &&
-        record.finalizedAt !== undefined &&
-        now.getTime() - record.finalizedAt.getTime() >= unreferencedRetentionMilliseconds;
-      if (oldPending || oldUnreferenced) {
+        !isReachable &&
+        record.unreachableAt !== undefined &&
+        now.getTime() - record.unreachableAt.getTime() >= unreferencedRetentionMilliseconds;
+      if ((!isReachable && oldPending) || oldUnreferenced) {
         // oxlint-disable-next-line no-await-in-loop -- owner admission serializes each destructive decision.
-        removed += (await this.repositories.retireLfsObject(record)) ? 1 : 0;
+        removed += (await this.repositories.retireLfsObject(record, now)) ? 1 : 0;
       }
     }
     const currentRecords = await this.repositories.listLfsObjects(projectId);
@@ -145,22 +159,36 @@ export class GitBackupService implements OnModuleInit, OnModuleDestroy {
     return removed;
   }
 
-  private async backupLfs(projectId: string, at: Date): Promise<void> {
+  private async backupLfs(projectId: string, at: Date, reachable: ReadonlySet<string>): Promise<void> {
     const records = await this.repositories.listLfsObjects(projectId);
-    const finalized = records.filter((record) => record.finalized);
-    for (const record of finalized) {
+    const finalized = new Map(records.filter((record) => record.finalized).map((record) => [record.oid, record]));
+    for (const oid of reachable) {
+      const record = finalized.get(oid);
+      if (record === undefined) {
+        throw new Error(`Reachable LFS object ${oid} has no finalized storage record.`);
+      }
       const destinationKey = `${snapshotPrefix(projectId, at)}/lfs/${record.oid}`;
       // oxlint-disable-next-line no-await-in-loop -- R2 copies are bounded and a completed object is idempotent.
-      if (await this.objectStorage.headBlob({ namespace: 'blobs', key: destinationKey, tier: 'private' })) {
+      const existing = await this.objectStorage.headBlob({ namespace: 'blobs', key: destinationKey, tier: 'private' });
+      if (existing?.size === record.size) {
         continue;
+      }
+      const sourceKey = gitLfsObjectKey(projectId, record.oid);
+      const source = await this.objectStorage.headBlob({ namespace: 'blobs', key: sourceKey, tier: 'private' });
+      if (source?.size !== record.size) {
+        throw new Error(`Reachable LFS object ${record.oid} is missing or has the wrong size.`);
       }
       // oxlint-disable-next-line no-await-in-loop -- server-side copy avoids buffering LFS bytes in the API.
       await this.objectStorage.copyBlob({
         namespace: 'blobs',
-        sourceKey: gitLfsObjectKey(projectId, record.oid),
+        sourceKey,
         destinationKey,
         tier: 'private',
       });
+      const copied = await this.objectStorage.headBlob({ namespace: 'blobs', key: destinationKey, tier: 'private' });
+      if (copied?.size !== record.size) {
+        throw new Error(`Backup copy for LFS object ${record.oid} could not be verified.`);
+      }
     }
   }
 

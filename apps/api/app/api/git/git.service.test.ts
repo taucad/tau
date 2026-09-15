@@ -15,7 +15,11 @@ import { GitRepositoryService } from '#api/git/git.service.js';
 const spawnMock = vi.hoisted(() => vi.fn());
 vi.mock('node:child_process', () => ({ spawn: spawnMock }));
 
-const fakeChild = (): EventEmitter & { stdout: PassThrough; stderr: PassThrough; stdin: PassThrough } =>
+const fakeChild = (): EventEmitter & {
+  stdout: PassThrough;
+  stderr: PassThrough;
+  stdin: PassThrough;
+} =>
   // oxlint-disable-next-line unicorn/prefer-event-target -- a fake `ChildProcess`, which is a Node EventEmitter
   Object.assign(new EventEmitter(), {
     stdout: new PassThrough(),
@@ -26,10 +30,9 @@ const fakeChild = (): EventEmitter & { stdout: PassThrough; stderr: PassThrough;
 
 const createService = (): InstanceType<typeof GitRepositoryService> =>
   new GitRepositoryService(
-    { get: (key: string): unknown => (key === 'TAU_GIT_ROOT' ? '/tmp/tau-git-root' : '') } as unknown as ConfigService<
-      Environment,
-      true
-    >,
+    {
+      get: (key: string): unknown => (key === 'TAU_GIT_ROOT' ? '/tmp/tau-git-root' : ''),
+    } as unknown as ConfigService<Environment, true>,
     {} as unknown as DatabaseService,
     {} as unknown as BillingService,
     {} as unknown as ObjectStorageService,
@@ -104,7 +107,10 @@ describe('GitRepositoryService.serve', () => {
 
   it('holds one owner-wide admission across receive-pack and refuses a racing LFS reservation', async () => {
     const service = createService();
-    vi.spyOn(service, 'readOwnerUsage').mockResolvedValue({ storageBytes: 10, lfsBytes: 20 });
+    vi.spyOn(service, 'readOwnerUsage').mockResolvedValue({
+      storageBytes: 10,
+      lfsBytes: 20,
+    });
     const access = {
       projectId: 'proj_1',
       ownerId: 'owner_1',
@@ -121,6 +127,24 @@ describe('GitRepositoryService.serve', () => {
     const reopened = await service.admitGitPush(access);
     expect(reopened.remainingBytes).toBe(70);
     reopened.release();
+  });
+
+  it('excludes repository maintenance while receive-pack owns the repository', async () => {
+    const service = createService();
+    const child = fakeChild();
+    spawnMock.mockImplementationOnce(() => child);
+    service.serve({
+      repositoryPath: '/tmp/tau-git-root/proj_1.git',
+      service: 'git-receive-pack',
+      body: Readable.from([]),
+      gzipped: false,
+      accountFor: 'proj_1',
+    });
+
+    await expect(service.withRepositoryMaintenance('proj_1', async () => undefined)).rejects.toMatchObject({
+      response: { code: 'GIT_REPOSITORY_BUSY' },
+    });
+    child.emit('close', 0);
   });
 });
 
@@ -153,10 +177,9 @@ describe('GitRepositoryService.ensureRepository', () => {
 
   const rootedService = (): InstanceType<typeof GitRepositoryService> =>
     new GitRepositoryService(
-      { get: (key: string): unknown => (key === 'TAU_GIT_ROOT' ? root : '') } as unknown as ConfigService<
-        Environment,
-        true
-      >,
+      {
+        get: (key: string): unknown => (key === 'TAU_GIT_ROOT' ? root : ''),
+      } as unknown as ConfigService<Environment, true>,
       {} as unknown as DatabaseService,
       {} as unknown as BillingService,
       {} as unknown as ObjectStorageService,
@@ -196,10 +219,9 @@ describe('GitRepositoryService storage accounting', () => {
 
   const accountingService = (): InstanceType<typeof GitRepositoryService> =>
     new GitRepositoryService(
-      { get: (key: string): unknown => (key === 'TAU_GIT_ROOT' ? root : '') } as unknown as ConfigService<
-        Environment,
-        true
-      >,
+      {
+        get: (key: string): unknown => (key === 'TAU_GIT_ROOT' ? root : ''),
+      } as unknown as ConfigService<Environment, true>,
       {
         database: {
           insert: () => ({

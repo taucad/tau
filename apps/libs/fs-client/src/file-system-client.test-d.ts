@@ -42,7 +42,7 @@ describe('FileSystemClient explicit-workspace contract', () => {
 
   it('mount accepts a discriminated MountConfig', () => {
     expectTypeOf<Parameters<FileSystemClient['mount']>[1]>().toExtend<{
-      backend: 'webaccess' | 'indexeddb' | 'opfs' | 'memory';
+      backend: 'webaccess' | 'indexeddb' | 'opfs' | 'memory' | 'node';
     }>();
   });
 

@@ -1876,9 +1876,9 @@ describe('FileContentService over the composed view (north star W2)', () => {
   /*
    * The content half of W0 pin 2 (W0 review F2): the bytes a chat's skill row
    * links to resolve through the same composition the agent's tools read, and
-   * the entry says it is a read-only built-in.
+   * the entry says it is a read-only system skill.
    */
-  it('should resolve a built-in skill file through the composed view as a read-only system-skills entry', async () => {
+  it('should resolve a system skill file through the composed view as a read-only system-skills entry', async () => {
     const harness = await composedHarness();
 
     expect(new TextDecoder().decode(await harness.service.resolveBytes(skillPath))).toBe(skillContents);
@@ -1892,7 +1892,7 @@ describe('FileContentService over the composed view (north star W2)', () => {
     harness.disposeChannel();
   });
 
-  it('should refuse a write to a built-in skill file before any worker call', async () => {
+  it('should refuse a write to a system skill file before any worker call', async () => {
     const harness = await composedHarness();
 
     await expect(harness.service.write(skillPath, new Uint8Array([1]), 'user')).rejects.toMatchObject({

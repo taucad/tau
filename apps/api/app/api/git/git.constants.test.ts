@@ -16,21 +16,28 @@ import {
 } from '#api/git/git.constants.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- a process environment variable name, not an identifier
-const admittedEnvironment: Readonly<Record<string, string>> = { TAU_GIT_PUSH_ADMITTED: '1' };
+const admittedEnvironment: Readonly<Record<string, string>> = {
+  TAU_GIT_PUSH_ADMITTED: '1',
+};
 
 const runHook = async (
   ref: string | readonly string[],
   environment: Readonly<Record<string, string>> = admittedEnvironment,
 ): Promise<{ code: number | undefined; stderr: string }> =>
   new Promise((resolve) => {
-    const child = spawn('sh', [hookPath], { env: environment as NodeJS.ProcessEnv });
+    const child = spawn('sh', [hookPath], {
+      env: environment as NodeJS.ProcessEnv,
+    });
     const stderr: Array<Uint8Array<ArrayBuffer>> = [];
     child.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => stderr.push(chunk));
     child.stdin.end(
       (typeof ref === 'string' ? [ref] : ref).map((name) => `${'0'.repeat(40)} ${'1'.repeat(40)} ${name}\n`).join(''),
     );
     child.on('close', (code) => {
-      resolve({ code: code ?? undefined, stderr: Buffer.concat(stderr).toString('utf8') });
+      resolve({
+        code: code ?? undefined,
+        stderr: Buffer.concat(stderr).toString('utf8'),
+      });
     });
   });
 
@@ -100,7 +107,7 @@ describe('Tau Hosted Remote constants', () => {
     expect(preReceiveHookScript).toContain('GIT_QUARANTINE_PATH');
     expect(preReceiveHookScript.startsWith('#!/bin/sh\n')).toBe(true);
     expect(postReceiveHookScript).toContain('git update-server-info');
-    expect(postReceiveHookScript).toContain('git gc --auto');
+    expect(postReceiveHookScript).not.toContain('git gc');
   });
 
   it('spells one LFS object path the way packages/revisions does', () => {

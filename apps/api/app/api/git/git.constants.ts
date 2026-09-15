@@ -193,8 +193,7 @@ exit 0
 export const publishedTagSpoolFile = 'tau-published-tags';
 
 /**
- * \`post-receive\`: the dumb-HTTP layout, git's own scheduled maintenance, and
- * the names this push moved.
+ * \`post-receive\`: the dumb-HTTP layout and the names this push moved.
  *
  * Materialization (S32) attaches here as a **record**, not as work: the hook
  * appends the tag refs it saw and returns. Doing the work here would run it
@@ -212,5 +211,4 @@ while read -r _old _new ref; do
   esac
 done
 git update-server-info
-git gc --auto --quiet || true
 `;

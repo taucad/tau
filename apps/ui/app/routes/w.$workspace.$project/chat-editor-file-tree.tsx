@@ -2164,7 +2164,8 @@ function TreeItem({
           data-file-tree-kind={isFolder ? 'directory' : 'file'}
           {...(description ? { 'aria-describedby': descriptionId, title: description } : {})}
           className={cn(
-            'group/file relative flex h-7 w-full items-center justify-between rounded-md py-1 pr-1 pl-2 text-sm text-sidebar-foreground transition-colors',
+            // Own compositing layer so the native drag image keeps transparent rounded corners.
+            'group/file relative flex h-7 w-full transform-gpu items-center justify-between rounded-md py-1 pr-1 pl-2 text-sm text-sidebar-foreground transition-colors',
             !isActive && 'hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground',
             isActive && !isSelected && 'bg-sidebar-accent',
             isSelected && 'bg-sidebar-accent/70 text-sidebar-accent-foreground',

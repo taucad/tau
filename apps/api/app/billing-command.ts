@@ -2,6 +2,7 @@ import 'reflect-metadata'; // oxlint-disable-line import/no-unassigned-import --
 import { readFile } from 'node:fs/promises';
 import { setTimeout as wait } from 'node:timers/promises';
 import { runBillingLifecycleCommand } from '#api/billing/billing-lifecycle.command.js';
+import { runBillingBudgetCommand } from '#api/billing/billing-budget.command.js';
 import { BillingCashService } from '#api/billing/billing-cash.service.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
@@ -53,7 +54,7 @@ async function main(): Promise<void> {
   };
   const command = args[0] ?? '';
   const role =
-    command === 'protect' || command === 'migrate'
+    command === 'protect' || command === 'migrate' || command === 'provision-budgets'
       ? undefined
       : (runtimeRoles[command] ?? 'tau_billing_policy_publisher');
   const client = postgres(databaseUrl, {
@@ -122,6 +123,11 @@ async function main(): Promise<void> {
         // Protected one-shot DDL identity on its own `max: 1` connection; API replicas never migrate.
         const migration = await runMigrationJob(databaseUrl);
         console.log(JSON.stringify(migration));
+        break;
+      }
+      case 'provision-budgets': {
+        const result = await runBillingBudgetCommand(client, args, environment);
+        console.log(JSON.stringify(result));
         break;
       }
       case 'recover-payments': {

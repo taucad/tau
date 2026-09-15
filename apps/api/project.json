@@ -120,10 +120,10 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "Mandatory real Stripe test-mode acceptance. Requires separate restricted create/read/refund keys and Stripe CLI; never skips when invoked."
+        "description": "Mandatory real Stripe test-mode acceptance. Requires separate restricted create/read/refund keys, Stripe CLI and ngrok; never skips when invoked."
       },
       "options": {
-        "command": "test -n \"$STRIPE_SECRET_KEY\" && test -n \"$STRIPE_READ_SECRET_KEY\" && test -n \"$STRIPE_REFUND_SECRET_KEY\" && test -n \"$STRIPE_ACCOUNT_ID\" && BILLING_STRIPE_ACCEPTANCE=true vitest run --config vitest.integration.config.ts app/testing/billing-stripe.acceptance.test.ts",
+        "command": "test -n \"$STRIPE_SECRET_KEY\" && test -n \"$STRIPE_READ_SECRET_KEY\" && test -n \"$STRIPE_REFUND_SECRET_KEY\" && test -n \"$STRIPE_ACCOUNT_ID\" && test -n \"$STRIPE_PRICE_ID_PRO_MONTHLY\" && test -n \"$STRIPE_PRODUCT_ID_CREDIT_PACK\" && BILLING_STRIPE_ACCEPTANCE=true vitest run --config vitest.integration.config.ts app/testing/billing-stripe.acceptance.test.ts",
         "cwd": "{projectRoot}"
       }
     },

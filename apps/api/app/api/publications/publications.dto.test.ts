@@ -333,6 +333,7 @@ describe('projectShareEnvelopeSchema', () => {
       project: { id: 'proj_share', name: 'Tray', description: 'Shared source' },
       currentPublication: {
         id: 'pub_share',
+        tag: 'main',
         title: 'Tray',
         description: null,
         visibility: 'private',

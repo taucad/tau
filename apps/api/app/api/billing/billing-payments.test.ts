@@ -297,12 +297,22 @@ describe('payment source qualification', () => {
   });
 
   it('allows a hosted replacement to qualify its own newly selected card', () => {
+    const checkoutOffer: PaymentOfferSnapshot = {
+      ...offer,
+      taxMinor: null,
+      grossMinor: null,
+      maximumGrossMinor: null,
+      taxBasis: 'stripe_checkout',
+      paymentMethod: null,
+    };
     const session = {
       id: 'cs_hosted',
       amount_subtotal: 537,
       amount_total: 537,
+      automatic_tax: { enabled: true, status: 'complete' },
       client_reference_id: 'purchase',
       currency: 'usd',
+      customer_details: { address: { country: 'US' } },
       customer: 'cus_owned',
       livemode: false,
       metadata: { tau_customer_binding_id: 'binding', tau_provider_leg_id: 'leg', tau_purchase_id: 'purchase' },
@@ -321,7 +331,7 @@ describe('payment source qualification', () => {
       price: { product: 'prod_topup' },
     } as unknown as Stripe.LineItem;
     const result = qualifyManualPayment({
-      offer,
+      offer: checkoutOffer,
       customerId: 'cus_owned',
       customerBindingId: 'binding',
       providerLegId: 'leg',
@@ -334,7 +344,7 @@ describe('payment source qualification', () => {
     expect(result.status).toBe('paid');
     expect(
       qualifyManualPayment({
-        offer,
+        offer: checkoutOffer,
         customerId: 'cus_owned',
         customerBindingId: 'binding',
         providerLegId: 'leg',
@@ -352,21 +362,26 @@ const monthlyOffer: PaymentOfferSnapshot = {
   ...offer,
   offerId: 'monthly',
   principalMinor: '2000',
-  grossMinor: '2000',
-  maximumGrossMinor: '2000',
+  taxMinor: null,
+  grossMinor: null,
+  maximumGrossMinor: null,
   creditAtoms: '20000000',
   ceilingCreditAtoms: '40000000',
   stripePriceId: 'price_monthly',
   term: 'month',
+  taxBasis: 'stripe_checkout',
   paymentMethod: null,
   stripeProductId: null,
 };
 const invoice = {
   id: 'in_paid',
+  amount_due: 2000,
   amount_paid: 2000,
   amount_remaining: 0,
   currency: 'usd',
   customer: 'cus_owned',
+  customer_address: { country: 'US' },
+  automatic_tax: { enabled: true, status: 'complete' },
   livemode: false,
   parent: { type: 'subscription_details', subscription_details: { subscription: 'sub_owned' } },
   status: 'paid',

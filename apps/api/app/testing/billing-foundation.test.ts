@@ -46,7 +46,7 @@ const launchPolicy = {
       kind: 'top_up',
       currency: 'usd',
       minimumPrincipalMinor: '500',
-      maximumPrincipalMinor: '50000',
+      maximumPrincipalMinor: '500000',
       creditAtomsPerPrincipalMinor: '10000',
     },
   ],
@@ -54,11 +54,32 @@ const launchPolicy = {
 };
 
 describe('billing database protections and real command', () => {
+  it('should refuse every billing command before opening a database when Cloud is disabled', () => {
+    const childEnvironment: Record<string, string | undefined> = {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment key
+      PATH: process.env['PATH'],
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment key
+      TAU_CLOUD_ENABLED: 'false',
+    };
+    const result = spawnSync(
+      process.execPath,
+      [resolve(import.meta.dirname, '../../dist/billing-command.js'), 'protect'],
+      {
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- raw process environments contain strings before schema parsing
+        env: childEnvironment as NodeJS.ProcessEnv,
+        encoding: 'utf8',
+      },
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('billing-command requires TAU_CLOUD_ENABLED=true');
+  });
+
   it('should run the credential-free recovery worker and stop cleanly', async () => {
     const childEnvironment: Record<string, string | undefined> = {};
     childEnvironment['PATH'] = process.env['PATH'];
     childEnvironment['BILLING_DATABASE_URL'] = databaseUrl;
     childEnvironment['BILLING_ENVIRONMENT'] = 'prod-eu';
+    childEnvironment['TAU_CLOUD_ENABLED'] = 'true';
     childEnvironment['OTEL_METRICS_PORT'] = '0';
     const child = spawn(
       process.execPath,
@@ -90,6 +111,80 @@ describe('billing database protections and real command', () => {
         environment: 'prod-eu',
         failed: 0,
       });
+      child.kill('SIGTERM');
+      const [code, signal] = (await once(child, 'close')) as unknown[];
+      expect({ code, signal, stderr }).toEqual({ code: 0, signal: null, stderr: '' });
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL');
+      }
+    }
+  });
+
+  it('should run payment recovery and journal reconciliation on the operations worker', async () => {
+    const childEnvironment: Record<string, string | undefined> = {};
+    childEnvironment['PATH'] = process.env['PATH'];
+    childEnvironment['BILLING_DATABASE_URL'] = databaseUrl;
+    childEnvironment['BILLING_ENVIRONMENT'] = 'prod-us';
+    childEnvironment['TAU_CLOUD_ENABLED'] = 'true';
+    childEnvironment['STRIPE_READ_SECRET_KEY'] = 'rk_test_operations_worker';
+    childEnvironment['STRIPE_ACCOUNT_ID'] = 'acct_operations_worker';
+    childEnvironment['STRIPE_LIVEMODE'] = 'false';
+    childEnvironment['OTEL_METRICS_PORT'] = '0';
+    const child = spawn(
+      process.execPath,
+      [
+        resolve(import.meta.dirname, '../../dist/billing-command.js'),
+        'billing-operations-worker',
+        '--environment',
+        'prod-us',
+        '--limit',
+        '100',
+        '--poll-milliseconds',
+        '1000',
+      ],
+      {
+        // The empty environment has no payment sources, so this verifies scheduling without provider I/O.
+        env: childEnvironment as NodeJS.ProcessEnv,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    try {
+      const deadline = Date.now() + 10_000;
+      while (!stdout.includes('billing.payment_recovery_batch') || !stdout.includes('billing.journal_reconciliation')) {
+        if (Date.now() >= deadline) {
+          throw new Error(`Timed out waiting for billing operations worker: ${stdout}\n${stderr}`);
+        }
+        // oxlint-disable-next-line no-await-in-loop -- the probe waits for both first-cycle events
+        await wait(25);
+      }
+      const events = stdout
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            event: 'billing.payment_recovery_batch',
+            environment: 'prod-us',
+            failed: 0,
+          }),
+          expect.objectContaining({
+            event: 'billing.journal_reconciliation',
+            environment: 'prod-us',
+          }),
+        ]),
+      );
       child.kill('SIGTERM');
       const [code, signal] = (await once(child, 'close')) as unknown[];
       expect({ code, signal, stderr }).toEqual({ code: 0, signal: null, stderr: '' });
@@ -137,6 +232,7 @@ describe('billing database protections and real command', () => {
           ...Object.fromEntries([
             ['BILLING_DATABASE_URL', databaseUrl],
             ['BILLING_ENVIRONMENT', environment],
+            ['TAU_CLOUD_ENABLED', 'true'],
           ]),
         };
         return spawnSync(process.execPath, args, {
@@ -160,6 +256,7 @@ describe('billing database protections and real command', () => {
         ...Object.fromEntries([
           ['BILLING_DATABASE_URL', databaseUrl],
           ['BILLING_ENVIRONMENT', 'prod-eu'],
+          ['TAU_CLOUD_ENABLED', 'true'],
         ]),
       };
       const duplicate = spawnSync(process.execPath, [...args, '--environment', 'prod-us'], {
@@ -438,6 +535,7 @@ describe('funded LLM recovery worker under a mid-run database outage', () => {
     childEnvironment['PATH'] = process.env['PATH'];
     childEnvironment['BILLING_DATABASE_URL'] = databaseUrl;
     childEnvironment['BILLING_ENVIRONMENT'] = 'prod-eu';
+    childEnvironment['TAU_CLOUD_ENABLED'] = 'true';
     childEnvironment['OTEL_METRICS_PORT'] = '0';
     // Names the worker's backend so the outage terminates exactly that session.
     childEnvironment['PGAPPNAME'] = applicationName;

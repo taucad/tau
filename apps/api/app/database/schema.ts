@@ -99,6 +99,8 @@ export const projectGitLfsObject = pgTable(
     oid: text('oid').notNull(),
     sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
     finalizedAt: timestamp('finalized_at', { withTimezone: true }),
+    /** First observation that no retained Git tree reaches this object. */
+    unreachableAt: timestamp('unreachable_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -1227,7 +1229,7 @@ export const billingProviderLeg = billing.table(
     check('billing_provider_redirect_bound', sql`${table.redirectUrl} IS NULL OR length(${table.redirectUrl}) <= 4096`),
     check(
       'billing_provider_leg_kind',
-      sql`(${table.kind} IN ('customer','portal','tax_calculation') AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NULL) OR (${table.kind} IN ('checkout_payment','payment_intent') AND ${table.purchaseId} IS NOT NULL AND ${table.subscriptionId} IS NULL) OR (${table.kind} = 'checkout_subscription' AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NOT NULL) OR (${table.kind} = 'checkout_setup' AND ${table.reloadConsentId} IS NOT NULL AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NULL) OR (${table.kind} IN ('subscription_update','subscription_schedule') AND ${table.subscriptionOfferId} IS NOT NULL AND ${table.subscriptionId} IS NOT NULL AND ${table.purchaseId} IS NULL) OR (${table.kind} = 'subscription_cancel' AND ${table.closureId} IS NOT NULL AND ${table.subscriptionId} IS NOT NULL AND ${table.purchaseId} IS NULL) OR (${table.kind} = 'refund' AND ${table.refundIntentId} IS NOT NULL AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NULL)`,
+      sql`(${table.kind} IN ('customer','portal','tax_calculation') AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NULL) OR (${table.kind} IN ('checkout_payment','payment_intent','tax_transaction') AND ${table.purchaseId} IS NOT NULL AND ${table.subscriptionId} IS NULL) OR (${table.kind} = 'checkout_subscription' AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NOT NULL) OR (${table.kind} = 'checkout_setup' AND ${table.reloadConsentId} IS NOT NULL AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NULL) OR (${table.kind} IN ('subscription_update','subscription_schedule') AND ${table.subscriptionOfferId} IS NOT NULL AND ${table.subscriptionId} IS NOT NULL AND ${table.purchaseId} IS NULL) OR (${table.kind} = 'subscription_cancel' AND ${table.closureId} IS NOT NULL AND ${table.subscriptionId} IS NOT NULL AND ${table.purchaseId} IS NULL) OR (${table.kind} = 'refund' AND ${table.refundIntentId} IS NOT NULL AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NULL)`,
     ),
     check(
       'billing_provider_no_charge',

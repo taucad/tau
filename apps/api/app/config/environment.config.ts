@@ -2,9 +2,15 @@ import process from 'node:process';
 import { z } from 'zod';
 import { jsonCodec } from '#lib/zod.lib.js';
 
+const strictEnvironmentBoolean = (defaultValue: boolean) =>
+  z.union([z.boolean(), z.enum(['true', 'false']).transform((value) => value === 'true')]).default(defaultValue);
+
 const environmentSchemaBase = z.object({
   /* eslint-disable @typescript-eslint/naming-convention -- environment variables are UPPER_CASED */
   NODE_ENV: z.enum(['development', 'production', 'test']),
+  TAU_CLOUD_ENABLED: strictEnvironmentBoolean(false).describe(
+    'Start Tau Cloud billing and funded-admission services. Defaults false for self-hosted deployments.',
+  ),
   PORT: z.string().default('3000'),
   DATABASE_URL: z.string(),
   // Bounded runtime pool (B8 R3). Every value fails closed: a non-numeric or out-of-range
@@ -47,12 +53,12 @@ const environmentSchemaBase = z.object({
   LOG_SERVICE: z.enum(['console', 'fly', 'google-logging', 'aws-cloudwatch']).default('console'),
 
   // Chat & LLMs
-  OPENAI_API_KEY: z.string(),
+  OPENAI_API_KEY: z.string().optional(),
   // Serves the morph inference-provider catalog rows and the gateway's morph wire only.
   // Optional by design: fast-apply and /v1/compact are deleted (PH17/PH18), so booting
   // and editing never require it (V6).
   MORPH_API_KEY: z.string().optional(),
-  ANTHROPIC_API_KEY: z.string(),
+  ANTHROPIC_API_KEY: z.string().optional(),
   GOOGLE_VERTEX_AI_CREDENTIALS: jsonCodec(
     z.object({
       type: z.string(),
@@ -67,20 +73,21 @@ const environmentSchemaBase = z.object({
       client_x509_cert_url: z.string(),
       universe_domain: z.string(),
     }),
-  ),
+  ).optional(),
   TAVILY_API_KEY: z.string().optional(),
   CEREBRAS_API_KEY: z.string().optional(),
   TOGETHER_API_KEY: z.string().optional(),
   XAI_API_KEY: z.string().optional(),
   MOONSHOT_API_KEY: z.string().optional(),
+  ZOO_API_KEY: z.string().optional(),
+  ZOO_WEBSOCKET_URL: z.url().default('wss://api.zoo.dev'),
   LANGSMITH_TRACING: z.string().optional(),
   LANGSMITH_ENDPOINT: z.string().optional(),
   LANGSMITH_PROJECT: z.string().optional(),
   LANGSMITH_API_KEY: z.string().optional(),
-  TAU_PROVIDER_DIAGNOSTICS_VERBOSE: z.coerce
-    .boolean()
-    .default(false)
-    .describe('Emit sanitized provider request diagnostics for successful model calls. Failures are always logged.'),
+  TAU_PROVIDER_DIAGNOSTICS_VERBOSE: strictEnvironmentBoolean(false).describe(
+    'Emit sanitized provider request diagnostics for successful model calls. Failures are always logged.',
+  ),
 
   // Authentication
   AUTH_SECRET: z.string(),
@@ -110,7 +117,7 @@ const environmentSchemaBase = z.object({
   TAU_EMAIL_REPLY_TO: z.email().default('identity@taucad.dev'),
 
   // Local Model Providers
-  OLLAMA_ENABLED: z.coerce.boolean().default(false).describe('Enable Ollama local model provider'),
+  OLLAMA_ENABLED: strictEnvironmentBoolean(false).describe('Enable Ollama local model provider'),
 
   // Redis Configuration
   // Billing (Stripe + credit ledger). STRIPE_* default to '' (the RESEND_API_KEY pattern) so local
@@ -121,7 +128,7 @@ const environmentSchemaBase = z.object({
   BILLING_REQUEST_DIGEST_SECRET: z.string().min(32).optional(),
   BILLING_PROVIDER_ACCOUNTS: jsonCodec(
     z.partialRecord(
-      z.enum(['anthropic', 'openai', 'vertexai', 'together', 'morph', 'xai']),
+      z.enum(['anthropic', 'openai', 'vertexai', 'together', 'morph', 'xai', 'zoo']),
       z
         .string()
         .min(1)
@@ -199,7 +206,7 @@ const environmentSchemaBase = z.object({
   TAU_S3_REGION: z.string().default('us-east-1').describe('AWS SigV4 region (MinIO: arbitrary; R2/Tigris: auto)'),
   TAU_S3_ACCESS_KEY_ID: z.string().default('tau-api'),
   TAU_S3_SECRET_ACCESS_KEY: z.string().default('tau-api-dev-secret'),
-  TAU_S3_FORCE_PATH_STYLE: z.coerce.boolean().default(true).describe('Required true for MinIO + R2 S3 API'),
+  TAU_S3_FORCE_PATH_STYLE: strictEnvironmentBoolean(true).describe('Required true for MinIO + R2 S3 API'),
   TAU_S3_BUCKET: z
     .string()
     .default('tau-content')
@@ -278,6 +285,45 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
           message: `${key} is required when GitHub repository access is configured`,
           path: [key],
         });
+      }
+    }
+  }
+
+  if (data.TAU_CLOUD_ENABLED) {
+    const requiredCloudKeys = [
+      'BILLING_ENVIRONMENT',
+      'BILLING_USAGE_CURSOR_SECRET',
+      'BILLING_REQUEST_DIGEST_SECRET',
+      'STRIPE_SECRET_KEY',
+      'STRIPE_READ_SECRET_KEY',
+      'STRIPE_ACCOUNT_ID',
+      'STRIPE_LIVEMODE',
+      'STRIPE_WEBHOOK_SECRET',
+      'STRIPE_PRICE_ID_PRO_MONTHLY',
+      'STRIPE_PRODUCT_ID_CREDIT_PACK',
+    ] as const;
+    for (const key of requiredCloudKeys) {
+      if (data[key] === undefined || data[key] === '') {
+        context.addIssue({
+          code: 'custom',
+          message: `${key} is required when TAU_CLOUD_ENABLED=true`,
+          path: [key],
+        });
+      }
+    }
+    const stripeMode = data.STRIPE_LIVEMODE ? 'live' : 'test';
+    const stripeIdentifiers = [
+      ['STRIPE_SECRET_KEY', data.STRIPE_SECRET_KEY, [`sk_${stripeMode}_`, `rk_${stripeMode}_`]],
+      ['STRIPE_READ_SECRET_KEY', data.STRIPE_READ_SECRET_KEY, [`rk_${stripeMode}_`]],
+      ['STRIPE_ACCOUNT_ID', data.STRIPE_ACCOUNT_ID, 'acct_'],
+      ['STRIPE_WEBHOOK_SECRET', data.STRIPE_WEBHOOK_SECRET, 'whsec_'],
+      ['STRIPE_PRICE_ID_PRO_MONTHLY', data.STRIPE_PRICE_ID_PRO_MONTHLY, 'price_'],
+      ['STRIPE_PRODUCT_ID_CREDIT_PACK', data.STRIPE_PRODUCT_ID_CREDIT_PACK, 'prod_'],
+    ] as const;
+    for (const [key, value, accepted] of stripeIdentifiers) {
+      const prefixes = typeof accepted === 'string' ? [accepted] : accepted;
+      if (value && !prefixes.some((prefix) => value.startsWith(prefix))) {
+        context.addIssue({ code: 'custom', message: `${key} does not match Stripe ${stripeMode} mode`, path: [key] });
       }
     }
   }
@@ -373,41 +419,14 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
     });
   }
 
-  // Billing cannot run half-configured in production: a missing webhook secret silently drops every
-  // credit grant, and a missing price id breaks upgrade checkout.
-  // A production API replica that keeps its login role can run DDL and edit immutable
-  // financial evidence; B7 R8 requires the de-privileged runtime role there.
-  const requiredKeys = [
-    'DATABASE_RUNTIME_ROLE',
-    'STRIPE_SECRET_KEY',
-    'STRIPE_READ_SECRET_KEY',
-    'STRIPE_ACCOUNT_ID',
-    'STRIPE_WEBHOOK_SECRET',
-    'STRIPE_PRICE_ID_PRO_MONTHLY',
-    'STRIPE_PRODUCT_ID_CREDIT_PACK',
-  ] as const;
-  if (data.BILLING_ENVIRONMENT === undefined) {
+  // A production API replica that keeps its login role can run DDL and edit
+  // immutable evidence. This protection applies to cloud and self-host alike.
+  if (!data.DATABASE_RUNTIME_ROLE) {
     context.addIssue({
       code: 'custom',
-      message: 'BILLING_ENVIRONMENT is required in production',
-      path: ['BILLING_ENVIRONMENT'],
+      message: 'DATABASE_RUNTIME_ROLE is required in production',
+      path: ['DATABASE_RUNTIME_ROLE'],
     });
-  }
-  if (data.STRIPE_LIVEMODE === undefined) {
-    context.addIssue({
-      code: 'custom',
-      message: 'STRIPE_LIVEMODE is required in production',
-      path: ['STRIPE_LIVEMODE'],
-    });
-  }
-  for (const key of requiredKeys) {
-    if (!data[key]) {
-      context.addIssue({
-        code: 'custom',
-        message: `${key} is required in production`,
-        path: [key],
-      });
-    }
   }
   for (const key of githubRepositoryKeys) {
     if (!data[key]) {

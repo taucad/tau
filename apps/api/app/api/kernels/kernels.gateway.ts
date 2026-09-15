@@ -9,6 +9,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { authInstanceKey } from '#constants/auth.constant.js';
 import { KernelsService } from '#api/kernels/kernels.service.js';
 import { zooCloseCodes } from '#api/billing/billing.constants.js';
+import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
+import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
 import { DevWebSocketService } from '#api/websocket/dev-websocket.service.js';
 import { Span } from '#telemetry/tracer.service.js';
 
@@ -36,6 +38,7 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
     private readonly kernelsService: KernelsService,
     private readonly devWebSocketService: DevWebSocketService,
     @Inject(authInstanceKey) private readonly auth: Auth,
+    @Inject(commercialEntitlementsKey) private readonly entitlements: CommercialEntitlementsService,
     @Inject(HttpAdapterHost) private readonly httpAdapterHost: HttpAdapterHost,
   ) {}
 
@@ -88,9 +91,8 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Session gate (S49). No entitlement or credit check runs here: the route is
-   * disabled for every tier, so an authorized connection is refused by the
-   * service without reading billing state.
+   * Session and commercial-entitlement gate. Self-host composition grants the
+   * operator-owned capability without creating a billing account.
    */
   private async authorizeZooConnection(
     request: IncomingMessage,
@@ -100,9 +102,13 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
       if (!session) {
         return { ok: false, code: zooCloseCodes.unauthenticated, reason: 'UNAUTHENTICATED' };
       }
+      const entitlements = await this.entitlements.getEntitlements(session.user.id);
+      if (!entitlements.canUseProKernels) {
+        return { ok: false, code: zooCloseCodes.proRequired, reason: 'PRO_REQUIRED' };
+      }
       return { ok: true, userId: session.user.id };
     } catch (error) {
-      // Fail closed: an auth outage must not open an unmetered proxy.
+      // Fail closed: an auth/entitlement outage must not open an unmetered proxy.
       this.logger.error(`Zoo proxy authorization failed: ${String(error)}`);
       return { ok: false, code: zooCloseCodes.unauthenticated, reason: 'AUTH_ERROR' };
     }

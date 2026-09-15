@@ -12,6 +12,7 @@ import {
 } from '#api/billing/billing-payment-contract.js';
 import type { PaidPaymentEvidence } from '#api/billing/billing-payment-contract.js';
 import type { FinancialEnvironment } from '#api/billing/billing-policy.js';
+import type { StripeTaxTransactionEvidence } from '#api/billing/billing-stripe.js';
 import type { DatabaseService } from '#database/database.service.js';
 import {
   billingFinancialCase,
@@ -199,6 +200,7 @@ export class BillingTaxService {
     readonly paidEvidence: PaidPaymentEvidence;
     readonly checkout?: Stripe.Checkout.Session;
     readonly invoice?: Stripe.Invoice;
+    readonly taxTransaction?: StripeTaxTransactionEvidence;
   }): Promise<TaxObservationResult | undefined> {
     if (
       input.paidEvidence.stripeAccountId !== input.claim.stripeAccountId ||
@@ -211,6 +213,7 @@ export class BillingTaxService {
       paidEvidence: input.paidEvidence,
       checkout: input.checkout,
       invoice: input.invoice,
+      taxTransaction: input.taxTransaction,
       resolveFx: this.resolveFx,
     });
     if (projected === undefined) {
@@ -220,6 +223,7 @@ export class BillingTaxService {
         paidEvidence: input.paidEvidence,
         checkout: input.checkout,
         invoice: input.invoice,
+        taxTransaction: input.taxTransaction,
       });
       await this.recordObservationGap({
         claim: input.claim,
@@ -867,9 +871,10 @@ export async function projectPaidTaxEvidence(input: {
   readonly paidEvidence: PaidPaymentEvidence;
   readonly checkout?: Stripe.Checkout.Session;
   readonly invoice?: Stripe.Invoice;
+  readonly taxTransaction?: StripeTaxTransactionEvidence;
   readonly resolveFx?: TaxFxResolver;
 }): Promise<TaxFactEvidence | undefined> {
-  const source = input.invoice ?? input.checkout;
+  const source = input.invoice ?? input.checkout ?? input.taxTransaction?.transaction;
   if (source === undefined) return undefined;
   if (input.invoice && input.paidEvidence.invoiceId !== input.invoice.id)
     throw new Error('tax_invoice_identity_mismatch');
@@ -880,14 +885,25 @@ export async function projectPaidTaxEvidence(input: {
     | null
     | undefined;
   const checkoutTaxIds = checkoutDetails?.tax_ids ?? [];
-  const taxIds = invoiceTaxIds.length > 0 ? invoiceTaxIds : checkoutTaxIds;
+  const transactionTaxIds = input.taxTransaction?.transaction.customer_details.tax_ids ?? [];
+  const taxIds =
+    invoiceTaxIds.length > 0 ? invoiceTaxIds : checkoutTaxIds.length > 0 ? checkoutTaxIds : transactionTaxIds;
   const rawTaxId = taxIds[0] as
     | { type?: string; value?: string; verification?: { status?: string; verified_at?: number } | null }
     | undefined;
-  const countryCode = input.invoice?.customer_address?.country ?? checkoutDetails?.address?.country ?? null;
+  const countryCode =
+    input.invoice?.customer_address?.country ??
+    checkoutDetails?.address?.country ??
+    input.taxTransaction?.transaction.customer_details.address?.country ??
+    null;
   const verified = rawTaxId?.verification?.status === 'verified';
   const customerType = taxIds.length > 0 ? 'business' : 'consumer';
-  const automaticTax = (source.automatic_tax as { status?: string | null } | undefined)?.status ?? null;
+  const automaticTax =
+    input.taxTransaction === undefined
+      ? (((source as Stripe.Invoice | Stripe.Checkout.Session).automatic_tax as { status?: string | null } | undefined)
+          ?.status ?? null)
+      : 'complete';
+  const transactionLine = input.taxTransaction?.lines.at(0);
   const effectiveAt = new Date(input.paidEvidence.paidAt);
   const monitoredCountry = countryCode === 'GB' || (countryCode !== null && euCountries.has(countryCode));
   const fx =
@@ -902,7 +918,7 @@ export async function projectPaidTaxEvidence(input: {
     version: 'tax-fact-evidence-v1',
     sourceComplete: true,
     countryCode,
-    countryEvidenceSource: input.invoice ? 'invoice' : 'checkout',
+    countryEvidenceSource: input.invoice ? 'invoice' : input.checkout ? 'checkout' : 'tax_transaction',
     customerType,
     vat: {
       type: rawTaxId?.type ?? null,
@@ -923,7 +939,7 @@ export async function projectPaidTaxEvidence(input: {
     cumulativeRefundGrossMinor: '0',
     fx,
     automaticTaxStatus: automaticTax,
-    productTaxCode: null,
+    productTaxCode: transactionLine?.tax_code ?? null,
     taxabilityReason: null,
     classificationReason:
       rawTaxId === undefined
@@ -933,7 +949,11 @@ export async function projectPaidTaxEvidence(input: {
           : 'customer tax ID exists without verified VAT evidence',
     lineage: {
       kind: 'sale',
-      canonicalSourceId: input.invoice?.id ?? input.checkout?.id ?? input.paidEvidence.paymentIntentIds[0]!,
+      canonicalSourceId:
+        input.invoice?.id ??
+        input.checkout?.id ??
+        input.taxTransaction?.transaction.id ??
+        input.paidEvidence.paymentIntentIds[0]!,
     },
   });
 }
@@ -947,12 +967,37 @@ export function paidTaxSourceIncompleteness(input: {
   readonly paidEvidence: PaidPaymentEvidence;
   readonly checkout?: Stripe.Checkout.Session;
   readonly invoice?: Stripe.Invoice;
+  readonly taxTransaction?: StripeTaxTransactionEvidence;
 }): string | undefined {
-  const source = input.invoice ?? input.checkout;
+  const source = input.invoice ?? input.checkout ?? input.taxTransaction?.transaction;
   if (source === undefined) return 'missing_immutable_paid_snapshot';
+  if (input.taxTransaction !== undefined) {
+    const { transaction, lines, complete } = input.taxTransaction;
+    const line = lines.at(0);
+    if (!complete) return 'tax_transaction_pagination_incomplete';
+    if (
+      transaction.type !== 'transaction' ||
+      transaction.livemode !== input.paidEvidence.livemode ||
+      transaction.customer !== input.paidEvidence.customerId ||
+      transaction.currency !== input.paidEvidence.currency ||
+      transaction.customer_details.address?.country === null ||
+      transaction.customer_details.address?.country === undefined ||
+      lines.length !== 1 ||
+      line === undefined ||
+      line.type !== 'transaction' ||
+      line.livemode !== input.paidEvidence.livemode ||
+      line.tax_behavior !== 'exclusive' ||
+      line.amount !== Number(input.paidEvidence.principalMinor) ||
+      line.amount_tax !== Number(input.paidEvidence.taxMinor) ||
+      line.amount + line.amount_tax !== Number(input.paidEvidence.grossMinor)
+    )
+      return 'tax_transaction_source_mismatch';
+    return undefined;
+  }
   if (input.invoice === undefined && input.checkout?.status !== 'complete')
     return `checkout_status:${input.checkout?.status ?? 'absent'}`;
-  const automaticTaxStatus = (source.automatic_tax as { status?: string | null } | undefined)?.status ?? null;
+  const paidSource = input.invoice ?? input.checkout;
+  const automaticTaxStatus = (paidSource?.automatic_tax as { status?: string | null } | undefined)?.status ?? null;
   if (automaticTaxStatus !== 'complete') return `automatic_tax_status:${automaticTaxStatus ?? 'absent'}`;
   const retainedTaxMinor =
     input.invoice === undefined ? checkoutTaxMinor(input.checkout) : invoiceTaxMinor(input.invoice);

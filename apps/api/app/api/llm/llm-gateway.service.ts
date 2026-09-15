@@ -1,12 +1,9 @@
 import { Readable } from 'node:stream';
 import type { ReadableStream as NodeReadableStream } from 'node:stream/web';
-import { HttpStatus, Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
-import { BillableModelInvocationService } from '#api/billing/billable-model-invocation.service.js';
-import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
-import type { BillableProviderWire } from '#api/billing/billable-model-invocation.types.js';
-import type { BillingEnvironment } from '#api/billing/credit-ledger.types.js';
+import type { ModelInvocationService, ModelProviderWire } from '#api/llm/model-invocation.types.js';
+import { modelInvocationServiceKey } from '#api/llm/model-invocation.types.js';
 
 /* oxlint-disable no-barrel-files/no-barrel-files -- retained test-facing transport utility exports */
 export { consumeSseBody } from '#api/llm/llm-gateway.stream.js';
@@ -14,7 +11,7 @@ export type { SseEvent } from '#api/llm/llm-gateway.stream.js';
 /* oxlint-enable no-barrel-files/no-barrel-files */
 
 export type LlmGatewayRelayInput = {
-  readonly provider: BillableProviderWire;
+  readonly provider: ModelProviderWire;
   readonly body: unknown;
   readonly principalId: string;
   readonly attemptId: string;
@@ -29,22 +26,10 @@ export type LlmGatewayRelayInput = {
 export class LlmGatewayService {
   private readonly logger = new Logger(LlmGatewayService.name);
 
-  public constructor(
-    private readonly invocations: BillableModelInvocationService,
-    private readonly config: ConfigService,
-  ) {}
+  public constructor(@Inject(modelInvocationServiceKey) private readonly invocations: ModelInvocationService) {}
 
   public async relay(input: LlmGatewayRelayInput): Promise<void> {
-    const environment = this.config.get<BillingEnvironment>('BILLING_ENVIRONMENT');
-    if (!environment) {
-      throw new LlmGatewayError(
-        HttpStatus.SERVICE_UNAVAILABLE,
-        'PROVIDER_UNAVAILABLE',
-        'Billing environment is unavailable.',
-      );
-    }
     const result = await this.invocations.invoke({
-      environment,
       authUserId: input.principalId,
       surface: 'gateway',
       attempt: { version: 1, key: input.attemptId },

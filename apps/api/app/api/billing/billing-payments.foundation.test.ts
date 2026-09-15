@@ -50,6 +50,26 @@ const requests: string[] = [];
 const stripeAccountId = 'acct_payments_foundation';
 let latestCustomerId = `cus_${randomUUID().replaceAll('-', '')}`;
 let latestCustomerMetadata: Record<string, string> = {};
+const latestCustomerAddress = {
+  city: 'Wellington',
+  country: 'NZ',
+  line1: '1 Willis Street',
+  line2: null,
+  postal_code: '6011',
+  state: null,
+};
+let taxCalculation:
+  | {
+      readonly id: string;
+      readonly customerId: string;
+      readonly productId: string;
+      readonly reference: string;
+      readonly amount: number;
+    }
+  | undefined;
+let taxTransaction:
+  | { readonly id: string; readonly calculationId: string; readonly reference: string; readonly postedAt: number }
+  | undefined;
 let paymentFixture:
   | { purchaseId: string; providerLegId: string; customerBindingId: string; customerId: string }
   | undefined;
@@ -89,9 +109,74 @@ const server = createServer((request, response) => {
       };
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(
-        JSON.stringify({ id: latestCustomerId, object: 'customer', livemode: false, metadata: latestCustomerMetadata }),
+        JSON.stringify({
+          id: latestCustomerId,
+          object: 'customer',
+          address: latestCustomerAddress,
+          livemode: false,
+          metadata: latestCustomerMetadata,
+        }),
       );
     });
+    return;
+  }
+  if (url.pathname === '/v1/tax/calculations' && request.method === 'POST') {
+    const chunks: string[] = [];
+    request.setEncoding('utf8');
+    request.on('data', (chunk: string) => chunks.push(chunk));
+    request.on('end', () => {
+      const form = new URLSearchParams(chunks.join(''));
+      taxCalculation = {
+        id: `taxcalc_${randomUUID().replaceAll('-', '')}`,
+        customerId: form.get('customer') ?? '',
+        productId: form.get('line_items[0][product]') ?? '',
+        reference: form.get('line_items[0][reference]') ?? '',
+        amount: Number(form.get('line_items[0][amount]')),
+      };
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(taxCalculationObject()));
+    });
+    return;
+  }
+  const calculationId = /^\/v1\/tax\/calculations\/(?<id>[\w-]+)(?:\/line_items)?$/u.exec(url.pathname)?.groups?.['id'];
+  if (calculationId !== undefined && taxCalculation?.id === calculationId) {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(
+      JSON.stringify(
+        url.pathname.endsWith('/line_items')
+          ? { object: 'list', data: [taxCalculationLine()], has_more: false, url: url.pathname }
+          : taxCalculationObject(),
+      ),
+    );
+    return;
+  }
+  if (url.pathname === '/v1/tax/transactions/create_from_calculation' && request.method === 'POST') {
+    const chunks: string[] = [];
+    request.setEncoding('utf8');
+    request.on('data', (chunk: string) => chunks.push(chunk));
+    request.on('end', () => {
+      const form = new URLSearchParams(chunks.join(''));
+      taxTransaction = {
+        id: `tax_${randomUUID().replaceAll('-', '')}`,
+        calculationId: form.get('calculation') ?? '',
+        reference: form.get('reference') ?? '',
+        postedAt: Number(form.get('posted_at')),
+      };
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(taxTransactionObject()));
+    });
+    return;
+  }
+  const transactionId = /^\/v1\/tax\/transactions\/(?<id>[\w-]+)(?:\/line_items)?$/u.exec(url.pathname)?.groups?.['id'];
+  if (transactionId !== undefined && taxTransaction?.id === transactionId) {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(
+      JSON.stringify(
+        url.pathname.endsWith('/line_items')
+          ? { object: 'list', data: [taxTransactionLine()], has_more: false, url: url.pathname }
+          : taxTransactionObject(),
+      ),
+    );
     return;
   }
   const paymentIntent =
@@ -131,11 +216,14 @@ const server = createServer((request, response) => {
           billing_reason: 'subscription_cycle',
           currency: 'usd',
           customer: invoice.customerId,
+          customer_address: latestCustomerAddress,
           livemode: false,
           parent: { type: 'subscription_details', subscription_details: { subscription: invoice.subscriptionId } },
           status: invoice.paid ? 'paid' : 'open',
           subtotal: 2000,
           total: 2000,
+          automatic_tax: { status: 'complete' },
+          total_taxes: [{ amount: 0 }],
         };
   const invoiceLine =
     invoice === undefined
@@ -175,8 +263,10 @@ const server = createServer((request, response) => {
         ? {
             id: latestCustomerId,
             object: 'customer',
+            address: latestCustomerAddress,
             deleted: false,
             livemode: false,
+            metadata: latestCustomerMetadata,
             invoice_settings: {
               default_payment_method: {
                 id: 'pm_foundation',
@@ -298,6 +388,66 @@ const server = createServer((request, response) => {
   response.end(JSON.stringify(responseBody));
 });
 
+function taxCalculationObject() {
+  const value = taxCalculation!;
+  return {
+    id: value.id,
+    object: 'tax.calculation',
+    amount_total: value.amount,
+    currency: 'usd',
+    customer: value.customerId,
+    customer_details: { address: latestCustomerAddress, address_source: 'billing' },
+    expires_at: 2_000_000_000,
+    livemode: false,
+    tax_amount_exclusive: 0,
+    tax_amount_inclusive: 0,
+  };
+}
+
+function taxCalculationLine() {
+  const value = taxCalculation!;
+  return {
+    id: `taxli_${value.id}`,
+    object: 'tax.calculation_line_item',
+    amount: value.amount,
+    amount_tax: 0,
+    livemode: false,
+    product: value.productId,
+    quantity: 1,
+    reference: value.reference,
+    tax_behavior: 'exclusive',
+  };
+}
+
+function taxTransactionObject() {
+  const value = taxTransaction!;
+  return {
+    id: value.id,
+    object: 'tax.transaction',
+    currency: 'usd',
+    customer: taxCalculation?.customerId,
+    customer_details: { address: latestCustomerAddress, address_source: 'billing', tax_ids: [] },
+    livemode: false,
+    posted_at: value.postedAt,
+    reference: value.reference,
+    type: 'transaction',
+  };
+}
+
+function taxTransactionLine() {
+  const value = taxCalculation!;
+  return {
+    id: `taxli_${taxTransaction?.id ?? 'missing'}`,
+    object: 'tax.transaction_line_item',
+    amount: value.amount,
+    amount_tax: 0,
+    livemode: false,
+    tax_behavior: 'exclusive',
+    tax_code: 'txcd_10103000',
+    type: 'transaction',
+  };
+}
+
 let payments: BillingPaymentsService;
 let fixtureStripe: ReturnType<typeof createBillingStripeClient>;
 
@@ -358,7 +508,7 @@ beforeAll(async () => {
           kind: 'top_up',
           currency: 'usd',
           minimumPrincipalMinor: '500',
-          maximumPrincipalMinor: '50000',
+          maximumPrincipalMinor: '500000',
           creditAtomsPerPrincipalMinor: '10000',
         },
       ],
@@ -707,11 +857,25 @@ describe('billing payments PostgreSQL foundation', () => {
       customerBindingId: leg.customerBindingId,
       customerId: 'cus_foreign',
     };
+    // This recovery assertion owns the only due item; prior foundation rows must not win its bounded claim.
+    await database
+      .update(billingStripeSource)
+      .set({ nextAttemptAt: new Date('9999-12-31T00:00:00Z') })
+      .where(eq(billingStripeSource.stripeAccountId, stripeAccountId));
+    await database
+      .update(billingProviderLeg)
+      .set({ nextAttemptAt: new Date('9999-12-31T00:00:00Z') })
+      .where(eq(billingProviderLeg.environment, 'development'));
     await database
       .update(billingProviderLeg)
       .set({ nextAttemptAt: sql`transaction_timestamp() - interval '1 second'` })
       .where(eq(billingProviderLeg.id, leg.id));
-    expect(await payments.recoverPayments({ environment: 'development', limit: 1 })).toMatchObject({
+    const recovery = await payments.recoverPayments({ environment: 'development', limit: 1 });
+    const [recoveredLeg] = await database
+      .select({ state: billingProviderLeg.state, errorCode: billingProviderLeg.errorCode })
+      .from(billingProviderLeg)
+      .where(eq(billingProviderLeg.id, leg.id));
+    expect(recovery, JSON.stringify({ recoveredLeg, requests: requests.slice(-20) })).toMatchObject({
       processed: [leg.id],
       pending: [],
       failed: [],

@@ -34,7 +34,7 @@ import { LoggerModule } from '#logger/logger.module.js';
     RedisModule, // @Global()
     DatabaseModule,
     BillingModule,
-    AuthModule.forRootAsync(),
+    AuthModule.forRootAsync({ tauCloudEnabled: true }),
   ],
   providers: [{ provide: APP_PIPE, useClass: ZodValidationPipe }],
 })

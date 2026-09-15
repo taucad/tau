@@ -40,7 +40,16 @@ const getCloudCatalogEntries = () => Object.values(modelList).flatMap((modelsByS
 const createModelService = () => {
   const providerService = {} satisfies Partial<ProviderService>;
   const configService = {
-    get: vi.fn().mockReturnValue(false),
+    get: vi.fn((key: string) => {
+      if (key === 'OLLAMA_ENABLED' || key === 'TAU_CLOUD_ENABLED') {
+        return false;
+      }
+      if (key === 'GOOGLE_VERTEX_AI_CREDENTIALS') {
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Google service-account wire keys
+        return { client_email: 'test@example.com', private_key: 'test-key', project_id: 'test-project' };
+      }
+      return 'test-key';
+    }),
   } satisfies Pick<ConfigService<Environment>, 'get'>;
 
   return new ModelService(
@@ -71,6 +80,23 @@ describe('modelList', () => {
 });
 
 describe('ModelService', () => {
+  it('advertises only configured providers and keeps direct-only providers out of Cloud', async () => {
+    const configService = {
+      get: vi.fn((key: string) => {
+        if (key === 'TAU_CLOUD_ENABLED') {
+          return true;
+        }
+        return key === 'CEREBRAS_API_KEY' ? 'test-key' : false;
+      }),
+    } satisfies Pick<ConfigService<Environment>, 'get'>;
+    const service = new ModelService({} as ProviderService, configService as unknown as ConfigService<Environment>);
+
+    expect(await service.getModels()).toEqual([]);
+    configService.get.mockImplementation((key: string) => (key === 'CEREBRAS_API_KEY' ? 'test-key' : false));
+    const models = await service.getModels();
+    expect(models.every((model) => model.provider.id === 'cerebras')).toBe(true);
+  });
+
   it('returns the 200K effective context window for all capped model IDs', async () => {
     const service = createModelService();
     await service.getModels();

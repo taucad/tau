@@ -24,7 +24,7 @@ import { DatabaseService } from '#database/database.service.js';
 import { RedisService } from '#redis/redis.service.js';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
-import { BillingService } from '#api/billing/billing.service.js';
+import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
 import { GitBasicAuthMiddleware, registerGitContentTypeParsers } from '#api/git/git-transport.js';
 import { GitController } from '#api/git/git.controller.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
@@ -229,7 +229,7 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
         { provide: DatabaseService, useValue: databaseStub },
         { provide: ObjectStorageService, useValue: objectStorageStub },
         {
-          provide: BillingService,
+          provide: commercialEntitlementsKey,
           useValue: {
             getEntitlements: async () => ({
               tier: state.tier,

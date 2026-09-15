@@ -31,6 +31,7 @@ import { serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/no
 import type { EmitterPort } from '@taucad/filesystem/backend/node';
 import { createNodeAgentLauncher, serveAgentChannel } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
+import { createGatewayModelTransport, createTauCloudGatewayModelTransport } from '@taucad/agent-host';
 import {
   createAcpExternalAgentPort,
   createHostMcpEndpoint,
@@ -126,7 +127,7 @@ export type ServicesHostOptions = {
    * close revision and waits for `awaitSyncSettled` — never ran to completion.
    * Main now asks first and waits, bounded, for this reply.
    */
-  readonly quiesced?: () => void;
+  readonly quiesced?: (error?: string) => void;
   /** Reply to main once one project launcher has fully stopped. */
   readonly agentHostReleased?: (requestId: string, error?: string) => void;
   /** Tell main this project can record nothing, so a person is told (W5). */
@@ -186,6 +187,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    * it: a run keeps executing with zero clients attached, which is the whole
    * point of the portable host. */
   const launchers = new Map<string, NodeAgentLauncher>();
+  const launcherGenerations = new Map<string, number>();
+  const launcherProjectIds = new Map<string, string>();
   const revisionRoots = new Map<string, ProjectRevisions>();
   type DesktopRuntime = ReturnType<typeof createDesktopRuntime>;
   type DesktopClient = ReturnType<typeof createRuntimeClient<DesktopRuntime>>;
@@ -288,13 +291,28 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   };
 
   /** Stop one project's launcher and every utility resource rooted beneath it. */
-  const releaseAgentHost = async (workspaceRoot: string, projectId: string): Promise<void> => {
+  const releaseAgentHost = async (
+    workspaceRoot: string,
+    projectId: string,
+    attachmentGeneration?: number,
+  ): Promise<void> => {
+    if (attachmentGeneration !== undefined && launcherGenerations.get(workspaceRoot) !== attachmentGeneration) {
+      return;
+    }
     const launcher = launchers.get(workspaceRoot);
-    launchers.delete(workspaceRoot);
-    revisionRoots.delete(workspaceRoot);
     if (launcher !== undefined) {
       await launcher.close();
     }
+    if (attachmentGeneration !== undefined && launcherGenerations.get(workspaceRoot) !== attachmentGeneration) {
+      return;
+    }
+    if (launcher !== undefined && launchers.get(workspaceRoot) !== launcher) {
+      return;
+    }
+    launchers.delete(workspaceRoot);
+    launcherGenerations.delete(workspaceRoot);
+    launcherProjectIds.delete(workspaceRoot);
+    revisionRoots.delete(workspaceRoot);
     const checkoutsRoot = resolve(join(dirname(workspaceRoot), '.tau', 'checkouts', projectId));
     for (const [root, client] of connectedRuntimeClients) {
       if (root === workspaceRoot || root === checkoutsRoot || root.startsWith(`${checkoutsRoot}${sep}`)) {
@@ -337,10 +355,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         void (async () => {
           try {
             await quiesce();
-          } catch (error) {
-            log('quiesce-failed', error instanceof Error ? error.message : String(error));
-          } finally {
             quiesced?.();
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            log('quiesce-failed', message);
+            quiesced?.(message);
           }
         })();
         return;
@@ -362,14 +381,18 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         return;
       }
       case 'agent-host-release': {
-        const { requestId, workspaceRoot: root, projectId } = frame;
+        const { attachmentGeneration, requestId, workspaceRoot: root, projectId } = frame;
         if (typeof requestId !== 'string' || typeof root !== 'string' || typeof projectId !== 'string') {
           return;
         }
         // async-iife: bootstrap -- a control frame has no caller to await project release.
         void (async () => {
           try {
-            await releaseAgentHost(resolve(root), projectId);
+            await releaseAgentHost(
+              resolve(root),
+              projectId,
+              typeof attachmentGeneration === 'number' ? attachmentGeneration : undefined,
+            );
             agentHostReleased?.(requestId);
           } catch (error) {
             agentHostReleased?.(requestId, error instanceof Error ? error.message : String(error));
@@ -411,6 +434,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       return;
     }
     const workspaceRoot = resolve(requested);
+    launcherProjectIds.set(workspaceRoot, projectId);
+    const requestedGeneration = Number(context?.['attachmentGeneration']);
+    if (Number.isSafeInteger(requestedGeneration) && requestedGeneration >= 0) {
+      launcherGenerations.set(workspaceRoot, requestedGeneration);
+    }
     /**
      * One runtime client per tree, project or turn checkout.
      *
@@ -584,6 +612,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
             return createHostGeoSpecRunner(root, client as unknown as HostGeoSpecRuntimeClient);
           },
         });
+        const transportOptions = {
+          baseUrl: agentHostConfig.gatewayBaseUrl,
+          auth: () => authToken,
+        } as const;
         return revisions.record(
           createNodeAgentLauncher({
             workspaceRoot,
@@ -593,6 +625,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
             /* Resolved per request, never captured: main refreshes the bearer and a
              * captured string would pin this host to a stale one. */
             auth: () => authToken,
+            modelTransport: (typeof tauCloudBuildEnabled !== 'undefined' && tauCloudBuildEnabled
+              ? createTauCloudGatewayModelTransport
+              : createGatewayModelTransport)(transportOptions),
             /* The adapters main resolved, wired through the daemon's own port —
              * same factory, same branch confinement, same refusal for an agent this
              * machine cannot start, and the same `tau` MCP server over this
@@ -641,12 +676,31 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    * @returns Once every project this utility serves has settled.
    */
   const quiesce = async (): Promise<void> => {
-    const closing = [...launchers.values()].map(async (launcher) => launcher.close());
-    launchers.clear();
-    revisionRoots.clear();
-    mcpRoutes.clear();
-    await Promise.allSettled(closing);
+    const closing = [...launchers.keys()].map(async (workspaceRoot) =>
+      releaseAgentHost(
+        workspaceRoot,
+        launcherProjectIds.get(workspaceRoot) ?? '',
+        launcherGenerations.get(workspaceRoot),
+      ),
+    );
+    const outcomes = await Promise.allSettled(closing);
+    const failures = outcomes.flatMap((outcome) =>
+      outcome.status === 'rejected'
+        ? [outcome.reason instanceof Error ? outcome.reason : new Error(String(outcome.reason))]
+        : [],
+    );
+    if (failures.length > 0) {
+      throw new AggregateError(failures, `${String(failures.length)} project launcher(s) could not close.`);
+    }
     log('quiesced', { projects: closing.length });
+  };
+
+  const closeForDispose = async (launcher: NodeAgentLauncher): Promise<void> => {
+    try {
+      await launcher.close();
+    } catch (error) {
+      log('dispose-close-failed', error instanceof Error ? error.message : String(error));
+    }
   };
 
   return {
@@ -660,9 +714,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
        * serves. Fire-and-forget like the endpoints below — `dispose` is the
        * window closing, and nothing waits on it. */
       for (const launcher of launchers.values()) {
-        void launcher.close();
+        void closeForDispose(launcher);
       }
       launchers.clear();
+      launcherGenerations.clear();
+      launcherProjectIds.clear();
       revisionRoots.clear();
       for (const endpoint of mcpEndpoints.values()) {
         void endpoint.close();

@@ -121,8 +121,8 @@ contextBridge.exposeInMainWorld('tau', {
         }
       };
     },
-    reportQuiesced: (): void => {
-      ipcRenderer.send(quitChannels.quiesced);
+    reportQuiesced: (forced: boolean): void => {
+      ipcRenderer.send(quitChannels.quiesced, forced);
     },
   },
   dialog: {

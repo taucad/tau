@@ -134,32 +134,35 @@ const quitQuiesceMilliseconds = 20_000;
  *
  * The page runs every live project's `closing` — cancel, sync flush, lease
  * release — and answers `quiesced`. The person can cut it short with *Quit
- * anyway*; this bound cuts it short when nobody is looking.
+ * anyway*. The bound reports failure to main; it never turns an incomplete
+ * close into permission to quit.
  */
 const quitRendererMilliseconds = 20_000;
 
 /**
  * Ask every window's sessions registry to close its projects, and wait.
  *
- * Resolves on the first `quiesced` (the registry's own emit, or *Quit
- * anyway*), at the bound, or at once when there is no window to ask.
+ * Resolves on the first completion or explicit *Quit anyway*, at the bound,
+ * or at once when there is no window to ask.
  *
  * @param boundMilliseconds - How long to wait before proceeding regardless.
  * @returns What ended the wait.
  */
-const askRendererToQuiesce = async (boundMilliseconds: number): Promise<'quiesced' | 'timeout' | 'no-window'> => {
+const askRendererToQuiesce = async (
+  boundMilliseconds: number,
+): Promise<'quiesced' | 'forced' | 'timeout' | 'no-window'> => {
   const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
   if (windows.length === 0) {
     return 'no-window';
   }
-  return new Promise<'quiesced' | 'timeout' | 'no-window'>((resolve) => {
-    const settle = (outcome: 'quiesced' | 'timeout'): void => {
+  return new Promise<'quiesced' | 'forced' | 'timeout' | 'no-window'>((resolve) => {
+    const settle = (outcome: 'quiesced' | 'forced' | 'timeout'): void => {
       clearTimeout(timer);
       ipcMain.off(quitChannels.quiesced, onQuiesced);
       resolve(outcome);
     };
-    const onQuiesced = (): void => {
-      settle('quiesced');
+    const onQuiesced = (_event: unknown, forced: unknown): void => {
+      settle(forced === true ? 'forced' : 'quiesced');
     };
     const timer = setTimeout(() => {
       settle('timeout');
@@ -800,16 +803,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
     event.preventDefault();
     if (!shutdown) {
       shutdown = (async () => {
-        try {
-          showOpenFileImport = undefined;
-          for (const controller of quickLookControllers.values()) {
-            controller.dispose();
-          }
-          quickLookControllers.clear();
-          auth.dispose();
-        } catch (error) {
-          log.log('error', 'main.shutdown', error);
-        }
         /*
          * The quit hold (D31, W19).
          *
@@ -817,8 +810,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
          * waits for W13's `awaitSyncSettled` before this process ends. Without
          * this round trip `services.dispose()` killed the utility outright —
          * `ServicesHost.dispose()` is synchronous fire-and-forget — so the last
-         * edits of a quit were recorded by nothing. After the bound the durable
-         * queue is the guarantee (D28) and quit proceeds regardless.
+         * edits of a quit were recorded by nothing. A timeout or negative
+         * acknowledgement leaves the app live so the same owners can retry.
          */
         /*
          * The renderer's half first (P49): the browser-side registry owns the
@@ -826,15 +819,28 @@ const bootstrapElectronApp = async (): Promise<void> => {
          * it can cancel runs and release the leases its turns took. It shows
          * the *Backing up…* overlay while it does, with *Quit anyway*.
          */
-        try {
-          const rendererOutcome = await askRendererToQuiesce(quitRendererMilliseconds);
-          log.log('info', 'main.renderer-quiesce', { outcome: rendererOutcome });
-        } catch (error) {
-          log.log('error', 'main.shutdown', error);
+        const rendererOutcome = await askRendererToQuiesce(quitRendererMilliseconds);
+        log.log('info', 'main.renderer-quiesce', { outcome: rendererOutcome });
+        const forced = rendererOutcome === 'forced';
+        if (rendererOutcome === 'timeout') {
+          quitting = false;
+          shutdown = undefined;
+          return;
+        }
+        const utilityOutcome = await services.quiesce(quitQuiesceMilliseconds);
+        log.log('info', 'main.quiesce', { outcome: utilityOutcome });
+        if (!forced && utilityOutcome !== 'quiesced' && utilityOutcome !== 'no-utility') {
+          quitting = false;
+          shutdown = undefined;
+          return;
         }
         try {
-          const outcome = await services.quiesce(quitQuiesceMilliseconds);
-          log.log('info', 'main.quiesce', { outcome });
+          showOpenFileImport = undefined;
+          for (const controller of quickLookControllers.values()) {
+            controller.dispose();
+          }
+          quickLookControllers.clear();
+          auth.dispose();
         } catch (error) {
           log.log('error', 'main.shutdown', error);
         }

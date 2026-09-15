@@ -80,13 +80,13 @@ export type ServicesBroker = {
    * Quit used to reach `dispose()` directly, which kills the utility: the
    * launcher closes that record the close revision and await W13's
    * `awaitSyncSettled` never finished. This is the one round trip that lets
-   * them. Main owns the bound; a utility that does not answer inside it is
-   * killed anyway, and the durable queue is the guarantee (D28).
+   * them. Main owns the bound and treats timeout or failure as a negative
+   * acknowledgement unless the person explicitly chose Quit anyway.
    *
    * @param boundMilliseconds - How long to wait before cutting.
    * @returns What ended the wait.
    */
-  quiesce(boundMilliseconds: number): Promise<'quiesced' | 'timeout' | 'no-utility'>;
+  quiesce(boundMilliseconds: number): Promise<'quiesced' | 'failed' | 'timeout' | 'no-utility'>;
   /** Terminate the utility. */
   dispose(): Promise<void>;
 };
@@ -115,6 +115,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   const runtimeLeases = new Map<string, ReturnType<ServicesBrokerOptions['connectRuntime']>>();
   const runtimeLeaseClosures = new Map<string, Promise<void>>();
   const projectAttachments = new Map<string, Set<string>>();
+  const attachmentGenerations = new Map<string, number>();
   const releaseWaiters = new Map<string, ReturnType<typeof Promise.withResolvers<void>>>();
   let releaseRequest = 0;
   let utility: UtilityProcess | undefined;
@@ -199,7 +200,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   };
 
   /** Resolvers waiting for the utility's `quiesced` reply. */
-  const quiesceWaiters = new Set<() => void>();
+  const quiesceWaiters = new Set<(outcome: 'quiesced' | 'failed') => void>();
 
   const handleUtilityMessage = (spawned: UtilityProcess, frame: unknown): void => {
     if (!frame || typeof frame !== 'object') {
@@ -218,9 +219,9 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       }
       return;
     }
-    if (type === 'quiesced') {
+    if (type === 'quiesced' || type === 'quiesce-failed') {
       for (const resolveWaiter of quiesceWaiters) {
-        resolveWaiter();
+        resolveWaiter(type === 'quiesced' ? 'quiesced' : 'failed');
       }
       quiesceWaiters.clear();
       return;
@@ -319,6 +320,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
 
   return {
     connect(concern, context) {
+      let concernContext = context;
       if (concern === 'agentHost' && context?.['workspaceRoot']) {
         const projectRoot = canonicalRoot(context['workspaceRoot']);
         if (context['projectId'] !== undefined) {
@@ -330,17 +332,25 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
           computeMode: context['computeMode'] ?? 'off',
           definition: 'default',
         });
+        const generation = attachmentGenerations.get(projectRoot);
+        if (generation !== undefined) {
+          concernContext = { ...context, attachmentGeneration: String(generation) };
+        }
       }
       const channel = options.createChannel();
-      ensure().postMessage({ type: 'concern', concern, ...(context === undefined ? {} : { context }) }, [
-        channel.port2,
-      ]);
+      ensure().postMessage(
+        { type: 'concern', concern, ...(concernContext === undefined ? {} : { context: concernContext }) },
+        [channel.port2],
+      );
       log('info', 'services.concern-connected', { concern });
       return channel.port1;
     },
     retainAgentHost(input) {
       const root = canonicalRoot(input.workspaceRoot);
       const attachments = projectAttachments.get(root) ?? new Set<string>();
+      if (!attachments.has(input.attachmentId)) {
+        attachmentGenerations.set(root, (attachmentGenerations.get(root) ?? 0) + 1);
+      }
       attachments.add(input.attachmentId);
       projectAttachments.set(root, attachments);
       projectIds.set(root, input.projectId);
@@ -348,15 +358,19 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     async releaseAgentHost(input, boundMilliseconds) {
       const root = canonicalRoot(input.workspaceRoot);
       const attachments = projectAttachments.get(root);
-      if (attachments === undefined || !attachments.delete(input.attachmentId)) {
+      if (attachments === undefined || !attachments.has(input.attachmentId)) {
         return;
       }
-      if (attachments.size > 0) {
+      if (attachments.size > 1) {
+        attachments.delete(input.attachmentId);
         return;
       }
-      projectAttachments.delete(root);
+      const generation = attachmentGenerations.get(root);
       const spawned = utility;
       if (spawned === undefined) {
+        attachments.delete(input.attachmentId);
+        projectAttachments.delete(root);
+        attachmentGenerations.delete(root);
         runtimeContexts.delete(root);
         projectIds.delete(root);
         return;
@@ -370,6 +384,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         requestId,
         workspaceRoot: root,
         projectId: input.projectId,
+        ...(generation === undefined ? {} : { attachmentGeneration: generation }),
       });
       let releaseTimeout: ReturnType<typeof setTimeout> | undefined;
       const deadline = new Promise<never>((_resolve, reject) => {
@@ -380,8 +395,13 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       });
       try {
         await Promise.race([pending.promise, deadline]);
-        runtimeContexts.delete(root);
-        projectIds.delete(root);
+        attachments.delete(input.attachmentId);
+        if (attachments.size === 0) {
+          projectAttachments.delete(root);
+          attachmentGenerations.delete(root);
+          runtimeContexts.delete(root);
+          projectIds.delete(root);
+        }
       } finally {
         if (releaseTimeout !== undefined) {
           clearTimeout(releaseTimeout);
@@ -405,13 +425,15 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       if (!spawned) {
         return 'no-utility';
       }
-      const settled = Promise.withResolvers<'quiesced'>();
-      const resolveWaiter = (): void => {
-        settled.resolve('quiesced');
+      const settled = Promise.withResolvers<'quiesced' | 'failed'>();
+      const resolveWaiter = (outcome: 'quiesced' | 'failed'): void => {
+        settled.resolve(outcome);
       };
       quiesceWaiters.add(resolveWaiter);
-      /* A utility that dies mid-quiesce has nothing left to settle. */
-      spawned.on('exit', resolveWaiter);
+      /* A dead utility cannot prove that its projects settled. */
+      spawned.on('exit', () => {
+        resolveWaiter('failed');
+      });
       try {
         spawned.postMessage({ type: 'quiesce' });
       } catch {
@@ -439,6 +461,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       releaseRuntimeLeases();
       forgetCheckoutContexts();
       projectAttachments.clear();
+      attachmentGenerations.clear();
       for (const pending of releaseWaiters.values()) {
         pending.reject(new Error('The desktop services broker was disposed.'));
       }

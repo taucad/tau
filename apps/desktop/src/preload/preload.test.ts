@@ -35,7 +35,7 @@ vi.mock('@taucad/runtime/electron/preload', () => ({
 type QuitApi = Readonly<{
   isReady(): boolean;
   onAsk(handler: () => void): () => void;
-  reportQuiesced(): void;
+  reportQuiesced(forced: boolean): void;
 }>;
 
 const quitApi = (): QuitApi => {

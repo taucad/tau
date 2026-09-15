@@ -1,11 +1,10 @@
-/* eslint-disable @typescript-eslint/naming-convention -- Git configuration keys and HTTP header names keep their own spelling. */
 /* oxlint-disable no-await-in-loop -- Every loop here drives one `git` child or one database statement after another on purpose. */
 import { randomFillSync } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { gitE2EApiUrl } from '#git/config.js';
+import { gitE2EApiUrl, gitE2EFrontendUrl } from '#git/config.js';
 import {
   basicAuthorization,
   deleteTauCloudOwner,
@@ -98,7 +97,25 @@ const pushMain = async (
     tree,
   );
 
-/** Set the storage this project has already spent, so the plan headroom is a known number. */
+/** *Connect Tau Cloud*, as the product's own verb rather than as a seeded row (P51). */
+const connectProject = async (token: string, projectId: string, name = 'Git server E2E'): Promise<Response> =>
+  fetch(`${gitE2EApiUrl}/v1/projects/${projectId}`, {
+    method: 'PUT',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+
+/**
+ * Set the allowance this project has already spent, so the plan headroom is a
+ * known number.
+ *
+ * **LFS bytes, not repository bytes.** `storage_bytes` is the repository as the
+ * server last measured it, and the server re-measures it after *every*
+ * `git-receive-pack` — including the empty one git sends first to authenticate
+ * a chunked push — so a figure seeded there is overwritten before the pack
+ * arrives. That is what W18 DEF-4 observed: both guards looked inert because
+ * the headroom they read was the real one, not the seeded one.
+ */
 const spendStorage = async (projectId: string, bytes: number): Promise<void> => {
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
@@ -114,19 +131,24 @@ const spendStorage = async (projectId: string, bytes: number): Promise<void> => 
     '-d',
     'tau_dev',
     '-c',
-    `INSERT INTO project_git (project_id, storage_bytes, lfs_bytes) VALUES ('${projectId}', ${String(bytes)}, 0) ` +
-      `ON CONFLICT (project_id) DO UPDATE SET storage_bytes = ${String(bytes)}, lfs_bytes = 0;`,
+    `INSERT INTO project_git (project_id, storage_bytes, lfs_bytes) VALUES ('${projectId}', 0, ${String(bytes)}) ` +
+      `ON CONFLICT (project_id) DO UPDATE SET lfs_bytes = ${String(bytes)};`,
   ]);
 };
 
 const proLimitBytes = 10 * 1024 ** 3;
 
 let owner: TauCloudOwner;
+/* One shared second account. Better Auth allows three sign-ups per ten
+   seconds, so every case that needs "somebody else" reads this one. */
+let stranger: TauCloudOwner;
 
 beforeAll(async () => {
   owner = await seedTauCloudOwner('remote');
   owners.push(owner);
   await seedProPlan(owner);
+  stranger = await seedTauCloudOwner('stranger');
+  owners.push(stranger);
 }, 300_000);
 
 afterAll(async () => {
@@ -140,20 +162,77 @@ afterAll(async () => {
 
 describe('Tau Hosted Remote, real process', () => {
   describe('project registration', () => {
-    /* W18 defect DEF-1, owner W11a (server).
+    /* W18 defect DEF-1, fixed under ruling P51: *Connect Tau Cloud* registers
+     * the project.
      *
-     * Nothing in the product registers a project on the Tau Hosted Remote.
-     * `GitRepositoryService.authorize` needs a `project` row and the only
-     * production writer of that table is `PublicationsService`, which runs
-     * *after* a successful push — so *Connect Tau Cloud* on a project that has
-     * never been published can never take. Remove `.fails` when a connect path
-     * creates the row; the rest of this file seeds it explicitly and says so. */
-    it.fails('should accept a signed-in owner connecting a project that was never published', async () => {
+     * `GitRepositoryService.authorize` needs a `project` row, and before P51 the
+     * only production writer of that table was `PublicationsService` — which
+     * runs *after* a successful push, so a project that had never been published
+     * answered `404` on both advertisements and could never be connected at all.
+     * `PUT /v1/projects/:projectId` is the connect verb's own write; the rest of
+     * this file still seeds the row directly, because those cases are about the
+     * git server rather than about registration. */
+    it('should accept a signed-in owner connecting a project that was never published', async () => {
       const projectId = gitE2EProjectId();
+      const connected = await connectProject(owner.token, projectId, 'Never published');
+      expect(connected.status, await connected.clone().text()).toBeLessThan(300);
+
       const response = await fetch(`${remoteUrlFor(projectId)}/info/refs?service=git-receive-pack`, {
         headers: { authorization: `Bearer ${owner.token}` },
       });
       expect(response.status).toBe(200);
+
+      /* Idempotent: a retried *Connect* is one more request and no second row. */
+      const again = await connectProject(owner.token, projectId, 'Never published');
+      expect(again.status).toBeLessThan(300);
+    }, 300_000);
+
+    /* Ruling P55: one posture for "not yours" across both surfaces. The git
+       routes answer `404` by a stated invariant — a client must not learn which
+       project ids exist — and registration now answers the same rather than
+       `403`, so no surface names another account or says "this id is taken".
+       A create-if-absent verb still distinguishes a free id from a taken one by
+       succeeding on the first; what P55 removes is the *shape* of the refusal
+       diverging between two surfaces of the same product. */
+    it('should answer a project id that belongs to another account with 404 on both surfaces', async () => {
+      const projectId = gitE2EProjectId();
+      const connected = await connectProject(owner.token, projectId);
+      expect(connected.status).toBeLessThan(300);
+
+      const refused = await connectProject(stranger.token, projectId);
+      expect(refused.status).toBe(404);
+      expect(await refused.json()).toEqual(expect.objectContaining({ code: 'PROJECT_NOT_FOUND' }));
+
+      const advertisement = await fetch(`${remoteUrlFor(projectId)}/info/refs?service=git-upload-pack`, {
+        headers: { authorization: `Bearer ${stranger.token}` },
+      });
+      expect(advertisement.status).toBe(404);
+    }, 300_000);
+
+    /* W18 defect DEF-5, in the real process: the CORS answer a browser page's
+     * preflight gets, from the deployed allow-list rather than from a harness
+     * that re-declares it. `isomorphic-git` asks for protocol v2 with
+     * `git-protocol`, which is not CORS-safelisted; while it was missing here,
+     * Chromium answered the preflight `204` and then dropped the request the
+     * page made, with nothing in its console for the suite to see. */
+    it('should allow the headers a browser git client sends on its preflight', async () => {
+      const projectId = gitE2EProjectId();
+      const response = await fetch(`${remoteUrlFor(projectId)}/info/refs?service=git-upload-pack`, {
+        method: 'OPTIONS',
+        headers: {
+          origin: gitE2EFrontendUrl,
+          'access-control-request-method': 'GET',
+          'access-control-request-headers': 'git-protocol',
+        },
+      });
+      expect(response.status).toBeLessThan(300);
+      expect(response.headers.get('access-control-allow-origin')).toBe(gitE2EFrontendUrl);
+      const allowed = (response.headers.get('access-control-allow-headers') ?? '')
+        .split(',')
+        .map((name) => name.trim().toLowerCase());
+      expect(allowed).toEqual(
+        expect.arrayContaining(['git-protocol', 'content-type', 'authorization', 'x-tau-proxy-authorization']),
+      );
     });
 
     it('should answer an unregistered project with 404 and the not-found code', async () => {
@@ -166,6 +245,42 @@ describe('Tau Hosted Remote, real process', () => {
         expect.objectContaining({ code: 'GIT_REPOSITORY_NOT_FOUND', statusCode: 404 }),
       );
     });
+
+    /* W18 DEF-2 / W18-b review R8: how a second device *names* a project it has
+       never held. This is the one route that answers with more than one project
+       id, so its owner filter is proved here against real Postgres and over the
+       wire rather than only against a stub. */
+    it('should list a caller’s own projects and no other account’s', async () => {
+      const mine = gitE2EProjectId();
+      const theirs = gitE2EProjectId();
+      const ourConnect = await connectProject(owner.token, mine, 'Mine');
+      expect(ourConnect.status).toBeLessThan(300);
+      const theirConnect = await connectProject(stranger.token, theirs, 'Theirs');
+      expect(theirConnect.status).toBeLessThan(300);
+
+      const listed = async (token: string): Promise<readonly string[]> => {
+        const response = await fetch(`${gitE2EApiUrl}/v1/projects`, {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        expect(response.status, await response.clone().text()).toBe(200);
+        const body = (await response.json()) as ReadonlyArray<{ id: string; name: string; updatedAt: string }>;
+        expect(body.every((row) => typeof row.name === 'string' && typeof row.updatedAt === 'string')).toBe(true);
+        return body.map((row) => row.id);
+      };
+
+      const ours = await listed(owner.token);
+      expect(ours).toContain(mine);
+      expect(ours).not.toContain(theirs);
+
+      const others = await listed(stranger.token);
+      expect(others).toContain(theirs);
+      expect(others).not.toContain(mine);
+
+      /* And a caller with no session is not a caller: `@UseAuth()` covers the
+         listing exactly as it covers registration. */
+      const anonymous = await fetch(`${gitE2EApiUrl}/v1/projects`);
+      expect(anonymous.status).toBe(401);
+    }, 300_000);
   });
 
   describe('plan entitlements, decided by real Postgres', () => {
@@ -188,8 +303,6 @@ describe('Tau Hosted Remote, real process', () => {
     }, 300_000);
 
     it('should answer another owner’s project with 404 rather than 403', async () => {
-      const stranger = await seedTauCloudOwner('stranger');
-      owners.push(stranger);
       const projectId = gitE2EProjectId();
       await registerProject(owner, projectId);
 
@@ -313,38 +426,38 @@ describe('Tau Hosted Remote, real process', () => {
       );
     }, 300_000);
 
-    /* W18 defect DEF-4, owner W11a (server).
+    /* W18 defect DEF-4, and the premise it was filed on is falsified.
      *
-     * A push whose pack is ~70 MB lands on a project with 1024 bytes of plan
-     * headroom left. Both guards that should stop it are inert through the API:
+     * The report reads: a ~70 MB push lands on a project with 1024 bytes of
+     * headroom, because `receive.maxInputSize` is only honoured by `index-pack`
+     * and `pre-receive`'s `du` backstop does not fire through the API. Neither
+     * half holds.
      *
-     *  - `receive.maxInputSize` (`git.controller.ts:282`) is only honoured by
-     *    `index-pack`; a push below `receive.unpackLimit` (100 objects — this
-     *    one has three) is unpacked by `unpack-objects`, which ignores it. The
-     *    objects land loose, which is exactly what the repository shows.
-     *  - `pre-receive`'s `du` backstop (`git.constants.ts`) does not fire
-     *    either. The same hook file, copied byte-for-byte into a plain
-     *    `git http-backend` fixture and given `TAU_GIT_PUSH_ADMITTED=1` and
-     *    `TAU_GIT_QUOTA_REMAINING_BYTES=1024`, refuses the same shape of push
-     *    with `Tau: storage quota exceeded` — so the hook is right and
-     *    something about how the API spawns `git receive-pack --stateless-rpc`
-     *    is not. The hook does run through the API: the host-local-ref case
-     *    above passes on its refusal message.
+     *  - `unpack-objects` takes `--max-input-size` too, and git 2.55 refuses an
+     *    oversized pack on that path with `fatal: pack exceeds maximum allowed
+     *    size`, including through `git receive-pack --stateless-rpc` spawned
+     *    exactly as `git.service.ts` spawns it.
+     *  - The backstop does fire. What did not survive was the *seeded row*: git
+     *    authenticates a chunked push with an empty `git-receive-pack` POST
+     *    first, the server accounts for that POST like any other push, and
+     *    `accountAfterPush` overwrote `storage_bytes` with the repository's real
+     *    size — so the second POST read ~10 GiB of headroom, not 1024 bytes, and
+     *    both guards were correctly inert. The API's own log carried
+     *    `remaining=1024` then `remaining=10737389509` for one push.
      *
-     * The row is read at push time (a project at exactly the limit answers
-     * `413 GIT_QUOTA_EXCEEDED` on the advertisement), so this is not a stale
-     * usage figure. Remove `.fails` when the backstop refuses. */
-    it.fails('should refuse a pack that does not fit in what is left of the plan', async () => {
+     * So the headroom is now spent as LFS bytes, which nothing re-measures, and
+     * the pack is sized to land between the two guards: larger than the plan
+     * headroom, smaller than `quotaOverrunSlackBytes`, so `pre-receive` is what
+     * has to refuse it. */
+    it('should refuse a pack that does not fit in what is left of the plan', async () => {
       const projectId = gitE2EProjectId();
       await registerProject(owner, projectId);
-      /* 1024 bytes of headroom and a pack that clears the 64 MiB
-       * `quotaOverrunSlackBytes`, so both guards are in range. */
-      await spendStorage(projectId, proLimitBytes - 1024);
+      await spendStorage(projectId, proLimitBytes - 4 * 1024 * 1024);
       const tree = await scratch('oversized');
       await expectGit(['init', '-q', '--initial-branch=main', '.'], tree);
       await expectGit(['config', 'user.email', 'w18@example.test'], tree);
       await expectGit(['config', 'user.name', 'W18 E2E'], tree);
-      const noise = Buffer.alloc(68 * 1024 * 1024);
+      const noise = Buffer.alloc(16 * 1024 * 1024);
       randomFillSync(noise);
       await writeFile(join(tree, 'noise.bin'), noise);
       await expectGit(['add', '.'], tree);
@@ -352,7 +465,12 @@ describe('Tau Hosted Remote, real process', () => {
 
       const pushed = await pushMain(tree, owner, projectId);
       expect(pushed.code, `push stderr: ${pushed.stderr}`).not.toBe(0);
-      expect(pushed.stderr).toMatch(/maximum allowed size|quota/iu);
+      /* `pre-receive`'s own sentence (review R3). The pack is larger than the
+         headroom and smaller than `quotaOverrunSlackBytes`, so the hook is the
+         guard under test; git's own `pack exceeds maximum allowed size` and
+         `authorize`'s `Storage quota reached` are different guards and must not
+         satisfy this row. */
+      expect(pushed.stderr).toContain('Tau: storage quota exceeded');
 
       const advertisement = await fetch(`${remoteUrlFor(projectId)}/info/refs?service=git-upload-pack`, {
         headers: { authorization: `Bearer ${owner.token}` },

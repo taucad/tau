@@ -1,5 +1,4 @@
 /* oxlint-disable no-await-in-loop -- Server readiness polling is intentionally sequential. */
-/* eslint-disable @typescript-eslint/naming-convention -- Process environment names keep their wire spelling. */
 import { execFileSync, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { createWriteStream, mkdirSync } from 'node:fs';
@@ -93,9 +92,20 @@ export const setup = async (): Promise<() => Promise<void>> => {
   environment['TAU_API_URL'] = gitE2EApiUrl;
   environment['TAU_FRONTEND_URL'] = gitE2EFrontendUrl;
   environment['TAU_TEST_MODE'] = 'true';
+  /* `TAU_GIT_ROOT` defaults to `.tau-git` and `git.service.ts` resolves it
+   * against the process cwd, which is `apps/api` here — so without this every
+   * run of this tier writes bare repositories into the source tree (825 MB of
+   * them by W18's review). `out/test-results` is this tier's log home and is
+   * gitignored; the repositories are kept rather than removed at teardown,
+   * because a failed push is only diagnosable from the volume it landed on. */
+  environment['TAU_GIT_ROOT'] = resolve(workspaceRoot, 'out/test-results/api-e2e-git/git-root');
+  /* Never set `TAU_GIT_REMOTE_ALLOW_PRIVATE` here: three rows in this tier
+   * assert the proxy's loopback and private-address refusals, and P50's
+   * relaxation inverts two of them (W18 review, Q2). */
 
   const logDirectory = resolve(workspaceRoot, 'out/test-results/api-e2e-git');
   mkdirSync(logDirectory, { recursive: true });
+  mkdirSync(environment['TAU_GIT_ROOT'], { recursive: true });
   const apiLog = createWriteStream(resolve(logDirectory, 'api.log'), { flags: 'w' });
   const api = spawn(
     process.execPath,

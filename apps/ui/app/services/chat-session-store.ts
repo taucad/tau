@@ -251,7 +251,7 @@ function countToolParts(messages: readonly MyUIMessage[]): { inFlight: number; a
         approvals += 1;
       } else if (part.state === 'input-streaming' || part.state === 'input-available') {
         inFlight += 1;
-        toolName = 'type' in part ? part.type.replace(/^tool-/u, '') : toolName;
+        toolName = part.type === 'dynamic-tool' ? part.toolName : part.type.replace(/^tool-/u, '');
       }
     }
   }
@@ -314,7 +314,14 @@ type InternalSession = ChatSession & {
   /** The project this chat belongs to; its session owns the run accounting. */
   projectId: string | undefined;
   /** What was last handed to `stateActorRef`, so nothing is sent twice. */
-  lastState: { phase?: ChatRunPhase; inFlight: number; approvals: number; durable?: string; lifecycle?: string };
+  lastState: {
+    phase?: ChatRunPhase;
+    inFlight: number;
+    approvals: number;
+    toolName?: string;
+    durable?: string;
+    lifecycle?: string;
+  };
   /** Cleanups for the per-chat subscriptions wired up at session creation. */
   dispose: () => void;
 };
@@ -1435,9 +1442,14 @@ export class ChatSessionStore {
      * to know a run started even where no `chat-session` exists yet, because
      * `busy` is what stops a policy closing a project mid-run (I24). */
     const tools = countToolParts(session.chat.messages);
-    if (tools.inFlight !== lastState.inFlight || tools.approvals !== lastState.approvals) {
+    if (
+      tools.inFlight !== lastState.inFlight ||
+      tools.approvals !== lastState.approvals ||
+      tools.toolName !== lastState.toolName
+    ) {
       lastState.inFlight = tools.inFlight;
       lastState.approvals = tools.approvals;
+      lastState.toolName = tools.toolName;
       stateActorRef?.send({ type: 'toolParts', ...tools });
     }
     this.#syncRunPhase(session);

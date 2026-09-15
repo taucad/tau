@@ -190,16 +190,25 @@ vi.mock('#hooks/use-project.js', () => ({
 const capturedVirtuoso: {
   totalCount?: number;
   itemContent?: (index: number) => React.ReactNode;
+  followOutput?: (atBottom: boolean) => 'auto' | false;
 } = {};
+const scrollToIndexMock = vi.fn();
 vi.mock('react-virtuoso', () => ({
-  Virtuoso: (properties: { readonly totalCount: number; readonly itemContent: (index: number) => React.ReactNode }) => {
-    capturedVirtuoso.totalCount = properties.totalCount;
-    capturedVirtuoso.itemContent = properties.itemContent;
+  Virtuoso: (properties: {
+    readonly data: readonly unknown[];
+    readonly itemContent: (index: number, item: unknown) => React.ReactNode;
+    readonly followOutput: (atBottom: boolean) => 'auto' | false;
+    readonly ref?: React.Ref<{ scrollToIndex: typeof scrollToIndexMock }>;
+  }) => {
+    capturedVirtuoso.totalCount = properties.data.length;
+    capturedVirtuoso.itemContent = async (index) => properties.itemContent(index, properties.data[index]);
+    capturedVirtuoso.followOutput = properties.followOutput;
+    useImperativeHandle(properties.ref, () => ({ scrollToIndex: scrollToIndexMock }), []);
     const items: React.ReactNode[] = [];
-    for (let index = 0; index < properties.totalCount; index++) {
+    for (let index = 0; index < properties.data.length; index++) {
       items.push(
         <div key={index} data-testid='virtuoso-item' data-index={index}>
-          {properties.itemContent(index)}
+          {properties.itemContent(index, properties.data[index])}
         </div>,
       );
     }
@@ -280,6 +289,8 @@ describe('ChatHistory — turn group rendering', () => {
     capturedTextarea.onSubmit = undefined;
     capturedVirtuoso.totalCount = undefined;
     capturedVirtuoso.itemContent = undefined;
+    capturedVirtuoso.followOutput = undefined;
+    scrollToIndexMock.mockClear();
     setMockMessages([]);
   });
 
@@ -374,6 +385,34 @@ describe('ChatHistory — turn group rendering', () => {
 
     expect(capturedVirtuoso.totalCount).toBe(3);
     expect(typeof capturedVirtuoso.itemContent).toBe('function');
+  });
+
+  it('uses instant live following and pins a batched user plus assistant turn', () => {
+    const callbacks: FrameRequestCallback[] = [];
+    const requestAnimationFrameSpy = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      callbacks.push(callback);
+      return callbacks.length;
+    });
+
+    try {
+      setMockMessages([message('u1', 'user'), message('a1', 'assistant')]);
+      const view = render(<ChatHistory />);
+      expect(capturedVirtuoso.followOutput?.(true)).toBe('auto');
+      expect(capturedVirtuoso.followOutput?.(false)).toBe(false);
+
+      setMockMessages([
+        message('u1', 'user'),
+        message('a1', 'assistant'),
+        message('u2', 'user'),
+        message('a2', 'assistant'),
+      ]);
+      view.rerender(<ChatHistory className='updated' />);
+      act(() => callbacks.at(-1)?.(0));
+
+      expect(scrollToIndexMock).toHaveBeenCalledWith({ index: 'LAST', align: 'start', behavior: 'instant' });
+    } finally {
+      requestAnimationFrameSpy.mockRestore();
+    }
   });
 });
 

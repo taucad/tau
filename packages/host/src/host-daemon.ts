@@ -6,6 +6,7 @@ import { WebSocket } from 'ws';
 
 import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
+import { createTauCloudGatewayModelTransport } from '@taucad/agent-host';
 import type { AgentSessionModel, ExternalAgentDescriptor } from '@taucad/agent-host';
 import { createRuntimeClient } from '@taucad/runtime';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
@@ -120,6 +121,8 @@ export type HostDaemonEvent =
  * @public
  */
 export type HostDaemonAgentOptions = {
+  /** Enables Tau-funded operation binding for a managed Cloud host. */
+  readonly tauCloudEnabled?: boolean | undefined;
   /** Absolute workspace root; `.tau/chats/<chatId>/events.jsonl` lives under it. */
   readonly workspaceRoot: string;
   /** Host-admitted compute binding shared by direct and candidate execution roots. */
@@ -607,6 +610,15 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       systemPrompt: agent.systemPrompt,
       toolRegistry,
       auth: () => currentCredential?.credential,
+      ...(agent.tauCloudEnabled === true
+        ? {
+            modelTransport: createTauCloudGatewayModelTransport({
+              baseUrl: agent.gatewayBaseUrl,
+              model: agent.model,
+              auth: () => currentCredential?.credential,
+            }),
+          }
+        : {}),
       ...(discovery.agents.length > 0
         ? {
             externalAgents: createAcpExternalAgentPort({

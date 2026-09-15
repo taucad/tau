@@ -147,7 +147,7 @@ export type AcpExternalAgentPortOptions = {
           readonly runId: string;
           readonly chatId: string;
           readonly signal: AbortSignal;
-        }): () => void;
+        }): () => void | Promise<void>;
       }
     | undefined;
   readonly onFrame?: ((frame: AcpWireFrame) => void) | undefined;
@@ -177,14 +177,13 @@ type LiveSession = {
   /** Epoch milliseconds when the session's MCP capability expires; absent without MCP. */
   readonly capabilityExpiresAt?: number | undefined;
   readonly capabilityToken?: string | undefined;
-  readonly skillPublication?: { readonly close: () => Promise<void> } | undefined;
   timer?: NodeJS.Timeout | undefined;
 };
 
 const publishSystemSkills = async (
   bundles: readonly HostSystemSkillBundle[] | undefined,
   signal: AbortSignal,
-): Promise<{ readonly root: string; readonly close: () => Promise<void> } | undefined> => {
+): Promise<{ readonly root: string } | undefined> => {
   if (!bundles || bundles.length === 0) {
     return undefined;
   }
@@ -196,10 +195,20 @@ const publishSystemSkills = async (
    * workspace-write sandbox grants by default. Project skill discovery still
    * runs first and owns native precedence; an invalid project entry cannot
    * erase a valid package skill before that loader sees either candidate. */
-  const root = await mkdtemp(join(parent, 'session-'));
-  const agentsRoot = join(root, '.agents');
-  const staging = join(agentsRoot, `.skills-${randomUUID()}`);
-  const close = async (): Promise<void> => rm(root, { recursive: true, force: true });
+  const digest = createHash('sha256')
+    .update(
+      JSON.stringify(
+        registry.bundles.map((bundle) => ({
+          slug: bundle.slug,
+          files: bundle.files.map(({ path, sha256 }) => ({ path, sha256 })),
+        })),
+      ),
+    )
+    .digest('hex');
+  const root = join(parent, digest);
+  const stagingRoot = await mkdtemp(join(parent, '.staging-'));
+  const staging = join(stagingRoot, '.agents', 'skills');
+  const verified = new Map<string, string>();
   try {
     for (const bundle of registry.bundles) {
       for (const resource of bundle.files) {
@@ -214,18 +223,31 @@ const publishSystemSkills = async (
           throw new Error(`System skill body does not match SKILL.md: ${bundle.slug}`);
         }
         const target = join(staging, bundle.slug, resource.path);
+        verified.set(join(bundle.slug, resource.path), fingerprint);
         // oxlint-disable-next-line no-await-in-loop -- each verified resource needs its parent before its atomic publication.
         await mkdir(dirname(target), { recursive: true });
         // oxlint-disable-next-line no-await-in-loop -- resources must be complete before the directory becomes visible.
         await writeFile(target, bytes, { signal });
       }
     }
-    await mkdir(agentsRoot, { recursive: true });
-    await rename(staging, join(agentsRoot, 'skills'));
-    return { root, close };
-  } catch (error) {
-    await close();
-    throw error;
+    try {
+      await rename(stagingRoot, root);
+    } catch (error) {
+      if (!isRecord(error) || (error['code'] !== 'EEXIST' && error['code'] !== 'ENOTEMPTY')) {
+        throw error;
+      }
+      for (const [path, fingerprint] of verified) {
+        // oxlint-disable-next-line no-await-in-loop -- verify the existing immutable publication before native discovery.
+        const published = await readFile(join(root, '.agents', 'skills', path), { signal });
+        if (createHash('sha256').update(published).digest('hex') !== fingerprint) {
+          throw new Error(`Published system skill resource changed: ${path}`);
+        }
+      }
+    }
+    // Ponytail: retain one tree per content version; GC needs vendor-session reference ownership, not a connection TTL.
+    return { root };
+  } finally {
+    await rm(stagingRoot, { recursive: true, force: true });
   }
 };
 
@@ -483,11 +505,7 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
     }
     live.delete(key);
     clearTimeout(entry.timer);
-    try {
-      await entry.session.close();
-    } finally {
-      await entry.skillPublication?.close();
-    }
+    await entry.session.close();
   };
 
   /**
@@ -569,27 +587,21 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
     const mcpServers = tauMcpServers(capability);
     const skillPublication = await publishSystemSkills(options.systemSkillBundles, turn.signal);
     const sessionMessageId = committedSessionMessageId(turn);
-    let session: AcpSession;
-    try {
-      session = await abortableOpen(
-        openAcpSession({
-          adapter: input.adapter,
-          cwd,
-          mcpServers,
-          ...(skillPublication === undefined ? {} : { additionalDirectories: [skillPublication.root] }),
-          createId,
-          ...(acpSessionId === undefined ? {} : { acpSessionId }),
-          ...(acpSessionId === undefined ? {} : { priorUsage: committedUsage(turn) }),
-          ...(sessionMessageId === undefined ? {} : { sessionMessageId }),
-          ...(options.onFrame ? { onFrame: options.onFrame } : {}),
-          signal: turn.signal,
-        }),
-        turn.signal,
-      );
-    } catch (error) {
-      await skillPublication?.close();
-      throw error;
-    }
+    const session = await abortableOpen(
+      openAcpSession({
+        adapter: input.adapter,
+        cwd,
+        mcpServers,
+        ...(skillPublication === undefined ? {} : { additionalDirectories: [skillPublication.root] }),
+        createId,
+        ...(acpSessionId === undefined ? {} : { acpSessionId }),
+        ...(acpSessionId === undefined ? {} : { priorUsage: committedUsage(turn) }),
+        ...(sessionMessageId === undefined ? {} : { sessionMessageId }),
+        ...(options.onFrame ? { onFrame: options.onFrame } : {}),
+        signal: turn.signal,
+      }),
+      turn.signal,
+    );
     /* Busy from the first instant: the awaits below would otherwise let a
      * concurrent chat's eviction close this session before its own first
      * prompt (review 2-review S7). `run` clears it. */
@@ -600,7 +612,6 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
       busy: true,
       capabilityExpiresAt: capability === undefined ? undefined : Date.parse(capability.expiresAt),
       capabilityToken: capability?.token,
-      skillPublication,
     };
     live.set(input.key, entry);
     const forgetClosed = async (): Promise<void> => {
@@ -713,7 +724,7 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
       }
       entry ??= await start({ key, turn, model, adapter, cwd, mode: checkout?.mode });
       entry.busy = true;
-      let releaseMcp: (() => void) | undefined;
+      let releaseMcp: (() => void | Promise<void>) | undefined;
       try {
         releaseMcp =
           options.mcp && entry.capabilityToken
@@ -763,7 +774,7 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
         }
         return { stopReason: outcome.stopReason };
       } finally {
-        releaseMcp?.();
+        await releaseMcp?.();
         entry.busy = false;
         touch(key);
       }

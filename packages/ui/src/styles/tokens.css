@@ -87,6 +87,17 @@
   --focus-outline-width: 2px;
   --focus-outline-offset: calc(-1 * var(--focus-outline-width));
   --focus-outline-offset-outside: var(--focus-outline-width);
+  /* FADE LABEL — one-line labels that use their whole row.
+     A name column that stops short of the trailing controls wastes the width it reserves, and an
+     ellipsis cuts the name at a hard edge. Instead the label runs to the row's edge and dissolves,
+     and the controls that appear on hover or focus sit over the dissolved tail with a scrim of the
+     row's own background, so the name never collides with a glyph. One owner: `fade-row` holds the
+     state, `fade-label` masks, `fade-action` carries the scrim. Do not restate the mask or the
+     gradient in a component. */
+  --fade-label-size: 1.5rem;
+  --fade-label-size-actions: 2.625rem;
+  --fade-scrim-size: 1.5rem;
+  --fade-scrim-into: var(--accent);
   --popover: oklch(var(--l-base) 0 none);
   --popover-foreground: oklch(var(--l-deepest) 0 none);
   --menu-ring: color-mix(in oklch, black 10%, var(--popover));
@@ -144,6 +155,17 @@
   --sidebar-primary-foreground: oklch(var(--l-base) 0 none);
   --sidebar-border: oklch(var(--l-subtle) 0 none);
   --sidebar-accent: oklch(0.295 0 none);
+  /* ponytail: the light-mode fill and sheen both read too light against a dark
+     background, so dark drops the fill and halves the highlight/shadow mix. */
+  --primary-action: oklch(0.33 0.008 var(--hue-primary));
+  --primary-action-sheen: linear-gradient(
+    165deg,
+    color-mix(in oklch, white 7%, var(--primary-action)),
+    var(--primary-action) 45%,
+    color-mix(in oklch, black 9%, var(--primary-action)) 50%,
+    var(--primary-action)
+  );
+  --primary-action-glint: linear-gradient(oklch(1 0 none / 0.04), oklch(1 0 none / 0.04));
   --menu-ring: color-mix(in oklch, white 25%, var(--popover));
   --menu-highlight: color-mix(in oklch, var(--neutral) 30%, var(--popover));
   --menu-highlight-destructive: color-mix(in oklch, var(--destructive) 20%, var(--popover));
@@ -161,7 +183,12 @@
 :root[class~='black'] {
   --l-base: 0;
   --l-surface: 0.075;
-  --l-subtle: 0.16;
+  /* Luminance is cubic in OKLCH lightness, so a delta that separates an edge or a
+     hover fill on the dark surface (0.19) collapses on pure black: the old values
+     left every edge and hover between 1.03 and 1.08 against the background, where
+     dark sits at 1.14-1.43. These are solved to reproduce dark's own ratios over a
+     0 background, so black keeps its surfaces and regains its affordances. */
+  --l-subtle: 0.278;
   --l-element: 0.2;
   --l-medium: 0.5;
   --l-emphasized: 0.65;
@@ -171,13 +198,14 @@
   --l-deepest: 0.95;
   --background: oklch(0 0 none);
   --muted: oklch(var(--l-surface) 0 none);
-  --input: oklch(0.13 0 none);
+  --input: oklch(var(--l-subtle) 0 none);
   --border: oklch(var(--l-subtle) 0 none);
-  --accent: oklch(0.12 0 none);
+  --accent: oklch(0.261 0 none);
+  --secondary: oklch(0.19 0 none);
   --neutral: oklch(0.44 0 none);
   --sidebar-background: oklch(0.035 0 none);
-  --sidebar-border: oklch(0.14 0 none);
-  --sidebar-accent: oklch(0.11 0 none);
+  --sidebar-border: oklch(0.257 0 none);
+  --sidebar-accent: oklch(0.232 0 none);
 }
 
 .high-contrast,
@@ -378,6 +406,40 @@
 @utility focus-outline {
   outline: var(--focus-outline-width) solid var(--focus-outline-color);
   outline-offset: var(--focus-outline-offset);
+}
+
+/* The row that owns the state. Position context for `fade-action`, and the one place that says a
+   label makes room once its controls are reachable. Anything that reveals controls on another
+   signal sets `--fade-label-size` itself; the mask reads whatever the row resolves. */
+@utility fade-row {
+  position: relative;
+
+  &:hover,
+  &:focus-within {
+    --fade-label-size: var(--fade-label-size-actions);
+  }
+}
+
+/* The label. Fills the width it is given and dissolves at the inline end instead of clipping. */
+@utility fade-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  mask-image: linear-gradient(to right, black, black calc(100% - var(--fade-label-size)), transparent);
+}
+
+/* The trailing control. Its scrim finishes the dissolve so the tail never reads as a glyph's
+   neighbour; `--fade-scrim-into` is the background the label dissolves into. */
+@utility fade-action {
+  &::before {
+    content: '';
+    position: absolute;
+    inset-block: 0;
+    right: 100%;
+    width: var(--fade-scrim-size);
+    pointer-events: none;
+    background-image: linear-gradient(to right, transparent, var(--fade-scrim-into));
+  }
 }
 
 @utility focus-outline-outside {

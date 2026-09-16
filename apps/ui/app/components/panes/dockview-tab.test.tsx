@@ -34,32 +34,23 @@ describe('DockviewTab', () => {
     const title = screen.getByText('long-assembly-name.scad');
     const close = container.querySelector('.dv-default-tab-action');
 
-    expect(root).toHaveClass('relative', 'size-full', 'min-w-0', 'overflow-hidden', 'py-1', 'pr-1', 'pl-2');
-    expect(title).toHaveClass(
-      'min-w-0',
-      'flex-1',
-      'dockview-tab-title',
-      'scroll-shadow-right',
-      'overflow-hidden',
-      'whitespace-nowrap',
-      '[--scroll-fade-size:24px]',
-      'group-hover/default-tab:[--scroll-fade-size:42px]',
-    );
+    /* The fade geometry has one owner: `fade-row` / `fade-label` / `fade-action` in the token
+       layer. A tab composes them and never restates the mask or the scrim gradient. */
+    expect(root).toHaveClass('fade-row', 'size-full', 'min-w-0', 'overflow-hidden', 'py-1', 'pr-1', 'pl-2');
+    expect(title).toHaveClass('dockview-tab-title', 'fade-label', 'flex-1');
     expect(title).not.toHaveClass('truncate');
+    expect(title.className).not.toMatch(/scroll-shadow-right|--scroll-fade-size|whitespace-nowrap|overflow-hidden/);
     expect(close).toHaveClass(
+      'fade-action',
       'absolute',
       'right-1',
       'z-10',
       'size-4.5!',
       'rounded-[calc(var(--dv-tab-border-radius)-0.25rem)]!',
       'bg-transparent',
-      'before:right-full',
-      'before:w-6',
-      'before:bg-linear-to-r',
-      'before:from-transparent',
-      'before:to-accent',
       'hover:bg-nested-action-hover!',
     );
+    expect(close?.className).not.toMatch(/before:/);
     expect(close).not.toHaveClass('rounded-[5px]!');
     expect(close).not.toHaveClass('group-hover/default-tab:bg-nested-action-hover!');
     expect(close).not.toHaveClass('right-0', 'right-0.5', 'bg-muted-foreground/10');

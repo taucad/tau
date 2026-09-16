@@ -16,6 +16,7 @@ expectTypeOf<ExpandPluginMiddleware<readonly [typeof selected]>>().toEqualTypeOf
   readonly [
     ReturnType<typeof parameterFileResolver>,
     ReturnType<typeof parameterCache>,
+    ReturnType<typeof parameterUnits>,
     ReturnType<typeof geometryCache>,
     ReturnType<typeof gltfEdgeDetection>,
   ]

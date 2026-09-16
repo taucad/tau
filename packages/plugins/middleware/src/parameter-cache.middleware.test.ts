@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { contentDigest } from '@taucad/cache-core';
-import { compileParameterManifest } from '@taucad/runtime/parameter';
+import { compileParameterManifest } from '@taucad/parameters';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { GetParametersResult } from '@taucad/runtime/types';
 import { createMockInput, createMockRuntime } from '@taucad/runtime-testing';

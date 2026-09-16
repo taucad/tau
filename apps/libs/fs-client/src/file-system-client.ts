@@ -1,4 +1,4 @@
-import type { FileStat, FileStatEntry, ProjectManifest } from '@taucad/types';
+import type { CheckedFileWrite, CheckedFileWriteResult, FileStat, FileStatEntry, ProjectManifest } from '@taucad/types';
 import type {
   FileTreeNode,
   MkdirOptions,
@@ -61,6 +61,7 @@ export type FileSystemClient = {
   readFile(filepath: string, options: 'utf8' | { encoding: 'utf8'; scope?: WorkspaceScope }): Promise<string>;
   readFile(filepath: string, options?: { scope?: WorkspaceScope }): Promise<Uint8Array<ArrayBuffer>>;
   writeFile(filepath: string, data: Uint8Array<ArrayBuffer> | string): Promise<void>;
+  writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
   writeFiles(files: Record<string, { content: Uint8Array<ArrayBuffer> }>): Promise<void>;
   mkdir(path: string, options?: MkdirOptions): Promise<void>;
   readdir(path: string): Promise<string[]>;

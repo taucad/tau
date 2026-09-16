@@ -1,4 +1,4 @@
-import { BoundedFileCache } from '@taucad/filesystem';
+import { BoundedFileCache, WorkspaceMutationError } from '@taucad/filesystem';
 import { Topic } from '@taucad/events';
 import { PathSubscriberRegistry } from '#path-subscriber-registry.js';
 import type { RefreshGenerationGuard } from '#refresh-generation-guard.js';
@@ -6,7 +6,6 @@ import type { WorkerChangeChannel, WorkerRelativeRenameEvent } from '#worker-cha
 import type { WorkspacePathResolver } from '#workspace-path-resolver.js';
 import type { SharedPool } from '@taucad/memory';
 import type { BulkMoveEdit, BulkMoveResult, FileSystemClient } from '#file-system-client.js';
-import type { WorkspaceMutationError } from '@taucad/filesystem';
 import type { FileWriteSource } from '#file-write-source.js';
 import { headSniffByteLength, seemsBinary } from '#seems-binary.js';
 import { BinaryFileError, FileNotFoundError, FileTooLargeError } from '#file-content-errors.js';
@@ -27,6 +26,20 @@ export type ContentChangeEvent =
   | { type: 'directoryRenamed'; oldPath: string; newPath: string }
   | { type: 'fileCopied'; sourcePath: string | undefined; targetPath: string }
   | { type: 'directoryCopied'; sourcePath: string | undefined; targetPath: string };
+
+/** A source-tree mutation which may have dependent project records. @public */
+export type FileOperation =
+  | { readonly kind: 'move'; readonly oldPath: string; readonly newPath: string }
+  | { readonly kind: 'delete'; readonly path: string; readonly directory: boolean };
+
+/** Prepared dependent work around one source-tree mutation. @public */
+export type PreparedFileOperation = Readonly<{
+  commit(): Promise<void>;
+  rollback(): Promise<void>;
+}>;
+
+/** Prepare dependent records before the source-tree mutation starts. @public */
+export type FileOperationParticipant = (operation: FileOperation) => Promise<PreparedFileOperation | undefined>;
 
 /**
  * Discriminated outcome of a content resolve.
@@ -169,6 +182,7 @@ export class FileContentService {
   private readonly orphanedPaths = new Set<string>();
   private readonly editorSaves = new Map<string, EditorSaveState>();
   private readonly editorMutationBarriers: EditorMutationBarrier[] = [];
+  private readonly fileOperationParticipants = new Set<FileOperationParticipant>();
   private readonly unsubscribeChannel: Array<() => void>;
   readonly #orphanTopic = new Topic<OrphanChangeEvent>({ name: 'FileContentService.orphan' });
   readonly #outcomeTopic = new Topic<OutcomeChangeEvent>({ name: 'FileContentService.outcome' });
@@ -492,12 +506,25 @@ export class FileContentService {
     const absoluteNewPath = this.paths.toAbsolutePath(newKey);
     const barrier = this._beginEditorMutation(oldKey, newKey);
     await this._drainEditorSavesUnder(oldKey, barrier, false);
+    let participants: PreparedFileOperation[] = [];
+    let sourceMoved = false;
     try {
+      participants = await this._prepareFileOperation({ kind: 'move', oldPath: oldKey, newPath: newKey });
       await this.proxy.move(absoluteOldPath, absoluteNewPath);
+      sourceMoved = true;
+      await Promise.all(participants.map(async ({ commit }) => commit()));
       this.recordMove(oldKey, newKey);
       await this._finishEditorMutation(barrier, true);
     } catch (error) {
-      await this._finishEditorMutation(barrier, false);
+      const recovery = await Promise.allSettled([
+        ...(sourceMoved ? [this.proxy.move(absoluteNewPath, absoluteOldPath)] : []),
+        ...participants.toReversed().map(async ({ rollback }) => rollback()),
+        this._finishEditorMutation(barrier, false),
+      ]);
+      const recoveryFailure = recovery.find((result) => result.status === 'rejected');
+      if (recoveryFailure?.status === 'rejected') {
+        throw new AggregateError([error, recoveryFailure.reason], 'File move failed and rollback was incomplete.');
+      }
       throw error;
     }
   }
@@ -585,68 +612,99 @@ export class FileContentService {
       }),
     );
 
+    const prepared: PreparedFileOperation[][] = [];
+    try {
+      for (const { oldKey, newKey } of normalized) {
+        // oxlint-disable-next-line no-await-in-loop -- Preparation order defines the exact rollback prefix.
+        prepared.push(await this._prepareFileOperation({ kind: 'move', oldPath: oldKey, newPath: newKey }));
+      }
+    } catch (error) {
+      const recovery = await Promise.allSettled(
+        prepared.flatMap((participants) => participants.toReversed().map(async ({ rollback }) => rollback())),
+      );
+      await Promise.all(barriers.map(async (barrier) => this._finishEditorMutation(barrier, false)));
+      const recoveryFailure = recovery.find((outcome) => outcome.status === 'rejected');
+      throw recoveryFailure?.status === 'rejected'
+        ? new AggregateError([error, recoveryFailure.reason], 'Bulk move preparation rollback was incomplete.')
+        : error;
+    }
+
     let result: BulkMoveResult;
     try {
       result = await this.proxy.bulkMove(normalized.map(({ source, target }) => ({ source, target })));
     } catch (error) {
-      await Promise.all(barriers.map(async (barrier) => this._finishEditorMutation(barrier, false)));
-      throw error;
-    }
-
-    for (const moved of result.moved) {
-      const entry = normalized.find(
-        ({ source, target }) => source === moved.edit.source && target === moved.edit.target,
+      const recovery = await Promise.allSettled(
+        prepared.flatMap((participants) => participants.toReversed().map(async ({ rollback }) => rollback())),
       );
-      if (entry === undefined) {
-        continue;
-      }
-      const { oldKey, newKey } = entry;
-      this.refreshGuard.begin(oldKey);
-      this.refreshGuard.begin(newKey);
-      const subtreeKeys: string[] = [];
-      const oldPrefix = oldKey === '' ? '' : `${oldKey}/`;
-      for (const path of this.outcomes.keys()) {
-        if (path === oldKey || path.startsWith(oldPrefix)) {
-          subtreeKeys.push(path);
-        }
-      }
-      for (const [path] of this.cache.entries()) {
-        if ((path === oldKey || path.startsWith(oldPrefix)) && !subtreeKeys.includes(path)) {
-          subtreeKeys.push(path);
-        }
-      }
-
-      if (subtreeKeys.length === 0) {
-        this.cache.rename(oldKey, newKey);
-        this.pathNotifyRegistry.notifyPath(oldKey, undefined);
-        this.notifyGlobalSubscribers({ type: 'renamed', oldPath: oldKey, newPath: newKey });
-        continue;
-      }
-
-      const newPrefix = newKey === '' ? '' : `${newKey}/`;
-      for (const path of subtreeKeys) {
-        const remapped = path === oldKey ? newKey : `${newPrefix}${path.slice(oldPrefix.length)}`;
-        this.refreshGuard.begin(path);
-        this.refreshGuard.begin(remapped);
-        this.cache.rename(path, remapped);
-        const oldOutcome = this.outcomes.get(path);
-        if (oldOutcome) {
-          this.outcomes.delete(path);
-          this.publishOutcome(remapped, oldOutcome);
-        }
-        this.pathNotifyRegistry.notifyPath(path, undefined);
-        this.notifyGlobalSubscribers({ type: 'renamed', oldPath: path, newPath: remapped });
-      }
+      await Promise.all(barriers.map(async (barrier) => this._finishEditorMutation(barrier, false)));
+      const recoveryFailure = recovery.find((outcome) => outcome.status === 'rejected');
+      throw recoveryFailure?.status === 'rejected'
+        ? new AggregateError([error, recoveryFailure.reason], 'Bulk move failed and rollback was incomplete.')
+        : error;
     }
 
-    const movedSources = new Set(result.moved.map(({ edit }) => edit.source));
+    const outcomes = await Promise.allSettled([
+      ...result.failed.map(async (failure) => {
+        const index = normalized.findIndex(
+          ({ source, target }) => source === failure.edit.source && target === failure.edit.target,
+        );
+        await Promise.all(prepared[index]?.toReversed().map(async ({ rollback }) => rollback()) ?? []);
+        return { kind: 'failed', failure } as const;
+      }),
+      ...result.moved.map(async (moved) => {
+        const index = normalized.findIndex(
+          ({ source, target }) => source === moved.edit.source && target === moved.edit.target,
+        );
+        const entry = normalized[index];
+        if (entry === undefined) {
+          throw new Error(`Bulk move returned an unknown edit: ${moved.edit.source} -> ${moved.edit.target}`);
+        }
+        try {
+          await Promise.all(prepared[index]!.map(async ({ commit }) => commit()));
+          this.recordMove(entry.oldKey, entry.newKey);
+          return { kind: 'moved', moved } as const;
+        } catch (error) {
+          const recovery = await Promise.allSettled([
+            this.proxy.move(entry.target, entry.source),
+            ...prepared[index]!.toReversed().map(async ({ rollback }) => rollback()),
+          ]);
+          const recoveryFailure = recovery.find((outcome) => outcome.status === 'rejected');
+          if (recoveryFailure?.status === 'rejected') {
+            throw new AggregateError([error, recoveryFailure.reason], 'Bulk move dependency rollback was incomplete.');
+          }
+          return {
+            kind: 'failed',
+            failure: {
+              edit: moved.edit,
+              error: new WorkspaceMutationError('OPERATION_FAILED', moved.edit.source, {
+                target: moved.edit.target,
+                cause: error,
+              }),
+            },
+          } as const;
+        }
+      }),
+    ]);
+    const completed = outcomes.flatMap((outcome) =>
+      outcome.status === 'fulfilled' && outcome.value.kind === 'moved' ? [outcome.value.moved] : [],
+    );
+    const failures = outcomes.flatMap((outcome) =>
+      outcome.status === 'fulfilled' && outcome.value.kind === 'failed' ? [outcome.value.failure] : [],
+    );
+    const movedSources = new Set(completed.map(({ edit }) => edit.source));
     await Promise.all(
       barriers.map(async (barrier, index) =>
         this._finishEditorMutation(barrier, movedSources.has(normalized[index]!.source)),
       ),
     );
+    const incomplete: unknown[] = outcomes.flatMap((outcome) =>
+      outcome.status === 'rejected' ? [outcome.reason as unknown] : [],
+    );
+    if (incomplete.length > 0) {
+      throw new AggregateError(incomplete, 'Bulk move dependency recovery was incomplete.');
+    }
 
-    return result;
+    return { moved: completed, failed: failures };
   }
 
   /**
@@ -664,8 +722,11 @@ export class FileContentService {
     const absolutePath = this.paths.toAbsolutePath(key);
     const barrier = this._beginEditorMutation(key);
     await this._drainEditorSavesUnder(key, barrier, true);
+    let participants: PreparedFileOperation[] = [];
     try {
+      participants = await this._prepareFileOperation({ kind: 'delete', path: key, directory: false });
       await this.proxy.unlink(absolutePath);
+      await Promise.all(participants.map(async ({ commit }) => commit()));
       this.refreshGuard.begin(key);
       this.cache.delete(key);
       this.setOrphaned(key, true);
@@ -673,7 +734,14 @@ export class FileContentService {
       this.notifyGlobalSubscribers({ type: 'deleted', path: key, source });
       await this._finishEditorMutation(barrier, true);
     } catch (error) {
-      await this._finishEditorMutation(barrier, false);
+      const recovery = await Promise.allSettled([
+        ...participants.toReversed().map(async ({ rollback }) => rollback()),
+        this._finishEditorMutation(barrier, false),
+      ]);
+      const recoveryFailure = recovery.find((result) => result.status === 'rejected');
+      if (recoveryFailure?.status === 'rejected') {
+        throw new AggregateError([error, recoveryFailure.reason], 'File deletion failed and rollback was incomplete.');
+      }
       throw error;
     }
   }
@@ -708,15 +776,34 @@ export class FileContentService {
     const key = this.paths.toWorkspaceRelativeKey('deleteDirectory', path);
     const barrier = this._beginEditorMutation(key);
     await this._drainEditorSavesUnder(key, barrier, true);
+    let participants: PreparedFileOperation[] = [];
     try {
+      participants = await this._prepareFileOperation({ kind: 'delete', path: key, directory: true });
       await this.proxy.rmdir(this.paths.toAbsolutePath(key), options);
+      await Promise.all(participants.map(async ({ commit }) => commit()));
       this.orphanSubtree(key);
       this.notifyGlobalSubscribers({ type: 'directoryDeleted', path: key });
       await this._finishEditorMutation(barrier, true);
     } catch (error) {
-      await this._finishEditorMutation(barrier, false);
+      const recovery = await Promise.allSettled([
+        ...participants.toReversed().map(async ({ rollback }) => rollback()),
+        this._finishEditorMutation(barrier, false),
+      ]);
+      const recoveryFailure = recovery.find((result) => result.status === 'rejected');
+      if (recoveryFailure?.status === 'rejected') {
+        throw new AggregateError(
+          [error, recoveryFailure.reason],
+          'Directory deletion failed and rollback was incomplete.',
+        );
+      }
       throw error;
     }
+  }
+
+  /** Register dependent project-record work in the existing mutation authority. @public */
+  public addFileOperationParticipant(participant: FileOperationParticipant): () => void {
+    this.fileOperationParticipants.add(participant);
+    return () => this.fileOperationParticipants.delete(participant);
   }
 
   /**
@@ -877,6 +964,29 @@ export class FileContentService {
     this.outcomes.clear();
     this.#outcomeTopic.dispose();
     this.refreshGuard.reset();
+  }
+
+  private async _prepareFileOperation(operation: FileOperation): Promise<PreparedFileOperation[]> {
+    const results = await Promise.allSettled(
+      [...this.fileOperationParticipants].map(async (participant) => participant(operation)),
+    );
+    const prepared = results.flatMap((result) =>
+      result.status === 'fulfilled' && result.value !== undefined ? [result.value] : [],
+    );
+    const failure = results.find((result) => result.status === 'rejected');
+    if (failure?.status === 'rejected') {
+      const recovery = await Promise.allSettled(prepared.toReversed().map(async ({ rollback }) => rollback()));
+      const recoveryFailure = recovery.find((result) => result.status === 'rejected');
+      throw recoveryFailure?.status === 'rejected'
+        ? new AggregateError(
+            [failure.reason, recoveryFailure.reason],
+            'File-operation preparation rollback was incomplete.',
+          )
+        : failure.reason instanceof Error
+          ? failure.reason
+          : new Error('File-operation preparation failed.', { cause: failure.reason });
+    }
+    return prepared;
   }
 
   private async _drainEditorSave(path: string, state: EditorSaveState): Promise<void> {

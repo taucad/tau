@@ -42,7 +42,12 @@ const overlay = (): ComposedViewOverlay => {
       }
       return kind === 'dir'
         ? { type: 'dir', children: children.get(path) ?? [] }
-        : { type: 'file', size: skillBytes.byteLength, contentKind: 'text', lineCount: 3 };
+        : {
+            type: 'file',
+            size: skillBytes.byteLength,
+            contentKind: 'text',
+            lineCount: 3,
+          };
     },
     read: async () => skillBytes,
   };
@@ -51,6 +56,7 @@ const overlay = (): ComposedViewOverlay => {
 const authorityMock = (): FileSystemClient =>
   mock<FileSystemClient>({
     writeFile: vi.fn().mockResolvedValue(undefined),
+    writeFileChecked: vi.fn().mockResolvedValue({ status: 'applied', content: new Uint8Array() }),
     writeFiles: vi.fn().mockResolvedValue(undefined),
     mkdir: vi.fn().mockResolvedValue(undefined),
     rmdir: vi.fn().mockResolvedValue(undefined),
@@ -167,11 +173,30 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
     await expect(client.canDelete(`${root}/main.ts`)).resolves.toBe(true);
     await client.move(`${root}/main.ts`, `${root}/renamed.ts`);
     await client.writeFiles({ [`${root}/a.ts`]: { content: skillBytes } });
+    await client.writeFileChecked({
+      path: `${root}/parameters.json`,
+      data: '{}',
+      preconditions: [{ path: `${root}/parameters.json`, expected: null }],
+    });
     await client.duplicateFile(`${root}/main.ts`, `${root}/copy.ts`);
     expect(authority.canDelete).toHaveBeenCalledWith(`${root}/main.ts`);
     expect(authority.move).toHaveBeenCalledWith(`${root}/main.ts`, `${root}/renamed.ts`);
     expect(authority.writeFiles).toHaveBeenCalledOnce();
+    expect(authority.writeFileChecked).toHaveBeenCalledOnce();
     expect(authority.duplicateFile).toHaveBeenCalledWith(`${root}/main.ts`, `${root}/copy.ts`);
+  });
+
+  it('should refuse a checked write when its target or any precondition is read-only', async () => {
+    const { client, authority } = await harness();
+
+    await expect(
+      client.writeFileChecked({
+        path: `${root}/parameters.json`,
+        data: '{}',
+        preconditions: [{ path: `${root}/${skillPath}`, expected: skillBytes }],
+      }),
+    ).rejects.toMatchObject({ code: 'EROFS' });
+    expect(authority.writeFileChecked).not.toHaveBeenCalled();
   });
 
   /* `/node_modules` is a mount, not an overlay: it never reaches the view. */
@@ -194,9 +219,17 @@ describe('createComposedViewClient mutation guard (north star W2 attempt a2)', (
 
     expect(authority.readDirectory).toHaveBeenCalledWith('/node_modules');
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.provenance).toEqual({ source: 'dependencies', versioned: false, agentAccess: 'read-only' });
+    expect(rows[0]?.provenance).toEqual({
+      source: 'dependencies',
+      versioned: false,
+      agentAccess: 'read-only',
+    });
     await expect(client.stat('/node_modules/three/package.json')).resolves.toMatchObject({
-      provenance: { source: 'dependencies', versioned: false, agentAccess: 'read-only' },
+      provenance: {
+        source: 'dependencies',
+        versioned: false,
+        agentAccess: 'read-only',
+      },
     });
   });
 });

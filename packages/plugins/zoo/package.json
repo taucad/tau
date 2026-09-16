@@ -69,6 +69,7 @@
     "@msgpack/msgpack": "catalog:",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/kcl-wasm-lib": "catalog:",
+    "@taucad/parameters": "workspace:*",
     "deepmerge": "catalog:",
     "type-fest": "catalog:"
   },

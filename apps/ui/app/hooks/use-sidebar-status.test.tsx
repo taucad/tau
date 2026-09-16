@@ -13,22 +13,21 @@ import type { ChatSessionActorRef, ChatSessionMachineEvent } from '#machines/cha
 import type { ProjectSessionActorRef, ProjectSessionCloseReason } from '#machines/project-session.machine.js';
 import type { SessionsActorRef, SessionsProjectStatus } from '#machines/sessions.machine.js';
 
-import { LivenessGlyph, projectRowDescription } from '#components/nav/liveness-glyph.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { peekRevisionClient } from '#hooks/use-revision-status.js';
 import { useSessions } from '#hooks/use-sessions.js';
 import {
   chatStatusLabel,
-  liveNowText,
   readProjectStatus,
+  selectChatFacts,
   selectChatStatus,
-  selectLiveNow,
+  selectProjectFacts,
   selectProjectRow,
   useChatSidebarStatus,
   useProjectSidebarRow,
   useSidebarCommands,
 } from '#hooks/use-sidebar-status.js';
-import type { useLiveNow } from '#hooks/use-sidebar-status.js';
+import type { ProjectSidebarRow, useLiveNow } from '#hooks/use-sidebar-status.js';
 
 /* The registry and the revision clients are the hooks' two inputs; the chat
  * machines below are real, because the pins are about what they say. */
@@ -43,7 +42,6 @@ vi.mock('#hooks/use-chats.js', () => ({
     chats: sidebarChats,
     isLoading: false,
     error: undefined,
-    retry: vi.fn(),
     updateChatName: vi.fn(),
     deleteChat: vi.fn(),
   }),
@@ -53,7 +51,6 @@ vi.mock('#hooks/use-projects.js', () => ({
     projects: [sidebarProject],
     isLoading: false,
     error: undefined,
-    retry: vi.fn(),
     deleteProject: vi.fn(),
     duplicateProject: vi.fn(),
     updateName: vi.fn(),
@@ -102,6 +99,7 @@ vi.mock('@taucad/ui/components/button', () => ({
   ),
 }));
 vi.mock('@taucad/ui/components/tooltip', () => ({
+  TooltipProvider: ({ children }: { readonly children: ReactNode }): ReactNode => children,
   Tooltip: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
   TooltipTrigger: ({ children }: { readonly children: ReactNode }) => <span>{children}</span>,
   TooltipContent: ({ children }: { readonly children: ReactNode }) => <span>{children}</span>,
@@ -271,14 +269,12 @@ const notifyRegistry = (): void => {
 };
 
 const stopRun = vi.fn();
-const retryRun = vi.fn();
 const acquireSession = vi.fn(() => ({}));
 const releaseSession = vi.fn();
 
 beforeEach(() => {
   resetRegistry();
   stopRun.mockReset();
-  retryRun.mockReset();
   acquireSession.mockClear();
   releaseSession.mockClear();
   registrySend.mockReset();
@@ -287,7 +283,6 @@ beforeEach(() => {
    * the store mock owes the two verbs that acquisition uses. */
   vi.mocked(useChatSessionStore).mockReturnValue({
     stopRun,
-    retryRun,
     acquire: acquireSession,
     release: releaseSession,
   } as unknown as ReturnType<typeof useChatSessionStore>);
@@ -307,10 +302,8 @@ const agentStateRows: ReadonlyArray<{
   readonly events: readonly ChatSessionMachineEvent[];
   readonly state?: string;
   readonly label: string | undefined;
-  readonly glyphs: readonly string[];
-  readonly description: string;
-  readonly branch?: string;
-  readonly dirty?: boolean;
+  readonly mark: string;
+  readonly sentence: string | undefined;
   readonly revision?: RevisionOverrides;
   readonly conflictedChats?: number;
   readonly attention?: number;
@@ -321,8 +314,8 @@ const agentStateRows: ReadonlyArray<{
     events: [],
     state: 'idle',
     label: undefined,
-    glyphs: [],
-    description: 'Wall thickness sweep.',
+    mark: 'none',
+    sentence: undefined,
   },
   {
     signal: 'run.lifecycle: admitted',
@@ -330,8 +323,8 @@ const agentStateRows: ReadonlyArray<{
     events: [{ type: 'runLifecycle', phase: 'admitted' }],
     state: 'queued',
     label: 'Queued',
-    glyphs: ['queued'],
-    description: 'Wall thickness sweep, queued.',
+    mark: 'running',
+    sentence: 'Queued',
   },
   {
     signal: 'run.lifecycle: running, no tool in flight',
@@ -339,8 +332,8 @@ const agentStateRows: ReadonlyArray<{
     events: [{ type: 'runLifecycle', phase: 'running' }],
     state: 'working',
     label: 'Working…',
-    glyphs: ['working'],
-    description: 'Wall thickness sweep, working.',
+    mark: 'running',
+    sentence: 'Working…',
   },
   {
     signal: 'tool part in flight',
@@ -351,8 +344,8 @@ const agentStateRows: ReadonlyArray<{
     ],
     state: 'tool',
     label: 'Running geospec_check',
-    glyphs: ['tool'],
-    description: 'Wall thickness sweep, running geospec_check.',
+    mark: 'running',
+    sentence: 'Running geospec_check',
   },
   {
     signal: 'interrupt.recorded requested',
@@ -363,8 +356,8 @@ const agentStateRows: ReadonlyArray<{
     ],
     state: 'approval',
     label: 'Needs your approval · 1',
-    glyphs: ['approval'],
-    description: 'Wall thickness sweep, needs your approval, 1 pending.',
+    mark: 'attention',
+    sentence: 'Needs your approval · 1',
   },
   {
     signal: 'model asked a question and stopped',
@@ -372,8 +365,8 @@ const agentStateRows: ReadonlyArray<{
     events: [{ type: 'runLifecycle', phase: 'paused' }],
     state: 'question',
     label: 'Waiting for you',
-    glyphs: ['question'],
-    description: 'Wall thickness sweep, waiting for you.',
+    mark: 'attention',
+    sentence: 'Waiting for you',
   },
   {
     signal: 'durableRunState reattaching',
@@ -381,8 +374,8 @@ const agentStateRows: ReadonlyArray<{
     events: [{ type: 'durableRunState', state: 'reattaching' }],
     state: 'reconnecting',
     label: 'Reconnecting…',
-    glyphs: ['reconnecting'],
-    description: 'Wall thickness sweep, reconnecting.',
+    mark: 'running',
+    sentence: 'Reconnecting…',
   },
   {
     signal: 'run.lifecycle: completed, chat not focused',
@@ -390,8 +383,8 @@ const agentStateRows: ReadonlyArray<{
     events: [{ type: 'runLifecycle', phase: 'completed' }],
     state: 'finishing',
     label: 'Finishing…',
-    glyphs: ['finishing'],
-    description: 'Wall thickness sweep, finishing, unread.',
+    mark: 'running',
+    sentence: 'Finishing…',
   },
   {
     signal: 'turn.finalized, chat not focused',
@@ -402,8 +395,8 @@ const agentStateRows: ReadonlyArray<{
     ],
     state: 'done',
     label: 'Done',
-    glyphs: ['unread'],
-    description: 'Wall thickness sweep, done, unread.',
+    mark: 'unread',
+    sentence: 'Finished while you were away',
   },
   {
     signal: 'turn.finalized, focused',
@@ -415,8 +408,8 @@ const agentStateRows: ReadonlyArray<{
     ],
     state: 'done',
     label: 'Done',
-    glyphs: [],
-    description: 'Wall thickness sweep, done.',
+    mark: 'none',
+    sentence: undefined,
   },
   {
     signal: 'run.lifecycle: failed',
@@ -424,8 +417,8 @@ const agentStateRows: ReadonlyArray<{
     events: [{ type: 'runLifecycle', phase: 'failed', reason: 'kernel crashed while meshing' }],
     state: 'failed',
     label: 'Failed · kernel crashed while meshing',
-    glyphs: ['failed'],
-    description: 'Wall thickness sweep, failed: kernel crashed while meshing, unread.',
+    mark: 'failed',
+    sentence: 'Failed · kernel crashed while meshing',
   },
   {
     signal: 'run.lifecycle: cancelled',
@@ -433,8 +426,8 @@ const agentStateRows: ReadonlyArray<{
     events: [{ type: 'runLifecycle', phase: 'cancelled' }],
     state: 'stopped',
     label: 'Stopped',
-    glyphs: [],
-    description: 'Wall thickness sweep, stopped.',
+    mark: 'none',
+    sentence: 'Stopped',
   },
   {
     signal: 'turn.finalized on a branch',
@@ -442,9 +435,8 @@ const agentStateRows: ReadonlyArray<{
     events: [{ type: 'turnFinalized', branch: 'arm-fillet' }],
     state: 'idle',
     label: undefined,
-    glyphs: ['branch'],
-    description: 'Wall thickness sweep, on branch arm-fillet.',
-    branch: 'arm-fillet',
+    mark: 'none',
+    sentence: undefined,
   },
   {
     signal: 'checkout.machine dirty',
@@ -455,27 +447,25 @@ const agentStateRows: ReadonlyArray<{
     ],
     state: 'idle',
     label: undefined,
-    glyphs: ['branch', 'dirty'],
-    description: 'Wall thickness sweep, on branch arm-fillet, unsaved edits.',
-    branch: 'arm-fillet',
-    dirty: true,
+    mark: 'none',
+    sentence: undefined,
   },
   {
     signal: 'sync.machine queued',
     target: 'project',
     events: [],
-    label: 'Not backed up · 1 revision · retrying',
-    glyphs: ['idle', 'sync-queued'],
-    description: 'Enclosure, live, not backed up, 1 revision pending.',
+    label: undefined,
+    mark: 'none',
+    sentence: 'Live',
     revision: { sync: { state: 'queued', pendingCount: 1 } },
   },
   {
     signal: 'sync.machine conflicted',
     target: 'project',
     events: [],
-    label: 'Needs resolution',
-    glyphs: ['attention', 'sync-conflicted'],
-    description: 'Enclosure, live, 1 needs you, needs resolution.',
+    label: undefined,
+    mark: 'attention',
+    sentence: 'Live · 1 needs you · needs resolution',
     revision: { sync: { state: 'conflicted', pendingCount: 0 } },
     conflictedChats: 3,
     attention: 1,
@@ -484,9 +474,9 @@ const agentStateRows: ReadonlyArray<{
     signal: 'sync.machine pending (ordinary project row)',
     target: 'project',
     events: [],
-    label: 'Backing up 2 revisions',
-    glyphs: ['idle', 'sync-pending'],
-    description: 'Enclosure, live, backing up, 2 revisions pending.',
+    label: undefined,
+    mark: 'none',
+    sentence: 'Live',
     revision: { sync: { state: 'pending', pendingCount: 2 } },
   },
 ];
@@ -494,19 +484,7 @@ const agentStateRows: ReadonlyArray<{
 describe('use-sidebar-status — pin (a): every agent-state row renders from a driven machine (V22)', () => {
   it.each(agentStateRows)(
     '$signal',
-    ({
-      target,
-      events,
-      state,
-      label,
-      glyphs,
-      description,
-      branch,
-      dirty = false,
-      revision,
-      conflictedChats,
-      attention,
-    }) => {
+    ({ target, events, state, label, mark, sentence, revision, conflictedChats, attention }) => {
       liveProject(sidebarProject.id);
       if (target === 'chat') {
         const actor = driveChat(sidebarProject.id, sidebarChat.id, events);
@@ -530,40 +508,60 @@ describe('use-sidebar-status — pin (a): every agent-state row renders from a d
       const accessibleName = target === 'chat' ? sidebarChat.name : sidebarProject.name;
       const link = screen.getByRole('link', { name: accessibleName });
       const descriptionId = link.getAttribute('aria-describedby');
-      expect(descriptionId).not.toBeNull();
+      /* D1: the sentence is the link's description, or there is none. */
       expect(descriptionId === null ? undefined : document.querySelector(`#${descriptionId}`)?.textContent).toBe(
-        description,
+        sentence,
       );
 
       const renderedRow = link.closest<HTMLElement>(`[data-slot=${target}-trigger]`);
-      expect(
-        Array.from(renderedRow?.querySelectorAll<HTMLElement>('[data-glyph]') ?? [], (glyph) => glyph.dataset['glyph']),
-      ).toEqual(glyphs);
-      expect(renderedRow?.querySelector('[data-slot=branch-chip]')?.textContent).toBe(branch);
-      expect(renderedRow?.querySelector('[data-slot=dirty-pip]') !== null).toBe(dirty);
+      /* D2: one mark per row; the chat's leading column renders even when plain. */
+      const marks = Array.from(
+        renderedRow?.querySelectorAll<HTMLElement>('[data-glyph]') ?? [],
+        (glyph) => glyph.dataset['glyph'],
+      );
+      expect(marks).toEqual(target === 'chat' || mark !== 'none' ? [mark] : []);
+      /* D4: branch, dirty and backup left the sidebar. */
+      expect(renderedRow?.querySelector('[data-slot=branch-chip], [data-slot=dirty-pip]')).toBeNull();
+      /* D15: the name dissolves; it never clips at an ellipsis. */
+      expect(link.querySelector('.fade-label')?.textContent).toBe(accessibleName);
+      expect(link.querySelector('.truncate')).toBeNull();
     },
   );
 
-  it('carries a failed run its reason and its Retry affordance vocabulary', () => {
+  it('carries a failed run its reason', () => {
     const actor = driveChat('bracket', 'arm', [
       { type: 'runLifecycle', phase: 'failed', reason: 'kernel crashed while meshing' },
     ]);
     expect(chatStatusLabel(selectChatStatus(actor.getSnapshot()))).toBe('Failed · kernel crashed while meshing');
   });
+
+  /* D16: the count hangs off the disc; the disc keeps the slot's centre. */
+  it('hangs the needs-you count off a centred disc', () => {
+    liveProject(sidebarProject.id);
+    driveChat(sidebarProject.id, sidebarChat.id, [
+      { type: 'runLifecycle', phase: 'running' },
+      { type: 'interruptRecorded', state: 'requested', count: 12 },
+    ]);
+    render(<ProjectChatList project={sidebarProject} isProjectActive={false} />);
+    const slot = document.querySelector<HTMLElement>('[data-slot=chat-status]');
+    expect(slot?.className).toContain('justify-center');
+    expect(slot?.querySelector('.absolute')?.textContent).toBe('9+');
+  });
 });
 
-describe('use-sidebar-status — pin (d): the project row aggregates its chats (A36)', () => {
-  const glyphOf = (projectId: string): string | undefined => {
-    const row = selectProjectRow(readProjectStatus(fakeRegistry.actor, projectId), idleWindowMilliseconds);
-    const { container } = render(<LivenessGlyph row={row} />);
-    return container.querySelector<HTMLElement>('[data-glyph]')?.dataset['glyph'];
-  };
+describe('use-sidebar-status — pin (d): the project row rolls up its chats (A36, v2 D3, D11)', () => {
+  const rowOf = (projectId: string): ProjectSidebarRow =>
+    selectProjectRow(readProjectStatus(fakeRegistry.actor, projectId), idleWindowMilliseconds);
+  const collapsed = (projectId: string) => selectProjectFacts(rowOf(projectId), false);
+  const expanded = (projectId: string) => selectProjectFacts(rowOf(projectId), true);
 
-  it('spins while any chat runs', () => {
+  it('rolls up a running chat while collapsed, and hands it to the chat once expanded', () => {
     liveProject('bracket');
     driveChat('bracket', 'idle-chat', []);
     driveChat('bracket', 'busy-chat', [{ type: 'runLifecycle', phase: 'running' }]);
-    expect(glyphOf('bracket')).toBe('busy');
+    expect(rowOf('bracket').glyph).toBe('busy');
+    expect(collapsed('bracket')).toEqual({ mark: 'running', sentence: 'Live, busy · 1 agent working' });
+    expect(expanded('bracket')).toEqual({ mark: 'none', sentence: 'Live, busy' });
   });
 
   it('lifts the amber count from the chats that need a person', () => {
@@ -573,57 +571,76 @@ describe('use-sidebar-status — pin (d): the project row aggregates its chats (
       { type: 'interruptRecorded', state: 'requested', count: 1 },
     ]);
     driveChat('bracket', 'two', [{ type: 'runLifecycle', phase: 'paused' }]);
-    const row = selectProjectRow(readProjectStatus(fakeRegistry.actor, 'bracket'), idleWindowMilliseconds);
-    expect(row.attention).toBe(2);
-    expect(glyphOf('bracket')).toBe('attention');
-    expect(projectRowDescription('Bracket v2', row)).toBe('Bracket v2, live, 2 need you.');
+    expect(rowOf('bracket').attention).toBe(2);
+    expect(collapsed('bracket')).toEqual({ mark: 'attention', count: 2, sentence: 'Live · 2 need you' });
   });
 
-  /* P57: red is "a run failed **and is unread**", so looking at the chat is
-   * what quiets the project row. */
-  it('turns red on a failed run nobody has seen, and not once it is seen', () => {
+  it('ranks needs-you over failed over running over finished', () => {
+    liveProject('bracket');
+    driveChat('bracket', 'done', [
+      { type: 'runLifecycle', phase: 'completed' },
+      { type: 'turnFinalizedObserved', branch: 'main' },
+    ]);
+    expect(collapsed('bracket').mark).toBe('unread');
+    driveChat('bracket', 'running', [{ type: 'runLifecycle', phase: 'running' }]);
+    expect(collapsed('bracket').mark).toBe('running');
+    driveChat('bracket', 'failed', [{ type: 'runLifecycle', phase: 'failed', reason: 'kernel crashed' }]);
+    expect(collapsed('bracket').mark).toBe('failed');
+    driveChat('bracket', 'asking', [{ type: 'runLifecycle', phase: 'paused' }]);
+    expect(collapsed('bracket').mark).toBe('attention');
+  });
+
+  /* D11: a failed chat is the chat's mark; the project fails only when its
+   * session does, and that shows whether or not it is expanded. */
+  it('never turns a failed chat into a failed session', () => {
     liveProject('bracket');
     const actor = driveChat('bracket', 'arm', [{ type: 'runLifecycle', phase: 'failed', reason: 'kernel crashed' }]);
-    expect(selectChatStatus(actor.getSnapshot()).unread).toBe(true);
-    expect(glyphOf('bracket')).toBe('failed');
+    expect(rowOf('bracket').glyph).toBe('idle');
+    expect(collapsed('bracket')).toEqual({ mark: 'failed', sentence: 'Live · 1 chat failed' });
+    expect(expanded('bracket')).toEqual({ mark: 'none', sentence: 'Live' });
+    /* P57: looking at the chat quiets the rollup. */
     actor.send({ type: 'viewed' });
-    expect(glyphOf('bracket')).toBe('idle');
+    expect(collapsed('bracket')).toEqual({ mark: 'none', sentence: 'Live' });
+
+    liveProject('gearbox', { state: 'failed' });
+    expect(rowOf('gearbox').glyph).toBe('failed');
+    expect(expanded('gearbox')).toEqual({ mark: 'failed', sentence: 'Failed to open' });
   });
 
-  it('is a solid dot when live and idle, and nothing at all when closed', () => {
+  it('says whether every project is live (D12)', () => {
+    liveProject('bracket', { state: 'opening' });
+    expect(collapsed('bracket')).toEqual({ mark: 'running', sentence: 'Opening…' });
     liveProject('bracket');
-    expect(glyphOf('bracket')).toBe('idle');
+    expect(collapsed('bracket')).toEqual({ mark: 'none', sentence: 'Live' });
     closeProject('bracket', 'user');
-    expect(glyphOf('bracket')).toBeUndefined();
+    expect(collapsed('bracket')).toEqual({ mark: 'none', sentence: 'Closed' });
   });
 
-  it('names a policy close on the row and says nothing about a user close', () => {
+  it('names a policy close on the row and says nothing more about a user close', () => {
     closeProject('enclosure', 'idle');
-    expect(selectProjectRow(readProjectStatus(fakeRegistry.actor, 'enclosure'), idleWindowMilliseconds).detail).toBe(
-      'Closed to save memory · 30 min idle',
-    );
+    expect(rowOf('enclosure').detail).toBe('Closed to save memory · 30 min idle');
+    expect(collapsed('enclosure').sentence).toBe('Closed to save memory · 30 min idle');
     closeProject('gearbox', 'budget');
-    expect(selectProjectRow(readProjectStatus(fakeRegistry.actor, 'gearbox'), idleWindowMilliseconds).detail).toBe(
-      'Closed · memory budget · reopen any time',
-    );
+    expect(rowOf('gearbox').detail).toBe('Closed · memory budget · reopen any time');
     closeProject('quadcopter', 'user');
-    expect(
-      selectProjectRow(readProjectStatus(fakeRegistry.actor, 'quadcopter'), idleWindowMilliseconds).detail,
-    ).toBeUndefined();
+    expect(rowOf('quadcopter').detail).toBeUndefined();
   });
 
-  it('writes the Live now header the canvas writes', () => {
-    liveProject('bracket', { runs: 3 });
-    liveProject('quadcopter');
-    driveChat('bracket', 'one', [
-      { type: 'runLifecycle', phase: 'running' },
-      { type: 'interruptRecorded', state: 'requested', count: 1 },
-    ]);
-    const rows = ['bracket', 'quadcopter'].map((projectId) =>
-      selectProjectRow(readProjectStatus(fakeRegistry.actor, projectId), idleWindowMilliseconds),
-    );
-    expect(liveNowText(selectLiveNow(rows, ['quadcopter']))).toBe('2 projects · 3 agents · 1 needs you');
-    expect(selectLiveNow(rows, ['quadcopter']).idleProjectIds).toEqual(['quadcopter']);
+  it('keeps backup state out of the sidebar (D4)', () => {
+    liveProject('enclosure');
+    revisions('enclosure', { branch: 'lid', dirty: true, sync: { state: 'failed', pendingCount: 2, error: 'quota' } });
+    expect(rowOf('enclosure').detail).toBeUndefined();
+    expect(collapsed('enclosure')).toEqual({ mark: 'none', sentence: 'Live' });
+  });
+
+  it('names the chat facts the row draws', () => {
+    const facts = (events: readonly ChatSessionMachineEvent[]) =>
+      selectChatFacts(selectChatStatus(driveChat('bracket', 'probe', events).getSnapshot()));
+    expect(facts([{ type: 'runLifecycle', phase: 'paused' }])).toEqual({
+      mark: 'attention',
+      sentence: 'Waiting for you',
+    });
+    expect(facts([])).toEqual({ mark: 'none', sentence: undefined });
   });
 });
 
@@ -744,30 +761,6 @@ describe('use-sidebar-status — pin (R1/P63): *Close* on a chat stops the run a
     expect(actor.getSnapshot().status).toBe('active');
     expect(screen.getByRole('button').textContent).toBe('Stopped');
   });
-
-  it('retries a failed chat through the same store', () => {
-    liveProject('bracket');
-    driveChat('bracket', 'arm', [{ type: 'runLifecycle', phase: 'failed', reason: 'kernel crashed' }]);
-
-    function Retry(): React.JSX.Element {
-      const { retryChat } = useSidebarCommands();
-      return (
-        <button
-          type='button'
-          onClick={() => {
-            retryChat('arm');
-          }}
-        >
-          Retry
-        </button>
-      );
-    }
-    render(<Retry />);
-    act(() => {
-      screen.getByRole('button').click();
-    });
-    expect(retryRun).toHaveBeenCalledExactlyOnceWith('arm');
-  });
 });
 
 describe('use-sidebar-status — pin (P68): confirmed project closes finish through the registry', () => {
@@ -813,28 +806,28 @@ describe('use-sidebar-status — pin (R3/R4): the bind key carries what the row 
     liveProject('enclosure');
     function Row(): React.JSX.Element {
       const row = useProjectSidebarRow('enclosure');
-      return <span>{row.detail ?? 'nothing'}</span>;
+      return <span>{selectProjectFacts(row, false).sentence}</span>;
     }
     render(<Row />);
-    expect(screen.getByText('nothing')).toBeTruthy();
+    expect(screen.getByText('Live')).toBeTruthy();
 
     act(() => {
       /* The client is created by the project's route subtree, after the
-       * sidebar bound this row. */
-      revisions('enclosure', { sync: { state: 'queued', pendingCount: 1 } });
+       * sidebar bound this row. A conflict is the one sync fact it keeps. */
+      revisions('enclosure', { sync: { state: 'conflicted', pendingCount: 0 } });
       notifyRegistry();
     });
-    expect(screen.getByText('Not backed up · 1 revision · retrying')).toBeTruthy();
+    expect(screen.getByText('Live · 1 needs you · needs resolution')).toBeTruthy();
   });
 
   it('leaves `opening` when the registry says the project is live, with no chat spawned (W19-b)', () => {
     liveProject('enclosure', { state: 'opening' });
     function Row(): React.JSX.Element {
       const row = useProjectSidebarRow('enclosure');
-      return <span>{projectRowDescription('Enclosure', row)}</span>;
+      return <span>{selectProjectFacts(row, false).sentence}</span>;
     }
     render(<Row />);
-    expect(screen.getByText('Enclosure, opening.')).toBeTruthy();
+    expect(screen.getByText('Opening…')).toBeTruthy();
 
     act(() => {
       /* `project-session` reached `live`; the registry's own record is the only
@@ -844,7 +837,7 @@ describe('use-sidebar-status — pin (R3/R4): the bind key carries what the row 
       liveProject('enclosure');
       notifyRegistry();
     });
-    expect(screen.getByText('Enclosure, live.')).toBeTruthy();
+    expect(screen.getByText('Live')).toBeTruthy();
   });
 
   it('re-subscribes when a chat id is bound to a freshly spawned machine', () => {
@@ -901,10 +894,7 @@ describe('use-sidebar-status — pin (R13): closing is visible, never silent', (
 const compiledHooks = await (async () => {
   const { transformSync } = await import('oxc-transform-react');
   const source = await readFile(new URL('use-sidebar-status.ts', pathToFileURL(import.meta.filename)), 'utf8');
-  const compiled = transformSync('use-sidebar-status.ts', source, {
-    lang: 'ts',
-    reactCompiler: { target: '19' },
-  });
+  const compiled = transformSync('use-sidebar-status.ts', source, { lang: 'ts', reactCompiler: { target: '19' } });
   if (compiled.fatal || compiled.errors.length > 0) {
     throw new Error(`React Compiler refused the hook module: ${JSON.stringify(compiled.errors)}`);
   }
@@ -955,8 +945,10 @@ describe('use-sidebar-status — pin (P66): every row reads its value from the s
       return <span data-testid='chat'>{status?.state ?? 'none'}</span>;
     }
     function Header(): React.JSX.Element {
-      const summary = compiledHooks.useLiveNow(['bracket']);
-      return <span data-testid='header'>{liveNowText(summary)}</span>;
+      const summary = compiledHooks.useLiveNow();
+      return (
+        <span data-testid='header'>{`${String(summary.projects)} live · ${summary.idleProjectIds.join(',')}`}</span>
+      );
     }
 
     render(
@@ -968,16 +960,17 @@ describe('use-sidebar-status — pin (P66): every row reads its value from the s
     );
     expect(screen.getByTestId('project').textContent).toBe('opening');
     expect(screen.getByTestId('chat').textContent).toBe('idle');
-    expect(screen.getByTestId('header').textContent).toBe('1 project');
+    expect(screen.getByTestId('header').textContent).toBe('1 live · bracket');
 
     act(() => {
       liveProject('bracket', { runs: 1 });
+      liveProject('gearbox');
       notifyRegistry();
       chat.send({ type: 'runLifecycle', phase: 'admitted' });
     });
 
     expect(screen.getByTestId('project').textContent).toBe('busy');
     expect(screen.getByTestId('chat').textContent).toBe('queued');
-    expect(screen.getByTestId('header').textContent).toBe('1 project · 1 agent');
+    expect(screen.getByTestId('header').textContent).toBe('2 live · gearbox');
   });
 });

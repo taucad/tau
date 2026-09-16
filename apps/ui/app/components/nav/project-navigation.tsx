@@ -1,6 +1,6 @@
 import { Fragment, useMemo, useState } from 'react';
 import { ChevronRight, Copy, Forward, MoreHorizontal, Pencil, SquarePen, Trash2, X } from 'lucide-react';
-import { Link, useLocation, useNavigate, useNavigation } from 'react-router';
+import { useLocation, useNavigate, useNavigation } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ProjectListItem } from '#types/project.types.js';
 import { useProjects } from '#hooks/use-projects.js';
@@ -16,10 +16,9 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from '#components/ui/sidebar.js';
-import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Button } from '@taucad/ui/components/button';
-import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { cn } from '@taucad/ui/utils/cn';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,14 +28,26 @@ import {
 } from '@taucad/ui/components/dropdown-menu';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { ProjectChatList } from '#components/nav/project-chat-list.js';
-import { Loader } from '#components/ui/loader.js';
 import { toast } from '#components/ui/sonner.js';
-import { BranchChip } from '#components/nav/chat-status-glyph.js';
-import { LivenessGlyph, ProjectSyncGlyph, projectRowDescription } from '#components/nav/liveness-glyph.js';
+import { StatusMark } from '#components/nav/status-mark.js';
+import {
+  SidebarFailureRow,
+  SidebarRowActions,
+  SidebarRowLink,
+  SidebarRowSkeleton,
+  sidebarRowButtonClass,
+  sidebarRowClass,
+  sidebarRowEditorClass,
+} from '#components/nav/sidebar-row.js';
 import { CloseProjectDialog } from '#components/nav/project-close-dialogs.js';
 import { useLiveProjectIds } from '#hooks/use-sessions.js';
-import { liveNowText, useLiveNow, useProjectSidebarRow, useSidebarCommands } from '#hooks/use-sidebar-status.js';
-import type { ProjectSidebarRow } from '#hooks/use-sidebar-status.js';
+import {
+  pluralize,
+  selectProjectFacts,
+  useLiveNow,
+  useProjectSidebarRow,
+  useSidebarCommands,
+} from '#hooks/use-sidebar-status.js';
 
 const projectsPerPage = 5;
 
@@ -44,7 +55,7 @@ export const sortProjectsByActivity = (projects: readonly ProjectListItem[]): Pr
   [...projects].sort((left, right) => right.lastActivityAt - left.lastActivityAt || left.id.localeCompare(right.id));
 
 export function ProjectNavigation(): React.JSX.Element {
-  const { projects, isLoading, error, retry, deleteProject, duplicateProject, updateName } = useProjects();
+  const { projects, isLoading, error, deleteProject, duplicateProject, updateName } = useProjects();
   const { createChat } = useProjectManager();
   const { isProjectExpanded, setProjectDisclosure } = useAppUiPreferences();
   const queryClient = useQueryClient();
@@ -98,117 +109,103 @@ export function ProjectNavigation(): React.JSX.Element {
   };
 
   return (
-    <SidebarGroup className='px-2 group-data-[collapsible=icon]:hidden'>
-      <SidebarGroupLabel>Projects</SidebarGroupLabel>
-      <LiveNowHeader projectIds={liveProjectIds} />
-      <SidebarMenu className='gap-2'>
-        {isLoading && projects.length === 0
-          ? Array.from({ length: 3 }, (_, index) => (
-              <SidebarMenuItem key={index} data-testid='project-navigation-skeleton'>
-                <div className='flex h-7 items-center gap-2 px-2'>
-                  <Skeleton className='size-4 rounded-sm' />
-                  <Skeleton className='h-4 flex-1' />
-                </div>
-              </SidebarMenuItem>
-            ))
-          : null}
-        {error && projects.length === 0 ? (
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              onClick={() => {
-                void retry();
-              }}
-            >
-              <span>Could not load projects</span>
-              <span className='ml-auto text-xs text-muted-foreground'>Retry</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        ) : null}
-        {!isLoading && !error && projects.length === 0 && liveProjectIds.length === 0 ? (
-          <SidebarMenuItem>
-            <div className='flex h-7 items-center px-2 text-xs text-muted-foreground'>No projects yet</div>
-          </SidebarMenuItem>
-        ) : null}
-        {error && projects.length > 0 ? (
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              onClick={() => {
-                void retry();
-              }}
-            >
-              Projects could not be refreshed. Retry
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        ) : null}
-        {visibleProjects.map((project) => {
-          const projectPath = projectUrlOr(project.slugs);
-          const isActive = project.slugs !== undefined && location.pathname === projectPath;
-          const isExpanded = isProjectExpanded(project.id, isActive);
-          return (
-            <Fragment key={project.id}>
-              {earlierFromId === project.id ? (
-                <SidebarMenuItem>
-                  <div className='flex h-6 items-center px-1.5 text-xs text-muted-foreground/70'>Earlier</div>
+    /* R9: one row after another carries a tooltip, so a pointer travelling down
+     * the list waits before the first and then skips the delay. */
+    <TooltipProvider delayDuration={500} skipDelayDuration={300}>
+      <SidebarGroup className='px-2 group-data-[collapsible=icon]:hidden'>
+        <ProjectsLabel />
+        {/* D10: collapsed rows sit flush at the row pitch; an expanded project
+          takes its own separation. */}
+        <SidebarMenu className='gap-0'>
+          {isLoading && projects.length === 0
+            ? Array.from({ length: 3 }, (_, index) => (
+                <SidebarMenuItem key={index} aria-hidden data-testid='project-navigation-skeleton'>
+                  <SidebarRowSkeleton />
                 </SidebarMenuItem>
-              ) : null}
-              <ProjectNavigationItem
-                project={project}
-                isActive={isActive}
-                isPending={pendingUrl === projectPath}
-                isExpanded={isExpanded}
-                isEditing={editingProjectId === project.id}
-                onToggle={async () => setProjectDisclosure(project.id, !isExpanded)}
-                onOpen={() => {
-                  if (!isExpanded) {
-                    void setProjectDisclosure(project.id, true);
-                  }
+              ))
+            : null}
+          {/* D18: a failed refresh over a list already on screen shows nothing;
+            the last good list stays. */}
+          {error && projects.length === 0 ? (
+            <SidebarMenuItem>
+              <SidebarFailureRow what='projects' />
+            </SidebarMenuItem>
+          ) : null}
+          {!isLoading && !error && projects.length === 0 && liveProjectIds.length === 0 ? (
+            <SidebarMenuItem>
+              <div className='flex h-7 items-center px-2 text-xs text-muted-foreground'>No projects yet</div>
+            </SidebarMenuItem>
+          ) : null}
+          {visibleProjects.map((project) => {
+            const projectPath = projectUrlOr(project.slugs);
+            const isActive = project.slugs !== undefined && location.pathname === projectPath;
+            const isExpanded = isProjectExpanded(project.id, isActive);
+            return (
+              <Fragment key={project.id}>
+                {earlierFromId === project.id ? (
+                  <SidebarMenuItem>
+                    <div className='flex h-6 items-center px-1.5 text-xs text-muted-foreground/70'>Earlier</div>
+                  </SidebarMenuItem>
+                ) : null}
+                <ProjectNavigationItem
+                  project={project}
+                  isActive={isActive}
+                  isPending={pendingUrl === projectPath}
+                  isExpanded={isExpanded}
+                  isEditing={editingProjectId === project.id}
+                  onToggle={async () => setProjectDisclosure(project.id, !isExpanded)}
+                  onOpen={() => {
+                    if (!isExpanded) {
+                      void setProjectDisclosure(project.id, true);
+                    }
+                  }}
+                  onCreateChat={async () => handleCreateChat(project, isActive)}
+                  onRename={() => {
+                    setEditingProjectId(project.id);
+                  }}
+                  onRenameSave={async (name) => {
+                    await updateName(project.id, name);
+                  }}
+                  onEditingChange={(editing) => {
+                    if (!editing) {
+                      setEditingProjectId(undefined);
+                    }
+                  }}
+                  onDuplicate={async () => handleDuplicate(project)}
+                  onShare={() => {
+                    if (!project.slugs) {
+                      return;
+                    }
+                    const parameters = new URLSearchParams(isActive ? location.search : '');
+                    parameters.set(searchParameterName.workbench, 'share');
+                    void navigate(`${projectUrl(project.slugs)}?${parameters.toString()}`);
+                  }}
+                  onDelete={async () => {
+                    closeProject(project.id);
+                    await deleteProject(project.id);
+                    toast.success(`Deleted ${project.name}`);
+                  }}
+                />
+              </Fragment>
+            );
+          })}
+          {visibleCount < sortedProjects.length ? (
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                type='button'
+                className='pr-1.5 pl-[30px] text-muted-foreground/55 hover:bg-transparent hover:text-muted-foreground/90 active:bg-transparent active:text-muted-foreground/90 dark:hover:bg-transparent'
+                aria-label='Show more projects'
+                onClick={() => {
+                  setVisibleCount((count) => count + projectsPerPage);
                 }}
-                onCreateChat={async () => handleCreateChat(project, isActive)}
-                onRename={() => {
-                  setEditingProjectId(project.id);
-                }}
-                onRenameSave={async (name) => {
-                  await updateName(project.id, name);
-                }}
-                onEditingChange={(editing) => {
-                  if (!editing) {
-                    setEditingProjectId(undefined);
-                  }
-                }}
-                onDuplicate={async () => handleDuplicate(project)}
-                onShare={() => {
-                  if (!project.slugs) {
-                    return;
-                  }
-                  const parameters = new URLSearchParams(isActive ? location.search : '');
-                  parameters.set(searchParameterName.workbench, 'share');
-                  void navigate(`${projectUrl(project.slugs)}?${parameters.toString()}`);
-                }}
-                onDelete={async () => {
-                  closeProject(project.id);
-                  await deleteProject(project.id);
-                  toast.success(`Deleted ${project.name}`);
-                }}
-              />
-            </Fragment>
-          );
-        })}
-        {visibleCount < sortedProjects.length ? (
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              type='button'
-              className='pr-1.5 pl-[30px] text-muted-foreground/55 hover:bg-transparent hover:text-muted-foreground/90 active:bg-transparent active:text-muted-foreground/90 dark:hover:bg-transparent'
-              aria-label='Show more projects'
-              onClick={() => {
-                setVisibleCount((count) => count + projectsPerPage);
-              }}
-            >
-              Show more projects
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        ) : null}
-      </SidebarMenu>
-    </SidebarGroup>
+              >
+                Show more projects
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          ) : null}
+        </SidebarMenu>
+      </SidebarGroup>
+    </TooltipProvider>
   );
 }
 
@@ -250,78 +247,69 @@ function ProjectNavigationItem({
    * (R10): the item reads the row once and hands it to everything that draws
    * it, instead of three folds and three subscription trees per row. */
   const row = useProjectSidebarRow(project.id);
+  const facts = selectProjectFacts(row, isExpanded);
+  /* D3: a mark sits on the disclosure control; hover or focus returns the
+   * chevron, so the control always shows what it does when it is reached. */
+  const hasMark = facts.mark !== 'none';
   const { closeProject } = useSidebarCommands();
   const [askingToClose, setAskingToClose] = useState(false);
   const [askingToDelete, setAskingToDelete] = useState(false);
 
   return (
-    <SidebarMenuItem>
-      <div
-        data-slot='project-trigger'
-        data-active={isActive}
-        className='group/project-trigger flex min-h-7 w-full min-w-0 items-center gap-0.5 rounded-md px-0.5 text-sm text-sidebar-foreground transition-colors focus-within:bg-sidebar-accent hover:bg-sidebar-accent data-[active=true]:bg-sidebar-accent'
-      >
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type='button'
-              variant='ghost'
-              size='icon'
-              className={nestedActionVariants({ className: 'size-6 shrink-0 text-muted-foreground' })}
-              aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${project.name}`}
-              aria-expanded={isExpanded}
-              aria-controls={chatsId}
-              onClick={() => {
-                void onToggle();
-              }}
-            >
-              {isPending ? (
-                <Loader className='size-4' />
-              ) : (
-                <ChevronRight
-                  aria-hidden
-                  className={`size-3.5 transition-transform motion-reduce:transition-none ${isExpanded ? 'rotate-90' : ''}`}
-                />
-              )}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side='right'>{isExpanded ? 'Collapse project' : 'Expand project'}</TooltipContent>
-        </Tooltip>
+    <SidebarMenuItem className={cn(isExpanded && 'my-1 first:mt-0 last:mb-0')}>
+      <div data-slot='project-trigger' data-active={isActive} className={sidebarRowClass(isEditing)}>
+        <Button
+          type='button'
+          variant='ghost'
+          size='icon'
+          className={sidebarRowButtonClass}
+          aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${project.name}`}
+          aria-expanded={isExpanded}
+          aria-controls={chatsId}
+          onClick={() => {
+            void onToggle();
+          }}
+        >
+          {hasMark ? (
+            <StatusMark facts={facts} className='group-focus-within/row:hidden group-hover/row:hidden' />
+          ) : null}
+          <ChevronRight
+            aria-hidden
+            className={cn(
+              'size-3.5 transition-transform motion-reduce:transition-none',
+              isExpanded && 'rotate-90',
+              hasMark && 'hidden group-focus-within/row:block group-hover/row:block',
+            )}
+          />
+        </Button>
         {isEditing ? (
           <InlineTextEditor
             value={project.name}
             variant='ghost'
             shouldStartEditing
-            className='h-7 min-w-0 flex-1 [&_[data-slot=button]]:hidden [&_[data-slot=input]]:h-7'
+            className={sidebarRowEditorClass}
             onSave={onRenameSave}
             onEditingChange={onEditingChange}
           />
         ) : (
-          <ProjectRowContent
-            project={project}
-            row={row}
-            target={target}
-            isActive={isActive}
-            isPending={isPending}
-            onOpen={onOpen}
-          />
-        )}
-        {isEditing ? null : (
-          <span className='relative flex shrink-0 items-center'>
-            <span className='pointer-events-none absolute right-2 hidden items-center gap-1 transition-opacity md:flex md:group-focus-within/project-trigger:opacity-0 md:group-hover/project-trigger:opacity-0'>
-              <LivenessGlyph row={row} />
-              <ProjectSyncGlyph row={row} />
-            </span>
-            <span className='flex items-center transition-opacity md:opacity-0 md:group-focus-within/project-trigger:opacity-100 md:group-hover/project-trigger:opacity-100'>
+          <>
+            <SidebarRowLink
+              to={target}
+              name={project.name}
+              sentence={facts.sentence}
+              descriptionId={`project-status-${project.id}`}
+              isActive={isActive}
+              isPending={isPending}
+              onClick={onOpen}
+            />
+            <SidebarRowActions>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
                     type='button'
                     variant='ghost'
                     size='icon'
-                    className={nestedActionVariants({
-                      className: 'size-6 shrink-0 text-muted-foreground',
-                    })}
+                    className={sidebarRowButtonClass}
                     aria-label={`More actions for ${project.name}`}
                   >
                     <MoreHorizontal aria-hidden className='size-3.5' />
@@ -394,9 +382,7 @@ function ProjectNavigationItem({
                     type='button'
                     variant='ghost'
                     size='icon'
-                    className={nestedActionVariants({
-                      className: 'size-6 shrink-0 text-muted-foreground',
-                    })}
+                    className={sidebarRowButtonClass}
                     aria-label={`New chat in ${project.name}`}
                     disabled={!project.slugs}
                     onClick={() => {
@@ -408,8 +394,8 @@ function ProjectNavigationItem({
                 </TooltipTrigger>
                 <TooltipContent side='right'>New chat</TooltipContent>
               </Tooltip>
-            </span>
-          </span>
+            </SidebarRowActions>
+          </>
         )}
       </div>
       <CloseProjectDialog row={row} name={project.name} isOpen={askingToClose} onOpenChange={setAskingToClose} />
@@ -428,92 +414,52 @@ function ProjectNavigationItem({
 }
 
 /**
- * The `Live now` header (S46, I28).
+ * The group label: "Projects", how many are live, and *Close idle* (D5, D19).
  *
- * Progressive disclosure: it exists only while something is live, and it names
- * the budget's own way out — *Close all idle* closes exactly the projects the
- * registry says a policy may close.
+ * The budget stays stated (I28) in two words, and its way out — closing exactly
+ * the projects the registry says a policy may close — is the label's overflow
+ * menu, reachable on hover, focus and coarse pointers.
  *
- * @param props - The live set, in the registry's order.
- * @returns The header, while anything is live.
+ * @returns The label.
  */
-function LiveNowHeader({ projectIds }: { readonly projectIds: readonly string[] }): React.JSX.Element | undefined {
-  const summary = useLiveNow(projectIds);
+function ProjectsLabel(): React.JSX.Element {
+  const { projects, idleProjectIds } = useLiveNow();
   const { closeProject } = useSidebarCommands();
-  if (summary.projects === 0) {
-    return undefined;
-  }
   return (
-    <div className='flex min-w-0 items-center gap-2 px-1.5 pb-1'>
-      <span className='flex min-w-0 flex-col'>
-        <span className='text-xs font-medium text-foreground'>Live now</span>
-        <span className='truncate text-xs text-muted-foreground'>{liveNowText(summary)}</span>
-      </span>
-      {summary.idleProjectIds.length > 0 ? (
-        <Button
-          type='button'
-          variant='ghost'
-          size='sm'
-          className='ml-auto h-6 shrink-0 px-1.5 text-xs text-muted-foreground hover:text-foreground'
-          onClick={() => {
-            for (const projectId of summary.idleProjectIds) {
-              closeProject(projectId);
-            }
-          }}
-        >
-          Close all idle
-        </Button>
+    <div className='group/label flex h-7 items-center gap-1 pr-0.5'>
+      <SidebarGroupLabel className='min-w-0 flex-1'>
+        Projects
+        {projects > 0 ? <span className='ml-1.5 font-normal tabular-nums'>{`${String(projects)} live`}</span> : null}
+      </SidebarGroupLabel>
+      {idleProjectIds.length > 0 ? (
+        <span className='hidden group-focus-within/label:flex group-hover/label:flex pointer-coarse:flex'>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type='button'
+                variant='ghost'
+                size='icon'
+                className={sidebarRowButtonClass}
+                aria-label='More actions for projects'
+              >
+                <MoreHorizontal aria-hidden className='size-3.5' />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent side='right' align='start' className='w-48'>
+              <DropdownMenuItem
+                onSelect={() => {
+                  for (const projectId of idleProjectIds) {
+                    closeProject(projectId);
+                  }
+                }}
+              >
+                <X aria-hidden />
+                {`Close ${pluralize(idleProjectIds.length, 'idle project')}`}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </span>
       ) : null}
     </div>
-  );
-}
-
-/**
- * A project row's whole status surface — one subscriber, one repaint.
- *
- * The glyph, the second line and the branch chip sit outside the link, so the
- * link's accessible name stays the project's name.
- *
- * @param props - The project and the link's own state.
- * @returns The row's content.
- */
-function ProjectRowContent({
-  project,
-  row,
-  target,
-  isActive,
-  isPending,
-  onOpen,
-}: {
-  readonly project: ProjectListItem;
-  readonly row: ProjectSidebarRow;
-  readonly target: string;
-  readonly isActive: boolean;
-  readonly isPending: boolean;
-  readonly onOpen: () => void;
-}): React.JSX.Element {
-  const descriptionId = `project-status-${project.id}`;
-  return (
-    <>
-      <span className='flex min-w-0 flex-1 flex-col justify-center px-0.5 py-0.5'>
-        <Link
-          to={target}
-          aria-current={isActive ? 'page' : undefined}
-          aria-busy={isPending}
-          aria-describedby={descriptionId}
-          className='flex min-w-0 items-center overflow-hidden rounded-sm outline-hidden focus-visible:focus-outline'
-          onClick={onOpen}
-        >
-          <span className='truncate'>{project.name}</span>
-        </Link>
-        {row.detail === undefined ? null : (
-          <span className='truncate text-xs leading-tight text-muted-foreground'>{row.detail}</span>
-        )}
-      </span>
-      <BranchChip branch={row.branch} isDirty={row.dirty} />
-      <span id={descriptionId} className='sr-only'>
-        {projectRowDescription(project.name, row)}
-      </span>
-    </>
   );
 }

@@ -46,6 +46,11 @@ vi.mock('@taucad/ui/components/button', () => ({
     </button>
   ),
 }));
+vi.mock('@taucad/ui/components/tooltip', () => ({
+  Tooltip: ({ children }: { readonly children: ReactNode }): ReactNode => children,
+  TooltipTrigger: ({ children }: { readonly children: ReactNode }): ReactNode => children,
+  TooltipContent: ({ children }: { readonly children: ReactNode }) => <span data-testid='tooltip'>{children}</span>,
+}));
 vi.mock('@taucad/ui/components/dropdown-menu', () => ({
   DropdownMenu: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
   DropdownMenuTrigger: ({ children }: { readonly children: ReactNode }) => <span>{children}</span>,
@@ -66,7 +71,11 @@ vi.mock('@taucad/ui/components/dropdown-menu', () => ({
   ),
 }));
 vi.mock('#components/inline-text-editor.js', () => ({
-  InlineTextEditor: ({ value }: { readonly value: string }) => <input value={value} readOnly />,
+  InlineTextEditor: ({ value, className }: { readonly value: string; readonly className?: string }) => (
+    <div data-testid='inline-editor' className={className}>
+      <input value={value} readOnly />
+    </div>
+  ),
 }));
 vi.mock('@taucad/ui/components/skeleton', () => ({ Skeleton: () => <span data-testid='skeleton' /> }));
 
@@ -74,18 +83,12 @@ vi.mock('@taucad/ui/components/skeleton', () => ({ Skeleton: () => <span data-te
  * about what the row does with what they say. */
 const mockChatStatus = vi.fn();
 const mockCloseChat = vi.fn();
-const mockRetryChat = vi.fn();
 vi.mock('#hooks/use-sidebar-status.js', async (importOriginal) => {
   const original = await importOriginal<typeof SidebarStatusModule>();
   return {
     ...original,
     useChatSidebarStatus: (projectId: string, chatId: string) => mockChatStatus(projectId, chatId) as unknown,
-    useSidebarCommands: () => ({
-      closeChat: mockCloseChat,
-      retryChat: mockRetryChat,
-      closeProject: vi.fn(),
-      openProject: vi.fn(),
-    }),
+    useSidebarCommands: () => ({ closeChat: mockCloseChat, closeProject: vi.fn(), openProject: vi.fn() }),
   };
 });
 
@@ -126,7 +129,6 @@ const defaultChatsResult = {
   chats: Array.from({ length: 12 }, (_, index) => chat(index + 1)),
   isLoading: false,
   error: undefined,
-  retry: vi.fn(),
   updateChatName: vi.fn(),
   deleteChat: vi.fn(),
 };
@@ -202,7 +204,9 @@ describe('ProjectChatList', () => {
     });
   });
 
-  it('draws the state glyph, the second line and the screen-reader sentence beside the link', () => {
+  /* D1, D8, D16: one leading mark inside the rail; the sentence is the
+   * link's tooltip and description; branch facts are not the sidebar's (D4). */
+  it('leads the row with its mark and says its sentence on the link', () => {
     mockChatStatus.mockImplementation((_projectId: string, chatId: string) =>
       chatId === 'chat_12'
         ? status({ state: 'approval', pendingApprovalCount: 1, branch: 'sweep', unread: true })
@@ -212,43 +216,80 @@ describe('ProjectChatList', () => {
 
     const link = screen.getByRole('link', { name: 'Chat 12' });
     expect(link).toHaveAttribute('aria-describedby', 'chat-status-chat_12');
-    expect(document.querySelector('#chat-status-chat_12')?.textContent).toBe(
-      'Chat 12, needs your approval, 1 pending, unread, on branch sweep.',
-    );
-    expect(screen.getByText('Needs your approval · 1')).toBeInTheDocument();
-    expect(screen.getByText('sweep')).toBeInTheDocument();
-    expect(document.querySelector('[data-glyph=approval]')).toBeInTheDocument();
+    expect(document.querySelector('#chat-status-chat_12')?.textContent).toBe('Needs your approval · 1');
+    expect(screen.getByTestId('tooltip')).toHaveTextContent('Needs your approval · 1');
+    expect(screen.queryByText('sweep')).not.toBeInTheDocument();
+    const row = link.closest<HTMLElement>('[data-slot=chat-trigger]');
+    const slot = row?.querySelector<HTMLElement>('[data-slot=chat-status]');
+    expect(row?.firstElementChild).toBe(slot);
+    expect(slot?.dataset['glyph']).toBe('attention');
+    expect(slot?.querySelector('.absolute')).toHaveTextContent('1');
+    /* No bold for unread: the mark says it (D2). */
+    expect(link.querySelector('.font-medium')).toBeNull();
   });
 
-  it('shows nothing about a chat with no state at all', () => {
+  it('hangs the chats off a rail one slot in', () => {
+    render(<ProjectChatList project={project} isProjectActive />);
+    expect(document.querySelector('#project-chats-proj_one')).toHaveClass('ml-3.5', 'border-l', 'pl-1.5', 'gap-0');
+  });
+
+  it('keeps an empty status column and no sentence for a chat with no state at all', () => {
     render(<ProjectChatList project={project} isProjectActive />);
     expect(mockUseChatSession).toHaveBeenCalledWith('chat_12', 'proj_one');
     expect(screen.getByRole('link', { name: 'Chat 12' })).not.toHaveAttribute('aria-describedby');
-    expect(document.querySelector('[data-glyph]')).not.toBeInTheDocument();
-    expect(document.querySelector('[data-slot=branch-chip]')).not.toBeInTheDocument();
+    const slots = document.querySelectorAll<HTMLElement>('[data-slot=chat-status]');
+    expect(slots).toHaveLength(5);
+    expect([...slots].every((slot) => slot.dataset['glyph'] === 'none' && slot.childElementCount === 0)).toBe(true);
   });
 
-  it('closes one chat without touching the record', () => {
+  /* D9: in flight is a pulsing ring that stops under reduced motion. */
+  it('draws work in flight as a hollow pulsing ring, not a spinner', () => {
+    mockChatStatus.mockReturnValue(status({ state: 'tool', toolName: 'bash' }));
     render(<ProjectChatList project={project} isProjectActive />);
-    fireEvent.click(screen.getByRole('button', { name: 'Close Chat 12' }));
+    const slot = document.querySelector<HTMLElement>('[data-slot=chat-status]');
+    expect(slot?.dataset['glyph']).toBe('running');
+    expect(slot?.querySelector('svg')).toBeNull();
+    const ring = slot?.firstElementChild;
+    expect(ring).toHaveClass('ring-1', 'animate-pulse', 'motion-reduce:animate-none', 'rounded-full');
+    expect(ring?.className).not.toMatch(/\bbg-/u);
+  });
+
+  it('stops a running chat without touching the record', () => {
+    mockChatStatus.mockReturnValue(status({ state: 'working' }));
+    render(<ProjectChatList project={project} isProjectActive />);
+    fireEvent.click(screen.getByRole('button', { name: 'Stop Chat 12' }));
     expect(mockCloseChat).toHaveBeenCalledExactlyOnceWith('proj_one', 'chat_12');
   });
 
-  /* R12: a failed row that only says "Failed" is a dead end — the two things
-   * a person wants are the run again and the transcript. */
-  it('offers Retry and Open log on a failed chat, and on no other', () => {
+  /* D7, D18: the chat's banner owns Try again; the name already opens it. */
+  it('offers neither Retry nor Open log on a failed chat, and no Stop on a finished one', () => {
     mockChatStatus.mockImplementation((_projectId: string, chatId: string) =>
       chatId === 'chat_12' ? status({ state: 'failed', failureReason: 'the model refused' }) : status(),
     );
     render(<ProjectChatList project={project} isProjectActive />);
 
-    expect(screen.getAllByRole('button', { name: /^Retry / })).toHaveLength(1);
-    fireEvent.click(screen.getByRole('button', { name: 'Retry Chat 12' }));
-    expect(mockRetryChat).toHaveBeenCalledExactlyOnceWith('chat_12');
-    expect(screen.getByRole('link', { name: 'Open log for Chat 12' })).toHaveAttribute(
-      'href',
-      '/w/home/project%20one?chat=chat_12',
-    );
+    expect(screen.queryByRole('button', { name: /retry/iu })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /open log/iu })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Stop / })).not.toBeInTheDocument();
+    expect(document.querySelector('[data-slot=chat-status][data-glyph=failed]')).toBeInTheDocument();
+  });
+
+  it('shows a failure row with no control when the chats could not load', () => {
+    mockUseChats.mockReturnValue({ ...defaultChatsResult, chats: [], error: new Error('offline') });
+    render(<ProjectChatList project={project} isProjectActive />);
+    const failure = document.querySelector('[data-slot=failure-row]');
+    expect(failure).toHaveTextContent("Couldn't load chats");
+    expect(failure?.querySelector('button, a')).toBeNull();
+  });
+
+  /* D17: renaming keeps the status column and outlines the whole row. */
+  it('outlines the whole row while it is renamed and keeps its status column', () => {
+    mockChatStatus.mockReturnValue(status({ state: 'working' }));
+    render(<ProjectChatList project={project} isProjectActive />);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Rename' })[0]!);
+    const row = screen.getByTestId('inline-editor').closest('[data-slot=chat-trigger]');
+    expect(row).toHaveClass('focus-outline');
+    expect(row?.querySelector('[data-slot=chat-status]')).toBeInTheDocument();
   });
 
   it('groups chats by day only when both days are on screen', () => {

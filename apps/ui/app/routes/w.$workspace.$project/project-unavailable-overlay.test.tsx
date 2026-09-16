@@ -54,12 +54,12 @@ describe('ProjectUnavailableOverlay', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText('Project Unavailable')).toBeInTheDocument();
-    expect(screen.getByText('Tau could not load this project.')).toBeInTheDocument();
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: "Couldn't open this project" })).toBeInTheDocument();
     expect(screen.getByText('Scoped tau.json could not be read')).toBeInTheDocument();
     expect(screen.queryByText(/doesn't exist|deleted/i)).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(projectSend).toHaveBeenCalledWith({ type: 'reloadProject' });
   });
 
@@ -71,7 +71,7 @@ describe('ProjectUnavailableOverlay', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText('Project Unavailable')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: "Couldn't reach this project's files" })).toBeInTheDocument();
     expect(screen.getByText('Worker connection failed')).toBeInTheDocument();
     expect(screen.queryByText(/doesn't exist|deleted/i)).not.toBeInTheDocument();
   });

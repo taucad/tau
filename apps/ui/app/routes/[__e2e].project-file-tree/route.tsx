@@ -60,6 +60,47 @@ const seedFiles = Object.fromEntries([
   ['src/readme.md', { content: encode('# File tree e2e fixture\n') }],
 ]) as Record<string, { content: Uint8Array<ArrayBuffer> }>;
 
+const mebibyte = 1024 * 1024;
+
+/**
+ * The same seed, at a size a latency budget is measured against (B1).
+ *
+ * `?files=` adds that many small source files and `?binaryMib=` one binary of
+ * that size, because W6's ceilings are stated for a project with real bulk in
+ * it — a cut over five files says nothing about the one a person actually has.
+ * Both default to nothing, so every existing fixture URL seeds exactly what it
+ * seeded before.
+ *
+ * @param fileCount - Extra source files to seed.
+ * @param binaryMib - Size of the single binary asset, in MiB.
+ * @returns The seed map `createProject` is given.
+ */
+const buildSeedFiles = (fileCount: number, binaryMib: number): Record<string, { content: Uint8Array<ArrayBuffer> }> => {
+  const files = { ...seedFiles };
+  for (let index = 0; index < fileCount; index += 1) {
+    files[`public/models/bulk/part-${String(index).padStart(4, '0')}.js`] = {
+      content: encode(boxCornerModel.replace('width, height, depth', `width + ${String(index)}, height, depth`)),
+    };
+  }
+  if (binaryMib > 0) {
+    /* Incompressible bytes: a run of zeroes would be deflated away and measure
+     * the compressor rather than the export it stands in for. */
+    const bytes = new Uint8Array(binaryMib * mebibyte);
+    crypto.getRandomValues(bytes.subarray(0, 65_536));
+    for (let offset = 65_536; offset < bytes.length; offset += 65_536) {
+      bytes.set(bytes.subarray(0, Math.min(65_536, bytes.length - offset)), offset);
+    }
+    files['public/exports/bulk.stl'] = { content: bytes };
+  }
+  return files;
+};
+
+/** A bounded, non-negative integer from one search parameter. */
+const readCount = (value: string | null, limit: number): number => {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, limit) : 0;
+};
+
 const createSeedProject = (): Omit<ProjectManifest, '$schema' | 'id'> => ({
   name: 'sgenoud/models file-tree e2e',
   description: 'Deterministic local seed for the project file tree e2e surface.',
@@ -96,6 +137,13 @@ const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
    * picker cannot offer browser-host from the homepage, where no project exists).
    */
   const seededPrompt = searchParameters.get('prompt') ?? undefined;
+  const bulkFileCount = readCount(searchParameters.get('files'), 2000);
+  const binaryMib = readCount(searchParameters.get('binaryMib'), 64);
+  /* The composer without a seeded turn: the branch picker is the only
+   * always-reachable *New branch* in a one-branch project (W7 review R1), so a
+   * fixture that needs branches has to be able to open the composer without
+   * also starting an agent run. */
+  const chatOpen = searchParameters.get('chat') === '1';
   const [error, setError] = React.useState<string | undefined>(undefined);
   const seedStarted = React.useRef(false);
 
@@ -128,7 +176,7 @@ const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
           location: await resolveLocation(),
           project: createSeedProject(),
           activeKernel: 'replicad',
-          files: seedFiles,
+          files: buildSeedFiles(bulkFileCount, binaryMib),
           ...(seededPrompt === undefined
             ? {}
             : {
@@ -138,7 +186,7 @@ const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
           editorState: {
             panelState: {
               desktopLayout: {
-                chatOpen: seededPrompt !== undefined,
+                chatOpen: seededPrompt !== undefined || chatOpen,
                 workbenchOpen: true,
                 workbenchWidth: 460,
                 compactAuxiliary: 'workbench',

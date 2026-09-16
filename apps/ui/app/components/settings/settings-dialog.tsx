@@ -3,12 +3,7 @@ import { ArrowLeft } from 'lucide-react';
 import { AccountSettings } from '#components/auth/settings/account/account-settings.js';
 import { SecuritySettings } from '#components/auth/settings/security/security-settings.js';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@taucad/ui/components/dialog';
-import {
-  useSettingsDialog,
-  closeSettingsDialog,
-  setSettingsSection,
-  openSettingsDialog,
-} from '#hooks/use-settings-dialog.js';
+import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import type { SettingsSection } from '#hooks/use-settings-dialog.js';
 import { CloudBillingSettings } from '#cloud/settings-billing.js';
 import { FileSystemSettings } from '#components/settings/filesystem-settings.js';
@@ -100,15 +95,18 @@ function SettingsContent({ section }: { readonly section: SettingsSection }): Re
 
 /** URL-backed settings navigation with a searchable catalogue of individual controls. */
 export function SettingsDialog(): React.JSX.Element {
-  const { isOpen, section: activeSection } = useSettingsDialog();
+  const { isOpen, section: activeSection, open, close } = useSettingsDialog();
   useKeybinding({ key: ',', modKey: true }, () => {
-    openSettingsDialog();
+    open();
   });
-  const handleOpenChange = useCallback((open: boolean) => {
-    if (!open) {
-      closeSettingsDialog();
-    }
-  }, []);
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (!nextOpen) {
+        close();
+      }
+    },
+    [close],
+  );
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       {isOpen ? <SettingsSurface activeSection={activeSection} /> : null}
@@ -117,6 +115,7 @@ export function SettingsDialog(): React.JSX.Element {
 }
 
 function SettingsSurface({ activeSection }: { readonly activeSection: SettingsSection }): React.JSX.Element {
+  const { open: openSection, close } = useSettingsDialog();
   const [query, setQuery] = useState('');
   const [destination, setDestination] = useState<{ section: SettingsSection; id?: string }>();
   const searchRef = useRef<HTMLInputElement>(null);
@@ -175,7 +174,7 @@ function SettingsSurface({ activeSection }: { readonly activeSection: SettingsSe
   }, [activeSection, destination]);
 
   const navigate = (section: SettingsSection, id?: string): void => {
-    setSettingsSection(section);
+    openSection(section);
     setDestination({ section, id });
   };
   const clearSearch = (): void => {
@@ -197,7 +196,7 @@ function SettingsSurface({ activeSection }: { readonly activeSection: SettingsSe
       <DialogDescription className='sr-only'>Application settings and preferences</DialogDescription>
       <div className='flex min-h-0 flex-col md:flex-row'>
         <aside className='flex shrink-0 flex-col gap-4 border-b bg-sidebar p-4 max-md:max-h-[45%] md:w-64 md:border-r md:border-b-0'>
-          <Button variant='ghost' className='w-full justify-start' onClick={closeSettingsDialog}>
+          <Button variant='ghost' className='w-full justify-start' onClick={close}>
             <ArrowLeft className='size-4' aria-hidden='true' /> Back to app
           </Button>
           <form

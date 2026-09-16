@@ -122,7 +122,13 @@ vi.mock('#routes/w.$workspace.$project/chat-message.js', () => ({
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-revision-marker.js', () => ({
-  ChatRevisionMarker: () => null,
+  ChatRevisionMarker: ({
+    userMessageId,
+    isLatestTurn,
+  }: {
+    readonly userMessageId: string;
+    readonly isLatestTurn: boolean;
+  }) => <div data-testid='turn-revision' data-user-message-id={userMessageId} data-latest={String(isLatestTurn)} />,
 }));
 
 vi.mock('#routes/w.$workspace.$project/scroll-down-button.js', () => ({
@@ -320,6 +326,39 @@ describe('ChatHistory — turn group rendering', () => {
     expect(lastGroup.className).toContain('min-h-(--chat-live-turn-min-h)');
     const lastGroupMessages = lastGroup.querySelectorAll<HTMLElement>('[data-testid="chat-message"]');
     expect([...lastGroupMessages].map((node) => node.dataset['messageId'])).toEqual(['u2', 'a2', 'a3']);
+  });
+
+  it('should anchor one revision summary directly after each request, before its replies', () => {
+    setMockMessages([
+      message('u1', 'user'),
+      message('a1', 'assistant'),
+      message('u2', 'user'),
+      message('a2', 'assistant'),
+      message('a3', 'assistant'),
+    ]);
+    render(<ChatHistory />);
+    const [firstGroup, lastGroup] = screen
+      .getAllByTestId('virtuoso-item')
+      .map((item) => item.firstElementChild as HTMLElement);
+    const order = (group: HTMLElement | undefined): string[] =>
+      [...(group?.children ?? [])].map((node) =>
+        node instanceof HTMLElement
+          ? `${node.dataset['testid'] ?? ''}:${node.dataset['messageId'] ?? node.dataset['userMessageId'] ?? ''}`
+          : '',
+      );
+    const summaryOf = (group: HTMLElement | undefined): HTMLElement | undefined =>
+      group?.querySelector<HTMLElement>('[data-testid="turn-revision"]') ?? undefined;
+
+    expect(order(firstGroup)).toEqual(['chat-message:u1', 'turn-revision:u1', 'chat-message:a1']);
+    expect(order(lastGroup).slice(0, 4)).toEqual([
+      'chat-message:u2',
+      'turn-revision:u2',
+      'chat-message:a2',
+      'chat-message:a3',
+    ]);
+    expect(lastGroup?.querySelectorAll('[data-testid="turn-revision"]')).toHaveLength(1);
+    expect(summaryOf(firstGroup)?.dataset['latest']).toBe('false');
+    expect(summaryOf(lastGroup)?.dataset['latest']).toBe('true');
   });
 
   it('should render a leading assistant message in its own group when no user message precedes it', () => {

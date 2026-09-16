@@ -272,16 +272,25 @@ const notifyRegistry = (): void => {
 
 const stopRun = vi.fn();
 const retryRun = vi.fn();
+const acquireSession = vi.fn(() => ({}));
+const releaseSession = vi.fn();
 
 beforeEach(() => {
   resetRegistry();
   stopRun.mockReset();
   retryRun.mockReset();
+  acquireSession.mockClear();
+  releaseSession.mockClear();
   registrySend.mockReset();
   sessionSend.mockReset();
-  vi.mocked(useChatSessionStore).mockReturnValue({ stopRun, retryRun } as unknown as ReturnType<
-    typeof useChatSessionStore
-  >);
+  /* `ProjectChatItem` acquires a chat session on mount (`useChatSession`), so
+   * the store mock owes the two verbs that acquisition uses. */
+  vi.mocked(useChatSessionStore).mockReturnValue({
+    stopRun,
+    retryRun,
+    acquire: acquireSession,
+    release: releaseSession,
+  } as unknown as ReturnType<typeof useChatSessionStore>);
   vi.mocked(useSessions).mockImplementation(() => fakeRegistry.actor);
   vi.mocked(peekRevisionClient).mockImplementation(
     (projectId: string) => fakeRegistry.revisionClients.get(projectId) as ReturnType<typeof peekRevisionClient>,

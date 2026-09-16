@@ -188,9 +188,17 @@ describe('the projection comparator (P52, W18 DEF-6)', () => {
       fetchOnly: false,
       provider: undefined,
       repositoryId: undefined,
+      quota: undefined,
     } as const,
     publish: { phase: 'idle', tags: [], publicationId: undefined, shareUrl: undefined, error: undefined } as const,
-    sync: { state: 'noRemote', pendingCount: 0, online: true, conflictRef: undefined, error: undefined } as const,
+    sync: {
+      state: 'noRemote',
+      pendingCount: 0,
+      online: true,
+      conflictRef: undefined,
+      error: undefined,
+      reason: undefined,
+    } as const,
     branches: [],
     branchVerb: { busy: false, asking: false, operation: undefined, branch: undefined, question: undefined },
     conflicts: [],
@@ -455,6 +463,41 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     const rows = await root.log();
     expect(rows.map((row) => row.source)).not.toContain('user');
     expect(rows[0]?.turnId).toBe('turn-1');
+  });
+
+  /*
+   * C16 (contract §6), the worker leg. `saveRevision` used to be fire and
+   * forget, so the page's `hidden` registrant had nothing to wait for and
+   * `pagehide` could offer a pack before the cut existed. The frame the page
+   * waits on has to arrive *after* the revision is in the log, not before.
+   */
+  it('should answer a saveRevision only once its cut has settled (C16)', async () => {
+    const fixture = harness(['alpha']);
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.scad', 'cube(10);');
+    const alpha = await fixture.open('alpha');
+    await settle(20);
+    const root = await fixture.root('alpha');
+    const before = (await root.log()).length;
+
+    await project.writeFile('main.scad', 'cube(20);');
+    fixture.announce('alpha', ['main.scad']);
+    alpha.send({ command: 'saveRevision', id: 77, trigger: 'close' });
+
+    let answer: WorkerRevisionResponse | undefined;
+    let rowsWhenAnswered = before;
+    for (let attempt = 0; attempt < 60 && answer === undefined; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- polling the port's own answer.
+      await settle(4);
+      answer = alpha.frames.find((frame) => (frame.type === 'result' || frame.type === 'error') && frame.id === 77);
+      if (answer !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- read the log at the instant the frame landed.
+        rowsWhenAnswered = (await root.log()).length;
+      }
+    }
+
+    expect(answer).toEqual({ type: 'result', id: 77, result: { kind: 'saved' } });
+    expect(rowsWhenAnswered).toBeGreaterThan(before);
   });
 
   it('should mint one strictly increasing generation per content-change event (F9, F4)', async () => {

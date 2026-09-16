@@ -64,7 +64,10 @@ export function RevisionStatusAction(): React.JSX.Element | undefined {
             <span className='max-w-24 truncate'>{line}</span>
             {revisionName === undefined ? null : (
               <>
-                <span aria-hidden className='hidden text-muted-foreground @xl/viewer:inline'>
+                {/* R33 reads `main · Rev 3` everywhere, so the chip does too at
+                    every width; hiding it below `@xl/viewer` made the narrow
+                    chip the one surface that said `main Rev 1` (C47). */}
+                <span aria-hidden className='text-muted-foreground'>
                   ·
                 </span>
                 <span className='font-mono'>{revisionName}</span>

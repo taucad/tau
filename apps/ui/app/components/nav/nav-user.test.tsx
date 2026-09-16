@@ -3,6 +3,7 @@ import { render, screen, within } from '@testing-library/react';
 import { isValidElement } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router';
 import { NavUser } from '#components/nav/nav-user.js';
 import { metaConfig } from '#constants/meta.constants.js';
 
@@ -74,7 +75,7 @@ describe('NavUser', () => {
   });
 
   it('shows product navigation, upgrade, and settings to free users', () => {
-    render(<NavUser />);
+    render(<NavUser />, { wrapper: MemoryRouter });
 
     expect(screen.getByText('Upgrade to Pro')).toBeDefined();
     expect(screen.queryByText('Billing')).not.toBeInTheDocument();
@@ -88,7 +89,7 @@ describe('NavUser', () => {
   it('shows billing instead of upgrade to paid users', () => {
     useEntitlementsMock.mockReturnValue({ tier: 'pro' });
 
-    render(<NavUser />);
+    render(<NavUser />, { wrapper: MemoryRouter });
 
     expect(screen.getByText('Billing')).toBeInTheDocument();
     expect(screen.queryByText('Upgrade to Pro')).not.toBeInTheDocument();
@@ -96,7 +97,7 @@ describe('NavUser', () => {
   });
 
   it('moves product help into its own menu with the current version', () => {
-    render(<NavUser />);
+    render(<NavUser />, { wrapper: MemoryRouter });
 
     expect(screen.getByRole('button', { name: 'Help' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Documentation' })).toHaveAttribute('href', 'https://docs.tau.new');
@@ -112,7 +113,7 @@ describe('NavUser', () => {
   it('shows connectivity in the footer row and user menu only while offline', () => {
     useNetworkConnectivityMock.mockReturnValue(false);
 
-    render(<NavUser />);
+    render(<NavUser />, { wrapper: MemoryRouter });
 
     expect(screen.getByRole('status', { name: 'Offline' })).toBeInTheDocument();
     expect(screen.getByText('Offline — online features unavailable')).toBeInTheDocument();

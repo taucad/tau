@@ -12,7 +12,7 @@ import { modelTier, modelTiers, useCreditAffordance } from '#components/billing/
 import type { CreditAffordance } from '#components/billing/credit-estimate.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
-import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
+import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
 
@@ -66,6 +66,7 @@ export const ChatModelSelector = memo(function ({
   ...properties
 }: ChatModelSelectorProps): React.JSX.Element {
   const [open, setOpen] = useState(false);
+  const { open: openSettings } = useSettingsDialog();
 
   const handleOpenFromShortcut = useCallback(() => {
     setOpen(true);
@@ -206,7 +207,7 @@ export const ChatModelSelector = memo(function ({
               type='button'
               className={cn(menuItemVariants({ highlight: 'selected' }), 'h-auto w-full')}
               onClick={() => {
-                openSettingsDialog('models');
+                openSettings('models');
               }}
             >
               <Plus />

@@ -9,7 +9,9 @@ let registered: CommandPaletteItem[] = [];
 vi.mock('@better-auth-ui/react', () => ({ useSession: () => ({ data: undefined }) }));
 vi.mock('#lib/auth-client.js', () => ({ authClient: {} }));
 vi.mock('#hooks/use-auth-links.js', () => ({ useAuthLinks: () => ({ signIn: '/in', signOut: '/out' }) }));
-vi.mock('#hooks/use-settings-dialog.js', () => ({ openSettingsDialog: vi.fn() }));
+vi.mock('#hooks/use-settings-dialog.js', () => ({
+  useSettingsDialog: () => ({ isOpen: false, section: 'general', open: vi.fn(), close: vi.fn() }),
+}));
 vi.mock('#components/layout/command-palette.js', () => ({
   useCommandPaletteItems: (_id: string, factory: () => CommandPaletteItem[]) => {
     registered = factory();

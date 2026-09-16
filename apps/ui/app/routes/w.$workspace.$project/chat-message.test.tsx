@@ -85,8 +85,8 @@ vi.mock('#routes/w.$workspace.$project/chat-message-planning.js', () => ({
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-message-reasoning.js', () => ({
-  ChatMessageReasoning() {
-    return <div data-testid='chat-message-reasoning' />;
+  ChatMessageReasoning({ parts }: { readonly parts: ReadonlyArray<{ readonly text: string }> }) {
+    return <div data-testid='chat-message-reasoning'>{parts.map((part) => part.text).join('|')}</div>;
   },
 }));
 
@@ -159,7 +159,9 @@ vi.mock('#routes/w.$workspace.$project/chat-message-tool-glob-search.js', () => 
   ChatMessageToolGlobSearch: () => <div data-testid='tool-glob-search' />,
 }));
 vi.mock('#routes/w.$workspace.$project/chat-message-tool-get-kernel-result.js', () => ({
-  ChatMessageToolGetKernelResult: () => <div data-testid='tool-get-kernel-result' />,
+  ChatMessageToolGetKernelResult: ({ part }: { readonly part: { readonly state: string } }) => (
+    <div data-testid='tool-get-kernel-result' data-state={part.state} />
+  ),
 }));
 vi.mock('#routes/w.$workspace.$project/chat-message-tool-screenshot.js', () => ({
   ChatMessageToolScreenshot: () => <div data-testid='tool-screenshot' />,
@@ -181,14 +183,10 @@ vi.mock('#components/chat/context-chip.js', () => ({
 }));
 
 vi.mock('#components/chat/chat-activity-group.js', () => ({
-  ChatActivityGroup: ({ children }: { readonly children: React.ReactNode }) => (
-    <div data-testid='chat-activity-group'>{children}</div>
-  ),
-}));
-
-vi.mock('#components/chat/chat-activity-section.js', () => ({
-  ChatActivitySection: ({ children }: { readonly children: React.ReactNode }) => (
-    <div data-testid='chat-activity-section'>{children}</div>
+  ChatActivityGroup: ({ children, summary }: { readonly children: React.ReactNode; readonly summary: string }) => (
+    <div data-testid='chat-activity-group' data-summary={summary}>
+      {children}
+    </div>
   ),
 }));
 
@@ -377,6 +375,35 @@ describe('ChatMessage use_skill tool rendering', () => {
   });
 });
 
+describe('ChatMessage activity composition', () => {
+  it('renders adjacent reasoning chunks in one disclosure and preserves tool boundaries', () => {
+    const message: MyUIMessage = {
+      id: 'msg-reasoning-chain',
+      role: 'assistant',
+      parts: [
+        { type: 'reasoning', text: 'Inspecting the model', state: 'done' },
+        { type: 'reasoning', text: 'Confirming dimensions', state: 'done' },
+        {
+          type: 'tool-read_file',
+          toolCallId: 'read-1',
+          state: 'input-available',
+          input: { targetFile: 'main.scad' },
+        },
+        { type: 'reasoning', text: 'Preparing the answer', state: 'done' },
+      ],
+    };
+    setMessages([message], 'streaming');
+
+    render(<ChatMessage messageId={message.id} />);
+
+    const reasoningBlocks = screen.getAllByTestId('chat-message-reasoning');
+    expect(reasoningBlocks).toHaveLength(2);
+    expect(reasoningBlocks[0]).toHaveTextContent('Inspecting the model|Confirming dimensions');
+    expect(reasoningBlocks[1]).toHaveTextContent('Preparing the answer');
+    expect(screen.getByTestId('chat-activity-group')).toHaveAttribute('data-summary', 'Reading files');
+  });
+});
+
 describe('ChatMessage assistant actions', () => {
   it('does not render retry actions below assistant messages', () => {
     setMessages([assistantMessage('msg-1', 'Hello there')]);
@@ -547,6 +574,32 @@ describe('ChatMessage external Tau MCP porcelain', () => {
     render(<ChatMessage messageId={message.id} />);
 
     expect(screen.queryByTestId('tool-get-kernel-result')).toBeNull();
+  });
+
+  it('keeps a preliminary qualified call in the same native loading card', () => {
+    const preliminaryPart = {
+      type: 'dynamic-tool',
+      toolCallId: 'call-preliminary-kernel',
+      toolName: 'get_kernel_result',
+      state: 'output-available',
+      input: { targetFile: 'main.scad' },
+      output: { status: 'pending' },
+      preliminary: true,
+      toolMetadata: {
+        tau: { origin: 'external', nativeName: 'get_kernel_result', presentation: 'tau-mcp' },
+      },
+    };
+    const message: MyUIMessage = {
+      id: 'msg-preliminary-kernel',
+      role: 'assistant',
+      parts: [preliminaryPart as MyUIMessage['parts'][number]],
+    };
+    setMessages([message], 'streaming');
+
+    render(<ChatMessage messageId={message.id} />);
+
+    expect(screen.getByTestId('chat-activity-group')).toHaveAttribute('data-summary', 'Rendering models');
+    expect(screen.getByTestId('tool-get-kernel-result')).toHaveAttribute('data-state', 'input-available');
   });
 });
 

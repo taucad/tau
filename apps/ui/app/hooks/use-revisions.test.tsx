@@ -230,7 +230,8 @@ describe('useRevisions', () => {
         revisionId: 'rev-3',
         n: 3,
         createdAt: 1_788_307_200_000,
-        summary: 'Agent turn u3',
+        /* The generator's `Agent turn <turnId>` is never product copy (C37). */
+        summary: 'Agent change',
       });
     });
   });
@@ -351,5 +352,66 @@ describe('useRevisionChanges', () => {
     const { result } = renderHook(() => useRevisionChanges(card), { wrapper });
 
     expect(result.current).toEqual([{ path: 'main.scad', kind: 'modified' }]);
+  });
+
+  /*
+   * B9/C51: the view is one object until the graph moves.
+   *
+   * `useQueries` without `combine` hands back a fresh array on every render, so
+   * the memo below it never hit and the whole view — `revisions`, `byTurnId`,
+   * `selectedIds`, `branchFacts` — was rebuilt per render per consumer,
+   * including one per chat turn.
+   */
+  it('returns the same view across renders while the store has not moved', async () => {
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1, turnId: 'u1' })];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-1' };
+
+    const { result, rerender } = renderHook(() => useRevisions(), { wrapper });
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(1);
+    });
+
+    const first = result.current;
+    rerender();
+    rerender();
+
+    expect(result.current).toBe(first);
+  });
+
+  /* C37/C45: no surface renders the generator's placeholder or a raw actor id. */
+  it('formats the title and the actor a person reads', async () => {
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-1', revisionNumber: 1, turnId: 'u1', summary: 'Agent turn u1' }),
+      row({
+        revisionId: 'rev-2',
+        revisionNumber: 2,
+        source: 'user',
+        actor: 'anon:2722de98',
+        summary: 'Saved changes (save)',
+        trigger: 'save',
+      }),
+      row({
+        revisionId: 'rev-3',
+        revisionNumber: 3,
+        source: 'user',
+        actor: 'anon:2722de98',
+        summary: 'Tapered wall',
+        trigger: 'save',
+      }),
+    ];
+
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(3);
+    });
+
+    const summaries = result.current.revisions.map((revision) => revision.summary);
+    expect(summaries).toEqual(['Agent change', 'Saved changes', 'Tapered wall']);
+    expect(summaries.some((summary) => /\(save\)|msg_|Agent turn /u.test(summary))).toBe(false);
+    /* A hand-written title is never rewritten. */
+    expect(result.current.revisions[2]?.summary).toBe('Tapered wall');
+    /* The pseudonym stays stable and per workspace; the scheme is not copy. */
+    expect(result.current.revisions[1]?.actor).toBe('Anonymous · 2722de98');
+    expect(result.current.revisions[0]?.actor).toBe('tau-browser-agent-host');
   });
 });

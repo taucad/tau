@@ -57,6 +57,7 @@ import {
   AlertDialogTitle,
 } from '@taucad/ui/components/alert-dialog';
 import { useCookie } from '#hooks/use-cookie.js';
+import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { isFunction } from '#utils/function.utils.js';
 import { ProjectActionDropdown } from '#components/project-library/project-action-dropdown.js';
 import { Checkbox } from '@taucad/ui/components/checkbox';
@@ -64,6 +65,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import { formatRelativeTime } from '#utils/date.utils.js';
 import { Loader } from '#components/ui/loader.js';
 import { cookieName } from '#constants/cookie.constants.js';
+import { searchParameterName } from '#constants/search-parameter.constants.js';
+import { flagParameter } from '#utils/search-parameter.codecs.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
 import { NewProjectChatComposer } from '#components/chat/new-project-chat-composer.js';
@@ -93,7 +96,13 @@ const recoveryDirectoryName = (recovery: PendingProjectRecovery): string =>
 
 export function ProjectLibrary(): React.JSX.Element {
   const [viewMode, setViewMode] = useCookie<'grid' | 'table'>(cookieName.projectViewMode, 'grid');
-  const [showDeleted, setShowDeleted] = useState(false);
+  /*
+   * D1: the Trash is a place, not a menu tick. `/projects?trash=1` is what the
+   * trashed project's notice links to and what a person can bookmark or send,
+   * so the view lives in the URL rather than in component state that a reload
+   * throws away.
+   */
+  const [showDeleted, setShowDeleted] = useSearchParameter(searchParameterName.trash, flagParameter);
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<ProjectListItem | undefined>();
   const [repairTarget, setRepairTarget] = useState<WorkspaceBindingRepairGroup | undefined>();
   const {
@@ -115,9 +124,12 @@ export function ProjectLibrary(): React.JSX.Element {
   const projectManager = useProjectManager();
   const { closeProject } = useSidebarCommands();
 
-  const handleToggleDeleted = useCallback((value: boolean) => {
-    setShowDeleted(value);
-  }, []);
+  const handleToggleDeleted = useCallback(
+    (value: boolean) => {
+      setShowDeleted(value);
+    },
+    [setShowDeleted],
+  );
 
   // The toast follows the mutation, never precedes it: a row that has already
   // vanished is a failure, not a silent success (DF3).
@@ -399,7 +411,7 @@ export function ProjectLibrary(): React.JSX.Element {
       <div className='mb-4 flex justify-end gap-2'>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant='outline' size='icon'>
+            <Button variant='outline' size='icon' aria-label='View mode'>
               {viewMode === 'grid' ? <Grid /> : <TableIcon />}
             </Button>
           </DropdownMenuTrigger>
@@ -424,7 +436,7 @@ export function ProjectLibrary(): React.JSX.Element {
         </DropdownMenu>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant='outline' size='icon'>
+            <Button variant='outline' size='icon' aria-label='Settings'>
               <Cog className='size-4' />
             </Button>
           </DropdownMenuTrigger>

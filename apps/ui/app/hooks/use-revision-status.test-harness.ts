@@ -36,11 +36,19 @@ const emptyStatus = (): RevisionStatusProjection => ({
     fetchOnly: false,
     provider: undefined,
     repositoryId: undefined,
+    quota: undefined,
   },
   branches: [{ name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] }],
   branchVerb: { busy: false, asking: false, operation: undefined, branch: undefined, question: undefined },
   publish: { phase: 'idle', tags: [], publicationId: undefined, shareUrl: undefined, error: undefined },
-  sync: { state: 'noRemote', pendingCount: 0, online: true, conflictRef: undefined, error: undefined },
+  sync: {
+    state: 'noRemote',
+    pendingCount: 0,
+    online: true,
+    conflictRef: undefined,
+    error: undefined,
+    reason: undefined,
+  },
   conflicts: [],
 });
 
@@ -55,6 +63,8 @@ export const revisionStatusHarness = {
   rows: [] as readonly RevisionRow[],
   rowsByBranch: new Map<string, readonly RevisionRow[]>(),
   diff: [] as readonly RevisionDiffEntry[],
+  /** Every revision a surface asked for a diff of, in order (C52). */
+  diffRequests: [] as string[],
   comparison: emptyComparison(),
   comparisonError: undefined as Error | undefined,
   toasts: new Set<(toast: RevisionToast) => void>(),
@@ -97,6 +107,7 @@ export const revisionStatusHarness = {
     this.rows = [];
     this.rowsByBranch.clear();
     this.diff = [];
+    this.diffRequests.length = 0;
     this.comparison = emptyComparison();
     this.comparisonError = undefined;
     this.toasts.clear();
@@ -111,10 +122,12 @@ export const revisionStatusHarness = {
  *
  * @returns The hook surface, backed by {@link revisionStatusHarness}.
  */
-export const revisionStatusMock = (): Record<string, unknown> => ({
-  useRevisionStatus: () => (revisionStatusHarness.connected ? revisionStatusHarness.status : undefined),
-  useRevisionCommands: () => revisionStatusHarness.commands,
-  useRevisionClient: () => ({
+export const revisionStatusMock = (): Record<string, unknown> => {
+  /* One client object for the whole suite, because the product's
+   * `useRevisionClient` is memoized on the worker: a mock that minted a fresh
+   * object per render made every downstream `useMemo` miss, which is the very
+   * defect B9 exists to catch. */
+  const client = {
     status: () => revisionStatusHarness.status,
     subscribe: () => () => undefined,
     subscribeEvents: () => () => undefined,
@@ -126,13 +139,22 @@ export const revisionStatusMock = (): Record<string, unknown> => ({
     log: async (request?: { readonly branch?: string }) =>
       (request?.branch === undefined ? undefined : revisionStatusHarness.rowsByBranch.get(request.branch)) ??
       revisionStatusHarness.rows,
-    diff: async () => revisionStatusHarness.diff,
+    diff: async (revisionId: string) => {
+      revisionStatusHarness.diffRequests.push(revisionId);
+      return revisionStatusHarness.diff;
+    },
     compare: async () => {
       if (revisionStatusHarness.comparisonError !== undefined) throw revisionStatusHarness.comparisonError;
       return revisionStatusHarness.comparison;
     },
     send: () => undefined,
+    saveRevision: async () => undefined,
     open: () => undefined,
     close: () => undefined,
-  }),
-});
+  };
+  return {
+    useRevisionStatus: () => (revisionStatusHarness.connected ? revisionStatusHarness.status : undefined),
+    useRevisionCommands: () => revisionStatusHarness.commands,
+    useRevisionClient: () => client,
+  };
+};

@@ -37,6 +37,8 @@ import { CopyButton } from '#components/copy-button.js';
 import { createImportedProjectFiles } from '#utils/file-reader.utils.js';
 import { projectUrl } from '#utils/project-url.utils.js';
 import { useProjectSlugs } from '#hooks/use-project-slug-route.js';
+import { useSearchParameter } from '#hooks/use-search-parameter.js';
+import { flagParameter } from '#utils/search-parameter.codecs.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { parseProjectManifestBytes, projectToManifest, serializeProjectManifest } from '@taucad/types';
 import { largeObjectThresholdBytes } from '@taucad/revisions';
@@ -52,6 +54,14 @@ export const handle: Handle = {
 };
 
 const readSplatPath = (params: Record<string, string | undefined>): string => params['*'] ?? '';
+
+/** Compare import URLs across the protocol spellings `/import/*` accepts. */
+const normalizeImportUrl = (url: string): string =>
+  url
+    .replace('/import/https%3A%2F%2Fgithub.com/', '/import/github.com/')
+    .replace('/import/https%3A//github.com/', '/import/github.com/')
+    .replace('/import/https://github.com/', '/import/github.com/')
+    .replace('/import/https:/github.com/', '/import/github.com/');
 
 const linkedSetupBranch = (repositoryName: string): string => {
   const slug = repositoryName
@@ -256,9 +266,15 @@ export default function ImportRoute(): React.JSX.Element {
   // Track if this is the initial mount to avoid syncing on first render
   const isInitialMount = useRef(true);
   const location = useLocation();
+  const [isDesktopOpen, clearDesktopOpen] = useSearchParameter('desktop-open', flagParameter);
+  const currentUrl = `${location.pathname}${location.search}`;
+  /* The machine owns the import URL, so its own writes must not bounce back in
+   * through `syncLocation`: that would flip `urlFromNavigation` and swallow the
+   * history push the machine raises once a repository resolves. */
+  const machineUrl = useRef<string | undefined>(undefined);
 
   useEffect(() => {
-    if (!new URLSearchParams(location.search).has('desktop-open')) {
+    if (!isDesktopOpen) {
       return;
     }
     let active = true;
@@ -277,7 +293,7 @@ export default function ImportRoute(): React.JSX.Element {
           type: 'processFiles',
           files: opened.map((file) => new File([file.bytes], file.name)),
         });
-        await navigate('/import', { replace: true });
+        clearDesktopOpen(false);
       } catch (error) {
         if (active) {
           diskActorRef.send({
@@ -292,11 +308,17 @@ export default function ImportRoute(): React.JSX.Element {
     return () => {
       active = false;
     };
-  }, [diskActorRef, location.search, navigate]);
+  }, [clearDesktopOpen, diskActorRef, isDesktopOpen]);
 
   // Sync location changes to machine (for back/forward navigation)
   // This is the single source of truth for URL → Machine state
   useEffect(() => {
+    if (machineUrl.current !== undefined && normalizeImportUrl(machineUrl.current) === normalizeImportUrl(currentUrl)) {
+      // One-shot: a later visit to the same URL is real navigation to sync.
+      machineUrl.current = undefined;
+      isInitialMount.current = false;
+      return;
+    }
     // Skip on initial mount - let the loader data initialize the machine
     if (isInitialMount.current) {
       isInitialMount.current = false;
@@ -319,54 +341,31 @@ export default function ImportRoute(): React.JSX.Element {
       ref,
       mainFile,
     });
-  }, [owner, repo, ref, mainFile, gitHubActorRef]);
+  }, [owner, repo, ref, mainFile, gitHubActorRef, currentUrl]);
 
-  // Listen to machine's URL events and update browser URL
+  /* Through the router, never `history.*` (D3): a raw history write left React
+   * Router's location stale, so nothing downstream of `useLocation` saw the
+   * repository the machine had just resolved. */
   useEffect(() => {
-    const subscription = gitHubActorRef.on('urlReplaced', (event) => {
-      // Normalize URLs for comparison (handle all format variants)
-      const normalizeForCompare = (url: string): string =>
-        url
-          // Remove protocol variations to compare just the path
-          .replace('/import/https%3A%2F%2Fgithub.com/', '/import/github.com/')
-          .replace('/import/https%3A//github.com/', '/import/github.com/')
-          .replace('/import/https://github.com/', '/import/github.com/')
-          .replace('/import/https:/github.com/', '/import/github.com/');
-
-      const currentUrl = globalThis.location.pathname + globalThis.location.search;
-
-      if (normalizeForCompare(currentUrl) !== normalizeForCompare(event.url)) {
-        globalThis.history.replaceState(null, '', event.url);
+    const send = (url: string, replace: boolean): void => {
+      if (normalizeImportUrl(currentUrl) === normalizeImportUrl(url)) {
+        return;
       }
+      machineUrl.current = url;
+      void navigate(url, { replace, preventScrollReset: true });
+    };
+    const replaced = gitHubActorRef.on('urlReplaced', (event) => {
+      send(event.url, true);
+    });
+    const pushed = gitHubActorRef.on('urlPushed', (event) => {
+      send(event.url, false);
     });
 
     return () => {
-      subscription.unsubscribe();
+      replaced.unsubscribe();
+      pushed.unsubscribe();
     };
-  }, [gitHubActorRef]);
-
-  useEffect(() => {
-    const subscription = gitHubActorRef.on('urlPushed', (event) => {
-      // Normalize URLs for comparison (handle all format variants)
-      const normalizeForCompare = (url: string): string =>
-        url
-          // Remove protocol variations to compare just the path
-          .replace('/import/https%3A%2F%2Fgithub.com/', '/import/github.com/')
-          .replace('/import/https%3A//github.com/', '/import/github.com/')
-          .replace('/import/https://github.com/', '/import/github.com/')
-          .replace('/import/https:/github.com/', '/import/github.com/');
-
-      const currentUrl = globalThis.location.pathname + globalThis.location.search;
-
-      if (normalizeForCompare(currentUrl) !== normalizeForCompare(event.url)) {
-        globalThis.history.pushState(null, '', event.url);
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [gitHubActorRef]);
+  }, [currentUrl, gitHubActorRef, navigate]);
 
   // Navigate when GitHub project is created. The import machines carry only the
   // `proj_` id, so the canonical URL comes from the listing once discovery has

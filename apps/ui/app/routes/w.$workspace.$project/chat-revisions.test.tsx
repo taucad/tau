@@ -12,6 +12,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
+import { MemoryRouter } from 'react-router';
 import type { RevisionRow } from '@taucad/revisions';
 import { RevisionsPanelBody, groupRevisionHistory } from '#routes/w.$workspace.$project/chat-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
@@ -63,9 +64,11 @@ const row = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): Revi
   ...over,
 });
 
+/* A router, because the pane resolves the *Sign in* destination the rest of the
+   app resolves (`useAuthLinks`) rather than inventing a second one (N3). */
 const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
   <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-    {children}
+    <MemoryRouter>{children}</MemoryRouter>
   </QueryClientProvider>
 );
 
@@ -500,5 +503,137 @@ describe('Revisions pane', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(revisionStatusHarness.commands.renameBranch).toHaveBeenCalledWith('bracket-fillet', 'enclosure-v2');
+  });
+});
+
+/** The W5 closeout pins: what the pane owed a person and did not give them. */
+describe('Revisions pane closeout', () => {
+  it('offers a resolution surface for a conflict on the only branch (C35)', async () => {
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      /* A sync divergence records its conflict on the *same* branch
+       * (`sync.machine.ts` `conflictRef = refs/heads/${branch}`), so a
+       * one-branch project announced *Needs resolution* with nowhere to go. */
+      branches: [{ name: 'main', head: 'rev-c', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] }],
+      conflicts: [
+        {
+          revisionId: 'rev-c',
+          branch: 'main',
+          labels: { ours: 'main', theirs: 'origin/main' },
+          paths: [{ path: 'src/bracket.ts', openable: true, side: undefined }],
+          busy: false,
+          ready: false,
+        },
+      ],
+    };
+
+    renderPane();
+
+    expect(await screen.findByRole('button', { name: 'Keep main in src/bracket.ts' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Keep origin/main in src/bracket.ts' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Ask chat to resolve' })).toBeInTheDocument();
+  });
+
+  it('says Not saved yet and offers one Save revision on a fresh project (C41)', async () => {
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, dirty: true, headRevisionId: undefined };
+
+    renderPane();
+
+    /* "Modified since nothing" is not a state a person can read. */
+    expect(await screen.findByText('Not saved yet')).toBeInTheDocument();
+    expect(screen.queryByText('Modified')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save revision' })).toBeInTheDocument();
+  });
+
+  it('compares the head row against the working copy while the checkout is dirty (C39)', async () => {
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, dirty: true, headRevisionId: 'rev-1' };
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];
+    revisionStatusHarness.diff = [{ path: 'src/main.scad', kind: 'modified' }];
+
+    renderPane();
+
+    expect(
+      await screen.findByRole('button', { name: 'Compare src/main.scad with the current file' }),
+    ).toBeInTheDocument();
+  });
+
+  it('marks a branch on a host data directory as Linked (C40, I2)', async () => {
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      checkoutId: 'live',
+      branches: [
+        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'bracket-fillet',
+          head: undefined,
+          checkoutId: 'co-2',
+          /* A disk host puts linked checkouts under its own data directory, so
+           * the old `/checkouts/` prefix test never fired off the browser. */
+          checkoutRoot: '/Users/x/Library/Application Support/Tau/checkouts/co-2',
+          leaseChatIds: [],
+        },
+      ],
+    };
+
+    renderPane();
+
+    expect(await screen.findByText('Linked')).toBeInTheDocument();
+  });
+
+  it('asks for no diff it does not render, including inside the closed Earlier fold (C52)', async () => {
+    const rows = Array.from({ length: 40 }, (_, index) =>
+      row({ revisionId: `rev-${String(index)}`, revisionNumber: 40 - index, trigger: 'save' }),
+    );
+    revisionStatusHarness.rows = rows;
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-0' };
+
+    renderPane();
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('listitem', { name: /^Revision \d+$/u }).length).toBeGreaterThan(0);
+    });
+    const visible = screen.getAllByRole('listitem', { name: /^Revision \d+$/u }).length;
+    expect(visible).toBeLessThanOrEqual(8);
+    /* One `revision-diff` query per *rendered* row, not per row in the graph. */
+    expect(new Set(revisionStatusHarness.diffRequests).size).toBeLessThanOrEqual(visible);
+  });
+
+  it('names every live region the pane owns (C43)', async () => {
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      attention: 2,
+      headRevisionId: 'rev-1',
+      remote: {
+        ...revisionStatusHarness.status.remote,
+        kind: 'tau',
+        phase: 'failed',
+        url: 'https://api.tau.new/v1/git/p.git',
+        error: 'The plan does not allow it.',
+      },
+      sync: {
+        ...revisionStatusHarness.status.sync,
+        state: 'failed',
+        pendingCount: 2,
+        error: 'The plan does not allow it.',
+        reason: 'notEntitled',
+      },
+    };
+
+    const { container } = render(<RevisionsPanelBody />, { wrapper });
+    await waitFor(() => {
+      expect(screen.getAllByText(/Rev 1/u).length).toBeGreaterThan(0);
+    });
+
+    const regions = [...container.querySelectorAll('[role="status"], [role="alert"]')];
+    /* The scenario has to actually produce live regions, or the rule below is
+     * a test that cannot fail. */
+    expect(regions.length).toBeGreaterThan(2);
+    const unnamed = regions.filter(
+      (node) => node.getAttribute('aria-label') === null && node.getAttribute('aria-labelledby') === null,
+    );
+    expect(unnamed.map((node) => node.textContent)).toEqual([]);
   });
 });

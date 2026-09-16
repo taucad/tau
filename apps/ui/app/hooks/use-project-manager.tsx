@@ -205,6 +205,15 @@ type ProjectManagerContextType = {
   /** @returns whether a library row was actually trashed — a vanished row is not a success (DF3). */
   deleteProject: (projectId: string) => Promise<boolean>;
   permanentlyDeleteProject: (projectId: string) => Promise<void>;
+  /**
+   * Bumped whenever a project's library row moves in or out of the Trash.
+   *
+   * `getProjectRouteAccess` reads `deletedAt` once per call, so a route that
+   * resolved its access before the person deleted the project on screen would
+   * keep showing the closed notice until a reload (blueprint Finding 2). The
+   * project route depends on this counter, which makes that a live transition.
+   */
+  libraryRevision: number;
   /** Give an `adoption-required` directory a fresh identity so it becomes a real project (R11). */
   adoptProject: (locator: ProjectLocator) => Promise<ProjectManifest>;
   /** Pending operations this session is still settling, or has given up on (DF11). */
@@ -1908,6 +1917,16 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [getProjectListing],
   );
 
+  /*
+   * One counter, not a subscription: trash and restore are rare, deliberate acts,
+   * and the route's access effect already knows how to re-resolve. A library
+   * event channel would be a second source of truth for the same fact.
+   */
+  const [libraryRevision, setLibraryRevision] = useState(0);
+  const bumpLibraryRevision = useCallback((): void => {
+    setLibraryRevision((revision) => revision + 1);
+  }, []);
+
   const deleteProject = useCallback(
     async (projectId: string): Promise<boolean> => {
       await ensureDiscoveryReady();
@@ -1917,9 +1936,10 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         return false;
       }
       await writeProjectLibraryFile(fileManager.client, projectId, { deletedAt: trashed.deletedAt });
+      bumpLibraryRevision();
       return true;
     },
-    [ensureDiscoveryReady, fileManager.client, getReadiedWorker],
+    [bumpLibraryRevision, ensureDiscoveryReady, fileManager.client, getReadiedWorker],
   );
 
   const restoreProject = useCallback(
@@ -1931,9 +1951,10 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         return false;
       }
       await writeProjectLibraryFile(fileManager.client, projectId, {});
+      bumpLibraryRevision();
       return true;
     },
-    [ensureDiscoveryReady, fileManager.client, getReadiedWorker],
+    [bumpLibraryRevision, ensureDiscoveryReady, fileManager.client, getReadiedWorker],
   );
 
   const permanentlyDeleteProject = useCallback(
@@ -1948,8 +1969,15 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         throw new Error(`Pending project operation not found: ${operationId}`);
       }
       await resumePendingProjectOperation(operation, worker);
+      bumpLibraryRevision();
     },
-    [discoverPermanentDeleteStorage, ensureDiscoveryReady, getReadiedWorker, resumePendingProjectOperation],
+    [
+      bumpLibraryRevision,
+      discoverPermanentDeleteStorage,
+      ensureDiscoveryReady,
+      getReadiedWorker,
+      resumePendingProjectOperation,
+    ],
   );
 
   const adoptProject = useCallback(
@@ -2173,6 +2201,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       deleteProject,
       restoreProject,
       permanentlyDeleteProject,
+      libraryRevision,
       adoptProject,
       recoveries,
       discardRecovery,
@@ -2219,6 +2248,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     deleteProject,
     restoreProject,
     permanentlyDeleteProject,
+    libraryRevision,
     adoptProject,
     recoveries,
     discardRecovery,

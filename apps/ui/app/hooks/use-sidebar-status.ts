@@ -324,10 +324,16 @@ const syncDetail = (revisions: RevisionStatusProjection | undefined, isClosing: 
   if (state === 'pending') {
     return `Backing up ${pluralize(pendingCount, 'revision')}`;
   }
+  /* The reason, not just the count (N3, C4): `sync.error` is produced for every
+   * `queued`/`failed` state and was rendered nowhere, so a refusal a person
+   * could act on — quota, sign-in, plan — read as a number. The row's own
+   * action is opening the project, which is where the verb is. */
+  const trouble = (reason: string | undefined): string =>
+    `Not backed up · ${pluralize(pendingCount, 'revision')}${reason === undefined ? '' : ` · ${reason}`}`;
   if (state === 'queued') {
-    return `Not backed up · ${pluralize(pendingCount, 'revision')} · retrying`;
+    return trouble(revisions.sync.error ?? 'retrying');
   }
-  return state === 'failed' ? `Not backed up · ${pluralize(pendingCount, 'revision')}` : undefined;
+  return state === 'failed' ? trouble(revisions.sync.error) : undefined;
 };
 
 /*

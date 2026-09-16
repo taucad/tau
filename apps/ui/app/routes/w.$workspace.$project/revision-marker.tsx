@@ -4,6 +4,7 @@ import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
+import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { Spinner } from '#components/ui/spinner.js';
 import { DiffViewer } from '#components/code/diff-viewer.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
@@ -58,7 +59,7 @@ const changeLabels: Readonly<Record<RevisionDiffEntry['kind'], string>> = {
  * parent. The comparison is only asked for once a reader opens it — a card with
  * twenty files must not cost twenty tree reads to render.
  */
-function FileRow({
+export function FileRow({
   file,
   revisionId,
   compareAgainst,
@@ -113,14 +114,23 @@ function FileComparison({
   );
   if (isLoading) {
     return (
-      <div role='status' aria-busy='true' className='flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground'>
+      <div
+        role='status'
+        aria-label={`Comparison for ${path}`}
+        aria-busy='true'
+        className='flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground'
+      >
         <Spinner className='size-3' /> Loading comparison…
       </div>
     );
   }
   if (error !== undefined) {
     return (
-      <div role='alert' className='flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 text-xs'>
+      <div
+        role='alert'
+        aria-label={`Comparison for ${path}`}
+        className='flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 text-xs'
+      >
         <span>{`Could not compare ${path}. ${error}`}</span>
         <Button size='xs' variant='outline' onClick={retry}>
           Retry
@@ -132,6 +142,93 @@ function FileComparison({
     return null;
   }
   return <DiffViewer originalContent={original} modifiedContent={modified} language={path} className='border-t' />;
+}
+
+/**
+ * *Name version* — an anchored, cancellable form for tagging one revision.
+ *
+ * Shared by the chat summary and the Revisions pane so both surfaces use one
+ * verb and one form.
+ */
+export function RevisionNameAction({
+  revisionName,
+  onTag,
+}: {
+  /** The accessible revision name, e.g. `Revision 2`. */
+  readonly revisionName: string;
+  readonly onTag: (name: string) => Promise<void>;
+}): React.JSX.Element {
+  const [isOpen, setIsOpen] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState<string>();
+
+  return (
+    <Popover
+      open={isOpen}
+      onOpenChange={(open) => {
+        setIsOpen(open);
+        setDraft('');
+        setError(undefined);
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button size='xs' variant='outline'>
+          <Tag aria-hidden className='size-3' />
+          Name version
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align='start' className='w-72 max-w-[calc(100vw-2rem)] p-3'>
+        <form
+          className='flex flex-col gap-3'
+          onSubmit={async (event) => {
+            event.preventDefault();
+            const tag = draft.trim();
+            if (tag === '') {
+              return;
+            }
+            try {
+              await onTag(tag);
+              setIsOpen(false);
+              setDraft('');
+            } catch (error) {
+              setError(error instanceof Error ? error.message : 'Could not name this revision.');
+            }
+          }}
+        >
+          <Input
+            autoFocus
+            aria-label={`Name ${revisionName}`}
+            value={draft}
+            placeholder='e.g. Ready for prototype'
+            aria-invalid={error === undefined ? undefined : true}
+            onChange={(event) => {
+              setDraft(event.target.value);
+            }}
+          />
+          {error === undefined ? null : (
+            <span role='alert' className='text-xs'>
+              {error}
+            </span>
+          )}
+          <div className='flex justify-end gap-2'>
+            <Button
+              size='xs'
+              type='button'
+              variant='outline'
+              onClick={() => {
+                setIsOpen(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button size='xs' type='submit' disabled={draft.trim() === ''}>
+              Save name
+            </Button>
+          </div>
+        </form>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 /**
@@ -169,8 +266,6 @@ export function RevisionMarker({
   const [showAllFiles, setShowAllFiles] = useState(false);
   const [isActionRequested, setIsActionRequested] = useState(false);
   const [previousIsBusy, setPreviousIsBusy] = useState(isBusy);
-  const [nameDraft, setNameDraft] = useState<string>();
-  const [nameError, setNameError] = useState<string>();
   if (previousIsBusy !== isBusy) {
     setPreviousIsBusy(isBusy);
     if (!isBusy) {
@@ -195,8 +290,7 @@ export function RevisionMarker({
         appearance === 'card'
           ? 'rounded-lg border bg-background dark:bg-background/20'
           : 'rounded-none border-0 bg-transparent',
-        appearance === 'card' && isActive ? 'ring-primary/50 ring-2 ring-offset-2 ring-offset-background' : undefined,
-        appearance === 'card' && !isActive ? 'border-border' : undefined,
+        appearance === 'card' ? 'border-border' : undefined,
         className,
       )}
     >
@@ -205,10 +299,10 @@ export function RevisionMarker({
           <span className='font-medium @[30rem]:hidden'>{shortName}</span>
           <span className='hidden font-medium @[30rem]:inline'>{name}</span>
           {isActive ? (
-            <Badge variant='outline' className='gap-1 border-primary/30 bg-primary/10 text-primary'>
-              <Check />
+            <span className='flex items-center gap-1 text-xs'>
+              <Check aria-hidden className='size-3' />
               Current
-            </Badge>
+            </span>
           ) : (
             <Button
               size='xs'
@@ -256,70 +350,7 @@ export function RevisionMarker({
             )}
           </Badge>
         ))}
-        {nameDraft === undefined ? (
-          onTag === undefined ? null : (
-            <Button
-              size='xs'
-              variant='ghost'
-              onClick={() => {
-                setNameDraft('');
-                setNameError(undefined);
-              }}
-            >
-              Name…
-            </Button>
-          )
-        ) : (
-          <form
-            className='flex min-w-0 flex-1 flex-wrap items-center gap-1.5'
-            onSubmit={(event) => {
-              event.preventDefault();
-              const tag = nameDraft.trim();
-              if (tag === '' || onTag === undefined) return;
-              void onTag(tag).then(
-                () => {
-                  setNameDraft(undefined);
-                  setNameError(undefined);
-                },
-                (cause: unknown) => {
-                  setNameError(cause instanceof Error ? cause.message : 'Could not name this revision.');
-                },
-              );
-            }}
-          >
-            <Input
-              autoFocus
-              aria-label={`Name ${name}`}
-              value={nameDraft}
-              className='h-7 min-w-28 flex-1'
-              aria-invalid={nameError === undefined ? undefined : true}
-              onChange={(event) => {
-                setNameDraft(event.target.value);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') setNameDraft(undefined);
-              }}
-            />
-            <Button size='xs' type='submit' disabled={nameDraft.trim() === ''}>
-              Save name
-            </Button>
-            <Button
-              size='xs'
-              type='button'
-              variant='ghost'
-              onClick={() => {
-                setNameDraft(undefined);
-              }}
-            >
-              Cancel
-            </Button>
-            {nameError === undefined ? null : (
-              <span role='alert' className='w-full text-xs'>
-                {nameError}
-              </span>
-            )}
-          </form>
-        )}
+        {onTag === undefined ? null : <RevisionNameAction revisionName={name} onTag={onTag} />}
         {revision.trigger === 'idle' || revision.trigger === 'hidden' || revision.trigger === 'close' ? (
           <span className='ml-auto text-xs text-muted-foreground'>Autosave</span>
         ) : null}

@@ -5,7 +5,7 @@ import { CreditCard, Play, Repeat } from 'lucide-react';
 import { creditAtomsPerCredit } from '@taucad/billing';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
-import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
+import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { useChatActions } from '#hooks/use-chat.js';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import { TopupModal } from '#components/billing/topup-modal.js';
@@ -54,6 +54,7 @@ export const ChatErrorCredits = memo(function ({
   const entitlements = useEntitlements();
   const { resolveModel } = useModels();
   const [isTopupOpen, setIsTopupOpen] = useState(false);
+  const { open: openSettings } = useSettingsDialog();
   // The denial's `routeId` is the catalogue model id, so the reader sees the
   // model's own name rather than a route slug.
   const shortfall = shortfallCredits(details);
@@ -94,7 +95,7 @@ export const ChatErrorCredits = memo(function ({
             variant='ghost'
             size='sm'
             onClick={() => {
-              openSettingsDialog('billing');
+              openSettings('billing');
             }}
           >
             <CreditCard className='size-3.5' />

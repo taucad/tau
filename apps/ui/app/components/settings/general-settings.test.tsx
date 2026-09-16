@@ -27,6 +27,8 @@ vi.mock('react-router', () => ({
       {children}
     </a>
   ),
+  /* `useCommercialFeatures` reaches the settings dialog, which is URL state. */
+  useSearchParams: (): [URLSearchParams, () => void] => [new URLSearchParams(), vi.fn()],
 }));
 
 vi.mock('#hooks/use-privacy-preferences.js', () => ({

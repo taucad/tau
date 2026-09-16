@@ -631,6 +631,53 @@ describe('Home storage backend', () => {
     await expect(pinHomeStorageBackend('opfs')).rejects.toThrow('Home is pinned to indexeddb');
   });
 
+  it('fails the open rather than hanging when another tab blocks the upgrade', async () => {
+    globalThis.indexedDB = new IDBFactory();
+    // Another tab holding an older version open never yields, so the upgrade stays blocked. The open must
+    // settle: an unsettled promise leaves the app on the "Opening Home" shell for as long as that tab lives.
+    const older = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(`${metaConfig.databasePrefix}fs-handles`, 3);
+      request.addEventListener('upgradeneeded', () => {
+        request.result.createObjectStore('meta', { keyPath: 'key' });
+      });
+      request.addEventListener('success', () => {
+        resolve(request.result);
+      });
+      request.addEventListener('error', () => {
+        reject(request.error ?? new Error('older open failed'));
+      });
+    });
+    stubHomeProbe(false);
+    vi.resetModules();
+    const { getHomeStorageBackend } = await import('#filesystem/handle-store.js');
+
+    await expect(getHomeStorageBackend()).rejects.toThrow('blocked by another Tau tab');
+    older.close();
+  });
+
+  it('closes its connection so a newer version in another tab can upgrade', async () => {
+    stubHomeProbe(false);
+    const { getHomeStorageBackend } = await loadStore();
+    await expect(getHomeStorageBackend()).resolves.toBe('indexeddb');
+
+    // The store now holds the database open. A newer build in another tab must still be able to upgrade.
+    const upgraded = await new Promise<IDBDatabase | 'blocked'>((resolve, reject) => {
+      const request = indexedDB.open(`${metaConfig.databasePrefix}fs-handles`, 5);
+      request.addEventListener('blocked', () => {
+        resolve('blocked');
+      });
+      request.addEventListener('success', () => {
+        resolve(request.result);
+      });
+      request.addEventListener('error', () => {
+        reject(request.error ?? new Error('upgrade failed'));
+      });
+    });
+
+    expect(upgraded).not.toBe('blocked');
+    (upgraded as IDBDatabase).close();
+  });
+
   it('mounts only the selected Home engine', async () => {
     stubHomeProbe(true);
     const { getProjectRootConfigs } = await loadStore();

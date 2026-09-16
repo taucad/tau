@@ -7,7 +7,7 @@ import { useModelEstimates } from '@taucad/billing/hooks/use-model-estimates';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import { TopupModal } from '#components/billing/topup-modal.js';
-import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
+import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 
 /** Spend tiers a reader chooses between, cheapest first. @public */
 export const modelTiers = ['Fast', 'Balanced', 'Frontier'] as const;
@@ -85,6 +85,7 @@ export const useCreditAffordance = (): ((modelId: string) => CreditAffordance | 
 export function CreditBalanceChip({ className }: { readonly className?: string }): React.JSX.Element | undefined {
   const balance = useCredits();
   const entitlements = useEntitlements();
+  const { open: openSettings } = useSettingsDialog();
   const [isTopupOpen, setIsTopupOpen] = useState(false);
   const categories = balance?.balance;
 
@@ -110,7 +111,7 @@ export function CreditBalanceChip({ className }: { readonly className?: string }
           if (entitlements.hasPaymentMethod) {
             setIsTopupOpen(true);
           } else {
-            openSettingsDialog('billing');
+            openSettings('billing');
           }
         }}
       >

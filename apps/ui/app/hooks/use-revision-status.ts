@@ -89,6 +89,16 @@ export type RevisionClient = Readonly<{
     readonly checkoutId?: string;
   }) => Promise<WorkerTurnPlacement>;
   send: (command: WorkerRevisionCommand) => void;
+  /**
+   * Record what is on disk and wait for the answer (C16, contract §6).
+   *
+   * The correlated form of `send({ command: 'saveRevision' })`: it resolves
+   * once the root has settled the cut and its scheduler has quiesced, bounded
+   * by `syncQuiesceMilliseconds` on the far side. The `hidden` unload registrant
+   * awaits it so `pagehide`'s keepalive POST carries *this* close revision
+   * rather than the previous push's pack.
+   */
+  saveRevision: (trigger?: 'save' | 'hidden' | 'close') => Promise<void>;
   /** Connect, or do nothing when the connection is already open. */
   open: () => void;
   /**
@@ -354,6 +364,9 @@ export const createHostRevisionClient = (input: {
         ...(options?.against === undefined ? {} : { against: options.against }),
       })) as unknown as RevisionFileComparison,
     send,
+    saveRevision: async (trigger) => {
+      await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
+    },
     open: () => {
       // async-iife: bootstrap -- project lifecycle owns this connection and errors surface as toasts.
       void (async (): Promise<void> => {
@@ -581,6 +594,9 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
     send: (command) => {
       post(command);
     },
+    saveRevision: async (trigger) => {
+      await ask({ command: 'saveRevision', ...(trigger === undefined ? {} : { trigger }) });
+    },
     open: () => {
       open();
     },
@@ -710,12 +726,15 @@ export const useRevisionClientLifecycle = (): RevisionClient | undefined => {
    * close the worker root, because release itself takes a fresh close cut.
    */
   useFlushOnClose(
-    (phase) => {
+    async (phase) => {
       if (client === undefined) {
         return;
       }
       if (phase === 'hidden') {
-        client.send({ command: 'saveRevision', trigger: 'close' });
+        /* Awaited (C16): posting and returning let `flushHidden` resolve in the
+         * same microtask, so `pagehide` offered the *previous* push's pack —
+         * or nothing. The far side bounds this at `syncQuiesceMilliseconds`. */
+        await client.saveRevision('close');
         return;
       }
       /* Bounded at 64 KiB; refusal remains a durable *Not backed up* fact. */
@@ -905,7 +924,7 @@ export type RevisionCommands = Readonly<{
    * decides whether a revision is minted at all, so a save on an unchanged tree
    * costs a tree hash and records nothing.
    */
-  saveRevision: (trigger?: 'save' | 'hidden' | 'close') => void;
+  saveRevision: (trigger?: 'save' | 'hidden' | 'close') => Promise<void>;
   /** Name one revision, or re-point an existing name (S31). */
   tag: (input: Readonly<{ name: string; revisionId: string; note?: string }>) => Promise<RevisionTag | undefined>;
   /** Remove one name (S31). */
@@ -1058,11 +1077,7 @@ export const useRevisionCommands = (): RevisionCommands => {
       },
       cancelRemote: () => client?.send({ command: 'cancelRemote' }),
       syncNow: () => client?.send({ command: 'syncNow' }),
-      saveRevision: (trigger?: 'save' | 'hidden' | 'close') =>
-        client?.send({
-          command: 'saveRevision',
-          ...(trigger === undefined ? {} : { trigger }),
-        }),
+      saveRevision: async (trigger?: 'save' | 'hidden' | 'close') => client?.saveRevision(trigger),
       tag: async (input) => client?.tag(input),
       deleteTag: async (name) => client?.deleteTag(name),
       publishProject: (tag?: string) => {

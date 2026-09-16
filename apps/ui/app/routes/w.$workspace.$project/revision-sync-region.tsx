@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Cloud, CloudOff, GitBranch } from 'lucide-react';
+import { Link } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
@@ -7,6 +8,11 @@ import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { cn } from '@taucad/ui/utils/cn';
 import { gitRemoteUrlProblem } from '@taucad/revisions';
 import type { RemoteFacet, SyncFacet } from '@taucad/revisions';
+/* The machine's own subpath: `SyncFailureReason` is not on the package barrel,
+   and a second copy of the union here would be exactly the dual vocabulary the
+   contract forbids (§3). */
+import type { SyncFailureReason } from '@taucad/revisions/sync-machine';
+import { CommercialUpgradeLabel } from '#cloud/commercial-features.js';
 import { GithubRepositoryPicker } from '#components/github/github-repository-picker.js';
 import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';
 import { githubConnections } from '#lib/github-connections.js';
@@ -51,6 +57,22 @@ export type RevisionSyncRegionProps = {
   readonly onSync: () => void;
   readonly syncChats: boolean;
   readonly onSyncChatsChange: (enabled: boolean) => void;
+  /** EQ7/D16: generated evidence is opt-in, per project, beside *Sync chats*. */
+  readonly syncLargeExports: boolean;
+  readonly onSyncLargeExportsChange: (enabled: boolean) => void;
+  /**
+   * Whether this account may back a project up at all (N4).
+   *
+   * Read once by the pane from `useCommercialFeatures`, because this component
+   * is presentational and a plan is a session fact, not a projection fact. The
+   * default is "entitled", which is what a self-host build always answers.
+   */
+  readonly canSyncFiles?: boolean;
+  readonly canConnectGitHub?: boolean;
+  /** Take a free account to the plan surface; the pane supplies the route. */
+  readonly onUpgrade?: () => void;
+  /** Where *Sign in* goes when the remote answered 401 (N3). */
+  readonly signInHref?: string;
   readonly className?: string;
 };
 
@@ -95,6 +117,46 @@ const syncCopy = (sync: SyncFacet): string | undefined => {
   }
 };
 
+/**
+ * The one action a failure class implies (N3).
+ *
+ * Keyed on the machine's own `reason`, never on the sentence: the text is the
+ * server's and changes with it, while the class is a contract (contract §3).
+ * `Open Revisions` is deliberately absent — this *is* Revisions.
+ *
+ * @param reason - The failure class the sync machine recorded.
+ * @param remote - The connection, so a credential problem names its provider.
+ * @returns Which action to render, or `undefined` when there is nothing to do.
+ */
+const syncFailureAction = (
+  reason: SyncFailureReason | undefined,
+  remote: RemoteFacet,
+): 'signIn' | 'upgrade' | 'reconnectGithub' | 'syncNow' | 'retry' | undefined => {
+  switch (reason) {
+    case 'unauthorized': {
+      return remote.provider === 'github' ? 'reconnectGithub' : 'signIn';
+    }
+    case 'notEntitled':
+    case 'quota': {
+      return 'upgrade';
+    }
+    case 'forbidden':
+    case 'notFound': {
+      return remote.provider === 'github' ? 'reconnectGithub' : 'retry';
+    }
+    case 'rejected':
+    case 'offline': {
+      return 'syncNow';
+    }
+    case 'unknown': {
+      return 'retry';
+    }
+    default: {
+      return undefined;
+    }
+  }
+};
+
 const connectingCopy = (remote: RemoteFacet): string =>
   remote.phase === 'disconnecting'
     ? 'Disconnecting…'
@@ -124,6 +186,27 @@ const gitRemoteLabel = (url: string | undefined, github = false): string => {
  */
 const authoritySentence = (): string =>
   'Advanced HTTPS remotes are anonymous. Use the GitHub picker above for private or writable repositories.';
+
+/**
+ * *Available on Pro*, with the route the rest of the app already uses (N4).
+ *
+ * @param props - The upgrade verb the pane supplied, when this build has one.
+ * @returns The label, or nothing on a build with no plans to sell.
+ */
+function PlanGate({ onUpgrade }: { readonly onUpgrade: (() => void) | undefined }): React.JSX.Element | undefined {
+  if (onUpgrade === undefined) {
+    return undefined;
+  }
+  return (
+    <button
+      type='button'
+      className='inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline'
+      onClick={onUpgrade}
+    >
+      Available on Pro · <CommercialUpgradeLabel />
+    </button>
+  );
+}
 
 /**
  * The *Git remote* half of the choice: an address, a visibility, and what
@@ -216,6 +299,12 @@ export function RevisionSyncRegion({
   onSync,
   syncChats,
   onSyncChatsChange,
+  syncLargeExports,
+  onSyncLargeExportsChange,
+  canSyncFiles = true,
+  canConnectGitHub = true,
+  onUpgrade,
+  signInHref,
   className,
 }: RevisionSyncRegionProps): React.JSX.Element {
   const busy = remote.phase === 'connecting' || remote.phase === 'disconnecting';
@@ -230,15 +319,20 @@ export function RevisionSyncRegion({
   const [pendingConnection, setPendingConnection] = useState<PendingConnection>();
   const [changingBackup, setChangingBackup] = useState(remote.phase !== 'connected');
   const syncState = syncCopy(sync);
+  const failureAction = syncFailureAction(sync.reason, remote);
   const [connectionError, setConnectionError] = useState<string | undefined>(undefined);
   const percentage =
     remote.storage === undefined || remote.storage.quota <= 0
       ? 0
       : Math.min((remote.storage.used / remote.storage.quota) * 100, 100);
 
+  /* Symmetric on purpose (C9): the draft is open exactly while there is no
+   * settled connection. An effect that only ever *closed* it left a connection
+   * that fell out of `connected` rendering three radios and no verb at all —
+   * no Connect, no Cancel, no summary — with focus on `<body>`. */
   useEffect(() => {
+    setChangingBackup(remote.phase !== 'connected');
     if (remote.phase === 'connected') {
-      setChangingBackup(false);
       setChoice(undefined);
     }
   }, [remote.phase]);
@@ -283,6 +377,13 @@ export function RevisionSyncRegion({
   };
 
   const requestConnection = async (pending: PendingConnection): Promise<void> => {
+    /* N4: a free account issues **no** connect. The radio is already disabled;
+     * this is the one funnel every kind passes through, including the GitHub
+     * picker's own `onSelect`. */
+    if (pending.kind === 'tau' ? !canSyncFiles : !canConnectGitHub) {
+      onUpgrade?.();
+      return;
+    }
     const same =
       pending.kind === 'tau'
         ? remote.kind === 'tau'
@@ -338,6 +439,12 @@ export function RevisionSyncRegion({
             <span className='flex items-center gap-2'>
               <Switch aria-label='Sync chats' checked={syncChats} onCheckedChange={onSyncChatsChange} />
               <span className='text-xs'>Sync chats</span>
+              {/* EQ7/D16: the project's own `syncLargeExports`, on the row that
+                  already owns the other per-project transfer choice. Only the
+                  import route wrote it before, so a connected project could
+                  never turn it on (C14). */}
+              <Switch aria-label='Sync exports' checked={syncLargeExports} onCheckedChange={onSyncLargeExportsChange} />
+              <span className='text-xs'>Sync exports</span>
             </span>
           ) : null}
           {remote.fetchOnly ? null : (
@@ -372,19 +479,25 @@ export function RevisionSyncRegion({
               No remote
             </Label>
           </div>
+          {/* N4: a plan that cannot back files up is not offered a backup. The
+              row still exists — hiding it would make the capability invisible
+              — but it says what it costs and routes to the plan surface, the
+              way `project-share-panel` already gates private shares. */}
           <div className='flex items-center gap-2'>
-            <RadioGroupItem id='remote-tau' value='tau' />
+            <RadioGroupItem id='remote-tau' value='tau' disabled={!canSyncFiles} />
             <Cloud aria-hidden className='size-4 shrink-0 text-muted-foreground' />
-            <Label htmlFor='remote-tau' className='font-normal'>
+            <Label htmlFor='remote-tau' className={cn('font-normal', !canSyncFiles && 'text-muted-foreground')}>
               Tau Cloud
             </Label>
+            {canSyncFiles ? null : <PlanGate onUpgrade={onUpgrade} />}
           </div>
           <div className='flex items-center gap-2'>
-            <RadioGroupItem id='remote-git' value='git' />
+            <RadioGroupItem id='remote-git' value='git' disabled={!canConnectGitHub} />
             <GitBranch aria-hidden className='size-4 shrink-0 text-muted-foreground' />
-            <Label htmlFor='remote-git' className='font-normal'>
+            <Label htmlFor='remote-git' className={cn('font-normal', !canConnectGitHub && 'text-muted-foreground')}>
               Git remote
             </Label>
+            {canConnectGitHub ? null : <PlanGate onUpgrade={onUpgrade} />}
           </div>
         </RadioGroup>
       )}
@@ -409,7 +522,7 @@ export function RevisionSyncRegion({
         <div className='flex flex-wrap gap-2'>
           <Button
             size='sm'
-            disabled={remote.kind === 'none' && choice === 'none'}
+            disabled={(remote.kind === 'none' && choice === 'none') || (choice === 'tau' && !canSyncFiles)}
             onClick={() => {
               void applyRemote();
             }}
@@ -468,7 +581,12 @@ export function RevisionSyncRegion({
       ) : undefined}
 
       {busy ? (
-        <div role='status' aria-busy='true' className='flex items-center gap-2 text-sm'>
+        <div
+          role='status'
+          aria-label='Backup connection progress'
+          aria-busy='true'
+          className='flex items-center gap-2 text-sm'
+        >
           {/* The region's own `status` carries the message; the glyph is decoration. */}
           <Spinner role={undefined} aria-hidden aria-label={undefined} className='size-4' />
           <span>{connectingCopy(remote)}</span>
@@ -489,14 +607,60 @@ export function RevisionSyncRegion({
         count is the whole of what they can act on.
       */}
       {syncState === undefined ? undefined : (
-        <div role='status' className='flex items-center gap-2 text-sm'>
-          {sync.state === 'conflicted' || sync.state === 'failed' || sync.state === 'queued' ? (
-            <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
-          ) : (
-            <Cloud aria-hidden className='size-4 shrink-0 text-muted-foreground' />
+        <div role='status' aria-label='Backup status' className='flex flex-col gap-1.5 text-sm'>
+          <span className='flex items-center gap-2'>
+            {sync.state === 'conflicted' || sync.state === 'failed' || sync.state === 'queued' ? (
+              <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
+            ) : (
+              <Cloud aria-hidden className='size-4 shrink-0 text-muted-foreground' />
+            )}
+            <span className='tabular-nums'>{syncState}</span>
+            {sync.online ? undefined : <span className='text-xs text-muted-foreground'>Offline</span>}
+          </span>
+          {/*
+            The reason, and exactly one action for its class (N3, C4).
+
+            `sync.error` is the server's own sentence; the *action* is chosen
+            from `sync.reason`, which is a contract. A count is not a reason,
+            and a reason with no verb is not an answer.
+          */}
+          {sync.error === undefined ? undefined : (
+            <span className='flex flex-wrap items-center gap-2 text-xs'>
+              <span className='min-w-0 flex-1'>{sync.error}</span>
+              {failureAction === 'signIn' && signInHref !== undefined ? (
+                <Button asChild size='xs' variant='outline'>
+                  <Link to={signInHref}>Sign in</Link>
+                </Button>
+              ) : undefined}
+              {failureAction === 'upgrade' && onUpgrade !== undefined ? (
+                <Button size='xs' variant='outline' onClick={onUpgrade}>
+                  <CommercialUpgradeLabel />
+                </Button>
+              ) : undefined}
+              {failureAction === 'reconnectGithub' ? (
+                <Button
+                  size='xs'
+                  variant='outline'
+                  onClick={() => {
+                    setChoice('git');
+                    setChangingBackup(true);
+                  }}
+                >
+                  Reconnect GitHub
+                </Button>
+              ) : undefined}
+              {failureAction === 'syncNow' ? (
+                <Button size='xs' variant='outline' onClick={onSync}>
+                  Sync now
+                </Button>
+              ) : undefined}
+              {failureAction === 'retry' ? (
+                <Button size='xs' variant='outline' onClick={onSync}>
+                  Retry
+                </Button>
+              ) : undefined}
+            </span>
           )}
-          <span className='tabular-nums'>{syncState}</span>
-          {sync.online ? undefined : <span className='text-xs text-muted-foreground'>Offline</span>}
         </div>
       )}
 
@@ -595,7 +759,7 @@ export function RevisionSyncRegion({
       */}
       {remote.phase === 'reconnectRequired' ? (
         <div className='flex flex-col gap-2'>
-          <p role='alert' className='flex items-center gap-2 text-sm'>
+          <p role='alert' aria-label='GitHub connection' className='flex items-center gap-2 text-sm'>
             <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
             <span>{remote.error ?? 'Your GitHub connection needs to be renewed.'}</span>
           </p>
@@ -612,10 +776,20 @@ export function RevisionSyncRegion({
       ) : undefined}
 
       {connectionError === undefined ? undefined : (
-        <p role='alert' className='flex items-center gap-2 text-sm'>
+        <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-sm'>
           <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
-          <span>{connectionError}</span>
-        </p>
+          <span className='min-w-0 flex-1'>{connectionError}</span>
+          <Button
+            size='xs'
+            variant='outline'
+            onClick={() => {
+              setConnectionError(undefined);
+              setChangingBackup(true);
+            }}
+          >
+            Try again
+          </Button>
+        </div>
       )}
 
       {remote.storage === undefined ? undefined : (
@@ -653,10 +827,19 @@ export function RevisionSyncRegion({
       ) : undefined}
 
       {remote.phase === 'failed' && remote.error !== undefined ? (
-        <p role='alert' className='flex items-center gap-2 text-sm'>
+        <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-sm'>
           <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
-          <span>{remote.error}</span>
-        </p>
+          <span className='min-w-0 flex-1'>{remote.error}</span>
+          <Button
+            size='xs'
+            variant='outline'
+            onClick={() => {
+              setChangingBackup(true);
+            }}
+          >
+            Try again
+          </Button>
+        </div>
       ) : undefined}
     </section>
   );

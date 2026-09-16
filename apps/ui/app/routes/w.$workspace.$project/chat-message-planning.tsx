@@ -17,7 +17,7 @@ type ChatMessagePlanningProperties = {
 };
 
 /** Part type for areAllPartsConcluded - only needs to check state property */
-export type PartWithOptionalState = { [key: string]: unknown; state?: string };
+export type PartWithOptionalState = { [key: string]: unknown; preliminary?: boolean; state?: string };
 
 /**
  * Check if all parts in a message have concluded.
@@ -29,6 +29,9 @@ export type PartWithOptionalState = { [key: string]: unknown; state?: string };
  */
 export function areAllPartsConcluded(parts: readonly PartWithOptionalState[]): boolean {
   for (const part of parts) {
+    if (part.preliminary === true) {
+      return false;
+    }
     // Skip parts without state (considered complete)
     if (!('state' in part) || part.state === undefined) {
       continue;

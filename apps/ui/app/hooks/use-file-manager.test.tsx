@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ReactNode } from 'react';
-import { renderHook, act } from '@testing-library/react';
+import { renderHook, render, screen, act } from '@testing-library/react';
 import { createActor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import type { ProjectRootConfiguration } from '@taucad/filesystem';
@@ -162,6 +162,7 @@ const {
   HomeFileManagerProvider,
   useFileManager,
   useHomeStorageBackend,
+  SharedWorkerGate,
 } = await import('#hooks/use-file-manager.js');
 
 describe('waitForFileManagerServices', () => {
@@ -288,6 +289,36 @@ describe('HomeFileManagerProvider', () => {
       expect(result.current).toBe('opfs');
     });
     expect(mockGetHomeStorageBackend).toHaveBeenCalledOnce();
+  });
+});
+
+describe('SharedWorkerGate', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    workerTestState.instances.length = 0;
+    mockGetProjectFileSystemConfig.mockResolvedValue(undefined);
+    mockSetProjectFileSystemConfig.mockResolvedValue(undefined);
+    mockGetHomeStorageBackend.mockResolvedValue('opfs');
+    mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
+  });
+
+  /* R7: a machine that gave up used to leave the gate's whole subtree blank. */
+  it('explains a failed worker connection instead of rendering nothing', async () => {
+    mockWaitForWorkerReady.mockRejectedValue(new Error('worker never became ready'));
+
+    render(
+      <HomeFileManagerProvider rootDirectory='/'>
+        <SharedWorkerGate>
+          <div>subtree</div>
+        </SharedWorkerGate>
+      </HomeFileManagerProvider>,
+    );
+
+    await vi.waitFor(() => {
+      expect(screen.getByRole('heading', { name: "Couldn't start the file service" })).toBeInTheDocument();
+    });
+    expect(screen.queryByText('subtree')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 });
 

@@ -1,6 +1,7 @@
 import { render, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router';
 import { usePaymentActionReturn } from '#root-layout.js';
 
 const payment = vi.hoisted(() => ({
@@ -23,16 +24,27 @@ vi.mock('sonner', () => ({
 vi.mock('@taucad/billing/hooks/billing-session', () => ({
   useBillingSession: () => session.current,
 }));
+/* One controller, as the real provider's memoised context value is: a fresh
+ * object per render would re-run every effect that depends on it, and the
+ * payment return now re-renders when it clears its own search parameter. */
+const financialSession = vi.hoisted(() => ({
+  capture: () => ({ generation: 1, signal: new AbortController().signal, isCurrent: () => true }),
+}));
 vi.mock('#providers/financial-session-provider.js', () => ({
-  useFinancialSession: () => ({
-    capture: () => ({ generation: 1, signal: new AbortController().signal, isCurrent: () => true }),
-  }),
+  useFinancialSession: () => financialSession,
 }));
 
 function Harness(): React.JSX.Element {
   usePaymentActionReturn();
   return <div />;
 }
+
+/* The return parameter is router state now, not a raw history entry. */
+const returnAt = (search: string): React.JSX.Element => (
+  <MemoryRouter initialEntries={[`/work${search}`]}>
+    <Harness />
+  </MemoryRouter>
+);
 
 describe('billing payment return', () => {
   beforeEach(() => {
@@ -42,7 +54,6 @@ describe('billing payment return', () => {
       environment: 'development',
       userId: 'user-a',
     };
-    history.replaceState({}, '', '/work?payment_action=topup_1');
   });
 
   it('GETs attention status and performs no recovery until the explicit action is clicked', async () => {
@@ -60,7 +71,7 @@ describe('billing payment return', () => {
     payment.recoverPaymentAction.mockResolvedValue({
       state: 'redirect_required',
     });
-    render(<Harness />);
+    render(returnAt('?payment_action=topup_1'));
     await waitFor(() => {
       expect(warning).toHaveBeenCalledOnce();
     });
@@ -91,7 +102,7 @@ describe('billing payment return', () => {
       redirectUrl: 'https://checkout.example/resume',
     };
     payment.getPaymentAction.mockResolvedValue(action);
-    render(<Harness />);
+    render(returnAt('?payment_action=topup_1'));
     await waitFor(() => {
       expect(warning).toHaveBeenCalledOnce();
     });
@@ -112,10 +123,9 @@ describe('billing payment return', () => {
         rejectRequest = reject;
       }),
     );
-    const view = render(<Harness />);
+    const view = render(returnAt('?payment_action=topup_1'));
     session.current = { ...session.current, userId: 'user-b' };
-    history.replaceState({}, '', '/work');
-    view.rerender(<Harness />);
+    view.rerender(returnAt('?payment_action=topup_1'));
     rejectRequest(new Error('old owner request failed'));
     await Promise.resolve();
     await Promise.resolve();

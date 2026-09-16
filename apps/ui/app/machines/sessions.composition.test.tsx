@@ -26,7 +26,7 @@
 
 import { useEffect } from 'react';
 import { act, render, screen } from '@testing-library/react';
-import { Link, MemoryRouter, Route, Routes, useNavigate } from 'react-router';
+import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
 import { createActor, fromCallback } from 'xstate';
 import type { EventObject } from 'xstate';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -41,6 +41,7 @@ import { browserLiveProjectBudget, sessionsMachine } from '#machines/sessions.ma
 import type { SessionsMachineEmitted } from '#machines/sessions.machine.js';
 import { projectSessionIdleWindowMilliseconds, projectSessionMachine } from '#machines/project-session.machine.js';
 import { useChatSidebarStatus, useProjectSidebarRow } from '#hooks/use-sidebar-status.js';
+import { useProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
 
 const {
   workerFrames,
@@ -267,7 +268,7 @@ vi.mock('#hooks/use-revision-status.js', async (importOriginal) => ({
   },
   peekRevisionClient: () => revisionClient,
   useRevisionStatus: () => revisionProjection.current,
-  useRevisionCommands: () => ({}),
+  useRevisionCommands: () => ({ connectRemote: async () => undefined }),
 }));
 /* The checkout routes are storage, and storage is a leaf here: what S48(14) is
  * about is the workbench following the selection, not where the route table is
@@ -314,8 +315,15 @@ vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
 }));
 vi.mock('#routes/w.$workspace.$project/chat-interface.js', () => ({ ChatInterface: () => null }));
 vi.mock('#routes/w.$workspace.$project/revision-conflict-chat.js', () => ({ RevisionConflictChat: () => null }));
-vi.mock('#routes/w.$workspace.$project/project-not-found.js', () => ({ ProjectNotFound: () => null }));
-vi.mock('#routes/w.$workspace.$project/project-load-error.js', () => ({ ProjectLoadError: () => null }));
+/* W2: the route's non-editor states all render through one notice now. This
+ * suite is about the registry, so the notice stands in as its kind. */
+vi.mock('#routes/w.$workspace.$project/project-route-notices.js', async () => {
+  const { createContext } = await import('react');
+  return {
+    ProjectRouteRetryContext: createContext<() => void>(() => undefined),
+    ProjectRouteNotice: ({ state }: { readonly state: { kind: string } }) => <p>Notice: {state.kind}</p>,
+  };
+});
 vi.mock('#routes/w.$workspace.$project/revision-restore.js', () => ({ RevisionRestore: () => null }));
 /* Not mocked away for the route's own rows either: with no projection the real
  * component does nothing, and S48(14) below renders it against one. */
@@ -404,8 +412,11 @@ const renderRoute = async (
 
 let navigateRoute: ReturnType<typeof useNavigate> | undefined;
 
+let currentSearch = '';
+
 function NavigationProbe(): undefined {
   const navigate = useNavigate();
+  currentSearch = useLocation().search;
   useEffect(() => {
     navigateRoute = navigate;
     return () => {
@@ -416,6 +427,16 @@ function NavigationProbe(): undefined {
 }
 
 /** Render the app-owned session host with real project and non-project navigation. */
+/*
+ * W2: the route component below the outlet is what picks between the editor
+ * and a notice, and it reads the one state the gate publishes. The real
+ * `ProjectChatRoute` needs the whole chat stack; this probe reads the same
+ * context, so these tests can assert what the gate derived.
+ */
+const RouteStateProbe = (): React.JSX.Element => (
+  <span data-testid='route-state'>{useProjectRouteState()?.kind ?? 'none'}</span>
+);
+
 const renderRouteFamily = async (
   projectId: string,
   initialEntry = `/w/workspace/${projectId}`,
@@ -428,7 +449,15 @@ const renderRouteFamily = async (
           <routeModule.ProjectSessionsHost>
             <Routes>
               <Route path='/' element={<div>Home</div>} />
-              <Route path='/w/:workspace/:project' element={<Link to='/projects'>Projects</Link>} />
+              <Route
+                path='/w/:workspace/:project'
+                element={
+                  <>
+                    <Link to='/projects'>Projects</Link>
+                    <RouteStateProbe />
+                  </>
+                }
+              />
               <Route path='/projects' element={<div>Project library</div>} />
             </Routes>
           </routeModule.ProjectSessionsHost>
@@ -852,11 +881,27 @@ describe('sessions composition', () => {
     view.unmount();
   });
 
+  it('consumes the Tau Cloud open marker through the router (W7)', async () => {
+    /*
+     * The marker used to be stripped with `history.replaceState` from inside
+     * the session subtree, so React never saw the change and the URL and the
+     * render disagreed. It is read and cleared through the router now.
+     */
+    const view = await renderRouteFamily('route-cloud-a', '/w/workspace/route-cloud-a?cloudOpen=tau&chat=chat-keep');
+
+    expect(currentSearch).not.toContain('cloudOpen');
+    /* The write merges: the unrelated parameter survives. */
+    expect(currentSearch).toContain('chat=chat-keep');
+    view.unmount();
+  });
+
   it('never combines a retained project with a chat from an unresolved new URL', async () => {
     const view = await renderRouteFamily('route-chat-a');
     await view.navigate('/w/workspace/resolving?chat=chat-new');
 
-    expect(screen.getByRole('status', { name: 'Opening project' })).toBeInTheDocument();
+    /* W2: an unresolved slug is the `resolving` state, and its loader lives in
+     * the notice the real route component renders below the outlet. */
+    expect(screen.getByTestId('route-state')).toHaveTextContent('resolving');
     expect(projectProviderInputs).not.toContainEqual({
       projectId: 'route-chat-a',
       requestedChatId: 'chat-new',

@@ -1,6 +1,9 @@
 import type { ReactNode } from 'react';
 import { createContext, useContext, useMemo, useCallback, useEffect, useState } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
+import { OctagonAlert, RefreshCw } from 'lucide-react';
+import { Button } from '@taucad/ui/components/button';
+import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { waitFor } from 'xstate';
 import type { SnapshotFrom } from 'xstate';
 import type { FileSystemBackend, FileStatEntry, FileStat } from '@taucad/types';
@@ -371,14 +374,65 @@ export function useSharedFileManagerWorker(): Worker | undefined {
   return useContext(SharedWorkerContext);
 }
 
-export function SharedWorkerGate({ children }: { readonly children: ReactNode }): React.ReactNode | undefined {
-  const worker = useContext(SharedWorkerContext);
+/**
+ * What the gate shows when the root mount has no worker (blueprint R7).
+ *
+ * "No worker" means one of two things and the gate must not confuse them: the
+ * root mount is still connecting one, which is progress and stays silent, or
+ * its machine gave up, which used to be an unexplained blank. `initialize`
+ * takes the machine's `error` state back to `connectingWorker`, so Try again
+ * is a real retry rather than a page reload.
+ *
+ * Soft-error tone, not destructive red: nothing was lost, the service just did
+ * not start.
+ *
+ * @param properties - The root mount's machine, for the failure check and the retry.
+ * @returns The notice, or undefined while the worker is still on its way.
+ */
+function SharedWorkerFallback({
+  fileManagerRef,
+}: {
+  readonly fileManagerRef: FileManagerRef;
+}): React.JSX.Element | undefined {
+  const hasFailed = useSelector(fileManagerRef, (state) => state.matches('error'));
 
-  if (!worker) {
+  if (!hasFailed) {
     return undefined;
   }
 
-  return children;
+  return (
+    <div role='alert' className='size-full'>
+      <PanelEmptyState
+        icon={OctagonAlert}
+        iconClassName='text-feature'
+        title="Couldn't start the file service"
+        description="Tau's file service did not start, so your files aren't available yet. Try again to restart it."
+        className='p-6 [&_[data-slot=panel-empty-state-copy]]:mt-6'
+      >
+        <Button
+          type='button'
+          onClick={() => {
+            fileManagerRef.send({ type: 'initialize' });
+          }}
+        >
+          <RefreshCw />
+          Try again
+        </Button>
+      </PanelEmptyState>
+    </div>
+  );
+}
+
+export function SharedWorkerGate({ children }: { readonly children: ReactNode }): React.ReactNode | undefined {
+  const worker = useContext(SharedWorkerContext);
+  const fileManager = useOptionalFileManager();
+
+  if (worker) {
+    return children;
+  }
+
+  /* Outside a provider there is no machine to report on, so the gate stays silent. */
+  return fileManager === undefined ? undefined : <SharedWorkerFallback fileManagerRef={fileManager.fileManagerRef} />;
 }
 
 /**
@@ -423,6 +477,7 @@ export function HomeFileManagerProvider({
 }: HomeFileManagerProviderProps): React.JSX.Element {
   const inheritedBackend = useContext(HomeStorageBackendContext);
   const [resolvedBackend, setResolvedBackend] = useState<HomeStorageBackend>();
+  const [resolutionFailure, setResolutionFailure] = useState<Error>();
   const backend = inheritedBackend ?? resolvedBackend;
 
   useEffect(() => {
@@ -432,15 +487,27 @@ export function HomeFileManagerProvider({
     const controller = new AbortController();
     // async-iife: bootstrap
     void (async () => {
-      const resolved = await getHomeStorageBackend();
-      if (!controller.signal.aborted) {
-        setResolvedBackend(resolved);
+      try {
+        const resolved = await getHomeStorageBackend();
+        if (!controller.signal.aborted) {
+          setResolvedBackend(resolved);
+        }
+      } catch (error) {
+        // This provider gates the entire app, so a swallowed rejection is indistinguishable from a
+        // permanent hang. There is no safe fallback engine — surface it to the root error boundary.
+        if (!controller.signal.aborted) {
+          setResolutionFailure(error instanceof Error ? error : new Error(String(error)));
+        }
       }
     })();
     return () => {
       controller.abort();
     };
   }, [inheritedBackend]);
+
+  if (resolutionFailure) {
+    throw resolutionFailure;
+  }
 
   if (!backend) {
     return <div role='status' aria-label='Opening Home' />;

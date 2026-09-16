@@ -247,6 +247,13 @@ describe('Draft-7 parameter declaration adapter', () => {
       projectDraft7SchemaToParameterDeclaration({
         ...identity,
         defaults: {},
+        schema: null,
+      }),
+    ).toThrow('INVALID_SCHEMA');
+    expect(() =>
+      projectDraft7SchemaToParameterDeclaration({
+        ...identity,
+        defaults: {},
         schema: { type: 'number', 'x-ogc-unit': 'mm', 'x-ogc-unitLang': 'ucum' },
       }),
     ).toThrow('INVALID_QUANTITY');

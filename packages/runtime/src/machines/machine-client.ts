@@ -1,0 +1,156 @@
+import type { CacheValue, ContentDigest } from '@taucad/cache-core';
+
+import type {
+  MachineArtifactReference,
+  MachineBindingOutcome,
+  MachineCandidate,
+  MachineDiscoveryEvent,
+  MachineProvider,
+  MachineStill,
+} from '#machines/machine.js';
+import type {
+  MachineDirectoryCursor,
+  MachineDirectoryEntry,
+  MachineDirectoryFrame,
+  MachineDirectorySnapshot,
+} from '#machines/machine-directory.js';
+
+/** List the machine providers admitted by this host route. @public */
+export type MachineListProvidersInput = Readonly<{ signal?: AbortSignal }>;
+
+/** Start one bounded, user-initiated provider discovery operation. @public */
+export type MachineDiscoverInput = Readonly<{
+  providerId: string;
+  configuration: CacheValue;
+  signal?: AbortSignal;
+}>;
+
+/** One normalized discovery event. @public */
+export type MachineDiscoveryFrame = MachineDiscoveryEvent;
+
+/** Begin host-local binding without carrying credentials or certificate decisions. @public */
+export type MachineBeginBindingInput = Readonly<{
+  candidate: MachineCandidate;
+  name: string;
+  signal?: AbortSignal;
+}>;
+
+/** Prepare and transfer one immutable machine artifact without starting a physical run. @public */
+export type MachinePreparePrintInput = Readonly<{
+  machineId: string;
+  artifact: MachineArtifactReference;
+  configuration: CacheValue;
+  signal?: AbortSignal;
+}>;
+
+/** Durable preparation identity bound to one machine, artifact, setup and transferred remote object. @public */
+export type MachinePreparedPrint = Readonly<{
+  preparedId: string;
+  preparedDigest: ContentDigest;
+  configurationDigest: ContentDigest;
+  providerDataDigest: ContentDigest;
+  setupDigest: ContentDigest;
+  machineId: string;
+  physicalMachineId: string;
+  artifact: MachineArtifactReference;
+  remoteName: string;
+  parser: Readonly<{ id: string; version: string }>;
+  preparedAt: string;
+  expiresAt: string;
+}>;
+
+/** Start an exact prepared artifact with one caller-retained idempotency key. @public */
+export type MachineStartPrintInput = Readonly<{
+  machineId: string;
+  preparedId: string;
+  preparedDigest: ContentDigest;
+  expectedSetupDigest: ContentDigest;
+  operationId: string;
+  signal?: AbortSignal;
+}>;
+
+/** Issue one run command against the exact currently observed provider run. @public */
+export type MachineControlRunInput = Readonly<{
+  machineId: string;
+  operationId: string;
+  command: 'cancel' | 'pause' | 'resume' | 'urgent-stop';
+  expectedProviderRunId: string;
+  signal?: AbortSignal;
+}>;
+
+/** Read and explicitly reconcile one durable physical-operation state. @public */
+export type MachineReconcileOperationInput = Readonly<{
+  machineId: string;
+  operationId: string;
+  signal?: AbortSignal;
+}>;
+
+/** Capture one short-lived bounded still from an exact logical machine. @public */
+export type MachineCaptureStillClientInput = Readonly<{
+  machineId: string;
+  signal?: AbortSignal;
+}>;
+
+/** Terminal result returned after one physical command may have been sent. @public */
+export type MachineOperationReceipt =
+  | Readonly<{
+      operationId: string;
+      machineId: string;
+      kind: 'cancel' | 'pause' | 'resume' | 'start' | 'urgent-stop';
+      status: 'accepted';
+      providerRunId?: string;
+      observedAt: string;
+    }>
+  | Readonly<{
+      operationId: string;
+      machineId: string;
+      kind: 'cancel' | 'pause' | 'resume' | 'start' | 'urgent-stop';
+      status: 'rejected';
+      code: string;
+      message: string;
+      observedAt: string;
+    }>
+  | Readonly<{
+      operationId: string;
+      machineId: string;
+      kind: 'cancel' | 'pause' | 'resume' | 'start' | 'urgent-stop';
+      status: 'unknown';
+      reason: string;
+      providerRunId?: string;
+      observedAt: string;
+    }>;
+
+/** Durable physical-effect projection, including pre-send phases after recovery. @public */
+export type MachineOperationSnapshot = Readonly<{
+  operationId: string;
+  machineId: string;
+  kind: MachineOperationReceipt['kind'];
+  inputDigest: ContentDigest;
+  status: 'accepted' | 'planned' | 'rejected' | 'sending' | 'unknown';
+  updatedAt: string;
+  receipt?: MachineOperationReceipt;
+}>;
+
+/** Read the current workspace machine directory. @public */
+export type MachineListInput = Readonly<{ signal?: AbortSignal }>;
+
+/** Read one logical machine from the current workspace directory. @public */
+export type MachineGetInput = Readonly<{ machineId: string; signal?: AbortSignal }>;
+
+/** Watch a workspace directory from an optional durable cursor. @public */
+export type MachineWatchInput = Readonly<{ cursor?: MachineDirectoryCursor; signal?: AbortSignal }>;
+
+/** Browser-safe machines facet shared by the workbench and agent tools. @public */
+export type MachineClient = Readonly<{
+  listProviders(input: MachineListProvidersInput): Promise<readonly MachineProvider[]>;
+  discover(input: MachineDiscoverInput): AsyncIterable<MachineDiscoveryFrame>;
+  beginBinding(input: MachineBeginBindingInput): Promise<MachineBindingOutcome>;
+  preparePrint(input: MachinePreparePrintInput): Promise<MachinePreparedPrint>;
+  startPrint(input: MachineStartPrintInput): Promise<MachineOperationReceipt>;
+  reconcileOperation(input: MachineReconcileOperationInput): Promise<MachineOperationSnapshot>;
+  controlRun(input: MachineControlRunInput): Promise<MachineOperationReceipt>;
+  captureStill(input: MachineCaptureStillClientInput): Promise<MachineStill>;
+  list(input: MachineListInput): Promise<MachineDirectorySnapshot>;
+  get(input: MachineGetInput): Promise<MachineDirectoryEntry>;
+  watch(input: MachineWatchInput): AsyncIterable<MachineDirectoryFrame>;
+}>;

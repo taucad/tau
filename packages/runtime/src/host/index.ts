@@ -6,7 +6,9 @@ export { defineRuntime } from '#host/host-definition.js';
 export { createHostAdmissionAuthority, HostAdmissionRefusal } from '#host/host-admission.js';
 export type {
   AdmittedHostOperation,
+  AdmittedHostRoute,
   AdmitHostOperationInput,
+  AdmitHostRouteInput,
   CreateHostAdmissionAuthorityInput,
   HostActor,
   HostAdmissionAuthority,
@@ -34,3 +36,5 @@ export type {
   MatchHostCapabilitiesInput,
 } from '#host/capability-matching.js';
 export { connectComputeStoreChannel, exposeComputeStoreChannel } from '#transport/_internal/compute-store-channel.js';
+export { exposeMachineChannel } from '#machines/machine-channel.js';
+export type { MachineChannelHostOperations } from '#machines/machine-channel.js';

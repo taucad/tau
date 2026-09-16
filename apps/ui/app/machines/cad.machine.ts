@@ -19,7 +19,6 @@ import { isRenderTimeoutError } from '@taucad/runtime/client';
 import { isKernelIssueCode } from '@taucad/runtime/types';
 import { safeDispose } from '@taucad/utils/dispose';
 import type { JSONSchema7 } from '@taucad/json-schema';
-import type { LengthSymbol } from '@taucad/units';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { getComputeReuseMode } from '#lib/compute-reuse-preference.js';
@@ -33,6 +32,7 @@ import type {
   AppRuntimeClient,
   LazyKernelOptionsFactory,
 } from '#types/runtime-client.alias.js';
+import type { LengthSymbol } from '#utils/length-unit.utils.js';
 import {
   appendSceneTimelineUpdate,
   clearSceneTimeline,
@@ -595,11 +595,11 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
       machineRef.send({ type: 'kernelProgress', phase });
     }),
     client.on('parametersResolved', (parametersResult: GetParametersResult) => {
-      if (parametersResult.success) {
+      if (parametersResult.success && parametersResult.data.legacyProjection.status === 'usable') {
         machineRef.send({
           type: 'parametersParsed',
-          defaultParameters: parametersResult.data.defaultParameters,
-          jsonSchema: parametersResult.data.jsonSchema,
+          defaultParameters: { ...parametersResult.data.defaults },
+          jsonSchema: parametersResult.data.legacyProjection.schema as JSONSchema7,
         });
       }
     }),

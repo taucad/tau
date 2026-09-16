@@ -1,4 +1,5 @@
 import type { StandardJSONSchemaV1, StandardSchemaV1 } from '@standard-schema/spec';
+import { createQuantity, quantityKinds } from '@taucad/units/quantity';
 import { describe, expect, it, vi } from 'vitest';
 
 import { defineConfiguration } from '#configuration/configuration.js';
@@ -44,6 +45,16 @@ const accepted = {
   payloadSelection: 'plate',
   technology: 'fff',
 } as const;
+const nozzleDiameter = createQuantity({
+  value: 0.4,
+  unit: 'mm',
+  kind: quantityKinds.diameter,
+  space: 'linear',
+  semanticMode: 'declared-only',
+});
+if (nozzleDiameter.status !== 'success') {
+  throw new Error(nozzleDiameter.diagnostic.message);
+}
 
 describe('defineMachine', () => {
   it('keeps authoring and invocation lazy while exposing frozen serializable metadata', async () => {
@@ -120,7 +131,7 @@ describe('defineMachine', () => {
               operations: ['submit'],
               ratedEnvelope: { width: 0.3, depth: 0.3, height: 0.3, unit: 'm' },
               printableEnvelope: { width: 0.25, depth: 0.25, height: 0.25, unit: 'm' },
-              tools: [{ id: 'tool-0', kind: 'extruder', nozzleDiameter: 0.0004 }],
+              tools: [{ id: 'tool-0', kind: 'extruder', nozzleDiameter: nozzleDiameter.value }],
               materialSystem: { kind: 'single', slotCount: 1 },
               bedTypes: ['textured'],
             };

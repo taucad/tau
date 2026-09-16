@@ -615,11 +615,11 @@ export function useRuntime<
             if (cancelled) {
               return;
             }
-            if (result.success) {
-              const nextDefaults = cloneParameterRecord(result.data.defaultParameters);
+            if (result.success && result.data.legacyProjection.status === 'usable') {
+              const nextDefaults = cloneParameterRecord(result.data.defaults);
               setDefaultParameters(nextDefaults);
               setParameterEdits((current) => pruneParameterOverrides(current, nextDefaults));
-              setJsonSchema(result.data.jsonSchema);
+              setJsonSchema(result.data.legacyProjection.schema as JSONSchema7);
             }
           }),
           capabilitiesClient.on('capabilities', (manifest) => {

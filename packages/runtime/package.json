@@ -46,6 +46,7 @@
     "./job": "./src/jobs/index.ts",
     "./machine": "./src/machines/index.ts",
     "./host": "./src/host/index.ts",
+    "./host/node": "./src/host/node.ts",
     "./worker": "./src/worker/index.ts",
     "./plugin": "./src/plugins/plugin-entry.ts",
     "./kernel": "./src/plugins/kernel-plugin-entry.ts",
@@ -136,6 +137,11 @@
         "types": "./dist/host/index.d.mts",
         "import": "./dist/host/index.mjs",
         "default": "./dist/host/index.mjs"
+      },
+      "./host/node": {
+        "types": "./dist/host/node.d.mts",
+        "import": "./dist/host/node.mjs",
+        "default": "./dist/host/node.mjs"
       },
       "./worker": {
         "types": "./dist/worker/index.d.mts",

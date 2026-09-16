@@ -1,6 +1,5 @@
 import type { RJSFSchema, WidgetProps } from '@rjsf/utils';
 import { getSchemaType } from '@rjsf/utils';
-import { quantityRegistry } from '@taucad/units/constants';
 import { ParametersBoolean } from '#components/geometry/parameters/parameters-boolean.js';
 import { ParametersNumber } from '#components/geometry/parameters/parameters-number.js';
 import { ParametersString } from '#components/geometry/parameters/parameters-string.js';
@@ -8,26 +7,62 @@ import { formatDisplayLabel } from '#utils/string.utils.js';
 import { getDescriptor } from '#constants/project-parameters.js';
 import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
 import { Input } from '@taucad/ui/components/input';
+import { toDisplayUnitSymbol } from '#utils/length-unit.utils.js';
+
+const legacyCanonicalUnits = {
+  length: 'm',
+  mass: 'kg',
+  time: 's',
+  electricCurrent: 'A',
+  thermodynamicTemperature: 'K',
+  temperatureDifference: 'K',
+  amountOfSubstance: 'mol',
+  luminousIntensity: 'cd',
+  planeAngle: 'rad',
+  solidAngle: 'sr',
+  ratio: '1',
+  frequency: 'Hz',
+  force: 'N',
+  pressure: 'Pa',
+  energy: 'J',
+  torque: 'N.m',
+  power: 'W',
+  electricCharge: 'C',
+  electricPotential: 'V',
+  capacitance: 'F',
+  electricalResistance: 'Ohm',
+  electricalConductance: 'S',
+  magneticFlux: 'Wb',
+  magneticFluxDensity: 'T',
+  inductance: 'H',
+  luminousFlux: 'lm',
+  illuminance: 'lx',
+  activityRadionuclide: 'Bq',
+  absorbedDose: 'Gy',
+  doseEquivalent: 'Sv',
+  catalyticActivity: 'kat',
+  area: 'm2',
+  volume: 'm3',
+  speed: 'm/s',
+  acceleration: 'm/s2',
+  density: 'kg/m3',
+} as const;
 
 function getQuantityUnit(schema: Readonly<Record<string, unknown>>): string | undefined {
+  const declaredUnit = schema['x-tau-unit'] ?? schema['x-ogc-unit'];
+  if (typeof declaredUnit === 'string') {
+    return toDisplayUnitSymbol(declaredUnit);
+  }
   if (!Object.hasOwn(schema, 'x-tau-quantity')) {
     return undefined;
   }
 
   const quantityId = schema['x-tau-quantity'];
-  if (typeof quantityId !== 'string' || !Object.hasOwn(quantityRegistry, quantityId)) {
+  if (typeof quantityId !== 'string' || !Object.hasOwn(legacyCanonicalUnits, quantityId)) {
     throw new Error(`Unsupported x-tau-quantity: ${String(quantityId)}`);
   }
 
-  const quantity = Object.entries(quantityRegistry).find(([id]) => id === quantityId)?.[1];
-  const canonicalUnit = quantity
-    ? Object.entries(quantity.units).find(([unitId]) => unitId === quantity.canonicalUnit)?.[1]
-    : undefined;
-  if (!canonicalUnit) {
-    throw new Error(`Quantity ${quantityId} has no canonical unit`);
-  }
-
-  return canonicalUnit.symbol;
+  return Object.entries(legacyCanonicalUnits).find(([id]) => id === quantityId)?.[1];
 }
 
 export function ParametersWidget(

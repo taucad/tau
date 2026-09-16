@@ -198,7 +198,7 @@ export function extractDefaultParameters(module: unknown): Record<string, unknow
  */
 export const createKernelParameterDeclaration = (
   defaults: Readonly<Record<string, unknown>>,
-  schema: Readonly<Record<string, unknown>>,
+  schema: unknown,
   identity: Readonly<{ id: string; name: string }>,
 ): ParameterDeclaration =>
   projectDraft7SchemaToParameterDeclaration({

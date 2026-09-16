@@ -15,6 +15,8 @@ import { createRuntimeClient, RuntimeConnectionError } from '#client/runtime-cli
 import type { RuntimeClientOptionsWithTransport } from '#client/runtime-client.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
+import type { MachineClient } from '#machines/machine-client.js';
+import type { RuntimeTransportFacet } from '#transport/runtime-transport.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 
 describe('RuntimeClient TransportPlugin materialization', () => {
@@ -40,6 +42,60 @@ describe('RuntimeClient TransportPlugin materialization', () => {
 
     await clientSecond.connect();
     clientSecond.terminate();
+  });
+
+  it('projects the optional machines facet without opening the CAD runtime', async () => {
+    const base = inProcessTransport({ runtime: defineRuntime({}), fileSystem: fromMemoryFs() });
+    const listProviders = vi.fn(async () => []);
+    const machines: RuntimeTransportFacet<MachineClient> = {
+      available: true,
+      listProviders,
+      async *discover() {
+        yield* [];
+      },
+      async beginBinding() {
+        return { status: 'operator-action-required', ceremonyId: 'fixture' };
+      },
+      async preparePrint() {
+        throw new Error('Unused fixture operation');
+      },
+      async startPrint() {
+        throw new Error('Unused fixture operation');
+      },
+      async reconcileOperation() {
+        throw new Error('Unused fixture operation');
+      },
+      async controlRun() {
+        throw new Error('Unused fixture operation');
+      },
+      async list() {
+        throw new Error('Unused fixture operation');
+      },
+      async get() {
+        throw new Error('Unused fixture operation');
+      },
+      async *watch() {
+        yield* [];
+      },
+    };
+    const client = createRuntimeClient({
+      transport: {
+        ...base,
+        materialize() {
+          return {
+            ...base.materialize(),
+            machines,
+          };
+        },
+      },
+    });
+
+    expect(client.machines.available).toBe(true);
+    if (client.machines.available) {
+      await expect(client.machines.listProviders({})).resolves.toEqual([]);
+    }
+    expect(listProviders).toHaveBeenCalledOnce();
+    client.terminate();
   });
 
   it('requires transport even when a runtime is supplied through an invalid cast', () => {

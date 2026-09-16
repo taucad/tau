@@ -1,5 +1,5 @@
 import type { LinksFunction, LoaderFunctionArgs, MetaFunction, ShouldRevalidateFunction } from 'react-router';
-import { Links, Meta, Scripts, ScrollRestoration, useRouteLoaderData } from 'react-router';
+import { Links, Meta, Outlet, Scripts, ScrollRestoration, useRouteLoaderData } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
@@ -194,6 +194,8 @@ export function Layout({ children }: { readonly children: ReactNode }): React.JS
   const application =
     data?.env.TAU_DEBUG && data.pathname === '/__e2e/remote-host' ? (
       children
+    ) : data?.pathname === '/x1c' ? (
+      children
     ) : (
       <HomeFileManagerProvider rootDirectory='/'>{managedChildren}</HomeFileManagerProvider>
     );
@@ -308,7 +310,14 @@ function LayoutDocument({
 
 export default function App(): React.JSX.Element {
   usePaymentActionReturn();
-  return <Page />;
+  const data = useRouteLoaderData<typeof loader>('root');
+  return data?.pathname === '/x1c' ? (
+    <div className='h-dvh overflow-y-auto'>
+      <Outlet />
+    </div>
+  ) : (
+    <Page />
+  );
 }
 
 export const usePaymentActionReturn = (): void => {

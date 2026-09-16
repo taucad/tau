@@ -1,7 +1,5 @@
 import React, { useMemo } from 'react';
 import { Box, PenLine, Ruler } from 'lucide-react';
-import type { LengthSymbol } from '@taucad/units';
-import { convertLength } from '@taucad/units/converter';
 import { Button } from '@taucad/ui/components/button';
 import { Tabs, TabsList, TabsTrigger } from '@taucad/ui/components/tabs';
 import { Switch } from '@taucad/ui/components/switch';
@@ -9,6 +7,8 @@ import { ParametersNumber } from '#components/geometry/parameters/parameters-num
 import type { Units } from '#components/geometry/parameters/rjsf-context.js';
 import { InfoTooltip } from '#components/ui/info-tooltip.js';
 import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
+import { convertLength } from '#utils/length-unit.utils.js';
+import type { LengthSymbol } from '#utils/length-unit.utils.js';
 
 function toDegrees(radians: number): number {
   const degrees = (radians * 180) / Math.PI;

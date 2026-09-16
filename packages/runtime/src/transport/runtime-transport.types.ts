@@ -23,6 +23,7 @@
 
 import type { Channel, ChannelServerHandle, RpcProtocol } from '@taucad/rpc';
 import type { Geometry } from '@taucad/types';
+import type { MachineClient } from '#machines/machine-client.js';
 import type { ExportGeometryResult } from '#types/runtime.types.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
@@ -290,6 +291,11 @@ export type TransportHostReady<Protocol extends RpcProtocol = RuntimeProtocol> =
   readonly peerHello: TransportHelloPayload;
 };
 
+/** Truthful negotiated availability for one optional host facet. @public */
+export type RuntimeTransportFacet<Value> =
+  | Readonly<{ available: false; reason: 'not-granted' | 'unsupported' }>
+  | (Readonly<{ available: true }> & Value);
+
 /* ============================================================ *
  * Fat client / host handles                                     *
  * ============================================================ */
@@ -313,6 +319,9 @@ export type RuntimeTransportClient<
 > = {
   /** Literal id (matches the plugin's `id`). */
   readonly id: Id;
+
+  /** Optional authenticated machines service carried beside, never over, the CAD channel. */
+  readonly machines?: RuntimeTransportFacet<MachineClient>;
 
   /** Resolves once with the first terminal transport cause. Never rejects. */
   readonly closed: Promise<RuntimeTransportCloseResult>;

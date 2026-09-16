@@ -24,9 +24,7 @@ import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 <% } %>
 
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
-import { plugin, <%= alias %> } from '#index.js';
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-import self-reference resolves this package's source alias.
-import<%= capabilities.some(({ role }) => role === 'job' || role === 'machine') ? '' : ' type' %> {<% capabilities.forEach((capability, index) => { %><%= index === 0 ? ' ' : ', ' %><%= capability.factoryName %><% }); %> } from '#index.js';
+import { plugin, <%= alias %><% for (const capability of capabilities) { %>, <%= capability.role === 'job' || capability.role === 'machine' ? '' : 'type ' %><%= capability.factoryName %><% } %> } from '#index.js';
 
 const selected = plugin();
 <% for (const capability of capabilities) { const projection = capability.role === 'kernel' ? 'ExpandPluginKernels' : capability.role === 'middleware' ? 'ExpandPluginMiddleware' : capability.role === 'bundler' ? 'ExpandPluginBundlers' : capability.role === 'job' ? 'ExpandPluginJobs' : capability.role === 'machine' ? 'ExpandPluginMachines' : 'ExpandPluginTranscoders'; %>

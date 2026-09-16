@@ -75,7 +75,6 @@
     "@taucad/gltf": "workspace:*",
     "@taucad/host": "workspace:*",
     "@taucad/image": "workspace:*",
-    "@taucad/jobs-solvers": "workspace:*",
     "@taucad/jscad": "workspace:*",
     "@taucad/manifold": "workspace:*",
     "@taucad/middleware": "workspace:*",

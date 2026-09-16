@@ -1677,7 +1677,7 @@ export const jobRun = pgTable(
   ],
 );
 
-/** Durable at-least-once dispatch intent; Hatchet idempotency closes the crash-after-trigger window. */
+/** Historical durable dispatch intent retained with existing job data while job execution is paused. */
 export const jobDispatchOutbox = pgTable(
   'job_dispatch_outbox',
   {

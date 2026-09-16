@@ -1,8 +1,8 @@
 import type { PartialDeep, SetRequired } from 'type-fest';
 import type { Node } from '@taucad/kcl-wasm-lib/bindings/Node';
 import type { Program } from '@taucad/kcl-wasm-lib/bindings/Program';
-import type { KclValue } from '@taucad/kcl-wasm-lib/bindings/KclValue';
-import type { Operation } from '@taucad/kcl-wasm-lib/bindings/Operation';
+import type { KclValueView } from '@taucad/kcl-wasm-lib/bindings/KclValueView';
+import type { OperationsByModule } from '@taucad/kcl-wasm-lib/bindings/OperationsByModule';
 import type { ArtifactGraph } from '@taucad/kcl-wasm-lib/bindings/Artifact';
 import type { CompilationIssue as CompilationError } from '@taucad/kcl-wasm-lib/bindings/CompilationIssue';
 import type { DefaultPlanes } from '@taucad/kcl-wasm-lib/bindings/DefaultPlanes';
@@ -90,7 +90,7 @@ function normalizeKclExecutionResult(raw: unknown): KclExecutionResult {
 
   return {
     variables: (record['variables'] ?? {}) as KclExecutionResult['variables'],
-    operations: (record['operations'] ?? []) as Operation[],
+    operations: (record['operations'] ?? { map: {} }) as OperationsByModule,
     artifactGraph: (record['artifactGraph'] ?? { map: {}, itemCount: 0 }) as ArtifactGraph,
     errors: partitioned.errors,
     warnings: partitioned.warnings,
@@ -227,7 +227,7 @@ export class KclUtilities {
    * @param variables - name-to-value map produced by the KCL executor (only literal types are extracted)
    * @returns Object containing default parameters and JSON schema
    */
-  public static convertKclVariablesToJsonSchema(variables: Partial<Record<string, KclValue>>): {
+  public static convertKclVariablesToJsonSchema(variables: Partial<Record<string, KclValueView>>): {
     defaultParameters: Record<string, unknown>;
     jsonSchema: Record<string, unknown>;
   } {

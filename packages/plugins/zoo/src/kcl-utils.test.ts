@@ -34,4 +34,27 @@ describe('KclUtilities execution normalization', () => {
     expect(Array.isArray(outcome.errors)).toBe(true);
     expect(Array.isArray(outcome.warnings)).toBe(true);
   });
+
+  it('preserves KCL numeric unit types in mock execution variables', async () => {
+    const source = `@settings(defaultLengthUnit = mm, kclVersion = 1.0)
+length = 12mm
+angle = 30deg
+count = 3_
+derived = length + 2cm
+area = 2mm * 3mm
+bare = 7
+`;
+    const fs = new FileSystemManager(memoryFs(new Map([['/main.kcl', source]])));
+    const utils = new KclUtilities({ baseUrl: 'ws://fake.example/modeling-commands', fileSystemManager: fs });
+    await utils.initializeWasm();
+    const { program } = await utils.parseKcl(source);
+    const { variables } = await utils.executeMockKcl(program, '/main.kcl');
+
+    expect(variables['length']).toMatchObject({ ty: { type: 'Length', mm: null } });
+    expect(variables['angle']).toMatchObject({ ty: { type: 'Angle', degrees: null } });
+    expect(variables['count']).toMatchObject({ ty: { type: 'Count' } });
+    expect(variables['derived']).toMatchObject({ value: 32, ty: { type: 'Length', mm: null } });
+    expect(variables['area']).toMatchObject({ ty: { type: 'Unknown' } });
+    expect(variables['bare']).toMatchObject({ ty: { type: 'Default', len: 'mm', angle: 'degrees' } });
+  });
 });

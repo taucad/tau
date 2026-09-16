@@ -63,6 +63,7 @@ export function convertKclErrorToKernelIssue(kclError: KclError, code?: string, 
   // Default position
   let startLineNumber = 0;
   let startColumn = 0;
+  let locationFileName = fileName;
   let stackFrames: KernelStackFrame[] | undefined;
   let stack: string | undefined;
 
@@ -78,6 +79,12 @@ export function convertKclErrorToKernelIssue(kclError: KclError, code?: string, 
 
     // Create stack frames from backtrace
     stackFrames = kclError.createStackFrames(code);
+    const firstFrame = stackFrames[0];
+    if (firstFrame) {
+      startLineNumber = firstFrame.lineNumber ?? 0;
+      startColumn = firstFrame.columnNumber ?? 0;
+      locationFileName = firstFrame.fileName ?? fileName;
+    }
 
     // Create stack string representation if we have stack frames
     if (stackFrames.length > 0) {
@@ -103,12 +110,22 @@ export function convertKclErrorToKernelIssue(kclError: KclError, code?: string, 
     case 'lexical':
     case 'syntax':
     case 'semantic':
-    case 'type': {
+    case 'import_cycle':
+    case 'argument':
+    case 'type':
+    case 'value_already_defined':
+    case 'undefined_value':
+    case 'invalid_expression':
+    case 'refactor': {
       errorType = 'compilation';
       break;
     }
 
+    case 'user_defined':
+    case 'max_call_stack':
     case 'engine':
+    case 'engine_hangup':
+    case 'engine_internal':
     case 'runtime': {
       errorType = 'runtime';
       break;
@@ -139,8 +156,9 @@ export function convertKclErrorToKernelIssue(kclError: KclError, code?: string, 
   }
 
   // Only include location if we have meaningful location data
-  const hasLocation = fileName && (startLineNumber > 0 || startColumn > 0);
-  const location: ErrorLocation | undefined = hasLocation ? { fileName, startLineNumber, startColumn } : undefined;
+  const hasLocation = locationFileName && (startLineNumber > 0 || startColumn > 0);
+  const location: ErrorLocation | undefined =
+    hasLocation && locationFileName ? { fileName: locationFileName, startLineNumber, startColumn } : undefined;
 
   const kernelIssue: KernelIssue = {
     message: kclError.msg,

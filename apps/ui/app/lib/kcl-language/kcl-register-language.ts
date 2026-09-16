@@ -4,7 +4,7 @@ import type * as Monaco from 'monaco-editor';
 import type * as LSP from 'vscode-languageserver-protocol';
 import type { Node } from '@taucad/kcl-wasm-lib/bindings/Node';
 import type { Program } from '@taucad/kcl-wasm-lib/bindings/Program';
-import type { KclValue } from '@taucad/kcl-wasm-lib/bindings/KclValue';
+import type { KclValueView } from '@taucad/kcl-wasm-lib/bindings/KclValueView';
 import { KclLspClient } from '#lib/kcl-language/lsp/kcl-lsp-client.js';
 import { createKclLogger } from '#lib/kcl-language/lsp/kcl-logs.js';
 import { createDiagnosticsHandler, kclMarkerOwner } from '#lib/kcl-language/lsp/providers/diagnostics-handler.js';
@@ -378,7 +378,7 @@ async function initializeSymbolServiceWasm(): Promise<void> {
     };
 
     type MockExecutionResult = {
-      variables: Partial<Record<string, KclValue>>;
+      variables: Partial<Record<string, KclValueView>>;
       errors: unknown[];
       sourceFiles?: Record<
         string | number,

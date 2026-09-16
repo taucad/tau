@@ -78,7 +78,7 @@ describe('convertKclErrorToKernelIssue', () => {
       details: {
         msg: 'error',
         sourceRanges: [[0, 10, 0]],
-        backtrace: [{ sourceRange: [0, 10, 0], fnName: null }],
+        backtrace: [{ sourceRange: [0, 10, 0], fnName: null, kind: 'call' }],
       },
     });
     const kclError = new KclWasmError(wasmError);
@@ -95,7 +95,7 @@ describe('convertKclErrorToKernelIssue', () => {
       details: {
         msg: 'error',
         sourceRanges: [[0, 5, 0]],
-        backtrace: [{ sourceRange: [0, 5, 0], fnName: null }],
+        backtrace: [{ sourceRange: [0, 5, 0], fnName: null, kind: 'call' }],
       },
     });
     const kclError = new KclWasmError(wasmError);

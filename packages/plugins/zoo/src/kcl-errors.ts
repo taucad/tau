@@ -1,6 +1,7 @@
 import type { SourceRange } from '@taucad/kcl-wasm-lib/bindings/SourceRange';
 import type { KclError as WasmKclError } from '@taucad/kcl-wasm-lib/bindings/KclError';
 import type { KclErrorWithOutputs } from '@taucad/kcl-wasm-lib/bindings/KclErrorWithOutputs';
+import type { ModuleSource } from '@taucad/kcl-wasm-lib/bindings/ModuleSource';
 import type { KernelStackFrame } from '@taucad/runtime/types';
 import type { KclExecutionResult } from '#kcl-execution-result.types.js';
 import { sourceRangeToLineColumn } from '#source-range-utils.js';
@@ -26,21 +27,15 @@ export type WasmFileInfo = {
  */
 export type ExtendedWasmKclError = WasmKclError & {
   filenames?: Record<string | number, WasmFileInfo>;
+  sourceFiles?: Record<string | number, ModuleSource>;
 };
 
 /**
  * Simplified error kinds that map to KernelIssue types for KCL execution failures.
  */
 export type KclErrorKind =
-  | 'lexical'
-  | 'syntax'
-  | 'semantic'
-  | 'type'
-  | 'engine'
+  | WasmKclError['kind']
   | 'runtime'
-  | 'internal'
-  | 'io'
-  | 'unexpected'
   | 'auth'
   | 'export'
   | 'connection'
@@ -309,7 +304,7 @@ export class KclWasmError extends KclError {
     // Use the first source range if available, otherwise default
     const sourceRange: SourceRange = sourceRanges.length > 0 ? sourceRanges[0]! : [0, 0, 0];
 
-    super(kind as KclErrorKind, healedMessage, sourceRange);
+    super(kind, healedMessage, sourceRange);
     this.partialOutcome = partialOutcome;
     this.wasmError =
       healedMessage === details.msg
@@ -344,7 +339,7 @@ export class KclWasmError extends KclError {
       }
 
       // Convert source range to line/column positions
-      const position = sourceRangeToLineColumn(sourceRange, code);
+      const position = sourceRangeToLineColumn(sourceRange, extendedError.sourceFiles?.[moduleId]?.source ?? code);
 
       const stackFrame: KernelStackFrame = {
         functionName: fnName ?? undefined,
@@ -416,6 +411,7 @@ export const extractWasmKclErrorDetails = (error: unknown): WasmKclErrorExtracti
   if (isKclErrorWithOutputs(error)) {
     const extended = error.error as ExtendedWasmKclError;
     extended.filenames = error.filenames as unknown as ExtendedWasmKclError['filenames'];
+    extended.sourceFiles = error.sourceFiles as unknown as ExtendedWasmKclError['sourceFiles'];
     return {
       wasmError: extended,
       partialOutcome: mapKclErrorWithOutputsToPartialExecutionResult(error),

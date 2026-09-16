@@ -704,10 +704,10 @@ export cube = garbage`,
         expect(result.success).toBe(false);
         expect(result.issues).toEqual([
           {
-            code: 'RUNTIME',
+            code: 'BUNDLER_FAILED',
             message: '`garbage` is not defined',
             severity: 'error',
-            type: 'unknown',
+            type: 'compilation',
             stack: '    at <anonymous> (main.kcl:3:14)',
             location: {
               fileName: 'main.kcl',
@@ -728,9 +728,7 @@ export cube = garbage`,
       });
 
       it('should return error with imported file name in message for multi-file project', async () => {
-        // NOTE: The KCL WASM only provides sourceRanges/backtrace for the import
-        // site in main.kcl (moduleId 0), not for the actual error in bad.kcl.
-        // The imported filename and sub-error are embedded in the message string.
+        // KCL 0.1.184 provides the cross-file source and import frame.
         const result = await getParametersWithError(
           {
             'main.kcl': `@settings(defaultLengthUnit = mm, kclVersion = 1.0)
@@ -747,17 +745,23 @@ export cube = garbage`,
         expect(result.issues).toEqual([
           {
             code: 'BUNDLER_FAILED',
-            message: 'Error loading imported file (bad.kcl). Open it to view more details.\n  `garbage` is not defined',
+            message: '`garbage` is not defined',
             severity: 'error',
             type: 'compilation',
-            stack: '    at <anonymous> (main.kcl:3:0)',
-            // Location points to the import site in main.kcl (WASM limitation)
+            stack: '    at import bad.kcl (bad.kcl:3:14)\n    at <anonymous> (main.kcl:3:0)',
             location: {
-              fileName: 'main.kcl',
+              fileName: 'bad.kcl',
               startLineNumber: 3,
-              startColumn: 0,
+              startColumn: 14,
             },
             stackFrames: [
+              {
+                fileName: 'bad.kcl',
+                lineNumber: 3,
+                columnNumber: 14,
+                context: 'user',
+                functionName: 'import bad.kcl',
+              },
               {
                 fileName: 'main.kcl',
                 lineNumber: 3,
@@ -789,10 +793,10 @@ result = makeBadShape()`,
         expect(result.success).toBe(false);
         expect(result.issues).toEqual([
           {
-            code: 'RUNTIME',
+            code: 'BUNDLER_FAILED',
             message: '`garbage` is not defined',
             severity: 'error',
-            type: 'unknown',
+            type: 'compilation',
             stack: '    at makeBadShape (main.kcl:4:9)\n    at <anonymous> (main.kcl:7:9)',
             location: {
               fileName: 'main.kcl',
@@ -825,10 +829,6 @@ result = makeBadShape()`,
       it('should return error with nested import chain in message for 3-file project', async () => {
         // 3-file chain: main.kcl -> middle.kcl -> bad.kcl
         // Error is in bad.kcl, imported transitively through middle.kcl.
-        //
-        // NOTE: Same WASM limitation as 2-file imports -- the backtrace only
-        // contains a single frame at the import site in main.kcl. The import
-        // chain is encoded in the nested error message instead.
         const result = await getParametersWithError(
           {
             'main.kcl': `@settings(defaultLengthUnit = mm, kclVersion = 1.0)
@@ -850,19 +850,31 @@ export badThing = garbage`,
         expect(result.issues).toEqual([
           {
             code: 'BUNDLER_FAILED',
-            message:
-              'Error loading imported file (middle.kcl). Open it to view more details.\n  Error loading imported file (bad.kcl). Open it to view more details.\n  `garbage` is not defined',
+            message: '`garbage` is not defined',
             severity: 'error',
             type: 'compilation',
-            stack: '    at <anonymous> (main.kcl:3:0)',
-            // Location points to the import site in main.kcl (WASM limitation)
+            stack:
+              '    at import bad.kcl (bad.kcl:3:18)\n    at import middle.kcl (middle.kcl:3:0)\n    at <anonymous> (main.kcl:3:0)',
             location: {
-              fileName: 'main.kcl',
+              fileName: 'bad.kcl',
               startLineNumber: 3,
-              startColumn: 0,
+              startColumn: 18,
             },
-            // Only one stack frame at the import site (no cross-file frames)
             stackFrames: [
+              {
+                fileName: 'bad.kcl',
+                lineNumber: 3,
+                columnNumber: 18,
+                context: 'user',
+                functionName: 'import bad.kcl',
+              },
+              {
+                fileName: 'middle.kcl',
+                lineNumber: 3,
+                columnNumber: 0,
+                context: 'user',
+                functionName: 'import middle.kcl',
+              },
               {
                 fileName: 'main.kcl',
                 lineNumber: 3,

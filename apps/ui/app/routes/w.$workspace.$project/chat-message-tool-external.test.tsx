@@ -390,7 +390,7 @@ describe('the external tool-call renderer', () => {
     expect(document.body.textContent).not.toMatch(/[\u202A-\u202E\u2066-\u2069]/u);
   });
 
-  it('groups an external call by its kind, and keeps a think call with the reasoning', async () => {
+  it('groups external calls, including a think call, as tool activity', async () => {
     const readPart = await partFromLog(listFilesRows);
     expect(classifyActivityPart(readPart)).toBe('research');
 
@@ -405,6 +405,6 @@ describe('the external tool-call renderer', () => {
         metadata: externalMetadata,
       },
     ]);
-    expect(classifyActivityPart(thinkPart)).toBe('reasoning');
+    expect(classifyActivityPart(thinkPart)).toBe('research');
   });
 });

@@ -23,7 +23,7 @@ type ChatToolLabelProps = {
 
 /**
  * Shared verb + detail label for every chat-tool header row (tool cards,
- * activity summaries, the reasoning Brain button).
+ * activity summaries, and the reasoning thought trigger).
  *
  * Lays out the verb and detail as inline text separated by a literal space —
  * **not** a CSS `gap` — so the pair reads as one natural phrase that matches
@@ -41,7 +41,7 @@ type ChatToolLabelProps = {
  *
  * **Hover affordance:** when the label lives inside a parent that declares the
  * `group/chat-tool-trigger` Tailwind named group (every clickable chat-tool
- * header — activity section/group, tool-card header, reasoning Brain button),
+ * header — activity section/group, tool-card header, reasoning thought trigger),
  * the verb lifts from `text-foreground/60` to `text-foreground` and the
  * accompanying `ChatToolDescription` lifts from `text-foreground/50` to
  * `text-foreground/80`, giving a single consistent "this is clickable" cue

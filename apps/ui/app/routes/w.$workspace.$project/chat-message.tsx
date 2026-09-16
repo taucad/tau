@@ -1,4 +1,16 @@
-import { Wrench } from 'lucide-react';
+import {
+  BookOpen,
+  Box,
+  Camera,
+  Globe,
+  ListChecks,
+  MessageCircle,
+  Pencil,
+  Search,
+  Terminal,
+  Wrench,
+} from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { memo, useCallback, useMemo, useState } from 'react';
 import { messageRole, toolName } from '@taucad/chat/constants';
 import type { MyMessagePart, ToolInvocation, UsageData } from '@taucad/chat';
@@ -9,17 +21,11 @@ import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { serializeMessage } from '#utils/chat.utils.js';
 import { parseInlineReferences } from '#utils/at-reference.utils.js';
-import type { ActivityGroup, AggregatedGroup } from '#utils/assistant-message-activity.js';
-import {
-  groupAssistantParts,
-  partitionActivityRuns,
-  findLastMeaningfulPartIndex,
-  shouldWrapRun,
-} from '#utils/assistant-message-activity.js';
+import type { ActivityFamily, ActivityGroup } from '#utils/assistant-message-activity.js';
+import { groupAssistantParts, findLastMeaningfulPartIndex } from '#utils/assistant-message-activity.js';
 import { AtReferenceChip } from '#components/chat/at-reference-chip.js';
 import { ContextChip } from '#components/chat/context-chip.js';
 import { ChatActivityGroup } from '#components/chat/chat-activity-group.js';
-import { ChatActivitySection } from '#components/chat/chat-activity-section.js';
 import { agentApprovalToolName } from '#services/agent-host-event-projection.js';
 import { useSkillsCatalog } from '#hooks/use-skills-catalog.js';
 import { ChatMessageReasoning } from '#routes/w.$workspace.$project/chat-message-reasoning.js';
@@ -222,7 +228,6 @@ function ChatMessageAcpPlan({
 type PartRenderContext = {
   readonly messageId: string;
   readonly lastMeaningfulIndex: number;
-  readonly isLastGroup: boolean;
   readonly isActiveGroup: boolean;
   readonly isMessageActive: boolean;
 };
@@ -255,9 +260,9 @@ function renderAssistantPart(
       return (
         <ChatMessageReasoning
           key={`${messageId}-message-part-${index}`}
-          part={part}
+          parts={[part]}
           hasContent={index < lastMeaningfulIndex}
-          isMessageActive={isMessageActive}
+          isMessageActive={context.isActiveGroup}
         />
       );
     }
@@ -282,14 +287,15 @@ function renderAssistantPart(
       }
       const tau = isRecord(part.toolMetadata?.['tau']) ? part.toolMetadata['tau'] : undefined;
       const nativeName = typeof tau?.['nativeName'] === 'string' ? tau['nativeName'] : undefined;
-      if (tau?.['presentation'] === 'tau-mcp' && Reflect.get(part, 'preliminary') !== true) {
+      if (tau?.['presentation'] === 'tau-mcp') {
+        const state = Reflect.get(part, 'preliminary') === true ? 'input-available' : part.state;
         switch (nativeName) {
           case 'get_kernel_result': {
             return (
               <ChatMessageToolGetKernelResult
                 key={part.toolCallId}
                 part={
-                  { ...part, type: 'tool-get_kernel_result' } as Extract<
+                  { ...part, type: 'tool-get_kernel_result', state } as Extract<
                     MyMessagePart,
                     { type: 'tool-get_kernel_result' }
                   >
@@ -301,7 +307,9 @@ function renderAssistantPart(
             return (
               <ChatMessageToolTestModel
                 key={part.toolCallId}
-                part={{ ...part, type: 'tool-test_model' } as Extract<MyMessagePart, { type: 'tool-test_model' }>}
+                part={
+                  { ...part, type: 'tool-test_model', state } as Extract<MyMessagePart, { type: 'tool-test_model' }>
+                }
               />
             );
           }
@@ -309,7 +317,9 @@ function renderAssistantPart(
             return (
               <ChatMessageToolScreenshot
                 key={part.toolCallId}
-                part={{ ...part, type: 'tool-screenshot' } as Extract<MyMessagePart, { type: 'tool-screenshot' }>}
+                part={
+                  { ...part, type: 'tool-screenshot', state } as Extract<MyMessagePart, { type: 'tool-screenshot' }>
+                }
               />
             );
           }
@@ -318,7 +328,10 @@ function renderAssistantPart(
               <ChatMessageToolExportGeometry
                 key={part.toolCallId}
                 part={
-                  { ...part, type: 'tool-export_geometry' } as Extract<MyMessagePart, { type: 'tool-export_geometry' }>
+                  { ...part, type: 'tool-export_geometry', state } as Extract<
+                    MyMessagePart,
+                    { type: 'tool-export_geometry' }
+                  >
                 }
               />
             );
@@ -447,13 +460,25 @@ function renderActivityGroup(
     return renderAssistantPart(group.part, group.partIndex, context);
   }
 
+  if (group.category === 'reasoning') {
+    const reasoningParts = group.parts.filter(
+      (part): part is Extract<MyMessagePart, { type: 'reasoning' }> => part.type === 'reasoning',
+    );
+    return (
+      <ChatMessageReasoning
+        key={`${context.messageId}-reasoning-${group.partIndices[0] ?? groupIndex}`}
+        parts={reasoningParts}
+        hasContent={(group.partIndices.at(-1) ?? 0) < context.lastMeaningfulIndex}
+        isMessageActive={context.isActiveGroup}
+      />
+    );
+  }
+
   return (
     <ChatActivityGroup
       key={`${context.messageId}-group-${groupIndex}`}
-      summaryVerbPast={group.summaryVerbPast}
-      summaryVerbActive={group.summaryVerbActive}
-      summaryDetail={group.summaryDetail}
-      icon={group.parts.some((part) => part.type === 'tool-use_skill') ? Wrench : undefined}
+      summary={group.summary}
+      icon={activityIcons[group.families[0] ?? 'other']}
       isActive={context.isActiveGroup}
     >
       {group.parts.map((part, i) => renderAssistantPart(part, group.partIndices[i]!, context))}
@@ -461,37 +486,20 @@ function renderActivityGroup(
   );
 }
 
-function getGroupKeyPartIndex(group: ActivityGroup): number {
-  return group.kind === 'singleton' ? group.partIndex : (group.partIndices[0] ?? 0);
-}
-
-function composeRunSummary(aggregated: readonly AggregatedGroup[]): {
-  verb: string;
-  verbActive: string;
-  detail: string;
-} {
-  if (aggregated.length === 0) {
-    return { verb: 'Activity', verbActive: 'Working', detail: '' };
-  }
-
-  const firstVerb = aggregated[0]!.summaryVerbPast;
-  const firstVerbActive = aggregated[0]!.summaryVerbActive;
-  const allSameVerb = aggregated.every((group) => group.summaryVerbPast === firstVerb);
-  const allSameVerbActive = aggregated.every((group) => group.summaryVerbActive === firstVerbActive);
-  if (allSameVerb) {
-    return {
-      verb: firstVerb,
-      verbActive: allSameVerbActive ? firstVerbActive : '',
-      detail: aggregated.map((group) => group.summaryDetail).join(', '),
-    };
-  }
-
-  return {
-    verb: '',
-    verbActive: allSameVerbActive ? firstVerbActive : '',
-    detail: aggregated.map((group) => group.summary).join(', '),
-  };
-}
+const activityIcons: Record<ActivityFamily, LucideIcon> = {
+  skill: Wrench,
+  read: BookOpen,
+  search: Search,
+  'web-search': Search,
+  'web-read': Globe,
+  execute: Terminal,
+  edit: Pencil,
+  render: Box,
+  screenshot: Camera,
+  test: ListChecks,
+  chat: MessageCircle,
+  other: Wrench,
+};
 
 function AssistantParts({
   parts,
@@ -501,7 +509,6 @@ function AssistantParts({
   readonly messageId: string;
 }): React.JSX.Element {
   const groups = useMemo(() => groupAssistantParts(parts), [parts]);
-  const runs = useMemo(() => partitionActivityRuns(groups), [groups]);
   const lastMeaningfulIndex = useMemo(() => findLastMeaningfulPartIndex(parts), [parts]);
   const lastGroupIndex = groups.length - 1;
   const isMessageActive = useChatSelector(
@@ -514,7 +521,6 @@ function AssistantParts({
       return {
         messageId,
         lastMeaningfulIndex,
-        isLastGroup,
         isActiveGroup: isLastGroup && isMessageActive,
         isMessageActive,
       };
@@ -523,47 +529,7 @@ function AssistantParts({
   );
 
   return (
-    <>
-      {runs.map((run, runIndex) => {
-        const isLastRun = runIndex === runs.length - 1;
-
-        if (run.kind === 'standalone') {
-          return renderActivityGroup(run.group, run.groupIndex, renderContextForGroup(run.groupIndex));
-        }
-
-        if (!shouldWrapRun(run)) {
-          return run.groups.map((group, j) => {
-            const absoluteIndex = run.startIndex + j;
-            return renderActivityGroup(group, absoluteIndex, renderContextForGroup(absoluteIndex));
-          });
-        }
-
-        const aggregatedInRun = run.groups.filter((group): group is AggregatedGroup => group.kind === 'aggregated');
-        const summary = composeRunSummary(aggregatedInRun);
-        const sectionKey = `${messageId}-section-${getGroupKeyPartIndex(run.groups[0]!)}`;
-        return (
-          <ChatActivitySection
-            key={sectionKey}
-            summaryVerbPast={summary.verb}
-            summaryVerbActive={summary.verbActive}
-            summaryDetail={summary.detail}
-            icon={
-              aggregatedInRun.some((group) => group.parts.some((part) => part.type === 'tool-use_skill'))
-                ? Wrench
-                : undefined
-            }
-            hasDownstreamText={!isLastRun}
-            isLast={isLastRun}
-            isActive={isLastRun && isMessageActive}
-          >
-            {run.groups.map((group, j) => {
-              const absoluteIndex = run.startIndex + j;
-              return renderActivityGroup(group, absoluteIndex, renderContextForGroup(absoluteIndex));
-            })}
-          </ChatActivitySection>
-        );
-      })}
-    </>
+    <>{groups.map((group, groupIndex) => renderActivityGroup(group, groupIndex, renderContextForGroup(groupIndex)))}</>
   );
 }
 

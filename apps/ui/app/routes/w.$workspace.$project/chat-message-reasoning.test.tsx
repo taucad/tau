@@ -135,12 +135,14 @@ describe('ChatMessageReasoning', () => {
   it('collapses the whole body to the union duration and restores trigger focus', async () => {
     const user = userEvent.setup();
     renderReasoning([reasoning('One', { start: 0, end: 1000 }), reasoning('Two', { start: 3000, end: 5000 })]);
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus');
 
     await user.click(screen.getByRole('group', { name: 'Collapse thought' }));
 
     const trigger = screen.getByRole('button', { name: 'Thought for 3 seconds' });
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
     expect(trigger).toHaveFocus();
+    expect(focus).toHaveBeenLastCalledWith({ focusVisible: false });
     expect(screen.queryByText('One')).not.toBeInTheDocument();
   });
 
@@ -177,8 +179,10 @@ describe('ChatMessageReasoning', () => {
 
     renderReasoning([reasoning('Keyboard')]);
     screen.getByRole('button', { name: 'Collapse thought' }).focus();
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus');
     await user.keyboard(' ');
-    expect(screen.getByRole('button', { name: 'Thought briefly' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Thought briefly' })).toHaveFocus();
+    expect(focus).toHaveBeenLastCalledWith({ focusVisible: true });
   });
 
   it('preserves an explicit collapse while the active sequence receives another chunk', async () => {

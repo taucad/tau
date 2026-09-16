@@ -18,7 +18,8 @@ import type {
   StorageRootConfig,
 } from '@taucad/filesystem';
 import { resolveStorageRootKey } from '@taucad/filesystem/storage-root-key';
-import type { CadAgentExecution, Chat } from '@taucad/chat';
+import type { CadAgentExecution, Chat, MyUIMessage } from '@taucad/chat';
+import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { getErrno } from '@taucad/utils/error';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type { Remote } from 'comlink';
@@ -55,14 +56,16 @@ import type {
   WorkspaceEntry,
 } from '#filesystem/handle-store.js';
 import { createChatFileStore } from '#db/chat-file-storage.js';
-import { composerRecordPaths } from '#db/composer-record-store.js';
+import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
 import { isBuildSuperseded } from '#filesystem/build-skew.js';
 import { WorkspaceDirectoryRequiredError } from '#filesystem/workspace-errors.js';
 import { directoryPicker } from '#constants/browser.constants.js';
 import type { DirectoryPick } from '#constants/browser.constants.js';
 import { nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import { createInitialProject } from '#constants/project.constants.js';
-import { createMessage } from '#utils/chat.utils.js';
+import { attachmentKind, attachmentReferenceOf, attachmentUrl } from '#utils/attachment.utils.js';
+import type { AttachmentReference } from '#utils/attachment.utils.js';
+import { createAttachmentStore, createChatAttachmentStore } from '#db/attachment-store.js';
 import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 import { defaultProjectName } from '#constants/project-names.js';
@@ -89,6 +92,42 @@ import type {
   WorkspaceConnectionState,
 } from '#hooks/workspace-connection.machine.js';
 
+/** A stored draft attachment, as the startup message references it. */
+export type InitialMessageAttachment = Omit<AttachmentReference, 'byteLength'>;
+
+/**
+ * The startup user message: attachment references first so they render first,
+ * then the trimmed text.
+ */
+// Ponytail: local until W7's `buildUserMessage` lands in chat.utils (P39).
+const startupMessage = ({
+  content,
+  attachments = [],
+}: NonNullable<CreateProjectChatOptions['initialMessage']>): MyUIMessage => {
+  const parts = attachments.map((attachment): MyUIMessage['parts'][number] => ({
+    type: 'file',
+    url: attachmentUrl(attachment),
+    mediaType: attachment.mediaType,
+    ...(attachment.filename === undefined ? {} : { filename: attachment.filename }),
+  }));
+  const text = content.trim();
+  if (text.length > 0) {
+    parts.push({ type: 'text', text });
+  }
+  return {
+    id: generatePrefixedId(idPrefix.message),
+    role: messageRole.user,
+    parts,
+    metadata: { status: messageStatus.pending, createdAt: Date.now() },
+  };
+};
+
+/** The operation field naming where a created chat's attachments are copied from, when not Home. */
+const attachmentSourceOf = (options: CreateProjectChatOptions): { attachmentSource?: string } => {
+  const source = options.initialMessage?.attachmentSource;
+  return source === undefined ? {} : { attachmentSource: source };
+};
+
 /**
  * Shared options for initial chat configuration.
  *
@@ -102,7 +141,13 @@ type CreateProjectChatOptions = {
   /** If provided, add to chat and seed a one-shot startup request. */
   initialMessage?: {
     content: string;
-    imageUrls?: string[];
+    /**
+     * Draft attachments already stored in `attachmentSource`. Resume copies
+     * them into the new chat before its startup request is written.
+     */
+    attachments?: readonly InitialMessageAttachment[];
+    /** The composer directory holding those bytes. Defaults to the Home composer's. */
+    attachmentSource?: string;
   };
   /** Chat name (defaults to 'Initial design' with message, 'Initial chat' without) */
   chatName?: string;
@@ -758,6 +803,62 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [fileManager.client],
   );
 
+  /** The attachment store a composer directory names; the Home composer's when none is named. */
+  const composerAttachments = useCallback(
+    (directory: string | undefined) =>
+      directory === undefined
+        ? createComposerRecordStore(fileManager.client, composerRecordPaths.newProject).attachments
+        : createAttachmentStore(fileManager.client, directory),
+    [fileManager.client],
+  );
+
+  /**
+   * Copy a new chat's referenced attachments out of the composer directory the
+   * operation names. Idempotent by hash, so a resumed operation repeats it safely.
+   */
+  const promoteDraftAttachments = useCallback(
+    async (operation: PendingProjectOperation, chats: readonly Chat[]): Promise<void> => {
+      // Only a create carries a fresh draft; a duplicate's chats already own their bytes.
+      if (operation.kind !== 'create') {
+        return;
+      }
+      const source = composerAttachments(operation.attachmentSource);
+      await Promise.all(
+        chats.map(async (chat) => {
+          const target = createChatAttachmentStore(fileManager.client, operation.manifest.id, chat.id);
+          const references = chat.messages.flatMap((message) =>
+            message.parts.flatMap((part) => {
+              const reference = part.type === 'file' ? attachmentReferenceOf(part) : undefined;
+              return reference === undefined ? [] : [reference];
+            }),
+          );
+          await Promise.all(references.map(async (reference) => source.copyTo(target, reference)));
+        }),
+      );
+    },
+    [composerAttachments, fileManager.client],
+  );
+
+  /**
+   * Images for the naming profile, which needs bytes over HTTP. Documents are
+   * not sent to it (blueprint §Legacy arms).
+   */
+  const namingImageUrls = useCallback(
+    async (message: NonNullable<CreateProjectChatOptions['initialMessage']>): Promise<string[]> => {
+      const source = composerAttachments(message.attachmentSource);
+      const urls = await Promise.all(
+        (message.attachments ?? [])
+          .filter((attachment) => attachmentKind(attachment.mediaType) === 'image')
+          .map(async (attachment) => {
+            const bytes = await source.read(attachment);
+            return bytes && `data:${attachment.mediaType};base64,${uint8ArrayToBase64(bytes)}`;
+          }),
+      );
+      return urls.filter((url) => url !== undefined);
+    },
+    [composerAttachments],
+  );
+
   /**
    * Reclaim a permanently deleted project's composer records (blueprint D11).
    *
@@ -848,6 +949,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         /* The project's root is mounted by the line above, so the chats this
          * operation carries can be written where they live: files inside it. */
         const chats = await worker.resumePendingProjectOperationResources(operation.operationId);
+        // The bytes land before the record that makes the startup request runnable.
+        await promoteDraftAttachments(operation, chats);
         await Promise.all(chats.map(async (chat) => chatStore.putChatRecord(chat)));
         await worker.completePendingProjectOperation(operation.operationId);
       } catch (error) {
@@ -859,6 +962,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       chatStore,
       fileManager,
       getReadiedWorker,
+      promoteDraftAttachments,
       queryClient,
       removeProjectComposerRecords,
     ],
@@ -931,7 +1035,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
             .generate({
               projectId,
               text: options.initialMessage.content,
-              imageUrls: options.initialMessage.imageUrls,
+              imageUrls: await namingImageUrls(options.initialMessage),
             })
             /* Naming is a courtesy from the API, not a prerequisite: with the
              * API unreachable (a daemon-served page, desktop offline) the
@@ -962,16 +1066,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       // The initial homepage prompt remains a normal pending user message
       // for display purposes. The permission to run it automatically after
       // route hydration is separate one-shot command state on the chat row.
-      const initialUserMessage = options.initialMessage
-        ? createMessage({
-            content: options.initialMessage.content,
-            role: messageRole.user,
-            metadata: {
-              status: messageStatus.pending,
-            },
-            imageUrls: options.initialMessage.imageUrls,
-          })
-        : undefined;
+      const initialUserMessage = options.initialMessage ? startupMessage(options.initialMessage) : undefined;
       const chatMessages = initialUserMessage ? [initialUserMessage] : [];
       const startupRequest: Chat['startupRequest'] | undefined = initialUserMessage
         ? {
@@ -1005,6 +1100,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
                 activeKernel: seededActiveKernel,
                 ...(startupRequest ? { startupRequest } : {}),
               },
+              ...attachmentSourceOf(options),
             }),
         editorState: options.editorState,
         files,
@@ -1027,7 +1123,14 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
 
       return { ...operation.manifest, slugs: { workspaceSlug, projectSlug: directorySlug(providerBasePath) } };
     },
-    [fileManager.client, getReadiedWorker, projectNameClient, queryClient, resumePendingProjectOperation],
+    [
+      fileManager.client,
+      getReadiedWorker,
+      namingImageUrls,
+      projectNameClient,
+      queryClient,
+      resumePendingProjectOperation,
+    ],
   );
 
   const runDiscoveryPass = useCallback(

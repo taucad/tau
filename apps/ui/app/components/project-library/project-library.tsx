@@ -581,7 +581,7 @@ function UnifiedProjectList({ projects, viewMode, actions }: UnifiedProjectListP
     return (
       <CollectionEmptyState className='min-h-[60vh]'>
         {/* Empty-library CTA — composer-only, no chat session to attach to. */}
-        <ChatComposerProvider>
+        <ChatComposerProvider surface='library'>
           <div className='mx-auto max-w-2xl space-y-6'>
             <div className='flex flex-col items-center space-y-4 text-center'>
               <PackageX className='size-16 text-muted-foreground' strokeWidth={1} />

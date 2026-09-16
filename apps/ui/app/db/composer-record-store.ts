@@ -32,6 +32,12 @@ export const composerRecordPaths = {
   unread: (projectId: string): string => `${composersRoot}/chats/${projectId}/unread.json`,
   /** The directory removed when a project is deleted. */
   project: (projectId: string): string => `${composersRoot}/chats/${projectId}`,
+  /**
+   * Draft-stage bytes of a pre-project composer that keeps no record. One
+   * directory per surface, so releasing one surface's copies never touches
+   * another's open draft.
+   */
+  surfaceAttachments: (surface: 'marketing' | 'library'): string => `${composersRoot}/${surface}/attachments`,
 } as const;
 
 /** One composer record. Every field except `version` is optional and omitted when empty (D8). */

@@ -9,7 +9,7 @@ import { ChatComposerProvider } from '#hooks/active-chat-provider.js';
  */
 export function MarketingComposer(): React.JSX.Element {
   return (
-    <ChatComposerProvider>
+    <ChatComposerProvider surface='marketing'>
       <NewProjectChatComposer enableAutoFocus={false} />
     </ChatComposerProvider>
   );

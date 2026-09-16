@@ -238,6 +238,31 @@ describe('chatSessionMachine', () => {
     );
   });
 
+  /*
+   * D9: the store's unread decision is the one writer of the unread record,
+   * and the `read` region follows it — restored from the record when a chat
+   * binds, and raised by a newly pending approval, the store's other trigger.
+   * Each row asks `getShortestPaths` for a generated path into `read.unread`
+   * and checks it is exactly that trigger.
+   */
+  it.each<{ readonly signal: string; readonly event: ChatSessionMachineEvent }>([
+    { signal: 'unreadRestored from the unread record', event: { type: 'unreadRestored' } },
+    { signal: 'a newly pending approval', event: { type: 'toolParts', inFlight: 1, approvals: 1 } },
+  ])('reaches read.unread from $signal with a generated path (D9)', ({ event }) => {
+    const paths = getShortestPaths(chatSessionMachine, {
+      input: { chatId: 'chat-1', projectId: 'proj_1' },
+      serializeState: (state) =>
+        JSON.stringify([(state.value as { read: unknown }).read, state.context.pendingApprovalCount]),
+      events: [event, { type: 'viewed' }],
+      toState: (state) => state.matches({ read: 'unread' }),
+    });
+
+    const triggers = paths.map((path) =>
+      path.steps.map((step): string => step.event.type).filter((type) => type !== 'xstate.init'),
+    );
+    expect(triggers).toEqual([[event.type]]);
+  });
+
   it('leaves the approval wait when the approvals clear, back to the tool that is still running', () => {
     const actor = start();
     actor.send({ type: 'runLifecycle', phase: 'running' });

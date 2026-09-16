@@ -187,7 +187,9 @@ describe('chat file store', () => {
     // get + put across two separate transactions. After atomic updateChat,
     // per-chatId mutex, and field-scoped patchChat the production
     // call sites use patchChat and the race is closed at every layer.
-    it('should preserve both draft and messages when patchChat("draft") and patchChat("messages") race repeatedly', async () => {
+    /* Rewritten for W8: the draft left `Chat` for the composer record, so the
+     * race is pinned on `name`, another field written beside `messages`. */
+    it('should preserve both name and messages when patchChat("name") and patchChat("messages") race repeatedly', async () => {
       const iterations = 200;
       const store = createStore();
       const chat = await freshChat(store);
@@ -195,25 +197,13 @@ describe('chat file store', () => {
       /* oxlint-disable no-await-in-loop -- race-detection: each iteration must settle before the next */
       for (let i = 0; i < iterations; i++) {
         const text = `iter-${i}`;
-        const draft = draftMessage(text);
         const messages = [userMessage(text)];
 
-        await Promise.all([store.patchChat(chat.id, 'draft', draft), store.patchChat(chat.id, 'messages', messages)]);
+        await Promise.all([store.patchChat(chat.id, 'name', text), store.patchChat(chat.id, 'messages', messages)]);
 
         const final = await store.getChat(chat.id);
-        if (
-          final?.draft?.parts[0]?.type !== 'text' ||
-          final.draft.parts[0].text !== text ||
-          final.messages.length !== 1 ||
-          final.messages[0]?.parts[0]?.type !== 'text' ||
-          final.messages[0].parts[0].text !== text
-        ) {
-          throw new Error(
-            `iteration ${i}: expected draft="${text}" + messages=["${text}"], got draft=${JSON.stringify(
-              final?.draft?.parts,
-            )} messages=${JSON.stringify(final?.messages)}`,
-          );
-        }
+        expect(final?.name).toBe(text);
+        expect(final?.messages).toEqual(messages);
       }
       /* oxlint-enable no-await-in-loop */
     });
@@ -320,7 +310,10 @@ describe('chat file store', () => {
       expect(stored?.updatedAt).toBe(chat.updatedAt);
     });
 
-    it('should commit restored messages, draft, and startup cleanup together', async () => {
+    /* Rewritten for W8: the restored draft is written to the composer record
+     * by `ChatSessionStore`; the chat row commits the transcript and the
+     * startup cleanup. */
+    it('should commit restored messages and startup cleanup together', async () => {
       const store = createStore();
       const message = userMessage('cancelled');
       const request = startupRequest(message.id);
@@ -329,21 +322,18 @@ describe('chat file store', () => {
         messages: [message],
         startupRequest: request,
       });
-      const draft = draftMessage('cancelled');
       await sleep(2);
 
       const restored = await store.commitCancelledDraftRestore(chat.id, {
         messages: [],
-        draft,
         clearStartupRequestId: request.id,
       });
       const stored = await store.getChat(chat.id);
 
       expect(restored?.messages).toEqual([]);
-      expect(restored?.draft).toEqual(draft);
       expect(restored?.startupRequest).toBeUndefined();
       expect(stored?.messages).toEqual([]);
-      expect(stored?.draft).toEqual(draft);
+      expect(stored).not.toHaveProperty('draft');
       expect(stored?.startupRequest).toBeUndefined();
       expect(restored?.updatedAt).toBeGreaterThan(chat.updatedAt);
     });
@@ -358,17 +348,14 @@ describe('chat file store', () => {
         const text = `cancelled-${i}`;
         const message = userMessage(text);
         const request = startupRequest(message.id, `req_restore_${i}`);
-        const draft = draftMessage(text);
 
         await store.patchChat(chat.id, 'messages', [message]);
-        await store.patchChat(chat.id, 'draft', undefined);
         await store.patchChat(chat.id, 'startupRequest', request);
 
         await Promise.all([
           store.patchChat(chat.id, 'activeExecution', { kind: 'tau', model: `model-${i}` }),
           store.commitCancelledDraftRestore(chat.id, {
             messages: [],
-            draft,
             clearStartupRequestId: request.id,
           }),
         ]);
@@ -376,7 +363,6 @@ describe('chat file store', () => {
         const final = await store.getChat(chat.id);
         expect(final?.activeExecution).toEqual({ kind: 'tau', model: `model-${i}` });
         expect(final?.messages).toEqual([]);
-        expect(final?.draft).toEqual(draft);
         expect(final?.startupRequest).toBeUndefined();
       }
       /* oxlint-enable no-await-in-loop */
@@ -437,8 +423,8 @@ describe('chat file store', () => {
       const seeded = await store.createChat('resource_test', {
         name: 'Original',
         messages: [userMessage('hello')],
-        draft: draftMessage('seed-draft'),
-        messageEdits: { 'msg-1': draftMessage('seed-edit') },
+        error: sampleError('seed-error'),
+        activeKernel: 'manifold',
       });
       const before = structuredClone(seeded);
 
@@ -447,8 +433,8 @@ describe('chat file store', () => {
       const after = await store.getChat(seeded.id);
       expect(after?.name).toBe('Renamed');
       expect(after?.messages).toEqual(before.messages);
-      expect(after?.draft).toEqual(before.draft);
-      expect(after?.messageEdits).toEqual(before.messageEdits);
+      expect(after?.error).toEqual(before.error);
+      expect(after?.activeKernel).toBe(before.activeKernel);
       expect(after?.id).toBe(before.id);
       expect(after?.resourceId).toBe(before.resourceId);
       expect(after?.createdAt).toBe(before.createdAt);
@@ -488,13 +474,16 @@ describe('chat file store', () => {
 
       /* oxlint-disable no-await-in-loop -- race-detection: each iteration must settle before the next */
       for (let i = 0; i < iterations; i++) {
-        const draft = draftMessage(`d-${i}`);
+        const execution = { kind: 'tau', model: `model-${i}` } as const;
         const messages = [userMessage(`m-${i}`)];
 
-        await Promise.all([store.patchChat(chat.id, 'draft', draft), store.patchChat(chat.id, 'messages', messages)]);
+        await Promise.all([
+          store.patchChat(chat.id, 'activeExecution', execution),
+          store.patchChat(chat.id, 'messages', messages),
+        ]);
 
         const final = await store.getChat(chat.id);
-        expect(final?.draft).toEqual(draft);
+        expect(final?.activeExecution).toEqual(execution);
         expect(final?.messages).toEqual(messages);
       }
       /* oxlint-enable no-await-in-loop */
@@ -516,13 +505,14 @@ describe('chat file store', () => {
     });
   });
 
-  describe('chat recency and unread semantics', () => {
-    it('initializes recency with row timestamps and starts read', async () => {
+  /* W8: unread is the project's unread record, written by `ChatSessionStore`
+   * alone (D9); the rows that pinned `setChatUnreadState` here moved there. */
+  describe('chat recency semantics', () => {
+    it('initializes recency with row timestamps', async () => {
       const chat = await freshChat(createStore());
 
       expect(chat.recencyAt).toBe(chat.createdAt);
       expect(chat.updatedAt).toBe(chat.createdAt);
-      expect(chat.hasUnreadTurn).toBe(false);
     });
 
     it('strictly advances recency for every accepted action and bumps row updatedAt', async () => {
@@ -541,32 +531,13 @@ describe('chat file store', () => {
       expect(stored?.recencyAt).toBe(activityAt + 1);
     });
 
-    it('sets and clears unread state while preserving row and recency timestamps', async () => {
-      const store = createStore();
-      const chat = await freshChat(store);
-
-      const unread = await store.setChatUnreadState(chat.id, true);
-
-      expect(unread?.hasUnreadTurn).toBe(true);
-      expect(unread?.updatedAt).toBe(chat.updatedAt);
-      expect(unread?.recencyAt).toBe(chat.recencyAt);
-      await expect(store.setChatUnreadState(chat.id, true)).resolves.toBeUndefined();
-      const read = await store.setChatUnreadState(chat.id, false);
-      expect(read?.hasUnreadTurn).toBe(false);
-      expect(read?.updatedAt).toBe(chat.updatedAt);
-      expect(read?.recencyAt).toBe(chat.recencyAt);
-      const stored = await store.getChat(chat.id);
-      expect(stored?.hasUnreadTurn).toBe(false);
-    });
-
-    it('returns undefined for missing recency and unread targets', async () => {
+    it('returns undefined for a missing recency target', async () => {
       const store = createStore();
 
       await expect(store.touchChatRecency('chat_missing', 1)).resolves.toBeUndefined();
-      await expect(store.setChatUnreadState('chat_missing', true)).resolves.toBeUndefined();
     });
 
-    it('preserves recency, unread state, and messages across repeated concurrent writes', async () => {
+    it('preserves recency, name, and messages across repeated concurrent writes', async () => {
       const store = createStore();
       const chat = await freshChat(store);
       const initialActivityAt = chat.recencyAt!;
@@ -577,135 +548,14 @@ describe('chat file store', () => {
         const messages = [userMessage(`activity-race-${index}`)];
         await Promise.all([
           store.touchChatRecency(chat.id, activityAt),
-          store.setChatUnreadState(chat.id, index % 2 === 1),
+          store.patchChat(chat.id, 'name', `name-${index}`),
           store.patchChat(chat.id, 'messages', messages),
         ]);
 
         const stored = await store.getChat(chat.id);
         expect(stored?.recencyAt).toBe(activityAt);
-        expect(stored?.hasUnreadTurn).toBe(index % 2 === 1);
+        expect(stored?.name).toBe(`name-${index}`);
         expect(stored?.messages).toEqual(messages);
-      }
-      /* oxlint-enable no-await-in-loop */
-    });
-  });
-
-  describe('setMessageEdit / clearMessageEdit', () => {
-    it('should create the messageEdits map if absent and store the named entry', async () => {
-      const store = createStore();
-      const chat = await freshChat(store);
-      expect(chat.messageEdits).toBeUndefined();
-
-      const result = await store.setMessageEdit(chat.id, 'msg-1', draftMessage('edit-1'));
-
-      expect(result?.messageEdits).toBeDefined();
-      expect(result?.messageEdits?.['msg-1']?.parts[0]).toEqual({ type: 'text', text: 'edit-1' });
-    });
-
-    it('should return undefined and preserve updatedAt when setting the same message edit', async () => {
-      const store = createStore();
-      const chat = await freshChat(store);
-      const draft = draftMessage('edit-1');
-      const first = await store.setMessageEdit(chat.id, 'msg-1', draft);
-      await sleep(2);
-
-      const result = await store.setMessageEdit(chat.id, 'msg-1', structuredClone(draft));
-      const stored = await store.getChat(chat.id);
-
-      expect(result).toBeUndefined();
-      expect(stored?.updatedAt).toBe(first?.updatedAt);
-    });
-
-    it('should replace only the named entry, leaving siblings untouched', async () => {
-      const store = createStore();
-      const chat = await store.createChat('resource_test', {
-        name: 'Test',
-        messages: [],
-        messageEdits: {
-          'msg-keep': draftMessage('keep-original'),
-          'msg-replace': draftMessage('replace-original'),
-        },
-      });
-
-      const result = await store.setMessageEdit(chat.id, 'msg-replace', draftMessage('replaced'));
-
-      expect(result?.messageEdits?.['msg-keep']?.parts[0]).toEqual({
-        type: 'text',
-        text: 'keep-original',
-      });
-      expect(result?.messageEdits?.['msg-replace']?.parts[0]).toEqual({
-        type: 'text',
-        text: 'replaced',
-      });
-    });
-
-    it('should remove only the named entry on clearMessageEdit', async () => {
-      const store = createStore();
-      const chat = await store.createChat('resource_test', {
-        name: 'Test',
-        messages: [],
-        messageEdits: {
-          'msg-keep': draftMessage('stay'),
-          'msg-remove': draftMessage('remove-me'),
-        },
-      });
-
-      const result = await store.clearMessageEdit(chat.id, 'msg-remove');
-
-      expect(result?.messageEdits?.['msg-remove']).toBeUndefined();
-      expect(result?.messageEdits?.['msg-keep']?.parts[0]).toEqual({ type: 'text', text: 'stay' });
-    });
-
-    it('should be a no-op (no updatedAt bump) when clearing a non-existent entry', async () => {
-      const store = createStore();
-      const chat = await freshChat(store);
-
-      const result = await store.clearMessageEdit(chat.id, 'msg-never-existed');
-
-      expect(result).toBeUndefined();
-    });
-
-    it('should preserve disjoint message-edit writes when concurrent setMessageEdit calls race', async () => {
-      const iterations = 30;
-      const store = createStore();
-      const chat = await freshChat(store);
-
-      /* oxlint-disable no-await-in-loop -- race-detection: each iteration must settle before the next */
-      for (let i = 0; i < iterations; i++) {
-        const a = draftMessage(`a-${i}`);
-        const b = draftMessage(`b-${i}`);
-
-        await Promise.all([store.setMessageEdit(chat.id, 'msg-a', a), store.setMessageEdit(chat.id, 'msg-b', b)]);
-
-        const final = await store.getChat(chat.id);
-        expect(final?.messageEdits?.['msg-a']?.parts[0]).toEqual({ type: 'text', text: `a-${i}` });
-        expect(final?.messageEdits?.['msg-b']?.parts[0]).toEqual({ type: 'text', text: `b-${i}` });
-      }
-      /* oxlint-enable no-await-in-loop */
-    });
-
-    it('should preserve other entries when setMessageEdit and clearMessageEdit race on the same chat', async () => {
-      const iterations = 30;
-      const store = createStore();
-      const chat = await store.createChat('resource_test', {
-        name: 'Test',
-        messages: [],
-        messageEdits: { 'msg-keep': draftMessage('initial-keep') },
-      });
-
-      /* oxlint-disable no-await-in-loop -- race-detection: each iteration must settle before the next */
-      for (let i = 0; i < iterations; i++) {
-        await Promise.all([
-          store.setMessageEdit(chat.id, 'msg-keep', draftMessage(`keep-${i}`)),
-          store.clearMessageEdit(chat.id, 'msg-removable'),
-        ]);
-
-        const final = await store.getChat(chat.id);
-        expect(final?.messageEdits?.['msg-keep']?.parts[0]).toEqual({
-          type: 'text',
-          text: `keep-${i}`,
-        });
-        expect(final?.messageEdits?.['msg-removable']).toBeUndefined();
       }
       /* oxlint-enable no-await-in-loop */
     });
@@ -785,7 +635,6 @@ describe('chat file store', () => {
       expect(copy.activeKernel).toBe('manifold');
       expect(copy.recencyAt).toBe(copy.createdAt);
       expect(copy.recencyAt).toBeGreaterThan(original.recencyAt!);
-      expect(copy.hasUnreadTurn).toBe(false);
     });
 
     it('should leave duplicate fields undefined when the source chat had none', async () => {
@@ -853,6 +702,59 @@ describe('chat file store', () => {
       const result = await store.softDeleteChat('chat_missing');
       expect(result).toBeUndefined();
     });
+  });
+});
+
+/**
+ * A chat is its record and its log; its composer is not (blueprint W8, D3, D4).
+ *
+ * `draft`, `messageEdits` and `hasUnreadTurn` moved to this device's composer
+ * records, so the chat store neither holds nor hands them out, and a copy of a
+ * chat starts with an empty composer.
+ */
+describe('chat file store — composer fields are not the chat’s (W8)', () => {
+  const composerFields = ['draft', 'messageEdits', 'hasUnreadTurn'];
+  const composerRecord = (project: string, chatId: string): string => `/.tau/composers/chats/${project}/${chatId}.json`;
+
+  it('creates, reads and lists chats with no composer field', async () => {
+    const store = createStore();
+    const created = await freshChat(store);
+    const read = await store.getChat(created.id);
+    const [listed] = await store.getChatsForResource('resource_test');
+
+    for (const chat of [created, read, listed]) {
+      for (const field of composerFields) {
+        expect(chat).not.toHaveProperty(field);
+      }
+    }
+  });
+
+  it('duplicates a chat and its project’s chats without composer state or records (D4)', async () => {
+    const files = createStoreWithFiles();
+    const projectId = nextProjectId();
+    const targetProjectId = nextProjectId();
+    const original = await files.store.createChat(projectId, { name: 'Original', messages: [] });
+    await files.write(
+      composerRecord(projectId, original.id),
+      `${JSON.stringify({ version: 1, draft: draftMessage('mine alone') })}\n`,
+    );
+    /* A caller from before W8 that still names the old field. */
+    await files.store.updateChat(original.id, {
+      ...original,
+      draft: draftMessage('held in memory'),
+    } as unknown as Chat);
+
+    const copy = await files.store.duplicateChat(original.id);
+    const mapping = await files.store.duplicateResourceChats(projectId, targetProjectId);
+    const projectCopy = await files.store.getChat(mapping[original.id]!);
+
+    for (const chat of [copy, projectCopy]) {
+      for (const field of composerFields) {
+        expect(chat).not.toHaveProperty(field);
+      }
+    }
+    await expect(files.exists(composerRecord(projectId, copy.id))).resolves.toBe(false);
+    await expect(files.exists(composerRecord(targetProjectId, mapping[original.id]!))).resolves.toBe(false);
   });
 });
 

@@ -33,6 +33,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MyUIMessage } from '@taucad/chat';
+import type { ChatSessionDeps } from '#services/chat-session-store.js';
 
 type FakeChatInstance = {
   id: string;
@@ -48,8 +49,6 @@ type FakeChatInstance = {
 const harness = vi.hoisted(() => ({
   created: [] as FakeChatInstance[],
   patchChat: vi.fn().mockResolvedValue(undefined),
-  setMessageEdit: vi.fn().mockResolvedValue(undefined),
-  clearMessageEdit: vi.fn().mockResolvedValue(undefined),
   getChat: vi.fn().mockResolvedValue(undefined),
   consumeChatStartupRequest: vi.fn().mockResolvedValue(undefined),
   commitCancelledDraftRestore: vi.fn().mockResolvedValue(undefined),
@@ -163,12 +162,25 @@ const testRunBody = Object.freeze({
   admission: Object.freeze({ version: 1, idempotencyKey: 'req_test_new_chat_submit' }),
 });
 
+/** A filesystem with no composer records yet: reads miss, writes land nowhere (W8 deps). */
+const emptyClient = (): ChatSessionDeps['client'] => {
+  const missing = async (path: string): Promise<never> => {
+    throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
+  };
+  return {
+    readFile: missing,
+    readdir: missing,
+    writeFile: vi.fn().mockResolvedValue(undefined),
+    exists: vi.fn().mockResolvedValue(false),
+    unlink: vi.fn().mockResolvedValue(undefined),
+    rmdir: vi.fn().mockResolvedValue(undefined),
+  };
+};
+
 describe('new chat submit regression', () => {
   beforeEach(() => {
     harness.created = [];
     harness.patchChat.mockReset().mockResolvedValue(undefined);
-    harness.setMessageEdit.mockReset().mockResolvedValue(undefined);
-    harness.clearMessageEdit.mockReset().mockResolvedValue(undefined);
     harness.getChat.mockReset().mockResolvedValue(undefined);
     harness.consumeChatStartupRequest.mockReset().mockResolvedValue(undefined);
     harness.commitCancelledDraftRestore.mockReset().mockResolvedValue(undefined);
@@ -184,11 +196,9 @@ describe('new chat submit regression', () => {
       getChat: harness.getChat,
       patchChat: harness.patchChat,
       touchChatRecency: vi.fn().mockResolvedValue(undefined),
-      setChatUnreadState: vi.fn().mockResolvedValue(undefined),
-      setMessageEdit: harness.setMessageEdit,
-      clearMessageEdit: harness.clearMessageEdit,
       consumeChatStartupRequest: harness.consumeChatStartupRequest,
       commitCancelledDraftRestore: harness.commitCancelledDraftRestore,
+      client: emptyClient(),
     });
 
     // Pre-acquire the "previous focused chat" — this mirrors the route having
@@ -251,11 +261,9 @@ describe('new chat submit regression', () => {
       getChat: harness.getChat,
       patchChat: harness.patchChat,
       touchChatRecency: vi.fn().mockResolvedValue(undefined),
-      setChatUnreadState: vi.fn().mockResolvedValue(undefined),
-      setMessageEdit: harness.setMessageEdit,
-      clearMessageEdit: harness.clearMessageEdit,
       consumeChatStartupRequest: harness.consumeChatStartupRequest,
       commitCancelledDraftRestore: harness.commitCancelledDraftRestore,
+      client: emptyClient(),
     });
 
     store.acquire('chat_old');

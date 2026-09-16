@@ -2339,10 +2339,8 @@ describe('ChatSessionStore', () => {
         const [restoreChatId, restoreInput] = deps.commitCancelledDraftRestore.mock.calls[0]!;
         expect(restoreChatId).toBe(chatId);
         expect(restoreInput.messages).toEqual([priorUser, priorAssistant]);
-        expect(restoreInput.draft.id).toBe('draft');
-        expect(restoreInput.draft.role).toBe('user');
-        expect(restoreInput.draft.parts).toEqual(cancelledUser.parts);
-        expect(restoreInput.draft.metadata?.status).toBe('pending');
+        // W8: the draft is the composer record's (asserted above), never the chat row's.
+        expect(restoreInput).not.toHaveProperty('draft');
         expect(deps.patchChat.mock.calls.some(([, key]) => key === 'messages')).toBe(false);
 
         store.release(chatId);
@@ -2646,16 +2644,7 @@ describe('ChatSessionStore', () => {
         createdAt: 0,
         updatedAt: 0,
       };
-      const restoredChat: ChatEntity = {
-        ...orphanChat,
-        messages: [],
-        draft: {
-          id: 'draft',
-          role: 'user',
-          parts: pendingUserMessage.parts,
-          metadata: { createdAt: 2, status: 'pending' },
-        },
-      };
+      const restoredChat: ChatEntity = { ...orphanChat, messages: [] };
       deps.getChat.mockResolvedValue(orphanChat);
       deps.commitCancelledDraftRestore.mockResolvedValue(restoredChat);
 
@@ -2672,9 +2661,8 @@ describe('ChatSessionStore', () => {
       const [restoreChatId, restoreInput] = deps.commitCancelledDraftRestore.mock.calls[0]!;
       expect(restoreChatId).toBe('chat_orphan_pending');
       expect(restoreInput.messages).toEqual([]);
-      expect(restoreInput.draft.id).toBe('draft');
-      expect(restoreInput.draft.role).toBe('user');
-      expect(restoreInput.draft.parts).toEqual(pendingUserMessage.parts);
+      // W8: the restored draft goes to the composer (asserted below), never the chat row.
+      expect(restoreInput).not.toHaveProperty('draft');
       expect(restoreInput.clearStartupRequestId).toBeUndefined();
       expect(fake.messages).toEqual([]);
       expect(session.draftActorRef.getSnapshot().context.draftText).toBe('do not auto run');
@@ -2727,8 +2715,8 @@ describe('ChatSessionStore', () => {
       const [restoreChatId, restoreInput] = deps.commitCancelledDraftRestore.mock.calls[0]!;
       expect(restoreChatId).toBe('chat_orphan_placeholder');
       expect(restoreInput.messages).toEqual([priorAssistant]);
-      expect(restoreInput.draft.id).toBe('draft');
-      expect(restoreInput.draft.parts).toEqual(pendingUserMessage.parts);
+      // W8: the restored draft goes to the composer (asserted below), never the chat row.
+      expect(restoreInput).not.toHaveProperty('draft');
       expect(restoreInput.clearStartupRequestId).toBeUndefined();
       expect(fake.messages).toEqual([priorAssistant]);
       expect(session.draftActorRef.getSnapshot().context.draftText).toBe('recover me');
@@ -3555,5 +3543,111 @@ describe('ChatSessionStore — composer records (W7)', () => {
     session.draftActorRef.send({ type: 'removeDraftAttachment', index: 1 });
     expect(gate(imageOnlyModel)).toBeUndefined();
     store.release(chatId);
+  });
+});
+
+/**
+ * The unread record is the one source of unread (D9), and deletion reaches the
+ * live composer (D11, W8).
+ */
+describe('ChatSessionStore — unread restore and live-record deletion (W8)', () => {
+  const projectId = 'proj_w8';
+  const chatId = 'chat_w8';
+  const unreadPath = `/.tau/composers/chats/${projectId}/unread.json`;
+
+  /** A store over one device's disk, with a live project session holding a real chat machine. */
+  const openStore = (client: MemoryClient) => {
+    const store = new ChatSessionStore();
+    const deps = createStubDeps(client);
+    deps.getChat.mockImplementation(async (id) => chatRow(id, projectId));
+    store.setDependencies(deps);
+    const chat = createActor(chatSessionMachine, { input: { chatId, projectId } }).start();
+    const projectRef = {
+      send: () => undefined,
+      getSnapshot: () => ({ context: { chatRefs: { [chatId]: chat }, runs: new Set() } }),
+    } as unknown as Parameters<StoreType['setProjectSession']>[1];
+    store.setProjectSession(projectId, projectRef);
+    return { store, chat };
+  };
+
+  beforeEach(() => {
+    harness.created = [];
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('restores unread into the chat machine of a fresh store (unreadRestored)', async () => {
+    vi.stubGlobal('document', { visibilityState: 'hidden', hasFocus: () => false });
+    const client = createMemoryClient();
+    const first = openStore(client);
+    first.store.acquire(chatId, projectId);
+    harness.created.at(-1)!.finish();
+    await vi.waitFor(() => {
+      expect(client.json(unreadPath)).toEqual({ version: 1, unread: { [chatId]: true } });
+    });
+    first.store.release(chatId);
+
+    const second = openStore(client);
+    expect(second.chat.getSnapshot().matches({ read: 'read' })).toBe(true);
+    second.store.acquire(chatId, projectId);
+
+    await vi.waitFor(() => {
+      expect(second.chat.getSnapshot().matches({ read: 'unread' })).toBe(true);
+    });
+    expect(second.store.isUnread(chatId)).toBe(true);
+    second.store.release(chatId);
+    first.chat.stop();
+    second.chat.stop();
+  });
+
+  it('stops the live record actor when its chat is deleted, so a later patch cannot write the record back', async () => {
+    const client = createMemoryClient();
+    const { store, chat } = openStore(client);
+    const session = store.acquire(chatId, projectId);
+    const draft = (text: string): MyUIMessage => ({
+      id: 'draft',
+      role: 'user',
+      metadata: { createdAt: 1, status: 'pending' },
+      parts: [{ type: 'text', text }],
+    });
+    session.composerRecordRef.send({ type: 'patch', fields: { draft: draft('before delete') } });
+    await vi.waitFor(() => {
+      expect(client.json(composerPath(projectId, chatId))).toMatchObject({ draft: { id: 'draft' } });
+    });
+
+    await store.removeChat(chatId);
+    expect(client.json(composerPath(projectId, chatId))).toBeUndefined();
+
+    session.composerRecordRef.send({ type: 'patch', fields: { draft: draft('after delete') } });
+    session.draftActorRef.send({ type: 'setDraftText', text: 'typed after delete' });
+    await settle();
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 600);
+    });
+    expect(client.json(composerPath(projectId, chatId))).toBeUndefined();
+    expect(session.composerRecordRef.getSnapshot().status).toBe('done');
+    store.release(chatId);
+    chat.stop();
+  });
+
+  it('does not recreate unread.json for a late unread decision after its project is deleted', async () => {
+    vi.stubGlobal('document', { visibilityState: 'hidden', hasFocus: () => false });
+    const client = createMemoryClient();
+    const { store, chat } = openStore(client);
+    store.acquire(chatId, projectId);
+    store.markViewed(chatId);
+    await settle();
+
+    await store.removeProject(projectId);
+    harness.created.at(-1)!.finish();
+    await settle();
+
+    expect(client.json(unreadPath)).toBeUndefined();
+    expect(client.namesUnder(`/.tau/composers/chats/${projectId}`)).toEqual([]);
+    store.release(chatId);
+    chat.stop();
   });
 });

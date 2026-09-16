@@ -53,6 +53,7 @@ import type { AttachmentReference } from '#utils/attachment.utils.js';
 import {
   deferredRecordStore,
   referencedAttachments,
+  removeRecord,
   stopWhenWritesSettle,
 } from '#services/chat-session-store-composer.js';
 import type { ComposerBinding, UnreadRecord } from '#services/chat-session-store-composer.js';
@@ -801,6 +802,7 @@ export class ChatSessionStore {
       this.#replayPersistedFailure(session);
       this.#replayPersistedSettlement(session);
       this.#syncChatState(session);
+      this.#restoreUnread(session);
     }
     if (this.#projectSessions.size === 0) {
       this.#settlementUnsubscribe?.();
@@ -867,6 +869,44 @@ export class ChatSessionStore {
   }
 
   /**
+   * Stop a chat's live composer record before the chat is deleted (D11).
+   *
+   * The record actor drains its in-flight write, removes the record, and ends
+   * in `removed`, so a patch that arrives later — a debounced keystroke, a
+   * restore — is dropped instead of writing the deleted record back. The chat's
+   * unread entry is cleared with it. A chat with no live session has no actor to
+   * stop; the chat store removes its record file either way.
+   *
+   * @param chatId - The chat being deleted.
+   * @public
+   */
+  public async removeChat(chatId: string): Promise<void> {
+    const session = this.#sessions.get(chatId);
+    if (session === undefined) {
+      return;
+    }
+    await this.#setUnreadWhenBound(session.composer, chatId, false);
+    await removeRecord(session.composerRecordRef);
+  }
+
+  /**
+   * Stop every live composer record of a project before its records are
+   * removed (D11), so a late unread decision or keystroke cannot recreate
+   * `unread.json` or a chat record under the deleted project.
+   *
+   * @param projectId - The project being permanently deleted.
+   * @public
+   */
+  public async removeProject(projectId: string): Promise<void> {
+    const sessions = [...this.#sessions.values()].filter((session) => session.projectId === projectId);
+    await Promise.all([
+      ...sessions.map(async (session) => removeRecord(session.composerRecordRef)),
+      // Kept in the map once removed: a later decision for this project reaches the terminal actor and is dropped.
+      removeRecord(this.#unreadRecord(projectId).ref),
+    ]);
+  }
+
+  /**
    * Copy a draft's attachments into the chat's own directory before they are
    * sent (D18). Resolves only when every blob is durable there.
    *
@@ -926,10 +966,22 @@ export class ChatSessionStore {
         }
       }
       unread.clearedBeforeLoad.clear();
+      for (const session of this.#sessions.values()) {
+        if (session.projectId === projectId) {
+          this.#restoreUnread(session);
+        }
+      }
     });
     this.#unreadRecords.set(projectId, unread);
     ref.start();
     return unread;
+  }
+
+  /** Tell a bound chat machine what the unread record says (D9); `read` is its default, so only unread is sent. */
+  #restoreUnread(session: InternalSession): void {
+    if (session.projectId !== undefined && this.#unreadRecords.get(session.projectId)?.chats.has(session.chatId)) {
+      session.stateActorRef?.send({ type: 'unreadRestored' });
+    }
   }
 
   /** Record an unread decision once the chat's project is known; a chat with no project has no record. */
@@ -1004,6 +1056,7 @@ export class ChatSessionStore {
     this.#replayPersistedFailure(session);
     this.#replayPersistedSettlement(session);
     this.#syncChatState(session);
+    this.#restoreUnread(session);
   }
 
   #createSession(chatId: string, projectId: string | undefined): InternalSession {
@@ -1133,10 +1186,9 @@ export class ChatSessionStore {
             session.draftActorRef.send({ type: 'initializeFromChat' });
             if (pendingTailRestore) {
               session.chat.messages = pendingTailRestore.truncatedMessages;
-              const draft = await restoreDraft(pendingTailRestore.userMessage);
+              await restoreDraft(pendingTailRestore.userMessage);
               const restoredChat = await depsRef().commitCancelledDraftRestore(input.chatId, {
                 messages: pendingTailRestore.truncatedMessages,
-                draft,
                 clearStartupRequestId: startupRequest?.id,
               });
               const healedChat = restoredChat ?? {
@@ -1202,7 +1254,7 @@ export class ChatSessionStore {
      * record is told to reference it; bytes that are already gone stay a
      * placeholder (D19) rather than failing the restore.
      */
-    const restoreDraft = async (userMessage: MyUIMessage): Promise<MyUIMessage> => {
+    const restoreDraft = async (userMessage: MyUIMessage): Promise<void> => {
       const draft = buildDraftFromUserMessage(userMessage);
       draftActorRef.send({ type: 'loadDraftFromMessageTransient', draft });
       const work = persistRestoredDraft();
@@ -1212,7 +1264,6 @@ export class ChatSessionStore {
       } finally {
         session.composerWork.delete(work);
       }
-      return draft;
     };
     const persistRestoredDraft = async (): Promise<void> => {
       const binding = await composer.promise;
@@ -1460,11 +1511,8 @@ export class ChatSessionStore {
         resetMilestonePersistTracking();
         chat.messages = truncatedMessages;
         try {
-          const draft = await restoreDraft(userMessage);
-          await depsRef().commitCancelledDraftRestore(chatId, {
-            messages: truncatedMessages,
-            draft,
-          });
+          await restoreDraft(userMessage);
+          await depsRef().commitCancelledDraftRestore(chatId, { messages: truncatedMessages });
         } catch (error) {
           const persistenceError =
             error instanceof Error ? error : new Error('Failed to restore cancelled draft', { cause: error });
@@ -1629,6 +1677,7 @@ export class ChatSessionStore {
     // actor may dispatch a startup run, whose non-view hold must be able to
     // reference the fully initialised session.
     persistenceActorRef.send({ type: 'setActiveChatId', chatId });
+    this.#restoreUnread(session);
 
     return session;
   }

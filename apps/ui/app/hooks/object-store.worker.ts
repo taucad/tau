@@ -129,7 +129,7 @@ const objectStoreWorker = {
   async prepareProjectCreation(options: {
     manifest: ProjectManifest;
     /** Omitted to create the project and no chat at all (review R5). */
-    chat?: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt' | 'hasUnreadTurn'>;
+    chat?: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt'>;
     /** Where the chat's attachment references are copied from; see `PendingCreateProjectOperation`. */
     attachmentSource?: string;
     editorState?: InitialEditorState;
@@ -148,7 +148,6 @@ const objectStoreWorker = {
             createdAt: timestamp,
             updatedAt: timestamp,
             recencyAt: timestamp,
-            hasUnreadTurn: false,
           };
     const operationId = generatePrefixedId(idPrefix.request);
     const operation: PendingCreateProjectOperation = {
@@ -194,7 +193,6 @@ const objectStoreWorker = {
         createdAt: timestamp,
         updatedAt: timestamp,
         recencyAt: timestamp,
-        hasUnreadTurn: false,
         deletedAt: undefined,
       };
     });

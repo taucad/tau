@@ -128,6 +128,31 @@ export const stopWhenWritesSettle = async (ref: ComposerRecordRef): Promise<void
 };
 
 /**
+ * Remove a record through its actor and wait for the actor to finish (D11).
+ * `removed` is terminal, so the actor drops every patch sent afterwards.
+ *
+ * @param ref - The record actor whose record is going away.
+ */
+export const removeRecord = async (ref: ComposerRecordRef): Promise<void> => {
+  if (ref.getSnapshot().status !== 'active') {
+    return;
+  }
+  const finished = new Promise<void>((resolve) => {
+    const subscription = ref.subscribe({
+      next: (snapshot) => {
+        if (snapshot.status !== 'active') {
+          subscription.unsubscribe();
+          resolve();
+        }
+      },
+      complete: resolve,
+    });
+  });
+  ref.send({ type: 'remove' });
+  await finished;
+};
+
+/**
  * Every attachment reference a draft context still holds: the draft, the open
  * edit and the saved edits. `retainOnly` keeps exactly these.
  *

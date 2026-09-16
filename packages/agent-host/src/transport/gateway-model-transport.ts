@@ -14,6 +14,7 @@ import type {
 } from '@earendil-works/pi-ai';
 import { util as zodUtility } from 'zod';
 import { MessageIdentities, providerMessageToPi } from '#harness/session-record.js';
+import { rewriteDocuments } from '#transport/document-payload.js';
 import { createVertexResponseShim, echoThoughtSignatures } from '#transport/vertex-completions-shim.js';
 import type { JsonObject, ModelProviderKind, ModelSystemPromptBlock } from '#log/event-types.js';
 import type { ModelInvocationBinding, ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
@@ -713,6 +714,24 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
     const state: GatewayFetchState = {};
     const context = piContextFor(request, model);
     const thoughtSignatures = new Map<string, string>();
+    const rewrite = rewriteDocuments(request.documents, model.api);
+    const echo = request.providerKind === 'vertexai' ? echoThoughtSignatures(context) : undefined;
+    // Every adapter shares one request-construction step: Vertex signature echo,
+    // then the document rewrite (D21, D25). A refusal here is the caller's
+    // request, so it surfaces as INVALID_REQUEST and nothing is fetched.
+    const onPayload = (payload: unknown): unknown => {
+      try {
+        const echoed = echo?.(payload);
+        return rewrite(echoed ?? payload) ?? echoed;
+      } catch (error) {
+        state.failure = new GatewayModelTransportError({
+          code: 'INVALID_REQUEST',
+          message: error instanceof Error ? error.message : 'Tau could not build the model request.',
+          cause: error,
+        });
+        throw state.failure;
+      }
+    };
     const gatewayFetch = authenticatedFetch({
       ...(options.auth === undefined ? {} : { auth: options.auth }),
       // Bound: a bare globalThis.fetch reference invoked as options.fetch(...)
@@ -747,6 +766,7 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
             }) satisfies typeof globalThis.fetch)
           : gatewayFetch,
       maxRetries: 0,
+      onPayload,
       ...(request.maxTokens === undefined ? {} : { maxTokens: request.maxTokens }),
       signal: request.signal,
     } as const;
@@ -774,7 +794,6 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
             } satisfies OpenAIResponsesOptions)
           : openAICompletionsApi().stream(model as Model<'openai-completions'>, context, {
               ...commonOptions,
-              ...(request.providerKind === 'vertexai' ? { onPayload: echoThoughtSignatures(context) } : {}),
               ...(request.providerKind === 'vertexai' && reasoning?.effort !== undefined
                 ? {
                     /* eslint-disable @typescript-eslint/naming-convention -- Upstream Gemini wire keys use snake_case. */

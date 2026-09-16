@@ -675,7 +675,7 @@ describe('HTML browser capture', () => {
     expect(converted.markdown).toContain('Lazy second tab evidence.');
     expect(converted.markdown).toContain('Caption survives omitted video.');
     expect(converted.markdown).not.toContain('ignored-video.mp4');
-    expect(converted.markdown).toContain('``` text\nconst answer = 42;\n```');
+    expect(converted.markdown).toContain('```\nconst answer = 42;\n```');
     expect(converted.markdown.match(/## Responsive evidence/gu)).toHaveLength(1);
     expect(converted.markdown.match(/## Native details one/gu)).toHaveLength(1);
     expect(converted.markdown).not.toContain('Copy');

@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Duplex } from 'node:stream';
 
-import { decode, encode } from '@msgpack/msgpack';
+import { decode } from '@msgpack/msgpack';
 import { WebSocket, WebSocketServer } from 'ws';
 import { afterEach, describe, expect, it } from 'vitest';
 

@@ -14,6 +14,7 @@ const createMemoryFileService = async (): Promise<WorkspaceFileService> => {
   const mountTable = new MountTable();
   const storageRootKey = 'memory:bundled-types';
   mountTable.mount('/', await providerRegistry.getProvider({ backend: 'memory', storageRootKey }), {
+    class: 'authored',
     backend: 'memory',
     storageRootKey,
   });

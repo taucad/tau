@@ -134,7 +134,11 @@ export const createVertexResponseShim = (signatures: Map<string, string>): Trans
       carry += decoder.decode(bytes, { stream: true });
       const lines = carry.split('\n');
       carry = lines.pop() ?? '';
-      controller.enqueue(encoder.encode(`${lines.map(rewriteLine).join('\n')}\n`));
+      // A chunk that closed no line adds nothing to the wire; enqueueing here
+      // would inject a newline the upstream never sent.
+      if (lines.length > 0) {
+        controller.enqueue(encoder.encode(`${lines.map(rewriteLine).join('\n')}\n`));
+      }
     },
     flush(controller) {
       if (carry.length > 0) {

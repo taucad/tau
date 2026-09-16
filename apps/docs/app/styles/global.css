@@ -134,8 +134,9 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* Geometry lives in @taucad/ui's `focus-outline` utility; never restate it here. */
   :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
-    @apply outline-2 outline-offset-2 outline-ring;
+    @apply focus-outline;
   }
 
   ::selection {

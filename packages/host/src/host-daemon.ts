@@ -13,9 +13,17 @@ import type { AgentSessionModel, ExternalAgentDescriptor } from '@taucad/agent-h
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
 import { createRuntimeClient } from '@taucad/runtime';
+import { admitParameterManifest } from '@taucad/parameters';
+import type { ParameterManifest, ParameterResolutionOptions, ParameterSetTarget } from '@taucad/parameters';
+import { loadParameterSnapshot, refreshParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
+import type { ParameterAuthority } from '@taucad/parameters/authority';
+import { createActor, fromCallback, fromPromise, waitFor } from 'xstate';
+import type { ActorRefFrom } from 'xstate';
+import { parameterSetMachine } from '@taucad/parameters/set-machine';
 import { createFileSystemBridgePort, fromFileSystemBridge } from '@taucad/runtime/filesystem';
 import { webSocketTransport } from '@taucad/runtime/transport/websocket';
 import type { ComputeBinding, ComputeStoreControl } from '@taucad/runtime/types';
+import { parameterEntryPath } from '@taucad/types';
 
 import { startAgentServer } from '#agent-server.js';
 import type { AgentServerHandle } from '#agent-server.js';
@@ -43,6 +51,8 @@ import { createProjectRevisions } from '#revisions.js';
 import type { TurnCheckout } from '#revisions.js';
 import { startRuntimeChild } from '#runtime-child-supervisor.js';
 import type { RuntimeChildHandle } from '#runtime-child-supervisor.js';
+
+type ParameterActor = ActorRefFrom<typeof parameterSetMachine>;
 
 /** Milliseconds. */
 const socketOpenTimeout = 15_000;
@@ -419,6 +429,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
    * the files the kernel reads are the ones that turn is writing.
    */
   const agentRuntimes = new Map<string, Promise<ReturnType<typeof createRuntimeClient>>>();
+  const agentParameters = new Map<string, Map<string, Promise<ParameterActor>>>();
   const agentRuntimeClosures = new Map<string, Set<Promise<void>>>();
   const agentRuntimeCloseFailures: unknown[] = [];
 
@@ -464,6 +475,21 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     }
     const shutdown = async (): Promise<void> => {
       try {
+        const parameters = agentParameters.get(workspaceRoot);
+        agentParameters.delete(workspaceRoot);
+        await Promise.all(
+          [...(parameters?.entries() ?? [])].map(async ([targetFile, client]) => {
+            const opened = await client;
+            opened.send({ type: 'close' });
+            const state = await waitFor(
+              opened,
+              (state) => state.status === 'done' || state.matches({ open: 'uncertain' }),
+            );
+            if (state.status !== 'done') {
+              throw new Error(`Parameter write for ${targetFile} remains uncertain.`);
+            }
+          }),
+        );
         const client = await pending;
         await client.shutdown();
       } catch (error) {
@@ -503,6 +529,9 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
              * new port while every tool keeps dialling the dead one, so a render
              * fails with a transport error that names nothing instead of the
              * supervisor's real reason. */
+            for (const [root, client] of agentRuntimes) {
+              closeAgentRuntime(root, client);
+            }
             agentRuntimes.clear();
             closeSessions('CHILD_EXIT');
           }
@@ -562,6 +591,145 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       })();
     agentRuntimes.set(workspaceRoot, pending);
     return pending;
+  };
+
+  const ensureAgentParameterActor = async (workspaceRoot: string, targetFile: string): Promise<ParameterActor> => {
+    const clients = agentParameters.get(workspaceRoot) ?? new Map<string, Promise<ParameterActor>>();
+    agentParameters.set(workspaceRoot, clients);
+    const existing = clients.get(targetFile);
+    if (existing) {
+      return existing;
+    }
+    const pending = (async (): Promise<ParameterActor> => {
+      const [runtime, provider] = await Promise.all([
+        ensureAgentRuntime(workspaceRoot),
+        Promise.resolve(providerForAgentRoot(workspaceRoot)),
+      ]);
+      const target = {
+        authority: provider.id,
+        root: workspaceRoot,
+        entry: targetFile,
+      } as const;
+      const sidecar = parameterEntryPath(targetFile);
+      let observer: Readonly<{ changed(): void; failed(error: unknown): void }> | undefined;
+      const handleWatch = (event: Readonly<{ type: string }>): void => {
+        if (event.type === 'reset') {
+          observer?.failed(Object.assign(new Error('Parameter watch reset.'), { code: 'WATCH_RESET' }));
+        } else {
+          observer?.changed();
+        }
+      };
+      let prearmed: (() => void) | undefined = await provider.watch({ paths: [sidecar] }, handleWatch);
+      const manifest = async (
+        _target: ParameterSetTarget,
+        signal: AbortSignal,
+        resolution?: ParameterResolutionOptions,
+      ): Promise<ParameterManifest> => {
+        const result = await runtime.resolveParameters({
+          source: { path: targetFile },
+          ...(resolution === undefined ? {} : { resolution }),
+          signal,
+        });
+        if (!result.success) {
+          throw Object.assign(
+            new Error(result.issues.map(({ message }) => message).join('; ') || 'Parameter resolution failed.'),
+            { code: result.issues[0]?.code ?? 'PARAMETER_RESOLUTION_FAILED' },
+          );
+        }
+        return admitParameterManifest(result.data);
+      };
+      const authority: ParameterAuthority = {
+        path: () => sidecar,
+        read: async (_target, signal) => {
+          signal.throwIfAborted();
+          return (await provider.exists(sidecar)) ? provider.readFile(sidecar) : null;
+        },
+        writeChecked: async ({ signal, ...write }) => {
+          signal?.throwIfAborted();
+          return provider.writeFileChecked(write);
+        },
+        semanticPreconditions: async (_target, signal) => {
+          const snapshot = await runtime.snapshotSource({
+            source: { path: targetFile },
+            signal,
+          });
+          if (!snapshot.success) {
+            throw Object.assign(new Error(snapshot.issues.map(({ message }) => message).join('; ')), {
+              code: snapshot.issues[0]?.code ?? 'SOURCE_SNAPSHOT_FAILED',
+            });
+          }
+          return snapshot.data.files.map(({ path, content }) => ({ path, expected: content }));
+        },
+      };
+      const observe = (changed: () => void, failed: (error: unknown) => void): (() => void) => {
+        observer = { changed, failed };
+        let active = true;
+        let unwatch = prearmed;
+        prearmed = undefined;
+        if (!unwatch) {
+          const openWatch = async (): Promise<void> => {
+            try {
+              const opened = await provider.watch({ paths: [sidecar] }, handleWatch);
+              if (active) {
+                unwatch = opened;
+              } else {
+                opened();
+              }
+            } catch (error) {
+              if (active) {
+                failed(error);
+              }
+            }
+          };
+          // async-iife: report a late watch-open failure to the authority observer.
+          void openWatch();
+        }
+        return () => {
+          active = false;
+          observer = undefined;
+          unwatch?.();
+        };
+      };
+      const actor = createActor(
+        parameterSetMachine.provide({
+          actors: {
+            loadParameterSet: fromPromise(async ({ input, signal }) =>
+              input.current === undefined
+                ? loadParameterSnapshot({ target, authority, manifest, resolution: input.resolution, signal })
+                : refreshParameterSnapshot({ current: input.current, authority, signal }),
+            ),
+            commitParameterSet: fromPromise(async ({ input: change, signal }) =>
+              commitParameterChange({ change, authority, signal }),
+            ),
+            observeParameterSet: fromCallback(({ sendBack }) =>
+              observe(
+                () => {
+                  sendBack({ type: 'watch.changed' });
+                },
+                (error) => {
+                  sendBack({
+                    type: 'watch.error',
+                    message: error instanceof Error ? error.message : 'Observation failed.',
+                  });
+                },
+              ),
+            ),
+          },
+        }),
+        { input: { target } },
+      );
+      actor.start();
+      return actor;
+    })();
+    clients.set(targetFile, pending);
+    try {
+      return await pending;
+    } catch (error) {
+      if (clients.get(targetFile) === pending) {
+        clients.delete(targetFile);
+      }
+      throw error;
+    }
   };
 
   /**
@@ -722,6 +890,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       /* Per root, not per host: a candidate turn's kernel must read the tree
        * that turn is writing, which is its checkout and not the project. */
       runtimeClient: async (root) => ensureAgentRuntime(root),
+      parameterActor: async (root, targetFile) => ensureAgentParameterActor(root, targetFile),
       filesystem: (root) => providerForAgentRoot(root),
       /* The host's own decision, not a resolution accident: `false` withholds
        * `test_model` from an installation whose GeoSpec engine resolves. */

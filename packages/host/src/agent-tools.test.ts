@@ -1,3 +1,4 @@
+import type { ParameterSnapshot } from '@taucad/parameters';
 /**
  * What the daemon offers the model, and what it does with it.
  *
@@ -22,6 +23,8 @@ import type { JsonValue } from '@taucad/agent-host';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
 import type { HashedGeometryResult } from '@taucad/runtime/types';
+import { createActor, fromPromise } from 'xstate';
+import { parameterSetMachine } from '@taucad/parameters/set-machine';
 
 import * as agentToolsRegistry from '@taucad/agent-tools/registry';
 import type { SystemSkillBundle } from '@taucad/agent-tools/registry';
@@ -339,6 +342,45 @@ describe('createHostToolRegistry', () => {
     expect(names).toContain('export_geometry');
   });
 
+  it('offers both parameter tools only with a native parameter actor and preserves its outcome', async () => {
+    const workspaceRoot = await makeWorkspace();
+    const actor = createActor(
+      parameterSetMachine.provide({
+        actors: {
+          loadParameterSet: fromPromise(async (): Promise<ParameterSnapshot> => {
+            throw Object.assign(new Error('No declared parameter semantics.'), { code: 'SEMANTICS_UNRESOLVED' });
+          }),
+        },
+      }),
+      { input: { target: { authority: 'test', root: workspaceRoot, entry: 'main.ts' } } },
+    );
+    actor.start();
+    const open = vi.fn(async () => actor);
+    const registry = createHostToolRegistry({ workspaceRoot, parameterActor: open });
+
+    expect(registry.list().map(({ name }) => name)).toEqual(
+      expect.arrayContaining(['get_parameters', 'apply_parameter_operation']),
+    );
+    const unresolved = await invoke(registry, 'get_parameters', { targetFile: 'main.ts' });
+    expect(JSON.stringify(unresolved.content)).toContain('SEMANTICS_UNRESOLVED');
+
+    const rejected = await invoke(registry, 'apply_parameter_operation', {
+      targetFile: 'main.ts',
+      requestId: 'request-1',
+      expected: {
+        sourceRevision: 'source',
+        manifestRevision: 'manifest',
+        valueRevision: 'value',
+        dependencyRevision: 'dependency',
+      },
+      pressure: 'final',
+      operation: { kind: 'reset-group', group: 'default' },
+    });
+    expect(JSON.stringify(rejected.content)).toContain('DISCONNECTED');
+    actor.stop();
+    expect(open).toHaveBeenCalledWith(workspaceRoot, 'main.ts');
+  });
+
   it('reads and writes inside the workspace root through the canonical RPCs', async () => {
     const workspaceRoot = await makeWorkspace();
     const registry = createHostToolRegistry({ workspaceRoot });
@@ -425,7 +467,7 @@ describe('createHostToolRegistry', () => {
           };
         }),
         export: vi.fn<HostRuntimeClient['export']>(async (format, options) => {
-          // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- tsgo's spec config keeps source optional.
+          // oxlint-disable-next-line typescript/no-unnecessary-condition -- tsgo's spec config keeps options optional.
           const sourcePath = options?.source?.path;
           if (sourcePath === undefined) {
             throw new TypeError('Expected export source options');

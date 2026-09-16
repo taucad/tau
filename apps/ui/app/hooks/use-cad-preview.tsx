@@ -5,6 +5,7 @@ import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { Geometry } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
+import type { ParameterManifest } from '@taucad/parameters';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { cadMachine, selectCadFailureIssues } from '#machines/cad.machine.js';
 import { cadPreviewMachine } from '#machines/cad-preview.machine.js';
@@ -33,6 +34,7 @@ export type CadPreviewContextValue = {
   readonly graphicsRef: ActorRefFrom<typeof graphicsMachine>;
   readonly defaultParameters: Record<string, unknown>;
   readonly jsonSchema: JSONSchema7 | undefined;
+  readonly parameterManifest: ParameterManifest | undefined;
   readonly setParameters: (parameters: Record<string, unknown>) => void;
 };
 
@@ -296,8 +298,10 @@ function CadPreviewPipeline({
     return 'idle';
   });
   const failureIssues = useSelector(cadRef, selectCadFailureIssues);
-  const defaultParameters = useSelector(cadRef, (s) => s.context.defaultParameters);
-  const jsonSchema = useSelector(cadRef, (s) => s.context.jsonSchema);
+  const parameterManifest = useSelector(cadRef, (s) => s.context.parameterManifest);
+  const defaultParameters = parameterManifest?.defaults ?? {};
+  const jsonSchema =
+    parameterManifest?.legacyProjection.status === 'usable' ? parameterManifest.legacyProjection.schema : undefined;
   const cadUnits = useSelector(cadRef, (s) => s.context.units);
 
   // Initialization error from the preview machine
@@ -353,9 +357,10 @@ function CadPreviewPipeline({
       graphicsRef,
       defaultParameters,
       jsonSchema,
+      parameterManifest,
       setParameters,
     }),
-    [geometry, status, error, cadRef, graphicsRef, defaultParameters, jsonSchema, setParameters],
+    [geometry, status, error, cadRef, graphicsRef, defaultParameters, jsonSchema, parameterManifest, setParameters],
   );
 
   return <CadPreviewContext.Provider value={value}>{children}</CadPreviewContext.Provider>;

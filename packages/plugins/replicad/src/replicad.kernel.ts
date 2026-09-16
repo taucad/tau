@@ -12,6 +12,7 @@ import type { OpenCascadeInstance } from 'replicad-opencascadejs';
 import type { AnyShape } from 'replicad';
 import type * as ReplicadModule from 'replicad';
 import { digestContent } from '@taucad/cache-core';
+import type { CacheValue, ComputeAction } from '@taucad/cache-core';
 import { createExportFile } from '@taucad/runtime/types';
 import type {
   GeometryGltf,
@@ -37,6 +38,7 @@ import {
   defineLibraryTracePolicy,
   createKernelError,
   createKernelSuccess,
+  createKernelParameterDeclaration,
   RenderArtifactFinalizationError,
   finalizeMeshOutput,
   finalizeRenderOutput,
@@ -208,7 +210,9 @@ type ReplicadContext = {
   libraryExportNames: Set<string>;
   tracingSummary?: OcTracingSummary;
   libraryTrace: KernelLibraryTraceHandle<ReplicadLibrary>;
-  computeReuse: ReplicadComputeReuseAdapter | undefined;
+  computeReuse: ReplicadComputeReuseAdapter<ReplicadLibrary> | undefined;
+  computeProducer: ComputeAction['producer'];
+  computeEnvironment: CacheValue;
 };
 
 type ReplicadLibrary = typeof ReplicadModule;
@@ -410,10 +414,16 @@ export const replicadKernel = defineKernel({
   exportFormats: {
     stl: { optionsSchema: replicadExportSchemas.stl },
     step: { optionsSchema: replicadExportSchemas.step },
-    glb: { optionsSchema: replicadExportSchemas.glb, content: ['includeEdges', 'includeTopology'] },
-    gltf: { optionsSchema: replicadExportSchemas.gltf, content: ['includeEdges', 'includeTopology'] },
+    glb: {
+      optionsSchema: replicadExportSchemas.glb,
+      content: ['includeEdges', 'includeTopology'],
+    },
+    gltf: {
+      optionsSchema: replicadExportSchemas.gltf,
+      content: ['includeEdges', 'includeTopology'],
+    },
   },
-  async initialize(options, runtime) {
+  async initialize(options, runtime): Promise<ReplicadContext> {
     const replicadLibrary = await import('replicad');
     const { mangledToOriginal: exportNameMap, exportNames: libraryExportNames } = preserveExportNames(replicadLibrary);
 
@@ -469,7 +479,8 @@ export const replicadKernel = defineKernel({
 
     try {
       const fontSpan = tracer.startSpan('replicad.font-load');
-      if (!(replicadLibrary.getFont as (fontFamily?: string) => unknown)('default')) {
+      // The dependency declaration says this is always present, but its registry lookup returns undefined before load.
+      if (Object.is(replicadLibrary.getFont('default'), undefined)) {
         logger.debug('Loading default font for text rendering');
         const fontData = await loadBinaryFile(geistRegularUrl);
         if (!fontData) {
@@ -511,7 +522,10 @@ export const replicadKernel = defineKernel({
       version: 'replicad@0.23.4-beta.2|replicad-opencascadejs@0.23.0-beta.0|adapter@1',
       implementationAssets,
     };
-    const computeEnvironment = { wasmVariant: resolved.variant, lengthUnit: 'millimeter' };
+    const computeEnvironment = {
+      wasmVariant: resolved.variant,
+      lengthUnit: 'millimeter',
+    };
     const computeReuse = computeReuseEnabled
       ? createReplicadComputeReuse({
           library: replicadLibrary,
@@ -521,7 +535,7 @@ export const replicadKernel = defineKernel({
         })
       : undefined;
     const libraryTrace = createKernelLibraryTracer({
-      library: (computeReuse?.library ?? replicadLibrary) as unknown as ReplicadLibrary,
+      library: computeReuse?.library ?? replicadLibrary,
       tracer,
       mode: libraryTracing,
       policy: replicadLibraryTracePolicy,
@@ -587,7 +601,12 @@ export const replicadKernel = defineKernel({
       const defaultParameters = extractDefaultParameters(executeResult.value);
       const jsonSchema = await jsonSchemaFromJson(defaultParameters);
 
-      return createKernelSuccess({ defaultParameters, jsonSchema });
+      return createKernelSuccess(
+        createKernelParameterDeclaration(defaultParameters, jsonSchema, {
+          id: 'urn:taucad:replicad:parameters',
+          name: 'ReplicadParameters',
+        }),
+      );
     } catch (error) {
       const issue = formatOcRuntimeError(
         error,
@@ -598,7 +617,7 @@ export const replicadKernel = defineKernel({
     }
   },
 
-  async createGeometry({ entryPath, parameters }, runtime, context) {
+  async createGeometry({ entryPath, parameters }, runtime, context: ReplicadContext) {
     const { tracer } = runtime;
     const relativeFilePath = toVmEntryPath(entryPath);
     let bundleSourceMap: string | undefined;
@@ -631,7 +650,10 @@ export const replicadKernel = defineKernel({
                   module: executeResult.value,
                   parameters,
                   ocInstance: context.openCascade,
-                  errorContext: buildErrorContext(context, { bundleSourceMap, entryUrl }),
+                  errorContext: buildErrorContext(context, {
+                    bundleSourceMap,
+                    entryUrl,
+                  }),
                   firstArg: getReplicadFirstArgument(),
                 }),
             });
@@ -653,7 +675,10 @@ export const replicadKernel = defineKernel({
           runtime.logger.warn('createGeometry returning empty: main-returned-undefined', {
             data: { filePath: relativeFilePath },
           });
-          return finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry()], nativeHandle: [] });
+          return finalizeRenderOutput({
+            artifacts: [createEmptyGltfGeometry()],
+            nativeHandle: [],
+          });
         }
 
         const defaultName = extractDefaultName(executeResult.value);
@@ -780,7 +805,10 @@ export const replicadKernel = defineKernel({
             return convertReplicadGeometriesToGltf({
               geometries: includeEdges
                 ? shapes3d
-                : shapes3d.map((geometry) => ({ ...geometry, edges: { ...geometry.edges, lines: [] } })),
+                : shapes3d.map((geometry) => ({
+                    ...geometry,
+                    edges: { ...geometry.edges, lines: [] },
+                  })),
               format: 'glb',
               includeTauTopology: includeTopology,
               logger: runtime.logger,
@@ -848,7 +876,11 @@ export const replicadKernel = defineKernel({
             const { coordinateSystem, unit } = options;
             const namedShapes = nativeHandle.map((shapeConfig, index) => ({
               ...shapeConfig,
-              name: resolveShapeName({ index, name: shapeConfig.name, source: 'generated' }),
+              name: resolveShapeName({
+                index,
+                name: shapeConfig.name,
+                source: 'generated',
+              }),
             }));
             const renderedShapes = await tracedPhase(runtime.tracer, 'export.renderGlbTessellation', () =>
               render(namedShapes, {
@@ -935,7 +967,10 @@ export const replicadKernel = defineKernel({
 
             const shapes =
               coordinateSystem === 'y-up'
-                ? nativeHandle.map((s) => ({ ...s, shape: s.shape.clone().rotate(-90, [0, 0, 0], [1, 0, 0]) }))
+                ? nativeHandle.map((s) => ({
+                    ...s,
+                    shape: s.shape.clone().rotate(-90, [0, 0, 0], [1, 0, 0]),
+                  }))
                 : nativeHandle;
 
             const result = await Promise.all(
@@ -995,7 +1030,11 @@ const serializeReplicadHandle = (nativeHandle: NativeHandleEntry[]) =>
 
 async function buildExportBytes(
   shape: AnyShape,
-  tessellation: { tolerance: number; angularTolerance: number; binary?: boolean },
+  tessellation: {
+    tolerance: number;
+    angularTolerance: number;
+    binary?: boolean;
+  },
 ): Promise<Uint8Array<ArrayBuffer>> {
   const blob = shape.blobSTL(tessellation.binary ? { ...tessellation, binary: true } : tessellation);
   return new Uint8Array(await blob.arrayBuffer());

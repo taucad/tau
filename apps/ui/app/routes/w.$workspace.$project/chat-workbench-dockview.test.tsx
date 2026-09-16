@@ -190,7 +190,7 @@ vi.mock('#routes/w.$workspace.$project/file-viewers/built-in-viewers.js', () => 
           render: (request: {
             readonly binaryFallback?: { readonly onForceOpen: () => void };
             readonly renderPane: (content: { readonly body: React.ReactNode }) => React.ReactNode;
-          }) =>
+          }): React.ReactNode =>
             request.renderPane({
               body: (
                 <div>
@@ -224,7 +224,7 @@ vi.mock('#routes/w.$workspace.$project/file-viewers/built-in-viewers.js', () => 
             readonly actions?: React.ReactNode;
             readonly body: React.ReactNode;
           }) => React.ReactNode;
-        }) => {
+        }): React.ReactNode => {
           const { outcome } = request.resource;
           const content = outcome.kind === 'text' ? new TextDecoder().decode(outcome.content) : '';
           return request.renderPane({

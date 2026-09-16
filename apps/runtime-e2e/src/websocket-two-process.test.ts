@@ -30,6 +30,7 @@ import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceF
 import { exposeFileSystem, openFileSystemBridge } from '@taucad/fs-bridge';
 import { createRuntimeClient, fromFileSystemBridge } from '@taucad/runtime';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
+import { createSqliteComputeEngine, fromSqlite } from '@taucad/runtime/node';
 import { createGeometryTestHelpers, extractGltfFromExportResult } from '@taucad/runtime-testing';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { webSocketTransport } from '@taucad/runtime/transport/websocket';
@@ -89,14 +90,25 @@ const authorityDisposers: Array<() => void> = [];
 
 const createBrowserFileSystem = async (
   files: Readonly<Record<string, string>>,
-): Promise<{ fileSystem: ReturnType<typeof fromFileSystemBridge>; service: WorkspaceFileService; root: string }> => {
+): Promise<{
+  fileSystem: ReturnType<typeof fromFileSystemBridge>;
+  service: WorkspaceFileService;
+  root: string;
+}> => {
   const projectId = 'proj_remoteauthoritytest00';
   const root = `/projects/${projectId}`;
   const providerRegistry = new ProviderRegistry();
   const storageRootKey = 'memory:remote-authority';
-  const provider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey });
+  const provider = await providerRegistry.getProvider({
+    backend: 'memory',
+    storageRootKey,
+  });
   const mountTable = new MountTable();
-  mountTable.mount('/', provider, { backend: 'memory', storageRootKey });
+  mountTable.mount('/', provider, {
+    class: 'authored',
+    backend: 'memory',
+    storageRootKey,
+  });
   const eventBus = new ChangeEventBus();
   const service = new WorkspaceFileService({
     providerRegistry,
@@ -105,7 +117,14 @@ const createBrowserFileSystem = async (
     mountTable,
   });
   await service.configureProjectRoots({
-    projects: [{ projectId, backend: 'memory', storageRootKey, providerBasePath: projectId }],
+    projects: [
+      {
+        projectId,
+        backend: 'memory',
+        storageRootKey,
+        providerBasePath: projectId,
+      },
+    ],
     roots: [],
   });
   for (const [path, content] of Object.entries(files)) {
@@ -363,7 +382,10 @@ describe('WebSocket transport across two processes', { concurrent: false }, () =
       await client.connect();
       const ready = await captured.handle().open();
       await ready.channel.ready;
-      expect(ready.channel.hello.payload).toMatchObject({ server: 'kernel-runtime-worker', protocolVersion: 3 });
+      expect(ready.channel.hello.payload).toMatchObject({
+        server: 'kernel-runtime-worker',
+        protocolVersion: 3,
+      });
       expect(client.transport.id).toBe('web-socket');
       expect(client.transport.descriptor).toEqual(hostLocalDescriptor);
 
@@ -381,7 +403,10 @@ describe('WebSocket transport across two processes', { concurrent: false }, () =
        * this process, must produce the same bytes. */
       const localRoot = await makeRoot({ 'main.ts': boxSource(20) });
       const local = createRuntimeClient({
-        transport: inProcessTransport({ runtime: webSocketRuntime, fileSystem: fromNodeFs(localRoot) }),
+        transport: inProcessTransport({
+          runtime: webSocketRuntime,
+          fileSystem: fromNodeFs(localRoot),
+        }),
       });
       try {
         const expected = extractGltfFromExportResult(await local.export('glb', { source: { path: 'main.ts' } }));
@@ -398,7 +423,9 @@ describe('WebSocket transport across two processes', { concurrent: false }, () =
     const serverRoot = await makeRoot({ 'main.ts': boxSource(20) });
     const entryPath = join(serverRoot, 'main.ts');
     const server = await startApiServer({ mode: 'host-local', serverRoot });
-    const client = createRuntimeClient({ transport: webSocketTransport({ url: server.url }) });
+    const client = createRuntimeClient({
+      transport: webSocketTransport({ url: server.url }),
+    });
     const tracker = trackStates((handler) => client.on('state', handler));
 
     try {
@@ -448,27 +475,35 @@ describe('WebSocket transport across two processes', { concurrent: false }, () =
     }
   });
 
-  it('E3: serves the UI filesystem to the remote kernel, cache writes and watch included', async () => {
-    const authority = await createBrowserFileSystem({ 'main.ts': boxSource(20) });
+  it('E3: serves UI filesystem and compute authorities to the remote kernel, watch included', async () => {
+    const authority = await createBrowserFileSystem({
+      'main.ts': boxSource(20),
+    });
+    const computeRoot = await mkdtemp(join(tmpdir(), 'tau-ws-compute-'));
+    roots.push(computeRoot);
+    const computeWorkspace = 'test:remote-authority';
+    const computeEngine = createSqliteComputeEngine({
+      directory: computeRoot,
+    });
+    const computeStore = fromSqlite({
+      store: computeEngine,
+      workspace: computeWorkspace,
+    });
     const server = await startApiServer({ mode: 'bridged' });
-    const captured = capturingTransport({ url: server.url, fileSystem: authority.fileSystem });
+    const captured = capturingTransport({
+      url: server.url,
+      fileSystem: authority.fileSystem,
+      compute: { mode: 'durable', store: computeStore },
+    });
     const client = createRuntimeClient({ transport: captured.plugin });
     const tracker = trackStates((handler) => client.on('state', handler));
-    /* The remote kernel's cache writes are void bridged calls. When the
-     * msgpack `nil` for a void result is rejected (`voidResult` strict), the
-     * UI-side authority still performs the write, so the cache directory
-     * exists either way — only the kernel-side rejection tells the truth,
-     * and the geometry-cache middleware surfaces it as a `warn` log. */
-    const cacheWriteWarnings: string[] = [];
-    const stopLogs = client.on('log', (entry) => {
-      if (entry.level === 'warn' && /cache write error/i.test(entry.message)) {
-        cacheWriteWarnings.push(entry.message);
-      }
-    });
 
     try {
       await client.connect();
-      expect(client.transport.descriptor).toEqual({ ...hostLocalDescriptor, fileSystem: 'bridged' });
+      expect(client.transport.descriptor).toEqual({
+        ...hostLocalDescriptor,
+        fileSystem: 'bridged',
+      });
 
       const initial = await client.render({ source: { path: 'main.ts' } });
       if (initial.superseded) {
@@ -477,17 +512,19 @@ describe('WebSocket transport across two processes', { concurrent: false }, () =
       await geometryHelpers.expectMeshCount(initial.geometry, 1);
       await tracker.settle();
 
-      /* The remote kernel wrote its caches back through the `/fs` socket —
-       * every one of those calls is a void result, the msgpack `nil` the
-       * blueprint's Finding 3 pincer is about. */
+      // The remote kernel published its cache through the distinct `/compute`
+      // authority instead of reviving the retired filesystem cache writer.
+      const computeControl = await computeEngine.control({
+        workspace: computeWorkspace,
+      });
+      const control = computeControl;
       await vi.waitFor(
         async () => {
-          expect(await authority.service.readdir(`${authority.root}/.tau/cache`)).not.toHaveLength(0);
+          const inspection = await control.inspect({});
+          expect(inspection.entries).toBeGreaterThan(0);
         },
         { timeout: 30_000, interval: 100 },
       );
-      // Red before WS3: every void bridged call rejected with "Expected no result".
-      expect(cacheWriteWarnings).toEqual([]);
 
       // An external edit in the UI root: the watch registration crossed the socket.
       let mark = tracker.mark();
@@ -518,14 +555,18 @@ describe('WebSocket transport across two processes', { concurrent: false }, () =
       await delay(debounceSettlingWindow);
       expect(tracker.renders(mark)).toEqual([]);
     } finally {
-      stopLogs();
       tracker.stop();
       client.terminate();
+      await captured.handle().close();
+      await computeEngine.dispose();
     }
   });
 
   it('E4: surfaces a lone /fs socket failure as a render error, leaving the runtime wire up', async () => {
-    const uiRoot = await makeRoot({ 'main.ts': boxSource(20), 'other.ts': boxSource(35) });
+    const uiRoot = await makeRoot({
+      'main.ts': boxSource(20),
+      'other.ts': boxSource(35),
+    });
     const server = await startApiServer({ mode: 'bridged' });
     const sockets = recordSockets();
     const captured = capturingTransport({
@@ -570,7 +611,10 @@ describe('WebSocket transport across two processes', { concurrent: false }, () =
   }, 120_000);
 
   it('E5: settles wire-failure when the API server dies mid-render, and a later close() cannot overwrite it', async () => {
-    const uiRoot = await makeRoot({ 'main.ts': boxSource(20), 'slow.ts': slowSource });
+    const uiRoot = await makeRoot({
+      'main.ts': boxSource(20),
+      'slow.ts': slowSource,
+    });
     const server = await startApiServer({ mode: 'bridged' });
     const sockets = recordSockets();
     const captured = capturingTransport({
@@ -614,7 +658,9 @@ describe('WebSocket transport across two processes', { concurrent: false }, () =
 
       /* A late close() must not overwrite the first cause. */
       await captured.handle().close();
-      await expect(captured.handle().closed).resolves.toMatchObject({ cause: 'wire-failure' });
+      await expect(captured.handle().closed).resolves.toMatchObject({
+        cause: 'wire-failure',
+      });
 
       /* The UI's own `/fs` bridge server went down with the transport. */
       await vi.waitFor(
@@ -631,10 +677,17 @@ describe('WebSocket transport across two processes', { concurrent: false }, () =
   });
 
   it('E6: serves two UI clients from one API server without cross-talk', async () => {
-    const serverRoot = await makeRoot({ 'main-a.ts': boxSource(20), 'main-b.ts': boxSource(70) });
+    const serverRoot = await makeRoot({
+      'main-a.ts': boxSource(20),
+      'main-b.ts': boxSource(70),
+    });
     const server = await startApiServer({ mode: 'host-local', serverRoot });
-    const first = createRuntimeClient({ transport: webSocketTransport({ url: server.url }) });
-    const second = createRuntimeClient({ transport: webSocketTransport({ url: server.url }) });
+    const first = createRuntimeClient({
+      transport: webSocketTransport({ url: server.url }),
+    });
+    const second = createRuntimeClient({
+      transport: webSocketTransport({ url: server.url }),
+    });
 
     try {
       const [one, two] = await Promise.all([
@@ -663,10 +716,15 @@ describe('WebSocket transport across two processes', { concurrent: false }, () =
   it('E7: exports STL bytes over the socket identical to a deterministic in-process export', async () => {
     const serverRoot = await makeRoot({ 'main.ts': boxSource(20) });
     const server = await startApiServer({ mode: 'host-local', serverRoot });
-    const client = createRuntimeClient({ transport: webSocketTransport({ url: server.url }) });
+    const client = createRuntimeClient({
+      transport: webSocketTransport({ url: server.url }),
+    });
     const localRoot = await makeRoot({ 'main.ts': boxSource(20) });
     const local = createRuntimeClient({
-      transport: inProcessTransport({ runtime: webSocketRuntime, fileSystem: fromNodeFs(localRoot) }),
+      transport: inProcessTransport({
+        runtime: webSocketRuntime,
+        fileSystem: fromNodeFs(localRoot),
+      }),
     });
 
     const stlBytes = async (result: Awaited<ReturnType<typeof client.export>>): Promise<Uint8Array<ArrayBuffer>> => {
@@ -695,9 +753,15 @@ describe('WebSocket transport across two processes', { concurrent: false }, () =
 
   it('E8: enforces the origin allowlist at the HTTP upgrade across processes', async () => {
     const serverRoot = await makeRoot({ 'main.ts': boxSource(20) });
-    const server = await startApiServer({ mode: 'host-local', serverRoot, allowedOrigins: 'http://ui.test' });
+    const server = await startApiServer({
+      mode: 'host-local',
+      serverRoot,
+      allowedOrigins: 'http://ui.test',
+    });
 
-    const allowed = new WebSocket(`${server.url}/runtime`, { origin: 'http://ui.test' });
+    const allowed = new WebSocket(`${server.url}/runtime`, {
+      origin: 'http://ui.test',
+    });
     const [frame] = (await once(allowed, 'message')) as [Uint8Array<ArrayBuffer>];
     /* The wire is msgpack and the runtime hello is the first frame the host
      * posts — decoding it here is the codec assertion E7's parity cannot make. */
@@ -708,7 +772,9 @@ describe('WebSocket transport across two processes', { concurrent: false }, () =
     });
     allowed.close();
 
-    const denied = new WebSocket(`${server.url}/runtime`, { origin: 'http://evil.test' });
+    const denied = new WebSocket(`${server.url}/runtime`, {
+      origin: 'http://evil.test',
+    });
     const [error] = (await once(denied, 'error')) as [Error];
     expect(error.message).toContain('403');
 

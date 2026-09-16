@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
+import { builtinExamples } from '@taucad/tau-examples/builtin';
 import { galleryProjects, sampleProjects } from '#constants/project-examples.js';
 
 describe('galleryProjects', () => {
@@ -11,7 +12,7 @@ describe('galleryProjects', () => {
   });
 
   it('exposes every manifest-backed Community project', () => {
-    expect(galleryProjects.length).toBeGreaterThanOrEqual(34);
+    expect(galleryProjects.map(({ locator }) => locator)).toEqual(builtinExamples.map(({ locator }) => locator));
   });
 
   it('should expose every sample project without a placeholder filter', () => {

@@ -1,4 +1,4 @@
-import type { IpcMain, UtilityProcess } from 'electron';
+import type { IpcMain, MessagePortMain, UtilityProcess } from 'electron';
 import { describe, expect, it, vi } from 'vitest';
 import { _registerComputeStore } from '#cache/kernel-compute-runtime.js';
 import type { ComputeGeneration, ComputeStore, ComputeStoreControl } from '#types/runtime-compute.types.js';
@@ -324,7 +324,7 @@ describe('Electron main runtime helpers', () => {
 
     listeners.get('taucad:connect-runtime')?.({ sender, senderFrame: { postMessage } }, { requestId: 'request-1' });
 
-    expect(liveUtilities[0]?.postMessage).toHaveBeenCalledWith({ taucadRuntime: true }, [
+    expect(liveUtilities[0]?.postMessage).toHaveBeenCalledWith({ taucadRuntime: true, runtimePortIndex: 0 }, [
       expect.objectContaining({ id: 'utility-port' }),
     ]);
     expect(postMessage).toHaveBeenCalledOnce();
@@ -722,7 +722,17 @@ describe('Electron main runtime helpers', () => {
 
   it('kills the exact utility when post-fork channel setup fails', async () => {
     const { registerElectronRuntimeMain } = await import('#electron/main.js');
-    const handle = registerElectronRuntimeMain({ utilityEntry: '/dist/main/kernel-host.js' });
+    const fileSystemPort = {
+      postMessage: vi.fn(),
+      on: vi.fn(),
+      off: vi.fn(),
+      start: vi.fn(),
+      close: vi.fn(),
+    };
+    const handle = registerElectronRuntimeMain({
+      resolveFork: () => ({ fileSystemPort: fileSystemPort as unknown as MessagePortMain }),
+      utilityEntry: '/dist/main/kernel-host.js',
+    });
     const nextUtilityIndex = liveUtilities.length;
     const { utilityProcess } = await import('electron');
     vi.mocked(utilityProcess.fork).mockImplementationOnce(() => {
@@ -739,6 +749,30 @@ describe('Electron main runtime helpers', () => {
 
     expect(() => handle.connect({ purpose: 'main-process-client' })).toThrow(/port transfer failed/u);
     expect(liveUtilities[nextUtilityIndex]?.kill).toHaveBeenCalledOnce();
+    expect(fileSystemPort.close).toHaveBeenCalledOnce();
+    handle.dispose();
+  });
+
+  it('transfers an admitted filesystem port at an explicit boot-frame index', async () => {
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    const fileSystemPort = {
+      postMessage: vi.fn(),
+      on: vi.fn(),
+      off: vi.fn(),
+      start: vi.fn(),
+      close: vi.fn(),
+    };
+    const handle = registerElectronRuntimeMain({
+      resolveFork: () => ({ fileSystemPort: fileSystemPort as unknown as MessagePortMain }),
+      utilityEntry: '/dist/main/kernel-host.js',
+    });
+
+    handle.connect({ purpose: 'main-process-client' });
+
+    expect(liveUtilities.at(-1)?.postMessage).toHaveBeenLastCalledWith(
+      { taucadRuntime: true, runtimePortIndex: 0, fileSystemPortIndex: 1 },
+      [expect.objectContaining({ id: 'utility-port' }), fileSystemPort],
+    );
     handle.dispose();
   });
 

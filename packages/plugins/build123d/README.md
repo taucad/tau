@@ -23,6 +23,17 @@ npm i @taucad/build123d @taucad/runtime
 `@taucad/runtime` is a required peer — one install must hold one runtime. A capability with an
 options schema adds `zod` as a second required peer.
 
+## Quick start
+
+```typescript
+import { defineRuntime } from '@taucad/runtime/worker';
+import { build123d } from '@taucad/build123d';
+
+const runtime = defineRuntime({ plugins: [build123d()] });
+```
+
+Hand the definition to a trusted Node host that supplies the resources described below.
+
 ## Host integration
 
 This package deliberately has no ambient setup. The host must package a pinned CPython and wheel tree, validate its own resource manifest, create a separately revocable trusted-project marker, and pass the exact executable, worker, support-file paths, and SHA-256 digests under `kernels.default`. Tau Desktop is the reference integration in `apps/desktop/src/tau/build123d-resources.ts` and `desktop-runtime.definition.ts`.

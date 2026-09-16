@@ -60,8 +60,8 @@ describe('runtime-protocol schema coverage (C15)', () => {
     }
   });
 
-  it('should expose exactly the protocol inventory: 9 calls, 18 notifies, and 1 listen (T18)', () => {
-    expect(Object.keys(runtimeProtocolSchemas.calls)).toHaveLength(9);
+  it('should expose exactly the protocol inventory: 10 calls, 18 notifies, and 1 listen (T18)', () => {
+    expect(Object.keys(runtimeProtocolSchemas.calls)).toHaveLength(10);
     expect(Object.keys(runtimeProtocolSchemas.notifies)).toHaveLength(18);
     expect(Object.keys(runtimeProtocolSchemas.listens)).toHaveLength(1);
   });

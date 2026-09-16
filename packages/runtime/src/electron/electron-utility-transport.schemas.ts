@@ -53,6 +53,7 @@ export const electronUtilityMainClientOptionsSchema = z.object({
 
 /** Utility-process options owned by the standalone host factory. @public */
 export type ElectronUtilityHostOptions = {
-  readonly fileSystem: RuntimeFileSystem;
+  /** Static filesystem for callers that do not transfer one in the boot frame. */
+  readonly fileSystem?: RuntimeFileSystem;
   readonly worker: KernelRuntimeWorker;
 };

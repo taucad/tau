@@ -57,7 +57,16 @@ const kernelBase = (id: string) => ({
   getDependencies: async () => ({ resolved: [], unresolved: [] }),
   getParameters: async () => ({
     success: true,
-    data: { defaultParameters: {}, jsonSchema: {} },
+    data: {
+      schema: {
+        $schema: 'https://json-structure.org/meta/extended/v0/#',
+        $id: `urn:taucad:test:${id}`,
+        $uses: ['JSONSchemaUnits'],
+        name: `${id}Parameters`,
+        type: 'object',
+      },
+      defaults: {},
+    },
     issues: [],
   }),
   createGeometry: async () => ({ nativeHandle: {}, geometry: { format: 'gltf', content: new Uint8Array() } }),

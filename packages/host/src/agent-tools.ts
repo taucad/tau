@@ -38,7 +38,7 @@ import {
 } from '@taucad/agent-tools/registry';
 import type { ReadSkillResource } from '@taucad/agent-tools/registry';
 import { createSkillResolver } from '@taucad/agent-tools/skills';
-import { createRuntimeAgentClients } from '@taucad/agent-tools/runtime';
+import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
 import { createProjectModelLoader, runGeoSpecTests } from '@taucad/agent-tools/geospec';
 import type { GeoSpecRuntimeClient } from 'geospec/model';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
@@ -48,12 +48,16 @@ import { assertRootedPath } from '@taucad/utils/path';
  * follow, and it bundles rather than externalises. `@taucad/runtime` is a peer,
  * and re-exports the same declaration by name, so the emitted `.d.mts` keeps it
  * as an external import. */
-import type { ExportFile } from '@taucad/runtime/types';
+import type { ExportFile, RuntimeFileSystemBase } from '@taucad/runtime/types';
 import type { RuntimeClient } from '@taucad/runtime/client';
+import type { ActorRefFrom } from 'xstate';
+import type { parameterSetMachine } from '@taucad/parameters/set-machine';
 
 import type { ToolRegistry } from '@taucad/agent-host';
 
 import type { ProjectRevisions } from '#revisions.js';
+
+type ParameterActor = ActorRefFrom<typeof parameterSetMachine>;
 
 /** Runtime surface accepted by the host's GeoSpec model loader. @public */
 export type HostGeoSpecRuntimeClient = GeoSpecRuntimeClient;
@@ -79,6 +83,9 @@ export type HostExportFile = ExportFile;
  * @public
  */
 export type HostRuntimeClient = Pick<RuntimeClient, 'evaluate' | 'export' | 'transcode'>;
+
+/** Filesystem capability the host tool registry consumes. @public */
+export type HostToolFileSystem = Omit<RuntimeFileSystemBase, 'watch'>;
 
 /** One package-owned skill bundle accepted by the host. @public */
 export type HostSystemSkillBundle = {
@@ -193,6 +200,14 @@ export type HostToolRegistryOptions = {
   /** Absolute workspace root every file tool is confined to. */
   readonly workspaceRoot: string;
   /**
+   * Open the host-owned filesystem view for one admitted execution root.
+   *
+   * The embedding host owns root admission and provider lifetime. Defaults to
+   * a standalone {@link NodeFsProvider} for callers that have no shared Node
+   * authority.
+   */
+  readonly filesystem?: ((workspaceRoot: string) => HostToolFileSystem) | undefined;
+  /**
    * Resolves the loopback runtime client backing every geometry tool. A thunk,
    * because the daemon starts its runtime child on first use. Omit it and the
    * geometry tools are not offered rather than offered-and-failing.
@@ -203,6 +218,10 @@ export type HostToolRegistryOptions = {
    * answers with its own; the file tools are re-rooted either way.
    */
   readonly runtimeClient?: ((workspaceRoot: string) => Promise<HostRuntimeClient>) | undefined;
+  /** Open the one host-owned semantic parameter client for a source target. */
+  readonly parameterActor?:
+    | ((workspaceRoot: string, targetFile: string) => ParameterActor | Promise<ParameterActor>)
+    | undefined;
   /**
    * Builds the GeoSpec runner one `test_model` call runs on, in the root the
    * calling turn works in. Defaults to the engine's Node runner when
@@ -281,7 +300,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
      * D1): this provider is the checkout, and what the agent sees over it is
      * the composed view. The skill resolver below reads the disk directly and
      * mutates nothing. */
-    const provider = new NodeFsProvider(workspaceRoot);
+    const provider = options.filesystem?.(workspaceRoot) ?? new NodeFsProvider(workspaceRoot);
     const view = composeView(
       { filesystem: provider },
       { consumer: 'agent', ...(skillOverlay === undefined ? {} : { overlays: [skillOverlay] }) },
@@ -335,6 +354,13 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
         return result.data;
       },
     });
+    const { parameterActor } = options;
+    const parameters = parameterActor
+      ? createRuntimeParameterAgentClient({
+          mapRuntimeError: runtimeFailure,
+          parameterActorFor: async (targetFile) => parameterActor(workspaceRoot, targetFile),
+        })
+      : undefined;
 
     /** Workspace skills remain authored files; package skills come from the injected registry. */
     const skillReaders = {
@@ -397,6 +423,7 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       fileSystemFor: (signal) => createProviderRpcFileSystem({ provider: view, mutations, signal }),
       recordFileSystemFor: (signal) => createProviderRpcFileSystem({ provider: recordView, mutations, signal }),
       ...(runtimeClient === undefined ? {} : { kernelClient, graphics, images }),
+      ...(parameters === undefined ? {} : { parameters }),
       ...(geospec === undefined ? {} : { geospec }),
       ...(options.revisions === undefined ? {} : { revisions: options.revisions }),
       skillResolver,

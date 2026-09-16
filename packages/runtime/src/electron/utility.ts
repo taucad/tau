@@ -16,6 +16,7 @@ import { electronUtilityHost } from '#electron/electron-utility-host.js';
 import type { ElectronUtilityHostOptions } from '#electron/electron-utility-transport.schemas.js';
 
 export { electronUtilityHost } from '#electron/electron-utility-host.js';
+export { serveElectronFileSystemBridgePort } from '#electron/filesystem-bridge-port.js';
 export type { ElectronUtilityHostOptions } from '#electron/electron-utility-transport.schemas.js';
 
 /**
@@ -24,8 +25,8 @@ export type { ElectronUtilityHostOptions } from '#electron/electron-utility-tran
  * @public
  */
 export type ServeElectronRuntimeOptions = {
-  /** Rooted filesystem authority exposed inside the utility host. */
-  readonly fileSystem: RuntimeFileSystem;
+  /** Rooted static filesystem, omitted when main transfers one in the boot frame. */
+  readonly fileSystem?: RuntimeFileSystem;
   /** Install a process-exit disposer. Defaults to true. */
   readonly installProcessTeardown?: boolean;
   /** Executable runtime definition owned by this utility host. */
@@ -54,7 +55,7 @@ export const serveElectronRuntime = (options: ServeElectronRuntimeOptions): Runt
   const worker = createRuntimeWorker({ runtime: options.runtime });
   const host = createRuntimeHost({
     transport: electronUtilityHost({
-      fileSystem: options.fileSystem,
+      ...(options.fileSystem === undefined ? {} : { fileSystem: options.fileSystem }),
       worker,
     } satisfies ElectronUtilityHostOptions),
   });

@@ -4,12 +4,20 @@ import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { toRpcError } from '@taucad/chat/rpc';
 import { createChatToolRegistry, createProviderRpcFileSystem } from '@taucad/agent-tools/registry';
 import { composeView } from '@taucad/filesystem/composed-view';
-import { createRuntimeAgentClients } from '@taucad/agent-tools/runtime';
+import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
 import type { RuntimeAgentClient } from '@taucad/agent-tools/runtime';
 import { createRuntimeClient } from '@taucad/runtime/client';
+import { admitParameterManifest } from '@taucad/parameters';
+import type { ParameterManifest, ParameterResolutionOptions, ParameterSetTarget } from '@taucad/parameters';
+import { loadParameterSnapshot, refreshParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
+import type { ParameterAuthority } from '@taucad/parameters/authority';
+import { createActor, fromCallback, fromPromise, waitFor } from 'xstate';
+import type { ActorRefFrom } from 'xstate';
+import { parameterSetMachine } from '@taucad/parameters/set-machine';
 import { fromFsLike } from '@taucad/runtime/filesystem';
 import { connectComputeStoreChannel } from '@taucad/runtime/host';
 import type { FsLike } from '@taucad/runtime/filesystem';
+import { parameterEntryPath } from '@taucad/types';
 import type { FileStat } from '@taucad/types';
 import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath } from '@taucad/utils/path';
@@ -65,10 +73,13 @@ import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js'
 import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 import type { GeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 
+type ParameterActor = ActorRefFrom<typeof parameterSetMachine>;
+
 type ProjectFileSystemBridge = Pick<
   FileSystemBridgeProxy,
   | 'readFile'
   | 'writeFile'
+  | 'writeFileChecked'
   | 'appendFile'
   | 'readdir'
   | 'stat'
@@ -78,6 +89,7 @@ type ProjectFileSystemBridge = Pick<
   | 'rmdir'
   | 'rename'
   | 'exists'
+  | 'watchReady'
   | 'hello'
   | 'dispose'
 >;
@@ -171,6 +183,7 @@ type WorkerSession = {
   readonly storageBackend: string;
   readonly host: TauAgentHost;
   readonly runtimeClient: AppRuntimeClient;
+  readonly parameterActors: ReadonlyMap<string, Promise<ParameterActor>>;
   readonly imageService: HeadlessImageService;
   readonly geoSpecClient: GeoSpecWorkerRpcClient;
   readonly computeDispose?: (() => void) | undefined;
@@ -1380,6 +1393,153 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     runtimeClient,
     imageService,
   });
+  const parameterActors = new Map<string, Promise<ParameterActor>>();
+  const parameterActorFor = async (targetFile: string): Promise<ParameterActor> => {
+    const existing = parameterActors.get(targetFile);
+    if (existing) {
+      return existing;
+    }
+    const pending = (async (): Promise<ParameterActor> => {
+      const sidecar = parameterEntryPath(targetFile);
+      const target = {
+        authority: `browser:${request.authority.workspaceId}:${request.authority.projectId}`,
+        root: request.authority.projectId,
+        entry: targetFile,
+      } as const;
+      let observer: Readonly<{ changed(): void; failed(error: unknown): void }> | undefined;
+      const handleWatch = (event: Readonly<{ type: string }>): void => {
+        if (event.type === 'reset') {
+          observer?.failed(Object.assign(new Error('Parameter watch reset.'), { code: 'WATCH_RESET' }));
+        } else {
+          observer?.changed();
+        }
+      };
+      let prearmed: ReturnType<ProjectFileSystemBridge['watchReady']> | undefined = projectRoot.watchReady(
+        { paths: [sidecar] },
+        handleWatch,
+      );
+      await prearmed.ready;
+      const manifest = async (
+        _target: ParameterSetTarget,
+        signal: AbortSignal,
+        resolution?: ParameterResolutionOptions,
+      ): Promise<ParameterManifest> => {
+        const result = await runtimeClient.resolveParameters({
+          source: { path: targetFile },
+          ...(resolution === undefined ? {} : { resolution }),
+          signal,
+        });
+        if (!result.success) {
+          throw Object.assign(
+            new Error(result.issues.map(({ message }) => message).join('; ') || 'Parameter resolution failed.'),
+            { code: result.issues[0]?.code ?? 'PARAMETER_RESOLUTION_FAILED' },
+          );
+        }
+        return admitParameterManifest(result.data);
+      };
+      const authority: ParameterAuthority = {
+        path: () => sidecar,
+        read: async (_target, signal) => {
+          signal.throwIfAborted();
+          return (await projectRoot.exists(sidecar)) ? projectRoot.readFile(sidecar) : null;
+        },
+        writeChecked: async ({ signal, ...write }) => {
+          signal?.throwIfAborted();
+          return projectRoot.writeFileChecked(write);
+        },
+        semanticPreconditions: async (_target, signal) => {
+          const snapshot = await runtimeClient.snapshotSource({
+            source: { path: targetFile },
+            signal,
+          });
+          if (!snapshot.success) {
+            throw Object.assign(new Error(snapshot.issues.map(({ message }) => message).join('; ')), {
+              code: snapshot.issues[0]?.code ?? 'SOURCE_SNAPSHOT_FAILED',
+            });
+          }
+          return snapshot.data.files.map(({ path, content }) => ({ path, expected: content }));
+        },
+      };
+      const observe = (changed: () => void, failed: (error: unknown) => void): (() => void) => {
+        observer = { changed, failed };
+        let active = true;
+        let watch = prearmed;
+        prearmed = undefined;
+        if (!watch) {
+          watch = projectRoot.watchReady({ paths: [sidecar] }, handleWatch);
+          const activeWatch = watch;
+          const reportReady = async (): Promise<void> => {
+            try {
+              await activeWatch.ready;
+            } catch (error) {
+              if (active) {
+                failed(error);
+              }
+            }
+          };
+          // async-iife: report a late watch-open failure to the authority observer.
+          void reportReady();
+        }
+        const activeWatch = watch;
+        const reportClosed = async (): Promise<void> => {
+          await activeWatch.closed;
+          if (active) {
+            failed(Object.assign(new Error('Parameter watch closed.'), { code: 'WATCH_CLOSED' }));
+          }
+        };
+        // async-iife: a live authority treats an unexpected watch close as failure.
+        void reportClosed();
+        return () => {
+          active = false;
+          observer = undefined;
+          activeWatch.unsubscribe();
+        };
+      };
+      const actor = createActor(
+        parameterSetMachine.provide({
+          actors: {
+            loadParameterSet: fromPromise(async ({ input, signal }) =>
+              input.current === undefined
+                ? loadParameterSnapshot({ target, authority, manifest, resolution: input.resolution, signal })
+                : refreshParameterSnapshot({ current: input.current, authority, signal }),
+            ),
+            commitParameterSet: fromPromise(async ({ input: change, signal }) =>
+              commitParameterChange({ change, authority, signal }),
+            ),
+            observeParameterSet: fromCallback(({ sendBack }) =>
+              observe(
+                () => {
+                  sendBack({ type: 'watch.changed' });
+                },
+                (error) => {
+                  sendBack({
+                    type: 'watch.error',
+                    message: error instanceof Error ? error.message : 'Observation failed.',
+                  });
+                },
+              ),
+            ),
+          },
+        }),
+        { input: { target } },
+      );
+      actor.start();
+      return actor;
+    })();
+    parameterActors.set(targetFile, pending);
+    try {
+      return await pending;
+    } catch (error) {
+      if (parameterActors.get(targetFile) === pending) {
+        parameterActors.delete(targetFile);
+      }
+      throw error;
+    }
+  };
+  const parameters = createRuntimeParameterAgentClient({
+    mapRuntimeError: (error) => toRpcError(error),
+    parameterActorFor,
+  });
   /* One function composes every view on every host (charter D1): the bundles,
    * the registry mask and provenance are all inside it, so this worker only
    * adapts the RPC shape over it. */
@@ -1395,6 +1555,7 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
       createProviderRpcFileSystem({ provider: recordView, mutations: fileSystemMutations, signal }),
     skillResolver,
     ...runtimeRpc,
+    parameters,
     geospec: geoSpecClient,
     testingEnabled: request.testingEnabled ?? false,
   });
@@ -1483,6 +1644,7 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     storageBackend,
     host,
     runtimeClient,
+    parameterActors,
     imageService,
     geoSpecClient,
     computeDispose: computeConnection?.dispose,
@@ -1509,15 +1671,39 @@ const close = async (): Promise<void> => {
   followerRetryIds.clear();
   const active = session;
   session = undefined;
-  try {
-    await active?.host.close();
-  } finally {
-    await Promise.allSettled(active ? [active.geoSpecClient.close()] : []);
-    active?.imageService.dispose();
-    active?.runtimeClient.terminate();
-    active?.computeDispose?.();
-    active?.fileSystem.dispose();
-    active?.projectRoot.dispose();
+  const failures: unknown[] = [];
+  if (active) {
+    try {
+      await active.host.close();
+    } catch (error) {
+      failures.push(error);
+    }
+    const parameterResults = await Promise.allSettled(
+      [...active.parameterActors.entries()].map(async ([targetFile, pending]) => {
+        const client = await pending;
+        client.send({ type: 'close' });
+        const state = await waitFor(client, (state) => state.status === 'done' || state.matches({ open: 'uncertain' }));
+        if (state.status !== 'done') {
+          throw new Error(`Parameter write for ${targetFile} remains uncertain.`);
+        }
+      }),
+    );
+    for (const result of parameterResults) {
+      if (result.status === 'rejected') {
+        failures.push(result.reason as unknown);
+      }
+    }
+    const geospecResult = await Promise.allSettled([active.geoSpecClient.close()]);
+    for (const result of geospecResult) {
+      if (result.status === 'rejected') {
+        failures.push(result.reason as unknown);
+      }
+    }
+    active.imageService.dispose();
+    active.runtimeClient.terminate();
+    active.computeDispose?.();
+    active.fileSystem.dispose();
+    active.projectRoot.dispose();
     const states = [...leadership.values()];
     for (const state of states) {
       globalThis.clearInterval(state.heartbeatId);
@@ -1541,6 +1727,9 @@ const close = async (): Promise<void> => {
     followerCursors.clear();
     tailInFlight.clear();
     leaderGenerations.clear();
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, 'Browser agent host could not release every session resource.');
   }
 };
 

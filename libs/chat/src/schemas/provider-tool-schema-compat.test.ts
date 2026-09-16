@@ -43,7 +43,10 @@ const collectKeywordPaths = (
 };
 
 const serializeProviderFacingSchemas = (testingEnabled = true) =>
-  getProviderFacingToolInputSchemas({ toolChoice: toolMode.auto, testingEnabled }).map((entry) => ({
+  getProviderFacingToolInputSchemas({
+    toolChoice: toolMode.auto,
+    testingEnabled,
+  }).map((entry) => ({
     ...entry,
     jsonSchema: toJsonSchema(entry.schema),
   }));
@@ -53,7 +56,9 @@ const providerSchemaFor = (name: string): { properties?: Record<string, { type?:
   if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
     throw new Error(`missing JSON Schema for ${name}`);
   }
-  return schema as { properties?: Record<string, { type?: string; description?: string }> };
+  return schema as {
+    properties?: Record<string, { type?: string; description?: string }>;
+  };
 };
 
 describe('provider-facing tool schema compatibility', () => {
@@ -64,6 +69,8 @@ describe('provider-facing tool schema compatibility', () => {
       toolName.testModel,
       toolName.getKernelResult,
       toolName.exportGeometry,
+      toolName.getParameters,
+      toolName.applyParameterOperation,
       toolName.screenshot,
       toolName.editFile,
       toolName.useSkill,

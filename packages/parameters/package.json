@@ -1,0 +1,106 @@
+{
+  "name": "@taucad/parameters",
+  "version": "0.0.1",
+  "description": "Portable parameter semantics and checked change planning",
+  "type": "module",
+  "sideEffects": false,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taucad/tau.git",
+    "directory": "packages/parameters"
+  },
+  "homepage": "https://github.com/taucad/tau/tree/main/packages/parameters#readme",
+  "bugs": {
+    "url": "https://github.com/taucad/tau/issues"
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "NOTICE"
+  ],
+  "keywords": [
+    "cad",
+    "typescript"
+  ],
+  "author": "Richard Fontein",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./package.json": "./package.json",
+    "./set-machine": "./src/parameter-set.machine.ts",
+    "./input-machine": "./src/parameter-input.machine.ts",
+    "./authority": "./src/authority.ts",
+    "./schema": "./src/schema-admission.ts",
+    "./json": "./src/bounded-json.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.mts",
+        "import": "./dist/index.mjs",
+        "default": "./dist/index.mjs"
+      },
+      "./package.json": "./package.json",
+      "./set-machine": {
+        "types": "./dist/parameter-set.machine.d.mts",
+        "import": "./dist/parameter-set.machine.mjs",
+        "default": "./dist/parameter-set.machine.mjs"
+      },
+      "./input-machine": {
+        "types": "./dist/parameter-input.machine.d.mts",
+        "import": "./dist/parameter-input.machine.mjs",
+        "default": "./dist/parameter-input.machine.mjs"
+      },
+      "./authority": {
+        "types": "./dist/authority.d.mts",
+        "import": "./dist/authority.mjs",
+        "default": "./dist/authority.mjs"
+      },
+      "./schema": {
+        "types": "./dist/schema-admission.d.mts",
+        "import": "./dist/schema-admission.mjs",
+        "default": "./dist/schema-admission.mjs"
+      },
+      "./json": {
+        "types": "./dist/bounded-json.d.mts",
+        "import": "./dist/bounded-json.mjs",
+        "default": "./dist/bounded-json.mjs"
+      }
+    },
+    "imports": {}
+  },
+  "imports": {
+    "#*.js": "./src/*.ts",
+    "#*": "./src/*"
+  },
+  "peerDependencies": {
+    "xstate": "^5.0.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@taucad/json-schema": "workspace:*",
+    "@taucad/nx": "workspace:*",
+    "@taucad/types": "workspace:*",
+    "xstate": "catalog:",
+    "zod": "catalog:"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "catalog:",
+    "@json-structure/sdk": "catalog:",
+    "@taucad/cache-core": "workspace:*",
+    "@taucad/units": "workspace:*"
+  },
+  "peerDependenciesMeta": {
+    "xstate": {
+      "optional": true
+    }
+  }
+}

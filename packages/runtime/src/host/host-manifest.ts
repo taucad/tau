@@ -1,4 +1,4 @@
-import { cloneBoundedJson } from '#configuration/bounded-json.js';
+import { cloneBoundedJson } from '@taucad/parameters/json';
 import { protocolVersion } from '#types/protocol-header.types.js';
 
 const manifestLimits = {

@@ -19,6 +19,7 @@ import { RuntimeAlreadyInitializedError } from '#transport/runtime-transport.typ
 import { contentDigest, sceneDigest } from '@taucad/cache-core';
 import type { ProgressiveSceneUpdate, SceneNodeId } from '#types/runtime-scene.types.js';
 import { createMemoryComputeEngine } from '#cache/memory-compute-engine.js';
+import { compileParameterManifest } from '@taucad/parameters';
 import { createComputeCapabilityHost } from '#cache/kernel-compute-runtime.js';
 import { exposeComputeStoreChannel } from '#transport/_internal/compute-store-channel.js';
 import type { ComputeBinding } from '#types/runtime-compute.types.js';
@@ -75,6 +76,9 @@ function createMockWorker(overrides?: Partial<KernelWorker>): KernelWorker {
     evaluateModel: vi
       .fn<() => Promise<{ success: true; data: typeof testGeometry; issues: never[] }>>()
       .mockResolvedValue({ success: true, data: testGeometry, issues: [] }),
+    getParameters: vi
+      .fn<() => Promise<{ success: false; issues: never[] }>>()
+      .mockResolvedValue({ success: false, issues: [] }),
     transcode: vi
       .fn<() => Promise<{ success: true; data: unknown[] }>>()
       .mockResolvedValue({ success: true, data: [] }),
@@ -141,6 +145,29 @@ describe('createWorkerDispatcher', () => {
       const result = await fixture.client.call('initialize', {});
 
       expect(result).toEqual({ capabilities: manifest });
+    });
+
+    it('forwards request-scoped parameter resolution, staging, mode, and abort signal', async () => {
+      const getParameters = vi.fn<KernelWorker['getParameters']>();
+      getParameters.mockResolvedValue({ success: false, issues: [] });
+      const worker = createMockWorker({ getParameters });
+      fixture = await buildFixture(worker);
+      const stage = { 'main.ts': new Uint8Array([1]) };
+
+      await expect(
+        fixture.client.call('resolveParameters', {
+          stage,
+          file: { path: '', filename: 'main.ts' },
+          resolution: { mode: 'declared-only' },
+        }),
+      ).resolves.toEqual({ success: false, issues: [] });
+      expect(getParameters).toHaveBeenCalledOnce();
+      const [file, resolution, operation] = getParameters.mock.calls[0]!;
+      expect(file).toEqual({ path: '', filename: 'main.ts' });
+      expect(resolution).toEqual({ mode: 'declared-only' });
+      expect(operation?.stage).toStrictEqual(stage);
+      expect(operation?.stage?.['main.ts']).toStrictEqual(new Uint8Array([1]));
+      expect(operation?.signal).toBeInstanceOf(AbortSignal);
     });
 
     it('registers a host-minted compute authority before worker initialization', async () => {
@@ -937,8 +964,26 @@ describe('createWorkerDispatcher', () => {
       // Wire callbacks via initialize.
       await fixture.client.call('initialize', {});
 
+      const digest = contentDigest({ value: `sha256:${'1'.repeat(64)}` });
+      const manifest = await compileParameterManifest({
+        declaration: {
+          schema: {
+            $schema: 'https://json-structure.org/meta/extended/v0/#',
+            $id: 'urn:taucad:test:dispatcher-parameters',
+            $uses: ['JSONSchemaUnits'],
+            name: 'DispatcherParameters',
+            type: 'object',
+          },
+          defaults: {},
+        },
+        scope: { kind: 'source', authority: 'test', root: '', entry: 'main.ts' },
+        source: { id: 'test', version: '1', revision: digest, capability: 'json-structure' },
+        dependency: digest,
+        middleware: digest,
+      });
+
       onParametersResolved!({
-        result: { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] },
+        result: { success: true, data: manifest, issues: [] },
         renderId,
       });
       onProgressUpdate!({ phase: 'bundling', renderId });

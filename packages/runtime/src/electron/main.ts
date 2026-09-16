@@ -56,6 +56,8 @@ export type ElectronRuntimeHeadersOptions = {
 export type ElectronRuntimeForkResolver = (context: Record<string, string>) => {
   /** Host-minted compute authority for this admitted fork. */
   readonly compute?: ComputeBinding;
+  /** Application-minted rooted filesystem capability for this admitted fork. */
+  readonly fileSystemPort?: MessagePortMain;
   /**
    * Environment merged over `env`; every key must be in the allowlist.
    * A plain string record, not `NodeJS.ProcessEnv`: a resolver returns the two
@@ -197,6 +199,14 @@ export type ElectronRuntimeMainConnection = {
 };
 
 const toError = (error: unknown): Error => (error instanceof Error ? error : new Error(String(error)));
+
+const isMessagePortMain = (value: unknown): value is MessagePortMain =>
+  value !== null &&
+  typeof value === 'object' &&
+  typeof (value as { postMessage?: unknown }).postMessage === 'function' &&
+  typeof (value as { on?: unknown }).on === 'function' &&
+  typeof (value as { start?: unknown }).start === 'function' &&
+  typeof (value as { close?: unknown }).close === 'function';
 
 /** One supervised utility, from its fork to the exit its listeners report. */
 type LiveUtility = {
@@ -432,20 +442,36 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
     /* Optional-call short-circuit: with no resolver the context is never even
      * validated, because nothing reads it — the pre-resolver behaviour, exactly. */
     const resolved = options.resolveFork?.(sanitizeForkContext(context)) ?? {};
-    for (const name of Object.keys(resolved.env ?? {})) {
-      if (!forkEnvAllowlist.has(name)) {
-        throw new Error(`registerElectronRuntimeMain: resolveFork returned disallowed environment key "${name}"`);
+    try {
+      if (resolved.fileSystemPort !== undefined && !isMessagePortMain(resolved.fileSystemPort)) {
+        throw new TypeError('registerElectronRuntimeMain: resolveFork returned an invalid filesystem port');
       }
+      for (const name of Object.keys(resolved.env ?? {})) {
+        if (!forkEnvAllowlist.has(name)) {
+          throw new Error(`registerElectronRuntimeMain: resolveFork returned disallowed environment key "${name}"`);
+        }
+      }
+    } catch (error) {
+      if (isMessagePortMain(resolved.fileSystemPort)) {
+        resolved.fileSystemPort.close();
+      }
+      throw error;
     }
     const resolvedEntry = resolved.utilityEntry ?? options.utilityEntry;
     const utilityEntry = resolvedEntry instanceof URL ? fileURLToPath(resolvedEntry) : resolvedEntry;
-    const spawnedUtility = utilityProcess.fork(utilityEntry, [], {
-      env: resolved.env === undefined ? options.env : { ...options.env, ...resolved.env },
-      /* Copied because Electron declares `execArgv?: string[]` (TS4104). */
-      ...(options.execArgv === undefined ? {} : { execArgv: [...options.execArgv] }),
-      serviceName: options.serviceName ?? 'tau-runtime-host',
-      stdio: options.stdio ?? 'pipe',
-    });
+    let spawnedUtility: UtilityProcess;
+    try {
+      spawnedUtility = utilityProcess.fork(utilityEntry, [], {
+        env: resolved.env === undefined ? options.env : { ...options.env, ...resolved.env },
+        /* Copied because Electron declares `execArgv?: string[]` (TS4104). */
+        ...(options.execArgv === undefined ? {} : { execArgv: [...options.execArgv] }),
+        serviceName: options.serviceName ?? 'tau-runtime-host',
+        stdio: options.stdio ?? 'pipe',
+      });
+    } catch (error) {
+      resolved.fileSystemPort?.close();
+      throw error;
+    }
     const hostId = randomUUID();
     const record: LiveUtility = {
       utility: spawnedUtility,
@@ -489,7 +515,10 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
     try {
       ports = new MessageChannelMain();
       const transferred = [ports.port2];
+      const runtimePortIndex = 0;
       const compute = resolved.compute ?? options.compute;
+      let computeStorePortIndex: number | undefined;
+      let fileSystemPortIndex: number | undefined;
       if (compute?.mode === 'durable') {
         const authority = _resolveComputeStore(compute.store);
         if (!authority) {
@@ -506,10 +535,19 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
           workspace: authority.workspace,
           generation: authority.generation ?? readGeneration,
         });
-        transferred.push(computePorts.port2);
+        computeStorePortIndex = transferred.push(computePorts.port2) - 1;
+      }
+      if (resolved.fileSystemPort !== undefined) {
+        fileSystemPortIndex = transferred.push(resolved.fileSystemPort) - 1;
       }
       spawnedUtility.postMessage(
-        { taucadRuntime: true, ...(compute?.mode === 'off' ? { computeBindingMode: 'off' } : {}) },
+        {
+          taucadRuntime: true,
+          runtimePortIndex,
+          ...(computeStorePortIndex === undefined ? {} : { computeStorePortIndex }),
+          ...(fileSystemPortIndex === undefined ? {} : { fileSystemPortIndex }),
+          ...(compute?.mode === 'off' ? { computeBindingMode: 'off' } : {}),
+        },
         transferred,
       );
       return { hostId, port: ports.port1 };
@@ -519,6 +557,7 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
         ports?.port2.close();
         computePorts?.port1.close();
         computePorts?.port2.close();
+        resolved.fileSystemPort?.close();
       } catch {
         /* Best-effort */
       }

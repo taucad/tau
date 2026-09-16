@@ -3,17 +3,30 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCommand } from 'citty';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ExportResult } from '@taucad/runtime';
+import type { ExportResult, GetParametersResult } from '@taucad/runtime';
 import type * as RuntimeNode from '@taucad/runtime/node';
+import type * as RuntimeParameter from '@taucad/parameters';
+import type { ParameterManifest } from '@taucad/parameters';
 import { exitCodes } from '#output.js';
 
 vi.mock('@taucad/runtime/node', async (importOriginal) => ({
   ...(await importOriginal<typeof RuntimeNode>()),
   createNodeClient: vi.fn(),
 }));
-vi.mock('#cli-runtime.js', () => ({ createCliRuntime: vi.fn(async () => ({ plugins: [] })) }));
+vi.mock('@taucad/parameters', async (importOriginal) => ({
+  ...(await importOriginal<typeof RuntimeParameter>()),
+  resolveParameterInputValues: vi.fn((_manifest: unknown, values: Record<string, unknown>) => values),
+}));
+vi.mock('#cli-runtime.js', () => ({
+  createCliRuntime: vi.fn(async () => ({ plugins: [] })),
+}));
 
 const exportFunction = vi.fn<(format: string, input: unknown) => Promise<ExportResult>>();
+const resolveParametersFunction = vi.fn<() => Promise<GetParametersResult>>(async () => ({
+  success: true,
+  data: { fixture: true } as unknown as ParameterManifest,
+  issues: [],
+}));
 const shutdown = vi.fn<(_options?: { drain?: boolean }) => Promise<void>>(async () => undefined);
 
 const importViewCommand = async () => {
@@ -65,6 +78,7 @@ describe('viewCommand', () => {
     runtime.createNodeClient.mockResolvedValue({
       on: vi.fn(),
       export: exportFunction,
+      resolveParameters: resolveParametersFunction,
       terminate: vi.fn(),
       shutdown,
     });
@@ -114,13 +128,17 @@ describe('viewCommand', () => {
     captureStream(process.stdout, stdout);
 
     await runCommand(command, {
-      rawArgs: [inputPath, '--width=1024', '--height=576', '--params={"teeth":24}'],
+      rawArgs: [inputPath, '--width=1024', '--height=576', '--params={"teeth":24}', '--resolution-mode=declared-only'],
     });
 
     expect(exportFunction).toHaveBeenCalledWith('webp', {
       source: { path: 'model.ts' },
       parameters: { teeth: 24 },
       exportOptions: { quality: 0.8, width: 1024, height: 576 },
+    });
+    expect(resolveParametersFunction).toHaveBeenCalledWith({
+      source: { path: 'model.ts' },
+      resolution: { mode: 'declared-only' },
     });
   });
 

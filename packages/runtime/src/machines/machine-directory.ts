@@ -4,7 +4,7 @@ import type { CacheValue } from '@taucad/cache-core';
 import { canonicalizeCacheValue } from '@taucad/cache-core';
 import { z } from 'zod';
 
-import { cloneBoundedJson } from '#configuration/bounded-json.js';
+import { cloneBoundedJson } from '@taucad/parameters/json';
 import type { JobJournal } from '#jobs/job-journal.js';
 import type { MachineDescriptor, MachineSession, MachineSnapshot } from '#machines/machine.js';
 

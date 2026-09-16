@@ -3,7 +3,7 @@ title: 'XState Policy'
 description: 'State machine design, actor lifecycle, and React integration using XState v5. setup(), context rules, assign, invoke/spawn, useActorRef, cleanup patterns.'
 status: active
 created: '2026-03-04'
-updated: '2026-09-05'
+updated: '2026-09-13'
 related:
   - docs/research/xstate-patterns.md
   - docs/policy/typescript-policy.md
@@ -219,8 +219,8 @@ registerParentRef: assign({
 | `invoke` with `fromPromise`    | State-scoped (auto-stop on exit) | `AbortSignal`           | One-shot async (API calls, initialization)        |
 | `invoke` with `fromCallback`   | State-scoped (auto-stop on exit) | Cleanup function return | Long-running processes (event listeners, polling) |
 | `invoke` with `fromObservable` | State-scoped (auto-stop on exit) | Unsubscribe             | Streaming data sources                            |
-| `spawn` (inside `assign`)      | Manual (explicit `stopChild`)    | Manual                  | Dynamic actors needing a context reference        |
-| `spawnChild` (action)          | Manual (explicit `stopChild`)    | Manual                  | Dynamic actors without context reference          |
+| `spawn` (inside `assign`)      | Parent-scoped; explicit removal  | `stopChild` for removal | Dynamic actors needing a context reference        |
+| `spawnChild` (action)          | Parent-scoped; explicit removal  | `stopChild` for removal | Dynamic actors without context reference          |
 
 ### Prefer `invoke` over `spawn` when possible
 
@@ -230,9 +230,9 @@ When a dynamic child must exist with a retained reference at parent startup, cre
 
 When a transition must reset the current state's timer or debounce, use `reenter: true` so exit and entry lifecycle actually run.
 
-### Always stop spawned actors
+### Stop spawned actors when removing or replacing them
 
-Spawned actors are NOT automatically stopped when the parent machine stops. Always pair `spawn` with explicit `stopChild`:
+The parent stopping cascades to its spawned children. Use explicit `stopChild` when removing or replacing a spawned actor while the parent remains alive:
 
 ```typescript
 // Spawn
@@ -388,7 +388,7 @@ const fetchDataActor = fromPromise(async ({ input, signal }) => {
 });
 ```
 
-**Key**: Use the `signal` parameter. XState creates an `AbortController` for each invoked promise and aborts it when the state exits or the machine stops. Check `signal.throwIfAborted()` after each `await` to ensure the operation stops promptly.
+**Key**: Use the `signal` parameter. XState creates an `AbortController` for each invoked promise and aborts it when the state exits or the machine stops. Check `signal.throwIfAborted()` after each `await` to ensure the operation stops promptly. Aborting prevents further cooperative work; it does not undo a write or other effect that already escaped to an external authority.
 
 ### Use `fromCallback` for long-running processes
 
@@ -437,20 +437,16 @@ states: {
 
 ## Cleanup and Exit Actions
 
-### Every machine with resources must have exit actions
+### Separate graceful close from abrupt stop
 
-If a machine creates workers, opens connections, subscribes to events, or holds any resource that requires explicit cleanup, it must have a root-level `exit` action:
+Use explicit closing states and acknowledgements when a machine must drain writes, flush state or reconcile an ambiguous external effect before shutdown. Only stop the actor after that graceful flow settles.
+
+An abrupt root `actor.stop()` stops invoked and spawned children, so callback actor cleanup functions release their resources. It does not run the root machine's `exit` actions. Keep resource disposal in owning callback actors or child actors instead of relying on a root `exit` action:
 
 ```typescript
-setup({
-  actions: {
-    cleanup({ context }) {
-      // Release all resources
-    },
-  },
-}).createMachine({
-  exit: ['cleanup'],
-  // ...
+const connectionActor = fromCallback(() => {
+  const connection = openConnection();
+  return () => connection.close();
 });
 ```
 

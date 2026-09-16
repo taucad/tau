@@ -6,13 +6,13 @@ import type { ActorRefFrom } from 'xstate';
 import type { Remote } from 'comlink';
 import { useQueryClient } from '@tanstack/react-query';
 import {
-  parameterEntryPath,
-  parametersDirectory,
+  getActiveGroupValues,
   parseProjectManifestBytes,
   projectToManifest,
   serializeProjectManifest,
 } from '@taucad/types';
-import type { FileParameterEntry, ProjectManifest } from '@taucad/types';
+import type { ProjectManifest } from '@taucad/types';
+import type { ParameterManifest } from '@taucad/parameters';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -31,9 +31,10 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { ChatStorage } from '#types/storage.types.js';
 import { localKernelOptions } from '#constants/local-kernel-options.js';
-import { joinPath } from '@taucad/utils/path';
-import { parseParameterEntry, createDefaultEntry, serializeParameterEntry } from '#utils/parameter-config.utils.js';
+import { createParameterSetService } from '#services/parameter-set-service.js';
+import type { ParameterSetService } from '#services/parameter-set-service.js';
 import { compareChatsByRecency } from '#utils/chat-recency.utils.js';
+import { toast } from 'sonner';
 
 type ProjectContextType = {
   projectId: string;
@@ -47,17 +48,28 @@ type ProjectContextType = {
   /** The main entry path from project.assets.main.entryPath. */
   mainEntryPath: string;
   logRef: ActorRefFrom<typeof logMachine>;
-  setCodeParameters: (
-    files: Record<string, { content: Uint8Array<ArrayBuffer> }>,
+  resolveParameterEntry: (filePath: string, manifest: ParameterManifest) => void;
+  setGeometryUnitParameters: (
+    filePath: string,
+    manifest: ParameterManifest,
     parameters: Record<string, unknown>,
   ) => void;
-  setParameters: (parameters: Record<string, unknown>) => void;
-  setGeometryUnitParameters: (filePath: string, parameters: Record<string, unknown>) => void;
-  switchParameterGroup: (filePath: string, groupName: string) => void;
-  createParameterGroup: (filePath: string, groupName: string, values?: Record<string, unknown>) => void;
-  deleteParameterGroup: (filePath: string, groupName: string) => void;
-  renameParameterGroup: (filePath: string, oldName: string, newName: string) => void;
-  parameterEntries: Map<string, FileParameterEntry>;
+  switchParameterGroup: (filePath: string, manifest: ParameterManifest, groupName: string) => void;
+  createParameterGroup: (
+    filePath: string,
+    manifest: ParameterManifest,
+    input: Readonly<{
+      groupName: string;
+      values?: Record<string, unknown>;
+    }>,
+  ) => void;
+  deleteParameterGroup: (filePath: string, manifest: ParameterManifest, groupName: string) => void;
+  renameParameterGroup: (
+    filePath: string,
+    manifest: ParameterManifest,
+    input: Readonly<{ oldName: string; newName: string }>,
+  ) => void;
+  parameterService: ParameterSetService;
   updateName: (name: string) => void;
   updateDescription: (description: string) => void;
   updateTags: (tags: string[]) => void;
@@ -66,6 +78,9 @@ type ProjectContextType = {
 };
 
 const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : 'Parameter operation failed.';
 
 type FocusedChatWorker = Pick<ChatStorage, 'getChatsForResource' | 'createNavigationRepairChat'>;
 
@@ -195,6 +210,19 @@ export function ProjectProvider({
   // Create the project machine actor - it will auto-load based on projectId
   const fileManager = useFileManager();
   const projectManager = useProjectManager();
+  const fileSystemRoot = useSelector(fileManager.fileManagerRef, (state) => state.context.rootDirectory);
+  const parameterService = useMemo(
+    () =>
+      createParameterSetService({
+        rootDirectory: fileSystemRoot,
+        client: fileManager.client,
+        subscribe: (path, listener) => fileManager.contentService?.subscribe(path, listener) ?? (() => undefined),
+        onError: (error) => {
+          toast.error(errorMessage(error));
+        },
+      }),
+    [fileManager.client, fileManager.contentService, fileSystemRoot],
+  );
 
   const actorRef = useActorRef(
     projectMachine.provide({
@@ -202,8 +230,7 @@ export function ProjectProvider({
         loadProjectActor: fromSafeAsync<ProjectRetrievedEvent, ProjectLoadInput>(async ({ input }) => {
           const readySnapshot = await waitFor(fileManager.fileManagerRef, (state) => state.matches('ready'));
 
-          const parameterEntries = new Map<string, FileParameterEntry>();
-          const { contentService, proxy, rootDirectory } = readySnapshot.context;
+          const { contentService } = readySnapshot.context;
           if (!contentService) {
             throw new Error(`Project content service is unavailable for ${input.projectId}`);
           }
@@ -211,40 +238,9 @@ export function ProjectProvider({
             contentService,
             projectId: input.projectId,
           });
-          const mainFile = project.assets.main.entryPath;
-
-          if (proxy) {
-            const absoluteParamsDirectory = joinPath(rootDirectory, parametersDirectory);
-            try {
-              const allFiles = await proxy.getDirectoryContents(absoluteParamsDirectory);
-              for (const [relativePath, data] of Object.entries(allFiles)) {
-                if (!relativePath.endsWith('.json')) {
-                  continue;
-                }
-                const entryPath = relativePath.slice(0, -'.json'.length);
-                try {
-                  const text = new TextDecoder().decode(data);
-                  parameterEntries.set(entryPath, parseParameterEntry(text));
-                } catch {
-                  // Corrupt parameter file — skip
-                }
-              }
-            } catch {
-              // Parameters directory doesn't exist yet — new project
-            }
-
-            if (!parameterEntries.has(mainFile)) {
-              const defaultEntry = createDefaultEntry();
-              parameterEntries.set(mainFile, defaultEntry);
-              const serialized = serializeParameterEntry(defaultEntry);
-              await contentService.write(parameterEntryPath(mainFile), new TextEncoder().encode(serialized), 'machine');
-            }
-          }
-
           return {
             type: 'projectRetrieved',
             project,
-            parameterEntries,
           };
         }),
         writeProjectActor: fromSafeAsync(async ({ input }) => {
@@ -254,21 +250,6 @@ export function ProjectProvider({
           }
           await contentService.write('tau.json', serializeProjectManifest(projectToManifest(input.project)), 'machine');
         }),
-        writeParameterFileActor: fromSafeAsync(async ({ input, signal }) => {
-          if (signal.aborted) {
-            return;
-          }
-          const path = parameterEntryPath(input.filePath);
-          const serialized = serializeParameterEntry(input.entry);
-          const encoded = new TextEncoder().encode(serialized);
-          if (encoded.byteLength === 0) {
-            return;
-          }
-          const { contentService } = fileManager.fileManagerRef.getSnapshot().context;
-          if (contentService) {
-            await contentService.write(path, encoded, 'machine');
-          }
-        }),
       },
       ...provide,
     }),
@@ -276,7 +257,7 @@ export function ProjectProvider({
       input: {
         projectId,
         fileManagerRef: fileManager.fileManagerRef,
-        fileSystemRoot: fileManager.fileManagerRef.getSnapshot().context.rootDirectory,
+        fileSystemRoot,
         kernelOptionsFactory: resolvedKernelOptionsFactory,
         ...input,
       },
@@ -381,7 +362,71 @@ export function ProjectProvider({
     (state) => state.context.mainEntryPath,
   );
   const logRef = useSelector(actorRef, (state) => state.context.logRef);
-  const parameterEntries = useSelector(actorRef, (state) => state.context.parameterEntries);
+  const appliedParameterValues = useRef(new Map<string, string>());
+  const parameterObservers = useRef(new Map<string, () => void>());
+
+  /* The kernel learns a committed value from the set actor's own notification, which runs in the
+   * same synchronous turn as the checked write — ahead of React's render of this provider. */
+  const dispatchParameters = useCallback(
+    (entryPath: string): void => {
+      const cadRef = actorRef.getSnapshot().context.geometryUnits.get(entryPath);
+      const current = parameterService.snapshot(entryPath);
+      if (cadRef === undefined || current === undefined) {
+        return;
+      }
+      const parameters = getActiveGroupValues(current.entry);
+      const fingerprint = JSON.stringify(parameters);
+      const appliedFingerprint =
+        appliedParameterValues.current.get(entryPath) ?? JSON.stringify(cadRef.getSnapshot().context.parameters);
+      if (appliedFingerprint !== fingerprint) {
+        cadRef.send({ type: 'setParameters', parameters });
+      }
+      appliedParameterValues.current.set(entryPath, fingerprint);
+    },
+    [actorRef, parameterService],
+  );
+
+  const observeParameters = useCallback(
+    (entryPath: string): void => {
+      const actor = parameterService.actor(entryPath);
+      if (actor === undefined || parameterObservers.current.has(entryPath)) {
+        return;
+      }
+      let last: unknown;
+      const subscription = actor.subscribe((snapshot) => {
+        const { current } = snapshot.context;
+        if (current !== undefined && current !== last) {
+          last = current;
+          dispatchParameters(entryPath);
+        }
+      });
+      parameterObservers.current.set(entryPath, () => {
+        subscription.unsubscribe();
+      });
+      dispatchParameters(entryPath);
+    },
+    [dispatchParameters, parameterService],
+  );
+
+  useEffect(() => {
+    const observers = parameterObservers.current;
+    for (const entryPath of geometryUnits.keys()) {
+      observeParameters(entryPath);
+    }
+    for (const [entryPath, unsubscribe] of observers) {
+      if (!geometryUnits.has(entryPath)) {
+        unsubscribe();
+        observers.delete(entryPath);
+        appliedParameterValues.current.delete(entryPath);
+      }
+    }
+    return () => {
+      for (const unsubscribe of observers.values()) {
+        unsubscribe();
+      }
+      observers.clear();
+    };
+  }, [geometryUnits, observeParameters]);
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
   const resolvedRequestedChatId = useSelector(editorRef, (state) => state.context.requestedChatId);
   const focusedChatResolved = useSelector(editorRef, (state) => state.matches({ ready: { operation: 'idle' } }));
@@ -487,93 +532,86 @@ export function ProjectProvider({
     };
   }, [actorRef, fileManager]);
 
-  // Subscribe to external parameter file changes (per-geometry-unit files under the parameters directory)
-  useEffect(() => {
-    const { contentService } = fileManager;
-    if (!contentService) {
-      return;
-    }
-
-    const parametersPrefix = `${parametersDirectory}/`;
-    const unsubscribe = contentService.onDidContentChange((event) => {
-      if (event.type !== 'written' || !event.path.startsWith(parametersPrefix) || event.source === 'machine') {
-        return;
-      }
+  const reportParameterOperation = useCallback((operation: Promise<unknown>): void => {
+    const report = async (): Promise<void> => {
       try {
-        const text = new TextDecoder().decode(event.data);
-        const entry = parseParameterEntry(text);
-        const filePath = event.path.slice(parametersPrefix.length, -'.json'.length);
-        actorRef.send({ type: 'parameterFileChanged', filePath, entry });
-      } catch {
-        // Invalid JSON — ignore
+        await operation;
+      } catch (error) {
+        toast.error(errorMessage(error));
       }
-    });
+    };
+    // async-iife: bootstrap -- UI event callbacks cannot return the operation promise.
+    void report();
+  }, []);
 
-    return unsubscribe;
-  }, [fileManager, actorRef]);
-
-  // Memoize callbacks
-  const setCodeParameters = useCallback(
-    (files: Record<string, { content: Uint8Array<ArrayBuffer> }>, parameters: Record<string, unknown>) => {
-      actorRef.send({ type: 'updateCodeParameters', files, parameters });
+  const resolveParameterEntry = useCallback(
+    (filePath: string, manifest: ParameterManifest) => {
+      // `resolve` creates the set actor synchronously, so the geometry observer can attach before
+      // the load settles and will dispatch the first loaded snapshot.
+      const operation = parameterService.resolve(filePath, manifest);
+      observeParameters(filePath);
+      reportParameterOperation(operation);
     },
-    [actorRef],
-  );
-
-  const setParameters = useCallback(
-    (parameters: Record<string, unknown>) => {
-      actorRef.send({ type: 'setParameters', parameters });
-    },
-    [actorRef],
+    [observeParameters, parameterService, reportParameterOperation],
   );
 
   const setGeometryUnitParameters = useCallback(
-    (filePath: string, parameters: Record<string, unknown>) => {
-      actorRef.send({
-        type: 'setGeometryUnitParameters',
-        filePath,
-        parameters,
-      });
+    (filePath: string, manifest: ParameterManifest, parameters: Record<string, unknown>) => {
+      reportParameterOperation(parameterService.replaceValues(filePath, manifest, parameters));
     },
-    [actorRef],
+    [parameterService, reportParameterOperation],
   );
 
   const switchParameterGroup = useCallback(
-    (filePath: string, groupName: string) => {
-      actorRef.send({ type: 'switchParameterGroup', filePath, groupName });
+    (filePath: string, manifest: ParameterManifest, groupName: string) => {
+      reportParameterOperation(parameterService.selectGroup(filePath, manifest, groupName));
     },
-    [actorRef],
+    [parameterService, reportParameterOperation],
   );
 
   const createParameterGroup = useCallback(
-    (filePath: string, groupName: string, values?: Record<string, unknown>) => {
-      actorRef.send({
-        type: 'createParameterGroup',
-        filePath,
+    (
+      filePath: string,
+      manifest: ParameterManifest,
+      {
         groupName,
         values,
-      });
+      }: Readonly<{
+        groupName: string;
+        values?: Record<string, unknown>;
+      }>,
+    ) => {
+      reportParameterOperation(
+        parameterService.createGroup(filePath, manifest, {
+          group: groupName,
+          ...(values === undefined ? {} : { values }),
+        }),
+      );
     },
-    [actorRef],
+    [parameterService, reportParameterOperation],
   );
 
   const deleteParameterGroup = useCallback(
-    (filePath: string, groupName: string) => {
-      actorRef.send({ type: 'deleteParameterGroup', filePath, groupName });
+    (filePath: string, manifest: ParameterManifest, groupName: string) => {
+      reportParameterOperation(parameterService.deleteGroup(filePath, manifest, groupName));
     },
-    [actorRef],
+    [parameterService, reportParameterOperation],
   );
 
   const renameParameterGroup = useCallback(
-    (filePath: string, oldName: string, newName: string) => {
-      actorRef.send({
-        type: 'renameParameterGroup',
-        filePath,
-        oldName,
-        newName,
-      });
+    (
+      filePath: string,
+      manifest: ParameterManifest,
+      { oldName, newName }: Readonly<{ oldName: string; newName: string }>,
+    ) => {
+      reportParameterOperation(
+        parameterService.renameGroup(filePath, manifest, {
+          group: oldName,
+          nextGroup: newName,
+        }),
+      );
     },
-    [actorRef],
+    [parameterService, reportParameterOperation],
   );
 
   const updateName = useCallback(
@@ -624,9 +662,8 @@ export function ProjectProvider({
       geometryUnits,
       mainEntryPath,
       logRef,
-      parameterEntries,
-      setCodeParameters,
-      setParameters,
+      parameterService,
+      resolveParameterEntry,
       setGeometryUnitParameters,
       switchParameterGroup,
       createParameterGroup,
@@ -647,9 +684,8 @@ export function ProjectProvider({
     geometryUnits,
     mainEntryPath,
     logRef,
-    parameterEntries,
-    setCodeParameters,
-    setParameters,
+    parameterService,
+    resolveParameterEntry,
     setGeometryUnitParameters,
     switchParameterGroup,
     createParameterGroup,

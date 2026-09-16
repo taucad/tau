@@ -3,7 +3,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Channel } from '@taucad/rpc';
 import type { Geometry } from '@taucad/types';
+import { contentDigest } from '@taucad/cache-core';
 import { createRuntimeClient, RuntimeNotConnectedError, RuntimeTerminatedError } from '#client/runtime-client-core.js';
+import { compileParameterManifest } from '@taucad/parameters';
 import type { RenderStatus } from '#client/runtime-client-core.js';
 import { RenderTimeoutError, TranscodeTimeoutError } from '#framework/runtime-worker-client.js';
 import type { GeometryTransport, RuntimeProtocol, WorkerState } from '#types/runtime-protocol.types.js';
@@ -45,6 +47,24 @@ const failureGeometry = (): Omit<RuntimeProtocol['notifies']['geometryComputed']
     issues: [{ message: 'bad model', code: 'RUNTIME', severity: 'error' }],
   },
 });
+
+const parameterManifestFixture = async () =>
+  compileParameterManifest({
+    declaration: {
+      schema: {
+        $schema: 'https://json-structure.org/meta/extended/v0/#',
+        $id: 'urn:taucad:test:stale-parameters',
+        $uses: ['JSONSchemaUnits'],
+        name: 'StaleParameters',
+        type: 'object',
+      },
+      defaults: {},
+    },
+    scope: { kind: 'source', authority: 'test', root: '', entry: 'stale.ts' },
+    source: { id: 'test', version: '1', revision: 'stale', capability: 'json-structure' },
+    dependency: contentDigest({ value: `sha256:${'1'.repeat(64)}` }),
+    middleware: contentDigest({ value: `sha256:${'2'.repeat(64)}` }),
+  });
 
 function createStatusClientFixture(options?: {
   readonly renderTimeout?: number;
@@ -1246,7 +1266,7 @@ describe('RuntimeClient render timeout control plane', () => {
       renderId: firstRenderId,
       result: {
         success: true,
-        data: { defaultParameters: { stale: true }, jsonSchema: { type: 'object' } },
+        data: await parameterManifestFixture(),
         issues: [],
       },
     });

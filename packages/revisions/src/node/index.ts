@@ -13,4 +13,4 @@ export type { GitCommandResult } from '#git-command.js';
 export { GitToolchainError, resolveGitToolchain } from '#git-toolchain.js';
 export type { MissingGitTool } from '#git-toolchain.js';
 export { createNativeGitRevisionPort } from '#native-git-port.js';
-export type { NativeGitRemoteCredential, TauApiCredential } from '#native-git-port.js';
+export type { NativeGitCheckoutOptions, NativeGitRemoteCredential, TauApiCredential } from '#native-git-port.js';

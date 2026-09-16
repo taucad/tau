@@ -1,10 +1,11 @@
 import { createContext, useContext } from 'react';
-import type { LengthSymbol } from '@taucad/units';
-import type { MeasurementDescriptor } from '#constants/project-parameters.js';
+import type { LengthSymbol } from '#constants/length-units.js';
+import type { CurrentFileParameterEntry } from '@taucad/types';
+import type { ParameterManifest, ParameterSetTarget } from '@taucad/parameters';
+import type { ParameterInputRequest, RetainedParameterInput } from '#services/parameter-set-service.js';
 
 export type Units = {
   length: {
-    sourceSymbol: LengthSymbol;
     displaySymbol: LengthSymbol;
   };
 };
@@ -14,10 +15,24 @@ export type RjsfFieldResetInput = {
   readonly defaultValue: unknown;
 };
 
+/**
+ * Identity-stable handle for one authoritative parameter editor. It deliberately carries no value
+ * and no revision: those live in the actors, so an edit to one field cannot invalidate every row.
+ */
+export type ParameterCommit = Readonly<{
+  target: ParameterSetTarget;
+  group: string;
+  editorInstance: string;
+  input(input: ParameterInputRequest): RetainedParameterInput;
+}>;
+
+export type ParameterEdit =
+  | Readonly<{ kind: 'transient' }>
+  | Readonly<{ kind: 'authoritative'; commit: ParameterCommit }>;
+
 // eslint-disable-next-line @typescript-eslint/naming-convention -- RJSF uses this format for formContext
 export type RJSFContext = {
   idPrefix: string;
-  parameterSemantics: 'configuration' | 'legacy-cad';
   rootPresentation: 'catalog' | 'embedded';
   searchTerm: string;
   allExpanded: boolean;
@@ -25,7 +40,9 @@ export type RJSFContext = {
   shouldShowField: (prettyLabel: string) => boolean;
   defaultParameters?: Record<string, unknown>;
   units: Units;
-  displayDescriptors?: Readonly<Record<string, { descriptor: MeasurementDescriptor; unit?: string }>>;
+  parameterManifest: ParameterManifest;
+  parameterBindings?: CurrentFileParameterEntry['groups'][string]['bindings'];
+  parameterEdit: ParameterEdit;
 };
 
 export type RjsfLayoutContextValue = {

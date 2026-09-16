@@ -1,7 +1,8 @@
 // @vitest-environment node
 import { afterEach, describe, it, expect } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
-import type { JSONSchema7, GeometryResponse } from '@taucad/runtime/types';
+import type { ParameterManifest } from '@taucad/parameters';
+import type { GeometryResponse } from '@taucad/runtime/types';
 
 import { manifoldKernel } from '#manifold.kernel.js';
 import { esbuildBundler } from '@taucad/esbuild';
@@ -30,13 +31,8 @@ afterEach(async () => {
   testClients.clear();
 });
 
-const getParameters = async (
-  files: Record<string, string>,
-  mainFile: string,
-): Promise<{
-  jsonSchema: JSONSchema7;
-  defaultParameters: Record<string, unknown>;
-}> => getTestParameters({ runtime: testRuntime, files, mainFile });
+const getParameters = async (files: Record<string, string>, mainFile: string): Promise<ParameterManifest> =>
+  getTestParameters({ runtime: testRuntime, files, mainFile });
 
 const createGeometry = async (
   files: Record<string, string>,
@@ -95,7 +91,7 @@ const readGlbJson = (
 describe('ManifoldWorker', () => {
   describe('getParameters', () => {
     it('should extract defaultParams from ESM module', async () => {
-      const { defaultParameters, jsonSchema } = await getParameters(
+      const { defaults, schema } = await getParameters(
         {
           'params.ts': `
             import { Manifold } from 'manifold-3d/manifoldCAD';
@@ -113,8 +109,8 @@ describe('ManifoldWorker', () => {
         'params.ts',
       );
 
-      expect(defaultParameters).toEqual({ size: 20, centered: true });
-      expect(jsonSchema).toMatchObject({
+      expect(defaults).toEqual({ size: 20, centered: true });
+      expect(schema).toMatchObject({
         type: 'object',
         properties: {
           size: { type: 'integer', default: 20 },
@@ -124,7 +120,7 @@ describe('ManifoldWorker', () => {
     });
 
     it('should extract defaultParameters alias', async () => {
-      const { defaultParameters } = await getParameters(
+      const { defaults } = await getParameters(
         {
           'params.ts': `
             import { Manifold } from 'manifold-3d/manifoldCAD';
@@ -141,11 +137,11 @@ describe('ManifoldWorker', () => {
         'params.ts',
       );
 
-      expect(defaultParameters).toEqual({ radius: 15 });
+      expect(defaults).toEqual({ radius: 15 });
     });
 
     it('should return empty parameter defaults when none are exported', async () => {
-      const { defaultParameters } = await getParameters(
+      const { defaults } = await getParameters(
         {
           'no-params.ts': `
             import { Manifold } from 'manifold-3d/manifoldCAD';
@@ -158,7 +154,7 @@ describe('ManifoldWorker', () => {
         'no-params.ts',
       );
 
-      expect(defaultParameters).toEqual({});
+      expect(defaults).toEqual({});
     });
   });
 

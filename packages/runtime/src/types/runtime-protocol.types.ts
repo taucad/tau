@@ -19,6 +19,7 @@ import type {
 } from '#types/runtime.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
+import type { ParameterResolutionOptions } from '@taucad/parameters';
 import type {
   ListSceneBookmarksInput,
   ProgressiveSceneUpdate,
@@ -304,10 +305,7 @@ type RuntimeGeometryComputedArgsWire = {
   readonly renderId: RenderId;
 };
 type RuntimeParametersResolvedArgsWire = {
-  readonly result: KernelResult<{
-    readonly defaultParameters: Record<string, unknown>;
-    readonly jsonSchema: unknown;
-  }>;
+  readonly result: KernelResult<unknown>;
   readonly renderId: RenderId;
 };
 type RuntimeLogArgsWire = { readonly entry: unknown };
@@ -367,6 +365,13 @@ export type RuntimeEvaluateModelArgs = {
   readonly parameters: Record<string, unknown>;
   readonly options?: Record<string, unknown>;
   readonly content?: RuntimeContentInput;
+};
+
+/** Request-scoped parameter resolution without selecting preview state. @public */
+export type RuntimeResolveParametersArgs = {
+  readonly stage?: Record<string, Uint8Array<ArrayBuffer>>;
+  readonly file: { readonly path: string; readonly filename: string };
+  readonly resolution?: ParameterResolutionOptions;
 };
 
 /** Request-scoped source-closure collection without geometry evaluation. @public */
@@ -532,7 +537,7 @@ export const runtimeProtocolNotifyNames = [
 ] as const;
 
 /**
- * Request/response call name inventory — exactly nine calls, including
+ * Request/response call name inventory — exactly ten calls, including
  * retained progressive-scene lookups. The legacy `render` call is deleted; the
  * autonomous `openFile` notify + `geometryComputed` correlation by
  * `renderId` replaces it (R18, mirrors LSP `didOpen` + diagnostics).
@@ -543,6 +548,7 @@ export const runtimeProtocolCallNames = [
   'export',
   'exportModel',
   'evaluateModel',
+  'resolveParameters',
   'snapshotSource',
   'readSceneSnapshot',
   'listSceneBookmarks',
@@ -606,6 +612,10 @@ export type RuntimeProtocol = {
       readonly args: RuntimeEvaluateModelArgs;
       /** Physical RPC result; RuntimeWorkerClient materializes it into HashedGeometryResult. */
       readonly result: HashedGeometryResultTransport;
+    };
+    readonly resolveParameters: {
+      readonly args: RuntimeResolveParametersArgs;
+      readonly result: GetParametersResult;
     };
     readonly snapshotSource: {
       readonly args: RuntimeSourceSnapshotArgs;

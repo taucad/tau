@@ -3,16 +3,13 @@
  *
  * One process per renderer client, forked by `registerElectronRuntimeMain`
  * with the project root the E6 resolver validated. The utility owns the
- * executable runtime and a rooted node filesystem; main only hands it a
- * `MessagePortMain`. Nothing here trusts `TAU_PROJECT_ROOT` — main already did
- * the trusting, and refuses the fork outright when it cannot.
+ * executable runtime and consumes the rooted filesystem capability main
+ * transfers from the services utility. Nothing here trusts `TAU_PROJECT_ROOT`
+ * — main already did the trusting, and refuses the fork outright when it cannot.
  */
-
-import { mkdirSync } from 'node:fs';
 
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { fromNodeFs } from '@taucad/runtime/filesystem/node';
 import { serveElectronRuntime } from '@taucad/runtime/electron/utility';
 
 import { createDiagnosticsLog } from '#main/diagnostics.js';
@@ -25,16 +22,12 @@ const ephemeral = process.env['TAU_RUNTIME_EPHEMERAL'] === '1';
 if (!projectRoot && !ephemeral) {
   throw new Error('The Tau kernel utility requires TAU_PROJECT_ROOT; main resolves it per request.');
 }
-if (projectRoot) {
-  mkdirSync(projectRoot, { recursive: true });
-}
-
 /* Serve first, diagnose second. `serveElectronRuntime` must attach its
  * `parentPort` listener synchronously during module evaluation — main posts the
  * wire port immediately after forking, and an `await` placed above this line
  * would race it. */
 serveElectronRuntime({
-  fileSystem: projectRoot ? fromNodeFs(projectRoot) : fromMemoryFs(),
+  ...(ephemeral ? { fileSystem: fromMemoryFs() } : {}),
   runtime: process.env['TAU_RUNTIME_DEBUG'] === '1' ? debugRuntime : runtime,
 });
 

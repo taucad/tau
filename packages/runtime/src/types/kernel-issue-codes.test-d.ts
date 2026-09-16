@@ -12,8 +12,13 @@ describe('KernelIssueCode', () => {
     expectTypeOf<KernelIssueCode>().toEqualTypeOf<(typeof kernelIssueCodeValues)[number]>();
     expect(kernelIssueCodeValues).toContain('GEOMETRY_INVALID');
     expect(kernelIssueCodeValues).toContain('TRANSCODER_OPTIONS_INVALID');
+    expect(kernelIssueCodeValues).toContain('INVALID_RECORD');
+    expect(kernelIssueCodeValues).toContain('UNSUPPORTED_RECORD');
+    expect(kernelIssueCodeValues).toContain('SEMANTICS_UNRESOLVED');
     assertType<KernelIssueCode>('GEOMETRY_INVALID');
     assertType<KernelIssueCode>('TRANSCODER_EXECUTION_FAILED');
+    assertType<KernelIssueCode>('INVALID_RECORD');
+    assertType<KernelIssueCode>('SEMANTICS_UNRESOLVED');
 
     // @ts-expect-error -- unnamed geometry parts use deterministic fallback names and do not emit an issue code.
     assertType<KernelIssueCode>(removedMissingNameCode);

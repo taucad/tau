@@ -5,7 +5,6 @@
  */
 import { useCallback, useMemo } from 'react';
 import { FlipHorizontal, Focus, Grid3X3, Ruler } from 'lucide-react';
-import type { LengthSymbol } from '@taucad/units';
 import {
   DropdownMenuItem,
   DropdownMenuLabel,
@@ -63,7 +62,7 @@ export function GridOverflowControl(): React.ReactNode {
     (selectedUnit: string) => {
       graphicsRef.send({
         type: 'setGridUnit',
-        payload: { unit: selectedUnit as LengthSymbol },
+        payload: { unit: selectedUnit },
       });
     },
     [graphicsRef],

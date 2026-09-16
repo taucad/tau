@@ -77,7 +77,11 @@ type ChatWorkspaceAuthorityContextValue = Readonly<{
    */
   bindConflict: (
     chatId: string,
-    conflict: Readonly<{ revisionId: string; paths: readonly string[]; checkoutId: string | undefined }>,
+    conflict: Readonly<{
+      revisionId: string;
+      paths: readonly string[];
+      checkoutId: string | undefined;
+    }>,
   ) => void;
   reclaim: (chatId: string) => Promise<PreparedChatWorkspace | undefined>;
   reclaimAll: () => Promise<readonly PreparedChatWorkspace[]>;
@@ -247,6 +251,12 @@ export const createRootedBridgeFileSystem = (binding: WorkspaceFileSystemBinding
       const proxy = await connect();
       return proxy.writeFile(path, data);
     },
+    writeFileChecked: async ({ signal, ...input }) => {
+      signal?.throwIfAborted();
+      const proxy = await connect();
+      signal?.throwIfAborted();
+      return proxy.writeFileChecked(input);
+    },
     appendFile: async (path, data) => {
       const proxy = await connect();
       return proxy.appendFile(path, data);
@@ -285,7 +295,9 @@ export const createRootedBridgeFileSystem = (binding: WorkspaceFileSystemBinding
     },
     dispose: () => undefined,
     watch: (request, handler) => {
-      const subscription: { stop?: () => void; cancelled: boolean } = { cancelled: false };
+      const subscription: { stop?: () => void; cancelled: boolean } = {
+        cancelled: false,
+      };
       // async-iife: bootstrap -- `watch` answers synchronously with its own
       // unsubscribe; the connection it needs resolves after that answer.
       void (async () => {
@@ -360,7 +372,11 @@ type BrowserWorkspaceAuthorityState = {
   /** Chats seeded by *Ask chat to resolve*, by chat id (S33). */
   readonly conflicts: Map<
     string,
-    Readonly<{ revisionId: string; paths: readonly string[]; checkoutId: string | undefined }>
+    Readonly<{
+      revisionId: string;
+      paths: readonly string[];
+      checkoutId: string | undefined;
+    }>
   >;
   readonly listeners: Set<() => void>;
   readonly hostId: string;
@@ -561,7 +577,12 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
             ...(placement.baseRevisionId === '' ? {} : { baseRevisionId: placement.baseRevisionId }),
             ...(conflict === undefined
               ? {}
-              : { conflict: { revisionId: conflict.revisionId, paths: [...conflict.paths] } }),
+              : {
+                  conflict: {
+                    revisionId: conflict.revisionId,
+                    paths: [...conflict.paths],
+                  },
+                }),
           }),
           ...preparedFileSystems,
           admitted: false,
@@ -640,7 +661,11 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
        * open against the authority epoch (F13). */
       reclaimAll: async () => [...state.turns.values()].map((record) => record.prepared),
       markAdmitted: async (chatId, turnId) => {
-        update(chatId, { admitted: true, cancelled: false, ...(turnId === undefined ? {} : { turnId }) });
+        update(chatId, {
+          admitted: true,
+          cancelled: false,
+          ...(turnId === undefined ? {} : { turnId }),
+        });
       },
       markCancelled: async (chatId) => {
         update(chatId, { cancelled: true });

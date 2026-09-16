@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
@@ -8,6 +8,8 @@ import { MessageChannel } from 'node:worker_threads';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
 import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
+import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
+import { acquireNodeAuthorityWriter, toNodeFsPort } from '@taucad/filesystem/backend/node';
 import type * as TauHost from '@taucad/host';
 import type * as AgentTools from '@taucad/host/agent-tools';
 import type * as RuntimeClient from '@taucad/runtime/client';
@@ -73,7 +75,7 @@ const stubPort = () => ({
 });
 
 const hostHarness = (overrides: Partial<ServicesHostOptions> = {}) => {
-  const serve = vi.fn(() => () => undefined);
+  const serve = vi.fn(() => async () => undefined);
   const log = vi.fn();
   return {
     serve,
@@ -130,6 +132,33 @@ describe('createServicesHost — concern ports', () => {
     expect(port.start).toHaveBeenCalled();
   });
 
+  it('serves a main-only runtime filesystem as an exact rooted authority client', async () => {
+    const bridge = { emit: vi.fn(), dispose: vi.fn() };
+    type ServeRuntimeFileSystem = NonNullable<ServicesHostOptions['serveRuntimeFileSystem']>;
+    const serveRuntimeFileSystem = vi.fn(
+      (_handlers: Parameters<ServeRuntimeFileSystem>[0], _port: Parameters<ServeRuntimeFileSystem>[1]) => bridge,
+    );
+    const { host } = hostHarness({
+      authorityDirectory: '/tmp/tau-desktop-authority-fixture',
+      serveRuntimeFileSystem: serveRuntimeFileSystem as ServicesHostOptions['serveRuntimeFileSystem'],
+    });
+    host.handleMessage(frame({ type: 'allowRoots', roots: [homeRoot] }));
+    const port = stubPort();
+
+    host.handleMessage(
+      frame({ type: 'concern', concern: 'runtimeFileSystem', context: { workspaceRoot: `${homeRoot}/widget` } }, [
+        port,
+      ]),
+    );
+
+    expect(serveRuntimeFileSystem).toHaveBeenCalledOnce();
+    expect(serveRuntimeFileSystem.mock.calls[0]?.[0]).toMatchObject({ root: `${homeRoot}/widget` });
+    expect(serveRuntimeFileSystem.mock.calls[0]?.[1]).toBe(port);
+    await host.quiesce();
+    expect(bridge.dispose).toHaveBeenCalledOnce();
+    host.dispose();
+  });
+
   it('closes a port for a concern it does not serve', () => {
     const { host, serve } = hostHarness();
     const port = stubPort();
@@ -142,6 +171,361 @@ describe('createServicesHost — concern ports', () => {
     const { host, serve } = hostHarness();
     host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }));
     expect(serve).not.toHaveBeenCalled();
+  });
+});
+
+describe('createServicesHost — filesystem authority lifetime', () => {
+  const createHeldRuntimeWrite = async (outcome: 'success' | 'failure') => {
+    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-runtime-drain-'));
+    const root = join(sandbox, 'project');
+    const authorityDirectory = join(sandbox, 'authority');
+    await Promise.all([mkdir(root), mkdir(authorityDirectory)]);
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    type ServeRuntimeFileSystem = NonNullable<ServicesHostOptions['serveRuntimeFileSystem']>;
+    let capturedHandlers: Parameters<ServeRuntimeFileSystem>[0] | undefined;
+    const bridge = { emit: vi.fn(), dispose: vi.fn() };
+    const host = createServicesHost({
+      authorityDirectory,
+      log: vi.fn(),
+      serveRuntimeFileSystem: (handlers, port) => {
+        void port;
+        capturedHandlers = handlers;
+        vi.spyOn(handlers, 'writeFile').mockImplementation(async (path, data) => {
+          entered.resolve();
+          await release.promise;
+          if (outcome === 'failure') {
+            throw new Error('held runtime write failed');
+          }
+          await writeFile(join(root, path), data);
+        });
+        return bridge;
+      },
+    });
+    host.handleMessage(frame({ type: 'allowRoots', roots: [root] }));
+    host.handleMessage(
+      frame({ type: 'concern', concern: 'runtimeFileSystem', context: { workspaceRoot: root } }, [stubPort()]),
+    );
+    if (capturedHandlers === undefined) {
+      throw new Error('The runtime filesystem concern was not served.');
+    }
+    return { bridge, entered, handlers: capturedHandlers, host, release, root, sandbox };
+  };
+
+  it('waits for a dispatched runtime bridge success reply before quiescing', async () => {
+    const fixture = await createHeldRuntimeWrite('success');
+    const write = fixture.handlers.writeFile('accepted.txt', 'settled');
+    await fixture.entered.promise;
+    const quiescence = fixture.host.quiesce();
+
+    const pending = async (): Promise<'pending'> => {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      return 'pending';
+    };
+    await expect(Promise.race([quiescence, pending()])).resolves.toBe('pending');
+    fixture.release.resolve();
+    await expect(write).resolves.toBeUndefined();
+    await quiescence;
+    await expect(readFile(join(fixture.root, 'accepted.txt'), 'utf8')).resolves.toBe('settled');
+
+    fixture.host.dispose();
+    await rm(fixture.sandbox, { recursive: true, force: true });
+  });
+
+  it('preserves a dispatched runtime bridge failure reply before quiescing', async () => {
+    const fixture = await createHeldRuntimeWrite('failure');
+    const write = fixture.handlers.writeFile('accepted.txt', 'settled');
+    await fixture.entered.promise;
+    const quiescence = fixture.host.quiesce();
+
+    fixture.release.resolve();
+    await expect(write).rejects.toThrow('held runtime write failed');
+    await expect(quiescence).resolves.toBeUndefined();
+
+    fixture.host.dispose();
+    await rm(fixture.sandbox, { recursive: true, force: true });
+  });
+
+  it('hard-closes a held runtime bridge operation during forced disposal', async () => {
+    const fixture = await createHeldRuntimeWrite('success');
+    const write = fixture.handlers.writeFile('accepted.txt', 'settled');
+    await fixture.entered.promise;
+
+    fixture.host.dispose();
+    expect(fixture.bridge.dispose).toHaveBeenCalledOnce();
+    fixture.release.resolve();
+    await expect(write).resolves.toBeUndefined();
+
+    await rm(fixture.sandbox, { recursive: true, force: true });
+  });
+
+  it('shares one real checked-write owner across overlapping rooted views and drains it on quiesce', async () => {
+    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-authority-'));
+    const root = join(sandbox, 'home');
+    const project = join(root, 'project');
+    const authorityDirectory = join(sandbox, 'authority');
+    await Promise.all([mkdir(project, { recursive: true }), mkdir(authorityDirectory)]);
+    await writeFile(join(project, 'value.txt'), 'old');
+    const host = createServicesHost({ authorityDirectory, log: vi.fn() });
+    const firstPorts = new MessageChannel();
+    const secondPorts = new MessageChannel();
+    host.handleMessage(frame({ type: 'allowRoots', roots: [root] }));
+    host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [firstPorts.port2 as unknown as UtilityPort]));
+    host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [secondPorts.port2 as unknown as UtilityPort]));
+    const firstChannel = new NodeFsChannel(toNodeFsPort(firstPorts.port1 as unknown as UtilityPort));
+    const secondChannel = new NodeFsChannel(toNodeFsPort(secondPorts.port1 as unknown as UtilityPort));
+    const parentView = new NodeFsProviderClient(firstChannel, root);
+    const projectView = new NodeFsProviderClient(secondChannel, project);
+
+    try {
+      const [first, second] = await Promise.all([
+        parentView.writeFileChecked({
+          path: 'project/value.txt',
+          data: 'first',
+          preconditions: [{ path: 'project/value.txt', expected: 'old' }],
+        }),
+        projectView.writeFileChecked({
+          path: 'value.txt',
+          data: 'second',
+          preconditions: [{ path: 'value.txt', expected: 'old' }],
+        }),
+      ]);
+      expect([first.status, second.status].sort()).toEqual(['applied', 'conflict']);
+
+      const quiescence = host.quiesce();
+      expect(host.quiesce()).toBe(quiescence);
+      await quiescence;
+      expect(existsSync(join(authorityDirectory, 'authority.writer.lock'))).toBe(true);
+      expect(existsSync(join(root, 'authority.writer.lock'))).toBe(false);
+    } finally {
+      firstChannel.close();
+      secondChannel.close();
+      host.dispose();
+      firstPorts.port2.close();
+      secondPorts.port2.close();
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a broad authored root that encloses authority metadata before applying its checked write', async () => {
+    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-authority-overlap-'));
+    const authorityDirectory = join(sandbox, 'filesystem-authority');
+    const contentDirectory = join(sandbox, 'project');
+    await Promise.all([mkdir(authorityDirectory), mkdir(contentDirectory)]);
+    const target = join(contentDirectory, 'value.txt');
+    await writeFile(target, 'old');
+    const host = createServicesHost({ authorityDirectory, log: vi.fn() });
+    const ports = new MessageChannel();
+    host.handleMessage(frame({ type: 'allowRoots', roots: [sandbox] }));
+    host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [ports.port2 as unknown as UtilityPort]));
+    const channel = new NodeFsChannel(toNodeFsPort(ports.port1 as unknown as UtilityPort));
+    const broadView = new NodeFsProviderClient(channel, sandbox);
+
+    try {
+      await expect(
+        broadView.writeFileChecked({
+          path: 'project/value.txt',
+          data: 'new',
+          preconditions: [{ path: 'project/value.txt', expected: 'old' }],
+        }),
+      ).rejects.toMatchObject({ code: 'AUTHORITY_ROOT_OVERLAP', applicationState: 'known-not-applied' });
+      await expect(readFile(target, 'utf8')).resolves.toBe('old');
+      expect(existsSync(join(authorityDirectory, 'authority.writer.lock'))).toBe(false);
+    } finally {
+      channel.close();
+      await host.quiesce();
+      host.dispose();
+      ports.port2.close();
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses physical and symlinked broad roots before reading, listing, stating, or watching authority metadata', async () => {
+    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-authority-private-'));
+    const alias = `${sandbox}-alias`;
+    const authorityDirectory = join(sandbox, 'filesystem-authority');
+    await mkdir(authorityDirectory);
+    await symlink(sandbox, alias);
+    const writer = await acquireNodeAuthorityWriter({ authorityRoot: authorityDirectory });
+    await writer.release();
+    expect(existsSync(join(authorityDirectory, 'authority.writer.lock'))).toBe(true);
+    const host = createServicesHost({ authorityDirectory, log: vi.fn() });
+    const connections = [new MessageChannel(), new MessageChannel()];
+    host.handleMessage(frame({ type: 'allowRoots', roots: [sandbox, alias] }));
+    for (const connection of connections) {
+      host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [connection.port2 as unknown as UtilityPort]));
+    }
+    const channels = connections.map(({ port1 }) => new NodeFsChannel(toNodeFsPort(port1 as unknown as UtilityPort)));
+    const broadViews = [new NodeFsProviderClient(channels[0]!, sandbox), new NodeFsProviderClient(channels[1]!, alias)];
+
+    try {
+      await Promise.all(
+        broadViews.map(async (broadView) => {
+          const metadataPath = 'filesystem-authority/authority.writer.lock';
+          await Promise.all([
+            expect(broadView.readFile(metadataPath)).rejects.toMatchObject({ code: 'AUTHORITY_ROOT_OVERLAP' }),
+            expect(broadView.readdir('filesystem-authority')).rejects.toMatchObject({
+              code: 'AUTHORITY_ROOT_OVERLAP',
+            }),
+            expect(broadView.stat(metadataPath)).rejects.toMatchObject({ code: 'AUTHORITY_ROOT_OVERLAP' }),
+            expect(broadView.watch({ paths: ['filesystem-authority'] }, () => undefined)).rejects.toMatchObject({
+              code: 'AUTHORITY_ROOT_OVERLAP',
+            }),
+          ]);
+        }),
+      );
+    } finally {
+      for (const channel of channels) {
+        channel.close();
+      }
+      await host.quiesce();
+      host.dispose();
+      for (const connection of connections) {
+        connection.port2.close();
+      }
+      await Promise.all([rm(alias, { force: true }), rm(sandbox, { recursive: true, force: true })]);
+    }
+  });
+
+  it('returns OS writer ownership when an actual MessageChannel client disconnects', async () => {
+    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-authority-detach-'));
+    const root = join(sandbox, 'project');
+    const authorityDirectory = join(sandbox, 'authority');
+    await Promise.all([mkdir(root), mkdir(authorityDirectory)]);
+    await writeFile(join(root, 'value.txt'), 'old');
+    const log = vi.fn();
+    const host = createServicesHost({ authorityDirectory, log });
+    const ports = new MessageChannel();
+    host.handleMessage(frame({ type: 'allowRoots', roots: [root] }));
+    host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [ports.port2 as unknown as UtilityPort]));
+    const channel = new NodeFsChannel(toNodeFsPort(ports.port1 as unknown as UtilityPort));
+    const provider = new NodeFsProviderClient(channel, root);
+
+    try {
+      await expect(
+        provider.writeFileChecked({
+          path: 'value.txt',
+          data: 'new',
+          preconditions: [{ path: 'value.txt', expected: 'old' }],
+        }),
+      ).resolves.toMatchObject({ status: 'applied' });
+      channel.close();
+      await vi.waitFor(() => {
+        expect(log).toHaveBeenCalledWith('node-fs-disconnected');
+      });
+      await expect(acquireNodeAuthorityWriter({ authorityRoot: authorityDirectory })).rejects.toMatchObject({
+        code: 'AUTHORITY_ALREADY_OWNED',
+      });
+      await host.quiesce();
+      const replacement = await acquireNodeAuthorityWriter({ authorityRoot: authorityDirectory });
+      await replacement.release();
+    } finally {
+      channel.close();
+      await host.quiesce();
+      host.dispose();
+      ports.port2.close();
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it('waits for every accepted disposer, reports failure, and refuses new concerns', async () => {
+    const first = Promise.withResolvers<void>();
+    const second = Promise.withResolvers<void>();
+    const pending = [first.promise, second.promise];
+    const quiesced = vi.fn();
+    const serve = vi.fn(() => {
+      const settlement = pending.shift()!;
+      return async () => settlement;
+    });
+    const host = createServicesHost({
+      log: vi.fn(),
+      quiesced,
+      serve: serve as unknown as ServicesHostOptions['serve'],
+    });
+    host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [stubPort()]));
+    host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [stubPort()]));
+    host.handleMessage(frame({ type: 'quiesce' }));
+    const quiescence = host.quiesce();
+    expect(host.quiesce()).toBe(quiescence);
+
+    first.reject(new Error('first disposer failed'));
+    await Promise.resolve();
+    expect(quiesced).not.toHaveBeenCalled();
+    const refused = stubPort();
+    host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [refused]));
+    expect(refused.close).toHaveBeenCalledOnce();
+    second.resolve();
+
+    await expect(quiescence).rejects.toThrow(/could not quiesce every accepted operation/u);
+    await vi.waitFor(() => {
+      expect(quiesced).toHaveBeenCalledWith({
+        type: 'quiesce-failed',
+        message: 'The services host could not quiesce every accepted operation.',
+      });
+    });
+    host.dispose();
+  });
+
+  it('reports forced filesystem cleanup failure and never fabricates a later graceful result', async () => {
+    const cleanupFailure = new Error('forced cleanup failed');
+    const log = vi.fn();
+    const quiesced = vi.fn();
+    const serve = vi.fn(() => async () => {
+      throw cleanupFailure;
+    });
+    const host = createServicesHost({
+      log,
+      quiesced,
+      serve: serve as unknown as ServicesHostOptions['serve'],
+    });
+    const unhandledRejections: unknown[] = [];
+    const observeUnhandled = (reason: unknown): void => {
+      unhandledRejections.push(reason);
+    };
+    process.on('unhandledRejection', observeUnhandled);
+
+    try {
+      host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [stubPort()]));
+      host.dispose();
+      host.handleMessage(frame({ type: 'quiesce' }));
+      const quiescence = host.quiesce();
+      expect(host.quiesce()).toBe(quiescence);
+
+      await expect(quiescence).rejects.toThrow(/forcibly disposed before graceful quiescence/u);
+      await vi.waitFor(() => {
+        expect(log).toHaveBeenCalledWith('node-fs-dispose-failed', cleanupFailure.message);
+        expect(quiesced).toHaveBeenCalledWith({
+          type: 'quiesce-failed',
+          message: 'The services host was forcibly disposed before graceful quiescence.',
+        });
+      });
+      expect(quiesced).not.toHaveBeenCalledWith({ type: 'quiesced' });
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
+      expect(unhandledRejections).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', observeUnhandled);
+    }
+  });
+
+  it('keeps an already-started graceful settlement when forced disposal follows', async () => {
+    const cleanup = Promise.withResolvers<void>();
+    const serve = vi.fn(() => async () => cleanup.promise);
+    const host = createServicesHost({
+      log: vi.fn(),
+      serve: serve as unknown as ServicesHostOptions['serve'],
+    });
+    host.handleMessage(frame({ type: 'concern', concern: 'nodeFs' }, [stubPort()]));
+
+    const quiescence = host.quiesce();
+    host.dispose();
+    expect(host.quiesce()).toBe(quiescence);
+    cleanup.resolve();
+
+    await expect(quiescence).resolves.toBeUndefined();
   });
 });
 

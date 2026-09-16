@@ -26,7 +26,7 @@ const heroMainFile = 'main.scad';
 
 const heroCode = { [heroMainFile]: qrcodeScad };
 
-const heroUnits: Units = { length: { sourceSymbol: 'mm', displaySymbol: 'mm' } };
+const heroUnits: Units = { length: { displaySymbol: 'mm' } };
 
 export function HeroViewer(): React.JSX.Element {
   const navigate = useNavigate();
@@ -37,12 +37,18 @@ export function HeroViewer(): React.JSX.Element {
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
-  const { geometry, status, defaultParameters, jsonSchema, exportGeometry, capabilities, setParameters } = useRuntime({
-    clientOptions: heroClientOptions,
-    source: { files: heroCode },
-  });
+  const {
+    geometry,
+    status,
+    defaultParameters,
+    jsonSchema,
+    parameterManifest,
+    exportGeometry,
+    capabilities,
+    setParameters,
+  } = useRuntime({ clientOptions: heroClientOptions, source: { files: heroCode } });
 
-  const hasParameters = Boolean(jsonSchema);
+  const hasParameters = Boolean(jsonSchema && parameterManifest);
 
   type HeroExportFormat = NonNullable<typeof capabilities>['routes'][number]['targetFormat'];
   type HeroExportFormatOption = ExportFormatOption<HeroExportFormat>;
@@ -179,6 +185,8 @@ export function HeroViewer(): React.JSX.Element {
                   parameters={currentParams}
                   defaultParameters={defaultParameters}
                   jsonSchema={jsonSchema}
+                  parameterManifest={parameterManifest!}
+                  parameterEdit={{ kind: 'transient' }}
                   units={heroUnits}
                   emptyDescription='Loading parameters...'
                   onParametersChange={handleParametersChange}

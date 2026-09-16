@@ -1,7 +1,8 @@
 import { Wrench } from 'lucide-react';
 import { memo, useCallback, useMemo, useState } from 'react';
-import { messageRole } from '@taucad/chat/constants';
-import type { MyMessagePart, UsageData } from '@taucad/chat';
+import { messageRole, toolName } from '@taucad/chat/constants';
+import type { MyMessagePart, ToolInvocation, UsageData } from '@taucad/chat';
+import type { DynamicToolUIPart } from 'ai';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
@@ -226,6 +227,15 @@ type PartRenderContext = {
   readonly isMessageActive: boolean;
 };
 
+const parameterToolPart = (
+  part: ToolInvocation<typeof toolName.getParameters> | ToolInvocation<typeof toolName.applyParameterOperation>,
+  name: typeof toolName.getParameters | typeof toolName.applyParameterOperation,
+): DynamicToolUIPart => ({
+  ...part,
+  type: 'dynamic-tool',
+  toolName: name,
+});
+
 // oxlint-disable-next-line complexity -- Part type dispatch requires many branches
 function renderAssistantPart(
   part: MyMessagePart,
@@ -398,6 +408,19 @@ function renderAssistantPart(
 
     case 'tool-export_geometry': {
       return <ChatMessageToolExportGeometry key={part.toolCallId} part={part} />;
+    }
+
+    case 'tool-get_parameters': {
+      return <ChatMessageToolExternal key={part.toolCallId} part={parameterToolPart(part, toolName.getParameters)} />;
+    }
+
+    case 'tool-apply_parameter_operation': {
+      return (
+        <ChatMessageToolExternal
+          key={part.toolCallId}
+          part={parameterToolPart(part, toolName.applyParameterOperation)}
+        />
+      );
     }
 
     case 'data-context-compaction': {

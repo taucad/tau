@@ -1,7 +1,0 @@
-{
-  "name": "configuration-core",
-  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "packages/core/configuration",
-  "projectType": "library",
-  "tags": ["scope:shared", "type:package"]
-}

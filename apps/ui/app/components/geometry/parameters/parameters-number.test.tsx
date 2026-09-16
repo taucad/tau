@@ -1,29 +1,150 @@
 import { vi, describe, it, expect } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import * as React from 'react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { LengthSymbol } from '@taucad/units';
-import { ParametersNumber } from '#components/geometry/parameters/parameters-number.js';
+import type { LengthSymbol } from '#constants/length-units.js';
+import { toUcumLengthCode } from '#constants/length-units.js';
+import { ParametersNumber as ParametersNumberImplementation } from '#components/geometry/parameters/parameters-number.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import type { Units } from '#components/geometry/parameters/rjsf-context.js';
+import type { ParameterCommit } from '#components/geometry/parameters/rjsf-context.js';
+import type { ParameterFieldProjection, ParameterSetOutcome, ParameterSetRequest } from '@taucad/parameters';
+import { parameterInputMachine } from '@taucad/parameters/input-machine';
+import type { ParameterInputMachineInput } from '@taucad/parameters/input-machine';
+import { createActor } from 'xstate';
 
-function createUnits(sourceSymbol: LengthSymbol, displaySymbol: LengthSymbol): Units {
-  return {
-    length: {
-      sourceSymbol,
-      displaySymbol,
-    },
-  };
+type TestUnits = Readonly<{ sourceSymbol: LengthSymbol; displaySymbol: LengthSymbol }>;
+
+function createUnits(sourceSymbol: LengthSymbol, displaySymbol: LengthSymbol): TestUnits {
+  return { sourceSymbol, displaySymbol };
 }
 
 // Default units (mm)
 const defaultUnits = createUnits('mm', 'mm');
+
+type TestParametersNumberProps = Omit<
+  React.ComponentProps<typeof ParametersNumberImplementation>,
+  'fieldProjection' | 'edit'
+> & {
+  readonly descriptor?: 'length' | 'angle' | 'count' | 'quantity' | 'unitless';
+  readonly units?: TestUnits;
+  readonly fieldProjection?: ParameterFieldProjection;
+  readonly parameterCommit?: ParameterCommit;
+};
+
+const testProjection = (
+  descriptor: TestParametersNumberProps['descriptor'],
+  units: TestUnits,
+): ParameterFieldProjection => {
+  const base: Pick<
+    ParameterFieldProjection,
+    'instancePointer' | 'parameterId' | 'schema' | 'representation' | 'constraints' | 'guessed'
+  > = {
+    instancePointer: '/value',
+    parameterId: 'value',
+    schema: { resource: 'urn:taucad:test:parameter-number', pointer: '/properties/value' },
+    representation: 'binary64',
+    constraints: {},
+    guessed: false,
+  };
+  if (descriptor === 'length') {
+    return {
+      ...base,
+      status: 'unit-bearing',
+      nativeUnit: toUcumLengthCode(units.sourceSymbol),
+      displayUnit: toUcumLengthCode(units.displaySymbol),
+      adornment: units.displaySymbol,
+      quantityKind: 'http://qudt.org/vocab/quantitykind/Length',
+      space: 'linear',
+    };
+  }
+  if (descriptor === 'angle') {
+    return {
+      ...base,
+      status: 'unit-bearing',
+      nativeUnit: 'deg',
+      displayUnit: 'deg',
+      adornment: '°',
+      quantityKind: 'http://qudt.org/vocab/quantitykind/PlaneAngle',
+      space: 'linear',
+    };
+  }
+  if (descriptor === 'count') {
+    return { ...base, status: 'dimensionless', nativeUnit: '1', displayUnit: '1', adornment: '×' };
+  }
+  if (descriptor === 'unitless') {
+    return { ...base, status: 'dimensionless', nativeUnit: '1', displayUnit: '1' };
+  }
+  return { ...base, status: 'unknown' };
+};
+
+function ParametersNumber({
+  descriptor,
+  units = defaultUnits,
+  fieldProjection,
+  parameterCommit,
+  ...properties
+}: TestParametersNumberProps): React.JSX.Element {
+  const projection = React.useMemo(
+    () => fieldProjection ?? testProjection(descriptor, units),
+    [descriptor, fieldProjection, units],
+  );
+  return (
+    <ParametersNumberImplementation
+      {...properties}
+      fieldProjection={projection}
+      edit={parameterCommit ? { kind: 'authoritative', commit: parameterCommit } : { kind: 'transient' }}
+    />
+  );
+}
+
+/** The service resolves the acknowledged value and revision from the authority; tests stand in for it. */
+const authorityIdentity = {
+  sourceRevision: 'source-1',
+  manifestRevision: 'manifest-1',
+  valueRevision: 'value-1',
+  dependencyRevision: 'dependency-1',
+};
+
+const machineInput = (request: Parameters<ParameterCommit['input']>[0]): ParameterInputMachineInput => ({
+  ...request,
+  acknowledgedValue: request.acknowledgedValue ?? 0,
+  acknowledgedRevision: request.acknowledgedRevision ?? authorityIdentity,
+});
+
+const createRetainedInput = (
+  submit?: (request: ParameterSetRequest) => Promise<ParameterSetOutcome>,
+): ParameterCommit['input'] => {
+  let retained: ReturnType<ParameterCommit['input']> | undefined;
+  return (input) => {
+    if (retained === undefined) {
+      const actor = createActor(parameterInputMachine, { input: machineInput(input) });
+      if (submit !== undefined) {
+        const settle = async (request: ParameterSetRequest): Promise<void> => {
+          const outcome = await submit(request);
+          actor.send({ type: 'settleSubmission', generation: request.draftGeneration, outcome });
+        };
+        actor.on('parameterSetIntent', (event) => {
+          void settle(event.request);
+        });
+      }
+      actor.start();
+      retained = { actor, attach: () => () => undefined };
+    }
+    return retained;
+  };
+};
 
 const fireSliderPointerEvent = (
   element: HTMLElement,
   type: 'pointercancel' | 'pointerdown' | 'pointermove',
   { clientX, pointerId = 1 }: { readonly clientX: number; readonly pointerId?: number },
 ): void => {
-  const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX });
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    button: 0,
+    clientX,
+  });
   Object.defineProperty(event, 'pointerId', { value: pointerId });
   fireEvent(element, event);
 };
@@ -134,8 +255,10 @@ describe('ParametersNumber', () => {
       await user.click(input);
       await user.keyboard('{ArrowUp}');
 
-      expect(input).toHaveValue('17');
-      expect(mockOnChange).toHaveBeenCalledWith(0.017);
+      await waitFor(() => {
+        expect(mockOnChange).toHaveBeenCalledWith(0.017);
+        expect(input).toHaveValue('17');
+      });
     });
 
     it('should convert from mm to inches and back', () => {
@@ -229,9 +352,11 @@ describe('ParametersNumber', () => {
       const input = screen.getByDisplayValue('1');
       await user.clear(input);
       await user.type(input, '2');
+      expect(mockOnChange).not.toHaveBeenCalled();
+      await user.keyboard('{Enter}');
 
-      // OnChange should be called with value in mm (2 inches = 50.8mm)
-      expect(mockOnChange).toHaveBeenCalledWith(50.8);
+      // The confirmed draft is committed in the native unit.
+      expect(mockOnChange.mock.calls[0]?.[0]).toBeCloseTo(50.8, 12);
     });
 
     it('should format values with 4 significant figures during conversion', () => {
@@ -279,6 +404,16 @@ describe('ParametersNumber', () => {
       expect((fillBar as HTMLElement).style.width).toBe('50%');
     });
 
+    it('should place an unbounded positive default at the middle of its automatic range', () => {
+      const { container } = render(
+        <TestWrapper>
+          <ParametersNumber value={14} defaultValue={14} descriptor='length' units={defaultUnits} onChange={vi.fn()} />
+        </TestWrapper>,
+      );
+
+      expect(container.querySelector<HTMLElement>('[data-slot="slider-input-fill"]')?.style.width).toBe('50%');
+    });
+
     it('should clamp fill bar to 0-100%', () => {
       const mockOnChange = vi.fn();
 
@@ -317,12 +452,15 @@ describe('ParametersNumber', () => {
         </TestWrapper>,
       );
       const sliderInput = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
-      Object.defineProperty(sliderInput, 'offsetWidth', { configurable: true, value: 100 });
+      Object.defineProperty(sliderInput, 'offsetWidth', {
+        configurable: true,
+        value: 100,
+      });
 
       fireSliderPointerEvent(sliderInput, 'pointerdown', { clientX: 0 });
       fireSliderPointerEvent(sliderInput, 'pointermove', { clientX: 25 });
       fireSliderPointerEvent(sliderInput, 'pointercancel', { clientX: 25 });
-      expect(mockOnChange).toHaveBeenLastCalledWith(75);
+      expect(mockOnChange).not.toHaveBeenCalled();
 
       rerender(
         <TestWrapper>
@@ -412,6 +550,253 @@ describe('ParametersNumber', () => {
   });
 
   describe('Input Field Interactions', () => {
+    it('gives sibling authoritative inputs disjoint request identities', () => {
+      const editorInstances = new Map<string, string>();
+      const actors = new Map<string, ReturnType<ParameterCommit['input']>['actor']>();
+      const input: ParameterCommit['input'] = (actorInput) => {
+        editorInstances.set(actorInput.binding.pointer, actorInput.editorInstance);
+        let actor = actors.get(actorInput.editorInstance);
+        if (actor === undefined) {
+          actor = createActor(parameterInputMachine, { input: machineInput(actorInput) });
+          actor.start();
+          actors.set(actorInput.editorInstance, actor);
+        }
+        return { actor, attach: () => () => undefined };
+      };
+      const parameterCommit: ParameterCommit = {
+        target: { authority: 'test', root: '/', entry: 'main.ts' },
+        group: 'default',
+        editorInstance: 'shared-editor',
+        input,
+      };
+
+      const view = render(
+        <TestWrapper>
+          <ParametersNumber
+            value={10}
+            defaultValue={10}
+            fieldProjection={{
+              ...testProjection('length', defaultUnits),
+              parameterId: 'width',
+              instancePointer: '/width',
+            }}
+            parameterCommit={parameterCommit}
+            onChange={vi.fn()}
+            aria-label='Width'
+          />
+          <ParametersNumber
+            value={10}
+            defaultValue={10}
+            fieldProjection={{
+              ...testProjection('length', defaultUnits),
+              parameterId: 'height',
+              instancePointer: '/height',
+            }}
+            parameterCommit={parameterCommit}
+            onChange={vi.fn()}
+            aria-label='Height'
+          />
+        </TestWrapper>,
+      );
+
+      expect(editorInstances.get('/width')).not.toBe(editorInstances.get('/height'));
+      view.unmount();
+      for (const actor of actors.values()) {
+        actor.stop();
+      }
+    });
+
+    it('restores retained invalid text into the visible input after remount', async () => {
+      const user = userEvent.setup();
+      const input = createRetainedInput();
+      const parameterCommit: ParameterCommit = {
+        target: { authority: 'test', root: '/', entry: 'main.ts' },
+        group: 'default',
+        editorInstance: 'retained-editor',
+        input,
+      };
+      const view = (
+        <TestWrapper>
+          <ParametersNumber
+            value={10}
+            defaultValue={10}
+            descriptor='length'
+            parameterCommit={parameterCommit}
+            onChange={vi.fn()}
+            aria-label='Retained width'
+          />
+        </TestWrapper>
+      );
+      const first = render(view);
+      const field = screen.getByRole('textbox', { name: 'Retained width' });
+      await user.click(field);
+      await user.clear(field);
+      await user.type(field, 'invalid draft');
+      first.unmount();
+
+      render(view);
+      const restored = screen.getByRole('textbox', { name: 'Retained width' });
+      expect(restored).toHaveValue('invalid draft');
+    });
+
+    it('rejects transient text outside the admitted constraints', async () => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      render(
+        <TestWrapper>
+          <ParametersNumber
+            value={10}
+            defaultValue={10}
+            fieldProjection={{
+              ...testProjection('length', defaultUnits),
+              constraints: { minimum: 0, maximum: 20 },
+            }}
+            onChange={onChange}
+            aria-label='Constrained width'
+          />
+        </TestWrapper>,
+      );
+      const field = screen.getByRole('textbox', { name: 'Constrained width' });
+      await user.click(field);
+      await user.clear(field);
+      await user.type(field, '999');
+      await user.keyboard('{Enter}');
+
+      expect(onChange).not.toHaveBeenCalled();
+      expect(screen.getByText('Value must be at most 20.')).toBeVisible();
+    });
+
+    it.each<{
+      name: string;
+      projection: Pick<ParameterFieldProjection, 'constraints' | 'representation'>;
+      text: string;
+      diagnostic: string;
+    }>([
+      {
+        name: 'exclusive bound',
+        projection: { constraints: { exclusiveMaximum: 20 }, representation: 'binary64' },
+        text: '20',
+        diagnostic: 'Value must be less than 20.',
+      },
+      {
+        name: 'multiple-of lattice',
+        projection: { constraints: { multipleOf: 0.5 }, representation: 'binary64' },
+        text: '10.25',
+        diagnostic: 'Value must be a multiple of 0.5.',
+      },
+      {
+        name: 'safe-integer representation',
+        projection: { constraints: {}, representation: 'safe-integer' },
+        text: String(Number.MAX_SAFE_INTEGER + 1),
+        diagnostic: 'Input does not preserve a safe integer in the native unit.',
+      },
+    ])('rejects transient $name without a geometry update', async ({ projection, text, diagnostic }) => {
+      const user = userEvent.setup();
+      const onChange = vi.fn();
+      render(
+        <TestWrapper>
+          <ParametersNumber
+            value={10}
+            defaultValue={10}
+            fieldProjection={{ ...testProjection('length', defaultUnits), ...projection }}
+            onChange={onChange}
+            aria-label='Admitted transient value'
+          />
+        </TestWrapper>,
+      );
+      const field = screen.getByRole('textbox', { name: 'Admitted transient value' });
+      await user.click(field);
+      await user.clear(field);
+      await user.type(field, text);
+      await user.keyboard('{Enter}');
+
+      expect(onChange).not.toHaveBeenCalled();
+      expect(screen.getByText(diagnostic)).toBeVisible();
+      expect(field).toHaveValue(text);
+    });
+
+    it('converts an explicit display unit and waits for the authority outcome before acknowledging it', async () => {
+      const onChange = vi.fn();
+      const user = userEvent.setup();
+      let settle: ((outcome: ParameterSetOutcome) => void) | undefined;
+      const submit = vi.fn(async (_request: ParameterSetRequest) => {
+        const outcome = await new Promise<ParameterSetOutcome>((resolve) => {
+          settle = resolve;
+        });
+        return outcome;
+      });
+      const identity = authorityIdentity;
+
+      render(
+        <TestWrapper>
+          <ParametersNumber
+            value={10}
+            defaultValue={10}
+            descriptor='length'
+            units={defaultUnits}
+            fieldProjection={{
+              status: 'unit-bearing',
+              schema: { resource: 'urn:taucad:test:provider-configuration', pointer: '/properties/width' },
+              instancePointer: '/width',
+              parameterId: 'width',
+              representation: 'binary64',
+              constraints: {},
+              nativeUnit: 'mm',
+              displayUnit: 'mm',
+              adornment: 'mm',
+              guessed: false,
+            }}
+            parameterCommit={{
+              target: {
+                authority: 'provider-configuration',
+                root: '/project',
+                entry: 'provider-configuration/runtime/export/stl/options',
+              },
+              group: 'default',
+              editorInstance: 'test-editor',
+              input: createRetainedInput(submit),
+            }}
+            onChange={onChange}
+          />
+        </TestWrapper>,
+      );
+
+      const input = screen.getByDisplayValue('10');
+      await user.clear(input);
+      await user.type(input, '2.1 cm');
+      await user.keyboard('{Enter}');
+
+      expect(submit).toHaveBeenCalledOnce();
+      const request = submit.mock.calls[0]?.[0];
+      expect(request).toMatchObject({
+        expected: identity,
+        operation: {
+          kind: 'unit-value',
+          group: 'default',
+          parameterId: 'width',
+          pointer: '/width',
+          inputUnit: 'cm',
+          value: '2.1 cm',
+        },
+      });
+      expect(onChange).not.toHaveBeenCalled();
+      if (request === undefined) {
+        throw new Error('Expected a submitted parameter request');
+      }
+
+      await act(async () => {
+        settle?.({
+          status: 'committed',
+          requestId: request.requestId,
+          write: 'applied',
+          revision: { ...identity, valueRevision: 'value-2' },
+        });
+      });
+
+      expect(input).toHaveValue('21');
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
     it('should update value when typing in input', async () => {
       const mockOnChange = vi.fn();
       const user = userEvent.setup();
@@ -431,8 +816,10 @@ describe('ParametersNumber', () => {
       const input = screen.getByDisplayValue('10');
       await user.clear(input);
       await user.type(input, '25');
+      expect(mockOnChange).not.toHaveBeenCalled();
+      await user.keyboard('{Enter}');
 
-      // Should call onChange with the new value
+      // Complete text drafts commit on Enter.
       expect(mockOnChange).toHaveBeenCalledWith(25);
     });
 
@@ -522,11 +909,8 @@ describe('ParametersNumber', () => {
       await user.clear(input);
       await user.type(input, '1 in');
 
-      // Should parse "1 in" and convert to mm live during typing
-      expect(mockOnChange).toHaveBeenCalledWith(25.4);
-
-      // Pressing Enter should just blur, not emit again
-      mockOnChange.mockClear();
+      // Equivalent input is a semantic no-op before and after confirmation.
+      expect(mockOnChange).not.toHaveBeenCalled();
       await user.keyboard('{Enter}');
       expect(mockOnChange).not.toHaveBeenCalled();
     });
@@ -551,14 +935,8 @@ describe('ParametersNumber', () => {
       await user.clear(input);
       await user.type(input, '1in');
 
-      // Should parse "1in" and convert to mm live during typing
-      expect(mockOnChange).toHaveBeenCalledWith(25.4);
-      mockOnChange.mockClear();
-
-      // Press Enter to trigger UI conversion
+      expect(mockOnChange).not.toHaveBeenCalled();
       await user.keyboard('{Enter}');
-
-      // Should NOT emit onChange again (value already emitted during typing)
       expect(mockOnChange).not.toHaveBeenCalled();
 
       // Display value should be updated to the converted value (25.4mm displayed as "25.4")
@@ -574,8 +952,8 @@ describe('ParametersNumber', () => {
       render(
         <TestWrapper>
           <ParametersNumber
-            value={12.7}
-            defaultValue={12.7}
+            value={10}
+            defaultValue={10}
             descriptor='length'
             units={defaultUnits}
             onChange={mockOnChange}
@@ -583,17 +961,13 @@ describe('ParametersNumber', () => {
         </TestWrapper>,
       );
 
-      const input = screen.getByDisplayValue('12.7');
+      const input = screen.getByDisplayValue('10');
       await user.clear(input);
       await user.type(input, '1/2 in');
 
-      // Should parse "1/2 in" and convert to mm (0.5 * 25.4 = 12.7) live during typing
-      expect(mockOnChange).toHaveBeenCalledWith(12.7);
-
-      // Pressing Enter should just blur, not emit again
-      mockOnChange.mockClear();
-      await user.keyboard('{Enter}');
       expect(mockOnChange).not.toHaveBeenCalled();
+      await user.keyboard('{Enter}');
+      expect(mockOnChange.mock.calls[0]?.[0]).toBeCloseTo(12.7, 12);
     });
 
     it('should parse feet and inches notation', async () => {
@@ -603,8 +977,8 @@ describe('ParametersNumber', () => {
       render(
         <TestWrapper>
           <ParametersNumber
-            value={304.8}
-            defaultValue={304.8}
+            value={10}
+            defaultValue={10}
             descriptor='length'
             units={defaultUnits}
             onChange={mockOnChange}
@@ -612,18 +986,13 @@ describe('ParametersNumber', () => {
         </TestWrapper>,
       );
 
-      const input = screen.getByDisplayValue('304.8');
+      const input = screen.getByDisplayValue('10');
       await user.clear(input);
       await user.type(input, "1'");
 
-      // Should parse 1 foot and convert to mm (1 foot = 30 inches = 30 * 25.4 = 762mm) live during typing
-      // Note: parseLength converts feet to inches
-      expect(mockOnChange).toHaveBeenCalled();
-
-      // Tabbing away should not emit again
-      mockOnChange.mockClear();
-      await user.tab();
       expect(mockOnChange).not.toHaveBeenCalled();
+      await user.keyboard('{Enter}');
+      expect(mockOnChange).toHaveBeenCalledWith(304.8);
     });
 
     it('should handle empty input gracefully', async () => {
@@ -798,6 +1167,27 @@ describe('ParametersNumber', () => {
   });
 
   describe('Edge Cases', () => {
+    it('should group a committed standalone value without changing its edit value', async () => {
+      const mockOnChange = vi.fn();
+      const user = userEvent.setup();
+
+      render(
+        <TestWrapper>
+          <ParametersNumber
+            value={123_456_789}
+            defaultValue={1}
+            descriptor='unitless'
+            units={defaultUnits}
+            onChange={mockOnChange}
+          />
+        </TestWrapper>,
+      );
+
+      const input = screen.getByDisplayValue('123,456,789');
+      await user.click(input);
+      expect(input).toHaveValue('123,456,789');
+    });
+
     it('should handle decimal precision correctly', async () => {
       const mockOnChange = vi.fn();
       const user = userEvent.setup();
@@ -817,9 +1207,11 @@ describe('ParametersNumber', () => {
       const input = screen.getByDisplayValue('0.1');
       await user.clear(input);
       await user.type(input, '0.123456789');
+      expect(mockOnChange).not.toHaveBeenCalled();
+      await user.keyboard('{Enter}');
 
-      // Should handle high precision
-      expect(mockOnChange).toHaveBeenCalledWith(0.123_456_789);
+      // Committed native precision is not reduced to display precision.
+      expect(mockOnChange).toHaveBeenCalledWith(Number('0.123456789'));
     });
   });
 });

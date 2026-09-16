@@ -1,12 +1,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
-import { getActiveGroupValues, projectToManifest } from '@taucad/types';
-import type { FileParameterEntry, ProjectManifest } from '@taucad/types';
+import { projectToManifest } from '@taucad/types';
+import type { ProjectManifest } from '@taucad/types';
 import { isProjectContentActivityPath, projectMachine } from '#machines/project.machine.js';
 import type { ProjectContext, ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
-import { createDefaultEntry } from '#utils/parameter-config.utils.js';
 import type { KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 
 vi.mock('#constants/browser.constants.js', () => ({
@@ -39,20 +38,15 @@ const stubProjectWithMechanical = stubProject;
 // Factory helpers
 // ---------------------------------------------------------------------------
 
-type WriteParameterInput = { projectId: string; filePath: string; entry: FileParameterEntry };
-
 function createTestActor(options?: {
   loadResult?: ProjectManifest | (() => Promise<ProjectManifest>);
   writeResult?: () => Promise<void>;
-  writeParameterResult?: (input?: WriteParameterInput) => Promise<void>;
-  parameterEntries?: Map<string, FileParameterEntry>;
   shouldAutoLoad?: boolean;
   shouldLoadModelOnStart?: boolean;
   projectId?: string;
 }) {
   const loadResult = options?.loadResult ?? stubProject;
   const loadFunction = typeof loadResult === 'function' ? loadResult : async () => loadResult;
-  const parameterEntries = options?.parameterEntries;
 
   const machine = projectMachine.provide({
     actors: {
@@ -61,20 +55,12 @@ function createTestActor(options?: {
         return {
           type: 'projectRetrieved',
           project,
-          parameterEntries: parameterEntries ?? new Map<string, FileParameterEntry>(),
         };
       }),
       ...(options?.writeResult
         ? {
             writeProjectActor: fromSafeAsync(async () => {
               await options.writeResult!();
-            }),
-          }
-        : {}),
-      ...(options?.writeParameterResult
-        ? {
-            writeParameterFileActor: fromSafeAsync<void, WriteParameterInput>(async ({ input }) => {
-              await options.writeParameterResult!(input);
             }),
           }
         : {}),
@@ -85,7 +71,9 @@ function createTestActor(options?: {
     },
   });
 
-  const fileManagerRef = mock<ProjectContext['fileManagerRef']>({ send: vi.fn() });
+  const fileManagerRef = mock<ProjectContext['fileManagerRef']>({
+    send: vi.fn(),
+  });
   const kernelOptionsFactory = createKernelOptionsFactory();
 
   return createActor(machine, {
@@ -169,7 +157,6 @@ describe('projectMachine', () => {
             return {
               type: 'projectRetrieved',
               project: stubProject,
-              parameterEntries: new Map(),
             };
           }),
         },
@@ -178,10 +165,17 @@ describe('projectMachine', () => {
           shouldAutoLoad: () => false,
         },
       });
-      const fileManagerRef = mock<ProjectContext['fileManagerRef']>({ send: vi.fn() });
+      const fileManagerRef = mock<ProjectContext['fileManagerRef']>({
+        send: vi.fn(),
+      });
       const kernelOptionsFactory = createKernelOptionsFactory();
       const actor = createActor(machine, {
-        input: { projectId: 'b', fileManagerRef, fileSystemRoot: '/projects/b', kernelOptionsFactory },
+        input: {
+          projectId: 'b',
+          fileManagerRef,
+          fileSystemRoot: '/projects/b',
+          kernelOptionsFactory,
+        },
       });
       actor.start();
       expect(actor.getSnapshot().value).toBe('ssr');
@@ -362,7 +356,9 @@ describe('projectMachine', () => {
     });
 
     it('should set main file path in project assets', async () => {
-      const actor = await startAndLoad({ loadResult: stubProjectWithMechanical });
+      const actor = await startAndLoad({
+        loadResult: stubProjectWithMechanical,
+      });
       actor.send({ type: 'setMainFile', path: 'other.ts' });
       expect(actor.getSnapshot().context.project?.assets.main.entryPath).toBe('other.ts');
       actor.stop();
@@ -372,7 +368,11 @@ describe('projectMachine', () => {
       const actor = await startAndLoad();
       const emitted: string[] = [];
       actor.on('projectActivity', (event) => emitted.push(event.type));
-      actor.send({ type: 'projectFileActivity', operation: 'written', paths: ['main.ts'] });
+      actor.send({
+        type: 'projectFileActivity',
+        operation: 'written',
+        paths: ['main.ts'],
+      });
       expect(emitted).toEqual(['projectActivity']);
       actor.stop();
     });
@@ -535,8 +535,16 @@ describe('projectMachine', () => {
       const unit = actor.getSnapshot().context.geometryUnits.get('main.ts');
       expect(unit).toBeDefined();
 
-      actor.send({ type: 'geometryUnit.exportAvailabilityChanged', actorId: unit!.id, available: true });
-      actor.send({ type: 'geometryUnit.exportAvailabilityChanged', actorId: unit!.id, available: false });
+      actor.send({
+        type: 'geometryUnit.exportAvailabilityChanged',
+        actorId: unit!.id,
+        available: true,
+      });
+      actor.send({
+        type: 'geometryUnit.exportAvailabilityChanged',
+        actorId: unit!.id,
+        available: false,
+      });
 
       expect(actor.getSnapshot().context.exportableGeometryUnitPaths.size).toBe(0);
       actor.stop();
@@ -545,7 +553,11 @@ describe('projectMachine', () => {
     it('should ignore availability events from unknown geometry units', async () => {
       const actor = await startAndLoad();
 
-      actor.send({ type: 'geometryUnit.exportAvailabilityChanged', actorId: 'missing-actor', available: true });
+      actor.send({
+        type: 'geometryUnit.exportAvailabilityChanged',
+        actorId: 'missing-actor',
+        available: true,
+      });
 
       expect(actor.getSnapshot().context.exportableGeometryUnitPaths.size).toBe(0);
       actor.stop();
@@ -556,7 +568,11 @@ describe('projectMachine', () => {
       actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
       const unit = actor.getSnapshot().context.geometryUnits.get('main.ts');
       expect(unit).toBeDefined();
-      actor.send({ type: 'geometryUnit.exportAvailabilityChanged', actorId: unit!.id, available: true });
+      actor.send({
+        type: 'geometryUnit.exportAvailabilityChanged',
+        actorId: unit!.id,
+        available: true,
+      });
 
       actor.send({ type: 'destroyGeometryUnit', entryPath: 'main.ts' });
 
@@ -569,9 +585,17 @@ describe('projectMachine', () => {
       actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
       const unit = actor.getSnapshot().context.geometryUnits.get('main.ts');
       expect(unit).toBeDefined();
-      actor.send({ type: 'geometryUnit.exportAvailabilityChanged', actorId: unit!.id, available: true });
+      actor.send({
+        type: 'geometryUnit.exportAvailabilityChanged',
+        actorId: unit!.id,
+        available: true,
+      });
 
-      actor.send({ type: 'fileMoved', oldPath: 'main.ts', newPath: 'renamed.ts' });
+      actor.send({
+        type: 'fileMoved',
+        oldPath: 'main.ts',
+        newPath: 'renamed.ts',
+      });
 
       expect(actor.getSnapshot().context.exportableGeometryUnitPaths).toEqual(new Set(['renamed.ts']));
       actor.stop();
@@ -582,7 +606,11 @@ describe('projectMachine', () => {
       actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
       const unit = actor.getSnapshot().context.geometryUnits.get('main.ts');
       expect(unit).toBeDefined();
-      actor.send({ type: 'geometryUnit.exportAvailabilityChanged', actorId: unit!.id, available: true });
+      actor.send({
+        type: 'geometryUnit.exportAvailabilityChanged',
+        actorId: unit!.id,
+        available: true,
+      });
 
       actor.send({ type: 'fileDeleted', path: 'main.ts' });
 
@@ -595,7 +623,11 @@ describe('projectMachine', () => {
       actor.send({ type: 'createGeometryUnit', entryPath: 'parts/main.ts' });
       const unit = actor.getSnapshot().context.geometryUnits.get('parts/main.ts');
       expect(unit).toBeDefined();
-      actor.send({ type: 'geometryUnit.exportAvailabilityChanged', actorId: unit!.id, available: true });
+      actor.send({
+        type: 'geometryUnit.exportAvailabilityChanged',
+        actorId: unit!.id,
+        available: true,
+      });
 
       actor.send({ type: 'directoryDeleted', path: 'parts' });
 
@@ -665,7 +697,11 @@ describe('projectMachine', () => {
         },
       });
 
-      actor.send({ type: 'fileMoved', oldPath: 'main.ts', newPath: 'renamed.ts' });
+      actor.send({
+        type: 'fileMoved',
+        oldPath: 'main.ts',
+        newPath: 'renamed.ts',
+      });
       expect(modelInteractionRef.getSnapshot().context.unitsById['file:main.ts']).toBeUndefined();
       expect(modelInteractionRef.getSnapshot().context.unitsById['file:renamed.ts']?.hiddenComponentIds).toEqual([
         'node-1',
@@ -678,52 +714,13 @@ describe('projectMachine', () => {
   });
 
   // =========================================================================
-  // State: ready – parameters
-  // =========================================================================
-  describe('ready – parameters', () => {
-    it('should update code parameters in the main entry sidecar state', async () => {
-      const entries = new Map<string, FileParameterEntry>([['main.ts', createDefaultEntry()]]);
-      const actor = await startAndLoad({
-        loadResult: stubProjectWithMechanical,
-        shouldLoadModelOnStart: true,
-        parameterEntries: entries,
-      });
-      actor.send({
-        type: 'updateCodeParameters',
-        files: {},
-        parameters: { height: 20 },
-      });
-      expect(getActiveGroupValues(actor.getSnapshot().context.parameterEntries.get('main.ts'))).toEqual({
-        height: 20,
-      });
-      expect(actor.getSnapshot().context.project).toEqual(stubProjectWithMechanical);
-      actor.stop();
-    });
-
-    it('should update parameters and forward to main geometry unit', async () => {
-      const entries = new Map<string, FileParameterEntry>([['main.ts', createDefaultEntry()]]);
-      const actor = await startAndLoad({
-        loadResult: stubProjectWithMechanical,
-        shouldLoadModelOnStart: true,
-        parameterEntries: entries,
-      });
-      const mainUnit = actor.getSnapshot().context.geometryUnits.get('main.ts');
-      expect(mainUnit).toBeDefined();
-
-      actor.send({ type: 'setParameters', parameters: { depth: 5 } });
-      const { parameterEntries } = actor.getSnapshot().context;
-      expect(parameterEntries.size).toBeGreaterThan(0);
-      expect(getActiveGroupValues(parameterEntries.get('main.ts'))).toEqual({ depth: 5 });
-      actor.stop();
-    });
-  });
-
-  // =========================================================================
   // State: ready – loadModel
   // =========================================================================
   describe('ready – loadModel', () => {
     it('should create geometry unit for main file when none exists', async () => {
-      const actor = await startAndLoad({ loadResult: stubProjectWithMechanical });
+      const actor = await startAndLoad({
+        loadResult: stubProjectWithMechanical,
+      });
       expect(actor.getSnapshot().context.geometryUnits.has('main.ts')).toBe(false);
       actor.send({ type: 'loadModel' });
       expect(actor.getSnapshot().context.geometryUnits.has('main.ts')).toBe(true);
@@ -951,384 +948,6 @@ describe('projectMachine', () => {
       expect(context.mainEntryPath).toBe('');
       expect(context.geometryUnits.size).toBe(0);
       expect(context.viewGraphics.size).toBe(0);
-      actor.stop();
-    });
-  });
-
-  // =========================================================================
-  // State: ready – parameterStoring (immediate write, no debounce)
-  // =========================================================================
-  describe('ready – parameterStoring', () => {
-    it('should not transition to writing when parameterEntries is empty', async () => {
-      const actor = await startAndLoad();
-      expect(actor.getSnapshot().context.parameterEntries.size).toBe(0);
-
-      actor.send({ type: 'setParameters', parameters: { width: 10 } });
-      expect(actor.getSnapshot().matches({ ready: { parameterStoring: 'idle' } })).toBe(true);
-      actor.stop();
-    });
-
-    it('should enter writing after a parameter event when entries exist', async () => {
-      let resolveWrite!: () => void;
-      const gate = new Promise<void>((resolve) => {
-        resolveWrite = resolve;
-      });
-
-      const entries = new Map<string, FileParameterEntry>([['main.ts', createDefaultEntry()]]);
-      const actor = await startAndLoad({
-        parameterEntries: entries,
-        loadResult: stubProjectWithMechanical,
-        shouldLoadModelOnStart: true,
-        writeParameterResult: async () => {
-          await gate;
-        },
-      });
-      expect(actor.getSnapshot().context.parameterEntries.size).toBeGreaterThan(0);
-
-      actor.send({ type: 'setParameters', parameters: { width: 10 } });
-      await waitFor(actor, (s) => s.matches({ ready: { parameterStoring: 'writing' } }));
-      resolveWrite();
-      await waitFor(actor, (s) => s.matches({ ready: { parameterStoring: 'idle' } }));
-      actor.stop();
-    });
-
-    it('should coalesce rapid parameter events into fewer writes than events', async () => {
-      let writeCallCount = 0;
-      const entries = new Map<string, FileParameterEntry>([['main.ts', createDefaultEntry()]]);
-      const actor = await startAndLoad({
-        parameterEntries: entries,
-        loadResult: stubProjectWithMechanical,
-        shouldLoadModelOnStart: true,
-        writeParameterResult: async () => {
-          writeCallCount++;
-        },
-      });
-
-      actor.send({ type: 'setParameters', parameters: { width: 1 } });
-      actor.send({ type: 'setParameters', parameters: { width: 2 } });
-      actor.send({ type: 'setParameters', parameters: { width: 3 } });
-
-      await waitFor(actor, (s) => s.matches({ ready: { parameterStoring: 'idle' } }));
-      expect(writeCallCount).toBe(2);
-      actor.stop();
-    });
-
-    it('should coalesce events during writing into a follow-up write', async () => {
-      vi.useFakeTimers();
-      try {
-        let writeCallCount = 0;
-        const writeResolvers: Array<() => void> = [];
-        const entries = new Map<string, FileParameterEntry>([['main.ts', createDefaultEntry()]]);
-        const actor = await startAndLoad({
-          parameterEntries: entries,
-          loadResult: stubProjectWithMechanical,
-          shouldLoadModelOnStart: true,
-          writeParameterResult: async () => {
-            writeCallCount++;
-            return new Promise<void>((resolve) => {
-              writeResolvers.push(resolve);
-            });
-          },
-        });
-
-        actor.send({ type: 'setParameters', parameters: { width: 1 } });
-        await waitFor(actor, (s) => s.matches({ ready: { parameterStoring: 'writing' } }));
-        expect(writeCallCount).toBe(1);
-
-        actor.send({ type: 'setParameters', parameters: { width: 2 } });
-        await waitFor(actor, (s) => s.matches({ ready: { parameterStoring: 'pending' } }));
-
-        await vi.advanceTimersByTimeAsync(0);
-        expect(writeCallCount).toBe(2);
-
-        writeResolvers[1]!();
-        await vi.advanceTimersByTimeAsync(0);
-        await waitFor(actor, (s) => s.matches({ ready: { parameterStoring: 'idle' } }));
-
-        actor.stop();
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-    it('should land in idle with error on parameter write failure and allow retry', async () => {
-      let writeCallCount = 0;
-      const entries = new Map<string, FileParameterEntry>([['main.ts', createDefaultEntry()]]);
-      const actor = await startAndLoad({
-        parameterEntries: entries,
-        loadResult: stubProjectWithMechanical,
-        shouldLoadModelOnStart: true,
-        writeParameterResult: async () => {
-          writeCallCount++;
-          if (writeCallCount === 1) {
-            throw new Error('write failed');
-          }
-        },
-      });
-
-      actor.send({ type: 'setParameters', parameters: { width: 1 } });
-      await waitFor(actor, (s) => s.matches({ ready: { parameterStoring: 'idle' } }));
-      expect(writeCallCount).toBe(1);
-      expect(actor.getSnapshot().context.error?.message).toBe('write failed');
-
-      actor.send({ type: 'setParameters', parameters: { width: 2 } });
-      await waitFor(actor, (s) => s.matches({ ready: { parameterStoring: 'idle' } }));
-      expect(writeCallCount).toBe(2);
-
-      actor.stop();
-    });
-
-    it('should write the correct geometry unit file path, not mainEntryPath', async () => {
-      const writtenPaths: string[] = [];
-      const entries = new Map<string, FileParameterEntry>([
-        ['main.ts', createDefaultEntry()],
-        ['other.ts', createDefaultEntry()],
-      ]);
-      const actor = await startAndLoad({
-        parameterEntries: entries,
-        loadResult: stubProjectWithMechanical,
-        shouldLoadModelOnStart: true,
-        writeParameterResult: async (input) => {
-          writtenPaths.push(input!.filePath);
-        },
-      });
-
-      actor.send({ type: 'setGeometryUnitParameters', filePath: 'other.ts', parameters: { radius: 5 } });
-      await waitFor(actor, (s) => s.matches({ ready: { parameterStoring: 'idle' } }));
-
-      expect(writtenPaths).toEqual(['other.ts']);
-      actor.stop();
-    });
-
-    it('should drain dirty set and write both geometry units when two different geometry units change rapidly', async () => {
-      const writtenPaths: string[] = [];
-      const entries = new Map<string, FileParameterEntry>([
-        ['main.ts', createDefaultEntry()],
-        ['other.ts', createDefaultEntry()],
-      ]);
-      const actor = await startAndLoad({
-        parameterEntries: entries,
-        loadResult: stubProjectWithMechanical,
-        shouldLoadModelOnStart: true,
-        writeParameterResult: async (input) => {
-          writtenPaths.push(input!.filePath);
-        },
-      });
-
-      actor.send({ type: 'setGeometryUnitParameters', filePath: 'main.ts', parameters: { width: 1 } });
-      actor.send({ type: 'setGeometryUnitParameters', filePath: 'other.ts', parameters: { radius: 2 } });
-
-      await waitFor(actor, (s) => s.matches({ ready: { parameterStoring: 'idle' } }));
-
-      expect(writtenPaths).toContain('main.ts');
-      expect(writtenPaths).toContain('other.ts');
-      actor.stop();
-    });
-
-    it('should deduplicate same-geometry-unit rapid fire in dirty set', async () => {
-      const writtenPaths: string[] = [];
-      const entries = new Map<string, FileParameterEntry>([['main.ts', createDefaultEntry()]]);
-      const actor = await startAndLoad({
-        parameterEntries: entries,
-        loadResult: stubProjectWithMechanical,
-        shouldLoadModelOnStart: true,
-        writeParameterResult: async (input) => {
-          writtenPaths.push(input!.filePath);
-        },
-      });
-
-      actor.send({ type: 'setGeometryUnitParameters', filePath: 'main.ts', parameters: { width: 1 } });
-      actor.send({ type: 'setGeometryUnitParameters', filePath: 'main.ts', parameters: { width: 2 } });
-      actor.send({ type: 'setGeometryUnitParameters', filePath: 'main.ts', parameters: { width: 3 } });
-
-      await waitFor(actor, (s) => s.matches({ ready: { parameterStoring: 'idle' } }));
-
-      expect(writtenPaths).toEqual(['main.ts', 'main.ts']);
-      const { parameterEntries } = actor.getSnapshot().context;
-      expect(getActiveGroupValues(parameterEntries.get('main.ts'))).toEqual({ width: 3 });
-      actor.stop();
-    });
-
-    it('should clear dirtyParameterPaths after all writes complete', async () => {
-      const entries = new Map<string, FileParameterEntry>([
-        ['main.ts', createDefaultEntry()],
-        ['other.ts', createDefaultEntry()],
-      ]);
-      const actor = await startAndLoad({
-        parameterEntries: entries,
-        loadResult: stubProjectWithMechanical,
-        shouldLoadModelOnStart: true,
-        writeParameterResult: async () => {
-          /* Test stub: no side effects needed */
-        },
-      });
-
-      actor.send({ type: 'setGeometryUnitParameters', filePath: 'main.ts', parameters: { width: 1 } });
-      actor.send({ type: 'setGeometryUnitParameters', filePath: 'other.ts', parameters: { radius: 2 } });
-
-      await waitFor(actor, (s) => s.matches({ ready: { parameterStoring: 'idle' } }));
-
-      expect(actor.getSnapshot().context.dirtyParameterPaths.size).toBe(0);
-      actor.stop();
-    });
-
-    it('should lazily create a default entry for a non-main geometry unit on setGeometryUnitParameters', async () => {
-      const entries = new Map<string, FileParameterEntry>([['main.ts', createDefaultEntry()]]);
-      const writtenInputs: WriteParameterInput[] = [];
-      const actor = await startAndLoad({
-        parameterEntries: entries,
-        loadResult: stubProjectWithMechanical,
-        shouldLoadModelOnStart: true,
-        writeParameterResult: async (input) => {
-          writtenInputs.push(input!);
-        },
-      });
-
-      expect(actor.getSnapshot().context.parameterEntries.has('other.ts')).toBe(false);
-
-      actor.send({ type: 'setGeometryUnitParameters', filePath: 'other.ts', parameters: { radius: 5 } });
-      await waitFor(actor, (s) => s.matches({ ready: { parameterStoring: 'idle' } }));
-
-      const { parameterEntries } = actor.getSnapshot().context;
-      expect(parameterEntries.has('other.ts')).toBe(true);
-      expect(getActiveGroupValues(parameterEntries.get('other.ts'))).toEqual({ radius: 5 });
-
-      const otherWrite = writtenInputs.find((w) => w.filePath === 'other.ts');
-      expect(otherWrite).toBeDefined();
-      expect(otherWrite!.entry).toBeDefined();
-      actor.stop();
-    });
-
-    it('should lazily init and write valid entry for a non-main geometry unit without throwing', async () => {
-      const entries = new Map<string, FileParameterEntry>([['main.ts', createDefaultEntry()]]);
-      let writeError: Error | undefined;
-      const actor = await startAndLoad({
-        parameterEntries: entries,
-        loadResult: stubProjectWithMechanical,
-        shouldLoadModelOnStart: true,
-        writeParameterResult: async (input) => {
-          if (!input?.entry) {
-            writeError = new Error('entry was undefined');
-            throw writeError;
-          }
-        },
-      });
-
-      actor.send({ type: 'setGeometryUnitParameters', filePath: 'new-cu.ts', parameters: { height: 10 } });
-      await waitFor(actor, (s) => s.matches({ ready: { parameterStoring: 'idle' } }));
-
-      expect(writeError).toBeUndefined();
-      expect(actor.getSnapshot().context.error).toBeUndefined();
-      actor.stop();
-    });
-
-    it('should handle rapid parameter changes for a geometry unit that starts without an entry', async () => {
-      const entries = new Map<string, FileParameterEntry>([['main.ts', createDefaultEntry()]]);
-      const writtenInputs: WriteParameterInput[] = [];
-      const actor = await startAndLoad({
-        parameterEntries: entries,
-        loadResult: stubProjectWithMechanical,
-        shouldLoadModelOnStart: true,
-        writeParameterResult: async (input) => {
-          writtenInputs.push(input!);
-        },
-      });
-
-      actor.send({ type: 'setGeometryUnitParameters', filePath: 'new-cu.ts', parameters: { x: 1 } });
-      actor.send({ type: 'setGeometryUnitParameters', filePath: 'new-cu.ts', parameters: { x: 2 } });
-      actor.send({ type: 'setGeometryUnitParameters', filePath: 'new-cu.ts', parameters: { x: 3 } });
-
-      await waitFor(actor, (s) => s.matches({ ready: { parameterStoring: 'idle' } }));
-
-      const { parameterEntries } = actor.getSnapshot().context;
-      expect(getActiveGroupValues(parameterEntries.get('new-cu.ts'))).toEqual({ x: 3 });
-
-      const newCuWrites = writtenInputs.filter((w) => w.filePath === 'new-cu.ts');
-      expect(newCuWrites.length).toBeGreaterThan(0);
-      expect(newCuWrites.every((w) => Object.keys(w.entry.groups).length > 0)).toBe(true);
-      actor.stop();
-    });
-
-    it('should load multi-geometry-unit parameter entries from loadProjectActor and make all accessible', async () => {
-      const secondaryEntry: FileParameterEntry = {
-        activeGroup: 'preset-a',
-        groups: { 'preset-a': { values: { radius: 42, height: 100 } } },
-      };
-      const entries = new Map<string, FileParameterEntry>([
-        ['main.ts', createDefaultEntry()],
-        ['public/models/box-corner.js', secondaryEntry],
-      ]);
-
-      const actor = await startAndLoad({
-        parameterEntries: entries,
-        loadResult: stubProjectWithMechanical,
-        shouldLoadModelOnStart: true,
-      });
-
-      const { parameterEntries } = actor.getSnapshot().context;
-      expect(parameterEntries.has('main.ts')).toBe(true);
-      expect(parameterEntries.has('public/models/box-corner.js')).toBe(true);
-      expect(getActiveGroupValues(parameterEntries.get('public/models/box-corner.js'))).toEqual({
-        radius: 42,
-        height: 100,
-      });
-      actor.stop();
-    });
-
-    it('should merge with pre-loaded non-main geometry unit entry on setGeometryUnitParameters', async () => {
-      const secondaryEntry: FileParameterEntry = {
-        activeGroup: 'default',
-        groups: { default: { values: { radius: 42, depth: 10 } } },
-      };
-      const entries = new Map<string, FileParameterEntry>([
-        ['main.ts', createDefaultEntry()],
-        ['other.ts', secondaryEntry],
-      ]);
-
-      const actor = await startAndLoad({
-        parameterEntries: entries,
-        loadResult: stubProjectWithMechanical,
-        shouldLoadModelOnStart: true,
-        writeParameterResult: async () => {
-          /* Test stub: no side effects needed */
-        },
-      });
-
-      actor.send({ type: 'setGeometryUnitParameters', filePath: 'other.ts', parameters: { radius: 99 } });
-      await waitFor(actor, (s) => s.matches({ ready: { parameterStoring: 'idle' } }));
-
-      const { parameterEntries } = actor.getSnapshot().context;
-      expect(getActiveGroupValues(parameterEntries.get('other.ts'))).toEqual({ radius: 99 });
-      actor.stop();
-    });
-
-    it('should write pre-loaded non-main geometry unit entry content via writeParameterFileActor', async () => {
-      const secondaryEntry: FileParameterEntry = {
-        activeGroup: 'default',
-        groups: { default: { values: { radius: 42 } } },
-      };
-      const entries = new Map<string, FileParameterEntry>([
-        ['main.ts', createDefaultEntry()],
-        ['other.ts', secondaryEntry],
-      ]);
-      const writtenInputs: WriteParameterInput[] = [];
-
-      const actor = await startAndLoad({
-        parameterEntries: entries,
-        loadResult: stubProjectWithMechanical,
-        shouldLoadModelOnStart: true,
-        writeParameterResult: async (input) => {
-          writtenInputs.push(input!);
-        },
-      });
-
-      actor.send({ type: 'setGeometryUnitParameters', filePath: 'other.ts', parameters: { radius: 99 } });
-      await waitFor(actor, (s) => s.matches({ ready: { parameterStoring: 'idle' } }));
-
-      const otherWrite = writtenInputs.find((w) => w.filePath === 'other.ts');
-      expect(otherWrite).toBeDefined();
-      expect(otherWrite!.entry.activeGroup).toBe('default');
-      expect(otherWrite!.entry.groups['default']!.values).toEqual({ radius: 99 });
       actor.stop();
     });
   });

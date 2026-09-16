@@ -10,10 +10,10 @@ import type {
   FileExtension,
   GeometryResponse,
   HashedGeometryResult,
-  JSONSchema7,
   RuntimeContentInput,
   TelemetryEntry,
 } from '@taucad/runtime/types';
+import type { ParameterManifest } from '@taucad/parameters';
 import type { ExportResult } from '@taucad/runtime';
 
 import { replicadKernel } from '#replicad.kernel.js';
@@ -216,13 +216,8 @@ const mapStlEvidenceToYUp = ({
 };
 
 /** Helper to extract parameters and assert success. */
-const getParameters = async (
-  files: Record<string, string>,
-  mainFile: string,
-): Promise<{
-  jsonSchema: JSONSchema7;
-  defaultParameters: Record<string, unknown>;
-}> => getTestParameters({ runtime: createReplicadRuntime(), files, mainFile });
+const getParameters = async (files: Record<string, string>, mainFile: string): Promise<ParameterManifest> =>
+  getTestParameters({ runtime: createReplicadRuntime(), files, mainFile });
 
 /** Helper to create geometry and return the result. */
 const createGeometry = async ({
@@ -264,7 +259,7 @@ describe('ReplicadWorker', () => {
   describe('getParameters', () => {
     describe('ESM style - export syntax', () => {
       it('should extract defaultParams from exported const', async () => {
-        const { jsonSchema, defaultParameters } = await getParameters(
+        const { schema, defaults } = await getParameters(
           {
             'box.ts': `
               import { drawRoundedRectangle } from 'replicad';
@@ -284,12 +279,12 @@ describe('ReplicadWorker', () => {
           'box.ts',
         );
 
-        expect(defaultParameters).toEqual({
+        expect(defaults).toEqual({
           width: 100,
           height: 50,
           depth: 30,
         });
-        expect(jsonSchema).toMatchObject({
+        expect(schema).toMatchObject({
           type: 'object',
           properties: {
             width: { type: 'integer', default: 100 },
@@ -300,7 +295,7 @@ describe('ReplicadWorker', () => {
       });
 
       it('should extract nested defaultParams', async () => {
-        const { jsonSchema, defaultParameters } = await getParameters(
+        const { schema, defaults } = await getParameters(
           {
             'box.ts': `
               import { draw } from 'replicad';
@@ -324,11 +319,11 @@ describe('ReplicadWorker', () => {
           'box.ts',
         );
 
-        expect(defaultParameters).toEqual({
+        expect(defaults).toEqual({
           dimensions: { width: 100, height: 50 },
           options: { rounded: true, radius: 5 },
         });
-        expect(jsonSchema).toMatchObject({
+        expect(schema).toMatchObject({
           type: 'object',
           properties: {
             dimensions: {
@@ -350,7 +345,7 @@ describe('ReplicadWorker', () => {
       });
 
       it('should handle array parameters', async () => {
-        const { defaultParameters } = await getParameters(
+        const { defaults } = await getParameters(
           {
             'box.ts': `
               import { draw } from 'replicad';
@@ -368,7 +363,7 @@ describe('ReplicadWorker', () => {
           'box.ts',
         );
 
-        expect(defaultParameters).toEqual({
+        expect(defaults).toEqual({
           sizes: [10, 20, 30],
           position: [0, 0, 0],
         });
@@ -377,7 +372,7 @@ describe('ReplicadWorker', () => {
 
     describe('CommonJS style - global defaultParams', () => {
       it('should extract defaultParams from global variable', async () => {
-        const { jsonSchema, defaultParameters } = await getParameters(
+        const { schema, defaults } = await getParameters(
           {
             'box.js': `
               const { draw } = replicad;
@@ -396,8 +391,8 @@ describe('ReplicadWorker', () => {
           'box.js',
         );
 
-        expect(defaultParameters).toEqual({ width: 80, height: 40 });
-        expect(jsonSchema).toMatchObject({
+        expect(defaults).toEqual({ width: 80, height: 40 });
+        expect(schema).toMatchObject({
           type: 'object',
           properties: {
             width: { type: 'integer', default: 80 },
@@ -409,7 +404,7 @@ describe('ReplicadWorker', () => {
 
     describe('Edge cases', () => {
       it('should return empty parameters for file without defaultParams', async () => {
-        const { jsonSchema, defaultParameters } = await getParameters(
+        const { schema, defaults } = await getParameters(
           {
             'box.ts': `
               import { draw } from 'replicad';
@@ -422,14 +417,14 @@ describe('ReplicadWorker', () => {
           'box.ts',
         );
 
-        expect(defaultParameters).toEqual({});
-        expect(jsonSchema).toMatchObject({
+        expect(defaults).toEqual({});
+        expect(schema).toMatchObject({
           type: 'object',
         });
       });
 
       it('should handle boolean parameters', async () => {
-        const { defaultParameters } = await getParameters(
+        const { defaults } = await getParameters(
           {
             'box.ts': `
               import { draw } from 'replicad';
@@ -447,11 +442,11 @@ describe('ReplicadWorker', () => {
           'box.ts',
         );
 
-        expect(defaultParameters).toEqual({ addHoles: true, centered: false });
+        expect(defaults).toEqual({ addHoles: true, centered: false });
       });
 
       it('should handle string parameters', async () => {
-        const { defaultParameters } = await getParameters(
+        const { defaults } = await getParameters(
           {
             'box.ts': `
               import { draw } from 'replicad';
@@ -469,7 +464,7 @@ describe('ReplicadWorker', () => {
           'box.ts',
         );
 
-        expect(defaultParameters).toEqual({ label: 'My Box', material: 'PLA' });
+        expect(defaults).toEqual({ label: 'My Box', material: 'PLA' });
       });
     });
   });

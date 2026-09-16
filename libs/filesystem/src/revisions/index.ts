@@ -4,6 +4,7 @@
  */
 
 export { ResourceQueue } from '#resource-queue.js';
+export type { ResourceQueueClaim } from '#resource-queue.js';
 export { revisionMetadataSchema } from '#revision-metadata.js';
 export { ImmutableRevisionTree, revisionId } from '#revision-tree.js';
 export type { RevisionFileMode, RevisionId, RevisionTreeEntry, RevisionTreeInput } from '#revision-tree.js';

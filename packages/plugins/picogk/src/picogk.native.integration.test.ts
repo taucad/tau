@@ -19,6 +19,7 @@ import {
   validateGlbData,
 } from '@taucad/runtime-testing';
 import { createNodeClient } from '@taucad/runtime/node';
+import type { ParameterManifest } from '@taucad/parameters';
 import type { ProgressiveSceneUpdate, WorkerState } from '@taucad/runtime/types';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { describe, expect, it, vi } from 'vitest';
@@ -32,7 +33,11 @@ type ResourceManifest = {
   readonly target: string;
   readonly workerPath: string;
   readonly workerSha256: string;
-  readonly resourceFiles: ReadonlyArray<{ readonly path: string; readonly sha256: string; readonly label: string }>;
+  readonly resourceFiles: ReadonlyArray<{
+    readonly path: string;
+    readonly sha256: string;
+    readonly label: string;
+  }>;
 };
 
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
@@ -157,11 +162,19 @@ const comparableTimeline = (
 type GltfJson = {
   readonly nodes: ReadonlyArray<{ readonly mesh?: number }>;
   readonly meshes: ReadonlyArray<{
-    readonly primitives: ReadonlyArray<{ readonly mode?: number; readonly indices?: number }>;
+    readonly primitives: ReadonlyArray<{
+      readonly mode?: number;
+      readonly indices?: number;
+    }>;
   }>;
   readonly accessors: ReadonlyArray<{ readonly count: number }>;
-  readonly bufferViews: ReadonlyArray<{ readonly byteOffset?: number; readonly byteLength: number }>;
-  readonly extensions: { readonly TAU_cad_topology: { readonly topologyBufferView: number } };
+  readonly bufferViews: ReadonlyArray<{
+    readonly byteOffset?: number;
+    readonly byteLength: number;
+  }>;
+  readonly extensions: {
+    readonly TAU_cad_topology: { readonly topologyBufferView: number };
+  };
 };
 
 const readTopology = (
@@ -199,14 +212,26 @@ describe('PicoGK native C# kernel', () => {
       })),
       requestTimeout: 120_000,
       maxArtifactBytes: 512 * 1024 * 1024,
-      logger: { log: vi.fn(), debug: vi.fn(), trace: vi.fn(), warn: vi.fn(), error: vi.fn(), custom: vi.fn() },
+      logger: {
+        log: vi.fn(),
+        debug: vi.fn(),
+        trace: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        custom: vi.fn(),
+      },
     });
     const { signal } = new AbortController();
     try {
       const compute = { modelDigest: `sha256:${'1'.repeat(64)}`, prepared: [] };
       const cold = await session.request({
         method: 'build',
-        params: { entryPath: 'main.cs', parameters: {}, streamScene: false, compute },
+        params: {
+          entryPath: 'main.cs',
+          parameters: {},
+          streamScene: false,
+          compute,
+        },
         schema: picogkBuildSchema,
         signal,
       });
@@ -230,7 +255,12 @@ describe('PicoGK native C# kernel', () => {
       await session.recycle();
       const warm = await session.request({
         method: 'build',
-        params: { entryPath: 'main.cs', parameters: {}, streamScene: false, compute: { ...compute, prepared } },
+        params: {
+          entryPath: 'main.cs',
+          parameters: {},
+          streamScene: false,
+          compute: { ...compute, prepared },
+        },
         schema: picogkBuildSchema,
         signal,
       });
@@ -278,7 +308,11 @@ Library.Go(1f, () =>
           const result = await client.render({
             source: { files: { 'main.cs': content } },
             renderOptions: {
-              capture: { mode: 'operation', minimumIntervalMilliseconds: 0, maximumPendingCommands: 16 },
+              capture: {
+                mode: 'operation',
+                minimumIntervalMilliseconds: 0,
+                maximumPendingCommands: 16,
+              },
             },
           });
           expect(result.superseded).toBe(false);
@@ -343,7 +377,10 @@ Library.Go(1f, () =>
     Library.oViewer().SetObjectMatrix(mesh, Matrix4x4.CreateTranslation(10, 0, 0));
 });
 `;
-    const client = createTestRuntimeClient({ runtime, files: { 'main.cs': source } });
+    const client = createTestRuntimeClient({
+      runtime,
+      files: { 'main.cs': source },
+    });
     const updates: ProgressiveSceneUpdate[] = [];
     const firstReset = Promise.withResolvers<void>();
     let terminalSettled = false;
@@ -362,7 +399,11 @@ Library.Go(1f, () =>
       const rendering = client.render({
         source: { path: 'main.cs' },
         renderOptions: {
-          capture: { mode: 'operation', minimumIntervalMilliseconds: 0, maximumPendingCommands: 2 },
+          capture: {
+            mode: 'operation',
+            minimumIntervalMilliseconds: 0,
+            maximumPendingCommands: 2,
+          },
         },
       });
       await firstReset.promise;
@@ -385,7 +426,10 @@ Library.Go(1f, () =>
         throw new Error('Expected a PicoGK changed-component delta.');
       }
       expect(delta.operations).toEqual([
-        expect.objectContaining({ type: 'upsert-node', node: expect.objectContaining({ id: 'component:picogk-1' }) }),
+        expect.objectContaining({
+          type: 'upsert-node',
+          node: expect.objectContaining({ id: 'component:picogk-1' }),
+        }),
       ]);
       const changedGeometry = delta.assets[0]?.geometry;
       expect(changedGeometry?.format).toBe('gltf');
@@ -421,14 +465,21 @@ Library.Go(1f, () =>
     viewer.RequestScreenShot(Path.Combine(Library.strLogFolder, "removed.tga"));
 });
 `;
-    const client = createTestRuntimeClient({ runtime, files: { 'main.cs': source } });
+    const client = createTestRuntimeClient({
+      runtime,
+      files: { 'main.cs': source },
+    });
     const updates: ProgressiveSceneUpdate[] = [];
     const stopScene = client.on('sceneUpdate', (update) => updates.push(update));
     try {
       const rendered = await client.render({
         source: { path: 'main.cs' },
         renderOptions: {
-          capture: { mode: 'explicit', minimumIntervalMilliseconds: 0, maximumPendingCommands: 16 },
+          capture: {
+            mode: 'explicit',
+            minimumIntervalMilliseconds: 0,
+            maximumPendingCommands: 16,
+          },
         },
       });
       expect(rendered.superseded).toBe(false);
@@ -463,10 +514,16 @@ Library.Go(1f, () =>
       );
       expect(deltas).toHaveLength(3);
       expect(deltas[0]?.operations).toEqual([
-        expect.objectContaining({ type: 'upsert-node', node: expect.objectContaining({ id: 'component:picogk-2' }) }),
+        expect.objectContaining({
+          type: 'upsert-node',
+          node: expect.objectContaining({ id: 'component:picogk-2' }),
+        }),
       ]);
       expect(deltas[1]?.operations).toEqual([
-        expect.objectContaining({ type: 'upsert-node', node: expect.objectContaining({ id: 'component:picogk-2' }) }),
+        expect.objectContaining({
+          type: 'upsert-node',
+          node: expect.objectContaining({ id: 'component:picogk-2' }),
+        }),
       ]);
       expect(deltas[2]?.operations).toEqual([{ type: 'remove-node', nodeId: 'component:picogk-1' }]);
       expect(deltas.flatMap(({ assets }) => assets).some(({ contentDigest }) => contentDigest === retainedDigest)).toBe(
@@ -493,24 +550,31 @@ Library.Go(1f, () =>
   }, 180_000);
 
   it('resolves opt-in C# metadata and applies selected parameters to native geometry', async () => {
-    const client = createTestRuntimeClient({ runtime, files: { 'main.cs': parameterizedSphereSource } });
-    const parameters = new Promise<{ readonly defaults: Record<string, unknown>; readonly schema: unknown }>(
-      (resolve) => {
-        client.on('parametersResolved', (result) => {
-          if (result.success) {
-            resolve({ defaults: result.data.defaultParameters, schema: result.data.jsonSchema });
-          }
-        });
-      },
-    );
+    const client = createTestRuntimeClient({
+      runtime,
+      files: { 'main.cs': parameterizedSphereSource },
+    });
+    const parameters = new Promise<ParameterManifest>((resolve) => {
+      client.on('parametersResolved', (result) => {
+        if (result.success) {
+          resolve(result.data);
+        }
+      });
+    });
     try {
       const initial = await client.render({ source: { path: 'main.cs' } });
       expect(initial.superseded).toBe(false);
       if (initial.superseded) {
         throw new Error('Initial PicoGK render was unexpectedly superseded.');
       }
-      expect(await parameters).toEqual({
-        defaults: { [voxelSizeParameter]: 1, [radiusParameter]: 15, [colorParameter]: '4f7dd9' },
+      const manifest = await parameters;
+      expect(manifest.defaults).toEqual({
+        [voxelSizeParameter]: 1,
+        [radiusParameter]: 15,
+        [colorParameter]: '4f7dd9',
+      });
+      expect(manifest.legacyProjection).toMatchObject({
+        status: 'usable',
         schema: {
           type: 'object',
           properties: {
@@ -530,7 +594,11 @@ Library.Go(1f, () =>
               title: 'Radius',
               description: 'Sphere radius in millimetres',
             },
-            [colorParameter]: { type: 'string', default: '4f7dd9', title: 'Color' },
+            [colorParameter]: {
+              type: 'string',
+              default: '4f7dd9',
+              title: 'Color',
+            },
           },
           additionalProperties: false,
         },
@@ -560,16 +628,17 @@ Library.Go(1f, () =>
     const previousPath = process.env['PATH'];
     // Only the system directories the sandbox wrapper resolves `which` from: no user or tool PATH.
     process.env['PATH'] = '/usr/bin:/bin';
-    const client = createTestRuntimeClient({ runtime, files: { 'main.cs': sphereSource() } });
-    const parameters = new Promise<{ readonly defaults: Record<string, unknown>; readonly schema: unknown }>(
-      (resolve) => {
-        client.on('parametersResolved', (result) => {
-          if (result.success) {
-            resolve({ defaults: result.data.defaultParameters, schema: result.data.jsonSchema });
-          }
-        });
-      },
-    );
+    const client = createTestRuntimeClient({
+      runtime,
+      files: { 'main.cs': sphereSource() },
+    });
+    const parameters = new Promise<ParameterManifest>((resolve) => {
+      client.on('parametersResolved', (result) => {
+        if (result.success) {
+          resolve(result.data);
+        }
+      });
+    });
     try {
       const rendered = await client.render({ source: { path: 'main.cs' } });
       expect(rendered.superseded).toBe(false);
@@ -578,7 +647,10 @@ Library.Go(1f, () =>
       }
       const analyzed = await parameters;
       expect(analyzed.defaults).toEqual({});
-      expect(analyzed.schema).toEqual({ type: 'object', properties: {}, additionalProperties: false });
+      expect(analyzed.legacyProjection).toMatchObject({
+        status: 'usable',
+        schema: { type: 'object', additionalProperties: false },
+      });
       assertSuccess(rendered.geometry);
       const glb = extractGltfFromResult(rendered.geometry);
       if (!glb) {
@@ -619,9 +691,14 @@ Library.Go(1f, () =>
       const stl = await client.export('stl');
       assertSuccess(stl);
       expect(stl.data).toHaveLength(1);
-      const roundTrip = createTestRuntimeClient({ runtime, files: { 'roundtrip.stl': stl.data[0]!.bytes } });
+      const roundTrip = createTestRuntimeClient({
+        runtime,
+        files: { 'roundtrip.stl': stl.data[0]!.bytes },
+      });
       try {
-        const imported = await roundTrip.render({ source: { path: 'roundtrip.stl' } });
+        const imported = await roundTrip.render({
+          source: { path: 'roundtrip.stl' },
+        });
         expect(imported.superseded).toBe(false);
         if (imported.superseded) {
           throw new Error('PicoGK STL round trip was unexpectedly superseded.');
@@ -653,7 +730,10 @@ Library.Go(1f, () =>
     writeFileSync(join(projectRoot, 'ShapeFactory.cs'), helperSource(1), 'utf8');
     writeFileSync(join(projectRoot, 'scale.txt'), '1', 'utf8');
     writeFileSync(join(projectRoot, 'thumbnail.webp'), new Uint8Array([1]));
-    const client = await createNodeClient({ runtime, projectPath: projectRoot });
+    const client = await createNodeClient({
+      runtime,
+      projectPath: projectRoot,
+    });
     const states: WorkerState[] = [];
     const geometries: unknown[] = [];
     const stopState = client.on('state', (state) => states.push(state));
@@ -690,10 +770,16 @@ Library.Go(1f, () =>
   }, 180_000);
 
   it('rerenders secondary C# and project-asset edits and recovers after a Roslyn error', async () => {
-    const files = { 'main.cs': multiFileMain, 'ShapeFactory.cs': helperSource(1), 'scale.txt': '1' };
+    const files = {
+      'main.cs': multiFileMain,
+      'ShapeFactory.cs': helperSource(1),
+      'scale.txt': '1',
+    };
     const client = createTestRuntimeClient({ runtime, files });
     const render = async (next: typeof files): Promise<Uint8Array<ArrayBuffer>> => {
-      const rendered = await client.render({ source: { files: next, entry: 'main.cs' } });
+      const rendered = await client.render({
+        source: { files: next, entry: 'main.cs' },
+      });
       expect(rendered.superseded).toBe(false);
       if (rendered.superseded) {
         throw new Error('Native PicoGK render was unexpectedly superseded.');
@@ -714,13 +800,23 @@ Library.Go(1f, () =>
         return bounds.size[0];
       };
       const initial = await sizeX(files);
-      const helperEdit = await sizeX({ ...files, 'ShapeFactory.cs': helperSource(2) });
-      const assetEdit = await sizeX({ ...files, 'ShapeFactory.cs': helperSource(2), 'scale.txt': '1.5' });
+      const helperEdit = await sizeX({
+        ...files,
+        'ShapeFactory.cs': helperSource(2),
+      });
+      const assetEdit = await sizeX({
+        ...files,
+        'ShapeFactory.cs': helperSource(2),
+        'scale.txt': '1.5',
+      });
       expect(helperEdit).toBeGreaterThan(initial * 1.8);
       expect(assetEdit).toBeGreaterThan(helperEdit * 1.4);
 
       const failed = await client.render({
-        source: { files: { ...files, 'ShapeFactory.cs': 'public static class {' }, entry: 'main.cs' },
+        source: {
+          files: { ...files, 'ShapeFactory.cs': 'public static class {' },
+          entry: 'main.cs',
+        },
       });
       expect(failed.superseded).toBe(false);
       if (!failed.superseded) {
@@ -729,7 +825,9 @@ Library.Go(1f, () =>
           issues: expect.arrayContaining([
             expect.objectContaining({
               type: 'compilation',
-              location: expect.objectContaining({ fileName: 'ShapeFactory.cs' }),
+              location: expect.objectContaining({
+                fileName: 'ShapeFactory.cs',
+              }),
             }),
           ]),
         });
@@ -741,7 +839,10 @@ Library.Go(1f, () =>
   }, 180_000);
 
   it('runs the pinned ShapeKernel HeatX program and captures only its final viewer scene', async () => {
-    const client = createTestRuntimeClient({ runtime, files: helixHeatExchangerFiles() });
+    const client = createTestRuntimeClient({
+      runtime,
+      files: helixHeatExchangerFiles(),
+    });
     try {
       const rendered = await client.render({ source: { path: 'Program.cs' } });
       expect(rendered.superseded).toBe(false);
@@ -777,7 +878,9 @@ Library.Go(1f, () => Sh.PreviewBoxWireframe(new BaseBox(new LocalFrame(), 10f, 2
       },
     });
     try {
-      const rendered = await wireframeClient.render({ source: { path: 'Program.cs' } });
+      const rendered = await wireframeClient.render({
+        source: { path: 'Program.cs' },
+      });
       expect(rendered.superseded).toBe(false);
       if (rendered.superseded) {
         throw new Error('ShapeKernel wireframe render was unexpectedly superseded.');
@@ -797,9 +900,14 @@ Library.Go(1f, () => Sh.PreviewBoxWireframe(new BaseBox(new LocalFrame(), 10f, 2
       await wireframeClient.shutdown();
     }
 
-    const roverClient = createTestRuntimeClient({ runtime, files: roverFiles() });
+    const roverClient = createTestRuntimeClient({
+      runtime,
+      files: roverFiles(),
+    });
     try {
-      const rendered = await roverClient.render({ source: { path: 'Program.cs' } });
+      const rendered = await roverClient.render({
+        source: { path: 'Program.cs' },
+      });
       expect(rendered.superseded).toBe(false);
       if (rendered.superseded) {
         throw new Error('RoverWheel render was unexpectedly superseded.');

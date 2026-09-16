@@ -25,7 +25,7 @@ On supported Node platforms, npm installs native `rolldown` as an optional depen
 
 ## Quick start
 
-```ts
+```typescript
 import { defineRuntime } from '@taucad/runtime/worker';
 import { rolldown } from '@taucad/rolldown';
 

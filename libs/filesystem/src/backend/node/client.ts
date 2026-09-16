@@ -11,6 +11,7 @@
 import type { z } from 'zod';
 import { Topic } from '@taucad/events';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
+import type { CheckedFileWrite, CheckedFileWriteResult } from '@taucad/types';
 import type { FileStat, ProviderCapabilities, WatchRequest } from '#types.js';
 import type { RevisionFileMode } from '#revision-tree.js';
 import type { NodeFsPort } from '#backend/node/port.js';
@@ -48,6 +49,9 @@ const toError = (frame: Extract<NodeFsResponse, { type: 'error' }>): Error => {
   const error = new Error(frame.message);
   if (frame.code !== undefined) {
     (error as NodeJS.ErrnoException).code = frame.code;
+  }
+  if (frame.applicationState !== undefined) {
+    Object.assign(error, { applicationState: frame.applicationState });
   }
   return error;
 };
@@ -278,6 +282,27 @@ export class NodeFsProviderClient extends AbstractFileSystemProvider {
   public async writeFile(path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> {
     this._assertRootedPath(path);
     await this._channel.request({ root: this._root, op: 'writeFile', path, data });
+  }
+
+  public async writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult> {
+    this._assertRootedPath(input.path);
+    for (const precondition of input.preconditions) {
+      this._assertRootedPath(precondition.path);
+    }
+    try {
+      return await this._channel.request({ root: this._root, op: 'writeFileChecked', ...input });
+    } catch (error) {
+      if ((error as { applicationState?: unknown }).applicationState !== undefined) {
+        throw error;
+      }
+      throw Object.assign(
+        new Error('Checked write outcome is unknown because its reply was unavailable.', { cause: error }),
+        {
+          code: 'CHECKED_WRITE_POTENTIALLY_APPLIED',
+          applicationState: 'potentially-applied',
+        },
+      );
+    }
   }
 
   public async readdir(path: string): Promise<string[]> {

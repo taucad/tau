@@ -16,6 +16,7 @@ import {
   assertRootedPath,
   createKernelError,
   createKernelSuccess,
+  createKernelParameterDeclaration,
   defineKernel,
   finalizeMeshOutput,
   gltfExportConventionSchema,
@@ -28,7 +29,10 @@ const maxIncludeDepth = 50;
 const useIncludePattern = /^\s*(?:use|include)\s*["<]([^">]+)[">]/gm;
 const importedAssetPattern = /\b(?:import|surface)\s*\(\s*(?:file\s*=\s*)?"([^"]+)"/g;
 type OpenRscadBackend = typeof OpenRscadModule;
-type OpenRscadContext = { backend: OpenRscadBackend; entryPath: string | undefined };
+type OpenRscadContext = {
+  backend: OpenRscadBackend;
+  entryPath: string | undefined;
+};
 
 const renderTessellationSchema = z.object({
   tessellation: z
@@ -72,10 +76,19 @@ const customizerParameterSchema = z.object({
     step: z.unknown().optional(),
     maxLength: z.unknown().optional(),
     length: z.number().optional(),
-    options: z.array(z.object({ value: z.union([z.number(), z.string()]), label: z.string() })).optional(),
+    options: z
+      .array(
+        z.object({
+          value: z.union([z.number(), z.string()]),
+          label: z.string(),
+        }),
+      )
+      .optional(),
   }),
 });
-const customizerOutputSchema = z.object({ params: z.array(customizerParameterSchema).optional() });
+const customizerOutputSchema = z.object({
+  params: z.array(customizerParameterSchema).optional(),
+});
 type CustomizerParameter = z.output<typeof customizerParameterSchema>;
 
 type SourceBundle = {
@@ -156,6 +169,7 @@ const collectSourceBundle = async (options: {
       return;
     }
     visited.add(visitKey);
+    /* oxlint-disable no-await-in-loop -- static imported assets are resolved in source order. */
     for (const specifier of parseImportedAssets(input.source)) {
       const absolutePath = resolveImportPath(
         specifier.startsWith('/') || specifier.startsWith('.') ? specifier : `./${specifier}`,
@@ -165,10 +179,8 @@ const collectSourceBundle = async (options: {
       try {
         const extension = specifier.slice(specifier.lastIndexOf('.')).toLowerCase();
         if (extension === '.dxf' || extension === '.svg') {
-          // oxlint-disable-next-line no-await-in-loop -- static assets are resolved in source order.
           files.set(lookupKey, await options.filesystem.readFile(absolutePath, 'utf8'));
         } else {
-          // oxlint-disable-next-line no-await-in-loop -- static assets are resolved in source order.
           binaryFiles.set(lookupKey, await options.filesystem.readFile(absolutePath));
         }
         resolved.add(absolutePath);
@@ -179,6 +191,7 @@ const collectSourceBundle = async (options: {
         unresolved.add(absolutePath);
       }
     }
+    /* oxlint-enable no-await-in-loop */
     for (const specifier of parseIncludes(input.source)) {
       const absolutePath = resolveImportPath(
         specifier.startsWith('/') || specifier.startsWith('.') ? specifier : `./${specifier}`,
@@ -265,16 +278,41 @@ const customizerProperty = (parameter: CustomizerParameter): JSONSchema7 => {
     default: parameter.value,
     ...(typeof parameter.description === 'string' ? { description: parameter.description } : {}),
   };
+  const options = parameter.control.options ?? [];
+  const onlyOption = options.length === 1 ? options[0] : undefined;
+  if (
+    parameter.control.kind === 'dropdown' &&
+    parameter.type === 'number' &&
+    onlyOption !== undefined &&
+    typeof onlyOption.value === 'number' &&
+    onlyOption.value !== parameter.value
+  ) {
+    return {
+      ...base,
+      type: 'number',
+      minimum: 0,
+      maximum: onlyOption.value,
+    };
+  }
   if (parameter.control.kind === 'dropdown') {
     return {
       ...base,
       type: parameter.type === 'number' ? 'number' : 'string',
-      oneOf: (parameter.control.options ?? []).map((option) => ({ const: option.value, title: option.label })),
+      oneOf: options.map((option) => ({
+        const: option.value,
+        title: option.label,
+      })),
     };
   }
   if (parameter.type === 'vector') {
     const length = parameter.control.length ?? (Array.isArray(parameter.value) ? parameter.value.length : 0);
-    return { ...base, type: 'array', items: { type: 'number' }, minItems: length, maxItems: length };
+    return {
+      ...base,
+      type: 'array',
+      items: { type: 'number' },
+      minItems: length,
+      maxItems: length,
+    };
   }
   if (parameter.type === 'bool') {
     return { ...base, type: 'boolean' };
@@ -298,7 +336,10 @@ const customizerProperty = (parameter: CustomizerParameter): JSONSchema7 => {
 const parseCustomizer = async (
   source: string,
   extractParameters: OpenRscadBackend['parameters'],
-): Promise<{ defaultParameters: Record<string, unknown>; jsonSchema: JSONSchema7 }> => {
+): Promise<{
+  defaultParameters: Record<string, unknown>;
+  jsonSchema: JSONSchema7;
+}> => {
   const parsedJson: unknown = JSON.parse(await extractParameters(source));
   const parsed = customizerOutputSchema.parse(parsedJson);
   const properties: Record<string, JSONSchema7Definition> = {};
@@ -375,7 +416,12 @@ const collectIssues = (result: ExportShape3DOutput, source: string, entryPath: s
     }
   }
   if (result.error) {
-    add({ code: 'RUNTIME', message: result.error, severity: 'error', type: 'kernel' });
+    add({
+      code: 'RUNTIME',
+      message: result.error,
+      severity: 'error',
+      type: 'kernel',
+    });
   }
   return issues;
 };
@@ -429,6 +475,7 @@ export type CreateOpenrscadKernelOptions = {
   version?: string;
 };
 
+/* oxlint-disable typescript/explicit-module-boundary-types -- defineKernel's exact inferred contract is the public type; spelling it would restore the deleted ReturnType annotation. */
 /**
  * Build an OpenRSCAD kernel over a chosen engine build.
  *
@@ -436,7 +483,6 @@ export type CreateOpenrscadKernelOptions = {
  * @returns a kernel factory, ready to register with a runtime
  * @public
  */
-// oxlint-disable-next-line typescript/explicit-module-boundary-types -- defineKernel's exact inferred contract is the public type; spelling it would restore the deleted ReturnType annotation
 export const createOpenrscadKernel = ({
   loadBackend = async () => import('@taulabs/openrscad-engine'),
   version = engineVersion,
@@ -449,7 +495,10 @@ export const createOpenrscadKernel = ({
     createOptionsSchema: openrscadRenderSchema,
     render: { optionsSchema: openrscadRenderSchema, content: ['includeEdges'] },
     exportFormats: {
-      glb: { optionsSchema: openrscadExportSchemas.glb, content: ['includeEdges'] },
+      glb: {
+        optionsSchema: openrscadExportSchemas.glb,
+        content: ['includeEdges'],
+      },
       '3mf': { optionsSchema: openrscadExportSchemas['3mf'] },
     },
 
@@ -473,13 +522,23 @@ export const createOpenrscadKernel = ({
     },
 
     async getDependencies({ entryPath }, { filesystem, logger }) {
-      const bundle = await collectSourceBundle({ entryPath, filesystem, logger });
+      const bundle = await collectSourceBundle({
+        entryPath,
+        filesystem,
+        logger,
+      });
       return { resolved: bundle.resolved, unresolved: bundle.unresolved };
     },
 
     async getParameters({ entryPath }, { filesystem }, context) {
       const source = await filesystem.readFile(entryPath, 'utf8');
-      return createKernelSuccess(await parseCustomizer(source, context.backend.parameters));
+      const { defaultParameters, jsonSchema } = await parseCustomizer(source, context.backend.parameters);
+      return createKernelSuccess(
+        createKernelParameterDeclaration(defaultParameters, jsonSchema, {
+          id: 'urn:taucad:openrscad:parameters',
+          name: 'OpenRscadParameters',
+        }),
+      );
     },
 
     async createGeometry({ entryPath, parameters, options }, { filesystem, logger, tracer }, context) {
@@ -488,8 +547,14 @@ export const createOpenrscadKernel = ({
         await context.backend.clearCache();
         context.entryPath = normalizedEntryPath;
       }
-      const bundle = await collectSourceBundle({ entryPath, filesystem, logger });
-      const span = tracer.startSpan('openrscad.export-3d', { phase: 'computingGeometry' });
+      const bundle = await collectSourceBundle({
+        entryPath,
+        filesystem,
+        logger,
+      });
+      const span = tracer.startSpan('openrscad.export-3d', {
+        phase: 'computingGeometry',
+      });
       let result: ExportShape3DOutput;
       try {
         result = assertExport(
@@ -538,8 +603,14 @@ export const createOpenrscadKernel = ({
 
     async meshGeometry({ nativeHandle, options, content }, { tracer }, context) {
       if (content?.includeEdges !== true) {
-        const geometry: GeometryGltf = { format: 'gltf', content: nativeHandle.previewGlb };
-        return finalizeMeshOutput({ artifacts: [geometry], issues: nativeHandle.issues });
+        const geometry: GeometryGltf = {
+          format: 'gltf',
+          content: nativeHandle.previewGlb,
+        };
+        return finalizeMeshOutput({
+          artifacts: [geometry],
+          issues: nativeHandle.issues,
+        });
       }
       if (nativeHandle.previewGlbWithEdges) {
         return finalizeMeshOutput({
@@ -547,7 +618,9 @@ export const createOpenrscadKernel = ({
           issues: nativeHandle.issues,
         });
       }
-      const span = tracer.startSpan('openrscad.export-3d-edges', { phase: 'serializingGeometry' });
+      const span = tracer.startSpan('openrscad.export-3d-edges', {
+        phase: 'serializingGeometry',
+      });
       let result: ExportShape3DOutput;
       try {
         result = assertExport(
@@ -568,7 +641,10 @@ export const createOpenrscadKernel = ({
         span.end();
       }
       nativeHandle.previewGlbWithEdges = asBuffer(result.bytes);
-      const geometry: GeometryGltf = { format: 'gltf', content: nativeHandle.previewGlbWithEdges };
+      const geometry: GeometryGltf = {
+        format: 'gltf',
+        content: nativeHandle.previewGlbWithEdges,
+      };
       return finalizeMeshOutput({
         artifacts: [geometry],
         issues: collectIssues(result, nativeHandle.source, nativeHandle.entryPath),
@@ -581,7 +657,9 @@ export const createOpenrscadKernel = ({
         format: '3mf' | 'glb',
         exportArtifact: () => Promise<ExportShape3DOutput>,
       ): Promise<ExportShape3DOutput> => {
-        const span = tracer.startSpan(`openrscad.export-${format}`, { phase: 'serializingGeometry' });
+        const span = tracer.startSpan(`openrscad.export-${format}`, {
+          phase: 'serializingGeometry',
+        });
         try {
           return await exportArtifact();
         } finally {
@@ -653,6 +731,7 @@ export const createOpenrscadKernel = ({
       await context.backend.clearCache();
     },
   });
+/* oxlint-enable typescript/explicit-module-boundary-types */
 
 /** OpenRSCAD WebAssembly kernel plugin. @public */
 export const openrscadKernel = createOpenrscadKernel();

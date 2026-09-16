@@ -1,5 +1,5 @@
-export { admitJsonSchema } from '#configuration/admission.js';
-export type { JsonSchema } from '#configuration/admission.js';
+export { admitJsonSchema } from '@taucad/parameters/schema';
+export type { JsonSchema } from '@taucad/parameters/schema';
 export { configurationIconIds } from '#configuration/configuration-icons.generated.js';
 export type { ConfigurationIconId } from '#configuration/configuration-icons.generated.js';
 export {
@@ -13,6 +13,8 @@ export type {
   ConfigurationDefinition,
   ConfigurationIssue,
   ConfigurationManifestV1,
+  ConfigurationNativeProjection,
+  ConfigurationNativeProjectionDiagnostic,
   ConfigurationSource,
   RestrictedRjsfUiSchemaV1,
   RestrictedUiNodeV1,

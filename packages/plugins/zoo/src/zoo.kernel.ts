@@ -20,6 +20,7 @@ import {
   defineKernel,
   createKernelError,
   createKernelSuccess,
+  createKernelParameterDeclaration,
   RenderArtifactFinalizationError,
   finalizeRenderOutput,
 } from '@taucad/runtime/kernel';
@@ -224,7 +225,10 @@ export const zooKernel = defineKernel({
     stl: { optionsSchema: zooExportSchemas.stl },
     step: { optionsSchema: zooExportSchemas.step },
     glb: { optionsSchema: zooExportSchemas.glb, content: ['includeTopology'] },
-    gltf: { optionsSchema: zooExportSchemas.gltf, content: ['includeTopology'] },
+    gltf: {
+      optionsSchema: zooExportSchemas.gltf,
+      content: ['includeTopology'],
+    },
   },
 
   async initialize(options) {
@@ -273,7 +277,12 @@ export const zooKernel = defineKernel({
       }
 
       const { defaultParameters, jsonSchema } = KclUtilities.convertKclVariablesToJsonSchema(executionResult.variables);
-      return createKernelSuccess({ defaultParameters, jsonSchema });
+      return createKernelSuccess(
+        createKernelParameterDeclaration(defaultParameters, jsonSchema, {
+          id: 'urn:taucad:zoo:parameters',
+          name: 'ZooParameters',
+        }),
+      );
     } catch (error) {
       const kclErrorResult = handleError(error, code, relativeFilePath);
       logKernelIssues(kclErrorResult.issues, logger);
@@ -393,7 +402,11 @@ export const zooKernel = defineKernel({
           );
           if (stlResult.length === 0 || !stlResult[0]) {
             return createKernelError([
-              { message: 'No STL data received from KCL export', code: 'RUNTIME', severity: 'error' },
+              {
+                message: 'No STL data received from KCL export',
+                code: 'RUNTIME',
+                severity: 'error',
+              },
             ]);
           }
           return createKernelSuccess([createExportFile('stl', 'model.stl', asBuffer(stlResult[0].contents))]);
@@ -411,7 +424,11 @@ export const zooKernel = defineKernel({
           );
           if (stepResult.length === 0 || !stepResult[0]) {
             return createKernelError([
-              { message: 'No STEP data received from KCL export', code: 'RUNTIME', severity: 'error' },
+              {
+                message: 'No STEP data received from KCL export',
+                code: 'RUNTIME',
+                severity: 'error',
+              },
             ]);
           }
           return createKernelSuccess([createExportFile('step', 'model.step', asBuffer(stepResult[0].contents))]);
@@ -423,7 +440,11 @@ export const zooKernel = defineKernel({
           const glbResult = await utilities.exportFromMemory({ type: 'gltf', storage: 'binary' }, { signal });
           if (glbResult.length === 0 || !glbResult[0]) {
             return createKernelError([
-              { message: 'No GLB data received from KCL export', code: 'RUNTIME', severity: 'error' },
+              {
+                message: 'No GLB data received from KCL export',
+                code: 'RUNTIME',
+                severity: 'error',
+              },
             ]);
           }
           const transformedGlb = await transformGltfExportBytes(glbResult[0].contents, {
@@ -456,7 +477,11 @@ export const zooKernel = defineKernel({
           );
           if (gltfResult.length === 0 || !gltfResult[0]) {
             return createKernelError([
-              { message: 'No GLTF data received from KCL export', code: 'RUNTIME', severity: 'error' },
+              {
+                message: 'No GLTF data received from KCL export',
+                code: 'RUNTIME',
+                severity: 'error',
+              },
             ]);
           }
           const transformedGltf = await transformGltfExportBytes(gltfResult[0].contents, {

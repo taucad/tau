@@ -15,6 +15,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import {
   existsSync,
@@ -27,10 +28,12 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { bundledLibraries, publishable, publishableClosure, publishWaves, workspace } from '@taucad/nx';
+import { chromium } from 'playwright';
+import type { Page } from 'playwright';
 
 type Dependencies = Record<string, string>;
 
@@ -90,7 +93,11 @@ const invariant: (condition: unknown, message: string) => asserts condition = (c
 };
 
 const run = (command: string, arguments_: string[], cwd: string): string => {
-  const result = spawnSync(command, arguments_, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const result = spawnSync(command, arguments_, {
+    cwd,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
   if (result.status !== 0) {
     throw new Error(
       `${command} ${arguments_.join(' ')} failed with status ${String(result.status)}\n${result.error?.message ?? ''}${result.stdout}${result.stderr}`,
@@ -105,18 +112,19 @@ const exportTarget = (entry: ExportEntry): string | undefined =>
 /** Every subpath a consumer can `import()`, as bare specifiers. Type-only entries have no runtime target. */
 export const importableSpecifiers = (manifest: Manifest): string[] =>
   Object.entries(manifest.exports ?? {})
-    .filter(([key, entry]) => key !== './package.json' && exportTarget(entry) !== undefined)
+    .filter(([key, entry]) => key !== './package.json' && !key.includes('*') && exportTarget(entry) !== undefined)
     .map(([key]) => (key === '.' ? manifest.name : `${manifest.name}${key.slice(1)}`));
 
 /** Every file an installed tree must contain: `files` entries plus every export condition target. */
-export const requiredArtifactPaths = (manifest: Manifest): string[] => [
-  ...(manifest.files ?? []),
-  ...Object.values(manifest.exports ?? {}).flatMap((entry) =>
-    typeof entry === 'string'
-      ? [entry]
-      : [entry.types, entry.import, entry.default].filter((path) => path !== undefined),
-  ),
-];
+export const requiredArtifactPaths = (manifest: Manifest): string[] =>
+  [
+    ...(manifest.files ?? []),
+    ...Object.values(manifest.exports ?? {}).flatMap((entry) =>
+      typeof entry === 'string'
+        ? [entry]
+        : [entry.types, entry.import, entry.default].filter((path) => path !== undefined),
+    ),
+  ].filter((path) => !path.includes('*'));
 
 /** Specifiers that must not survive into a published manifest, plus bundled private libraries. */
 export const manifestViolations = (manifest: Manifest, bundledLibraryNames: ReadonlySet<string>): string[] => {
@@ -172,9 +180,10 @@ export const packageAssetUrlSpecifiers = (source: string): string[] =>
 
 /** Every asset an installed package's modules reach for must exist inside that package. */
 const assertAssetUrlsResolve = (installedRoot: string, name: string): number => {
-  const modules = readdirSync(installedRoot, { recursive: true, encoding: 'utf8' }).filter((path) =>
-    path.endsWith('.mjs'),
-  );
+  const modules = readdirSync(installedRoot, {
+    recursive: true,
+    encoding: 'utf8',
+  }).filter((path) => path.endsWith('.mjs'));
   let checked = 0;
   for (const module_ of modules) {
     const modulePath = join(installedRoot, module_);
@@ -212,7 +221,10 @@ const assertAssetUrlsResolve = (installedRoot: string, name: string): number => 
  * npm install rather than from the manifests.
  */
 const assertSingleZodInstance = (appRoot: string): void => {
-  type Node = { readonly path?: string; readonly dependencies?: Record<string, Node> };
+  type Node = {
+    readonly path?: string;
+    readonly dependencies?: Record<string, Node>;
+  };
   // `--long` carries each node's install `path`: `--all` lists the same hoisted
   // copy once per dependent, so paths — not node counts — say how many copies
   // exist. `npm ls` exits non-zero on any tree advisory, so the JSON is read
@@ -255,6 +267,286 @@ const runRuntimeQuickStart = (appRoot: string, installedRoot: string): void => {
   );
   invariant(Number(exportedBytes) > 0, `README quick start exported an empty artifact: ${quickStartOutput}`);
   console.log(`README quick start: ${quickStartOutput}`);
+};
+
+const runtimeParameterOperationSource = `
+import { contentDigest } from '@taucad/cache-core';
+import { parameterUnits } from '@taucad/middleware/parameter-units';
+import { compileParameterManifest } from '@taucad/parameters';
+import { loadParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
+import { createActor, fromPromise, waitFor } from 'xstate';
+import { parameterSetMachine, submitParameterRequest } from '@taucad/parameters/set-machine';
+import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
+
+const digest = contentDigest({ value: \`sha256:\${'1'.repeat(64)}\` });
+const bareManifest = await compileParameterManifest({
+  declaration: {
+    schema: {
+      $schema: 'https://json-structure.org/meta/extended/v0/#',
+      $id: 'urn:taucad:packed-smoke:parameters',
+      $uses: ['JSONSchemaUnits'],
+      name: 'PackedSmokeParameters',
+      type: 'object',
+      properties: {
+        width: { type: 'double', minimum: 0 },
+        rotationAngle: { type: 'double', minimum: -180, maximum: 180 },
+      },
+    },
+    defaults: { width: 10, rotationAngle: 45 },
+  },
+  scope: { kind: 'source', authority: 'memory', root: '/project', entry: 'main.ts' },
+  source: { id: 'packed-smoke', version: '1', revision: digest, capability: 'json-structure' },
+  dependency: digest,
+  middleware: digest,
+});
+const middlewareDefinition = await resolveRuntimePluginDefinition('middleware', parameterUnits());
+const inferred = await middlewareDefinition.wrapGetParameters(
+  { entryPath: 'main.ts', resolution: { mode: 'default', inferenceLanguage: 'en' } },
+  async () => ({ success: true, data: bareManifest, issues: [] }),
+  { options: { angleDefault: 'deg' } },
+);
+if (!inferred.success) throw new Error('Packed parameter middleware failed to resolve a manifest.');
+const manifest = inferred.data;
+if (manifest.bindings['/width']?.unit !== 'mm' || manifest.bindings['/rotationAngle']?.unit !== 'deg') {
+  throw new Error(\`Packed parameter middleware returned the wrong units: \${JSON.stringify(manifest.bindings)}\`);
+}
+if (!Object.values(manifest.provenance).some(({ field, origin, evidence }) =>
+  field === 'unit' && origin === 'inferred' && evidence?.includes('instance=/width;')
+)) {
+  throw new Error('Packed parameter middleware omitted inferred width provenance.');
+}
+
+let bytes = null;
+const equalBytes = (left, right) =>
+  left === null || right === null
+    ? left === right
+    : left.byteLength === right.byteLength && left.every((value, index) => value === right[index]);
+const target = { authority: 'memory', root: '/project', entry: 'main.ts' };
+const authority = {
+  path: () => '.tau/parameters/main.ts.json',
+  read: async () => bytes?.slice() ?? null,
+  semanticPreconditions: async () => [],
+  writeChecked: async (input) => {
+    const expected = input.preconditions.find(({ path }) => path === input.path)?.expected ?? null;
+    if (!equalBytes(bytes, expected)) {
+      return { status: 'conflict', conflicts: [{ path: input.path, actual: bytes?.slice() ?? null }] };
+    }
+    const status = equalBytes(bytes, input.data) ? 'unchanged' : 'applied';
+    bytes = input.data.slice();
+    return { status, content: bytes.slice() };
+  },
+};
+const actor = createActor(parameterSetMachine.provide({ actors: {
+  loadParameterSet: fromPromise(async ({ signal }) => loadParameterSnapshot({ target, authority, manifest: async () => manifest, signal })),
+  commitParameterSet: fromPromise(async ({ input: change, signal }) => commitParameterChange({ change, authority, signal })),
+} }), { input: { target } });
+actor.start();
+const resolution = await waitFor(actor, snapshot => snapshot.matches({ open: 'ready' }));
+if (bytes !== null) throw new Error('Reading defaults unexpectedly wrote a sidecar.');
+const outcome = await submitParameterRequest(actor, {
+  requestId: 'packed-smoke:replace',
+  draftGeneration: 1,
+  fingerprint: 'packed-smoke:replace:v1',
+  expected: resolution.context.current.identity,
+  pressure: 'final',
+  operation: { kind: 'replace-group-values', group: 'default', values: { width: 25 } },
+});
+if (outcome.status !== 'committed' || outcome.write !== 'applied') {
+  throw new Error(\`Packed runtime operation did not commit: \${JSON.stringify(outcome)}\`);
+}
+if (bytes === null || !new TextDecoder().decode(bytes).includes('"width": 25')) {
+  throw new Error('Packed runtime operation did not persist the admitted native value.');
+}
+actor.send({ type: 'close' });
+await waitFor(actor, snapshot => snapshot.status === 'done');
+globalThis.__TAU_PARAMETER_PACK_SMOKE__ = 'committed width=25 and settled';
+console.log(globalThis.__TAU_PARAMETER_PACK_SMOKE__);
+`;
+
+const runBrowserModule = async (modulePath: string, assertPage: (page: Page) => Promise<void>): Promise<void> => {
+  const scriptPath = `/${basename(modulePath)}`;
+  const server = createServer((request, response) => {
+    if (request.url === '/') {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      response.end(`<div id="root"></div><script type="module" src="${scriptPath}"></script>`);
+      return;
+    }
+    if (request.url === scriptPath) {
+      response.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8' });
+      response.end(readFileSync(modulePath));
+      return;
+    }
+    response.writeHead(404);
+    response.end();
+  });
+  const port = await new Promise<number>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      invariant(address && typeof address === 'object', 'Browser smoke server did not bind a TCP port.');
+      resolve(address.port);
+    });
+  });
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  const errors: string[] = [];
+  try {
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('console', (message) => {
+      if (message.type() === 'error') {
+        errors.push(message.text());
+      }
+    });
+    await page.goto(`http://127.0.0.1:${String(port)}/`);
+    await assertPage(page);
+    invariant(errors.length === 0, `Packed browser module failed:\n${errors.join('\n')}`);
+  } finally {
+    await browser?.close();
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+};
+
+/** Exercise one checked operation from the installed runtime in Node and Chromium. */
+const runRuntimeParameterOperation = async (appRoot: string): Promise<void> => {
+  const source = join(appRoot, 'parameter-operation.mjs');
+  const browserBundle = join(appRoot, 'parameter-operation.browser.mjs');
+  writeFileSync(source, runtimeParameterOperationSource);
+  const nodeOutput = run(process.execPath, [source], appRoot).trim();
+  const esbuildRoot = dirname(createRequire(import.meta.url).resolve('esbuild/package.json'));
+  run(
+    join(esbuildRoot, 'bin/esbuild'),
+    [source, '--bundle', '--platform=browser', '--format=esm', `--outfile=${browserBundle}`],
+    appRoot,
+  );
+  await runBrowserModule(browserBundle, async (page) => {
+    await page.waitForFunction(
+      (expected) =>
+        (globalThis as typeof globalThis & { __TAU_PARAMETER_PACK_SMOKE__?: string }).__TAU_PARAMETER_PACK_SMOKE__ ===
+        expected,
+      nodeOutput,
+    );
+  });
+  console.log(`Packed parameter operation (Node + Chromium): ${nodeOutput}`);
+};
+
+const installedReactRuntimeSource = `
+import { createElement, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import { useRuntime } from '@taucad/react';
+import { defineKernel } from '@taucad/runtime';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { defineRuntime } from '@taucad/runtime/worker';
+
+const kernel = defineKernel({
+  id: 'packed-react',
+  extensions: ['mock'],
+  name: 'PackedReactKernel',
+  version: '1.0.0',
+  exportFormats: {},
+  async initialize() { return {}; },
+  async getDependencies({ entryPath }) { return { resolved: [entryPath], unresolved: [] }; },
+  async getParameters() {
+    return {
+      success: true,
+      data: {
+        schema: {
+          $schema: 'https://json-structure.org/meta/extended/v0/#',
+          $id: 'urn:taucad:packed-react:parameters',
+          $uses: ['JSONSchemaUnits'],
+          name: 'PackedReactParameters',
+          type: 'object',
+        },
+        defaults: {},
+      },
+      issues: [],
+    };
+  },
+  async createGeometry(input, runtime) {
+    const source = await runtime.filesystem.readFile(input.entryPath, 'utf8');
+    if (source === 'bad') throw new Error('packed react failure');
+    return {
+      geometry: { format: 'svg', content: \`<svg data-source="\${source}"></svg>\` },
+      nativeHandle: {},
+    };
+  },
+  async exportGeometry() { return { success: true, data: [], issues: [] }; },
+});
+const runtime = defineRuntime({ kernels: [kernel()] });
+const clientOptions = { transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }) };
+
+const App = () => {
+  const [source, setSource] = useState('good-one');
+  const result = useRuntime({ clientOptions, source: { files: { 'main.mock': source } } });
+  const geometry = result.geometry?.format === 'svg' ? result.geometry.content : '';
+  return createElement('main', {},
+    createElement('output', {
+      id: 'state',
+      'data-status': result.status,
+      'data-geometry-status': result.geometryStatus,
+      'data-geometry': geometry,
+      'data-error': result.error?.message ?? '',
+    }),
+    createElement('button', { id: 'fail', onClick: () => setSource('bad') }, 'fail'),
+    createElement('button', { id: 'recover', onClick: () => setSource('good-two') }, 'recover'),
+  );
+};
+
+createRoot(document.querySelector('#root')).render(createElement(App));
+`;
+
+/** Verify the installed public React hook retains last-good geometry through a real browser failure. */
+const runInstalledReactRuntime = async (appRoot: string): Promise<void> => {
+  const source = join(appRoot, 'react-runtime.mjs');
+  const bundle = join(appRoot, 'react-runtime.browser.mjs');
+  writeFileSync(source, installedReactRuntimeSource);
+  const esbuildRoot = dirname(createRequire(import.meta.url).resolve('esbuild/package.json'));
+  run(
+    join(esbuildRoot, 'bin/esbuild'),
+    [source, '--bundle', '--platform=browser', '--format=esm', '--external:node:*', `--outfile=${bundle}`],
+    appRoot,
+  );
+  await runBrowserModule(bundle, async (page) => {
+    const state = page.locator('#state');
+    await page.waitForFunction(
+      () => document.querySelector<HTMLElement>('#state')?.dataset['geometryStatus'] === 'current',
+    );
+    const firstGeometry = await state.getAttribute('data-geometry');
+    invariant(
+      firstGeometry?.includes('good-one'),
+      `Installed React hook did not render initial geometry: ${firstGeometry ?? ''}`,
+    );
+    await page.locator('#fail').click();
+    await page.waitForFunction(() => {
+      const element = document.querySelector<HTMLElement>('#state');
+      return element?.dataset['status'] === 'error' && element.dataset['geometryStatus'] === 'stale';
+    });
+    invariant(
+      (await state.getAttribute('data-geometry')) === firstGeometry,
+      'Installed React hook discarded last-good geometry.',
+    );
+    const renderError = await state.getAttribute('data-error');
+    invariant(renderError?.includes('packed react failure'), 'Installed React hook omitted the render failure.');
+    await page.locator('#recover').click();
+    await page.waitForFunction(() => {
+      const element = document.querySelector<HTMLElement>('#state');
+      return (
+        element?.dataset['status'] === 'ready' &&
+        element.dataset['geometryStatus'] === 'current' &&
+        element.dataset['geometry']?.includes('good-two')
+      );
+    });
+  });
+  console.log('Packed React/runtime Chromium lifecycle: current → stale → current.');
 };
 
 /** Installed-consumer probe: load modules and JSON; resolve and read exported documentation. */
@@ -353,7 +645,15 @@ const main = async (): Promise<void> => {
     // does; `assertSingleZodInstance` then proves npm did not fork it.
     writeFileSync(
       join(appRoot, 'package.json'),
-      JSON.stringify({ private: true, type: 'module', dependencies: { zod: '^4.0.0' } }, undefined, 2),
+      JSON.stringify(
+        {
+          private: true,
+          type: 'module',
+          dependencies: { react: '19.2.7', 'react-dom': '19.2.7', zod: '^4.0.0' },
+        },
+        undefined,
+        2,
+      ),
     );
     // One install for every tarball: npm resolves the sibling `@taucad/*` and `geospec`
     // specifiers against the local files instead of their stale registry copies.
@@ -432,6 +732,10 @@ const main = async (): Promise<void> => {
     const runtimeRoot = join(appRoot, 'node_modules/@taucad/runtime');
     if (existsSync(runtimeRoot)) {
       runRuntimeQuickStart(appRoot, runtimeRoot);
+      await runRuntimeParameterOperation(appRoot);
+      if (existsSync(join(appRoot, 'node_modules/@taucad/react'))) {
+        await runInstalledReactRuntime(appRoot);
+      }
     }
     console.log('npm-local TGZ install and published-surface smoke passed.');
     passed = true;

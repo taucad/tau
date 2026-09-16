@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { resolve } from 'node:path';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 
-import { desktopAssimpBackend, desktopOpenrscadKernel } from '#tau/desktop-runtime.factory.js';
+import { createDesktopRuntime, desktopAssimpBackend, desktopOpenrscadKernel } from '#tau/desktop-runtime.factory.js';
+import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
 
 import { kernelEngineEvent, kernelEngineRecord } from '#tau/kernel-diagnostics.js';
 
@@ -55,6 +57,22 @@ describe('kernelEngineRecord', () => {
 });
 
 describe('the identity the record reports', () => {
+  it('enables one unit-inference middleware after the parameter cache', async () => {
+    process.env['TAU_BUILD123D_RESOURCE_ROOT'] = resolve(import.meta.dirname, '../../resources/python');
+    process.env['TAU_PICOGK_RESOURCE_ROOT'] = resolve(import.meta.dirname, '../../resources/picogk');
+    const resolved = await resolveRuntimeDefinition(createDesktopRuntime(), {
+      tauApiUrl: 'http://localhost:4000',
+      tauWebSocketUrl: 'ws://localhost:4001',
+    });
+    expect(resolved.middleware.map(({ id }) => id)).toEqual([
+      'parameterFileResolver',
+      'parameterCache',
+      'parameterUnits',
+      'geometryCache',
+      'gltfEdgeDetection',
+    ]);
+  });
+
   it('comes from the kernel the desktop recipe actually serves and the engine it loaded', async () => {
     /* The witness resolves `desktopOpenrscadKernel` — the same binding
      * `desktop-runtime.definition.ts` registers under `kernels:` — and the

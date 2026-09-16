@@ -87,11 +87,13 @@ const partTypeCategoryMap = new Map<string, ActivityCategory>([
   ['tool-use_skill', 'research'],
   // Reading this project's history is exploration like any other read (S28).
   ['tool-revisions', 'research'],
+  ['tool-get_parameters', 'research'],
 
   // File mutations share the activity fold; their own disclosure holds the diff card.
   ['tool-edit_file', 'research'],
   ['tool-create_file', 'research'],
   ['tool-delete_file', 'research'],
+  ['tool-apply_parameter_operation', 'research'],
   // Export deliverables remain standalone.
   ['tool-export_geometry', 'write'],
 ]);

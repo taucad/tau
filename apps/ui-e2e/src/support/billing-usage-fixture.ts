@@ -3,19 +3,11 @@
 /* oxlint-disable typescript/consistent-type-definitions -- the Vitest command contract is an augmentable interface, as `external-target.ts` declares it. */
 /* oxlint-disable typescript/no-restricted-types -- `null` is the wire's own signed-out and unauthorized value; swapping it for `undefined` would stop modelling what the API returns. */
 /* oxlint-disable no-restricted-imports -- the fixture has to be the billing wire's own schema, and `apps/ui-e2e` has no manifest or path mapping to reach `@taucad/billing` through, so the two imports below are relative. */
-import { server } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- see the file header
 import { wireUsageSnapshotSchema } from '../../../libs/billing/src/index.ts';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- see the file header
 import type { WireUsageSnapshot } from '../../../libs/billing/src/index.ts';
-
-declare module 'vitest/browser' {
-  interface BrowserCommands {
-    uiAddContextInitScript(source: string, argument?: unknown): Promise<void>;
-    uiSetTargetOffline(offline: boolean): Promise<void>;
-  }
-}
 
 /** The signed-in account the stubbed `/v1/auth/get-session` reports. */
 export type StubbedAccount = {
@@ -222,7 +214,7 @@ const billingApiStubScript = (stub: BillingApiStubPayload): void => {
  * @returns Resolves once the script is registered on the context.
  */
 export const installBillingApiStub = async (stub: BillingApiStub): Promise<void> => {
-  await server.commands.uiAddContextInitScript(billingApiStubScript.toString(), {
+  await target.commands.uiAddContextInitScript(billingApiStubScript.toString(), {
     ...stub,
     sessionToken: stubSessionToken,
   });
@@ -235,7 +227,7 @@ export const installBillingApiStub = async (stub: BillingApiStub): Promise<void>
  * @returns Resolves once the context is in that state.
  */
 export const setTargetOffline = async (offline: boolean): Promise<void> => {
-  await server.commands.uiSetTargetOffline(offline);
+  await target.commands.uiSetTargetOffline(offline);
 };
 
 /** What the `tau-billing` database holds, from the page's own origin. */
@@ -400,7 +392,7 @@ export const waitForOfflineShell = async (timeout = 120_000): Promise<string> =>
  * @returns Resolves once the recorder is registered.
  */
 export const installPurgeChannelRecorder = async (): Promise<void> => {
-  await server.commands.uiAddContextInitScript(
+  await target.commands.uiAddContextInitScript(
     ((): void => {
       const received: unknown[] = [];
       (globalThis as unknown as { __tauPurgeMessages?: unknown[] }).__tauPurgeMessages = received;
@@ -431,7 +423,7 @@ export const readPurgeMessages = async (surface?: 'primary' | 'secondary'): Prom
  * @returns Resolves once the override is registered on the context.
  */
 export const installUncachedViewOverride = async (): Promise<void> => {
-  await server.commands.uiAddContextInitScript(
+  await target.commands.uiAddContextInitScript(
     ((): void => {
       const { resolvedOptions } = Intl.DateTimeFormat.prototype;
       Intl.DateTimeFormat.prototype.resolvedOptions = function (

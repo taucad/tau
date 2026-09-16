@@ -50,6 +50,53 @@ class AnalyzerTest(unittest.TestCase):
         issue = analyzer.AnalysisIssue("bad", "CODE", 3, 4)
         self.assertEqual(issue.as_dict("main.py")["location"]["startColumn"], 4)
 
+    def test_native_unit_declaration_preserves_values_and_constraints(self) -> None:
+        result = analyzer.analyze_source(
+            model(
+                "length: float = 25.4\n    angle: float = 30.0",
+                "__tau__ = {'parameters': {"
+                "'length': {'minimum': 1.0, 'maximum': 100.0, 'unit': 'mm', 'ucumUnit': 'mm', "
+                "'symbol': 'mm', 'symbols': {'default': 'mm', 'lang:en-NZ': 'millimetres'}, "
+                "'quantityKind': 'http://qudt.org/vocab/quantitykind/Length', 'space': 'linear'}, "
+                "'angle': {'ucumUnit': 'deg', "
+                "'quantityKind': 'http://qudt.org/vocab/quantitykind/PlaneAngle', 'space': 'linear'}}}",
+            )
+        )
+
+        declaration = result["declaration"]
+        self.assertEqual(declaration["defaults"], {"length": 25.4, "angle": 30.0})
+        self.assertEqual(
+            declaration["schema"]["properties"]["length"],
+            {
+                "type": "double",
+                "default": 25.4,
+                "minimum": 1.0,
+                "maximum": 100.0,
+                "unit": "mm",
+                "ucumUnit": "mm",
+                "symbol": "mm",
+                "symbols": {"default": "mm", "lang:en-NZ": "millimetres"},
+            },
+        )
+        self.assertEqual(
+            declaration["bindings"],
+            {
+                "/length": {
+                    "unit": "mm",
+                    "quantityKind": "http://qudt.org/vocab/quantitykind/Length",
+                    "space": "linear",
+                    "sourceUnitCapability": "change-source-unit:preserve-size:v1",
+                },
+                "/angle": {
+                    "unit": "deg",
+                    "quantityKind": "http://qudt.org/vocab/quantitykind/PlaneAngle",
+                    "space": "linear",
+                    "sourceUnitCapability": "change-source-unit:preserve-size:v1",
+                },
+            },
+        )
+        self.assertEqual(result["jsonSchema"]["properties"]["length"]["default"], 25.4)
+
     def test_parse_limits_and_syntax(self) -> None:
         self.assertEqual(self.assert_issue("(", "was never closed").code, "PYTHON_SYNTAX")
         with patch.object(analyzer, "MAX_SOURCE_BYTES", 1):
@@ -142,6 +189,53 @@ class AnalyzerTest(unittest.TestCase):
         for hint, message in string_cases:
             source = model("name: str = 'a'", f"__tau__ = {{'parameters': {{'name': {hint}}}}}")
             with self.subTest(hint=hint):
+                self.assert_issue(source, message)
+
+    def test_unit_declaration_rejections(self) -> None:
+        cases = (
+            ("name: str = 'part'", "{'ucumUnit': 'mm'}", "numeric parameter"),
+            ("length: float = 1.0", "{'ucumUnit': ''}", "requires a UCUM code"),
+            ("length: float = 1.0", "{'ucumUnit': 'bad unit'}", "requires a UCUM code"),
+            ("length: float = 1.0", "{'unit': 'mm', 'ucumUnit': 'cm'}", "conflict"),
+            ("length: float = 1.0", "{'unit': 'inch'}", "reviewed unit symbol"),
+            ("length: float = 1.0", "{'symbol': 'mm'}", "require a unit"),
+            ("length: float = 1.0", "{'ucumUnit': 'mm', 'symbol': ''}", "non-empty string"),
+            ("length: float = 1.0", "{'ucumUnit': 'mm', 'symbols': []}", "is invalid"),
+            (
+                "length: float = 1.0",
+                "{'ucumUnit': 'mm', 'symbols': {'lang:not_a_tag': 'mm'}}",
+                "is invalid",
+            ),
+            ("length: float = 1.0", "{'ucumUnit': 'mm', 'quantityKind': 'length'}", "is invalid"),
+            ("length: float = 1.0", "{'ucumUnit': 'mm', 'space': 'affine'}", "is invalid"),
+            ("length: float = 1.0", "{'ucumUnit': 'mm', 'reference': ''}", "is invalid"),
+            ("length: float = 1.0", "{'ucumUnit': 'mm', 'space': 'point'}", "requires a reference"),
+            (
+                "length: float = 1.0",
+                "{'ucumUnit': 'mm', 'space': 'linear', 'reference': 'urn:reference'}",
+                "forbid one",
+            ),
+        )
+        for fields, hint, message in cases:
+            source = model(fields, f"__tau__ = {{'parameters': {{{fields.split(':')[0]!r}: {hint}}}}}")
+            with self.subTest(hint=hint):
+                self.assert_issue(source, message)
+
+    def test_nonfinite_and_unsafe_numeric_rejections(self) -> None:
+        cases = (
+            (model("count: int = 9007199254740992"), "safe integer"),
+            (model("length: float = 1e999"), "must be finite"),
+            (
+                model("count: int = 1", "__tau__ = {'parameters': {'count': {'maximum': 9007199254740992}}}"),
+                "safe integer",
+            ),
+            (
+                model("length: float = 1.0", "__tau__ = {'parameters': {'length': {'examples': [1e999]}}}"),
+                "must be finite",
+            ),
+        )
+        for source, message in cases:
+            with self.subTest(message=message):
                 self.assert_issue(source, message)
 
     def test_names_annotations_and_decorator_forms(self) -> None:

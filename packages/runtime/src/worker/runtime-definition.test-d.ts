@@ -12,6 +12,8 @@ import type {
   RuntimeMiddleware,
   RuntimeTranscoders,
 } from '#worker/runtime-definition.js';
+// oxlint-disable-next-line no-restricted-imports -- Runtime-private fixture stays outside the package build graph.
+import { createParameterDeclaration } from '../../test/support/kernel-worker.fixture.js';
 
 const kernel = defineKernel({
   id: 'typed-export',
@@ -26,7 +28,7 @@ const kernel = defineKernel({
     return { resolved: [], unresolved: [] };
   },
   async getParameters() {
-    return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+    return createParameterDeclaration();
   },
   async createGeometry() {
     return { geometry: { format: 'gltf', content: new Uint8Array() }, nativeHandle: {} };

@@ -1,12 +1,13 @@
 import React, { useMemo } from 'react';
 import { Box, PenLine, Ruler } from 'lucide-react';
-import type { LengthSymbol } from '@taucad/units';
-import { convertLength } from '@taucad/units/converter';
+import { convertLength, toUcumLengthCode } from '#constants/length-units.js';
+import type { LengthSymbol } from '#constants/length-units.js';
+import type { ParameterFieldProjection } from '@taucad/parameters';
+import { quantityKinds } from '@taucad/units/quantity';
 import { Button } from '@taucad/ui/components/button';
 import { Tabs, TabsList, TabsTrigger } from '@taucad/ui/components/tabs';
 import { Switch } from '@taucad/ui/components/switch';
 import { ParametersNumber } from '#components/geometry/parameters/parameters-number.js';
-import type { Units } from '#components/geometry/parameters/rjsf-context.js';
 import { InfoTooltip } from '#components/ui/info-tooltip.js';
 import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
 
@@ -18,6 +19,20 @@ function toDegrees(radians: number): number {
 function toRadians(degrees: number): number {
   return (degrees * Math.PI) / 180;
 }
+
+const angleProjection: ParameterFieldProjection = {
+  status: 'unit-bearing',
+  instancePointer: '/sectionRotation',
+  parameterId: 'sectionRotation',
+  representation: 'binary64',
+  constraints: {},
+  nativeUnit: 'deg',
+  quantityKind: quantityKinds.planeAngle,
+  space: 'linear',
+  displayUnit: 'deg',
+  adornment: '°',
+  guessed: false,
+};
 
 type PlaneButtonConfig = {
   id: 'xy' | 'xz' | 'yz' | 'yx' | 'zx' | 'zy';
@@ -111,7 +126,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
     enableClippingMesh,
     geometryRadius,
     geometryCenter,
-    parameterUnits,
+    displayLengthSymbol,
     upDirection,
   } = useGraphicsSelector((s) => ({
     selectedSectionViewId: s.context.selectedSectionViewId,
@@ -123,26 +138,37 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
     enableClippingMesh: s.context.enableClippingMesh,
     geometryRadius: s.context.geometryRadius,
     geometryCenter: s.context.geometryCenter,
-    parameterUnits: {
-      length: {
-        sourceSymbol: 'm',
-        displaySymbol: s.context.displayUnits.length.symbol,
-      },
-    } satisfies Units,
+    displayLengthSymbol: s.context.displayUnits.length.symbol,
     upDirection: s.context.upDirection,
   }));
 
   const translationControl = useMemo(
     () =>
       resolveSectionTranslationControl({
-        displaySymbol: parameterUnits.length.displaySymbol,
+        displaySymbol: displayLengthSymbol,
         geometryCenterMeters: geometryCenter,
         geometryRadiusMeters: geometryRadius,
         selectedPlaneId: selectedSectionViewId,
       }),
-    [geometryCenter, geometryRadius, parameterUnits.length.displaySymbol, selectedSectionViewId],
+    [displayLengthSymbol, geometryCenter, geometryRadius, selectedSectionViewId],
   );
 
+  const translationProjection = useMemo<ParameterFieldProjection>(
+    () => ({
+      status: 'unit-bearing',
+      instancePointer: '/sectionTranslation',
+      parameterId: 'sectionTranslation',
+      representation: 'binary64',
+      constraints: {},
+      nativeUnit: 'm',
+      quantityKind: quantityKinds.length,
+      space: 'linear',
+      displayUnit: toUcumLengthCode(displayLengthSymbol),
+      adornment: displayLengthSymbol,
+      guessed: false,
+    }),
+    [displayLengthSymbol],
+  );
   const rotationDegrees = useMemo(() => {
     const [rx, ry, rz] = sectionViewRotation;
     return { x: toDegrees(rx), y: toDegrees(ry), z: toDegrees(rz) };
@@ -242,10 +268,10 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
               </div>
               <ParametersNumber
                 enableContinualOnChange
-                units={parameterUnits}
+                edit={{ kind: 'transient' }}
+                fieldProjection={translationProjection}
                 value={sectionViewTranslation}
                 defaultValue={0}
-                descriptor='length'
                 step={translationControl.stepMeters}
                 min={translationControl.minMeters}
                 max={translationControl.maxMeters}
@@ -264,10 +290,10 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                 </div>
                 <ParametersNumber
                   enableContinualOnChange
-                  units={parameterUnits}
+                  edit={{ kind: 'transient' }}
+                  fieldProjection={angleProjection}
                   value={rotationDegrees.x}
                   defaultValue={0}
-                  descriptor='angle'
                   min={-180}
                   max={180}
                   step={1}
@@ -284,10 +310,10 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                 </div>
                 <ParametersNumber
                   enableContinualOnChange
-                  units={parameterUnits}
+                  edit={{ kind: 'transient' }}
+                  fieldProjection={angleProjection}
                   value={rotationDegrees.y}
                   defaultValue={0}
-                  descriptor='angle'
                   min={-180}
                   max={180}
                   step={1}
@@ -304,10 +330,10 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                 </div>
                 <ParametersNumber
                   enableContinualOnChange
-                  units={parameterUnits}
+                  edit={{ kind: 'transient' }}
+                  fieldProjection={angleProjection}
                   value={rotationDegrees.z}
                   defaultValue={0}
-                  descriptor='angle'
                   min={-180}
                   max={180}
                   step={1}

@@ -5,6 +5,7 @@ import { assign, createActor, setup, waitFor } from 'xstate';
 import { RenderTimeoutError } from '@taucad/runtime/client';
 import type { CapabilitiesManifest, KernelIssue, TelemetryEntry } from '@taucad/runtime';
 import { createMockRuntimeClient } from '@taucad/runtime-testing';
+import type { ParameterManifest } from '@taucad/parameters';
 import type { Geometry } from '@taucad/types';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
@@ -614,23 +615,24 @@ describe('cadMachine', () => {
       actor.stop();
     });
 
-    it('should set default parameters on parametersParsed', async () => {
+    it('should store the exact manifest on parametersParsed', async () => {
       const { actor } = await startAndConnect();
       const schema = {
         type: 'object',
         properties: { width: { type: 'number' } },
       } as const;
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- action fixture exercises only projected fields.
+      const manifest = {
+        defaults: { width: 42 },
+        legacyProjection: { status: 'usable', schema, diagnostics: [] },
+      } as unknown as ParameterManifest;
 
       actor.send({
         type: 'parametersParsed',
-        defaultParameters: { width: 42 },
-        jsonSchema: schema,
+        manifest,
       });
 
-      expect(actor.getSnapshot().context.defaultParameters).toEqual({
-        width: 42,
-      });
-      expect(actor.getSnapshot().context.jsonSchema).toEqual(schema);
+      expect(actor.getSnapshot().context.parameterManifest).toBe(manifest);
       actor.stop();
     });
 
@@ -1293,7 +1295,7 @@ describe('cadMachine', () => {
       expect(context.entryPath).toBeUndefined();
       expect(context.screenshot).toBeUndefined();
       expect(context.parameters).toEqual({});
-      expect(context.defaultParameters).toEqual({});
+      expect(context.parameterManifest).toBeUndefined();
       expect(context.latestGeometryOutcome).toBeUndefined();
       expect(context.geometry).toBeUndefined();
       expect(context.kernelIssues.size).toBe(0);

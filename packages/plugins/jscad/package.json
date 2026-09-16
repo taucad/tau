@@ -61,7 +61,8 @@
     "@gltf-transform/core": "catalog:",
     "@gltf-transform/extensions": "catalog:",
     "@jscad/modeling": "catalog:",
-    "@taucad/geometry-core": "workspace:*"
+    "@taucad/geometry-core": "workspace:*",
+    "@taucad/parameters": "workspace:*"
   },
   "peerDependencies": {
     "@taucad/runtime": "^0.1.0-beta.0",

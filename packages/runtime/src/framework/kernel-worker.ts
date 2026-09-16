@@ -14,6 +14,7 @@ import type {
   CreateGeometryResult,
   MeshGeometryResult,
   ExportGeometryResult,
+  GetParameterDeclarationsResult,
   GetParametersResult,
   KernelIssue,
   CapabilitiesManifest,
@@ -105,7 +106,7 @@ import { createKernelError } from '#kernels/kernel-helpers.js';
 import { cooperativeYield } from '#framework/async-polyfills.js';
 import { parameterDebounce, fileChangeDebounce } from '#framework/runtime-framework.constants.js';
 import { canonicalJson, sha256Bytes, sha256String } from '@taucad/utils/hash';
-import { digestContent, digestScene } from '@taucad/cache-core';
+import { contentDigest, digestContent, digestScene } from '@taucad/cache-core';
 import type { SceneDigest } from '@taucad/cache-core';
 import { RuntimeTracer } from '#framework/runtime-tracer.js';
 import { WorkerTelemetryCollector } from '#framework/worker-telemetry.js';
@@ -145,6 +146,9 @@ import type {
 } from '#types/runtime-scene.types.js';
 import type { RuntimeContentInput, RuntimeContentKey } from '#types/runtime-content.types.js';
 import { packageVersion } from '#utils/package-info.js';
+import { admitParameterManifest, compileParameterManifest, ParameterAdmissionError } from '@taucad/parameters';
+import type { ParameterDeclaration, ParameterManifest, ParameterResolutionOptions } from '@taucad/parameters';
+import { validateJsonSchemaValue } from '@taucad/parameters/schema';
 import type {
   DependencyResolutionContext,
   CommonDependencySet,
@@ -1373,26 +1377,45 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * Handles base path setup, timing, and middleware application using onion model.
    *
    * @param file - The geometry file to extract parameters from.
+   * @param resolution - Bounded manifest resolution settings.
+   * @param operation - Optional request-owned staging and abort state.
    * @returns The extracted parameters.
    */
-  public async getParameters(file: RuntimeFileLocator): Promise<GetParametersResult> {
+  public async getParameters(
+    file: RuntimeFileLocator,
+    resolution?: ParameterResolutionOptions,
+    operation?: Readonly<{
+      signal?: AbortSignal;
+      stage?: Record<string, Uint8Array<ArrayBuffer>>;
+    }>,
+  ): Promise<GetParametersResult> {
     return this.enqueueOperation(async () => {
+      this.operationSignal?.throwIfAborted();
       this.prepareUnobservedFileSystem(false);
-      return this.getParametersInLane(file);
-    });
+      if (operation?.stage) {
+        await this.writeFilesAndInvalidate(operation.stage);
+        this.operationSignal?.throwIfAborted();
+      }
+      return this.getParametersInLane(file, { resolution });
+    }, operation?.signal);
   }
 
   private async getParametersInLane(
     file: RuntimeFileLocator,
-    dependencyContext?: DependencyResolutionContext,
-    owner?: OperationOwner,
+    options: Readonly<{
+      dependencyContext?: DependencyResolutionContext;
+      owner?: OperationOwner;
+      resolution?: ParameterResolutionOptions;
+    }> = {},
   ): Promise<GetParametersResult> {
+    const { dependencyContext, owner, resolution = {} } = options;
     const operationOwner = owner ?? (await this.createOperationOwner(file, 'request'));
     const entryPath = assertRootedPath(joinRelativePath(operationOwner.file.path, operationOwner.file.filename));
     const start = performance.now();
 
     const input: GetParametersInput = {
       entryPath,
+      resolution,
     };
 
     const resolvedArray = this.getMiddleware().filter(
@@ -1412,6 +1435,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       owner: operationOwner,
     });
     const dependencyHash = await this.computeDependencyHash(dependencies);
+    const parameterDependencyHash = await sha256String(canonicalJson({ dependencyHash, resolution }));
     depsSpan.end();
     const parameterMiddlewareKey = canonicalJson(
       resolvedArray.map(({ id, middleware, options }) => ({
@@ -1430,7 +1454,53 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       kernelOptionsKey,
       parameterMiddlewareKey,
       dependencyHash,
+      canonicalJson(resolution),
     ].join('|');
+    const parameterScope = {
+      kind: 'source',
+      authority: this.filesystem.id,
+      root: '',
+      entry: entryPath,
+    } as const;
+    const parameterSource = {
+      id: operationOwner.binding?.kernelId ?? 'unbound-kernel',
+      version: operationOwner.binding?.kernelVersion ?? '0',
+      revision: parameterDependencyHash,
+      capability: 'json-structure',
+    } as const;
+    const parameterSourceFiles: ParameterManifest['identity']['sourceFiles'] = Object.fromEntries(
+      dependencies.flatMap((dependency) =>
+        dependency.type === 'file'
+          ? ([
+              [
+                dependency.path,
+                dependency.contentHash === 'missing'
+                  ? 'missing'
+                  : contentDigest({
+                      value: `sha256:${dependency.contentHash}`,
+                      name: `parameter source ${dependency.path}`,
+                    }),
+              ],
+            ] as const)
+          : [],
+      ),
+    );
+    const parameterIdentity = {
+      dependency: contentDigest({ value: `sha256:${dependencyHash}`, name: 'parameter dependency hash' }),
+      middleware: contentDigest({
+        value: `sha256:${await sha256String(parameterMiddlewareKey)}`,
+        name: 'parameter middleware identity',
+      }),
+      resolution,
+      sourceFiles: parameterSourceFiles,
+    } as const;
+    const parameterSemanticHash = await sha256String(
+      canonicalJson({
+        dependency: parameterIdentity.dependency,
+        middleware: parameterIdentity.middleware,
+        resolution: parameterIdentity.resolution,
+      }),
+    );
     if (operationOwner.kind === 'render-artifact') {
       this.onProgress?.('extractingParams');
     }
@@ -1451,7 +1521,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             filesystem: this.filesystem,
             compute: this.createComputeRuntime(this.operationSignal ?? neverAbortedSignal),
             dependencies,
-            dependencyHash,
+            dependencyHash: parameterSemanticHash,
             stateSchema: middleware.stateSchema,
             options: middlewareOptions,
             logger: this.getMiddlewareLogger(id, middleware.name),
@@ -1461,14 +1531,46 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
 
     const { tracer } = this;
-    let chain: GetParametersHandler = named('kernelHandler', async (handlerInput: GetParametersInput) => {
+    let producerDeclaration: ParameterDeclaration | undefined;
+    const kernelHandler: GetParametersHandler = named('kernelHandler', async (handlerInput: GetParametersInput) => {
       const parametersSpan = tracer.startSpan('kernel.extract-params', {
         phase: 'extractingParams',
       });
       const result = await this.onGetParametersForOwner(operationOwner, handlerInput, this.createRuntime());
       parametersSpan.end();
-      return result;
+      if (!result.success) {
+        return result;
+      }
+      try {
+        const manifest = await compileParameterManifest({
+          declaration: result.data,
+          scope: parameterScope,
+          source: parameterSource,
+          dependency: parameterIdentity.dependency,
+          middleware: parameterIdentity.middleware,
+          resolution: parameterIdentity.resolution,
+          sourceFiles: parameterIdentity.sourceFiles,
+        });
+        producerDeclaration = {
+          schema: manifest.schema,
+          resources: manifest.resources,
+          defaults: manifest.defaults,
+          bindings: manifest.bindingDeclarations,
+        };
+        return { ...result, data: manifest };
+      } catch (error) {
+        return createKernelError([
+          {
+            message: error instanceof Error ? error.message : 'Parameter declaration admission failed',
+            code: 'RUNTIME',
+            type: 'kernel',
+            severity: 'error',
+            details: error instanceof ParameterAdmissionError ? error.diagnostics : undefined,
+          },
+        ]);
+      }
     });
+    let chain = kernelHandler;
 
     for (let index = resolvedArray.length - 1; index >= 0; index--) {
       const { middleware, enabled, id } = resolvedArray[index]!;
@@ -1505,7 +1607,44 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
     }
 
-    const result = await chain(input);
+    let chainedResult = await chain(input);
+    if (chainedResult.success && producerDeclaration === undefined) {
+      // A middleware cache hit bypasses the producer. Establish the current
+      // trusted declaration through the same handler before admitting the
+      // cached effective manifest; the cached manifest cannot be its own trust
+      // baseline.
+      const producerResult = await kernelHandler(input);
+      if (!producerResult.success) {
+        chainedResult = producerResult;
+      }
+    }
+    let result = chainedResult;
+    if (chainedResult.success) {
+      try {
+        if (producerDeclaration === undefined) {
+          throw new Error('Middleware returned parameters without invoking the producer declaration');
+        }
+        result = {
+          ...chainedResult,
+          data: await admitParameterManifest(chainedResult.data, {
+            scope: parameterScope,
+            source: parameterSource,
+            identity: parameterIdentity,
+            producerDeclaration,
+          }),
+        };
+      } catch (error) {
+        result = createKernelError([
+          {
+            message: error instanceof Error ? error.message : 'Effective parameter manifest admission failed',
+            code: 'RUNTIME',
+            type: 'kernel',
+            severity: 'error',
+            details: error instanceof ParameterAdmissionError ? error.diagnostics : undefined,
+          },
+        ]);
+      }
+    }
     if (result.success) {
       this.parameterResultCache = { key: parameterCacheKey, result: structuredClone(result) };
     }
@@ -1904,16 +2043,24 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             return plan.result;
           }
 
-          const parametersResult = await this.getParametersInLane(request.file, dependencyContext, owner);
+          const parametersResult = await this.getParametersInLane(request.file, { dependencyContext, owner });
           if (!parametersResult.success) {
             return parametersResult;
           }
           const extracted = parametersResult.data;
-          const mergedParameters = mergeParameterDefaults(
-            extracted.defaultParameters,
-            request.parameters,
-            extracted.jsonSchema,
-          );
+          if (extracted.legacyProjection.status !== 'usable') {
+            return createKernelError([
+              {
+                message: 'Parameter schema cannot be represented by the active Draft-7 execution path',
+                code: 'RUNTIME',
+                type: 'kernel',
+                severity: 'error',
+                details: extracted.legacyProjection.diagnostics,
+              },
+            ]);
+          }
+          const parameterSchema = extracted.legacyProjection.schema;
+          const mergedParameters = mergeParameterDefaults(extracted.defaults, request.parameters, parameterSchema);
 
           const renderOptionsResult = this.validateRenderOptions(request.options, owner);
           if (!renderOptionsResult.success) {
@@ -1961,7 +2108,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                 {
                   file: request.file,
                   parameters: mergedParameters,
-                  parameterSchema: parametersResult.data.jsonSchema,
+                  parameterSchema,
                   options: renderOptionsResult.options,
                   content: plan.route.content,
                   export: {
@@ -2140,23 +2287,34 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         await this.writeFilesAndInvalidate(input.stage);
       }
       const owner = await this.createOperationOwner(input.file, 'request');
-      const parametersResult = await this.getParametersInLane(input.file, dependencyContext, owner);
+      const parametersResult = await this.getParametersInLane(input.file, { dependencyContext, owner });
       if (!parametersResult.success) {
         return parametersResult;
       }
 
       const extracted = parametersResult.data;
+      if (extracted.legacyProjection.status !== 'usable') {
+        return createKernelError([
+          {
+            message: 'Parameter schema cannot be represented by the active Draft-7 execution path',
+            code: 'RUNTIME',
+            type: 'kernel',
+            severity: 'error',
+            details: extracted.legacyProjection.diagnostics,
+          },
+        ]);
+      }
       const mergedParameters = mergeParameterDefaults(
-        extracted.defaultParameters,
+        extracted.defaults,
         input.parameters,
-        extracted.jsonSchema,
+        extracted.legacyProjection.schema,
       );
 
       const { artifact } = await this.materializeRender(
         {
           file: input.file,
           parameters: mergedParameters,
-          parameterSchema: parametersResult.data.jsonSchema,
+          parameterSchema: extracted.legacyProjection.schema,
           options: input.options,
           content: input.content,
         },
@@ -2522,10 +2680,22 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const createSchema = owner.binding?.kernelId
         ? this.kernelCreateOptionsZodSchemaMap.get(owner.binding.kernelId)
         : undefined;
+      const parameters = mergeParameterDefaults({}, handlerInput.parameters, entry.parameterSchema);
+      if (entry.parameterSchema !== undefined && !validateJsonSchemaValue({ ...entry.parameterSchema }, parameters)) {
+        computeSpan.end();
+        return createKernelError([
+          {
+            message: 'Parameters do not satisfy the admitted execution schema',
+            code: 'RUNTIME',
+            type: 'kernel',
+            severity: 'error',
+          },
+        ]);
+      }
       const kernelInput: NativeBuildInput = {
         entryPath: handlerInput.entryPath,
         // Persisted-parameter middleware may reintroduce values removed from the source schema.
-        parameters: mergeParameterDefaults({}, handlerInput.parameters, entry.parameterSchema),
+        parameters,
         ...(createSchema
           ? {
               options:
@@ -3093,7 +3263,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     _owner: OperationOwner,
     input: GetParametersInput,
     runtime: KernelRuntime,
-  ): Promise<GetParametersResult> {
+  ): Promise<GetParameterDeclarationsResult> {
     return this.onGetParameters(input, runtime);
   }
 
@@ -3233,7 +3403,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * @param runtime - Runtime services (filesystem, logger)
    * @returns The extracted parameters.
    */
-  protected abstract onGetParameters(input: GetParametersInput, runtime: KernelRuntime): Promise<GetParametersResult>;
+  protected abstract onGetParameters(
+    input: GetParametersInput,
+    runtime: KernelRuntime,
+  ): Promise<GetParameterDeclarationsResult>;
 
   /**
    * Compute geometry from a file.
@@ -4249,7 +4422,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
 
       const renderWork = async (): Promise<HashedGeometryResult> => {
-        const parametersResult = await this.getParametersInLane(this.currentFile!, dependencyContext, owner);
+        const parametersResult = await this.getParametersInLane(this.currentFile!, { dependencyContext, owner });
         if (this.isAborted(record)) {
           throw new RenderAbortedError();
         }
@@ -4259,10 +4432,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         }
 
         const extracted = parametersResult.data;
+        if (extracted.legacyProjection.status !== 'usable') {
+          return createKernelError([
+            {
+              message: 'Parameter schema cannot be represented by the active Draft-7 execution path',
+              code: 'RUNTIME',
+              type: 'kernel',
+              severity: 'error',
+              details: extracted.legacyProjection.diagnostics,
+            },
+          ]);
+        }
         const mergedParameters = mergeParameterDefaults(
-          extracted.defaultParameters,
+          extracted.defaults,
           this.currentParameters,
-          extracted.jsonSchema,
+          extracted.legacyProjection.schema,
         );
 
         await cooperativeYield();
@@ -4274,7 +4458,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           {
             file: this.currentFile!,
             parameters: mergedParameters,
-            parameterSchema: parametersResult.data.jsonSchema,
+            parameterSchema: extracted.legacyProjection.schema,
             options: this.currentRenderOptions,
             content: contentResult.content,
           },

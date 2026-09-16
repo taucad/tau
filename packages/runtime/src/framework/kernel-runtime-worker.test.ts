@@ -42,6 +42,16 @@ import { defineKernel } from '#types/runtime-kernel.types.js';
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
 
 const replicadDetectPattern = /import.*from\s+["']replicad["']/s;
+const emptyParameterDeclaration = {
+  schema: {
+    $schema: 'https://json-structure.org/meta/extended/v0/#',
+    $id: 'urn:taucad:test:runtime-worker-parameters',
+    $uses: ['JSONSchemaUnits'],
+    name: 'RuntimeWorkerParameters',
+    type: 'object',
+  },
+  defaults: {},
+} as const;
 
 // ===================================================================
 // Helpers
@@ -59,7 +69,7 @@ function createMockKernelDefinition(id: string, overrides?: Partial<KernelDefini
     getDependencies: async (input: GetDependenciesInput) => ({ resolved: [input.entryPath], unresolved: [] }),
     getParameters: async () => ({
       success: true,
-      data: { defaultParameters: {}, jsonSchema: {} },
+      data: emptyParameterDeclaration,
       issues: [] as KernelIssue[],
     }),
     createGeometry: async () => ({
@@ -215,7 +225,7 @@ describe('KernelRuntimeWorker initialization', () => {
         return { resolved: [input.entryPath], unresolved: [] };
       },
       async getParameters() {
-        return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+        return { success: true, data: emptyParameterDeclaration, issues: [] };
       },
       async createGeometry() {
         return { geometry: gltfGeometry('metadata'), nativeHandle: {} };

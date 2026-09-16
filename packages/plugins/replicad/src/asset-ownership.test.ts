@@ -6,9 +6,9 @@ const copyConfig = readFileSync(new URL('../copy-files-from-to.cjson', import.me
 
 describe('Replicad asset ownership', () => {
   it('keeps both loaders and upstream WASM exports statically visible', () => {
-    expect(source).toContain("from '#replicad-wasm-multi-loader.js'");
-    expect(source).toContain("new URL(import.meta.resolve('replicad-opencascadejs/wasm'))");
-    expect(source).toContain("new URL(import.meta.resolve('replicad-opencascadejs/multi/wasm'))");
+    expect(source).toMatch(/from ["']#replicad-wasm-multi-loader\.js["']/u);
+    expect(source).toMatch(/new URL\(\s*import\.meta\.resolve\(["']replicad-opencascadejs\/wasm["']\),?\s*\)/u);
+    expect(source).toMatch(/new URL\(\s*import\.meta\.resolve\(["']replicad-opencascadejs\/multi\/wasm["']\),?\s*\)/u);
     expect(copyConfig).not.toContain('.wasm');
     expect(copyConfig).toContain('src/sourcemaps/replicad.js.map');
     // Declarations come from the `replicad-opencascadejs` dependency, never a vendored copy.

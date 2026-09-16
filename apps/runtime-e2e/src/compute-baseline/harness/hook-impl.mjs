@@ -70,8 +70,8 @@ const patches = {
     );
     code = replaceOnce(
       code,
-      'library: (computeReuse?.library ?? replicadLibrary) as unknown as ReplicadLibrary,',
-      'library: globalThis.__laneB.wrapLibrary((computeReuse?.library ?? replicadLibrary) as unknown as ReplicadLibrary),',
+      'library: computeReuse?.library ?? replicadLibrary,',
+      'library: globalThis.__laneB.wrapLibrary(computeReuse?.library ?? replicadLibrary),',
       url,
     );
     code = replaceOnce(

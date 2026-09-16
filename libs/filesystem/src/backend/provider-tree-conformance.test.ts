@@ -70,7 +70,7 @@ const providers: ReadonlyArray<{
       const channel = new NodeFsChannel(port1);
       disposers.push(() => {
         channel.close();
-        stop();
+        void stop();
         port2.close();
       });
       return new NodeFsProviderClient(channel, root);

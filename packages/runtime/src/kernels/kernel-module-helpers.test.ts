@@ -5,6 +5,7 @@ import {
   isRecordObject,
   getModuleRegistry,
   createKernelModuleShim,
+  createKernelParameterDeclaration,
   extractDefaultParameters,
   toVmEntryPath,
   convertRawIssuesToKernelIssues,
@@ -108,6 +109,28 @@ describe('extractDefaultParameters', () => {
   it('should return empty object when params are not a record', () => {
     expect(extractDefaultParameters({ defaultParams: 'not-a-record' })).toEqual({});
     expect(extractDefaultParameters({ defaultParams: [1, 2] })).toEqual({});
+  });
+});
+
+describe('createKernelParameterDeclaration', () => {
+  it('should delegate producer Draft-7 projection to the admitted parameter adapter', () => {
+    const declaration = createKernelParameterDeclaration(
+      { length: 2 },
+      {
+        type: 'object',
+        properties: { length: { type: 'number', minimum: 0, 'x-ogc-unit': 'mm', 'x-ogc-unitLang': 'UCUM' } },
+      },
+      { id: 'urn:test:kernel:parameters:v1', name: 'KernelParameters' },
+    );
+
+    expect(declaration).toMatchObject({
+      schema: {
+        $id: 'urn:test:kernel:parameters:v1',
+        name: 'KernelParameters',
+        properties: { length: { type: 'double', minimum: 0, ucumUnit: 'mm' } },
+      },
+      defaults: { length: 2 },
+    });
   });
 });
 

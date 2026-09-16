@@ -7,7 +7,7 @@ const qrMainFile = 'main.scad';
 
 // OpenRSCAD (WASM) lives on the secondary tab only. This module is imported
 // lazily by the demo section, so the WASM kernel never enters the default chunk.
-const qrUnits: Units = { length: { sourceSymbol: 'mm', displaySymbol: 'mm' } };
+const qrUnits: Units = { length: { displaySymbol: 'mm' } };
 
 export function QrDemo(): React.JSX.Element {
   return (

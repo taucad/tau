@@ -3,7 +3,7 @@ title: 'Public Surface Policy'
 description: 'Freeze register and admission rules for published Tau package exports, subpaths, declarations, and unstable internal escape hatches.'
 status: active
 created: '2026-08-15'
-updated: '2026-08-31'
+updated: '2026-09-13'
 related:
   - docs/policy/version-policy.md
   - docs/policy/library-api-policy.md
@@ -96,7 +96,7 @@ Add a register section for every later published version that adds, removes, ren
 
 ## Current Pre-Publish Topology
 
-The next runtime prerelease is the framework owner only. It bundles exactly nine private workspace libraries: events, filesystem, fs-bridge, JSON Schema, memory, RPC, types, units, and utils. Each has `@taucad/runtime` as its only published bundle owner. Converter, glTF-extensions, and the private VM library were dissolved; the VM's sources now live inside `@taucad/esbuild`, which publishes them under its own `./vm` subpath. `@taucad/geometry-core` and `@taucad/occt-core` are independently published shared implementation packages.
+The next runtime prerelease is the framework owner only. It bundles exactly eight private workspace libraries: events, filesystem, fs-bridge, JSON Schema, memory, RPC, types, and utils. Each has `@taucad/runtime` as its only published bundle owner. `@taucad/units` is an independently published portable dependency. Converter, glTF-extensions, and the private VM library were dissolved; the VM's sources now live inside `@taucad/esbuild`, which publishes them under its own `./vm` subpath. `@taucad/geometry-core` and `@taucad/occt-core` are independently published shared implementation packages.
 
 The as-built runtime export map contains the root plus these public subpaths:
 

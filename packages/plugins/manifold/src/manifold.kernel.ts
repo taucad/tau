@@ -22,6 +22,7 @@ import {
   enrichIssueLocation,
   createKernelError,
   createKernelSuccess,
+  createKernelParameterDeclaration,
   createFrameClassifier,
   parseStackTrace,
   resolveSourcePath,
@@ -260,7 +261,12 @@ export const manifoldKernel = defineKernel({
       const defaultParameters = extractDefaultParameters(module);
       const jsonSchema = await jsonSchemaFromJson(defaultParameters);
 
-      return createKernelSuccess({ defaultParameters, jsonSchema });
+      return createKernelSuccess(
+        createKernelParameterDeclaration(defaultParameters, jsonSchema, {
+          id: 'urn:taucad:manifold:parameters',
+          name: 'ManifoldParameters',
+        }),
+      );
     } catch (error) {
       return createKernelError([
         {
@@ -324,7 +330,10 @@ export const manifoldKernel = defineKernel({
         data: { filePath: relativeFilePath },
       });
       const geometry = createEmptyGltfGeometry();
-      return finalizeRenderOutput({ artifacts: [geometry], nativeHandle: { glb: geometry.content } });
+      return finalizeRenderOutput({
+        artifacts: [geometry],
+        nativeHandle: { glb: geometry.content },
+      });
     }
 
     try {
@@ -336,7 +345,10 @@ export const manifoldKernel = defineKernel({
         sceneNamePolicy: 'clear-generated',
         sceneNameSource: 'external-generated',
       });
-      return finalizeRenderOutput({ artifacts: [{ format: 'gltf', content: glb }], nativeHandle: { glb } });
+      return finalizeRenderOutput({
+        artifacts: [{ format: 'gltf', content: glb }],
+        nativeHandle: { glb },
+      });
     } catch (error) {
       const stackFrames = parseStackTrace(error, {
         classifyFrame: createFrameClassifier(),

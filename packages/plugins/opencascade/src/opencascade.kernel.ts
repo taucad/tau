@@ -25,6 +25,7 @@ import {
   convertRawIssuesToKernelIssues,
   createKernelError,
   createKernelSuccess,
+  createKernelParameterDeclaration,
   RenderArtifactFinalizationError,
   finalizeRenderOutput,
 } from '@taucad/runtime/kernel';
@@ -675,9 +676,17 @@ export const opencascadeKernel = defineKernel({
       const defaultParameters = extractDefaultParameters(executeResult.value);
       const jsonSchema = await jsonSchemaFromJson(defaultParameters);
 
-      return createKernelSuccess({ defaultParameters, jsonSchema });
+      return createKernelSuccess(
+        createKernelParameterDeclaration(defaultParameters, jsonSchema, {
+          id: 'urn:taucad:opencascade:parameters',
+          name: 'OpenCascadeParameters',
+        }),
+      );
     } catch (error) {
-      const issue = formatOcRuntimeError(error, context.oc, { bundleSourceMap, entryUrl });
+      const issue = formatOcRuntimeError(error, context.oc, {
+        bundleSourceMap,
+        entryUrl,
+      });
       return createKernelError([issue]);
     }
   },
@@ -708,10 +717,15 @@ export const opencascadeKernel = defineKernel({
         logger.warn('createGeometry returning empty: main-function-not-found', {
           data: { filePath: relativeFilePath },
         });
-        return finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry()], nativeHandle: [] });
+        return finalizeRenderOutput({
+          artifacts: [createEmptyGltfGeometry()],
+          nativeHandle: [],
+        });
       }
 
-      const mainSpan = tracer.startSpan('opencascade.run-main', { phase: 'computingGeometry' });
+      const mainSpan = tracer.startSpan('opencascade.run-main', {
+        phase: 'computingGeometry',
+      });
       const mainResult = await runOcMain({
         module,
         parameters,
@@ -734,7 +748,10 @@ export const opencascadeKernel = defineKernel({
         logger.warn('createGeometry returning empty: main-returned-no-shapes', {
           data: { filePath: relativeFilePath },
         });
-        return finalizeRenderOutput({ artifacts: [createEmptyGltfGeometry()], nativeHandle: [] });
+        return finalizeRenderOutput({
+          artifacts: [createEmptyGltfGeometry()],
+          nativeHandle: [],
+        });
       }
 
       // Tessellation is deferred to meshGeometry — the raw TopoDS shapes are the
@@ -745,7 +762,10 @@ export const opencascadeKernel = defineKernel({
         throw error;
       }
 
-      const issue = formatOcRuntimeError(error, context.oc, { bundleSourceMap, entryUrl });
+      const issue = formatOcRuntimeError(error, context.oc, {
+        bundleSourceMap,
+        entryUrl,
+      });
       throw new OcctBuildError([issue]);
     }
   },
@@ -789,7 +809,12 @@ export const opencascadeKernel = defineKernel({
       createKernelSuccess([createExportFile(format, 'model.glb', asBuffer(createEmptyGlb()))]);
     const noGeometryExportError = () =>
       createKernelError([
-        { message: 'No geometry available for export', code: 'RUNTIME', type: 'runtime', severity: 'error' },
+        {
+          message: 'No geometry available for export',
+          code: 'RUNTIME',
+          type: 'runtime',
+          severity: 'error',
+        },
       ]);
 
     switch (format) {
@@ -820,7 +845,12 @@ export const opencascadeKernel = defineKernel({
         const result = exportOpencascadeStepAssembly(context.oc, nativeHandle);
         if (!result.ok) {
           return createKernelError([
-            { message: 'STEP write failed', code: 'RUNTIME', type: 'runtime', severity: 'error' },
+            {
+              message: 'STEP write failed',
+              code: 'RUNTIME',
+              type: 'runtime',
+              severity: 'error',
+            },
           ]);
         }
 

@@ -75,6 +75,9 @@ catalogs:
     '@jscad/modeling':
       specifier: ^2.13.0
       version: 2.13.0
+    '@json-structure/sdk':
+      specifier: 0.7.0
+      version: 0.7.0
     '@kittycad/lib':
       specifier: ^2.0.48
       version: 2.0.48
@@ -117,6 +120,9 @@ catalogs:
     '@langchain/xai':
       specifier: ^1.4.3
       version: 1.4.3
+    '@lhncbc/ucum-lhc':
+      specifier: 7.1.9
+      version: 7.1.9
     '@libcascade/toolchain':
       specifier: 3.0.2
       version: 3.0.2
@@ -576,6 +582,9 @@ catalogs:
     polygon-clipping:
       specifier: ^0.15.7
       version: 0.15.7
+    portless:
+      specifier: 0.15.6
+      version: 0.15.6
     postprocessing:
       specifier: 6.39.1
       version: 6.39.1
@@ -1722,6 +1731,9 @@ importers:
       playwright:
         specifier: 'catalog:'
         version: 1.61.0
+      portless:
+        specifier: 'catalog:'
+        version: 0.15.6
       publint:
         specifier: 'catalog:'
         version: 0.3.21
@@ -1808,7 +1820,7 @@ importers:
         version: 1.29.2(@anthropic-ai/claude-agent-sdk@0.3.232(@anthropic-ai/sdk@0.103.0(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(@grpc/grpc-js@1.14.4)(@modelcontextprotocol/sdk@1.30.0(@cfworker/json-schema@4.1.1)(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)))(@opentelemetry/api@1.9.1)(@opentelemetry/core@2.8.0(@opentelemetry/api@1.9.1))(@opentelemetry/instrumentation@0.57.2(@opentelemetry/api@1.9.1))(@opentelemetry/sdk-trace-base@2.8.0(@opentelemetry/api@1.9.1))(zod@4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315))
       '@pyroscope/nodejs':
         specifier: 'catalog:'
-        version: 0.4.13(express@5.2.1)(fastify@5.8.5)
+        version: 0.4.13(express@5.2.1)(fastify@5.8.5)(supports-color@10.2.2)
       '@taucad/api-extractor':
         specifier: workspace:*
         version: link:../../libs/api-extractor
@@ -1850,7 +1862,7 @@ importers:
         version: 19.2.7
       react-email:
         specifier: 'catalog:'
-        version: 6.6.3(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+        version: 6.6.3(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(supports-color@10.2.2)
       resend:
         specifier: 'catalog:'
         version: 6.14.0(@react-email/render@2.0.9(react-dom@19.2.7(react@19.2.7))(react@19.2.7))
@@ -2411,6 +2423,9 @@ importers:
       '@taucad/openrscad':
         specifier: workspace:*
         version: link:../../packages/plugins/openrscad
+      '@taucad/parameters':
+        specifier: workspace:*
+        version: link:../../packages/parameters
       '@taucad/replicad':
         specifier: workspace:*
         version: link:../../packages/plugins/replicad
@@ -2438,6 +2453,9 @@ importers:
       ws:
         specifier: 'catalog:'
         version: 8.21.2
+      xstate:
+        specifier: 'catalog:'
+        version: 5.32.1
 
   apps/ui:
     dependencies:
@@ -2552,6 +2570,9 @@ importers:
       '@taucad/openrscad':
         specifier: workspace:*
         version: link:../../packages/plugins/openrscad
+      '@taucad/parameters':
+        specifier: workspace:*
+        version: link:../../packages/parameters
       '@taucad/picogk':
         specifier: workspace:*
         version: link:../../packages/plugins/picogk
@@ -2593,7 +2614,7 @@ importers:
         version: link:../../packages/ui
       '@taucad/units':
         specifier: workspace:*
-        version: link:../../libs/units
+        version: link:../../packages/units
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../libs/utils
@@ -2892,6 +2913,9 @@ importers:
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../filesystem
+      '@taucad/parameters':
+        specifier: workspace:*
+        version: link:../../packages/parameters
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
@@ -2901,6 +2925,9 @@ importers:
       geospec:
         specifier: workspace:*
         version: link:../../packages/geospec
+      xstate:
+        specifier: 'catalog:'
+        version: 5.32.1
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
@@ -3055,9 +3082,7 @@ importers:
         version: link:../json-schema
       '@taucad/units':
         specifier: workspace:*
-        version: link:../units
-
-  libs/units: {}
+        version: link:../../packages/units
 
   libs/utils:
     dependencies:
@@ -3161,6 +3186,9 @@ importers:
       '@taucad/openrscad':
         specifier: workspace:*
         version: link:../plugins/openrscad
+      '@taucad/parameters':
+        specifier: workspace:*
+        version: link:../parameters
       '@taucad/picogk':
         specifier: workspace:*
         version: link:../plugins/picogk
@@ -3225,12 +3253,6 @@ importers:
         version: link:../../runtime
 
   packages/core/cache: {}
-
-  packages/core/configuration:
-    devDependencies:
-      '@taucad/runtime':
-        specifier: workspace:*
-        version: link:../../runtime
 
   packages/core/geometry:
     dependencies:
@@ -3391,9 +3413,15 @@ importers:
       '@taucad/mcp':
         specifier: workspace:*
         version: link:../mcp
+      '@taucad/parameters':
+        specifier: workspace:*
+        version: link:../parameters
       ws:
         specifier: 'catalog:'
         version: 8.21.2
+      xstate:
+        specifier: 'catalog:'
+        version: 5.32.1
     devDependencies:
       '@taucad/agent-tools':
         specifier: workspace:*
@@ -3470,6 +3498,37 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
+  packages/parameters:
+    dependencies:
+      '@cfworker/json-schema':
+        specifier: 'catalog:'
+        version: 4.1.1
+      '@json-structure/sdk':
+        specifier: 'catalog:'
+        version: 0.7.0
+      '@taucad/cache-core':
+        specifier: workspace:*
+        version: link:../core/cache
+      '@taucad/units':
+        specifier: workspace:*
+        version: link:../units
+    devDependencies:
+      '@taucad/json-schema':
+        specifier: workspace:*
+        version: link:../../libs/json-schema
+      '@taucad/nx':
+        specifier: workspace:*
+        version: link:../../tools/nx
+      '@taucad/types':
+        specifier: workspace:*
+        version: link:../../libs/types
+      xstate:
+        specifier: 'catalog:'
+        version: 5.32.1
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
+
   packages/plugins/assimp:
     dependencies:
       '@taucad/geometry-core':
@@ -3525,7 +3584,13 @@ importers:
       '@taucad/native-process-core':
         specifier: workspace:*
         version: link:../../core/native-process
+      '@taucad/parameters':
+        specifier: workspace:*
+        version: link:../../parameters
     devDependencies:
+      '@taucad/agent-tools':
+        specifier: workspace:*
+        version: link:../../../libs/agent-tools
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../core/geometry
@@ -3646,6 +3711,9 @@ importers:
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../core/geometry
+      '@taucad/parameters':
+        specifier: workspace:*
+        version: link:../../parameters
     devDependencies:
       '@msgpack/msgpack':
         specifier: 'catalog:'
@@ -3674,6 +3742,9 @@ importers:
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../core/geometry
+      '@taucad/parameters':
+        specifier: workspace:*
+        version: link:../../parameters
       manifold-3d:
         specifier: 'catalog:'
         version: 3.4.1(@gltf-transform/core@4.4.0)(@gltf-transform/extensions@4.4.0)(@gltf-transform/functions@4.4.0)(esbuild-wasm@0.28.2)
@@ -3708,6 +3779,12 @@ importers:
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../core/geometry
+      '@taucad/parameters':
+        specifier: workspace:*
+        version: link:../../parameters
+      '@taucad/units':
+        specifier: workspace:*
+        version: link:../../units
       deepmerge:
         specifier: 'catalog:'
         version: 4.3.1
@@ -3820,6 +3897,9 @@ importers:
       '@taucad/native-process-core':
         specifier: workspace:*
         version: link:../../core/native-process
+      '@taucad/parameters':
+        specifier: workspace:*
+        version: link:../../parameters
     devDependencies:
       '@taucad/assimp':
         specifier: workspace:*
@@ -3854,6 +3934,9 @@ importers:
       '@taucad/occt-core':
         specifier: workspace:*
         version: link:../../core/occt
+      '@taucad/parameters':
+        specifier: workspace:*
+        version: link:../../parameters
       culori:
         specifier: 'catalog:'
         version: 4.0.2
@@ -3960,6 +4043,9 @@ importers:
       '@taucad/kcl-wasm-lib':
         specifier: 'catalog:'
         version: 0.1.148
+      '@taucad/parameters':
+        specifier: workspace:*
+        version: link:../../parameters
       deepmerge:
         specifier: 'catalog:'
         version: 4.3.1
@@ -3978,6 +4064,10 @@ importers:
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
   packages/react:
+    dependencies:
+      '@taucad/parameters':
+        specifier: workspace:*
+        version: link:../parameters
     devDependencies:
       '@taucad/esbuild':
         specifier: workspace:*
@@ -4028,6 +4118,9 @@ importers:
       '@cfworker/json-schema':
         specifier: 'catalog:'
         version: 4.1.1
+      '@json-structure/sdk':
+        specifier: 'catalog:'
+        version: 0.7.0
       '@msgpack/msgpack':
         specifier: 'catalog:'
         version: 3.1.3
@@ -4037,6 +4130,12 @@ importers:
       '@taucad/cache-core':
         specifier: workspace:*
         version: link:../core/cache
+      '@taucad/parameters':
+        specifier: workspace:*
+        version: link:../parameters
+      '@taucad/units':
+        specifier: workspace:*
+        version: link:../units
       '@types/json-schema':
         specifier: 'catalog:'
         version: 7.0.15
@@ -4089,9 +4188,6 @@ importers:
       '@taucad/types':
         specifier: workspace:*
         version: link:../../libs/types
-      '@taucad/units':
-        specifier: workspace:*
-        version: link:../../libs/units
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../libs/utils
@@ -4107,6 +4203,9 @@ importers:
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.0.15)(@vitest/browser-playwright@4.1.11)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(happy-dom@16.8.1)(jsdom@26.0.0(canvas@3.2.3))(vite@7.3.6(@types/node@26.3.0)(jiti@2.7.0)(less@4.5.1)(lightningcss@1.32.0)(sass-embedded@1.100.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.48.0)(tsx@4.22.4)(yaml@2.9.0))
+      xstate:
+        specifier: 'catalog:'
+        version: 5.32.1
       zod:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
@@ -4125,6 +4224,9 @@ importers:
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../core/geometry
+      '@taucad/parameters':
+        specifier: workspace:*
+        version: link:../parameters
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../libs/utils
@@ -4250,11 +4352,23 @@ importers:
         specifier: 'catalog:'
         version: 19.2.7(react@19.2.7)
 
+  packages/units:
+    dependencies:
+      '@lhncbc/ucum-lhc':
+        specifier: 'catalog:'
+        version: 7.1.9
+
   scripts:
     dependencies:
       '@inkjs/ui':
         specifier: 'catalog:'
         version: 2.0.0(ink@6.8.0(@types/react@19.0.12)(react@19.2.7))
+      '@taucad/esbuild':
+        specifier: workspace:*
+        version: link:../packages/plugins/esbuild
+      '@taucad/jscad':
+        specifier: workspace:*
+        version: link:../packages/plugins/jscad
       '@taucad/openrscad':
         specifier: workspace:*
         version: link:../packages/plugins/openrscad
@@ -4309,7 +4423,7 @@ importers:
         version: 21.1.7
       netlify-cli:
         specifier: 'catalog:'
-        version: 25.6.2(@swc/core@1.15.8(@swc/helpers@0.5.23))(@swc/wasm@1.15.47)(@types/node@24.0.15)(encoding@0.1.13)(ioredis@5.11.1)(picomatch@4.0.7)(rollup@4.62.2)
+        version: 25.6.2(@swc/core@1.15.8(@swc/helpers@0.5.23))(@swc/wasm@1.15.47)(@types/node@24.0.15)(encoding@0.1.13)(ioredis@5.11.1)(picomatch@4.0.7)(rollup@4.62.2)(supports-color@10.2.2)
 
   tools/nx:
     dependencies:
@@ -7673,6 +7787,10 @@ packages:
   '@jscadui/3mf-export@0.5.0':
     resolution: {integrity: sha512-y5vZktqCjyi7wA38zqNlLIdZUIRZoOO9vCjLzwmL4bR0hk7B/Zm1IeffzJPFe1vFc0C1IEv3hm8caDv3doRk9g==}
 
+  '@json-structure/sdk@0.7.0':
+    resolution: {integrity: sha512-Ki0SM5FoJZOnznJhN/UrIwYQ17q8a7Y1n8Xcz76H8eyltSGFNSopmg7WhWDy7cUwgq6E7ObXSZqAaf4rPIwNNg==}
+    engines: {node: '>=20.0.0'}
+
   '@jsonjoy.com/base64@1.1.2':
     resolution: {integrity: sha512-q6XAnWQDIMA3+FTiOYajoYqySkO+JSat0ytXGSuRdq9uXE7o92gzuQwQM14xaCRlBLGq3v5miDGC4vkVTn54xA==}
     engines: {node: '>=10.0'}
@@ -8302,6 +8420,9 @@ packages:
 
   '@levischuck/tiny-cbor@0.2.11':
     resolution: {integrity: sha512-llBRm4dT4Z89aRsm6u2oEZ8tfwL/2l6BwpZ7JcyieouniDECM5AqNgr/y08zalEIvW3RSK4upYyybDcmjXqAow==}
+
+  '@lhncbc/ucum-lhc@7.1.9':
+    resolution: {integrity: sha512-LgA+ElIlKrtmogYvk4n3PhExF25WZq0THkHF/UtW4SWct/pxt8ZpXGG1QwQiSs1JWUVpAsgRvyK931FZ1URiow==}
 
   '@libcascade/toolchain@3.0.2':
     resolution: {integrity: sha512-ko2ZS9vJ2xX6Rjc5+8NRyTL5Vr1COH6S3SyCHkxrUQpJ6BO1gVRH5N/3v/tLWIkXBsR+1WwCFLUVxJojWg+6Tg==}
@@ -16361,6 +16482,11 @@ packages:
     resolution: {integrity: sha512-xxodCmBen3iy2i0WtAK8FlFNrRzjUqjRsMfho58xT/wvZU1YTM3fCnRjcy1gJPMepaRlgm/0e6w8SpWHpn3/cA==}
     engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
 
+  coffeescript@2.7.0:
+    resolution: {integrity: sha512-hzWp6TUE2d/jCcN67LrW1eh5b/rSDKQK6oD6VMLlggYVUUFexgTH9z3dNYihzX4RMhze5FTUsUmOXViJKFQR/A==}
+    engines: {node: '>=6'}
+    hasBin: true
+
   collapse-white-space@2.1.0:
     resolution: {integrity: sha512-loKTxY1zCOuG4j9f6EPnuyyYkf58RnhhWTvRoZEokgB+WbdXehfjFviyOVYkqzEWz1Q5kRiZdBYS5SwxbQYwzw==}
 
@@ -16835,6 +16961,12 @@ packages:
 
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
+
+  csv-parse@4.16.3:
+    resolution: {integrity: sha512-cO1I/zmz4w2dcKHVvpCr7JVRu8/FymG5OEpmvsZYlccYolPBLoVGKUHgNoc4ZGkFeFlWGEDmMyBM+TTqRdW/wg==}
+
+  csv-stringify@1.1.2:
+    resolution: {integrity: sha512-3NmNhhd+AkYs5YtM1GEh01VR6PKj6qch2ayfQaltx5xpcAdThjnbbI5eT8CzRVpXfGKAxnmrSYLsNl/4f3eWiw==}
 
   culori@4.0.2:
     resolution: {integrity: sha512-1+BhOB8ahCn4O0cep0Sh2l9KCOfOdY+BXJnKMHFFzDEouSr/el18QwXEMRlOj9UY5nCeA8UN3a/82rUWRBeyBw==}
@@ -19578,6 +19710,10 @@ packages:
     resolution: {integrity: sha512-1pC6N8qWJbWoPtEjgcL2xyhQOP491EQjeUo3qTKcmV8YSDDJrOepfG8pcC7h/QgnQHYSv0mJ3Z/ZWxmatVrysg==}
     engines: {node: '>= 0.4'}
 
+  is-finite@1.1.0:
+    resolution: {integrity: sha512-cdyMtqX/BOqqNBBiKlIVkytNHm49MtMlYyn1zxzvJKWmFMlGzm+ry5BBfYyeY9YmNKbRSo/o7OX9w9ale0wg3w==}
+    engines: {node: '>=0.10.0'}
+
   is-fullwidth-code-point@3.0.0:
     resolution: {integrity: sha512-zymm5+u+sCsSWyD9qNaejV3DFvhCKclKdizYaJUuHA83RLjb7nSuGnddCHGv0hk+KY7BMAlsWeK4Ueg6EV6XQg==}
     engines: {node: '>=8'}
@@ -19631,6 +19767,9 @@ packages:
   is-installed-globally@1.0.0:
     resolution: {integrity: sha512-K55T22lfpQ63N4KEN57jZUAaAYqYHEe8veb/TycJRk9DdSCLLcovXz/mL6mOnhQaZsQGwPhuFopdQIlqGSEjiQ==}
     engines: {node: '>=18'}
+
+  is-integer@1.0.7:
+    resolution: {integrity: sha512-RPQc/s9yBHSvpi+hs9dYiJ2cuFeU6x3TyyIp8O2H6SKEltIvJOzRj9ToyvcStDvPR/pS4rxgr1oBFajQjZ2Szg==}
 
   is-interactive@1.0.0:
     resolution: {integrity: sha512-2HvIEKRoqS62guEC+qBjpvRubdX910WCMuJTZ+I9yvqKU2/12eSL549HMwtabb4oupdj2sMP50k+XJfB/8JE6w==}
@@ -20157,6 +20296,9 @@ packages:
   jsonc-parser@3.3.1:
     resolution: {integrity: sha512-HUgH65KyejrUFPvHFPbqOY0rsFip3Bo5wb4ngvdi1EpCYWUQDC5V+Y7mZws+DLkr4M//zQJoanu1SP+87Dv1oQ==}
 
+  jsonfile@2.4.0:
+    resolution: {integrity: sha512-PKllAqbgLgxHaj8TElYymKCAgrASebJrWpTnEkOaTowt23VKXXN0sUeriJ+eh7y6ufb/CC5ap11pz71/cM0hUw==}
+
   jsonfile@6.2.1:
     resolution: {integrity: sha512-zwOTdL3rFQ/lRdBnntKVOX6k5cKJwEc1HdilT71BWEu7J41gXIB2MRp+vxduPSwZJPWBxEzv4yH1wYLJGUHX4Q==}
 
@@ -20535,6 +20677,10 @@ packages:
 
   lodash.escape@4.0.1:
     resolution: {integrity: sha512-nXEOnb/jK9g0DYMr1/Xvq6l5xMD7GDG55+GSYIYmS0G4tBk/hURD4JR9WCavs04t33WmJx9kCyp9vJ+mr4BOUw==}
+
+  lodash.get@4.4.2:
+    resolution: {integrity: sha512-z+Uw/vLuy6gQe8cfaFWD7p0wVv8fJl3mbzXh33RS+0oW2wvUqiRXiQ69gLWSLpgB5/6sU+r6BlQR0MBILadqTQ==}
+    deprecated: This package is deprecated. Use the optional chaining (?.) operator instead.
 
   lodash.includes@4.3.0:
     resolution: {integrity: sha512-W3Bx6mdkRTGtlJISOvVD/lbqjTlPPUDTMnlXZFnVwi9NKJ6tiAk6LVdlhZMm17VZisqhKcgzpO5Wz91PCt5b0w==}
@@ -22608,6 +22754,12 @@ packages:
     resolution: {integrity: sha512-rEwq/ZHlJIKw++XtLAO8PPuOQA/zaPJOZJ37BVuN97nLpMJeuDVLVGRwbFoBgLudgdTMP2hdRJP++H+8QOA3vg==}
     engines: {node: '>= 10.12'}
 
+  portless@0.15.6:
+    resolution: {integrity: sha512-uOAwWLF32rmyEGFASzSO0VOaqb/AQxFCCzyZbPGd82UNNOfIEvc09zy92nroNibE5HNfzV4oVB0ObKbPXgkM9A==}
+    engines: {node: '>=24'}
+    os: [darwin, linux, win32]
+    hasBin: true
+
   possible-typed-array-names@1.1.0:
     resolution: {integrity: sha512-/+5VFTchJDoVj3bhoqi6UeymcD00DAwb1nJwamzPvHEszJ4FpF6SNNbUbOS8yI56qHzdV8eK0qEfOSiodkTdxg==}
     engines: {node: '>= 0.4'}
@@ -24127,6 +24279,9 @@ packages:
     engines: {node: '>=20.19.0'}
     hasBin: true
 
+  sax@1.1.6:
+    resolution: {integrity: sha512-8zci48uUQyfqynGDSkUMD7FCJB96hwLnlZOXlgs1l3TX+LW27t3psSWKUxC0fxVgA86i8tL4NwGcY1h/6t3ESg==}
+
   sax@1.4.4:
     resolution: {integrity: sha512-1n3r/tGXO6b6VXMdFT54SHzT9ytu9yr7TaELowdYpMqY/Ao7EnlQGmAQ1+RatX7Tkkdm6hONI2owqNx2aZj5Sw==}
     engines: {node: '>=11.0.0'}
@@ -24581,6 +24736,9 @@ packages:
   stream-to-array@2.3.0:
     resolution: {integrity: sha512-UsZtOYEn4tWU2RGLOXr/o/xjRBftZRlG3dEWoaHr8j4GuypJ3isitGbVyjQKAuMu+xbiop8q224TjiZWc4XTZA==}
 
+  stream-transform@0.1.2:
+    resolution: {integrity: sha512-3HXId/0W8sktQnQM6rOZf2LuDDMbakMgAjpViLk758/h0br+iGqZFFfUxxJSqEvGvT742PyFr4v/TBXUtowdCg==}
+
   streamdown@2.6.0:
     resolution: {integrity: sha512-nQZVUn4GvB2R5SAlDNph20iKZeW+RM4gv6G1H3ACypEnmQf8PgTHZ/1Ta2OACRwQ2coK7aW5AeIAa7Ls5zk+RA==}
     peerDependencies:
@@ -24604,6 +24762,9 @@ packages:
   string-length@4.0.2:
     resolution: {integrity: sha512-+l6rNN5fYHNhZZy41RXsYptCjA2Igmq4EG7kZAYFQI1E1VTXarr6ZPXBg6eq7Y6eK4FEhY6AJlyuFIb/v/S0VQ==}
     engines: {node: '>=10'}
+
+  string-to-stream@1.1.1:
+    resolution: {integrity: sha512-QySF2+3Rwq0SdO3s7BAp4x+c3qsClpPQ6abAmb0DGViiSBAkT5kL6JT2iyzEVP+T1SmzHrQD1TwlP9QAHCc+Sw==}
 
   string-width@4.2.3:
     resolution: {integrity: sha512-wKyQRQpjJ0sIp62ErSZdGsjMJWsap5oRNihHhu6G7JVO/9jIB6UyevL+tXuOqrng8j/cxKTWyWUwvSTriiZz/g==}
@@ -26458,6 +26619,9 @@ packages:
   xmlchars@2.2.0:
     resolution: {integrity: sha512-JZnDKK8B0RCDw84FNdDAIpZK+JuJw+s7Lz8nksI7SIuU3UXJJslUthsi+uWBUYOwPFwW7W7PRLRfUKpxjtjFCw==}
 
+  xmldoc@0.4.0:
+    resolution: {integrity: sha512-rJ/+/UzYCSlFNuAzGuRyYgkH2G5agdX1UQn4+5siYw9pkNC3Hu/grYNDx/dqYLreeSjnY5oKg74CMBKxJHSg6Q==}
+
   xmlhttprequest-ssl@2.1.2:
     resolution: {integrity: sha512-TEU+nJVUUnA4CYJFLvK5X9AOeH4KvDvhIfm0vV1GaQRtchnG0hgK5p8hw/xjv8cunWYCsiPCSDzObPyhEwq3KQ==}
     engines: {node: '>=0.4.0'}
@@ -27984,7 +28148,7 @@ snapshots:
       '@babel/parser': 7.29.8
       '@babel/types': 7.29.8
 
-  '@babel/traverse@7.27.0':
+  '@babel/traverse@7.27.0(supports-color@10.2.2)':
     dependencies:
       '@babel/code-frame': 7.29.7
       '@babel/generator': 7.29.8
@@ -29915,6 +30079,8 @@ snapshots:
 
   '@jscadui/3mf-export@0.5.0': {}
 
+  '@json-structure/sdk@0.7.0': {}
+
   '@jsonjoy.com/base64@1.1.2(tslib@2.8.1)':
     dependencies:
       tslib: 2.8.1
@@ -30276,6 +30442,18 @@ snapshots:
   '@leichtgewicht/ip-codec@2.0.5': {}
 
   '@levischuck/tiny-cbor@0.2.11': {}
+
+  '@lhncbc/ucum-lhc@7.1.9':
+    dependencies:
+      coffeescript: 2.7.0
+      csv-parse: 4.16.3
+      csv-stringify: 1.1.2
+      escape-html: 1.0.3
+      is-integer: 1.0.7
+      jsonfile: 2.4.0
+      stream-transform: 0.1.2
+      string-to-stream: 1.1.1
+      xmldoc: 0.4.0
 
   '@libcascade/toolchain@3.0.2':
     dependencies:
@@ -31126,7 +31304,7 @@ snapshots:
       '@netlify/zip-it-and-ship-it': 14.7.1(encoding@0.1.13)(rollup@4.62.2)(supports-color@10.2.2)
       cron-parser: 4.9.0
       decache: 4.6.2
-      extract-zip: 2.0.1
+      extract-zip: 2.0.1(supports-color@10.2.2)
       is-stream: 4.0.1
       jwt-decode: 4.0.0
       lambda-local: 2.2.0
@@ -34163,7 +34341,7 @@ snapshots:
       '@pnpm/network.ca-file': 1.0.2
       config-chain: 1.1.13
 
-  '@pnpm/tabtab@0.5.4':
+  '@pnpm/tabtab@0.5.4(supports-color@10.2.2)':
     dependencies:
       debug: 4.4.3(supports-color@10.2.2)
       enquirer: 2.4.1
@@ -34227,7 +34405,7 @@ snapshots:
       modern-tar: 0.7.6
       yargs: 17.7.3
 
-  '@pyroscope/nodejs@0.4.13(express@5.2.1)(fastify@5.8.5)':
+  '@pyroscope/nodejs@0.4.13(express@5.2.1)(fastify@5.8.5)(supports-color@10.2.2)':
     dependencies:
       '@datadog/pprof': 5.14.4
       debug: 4.4.3(supports-color@10.2.2)
@@ -39735,6 +39913,8 @@ snapshots:
     dependencies:
       convert-to-spaces: 2.0.1
 
+  coffeescript@2.7.0: {}
+
   collapse-white-space@2.1.0: {}
 
   collect-v8-coverage@1.0.3: {}
@@ -40227,6 +40407,12 @@ snapshots:
       rrweb-cssom: 0.8.0
 
   csstype@3.2.3: {}
+
+  csv-parse@4.16.3: {}
+
+  csv-stringify@1.1.2:
+    dependencies:
+      lodash.get: 4.4.2
 
   culori@4.0.2: {}
 
@@ -41991,7 +42177,7 @@ snapshots:
 
   extend@3.0.2: {}
 
-  extract-zip@2.0.1:
+  extract-zip@2.0.1(supports-color@10.2.2):
     dependencies:
       debug: 4.4.3(supports-color@10.2.2)
       get-stream: 5.2.0
@@ -42308,6 +42494,10 @@ snapshots:
       from2: 2.3.0
 
   follow-redirects@1.15.11: {}
+
+  follow-redirects@1.16.0(debug@4.4.3(supports-color@10.2.2)):
+    optionalDependencies:
+      debug: 4.4.3(supports-color@10.2.2)
 
   follow-redirects@1.16.0(debug@4.4.3):
     optionalDependencies:
@@ -43364,11 +43554,11 @@ snapshots:
     transitivePeerDependencies:
       - debug
 
-  http-proxy-middleware@3.0.5:
+  http-proxy-middleware@3.0.5(supports-color@10.2.2):
     dependencies:
       '@types/http-proxy': 1.17.17
       debug: 4.4.3(supports-color@10.2.2)
-      http-proxy: 1.18.1(debug@4.4.3)
+      http-proxy: 1.18.1(debug@4.4.3(supports-color@10.2.2))
       is-glob: 4.0.3
       is-plain-object: 5.0.0
       micromatch: 4.0.8
@@ -43385,6 +43575,14 @@ snapshots:
       micromatch: 4.0.8
     transitivePeerDependencies:
       - supports-color
+
+  http-proxy@1.18.1(debug@4.4.3(supports-color@10.2.2)):
+    dependencies:
+      eventemitter3: 4.0.7
+      follow-redirects: 1.16.0(debug@4.4.3(supports-color@10.2.2))
+      requires-port: 1.0.0
+    transitivePeerDependencies:
+      - debug
 
   http-proxy@1.18.1(debug@4.4.3):
     dependencies:
@@ -43429,7 +43627,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  https-proxy-agent@8.0.0:
+  https-proxy-agent@8.0.0(supports-color@10.2.2):
     dependencies:
       agent-base: 8.0.0
       debug: 4.4.3(supports-color@10.2.2)
@@ -43861,6 +44059,8 @@ snapshots:
     dependencies:
       call-bound: 1.0.4
 
+  is-finite@1.1.0: {}
+
   is-fullwidth-code-point@3.0.0: {}
 
   is-fullwidth-code-point@5.1.0:
@@ -43904,6 +44104,10 @@ snapshots:
     dependencies:
       global-directory: 4.0.1
       is-path-inside: 4.0.0
+
+  is-integer@1.0.7:
+    dependencies:
+      is-finite: 1.1.0
 
   is-interactive@1.0.0: {}
 
@@ -44606,6 +44810,10 @@ snapshots:
 
   jsonc-parser@3.3.1: {}
 
+  jsonfile@2.4.0:
+    optionalDependencies:
+      graceful-fs: 4.2.11
+
   jsonfile@6.2.1:
     dependencies:
       universalify: 2.0.1
@@ -45018,6 +45226,8 @@ snapshots:
   lodash.debounce@4.0.8: {}
 
   lodash.escape@4.0.1: {}
+
+  lodash.get@4.4.2: {}
 
   lodash.includes@4.3.0: {}
 
@@ -46531,7 +46741,7 @@ snapshots:
       rxjs: 7.8.2
       zod: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
 
-  netlify-cli@25.6.2(@swc/core@1.15.8(@swc/helpers@0.5.23))(@swc/wasm@1.15.47)(@types/node@24.0.15)(encoding@0.1.13)(ioredis@5.11.1)(picomatch@4.0.7)(rollup@4.62.2):
+  netlify-cli@25.6.2(@swc/core@1.15.8(@swc/helpers@0.5.23))(@swc/wasm@1.15.47)(@types/node@24.0.15)(encoding@0.1.13)(ioredis@5.11.1)(picomatch@4.0.7)(rollup@4.62.2)(supports-color@10.2.2):
     dependencies:
       '@fastify/static': 9.0.0
       '@netlify/ai': 0.4.1
@@ -46552,7 +46762,7 @@ snapshots:
       '@netlify/zip-it-and-ship-it': 14.5.4(encoding@0.1.13)(rollup@4.62.2)(supports-color@10.2.2)
       '@octokit/rest': 22.0.0
       '@opentelemetry/api': 1.8.0
-      '@pnpm/tabtab': 0.5.4
+      '@pnpm/tabtab': 0.5.4(supports-color@10.2.2)
       ansi-escapes: 7.3.0
       ansi-to-html: 0.7.2
       ascii-table: 0.0.9
@@ -46577,7 +46787,7 @@ snapshots:
       execa: 5.1.1
       express: 5.2.1
       express-logging: 1.1.1
-      extract-zip: 2.0.1
+      extract-zip: 2.0.1(supports-color@10.2.2)
       fastest-levenshtein: 1.0.16
       fastify: 5.8.5
       find-up: 8.0.0
@@ -46586,9 +46796,9 @@ snapshots:
       get-port: 5.1.1
       git-repo-info: 2.1.1
       gitconfiglocal: 2.1.0
-      http-proxy: 1.18.1(debug@4.4.3)
-      http-proxy-middleware: 3.0.5
-      https-proxy-agent: 8.0.0
+      http-proxy: 1.18.1(debug@4.4.3(supports-color@10.2.2))
+      http-proxy-middleware: 3.0.5(supports-color@10.2.2)
+      https-proxy-agent: 8.0.0(supports-color@10.2.2)
       inquirer: 8.2.7(@types/node@24.0.15)
       inquirer-autocomplete-prompt: 1.4.0(inquirer@8.2.7(@types/node@24.0.15))
       is-docker: 4.0.0
@@ -47942,6 +48152,8 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  portless@0.15.6: {}
+
   possible-typed-array-names@1.1.0: {}
 
   postal-mime@2.7.4: {}
@@ -48683,10 +48895,10 @@ snapshots:
       prop-types: 15.8.1
       react: 19.2.7
 
-  react-email@6.6.3(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
+  react-email@6.6.3(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(supports-color@10.2.2):
     dependencies:
       '@babel/parser': 7.27.0
-      '@babel/traverse': 7.27.0
+      '@babel/traverse': 7.27.0(supports-color@10.2.2)
       '@react-email/render': 2.0.9(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       chokidar: 4.0.3
       commander: 13.1.0
@@ -49693,6 +49905,8 @@ snapshots:
     optionalDependencies:
       '@parcel/watcher': 2.6.0
 
+  sax@1.1.6: {}
+
   sax@1.4.4:
     optional: true
 
@@ -50325,6 +50539,8 @@ snapshots:
     dependencies:
       any-promise: 1.3.0
 
+  stream-transform@0.1.2: {}
+
   streamdown@2.6.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
     dependencies:
       clsx: 2.1.1
@@ -50367,6 +50583,11 @@ snapshots:
     dependencies:
       char-regex: 1.0.2
       strip-ansi: 6.0.1
+
+  string-to-stream@1.1.1:
+    dependencies:
+      inherits: 2.0.4
+      readable-stream: 2.3.8
 
   string-width@4.2.3:
     dependencies:
@@ -52483,6 +52704,10 @@ snapshots:
   xmlbuilder@15.1.1: {}
 
   xmlchars@2.2.0: {}
+
+  xmldoc@0.4.0:
+    dependencies:
+      sax: 1.1.6
 
   xmlhttprequest-ssl@2.1.2: {}
 

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { ExportFile, GeometryResponse } from '@taucad/runtime/types';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { defineKernel } from '@taucad/runtime/kernel';
+import { createKernelParameterDeclaration, defineKernel } from '@taucad/runtime/kernel';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { defineRuntime } from '@taucad/runtime/worker';
 import type { imageEdgeSchemas } from '#image-export-options.js';
@@ -34,7 +34,18 @@ const kernel = defineKernel({
     return { resolved: [], unresolved: [] };
   },
   async getParameters() {
-    return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+    return {
+      success: true,
+      data: createKernelParameterDeclaration(
+        {},
+        { type: 'object', properties: {} },
+        {
+          id: 'urn:taucad:test:image-type-kernel',
+          name: 'ImageTypeKernelParameters',
+        },
+      ),
+      issues: [],
+    };
   },
   async createGeometry() {
     return { geometry, nativeHandle: {} };

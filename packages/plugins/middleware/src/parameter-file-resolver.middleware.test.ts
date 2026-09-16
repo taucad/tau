@@ -72,7 +72,9 @@ describe('parameterFileResolverMiddleware', () => {
   });
 
   it('should pass through when file does not exist', async () => {
-    const notFound = Object.assign(new Error('ENOENT: file not found'), { code: 'ENOENT' });
+    const notFound = Object.assign(new Error('ENOENT: file not found'), {
+      code: 'ENOENT',
+    });
     const { input, handler, runtime } = createTestContext({
       readFileError: notFound,
     });
@@ -84,7 +86,9 @@ describe('parameterFileResolverMiddleware', () => {
 
   it('should propagate non-not-found filesystem errors without calling the handler', async () => {
     const permissionError = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
-    const { input, handler, runtime } = createTestContext({ readFileError: permissionError });
+    const { input, handler, runtime } = createTestContext({
+      readFileError: permissionError,
+    });
 
     await expect(parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime)).rejects.toThrow(
       permissionError,
@@ -94,34 +98,37 @@ describe('parameterFileResolverMiddleware', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it('should pass through when JSON is invalid', async () => {
+  it('should diagnose invalid JSON without calling the handler', async () => {
     const { input, handler, runtime } = createTestContext({
       readFileResult: '{invalid json',
     });
 
-    await parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime);
-
-    expect(handler).toHaveBeenCalledWith(input);
+    await expect(parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime)).rejects.toMatchObject({
+      issues: [{ code: 'INVALID_RECORD' }],
+    });
+    expect(handler).not.toHaveBeenCalled();
   });
 
-  it('should pass through when entry is missing activeGroup', async () => {
+  it('should diagnose an entry missing activeGroup', async () => {
     const { input, handler, runtime } = createTestContext({
       readFileResult: JSON.stringify({ groups: {} }),
     });
 
-    await parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime);
-
-    expect(handler).toHaveBeenCalledWith(input);
+    await expect(parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime)).rejects.toMatchObject({
+      issues: [{ code: 'INVALID_RECORD' }],
+    });
+    expect(handler).not.toHaveBeenCalled();
   });
 
-  it('should pass through when entry is missing groups', async () => {
+  it('should diagnose an entry missing groups', async () => {
     const { input, handler, runtime } = createTestContext({
       readFileResult: JSON.stringify({ activeGroup: 'default' }),
     });
 
-    await parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime);
-
-    expect(handler).toHaveBeenCalledWith(input);
+    await expect(parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime)).rejects.toMatchObject({
+      issues: [{ code: 'INVALID_RECORD' }],
+    });
+    expect(handler).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -136,15 +143,47 @@ describe('parameterFileResolverMiddleware', () => {
     },
     {
       name: 'an unknown top-level field',
-      entry: { activeGroup: 'default', groups: { default: { values: {} } }, extra: true },
+      entry: {
+        activeGroup: 'default',
+        groups: { default: { values: {} } },
+        extra: true,
+      },
     },
-  ])('should pass through when the entry contains $name', async ({ entry }) => {
-    const { input, handler, runtime } = createTestContext({ readFileResult: JSON.stringify(entry) });
+  ])('should diagnose an entry containing $name', async ({ entry }) => {
+    const { input, handler, runtime } = createTestContext({
+      readFileResult: JSON.stringify(entry),
+    });
 
-    await parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime);
+    await expect(parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime)).rejects.toMatchObject({
+      issues: [{ code: 'INVALID_RECORD' }],
+    });
+    expect(handler).not.toHaveBeenCalled();
+  });
 
-    expect(handler).toHaveBeenCalledOnce();
-    expect(handler).toHaveBeenCalledWith(input);
+  it('applies current v1 records and rejects future profiles', async () => {
+    const current = createTestContext({
+      readFileResult: JSON.stringify({
+        recordVersion: 1,
+        profile: 'tau-json-structure-units-03-v1',
+        activeGroup: 'default',
+        groups: { default: { values: { width: 42 } } },
+      }),
+    });
+    await parameterFileResolverMiddleware.wrapCreateGeometry!(current.input, current.handler, current.runtime);
+    expect(current.handler).toHaveBeenCalledWith(expect.objectContaining({ parameters: { width: 42 } }));
+
+    const future = createTestContext({
+      readFileResult: JSON.stringify({
+        recordVersion: 2,
+        profile: 'future',
+        activeGroup: 'default',
+        groups: { default: { values: { width: 99 } } },
+      }),
+    });
+    await expect(
+      parameterFileResolverMiddleware.wrapCreateGeometry!(future.input, future.handler, future.runtime),
+    ).rejects.toMatchObject({ issues: [{ code: 'UNSUPPORTED_RECORD' }] });
+    expect(future.handler).not.toHaveBeenCalled();
   });
 
   it('should preserve existing input parameters when no file overrides apply', async () => {
@@ -218,7 +257,11 @@ describe('parameterFileResolverMiddleware', () => {
 
       await parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime);
 
-      const calledParams = (vi.mocked(handler).mock.calls[0]![0] as { parameters: Record<string, unknown> }).parameters;
+      const calledParams = (
+        vi.mocked(handler).mock.calls[0]![0] as {
+          parameters: Record<string, unknown>;
+        }
+      ).parameters;
       expect(calledParams).toEqual({
         base: { width: 30, depth: 20, cornerRadius: 10 },
         profile: { line1X: 5, line1Y: 5 },
@@ -249,7 +292,11 @@ describe('parameterFileResolverMiddleware', () => {
 
       await parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime);
 
-      const calledParams = (vi.mocked(handler).mock.calls[0]![0] as { parameters: Record<string, unknown> }).parameters;
+      const calledParams = (
+        vi.mocked(handler).mock.calls[0]![0] as {
+          parameters: Record<string, unknown>;
+        }
+      ).parameters;
       expect(calledParams).toEqual({
         base: { width: 30, depth: 20, cornerRadius: 10 },
         profile: { line1X: 5 },
@@ -258,19 +305,33 @@ describe('parameterFileResolverMiddleware', () => {
     });
 
     it('should replace arrays from source parameters with sidecar arrays', async () => {
-      const originalParameters = { dimensions: [10, 20], nested: { values: [1, 2] } };
+      const originalParameters = {
+        dimensions: [10, 20],
+        nested: { values: [1, 2] },
+      };
       const { input, handler, runtime } = createTestContext({
         readFileResult: makeEntry({
           activeGroup: 'default',
-          groups: { default: { values: { dimensions: [30], nested: { values: [3, 4] } } } },
+          groups: {
+            default: {
+              values: { dimensions: [30], nested: { values: [3, 4] } },
+            },
+          },
         }),
         input: { parameters: originalParameters },
       });
 
       await parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime);
 
-      const calledParams = (vi.mocked(handler).mock.calls[0]![0] as { parameters: Record<string, unknown> }).parameters;
-      expect(calledParams).toEqual({ dimensions: [30], nested: { values: [3, 4] } });
+      const calledParams = (
+        vi.mocked(handler).mock.calls[0]![0] as {
+          parameters: Record<string, unknown>;
+        }
+      ).parameters;
+      expect(calledParams).toEqual({
+        dimensions: [30],
+        nested: { values: [3, 4] },
+      });
       expect(input.parameters).toEqual(originalParameters);
     });
   });
@@ -294,28 +355,23 @@ describe('parameterFileResolverMiddleware', () => {
   });
 
   it('should support a root-level parameter directory', () => {
-    const runtime = createDependencyRuntime({ parametersDir: '', watchDebounce: 0 });
+    const runtime = createDependencyRuntime({
+      parametersDir: '',
+      watchDebounce: 0,
+    });
     const dependencies = parameterFileResolverMiddleware.getDependencies!({ entryPath: 'main.ts' }, runtime);
 
     expect(dependencies).toEqual([{ path: 'main.ts.json', watchDebounce: 0 }]);
-  });
-
-  it('should propagate non-syntax JSON parser failures', async () => {
-    const { input, handler, runtime } = createTestContext({ readFileResult: '{}' });
-    const failure = new TypeError('parser unavailable');
-    vi.spyOn(JSON, 'parse').mockImplementationOnce(() => {
-      throw failure;
-    });
-
-    await expect(parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime)).rejects.toBe(failure);
-    expect(handler).not.toHaveBeenCalled();
   });
 
   describe('getDependencies', () => {
     it('should return the per-geometry-unit parameter file path', () => {
       const result = parameterFileResolverMiddleware.getDependencies!(
         { entryPath: 'main.ts' },
-        createDependencyRuntime({ parametersDir: parametersDirectory, watchDebounce: 200 }),
+        createDependencyRuntime({
+          parametersDir: parametersDirectory,
+          watchDebounce: 200,
+        }),
       );
 
       expect(result).toEqual([{ path: `${parametersDirectory}/main.ts.json`, watchDebounce: 200 }]);
@@ -324,7 +380,10 @@ describe('parameterFileResolverMiddleware', () => {
     it('should use custom parametersDir option', () => {
       const result = parameterFileResolverMiddleware.getDependencies!(
         { entryPath: 'main.ts' },
-        createDependencyRuntime({ parametersDir: '.config/params', watchDebounce: 200 }),
+        createDependencyRuntime({
+          parametersDir: '.config/params',
+          watchDebounce: 200,
+        }),
       );
 
       expect(result).toEqual([{ path: '.config/params/main.ts.json', watchDebounce: 200 }]);
@@ -333,7 +392,10 @@ describe('parameterFileResolverMiddleware', () => {
     it('should return synchronously (not a promise)', () => {
       const result = parameterFileResolverMiddleware.getDependencies!(
         { entryPath: 'main.ts' },
-        createDependencyRuntime({ parametersDir: parametersDirectory, watchDebounce: 200 }),
+        createDependencyRuntime({
+          parametersDir: parametersDirectory,
+          watchDebounce: 200,
+        }),
       );
 
       expect(Array.isArray(result)).toBe(true);

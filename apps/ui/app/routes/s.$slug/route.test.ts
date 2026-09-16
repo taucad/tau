@@ -1,9 +1,13 @@
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LoaderFunctionArgs } from 'react-router';
+import { parameterEntryPath, projectToManifest } from '@taucad/types';
+import type { ShareOpenedArtifact } from '@taucad/share/artifact';
 
 const loadPublication = vi.hoisted(() =>
-  vi.fn(async (_arguments: LoaderFunctionArgs) => ({ publication: { id: 'pub' } })),
+  vi.fn(async (_arguments: LoaderFunctionArgs) => ({
+    publication: { id: 'pub' },
+  })),
 );
 const publicationMeta = vi.hoisted(() => vi.fn(() => [{ title: 'Persisted project' }]));
 
@@ -17,7 +21,27 @@ vi.mock('#components/share/tau-publication.js', () => ({
 }));
 /* eslint-enable @typescript-eslint/naming-convention -- end mocked exports. */
 
-const { loader, meta } = await import('#routes/s.$slug/route.js');
+const { loader, meta, resolvePortableArtifact } = await import('#routes/s.$slug/route.js');
+
+const encoder = new TextEncoder();
+const manifest = projectToManifest({
+  id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
+  name: 'Portable fixture',
+  description: 'Record classification fixture',
+  tags: [],
+  assets: { main: { entryPath: 'main.ts' } },
+});
+const portableArtifact = (parameterRecord: unknown): ShareOpenedArtifact => ({
+  archive: new Uint8Array(),
+  files: [
+    { path: 'tau.json', content: encoder.encode(JSON.stringify(manifest)) },
+    { path: 'main.ts', content: encoder.encode('export default null') },
+    {
+      path: parameterEntryPath('main.ts'),
+      content: encoder.encode(typeof parameterRecord === 'string' ? parameterRecord : JSON.stringify(parameterRecord)),
+    },
+  ],
+});
 
 const loaderArgs = (slug: string): LoaderFunctionArgs => {
   // oxlint-disable-next-line typescript-eslint/consistent-type-assertions -- route test fixture omits unstable router internals.
@@ -41,7 +65,9 @@ describe('/s provider dispatch', () => {
     'gitlab~opaque',
     'bitbucket~opaque',
   ])('keeps %s client-only and never invokes the Tau publication loader', async (slug) => {
-    await expect(loader(loaderArgs(slug))).resolves.toEqual({ kind: 'portable' });
+    await expect(loader(loaderArgs(slug))).resolves.toEqual({
+      kind: 'portable',
+    });
     expect(loadPublication).not.toHaveBeenCalled();
   });
 
@@ -80,10 +106,42 @@ describe('/s provider dispatch', () => {
     const tags = meta({
       loaderData: {
         kind: 'portable',
-        builtin: { title: 'Birdhouse', description: 'A portable example', thumbnail: 'https://tau.new/bird.webp' },
+        builtin: {
+          title: 'Birdhouse',
+          description: 'A portable example',
+          thumbnail: 'https://tau.new/bird.webp',
+        },
       },
     } as Parameters<typeof meta>[0]);
     expect(tags).toEqual(expect.arrayContaining([{ title: 'Birdhouse · Tau' }]));
     expect(tags).not.toEqual(expect.arrayContaining([{ name: 'robots', content: 'noindex, nofollow' }]));
+  });
+});
+
+describe('portable parameter records', () => {
+  it('reads a legacy record without rewriting the archived bytes', () => {
+    const artifact = portableArtifact({
+      activeGroup: 'default',
+      groups: { default: { values: { width: 12 } } },
+    });
+
+    const resolved = resolvePortableArtifact(artifact);
+
+    expect(resolved?.parameters).toEqual({ width: 12 });
+    expect(resolved?.parameterDiagnostic).toBeUndefined();
+    expect(resolved?.files[parameterEntryPath('main.ts')]?.content).toBe(artifact.files[2]?.content);
+  });
+
+  it.each([
+    [{ recordVersion: 2, profile: 'future', groups: {} }, 'Unsupported'],
+    ['{', 'Invalid'],
+  ])('preserves %s record bytes and reports the read-only diagnostic', (record, label) => {
+    const artifact = portableArtifact(record);
+
+    const resolved = resolvePortableArtifact(artifact);
+
+    expect(resolved?.parameters).toEqual({});
+    expect(resolved?.parameterDiagnostic).toMatch(new RegExp(`^${label}`, 'u'));
+    expect(resolved?.files[parameterEntryPath('main.ts')]?.content).toBe(artifact.files[2]?.content);
   });
 });

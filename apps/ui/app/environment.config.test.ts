@@ -63,6 +63,14 @@ describe('resolveFrontendUrl', () => {
     ).toBe('https://taucad.dev');
   });
 
+  it('should use the Portless worktree URL outside Netlify', () => {
+    expect(
+      resolveFrontendUrl(
+        environmentFrom([['PORTLESS_URL', 'https://units-runtime-implementation.tau-ui.localhost:1355']]),
+      ),
+    ).toBe('https://units-runtime-implementation.tau-ui.localhost:1355');
+  });
+
   it('should derive deploy-preview frontend origin from DEPLOY_PRIME_URL first', () => {
     expect(
       resolveFrontendUrl(

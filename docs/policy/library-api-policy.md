@@ -3,7 +3,7 @@ title: 'Library API Policy'
 description: 'Design rules for world-class JavaScript/TypeScript library APIs: factories, defineX, named operation inputs, max 3 params, naming, subpath exports, events, plugins, and lazy init.'
 status: active
 created: '2026-02-23'
-updated: '2026-09-05'
+updated: '2026-09-13'
 related:
   - docs/policy/api-evolution-policy.md
   - docs/policy/resource-cleanup-policy.md
@@ -781,11 +781,11 @@ Hook return objects follow the same ownership rule and must avoid reserved-word 
 
 ## 22. Temporal Values
 
-All numeric **operational timing** values — timeouts, retry delays, debounces, cache ages, polling cadences and wall-clock durations — are in **milliseconds**. Physical quantity values use their quantity registry's coherent SI unit: physical time and simulation time are **seconds**, speed is metres per second, and frequency is inverse seconds. Never encode the unit in the identifier (no `Ms`, `Sec`, `S`, `Min`, `Seconds`, `Hours` suffixes; no `ms`/`s`/`min` prefixes), except the external-contract allowlist below.
+All numeric **operational timing** values — timeouts, retry delays, debounces, cache ages, polling cadences and wall-clock durations — are in **milliseconds**. Existing coherent-SI APIs retain their units unless explicitly migrated: physical time and simulation time are **seconds**, speed is metres per second, and frequency is inverse seconds. Unit-bearing parameter records instead preserve their declared native values and constraints; do not normalize them to coherent SI for persistence. Geometry and world-space coordinates remain metres. Never encode the unit in the identifier (no `Ms`, `Sec`, `S`, `Min`, `Seconds`, `Hours` suffixes; no `ms`/`s`/`min` prefixes), except the external-contract allowlist below.
 
-Classify the semantic value, not its name: a solver's simulated duration is physical time, while its execution deadline is operational timing. Numeric defaults, bounds and examples use the same canonical unit as the value. Convert explicitly at native-provider, external-protocol and legacy-model boundaries; do not reinterpret existing stored numbers merely by adding quantity metadata. Presentation unit preferences do not change the stored unit.
+Classify the semantic value, not its name: a solver's simulated duration is physical time, while its execution deadline is operational timing. Numeric defaults, bounds and examples use the unit selected by the owning contract. Convert explicitly at geometry/world-space, native-provider, external-protocol and legacy-model boundaries; do not reinterpret existing stored numbers merely by adding quantity metadata. Presentation unit preferences do not change the stored unit.
 
-**Why**: One canonical unit per semantic quantity eliminates implicit conversion at module boundaries. Operational timing follows JavaScript's millisecond APIs (`setTimeout`, `Date.now`, `performance.now`, `AbortSignal.timeout`); physical quantities follow coherent SI so derived dimensions remain correct. Choosing units by human readability or identifier suffix instead of the owning contract reintroduces ambiguity.
+**Why**: Operational timing follows JavaScript's millisecond APIs (`setTimeout`, `Date.now`, `performance.now`, `AbortSignal.timeout`). Native parameter records avoid lossy or implicit persistence conversion, while explicit coherent-SI and geometry boundaries keep their established contracts.
 
 CORRECT:
 
@@ -818,7 +818,9 @@ client.setRenderTimeout(30_000); // `setRenderTimeoutMs` would be forbidden
 
 ### Documenting the unit
 
-Because the identifier carries no suffix, every public operational timing field must declare `Milliseconds.` in its JSDoc — a single word on its own sentence. Physical time declares `Seconds.` and its quantity semantics; schema metadata carries the registry quantity kind, not a guessed unit from a field name.
+Because the identifier carries no suffix, every public operational timing field must declare `Milliseconds.` in its JSDoc — a single word on its own sentence. Existing coherent-SI physical time declares `Seconds.` and its quantity semantics. Explicit native parameter declarations carry their source unit and quantity semantics in the parameter record. When either is absent, only the owning versioned runtime resolution profile may infer supported semantics; retain per-field provenance and let declared-only consumers reject inferred results. Consumers must not guess semantics locally from field names.
+
+The standalone public `@taucad/units` package owns unit parsing, conversion and quantity semantics. Runtime and other packages consume that owner rather than copying registries or conversion logic.
 
 CORRECT:
 

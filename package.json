@@ -7,6 +7,7 @@
   "type": "module",
   "scripts": {
     "dev": "nx run-many -t dev",
+    "dev:ui": "nx run ui:dev:portless",
     "start": "nx run-many -t serve",
     "lint": "nx run-many -t lint",
     "test": "nx run-many -t test",
@@ -358,6 +359,7 @@
     "oxc-transform-react": "catalog:",
     "oxfmt": "catalog:",
     "playwright": "catalog:",
+    "portless": "catalog:",
     "publint": "catalog:",
     "qrcode-terminal": "catalog:",
     "rolldown": "catalog:",

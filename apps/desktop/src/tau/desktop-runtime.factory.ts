@@ -8,7 +8,13 @@ import { gltf } from '@taucad/gltf';
 import { image } from '@taucad/image';
 import { jscad } from '@taucad/jscad';
 import { manifold } from '@taucad/manifold';
-import { geometryCache, gltfEdgeDetection, parameterCache, parameterFileResolver } from '@taucad/middleware';
+import {
+  geometryCache,
+  gltfEdgeDetection,
+  parameterCache,
+  parameterFileResolver,
+  parameterUnits,
+} from '@taucad/middleware';
 import { opencascade } from '@taucad/opencascade';
 import { openrscadKernel } from '@taucad/openrscad';
 import { picogk } from '@taucad/picogk';
@@ -18,7 +24,10 @@ import { rhino } from '@taucad/rhino';
 import { build123dKernelOptions } from '#tau/build123d-resources.js';
 import { picogkKernelOptions } from '#tau/picogk-resources.js';
 
-export const desktopRuntimeConfigSchema = z.object({ tauApiUrl: z.url(), tauWebSocketUrl: z.url() });
+export const desktopRuntimeConfigSchema = z.object({
+  tauApiUrl: z.url(),
+  tauWebSocketUrl: z.url(),
+});
 
 export type DesktopRuntimeOptions = {
   readonly withSourceMapping?: boolean;
@@ -41,17 +50,25 @@ const createDesktopRuntimeImplementation = (options: DesktopRuntimeOptions = {})
         brep(),
         rhino(),
         image(),
-        assimp({ preset: 'all', transcoders: { export: { backend: desktopAssimpBackend } } }),
+        assimp({
+          preset: 'all',
+          transcoders: { export: { backend: desktopAssimpBackend } },
+        }),
         build123d({ kernels: { default: build123dKernelOptions() } }),
         ...(process.platform === 'darwin' && process.arch === 'arm64'
           ? [picogk({ kernels: { default: picogkKernelOptions() } })]
           : []),
         replicad({
-          kernels: { default: { wasm: 'auto', withSourceMapping: options.withSourceMapping === true } },
+          kernels: {
+            default: {
+              wasm: 'auto',
+              withSourceMapping: options.withSourceMapping === true,
+            },
+          },
         }),
       ],
       kernels: [desktopOpenrscadKernel],
-      middleware: [parameterFileResolver(), parameterCache(), geometryCache(), gltfEdgeDetection()],
+      middleware: [parameterFileResolver(), parameterCache(), parameterUnits(), geometryCache(), gltfEdgeDetection()],
     }),
   });
 

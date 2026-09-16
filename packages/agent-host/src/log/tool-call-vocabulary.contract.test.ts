@@ -158,7 +158,9 @@ describe('the durable tool-call vocabulary', () => {
     expect(input.call).toEqual({ toolCallId: 'tau-call-2', kind: 'read', nativeName: 'list_directory' });
     /* Every tool Tau dispatches has a kind, so a client never has to special-case
      * "Tau's own calls are the ones with no vocabulary" (N11). */
-    expect(tauToolKinds.size).toBe(15);
+    expect(tauToolKinds.get('get_parameters')).toBe('read');
+    expect(tauToolKinds.get('apply_parameter_operation')).toBe('edit');
+    expect(tauToolKinds.size).toBe(17);
   });
 
   it('preserves an ACP fact this vocabulary has no event for without acting on it', async () => {

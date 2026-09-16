@@ -19,6 +19,7 @@ import type {
 } from '@taucad/filesystem';
 import { resolveStorageRootKey } from '@taucad/filesystem/storage-root-key';
 import type { CadAgentExecution, Chat } from '@taucad/chat';
+import { getErrno } from '@taucad/utils/error';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type { Remote } from 'comlink';
 import { messageRole, messageStatus } from '@taucad/chat/constants';
@@ -54,6 +55,7 @@ import type {
   WorkspaceEntry,
 } from '#filesystem/handle-store.js';
 import { createChatFileStore } from '#db/chat-file-storage.js';
+import { composerRecordPaths } from '#db/composer-record-store.js';
 import { isBuildSuperseded } from '#filesystem/build-skew.js';
 import { WorkspaceDirectoryRequiredError } from '#filesystem/workspace-errors.js';
 import { directoryPicker } from '#constants/browser.constants.js';
@@ -756,6 +758,28 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [fileManager.client],
   );
 
+  /**
+   * Reclaim a permanently deleted project's composer records (blueprint D11).
+   *
+   * Every per-chat record for the project, and the draft-stage attachments
+   * beside them, live under the one Home-workspace directory, so the subtree
+   * goes in a single recursive removal keyed on the project id — no other
+   * project's records are under it. A project that never held a draft has no
+   * directory at all, and that absence is not a failure.
+   */
+  const removeProjectComposerRecords = useCallback(
+    async (projectId: string): Promise<void> => {
+      try {
+        await fileManager.client.rmdir(composerRecordPaths.project(projectId), { recursive: true });
+      } catch (error) {
+        if (getErrno(error) !== 'ENOENT' && (error as { name?: unknown }).name !== 'NotFoundError') {
+          throw error;
+        }
+      }
+    },
+    [fileManager.client],
+  );
+
   const resumePendingProjectOperation = useCallback(
     async (operation: PendingProjectOperation, suppliedWorker?: Remote<ObjectStoreWorker>): Promise<void> => {
       const worker = suppliedWorker ?? (await getReadiedWorker());
@@ -782,6 +806,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         }
         try {
           await worker.deleteProjectResources(operation.projectId);
+          await removeProjectComposerRecords(operation.projectId);
           const updatedPreferences = await worker.setProjectDisclosure(operation.projectId, undefined);
           if (updatedPreferences) {
             void queryClient.invalidateQueries({ queryKey: ['app-ui-preferences'] });
@@ -829,7 +854,14 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         throw new PendingProjectRecoveryError('local-state-error', { cause: error });
       }
     },
-    [assertProjectAbsentAfterDelete, chatStore, fileManager, getReadiedWorker, queryClient],
+    [
+      assertProjectAbsentAfterDelete,
+      chatStore,
+      fileManager,
+      getReadiedWorker,
+      queryClient,
+      removeProjectComposerRecords,
+    ],
   );
 
   const createProject = useCallback(

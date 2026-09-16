@@ -50,7 +50,8 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import type { ChatSession } from '#services/chat-session-store.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
-import type { draftMachine } from '#hooks/draft.machine.js';
+import type { DraftAttachment, DraftAttachmentModel, draftMachine } from '#hooks/draft.machine.js';
+import type { AttachmentReference } from '#utils/attachment.utils.js';
 import type { ChatMode } from '#routes/w.$workspace.$project/chat-mode-selector.js';
 
 type ChatInstance = AiSdkChat<MyUIMessage>;
@@ -198,13 +199,13 @@ export type CombinedChatState = {
    */
   activeKernel: KernelId | undefined;
   draftText: string;
-  draftImages: string[];
+  draftAttachments: readonly DraftAttachment[];
   draftToolChoice: string | string[];
   draftMode: ChatMode;
   messageEdits: Record<string, MyUIMessage>;
   activeEditMessageId: string | undefined;
   editDraftText: string;
-  editDraftImages: string[];
+  editDraftAttachments: readonly DraftAttachment[];
 };
 
 function shallowEqual<T>(a: T, b: T): boolean {
@@ -282,14 +283,14 @@ export function useChatSelector<T>(selector: (state: CombinedChatState) => T, ch
       activeExecution: persistenceContext?.activeExecution,
       activeKernel: persistenceContext?.activeKernel,
       draftText: draftContext.draftText,
-      draftImages: draftContext.draftImages,
+      draftAttachments: draftContext.draftAttachments,
       draftToolChoice: draftContext.draftToolChoice,
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- ChatMode is the agent/plan superset narrowed at the consumer layer
       draftMode: draftContext.draftMode as ChatMode,
       messageEdits: draftContext.messageEdits,
       activeEditMessageId: draftContext.activeEditMessageId,
       editDraftText: draftContext.editDraftText,
-      editDraftImages: draftContext.editDraftImages,
+      editDraftAttachments: draftContext.editDraftAttachments,
     };
     const next = selector(state);
     const cached = cacheRef.current;
@@ -356,17 +357,18 @@ export function useChatRetrySnapshot(chatId?: string): ChatRetrySnapshot {
 
 /**
  * Draft-only state shape. Strict subset of {@link CombinedChatState} that
- * doesn't depend on a live `Chat` session.
+ * doesn't depend on a live `Chat` session. A composer derives its send gate
+ * from `draftAttachments` with `attachmentSendBlockReason` (`#utils/chat.utils.js`).
  */
 export type DraftState = {
   draftText: string;
-  draftImages: string[];
+  draftAttachments: readonly DraftAttachment[];
   draftToolChoice: string | string[];
   draftMode: ChatMode;
   messageEdits: Record<string, MyUIMessage>;
   activeEditMessageId: string | undefined;
   editDraftText: string;
-  editDraftImages: string[];
+  editDraftAttachments: readonly DraftAttachment[];
 };
 
 /**
@@ -380,14 +382,14 @@ export function useDraftSelector<T>(selector: (state: DraftState) => T): T {
   const draftState = useMemo<DraftState>(
     () => ({
       draftText: draftContext.draftText,
-      draftImages: draftContext.draftImages,
+      draftAttachments: draftContext.draftAttachments,
       draftToolChoice: draftContext.draftToolChoice,
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- ChatMode is the agent/plan superset narrowed at the consumer layer
       draftMode: draftContext.draftMode as ChatMode,
       messageEdits: draftContext.messageEdits,
       activeEditMessageId: draftContext.activeEditMessageId,
       editDraftText: draftContext.editDraftText,
-      editDraftImages: draftContext.editDraftImages,
+      editDraftAttachments: draftContext.editDraftAttachments,
     }),
     [draftContext],
   );
@@ -400,7 +402,11 @@ export function useDraftSelector<T>(selector: (state: DraftState) => T): T {
  * the session-required {@link ChatActions} so marketing-route composers can
  * write to the draft without a session.
  */
-export type DraftImageOptions = {
+export type DraftAttachmentOptions = {
+  /** The selected model; an attachment kind it cannot read is refused before any byte is stored (D20). */
+  readonly model: DraftAttachmentModel;
+  /** Shown on a document chip and sent to the provider. */
+  readonly filename?: string;
   /** Keep a generated lossless artifact byte-for-byte instead of applying the upload compression policy. */
   readonly preserveOriginal?: boolean;
 };
@@ -408,19 +414,17 @@ export type DraftImageOptions = {
 export type DraftActions = {
   setDraftText: (text: string) => void;
   /**
-   * Add a raw image data URL to the new-message draft. Synchronous: the
-   * `draftMachine` enqueues the URL and processes it through the single
-   * `imageProcessing` chokepoint (see `apps/ui/app/hooks/draft.machine.ts`).
-   * Pass the original (un-resized) data URL — the machine handles
-   * dimension/compression caps via `resizeImageForChat()`. Generated captures
-   * pass `preserveOriginal` so their lossless bytes bypass upload compression.
-   * Failures surface
-   * as a single global `toast.error` from the provider's
-   * `useDraftImageErrorToast` subscriber, so callers MUST NOT wrap this in
-   * try/catch or await any resize step.
+   * Add a raw image or PDF data URL to the new-message draft. Synchronous: the
+   * `draftMachine` enqueues it through its single `attachmentProcessing`
+   * chokepoint (see `apps/ui/app/hooks/draft.machine.ts`), which resizes
+   * images and stores the bytes before the draft references them. Pass the
+   * original data URL. Generated captures pass `preserveOriginal` so their
+   * lossless bytes bypass upload compression. Failures and refusals are
+   * emitted by the machine for one toast subscriber, so callers MUST NOT wrap
+   * this in try/catch.
    */
-  addDraftImage: (image: string, options?: DraftImageOptions) => void;
-  removeDraftImage: (index: number) => void;
+  addDraftAttachment: (dataUrl: string, options: DraftAttachmentOptions) => void;
+  removeDraftAttachment: (index: number) => void;
   setDraftToolChoice: (toolChoice: string | string[]) => void;
   setDraftMode: (mode: string) => void;
   clearDraft: () => void;
@@ -428,11 +432,11 @@ export type DraftActions = {
   exitEditMode: () => void;
   setEditDraftText: (text: string) => void;
   /**
-   * Add a raw image data URL to the message-edit draft. Same contract as
-   * {@link DraftActions.addDraftImage}.
+   * Add a raw data URL to the message-edit draft. Same contract as
+   * {@link DraftActions.addDraftAttachment}.
    */
-  addEditDraftImage: (image: string, options?: DraftImageOptions) => void;
-  removeEditDraftImage: (index: number) => void;
+  addEditDraftAttachment: (dataUrl: string, options: DraftAttachmentOptions) => void;
+  removeEditDraftAttachment: (index: number) => void;
   clearMessageEdit: (messageId: string) => void;
 };
 
@@ -444,11 +448,11 @@ export function useDraftActions(): DraftActions {
       setDraftText(text: string) {
         draftActorRef.send({ type: 'setDraftText', text });
       },
-      addDraftImage(image: string, options?: DraftImageOptions) {
-        draftActorRef.send({ type: 'addDraftImage', image, preserveOriginal: options?.preserveOriginal });
+      addDraftAttachment(dataUrl: string, options: DraftAttachmentOptions) {
+        draftActorRef.send({ type: 'addDraftAttachment', dataUrl, ...options });
       },
-      removeDraftImage(index: number) {
-        draftActorRef.send({ type: 'removeDraftImage', index });
+      removeDraftAttachment(index: number) {
+        draftActorRef.send({ type: 'removeDraftAttachment', index });
       },
       setDraftToolChoice(toolChoice: string | string[]) {
         draftActorRef.send({ type: 'setDraftToolChoice', toolChoice });
@@ -469,11 +473,11 @@ export function useDraftActions(): DraftActions {
       setEditDraftText(text: string) {
         draftActorRef.send({ type: 'setEditDraftText', text });
       },
-      addEditDraftImage(image: string, options?: DraftImageOptions) {
-        draftActorRef.send({ type: 'addEditDraftImage', image, preserveOriginal: options?.preserveOriginal });
+      addEditDraftAttachment(dataUrl: string, options: DraftAttachmentOptions) {
+        draftActorRef.send({ type: 'addEditDraftAttachment', dataUrl, ...options });
       },
-      removeEditDraftImage(index: number) {
-        draftActorRef.send({ type: 'removeEditDraftImage', index });
+      removeEditDraftAttachment(index: number) {
+        draftActorRef.send({ type: 'removeEditDraftAttachment', index });
       },
       clearMessageEdit(messageId: string) {
         draftActorRef.send({ type: 'clearMessageEdit', messageId });
@@ -502,7 +506,7 @@ export type ChatActions = DraftActions & {
   editMessage: (
     messageId: string,
     content: string,
-    options?: { imageUrls?: string[]; body?: Readonly<Record<string, unknown>> },
+    options?: { attachments?: readonly AttachmentReference[]; body?: Readonly<Record<string, unknown>> },
   ) => void;
   retryMessage: (messageId: string, options?: { body?: Readonly<Record<string, unknown>> }) => void;
 };
@@ -552,10 +556,21 @@ export function useChatActions(chatId?: string): ChatActions {
       return session;
     };
 
+    // The draft no longer references what a send promoted; its draft-stage copies go.
+    const releaseDraftAttachments = async (): Promise<void> => {
+      try {
+        await store.releaseDraftAttachments(resolvedChatId);
+      } catch (error) {
+        // An unreleased blob is reclaimed by the next `retainOnly`; nothing the person sent is affected.
+        console.warn('[useChatActions] draft attachments could not be released', error);
+      }
+    };
+
     return {
       ...draftActions,
       sendMessage(message: SendMessageInput, options) {
         draftActorRef.send({ type: 'clearDraft' });
+        void releaseDraftAttachments();
         const session = requireSession('sendMessage');
         if (!session) {
           return;
@@ -610,6 +625,7 @@ export function useChatActions(chatId?: string): ChatActions {
 
       editMessage(messageId: string, content: string, options?) {
         draftActorRef.send({ type: 'clearMessageEdit', messageId });
+        void releaseDraftAttachments();
         const session = requireSession('editMessage');
         if (!session) {
           return;
@@ -620,7 +636,13 @@ export function useChatActions(chatId?: string): ChatActions {
         void store.touchChatRecency(resolvedChatId, Date.now());
         session.persistenceActorRef.send({
           type: 'startRequest',
-          request: { kind: 'edit', messageId, content, imageUrls: options?.imageUrls, body: options?.body },
+          request: {
+            kind: 'edit',
+            messageId,
+            content,
+            ...(options?.attachments === undefined ? {} : { attachments: options.attachments }),
+            body: options?.body,
+          },
         });
       },
 

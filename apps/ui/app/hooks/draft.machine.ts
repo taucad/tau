@@ -37,7 +37,7 @@ import type { ChatMode } from '@taucad/chat/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 import { base64ToUint8Array } from 'uint8array-extras';
-import { attachmentKind, attachmentUrl, isAttachmentUrl } from '#utils/attachment.utils.js';
+import { attachmentKind, attachmentReferenceOf, attachmentUrl } from '#utils/attachment.utils.js';
 import type { Attachment, AttachmentKind } from '#utils/attachment.utils.js';
 
 /**
@@ -246,14 +246,11 @@ type LoadedDraft = { text: string; attachments: DraftAttachment[]; legacy: strin
 const loadMessage = (message: MyUIMessage | undefined): LoadedDraft => {
   const loaded: LoadedDraft = { text: '', attachments: [], legacy: [] };
   for (const part of message?.parts ?? []) {
+    const reference = part.type === 'file' ? attachmentReferenceOf(part) : undefined;
     if (part.type === 'text' && loaded.text === '') {
       loaded.text = part.text;
-    } else if (part.type === 'file' && isAttachmentUrl(part.url)) {
-      loaded.attachments.push({
-        hash: part.url.slice('attachments/'.length, 'attachments/'.length + 64),
-        mediaType: part.mediaType,
-        ...(part.filename === undefined ? {} : { filename: part.filename }),
-      });
+    } else if (reference !== undefined) {
+      loaded.attachments.push(reference);
     } else if (part.type === 'file' && part.url.startsWith('data:')) {
       loaded.legacy.push(part.url);
     }

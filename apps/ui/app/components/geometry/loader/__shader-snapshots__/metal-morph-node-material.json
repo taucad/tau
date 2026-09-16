@@ -1,0 +1,182 @@
+{
+  "anisotropy": 0,
+  "anisotropyRotation": 0,
+  "attenuationColor": 16777215,
+  "blendColor": 0,
+  "clearcoat": 0,
+  "clearcoatRoughness": 0,
+  "color": 15198443,
+  "dispersion": 0,
+  "emissive": 0,
+  "envMapIntensity": 1,
+  "envMapRotation": [0, 0, 0, "XYZ"],
+  "inputNodes": {
+    "iridescenceNode": "<nodeRef>",
+    "iridescenceThicknessNode": "<nodeRef>",
+    "normalNode": "<nodeRef>",
+    "positionNode": "<nodeRef>",
+    "roughnessNode": "<nodeRef>"
+  },
+  "iridescence": 0,
+  "iridescenceIOR": 1.28,
+  "iridescenceThicknessRange": [140, 480],
+  "metadata": {
+    "generator": "Material.toJSON",
+    "type": "Material",
+    "version": 4.7
+  },
+  "metalness": 1,
+  "nodes": [
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "shaderNode": "<nodeRef>"
+      },
+      "type": "Node"
+    },
+    {
+      "type": "Node"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "shaderNode": "<nodeRef>"
+      },
+      "type": "Node"
+    },
+    {
+      "type": "Node"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>",
+        "cNode": "<nodeRef>"
+      },
+      "method": "mix",
+      "type": "MathNode"
+    },
+    {
+      "inputNodes": {
+        "groupNode": "<nodeRef>"
+      },
+      "nodeType": "float",
+      "precision": null,
+      "type": "UniformNode",
+      "value": 0.12,
+      "valueType": "float"
+    },
+    {
+      "name": "object",
+      "shared": false,
+      "type": "UniformGroupNode",
+      "version": 0
+    },
+    {
+      "inputNodes": {
+        "groupNode": "<nodeRef>"
+      },
+      "nodeType": "float",
+      "precision": null,
+      "type": "UniformNode",
+      "value": 0.34,
+      "valueType": "float"
+    },
+    {
+      "type": "PropertyNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "groupNode": "<nodeRef>"
+      },
+      "nodeType": "float",
+      "precision": null,
+      "type": "UniformNode",
+      "value": 0.5,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>",
+        "cNode": "<nodeRef>"
+      },
+      "method": "mix",
+      "type": "MathNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 140,
+      "valueType": "float"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "nodeType": "float",
+      "precision": null,
+      "type": "ConstNode",
+      "value": 480,
+      "valueType": "float"
+    },
+    {
+      "type": "PropertyNode"
+    }
+  ],
+  "roughness": 0.12,
+  "sheen": 0,
+  "sheenColor": 0,
+  "sheenRoughness": 1,
+  "specularColor": 16777215,
+  "specularIntensity": 1,
+  "thickness": 0,
+  "transmission": 0,
+  "type": "MeshPhysicalNodeMaterial"
+}

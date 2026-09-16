@@ -64,5 +64,8 @@
     "@types/react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:"
+  },
+  "dependencies": {
+    "@taucad/parameters": "workspace:*"
   }
 }

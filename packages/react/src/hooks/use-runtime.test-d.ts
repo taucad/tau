@@ -1,5 +1,6 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import type { JSONSchema7 } from '@taucad/runtime/types';
+import type { ParameterManifest } from '@taucad/parameters';
 import { defineRuntime } from '@taucad/runtime/worker';
 import type { ExportResult } from '@taucad/runtime';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
@@ -42,6 +43,7 @@ describe('useRuntime source input types', () => {
     });
 
     expectTypeOf(result.geometry).toEqualTypeOf<UseRuntimeResult['geometry']>();
+    expectTypeOf(result.geometryStatus).toEqualTypeOf<'empty' | 'current' | 'stale'>();
   });
 
   it('requires entry for multi-key inline source maps and infers the entry key union', () => {
@@ -122,7 +124,9 @@ describe('useRuntime source input types', () => {
   });
 
   it('exposes hook-owned parameter state and setters', () => {
-    const { defaultParameters, parameters, setParameters, resetParameters, jsonSchema } = useRuntime<typeof runtime>({
+    const { defaultParameters, parameters, setParameters, resetParameters, jsonSchema, parameterManifest } = useRuntime<
+      typeof runtime
+    >({
       clientOptions,
       source: { path: scadPath },
       initialParameters: { len: 200 },
@@ -137,6 +141,7 @@ describe('useRuntime source input types', () => {
     expectTypeOf(resetParameters).toEqualTypeOf<() => void>();
     expectTypeOf(jsonSchema).toEqualTypeOf<JSONSchema7 | undefined>();
     expectTypeOf<UseRuntimeResult['jsonSchema']>().toEqualTypeOf<JSONSchema7 | undefined>();
+    expectTypeOf(parameterManifest).toEqualTypeOf<ParameterManifest | undefined>();
 
     setParameters({ len: 240 });
     setParameters((current) => ({ ...current, len: 260 }));

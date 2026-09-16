@@ -25,7 +25,7 @@ import { join } from 'node:path';
 
 import { createGatewayModelTransport } from '#transport/gateway-model-transport.js';
 import { createTauAgentHost } from '#host/tau-agent-host.js';
-import { createNodeEventLog } from '#node.js';
+import { createNodeAttachmentReader, createNodeEventLog } from '#node.js';
 import { createPortableId } from '#harness/session-record.js';
 import type {
   AgentLogEvent,
@@ -377,6 +377,7 @@ export const createNodeAgentLauncher = (options: NodeAgentLauncherOptions): Node
       }),
     toolRegistry: options.toolRegistry,
     openEventLog,
+    attachments: createNodeAttachmentReader(options.workspaceRoot),
     interruptPort,
     createId,
     /* W4-ACP's port, registered on the shared run-kind seam. The daemon's own

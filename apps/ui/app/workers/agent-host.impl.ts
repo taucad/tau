@@ -26,7 +26,7 @@ import type {
   StorageDurabilityClass,
   TauAgentHost,
 } from '@taucad/agent-host';
-import { createOpfsEventLog, createProviderEventLog } from '@taucad/agent-host/browser';
+import { createOpfsEventLog, createProviderAttachmentReader, createProviderEventLog } from '@taucad/agent-host/browser';
 import { createConfiguredGatewayModelTransport } from '#cloud/gateway-model-transport.js';
 import { createDefaultKernelOptions } from '#constants/kernel-worker.constants.js';
 import { createSkillResolver } from '#lib/skill-resolver.js';
@@ -1426,6 +1426,8 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
       }
       return openProjectEventLog(activeReference.current, chatId);
     },
+    // Chat attachments live beside the log in the project's own `.tau/chats`.
+    attachments: createProviderAttachmentReader(projectRoot),
     interruptPort: {
       pause: async (interrupt) => {
         const settled = Promise.withResolvers<InterruptResolution>();

@@ -13,7 +13,7 @@
  * coalesce, fail, retry and drain on their own (`writes`).
  */
 
-import { and, assign, emit, enqueueActions, not, setup, stateIn } from 'xstate';
+import { and, assign, emit, enqueueActions, not, or, setup, stateIn } from 'xstate';
 import type {
   ComposerRecord,
   ComposerRecordPatch,
@@ -188,6 +188,8 @@ export const composerRecordMachine = setup({
     hasPending: ({ context }) => hasFields(context.pending),
     hasAttemptsLeft: ({ context }) => context.attempt <= context.retryMaxAttempts,
     hasWorkAfterDrop: ({ context }) => hasFields(retainedAfterDrop(context)),
+    /** The record still exists: nothing has asked for it to be removed. */
+    isLive: or([stateIn({ lifecycle: 'loading' }), stateIn({ lifecycle: 'usable' })]),
   },
   delays: {
     /**
@@ -235,7 +237,8 @@ export const composerRecordMachine = setup({
         /**
          * Removal waits only for a write that is already on the wire — an
          * unlink racing it would leave the record recreated. A retained or
-         * retrying patch is abandoned on purpose: its record is going away.
+         * retrying patch is abandoned on purpose: its record is going away,
+         * and `writes` moves to `stopped` so nothing written later brings it back.
          */
         draining: {
           always: { guard: not(stateIn({ writes: 'persisting' })), target: 'removing' },
@@ -251,6 +254,7 @@ export const composerRecordMachine = setup({
           },
         },
         removed: {
+          type: 'final',
           entry: 'emitRecordRemoved',
         },
       },
@@ -259,6 +263,7 @@ export const composerRecordMachine = setup({
       initial: 'idle',
       states: {
         idle: {
+          always: { guard: not('isLive'), target: 'stopped' },
           on: {
             patch: { target: 'persisting', actions: 'mergePending' },
             flushNow: { guard: 'hasPending', target: 'persisting' },
@@ -270,12 +275,18 @@ export const composerRecordMachine = setup({
             src: 'writePatchActor',
             input: ({ context }) => context.inFlight,
             onDone: [
-              { guard: 'hasPending', target: 'persisting', reenter: true, actions: 'writeSucceeded' },
+              // A drain lets this write land, then starts no other: the patches behind it die with the record.
+              {
+                guard: and(['hasPending', 'isLive']),
+                target: 'persisting',
+                reenter: true,
+                actions: 'writeSucceeded',
+              },
               { target: 'idle', actions: 'writeSucceeded' },
             ],
             onError: [
               {
-                guard: and([({ event }) => isComposerRecordInputError(event.error), 'hasWorkAfterDrop']),
+                guard: and([({ event }) => isComposerRecordInputError(event.error), 'hasWorkAfterDrop', 'isLive']),
                 target: 'persisting',
                 reenter: true,
                 actions: [
@@ -318,6 +329,10 @@ export const composerRecordMachine = setup({
           },
         },
         retrying: {
+          // Removal does not wait out a retry (the record is going away), so the
+          // timer must die here — a retry that fired after the unlink would
+          // recreate the file.
+          always: { guard: not('isLive'), target: 'stopped' },
           after: {
             retryDelay: [
               { guard: 'hasAttemptsLeft', target: 'persisting' },
@@ -329,6 +344,16 @@ export const composerRecordMachine = setup({
             patch: { target: 'persisting', actions: 'mergePending' },
             flushNow: 'persisting',
           },
+        },
+        /**
+         * Terminal. Every resting state routes here once removal begins, and
+         * `persisting` reaches it through `idle` after its drain. With no
+         * handlers, a late `patch` or `flushNow` has nothing to start — and once
+         * `lifecycle` is `removed` too, both regions are final and the actor
+         * stops, so the deleted record cannot be written back.
+         */
+        stopped: {
+          type: 'final',
         },
       },
     },

@@ -412,6 +412,17 @@ const agentStateRows: ReadonlyArray<{
     sentence: undefined,
   },
   {
+    /* W8 (D9): after a reload the run is idle, and the unread record is what
+     * says a turn finished unseen; the store restores it into the machine. */
+    signal: 'unreadRestored after a reload, chat not focused',
+    target: 'chat',
+    events: [{ type: 'unreadRestored' }],
+    state: 'idle',
+    label: undefined,
+    mark: 'unread',
+    sentence: 'Finished while you were away',
+  },
+  {
     signal: 'run.lifecycle: failed',
     target: 'chat',
     events: [{ type: 'runLifecycle', phase: 'failed', reason: 'kernel crashed while meshing' }],

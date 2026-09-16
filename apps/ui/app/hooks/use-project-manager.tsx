@@ -246,7 +246,7 @@ type ProjectManagerContextType = {
   // Chat methods
   createChat: (
     resourceId: string,
-    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt' | 'hasUnreadTurn'> & {
+    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt'> & {
       id?: string;
     },
   ) => Promise<Chat>;
@@ -255,15 +255,8 @@ type ProjectManagerContextType = {
   applyGeneratedChatName: (chatId: string, name: string) => Promise<Chat | undefined>;
   patchChat: <K extends keyof Chat>(chatId: string, key: K, value: Chat[K]) => Promise<Chat | undefined>;
   touchChatRecency: (chatId: string, requestedAt: number) => Promise<Chat | undefined>;
-  setChatUnreadState: (chatId: string, hasUnreadTurn: boolean) => Promise<Chat | undefined>;
   consumeChatStartupRequest: (chatId: string, requestId: string) => Promise<Chat | undefined>;
   commitCancelledDraftRestore: (chatId: string, input: CommitCancelledDraftRestoreInput) => Promise<Chat | undefined>;
-  setMessageEdit: (
-    chatId: string,
-    messageId: string,
-    draft: NonNullable<Chat['messageEdits']>[string],
-  ) => Promise<Chat | undefined>;
-  clearMessageEdit: (chatId: string, messageId: string) => Promise<Chat | undefined>;
   softDeleteChat: (chatId: string) => Promise<Chat | undefined>;
   duplicateChat: (chatId: string) => Promise<Chat>;
   getAllChats: (options?: { includeDeleted?: boolean }) => Promise<Chat[]>;
@@ -2134,7 +2127,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   const createChat = useCallback(
     async (
       resourceId: string,
-      chatData: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt' | 'hasUnreadTurn'> & {
+      chatData: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt'> & {
         id?: string;
       },
     ): Promise<Chat> => {
@@ -2193,17 +2186,6 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [chatStore, invalidateChatQueries, invalidateProjectsList, touchProject],
   );
 
-  const setChatUnreadState = useCallback(
-    async (chatId: string, hasUnreadTurn: boolean): Promise<Chat | undefined> => {
-      const result = await chatStore.setChatUnreadState(chatId, hasUnreadTurn);
-      if (result) {
-        invalidateChatQueries(result.resourceId, chatId);
-      }
-      return result;
-    },
-    [chatStore, invalidateChatQueries],
-  );
-
   const consumeChatStartupRequest = useCallback(
     async (chatId: string, requestId: string): Promise<Chat | undefined> => {
       return chatStore.consumeChatStartupRequest(chatId, requestId);
@@ -2214,24 +2196,6 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
   const commitCancelledDraftRestore = useCallback(
     async (chatId: string, input: CommitCancelledDraftRestoreInput): Promise<Chat | undefined> => {
       return chatStore.commitCancelledDraftRestore(chatId, input);
-    },
-    [chatStore],
-  );
-
-  const setMessageEdit = useCallback(
-    async (
-      chatId: string,
-      messageId: string,
-      draft: NonNullable<Chat['messageEdits']>[string],
-    ): Promise<Chat | undefined> => {
-      return chatStore.setMessageEdit(chatId, messageId, draft);
-    },
-    [chatStore],
-  );
-
-  const clearMessageEdit = useCallback(
-    async (chatId: string, messageId: string): Promise<Chat | undefined> => {
-      return chatStore.clearMessageEdit(chatId, messageId);
     },
     [chatStore],
   );
@@ -2327,11 +2291,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       applyGeneratedChatName,
       patchChat,
       touchChatRecency,
-      setChatUnreadState,
       consumeChatStartupRequest,
       commitCancelledDraftRestore,
-      setMessageEdit,
-      clearMessageEdit,
       softDeleteChat,
       duplicateChat,
       getAllChats,
@@ -2374,11 +2335,8 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     applyGeneratedChatName,
     patchChat,
     touchChatRecency,
-    setChatUnreadState,
     consumeChatStartupRequest,
     commitCancelledDraftRestore,
-    setMessageEdit,
-    clearMessageEdit,
     softDeleteChat,
     duplicateChat,
     getAllChats,

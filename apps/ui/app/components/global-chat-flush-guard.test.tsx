@@ -59,6 +59,11 @@ vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => harness.projectManager,
 }));
 
+// These sessions never bind a project, so the composer record client is never reached.
+vi.mock('#hooks/use-file-manager.js', () => ({
+  useFileManager: () => ({ client: {} }),
+}));
+
 const { ChatSessionStoreProvider, useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
 const { UnloadProvider } = await import('#hooks/use-flush-on-close.js');
 const { GlobalChatFlushGuard } = await import('#components/global-chat-flush-guard.js');
@@ -165,6 +170,8 @@ describe('GlobalChatFlushGuard', () => {
     const b = spyOnActorSends(store.acquire('chat_b'));
 
     store.release('chat_b');
+    // Release flushes its own draft so the last keystroke is kept; only the close event's fan-out is under test.
+    b.draftSend.mockClear();
 
     dispatchVisibilityHidden();
 

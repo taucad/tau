@@ -4,9 +4,9 @@
  * Every glyph the sidebar shows is derived here, from the `sessions`,
  * `project-session`, `chat-session` and `project-revisions` snapshots at read
  * time. Nothing about a row is persisted: the only durable status in the whole
- * surface is the per-client `unread` record, and even that is read off the
- * chat's own `read` region — `use-focused-chat-read-state.ts` writes it, this
- * never does.
+ * surface is the project's per-device unread record, and even that is read off
+ * the chat's own `read` region, which `ChatSessionStore` restores from it (D9).
+ * The store is its one writer; this module never writes it.
  *
  * Two shapes, on purpose:
  *
@@ -284,6 +284,11 @@ export const selectChatFacts = (status: ChatSidebarStatus): SidebarFacts => {
         : { mark: 'none', sentence: undefined };
     }
     default: {
+      /* After a reload the run is `idle` and the restored unread record is what
+       * says a turn finished unseen (D9), so it reads as an unread `done`. */
+      if (status.state === 'idle' && status.unread) {
+        return { mark: 'unread', sentence: 'Finished while you were away' };
+      }
       /* `stopped` keeps its word (I1); `idle` has none. */
       return { mark: 'none', sentence };
     }

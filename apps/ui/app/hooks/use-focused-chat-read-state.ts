@@ -1,9 +1,8 @@
 import { useCallback, useEffect } from 'react';
 import { useSelector } from '@xstate/react';
-import { useChats } from '#hooks/use-chats.js';
 import { useProject } from '#hooks/use-project.js';
-import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 
 const isDocumentActive = (): boolean => {
   if (typeof document === 'undefined') {
@@ -12,23 +11,28 @@ const isDocumentActive = (): boolean => {
   return document.visibilityState === 'visible' && document.hasFocus();
 };
 
-/** Clears unread state only while the focused chat is actually visible to the user. */
+/**
+ * Clears unread state only while the focused chat is actually visible to the user.
+ *
+ * The store is the one writer of unread (D9): `markViewed` clears the chat's
+ * machine and the project's unread record together. The trigger is the chat's
+ * `read` region, which the store restores from that record, or the record
+ * itself before the machine has heard.
+ */
 export function useFocusedChatReadState(): void {
   const { projectId, editorRef } = useProject();
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
-  const { chats } = useChats(projectId);
-  const { setChatUnreadState } = useProjectManager();
   const chatSessions = useChatSessionStore();
-  const focusedChat = chats.find((chat) => chat.id === focusedChatId);
+  const unread = useChatSidebarStatus(projectId, focusedChatId ?? '')?.unread === true;
 
   const clearUnread = useCallback(() => {
-    if (!focusedChat?.hasUnreadTurn || !isDocumentActive()) {
+    if (focusedChatId === undefined || !isDocumentActive()) {
       return;
     }
-    /* The chat's own machine owns `read`/`unread` (S45); the record follows. */
-    chatSessions.markViewed(focusedChat.id);
-    void setChatUnreadState(focusedChat.id, false);
-  }, [chatSessions, focusedChat, setChatUnreadState]);
+    if (unread || chatSessions.isUnread(focusedChatId)) {
+      chatSessions.markViewed(focusedChatId);
+    }
+  }, [chatSessions, focusedChatId, unread]);
 
   useEffect(clearUnread, [clearUnread]);
 

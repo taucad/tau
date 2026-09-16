@@ -357,7 +357,7 @@ const pendingPermanentDelete: Extract<PendingProjectOperation, { kind: 'permanen
 type PrepareProjectCreationInput = {
   readonly manifest: ProjectManifest;
   readonly attachmentSource?: string;
-  readonly chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt' | 'hasUnreadTurn'>;
+  readonly chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt'>;
   readonly editorState?: unknown;
   readonly files: Record<string, { readonly content: Uint8Array<ArrayBuffer> }>;
   readonly storage: PendingProjectStorage;
@@ -415,13 +415,9 @@ const activityChat: Chat = {
   createdAt: 1,
   updatedAt: 2,
   recencyAt: 2,
-  hasUnreadTurn: false,
 };
 const mockTouchChatRecency = vi.fn<(chatId: string, activityAt: number) => Promise<Chat | undefined>>(
   async () => activityChat,
-);
-const mockSetChatUnreadState = vi.fn<(chatId: string, hasUnreadTurn: boolean) => Promise<Chat | undefined>>(
-  async (_chatId, hasUnreadTurn) => ({ ...activityChat, hasUnreadTurn }),
 );
 const mockPatchChat = vi.fn(async () => ({ ...activityChat, name: 'Patched' }));
 const mockTouchProjectActivity = vi.fn(async (projectId: string, activityAt?: number) => ({
@@ -438,7 +434,6 @@ vi.mock('#db/chat-file-storage.js', () => ({
   createChatFileStore: () => ({
     invalidateLog: mockInvalidateChatLog,
     touchChatRecency: mockTouchChatRecency,
-    setChatUnreadState: mockSetChatUnreadState,
     patchChat: mockPatchChat,
     putChatRecord: mockPutChatRecord,
     getChatsForResource: vi.fn(async () => []),
@@ -450,8 +445,6 @@ vi.mock('#db/chat-file-storage.js', () => ({
     applyGeneratedChatName: vi.fn(async () => undefined),
     consumeChatStartupRequest: vi.fn(async () => undefined),
     commitCancelledDraftRestore: vi.fn(async () => undefined),
-    setMessageEdit: vi.fn(async () => undefined),
-    clearMessageEdit: vi.fn(async () => undefined),
     softDeleteChat: vi.fn(async () => undefined),
     deleteChat: vi.fn(async () => undefined),
     duplicateChat: vi.fn(async () => activityChat),
@@ -495,7 +488,6 @@ vi.mock('xstate', async (importOriginal) => {
           restoreProject: mockRestoreProject,
           touchProjectActivity: mockTouchProjectActivity,
           touchChatRecency: mockTouchChatRecency,
-          setChatUnreadState: mockSetChatUnreadState,
           patchChat: mockPatchChat,
           beginPermanentDeleteProject: mockBeginPermanentDeleteProject,
           deleteProjectResources: mockDeleteProjectResources,
@@ -2670,22 +2662,21 @@ describe('useProjectManager.createProject', () => {
     );
   });
 
-  it('sets unread state with chat invalidation only and leaves no-op recency silent', async () => {
+  /* W8: unread, message edits and the draft are this device's composer
+   * records (D3, D9); the manager no longer offers a chat-row writer for any
+   * of them, so nothing can write them back into a chat. */
+  it('offers no composer writer on the chat surface', () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createInspectableWrapper().wrapper });
+
+    for (const removed of ['setChatUnreadState', 'setMessageEdit', 'clearMessageEdit']) {
+      expect(result.current).not.toHaveProperty(removed);
+    }
+  });
+
+  it('leaves no-op recency silent', async () => {
     const { wrapper, queryClient } = createInspectableWrapper();
     const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
     const { result } = renderHook(() => useProjectManager(), { wrapper });
-    invalidateQueries.mockClear();
-    mockSetChatUnreadState.mockResolvedValueOnce({ ...activityChat, hasUnreadTurn: true });
-
-    await act(async () => result.current.setChatUnreadState(activityChat.id, true));
-
-    expect(mockTouchProjectActivity).not.toHaveBeenCalled();
-    expect(invalidateQueries.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([
-      ['chats', fakeProject.id],
-      ['all-chats'],
-      ['chat', activityChat.id],
-    ]);
-
     invalidateQueries.mockClear();
     mockTouchChatRecency.mockResolvedValueOnce(undefined);
     await act(async () => result.current.touchChatRecency(activityChat.id, 2));

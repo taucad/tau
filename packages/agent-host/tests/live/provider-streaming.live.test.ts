@@ -155,7 +155,7 @@ describe('live gateway provider streaming', () => {
         const toolEnd = types.indexOf('tool-input-end');
         const progress = types.indexOf('tool-output-update');
 
-        expect(snapshot.state).toBe('completed');
+        expect(snapshot.state, JSON.stringify(snapshot.messages.slice(-2))).toBe('completed');
         expect(types).toContain('thinking-start');
         expect(types).toContain('thinking-delta');
         expect(types).toContain('thinking-end');

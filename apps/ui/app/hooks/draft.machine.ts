@@ -47,6 +47,11 @@ export type DraftMachineContext = {
   // Edit draft state
   messageEdits: Record<string, MyUIMessage>;
   activeEditMessageId?: string;
+  /**
+   * The message an edit save writes to. Kept through `exitEditMode`, which
+   * clears `activeEditMessageId` while a debounced save may still be pending.
+   */
+  savingEditMessageId?: string;
   editDraftText: string;
   editDraftImages: string[];
   /** FIFO queue of raw image data URLs awaiting processing via `imageProcessing.resizing`. */
@@ -96,6 +101,18 @@ export function buildDraftMessage(text: string, images: string[]): MyUIMessage {
     parts,
   };
 }
+
+/**
+ * The edit a save writes: the live text while the box is open, and the
+ * snapshot `exitEditMode` took into `messageEdits` once it has closed.
+ */
+const editDraftToPersist = (context: DraftMachineContext): MyUIMessage => {
+  const snapshot =
+    context.savingEditMessageId === undefined ? undefined : context.messageEdits[context.savingEditMessageId];
+  return context.activeEditMessageId === undefined && snapshot !== undefined
+    ? snapshot
+    : buildDraftMessage(context.editDraftText, context.editDraftImages);
+};
 
 // Helper to create empty draft
 export function createEmptyDraftMessage(): MyUIMessage {
@@ -337,6 +354,7 @@ export const draftMachine = setup({
                   [context.activeEditMessageId]: currentEditDraft,
                 },
                 activeEditMessageId: event.messageId,
+                savingEditMessageId: event.messageId,
                 editDraftText: textPart?.text ?? '',
                 editDraftImages: imageParts.map((p) => p.url),
               };
@@ -351,6 +369,7 @@ export const draftMachine = setup({
 
             return {
               activeEditMessageId: event.messageId,
+              savingEditMessageId: event.messageId,
               editDraftText: textPart?.text ?? '',
               editDraftImages: imageParts.map((p) => p.url),
             };
@@ -528,14 +547,19 @@ export const draftMachine = setup({
             flushNow: {
               target: 'persisting',
             },
+            // Closing the box mid-debounce still saves what was typed, under
+            // the message the save targets rather than a cleared id.
+            exitEditMode: {
+              target: 'persisting',
+            },
           },
         },
         persisting: {
           invoke: {
             src: 'persistEditDraftActor',
             input: ({ context }) => ({
-              messageId: context.activeEditMessageId!,
-              draft: buildDraftMessage(context.editDraftText, context.editDraftImages),
+              messageId: context.savingEditMessageId!,
+              draft: editDraftToPersist(context),
             }),
             onDone: 'idle',
             onError: 'idle',
@@ -548,6 +572,11 @@ export const draftMachine = setup({
             },
             imageResized: 'pending',
             removeEditDraftImage: 'pending',
+            // Re-persist the snapshot the exit took over a stale in-flight save
+            exitEditMode: {
+              target: 'persisting',
+              reenter: true,
+            },
           },
         },
       },

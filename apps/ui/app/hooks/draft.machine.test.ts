@@ -436,6 +436,48 @@ describe('draftMachine', () => {
       actor.stop();
     });
 
+    it('saves a pending edit under its own message id when the box closes', async () => {
+      const persisted: Array<{ messageId: string; draft: MyUIMessage }> = [];
+      const machine = draftMachine.provide({
+        actors: {
+          // oxlint-disable-next-line no-empty-function -- mock stub
+          persistDraftActor: fromSafeAsync(async () => {}),
+          persistEditDraftActor: fromSafeAsync(
+            async ({ input }: { input: { messageId: string; draft: MyUIMessage } }) => {
+              persisted.push(input);
+            },
+          ),
+          // oxlint-disable-next-line no-empty-function -- mock stub
+          clearMessageEditActor: fromSafeAsync(async () => {}),
+          resizeImageActor: fromSafeAsync<
+            { type: 'imageResized'; resized: string },
+            { image: string; preserveOriginal: boolean }
+          >(async ({ input }) => ({ type: 'imageResized', resized: input.image })),
+        },
+      });
+      const actor = createActor(machine, { input: {} });
+      actor.start();
+      actor.send({
+        type: 'startEditingMessage',
+        messageId: 'msg-1',
+        originalMessage: mock<MyUIMessage>({
+          id: 'msg-1',
+          role: 'user',
+          parts: [{ type: 'text', text: 'original' }],
+          metadata: { createdAt: Date.now(), status: 'pending' },
+        }),
+      });
+      // Exit inside the 200 ms debounce: the save is still pending here.
+      actor.send({ type: 'setEditDraftText', text: 'edited' });
+      actor.send({ type: 'exitEditMode' });
+
+      await waitFor(actor, () => persisted.length > 0);
+      expect(persisted).toHaveLength(1);
+      expect(persisted[0]?.messageId).toBe('msg-1');
+      expect(persisted[0]?.draft.parts.find((part) => part.type === 'text')?.text).toBe('edited');
+      actor.stop();
+    });
+
     it('should clear message edit', () => {
       const actor = createTestActor();
       actor.start();

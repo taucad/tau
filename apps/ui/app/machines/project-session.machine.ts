@@ -1,4 +1,4 @@
-import { assign, emit, enqueueActions, fromCallback, not, setup, stopChild } from 'xstate';
+import { assign, emit, enqueueActions, fromCallback, not, setup } from 'xstate';
 import type { ActorRefFrom, AnyActorRef, EventObject } from 'xstate';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
@@ -38,13 +38,6 @@ export type ProjectSessionMachineInput = Readonly<{
   startBoundMilliseconds?: number;
   /** The bound on the close flush, the rule W13's `awaitSyncSettled` uses. */
   closeFlushMilliseconds?: number;
-  /**
-   * Which compute placement the project's runtime was selected for.
-   *
-   * A string, not a factory: the store module resolves the placement and this
-   * session restarts its runtime child when the key changes.
-   */
-  kernelKey?: string;
 }>;
 
 /** State owned by projectSessionMachine, plus its child refs. @public */
@@ -54,13 +47,16 @@ export type ProjectSessionMachineContext = Readonly<{
   idleWindowMilliseconds: number;
   startBoundMilliseconds: number;
   closeFlushMilliseconds: number;
-  kernelKey: string | undefined;
   /** Chats with a run in flight. `busy` is `runs.length > 0`. */
   runs: readonly string[];
   /** The live checkout has unsaved changes (A25 — a policy never closes it). */
   dirty: boolean;
   /** Everything this device recorded has been acknowledged by the remote. */
   pushed: boolean;
+  /** Only hidden idle sessions are eligible for the idle-close window. */
+  visible: boolean;
+  /** Refs this device has not had acknowledged — quit's `Backing up n`. */
+  pending: number;
   /** What needs the person: approvals and failed runs, for the sidebar count. */
   attention: number;
   /** Regions that did not come up, with the reason the row shows. */
@@ -70,7 +66,6 @@ export type ProjectSessionMachineContext = Readonly<{
   reportedState: ProjectSessionState;
   fileManagerRef: AnyActorRef | undefined;
   projectRef: AnyActorRef | undefined;
-  editorRef: AnyActorRef | undefined;
   agentHostRef: AnyActorRef | undefined;
   computeRef: AnyActorRef | undefined;
   chatRefs: Readonly<Record<string, ActorRefFrom<typeof chatSessionMachine>>>;
@@ -87,6 +82,7 @@ export type ProjectSessionMachineEvent =
   | { readonly type: 'runSettled'; readonly chatId: string }
   | { readonly type: 'chatClosed'; readonly chatId: string }
   | { readonly type: 'activity' }
+  | { readonly type: 'visibilityChanged'; readonly visible: boolean }
   | { readonly type: 'openChat'; readonly chatId: string }
   | { readonly type: 'attention'; readonly count: number }
   | {
@@ -94,8 +90,11 @@ export type ProjectSessionMachineEvent =
       readonly dirty: boolean;
       readonly pushed: boolean;
       readonly sync?: ChatSyncState;
-    }
-  | { readonly type: 'kernelSelectionChanged'; readonly kernelKey: string };
+      /** The branch the live checkout is on; `revision.line`'s producer (R11). */
+      readonly branch?: string;
+      /** `sync.pendingCount`, for the quit overlay's `Backing up n`. */
+      readonly pendingCount?: number;
+    };
 
 /** What a session tells its watchers. @public */
 export type ProjectSessionMachineEmitted =
@@ -114,18 +113,20 @@ export const projectSessionStartBoundMilliseconds = 30_000;
 /** The close-flush bound, matching `packages/host`'s `closeFlushMilliseconds`. */
 export const projectSessionCloseFlushMilliseconds = 5000;
 
-/**
- * A thin wait on `sync.machine`'s facet leaving `checking` (P34).
+/*
+ * P48: `opening` has no `pulling` state.
  *
- * The three exits — offline, the 3 s render window, the 10 s abort — already
- * live in `sync.machine`, and the Files tree already gates its empty state on
- * `checking`. No second copy of any of them lives here: this resolves when the
- * facet has answered, and at once for a project with no remote.
+ * The open pull's gate lives in `sync.machine` and the Files tree's empty
+ * state (P34, amended). A second copy here waited on nothing — the subtree
+ * that could answer it only mounts once the registry says the project is
+ * live — so `opening` goes straight to `starting`.
  */
-const awaitPull = fromSafeAsync<void, { projectId: string }>(async () => undefined);
 
 /** Cancel every run this session holds, so `closing` flushes what they wrote. */
 const cancelRuns = fromSafeAsync<void, { projectId: string; runs: readonly string[] }>(async () => undefined);
+
+/** Flush editor and project producers before revision and record persistence. */
+const flushProducers = fromSafeAsync<void, { projectId: string }>(async () => undefined);
 
 /**
  * Flush this project's sync through W13's seam.
@@ -139,6 +140,9 @@ const flushSync = fromSafeAsync<void, { projectId: string; boundMilliseconds: nu
 /** Retire the leases this session's turns took on the project's checkouts. */
 const releaseLeases = fromSafeAsync<void, { projectId: string }>(async () => undefined);
 
+/** Release the project-scoped agent-host registration after its work drains. */
+const releaseAgentHost = fromSafeAsync<void, { projectId: string }>(async () => undefined);
+
 /**
  * The project's children, replaceable per host (I27, A37).
  *
@@ -150,8 +154,11 @@ const releaseLeases = fromSafeAsync<void, { projectId: string }>(async () => und
  * than pretending to be up.
  */
 const fileManager = fromCallback<EventObject, { projectId: string }>(() => undefined);
+/* R14: no separate `editor` child. The editor actor lives inside the runtime
+ * region's subtree and comes up with it; a second child relaying the same
+ * region key made one report mark two children ready and told nobody anything.
+ * Add it back when the editor can fail on its own. */
 const project = fromCallback<EventObject, { projectId: string }>(() => undefined);
-const editor = fromCallback<EventObject, { projectId: string }>(() => undefined);
 const agentHost = fromCallback<EventObject, { projectId: string }>(() => undefined);
 const compute = fromCallback<EventObject, { projectId: string }>(() => undefined);
 
@@ -193,13 +200,13 @@ export const projectSessionMachine = setup({
     emitted: {} as ProjectSessionMachineEmitted,
   },
   actors: {
-    awaitPull,
     cancelRuns,
+    flushProducers,
     flushSync,
     releaseLeases,
+    releaseAgentHost,
     fileManager,
     project,
-    editor,
     agentHost,
     compute,
     chatSession: chatSessionMachine,
@@ -218,6 +225,7 @@ export const projectSessionMachine = setup({
       (event.type === 'childReady' || event.type === 'childFailed') && event.region === params.region,
     isLastRun: ({ context, event }) =>
       event.type === 'runSettled' && context.runs.filter((chatId) => chatId !== event.chatId).length === 0,
+    isHidden: ({ context }) => !context.visible,
   },
   actions: {
     /* One place a session says where it is: an emit for local watchers and a
@@ -232,6 +240,7 @@ export const projectSessionMachine = setup({
           runs: context.runs.length,
           dirty: context.dirty,
           pushed: context.pushed,
+          pending: context.pending,
         });
       }
     }),
@@ -248,6 +257,7 @@ export const projectSessionMachine = setup({
         runs: context.runs.length,
         dirty: context.dirty,
         pushed: context.pushed,
+        pending: context.pending,
       });
     }),
     recordFailure: assign({
@@ -260,11 +270,20 @@ export const projectSessionMachine = setup({
         [params.region]: 'timeout',
       }),
     }),
+    clearCloseFailure: assign({
+      failures: ({ context }) =>
+        Object.fromEntries(Object.entries(context.failures).filter(([name]) => name !== 'close')),
+    }),
+    recordCloseFailure: assign({
+      failures: ({ context, event }) => ({
+        ...context.failures,
+        close: 'error' in event && event.error instanceof Error ? event.error.message : 'failed',
+      }),
+    }),
     spawnChildren: assign({
       fileManagerRef: ({ context, spawn }) =>
         spawn('fileManager', { id: 'fileManager', input: { projectId: context.projectId } }),
       projectRef: ({ context, spawn }) => spawn('project', { id: 'project', input: { projectId: context.projectId } }),
-      editorRef: ({ context, spawn }) => spawn('editor', { id: 'editor', input: { projectId: context.projectId } }),
       agentHostRef: ({ context, spawn }) =>
         spawn('agentHost', { id: 'agentHost', input: { projectId: context.projectId } }),
       computeRef: ({ context, spawn }) => spawn('compute', { id: 'compute', input: { projectId: context.projectId } }),
@@ -274,7 +293,6 @@ export const projectSessionMachine = setup({
       for (const ref of [
         context.fileManagerRef,
         context.projectRef,
-        context.editorRef,
         context.agentHostRef,
         context.computeRef,
         ...Object.values(context.chatRefs),
@@ -286,7 +304,6 @@ export const projectSessionMachine = setup({
       enqueue.assign({
         fileManagerRef: undefined,
         projectRef: undefined,
-        editorRef: undefined,
         agentHostRef: undefined,
         computeRef: undefined,
         chatRefs: {},
@@ -301,17 +318,17 @@ export const projectSessionMachine = setup({
     idleWindowMilliseconds: input.idleWindowMilliseconds ?? projectSessionIdleWindowMilliseconds,
     startBoundMilliseconds: input.startBoundMilliseconds ?? projectSessionStartBoundMilliseconds,
     closeFlushMilliseconds: input.closeFlushMilliseconds ?? projectSessionCloseFlushMilliseconds,
-    kernelKey: input.kernelKey,
     runs: [],
     dirty: false,
     pushed: true,
+    visible: false,
+    pending: 0,
     attention: 0,
     failures: {},
     closeReason: undefined,
     reportedState: 'opening',
     fileManagerRef: undefined,
     projectRef: undefined,
-    editorRef: undefined,
     agentHostRef: undefined,
     computeRef: undefined,
     chatRefs: {},
@@ -320,13 +337,20 @@ export const projectSessionMachine = setup({
   on: {
     revisionState: {
       actions: [
-        assign({ dirty: ({ event }) => event.dirty, pushed: ({ event }) => event.pushed }),
+        assign({
+          dirty: ({ event }) => event.dirty,
+          pushed: ({ event }) => event.pushed,
+          pending: ({ context, event }) => event.pendingCount ?? context.pending,
+        }),
         'reportFacts',
         enqueueActions(({ enqueue, context, event }) => {
           const sync: ChatSyncState = event.sync ?? (event.pushed ? 'synced' : 'pending');
           for (const ref of Object.values(context.chatRefs)) {
             enqueue.sendTo(ref, { type: 'dirtyChanged', dirty: event.dirty });
             enqueue.sendTo(ref, { type: 'syncState', state: sync });
+            if (event.branch !== undefined) {
+              enqueue.sendTo(ref, { type: 'turnFinalized', branch: event.branch });
+            }
           }
         }),
       ],
@@ -352,6 +376,13 @@ export const projectSessionMachine = setup({
         }),
       }),
     },
+    /*
+     * The store's teardown signal, and only ever that (P63).
+     *
+     * `#disposeIfUnreferenced` sends this when a chat has no view, no run and
+     * no durable run left; a person's *Close* does not, because a chat whose
+     * machine has been stopped has no row to read `Stopped` from.
+     */
     chatClosed: {
       actions: enqueueActions(({ enqueue, context, event }) => {
         const ref = context.chatRefs[event.chatId];
@@ -365,35 +396,14 @@ export const projectSessionMachine = setup({
         });
       }),
     },
-    kernelSelectionChanged: {
-      guard: ({ context, event }) => context.kernelKey !== event.kernelKey,
-      actions: [
-        assign({ kernelKey: ({ event }) => event.kernelKey }),
-        stopChild('project'),
-        assign({
-          projectRef: ({ context, spawn }) =>
-            spawn('project', { id: 'project', input: { projectId: context.projectId } }),
-        }),
-      ],
-    },
     close: { target: '.closing', actions: assign({ closeReason: ({ event }) => event.reason }) },
+    visibilityChanged: { actions: assign({ visible: ({ event }) => event.visible }) },
   },
   states: {
     opening: {
       entry: { type: 'reportState', params: { state: 'opening' } },
-      initial: 'pulling',
+      initial: 'starting',
       states: {
-        /* Open pulls first, under a bound — the exits are `sync.machine`'s. */
-        pulling: {
-          invoke: {
-            src: 'awaitPull',
-            input: ({ context }) => ({ projectId: context.projectId }),
-            onDone: 'starting',
-            /* A pull that cannot answer is no reason to refuse the project: the
-             * tree renders and the durable queue is the guarantee (D28). */
-            onError: 'starting',
-          },
-        },
         starting: {
           entry: 'spawnChildren',
           type: 'parallel',
@@ -444,9 +454,16 @@ export const projectSessionMachine = setup({
            * cancelled close, for instance — is busy, not idle. */
           always: [{ guard: ({ context }) => context.runs.length > 0, target: 'busy' }],
           /* EQ15: the liveness idle-close window. The session never closes
-           * itself — it tells the registry, which applies I24/I25. */
+           * itself — it tells the registry, which applies I24/I25.
+           *
+           * R6: `reenter` re-arms the window. A refusal is about the facts at
+           * the time; the project is still idle afterwards, so it has to be
+           * offered again rather than asked once and forgotten. */
           after: {
             idleWindow: {
+              guard: 'isHidden',
+              target: 'idle',
+              reenter: true,
               actions: enqueueActions(({ enqueue, context }) => {
                 if (context.parentRef !== undefined) {
                   enqueue.sendTo(context.parentRef, { type: 'idleExpired', projectId: context.projectId });
@@ -455,13 +472,20 @@ export const projectSessionMachine = setup({
             },
           },
           /* Navigation and focus only, never activity streams (A35). */
-          on: { activity: { target: 'idle', reenter: true } },
+          on: {
+            activity: { target: 'idle', reenter: true },
+            visibilityChanged: {
+              target: 'idle',
+              reenter: true,
+              actions: assign({ visible: ({ event }) => event.visible }),
+            },
+          },
         },
         busy: {},
       },
     },
     closing: {
-      entry: { type: 'reportState', params: { state: 'closing' } },
+      entry: ['clearCloseFailure', { type: 'reportState', params: { state: 'closing' } }],
       initial: 'asking',
       states: {
         asking: {
@@ -475,12 +499,23 @@ export const projectSessionMachine = setup({
           invoke: {
             src: 'cancelRuns',
             input: ({ context }) => ({ projectId: context.projectId, runs: context.runs }),
+            onDone: 'flushingProducers',
+            onError: { target: '#project-session.failed', actions: 'recordCloseFailure' },
+          },
+        },
+        flushingProducers: {
+          invoke: {
+            src: 'flushProducers',
+            input: ({ context }) => ({ projectId: context.projectId }),
             onDone: 'flushing',
-            onError: 'flushing',
+            onError: { target: '#project-session.failed', actions: 'recordCloseFailure' },
           },
         },
         /* W13's seam, called and never reimplemented: `close` → `pushSettled`
-         * or the durable queue write, inside `closeFlushMilliseconds`. */
+         * or the durable queue write. R15: the bound that applies is W13's
+         * `syncQuiesceMilliseconds` inside the worker's `release()`; this
+         * passes `closeFlushMilliseconds` so a host whose flush has no bound of
+         * its own has one to honour, and imposes none itself. */
         flushing: {
           invoke: {
             src: 'flushSync',
@@ -489,15 +524,23 @@ export const projectSessionMachine = setup({
               boundMilliseconds: context.closeFlushMilliseconds,
             }),
             onDone: 'releasing',
-            onError: 'releasing',
+            onError: { target: '#project-session.failed', actions: 'recordCloseFailure' },
           },
         },
         releasing: {
           invoke: {
             src: 'releaseLeases',
             input: ({ context }) => ({ projectId: context.projectId }),
+            onDone: 'releasingAgentHost',
+            onError: { target: '#project-session.failed', actions: 'recordCloseFailure' },
+          },
+        },
+        releasingAgentHost: {
+          invoke: {
+            src: 'releaseAgentHost',
+            input: ({ context }) => ({ projectId: context.projectId }),
             onDone: 'stopping',
-            onError: 'stopping',
+            onError: { target: '#project-session.failed', actions: 'recordCloseFailure' },
           },
         },
         stopping: { entry: 'stopChildren', always: '#project-session.closed' },

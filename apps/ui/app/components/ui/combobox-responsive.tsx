@@ -117,6 +117,7 @@ export function ComboBoxResponsive<T>({
   const open = isControlled ? isOpenProperty : uncontrolledOpen;
   const isMobile = useIsMobile();
   const selectionMadeReference = React.useRef(false);
+  const pointerDismissedReference = React.useRef(false);
 
   const setOpen = React.useCallback(
     (next: boolean) => {
@@ -142,14 +143,16 @@ export function ComboBoxResponsive<T>({
   };
 
   const handleOpenChange = (isOpen: boolean) => {
-    // If closing without making a selection, trigger onClose
-    if (!isOpen && !selectionMadeReference.current && open) {
+    // Pointer dismissal owns the next focus target. Refocusing the composer here
+    // races a sibling picker opening from the same click and closes it again.
+    if (!isOpen && !selectionMadeReference.current && !pointerDismissedReference.current && open) {
       onClose?.();
     }
 
     // Reset the selection flag when opening
     if (isOpen) {
       selectionMadeReference.current = false;
+      pointerDismissedReference.current = false;
     }
 
     setOpen(isOpen);
@@ -207,6 +210,10 @@ export function ComboBoxResponsive<T>({
         {...properties}
         {...popoverProperties}
         className={cn('w-[200px] overflow-hidden p-0', className, popoverProperties?.className)}
+        onPointerDownOutside={(event) => {
+          popoverProperties?.onPointerDownOutside?.(event);
+          pointerDismissedReference.current = !event.defaultPrevented;
+        }}
       >
         <>
           <ItemList
@@ -270,6 +277,7 @@ function ItemList<T>({
   readonly onLoadMore?: () => void;
 }) {
   const [search, setSearch] = React.useState('');
+  const lastSearchLoad = React.useRef('');
 
   type FlatItem =
     | { type: 'item'; item: T; groupName: string; value: string; keywords: readonly string[] }
@@ -322,6 +330,25 @@ function ItemList<T>({
             entry.keywords.some((keyword) => keyword.toLowerCase().includes(searchLower)))),
     );
   }, [flattenedItems, search, withVirtualization]);
+
+  React.useEffect(() => {
+    const key = `${search}\0${String(flattenedItems.length)}`;
+    if (
+      withVirtualization &&
+      search !== '' &&
+      filteredItems.length === 0 &&
+      onLoadMore !== undefined &&
+      !isLoadingMore &&
+      lastSearchLoad.current !== key
+    ) {
+      lastSearchLoad.current = key;
+      const searchLoadTimeout = globalThis.setTimeout(onLoadMore, 150);
+      return () => {
+        globalThis.clearTimeout(searchLoadTimeout);
+      };
+    }
+    return undefined;
+  }, [filteredItems.length, flattenedItems.length, isLoadingMore, onLoadMore, search, withVirtualization]);
 
   // Render individual item or group header
   const renderItem = React.useCallback(

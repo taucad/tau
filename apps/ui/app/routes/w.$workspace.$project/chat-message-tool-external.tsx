@@ -208,8 +208,14 @@ const bodyText = (facts: AcpFacts, output: unknown): string => {
 const exitCodeOf = (output: unknown): number | undefined =>
   isRecord(output) && typeof output['exit_code'] === 'number' ? output['exit_code'] : undefined;
 
-const cardStatus = (state: DynamicToolUIPart['state']): 'loading' | 'ready' | 'error' =>
-  state === 'input-streaming' || state === 'input-available' ? 'loading' : state === 'output-error' ? 'error' : 'ready';
+const isPreliminary = (part: DynamicToolUIPart): boolean => Reflect.get(part, 'preliminary') === true;
+
+const cardStatus = (part: DynamicToolUIPart): 'loading' | 'ready' | 'error' =>
+  part.state === 'input-streaming' || part.state === 'input-available' || isPreliminary(part)
+    ? 'loading'
+    : part.state === 'output-error'
+      ? 'error'
+      : 'ready';
 
 /**
  * One external agent's tool call, rendered from the ACP facts it sent.
@@ -222,13 +228,22 @@ export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUI
   const output = part.state === 'output-available' ? part.output : undefined;
   const facts = factsOf(part, output);
   const { icon, verb, activeVerb, body } = externalToolPresentation(facts.kind);
-  const status = cardStatus(part.state);
+  const status = cardStatus(part);
   const isLoading = status === 'loading';
   const label = sanitizeAgentText(facts.title ?? facts.nativeName ?? part.toolName);
 
   if (part.state === 'output-error') {
     return <ChatToolError errorText={sanitizeAgentText(part.errorText, 400)} icon={icon} noun={label} />;
   }
+
+  const displayVerb = isLoading ? activeVerb : verb;
+  const lowerLabel = label.toLowerCase();
+  const titleVerbs = facts.kind === 'search' ? [verb, activeVerb, 'Search'] : [verb, activeVerb];
+  const repeatedVerb = titleVerbs.find((candidate) => {
+    const lowerCandidate = candidate.toLowerCase();
+    return lowerLabel === lowerCandidate || lowerLabel.startsWith(`${lowerCandidate} `);
+  });
+  const detail = repeatedVerb === undefined ? label : label.slice(repeatedVerb.length).trimStart();
 
   const diffs = diffBlocks(facts.content);
   if (body === 'diff' && diffs.length > 0) {
@@ -258,8 +273,8 @@ export function ChatMessageToolExternal({ part }: { readonly part: DynamicToolUI
     <ChatToolCardHeader>
       <ChatToolCardIcon icon={icon} {...(exitCode !== undefined && exitCode !== 0 ? { tone: 'destructive' } : {})} />
       <ChatToolCardTitle>
-        <ChatToolLabel verb={isLoading ? activeVerb : verb}>
-          <ChatToolDescription className={body === 'command' ? 'font-mono' : undefined}>{label}</ChatToolDescription>
+        <ChatToolLabel verb={displayVerb}>
+          <ChatToolDescription className={body === 'command' ? 'font-mono' : undefined}>{detail}</ChatToolDescription>
         </ChatToolLabel>
       </ChatToolCardTitle>
     </ChatToolCardHeader>

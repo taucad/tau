@@ -80,11 +80,13 @@ function Command({ className, ...properties }: CommandProps): React.JSX.Element 
 function CommandDialog({
   title = 'Command Palette',
   description = 'Search for a command to run...',
+  contentClassName,
   children,
   ...properties
 }: React.ComponentProps<typeof Dialog> & {
   readonly title?: string;
   readonly description?: string;
+  readonly contentClassName?: string;
 }): React.JSX.Element {
   return (
     <Dialog {...properties}>
@@ -92,7 +94,12 @@ function CommandDialog({
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription>{description}</DialogDescription>
       </DialogHeader>
-      <DialogContent className='overflow-hidden p-0 *:data-[slot=dialog-close]:top-2.5 *:data-[slot=dialog-close]:right-2.5'>
+      <DialogContent
+        className={cn(
+          'overflow-hidden p-0 *:data-[slot=dialog-close]:top-2.5 *:data-[slot=dialog-close]:right-2.5',
+          contentClassName,
+        )}
+      >
         <Command className='[&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:size-4'>
           {children}
         </Command>
@@ -121,7 +128,7 @@ function CommandInput({ className, ...properties }: CommandInputProps): React.JS
         data-slot='command-input'
         className={cn(
           'flex h-7 w-full min-w-0 rounded-md border border-input bg-background py-1 pr-2 pl-8 text-sm shadow-xs transition-[box-shadow] outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30',
-          'focus-visible:ring-2 focus-visible:ring-ring',
+          'focus-visible:focus-outline',
           className,
         )}
         {...properties}

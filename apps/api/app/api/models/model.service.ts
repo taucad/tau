@@ -14,6 +14,11 @@ import { isModelListEntryEnabled, modelList, modelListEntryToModel } from '#api/
 import { Span } from '#telemetry/tracer.service.js';
 import type { ProviderDiagnosticsContext, ProviderDiagnosticsLogger } from '#api/chat/utils/provider-diagnostics.js';
 import { createProviderDiagnosticsContext } from '#api/chat/utils/provider-diagnostics.js';
+import {
+  isFundedGatewayProviderId,
+  isGatewayProviderConfigured,
+  isGatewayProviderId,
+} from '#api/providers/provider-gateway.js';
 
 export type CloudProviderId = Exclude<ProviderId, 'ollama'>;
 
@@ -30,7 +35,7 @@ export class ModelService implements OnModuleInit {
   @Span()
   public buildModel(
     modelId: string,
-    options: { providerDiagnosticsContext?: ProviderDiagnosticsContext } = {},
+    options: { providerDiagnosticsContext?: ProviderDiagnosticsContext; maximumOutputTokens?: number } = {},
   ): { model: BaseChatModel; support?: ModelSupport } {
     const modelConfig = this.models.find((model) => model.id === modelId);
 
@@ -49,6 +54,7 @@ export class ModelService implements OnModuleInit {
       },
       {
         diagnosticsContext: options.providerDiagnosticsContext,
+        maximumOutputTokens: options.maximumOutputTokens,
       },
     );
 
@@ -77,8 +83,16 @@ export class ModelService implements OnModuleInit {
 
   public async getModels(): Promise<Model[]> {
     const ollamaEnabled = this.configService.get('OLLAMA_ENABLED', { infer: true });
+    const tauCloudEnabled = this.configService.get('TAU_CLOUD_ENABLED', { infer: true });
     const ollamaModels = ollamaEnabled ? await this.getOllamaModels() : [];
-    const cloudEntries = Object.values(modelList).flatMap((modelsBySlug) => Object.values(modelsBySlug));
+    const cloudEntries = Object.values(modelList)
+      .flatMap((modelsBySlug) => Object.values(modelsBySlug))
+      .filter(
+        (entry) =>
+          isGatewayProviderId(entry.provider.id) &&
+          (!tauCloudEnabled || isFundedGatewayProviderId(entry.provider.id)) &&
+          isGatewayProviderConfigured(this.configService, entry.provider.id),
+      );
     const cloudModels = cloudEntries.map((entry) => modelListEntryToModel(entry));
     this.models = [...cloudModels, ...ollamaModels];
     const listedCloud = cloudEntries

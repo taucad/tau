@@ -4,77 +4,77 @@
 
 ProjLib_Sphere: declare class ProjLib_Sphere extends ProjLib_Projector
 
-constructor
+  constructor
 
-Init(Sp: gp_Sphere): void;
+  Init(Sp: gp_Sphere): void;
 
-Project(L: gp_Lin): void;
-Project(C: gp_Circ): void;
-Project(E: gp_Elips): void;
-Project(P: gp_Parab): void;
-Project(H: gp_Hypr): void;
-Project(L: gp_Lin): void;
-Project(C: gp_Circ): void;
-Project(E: gp_Elips): void;
-Project(P: gp_Parab): void;
-Project(H: gp_Hypr): void;
-Project(L: gp_Lin): void;
-Project(C: gp_Circ): void;
-Project(E: gp_Elips): void;
-Project(P: gp_Parab): void;
-Project(H: gp_Hypr): void;
-Project(L: gp_Lin): void;
-Project(C: gp_Circ): void;
-Project(E: gp_Elips): void;
-Project(P: gp_Parab): void;
-Project(H: gp_Hypr): void;
-Project(L: gp_Lin): void;
-Project(C: gp_Circ): void;
-Project(E: gp_Elips): void;
-Project(P: gp_Parab): void;
-Project(H: gp_Hypr): void;
+  Project(L: gp_Lin): void;
+  Project(C: gp_Circ): void;
+  Project(E: gp_Elips): void;
+  Project(P: gp_Parab): void;
+  Project(H: gp_Hypr): void;
+  Project(L: gp_Lin): void;
+  Project(C: gp_Circ): void;
+  Project(E: gp_Elips): void;
+  Project(P: gp_Parab): void;
+  Project(H: gp_Hypr): void;
+  Project(L: gp_Lin): void;
+  Project(C: gp_Circ): void;
+  Project(E: gp_Elips): void;
+  Project(P: gp_Parab): void;
+  Project(H: gp_Hypr): void;
+  Project(L: gp_Lin): void;
+  Project(C: gp_Circ): void;
+  Project(E: gp_Elips): void;
+  Project(P: gp_Parab): void;
+  Project(H: gp_Hypr): void;
+  Project(L: gp_Lin): void;
+  Project(C: gp_Circ): void;
+  Project(E: gp_Elips): void;
+  Project(P: gp_Parab): void;
+  Project(H: gp_Hypr): void;
 
-SetInBounds(U: number): void;
+  SetInBounds(U: number): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 ProjLib_Torus: declare class ProjLib_Torus extends ProjLib_Projector
 
-constructor
+  constructor
 
-Init(To: gp_Torus): void;
+  Init(To: gp_Torus): void;
 
-Project(L: gp_Lin): void;
-Project(C: gp_Circ): void;
-Project(E: gp_Elips): void;
-Project(P: gp_Parab): void;
-Project(H: gp_Hypr): void;
-Project(L: gp_Lin): void;
-Project(C: gp_Circ): void;
-Project(E: gp_Elips): void;
-Project(P: gp_Parab): void;
-Project(H: gp_Hypr): void;
-Project(L: gp_Lin): void;
-Project(C: gp_Circ): void;
-Project(E: gp_Elips): void;
-Project(P: gp_Parab): void;
-Project(H: gp_Hypr): void;
-Project(L: gp_Lin): void;
-Project(C: gp_Circ): void;
-Project(E: gp_Elips): void;
-Project(P: gp_Parab): void;
-Project(H: gp_Hypr): void;
-Project(L: gp_Lin): void;
-Project(C: gp_Circ): void;
-Project(E: gp_Elips): void;
-Project(P: gp_Parab): void;
-Project(H: gp_Hypr): void;
+  Project(L: gp_Lin): void;
+  Project(C: gp_Circ): void;
+  Project(E: gp_Elips): void;
+  Project(P: gp_Parab): void;
+  Project(H: gp_Hypr): void;
+  Project(L: gp_Lin): void;
+  Project(C: gp_Circ): void;
+  Project(E: gp_Elips): void;
+  Project(P: gp_Parab): void;
+  Project(H: gp_Hypr): void;
+  Project(L: gp_Lin): void;
+  Project(C: gp_Circ): void;
+  Project(E: gp_Elips): void;
+  Project(P: gp_Parab): void;
+  Project(H: gp_Hypr): void;
+  Project(L: gp_Lin): void;
+  Project(C: gp_Circ): void;
+  Project(E: gp_Elips): void;
+  Project(P: gp_Parab): void;
+  Project(H: gp_Hypr): void;
+  Project(L: gp_Lin): void;
+  Project(C: gp_Circ): void;
+  Project(E: gp_Elips): void;
+  Project(P: gp_Parab): void;
+  Project(H: gp_Hypr): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 ProjLib_HSequenceOfHSequenceOfPnt: NCollection_HSequence_handle_NCollection_HSequence_gp_Pnt
 

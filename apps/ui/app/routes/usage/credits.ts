@@ -1,4 +1,3 @@
-// eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party usage surface owns the direct billing client contract
 import { creditAtomsPerCredit } from '@taucad/billing';
 
 /**

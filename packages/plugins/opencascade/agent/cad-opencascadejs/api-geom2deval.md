@@ -4,431 +4,431 @@
 
 Geom2dEval_AHTBezierCurve: declare class Geom2dEval_AHTBezierCurve extends Geom2d_BoundedCurve
 
-constructor
+  constructor
 
-Poles(): NCollection_Array1_gp_Pnt2d;
+  Poles(): NCollection_Array1_gp_Pnt2d;
 
-Weights(): NCollection_Array1_double;
+  Weights(): NCollection_Array1_double;
 
-AlgDegree(): number;
+  AlgDegree(): number;
 
-Alpha(): number;
+  Alpha(): number;
 
-Beta(): number;
+  Beta(): number;
 
-NbPoles(): number;
+  NbPoles(): number;
 
-IsRational(): boolean;
+  IsRational(): boolean;
 
-StartPoint(): gp_Pnt2d;
+  StartPoint(): gp_Pnt2d;
 
-EndPoint(): gp_Pnt2d;
+  EndPoint(): gp_Pnt2d;
 
-Reverse(): void;
+  Reverse(): void;
 
-ReversedParameter(U: number): number;
+  ReversedParameter(U: number): number;
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-IsClosed(): boolean;
+  IsClosed(): boolean;
 
-IsPeriodic(): boolean;
+  IsPeriodic(): boolean;
 
-Continuity(): GeomAbs_Shape;
+  Continuity(): GeomAbs_Shape;
 
-IsCN(N: number): boolean;
+  IsCN(N: number): boolean;
 
-EvalD0(U: number): gp_Pnt2d;
+  EvalD0(U: number): gp_Pnt2d;
 
-EvalD1(U: number): Geom2d_Curve_ResD1;
+  EvalD1(U: number): Geom2d_Curve_ResD1;
 
-EvalD2(U: number): Geom2d_Curve_ResD2;
+  EvalD2(U: number): Geom2d_Curve_ResD2;
 
-EvalD3(U: number): Geom2d_Curve_ResD3;
+  EvalD3(U: number): Geom2d_Curve_ResD3;
 
-EvalDN(U: number, N: number): gp_Vec2d;
+  EvalDN(U: number, N: number): gp_Vec2d;
 
-Transform(T: gp_Trsf2d): void;
+  Transform(T: gp_Trsf2d): void;
 
-Copy(): Geom2d_Geometry;
+  Copy(): Geom2d_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dEval_ArchimedeanSpiralCurve: declare class Geom2dEval_ArchimedeanSpiralCurve extends Geom2d_Curve
 
-constructor
+  constructor
 
-Position(): gp_Ax2d;
+  Position(): gp_Ax2d;
 
-InitialRadius(): number;
+  InitialRadius(): number;
 
-GrowthRate(): number;
+  GrowthRate(): number;
 
-Reverse(): void;
+  Reverse(): void;
 
-ReversedParameter(U: number): number;
+  ReversedParameter(U: number): number;
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-IsClosed(): boolean;
+  IsClosed(): boolean;
 
-IsPeriodic(): boolean;
+  IsPeriodic(): boolean;
 
-Continuity(): GeomAbs_Shape;
+  Continuity(): GeomAbs_Shape;
 
-IsCN(N: number): boolean;
+  IsCN(N: number): boolean;
 
-EvalD0(U: number): gp_Pnt2d;
+  EvalD0(U: number): gp_Pnt2d;
 
-EvalD1(U: number): Geom2d_Curve_ResD1;
+  EvalD1(U: number): Geom2d_Curve_ResD1;
 
-EvalD2(U: number): Geom2d_Curve_ResD2;
+  EvalD2(U: number): Geom2d_Curve_ResD2;
 
-EvalD3(U: number): Geom2d_Curve_ResD3;
+  EvalD3(U: number): Geom2d_Curve_ResD3;
 
-EvalDN(U: number, N: number): gp_Vec2d;
+  EvalDN(U: number, N: number): gp_Vec2d;
 
-Transform(T: gp_Trsf2d): void;
+  Transform(T: gp_Trsf2d): void;
 
-Copy(): Geom2d_Geometry;
+  Copy(): Geom2d_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dEval_CircleInvoluteCurve: declare class Geom2dEval_CircleInvoluteCurve extends Geom2d_Curve
 
-constructor
+  constructor
 
-Position(): gp_Ax2d;
+  Position(): gp_Ax2d;
 
-Radius(): number;
+  Radius(): number;
 
-Reverse(): void;
+  Reverse(): void;
 
-ReversedParameter(U: number): number;
+  ReversedParameter(U: number): number;
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-IsClosed(): boolean;
+  IsClosed(): boolean;
 
-IsPeriodic(): boolean;
+  IsPeriodic(): boolean;
 
-Continuity(): GeomAbs_Shape;
+  Continuity(): GeomAbs_Shape;
 
-IsCN(N: number): boolean;
+  IsCN(N: number): boolean;
 
-EvalD0(U: number): gp_Pnt2d;
+  EvalD0(U: number): gp_Pnt2d;
 
-EvalD1(U: number): Geom2d_Curve_ResD1;
+  EvalD1(U: number): Geom2d_Curve_ResD1;
 
-EvalD2(U: number): Geom2d_Curve_ResD2;
+  EvalD2(U: number): Geom2d_Curve_ResD2;
 
-EvalD3(U: number): Geom2d_Curve_ResD3;
+  EvalD3(U: number): Geom2d_Curve_ResD3;
 
-EvalDN(U: number, N: number): gp_Vec2d;
+  EvalDN(U: number, N: number): gp_Vec2d;
 
-Transform(T: gp_Trsf2d): void;
+  Transform(T: gp_Trsf2d): void;
 
-Copy(): Geom2d_Geometry;
+  Copy(): Geom2d_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dEval_LogarithmicSpiralCurve: declare class Geom2dEval_LogarithmicSpiralCurve extends Geom2d_Curve
 
-constructor
+  constructor
 
-Position(): gp_Ax2d;
+  Position(): gp_Ax2d;
 
-Scale(): number;
-Scale(P: gp_Pnt2d, S: number): void;
-Scale(): number;
-Scale(P: gp_Pnt2d, S: number): void;
+  Scale(): number;
+  Scale(P: gp_Pnt2d, S: number): void;
+  Scale(): number;
+  Scale(P: gp_Pnt2d, S: number): void;
 
-GrowthExponent(): number;
+  GrowthExponent(): number;
 
-Reverse(): void;
+  Reverse(): void;
 
-ReversedParameter(U: number): number;
+  ReversedParameter(U: number): number;
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-IsClosed(): boolean;
+  IsClosed(): boolean;
 
-IsPeriodic(): boolean;
+  IsPeriodic(): boolean;
 
-Continuity(): GeomAbs_Shape;
+  Continuity(): GeomAbs_Shape;
 
-IsCN(N: number): boolean;
+  IsCN(N: number): boolean;
 
-EvalD0(U: number): gp_Pnt2d;
+  EvalD0(U: number): gp_Pnt2d;
 
-EvalD1(U: number): Geom2d_Curve_ResD1;
+  EvalD1(U: number): Geom2d_Curve_ResD1;
 
-EvalD2(U: number): Geom2d_Curve_ResD2;
+  EvalD2(U: number): Geom2d_Curve_ResD2;
 
-EvalD3(U: number): Geom2d_Curve_ResD3;
+  EvalD3(U: number): Geom2d_Curve_ResD3;
 
-EvalDN(U: number, N: number): gp_Vec2d;
+  EvalDN(U: number, N: number): gp_Vec2d;
 
-Transform(T: gp_Trsf2d): void;
+  Transform(T: gp_Trsf2d): void;
 
-Copy(): Geom2d_Geometry;
+  Copy(): Geom2d_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dEval_RepCurveDesc_Base: declare class Geom2dEval_RepCurveDesc_Base extends Standard_Transient
 
-Representation: Geom2d_Curve
+  Representation: Geom2d_Curve
 
-GetKind(): Geom2dEval_RepCurveDesc_Base_Kind;
+  GetKind(): Geom2dEval_RepCurveDesc_Base_Kind;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dEval_RepCurveDesc_Base_Kind: typeof Geom2dEval_RepCurveDesc_Base_Kind[keyof typeof Geom2dEval_RepCurveDesc_Base_Kind]
 
 Geom2dEval_RepCurveDesc_DerivBounded: declare class Geom2dEval_RepCurveDesc_DerivBounded extends Geom2dEval_RepCurveDesc_Base
 
-constructor
+  constructor
 
-MaxDerivOrder: number
+  MaxDerivOrder: number
 
-GetKind(): Geom2dEval_RepCurveDesc_Base_Kind;
+  GetKind(): Geom2dEval_RepCurveDesc_Base_Kind;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dEval_RepCurveDesc_Domain1d: declare class Geom2dEval_RepCurveDesc_Domain1d
 
-constructor
+  constructor
 
-First: number
+  First: number
 
-Last: number
+  Last: number
 
-Contains(theU: number): boolean;
+  Contains(theU: number): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dEval_RepCurveDesc_Full: declare class Geom2dEval_RepCurveDesc_Full extends Geom2dEval_RepCurveDesc_Base
 
-constructor
+  constructor
 
-GetKind(): Geom2dEval_RepCurveDesc_Base_Kind;
+  GetKind(): Geom2dEval_RepCurveDesc_Base_Kind;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dEval_RepCurveDesc_Map1d: declare class Geom2dEval_RepCurveDesc_Map1d
 
-constructor
+  constructor
 
-Scale: number
+  Scale: number
 
-Offset: number
+  Offset: number
 
-IsIdentity(): boolean;
+  IsIdentity(): boolean;
 
-IsValid(): boolean;
+  IsValid(): boolean;
 
-Map(theU: number): number;
+  Map(theU: number): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dEval_RepCurveDesc_Mapped: declare class Geom2dEval_RepCurveDesc_Mapped extends Geom2dEval_RepCurveDesc_Base
 
-constructor
+  constructor
 
-MaxDerivOrder: number
+  MaxDerivOrder: number
 
-Domain: Geom2dEval_RepCurveDesc_Domain1d | null | undefined
+  Domain: Geom2dEval_RepCurveDesc_Domain1d | null | undefined
 
-ParamMap: Geom2dEval_RepCurveDesc_Map1d
+  ParamMap: Geom2dEval_RepCurveDesc_Map1d
 
-GetKind(): Geom2dEval_RepCurveDesc_Base_Kind;
+  GetKind(): Geom2dEval_RepCurveDesc_Base_Kind;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dEval_SineWaveCurve: declare class Geom2dEval_SineWaveCurve extends Geom2d_Curve
 
-constructor
+  constructor
 
-Position(): gp_Ax2d;
+  Position(): gp_Ax2d;
 
-Amplitude(): number;
+  Amplitude(): number;
 
-Omega(): number;
+  Omega(): number;
 
-Phase(): number;
+  Phase(): number;
 
-Reverse(): void;
+  Reverse(): void;
 
-ReversedParameter(U: number): number;
+  ReversedParameter(U: number): number;
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-IsClosed(): boolean;
+  IsClosed(): boolean;
 
-IsPeriodic(): boolean;
+  IsPeriodic(): boolean;
 
-Continuity(): GeomAbs_Shape;
+  Continuity(): GeomAbs_Shape;
 
-IsCN(N: number): boolean;
+  IsCN(N: number): boolean;
 
-EvalD0(U: number): gp_Pnt2d;
+  EvalD0(U: number): gp_Pnt2d;
 
-EvalD1(U: number): Geom2d_Curve_ResD1;
+  EvalD1(U: number): Geom2d_Curve_ResD1;
 
-EvalD2(U: number): Geom2d_Curve_ResD2;
+  EvalD2(U: number): Geom2d_Curve_ResD2;
 
-EvalD3(U: number): Geom2d_Curve_ResD3;
+  EvalD3(U: number): Geom2d_Curve_ResD3;
 
-EvalDN(U: number, N: number): gp_Vec2d;
+  EvalDN(U: number, N: number): gp_Vec2d;
 
-Transform(T: gp_Trsf2d): void;
+  Transform(T: gp_Trsf2d): void;
 
-Copy(): Geom2d_Geometry;
+  Copy(): Geom2d_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dEval_TBezierCurve: declare class Geom2dEval_TBezierCurve extends Geom2d_BoundedCurve
 
-constructor
+  constructor
 
-Poles(): NCollection_Array1_gp_Pnt2d;
+  Poles(): NCollection_Array1_gp_Pnt2d;
 
-Weights(): NCollection_Array1_double;
+  Weights(): NCollection_Array1_double;
 
-Alpha(): number;
+  Alpha(): number;
 
-NbPoles(): number;
+  NbPoles(): number;
 
-Order(): number;
+  Order(): number;
 
-IsRational(): boolean;
+  IsRational(): boolean;
 
-StartPoint(): gp_Pnt2d;
+  StartPoint(): gp_Pnt2d;
 
-EndPoint(): gp_Pnt2d;
+  EndPoint(): gp_Pnt2d;
 
-Reverse(): void;
+  Reverse(): void;
 
-ReversedParameter(U: number): number;
+  ReversedParameter(U: number): number;
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-IsClosed(): boolean;
+  IsClosed(): boolean;
 
-IsPeriodic(): boolean;
+  IsPeriodic(): boolean;
 
-Continuity(): GeomAbs_Shape;
+  Continuity(): GeomAbs_Shape;
 
-IsCN(N: number): boolean;
+  IsCN(N: number): boolean;
 
-EvalD0(U: number): gp_Pnt2d;
+  EvalD0(U: number): gp_Pnt2d;
 
-EvalD1(U: number): Geom2d_Curve_ResD1;
+  EvalD1(U: number): Geom2d_Curve_ResD1;
 
-EvalD2(U: number): Geom2d_Curve_ResD2;
+  EvalD2(U: number): Geom2d_Curve_ResD2;
 
-EvalD3(U: number): Geom2d_Curve_ResD3;
+  EvalD3(U: number): Geom2d_Curve_ResD3;
 
-EvalDN(U: number, N: number): gp_Vec2d;
+  EvalDN(U: number, N: number): gp_Vec2d;
 
-Transform(T: gp_Trsf2d): void;
+  Transform(T: gp_Trsf2d): void;
 
-Copy(): Geom2d_Geometry;
+  Copy(): Geom2d_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

@@ -21,6 +21,7 @@ export {
   agentChannelCommandSchema,
   agentChannelEventSchema,
   agentChannelLiveEventSchema,
+  agentChannelRevisionEventSchema,
   agentChannelModelCostSchema,
   agentChannelModelSchema,
   agentChannelProtocolSchemas,
@@ -40,6 +41,9 @@ export type {
   AgentChannelLeadership,
   AgentChannelLiveEvent,
   AgentChannelProtocol,
+  AgentChannelRequest,
+  AgentChannelRevisionCommand,
+  AgentChannelRevisionEvent,
   AgentChannelResponse,
   AgentChannelResultOperation,
   ExternalAgentDescriptor,
@@ -61,6 +65,7 @@ export {
   isGatewayProviderKind,
   isOpenAiGatewayProviderKind,
 } from '#transport/gateway-model-transport.js';
+export { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gateway-model-transport.js';
 export { composeModelCallMiddleware } from '#harness/model-call-middleware.js';
 export { normalizeLatexDelimiters, trimToolResultContext } from '#harness/cad-middleware.js';
 export { HostCompactionError } from '#harness/compaction.js';
@@ -84,6 +89,7 @@ export type {
   MessageEnvelopeReplacedEvent,
   ModelInvocationBoundEvent,
   ModelInvocationPreparedEvent,
+  ModelReasoningConfig,
   ProviderMessage,
   ProviderMessageMetadata,
   TurnConflictedLogEvent,
@@ -151,6 +157,7 @@ export type {
 } from '#host/tau-agent-host.js';
 export type {
   CachedSystemPromptOptions,
+  GatewayFundedOperationProtocol,
   GatewayModelErrorCode,
   GatewayModelTransportOptions,
 } from '#transport/gateway-model-transport.js';

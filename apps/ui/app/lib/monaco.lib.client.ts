@@ -59,7 +59,7 @@ registry.addContribution(jsContribution);
 // Guard to ensure configureMonaco runs only once. shikiToMonaco monkey-patches
 // monaco.editor.create and monaco.editor.setTheme, creating chained wrappers
 // on repeated calls. This flag prevents that during HMR or multiple call sites.
-let isConfigured = false;
+let configuration: Promise<void> | undefined;
 
 /**
  * Configure the Monaco editor.
@@ -69,17 +69,14 @@ let isConfigured = false;
  */
 export const configureMonaco = async (): Promise<void> => {
   // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- can be undefined in SSR
-  if (isConfigured || globalThis.self === undefined) {
+  if (globalThis.self === undefined) {
     return;
   }
+  configuration ??= initializeMonaco();
+  return configuration;
+};
 
-  const fontSet = Reflect.get(document, 'fonts') as FontFaceSet | undefined;
-  if (!fontSet) {
-    return;
-  }
-
-  isConfigured = true;
-
+const initializeMonaco = async (): Promise<void> => {
   // Prime Geist Mono before Monaco's first DomCharWidthReader pass.
   //
   // Monaco caches char-width measurements as "trusted" on the first read
@@ -91,7 +88,11 @@ export const configureMonaco = async (): Promise<void> => {
   // first reading uses Geist Mono advances. `.catch` keeps offline users
   // working with fallback metrics (no worse than today).
   // Sizes mirror code-editor.client.tsx (14 desktop, 16 mobile).
-  await Promise.all([fontSet.load("14px 'Geist Mono'"), fontSet.load("16px 'Geist Mono'")]).catch(() => undefined);
+  // `document.fonts` is absent under jsdom, where there is nothing to prime.
+  const fontSet = Reflect.get(document, 'fonts') as FontFaceSet | undefined;
+  await Promise.all(
+    fontSet === undefined ? [] : [fontSet.load("14px 'Geist Mono'"), fontSet.load("16px 'Geist Mono'")],
+  ).catch(() => undefined);
 
   globalThis.self.MonacoEnvironment = {
     getWorker(_, label) {
@@ -143,7 +144,7 @@ export const configureMonaco = async (): Promise<void> => {
   // Mono above, additional weights/styles or HMR re-injection can change
   // the cached advances; `monaco.editor.remeasureFonts()` clears
   // FontMeasurementsImpl._cache and triggers per-editor re-render.
-  fontSet.addEventListener('loadingdone', () => {
+  fontSet?.addEventListener('loadingdone', () => {
     monaco.editor.remeasureFonts();
   });
 

@@ -8,12 +8,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, render } from '@testing-library/react';
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
+import { act, render, waitFor } from '@testing-library/react';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import {
   clearTurnOutcome,
   RevisionOutcomes,
-  useLatestTurnOutcome,
+  useTurnOutcomes,
 } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import type { WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
 
@@ -56,14 +57,35 @@ vi.mock('#components/ui/sonner.js', () => ({
 
 /** Reads the same store the pane's attention line reads. */
 function Latest(): React.JSX.Element {
-  const outcome = useLatestTurnOutcome();
+  const outcome = useTurnOutcomes('p').at(-1);
   return <span data-testid='latest'>{outcome === undefined ? 'none' : `${outcome.kind}:${outcome.turnId}`}</span>;
 }
+
+let projectedChats: ReadonlyArray<Readonly<{ id: string; name: string }>> = [];
+
+/** Reads the same cached project inventory the sidebar reads. */
+function CachedChatInventory(): React.JSX.Element {
+  const { data = [] } = useQuery({
+    queryKey: ['chats', 'p', { includeDeleted: false }],
+    queryFn: async () => projectedChats,
+    staleTime: Number.POSITIVE_INFINITY,
+  });
+  return <span data-testid='chats'>{data.map((chat) => chat.name).join(',') || 'none'}</span>;
+}
+
+const renderTurnOutcomes = (): ReturnType<typeof render> =>
+  render(
+    <QueryClientProvider client={new QueryClient()}>
+      <RevisionOutcomes />
+      <Latest />
+    </QueryClientProvider>,
+  );
 
 beforeEach(() => {
   revisionStatusHarness.reset();
   errors.length = 0;
-  clearTurnOutcome();
+  projectedChats = [];
+  clearTurnOutcome('p');
 });
 
 afterEach(() => {
@@ -72,12 +94,7 @@ afterEach(() => {
 
 describe('RevisionOutcomes', () => {
   it('says so when a turn ends without recording anything', () => {
-    const { getByTestId } = render(
-      <>
-        <RevisionOutcomes />
-        <Latest />
-      </>,
-    );
+    const { getByTestId } = renderTurnOutcomes();
 
     publish({
       type: 'turn.failed',
@@ -98,12 +115,7 @@ describe('RevisionOutcomes', () => {
   });
 
   it('says so when a turn conflicts, in document words', () => {
-    const { getByTestId } = render(
-      <>
-        <RevisionOutcomes />
-        <Latest />
-      </>,
-    );
+    const { getByTestId } = renderTurnOutcomes();
 
     publish({ type: 'turn.conflicted', turnId: 'turn-2', runId: 'run-2', chatId: 'chat-1', checkoutId: 'live' });
 
@@ -114,12 +126,7 @@ describe('RevisionOutcomes', () => {
   });
 
   it('stays quiet for the outcome that did record a revision', () => {
-    const { getByTestId } = render(
-      <>
-        <RevisionOutcomes />
-        <Latest />
-      </>,
-    );
+    const { getByTestId } = renderTurnOutcomes();
 
     publish({
       type: 'turn.finalized',
@@ -136,5 +143,36 @@ describe('RevisionOutcomes', () => {
 
     expect(errors).toEqual([]);
     expect(getByTestId('latest')).toHaveTextContent('none');
+  });
+
+  it('should refresh a cached empty chat inventory after remote chats are projected', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await queryClient.prefetchQuery({
+      queryKey: ['chats', 'p', { includeDeleted: false }],
+      queryFn: async () => projectedChats,
+      staleTime: Number.POSITIVE_INFINITY,
+    });
+    queryClient.setQueryData(['all-chats'], []);
+    queryClient.setQueryData(['chat', 'remote-chat'], { id: 'remote-chat', name: 'Stale name' });
+    queryClient.setQueryData(['chat', 'unrelated-chat'], { id: 'unrelated-chat' });
+    queryClient.setQueryData(['chats', 'other-project', { includeDeleted: false }], []);
+    const { getByTestId } = render(
+      <QueryClientProvider client={queryClient}>
+        <RevisionOutcomes />
+        <CachedChatInventory />
+      </QueryClientProvider>,
+    );
+    expect(getByTestId('chats')).toHaveTextContent('none');
+
+    projectedChats = [{ id: 'remote-chat', name: 'Remote design' }];
+    publish({ type: 'chats.projected', projectId: 'p', chatIds: ['remote-chat'] });
+
+    await waitFor(() => {
+      expect(getByTestId('chats')).toHaveTextContent('Remote design');
+    });
+    expect(queryClient.getQueryState(['all-chats'])?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(['chat', 'remote-chat'])?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(['chat', 'unrelated-chat'])?.isInvalidated).toBe(false);
+    expect(queryClient.getQueryState(['chats', 'other-project', { includeDeleted: false }])?.isInvalidated).toBe(false);
   });
 });

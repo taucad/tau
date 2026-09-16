@@ -72,7 +72,10 @@ export function FormatsList({
                 {filteredFormats.map((format) => (
                   <HoverCard key={format}>
                     <HoverCardTrigger asChild>
-                      <Badge variant='outline' className='cursor-pointer font-mono text-xs'>
+                      <Badge
+                        variant='outline'
+                        className='font-mono text-xs transition-colors hover:bg-accent hover:text-accent-foreground'
+                      >
                         {format.toUpperCase()}
                       </Badge>
                     </HoverCardTrigger>

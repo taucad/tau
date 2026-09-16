@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Cpu, RefreshCw, Trash2 } from 'lucide-react';
-import { useSearchParams } from 'react-router';
-
 import { Button } from '@taucad/ui/components/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import { SettingsSectionCard } from '#components/settings/settings-item.js';
+import { useSearchParameter } from '#hooks/use-search-parameter.js';
+import { stringParameter } from '#utils/search-parameter.codecs.js';
 import { approveRemoteHostPairing, listRemoteHosts, revokeRemoteHost } from '#lib/remote-host-client.js';
 import type { RemoteHostDevice } from '#lib/remote-host-client.js';
 import {
@@ -22,9 +23,10 @@ const placementCopy = {
   disconnected: 'The remote runtime disconnected',
 } as const;
 
+const pairParameter = stringParameter();
+
 export function RemoteComputeSettings(): React.JSX.Element {
-  const [searchParameters, setSearchParameters] = useSearchParams();
-  const pairingCode = searchParameters.get('pair');
+  const [pairingCode, setPairingCode] = useSearchParameter('pair', pairParameter);
   const placement = useRemoteComputePlacement();
   const [devices, setDevices] = useState<RemoteHostDevice[]>([]);
   const [error, setError] = useState<string>();
@@ -50,11 +52,7 @@ export function RemoteComputeSettings(): React.JSX.Element {
     setBusy(true);
     try {
       await approveRemoteHostPairing(pairingCode);
-      setSearchParameters((previous) => {
-        const next = new URLSearchParams(previous);
-        next.delete('pair');
-        return next;
-      });
+      setPairingCode('');
       await refresh();
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Could not pair this device');
@@ -79,12 +77,9 @@ export function RemoteComputeSettings(): React.JSX.Element {
   };
 
   return (
-    <Card aria-labelledby='remote-compute-title'>
+    <SettingsSectionCard aria-labelledby='remote-compute-title'>
       <CardHeader>
         <CardTitle id='remote-compute-title'>Tau Host</CardTitle>
-        <CardDescription>
-          Run CAD kernels on a paired Tau Host while this browser remains the project filesystem authority.
-        </CardDescription>
       </CardHeader>
       <CardContent className='flex flex-col gap-4'>
         {pairingCode ? (
@@ -169,6 +164,6 @@ export function RemoteComputeSettings(): React.JSX.Element {
           </Button>
         </div>
       </CardContent>
-    </Card>
+    </SettingsSectionCard>
   );
 }

@@ -4,7 +4,7 @@
 
 curves
 
-bezier
+  bezier
 
     declare function create(points: Array<number> | Array<Array<number>>): Bezier
 

@@ -4,445 +4,445 @@
 
 Interface_MSG: declare class Interface_MSG
 
-constructor
+  constructor
 
-Destroy(): void;
+  Destroy(): void;
 
-Value(): string;
+  Value(): string;
 
-static Read(file: string): number;
+  static Read(file: string): number;
 
-static IsKey(mess: string): boolean;
+  static IsKey(mess: string): boolean;
 
-static Translated(key: string): string;
+  static Translated(key: string): string;
 
-static Record(key: string, item: string): void;
+  static Record(key: string, item: string): void;
 
-static SetTrace(toprint: boolean, torecord: boolean): void;
+  static SetTrace(toprint: boolean, torecord: boolean): void;
 
-static SetMode(running: boolean, raising: boolean): void;
+  static SetMode(running: boolean, raising: boolean): void;
 
-static Intervalled(val: number, order?: number, upper?: boolean): number;
+  static Intervalled(val: number, order?: number, upper?: boolean): number;
 
-static TDate(text: string, yy: number, mm: number, dd: number, hh: number, mn: number, ss: number, format?: string): void;
+  static TDate(text: string, yy: number, mm: number, dd: number, hh: number, mn: number, ss: number, format?: string): void;
 
-static NDate(text: string, yy?: number, mm?: number, dd?: number, hh?: number, mn?: number, ss?: number): { returnValue: boolean; yy: number; mm: number; dd: number; hh: number; mn: number; ss: number };
+  static NDate(text: string, yy?: number, mm?: number, dd?: number, hh?: number, mn?: number, ss?: number): { returnValue: boolean; yy: number; mm: number; dd: number; hh: number; mn: number; ss: number };
 
-static CDate(text1: string, text2: string): number;
+  static CDate(text1: string, text2: string): number;
 
-static Blanks(count: number): string;
-static Blanks(val: number, max: number): string;
-static Blanks(val: string, max: number): string;
-static Blanks(count: number): string;
-static Blanks(val: number, max: number): string;
-static Blanks(val: string, max: number): string;
-static Blanks(count: number): string;
-static Blanks(val: number, max: number): string;
-static Blanks(val: string, max: number): string;
+  static Blanks(count: number): string;
+  static Blanks(val: number, max: number): string;
+  static Blanks(val: string, max: number): string;
+  static Blanks(count: number): string;
+  static Blanks(val: number, max: number): string;
+  static Blanks(val: string, max: number): string;
+  static Blanks(count: number): string;
+  static Blanks(val: number, max: number): string;
+  static Blanks(val: string, max: number): string;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Interface_NodeOfGeneralLib: declare class Interface_NodeOfGeneralLib extends Standard_Transient
 
-constructor
+  constructor
 
-AddNode(anode: Interface_GlobalNodeOfGeneralLib): void;
+  AddNode(anode: Interface_GlobalNodeOfGeneralLib): void;
 
-Protocol(): Interface_Protocol;
+  Protocol(): Interface_Protocol;
 
-Next(): Interface_NodeOfGeneralLib;
+  Next(): Interface_NodeOfGeneralLib;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Interface_NodeOfReaderLib: declare class Interface_NodeOfReaderLib extends Standard_Transient
 
-constructor
+  constructor
 
-AddNode(anode: Interface_GlobalNodeOfReaderLib): void;
+  AddNode(anode: Interface_GlobalNodeOfReaderLib): void;
 
-Module(): Interface_ReaderModule;
+  Module(): Interface_ReaderModule;
 
-Protocol(): Interface_Protocol;
+  Protocol(): Interface_Protocol;
 
-Next(): Interface_NodeOfReaderLib;
+  Next(): Interface_NodeOfReaderLib;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Interface_ParamList: declare class Interface_ParamList extends Standard_Transient
 
-constructor
+  constructor
 
-Length(): number;
+  Length(): number;
 
-Lower(): number;
+  Lower(): number;
 
-Upper(): number;
+  Upper(): number;
 
-SetValue(Index: number, Value: Interface_FileParameter): void;
+  SetValue(Index: number, Value: Interface_FileParameter): void;
 
-Value(Index: number): Interface_FileParameter;
+  Value(Index: number): Interface_FileParameter;
 
-ChangeValue(Index: number): Interface_FileParameter;
+  ChangeValue(Index: number): Interface_FileParameter;
 
-Clear(): void;
+  Clear(): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Interface_ParamSet: declare class Interface_ParamSet extends Standard_Transient
 
-constructor
+  constructor
 
-Append(val: string, lnval: number, typ: Interface_ParamType, nument: number): number;
-Append(FP: Interface_FileParameter): number;
-Append(val: string, lnval: number, typ: Interface_ParamType, nument: number): number;
-Append(FP: Interface_FileParameter): number;
+  Append(val: string, lnval: number, typ: Interface_ParamType, nument: number): number;
+  Append(FP: Interface_FileParameter): number;
+  Append(val: string, lnval: number, typ: Interface_ParamType, nument: number): number;
+  Append(FP: Interface_FileParameter): number;
 
-NbParams(): number;
+  NbParams(): number;
 
-Param(num: number): Interface_FileParameter;
+  Param(num: number): Interface_FileParameter;
 
-ChangeParam(num: number): Interface_FileParameter;
+  ChangeParam(num: number): Interface_FileParameter;
 
-SetParam(num: number, FP: Interface_FileParameter): void;
+  SetParam(num: number, FP: Interface_FileParameter): void;
 
-Params(num: number, nb: number): Interface_ParamList;
+  Params(num: number, nb: number): Interface_ParamList;
 
-Destroy(): void;
+  Destroy(): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Interface_ParamType: typeof Interface_ParamType[keyof typeof Interface_ParamType]
 
 Interface_Protocol: declare class Interface_Protocol extends Standard_Transient
 
-static Active(): Interface_Protocol;
+  static Active(): Interface_Protocol;
 
-static SetActive(aprotocol: Interface_Protocol): void;
+  static SetActive(aprotocol: Interface_Protocol): void;
 
-static ClearActive(): void;
+  static ClearActive(): void;
 
-NbResources(): number;
+  NbResources(): number;
 
-Resource(num: number): Interface_Protocol;
+  Resource(num: number): Interface_Protocol;
 
-CaseNumber(obj: Standard_Transient): number;
+  CaseNumber(obj: Standard_Transient): number;
 
-IsDynamicType(obj: Standard_Transient): boolean;
+  IsDynamicType(obj: Standard_Transient): boolean;
 
-NbTypes(obj: Standard_Transient): number;
+  NbTypes(obj: Standard_Transient): number;
 
-Type(obj: Standard_Transient, nt?: number): Standard_Type;
+  Type(obj: Standard_Transient, nt?: number): Standard_Type;
 
-TypeNumber(atype: Standard_Type): number;
+  TypeNumber(atype: Standard_Type): number;
 
-NewModel(): Interface_InterfaceModel;
+  NewModel(): Interface_InterfaceModel;
 
-IsSuitableModel(model: Interface_InterfaceModel): boolean;
+  IsSuitableModel(model: Interface_InterfaceModel): boolean;
 
-UnknownEntity(): Standard_Transient;
+  UnknownEntity(): Standard_Transient;
 
-IsUnknownEntity(ent: Standard_Transient): boolean;
+  IsUnknownEntity(ent: Standard_Transient): boolean;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Interface_ReaderLib: declare class Interface_ReaderLib
 
-constructor
+  constructor
 
-static SetGlobal(amodule: Interface_ReaderModule, aprotocol: Interface_Protocol): void;
+  static SetGlobal(amodule: Interface_ReaderModule, aprotocol: Interface_Protocol): void;
 
-AddProtocol(aprotocol: Standard_Transient): void;
+  AddProtocol(aprotocol: Standard_Transient): void;
 
-Clear(): void;
+  Clear(): void;
 
-SetComplete(): void;
+  SetComplete(): void;
 
-Select(obj: Standard*Transient, CN?: number): { returnValue: boolean; module*: Interface_ReaderModule; CN: number; [Symbol.dispose](): void };
+  Select(obj: Standard_Transient, CN?: number): { returnValue: boolean; module_: Interface_ReaderModule; CN: number; [Symbol.dispose](): void };
 
-Start(): void;
+  Start(): void;
 
-More(): boolean;
+  More(): boolean;
 
-Next(): void;
+  Next(): void;
 
-Module(): Interface_ReaderModule;
+  Module(): Interface_ReaderModule;
 
-Protocol(): Interface_Protocol;
+  Protocol(): Interface_Protocol;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Interface_ReaderModule: declare class Interface_ReaderModule extends Standard_Transient
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Interface_ReportEntity: declare class Interface_ReportEntity extends Standard_Transient
 
-constructor
+  constructor
 
-SetContent(content: Standard_Transient): void;
+  SetContent(content: Standard_Transient): void;
 
-Check(): Interface_Check;
+  Check(): Interface_Check;
 
-CCheck(): Interface_Check;
+  CCheck(): Interface_Check;
 
-Concerned(): Standard_Transient;
+  Concerned(): Standard_Transient;
 
-HasContent(): boolean;
+  HasContent(): boolean;
 
-HasNewContent(): boolean;
+  HasNewContent(): boolean;
 
-Content(): Standard_Transient;
+  Content(): Standard_Transient;
 
-IsError(): boolean;
+  IsError(): boolean;
 
-IsUnknown(): boolean;
+  IsUnknown(): boolean;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Interface_STAT: declare class Interface_STAT
 
-constructor
+  constructor
 
-Internals(total?: number): { tit: TCollection_HAsciiString; total: number; phn: NCollection_HSequence_TCollection_AsciiString; phw: NCollection_HSequence_double; phdeb: NCollection_HSequence_int; phfin: NCollection_HSequence_int; stw: NCollection_HSequence_double; [Symbol.dispose](): void };
+  Internals(total?: number): { tit: TCollection_HAsciiString; total: number; phn: NCollection_HSequence_TCollection_AsciiString; phw: NCollection_HSequence_double; phdeb: NCollection_HSequence_int; phfin: NCollection_HSequence_int; stw: NCollection_HSequence_double; [Symbol.dispose](): void };
 
-AddPhase(weight: number, name?: string): void;
+  AddPhase(weight: number, name?: string): void;
 
-AddStep(weight?: number): void;
+  AddStep(weight?: number): void;
 
-Step(num: number): number;
+  Step(num: number): number;
 
-Start(items: number, cycles?: number): void;
+  Start(items: number, cycles?: number): void;
 
-static StartCount(items: number, title?: string): void;
+  static StartCount(items: number, title?: string): void;
 
-static NextPhase(items: number, cycles?: number): void;
+  static NextPhase(items: number, cycles?: number): void;
 
-static SetPhase(items: number, cycles?: number): void;
+  static SetPhase(items: number, cycles?: number): void;
 
-static NextCycle(items: number): void;
+  static NextCycle(items: number): void;
 
-static NextStep(): void;
+  static NextStep(): void;
 
-static NextItem(nbitems?: number): void;
+  static NextItem(nbitems?: number): void;
 
-static End(): void;
+  static End(): void;
 
-static Where(phase: boolean): string;
+  static Where(phase: boolean): string;
 
-static Percent(phase?: boolean): number;
+  static Percent(phase?: boolean): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Interface_ShareFlags: declare class Interface_ShareFlags
 
-constructor
+  constructor
 
-Model(): Interface_InterfaceModel;
+  Model(): Interface_InterfaceModel;
 
-IsShared(ent: Standard_Transient): boolean;
+  IsShared(ent: Standard_Transient): boolean;
 
-NbRoots(): number;
+  NbRoots(): number;
 
-Root(num?: number): Standard_Transient;
+  Root(num?: number): Standard_Transient;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Interface_ShareTool: declare class Interface_ShareTool
 
-constructor
+  constructor
 
-Model(): Interface_InterfaceModel;
+  Model(): Interface_InterfaceModel;
 
-IsShared(ent: Standard_Transient): boolean;
+  IsShared(ent: Standard_Transient): boolean;
 
-NbTypedSharings(ent: Standard_Transient, atype: Standard_Type): number;
+  NbTypedSharings(ent: Standard_Transient, atype: Standard_Type): number;
 
-TypedSharing(ent: Standard_Transient, atype: Standard_Type): Standard_Transient;
+  TypedSharing(ent: Standard_Transient, atype: Standard_Type): Standard_Transient;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Interface_SignLabel: declare class Interface_SignLabel extends MoniTool_SignText
 
-constructor
+  constructor
 
-Name(): string;
+  Name(): string;
 
-Text(ent: Standard_Transient, context: Standard_Transient): TCollection_AsciiString;
+  Text(ent: Standard_Transient, context: Standard_Transient): TCollection_AsciiString;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Interface_SignType: declare class Interface_SignType extends MoniTool_SignText
 
-Text(ent: Standard_Transient, context: Standard_Transient): TCollection_AsciiString;
+  Text(ent: Standard_Transient, context: Standard_Transient): TCollection_AsciiString;
 
-Value(ent: Standard_Transient, model: Interface_InterfaceModel): string;
+  Value(ent: Standard_Transient, model: Interface_InterfaceModel): string;
 
-static ClassName(typnam: string): string;
+  static ClassName(typnam: string): string;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Interface_Static: declare class Interface_Static extends Interface_TypedValue
 
-constructor
+  constructor
 
-Family(): string;
+  Family(): string;
 
-SetWild(wildcard: Interface_Static): void;
+  SetWild(wildcard: Interface_Static): void;
 
-Wild(): Interface_Static;
+  Wild(): Interface_Static;
 
-SetUptodate(): void;
+  SetUptodate(): void;
 
-UpdatedStatus(): boolean;
+  UpdatedStatus(): boolean;
 
-static Init(family: string, name: string, type*: Interface_ParamType, init: string): boolean;
-static Init(family: string, name: string, type*: string, init: string): boolean;
-static Init(family: string, name: string, type*: Interface_ParamType, init: string): boolean;
-static Init(family: string, name: string, type*: string, init: string): boolean;
+  static Init(family: string, name: string, type_: Interface_ParamType, init: string): boolean;
+  static Init(family: string, name: string, type_: string, init: string): boolean;
+  static Init(family: string, name: string, type_: Interface_ParamType, init: string): boolean;
+  static Init(family: string, name: string, type_: string, init: string): boolean;
 
-static Static(name: string): Interface_Static;
+  static Static(name: string): Interface_Static;
 
-static IsPresent(name: string): boolean;
+  static IsPresent(name: string): boolean;
 
-static CDef(name: string, part: string): string;
+  static CDef(name: string, part: string): string;
 
-static IDef(name: string, part: string): number;
+  static IDef(name: string, part: string): number;
 
-static IsSet(name: string, proper?: boolean): boolean;
+  static IsSet(name: string, proper?: boolean): boolean;
 
-static CVal(name: string): string;
+  static CVal(name: string): string;
 
-static IVal(name: string): number;
+  static IVal(name: string): number;
 
-static RVal(name: string): number;
+  static RVal(name: string): number;
 
-static SetCVal(name: string, val: string): boolean;
+  static SetCVal(name: string, val: string): boolean;
 
-static SetIVal(name: string, val: number): boolean;
+  static SetIVal(name: string, val: number): boolean;
 
-static SetRVal(name: string, val: number): boolean;
+  static SetRVal(name: string, val: number): boolean;
 
-static Update(name: string): boolean;
+  static Update(name: string): boolean;
 
-static IsUpdated(name: string): boolean;
+  static IsUpdated(name: string): boolean;
 
-static Items(mode?: number, criter?: string): NCollection_HSequence_handle_TCollection_HAsciiString;
+  static Items(mode?: number, criter?: string): NCollection_HSequence_handle_TCollection_HAsciiString;
 
-static Standards(): void;
+  static Standards(): void;
 
-static FillMap(theMap: NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString): void;
+  static FillMap(theMap: NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Interface_TypedValue: declare class Interface_TypedValue extends MoniTool_TypedValue
 
-constructor
+  constructor
 
-Type(): Interface_ParamType;
+  Type(): Interface_ParamType;
 
-static ParamTypeToValueType(typ: Interface_ParamType): MoniTool_ValueType;
+  static ParamTypeToValueType(typ: Interface_ParamType): MoniTool_ValueType;
 
-static ValueTypeToParamType(typ: MoniTool_ValueType): Interface_ParamType;
+  static ValueTypeToParamType(typ: MoniTool_ValueType): Interface_ParamType;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Interface_Array1OfHAsciiString: NCollection_Array1_handle_TCollection_HAsciiString
 

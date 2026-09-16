@@ -9,6 +9,7 @@ import { WebSocket } from 'ws';
 
 import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
+import { createTauCloudGatewayModelTransport } from '@taucad/agent-host';
 import type { AgentSessionModel, ExternalAgentDescriptor } from '@taucad/agent-host';
 import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/filesystem/backend/node';
@@ -140,6 +141,8 @@ export type HostDaemonEvent =
  * @public
  */
 export type HostDaemonAgentOptions = {
+  /** Enables Tau-funded operation binding for a managed Cloud host. */
+  readonly tauCloudEnabled?: boolean | undefined;
   /** Absolute workspace root; `.tau/chats/<chatId>/events.jsonl` lives under it. */
   readonly workspaceRoot: string;
   /** Host-admitted compute binding shared by direct and candidate execution roots. */
@@ -147,6 +150,15 @@ export type HostDaemonAgentOptions = {
   readonly computeControl?: ComputeStoreControl;
   /** Base the model gateway hangs off, e.g. the Tau API origin. */
   readonly gatewayBaseUrl: string;
+  /**
+   * Bearer session token this daemon backs its projects up with (C67).
+   *
+   * Absent, a served project still knows *where* its Tau Cloud repository is
+   * and says so when a remote refuses it; present, *Connect Tau Cloud*
+   * registers the project (P51) and its pushes authenticate. Never persisted
+   * here and never written under a project.
+   */
+  readonly tauApiToken?: string | undefined;
   /** Default model row; one admission may override it. */
   readonly model: AgentSessionModel;
   /** Default system prompt; one admission may override it. */
@@ -856,6 +868,27 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
        * a daemon serves one machine, and `tau-host` in a clone's `git log` is
        * an opaque id nobody outside Tau can read. */
       actor: hostRevisionActor(),
+      /*
+       * Where this project's Tau Cloud repository is (C67, P51).
+       *
+       * The relay *is* the Tau API: it is the origin this daemon paired
+       * against, and `tauRemoteUrl` hangs the Hosted Remote off it. Without
+       * this the connect actor throws `INVALID_TRANSPORT` and a project served
+       * by `tau serve --ui` shows the Sync region it can never use.
+       */
+      apiBaseUrl: options.relayUrl.origin,
+      /* The session, not this daemon's device credential: the Git endpoints and
+       * `PUT /v1/projects/<id>` authenticate an account, and a paired device
+       * credential is only ever offered to the agent relay. A terminal has no
+       * cookie jar, so it is the same `TAU_API_TOKEN` `tau publish` uses. */
+      ...(agent.tauApiToken === undefined
+        ? {}
+        : {
+            tauCredential: () => ({
+              apiBaseUrl: options.relayUrl.origin,
+              authorization: `Bearer ${agent.tauApiToken}`,
+            }),
+          }),
       /* A turn that ran but could not be recorded is a warning, never a fatal:
        * the run itself is already durable in its own log, and a host that
        * stopped answering over a settlement failure would lose the next turn
@@ -920,12 +953,22 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       systemPrompt: agent.systemPrompt,
       toolRegistry,
       auth: () => currentCredential?.credential,
+      ...(agent.tauCloudEnabled === true
+        ? {
+            modelTransport: createTauCloudGatewayModelTransport({
+              baseUrl: agent.gatewayBaseUrl,
+              model: agent.model,
+              auth: () => currentCredential?.credential,
+            }),
+          }
+        : {}),
       ...(discovery.agents.length > 0
         ? {
             externalAgents: createAcpExternalAgentPort({
               agents: discovery.agents,
               workspaceRoot: agent.workspaceRoot,
               checkouts,
+              ...(options.systemSkillBundles === undefined ? {} : { systemSkillBundles: options.systemSkillBundles }),
               /* The MCP url is only known once the server is listening, so it is
                * resolved per run rather than captured here. */
               ...(mcp
@@ -935,6 +978,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
                         return agentServer ? new URL('mcp', agentServer.url()).href : '';
                       },
                       mint: (input) => mcp.mint(input),
+                      activate: (input) => mcp.activate(input),
                     },
                   }
                 : {}),
@@ -946,6 +990,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     const externalAgents = externalAgentDescriptors(discovery);
     const server = startAgentServer({
       launcher,
+      revisions: revisions.channel,
       token: agent.token,
       workspaceRoot: agent.workspaceRoot,
       ...(agent.label ? { label: agent.label } : {}),
@@ -989,7 +1034,17 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     resolveReady();
   };
 
-  /** Stop admission, settle the runs, then release their shared filesystem authority. */
+  /**
+   * Stop the channel first, then the runs, then release their shared filesystem
+   * authority.
+   *
+   * Each handle is retired only once its own release has *succeeded* (C70,
+   * R13's pattern). `launcher.close()` records this project's close revision and
+   * genuinely rejects when the store refuses it; a daemon that had already
+   * cleared the handle could never re-attempt that cut. Failures are collected
+   * rather than thrown at the first one, so a refusal in the channel still
+   * leaves the runs and the authority released.
+   */
   const stopAgent = async (): Promise<void> => {
     const server = agentServer;
     const launcher = agentLauncher;
@@ -997,30 +1052,35 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     const filesystem = agentFileSystem;
     agentRunReporter?.close();
     agentRunReporter = undefined;
-    agentServer = undefined;
-    agentLauncher = undefined;
-    agentMcp = undefined;
     agentExternalAgents = [];
     const failures: unknown[] = [];
-    const settle = async (operation: Promise<unknown> | undefined): Promise<void> => {
+    const settle = async (operation: Promise<unknown> | undefined, retire: () => void): Promise<void> => {
       try {
         await operation;
+        retire();
       } catch (error) {
         failures.push(error);
       }
     };
-    await settle(server?.close());
-    await settle(launcher?.close());
+    await settle(server?.close(), () => {
+      agentServer = undefined;
+    });
+    await settle(launcher?.close(), () => {
+      agentLauncher = undefined;
+    });
     for (const [root, pending] of agentRuntimes) {
       closeAgentRuntime(root, pending);
     }
     agentRuntimes.clear();
     await Promise.all([...agentRuntimeClosures.values()].flatMap((closures) => [...closures]));
     failures.push(...agentRuntimeCloseFailures.splice(0));
-    await settle(mcp?.close());
-    agentFileSystem = undefined;
+    await settle(mcp?.close(), () => {
+      agentMcp = undefined;
+    });
     filesystem?.channel.close();
-    await settle(filesystem?.stopServer());
+    await settle(filesystem?.stopServer(), () => {
+      agentFileSystem = undefined;
+    });
     if (server) {
       emit({ type: 'agent', state: 'stopped' });
     }
@@ -1452,6 +1512,29 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     return { cause: 'requested' };
   };
 
+  /** The outcome this daemon closes with, once the run itself has settled. */
+  let closeResult: HostDaemonCloseResult | undefined;
+
+  /**
+   * Release everything this daemon owns, and stay retryable (C70).
+   *
+   * Every step here is idempotent and each keeps its own handle until it
+   * succeeds, so a second call re-attempts exactly what the first could not
+   * finish — which for the agent launcher is the project's close revision.
+   *
+   * @returns Nothing, once the last capability has stopped.
+   */
+  const releaseCapabilities = async (): Promise<void> => {
+    await stopAgent();
+    await stopJobWorker();
+    await jobWorkerObserver;
+    await runtimeChild?.close();
+    await childObserver;
+    if (closeResult !== undefined) {
+      closed.resolve(closeResult);
+    }
+  };
+
   const execute = async (): Promise<HostDaemonCloseResult> => {
     let result: HostDaemonCloseResult;
     try {
@@ -1476,39 +1559,39 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       activeControlSocket?.terminate();
     }
     closeSessions('RELAY_CLOSED');
-    const cleanupFailures: unknown[] = [];
-    const settleCleanup = async (operation: Promise<unknown> | undefined): Promise<void> => {
-      try {
-        await operation;
-      } catch (error) {
-        cleanupFailures.push(error);
-      }
-    };
-    await settleCleanup(Promise.all([...sessions.values()].map(async (session) => session.closed)));
-    await settleCleanup(stopAgent());
-    await settleCleanup(stopJobWorker());
-    await settleCleanup(jobWorkerObserver);
-    await settleCleanup(runtimeChild?.close());
-    await settleCleanup(childObserver);
-    if (cleanupFailures.length > 0) {
-      const cleanupError = new AggregateError(
-        result.cause === 'fatal' ? [result.error, ...cleanupFailures] : cleanupFailures,
-        'Tau Host shutdown did not release every accepted resource.',
-      );
-      result = { cause: 'fatal', error: cleanupError };
-      ready.reject(cleanupError);
-    }
-    closed.resolve(result);
+    await Promise.all([...sessions.values()].map(async (session) => session.closed));
+    closeResult = result;
+    await releaseCapabilities();
     return result;
   };
   const runPromise = execute();
+  /* The release can reject (a close cut the store refused) and `close()` is the
+   * caller that sees it; this only keeps an unobserved rejection from ending the
+   * process before it asks.
+   *
+   * async-iife: bootstrap -- the settlement belongs to `close()`, never here. */
+  void (async (): Promise<void> => {
+    try {
+      await runPromise;
+    } catch {
+      /* Answered by `close()`. */
+    }
+  })();
 
   return {
     ready: ready.promise,
     closed: closed.promise,
     async close(): Promise<void> {
       if (isClosing) {
-        await runPromise;
+        /* The run is over either way; what may not be is the release. A close
+         * cut the store refused keeps its project, so this asks again rather
+         * than answering with the first rejection forever (C70). */
+        try {
+          await runPromise;
+        } catch {
+          /* The first attempt's reason; this call re-attempts and reports its own. */
+        }
+        await releaseCapabilities();
         return;
       }
       isClosing = true;

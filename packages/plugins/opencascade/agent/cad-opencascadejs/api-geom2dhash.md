@@ -4,12 +4,12 @@
 
 Geom2dHash_CurveHasher: declare class Geom2dHash_CurveHasher
 
-constructor
+  constructor
 
-CompTolerance: number
+  CompTolerance: number
 
-HashTolerance: number
+  HashTolerance: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

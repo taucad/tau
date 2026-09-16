@@ -323,11 +323,11 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
     const result = resolver.resolve({
       ...intent({
         model: 'xai-grok-4.6',
-        messages: [{ role: 'user', content: 'x'.repeat(210_000) }],
-        max_completion_tokens: 16,
+        input: 'x'.repeat(210_000),
+        max_output_tokens: 16,
         stream: true,
       }),
-      providerWire: 'openai-completions',
+      providerWire: 'openai-responses',
     });
     expect(result.invocation.supplierValuation).toMatchObject({
       longContextMinimumInputTokens: '200000',

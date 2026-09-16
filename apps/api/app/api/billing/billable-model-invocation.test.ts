@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from 'node:crypto';
 import { ConfigService } from '@nestjs/config';
 import { describe, expect, it, vi } from 'vitest';
 import { BillableModelInvocationService } from '#api/billing/billable-model-invocation.service.js';
@@ -96,7 +97,7 @@ describe('BillableModelInvocationService', () => {
         ['together-kimi-k3', 'moonshotai/Kimi-K3', 'openai-completions', 'max_completion_tokens'],
         ['together-glm-5.2', 'zai-org/GLM-5.2', 'openai-completions', 'max_completion_tokens'],
         ['morph-minimax-m2.7', 'morph-minimax27-230b', 'openai-completions', 'max_tokens'],
-        ['xai-grok-4.6', 'grok-4.6', 'openai-completions', 'max_completion_tokens'],
+        ['xai-grok-4.6', 'grok-4.6', 'openai-responses', 'max_output_tokens'],
       ] satisfies ReadonlyArray<
         readonly [
           routeId: string,
@@ -155,6 +156,104 @@ describe('BillableModelInvocationService', () => {
       expect(resolved.inputCount).toBeUndefined();
       expect(resolved.adapter).toBe(adapters.get(routeCase.routeId));
     }
+  });
+
+  it('dispatches the xAI route to the Responses endpoint with its supplier model id', async () => {
+    const fetchOnce = vi.fn<typeof fetch>().mockResolvedValue(new Response('fixture'));
+    const adapters = createBillableModelProviderAdapters(
+      { get: (key) => (key === 'XAI_API_KEY' ? 'xai-key' : undefined) },
+      fetchOnce,
+    );
+    const resolver = new CodeOwnedBillableModelQualificationResolver({
+      adapters,
+      credentialAccounts: new Map([['xai', 'xai-fixture-account']]),
+      executionTimeout: 30_000,
+    });
+    const qualified = resolver.resolve({
+      environment: 'development',
+      surface: 'gateway',
+      attempt: { version: 1, key: 'attempt-xai-responses' },
+      providerWire: 'openai-responses',
+      body: {
+        model: 'xai-grok-4.6',
+        input: 'fixture',
+        stream: true,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Exact OpenAI Responses wire key.
+        max_output_tokens: 64,
+        reasoning: { effort: 'high', summary: 'auto' },
+        include: ['reasoning.encrypted_content'],
+      },
+      priceHeaders: {},
+      activity: 'agent',
+    });
+
+    await qualified.adapter.executeOnce({ qualification: qualified, signal: new AbortController().signal });
+
+    expect(fetchOnce.mock.lastCall?.[0]).toBe('https://api.x.ai/v1/responses');
+    const xaiBody = fetchOnce.mock.lastCall?.[1]?.body;
+    expect(typeof xaiBody).toBe('string');
+    expect(xaiBody).toContain('"model":"grok-4.6"');
+  });
+
+  it('prefixes the Vertex supplier model id for the OpenAI-compatible endpoint', async () => {
+    const privateKey = generateKeyPairSync('rsa', { modulusLength: 1024 }).privateKey.export({
+      type: 'pkcs8',
+      format: 'pem',
+    });
+    const fetchOnce = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Exact Google OAuth response key.
+        new Response(JSON.stringify({ access_token: 'vertex-token' }), {
+          headers: { 'content-type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(new Response('fixture'));
+    const adapters = createBillableModelProviderAdapters(
+      {
+        get: (key) =>
+          key === 'GOOGLE_VERTEX_AI_CREDENTIALS'
+            ? {
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- Exact Google service-account key.
+                client_email: 'fixture@test.invalid',
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- Exact Google service-account key.
+                private_key: privateKey,
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- Exact Google service-account key.
+                project_id: 'fixture-project',
+              }
+            : undefined,
+      },
+      fetchOnce,
+    );
+    const resolver = new CodeOwnedBillableModelQualificationResolver({
+      adapters,
+      credentialAccounts: new Map([['vertexai', 'vertex-fixture-account']]),
+      executionTimeout: 30_000,
+    });
+    const qualified = resolver.resolve({
+      environment: 'development',
+      surface: 'gateway',
+      attempt: { version: 1, key: 'attempt-vertex-completions' },
+      providerWire: 'openai-completions',
+      body: {
+        model: 'google-gemini-3.7-flash',
+        messages: [{ role: 'user', content: 'fixture' }],
+        stream: true,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Exact OpenAI Completions wire key.
+        max_completion_tokens: 64,
+      },
+      priceHeaders: {},
+      activity: 'agent',
+    });
+
+    await qualified.adapter.executeOnce({ qualification: qualified, signal: new AbortController().signal });
+
+    expect(fetchOnce.mock.lastCall?.[0]).toBe(
+      'https://aiplatform.googleapis.com/v1/projects/fixture-project/locations/global/endpoints/openapi/chat/completions',
+    );
+    const vertexBody = fetchOnce.mock.lastCall?.[1]?.body;
+    expect(typeof vertexBody).toBe('string');
+    expect(vertexBody).toContain('"model":"google/gemini-3.7-flash"');
   });
 
   it('returns an existing attempt without issuing a promotion or calling a provider', async () => {

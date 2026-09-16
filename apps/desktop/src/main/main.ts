@@ -7,7 +7,7 @@
  * work — kernels, disk, the agent host — lives in the utilities.
  */
 
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
@@ -28,7 +28,7 @@ import type { IpcMainInvokeEvent } from 'electron';
 import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@taucad/runtime/electron/main';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import type { ComputeBinding } from '@taucad/runtime/types';
-import { discoverAcpAgents, externalAgentDescriptors } from '@taucad/host';
+import { defaultConfigDirectory, discoverAcpAgents, externalAgentDescriptors } from '@taucad/host';
 
 import kernelUtilityEntry from '#tau/kernel-host?modulePath';
 import servicesUtilityEntry from '#tau/services-host?modulePath';
@@ -71,6 +71,8 @@ import type { QuickLookController } from '#main/quick-look.js';
 import { createOpenFileQueue } from '#main/open-files.js';
 import {
   appIconThemeChannel,
+  agentHostSessionChannels,
+  quitChannels,
   bootstrapArgumentPrefix,
   desktopNativeKernelIds,
   computeControlChannels,
@@ -127,6 +129,51 @@ enqueueOpenFiles(process.argv.slice(1));
  */
 const quitQuiesceMilliseconds = 20_000;
 
+/**
+ * How long quit waits for the renderer's sessions registry (D31, P49).
+ *
+ * The page runs every live project's `closing` — cancel, sync flush, lease
+ * release — and answers `quiesced`. The person can cut it short with *Quit
+ * anyway*. The bound reports failure to main; it never turns an incomplete
+ * close into permission to quit.
+ */
+const quitRendererMilliseconds = 20_000;
+
+/**
+ * Ask every window's sessions registry to close its projects, and wait.
+ *
+ * Resolves on the first completion or explicit *Quit anyway*, at the bound,
+ * or at once when there is no window to ask.
+ *
+ * @param boundMilliseconds - How long to wait before proceeding regardless.
+ * @returns What ended the wait.
+ */
+const askRendererToQuiesce = async (
+  boundMilliseconds: number,
+): Promise<'quiesced' | 'forced' | 'timeout' | 'no-window'> => {
+  const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
+  if (windows.length === 0) {
+    return 'no-window';
+  }
+  return new Promise<'quiesced' | 'forced' | 'timeout' | 'no-window'>((resolve) => {
+    const settle = (outcome: 'quiesced' | 'forced' | 'timeout'): void => {
+      clearTimeout(timer);
+      ipcMain.off(quitChannels.quiesced, onQuiesced);
+      resolve(outcome);
+    };
+    const onQuiesced = (_event: unknown, forced: unknown): void => {
+      settle(forced === true ? 'forced' : 'quiesced');
+    };
+    const timer = setTimeout(() => {
+      settle('timeout');
+    }, boundMilliseconds);
+    ipcMain.on(quitChannels.quiesced, onQuiesced);
+    for (const window of windows) {
+      window.webContents.send(quitChannels.ask);
+    }
+  });
+};
+
 const ownsSingleInstanceLock = app.requestSingleInstanceLock();
 app.on('second-instance', (_event, argv) => {
   enqueueOpenFiles(argv.slice(1));
@@ -175,6 +222,26 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const picogkResourceRoot = app.isPackaged
     ? join(process.resourcesPath, 'picogk')
     : join(import.meta.dirname, '../../resources/picogk');
+  /*
+   * The `git` this app records revisions with (OQ3, C68).
+   *
+   * One binary, not two: the bundled git's own exec path carries `git-lfs`, so
+   * `git lfs` resolves through it and nothing has to name a second executable.
+   * Absent — a development tree, or a platform whose payload is not built — the
+   * toolchain comes from `PATH`, which on a Finder launch is
+   * `/usr/bin:/bin:/usr/sbin:/sbin`; a machine that has neither is told once,
+   * by name, through `revision.unavailable`.
+   */
+  const bundledGitExecutable = join(
+    app.isPackaged ? join(process.resourcesPath, 'git') : join(import.meta.dirname, '../../resources/git'),
+    `${process.platform}-${process.arch}`,
+    'bin',
+    process.platform === 'win32' ? 'git.exe' : 'git',
+  );
+  const gitEnvironment: Readonly<Record<string, string>> = existsSync(bundledGitExecutable)
+    ? // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+      { TAU_GIT_EXECUTABLE: bundledGitExecutable }
+    : {};
   const esbuildEnvironment = packagedEsbuildEnvironment(app.isPackaged, process.resourcesPath);
   const log = createDiagnosticsLog({ directory: logDirectory, echo: isDevelopment });
   log.log('info', 'main.ready', { electron: process.versions.electron, packaged: app.isPackaged, isDevelopment });
@@ -235,17 +302,26 @@ const bootstrapElectronApp = async (): Promise<void> => {
   /* Injection covers the API origin and, separately, the WebSocket origin —
    * `ws://localhost:4001` is not `http://localhost:4000`, and the chat RPC and
    * agent sockets are exactly the traffic a browser cannot decorate itself. */
-  const allowedOrigins = [originOf(environment['TAU_API_URL']), originOf(environment['TAU_WEBSOCKET_URL'])].filter(
-    (origin): origin is string => origin !== undefined,
-  );
+  const authenticatedOrigins = [
+    originOf(environment['TAU_API_URL']),
+    originOf(environment['TAU_WEBSOCKET_URL']),
+  ].filter((origin): origin is string => origin !== undefined);
   installTauHeaderInjection(session.defaultSession.webRequest, {
-    allowedOrigins,
+    allowedOrigins: authenticatedOrigins,
     token: () => auth.token(),
     clientHeader: `tau-desktop/${app.getVersion()}`,
   });
 
   if (!isDevelopment) {
-    registerAppProtocol({ clientRoot, protocol, net, contentSecurityPolicy: contentSecurityPolicy(allowedOrigins) });
+    const storageOrigin = originOf(environment['TAU_S3_ENDPOINT']);
+    registerAppProtocol({
+      clientRoot,
+      protocol,
+      net,
+      contentSecurityPolicy: contentSecurityPolicy(
+        storageOrigin === undefined ? authenticatedOrigins : [...authenticatedOrigins, storageOrigin],
+      ),
+    });
     log.log('info', 'main.app-protocol-registered', { clientRoot });
   }
 
@@ -283,7 +359,14 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }
     return connection;
   };
-  const baseForkResolver = createKernelForkResolver({ registry: roots, defaultRoot: homeRoot });
+  const baseForkResolver = createKernelForkResolver({
+    registry: roots,
+    defaultRoot: homeRoot,
+    isTrustedRoot: (executionRoot) => {
+      const projectRoot = computeProjectRootFor(executionRoot);
+      return projectRoot !== executionRoot && roots.isTrusted(projectRoot);
+    },
+  });
   const runtimeMain = registerElectronRuntimeMain({
     utilityEntry: kernelUtilityEntry,
     /* The kernel utility appends its engine-identity record (N5/N6) to the same
@@ -367,10 +450,13 @@ const bootstrapElectronApp = async (): Promise<void> => {
     return computeConnection(root).control.collect({ budget: budget as number, ...(cursor ? { cursor } : {}) });
   });
 
+  const tauConfigDirectory = defaultConfigDirectory();
   const services = createServicesBroker({
     utilityEntry: servicesUtilityEntry,
     env: utilityEnvironment(environment, {
       ...esbuildEnvironment,
+      ...gitEnvironment,
+      TAU_CONFIG_DIR: tauConfigDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_AUTHORITY_DIR: authorityDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
     }),
@@ -383,6 +469,31 @@ const bootstrapElectronApp = async (): Promise<void> => {
     log: (level, event, detail) => {
       log.log(level, event, detail);
     },
+  });
+  const agentHostSessionInput = (
+    event: IpcMainInvokeEvent,
+    payload: unknown,
+  ): Readonly<{ workspaceRoot: string; projectId: string; attachmentId: string }> => {
+    const { workspaceRoot, projectId, attachmentId } = (payload ?? {}) as Record<string, unknown>;
+    if (
+      !trusted(event.senderFrame) ||
+      typeof workspaceRoot !== 'string' ||
+      !roots.isTrusted(workspaceRoot) ||
+      typeof projectId !== 'string' ||
+      projectId === '' ||
+      typeof attachmentId !== 'string' ||
+      attachmentId === '' ||
+      attachmentId.length > 256
+    ) {
+      throw new Error('Desktop shell refused invalid agent-host session ownership.');
+    }
+    return { workspaceRoot, projectId, attachmentId };
+  };
+  ipcMain.handle(agentHostSessionChannels.retain, async (event, payload) => {
+    services.retainAgentHost(agentHostSessionInput(event, payload));
+  });
+  ipcMain.handle(agentHostSessionChannels.release, async (event, payload) => {
+    await services.releaseAgentHost(agentHostSessionInput(event, payload), quitQuiesceMilliseconds);
   });
   registeredProjectRootFor = (executionRoot) => services.computeProjectRoot(executionRoot);
   const publishRoots = (): void => {
@@ -729,6 +840,27 @@ const bootstrapElectronApp = async (): Promise<void> => {
 
   let shutdownComplete = false;
   let shutdown: Promise<void> | undefined;
+  /**
+   * Tell the person a quit could not settle, and offer to quit anyway (C69, R13).
+   *
+   * Both abort paths below leave the app live on purpose — the unrecorded work
+   * is still there — but the renderer has already taken its own overlay down by
+   * then, so without this Cmd+Q is silent and there is nothing to act on.
+   *
+   * @param detail - What could not settle, in the person's own words.
+   * @returns Whether to go on with the quit regardless.
+   */
+  const askToQuitAnyway = async (detail: string): Promise<boolean> => {
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      buttons: ['Keep Tau open', 'Quit anyway'],
+      defaultId: 0,
+      cancelId: 0,
+      message: 'Tau is still saving your work.',
+      detail: `${detail} Quitting now would leave those changes out of a revision.`,
+    });
+    return response === 1;
+  };
   app.on('before-quit', (event) => {
     quitting = true;
     if (shutdownComplete) {
@@ -737,16 +869,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
     event.preventDefault();
     if (!shutdown) {
       shutdown = (async () => {
-        try {
-          showOpenFileImport = undefined;
-          for (const controller of quickLookControllers.values()) {
-            controller.dispose();
-          }
-          quickLookControllers.clear();
-          auth.dispose();
-        } catch (error) {
-          log.log('error', 'main.shutdown', error);
-        }
         /*
          * The quit hold (D31, W19).
          *
@@ -754,16 +876,50 @@ const bootstrapElectronApp = async (): Promise<void> => {
          * waits for W13's `awaitSyncSettled` before this process ends. Without
          * this round trip `services.dispose()` killed the utility outright —
          * `ServicesHost.dispose()` is synchronous fire-and-forget — so the last
-         * edits of a quit were recorded by nothing. After the bound, quit still
-         * proceeds while the non-success outcome remains visible in the log.
+         * edits of a quit were recorded by nothing. A timeout or negative
+         * acknowledgement leaves the app live so the same owners can retry.
          */
+        /*
+         * The renderer's half first (P49): the browser-side registry owns the
+         * file manager, compute admission and every `chat-session`, and only
+         * it can cancel runs and release the leases its turns took. It shows
+         * the *Backing up…* overlay while it does, with *Quit anyway*.
+         */
+        const rendererOutcome = await askRendererToQuiesce(quitRendererMilliseconds);
+        log.log('info', 'main.renderer-quiesce', { outcome: rendererOutcome });
+        let forced = rendererOutcome === 'forced';
+        if (
+          rendererOutcome === 'timeout' &&
+          !(await askToQuitAnyway('This window did not finish closing its projects.'))
+        ) {
+          quitting = false;
+          shutdown = undefined;
+          return;
+        }
+        forced ||= rendererOutcome === 'timeout';
+        const utilityOutcome = await services.quiesce(quitQuiesceMilliseconds);
+        log.log(
+          utilityOutcome.status === 'quiesced' || utilityOutcome.status === 'no-utility' ? 'info' : 'error',
+          'main.quiesce',
+          { outcome: utilityOutcome },
+        );
+        if (
+          !forced &&
+          utilityOutcome.status !== 'quiesced' &&
+          utilityOutcome.status !== 'no-utility' &&
+          !(await askToQuitAnyway('Tau could not finish saving every open project.'))
+        ) {
+          quitting = false;
+          shutdown = undefined;
+          return;
+        }
         try {
-          const outcome = await services.quiesce(quitQuiesceMilliseconds);
-          log.log(
-            outcome.status === 'quiesced' || outcome.status === 'no-utility' ? 'info' : 'error',
-            'main.quiesce',
-            outcome,
-          );
+          showOpenFileImport = undefined;
+          for (const controller of quickLookControllers.values()) {
+            controller.dispose();
+          }
+          quickLookControllers.clear();
+          auth.dispose();
         } catch (error) {
           log.log('error', 'main.shutdown', error);
         }

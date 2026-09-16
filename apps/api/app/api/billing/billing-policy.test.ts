@@ -34,7 +34,7 @@ const launchPolicy = (): CommercialPolicy => ({
       kind: 'top_up',
       currency: 'usd',
       minimumPrincipalMinor: '500',
-      maximumPrincipalMinor: '50000',
+      maximumPrincipalMinor: '500000',
       creditAtomsPerPrincipalMinor: '10000',
     },
   ],

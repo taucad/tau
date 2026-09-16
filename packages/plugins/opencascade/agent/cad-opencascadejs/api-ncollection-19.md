@@ -4,1026 +4,1026 @@
 
 NCollection_HArray1_StepVisual_InvisibleItem: declare class NCollection_HArray1_StepVisual_InvisibleItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepVisual_InvisibleItem;
+  Array1(): NCollection_Array1_StepVisual_InvisibleItem;
 
-ChangeArray1(): NCollection_Array1_StepVisual_InvisibleItem;
+  ChangeArray1(): NCollection_Array1_StepVisual_InvisibleItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepVisual_LayeredItem: declare class NCollection_HArray1_StepVisual_LayeredItem
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepVisual_LayeredItem;
+  Array1(): NCollection_Array1_StepVisual_LayeredItem;
 
-ChangeArray1(): NCollection_Array1_StepVisual_LayeredItem;
+  ChangeArray1(): NCollection_Array1_StepVisual_LayeredItem;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepVisual_PresentationStyleSelect: declare class NCollection_HArray1_StepVisual_PresentationStyleSelect
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepVisual_PresentationStyleSelect;
+  Array1(): NCollection_Array1_StepVisual_PresentationStyleSelect;
 
-ChangeArray1(): NCollection_Array1_StepVisual_PresentationStyleSelect;
+  ChangeArray1(): NCollection_Array1_StepVisual_PresentationStyleSelect;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepVisual_RenderingPropertiesSelect: declare class NCollection_HArray1_StepVisual_RenderingPropertiesSelect
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepVisual_RenderingPropertiesSelect;
+  Array1(): NCollection_Array1_StepVisual_RenderingPropertiesSelect;
 
-ChangeArray1(): NCollection_Array1_StepVisual_RenderingPropertiesSelect;
+  ChangeArray1(): NCollection_Array1_StepVisual_RenderingPropertiesSelect;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepVisual_StyleContextSelect: declare class NCollection_HArray1_StepVisual_StyleContextSelect
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepVisual_StyleContextSelect;
+  Array1(): NCollection_Array1_StepVisual_StyleContextSelect;
 
-ChangeArray1(): NCollection_Array1_StepVisual_StyleContextSelect;
+  ChangeArray1(): NCollection_Array1_StepVisual_StyleContextSelect;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepVisual_SurfaceStyleElementSelect: declare class NCollection_HArray1_StepVisual_SurfaceStyleElementSelect
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepVisual_SurfaceStyleElementSelect;
+  Array1(): NCollection_Array1_StepVisual_SurfaceStyleElementSelect;
 
-ChangeArray1(): NCollection_Array1_StepVisual_SurfaceStyleElementSelect;
+  ChangeArray1(): NCollection_Array1_StepVisual_SurfaceStyleElementSelect;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepVisual_TessellatedEdgeOrVertex: declare class NCollection_HArray1_StepVisual_TessellatedEdgeOrVertex
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepVisual_TessellatedEdgeOrVertex;
+  Array1(): NCollection_Array1_StepVisual_TessellatedEdgeOrVertex;
 
-ChangeArray1(): NCollection_Array1_StepVisual_TessellatedEdgeOrVertex;
+  ChangeArray1(): NCollection_Array1_StepVisual_TessellatedEdgeOrVertex;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_StepVisual_TextOrCharacter: declare class NCollection_HArray1_StepVisual_TextOrCharacter
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_StepVisual_TextOrCharacter;
+  Array1(): NCollection_Array1_StepVisual_TextOrCharacter;
 
-ChangeArray1(): NCollection_Array1_StepVisual_TextOrCharacter;
+  ChangeArray1(): NCollection_Array1_StepVisual_TextOrCharacter;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_TCollection_AsciiString: declare class NCollection_HArray1_TCollection_AsciiString
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_TCollection_AsciiString;
+  Array1(): NCollection_Array1_TCollection_AsciiString;
 
-ChangeArray1(): NCollection_Array1_TCollection_AsciiString;
+  ChangeArray1(): NCollection_Array1_TCollection_AsciiString;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_TCollection_ExtendedString: declare class NCollection_HArray1_TCollection_ExtendedString
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_TCollection_ExtendedString;
+  Array1(): NCollection_Array1_TCollection_ExtendedString;
 
-ChangeArray1(): NCollection_Array1_TCollection_ExtendedString;
+  ChangeArray1(): NCollection_Array1_TCollection_ExtendedString;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_TDF_Label: declare class NCollection_HArray1_TDF_Label
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_TDF_Label;
+  Array1(): NCollection_Array1_TDF_Label;
 
-ChangeArray1(): NCollection_Array1_TDF_Label;
+  ChangeArray1(): NCollection_Array1_TDF_Label;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_TopoDS_Shape: declare class NCollection_HArray1_TopoDS_Shape
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_TopoDS_Shape;
+  Array1(): NCollection_Array1_TopoDS_Shape;
 
-ChangeArray1(): NCollection_Array1_TopoDS_Shape;
+  ChangeArray1(): NCollection_Array1_TopoDS_Shape;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_bool: declare class NCollection_HArray1_bool
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_bool;
+  Array1(): NCollection_Array1_bool;
 
-ChangeArray1(): NCollection_Array1_bool;
+  ChangeArray1(): NCollection_Array1_bool;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_double: declare class NCollection_HArray1_double
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_double;
+  Array1(): NCollection_Array1_double;
 
-ChangeArray1(): NCollection_Array1_double;
+  ChangeArray1(): NCollection_Array1_double;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_float: declare class NCollection_HArray1_float
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_float;
+  Array1(): NCollection_Array1_float;
 
-ChangeArray1(): NCollection_Array1_float;
+  ChangeArray1(): NCollection_Array1_float;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_gp_Pnt: declare class NCollection_HArray1_gp_Pnt
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_gp_Pnt;
+  Array1(): NCollection_Array1_gp_Pnt;
 
-ChangeArray1(): NCollection_Array1_gp_Pnt;
+  ChangeArray1(): NCollection_Array1_gp_Pnt;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_gp_Pnt2d: declare class NCollection_HArray1_gp_Pnt2d
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_gp_Pnt2d;
+  Array1(): NCollection_Array1_gp_Pnt2d;
 
-ChangeArray1(): NCollection_Array1_gp_Pnt2d;
+  ChangeArray1(): NCollection_Array1_gp_Pnt2d;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_gp_XY: declare class NCollection_HArray1_gp_XY
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_gp_XY;
+  Array1(): NCollection_Array1_gp_XY;
 
-ChangeArray1(): NCollection_Array1_gp_XY;
+  ChangeArray1(): NCollection_Array1_gp_XY;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_gp_XYZ: declare class NCollection_HArray1_gp_XYZ
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_gp_XYZ;
+  Array1(): NCollection_Array1_gp_XYZ;
 
-ChangeArray1(): NCollection_Array1_gp_XYZ;
+  ChangeArray1(): NCollection_Array1_gp_XYZ;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_Geom2d_BSplineCurve: declare class NCollection_HArray1_handle_Geom2d_BSplineCurve
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_Geom2d_BSplineCurve;
+  Array1(): NCollection_Array1_handle_Geom2d_BSplineCurve;
 
-ChangeArray1(): NCollection_Array1_handle_Geom2d_BSplineCurve;
+  ChangeArray1(): NCollection_Array1_handle_Geom2d_BSplineCurve;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_Geom2d_Curve: declare class NCollection_HArray1_handle_Geom2d_Curve
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_Geom2d_Curve;
+  Array1(): NCollection_Array1_handle_Geom2d_Curve;
 
-ChangeArray1(): NCollection_Array1_handle_Geom2d_Curve;
+  ChangeArray1(): NCollection_Array1_handle_Geom2d_Curve;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_Geom_BSplineCurve: declare class NCollection_HArray1_handle_Geom_BSplineCurve
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_Geom_BSplineCurve;
+  Array1(): NCollection_Array1_handle_Geom_BSplineCurve;
 
-ChangeArray1(): NCollection_Array1_handle_Geom_BSplineCurve;
+  ChangeArray1(): NCollection_Array1_handle_Geom_BSplineCurve;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_Geom_Curve: declare class NCollection_HArray1_handle_Geom_Curve
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_Geom_Curve;
+  Array1(): NCollection_Array1_handle_Geom_Curve;
 
-ChangeArray1(): NCollection_Array1_handle_Geom_Curve;
+  ChangeArray1(): NCollection_Array1_handle_Geom_Curve;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_IGESAppli_FiniteElement: declare class NCollection_HArray1_handle_IGESAppli_FiniteElement
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_IGESAppli_FiniteElement;
+  Array1(): NCollection_Array1_handle_IGESAppli_FiniteElement;
 
-ChangeArray1(): NCollection_Array1_handle_IGESAppli_FiniteElement;
+  ChangeArray1(): NCollection_Array1_handle_IGESAppli_FiniteElement;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_IGESAppli_Node: declare class NCollection_HArray1_handle_IGESAppli_Node
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_IGESAppli_Node;
+  Array1(): NCollection_Array1_handle_IGESAppli_Node;
 
-ChangeArray1(): NCollection_Array1_handle_IGESAppli_Node;
+  ChangeArray1(): NCollection_Array1_handle_IGESAppli_Node;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_IGESData_IGESEntity: declare class NCollection_HArray1_handle_IGESData_IGESEntity
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_IGESData_IGESEntity;
+  Array1(): NCollection_Array1_handle_IGESData_IGESEntity;
 
-ChangeArray1(): NCollection_Array1_handle_IGESData_IGESEntity;
+  ChangeArray1(): NCollection_Array1_handle_IGESData_IGESEntity;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_IGESData_LineFontEntity: declare class NCollection_HArray1_handle_IGESData_LineFontEntity
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_IGESData_LineFontEntity;
+  Array1(): NCollection_Array1_handle_IGESData_LineFontEntity;
 
-ChangeArray1(): NCollection_Array1_handle_IGESData_LineFontEntity;
+  ChangeArray1(): NCollection_Array1_handle_IGESData_LineFontEntity;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_IGESData_ViewKindEntity: declare class NCollection_HArray1_handle_IGESData_ViewKindEntity
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_IGESData_ViewKindEntity;
+  Array1(): NCollection_Array1_handle_IGESData_ViewKindEntity;
 
-ChangeArray1(): NCollection_Array1_handle_IGESData_ViewKindEntity;
+  ChangeArray1(): NCollection_Array1_handle_IGESData_ViewKindEntity;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_IGESDefs_TabularData: declare class NCollection_HArray1_handle_IGESDefs_TabularData
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_IGESDefs_TabularData;
+  Array1(): NCollection_Array1_handle_IGESDefs_TabularData;
 
-ChangeArray1(): NCollection_Array1_handle_IGESDefs_TabularData;
+  ChangeArray1(): NCollection_Array1_handle_IGESDefs_TabularData;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_IGESDimen_GeneralNote: declare class NCollection_HArray1_handle_IGESDimen_GeneralNote
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_IGESDimen_GeneralNote;
+  Array1(): NCollection_Array1_handle_IGESDimen_GeneralNote;
 
-ChangeArray1(): NCollection_Array1_handle_IGESDimen_GeneralNote;
+  ChangeArray1(): NCollection_Array1_handle_IGESDimen_GeneralNote;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_IGESDimen_LeaderArrow: declare class NCollection_HArray1_handle_IGESDimen_LeaderArrow
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_IGESDimen_LeaderArrow;
+  Array1(): NCollection_Array1_handle_IGESDimen_LeaderArrow;
 
-ChangeArray1(): NCollection_Array1_handle_IGESDimen_LeaderArrow;
+  ChangeArray1(): NCollection_Array1_handle_IGESDimen_LeaderArrow;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_IGESDraw_ConnectPoint: declare class NCollection_HArray1_handle_IGESDraw_ConnectPoint
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_IGESDraw_ConnectPoint;
+  Array1(): NCollection_Array1_handle_IGESDraw_ConnectPoint;
 
-ChangeArray1(): NCollection_Array1_handle_IGESDraw_ConnectPoint;
+  ChangeArray1(): NCollection_Array1_handle_IGESDraw_ConnectPoint;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_IGESGeom_Boundary: declare class NCollection_HArray1_handle_IGESGeom_Boundary
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_IGESGeom_Boundary;
+  Array1(): NCollection_Array1_handle_IGESGeom_Boundary;
 
-ChangeArray1(): NCollection_Array1_handle_IGESGeom_Boundary;
+  ChangeArray1(): NCollection_Array1_handle_IGESGeom_Boundary;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_IGESGeom_CurveOnSurface: declare class NCollection_HArray1_handle_IGESGeom_CurveOnSurface
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_IGESGeom_CurveOnSurface;
+  Array1(): NCollection_Array1_handle_IGESGeom_CurveOnSurface;
 
-ChangeArray1(): NCollection_Array1_handle_IGESGeom_CurveOnSurface;
+  ChangeArray1(): NCollection_Array1_handle_IGESGeom_CurveOnSurface;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_IGESGeom_TransformationMatrix: declare class NCollection_HArray1_handle_IGESGeom_TransformationMatrix
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_IGESGeom_TransformationMatrix;
+  Array1(): NCollection_Array1_handle_IGESGeom_TransformationMatrix;
 
-ChangeArray1(): NCollection_Array1_handle_IGESGeom_TransformationMatrix;
+  ChangeArray1(): NCollection_Array1_handle_IGESGeom_TransformationMatrix;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_IGESGraph_Color: declare class NCollection_HArray1_handle_IGESGraph_Color
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_IGESGraph_Color;
+  Array1(): NCollection_Array1_handle_IGESGraph_Color;
 
-ChangeArray1(): NCollection_Array1_handle_IGESGraph_Color;
+  ChangeArray1(): NCollection_Array1_handle_IGESGraph_Color;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_IGESGraph_TextDisplayTemplate: declare class NCollection_HArray1_handle_IGESGraph_TextDisplayTemplate
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_IGESGraph_TextDisplayTemplate;
+  Array1(): NCollection_Array1_handle_IGESGraph_TextDisplayTemplate;
 
-ChangeArray1(): NCollection_Array1_handle_IGESGraph_TextDisplayTemplate;
+  ChangeArray1(): NCollection_Array1_handle_IGESGraph_TextDisplayTemplate;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_IGESGraph_TextFontDef: declare class NCollection_HArray1_handle_IGESGraph_TextFontDef
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_IGESGraph_TextFontDef;
+  Array1(): NCollection_Array1_handle_IGESGraph_TextFontDef;
 
-ChangeArray1(): NCollection_Array1_handle_IGESGraph_TextFontDef;
+  ChangeArray1(): NCollection_Array1_handle_IGESGraph_TextFontDef;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_IGESSolid_Face: declare class NCollection_HArray1_handle_IGESSolid_Face
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_IGESSolid_Face;
+  Array1(): NCollection_Array1_handle_IGESSolid_Face;
 
-ChangeArray1(): NCollection_Array1_handle_IGESSolid_Face;
+  ChangeArray1(): NCollection_Array1_handle_IGESSolid_Face;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_IGESSolid_Loop: declare class NCollection_HArray1_handle_IGESSolid_Loop
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_IGESSolid_Loop;
+  Array1(): NCollection_Array1_handle_IGESSolid_Loop;
 
-ChangeArray1(): NCollection_Array1_handle_IGESSolid_Loop;
+  ChangeArray1(): NCollection_Array1_handle_IGESSolid_Loop;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_IGESSolid_Shell: declare class NCollection_HArray1_handle_IGESSolid_Shell
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_IGESSolid_Shell;
+  Array1(): NCollection_Array1_handle_IGESSolid_Shell;
 
-ChangeArray1(): NCollection_Array1_handle_IGESSolid_Shell;
+  ChangeArray1(): NCollection_Array1_handle_IGESSolid_Shell;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_IGESSolid_VertexList: declare class NCollection_HArray1_handle_IGESSolid_VertexList
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_IGESSolid_VertexList;
+  Array1(): NCollection_Array1_handle_IGESSolid_VertexList;
 
-ChangeArray1(): NCollection_Array1_handle_IGESSolid_VertexList;
+  ChangeArray1(): NCollection_Array1_handle_IGESSolid_VertexList;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_NCollection_HSequence_handle_StepElement_CurveElementPurposeMember: declare class NCollection_HArray1_handle_NCollection_HSequence_handle_StepElement_CurveElementPurposeMember
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_NCollection_HSequence_handle_StepElement_CurveElementPurposeMember;
+  Array1(): NCollection_Array1_handle_NCollection_HSequence_handle_StepElement_CurveElementPurposeMember;
 
-ChangeArray1(): NCollection_Array1_handle_NCollection_HSequence_handle_StepElement_CurveElementPurposeMember;
+  ChangeArray1(): NCollection_Array1_handle_NCollection_HSequence_handle_StepElement_CurveElementPurposeMember;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember: declare class NCollection_HArray1_handle_NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember;
+  Array1(): NCollection_Array1_handle_NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember;
 
-ChangeArray1(): NCollection_Array1_handle_NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember;
+  ChangeArray1(): NCollection_Array1_handle_NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_Standard_Persistent: declare class NCollection_HArray1_handle_Standard_Persistent
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_Standard_Persistent;
+  Array1(): NCollection_Array1_handle_Standard_Persistent;
 
-ChangeArray1(): NCollection_Array1_handle_Standard_Persistent;
+  ChangeArray1(): NCollection_Array1_handle_Standard_Persistent;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_Standard_Transient: declare class NCollection_HArray1_handle_Standard_Transient
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_Standard_Transient;
+  Array1(): NCollection_Array1_handle_Standard_Transient;
 
-ChangeArray1(): NCollection_Array1_handle_Standard_Transient;
+  ChangeArray1(): NCollection_Array1_handle_Standard_Transient;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_StepBasic_Approval: declare class NCollection_HArray1_handle_StepBasic_Approval
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_StepBasic_Approval;
+  Array1(): NCollection_Array1_handle_StepBasic_Approval;
 
-ChangeArray1(): NCollection_Array1_handle_StepBasic_Approval;
+  ChangeArray1(): NCollection_Array1_handle_StepBasic_Approval;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_StepBasic_DerivedUnitElement: declare class NCollection_HArray1_handle_StepBasic_DerivedUnitElement
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_StepBasic_DerivedUnitElement;
+  Array1(): NCollection_Array1_handle_StepBasic_DerivedUnitElement;
 
-ChangeArray1(): NCollection_Array1_handle_StepBasic_DerivedUnitElement;
+  ChangeArray1(): NCollection_Array1_handle_StepBasic_DerivedUnitElement;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_StepBasic_Document: declare class NCollection_HArray1_handle_StepBasic_Document
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_StepBasic_Document;
+  Array1(): NCollection_Array1_handle_StepBasic_Document;
 
-ChangeArray1(): NCollection_Array1_handle_StepBasic_Document;
+  ChangeArray1(): NCollection_Array1_handle_StepBasic_Document;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_StepBasic_NamedUnit: declare class NCollection_HArray1_handle_StepBasic_NamedUnit
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_StepBasic_NamedUnit;
+  Array1(): NCollection_Array1_handle_StepBasic_NamedUnit;
 
-ChangeArray1(): NCollection_Array1_handle_StepBasic_NamedUnit;
+  ChangeArray1(): NCollection_Array1_handle_StepBasic_NamedUnit;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_StepBasic_Organization: declare class NCollection_HArray1_handle_StepBasic_Organization
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_StepBasic_Organization;
+  Array1(): NCollection_Array1_handle_StepBasic_Organization;
 
-ChangeArray1(): NCollection_Array1_handle_StepBasic_Organization;
+  ChangeArray1(): NCollection_Array1_handle_StepBasic_Organization;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_StepBasic_Person: declare class NCollection_HArray1_handle_StepBasic_Person
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_StepBasic_Person;
+  Array1(): NCollection_Array1_handle_StepBasic_Person;
 
-ChangeArray1(): NCollection_Array1_handle_StepBasic_Person;
+  ChangeArray1(): NCollection_Array1_handle_StepBasic_Person;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_StepBasic_Product: declare class NCollection_HArray1_handle_StepBasic_Product
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_StepBasic_Product;
+  Array1(): NCollection_Array1_handle_StepBasic_Product;
 
-ChangeArray1(): NCollection_Array1_handle_StepBasic_Product;
+  ChangeArray1(): NCollection_Array1_handle_StepBasic_Product;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_StepBasic_ProductContext: declare class NCollection_HArray1_handle_StepBasic_ProductContext
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_StepBasic_ProductContext;
+  Array1(): NCollection_Array1_handle_StepBasic_ProductContext;
 
-ChangeArray1(): NCollection_Array1_handle_StepBasic_ProductContext;
+  ChangeArray1(): NCollection_Array1_handle_StepBasic_ProductContext;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_StepBasic_UncertaintyMeasureWithUnit: declare class NCollection_HArray1_handle_StepBasic_UncertaintyMeasureWithUnit
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_StepBasic_UncertaintyMeasureWithUnit;
+  Array1(): NCollection_Array1_handle_StepBasic_UncertaintyMeasureWithUnit;
 
-ChangeArray1(): NCollection_Array1_handle_StepBasic_UncertaintyMeasureWithUnit;
+  ChangeArray1(): NCollection_Array1_handle_StepBasic_UncertaintyMeasureWithUnit;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_StepDimTol_DatumReference: declare class NCollection_HArray1_handle_StepDimTol_DatumReference
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_StepDimTol_DatumReference;
+  Array1(): NCollection_Array1_handle_StepDimTol_DatumReference;
 
-ChangeArray1(): NCollection_Array1_handle_StepDimTol_DatumReference;
+  ChangeArray1(): NCollection_Array1_handle_StepDimTol_DatumReference;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_HArray1_handle_StepDimTol_DatumReferenceCompartment: declare class NCollection_HArray1_handle_StepDimTol_DatumReferenceCompartment
 
-constructor
+  constructor
 
-Array1(): NCollection_Array1_handle_StepDimTol_DatumReferenceCompartment;
+  Array1(): NCollection_Array1_handle_StepDimTol_DatumReferenceCompartment;
 
-ChangeArray1(): NCollection_Array1_handle_StepDimTol_DatumReferenceCompartment;
+  ChangeArray1(): NCollection_Array1_handle_StepDimTol_DatumReferenceCompartment;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

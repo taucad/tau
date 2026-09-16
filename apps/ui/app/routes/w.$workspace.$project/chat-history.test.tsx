@@ -122,7 +122,13 @@ vi.mock('#routes/w.$workspace.$project/chat-message.js', () => ({
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-revision-marker.js', () => ({
-  ChatRevisionMarker: () => null,
+  ChatRevisionMarker: ({
+    userMessageId,
+    isLatestTurn,
+  }: {
+    readonly userMessageId: string;
+    readonly isLatestTurn: boolean;
+  }) => <div data-testid='turn-revision' data-user-message-id={userMessageId} data-latest={String(isLatestTurn)} />,
 }));
 
 vi.mock('#routes/w.$workspace.$project/scroll-down-button.js', () => ({
@@ -190,16 +196,25 @@ vi.mock('#hooks/use-project.js', () => ({
 const capturedVirtuoso: {
   totalCount?: number;
   itemContent?: (index: number) => React.ReactNode;
+  followOutput?: (atBottom: boolean) => 'auto' | false;
 } = {};
+const scrollToIndexMock = vi.fn();
 vi.mock('react-virtuoso', () => ({
-  Virtuoso: (properties: { readonly totalCount: number; readonly itemContent: (index: number) => React.ReactNode }) => {
-    capturedVirtuoso.totalCount = properties.totalCount;
-    capturedVirtuoso.itemContent = properties.itemContent;
+  Virtuoso: (properties: {
+    readonly data: readonly unknown[];
+    readonly itemContent: (index: number, item: unknown) => React.ReactNode;
+    readonly followOutput: (atBottom: boolean) => 'auto' | false;
+    readonly ref?: React.Ref<{ scrollToIndex: typeof scrollToIndexMock }>;
+  }) => {
+    capturedVirtuoso.totalCount = properties.data.length;
+    capturedVirtuoso.itemContent = async (index) => properties.itemContent(index, properties.data[index]);
+    capturedVirtuoso.followOutput = properties.followOutput;
+    useImperativeHandle(properties.ref, () => ({ scrollToIndex: scrollToIndexMock }), []);
     const items: React.ReactNode[] = [];
-    for (let index = 0; index < properties.totalCount; index++) {
+    for (let index = 0; index < properties.data.length; index++) {
       items.push(
         <div key={index} data-testid='virtuoso-item' data-index={index}>
-          {properties.itemContent(index)}
+          {properties.itemContent(index, properties.data[index])}
         </div>,
       );
     }
@@ -280,6 +295,8 @@ describe('ChatHistory — turn group rendering', () => {
     capturedTextarea.onSubmit = undefined;
     capturedVirtuoso.totalCount = undefined;
     capturedVirtuoso.itemContent = undefined;
+    capturedVirtuoso.followOutput = undefined;
+    scrollToIndexMock.mockClear();
     setMockMessages([]);
   });
 
@@ -309,6 +326,39 @@ describe('ChatHistory — turn group rendering', () => {
     expect(lastGroup.className).toContain('min-h-(--chat-live-turn-min-h)');
     const lastGroupMessages = lastGroup.querySelectorAll<HTMLElement>('[data-testid="chat-message"]');
     expect([...lastGroupMessages].map((node) => node.dataset['messageId'])).toEqual(['u2', 'a2', 'a3']);
+  });
+
+  it('should anchor one revision summary directly after each request, before its replies', () => {
+    setMockMessages([
+      message('u1', 'user'),
+      message('a1', 'assistant'),
+      message('u2', 'user'),
+      message('a2', 'assistant'),
+      message('a3', 'assistant'),
+    ]);
+    render(<ChatHistory />);
+    const [firstGroup, lastGroup] = screen
+      .getAllByTestId('virtuoso-item')
+      .map((item) => item.firstElementChild as HTMLElement);
+    const order = (group: HTMLElement | undefined): string[] =>
+      [...(group?.children ?? [])].map((node) =>
+        node instanceof HTMLElement
+          ? `${node.dataset['testid'] ?? ''}:${node.dataset['messageId'] ?? node.dataset['userMessageId'] ?? ''}`
+          : '',
+      );
+    const summaryOf = (group: HTMLElement | undefined): HTMLElement | undefined =>
+      group?.querySelector<HTMLElement>('[data-testid="turn-revision"]') ?? undefined;
+
+    expect(order(firstGroup)).toEqual(['chat-message:u1', 'turn-revision:u1', 'chat-message:a1']);
+    expect(order(lastGroup).slice(0, 4)).toEqual([
+      'chat-message:u2',
+      'turn-revision:u2',
+      'chat-message:a2',
+      'chat-message:a3',
+    ]);
+    expect(lastGroup?.querySelectorAll('[data-testid="turn-revision"]')).toHaveLength(1);
+    expect(summaryOf(firstGroup)?.dataset['latest']).toBe('false');
+    expect(summaryOf(lastGroup)?.dataset['latest']).toBe('true');
   });
 
   it('should render a leading assistant message in its own group when no user message precedes it', () => {
@@ -350,6 +400,18 @@ describe('ChatHistory — turn group rendering', () => {
     expect(screen.getByTestId('virtuoso').querySelectorAll('[data-testid="chat-error-adornment"]')).toHaveLength(1);
   });
 
+  it('keeps the error adornment reachable on a chat with no turns yet (W19-b)', () => {
+    /* The first turn of a fresh project is refused by the durable workspace
+     * before any user message exists, so the banner that rides the last turn
+     * group has no group to ride and the person saw nothing at all (I12). */
+    setMockMessages([]);
+
+    render(<ChatHistory />);
+
+    expect(screen.queryAllByTestId('chat-error-adornment')).toHaveLength(1);
+    expect(screen.getByTestId('virtuoso').querySelectorAll('[data-testid="chat-error-adornment"]')).toHaveLength(0);
+  });
+
   it('should pass the correct totalCount to Virtuoso (one per turn group)', () => {
     setMockMessages([
       message('a0', 'assistant'),
@@ -362,6 +424,34 @@ describe('ChatHistory — turn group rendering', () => {
 
     expect(capturedVirtuoso.totalCount).toBe(3);
     expect(typeof capturedVirtuoso.itemContent).toBe('function');
+  });
+
+  it('uses instant live following and pins a batched user plus assistant turn', () => {
+    const callbacks: FrameRequestCallback[] = [];
+    const requestAnimationFrameSpy = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      callbacks.push(callback);
+      return callbacks.length;
+    });
+
+    try {
+      setMockMessages([message('u1', 'user'), message('a1', 'assistant')]);
+      const view = render(<ChatHistory />);
+      expect(capturedVirtuoso.followOutput?.(true)).toBe('auto');
+      expect(capturedVirtuoso.followOutput?.(false)).toBe(false);
+
+      setMockMessages([
+        message('u1', 'user'),
+        message('a1', 'assistant'),
+        message('u2', 'user'),
+        message('a2', 'assistant'),
+      ]);
+      view.rerender(<ChatHistory className='updated' />);
+      act(() => callbacks.at(-1)?.(0));
+
+      expect(scrollToIndexMock).toHaveBeenCalledWith({ index: 'LAST', align: 'start', behavior: 'instant' });
+    } finally {
+      requestAnimationFrameSpy.mockRestore();
+    }
   });
 });
 

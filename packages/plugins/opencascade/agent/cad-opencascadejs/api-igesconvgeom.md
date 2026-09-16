@@ -4,70 +4,70 @@
 
 IGESConvGeom: declare class IGESConvGeom
 
-constructor
+  constructor
 
-static SplineCurveFromIGES(igesent: IGESGeom_SplineCurve, epscoef: number, epsgeom: number): { returnValue: number; result: Geom_BSplineCurve; [Symbol.dispose](): void };
+  static SplineCurveFromIGES(igesent: IGESGeom_SplineCurve, epscoef: number, epsgeom: number): { returnValue: number; result: Geom_BSplineCurve; [Symbol.dispose](): void };
 
-static IncreaseCurveContinuity(curve: Geom_BSplineCurve, epsgeom: number, continuity: number): number;
-static IncreaseCurveContinuity(curve: Geom2d_BSplineCurve, epsgeom: number, continuity: number): number;
-static IncreaseCurveContinuity(curve: Geom_BSplineCurve, epsgeom: number, continuity: number): number;
-static IncreaseCurveContinuity(curve: Geom2d_BSplineCurve, epsgeom: number, continuity: number): number;
+  static IncreaseCurveContinuity(curve: Geom_BSplineCurve, epsgeom: number, continuity: number): number;
+  static IncreaseCurveContinuity(curve: Geom2d_BSplineCurve, epsgeom: number, continuity: number): number;
+  static IncreaseCurveContinuity(curve: Geom_BSplineCurve, epsgeom: number, continuity: number): number;
+  static IncreaseCurveContinuity(curve: Geom2d_BSplineCurve, epsgeom: number, continuity: number): number;
 
-static SplineSurfaceFromIGES(igesent: IGESGeom_SplineSurface, epscoef: number, epsgeom: number): { returnValue: number; result: Geom_BSplineSurface; [Symbol.dispose](): void };
+  static SplineSurfaceFromIGES(igesent: IGESGeom_SplineSurface, epscoef: number, epsgeom: number): { returnValue: number; result: Geom_BSplineSurface; [Symbol.dispose](): void };
 
-static IncreaseSurfaceContinuity(surface: Geom_BSplineSurface, epsgeom: number, continuity?: number): number;
+  static IncreaseSurfaceContinuity(surface: Geom_BSplineSurface, epsgeom: number, continuity?: number): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IGESConvGeom_GeomBuilder: declare class IGESConvGeom_GeomBuilder
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-AddXY(val: gp_XY): void;
+  AddXY(val: gp_XY): void;
 
-AddXYZ(val: gp_XYZ): void;
+  AddXYZ(val: gp_XYZ): void;
 
-AddVec(val: gp_XYZ): void;
+  AddVec(val: gp_XYZ): void;
 
-NbPoints(): number;
+  NbPoints(): number;
 
-Point(num: number): gp_XYZ;
+  Point(num: number): gp_XYZ;
 
-MakeCopiousData(datatype: number, polyline?: boolean): IGESGeom_CopiousData;
+  MakeCopiousData(datatype: number, polyline?: boolean): IGESGeom_CopiousData;
 
-Position(): gp_Trsf;
+  Position(): gp_Trsf;
 
-SetPosition(pos: gp_Trsf): void;
-SetPosition(pos: gp_Ax3): void;
-SetPosition(pos: gp_Ax2): void;
-SetPosition(pos: gp_Ax1): void;
-SetPosition(pos: gp_Trsf): void;
-SetPosition(pos: gp_Ax3): void;
-SetPosition(pos: gp_Ax2): void;
-SetPosition(pos: gp_Ax1): void;
-SetPosition(pos: gp_Trsf): void;
-SetPosition(pos: gp_Ax3): void;
-SetPosition(pos: gp_Ax2): void;
-SetPosition(pos: gp_Ax1): void;
-SetPosition(pos: gp_Trsf): void;
-SetPosition(pos: gp_Ax3): void;
-SetPosition(pos: gp_Ax2): void;
-SetPosition(pos: gp_Ax1): void;
+  SetPosition(pos: gp_Trsf): void;
+  SetPosition(pos: gp_Ax3): void;
+  SetPosition(pos: gp_Ax2): void;
+  SetPosition(pos: gp_Ax1): void;
+  SetPosition(pos: gp_Trsf): void;
+  SetPosition(pos: gp_Ax3): void;
+  SetPosition(pos: gp_Ax2): void;
+  SetPosition(pos: gp_Ax1): void;
+  SetPosition(pos: gp_Trsf): void;
+  SetPosition(pos: gp_Ax3): void;
+  SetPosition(pos: gp_Ax2): void;
+  SetPosition(pos: gp_Ax1): void;
+  SetPosition(pos: gp_Trsf): void;
+  SetPosition(pos: gp_Ax3): void;
+  SetPosition(pos: gp_Ax2): void;
+  SetPosition(pos: gp_Ax1): void;
 
-IsIdentity(): boolean;
+  IsIdentity(): boolean;
 
-IsTranslation(): boolean;
+  IsTranslation(): boolean;
 
-IsZOnly(): boolean;
+  IsZOnly(): boolean;
 
-EvalXYZ(val: gp_XYZ, X?: number, Y?: number, Z?: number): { X: number; Y: number; Z: number };
+  EvalXYZ(val: gp_XYZ, X?: number, Y?: number, Z?: number): { X: number; Y: number; Z: number };
 
-MakeTransformation(unit?: number): IGESGeom_TransformationMatrix;
+  MakeTransformation(unit?: number): IGESGeom_TransformationMatrix;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

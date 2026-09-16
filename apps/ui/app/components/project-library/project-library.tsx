@@ -57,6 +57,7 @@ import {
   AlertDialogTitle,
 } from '@taucad/ui/components/alert-dialog';
 import { useCookie } from '#hooks/use-cookie.js';
+import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { isFunction } from '#utils/function.utils.js';
 import { ProjectActionDropdown } from '#components/project-library/project-action-dropdown.js';
 import { Checkbox } from '@taucad/ui/components/checkbox';
@@ -64,12 +65,16 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import { formatRelativeTime } from '#utils/date.utils.js';
 import { Loader } from '#components/ui/loader.js';
 import { cookieName } from '#constants/cookie.constants.js';
+import { searchParameterName } from '#constants/search-parameter.constants.js';
+import { flagParameter } from '#utils/search-parameter.codecs.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { CollectionEmptyState } from '#components/ui/collection-empty-state.js';
 import { NewProjectChatComposer } from '#components/chat/new-project-chat-composer.js';
 import { ChatComposerProvider } from '#hooks/active-chat-provider.js';
 import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
+import { useSidebarCommands } from '#hooks/use-sidebar-status.js';
+import { Skeleton } from '@taucad/ui/components/skeleton';
 import type { WorkspaceBindingRepairGroup } from '#hooks/use-project-manager.js';
 import { ProjectCard, ProjectCardCadPreview, ProjectCardMedia } from '#components/project-card.js';
 import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
@@ -91,7 +96,13 @@ const recoveryDirectoryName = (recovery: PendingProjectRecovery): string =>
 
 export function ProjectLibrary(): React.JSX.Element {
   const [viewMode, setViewMode] = useCookie<'grid' | 'table'>(cookieName.projectViewMode, 'grid');
-  const [showDeleted, setShowDeleted] = useState(false);
+  /*
+   * D1: the Trash is a place, not a menu tick. `/projects?trash=1` is what the
+   * trashed project's notice links to and what a person can bookmark or send,
+   * so the view lives in the URL rather than in component state that a reload
+   * throws away.
+   */
+  const [showDeleted, setShowDeleted] = useSearchParameter(searchParameterName.trash, flagParameter);
   const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<ProjectListItem | undefined>();
   const [repairTarget, setRepairTarget] = useState<WorkspaceBindingRepairGroup | undefined>();
   const {
@@ -107,13 +118,18 @@ export function ProjectLibrary(): React.JSX.Element {
     permanentlyDeleteProject: deleteProjectPermanently,
     adoptProject,
     updateName,
+    isLoading,
   } = useProjects({ includeDeleted: showDeleted });
   const navigate = useNavigate();
   const projectManager = useProjectManager();
+  const { closeProject } = useSidebarCommands();
 
-  const handleToggleDeleted = useCallback((value: boolean) => {
-    setShowDeleted(value);
-  }, []);
+  const handleToggleDeleted = useCallback(
+    (value: boolean) => {
+      setShowDeleted(value);
+    },
+    [setShowDeleted],
+  );
 
   // The toast follows the mutation, never precedes it: a row that has already
   // vanished is a failure, not a silent success (DF3).
@@ -138,9 +154,10 @@ export function ProjectLibrary(): React.JSX.Element {
 
   const handleDelete = useCallback(
     (project: ProjectListItem) => {
+      closeProject(project.id);
       void trashProject(project);
     },
-    [trashProject],
+    [closeProject, trashProject],
   );
 
   const handlePermanentlyDelete = useCallback((project: ProjectListItem) => {
@@ -178,6 +195,7 @@ export function ProjectLibrary(): React.JSX.Element {
       return;
     }
     try {
+      closeProject(project.id);
       await deleteProjectPermanently(project.id);
       setPermanentDeleteTarget(undefined);
       toast.success(`Permanently deleted ${project.name}`);
@@ -185,7 +203,7 @@ export function ProjectLibrary(): React.JSX.Element {
       toast.error(`Could not permanently delete ${project.name}`);
       console.error('Error permanently deleting project:', error);
     }
-  }, [deleteProjectPermanently, permanentDeleteTarget]);
+  }, [closeProject, deleteProjectPermanently, permanentDeleteTarget]);
 
   const confirmWorkspaceBindingRepair = useCallback(async (): Promise<void> => {
     const target = repairTarget;
@@ -384,7 +402,7 @@ export function ProjectLibrary(): React.JSX.Element {
       {listingError && projects.length > 0 ? (
         <div className='mb-6 flex items-center justify-between gap-3 rounded-md border border-destructive/40 p-3'>
           <span className='text-sm'>Projects could not be refreshed.</span>
-          <Button size='sm' variant='outline' onClick={() => void retry()}>
+          <Button size='sm' variant='outline' onClick={async () => retry()}>
             Retry
           </Button>
         </div>
@@ -393,7 +411,7 @@ export function ProjectLibrary(): React.JSX.Element {
       <div className='mb-4 flex justify-end gap-2'>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant='outline' size='icon'>
+            <Button variant='outline' size='icon' aria-label='View mode'>
               {viewMode === 'grid' ? <Grid /> : <TableIcon />}
             </Button>
           </DropdownMenuTrigger>
@@ -418,7 +436,7 @@ export function ProjectLibrary(): React.JSX.Element {
         </DropdownMenu>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant='outline' size='icon'>
+            <Button variant='outline' size='icon' aria-label='Settings'>
               <Cog className='size-4' />
             </Button>
           </DropdownMenuTrigger>
@@ -438,9 +456,20 @@ export function ProjectLibrary(): React.JSX.Element {
             <div className='font-medium'>Projects could not be loaded</div>
             <div className='text-sm text-muted-foreground'>Check the connected workspace and try again.</div>
           </div>
-          <Button variant='outline' onClick={() => void retry()}>
+          <Button variant='outline' onClick={async () => retry()}>
             Retry
           </Button>
+        </div>
+      ) : isLoading && projects.length === 0 ? (
+        <div
+          className='grid grid-cols-2 gap-3 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4'
+          role='status'
+          aria-label='Loading projects'
+          aria-busy='true'
+        >
+          {Array.from({ length: 4 }, (_, index) => (
+            <Skeleton key={index} className='aspect-4/3 w-full rounded-md' />
+          ))}
         </div>
       ) : (
         <UnifiedProjectList projects={projects} viewMode={viewMode} actions={actions} />
@@ -462,7 +491,7 @@ export function ProjectLibrary(): React.JSX.Element {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void confirmWorkspaceBindingRepair()}>
+            <AlertDialogAction onClick={confirmWorkspaceBindingRepair}>
               Repair {repairTarget?.projectCount} {repairTarget?.projectCount === 1 ? 'project' : 'projects'}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -790,6 +819,7 @@ function BulkActions({ table, deleteProject }: BulkActionsProps) {
             </AlertDialogTitle>
             <AlertDialogDescription className='space-y-2'>
               <p>The following projects will be moved to the trash:</p>
+              <p>Any running agents will be stopped first. Their work so far is saved as revisions.</p>
               <ul className='max-h-40 list-disc overflow-y-auto pl-6 text-sm'>
                 {selectedRows.map((row) => {
                   const project = row.original;

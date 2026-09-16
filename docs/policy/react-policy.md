@@ -3,7 +3,7 @@ title: 'React Policy'
 description: 'Component composition, memoization, state management, and hook patterns for keeping React rendering efficient and predictable across Tau UI surfaces.'
 status: active
 created: '2026-03-19'
-updated: '2026-03-19'
+updated: '2026-09-14'
 related:
   - docs/policy/ui-policy.md
   - docs/policy/rendering-policy.md
@@ -255,6 +255,27 @@ useEffect(() => {
 }, [content]);
 ```
 
+### 5.4 Never Use a Dependency Array as a Change Signal
+
+A dependency array controls when React re-runs a hook; it does not carry external-store state into the callback. Read every listed dependency in the callback. Carry an external change through React state or context, or subscribe with `useSyncExternalStore` or a store selector whose snapshot changes with the external value.
+
+**Why**: Mutating an object outside React and listing one of its properties cannot schedule a render, while listing an unread value creates a misleading second source of change detection.
+
+CORRECT:
+
+```typescript
+const revision = useSyncExternalStore(store.subscribe, store.getSnapshot);
+const label = useMemo(() => describeRevision(revision), [revision]);
+```
+
+INCORRECT:
+
+```typescript
+const label = useMemo(() => describeRevision(store.current), [store.current.revisionId]);
+```
+
+This rule is checked by `apps/ui/app/dependency-signal.policy.node.test.ts` for supported React hook dependency expressions.
+
 ## 6. Keys
 
 ### 6.1 Use Stable, Unique Identifiers as Keys
@@ -273,6 +294,8 @@ Do not construct keys from a combination of the item and its index (`${item.id}-
 - Inline arrow functions as props to memoized children (`onClick={() => ...}`)
 - Inline object literals as props (`style={{}}`, `controls={{}}`) to memoized children
 - `useEffect` to derive state from props (`useEffect(() => setState(compute(props)), [props])`)
+- Treating a hook dependency array as notification that an external mutable value changed
+- Listing a hook dependency that the callback never reads
 - Destructuring store selectors into multiple fields (creates a new object reference)
 - `useMemo` or `useCallback` with no dependencies (`[]`) on values that never change — hoist to module scope instead
 - Passing `children` through `memo()` boundaries without verifying children stability
@@ -286,6 +309,8 @@ Do not construct keys from a combination of the item and its index (`${item.id}-
 - [ ] Store selectors return primitive values or stable references
 - [ ] Keys are stable unique identifiers, not array indices
 - [ ] DOM measurements in effects use `requestAnimationFrame`
+- [ ] External-store changes arrive through state, context, `useSyncExternalStore`, or a selector snapshot
+- [ ] Every listed hook dependency is read by its callback
 - [ ] State is colocated with its closest consumer
 
 ## References
@@ -293,4 +318,5 @@ Do not construct keys from a combination of the item and its index (`${item.id}-
 - [UI Policy](ui-policy.md) — Visual design rules, component composition with `cn()`/`cva`
 - [Rendering Policy](rendering-policy.md) — Virtualization thresholds, content budgets, scroll management
 - [React Testing Policy](react-testing-policy.md) — Testing hooks and components
+- Enforcement: `apps/ui/app/dependency-signal.policy.node.test.ts` — P66 hook dependency AST check
 - Research: `docs/research/chat-rendering-audit.md` — Audit findings that informed these rules

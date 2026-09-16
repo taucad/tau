@@ -16,19 +16,32 @@ import {
 } from '#api/git/git.constants.js';
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- a process environment variable name, not an identifier
-const admittedEnvironment: Readonly<Record<string, string>> = { TAU_GIT_PUSH_ADMITTED: '1' };
+const admittedEnvironment: Readonly<Record<string, string>> = {
+  TAU_GIT_PUSH_ADMITTED: '1',
+};
 
 const runHook = async (
-  ref: string,
+  ref: string | readonly string[],
   environment: Readonly<Record<string, string>> = admittedEnvironment,
 ): Promise<{ code: number | undefined; stderr: string }> =>
   new Promise((resolve) => {
-    const child = spawn('sh', [hookPath], { env: environment as NodeJS.ProcessEnv });
+    const child = spawn('sh', [hookPath], {
+      env: environment as NodeJS.ProcessEnv,
+    });
     const stderr: Array<Uint8Array<ArrayBuffer>> = [];
     child.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => stderr.push(chunk));
-    child.stdin.end(`${'0'.repeat(40)} ${'1'.repeat(40)} ${ref}\n`);
+    child.stdin.end(
+      (typeof ref === 'string' ? [ref] : ref)
+        /* A bare name is a ref *creation*; a caller that needs a particular
+           old/new pair (a deletion, a rewind) writes the whole hook line. */
+        .map((name) => (name.includes(' ') ? `${name}\n` : `${'0'.repeat(40)} ${'1'.repeat(40)} ${name}\n`))
+        .join(''),
+    );
     child.on('close', (code) => {
-      resolve({ code: code ?? undefined, stderr: Buffer.concat(stderr).toString('utf8') });
+      resolve({
+        code: code ?? undefined,
+        stderr: Buffer.concat(stderr).toString('utf8'),
+      });
     });
   });
 
@@ -65,9 +78,10 @@ describe('Tau Hosted Remote constants', () => {
       'refs/tau/workspaces/w1',
       'refs/tau/revisions/r1',
       'refs/tau/transactions/t1',
+      'refs/tau/retention/records/r1',
       'refs/tau/head',
       'refs/remotes/origin/main',
-      'sync/tau/main',
+      'refs/heads/sync/tau/main',
       'refs/heads/',
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- one hook run per ref, by design
@@ -77,10 +91,31 @@ describe('Tau Hosted Remote constants', () => {
     }
   });
 
+  /**
+   * Ruling OQ4: no ref family is deletable, and the hook is the only place that
+   * can say so. `receive.denyDeletes` is set on the spawn as well, but git
+   * applies it to `refs/heads/*` alone — measured against git 2.55, a tag and a
+   * `refs/tau/chats/*` ref were both deletable with it on (review C25).
+   */
+  it('refuses a deletion of every pushable ref family', async () => {
+    for (const ref of ['refs/heads/main', 'refs/tags/v1', 'refs/tau/chats/chat_1', 'refs/tau/artifacts/a1']) {
+      // oxlint-disable-next-line no-await-in-loop -- one hook run per ref, by design
+      const refused = await runHook(`${'1'.repeat(40)} ${'0'.repeat(40)} ${ref}`);
+      expect(refused.code, `${ref} was deletable: ${refused.stderr}`).toBe(1);
+      expect(refused.stderr).toContain('never deletes a ref');
+    }
+  });
+
   it('refuses a push that did not come through the API admission check', async () => {
     const refused = await runHook('refs/heads/main', {});
     expect(refused.code).toBe(1);
     expect(refused.stderr).toContain('only through the Tau API');
+  });
+
+  it('rejects a mixed push atomically when one ref is host-local', async () => {
+    const refused = await runHook(['refs/heads/main', 'refs/heads/sync/tau/main']);
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toContain('refs/heads/sync/tau/main');
   });
 
   it('installs the same allow-list into the pre-receive hook', () => {
@@ -91,7 +126,7 @@ describe('Tau Hosted Remote constants', () => {
     expect(preReceiveHookScript).toContain('GIT_QUARANTINE_PATH');
     expect(preReceiveHookScript.startsWith('#!/bin/sh\n')).toBe(true);
     expect(postReceiveHookScript).toContain('git update-server-info');
-    expect(postReceiveHookScript).toContain('git gc --auto');
+    expect(postReceiveHookScript).not.toContain('git gc');
   });
 
   it('spells one LFS object path the way packages/revisions does', () => {

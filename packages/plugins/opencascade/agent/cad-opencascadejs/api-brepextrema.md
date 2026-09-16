@@ -4,436 +4,436 @@
 
 BRepExtrema_DistShapeShape: declare class BRepExtrema_DistShapeShape
 
-constructor
+  constructor
 
-SetDeflection(theDeflection: number): void;
+  SetDeflection(theDeflection: number): void;
 
-LoadS1(Shape1: TopoDS_Shape): void;
+  LoadS1(Shape1: TopoDS_Shape): void;
 
-LoadS2(Shape1: TopoDS_Shape): void;
+  LoadS2(Shape1: TopoDS_Shape): void;
 
-Perform(theRange?: Message_ProgressRange): boolean;
+  Perform(theRange?: Message_ProgressRange): boolean;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolution(): number;
+  NbSolution(): number;
 
-Value(): number;
+  Value(): number;
 
-InnerSolution(): boolean;
+  InnerSolution(): boolean;
 
-PointOnShape1(N: number): gp_Pnt;
+  PointOnShape1(N: number): gp_Pnt;
 
-PointOnShape2(N: number): gp_Pnt;
+  PointOnShape2(N: number): gp_Pnt;
 
-SupportTypeShape1(N: number): BRepExtrema_SupportType;
+  SupportTypeShape1(N: number): BRepExtrema_SupportType;
 
-SupportTypeShape2(N: number): BRepExtrema_SupportType;
+  SupportTypeShape2(N: number): BRepExtrema_SupportType;
 
-SupportOnShape1(N: number): TopoDS_Shape;
+  SupportOnShape1(N: number): TopoDS_Shape;
 
-SupportOnShape2(N: number): TopoDS_Shape;
+  SupportOnShape2(N: number): TopoDS_Shape;
 
-ParOnEdgeS1(N: number, t?: number): { t: number };
+  ParOnEdgeS1(N: number, t?: number): { t: number };
 
-ParOnEdgeS2(N: number, t?: number): { t: number };
+  ParOnEdgeS2(N: number, t?: number): { t: number };
 
-ParOnFaceS1(N: number, u?: number, v?: number): { u: number; v: number };
+  ParOnFaceS1(N: number, u?: number, v?: number): { u: number; v: number };
 
-ParOnFaceS2(N: number, u?: number, v?: number): { u: number; v: number };
+  ParOnFaceS2(N: number, u?: number, v?: number): { u: number; v: number };
 
-SetFlag(F: Extrema_ExtFlag): void;
+  SetFlag(F: Extrema_ExtFlag): void;
 
-SetAlgo(A: Extrema_ExtAlgo): void;
+  SetAlgo(A: Extrema_ExtAlgo): void;
 
-SetMultiThread(theIsMultiThread: boolean): void;
+  SetMultiThread(theIsMultiThread: boolean): void;
 
-IsMultiThread(): boolean;
+  IsMultiThread(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepExtrema_DistanceSS: declare class BRepExtrema_DistanceSS
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-DistValue(): number;
+  DistValue(): number;
 
-Seq1Value(): NCollection_Sequence_BRepExtrema_SolutionElem;
+  Seq1Value(): NCollection_Sequence_BRepExtrema_SolutionElem;
 
-Seq2Value(): NCollection_Sequence_BRepExtrema_SolutionElem;
+  Seq2Value(): NCollection_Sequence_BRepExtrema_SolutionElem;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepExtrema_ElementFilter: declare class BRepExtrema_ElementFilter
 
-constructor
+  constructor
 
-PreCheckElements(argNo0: number, argNo1: number): BRepExtrema_ElementFilter_FilterResult;
+  PreCheckElements(argNo0: number, argNo1: number): BRepExtrema_ElementFilter_FilterResult;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepExtrema_ElementFilter_FilterResult: typeof BRepExtrema_ElementFilter_FilterResult[keyof typeof BRepExtrema_ElementFilter_FilterResult]
 
 BRepExtrema_ExtCC: declare class BRepExtrema_ExtCC
 
-constructor
+  constructor
 
-Initialize(E2: TopoDS_Edge): void;
+  Initialize(E2: TopoDS_Edge): void;
 
-Perform(E1: TopoDS_Edge): void;
+  Perform(E1: TopoDS_Edge): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbExt(): number;
+  NbExt(): number;
 
-IsParallel(): boolean;
+  IsParallel(): boolean;
 
-SquareDistance(N: number): number;
+  SquareDistance(N: number): number;
 
-ParameterOnE1(N: number): number;
+  ParameterOnE1(N: number): number;
 
-PointOnE1(N: number): gp_Pnt;
+  PointOnE1(N: number): gp_Pnt;
 
-ParameterOnE2(N: number): number;
+  ParameterOnE2(N: number): number;
 
-PointOnE2(N: number): gp_Pnt;
+  PointOnE2(N: number): gp_Pnt;
 
-TrimmedSquareDistances(dist11: number, distP12: number, distP21: number, distP22: number, P11: gp_Pnt, P12: gp_Pnt, P21: gp_Pnt, P22: gp_Pnt): { dist11: number; distP12: number; distP21: number; distP22: number };
+  TrimmedSquareDistances(dist11: number, distP12: number, distP21: number, distP22: number, P11: gp_Pnt, P12: gp_Pnt, P21: gp_Pnt, P22: gp_Pnt): { dist11: number; distP12: number; distP21: number; distP22: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepExtrema_ExtCF: declare class BRepExtrema_ExtCF
 
-constructor
+  constructor
 
-Initialize(E: TopoDS_Edge, F: TopoDS_Face): void;
+  Initialize(E: TopoDS_Edge, F: TopoDS_Face): void;
 
-Perform(E: TopoDS_Edge, F: TopoDS_Face): void;
+  Perform(E: TopoDS_Edge, F: TopoDS_Face): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbExt(): number;
+  NbExt(): number;
 
-SquareDistance(N: number): number;
+  SquareDistance(N: number): number;
 
-IsParallel(): boolean;
+  IsParallel(): boolean;
 
-ParameterOnEdge(N: number): number;
+  ParameterOnEdge(N: number): number;
 
-ParameterOnFace(N: number, U?: number, V?: number): { U: number; V: number };
+  ParameterOnFace(N: number, U?: number, V?: number): { U: number; V: number };
 
-PointOnEdge(N: number): gp_Pnt;
+  PointOnEdge(N: number): gp_Pnt;
 
-PointOnFace(N: number): gp_Pnt;
+  PointOnFace(N: number): gp_Pnt;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepExtrema_ExtFF: declare class BRepExtrema_ExtFF
 
-constructor
+  constructor
 
-Initialize(F2: TopoDS_Face): void;
+  Initialize(F2: TopoDS_Face): void;
 
-Perform(F1: TopoDS_Face, F2: TopoDS_Face): void;
+  Perform(F1: TopoDS_Face, F2: TopoDS_Face): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-IsParallel(): boolean;
+  IsParallel(): boolean;
 
-NbExt(): number;
+  NbExt(): number;
 
-SquareDistance(N: number): number;
+  SquareDistance(N: number): number;
 
-ParameterOnFace1(N: number, U?: number, V?: number): { U: number; V: number };
+  ParameterOnFace1(N: number, U?: number, V?: number): { U: number; V: number };
 
-ParameterOnFace2(N: number, U?: number, V?: number): { U: number; V: number };
+  ParameterOnFace2(N: number, U?: number, V?: number): { U: number; V: number };
 
-PointOnFace1(N: number): gp_Pnt;
+  PointOnFace1(N: number): gp_Pnt;
 
-PointOnFace2(N: number): gp_Pnt;
+  PointOnFace2(N: number): gp_Pnt;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepExtrema_ExtPC: declare class BRepExtrema_ExtPC
 
-constructor
+  constructor
 
-Initialize(E: TopoDS_Edge): void;
+  Initialize(E: TopoDS_Edge): void;
 
-Perform(V: TopoDS_Vertex): void;
+  Perform(V: TopoDS_Vertex): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbExt(): number;
+  NbExt(): number;
 
-IsMin(N: number): boolean;
+  IsMin(N: number): boolean;
 
-SquareDistance(N: number): number;
+  SquareDistance(N: number): number;
 
-Parameter(N: number): number;
+  Parameter(N: number): number;
 
-Point(N: number): gp_Pnt;
+  Point(N: number): gp_Pnt;
 
-TrimmedSquareDistances(dist1: number, dist2: number, pnt1: gp_Pnt, pnt2: gp_Pnt): { dist1: number; dist2: number };
+  TrimmedSquareDistances(dist1: number, dist2: number, pnt1: gp_Pnt, pnt2: gp_Pnt): { dist1: number; dist2: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepExtrema_ExtPF: declare class BRepExtrema_ExtPF
 
-constructor
+  constructor
 
-Initialize(TheFace: TopoDS_Face, TheFlag?: Extrema_ExtFlag, TheAlgo?: Extrema_ExtAlgo): void;
+  Initialize(TheFace: TopoDS_Face, TheFlag?: Extrema_ExtFlag, TheAlgo?: Extrema_ExtAlgo): void;
 
-Perform(TheVertex: TopoDS_Vertex, TheFace: TopoDS_Face): void;
+  Perform(TheVertex: TopoDS_Vertex, TheFace: TopoDS_Face): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbExt(): number;
+  NbExt(): number;
 
-SquareDistance(N: number): number;
+  SquareDistance(N: number): number;
 
-Parameter(N: number, U?: number, V?: number): { U: number; V: number };
+  Parameter(N: number, U?: number, V?: number): { U: number; V: number };
 
-Point(N: number): gp_Pnt;
+  Point(N: number): gp_Pnt;
 
-SetFlag(F: Extrema_ExtFlag): void;
+  SetFlag(F: Extrema_ExtFlag): void;
 
-SetAlgo(A: Extrema_ExtAlgo): void;
+  SetAlgo(A: Extrema_ExtAlgo): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepExtrema_OverlapTool: declare class BRepExtrema_OverlapTool
 
-constructor
+  constructor
 
-LoadTriangleSets(theSet1: BRepExtrema_TriangleSet, theSet2: BRepExtrema_TriangleSet): void;
+  LoadTriangleSets(theSet1: BRepExtrema_TriangleSet, theSet2: BRepExtrema_TriangleSet): void;
 
-Perform(theTolerance?: number): void;
+  Perform(theTolerance?: number): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-MarkDirty(): void;
+  MarkDirty(): void;
 
-OverlapSubShapes1(): unknown;
+  OverlapSubShapes1(): unknown;
 
-OverlapSubShapes2(): unknown;
+  OverlapSubShapes2(): unknown;
 
-SetElementFilter(theFilter: BRepExtrema_ElementFilter): void;
+  SetElementFilter(theFilter: BRepExtrema_ElementFilter): void;
 
-Accept(theLeaf1: number, theLeaf2: number): boolean;
+  Accept(theLeaf1: number, theLeaf2: number): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepExtrema_Poly: declare class BRepExtrema_Poly
 
-constructor
+  constructor
 
-static Distance(S1: TopoDS_Shape, S2: TopoDS_Shape, P1: gp_Pnt, P2: gp_Pnt, dist?: number): { returnValue: boolean; dist: number };
+  static Distance(S1: TopoDS_Shape, S2: TopoDS_Shape, P1: gp_Pnt, P2: gp_Pnt, dist?: number): { returnValue: boolean; dist: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepExtrema_ProximityDistTool_PrjState: declare class BRepExtrema_ProximityDistTool_PrjState
 
-constructor
+  constructor
 
-GetTrgIdx(): number;
+  GetTrgIdx(): number;
 
-GetPrjState(): unknown;
+  GetPrjState(): unknown;
 
-GetNumberOfFirstNode(): number;
+  GetNumberOfFirstNode(): number;
 
-GetNumberOfLastNode(): number;
+  GetNumberOfLastNode(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepExtrema_VertexInspector: declare class BRepExtrema_VertexInspector
 
-constructor
+  constructor
 
-static Coord(i: number, thePnt: gp_XYZ): number;
+  static Coord(i: number, thePnt: gp_XYZ): number;
 
-static Shift(thePnt: gp_XYZ, theTol: number): gp_XYZ;
+  static Shift(thePnt: gp_XYZ, theTol: number): gp_XYZ;
 
-Add(thePnt: gp_XYZ): void;
+  Add(thePnt: gp_XYZ): void;
 
-SetTol(theTol: number): void;
+  SetTol(theTol: number): void;
 
-SetCurrent(theCurPnt: gp_XYZ): void;
+  SetCurrent(theCurPnt: gp_XYZ): void;
 
-IsNeedAdd(): boolean;
+  IsNeedAdd(): boolean;
 
-Inspect(theTarget: number): NCollection_CellFilter_Action;
+  Inspect(theTarget: number): NCollection_CellFilter_Action;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepExtrema_SelfIntersection: declare class BRepExtrema_SelfIntersection extends BRepExtrema_ElementFilter
 
-constructor
+  constructor
 
-Tolerance(): number;
+  Tolerance(): number;
 
-SetTolerance(theTolerance: number): void;
+  SetTolerance(theTolerance: number): void;
 
-LoadShape(theShape: TopoDS_Shape): boolean;
+  LoadShape(theShape: TopoDS_Shape): boolean;
 
-Perform(): void;
+  Perform(): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-OverlapElements(): unknown;
+  OverlapElements(): unknown;
 
-GetSubShape(theID: number): TopoDS_Face;
+  GetSubShape(theID: number): TopoDS_Face;
 
-ElementSet(): BRepExtrema_TriangleSet;
+  ElementSet(): BRepExtrema_TriangleSet;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepExtrema_ShapeProximity: declare class BRepExtrema_ShapeProximity
 
-constructor
+  constructor
 
-Tolerance(): number;
+  Tolerance(): number;
 
-SetTolerance(theTolerance: number): void;
+  SetTolerance(theTolerance: number): void;
 
-Proximity(): number;
+  Proximity(): number;
 
-LoadShape1(theShape1: TopoDS_Shape): boolean;
+  LoadShape1(theShape1: TopoDS_Shape): boolean;
 
-LoadShape2(theShape2: TopoDS_Shape): boolean;
+  LoadShape2(theShape2: TopoDS_Shape): boolean;
 
-SetNbSamples1(theNbSamples: number): void;
+  SetNbSamples1(theNbSamples: number): void;
 
-SetNbSamples2(theNbSamples: number): void;
+  SetNbSamples2(theNbSamples: number): void;
 
-Perform(): void;
+  Perform(): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-OverlapSubShapes1(): unknown;
+  OverlapSubShapes1(): unknown;
 
-OverlapSubShapes2(): unknown;
+  OverlapSubShapes2(): unknown;
 
-GetSubShape1(theID: number): TopoDS_Shape;
+  GetSubShape1(theID: number): TopoDS_Shape;
 
-GetSubShape2(theID: number): TopoDS_Shape;
+  GetSubShape2(theID: number): TopoDS_Shape;
 
-ElementSet1(): BRepExtrema_TriangleSet;
+  ElementSet1(): BRepExtrema_TriangleSet;
 
-ElementSet2(): BRepExtrema_TriangleSet;
+  ElementSet2(): BRepExtrema_TriangleSet;
 
-ProximityPoint1(): gp_Pnt;
+  ProximityPoint1(): gp_Pnt;
 
-ProximityPoint2(): gp_Pnt;
+  ProximityPoint2(): gp_Pnt;
 
-ProxPntStatus1(): unknown;
+  ProxPntStatus1(): unknown;
 
-ProxPntStatus2(): unknown;
+  ProxPntStatus2(): unknown;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepExtrema_SolutionElem: declare class BRepExtrema_SolutionElem
 
-constructor
+  constructor
 
-Dist(): number;
+  Dist(): number;
 
-Point(): gp_Pnt;
+  Point(): gp_Pnt;
 
-SupportKind(): BRepExtrema_SupportType;
+  SupportKind(): BRepExtrema_SupportType;
 
-Vertex(): TopoDS_Vertex;
+  Vertex(): TopoDS_Vertex;
 
-Edge(): TopoDS_Edge;
+  Edge(): TopoDS_Edge;
 
-Face(): TopoDS_Face;
+  Face(): TopoDS_Face;
 
-EdgeParameter(theParam?: number): { theParam: number };
+  EdgeParameter(theParam?: number): { theParam: number };
 
-FaceParameter(theU?: number, theV?: number): { theU: number; theV: number };
+  FaceParameter(theU?: number, theV?: number): { theU: number; theV: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepExtrema_SupportType: typeof BRepExtrema_SupportType[keyof typeof BRepExtrema_SupportType]
 
 BRepExtrema_TriangleSet: declare class BRepExtrema_TriangleSet
 
-constructor
+  constructor
 
-Size(): number;
+  Size(): number;
 
-Box(theIndex: number): any;
+  Box(theIndex: number): any;
 
-Center(theIndex: number, theAxis: number): number;
+  Center(theIndex: number, theAxis: number): number;
 
-Swap(theIndex1: number, theIndex2: number): void;
+  Swap(theIndex1: number, theIndex2: number): void;
 
-Clear(): void;
+  Clear(): void;
 
-Init(theShapes: NCollection_DynamicArray_TopoDS_Shape): boolean;
+  Init(theShapes: NCollection_DynamicArray_TopoDS_Shape): boolean;
 
-GetVertices(): [number, number, number][];
+  GetVertices(): [number, number, number][];
 
-GetVtxIndices(theIndex: number, theVtxIndices: NCollection_Array1_int): void;
+  GetVtxIndices(theIndex: number, theVtxIndices: NCollection_Array1_int): void;
 
-GetFaceID(theIndex: number): number;
+  GetFaceID(theIndex: number): number;
 
-GetShapeIDOfVtx(theIndex: number): number;
+  GetShapeIDOfVtx(theIndex: number): number;
 
-GetVtxIdxInShape(theIndex: number): number;
+  GetVtxIdxInShape(theIndex: number): number;
 
-GetTrgIdxInShape(theIndex: number): number;
+  GetTrgIdxInShape(theIndex: number): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepExtrema_UnCompatibleShape: declare class BRepExtrema_UnCompatibleShape extends Standard_DomainError
 
-constructor
+  constructor
 
-ExceptionType(): string;
+  ExceptionType(): string;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepExtrema_SeqOfSolution: NCollection_Sequence_BRepExtrema_SolutionElem

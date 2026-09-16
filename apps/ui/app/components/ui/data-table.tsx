@@ -68,11 +68,22 @@ export function DataTable<Data>({
           table.getRowModel().rows.map((row) => (
             <TableRow
               key={row.id}
-              className={cn(row.getIsSelected() ? 'bg-muted/50' : undefined, onRowClick && 'cursor-pointer')}
+              className={cn(row.getIsSelected() ? 'bg-muted/50' : undefined, onRowClick && 'cursor-action')}
+              tabIndex={onRowClick ? 0 : undefined}
               onClick={
                 onRowClick
                   ? () => {
                       onRowClick(row.original);
+                    }
+                  : undefined
+              }
+              onKeyDown={
+                onRowClick
+                  ? (event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        onRowClick(row.original);
+                      }
                     }
                   : undefined
               }
@@ -177,11 +188,22 @@ export function DataTableVirtualized<Data>({
                   <TableRow
                     key={row.id}
                     data-index={virtualRow.index}
-                    className={cn(row.getIsSelected() ? 'bg-muted/50' : undefined, onRowClick && 'cursor-pointer')}
+                    className={cn(row.getIsSelected() ? 'bg-muted/50' : undefined, onRowClick && 'cursor-action')}
+                    tabIndex={onRowClick ? 0 : undefined}
                     onClick={
                       onRowClick
                         ? () => {
                             onRowClick(row.original);
+                          }
+                        : undefined
+                    }
+                    onKeyDown={
+                      onRowClick
+                        ? (event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              onRowClick(row.original);
+                            }
                           }
                         : undefined
                     }

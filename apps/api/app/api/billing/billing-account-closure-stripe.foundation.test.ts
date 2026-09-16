@@ -278,6 +278,12 @@ const lateBody = (method: string, url: URL): unknown => {
       billing_reason: 'subscription_cycle',
       currency: 'usd',
       customer: invoice.customerId,
+      customer_address: {
+        city: 'Wellington',
+        country: 'NZ',
+        line1: '1 Willis Street',
+        postal_code: '6011',
+      },
       livemode: false,
       parent: {
         type: 'subscription_details',
@@ -286,6 +292,8 @@ const lateBody = (method: string, url: URL): unknown => {
       status: 'paid',
       subtotal: 2000,
       total: 2000,
+      automatic_tax: { status: 'complete' },
+      total_taxes: [{ amount: 0 }],
     };
   }
   if (invoice !== undefined && url.pathname === `/v1/invoices/${invoice.invoiceId}/lines`) {

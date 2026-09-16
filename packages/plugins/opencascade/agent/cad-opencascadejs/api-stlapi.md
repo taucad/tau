@@ -4,35 +4,35 @@
 
 StlAPI: declare class StlAPI
 
-constructor
+  constructor
 
-static Write(theShape: TopoDS_Shape, theFile: string, theAsciiMode?: boolean): boolean;
+  static Write(theShape: TopoDS_Shape, theFile: string, theAsciiMode?: boolean): boolean;
 
-// DEPRECATED
-static Read(theShape: TopoDS_Shape, aFile: string): boolean;
+  // DEPRECATED
+  static Read(theShape: TopoDS_Shape, aFile: string): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StlAPI_Reader: declare class StlAPI_Reader
 
-constructor
+  constructor
 
-Read(theShape: TopoDS_Shape, theFileName: string): boolean;
+  Read(theShape: TopoDS_Shape, theFileName: string): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StlAPI_Writer: declare class StlAPI_Writer
 
-constructor
+  constructor
 
-ASCIIMode(): boolean;
+  ASCIIMode(): boolean;
 
-Write(theShape: TopoDS_Shape, theFileName: string, theProgress: Message_ProgressRange): boolean;
+  Write(theShape: TopoDS_Shape, theFileName: string, theProgress: Message_ProgressRange): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

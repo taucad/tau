@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ReactNode } from 'react';
-import { renderHook, act } from '@testing-library/react';
+import { renderHook, render, screen, act } from '@testing-library/react';
 import { createActor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import type { ProjectRootConfiguration } from '@taucad/filesystem';
@@ -162,6 +162,7 @@ const {
   HomeFileManagerProvider,
   useFileManager,
   useHomeStorageBackend,
+  SharedWorkerGate,
 } = await import('#hooks/use-file-manager.js');
 
 describe('waitForFileManagerServices', () => {
@@ -288,6 +289,36 @@ describe('HomeFileManagerProvider', () => {
       expect(result.current).toBe('opfs');
     });
     expect(mockGetHomeStorageBackend).toHaveBeenCalledOnce();
+  });
+});
+
+describe('SharedWorkerGate', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    workerTestState.instances.length = 0;
+    mockGetProjectFileSystemConfig.mockResolvedValue(undefined);
+    mockSetProjectFileSystemConfig.mockResolvedValue(undefined);
+    mockGetHomeStorageBackend.mockResolvedValue('opfs');
+    mockGetProjectRootConfigs.mockResolvedValue({ projects: [], roots: [] });
+  });
+
+  /* R7: a machine that gave up used to leave the gate's whole subtree blank. */
+  it('explains a failed worker connection instead of rendering nothing', async () => {
+    mockWaitForWorkerReady.mockRejectedValue(new Error('worker never became ready'));
+
+    render(
+      <HomeFileManagerProvider rootDirectory='/'>
+        <SharedWorkerGate>
+          <div>subtree</div>
+        </SharedWorkerGate>
+      </HomeFileManagerProvider>,
+    );
+
+    await vi.waitFor(() => {
+      expect(screen.getByRole('heading', { name: "Couldn't start the file service" })).toBeInTheDocument();
+    });
+    expect(screen.queryByText('subtree')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 });
 
@@ -575,7 +606,7 @@ describe('FileManagerProvider — client + workspace facades', () => {
    * `NOT_FOUND` where the row is really read-only, and a move onto a bundle
    * silently shadows the whole unit (V8).
    */
-  it('refuses a Files-pane delete of a built-in skill file as read-only, without asking the authority', async () => {
+  it('refuses a Files-pane delete of a system skill file as read-only, without asking the authority', async () => {
     const { result } = renderProvider();
 
     await expect(result.current.client.canDelete('/projects/root/.agents/skills/demo/SKILL.md')).resolves.toMatchObject(
@@ -584,7 +615,7 @@ describe('FileManagerProvider — client + workspace facades', () => {
     expect(mockProxyCanDelete).not.toHaveBeenCalled();
   });
 
-  it('refuses a Files-pane move of a project file onto a built-in skill path', async () => {
+  it('refuses a Files-pane move of a project file onto a system skill path', async () => {
     const { result } = renderProvider();
 
     await expect(

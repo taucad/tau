@@ -347,6 +347,59 @@ describe('ObjectStorageService', () => {
       }
     });
 
+    it('should upload server-side parts, copy them, and list the logical keys', async () => {
+      const payload = randomPayload(1024 * 1024);
+      const sourceKey = `jobs/test/server-multipart/${sha256HexFromBytes(payload)}`;
+      const copiedKey = `${sourceKey}.copy`;
+      const checksumSha256 = createHash('sha256').update(payload).digest('base64');
+      const uploadId = await service.createMultipartUpload({
+        namespace: 'blobs',
+        key: sourceKey,
+        contentType: 'application/octet-stream',
+        tier: 'private',
+      });
+      let completed = false;
+      try {
+        const part = await service.uploadPart({
+          namespace: 'blobs',
+          key: sourceKey,
+          uploadId,
+          partNumber: 1,
+          body: payload,
+          checksumSha256,
+          tier: 'private',
+        });
+        await service.completeMultipartUpload({
+          namespace: 'blobs',
+          key: sourceKey,
+          uploadId,
+          parts: [{ partNumber: 1, ...part }],
+          tier: 'private',
+        });
+        completed = true;
+        await service.copyBlob({
+          namespace: 'blobs',
+          sourceKey,
+          destinationKey: copiedKey,
+          tier: 'private',
+        });
+        const listed = await service.listBlobs({
+          namespace: 'blobs',
+          keyPrefix: 'jobs/test/server-multipart/',
+          tier: 'private',
+        });
+        expect(listed.map((object) => object.key)).toEqual(expect.arrayContaining([sourceKey, copiedKey]));
+        const copied = await service.headBlob({ namespace: 'blobs', key: copiedKey, tier: 'private' });
+        expect(copied?.size).toBe(payload.byteLength);
+      } finally {
+        if (!completed) {
+          await service.abortMultipartUpload({ namespace: 'blobs', key: sourceKey, uploadId, tier: 'private' });
+        }
+        await service.deleteBlob({ namespace: 'blobs', key: sourceKey, tier: 'private' });
+        await service.deleteBlob({ namespace: 'blobs', key: copiedKey, tier: 'private' });
+      }
+    });
+
     scaleIt('should resume and verify a 250 MiB private artifact transfer', async () => {
       const payload = new Uint8Array(250 * 1024 * 1024).fill(11);
       const digest = sha256HexFromBytes(payload);

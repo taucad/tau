@@ -16,9 +16,9 @@ import {
   projectAgentHostLiveEvent,
   projectAgentHostUserMessage,
   projectAgentHostUserTurn,
-  projectTurnFinalized,
+  projectTurnSettlement,
 } from '#services/agent-host-event-projection.js';
-import type { TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
+import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { Topic } from '@taucad/events';
 import { isResumableRunFailure } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
@@ -31,6 +31,8 @@ type UserProviderMessage = Exclude<Parameters<AgentHostClient['start']>[0]['mess
 type JsonValue = Extract<AgentLogEvent, { readonly type: 'message.appended' }>['message']['content'];
 type BrowserRunState = HostRunSnapshot['state'];
 type HostStartInput = Parameters<AgentHostClient['start']>[0];
+
+export type HostTurnSettlement = TurnConflictedEvent | TurnFailedEvent | TurnFinalizedEvent;
 
 export type BrowserAgentHostRun = Readonly<{
   runId: string;
@@ -80,6 +82,8 @@ const finalizedTurns = new Map<string, TurnFinalizedEvent>();
 const finalizedTurnLimit = 256;
 let finalizedTurnSnapshot: readonly TurnFinalizedEvent[] = [];
 const finalizedTurnTopic = new Topic<void>({ name: 'host-finalized-turns' });
+const hostTurnSettlementTopic = new Topic<HostTurnSettlement>({ name: 'host-turn-settlements' });
+const latestSettlementByChat = new Map<string, HostTurnSettlement>();
 
 /** Every host-attested turn settlement this tab has seen. @see finalizedTurns */
 export const getHostFinalizedTurns = (): readonly TurnFinalizedEvent[] => finalizedTurnSnapshot;
@@ -88,33 +92,64 @@ export const getHostFinalizedTurns = (): readonly TurnFinalizedEvent[] => finali
 export const subscribeHostFinalizedTurns = (listener: () => void): (() => void) =>
   finalizedTurnTopic.subscribe(listener);
 
+/** Observe every host-attested turn outcome, including durable replay. */
+export const subscribeHostTurnSettlements = (listener: (event: HostTurnSettlement) => void): (() => void) =>
+  hostTurnSettlementTopic.subscribe(listener);
+
+/** The last durable outcome already replayed for one chat. */
+export const getHostTurnSettlement = (chatId: string): HostTurnSettlement | undefined =>
+  latestSettlementByChat.get(chatId);
+
 /**
  * Record one host-attested settlement, wherever it came from.
  *
  * @param event - The settlement, already in the one schema.
  */
-export const recordHostFinalizedTurn = (event: TurnFinalizedEvent): void => {
-  if (finalizedTurns.get(event.turnId)?.revisionId === event.revisionId) {
-    return;
-  }
-  finalizedTurns.set(event.turnId, event);
-  for (const oldest of finalizedTurns.keys()) {
-    if (finalizedTurns.size <= finalizedTurnLimit) {
+export const recordHostTurnSettlement = (event: HostTurnSettlement): void => {
+  latestSettlementByChat.delete(event.chatId);
+  latestSettlementByChat.set(event.chatId, event);
+  for (const oldest of latestSettlementByChat.keys()) {
+    if (latestSettlementByChat.size <= finalizedTurnLimit) {
       break;
     }
-    finalizedTurns.delete(oldest);
+    latestSettlementByChat.delete(oldest);
   }
-  finalizedTurnSnapshot = [...finalizedTurns.values()];
-  finalizedTurnTopic.emit();
+  if (event.type === 'turn.finalized' && finalizedTurns.get(event.turnId)?.revisionId !== event.revisionId) {
+    finalizedTurns.set(event.turnId, event);
+    for (const oldest of finalizedTurns.keys()) {
+      if (finalizedTurns.size <= finalizedTurnLimit) {
+        break;
+      }
+      finalizedTurns.delete(oldest);
+    }
+    finalizedTurnSnapshot = [...finalizedTurns.values()];
+    finalizedTurnTopic.emit();
+  }
+  hostTurnSettlementTopic.emit(event);
+};
+
+/** Record the finalized member used by revision cards. */
+export const recordHostFinalizedTurn = (event: TurnFinalizedEvent): void => {
+  recordHostTurnSettlement(event);
+};
+
+/** Persist a browser revision root's settlement through the active chat-log writer. */
+export const persistBrowserTurnSettlement = async (event: HostTurnSettlement): Promise<boolean> => {
+  const active = activeClients.get(event.chatId);
+  if (active?.client.recordSettlement === undefined) {
+    return false;
+  }
+  await active.client.recordSettlement(event);
+  return true;
 };
 
 const recordDurableTurnSettlement = (event: AgentLiveEvent | AgentLogEvent): void => {
   if (!('leaderEpoch' in event)) {
     return;
   }
-  const finalized = projectTurnFinalized(event);
-  if (finalized !== undefined) {
-    recordHostFinalizedTurn(finalized);
+  const settlement = projectTurnSettlement(event);
+  if (settlement !== undefined) {
+    recordHostTurnSettlement(settlement);
   }
 };
 
@@ -238,7 +273,8 @@ export const registerAgentHostRunReset = (
 
 /** Replay one run's durable events into the message the live path built. */
 const readRunMessage = async (events: readonly AgentLogEvent[]): Promise<MyUIMessage | undefined> => {
-  const chunks = events.flatMap((event) => [...projectAgentHostEvent(event)]);
+  const streamedBlocks = new Map();
+  const chunks = events.flatMap((event) => [...projectAgentHostEvent(event, streamedBlocks)]);
   if (chunks.length === 0) {
     return undefined;
   }
@@ -304,6 +340,9 @@ const rebuildTranscript = async (
  * @returns The messages the log implies, oldest first.
  */
 export const deriveChatTranscript = async (events: readonly AgentLogEvent[]): Promise<readonly MyUIMessage[]> => {
+  for (const event of events) {
+    recordDurableTurnSettlement(event);
+  }
   const rebuild = await rebuildTranscript(events, '');
   return rebuild([]);
 };
@@ -494,6 +533,7 @@ const createHostStream = <Message extends UIMessage>(input: {
   const run = async (): Promise<void> => {
     let unsubscribe: (() => void) | undefined;
     let unsubscribeLive: (() => void) | undefined;
+    let unsubscribeSettlement: (() => void) | undefined;
     let { runId } = input;
     let closed = false;
     let cursor = 0;
@@ -502,10 +542,13 @@ const createHostStream = <Message extends UIMessage>(input: {
     let turnId: string | undefined;
     let durableUserMessage: MyUIMessage | undefined;
     let failure: HostRunSnapshot['failure'];
+    let externalToolRun = input.admission !== undefined && 'agent' in input.admission;
     let projection = Promise.resolve();
     const seen = new Set<string>();
-    const streamedBlocks = new Set<string>();
+    const streamedBlocks = new Map();
+    let attaching: Array<AgentLogEvent | AgentLiveEvent> | undefined = [];
     const terminalEvent = Promise.withResolvers<void>();
+    const turnSettlement = Promise.withResolvers<void>();
     const publishRun = (): void => {
       if (runId === undefined) {
         return;
@@ -533,8 +576,22 @@ const createHostStream = <Message extends UIMessage>(input: {
         return;
       }
       if (!('leaderEpoch' in event)) {
+        /* ACP also publishes tool updates as durable rows carrying ToolKind and
+         * Tau MCP presentation. A metadata-poor live copy arriving first would
+         * permanently type the AI SDK part as `tool-${title}`. */
+        if (externalToolRun && event.type.startsWith('tool-') && event.type !== 'tool-output-update') {
+          return;
+        }
         await enqueueChunks(projectAgentHostLiveEvent(event, streamedBlocks));
         return;
+      }
+      if (
+        event.type === 'message.appended' &&
+        event.message.role === 'user' &&
+        isRecord(event.message.metadata?.tauInternal) &&
+        event.message.metadata.tauInternal['kind'] === 'external-agent'
+      ) {
+        externalToolRun = true;
       }
       const key = `${event.leaderEpoch}:${String(event.sequence)}`;
       if (seen.has(key)) {
@@ -557,6 +614,10 @@ const createHostStream = <Message extends UIMessage>(input: {
     const enqueueAfter = async (previous: Promise<void>, event: AgentLogEvent | AgentLiveEvent): Promise<void> => {
       await previous;
       await enqueueEvent(event);
+      /* Reattach replays the whole chat log. Publish every earlier turn's
+       * settlement too, but only after its preceding lifecycle projection has
+       * crossed the stream backpressure boundary. */
+      recordDurableTurnSettlement(event);
     };
     const reportProjectionFailure = async (operation: Promise<void>): Promise<void> => {
       try {
@@ -570,12 +631,15 @@ const createHostStream = <Message extends UIMessage>(input: {
       }
     };
     const queueEvent = (event: AgentLogEvent | AgentLiveEvent): void => {
-      /* Before the run filter below: a reattach replays the whole log, and the
-       * revisions of a chat's *earlier* turns are as much this project's graph
-       * as the trailing run's. */
-      recordDurableTurnSettlement(event);
       projection = enqueueAfter(projection, event);
       void reportProjectionFailure(projection);
+    };
+    const queueSubscribedEvent = (event: AgentLogEvent | AgentLiveEvent): void => {
+      if (attaching === undefined) {
+        queueEvent(event);
+      } else {
+        attaching.push(event);
+      }
     };
     /**
      * Page the log to its end, writing nothing.
@@ -620,11 +684,17 @@ const createHostStream = <Message extends UIMessage>(input: {
       return true;
     };
     const replay = async (hostClient: AgentHostClient): Promise<boolean> => {
+      attaching ??= [];
       const batch = await hostClient.attach({ chatId: input.chatId, cursor, limit: agentHostTailBatchLimit });
       // The log's own snapshot names the run this chat ends on — the only source
       // for a reattach whose in-memory binding a reload dropped. The host answers
       // one for every non-empty log (and takes a non-terminal run over first).
       runId ??= batch.snapshot?.runId;
+      if (runId !== undefined) {
+        /* Lifecycle observers need the resolved run identity before replay can
+         * publish its first host-attested settlement. */
+        boundRunIds.set(input.chatId, runId);
+      }
       const events = await collectLog(hostClient, batch);
       // Handed over before the first chunk is written, and only now that the
       // host has actually answered for this chat's log.
@@ -633,7 +703,15 @@ const createHostStream = <Message extends UIMessage>(input: {
         queueEvent(event);
       }
       await projection;
-      return reconcileSnapshot(batch.snapshot);
+      const reconciled = reconcileSnapshot(batch.snapshot);
+      // Snapshot first; coordinate-aware blocks and durable IDs discard overlap.
+      const received = attaching;
+      attaching = undefined;
+      for (const event of received) {
+        queueEvent(event);
+      }
+      await projection;
+      return reconciled;
     };
     try {
       await priorSettlement;
@@ -654,12 +732,22 @@ const createHostStream = <Message extends UIMessage>(input: {
       }
       unsubscribe = client.subscribe((chatId, event) => {
         if (chatId === input.chatId) {
-          queueEvent(event);
+          queueSubscribedEvent(event);
         }
       });
       unsubscribeLive = client.subscribeLive?.((chatId, event) => {
         if (chatId === input.chatId) {
-          queueEvent(event);
+          queueSubscribedEvent(event);
+        }
+      });
+      /* Browser turns settle on the project's revision root, while daemon
+       * turns settle in the host log. Both publish through this one topic.
+       * Subscribe before replay/admission so a lifecycle-completed stream
+       * cannot retire its host lease in the gap before the matching settlement
+       * reaches the chat machine. */
+      unsubscribeSettlement = subscribeHostTurnSettlements((event) => {
+        if (event.chatId === input.chatId && event.runId === runId) {
+          turnSettlement.resolve();
         }
       });
       cancelRun = () => {
@@ -668,6 +756,11 @@ const createHostStream = <Message extends UIMessage>(input: {
         }
       };
       await replay(client);
+      /* A terminal snapshot found on initial attach has no later frame to
+       * retain a client for. Every run this stream is actively observing or
+       * driving can still publish its P71 settlement after lifecycle
+       * completion, so its subscription must outlive the readable stream. */
+      const awaitLateSettlement = !terminal(state) || input.admission !== undefined || driveResume;
       if (input.runId === undefined && runId !== undefined) {
         await bindRun(runId);
       }
@@ -723,6 +816,10 @@ const createHostStream = <Message extends UIMessage>(input: {
       }
       closed = true;
       await writer.close();
+      if (awaitLateSettlement && !cancelled) {
+        await turnSettlement.promise;
+        await projection;
+      }
     } catch (error) {
       if (!closed) {
         closed = true;
@@ -735,6 +832,7 @@ const createHostStream = <Message extends UIMessage>(input: {
       input.abortSignal?.removeEventListener('abort', cancel);
       unsubscribe?.();
       unsubscribeLive?.();
+      unsubscribeSettlement?.();
       if (activeClients.get(input.chatId)?.client === client) {
         activeClients.delete(input.chatId);
       }

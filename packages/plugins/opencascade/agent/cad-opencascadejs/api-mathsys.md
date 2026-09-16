@@ -4,34 +4,34 @@
 
 MathSys_LMConfig: declare class MathSys_LMConfig extends MathUtils_Config
 
-constructor
+  constructor
 
-LambdaInit: number
+  LambdaInit: number
 
-LambdaIncrease: number
+  LambdaIncrease: number
 
-LambdaDecrease: number
+  LambdaDecrease: number
 
-LambdaMax: number
+  LambdaMax: number
 
-LambdaMin: number
+  LambdaMin: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MathSys_NewtonOptions: declare class MathSys_NewtonOptions extends MathUtils_Config
 
-constructor
+  constructor
 
-MaxStepRatio: number
+  MaxStepRatio: number
 
-EnableLineSearch: boolean
+  EnableLineSearch: boolean
 
-AllowSoftBounds: boolean
+  AllowSoftBounds: boolean
 
-SoftBoundsExtension: number
+  SoftBoundsExtension: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

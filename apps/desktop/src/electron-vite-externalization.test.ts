@@ -7,10 +7,15 @@
  */
 
 import { readFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
+// oxlint-disable-next-line no-restricted-imports -- Exercise the package script's actual staging boundary.
+import { copyGeoSpecNative } from '../scripts/runtime-closure.mjs';
 
 const appRoot = join(import.meta.dirname, '..');
 
@@ -96,6 +101,32 @@ const resolveMainExternals = async (): Promise<MainExternals> => {
 };
 
 describe('electron-vite main externalization', () => {
+  it('resolves the GeoSpec native STEP backend from the desktop runtime boundary', () => {
+    const require = createRequire(join(appRoot, 'package.json'));
+    expect(require.resolve('@taucad/geospec-engine/native/opencascade/single')).toMatch(/init\.js$/u);
+  });
+
+  it('instantiates GeoSpec STEP evidence from the staged native payload without workspace resolution', async () => {
+    const require = createRequire(join(appRoot, 'package.json'));
+    const source = dirname(require.resolve('@taucad/geospec-engine/package.json'));
+    const stage = await mkdtemp(join(tmpdir(), 'tau-geospec-stage-'));
+    try {
+      await copyGeoSpecNative(source, join(stage, 'node_modules'));
+      const output = execFileSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          "const { default: init } = await import('@taucad/geospec-engine/native/opencascade/single'); const module = await init(); console.log(typeof module.GeoSpecXdeReader);",
+        ],
+        { cwd: stage, encoding: 'utf8', timeout: 60_000 },
+      );
+      expect(output.trim()).toBe('function');
+    } finally {
+      await rm(stage, { recursive: true, force: true });
+    }
+  }, 90_000);
+
   it('bundles workspace sources and keeps host/runtime imports external', async () => {
     const { isExternal, include } = await resolveMainExternals();
     for (const id of [

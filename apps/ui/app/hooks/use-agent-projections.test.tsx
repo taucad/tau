@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createActor } from 'xstate';
 import type { Chat, MyUIMessage } from '@taucad/chat';
-import type { ChatStatus } from 'ai';
+import { chatSessionMachine } from '#machines/chat-session.machine.js';
+import type { ChatSessionActorRef, ChatSessionMachineEvent } from '#machines/chat-session.machine.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { buildAgentProjection, sortAgentProjections, useAgentProjections } from '#hooks/use-agent-projections.js';
 import type { AgentProjection } from '#hooks/use-agent-projections.js';
@@ -46,15 +48,6 @@ const message = (id: string, createdAt: number, parts: MyUIMessage['parts'] = []
   metadata: { createdAt, status: 'success' },
 });
 
-const approvalPart = (): MyUIMessage['parts'][number] =>
-  ({
-    type: 'tool-delete_file',
-    toolCallId: 'tool-1',
-    state: 'approval-requested',
-    input: { targetFile: 'main.ts' },
-    approval: { id: 'approval-1' },
-  }) as unknown as MyUIMessage['parts'][number];
-
 const chat = (id: string, updatedAt: number, messages: MyUIMessage[] = []): Chat => ({
   id,
   resourceId: 'project-1',
@@ -64,40 +57,34 @@ const chat = (id: string, updatedAt: number, messages: MyUIMessage[] = []): Chat
   updatedAt,
 });
 
+/** The chat's own machine, driven by the events the run reports (R12, D32). */
+const driven = (chatId: string, events: readonly ChatSessionMachineEvent[]): ChatSessionActorRef => {
+  const actor = createActor(chatSessionMachine, { input: { chatId, projectId: 'project-1' } });
+  actor.start();
+  for (const event of events) {
+    actor.send(event);
+  }
+  return actor;
+};
+
 const buildSession = ({
   chatEntity,
-  lifecycle,
-  status,
+  events = [],
   activeExecution,
-  persistedError,
 }: {
   readonly chatEntity: Chat;
-  readonly lifecycle: 'idle' | 'invoking' | 'retrying' | 'stopping';
-  readonly status: ChatStatus;
+  readonly events?: readonly ChatSessionMachineEvent[];
   readonly activeExecution?: Chat['activeExecution'];
-  readonly persistedError?: Chat['error'];
-}): ChatSession => {
-  const actor = {
-    getSnapshot: () => ({
-      context: { activeExecution, persistedError, retryAttempt: lifecycle === 'retrying' ? 1 : 0 },
-      matches: (value: unknown) =>
-        typeof value === 'object' &&
-        value !== null &&
-        'requestLifecycle' in value &&
-        value.requestLifecycle === lifecycle,
-    }),
-    subscribe: () => ({ unsubscribe: vi.fn() }),
-  };
-  return {
+}): ChatSession =>
+  ({
     chatId: chatEntity.id,
-    chat: {
-      messages: chatEntity.messages,
-      status,
-      error: undefined,
+    chat: { messages: chatEntity.messages, error: undefined },
+    persistenceActorRef: {
+      getSnapshot: () => ({ context: { activeExecution } }),
+      subscribe: () => ({ unsubscribe: vi.fn() }),
     },
-    persistenceActorRef: actor,
-  } as unknown as ChatSession;
-};
+    stateActorRef: driven(chatEntity.id, events),
+  }) as unknown as ChatSession;
 
 const project = {
   editorRef: { getSnapshot: () => ({ context: { focusedChatId: 'chat-focused' } }) },
@@ -117,90 +104,121 @@ describe('buildAgentProjection', () => {
     source.hasUnreadTurn = true;
     const session = buildSession({
       chatEntity: source,
-      lifecycle: 'invoking',
-      status: 'streaming',
+      events: [{ type: 'runLifecycle', phase: 'running' }],
       activeExecution: { kind: 'tau', model: claudeModel.id },
     });
 
-    const projection = buildAgentProjection({
-      chat: source,
-      session,
-      status: 'streaming',
-      lifecycle: 'invoking',
-      focusedChatId: source.id,
-      defaultModel,
-      resolveModel,
-      defaultWorkspace: 'tau',
-    });
-
-    expect(projection).toMatchObject({
+    expect(
+      buildAgentProjection({
+        chat: source,
+        session,
+        focusedChatId: source.id,
+        defaultModel,
+        resolveModel,
+        defaultWorkspace: 'tau',
+      }),
+    ).toMatchObject({
       state: 'running',
+      detail: 'Working…',
       focused: true,
       lastActivityAt: 200,
       model: { name: 'Claude Sonnet', provider: 'Anthropic' },
       workspace: 'tau',
       /* No chat has a branch of its own — turns attach to the chat's checkout
-       * and never create one (A29, S11) — so a row with no metadata reads the
-       * default. */
+       * and never create one (A29, S11) — so a row with no branched turn reads
+       * the default. */
       branch: 'main',
       unread: false,
     });
   });
 
   it('makes approvals waiting and consumes durable unread/workspace/branch state', () => {
-    const source = chat('chat-waiting', 100, [message('turn-2', 300, [approvalPart()])]);
-    source.hasUnreadTurn = true;
-    const session = buildSession({ chatEntity: source, lifecycle: 'invoking', status: 'streaming' });
-    const projection = buildAgentProjection({
-      chat: source,
-      session,
-      status: 'streaming',
-      lifecycle: 'invoking',
-      focusedChatId: 'chat-focused',
-      defaultModel,
-      resolveModel,
-      defaultWorkspace: 'tau',
-      metadata: { workspace: 'solver-node-3', branch: 'fea/load-case-b' },
+    const source = chat('chat-waiting', 100, [message('turn-2', 300)]);
+    const session = buildSession({
+      chatEntity: source,
+      events: [
+        { type: 'runLifecycle', phase: 'running' },
+        { type: 'interruptRecorded', state: 'requested', count: 1 },
+        { type: 'runLifecycle', phase: 'completed' },
+      ],
     });
 
-    expect(projection).toMatchObject({
-      state: 'waiting',
-      pendingApprovalCount: 1,
-      detail: '1 approval required',
+    expect(
+      buildAgentProjection({
+        chat: source,
+        session,
+        focusedChatId: 'chat-focused',
+        defaultModel,
+        resolveModel,
+        defaultWorkspace: 'tau',
+        metadata: { workspace: 'solver-node-3', branch: 'fea/load-case-b' },
+      }),
+    ).toMatchObject({
       workspace: 'solver-node-3',
       branch: 'fea/load-case-b',
+      /* The completion is what the person has not seen; the machine's `read`
+       * region says so, and no second record does (I26). */
       unread: true,
     });
+
+    const waiting = buildSession({
+      chatEntity: source,
+      events: [
+        { type: 'runLifecycle', phase: 'running' },
+        { type: 'interruptRecorded', state: 'requested', count: 1 },
+      ],
+    });
+    expect(
+      buildAgentProjection({
+        chat: source,
+        session: waiting,
+        focusedChatId: 'chat-focused',
+        defaultModel,
+        resolveModel,
+        defaultWorkspace: 'tau',
+      }),
+    ).toMatchObject({ state: 'waiting', pendingApprovalCount: 1, detail: 'Needs your approval · 1' });
   });
 
   it('preserves error and idle as distinct terminal states', () => {
     const failed = chat('chat-error', 300);
-    failed.error = {
-      category: 'generic',
-      title: 'Failed',
-      message: 'Solver connection failed',
-    };
     const idle = chat('chat-idle', 200);
 
-    const failedProjection = buildAgentProjection({
-      chat: failed,
-      status: 'error',
-      lifecycle: 'idle',
-      defaultModel,
-      resolveModel,
-      defaultWorkspace: 'tau',
-    });
+    expect(
+      buildAgentProjection({
+        chat: failed,
+        session: buildSession({
+          chatEntity: failed,
+          events: [{ type: 'runLifecycle', phase: 'failed', reason: 'Solver connection failed' }],
+        }),
+        defaultModel,
+        resolveModel,
+        defaultWorkspace: 'tau',
+      }),
+    ).toMatchObject({ state: 'error', detail: 'Failed · Solver connection failed' });
+
     const idleProjection = buildAgentProjection({
       chat: idle,
-      status: 'ready',
-      lifecycle: 'idle',
+      session: buildSession({ chatEntity: idle }),
       defaultModel,
       resolveModel,
       defaultWorkspace: 'tau',
     });
-
-    expect(failedProjection).toMatchObject({ state: 'error', detail: 'Solver connection failed' });
     expect(idleProjection).toMatchObject({ state: 'idle' });
+    expect(idleProjection).not.toHaveProperty('detail');
+  });
+
+  it('reads idle for a chat whose project is not live, with no second derivation', () => {
+    const parked = chat('chat-parked', 100);
+    parked.error = { category: 'generic', title: 'Failed', message: 'Solver connection failed' };
+    const parkedProjection = buildAgentProjection({
+      chat: parked,
+      defaultModel,
+      resolveModel,
+      defaultWorkspace: 'tau',
+    });
+    expect(parkedProjection).toMatchObject({ state: 'idle', pendingApprovalCount: 0 });
+    expect(parkedProjection).not.toHaveProperty('detail');
   });
 
   it('orders attention and active work ahead of errors and idle agents', () => {
@@ -230,49 +248,20 @@ describe('buildAgentProjection', () => {
 });
 
 describe('useAgentProjections', () => {
-  it('subscribes to background sessions and projects concurrent runs without acquiring them', async () => {
+  it('subscribes to background sessions and projects concurrent runs without acquiring them', () => {
     const chats = [chat('chat-focused', 100, [message('turn-focused', 120)]), chat('chat-background', 90)];
-    let focusedLifecycle: 'idle' | 'invoking' = 'invoking';
-    let backgroundLifecycle: 'idle' | 'invoking' = 'invoking';
     const listeners = new Set<() => void>();
-    const sessions = new Map(
-      chats.map((chatEntity) => {
-        const actor = {
-          getSnapshot: () => {
-            const lifecycle = chatEntity.id === 'chat-focused' ? focusedLifecycle : backgroundLifecycle;
-            return {
-              context: { retryAttempt: 0 },
-              matches: (value: unknown) =>
-                typeof value === 'object' &&
-                value !== null &&
-                'requestLifecycle' in value &&
-                value.requestLifecycle === lifecycle,
-            };
-          },
-          subscribe: (listener: () => void) => {
-            listeners.add(listener);
-            return { unsubscribe: () => listeners.delete(listener) };
-          },
-        };
-        return [
-          chatEntity.id,
-          {
-            chatId: chatEntity.id,
-            chat: { messages: chatEntity.messages, error: undefined },
-            persistenceActorRef: actor,
-          } as unknown as ChatSession,
-        ] as const;
-      }),
-    );
+    const sessions = new Map(chats.map((chatEntity) => [chatEntity.id, buildSession({ chatEntity })] as const));
+    for (const session of sessions.values()) {
+      session.stateActorRef?.send({ type: 'runLifecycle', phase: 'running' });
+    }
     const store = {
       get: (chatId: string) => sessions.get(chatId),
-      getStatus: (chatId: string) =>
-        (chatId === 'chat-focused' ? focusedLifecycle : backgroundLifecycle) === 'idle' ? 'ready' : 'streaming',
       subscribeChat: (_chatId: string, listener: () => void) => {
         listeners.add(listener);
         return () => listeners.delete(listener);
       },
-      subscribeMembership: (_listener: () => void) => () => undefined,
+      subscribeMembership: () => () => undefined,
       acquire: vi.fn(),
     } as unknown as ChatSessionStore;
     vi.mocked(useChats).mockReturnValue({
@@ -289,16 +278,12 @@ describe('useAgentProjections', () => {
       ['chat-background', 'running'],
     ]);
     expect(store.acquire).not.toHaveBeenCalled();
+
     act(() => {
-      backgroundLifecycle = 'idle';
-      for (const listener of listeners) {
-        listener();
-      }
+      sessions.get('chat-background')?.stateActorRef?.send({ type: 'runLifecycle', phase: 'cancelled' });
     });
 
     expect(result.current.agents.find((agent) => agent.chatId === 'chat-background')?.state).toBe('idle');
     expect(result.current.agents.find((agent) => agent.chatId === 'chat-focused')?.state).toBe('running');
-
-    focusedLifecycle = 'idle';
   });
 });

@@ -7,7 +7,6 @@ import { afterEach, expect, test } from 'vitest';
 
 import { captureNextDesktopDownload, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
-import { declineCookieBanner } from '#support/scenario.js';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 const glbFixture = join(workspaceRoot, 'packages/plugins/gltf/src/fixtures/cube.glb');
@@ -56,7 +55,6 @@ const directorySnapshot = async (root: string): Promise<readonly string[]> => {
 
 const openRoute = async (page: Page, path: string): Promise<void> => {
   await page.goto(new URL(path, 'app://tau').href, { waitUntil: 'domcontentloaded' });
-  await declineCookieBanner(page);
 };
 
 const visibleCount = async (locator: ReturnType<Page['getByText']>): Promise<number> => {

@@ -38,8 +38,10 @@ const projectArguments = {
  * Refuse the run when the binaries a disk host records with are missing.
  *
  * `git` is the engine and `git-lfs` is how large objects reach a remote and how
- * a stock clone resolves them; the desktop app ships both, and the CLI takes
- * what is installed and says which one is not (OQ-B8).
+ * a stock clone resolves them. The CLI takes what is installed and says which
+ * one is not (OQ-B8). The desktop app is meant to carry its own `git` with
+ * `git-lfs` inside its exec path (OQ3); until that payload is packaged and
+ * verified, every host here answers from `PATH`.
  *
  * @throws CliError Naming exactly what is missing.
  */
@@ -103,10 +105,47 @@ const rowLine = (row: RevisionRow, branch: string | undefined): string =>
     /* Wide enough for `Rev 9999`; a merged-in revision has no number and keeps
      * the column, so the branch names line up either way (a1 review R14). */
     (row.revisionNumber === undefined ? '' : `Rev ${String(row.revisionNumber)}`).padEnd(8),
-    ...[branch ?? '', row.actor, row.conflicted ? `${row.summary} (needs resolution)` : row.summary].filter(
-      (field) => field !== '',
-    ),
+    ...[
+      branch ?? '',
+      row.actor,
+      `${row.tags.length === 0 ? '' : `[${row.tags.join(', ')}] `}${row.conflicted ? `${row.summary} (needs resolution)` : row.summary}${row.trigger === 'idle' || row.trigger === 'hidden' || row.trigger === 'close' ? ' (autosave)' : ''}`,
+    ].filter((field) => field !== ''),
   ].join('  ');
+
+const tagCommand = defineCommand({
+  meta: { name: 'tag', description: 'Name a revision, or remove a revision name' },
+  args: {
+    ...projectArguments,
+    name: { type: 'positional', description: 'Version name', required: true },
+    revision: { type: 'positional', description: 'Revision id (defaults to the current revision)', required: false },
+    note: { type: 'string', description: 'Note stored with the name', required: false },
+    delete: { type: 'boolean', description: 'Remove this version name', required: false },
+  },
+  async run({ args }) {
+    const { revisions } = await open(args.project);
+    try {
+      if (args.delete === true) {
+        await revisions.deleteTag(args.name);
+        if (args.json) await emit({ kind: 'revision-tag', ok: true, deleted: args.name });
+        else await writeStdout(`Removed version name ${args.name}.\n`);
+        return;
+      }
+      const revisionId = args.revision || (await revisions.describe()).revisionId;
+      if (revisionId === undefined) {
+        throw cliError('NO_REVISION', 'There is no revision to name yet.', exitCodes.refused);
+      }
+      const tag = await revisions.tag({
+        name: args.name,
+        revisionId,
+        ...(args.note === undefined ? {} : { note: args.note }),
+      });
+      if (args.json) await emit({ kind: 'revision-tag', ok: true, tag });
+      else await writeStdout(`${tag.name} names ${revisionId}.\n`);
+    } finally {
+      await revisions.close();
+    }
+  },
+});
 
 const logCommand = defineCommand({
   meta: { name: 'log', description: 'List a branch’s revisions, newest first' },
@@ -278,6 +317,7 @@ export const revisionsCommand = defineCommand({
     log: logCommand,
     describe: describeCommand,
     diff: diffCommand,
+    tag: tagCommand,
     switch: switchCommand,
     discard: discardCommand,
   },

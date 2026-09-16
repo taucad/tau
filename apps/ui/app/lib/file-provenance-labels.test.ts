@@ -18,15 +18,14 @@ describe('fileProvenanceLabel', () => {
     });
   });
 
-  it('locks and badges a built-in skill bundle', () => {
+  it('badges a system skill bundle without a redundant lock', () => {
     const label = fileProvenanceLabel(
       provenance({ source: 'system-skills', versioned: false, agentAccess: 'read-only' }),
       '.agents/skills/cad-openscad',
     );
     expect(label).toEqual({
-      glyph: 'lock',
-      badge: 'Built-in',
-      description: 'Built-in skill · read-only',
+      badge: 'system',
+      description: 'system skill · read-only',
       dimmed: false,
       readOnly: true,
     });
@@ -44,7 +43,7 @@ describe('fileProvenanceLabel', () => {
   it('names the bundle a project override replaces', () => {
     expect(
       fileProvenanceLabel(provenance({ overrides: 'skill:my-fixtures@2.0.0#deadbeef' }), '.agents/skills/my-fixtures'),
-    ).toEqual({ description: 'Overrides built-in skill my-fixtures', dimmed: false, readOnly: false });
+    ).toEqual({ description: 'Overrides system skill my-fixtures', dimmed: false, readOnly: false });
   });
 
   it('separates records from cache without either becoming read-only to the user', () => {

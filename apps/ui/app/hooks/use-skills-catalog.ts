@@ -35,7 +35,6 @@ export function skillMetadataToSlashCommand(skill: SkillMetadata): {
 export function useSkillsCatalog(): SkillMetadata[] {
   const { readFile, treeService } = useFileManager();
   const [skills, setSkills] = useState<SkillMetadata[]>([]);
-  const [treeRevision, setTreeRevision] = useState(0);
 
   const resolver = useMemo(() => {
     if (!treeService) {
@@ -49,19 +48,11 @@ export function useSkillsCatalog(): SkillMetadata[] {
   }, [readFile, treeService]);
 
   useEffect(() => {
-    if (!treeService) {
-      return;
-    }
-
-    return treeService.subscribeTree(() => {
-      setTreeRevision((revision) => revision + 1);
-    });
-  }, [treeService]);
-
-  useEffect(() => {
     let cancelled = false;
+    let loadSequence = 0;
 
     async function loadSkills(): Promise<void> {
+      const sequence = ++loadSequence;
       if (!resolver) {
         setSkills([]);
         return;
@@ -69,16 +60,20 @@ export function useSkillsCatalog(): SkillMetadata[] {
 
       const results = await resolver.listSkills();
 
-      if (!cancelled) {
+      if (!cancelled && sequence === loadSequence) {
         setSkills(results);
       }
     }
 
     void loadSkills();
+    const unsubscribe = treeService?.subscribeTree(() => {
+      void loadSkills();
+    });
     return () => {
       cancelled = true;
+      unsubscribe?.();
     };
-  }, [resolver, treeRevision]);
+  }, [resolver, treeService]);
 
   return useMemo(() => skills, [skills]);
 }
@@ -86,7 +81,6 @@ export function useSkillsCatalog(): SkillMetadata[] {
 export function usePromptSkillsCatalog(): SkillMetadata[] {
   const { readFile, treeService } = useFileManager();
   const [skills, setSkills] = useState<SkillMetadata[]>([]);
-  const [treeRevision, setTreeRevision] = useState(0);
   const resolver = useMemo(() => {
     if (!treeService) {
       return undefined;
@@ -99,35 +93,31 @@ export function usePromptSkillsCatalog(): SkillMetadata[] {
   }, [readFile, treeService]);
 
   useEffect(() => {
-    if (!treeService) {
-      return;
-    }
-
-    return treeService.subscribeTree(() => {
-      setTreeRevision((revision) => revision + 1);
-    });
-  }, [treeService]);
-
-  useEffect(() => {
     let cancelled = false;
+    let loadSequence = 0;
 
     async function loadSkills(): Promise<void> {
+      const sequence = ++loadSequence;
       if (!resolver) {
         setSkills([]);
         return;
       }
 
       const listing = await resolver.getPromptSkillListing();
-      if (!cancelled) {
+      if (!cancelled && sequence === loadSequence) {
         setSkills(listing);
       }
     }
 
     void loadSkills();
+    const unsubscribe = treeService?.subscribeTree(() => {
+      void loadSkills();
+    });
     return () => {
       cancelled = true;
+      unsubscribe?.();
     };
-  }, [resolver, treeRevision]);
+  }, [resolver, treeService]);
 
   return useMemo(() => skills, [skills]);
 }

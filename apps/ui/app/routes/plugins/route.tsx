@@ -24,9 +24,9 @@ import type { Handle } from '#types/matches.types.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useSkillsCatalog } from '#hooks/use-skills-catalog.js';
-import { builtInSystemSkills } from '#lib/system-skills-catalog.js';
+import { systemSkillsCatalog } from '#lib/system-skills-catalog.js';
 import { tauStoreSkills } from '#lib/tau-plugin-store-catalog.js';
-import type { BuiltInSystemSkill } from '#lib/system-skills-catalog.js';
+import type { SystemSkill } from '#lib/system-skills-catalog.js';
 import type { TauStoreSkill } from '#lib/tau-plugin-store-catalog.js';
 
 export const handle: Handle = {
@@ -132,7 +132,7 @@ function skillToStoreItem(skill: TauStoreSkill, index: number): StoreItem {
   };
 }
 
-function systemSkillToStoreItem(skill: BuiltInSystemSkill): StoreItem {
+function systemSkillToStoreItem(skill: SystemSkill): StoreItem {
   return {
     slug: skill.slug,
     name: skill.name,
@@ -221,7 +221,7 @@ export default function PluginsRoute(): React.JSX.Element {
   const skillsCatalog = useSkillsCatalog();
   const [manifest, setManifest] = useState<InstalledPluginManifest>({});
 
-  const systemSkills = useMemo(() => builtInSystemSkills.map((skill) => systemSkillToStoreItem(skill)), []);
+  const systemSkills = useMemo(() => systemSkillsCatalog.map((skill) => systemSkillToStoreItem(skill)), []);
   const storeSkills = useMemo(() => tauStoreSkills.map((skill, index) => skillToStoreItem(skill, index)), []);
 
   useEffect(() => {

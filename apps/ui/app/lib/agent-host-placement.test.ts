@@ -445,11 +445,16 @@ describe('launcher 2', () => {
     const connect = vi.fn(async () => channel.port1);
 
     const client = await openAgentHostChannel('desktop', {
+      projectId: 'proj_widget',
       workspaceRoot: '/Users/x/Library/Application Support/Tau/home/lamp',
       bridge: () => ({ agentHost: { connect } }),
     });
 
-    expect(connect).toHaveBeenCalledWith('/Users/x/Library/Application Support/Tau/home/lamp', 'durable');
+    expect(connect).toHaveBeenCalledWith(
+      '/Users/x/Library/Application Support/Tau/home/lamp',
+      'proj_widget',
+      'durable',
+    );
     expect(typeof client.execute).toBe('function');
     client.close();
     channel.port2.close();

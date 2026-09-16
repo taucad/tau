@@ -11,6 +11,7 @@ import {
   ImageDown,
   Info,
   RotateCcw,
+  Save,
   Share2,
   SlidersHorizontal,
   Terminal,
@@ -28,6 +29,7 @@ import { useFileTreeMap } from '#hooks/use-file-tree.js';
 import { useThumbnailGenerator } from '#hooks/use-thumbnail-generator.js';
 import { useRevisions } from '#hooks/use-revisions.js';
 import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
+import { useSaveRevisionRequest } from '#routes/w.$workspace.$project/revision-save-shortcut.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { useFeature } from '#flags/use-feature.js';
@@ -36,7 +38,12 @@ import { captureCadImages } from '#services/headless-capture.js';
 import { useGraphicsCameraRigQuery } from '#hooks/use-graphics.js';
 import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
 
-export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch }): undefined {
+export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch }): React.JSX.Element | undefined {
+  const project = useProject({ enableNoContext: true });
+  return project === undefined ? undefined : <ProjectCommandPaletteItemsReady match={match} />;
+}
+
+function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch }): undefined {
   const { projectRef, geometryUnits, mainEntryPath } = useProject();
   const { openPanel } = useProjectWorkspace();
   const isTauDebugEnabled = useFeature('tauDebug');
@@ -66,16 +73,12 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
    * unfinished). Where Tau Cloud is comes from `useRevisionCommands`, the one
    * page-side place that knows (S34). */
   const revisionStatus = useRevisionStatus();
-  const { connectRemote, disconnectRemote } = useRevisionCommands();
+  const { syncNow } = useRevisionCommands();
+  const saveRevision = useSaveRevisionRequest();
   const isRemoteConnected = revisionStatus?.remote.kind !== undefined && revisionStatus.remote.kind !== 'none';
-  const handleConnectTauCloud = useCallback(() => {
-    if (project === undefined) {
-      return;
-    }
-    /* Connecting is asynchronous now that a Git remote takes consent first
-     * (W12); the palette entry fires it and the Sync row reports the outcome. */
-    void connectRemote('tau');
-  }, [connectRemote, project]);
+  const handleOpenSync = useCallback(() => {
+    openPanel('revisions');
+  }, [openPanel]);
 
   const handleOpenExporter = useCallback(() => {
     openPanel('export');
@@ -182,11 +185,21 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
       ...(isRemoteConnected
         ? [
             {
+              id: 'change-backup',
+              label: 'Change backup',
+              group: 'Sync',
+              icon: <Cloud />,
+              action: handleOpenSync,
+            },
+            /* R29 names two verbs, not one wearing the other's id: *Change* and
+               *Disconnect* are different intents and both open the pane, which
+               is where the confirmation lives (C47). */
+            {
               id: 'disconnect-remote',
-              label: 'Disconnect remote',
+              label: 'Disconnect backup',
               group: 'Sync',
               icon: <CloudOff />,
-              action: disconnectRemote,
+              action: handleOpenSync,
             },
           ]
         : [
@@ -195,9 +208,25 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
               label: 'Connect Tau Cloud',
               group: 'Sync',
               icon: <Cloud />,
-              action: handleConnectTauCloud,
+              action: handleOpenSync,
             },
           ]),
+      {
+        id: 'sync-now',
+        label: 'Sync now',
+        group: 'Sync',
+        icon: <Cloud />,
+        action: syncNow,
+        visible: isRemoteConnected,
+        disabled: revisionStatus?.remote.phase !== 'connected' || revisionStatus.remote.fetchOnly === true,
+      },
+      {
+        id: 'save-revision',
+        label: 'Save revision',
+        group: 'Revisions',
+        icon: <Save />,
+        action: saveRevision,
+      },
       {
         id: 'share-project',
         label: 'Share project',
@@ -334,8 +363,11 @@ export function ProjectCommandPaletteItems({ match }: { readonly match: UIMatch 
       handleDownloadZip,
       fileCount,
       isRemoteConnected,
-      disconnectRemote,
-      handleConnectTauCloud,
+      handleOpenSync,
+      revisionStatus?.remote.fetchOnly,
+      revisionStatus?.remote.phase,
+      saveRevision,
+      syncNow,
     ],
   );
 

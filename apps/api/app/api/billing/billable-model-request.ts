@@ -6,15 +6,31 @@ const maximumBytes = 4_000_000;
 const maximumDepth = 64;
 const boundedString = z.string().max(maximumBytes);
 const cacheControlSchema = z.object({ type: z.literal('ephemeral'), ttl: z.literal('5m').optional() }).strict();
-const base64Schema = boundedString.refine(
-  (value) => value.length % 4 === 0 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value),
-  'Invalid base64 image data',
-);
+const isBase64 = (value: string): boolean =>
+  value.length % 4 === 0 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value);
+const base64Schema = boundedString.refine(isBase64, 'Invalid base64 image data');
 const imageMediaTypeSchema = z.enum(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 const dataImageUrlSchema = boundedString.refine((value) => {
   const match = /^data:(image\/(?:jpeg|png|gif|webp));base64,(.*)$/u.exec(value);
   return match !== null && base64Schema.safeParse(match[2]).success;
 }, 'Invalid image data URL');
+/* D24: a PDF attachment is capped at 20 MiB of raw bytes, and base64 spends four
+ * characters on every three bytes with the final group padded out. */
+const maximumDocumentBytes = 20 * 1024 * 1024;
+const maximumDocumentBase64Length = 4 * Math.ceil(maximumDocumentBytes / 3);
+const pdfDataUrlPrefix = 'data:application/pdf;base64,';
+const documentBase64Schema = z
+  .string()
+  .max(maximumDocumentBase64Length)
+  .refine(isBase64, 'Invalid base64 document data');
+const pdfDataUrlSchema = z
+  .string()
+  .max(pdfDataUrlPrefix.length + maximumDocumentBase64Length)
+  .refine((value) => {
+    const match = /^data:application\/pdf;base64,(.*)$/u.exec(value);
+    return match !== null && documentBase64Schema.safeParse(match[1]).success;
+  }, 'Invalid PDF data URL');
+const documentNameSchema = z.string().min(1).max(256);
 
 const textSchema = z
   .object({
@@ -51,6 +67,33 @@ const anthropicImageSchema = z
     cache_control: cacheControlSchema.optional(),
   })
   .strict();
+/* D24: the three native PDF document blocks, one per provider wire. */
+const anthropicDocumentSchema = z
+  .object({
+    type: z.literal('document'),
+    title: documentNameSchema.optional(),
+    source: z
+      .object({
+        type: z.literal('base64'),
+        media_type: z.literal('application/pdf'),
+        data: documentBase64Schema,
+      })
+      .strict(),
+  })
+  .strict();
+const inputFileSchema = z
+  .object({
+    type: z.literal('input_file'),
+    filename: documentNameSchema,
+    file_data: pdfDataUrlSchema,
+  })
+  .strict();
+const completionsFileSchema = z
+  .object({
+    type: z.literal('file'),
+    file: z.object({ filename: documentNameSchema, file_data: pdfDataUrlSchema }).strict(),
+  })
+  .strict();
 const thinkingSchema = z
   .object({
     type: z.literal('thinking'),
@@ -80,6 +123,33 @@ const toolResultSchema = z
 const googleToolCallExtraContentSchema = z
   .object({ google: z.object({ thought_signature: boundedString }).strict() })
   .strict();
+const anthropicThinkingConfigSchema = z.union([
+  z.object({ type: z.literal('adaptive'), display: z.enum(['summarized', 'omitted']).optional() }).strict(),
+  z
+    .object({
+      type: z.literal('enabled'),
+      budget_tokens: z.number().int().positive(),
+      display: z.enum(['summarized', 'omitted']).optional(),
+    })
+    .strict(),
+]);
+const anthropicOutputConfigSchema = z.object({ effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']) }).strict();
+const googleReasoningConfigSchema = z
+  .object({
+    google: z
+      .object({
+        thinking_config: z
+          .object({
+            include_thoughts: z.literal(true),
+            thinking_level: z.enum(['LOW', 'MEDIUM', 'HIGH']),
+          })
+          .strict(),
+        thought_tag_marker: z.literal('think'),
+        stream_function_call_arguments: z.literal(true),
+      })
+      .strict(),
+  })
+  .strict();
 const contentSchema = z.union([
   boundedString,
   z
@@ -90,6 +160,9 @@ const contentSchema = z.union([
         inputImageSchema,
         imageUrlSchema,
         anthropicImageSchema,
+        anthropicDocumentSchema,
+        inputFileSchema,
+        completionsFileSchema,
         thinkingSchema,
         redactedThinkingSchema,
         toolUseSchema,
@@ -214,10 +287,9 @@ export const billableModelRequestSchema = z
       })
       .strict()
       .optional(),
-    thinking: z
-      .object({ type: z.literal('adaptive') })
-      .strict()
-      .optional(),
+    thinking: anthropicThinkingConfigSchema.optional(),
+    output_config: anthropicOutputConfigSchema.optional(),
+    extra_body: googleReasoningConfigSchema.optional(),
     tool_choice: z
       .union([
         z.enum(['auto', 'none', 'required']),
@@ -301,7 +373,10 @@ const responsesConversationSchema = z.union([
   z
     .object({
       role: z.literal('user'),
-      content: z.union([boundedString, z.array(z.union([inputTextSchema, inputImageSchema])).max(512)]),
+      content: z.union([
+        boundedString,
+        z.array(z.union([inputTextSchema, inputImageSchema, inputFileSchema])).max(512),
+      ]),
     })
     .strict(),
 ]);
@@ -361,7 +436,7 @@ const responsesWireSchema = z
   .strict();
 const anthropicUserContentSchema = z.union([
   boundedString,
-  z.array(z.union([textSchema, anthropicImageSchema, toolResultSchema])).max(512),
+  z.array(z.union([textSchema, anthropicImageSchema, anthropicDocumentSchema, toolResultSchema])).max(512),
 ]);
 const anthropicAssistantContentSchema = z.union([
   boundedString,
@@ -383,10 +458,8 @@ const anthropicWireSchema = z
     max_tokens: z.number(),
     stream: z.literal(true),
     system: z.union([boundedString, z.array(textSchema).max(512)]).optional(),
-    thinking: z
-      .object({ type: z.literal('adaptive') })
-      .strict()
-      .optional(),
+    thinking: anthropicThinkingConfigSchema.optional(),
+    output_config: anthropicOutputConfigSchema.optional(),
     tools: z
       .array(
         z
@@ -412,7 +485,7 @@ const anthropicWireSchema = z
 const completionsContentSchema = z.union([
   boundedString,
   z.null(),
-  z.array(z.union([completionsTextSchema, imageUrlSchema])).max(512),
+  z.array(z.union([completionsTextSchema, imageUrlSchema, completionsFileSchema])).max(512),
 ]);
 const completionsMessageSchema = z
   .object({
@@ -448,6 +521,7 @@ const completionsWireSchema = z
     store: z.literal(false).optional(),
     max_completion_tokens: z.number().optional(),
     max_tokens: z.number().optional(),
+    extra_body: googleReasoningConfigSchema.optional(),
     tools: z
       .array(
         z
@@ -521,12 +595,16 @@ const perImageTokens = 3000n;
 const imageElementTypes = new Set(['image', 'image_url', 'input_image']);
 /* Every `type` literal `billableModelRequestSchema` admits outside an image element.
  * A request element whose type is absent here has no documented token bound and
- * fails the whole request closed onto the provider's context limit. */
+ * fails the whole request closed onto the provider's context limit. The document
+ * elements `document`, `input_file` and `file` are deliberately absent: a PDF's
+ * tokens come from its rendered pages, not from the length of its base64, so its
+ * bytes are not a bound on them and the whole context is the only honest ceiling. */
 const boundedElementTypes = new Set([
   'adaptive',
   'any',
   'auto',
   'ephemeral',
+  'enabled',
   'function',
   'function_call',
   'function_call_output',

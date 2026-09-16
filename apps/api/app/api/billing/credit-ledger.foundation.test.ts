@@ -2114,6 +2114,7 @@ it('should execute a bounded recovery batch through the built DB-only runtime-ro
   expect(await firstLedger.markDispatchIntent(admitted.operationId, admitted.generation)).toBe(false);
   const childEnvironment: Record<string, string | undefined> = {};
   childEnvironment['PATH'] = process.env['PATH'];
+  childEnvironment['TAU_CLOUD_ENABLED'] = 'true';
   childEnvironment['BILLING_DATABASE_URL'] = databaseUrl;
   childEnvironment['BILLING_ENVIRONMENT'] = fixture.environment;
   const child = spawnSync(

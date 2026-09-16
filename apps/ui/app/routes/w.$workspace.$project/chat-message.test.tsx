@@ -4,12 +4,11 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { MyUIMessage, SkillMetadata } from '@taucad/chat';
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
 
-const { mockMessagesById, mockMessageOrder, mockStatus, mockSkillsCatalog, mockCadChatRetry } = vi.hoisted(() => ({
+const { mockMessagesById, mockMessageOrder, mockStatus, mockSkillsCatalog } = vi.hoisted(() => ({
   mockMessagesById: new Map<string, MyUIMessage>(),
   mockMessageOrder: [] as string[],
   mockStatus: { value: 'ready' as 'ready' | 'streaming' | 'submitted' | 'error' },
   mockSkillsCatalog: [] as SkillMetadata[],
-  mockCadChatRetry: vi.fn(),
 }));
 
 const getMockChatSelectorState = (): {
@@ -55,7 +54,6 @@ vi.mock('#chat-clients/use-cad-chat-client.js', () => ({
   useCadChatClient: () => ({
     submit: vi.fn(),
     edit: vi.fn(),
-    retry: mockCadChatRetry,
     regenerateTail: vi.fn(),
     stop: vi.fn(),
     messages: [],
@@ -87,8 +85,8 @@ vi.mock('#routes/w.$workspace.$project/chat-message-planning.js', () => ({
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-message-reasoning.js', () => ({
-  ChatMessageReasoning() {
-    return <div data-testid='chat-message-reasoning' />;
+  ChatMessageReasoning({ parts }: { readonly parts: ReadonlyArray<{ readonly text: string }> }) {
+    return <div data-testid='chat-message-reasoning'>{parts.map((part) => part.text).join('|')}</div>;
   },
 }));
 
@@ -161,7 +159,9 @@ vi.mock('#routes/w.$workspace.$project/chat-message-tool-glob-search.js', () => 
   ChatMessageToolGlobSearch: () => <div data-testid='tool-glob-search' />,
 }));
 vi.mock('#routes/w.$workspace.$project/chat-message-tool-get-kernel-result.js', () => ({
-  ChatMessageToolGetKernelResult: () => <div data-testid='tool-get-kernel-result' />,
+  ChatMessageToolGetKernelResult: ({ part }: { readonly part: { readonly state: string } }) => (
+    <div data-testid='tool-get-kernel-result' data-state={part.state} />
+  ),
 }));
 vi.mock('#routes/w.$workspace.$project/chat-message-tool-screenshot.js', () => ({
   ChatMessageToolScreenshot: () => <div data-testid='tool-screenshot' />,
@@ -174,34 +174,6 @@ vi.mock('#components/chat/chat-textarea.js', () => ({
   ChatTextarea: () => <div data-testid='chat-textarea' />,
 }));
 
-vi.mock('#components/chat/chat-model-selector.js', () => ({
-  ChatModelSelector: ({
-    children,
-    onSelect,
-  }: {
-    readonly children: unknown;
-    readonly onSelect?: (modelId: string) => void;
-  }) => {
-    if (typeof children === 'function') {
-      const renderProperty = children as (context: { selectedModel: { name: string } }) => React.ReactNode;
-      return (
-        <div data-testid='chat-model-selector'>
-          {renderProperty({ selectedModel: { name: 'mock' } })}
-          <button
-            type='button'
-            onClick={() => {
-              onSelect?.('anthropic-claude-opus-4.8');
-            }}
-          >
-            Select alternate model
-          </button>
-        </div>
-      );
-    }
-    return <div data-testid='chat-model-selector' />;
-  },
-}));
-
 vi.mock('#components/chat/at-reference-chip.js', () => ({
   AtReferenceChip: () => <span data-testid='at-reference-chip' />,
 }));
@@ -211,14 +183,10 @@ vi.mock('#components/chat/context-chip.js', () => ({
 }));
 
 vi.mock('#components/chat/chat-activity-group.js', () => ({
-  ChatActivityGroup: ({ children }: { readonly children: React.ReactNode }) => (
-    <div data-testid='chat-activity-group'>{children}</div>
-  ),
-}));
-
-vi.mock('#components/chat/chat-activity-section.js', () => ({
-  ChatActivitySection: ({ children }: { readonly children: React.ReactNode }) => (
-    <div data-testid='chat-activity-section'>{children}</div>
+  ChatActivityGroup: ({ children, summary }: { readonly children: React.ReactNode; readonly summary: string }) => (
+    <div data-testid='chat-activity-group' data-summary={summary}>
+      {children}
+    </div>
   ),
 }));
 
@@ -288,7 +256,6 @@ const getColumnWrapper = (): HTMLDivElement => {
 
 afterEach(() => {
   cleanup();
-  mockCadChatRetry.mockClear();
   mockMessagesById.clear();
   mockMessageOrder.length = 0;
   mockStatus.value = 'ready';
@@ -408,19 +375,43 @@ describe('ChatMessage use_skill tool rendering', () => {
   });
 });
 
+describe('ChatMessage activity composition', () => {
+  it('renders adjacent reasoning chunks in one disclosure and preserves tool boundaries', () => {
+    const message: MyUIMessage = {
+      id: 'msg-reasoning-chain',
+      role: 'assistant',
+      parts: [
+        { type: 'reasoning', text: 'Inspecting the model', state: 'done' },
+        { type: 'reasoning', text: 'Confirming dimensions', state: 'done' },
+        {
+          type: 'tool-read_file',
+          toolCallId: 'read-1',
+          state: 'input-available',
+          input: { targetFile: 'main.scad' },
+        },
+        { type: 'reasoning', text: 'Preparing the answer', state: 'done' },
+      ],
+    };
+    setMessages([message], 'streaming');
+
+    render(<ChatMessage messageId={message.id} />);
+
+    const reasoningBlocks = screen.getAllByTestId('chat-message-reasoning');
+    expect(reasoningBlocks).toHaveLength(2);
+    expect(reasoningBlocks[0]).toHaveTextContent('Inspecting the model|Confirming dimensions');
+    expect(reasoningBlocks[1]).toHaveTextContent('Preparing the answer');
+    expect(screen.getByTestId('chat-activity-group')).toHaveAttribute('data-summary', 'Reading files');
+  });
+});
+
 describe('ChatMessage assistant actions', () => {
-  it('should keep model-switch retry without exposing same-model Try again', () => {
+  it('does not render retry actions below assistant messages', () => {
     setMessages([assistantMessage('msg-1', 'Hello there')]);
 
     render(<ChatMessage messageId='msg-1' />);
 
-    expect(screen.getAllByText('Switch model').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Switch model')).not.toBeInTheDocument();
     expect(screen.queryByText('Try again')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: /select alternate model/i }));
-
-    expect(mockCadChatRetry).toHaveBeenCalledTimes(1);
-    expect(mockCadChatRetry).toHaveBeenCalledWith('msg-1', 'anthropic-claude-opus-4.8');
   });
 });
 
@@ -466,6 +457,149 @@ describe('ChatMessage source part rendering', () => {
 
     expect(screen.getByRole('article')).toHaveTextContent('Design brief');
     expect(screen.getByRole('article')).toHaveTextContent('brief.pdf');
+  });
+});
+
+describe('ChatMessage ACP session state', () => {
+  it('renders the current ACP plan as one read-only plan surface', () => {
+    const message: MyUIMessage = {
+      id: 'msg-acp-plan',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'data-acp-session',
+          data: {
+            type: 'acp-session',
+            id: 'state-1',
+            agentId: 'codex',
+            commands: [],
+            configOptions: [],
+            plan: {
+              type: 'items',
+              entries: [
+                { content: 'Inspect the model', priority: 'high', status: 'completed' },
+                { content: 'Validate the kernel', priority: 'medium', status: 'in_progress' },
+              ],
+            },
+          },
+        },
+      ],
+    };
+    setMessages([message]);
+
+    render(<ChatMessage messageId='msg-acp-plan' />);
+
+    expect(screen.getByRole('region', { name: 'Agent plan' })).toHaveTextContent('Inspect the model');
+    expect(screen.getByRole('region', { name: 'Agent plan' })).toHaveTextContent('Validate the kernel');
+    expect(screen.getAllByRole('checkbox')).toHaveLength(2);
+    expect(screen.getAllByRole('checkbox')[0]).toBeChecked();
+    expect(screen.getByText('in progress')).toBeInTheDocument();
+  });
+
+  it('keeps unsafe ACP plan links inert and strips display controls', () => {
+    const message: MyUIMessage = {
+      id: 'msg-acp-unsafe-plan',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'data-acp-session',
+          data: {
+            type: 'acp-session',
+            id: 'state-unsafe',
+            agentId: 'codex',
+            commands: [],
+            configOptions: [],
+            // oxlint-disable-next-line eslint/no-script-url -- Malicious fixture verifies unsafe schemes stay inert.
+            plan: { type: 'file', planId: 'plan-unsafe', uri: 'javascript:alert(1)\u202E' },
+          },
+        },
+      ],
+    };
+    setMessages([message]);
+
+    render(<ChatMessage messageId='msg-acp-unsafe-plan' />);
+
+    expect(screen.queryByRole('link')).toBeNull();
+    // oxlint-disable-next-line eslint/no-script-url -- Assertion names the malicious fixture literally.
+    expect(screen.getByRole('region', { name: 'Agent plan' })).toHaveTextContent('javascript:alert(1)');
+    expect(screen.getByRole('region', { name: 'Agent plan' }).textContent).not.toContain('\u202E');
+  });
+});
+
+describe('ChatMessage external Tau MCP porcelain', () => {
+  it('renders a qualified dynamic call with the existing native card', () => {
+    const message: MyUIMessage = {
+      id: 'msg-acp-kernel',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'dynamic-tool',
+          toolCallId: 'call-kernel',
+          toolName: 'get_kernel_result',
+          state: 'output-available',
+          input: { targetFile: 'main.ts' },
+          output: { status: 'ready' },
+          toolMetadata: {
+            tau: { origin: 'external', nativeName: 'get_kernel_result', presentation: 'tau-mcp' },
+          },
+        },
+      ],
+    };
+    setMessages([message]);
+
+    render(<ChatMessage messageId={message.id} />);
+
+    expect(screen.getByTestId('tool-get-kernel-result')).toBeInTheDocument();
+    expect(screen.queryByTestId('tool-unknown')).toBeNull();
+  });
+
+  it('does not grant native porcelain to an unqualified same-name call', () => {
+    const message: MyUIMessage = {
+      id: 'msg-foreign-kernel',
+      role: 'assistant',
+      parts: [
+        {
+          type: 'dynamic-tool',
+          toolCallId: 'call-foreign-kernel',
+          toolName: 'get_kernel_result',
+          state: 'output-available',
+          input: { targetFile: 'main.ts' },
+          output: { status: 'ready' },
+          toolMetadata: { tau: { origin: 'external', nativeName: 'get_kernel_result' } },
+        },
+      ],
+    };
+    setMessages([message]);
+
+    render(<ChatMessage messageId={message.id} />);
+
+    expect(screen.queryByTestId('tool-get-kernel-result')).toBeNull();
+  });
+
+  it('keeps a preliminary qualified call in the same native loading card', () => {
+    const preliminaryPart = {
+      type: 'dynamic-tool',
+      toolCallId: 'call-preliminary-kernel',
+      toolName: 'get_kernel_result',
+      state: 'output-available',
+      input: { targetFile: 'main.scad' },
+      output: { status: 'pending' },
+      preliminary: true,
+      toolMetadata: {
+        tau: { origin: 'external', nativeName: 'get_kernel_result', presentation: 'tau-mcp' },
+      },
+    };
+    const message: MyUIMessage = {
+      id: 'msg-preliminary-kernel',
+      role: 'assistant',
+      parts: [preliminaryPart as MyUIMessage['parts'][number]],
+    };
+    setMessages([message], 'streaming');
+
+    render(<ChatMessage messageId={message.id} />);
+
+    expect(screen.getByTestId('chat-activity-group')).toHaveAttribute('data-summary', 'Rendering models');
+    expect(screen.getByTestId('tool-get-kernel-result')).toHaveAttribute('data-state', 'input-available');
   });
 });
 
@@ -545,7 +679,7 @@ describe('ChatMessage article wrapper — no sticky positioning (regression guar
     render(<ChatMessage messageId='msg-1' />);
 
     const article = screen.getByRole('article');
-    const bubble = article.querySelector<HTMLDivElement>('[class*="cursor-pointer"]');
+    const bubble = article.querySelector<HTMLDivElement>('[class*="cursor-action"]');
     if (!(bubble instanceof HTMLDivElement)) {
       throw new Error('user bubble not found');
     }
@@ -555,7 +689,7 @@ describe('ChatMessage article wrapper — no sticky positioning (regression guar
     expectNoStickyTokens(article);
   });
 
-  it('should render the editing textarea inside the user-message article when isEditing && isUser', () => {
+  it('should keyboard-activate the editable user-message bubble', () => {
     setMessages([userMessage('msg-1', 'go')]);
 
     render(<ChatMessage messageId='msg-1' />);
@@ -563,11 +697,13 @@ describe('ChatMessage article wrapper — no sticky positioning (regression guar
     const article = screen.getByRole('article');
     expect(screen.queryByTestId('chat-textarea')).toBeNull();
 
-    const bubble = article.querySelector<HTMLDivElement>('[class*="cursor-pointer"]');
+    const bubble = article.querySelector<HTMLDivElement>('[class*="cursor-action"]');
     if (!(bubble instanceof HTMLDivElement)) {
       throw new Error('user bubble not found');
     }
-    fireEvent.click(bubble);
+    expect(bubble).toHaveAttribute('role', 'button');
+    expect(bubble).toHaveAttribute('tabindex', '0');
+    fireEvent.keyDown(bubble, { key: 'Enter' });
 
     const textarea = screen.getByTestId('chat-textarea');
     expect(article.contains(textarea)).toBe(true);

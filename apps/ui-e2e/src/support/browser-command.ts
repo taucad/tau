@@ -22,6 +22,7 @@ import type {
   TargetViewport,
   TargetWebGpuProfile,
   TargetWebGpuQualificationReport,
+  TargetWorker,
 } from './external-target.ts';
 import { testBaseURL } from './base-url.ts';
 import { classifyWebGpuAdapter, webGpuLaunchArguments } from './webgpu-profile.ts';
@@ -55,6 +56,8 @@ type Session = {
   readonly context: ProviderContext;
   readonly pageErrors: string[];
   readonly primary: TargetPage;
+  readonly workerIds: WeakMap<object, string>;
+  nextWorkerId: number;
   agentHostGatewayFailure?: AgentHostGatewayFailure | undefined;
   agentHostGatewayRelease?: (() => void) | undefined;
   agentHostGatewayServer?: Server;
@@ -65,7 +68,11 @@ type Session = {
 
 const sessions = new Map<string, Session>();
 const hostFixtureProcesses = new Map<string, ChildProcess>();
-const outputRoot = resolve('out/test-results/vitest-browser/apps/ui-e2e/test-output');
+const outputRoot = resolve(
+  import.meta.dirname,
+  '../../../..',
+  'out/test-results/vitest-browser/apps/ui-e2e/test-output',
+);
 
 const tauApiUrl = process.env['TAU_E2E_API_URL'] ?? 'http://localhost:4000';
 const execFileAsync = promisify(execFile);
@@ -227,6 +234,13 @@ export const uiAuthenticateTauTestUser: BrowserCommand<[account: TargetTauTestAc
   assertTauTestEmail(account.email);
   const session = sessionFor(commandContext);
   session.testUserEmail = account.email;
+  await session.context.addInitScript((apiUrl) => {
+    Object.defineProperty(globalThis, 'ENV', {
+      configurable: true,
+      value: Object.fromEntries([['TAU_API_URL', apiUrl]]),
+      writable: true,
+    });
+  }, tauApiUrl);
   const headers = { origin: testBaseURL };
   const signUp = await session.context.request.post(`${tauApiUrl}/v1/auth/sign-up/email`, {
     data: {
@@ -297,6 +311,8 @@ export const uiOpenTarget: BrowserCommand = async (commandContext) => {
     context,
     pageErrors: [],
     primary,
+    workerIds: new WeakMap(),
+    nextWorkerId: 0,
     tracing: false,
   };
   observePage(session, primary);
@@ -371,8 +387,8 @@ const writeScriptedTurn = async (options: {
   readonly writeEvent: (event: string, data: unknown) => void;
 }): Promise<void> => {
   const { currentRequest, session, turn, writeEvent } = options;
-  const pause = async (): Promise<void> => {
-    if (!turn.gated) {
+  const pause = async (required = turn.gated === true): Promise<void> => {
+    if (!required) {
       return;
     }
     const gate = Promise.withResolvers<void>();
@@ -396,29 +412,41 @@ const writeScriptedTurn = async (options: {
       usage: { input_tokens: turn.usage.inputTokens, output_tokens: 0 },
     },
   });
-  if (turn.reasoning !== undefined) {
+  const reasoningBlocks = turn.reasoningBlocks?.map((reasoningBlock) => [reasoningBlock]) ?? [
+    turn.reasoningChunks ?? (turn.reasoning === undefined ? [] : [turn.reasoning]),
+  ];
+  for (const [reasoningBlockIndex, reasoningChunks] of reasoningBlocks.entries()) {
+    if (reasoningChunks.length === 0) {
+      continue;
+    }
     writeEvent('content_block_start', {
       type: 'content_block_start',
       index,
       content_block: { type: 'thinking', thinking: '' },
     });
-    writeEvent('content_block_delta', {
-      type: 'content_block_delta',
-      index,
-      delta: { type: 'thinking_delta', thinking: turn.reasoning },
-    });
+    for (const reasoning of reasoningChunks) {
+      writeEvent('content_block_delta', {
+        type: 'content_block_delta',
+        index,
+        delta: { type: 'thinking_delta', thinking: reasoning },
+      });
+      if (turn.gateChunks) {
+        await pause(true);
+      }
+    }
     writeEvent('content_block_delta', {
       type: 'content_block_delta',
       index,
       delta: {
         type: 'signature_delta',
-        signature: `browser-host-e2e-signature-${String(currentRequest)}`,
+        signature: `browser-host-e2e-signature-${String(currentRequest)}-${String(reasoningBlockIndex)}`,
       },
     });
     writeEvent('content_block_stop', { type: 'content_block_stop', index });
     index += 1;
   }
-  if (turn.text === undefined) {
+  const textChunks = turn.textChunks ?? (turn.text === undefined ? [] : [turn.text]);
+  if (textChunks.length === 0) {
     await pause();
   } else {
     writeEvent('content_block_start', {
@@ -426,11 +454,16 @@ const writeScriptedTurn = async (options: {
       index,
       content_block: { type: 'text', text: '' },
     });
-    writeEvent('content_block_delta', {
-      type: 'content_block_delta',
-      index,
-      delta: { type: 'text_delta', text: turn.text },
-    });
+    for (const text of textChunks) {
+      writeEvent('content_block_delta', {
+        type: 'content_block_delta',
+        index,
+        delta: { type: 'text_delta', text },
+      });
+      if (turn.gateChunks) {
+        await pause(true);
+      }
+    }
     await pause();
     writeEvent('content_block_stop', { type: 'content_block_stop', index });
     index += 1;
@@ -575,7 +608,7 @@ export const uiInstallAgentHostGatewayFixture: BrowserCommand<[script?: readonly
   // models catalog is control-plane and is stubbed with the real catalog rows
   // so provider-aware wire gating sees genuine provider ids without a live API.
   const { isModelListEntryEnabled, modelList, modelListEntryToModel } =
-    // eslint-disable-next-line @nx/enforce-module-boundaries -- This executable browser fixture needs the real API catalog rows without starting the API.
+    // eslint-disable-next-line @nx/enforce-module-boundaries -- This e2e-only catalog stub deliberately uses the API's real rows.
     await import('../../../api/app/api/models/model.constants.js');
   const catalog = Object.values(modelList)
     .flatMap((entries) => Object.values(entries))
@@ -1091,6 +1124,12 @@ export const uiEmulateContrast: BrowserCommand<[contrast: 'more' | 'no-preferenc
   await pageFor(sessionFor(commandContext), surface).emulateMedia({ contrast });
 };
 
+export const uiEmulateReducedMotion: BrowserCommand<
+  [reducedMotion: 'no-preference' | 'reduce', surface?: TargetSurface]
+> = async (commandContext, reducedMotion, surface) => {
+  await pageFor(sessionFor(commandContext), surface).emulateMedia({ reducedMotion });
+};
+
 export const uiEmulateForcedColors: BrowserCommand<[forcedColors: 'active' | 'none', surface?: TargetSurface]> = async (
   commandContext,
   forcedColors,
@@ -1104,7 +1143,9 @@ export const uiEmulateForcedColors: BrowserCommand<[forcedColors: 'active' | 'no
 export const uiClickTarget: BrowserCommand<
   [selector: string, options?: TargetClickOptions, surface?: TargetSurface]
 > = async (commandContext, selector, options, surface) => {
-  await pageFor(sessionFor(commandContext), surface).locator(selector).click(options);
+  const { touch = false, ...clickOptions } = options ?? {};
+  const locator = pageFor(sessionFor(commandContext), surface).locator(selector);
+  await (touch ? locator.tap() : locator.click(clickOptions));
 };
 
 export const uiFillTarget: BrowserCommand<[selector: string, value: string, surface?: TargetSurface]> = async (
@@ -1374,6 +1415,41 @@ export const uiCloseSecondaryTarget: BrowserCommand = async (commandContext) => 
   session.secondary = undefined;
 };
 
+/**
+ * The dedicated workers the target page is running right now (V21, S48(16)).
+ *
+ * Uninstrumented on purpose: a page cannot enumerate its own dedicated workers,
+ * and the alternative was a counter in product code behind a debug flag — which
+ * would make the measurement a thing the app has to keep true rather than a
+ * thing the browser already knows. Playwright's `page.workers()` is what
+ * Chrome's own task manager lists.
+ *
+ * @param commandContext - The Vitest browser command context.
+ * @param urlSubstring - Keep only workers whose script URL contains this.
+ * @param surface - Which target page to count.
+ * @returns Matching instances with stable identities and their script URLs.
+ */
+export const uiTargetWorkers: BrowserCommand<
+  [urlSubstring?: string, surface?: TargetSurface],
+  readonly TargetWorker[]
+> = async (commandContext, urlSubstring, surface) => {
+  const session = sessionFor(commandContext);
+  const page = pageFor(session, surface);
+  return page
+    .workers()
+    .map((worker) => {
+      let identity = session.workerIds.get(worker);
+      if (identity === undefined) {
+        session.nextWorkerId += 1;
+        identity = `worker-${String(session.nextWorkerId)}`;
+        session.workerIds.set(worker, identity);
+      }
+      return { identity, url: worker.url() };
+    })
+    .filter(({ url }) => urlSubstring === undefined || url.includes(urlSubstring))
+    .toSorted((left, right) => left.identity.localeCompare(right.identity));
+};
+
 export const uiCookies: BrowserCommand<[], TargetCookie[]> = async (commandContext) =>
   sessionFor(commandContext).context.cookies();
 
@@ -1463,6 +1539,7 @@ export const uiBrowserCommands = {
   uiEmulateColorScheme,
   uiEmulateContrast,
   uiEmulateForcedColors,
+  uiEmulateReducedMotion,
   uiEvaluateTarget,
   uiEvaluateTargetLocator,
   uiFillTarget,
@@ -1495,6 +1572,7 @@ export const uiBrowserCommands = {
   uiSetViewport,
   uiStartHostFixture,
   uiStartTauServeFixture,
+  uiTargetWorkers,
   uiStopTauServeFixture,
   uiReleaseTauServeGateway,
   uiReadTauServeFile,

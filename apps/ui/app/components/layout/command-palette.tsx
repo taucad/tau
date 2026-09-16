@@ -103,8 +103,15 @@ function CommandPalette({ isOpen, onOpenChange, items }: CommandPalettePropertie
   }, []);
 
   return (
-    <CommandDialog open={isOpen} onOpenChange={onOpenChange}>
-      <CommandInput placeholder='Search projects, chats, and actions...' />
+    <CommandDialog
+      open={isOpen}
+      onOpenChange={onOpenChange}
+      contentClassName='*:data-[slot=dialog-close]:hidden [&_[data-slot=command-input-wrapper]>svg]:hidden'
+    >
+      <CommandInput
+        className='h-12 border-0 bg-transparent px-3 text-base shadow-none focus-visible:outline-none dark:bg-transparent'
+        placeholder='Search projects, chats, and actions...'
+      />
       <CommandList className='py-0'>
         <CommandEmpty>No results found.</CommandEmpty>
         {Object.entries(groupedItems).map(([groupName, groupItems]) => (

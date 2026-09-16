@@ -84,6 +84,32 @@ export const projectGit = pgTable('project_git', {
     .notNull(),
 });
 
+/**
+ * One quota reservation per project-scoped git-lfs object. A nullable
+ * `finalized_at` means the upload URL was issued but exact bytes have not yet
+ * been verified; those rows still count against quota until retention safely
+ * reconciles abandoned uploads.
+ */
+export const projectGitLfsObject = pgTable(
+  'project_git_lfs_object',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => project.id, { onDelete: 'cascade' }),
+    oid: text('oid').notNull(),
+    sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
+    finalizedAt: timestamp('finalized_at', { withTimezone: true }),
+    /** First observation that no retained Git tree reaches this object. */
+    unreachableAt: timestamp('unreachable_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projectId, table.oid] }),
+    index('project_git_lfs_object_pending_idx').on(table.projectId, table.finalizedAt),
+    check('project_git_lfs_object_size_nonnegative', sql`${table.sizeBytes} >= 0`),
+  ],
+);
+
 export const publication = pgTable(
   'publication',
   {
@@ -195,6 +221,33 @@ export const account = pgTable('account', {
     .$onUpdate(() => /* @__PURE__ */ new Date())
     .notNull(),
 });
+
+/** A Tau user's separately authorized GitHub App identity. */
+export const githubConnection = pgTable(
+  'github_connection',
+  {
+    id: text('id').primaryKey(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    githubSubject: bigint('github_subject', { mode: 'number' }).notNull(),
+    login: text('login').notNull(),
+    avatarUrl: text('avatar_url'),
+    accessToken: text('access_token').notNull(),
+    refreshToken: text('refresh_token'),
+    accessTokenExpiresAt: timestamp('access_token_expires_at', { withTimezone: true }).notNull(),
+    refreshTokenExpiresAt: timestamp('refresh_token_expires_at', { withTimezone: true }),
+    keyVersion: integer('key_version').notNull(),
+    generation: integer('generation').notNull().default(1),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique('github_connection_user_subject').on(table.userId, table.githubSubject),
+    index('github_connection_user_idx').on(table.userId),
+    check('github_connection_generation_positive', sql`${table.generation} > 0`),
+  ],
+);
 
 export const verification = pgTable('verification', {
   id: text('id').primaryKey(),
@@ -1176,7 +1229,7 @@ export const billingProviderLeg = billing.table(
     check('billing_provider_redirect_bound', sql`${table.redirectUrl} IS NULL OR length(${table.redirectUrl}) <= 4096`),
     check(
       'billing_provider_leg_kind',
-      sql`(${table.kind} IN ('customer','portal','tax_calculation') AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NULL) OR (${table.kind} IN ('checkout_payment','payment_intent') AND ${table.purchaseId} IS NOT NULL AND ${table.subscriptionId} IS NULL) OR (${table.kind} = 'checkout_subscription' AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NOT NULL) OR (${table.kind} = 'checkout_setup' AND ${table.reloadConsentId} IS NOT NULL AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NULL) OR (${table.kind} IN ('subscription_update','subscription_schedule') AND ${table.subscriptionOfferId} IS NOT NULL AND ${table.subscriptionId} IS NOT NULL AND ${table.purchaseId} IS NULL) OR (${table.kind} = 'subscription_cancel' AND ${table.closureId} IS NOT NULL AND ${table.subscriptionId} IS NOT NULL AND ${table.purchaseId} IS NULL) OR (${table.kind} = 'refund' AND ${table.refundIntentId} IS NOT NULL AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NULL)`,
+      sql`(${table.kind} IN ('customer','portal','tax_calculation') AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NULL) OR (${table.kind} IN ('checkout_payment','payment_intent','tax_transaction') AND ${table.purchaseId} IS NOT NULL AND ${table.subscriptionId} IS NULL) OR (${table.kind} = 'checkout_subscription' AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NOT NULL) OR (${table.kind} = 'checkout_setup' AND ${table.reloadConsentId} IS NOT NULL AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NULL) OR (${table.kind} IN ('subscription_update','subscription_schedule') AND ${table.subscriptionOfferId} IS NOT NULL AND ${table.subscriptionId} IS NOT NULL AND ${table.purchaseId} IS NULL) OR (${table.kind} = 'subscription_cancel' AND ${table.closureId} IS NOT NULL AND ${table.subscriptionId} IS NOT NULL AND ${table.purchaseId} IS NULL) OR (${table.kind} = 'refund' AND ${table.refundIntentId} IS NOT NULL AND ${table.purchaseId} IS NULL AND ${table.subscriptionId} IS NULL)`,
     ),
     check(
       'billing_provider_no_charge',

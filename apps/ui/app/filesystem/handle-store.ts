@@ -256,6 +256,7 @@ let openPromise: Promise<IDBDatabase> | undefined;
 async function openHandleDbRaw(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(dbName, dbVersion);
+    let blocked = false;
 
     // Pure bootstrap: create whatever the current schema needs and nothing
     // else. The v2 -> v3 legacy-handle promotion was deleted at L6 — the
@@ -299,8 +300,31 @@ async function openHandleDbRaw(): Promise<IDBDatabase> {
       }
     });
 
+    // A blocked upgrade fires neither `success` nor `error`: the request stays pending until every older
+    // connection closes. Without this listener the open never settles and the whole app sits on the
+    // "Opening Home" shell for as long as the other tab lives. Fail loudly instead.
+    request.addEventListener('blocked', () => {
+      blocked = true;
+      reject(new Error(`Opening ${dbName} is blocked by another Tau tab on an older version; close it and reload.`));
+    });
+
     request.addEventListener('success', () => {
-      resolve(request.result);
+      const db = request.result;
+      if (blocked) {
+        // The blocker closed after we had already failed; nothing owns this connection, and leaving it
+        // open would block the next upgrade in turn.
+        db.close();
+        return;
+      }
+      // Yield to a newer build in another tab. A connection held open here is exactly what puts that tab
+      // in the blocked state above.
+      db.addEventListener('versionchange', () => {
+        db.close();
+        if (cachedDb === db) {
+          cachedDb = undefined;
+        }
+      });
+      resolve(db);
     });
 
     request.addEventListener('error', () => {
@@ -1538,19 +1562,25 @@ export async function getProjectRootConfigs(
       .filter((entry): entry is WorkspaceEntry => entry !== undefined)
       .map((entry) => [entry.workspace.workspaceId, entry] as const),
   );
+  const homeBackend = await getHomeStorageBackend();
+  const homeRoot: StorageRootConfig =
+    homeBackend === 'node' ? { backend: 'node', path: nodeHomeRoot() } : { backend: homeBackend };
+  const homeNodePath = homeRoot.backend === 'node' ? homeRoot.path : undefined;
   const projects: ProjectRootConfig[] = configs
     .filter((config) => config.backend !== 'webaccess' || connected.has(config.workspaceId))
     // A node row naming a root no longer registered is unreachable, exactly as a
     // webaccess row whose workspace is gone: publishing it would route a project
     // at a directory nothing scans.
-    .filter((config) => config.backend !== 'node' || config.path === undefined || nodeRoots.has(config.path))
+    .filter(
+      (config) =>
+        config.backend !== 'node' ||
+        config.path === undefined ||
+        config.path === homeNodePath ||
+        nodeRoots.has(config.path),
+    )
     .map((config) => (config.backend === 'node' ? { ...config, path: config.path ?? nodeHomeRoot() } : config));
-  const homeBackend = await getHomeStorageBackend();
-  const homeRoot: StorageRootConfig =
-    homeBackend === 'node' ? { backend: 'node', path: nodeHomeRoot() } : { backend: homeBackend };
   // Nothing stops the dialog from picking `userData/home` itself; both roots
   // would carry the same storage-root key, so Home wins and the duplicate goes.
-  const homeNodePath = homeRoot.backend === 'node' ? homeRoot.path : undefined;
   const roots: StorageRootConfig[] = [
     homeRoot,
     ...[...nodeRoots.keys()]

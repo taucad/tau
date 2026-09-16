@@ -4,43 +4,43 @@
 
 DESTL_ConfigurationNode: declare class DESTL_ConfigurationNode extends Standard_Transient
 
-constructor
+  constructor
 
-InternalParameters: DESTL_ConfigurationNode_RWStl_InternalSection
+  InternalParameters: DESTL_ConfigurationNode_RWStl_InternalSection
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-Save(): TCollection_AsciiString;
-Save(theResourcePath: TCollection_AsciiString): boolean;
-Save(): TCollection_AsciiString;
-Save(theResourcePath: TCollection_AsciiString): boolean;
+  Save(): TCollection_AsciiString;
+  Save(theResourcePath: TCollection_AsciiString): boolean;
+  Save(): TCollection_AsciiString;
+  Save(theResourcePath: TCollection_AsciiString): boolean;
 
-IsImportSupported(): boolean;
+  IsImportSupported(): boolean;
 
-IsExportSupported(): boolean;
+  IsExportSupported(): boolean;
 
-IsStreamSupported(): boolean;
+  IsStreamSupported(): boolean;
 
-GetFormat(): TCollection_AsciiString;
+  GetFormat(): TCollection_AsciiString;
 
-GetVendor(): TCollection_AsciiString;
+  GetVendor(): TCollection_AsciiString;
 
-GetExtensions(): NCollection_List_TCollection_AsciiString;
+  GetExtensions(): NCollection_List_TCollection_AsciiString;
 
-CheckContent(theBuffer: NCollection_Buffer): boolean;
+  CheckContent(theBuffer: NCollection_Buffer): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 DESTL_ConfigurationNode_RWStl_InternalSection: interface DESTL_ConfigurationNode_RWStl_InternalSection
 
-ReadMergeAngle: number
+  ReadMergeAngle: number
 
-ReadBRep: boolean
+  ReadBRep: boolean
 
-WriteAscii: boolean
+  WriteAscii: boolean

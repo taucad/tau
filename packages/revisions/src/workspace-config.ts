@@ -194,17 +194,31 @@ const attributePattern = (path: string): string => `/${path.replaceAll(/\s/gu, '
  * @param existing - Current attributes file content, or `undefined` when absent.
  * @returns Anchored patterns, exactly as {@link attributePattern} wrote them.
  */
-const generatedTrackedPatterns = (existing: string | undefined): readonly string[] => {
-  const start = existing?.indexOf(attributesMarker) ?? -1;
-  if (existing === undefined || start === -1) {
-    return [];
+const generatedTrackedPatterns = (existing: string | undefined): ReadonlySet<string> => {
+  /* One entry, because there is one attributes file per cut and every path in
+   * that cut asks about it: `cleanLargeObjects` asks twice per file, so a
+   * 4,000-file project re-split the same string 8,000 times. The cache is the
+   * string itself, so a changed file is a miss by construction. */
+  const held = parsedTrackedPatterns;
+  if (held !== undefined && held.source === existing) {
+    return held.patterns;
   }
-  const block = existing.slice(start, existing.indexOf(markerEnd, start));
-  return block
-    .split('\n')
-    .filter((line) => line.startsWith('/'))
-    .map((line) => line.slice(0, line.indexOf(' ')));
+  const start = existing?.indexOf(attributesMarker) ?? -1;
+  const patterns =
+    existing === undefined || start === -1
+      ? new Set<string>()
+      : new Set(
+          existing
+            .slice(start, existing.indexOf(markerEnd, start))
+            .split('\n')
+            .filter((line) => line.startsWith('/'))
+            .map((line) => line.slice(0, line.indexOf(' '))),
+        );
+  parsedTrackedPatterns = { source: existing, patterns };
+  return patterns;
 };
+
+let parsedTrackedPatterns: Readonly<{ source: string | undefined; patterns: ReadonlySet<string> }> | undefined;
 
 /**
  * Merge Tau's LFS tracking rules into any existing attributes file.
@@ -246,4 +260,4 @@ export const generatedGitattributesContent = (
  */
 export const isTrackedLargeObjectPath = (projectRelativePath: string, attributes: string | undefined): boolean =>
   isLargeObjectPath(projectRelativePath) ||
-  generatedTrackedPatterns(attributes).includes(attributePattern(projectRelativePath));
+  generatedTrackedPatterns(attributes).has(attributePattern(projectRelativePath));

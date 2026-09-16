@@ -118,7 +118,7 @@ export function ViewerLink({ path, className, children, asChild = false }: Viewe
         // dependent on Tailwind's CSS source order. See {@link FileLink} for
         // the full rationale.
         !asChild && 'inline',
-        'cursor-pointer decoration-current underline-offset-2 hover:text-foreground hover:underline',
+        'cursor-action decoration-current underline-offset-2 hover:text-foreground hover:underline',
         className,
       )}
       onClick={handleClick}

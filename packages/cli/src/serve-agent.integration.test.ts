@@ -43,7 +43,12 @@ const agentToken = 'integration-agent-token-at-least-32-characters';
 const disposers: Array<() => Promise<void> | void> = [];
 
 const ownerState = vi.hoisted(() => ({
-  daemonOptions: undefined as undefined | { agent?: { compute?: unknown; computeControl?: unknown } },
+  daemonOptions: undefined as
+    | undefined
+    | {
+        agent?: { compute?: unknown; computeControl?: unknown };
+        systemSkillBundles?: readonly unknown[];
+      },
   closed: undefined as undefined | PromiseWithResolvers<{ cause: 'requested' }>,
   workers: [] as WorkerThreads.Worker[],
   closeFailure: undefined as Error | undefined,
@@ -441,6 +446,8 @@ describe('tau serve compute owner', () => {
     await vi.waitFor(() => {
       expect(ownerState.daemonOptions?.agent).toBeDefined();
     });
+    expect(ownerState.daemonOptions?.systemSkillBundles).not.toEqual([]);
+    expect(JSON.stringify(ownerState.daemonOptions?.systemSkillBundles?.[0])).toContain('"path":"SKILL.md"');
     expect(ownerState.daemonOptions!.agent!.compute).toEqual({ mode: 'off' });
     expect(ownerState.workers).toHaveLength(0);
     ownerState.closed!.resolve({ cause: 'requested' });

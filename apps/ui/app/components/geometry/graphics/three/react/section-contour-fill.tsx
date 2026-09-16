@@ -79,7 +79,7 @@ import { Theme, useTheme } from '#hooks/use-theme.js';
 import { useGraphicsSelector, useModelInteractionRef, useModelInteractionSelector } from '#hooks/use-graphics.js';
 import { useFeature } from '#flags/use-feature.js';
 import { getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
-import type { ModelInteractionContext } from '#machines/model-interaction.machine.js';
+import type { ModelInteractionContext, ModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import {
   collectSectionSurfaceSources,
   sliceSectionSurfaceSource,
@@ -713,6 +713,9 @@ export function SectionContourFills({
   );
   const { invalidate, size } = useThree();
   const resolution = React.useMemo(() => new THREE.Vector2(size.width, size.height), [size.height, size.width]);
+  const invalidatedRenderStateRef = React.useRef<
+    readonly [number, ModelInteractionUnitState | undefined, number, number] | undefined
+  >(undefined);
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React refs use null
   const rootRef = React.useRef<THREE.Group | null>(null);
   const helperBySourceKey = React.useRef(new Map<string, SectionHelperRecord>());
@@ -746,7 +749,13 @@ export function SectionContourFills({
   };
 
   React.useEffect(() => {
-    if (enabled) {
+    if (!enabled) {
+      invalidatedRenderStateRef.current = undefined;
+      return;
+    }
+    const renderState = [edgeColor, modelInteractionUnitState, resolution.x, resolution.y] as const;
+    if (invalidatedRenderStateRef.current?.every((value, index) => Object.is(value, renderState[index])) !== true) {
+      invalidatedRenderStateRef.current = renderState;
       invalidate();
     }
   }, [edgeColor, enabled, invalidate, modelInteractionUnitState, resolution]);

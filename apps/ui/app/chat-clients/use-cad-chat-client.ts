@@ -232,14 +232,36 @@ const agentHostConfig = (input: {
     dynamicPrompt: prompt.dynamic,
   }) as AgentHostAdmissionConfig['systemPromptBlocks'];
   const snapshotContext = agent.snapshot ? buildBrowserAgentHostSnapshotContext(agent.snapshot) : undefined;
+  const providerKind = requireProviderKind(model?.provider.id);
+  const reasoning: AgentHostAdmissionConfig['model']['reasoning'] = (() => {
+    const configuration = model?.configuration;
+    if (providerKind === 'anthropic') {
+      if (configuration?.thinking?.type === 'enabled') {
+        return { budgetTokens: configuration.thinking.budget_tokens };
+      }
+      if (configuration?.thinking?.type === 'adaptive') {
+        return {
+          ...(configuration.outputConfig?.effort === undefined ? {} : { effort: configuration.outputConfig.effort }),
+          ...(configuration.thinking.display === undefined ? {} : { display: configuration.thinking.display }),
+        };
+      }
+      return undefined;
+    }
+    if (providerKind === 'vertexai') {
+      const effort = configuration?.thinkingLevel?.toLowerCase();
+      return effort === 'low' || effort === 'medium' || effort === 'high' ? { effort } : undefined;
+    }
+    return configuration?.reasoning;
+  })();
   return {
     systemPrompt: [prompt.static, prompt.dynamic].join('\n\n'),
     systemPromptBlocks,
     model: {
       id: agent.execution.model,
-      providerKind: requireProviderKind(model?.provider.id),
+      providerKind,
       contextWindow: model?.details.contextWindow ?? 128_000,
       ...(model?.details.maxTokens === undefined ? {} : { maxTokens: model.details.maxTokens }),
+      ...(reasoning === undefined ? {} : { reasoning }),
       ...(model?.details.cost === undefined
         ? {}
         : {
@@ -309,10 +331,15 @@ const hostAdmission = (input: {
   readonly trigger: BrowserHostTrigger;
 }): ((runId: string) => BrowserHostAdmission) | undefined => {
   if (input.agent.execution.kind === 'acp') {
-    const { agentId, model } = input.agent.execution;
+    const { agentId, model, config } = input.agent.execution;
     return () => ({
       ...input.trigger,
-      agent: { kind: 'acp', id: agentId, ...(model === undefined ? {} : { model }) },
+      agent: {
+        kind: 'acp',
+        id: agentId,
+        ...(model === undefined ? {} : { model }),
+        ...(config === undefined ? {} : { config }),
+      },
       /* The agent brings its own model, tools and login (X6), so none of the
        * Tau admission travels — but the CAD knowledge does. Composed by the
        * same helper a Tau turn uses, minus the model facts an external run has
@@ -343,7 +370,7 @@ const hostAdmission = (input: {
  */
 const dialAgentHost = async (hostId: TauAgentHostId, projectId: string): Promise<AgentChannelClient> =>
   hostId === 'desktop'
-    ? openAgentHostChannel(hostId, { workspaceRoot: await desktopWorkspaceRoot(projectId) })
+    ? openAgentHostChannel(hostId, { projectId, workspaceRoot: await desktopWorkspaceRoot(projectId) })
     : openAgentHostChannel(hostId);
 
 const retainedMessageIdsBeforeTurn = (
@@ -417,7 +444,7 @@ export const useCadChatClient = (): CadChatClient => {
   // branching needed.
   const { activeChatId } = useActiveChatSession();
   const store = useChatSessionStore();
-  const { projectId, mainEntryPath } = useProject();
+  const { projectId } = useProject();
   // Optional: the API path renders without a FileManagerProvider; the
   // browser-host registration effect below guards on its presence.
   const fileManager = useOptionalFileManager();
@@ -579,7 +606,6 @@ export const useCadChatClient = (): CadChatClient => {
       agent,
       computeMode,
       fileManagerRef,
-      mainEntryPath,
       projectId,
       resolveModel,
       store,
@@ -619,7 +645,7 @@ export const useCadChatClient = (): CadChatClient => {
     async (
       turnId: string | undefined,
       turnExecution: CadAgentExecution = agent.execution,
-    ): Promise<ChatExecutionTarget> => {
+    ): Promise<readonly [ChatExecutionTarget, string | undefined]> => {
       const daemonHostId = daemonPlacementOf(turnExecution);
       // Every host placement waits out its own probe: a turn dispatched before
       // one answers must WAIT for it (the seeded first turn fires at chat load,
@@ -675,7 +701,7 @@ export const useCadChatClient = (): CadChatClient => {
         /* No browser turn: the daemon owns the files, mints its own base and
          * records its own revision, so placing one here would lease a checkout
          * nothing writes to. */
-        return { hostId: daemonHostId };
+        return [{ hostId: daemonHostId }, undefined];
       }
       if (!workspaceAuthority) {
         throw new Error('The durable workspace authority is unavailable for this chat.');
@@ -710,7 +736,7 @@ export const useCadChatClient = (): CadChatClient => {
         workspaceAuthority.get(activeChatId) ??
         (await workspaceAuthority.prepare(activeChatId, turnId === undefined ? undefined : { turnId }));
       await workspaceAuthority.markAdmitted(activeChatId, turnId);
-      return prepared.execution;
+      return [prepared.execution, prepared.runId];
     },
     [activeChatId, agent.execution, awaitResolvedModel, creditPreflight, projectId, workspaceAuthority],
   );
@@ -745,7 +771,7 @@ export const useCadChatClient = (): CadChatClient => {
   const withWorkspace = useCallback(
     (
       turnId: string | undefined,
-      operation: (execution: ChatExecutionTarget) => void,
+      operation: (execution: ChatExecutionTarget, runId: string | undefined) => void,
       /* The execution this dispatch will actually run, when it is not the live
        * selection — "retry with a different model" is the one verb that
        * overrides it. Admission has to see the same row the body names, or the
@@ -766,7 +792,7 @@ export const useCadChatClient = (): CadChatClient => {
       preparing.current = true;
       const runPreparedOperation = async (): Promise<void> => {
         try {
-          operation(await admitWorkspace(turnId, turnExecution ?? agent.execution));
+          operation(...(await admitWorkspace(turnId, turnExecution ?? agent.execution)));
         } catch (error) {
           surfaceDispatchFailure(error);
         } finally {
@@ -810,12 +836,15 @@ export const useCadChatClient = (): CadChatClient => {
         registerTurnHost(executionOverride);
       }
       try {
-        const runId = generatePrefixedId(idPrefix.request);
+        const [execution, runId] = await admitWorkspace(
+          userTurnIdAtOrBefore(messages, lastAssistantId),
+          turnAgent.execution,
+        );
         return createRunBody({
           agent: turnAgent,
           projectId,
           runId,
-          execution: await admitWorkspace(userTurnIdAtOrBefore(messages, lastAssistantId), turnAgent.execution),
+          execution,
           browserHost: hostAdmission({
             agent: turnAgent,
             chatId: activeChatId,
@@ -838,7 +867,6 @@ export const useCadChatClient = (): CadChatClient => {
     messages,
     projectId,
     registerTurnHost,
-    resolveModel,
     store,
     surfaceDispatchFailure,
     workspaceAuthority,
@@ -851,12 +879,13 @@ export const useCadChatClient = (): CadChatClient => {
       }
 
       const userMessage = buildUserMessage(input);
-      withWorkspace(userMessage.id, (execution) => {
+      withWorkspace(userMessage.id, (execution, runId) => {
         actions.sendMessage(userMessage, {
           body: createRunBody({
             agent,
             projectId,
             execution,
+            runId,
             browserHost: hostAdmission({
               agent,
               chatId: activeChatId,
@@ -867,7 +896,7 @@ export const useCadChatClient = (): CadChatClient => {
         });
       });
     },
-    [actions, activeChatId, agent, projectId, refuseWhileBusy, resolveModel, withWorkspace],
+    [actions, activeChatId, agent, projectId, refuseWhileBusy, withWorkspace],
   );
 
   const edit = useCallback(
@@ -876,13 +905,14 @@ export const useCadChatClient = (): CadChatClient => {
         return;
       }
 
-      withWorkspace(messageId, (execution) => {
+      withWorkspace(messageId, (execution, runId) => {
         actions.editMessage(messageId, input.text, {
           imageUrls: input.imageUrls ? [...input.imageUrls] : undefined,
           body: createRunBody({
             agent,
             projectId,
             execution,
+            runId,
             browserHost: hostAdmission({
               agent,
               chatId: activeChatId,
@@ -896,7 +926,7 @@ export const useCadChatClient = (): CadChatClient => {
         });
       });
     },
-    [actions, activeChatId, agent, messages, projectId, refuseWhileBusy, resolveModel, withWorkspace],
+    [actions, activeChatId, agent, messages, projectId, refuseWhileBusy, withWorkspace],
   );
 
   const retry = useCallback(
@@ -915,11 +945,12 @@ export const useCadChatClient = (): CadChatClient => {
       const requestAgent = modelId ? { ...agent, execution: withExecutionModel(agent.execution, modelId) } : agent;
       withWorkspace(
         userTurnIdAtOrBefore(messages, messageId),
-        (execution) => {
+        (execution, runId) => {
           const overrideBody = createRunBody({
             agent: requestAgent,
             projectId,
             execution,
+            runId,
             browserHost: hostAdmission({
               agent: requestAgent,
               chatId: activeChatId,
@@ -935,7 +966,7 @@ export const useCadChatClient = (): CadChatClient => {
         requestAgent.execution,
       );
     },
-    [actions, activeChatId, agent, messages, projectId, refuseWhileBusy, resolveModel, withWorkspace],
+    [actions, activeChatId, agent, messages, projectId, refuseWhileBusy, withWorkspace],
   );
 
   const regenerateTail = useCallback(() => {
@@ -944,12 +975,13 @@ export const useCadChatClient = (): CadChatClient => {
     }
 
     const lastAssistantId = messages.findLast((message) => message.role === 'assistant')?.id;
-    withWorkspace(userTurnIdAtOrBefore(messages, lastAssistantId), (execution) => {
+    withWorkspace(userTurnIdAtOrBefore(messages, lastAssistantId), (execution, runId) => {
       actions.regenerate({
         body: createRunBody({
           agent,
           projectId,
           execution,
+          runId,
           browserHost: hostAdmission({
             agent,
             chatId: activeChatId,
@@ -962,7 +994,7 @@ export const useCadChatClient = (): CadChatClient => {
         }),
       });
     });
-  }, [actions, activeChatId, agent, messages, projectId, refuseWhileBusy, resolveModel, withWorkspace]);
+  }, [actions, activeChatId, agent, messages, projectId, refuseWhileBusy, withWorkspace]);
 
   const stop = useCallback(() => {
     if (workspaceAuthority) {
@@ -1030,7 +1062,10 @@ export const useCadChatClient = (): CadChatClient => {
         approvalTurnId === undefined ? undefined : { turnId: approvalTurnId },
       );
       await workspaceAuthority.markAdmitted(activeChatId, approvalTurnId);
-      const runBody = store.startRun(activeChatId, createRunBody({ agent, projectId, execution: prepared.execution }));
+      const runBody = store.startRun(
+        activeChatId,
+        createRunBody({ agent, projectId, execution: prepared.execution, runId: prepared.runId }),
+      );
       try {
         await chat.addToolApprovalResponse({
           id: approvalId,

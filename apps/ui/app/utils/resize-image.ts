@@ -22,6 +22,19 @@ const LAST_RESORT_QUALITY = 0.3;
 /* eslint-enable @typescript-eslint/naming-convention -- Re-enable after constant declarations */
 
 /**
+ * Thrown when even the last-resort compression stays over
+ * {@link MAX_DATA_URL_LENGTH}. Distinguishable from a generic compression
+ * failure so the caller can toast "too large" rather than "failed".
+ */
+export class ImageTooLargeError extends Error {
+  public override readonly name = 'ImageTooLargeError';
+
+  public constructor(length: number) {
+    super(`Image is too large to attach: ${length} bytes after compression exceeds ${MAX_DATA_URL_LENGTH}.`);
+  }
+}
+
+/**
  * Resizes and compresses an image data URL for chat transmission.
  *
  * - Caps dimensions at 1568×1568 (preserving aspect ratio)
@@ -55,8 +68,8 @@ export const resizeImageForChat = async (dataUrl: string): Promise<string> => {
       try {
         const result = compressWithCanvas(img, origW, origH);
         resolve(result);
-      } catch {
-        reject(new Error('Failed to compress image'));
+      } catch (error) {
+        reject(error instanceof ImageTooLargeError ? error : new Error('Failed to compress image'));
       }
     });
 
@@ -96,5 +109,11 @@ function compressWithCanvas(img: HTMLImageElement, origW: number, origH: number)
   canvas.height = height;
   context.drawImage(img, 0, 0, width, height);
 
-  return canvas.toDataURL('image/jpeg', LAST_RESORT_QUALITY);
+  const lastResort = canvas.toDataURL('image/jpeg', LAST_RESORT_QUALITY);
+  if (lastResort.length > MAX_DATA_URL_LENGTH) {
+    // D17: the ladder's last resort enforces the image cap or rejects; it never
+    // returns an over-cap data URL for the caller to store.
+    throw new ImageTooLargeError(lastResort.length);
+  }
+  return lastResort;
 }

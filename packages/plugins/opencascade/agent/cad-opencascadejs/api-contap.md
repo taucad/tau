@@ -4,683 +4,683 @@
 
 Contap_ArcFunction: declare class Contap_ArcFunction extends math_FunctionWithDerivative
 
-constructor
+  constructor
 
-Set(S: Adaptor3d_Surface): void;
-Set(Direction: gp_Dir): void;
-Set(Eye: gp_Pnt): void;
-Set(A: Adaptor2d_Curve2d): void;
-Set(Direction: gp_Dir, Angle: number): void;
-Set(Eye: gp_Pnt, Angle: number): void;
-Set(S: Adaptor3d_Surface): void;
-Set(Direction: gp_Dir): void;
-Set(Eye: gp_Pnt): void;
-Set(A: Adaptor2d_Curve2d): void;
-Set(Direction: gp_Dir, Angle: number): void;
-Set(Eye: gp_Pnt, Angle: number): void;
-Set(S: Adaptor3d_Surface): void;
-Set(Direction: gp_Dir): void;
-Set(Eye: gp_Pnt): void;
-Set(A: Adaptor2d_Curve2d): void;
-Set(Direction: gp_Dir, Angle: number): void;
-Set(Eye: gp_Pnt, Angle: number): void;
-Set(S: Adaptor3d_Surface): void;
-Set(Direction: gp_Dir): void;
-Set(Eye: gp_Pnt): void;
-Set(A: Adaptor2d_Curve2d): void;
-Set(Direction: gp_Dir, Angle: number): void;
-Set(Eye: gp_Pnt, Angle: number): void;
-Set(S: Adaptor3d_Surface): void;
-Set(Direction: gp_Dir): void;
-Set(Eye: gp_Pnt): void;
-Set(A: Adaptor2d_Curve2d): void;
-Set(Direction: gp_Dir, Angle: number): void;
-Set(Eye: gp_Pnt, Angle: number): void;
-Set(S: Adaptor3d_Surface): void;
-Set(Direction: gp_Dir): void;
-Set(Eye: gp_Pnt): void;
-Set(A: Adaptor2d_Curve2d): void;
-Set(Direction: gp_Dir, Angle: number): void;
-Set(Eye: gp_Pnt, Angle: number): void;
+  Set(S: Adaptor3d_Surface): void;
+  Set(Direction: gp_Dir): void;
+  Set(Eye: gp_Pnt): void;
+  Set(A: Adaptor2d_Curve2d): void;
+  Set(Direction: gp_Dir, Angle: number): void;
+  Set(Eye: gp_Pnt, Angle: number): void;
+  Set(S: Adaptor3d_Surface): void;
+  Set(Direction: gp_Dir): void;
+  Set(Eye: gp_Pnt): void;
+  Set(A: Adaptor2d_Curve2d): void;
+  Set(Direction: gp_Dir, Angle: number): void;
+  Set(Eye: gp_Pnt, Angle: number): void;
+  Set(S: Adaptor3d_Surface): void;
+  Set(Direction: gp_Dir): void;
+  Set(Eye: gp_Pnt): void;
+  Set(A: Adaptor2d_Curve2d): void;
+  Set(Direction: gp_Dir, Angle: number): void;
+  Set(Eye: gp_Pnt, Angle: number): void;
+  Set(S: Adaptor3d_Surface): void;
+  Set(Direction: gp_Dir): void;
+  Set(Eye: gp_Pnt): void;
+  Set(A: Adaptor2d_Curve2d): void;
+  Set(Direction: gp_Dir, Angle: number): void;
+  Set(Eye: gp_Pnt, Angle: number): void;
+  Set(S: Adaptor3d_Surface): void;
+  Set(Direction: gp_Dir): void;
+  Set(Eye: gp_Pnt): void;
+  Set(A: Adaptor2d_Curve2d): void;
+  Set(Direction: gp_Dir, Angle: number): void;
+  Set(Eye: gp_Pnt, Angle: number): void;
+  Set(S: Adaptor3d_Surface): void;
+  Set(Direction: gp_Dir): void;
+  Set(Eye: gp_Pnt): void;
+  Set(A: Adaptor2d_Curve2d): void;
+  Set(Direction: gp_Dir, Angle: number): void;
+  Set(Eye: gp_Pnt, Angle: number): void;
 
-Value(X: number, F: number): { returnValue: boolean; F: number };
+  Value(X: number, F: number): { returnValue: boolean; F: number };
 
-Derivative(X: number, D: number): { returnValue: boolean; D: number };
+  Derivative(X: number, D: number): { returnValue: boolean; D: number };
 
-Values(X: number, F: number, D: number): { returnValue: boolean; F: number; D: number };
+  Values(X: number, F: number, D: number): { returnValue: boolean; F: number; D: number };
 
-NbSamples(): number;
+  NbSamples(): number;
 
-GetStateNumber(): number;
+  GetStateNumber(): number;
 
-Valpoint(Index: number): gp_Pnt;
+  Valpoint(Index: number): gp_Pnt;
 
-Quadric(): IntSurf_Quadric;
+  Quadric(): IntSurf_Quadric;
 
-Surface(): Adaptor3d_Surface;
+  Surface(): Adaptor3d_Surface;
 
-LastComputedPoint(): gp_Pnt;
+  LastComputedPoint(): gp_Pnt;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Contap_ContAna: declare class Contap_ContAna
 
-constructor
+  constructor
 
-Perform(S: gp_Sphere, D: gp_Dir): void;
-Perform(S: gp_Sphere, Eye: gp_Pnt): void;
-Perform(C: gp_Cylinder, D: gp_Dir): void;
-Perform(C: gp_Cylinder, Eye: gp_Pnt): void;
-Perform(C: gp_Cone, D: gp_Dir): void;
-Perform(C: gp_Cone, Eye: gp_Pnt): void;
-Perform(S: gp_Sphere, D: gp_Dir, Ang: number): void;
-Perform(C: gp_Cylinder, D: gp_Dir, Ang: number): void;
-Perform(C: gp_Cone, D: gp_Dir, Ang: number): void;
-Perform(S: gp_Sphere, D: gp_Dir): void;
-Perform(S: gp_Sphere, Eye: gp_Pnt): void;
-Perform(C: gp_Cylinder, D: gp_Dir): void;
-Perform(C: gp_Cylinder, Eye: gp_Pnt): void;
-Perform(C: gp_Cone, D: gp_Dir): void;
-Perform(C: gp_Cone, Eye: gp_Pnt): void;
-Perform(S: gp_Sphere, D: gp_Dir, Ang: number): void;
-Perform(C: gp_Cylinder, D: gp_Dir, Ang: number): void;
-Perform(C: gp_Cone, D: gp_Dir, Ang: number): void;
-Perform(S: gp_Sphere, D: gp_Dir): void;
-Perform(S: gp_Sphere, Eye: gp_Pnt): void;
-Perform(C: gp_Cylinder, D: gp_Dir): void;
-Perform(C: gp_Cylinder, Eye: gp_Pnt): void;
-Perform(C: gp_Cone, D: gp_Dir): void;
-Perform(C: gp_Cone, Eye: gp_Pnt): void;
-Perform(S: gp_Sphere, D: gp_Dir, Ang: number): void;
-Perform(C: gp_Cylinder, D: gp_Dir, Ang: number): void;
-Perform(C: gp_Cone, D: gp_Dir, Ang: number): void;
-Perform(S: gp_Sphere, D: gp_Dir): void;
-Perform(S: gp_Sphere, Eye: gp_Pnt): void;
-Perform(C: gp_Cylinder, D: gp_Dir): void;
-Perform(C: gp_Cylinder, Eye: gp_Pnt): void;
-Perform(C: gp_Cone, D: gp_Dir): void;
-Perform(C: gp_Cone, Eye: gp_Pnt): void;
-Perform(S: gp_Sphere, D: gp_Dir, Ang: number): void;
-Perform(C: gp_Cylinder, D: gp_Dir, Ang: number): void;
-Perform(C: gp_Cone, D: gp_Dir, Ang: number): void;
-Perform(S: gp_Sphere, D: gp_Dir): void;
-Perform(S: gp_Sphere, Eye: gp_Pnt): void;
-Perform(C: gp_Cylinder, D: gp_Dir): void;
-Perform(C: gp_Cylinder, Eye: gp_Pnt): void;
-Perform(C: gp_Cone, D: gp_Dir): void;
-Perform(C: gp_Cone, Eye: gp_Pnt): void;
-Perform(S: gp_Sphere, D: gp_Dir, Ang: number): void;
-Perform(C: gp_Cylinder, D: gp_Dir, Ang: number): void;
-Perform(C: gp_Cone, D: gp_Dir, Ang: number): void;
-Perform(S: gp_Sphere, D: gp_Dir): void;
-Perform(S: gp_Sphere, Eye: gp_Pnt): void;
-Perform(C: gp_Cylinder, D: gp_Dir): void;
-Perform(C: gp_Cylinder, Eye: gp_Pnt): void;
-Perform(C: gp_Cone, D: gp_Dir): void;
-Perform(C: gp_Cone, Eye: gp_Pnt): void;
-Perform(S: gp_Sphere, D: gp_Dir, Ang: number): void;
-Perform(C: gp_Cylinder, D: gp_Dir, Ang: number): void;
-Perform(C: gp_Cone, D: gp_Dir, Ang: number): void;
-Perform(S: gp_Sphere, D: gp_Dir): void;
-Perform(S: gp_Sphere, Eye: gp_Pnt): void;
-Perform(C: gp_Cylinder, D: gp_Dir): void;
-Perform(C: gp_Cylinder, Eye: gp_Pnt): void;
-Perform(C: gp_Cone, D: gp_Dir): void;
-Perform(C: gp_Cone, Eye: gp_Pnt): void;
-Perform(S: gp_Sphere, D: gp_Dir, Ang: number): void;
-Perform(C: gp_Cylinder, D: gp_Dir, Ang: number): void;
-Perform(C: gp_Cone, D: gp_Dir, Ang: number): void;
-Perform(S: gp_Sphere, D: gp_Dir): void;
-Perform(S: gp_Sphere, Eye: gp_Pnt): void;
-Perform(C: gp_Cylinder, D: gp_Dir): void;
-Perform(C: gp_Cylinder, Eye: gp_Pnt): void;
-Perform(C: gp_Cone, D: gp_Dir): void;
-Perform(C: gp_Cone, Eye: gp_Pnt): void;
-Perform(S: gp_Sphere, D: gp_Dir, Ang: number): void;
-Perform(C: gp_Cylinder, D: gp_Dir, Ang: number): void;
-Perform(C: gp_Cone, D: gp_Dir, Ang: number): void;
-Perform(S: gp_Sphere, D: gp_Dir): void;
-Perform(S: gp_Sphere, Eye: gp_Pnt): void;
-Perform(C: gp_Cylinder, D: gp_Dir): void;
-Perform(C: gp_Cylinder, Eye: gp_Pnt): void;
-Perform(C: gp_Cone, D: gp_Dir): void;
-Perform(C: gp_Cone, Eye: gp_Pnt): void;
-Perform(S: gp_Sphere, D: gp_Dir, Ang: number): void;
-Perform(C: gp_Cylinder, D: gp_Dir, Ang: number): void;
-Perform(C: gp_Cone, D: gp_Dir, Ang: number): void;
+  Perform(S: gp_Sphere, D: gp_Dir): void;
+  Perform(S: gp_Sphere, Eye: gp_Pnt): void;
+  Perform(C: gp_Cylinder, D: gp_Dir): void;
+  Perform(C: gp_Cylinder, Eye: gp_Pnt): void;
+  Perform(C: gp_Cone, D: gp_Dir): void;
+  Perform(C: gp_Cone, Eye: gp_Pnt): void;
+  Perform(S: gp_Sphere, D: gp_Dir, Ang: number): void;
+  Perform(C: gp_Cylinder, D: gp_Dir, Ang: number): void;
+  Perform(C: gp_Cone, D: gp_Dir, Ang: number): void;
+  Perform(S: gp_Sphere, D: gp_Dir): void;
+  Perform(S: gp_Sphere, Eye: gp_Pnt): void;
+  Perform(C: gp_Cylinder, D: gp_Dir): void;
+  Perform(C: gp_Cylinder, Eye: gp_Pnt): void;
+  Perform(C: gp_Cone, D: gp_Dir): void;
+  Perform(C: gp_Cone, Eye: gp_Pnt): void;
+  Perform(S: gp_Sphere, D: gp_Dir, Ang: number): void;
+  Perform(C: gp_Cylinder, D: gp_Dir, Ang: number): void;
+  Perform(C: gp_Cone, D: gp_Dir, Ang: number): void;
+  Perform(S: gp_Sphere, D: gp_Dir): void;
+  Perform(S: gp_Sphere, Eye: gp_Pnt): void;
+  Perform(C: gp_Cylinder, D: gp_Dir): void;
+  Perform(C: gp_Cylinder, Eye: gp_Pnt): void;
+  Perform(C: gp_Cone, D: gp_Dir): void;
+  Perform(C: gp_Cone, Eye: gp_Pnt): void;
+  Perform(S: gp_Sphere, D: gp_Dir, Ang: number): void;
+  Perform(C: gp_Cylinder, D: gp_Dir, Ang: number): void;
+  Perform(C: gp_Cone, D: gp_Dir, Ang: number): void;
+  Perform(S: gp_Sphere, D: gp_Dir): void;
+  Perform(S: gp_Sphere, Eye: gp_Pnt): void;
+  Perform(C: gp_Cylinder, D: gp_Dir): void;
+  Perform(C: gp_Cylinder, Eye: gp_Pnt): void;
+  Perform(C: gp_Cone, D: gp_Dir): void;
+  Perform(C: gp_Cone, Eye: gp_Pnt): void;
+  Perform(S: gp_Sphere, D: gp_Dir, Ang: number): void;
+  Perform(C: gp_Cylinder, D: gp_Dir, Ang: number): void;
+  Perform(C: gp_Cone, D: gp_Dir, Ang: number): void;
+  Perform(S: gp_Sphere, D: gp_Dir): void;
+  Perform(S: gp_Sphere, Eye: gp_Pnt): void;
+  Perform(C: gp_Cylinder, D: gp_Dir): void;
+  Perform(C: gp_Cylinder, Eye: gp_Pnt): void;
+  Perform(C: gp_Cone, D: gp_Dir): void;
+  Perform(C: gp_Cone, Eye: gp_Pnt): void;
+  Perform(S: gp_Sphere, D: gp_Dir, Ang: number): void;
+  Perform(C: gp_Cylinder, D: gp_Dir, Ang: number): void;
+  Perform(C: gp_Cone, D: gp_Dir, Ang: number): void;
+  Perform(S: gp_Sphere, D: gp_Dir): void;
+  Perform(S: gp_Sphere, Eye: gp_Pnt): void;
+  Perform(C: gp_Cylinder, D: gp_Dir): void;
+  Perform(C: gp_Cylinder, Eye: gp_Pnt): void;
+  Perform(C: gp_Cone, D: gp_Dir): void;
+  Perform(C: gp_Cone, Eye: gp_Pnt): void;
+  Perform(S: gp_Sphere, D: gp_Dir, Ang: number): void;
+  Perform(C: gp_Cylinder, D: gp_Dir, Ang: number): void;
+  Perform(C: gp_Cone, D: gp_Dir, Ang: number): void;
+  Perform(S: gp_Sphere, D: gp_Dir): void;
+  Perform(S: gp_Sphere, Eye: gp_Pnt): void;
+  Perform(C: gp_Cylinder, D: gp_Dir): void;
+  Perform(C: gp_Cylinder, Eye: gp_Pnt): void;
+  Perform(C: gp_Cone, D: gp_Dir): void;
+  Perform(C: gp_Cone, Eye: gp_Pnt): void;
+  Perform(S: gp_Sphere, D: gp_Dir, Ang: number): void;
+  Perform(C: gp_Cylinder, D: gp_Dir, Ang: number): void;
+  Perform(C: gp_Cone, D: gp_Dir, Ang: number): void;
+  Perform(S: gp_Sphere, D: gp_Dir): void;
+  Perform(S: gp_Sphere, Eye: gp_Pnt): void;
+  Perform(C: gp_Cylinder, D: gp_Dir): void;
+  Perform(C: gp_Cylinder, Eye: gp_Pnt): void;
+  Perform(C: gp_Cone, D: gp_Dir): void;
+  Perform(C: gp_Cone, Eye: gp_Pnt): void;
+  Perform(S: gp_Sphere, D: gp_Dir, Ang: number): void;
+  Perform(C: gp_Cylinder, D: gp_Dir, Ang: number): void;
+  Perform(C: gp_Cone, D: gp_Dir, Ang: number): void;
+  Perform(S: gp_Sphere, D: gp_Dir): void;
+  Perform(S: gp_Sphere, Eye: gp_Pnt): void;
+  Perform(C: gp_Cylinder, D: gp_Dir): void;
+  Perform(C: gp_Cylinder, Eye: gp_Pnt): void;
+  Perform(C: gp_Cone, D: gp_Dir): void;
+  Perform(C: gp_Cone, Eye: gp_Pnt): void;
+  Perform(S: gp_Sphere, D: gp_Dir, Ang: number): void;
+  Perform(C: gp_Cylinder, D: gp_Dir, Ang: number): void;
+  Perform(C: gp_Cone, D: gp_Dir, Ang: number): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbContours(): number;
+  NbContours(): number;
 
-TypeContour(): GeomAbs_CurveType;
+  TypeContour(): GeomAbs_CurveType;
 
-Circle(): gp_Circ;
+  Circle(): gp_Circ;
 
-Line(Index: number): gp_Lin;
+  Line(Index: number): gp_Lin;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Contap_Contour: declare class Contap_Contour
 
-constructor
+  constructor
 
-Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool): void;
-Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Direction: gp_Vec): void;
-Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Eye: gp_Pnt): void;
-Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Direction: gp_Vec, Angle: number): void;
-Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool): void;
-Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Direction: gp_Vec): void;
-Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Eye: gp_Pnt): void;
-Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Direction: gp_Vec, Angle: number): void;
-Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool): void;
-Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Direction: gp_Vec): void;
-Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Eye: gp_Pnt): void;
-Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Direction: gp_Vec, Angle: number): void;
-Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool): void;
-Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Direction: gp_Vec): void;
-Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Eye: gp_Pnt): void;
-Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Direction: gp_Vec, Angle: number): void;
+  Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool): void;
+  Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Direction: gp_Vec): void;
+  Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Eye: gp_Pnt): void;
+  Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Direction: gp_Vec, Angle: number): void;
+  Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool): void;
+  Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Direction: gp_Vec): void;
+  Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Eye: gp_Pnt): void;
+  Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Direction: gp_Vec, Angle: number): void;
+  Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool): void;
+  Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Direction: gp_Vec): void;
+  Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Eye: gp_Pnt): void;
+  Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Direction: gp_Vec, Angle: number): void;
+  Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool): void;
+  Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Direction: gp_Vec): void;
+  Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Eye: gp_Pnt): void;
+  Perform(Surf: Adaptor3d_Surface, Domain: Adaptor3d_TopolTool, Direction: gp_Vec, Angle: number): void;
 
-Init(Direction: gp_Vec): void;
-Init(Eye: gp_Pnt): void;
-Init(Direction: gp_Vec, Angle: number): void;
-Init(Direction: gp_Vec): void;
-Init(Eye: gp_Pnt): void;
-Init(Direction: gp_Vec, Angle: number): void;
-Init(Direction: gp_Vec): void;
-Init(Eye: gp_Pnt): void;
-Init(Direction: gp_Vec, Angle: number): void;
+  Init(Direction: gp_Vec): void;
+  Init(Eye: gp_Pnt): void;
+  Init(Direction: gp_Vec, Angle: number): void;
+  Init(Direction: gp_Vec): void;
+  Init(Eye: gp_Pnt): void;
+  Init(Direction: gp_Vec, Angle: number): void;
+  Init(Direction: gp_Vec): void;
+  Init(Eye: gp_Pnt): void;
+  Init(Direction: gp_Vec, Angle: number): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-IsEmpty(): boolean;
+  IsEmpty(): boolean;
 
-NbLines(): number;
+  NbLines(): number;
 
-Line(Index: number): Contap_Line;
+  Line(Index: number): Contap_Line;
 
-SurfaceFunction(): Contap_SurfFunction;
+  SurfaceFunction(): Contap_SurfFunction;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Contap_HContTool: declare class Contap_HContTool
 
-constructor
+  constructor
 
-static NbSamplesU(S: Adaptor3d_Surface, u1: number, u2: number): number;
+  static NbSamplesU(S: Adaptor3d_Surface, u1: number, u2: number): number;
 
-static NbSamplesV(S: Adaptor3d_Surface, v1: number, v2: number): number;
+  static NbSamplesV(S: Adaptor3d_Surface, v1: number, v2: number): number;
 
-static NbSamplePoints(S: Adaptor3d_Surface): number;
+  static NbSamplePoints(S: Adaptor3d_Surface): number;
 
-static SamplePoint(S: Adaptor3d_Surface, Index: number, U?: number, V?: number): { U: number; V: number };
+  static SamplePoint(S: Adaptor3d_Surface, Index: number, U?: number, V?: number): { U: number; V: number };
 
-static HasBeenSeen(C: Adaptor2d_Curve2d): boolean;
+  static HasBeenSeen(C: Adaptor2d_Curve2d): boolean;
 
-static NbSamplesOnArc(A: Adaptor2d_Curve2d): number;
+  static NbSamplesOnArc(A: Adaptor2d_Curve2d): number;
 
-static Bounds(C: Adaptor2d_Curve2d, Ufirst?: number, Ulast?: number): { Ufirst: number; Ulast: number };
+  static Bounds(C: Adaptor2d_Curve2d, Ufirst?: number, Ulast?: number): { Ufirst: number; Ulast: number };
 
-static Project(C: Adaptor2d_Curve2d, P: gp_Pnt2d, Paramproj: number, Ptproj: gp_Pnt2d): { returnValue: boolean; Paramproj: number };
+  static Project(C: Adaptor2d_Curve2d, P: gp_Pnt2d, Paramproj: number, Ptproj: gp_Pnt2d): { returnValue: boolean; Paramproj: number };
 
-static Tolerance(V: Adaptor3d_HVertex, C: Adaptor2d_Curve2d): number;
+  static Tolerance(V: Adaptor3d_HVertex, C: Adaptor2d_Curve2d): number;
 
-static Parameter(V: Adaptor3d_HVertex, C: Adaptor2d_Curve2d): number;
+  static Parameter(V: Adaptor3d_HVertex, C: Adaptor2d_Curve2d): number;
 
-static NbPoints(C: Adaptor2d_Curve2d): number;
+  static NbPoints(C: Adaptor2d_Curve2d): number;
 
-static Value(C: Adaptor2d_Curve2d, Index: number, Pt: gp_Pnt, Tol?: number, U?: number): { Tol: number; U: number };
+  static Value(C: Adaptor2d_Curve2d, Index: number, Pt: gp_Pnt, Tol?: number, U?: number): { Tol: number; U: number };
 
-static IsVertex(C: Adaptor2d_Curve2d, Index: number): boolean;
+  static IsVertex(C: Adaptor2d_Curve2d, Index: number): boolean;
 
-static Vertex(C: Adaptor2d_Curve2d, Index: number): { V: Adaptor3d_HVertex; [Symbol.dispose](): void };
+  static Vertex(C: Adaptor2d_Curve2d, Index: number): { V: Adaptor3d_HVertex; [Symbol.dispose](): void };
 
-static NbSegments(C: Adaptor2d_Curve2d): number;
+  static NbSegments(C: Adaptor2d_Curve2d): number;
 
-static HasFirstPoint(C: Adaptor2d_Curve2d, Index: number, IndFirst?: number): { returnValue: boolean; IndFirst: number };
+  static HasFirstPoint(C: Adaptor2d_Curve2d, Index: number, IndFirst?: number): { returnValue: boolean; IndFirst: number };
 
-static HasLastPoint(C: Adaptor2d_Curve2d, Index: number, IndLast?: number): { returnValue: boolean; IndLast: number };
+  static HasLastPoint(C: Adaptor2d_Curve2d, Index: number, IndLast?: number): { returnValue: boolean; IndLast: number };
 
-static IsAllSolution(C: Adaptor2d_Curve2d): boolean;
+  static IsAllSolution(C: Adaptor2d_Curve2d): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Contap_HCurve2dTool: declare class Contap_HCurve2dTool
 
-constructor
+  constructor
 
-static FirstParameter(C: Adaptor2d_Curve2d): number;
+  static FirstParameter(C: Adaptor2d_Curve2d): number;
 
-static LastParameter(C: Adaptor2d_Curve2d): number;
+  static LastParameter(C: Adaptor2d_Curve2d): number;
 
-static Continuity(C: Adaptor2d_Curve2d): GeomAbs_Shape;
+  static Continuity(C: Adaptor2d_Curve2d): GeomAbs_Shape;
 
-static NbIntervals(C: Adaptor2d_Curve2d, S: GeomAbs_Shape): number;
+  static NbIntervals(C: Adaptor2d_Curve2d, S: GeomAbs_Shape): number;
 
-static Intervals(C: Adaptor2d_Curve2d, T: NCollection_Array1_double, S: GeomAbs_Shape): void;
+  static Intervals(C: Adaptor2d_Curve2d, T: NCollection_Array1_double, S: GeomAbs_Shape): void;
 
-static IsClosed(C: Adaptor2d_Curve2d): boolean;
+  static IsClosed(C: Adaptor2d_Curve2d): boolean;
 
-static IsPeriodic(C: Adaptor2d_Curve2d): boolean;
+  static IsPeriodic(C: Adaptor2d_Curve2d): boolean;
 
-static Period(C: Adaptor2d_Curve2d): number;
+  static Period(C: Adaptor2d_Curve2d): number;
 
-static Value(C: Adaptor2d_Curve2d, U: number): gp_Pnt2d;
+  static Value(C: Adaptor2d_Curve2d, U: number): gp_Pnt2d;
 
-static D0(C: Adaptor2d_Curve2d, U: number, P: gp_Pnt2d): void;
+  static D0(C: Adaptor2d_Curve2d, U: number, P: gp_Pnt2d): void;
 
-static D1(C: Adaptor2d_Curve2d, U: number, P: gp_Pnt2d, V: gp_Vec2d): void;
+  static D1(C: Adaptor2d_Curve2d, U: number, P: gp_Pnt2d, V: gp_Vec2d): void;
 
-static D2(C: Adaptor2d_Curve2d, U: number, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d): void;
+  static D2(C: Adaptor2d_Curve2d, U: number, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d): void;
 
-static D3(C: Adaptor2d_Curve2d, U: number, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d, V3: gp_Vec2d): void;
+  static D3(C: Adaptor2d_Curve2d, U: number, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d, V3: gp_Vec2d): void;
 
-static DN(C: Adaptor2d_Curve2d, U: number, N: number): gp_Vec2d;
+  static DN(C: Adaptor2d_Curve2d, U: number, N: number): gp_Vec2d;
 
-static Resolution(C: Adaptor2d_Curve2d, R3d: number): number;
+  static Resolution(C: Adaptor2d_Curve2d, R3d: number): number;
 
-static GetType(C: Adaptor2d_Curve2d): GeomAbs_CurveType;
+  static GetType(C: Adaptor2d_Curve2d): GeomAbs_CurveType;
 
-static Line(C: Adaptor2d_Curve2d): gp_Lin2d;
+  static Line(C: Adaptor2d_Curve2d): gp_Lin2d;
 
-static Circle(C: Adaptor2d_Curve2d): gp_Circ2d;
+  static Circle(C: Adaptor2d_Curve2d): gp_Circ2d;
 
-static Ellipse(C: Adaptor2d_Curve2d): gp_Elips2d;
+  static Ellipse(C: Adaptor2d_Curve2d): gp_Elips2d;
 
-static Hyperbola(C: Adaptor2d_Curve2d): gp_Hypr2d;
+  static Hyperbola(C: Adaptor2d_Curve2d): gp_Hypr2d;
 
-static Parabola(C: Adaptor2d_Curve2d): gp_Parab2d;
+  static Parabola(C: Adaptor2d_Curve2d): gp_Parab2d;
 
-static Bezier(C: Adaptor2d_Curve2d): Geom2d_BezierCurve;
+  static Bezier(C: Adaptor2d_Curve2d): Geom2d_BezierCurve;
 
-static BSpline(C: Adaptor2d_Curve2d): Geom2d_BSplineCurve;
+  static BSpline(C: Adaptor2d_Curve2d): Geom2d_BSplineCurve;
 
-static NbSamples(C: Adaptor2d_Curve2d, U0: number, U1: number): number;
+  static NbSamples(C: Adaptor2d_Curve2d, U0: number, U1: number): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Contap_IType: typeof Contap_IType[keyof typeof Contap_IType]
 
 Contap_Line: declare class Contap_Line
 
-constructor
+  constructor
 
-SetLineOn2S(L: IntSurf_LineOn2S): void;
+  SetLineOn2S(L: IntSurf_LineOn2S): void;
 
-Clear(): void;
+  Clear(): void;
 
-LineOn2S(): IntSurf_LineOn2S;
+  LineOn2S(): IntSurf_LineOn2S;
 
-ResetSeqOfVertex(): void;
+  ResetSeqOfVertex(): void;
 
-Add(P: IntSurf_PntOn2S): void;
-Add(P: Contap_Point): void;
-Add(P: IntSurf_PntOn2S): void;
-Add(P: Contap_Point): void;
+  Add(P: IntSurf_PntOn2S): void;
+  Add(P: Contap_Point): void;
+  Add(P: IntSurf_PntOn2S): void;
+  Add(P: Contap_Point): void;
 
-SetValue(L: gp_Lin): void;
-SetValue(C: gp_Circ): void;
-SetValue(A: Adaptor2d_Curve2d): void;
-SetValue(L: gp_Lin): void;
-SetValue(C: gp_Circ): void;
-SetValue(A: Adaptor2d_Curve2d): void;
-SetValue(L: gp_Lin): void;
-SetValue(C: gp_Circ): void;
-SetValue(A: Adaptor2d_Curve2d): void;
+  SetValue(L: gp_Lin): void;
+  SetValue(C: gp_Circ): void;
+  SetValue(A: Adaptor2d_Curve2d): void;
+  SetValue(L: gp_Lin): void;
+  SetValue(C: gp_Circ): void;
+  SetValue(A: Adaptor2d_Curve2d): void;
+  SetValue(L: gp_Lin): void;
+  SetValue(C: gp_Circ): void;
+  SetValue(A: Adaptor2d_Curve2d): void;
 
-NbVertex(): number;
+  NbVertex(): number;
 
-Vertex(Index: number): Contap_Point;
+  Vertex(Index: number): Contap_Point;
 
-TypeContour(): Contap_IType;
+  TypeContour(): Contap_IType;
 
-NbPnts(): number;
+  NbPnts(): number;
 
-Point(Index: number): IntSurf_PntOn2S;
+  Point(Index: number): IntSurf_PntOn2S;
 
-Line(): gp_Lin;
+  Line(): gp_Lin;
 
-Circle(): gp_Circ;
+  Circle(): gp_Circ;
 
-Arc(): Adaptor2d_Curve2d;
+  Arc(): Adaptor2d_Curve2d;
 
-SetTransitionOnS(T: IntSurf_TypeTrans): void;
+  SetTransitionOnS(T: IntSurf_TypeTrans): void;
 
-TransitionOnS(): IntSurf_TypeTrans;
+  TransitionOnS(): IntSurf_TypeTrans;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Contap_Point: declare class Contap_Point
 
-constructor
+  constructor
 
-SetValue(Pt: gp_Pnt, U: number, V: number): void;
+  SetValue(Pt: gp_Pnt, U: number, V: number): void;
 
-SetParameter(Para: number): void;
+  SetParameter(Para: number): void;
 
-SetVertex(V: Adaptor3d_HVertex): void;
+  SetVertex(V: Adaptor3d_HVertex): void;
 
-SetArc(A: Adaptor2d_Curve2d, Param: number, TLine: IntSurf_Transition, TArc: IntSurf_Transition): void;
+  SetArc(A: Adaptor2d_Curve2d, Param: number, TLine: IntSurf_Transition, TArc: IntSurf_Transition): void;
 
-SetMultiple(): void;
+  SetMultiple(): void;
 
-SetInternal(): void;
+  SetInternal(): void;
 
-Value(): gp_Pnt;
+  Value(): gp_Pnt;
 
-ParameterOnLine(): number;
+  ParameterOnLine(): number;
 
-Parameters(U1?: number, V1?: number): { U1: number; V1: number };
+  Parameters(U1?: number, V1?: number): { U1: number; V1: number };
 
-IsOnArc(): boolean;
+  IsOnArc(): boolean;
 
-Arc(): Adaptor2d_Curve2d;
+  Arc(): Adaptor2d_Curve2d;
 
-ParameterOnArc(): number;
+  ParameterOnArc(): number;
 
-TransitionOnLine(): IntSurf_Transition;
+  TransitionOnLine(): IntSurf_Transition;
 
-TransitionOnArc(): IntSurf_Transition;
+  TransitionOnArc(): IntSurf_Transition;
 
-IsVertex(): boolean;
+  IsVertex(): boolean;
 
-Vertex(): Adaptor3d_HVertex;
+  Vertex(): Adaptor3d_HVertex;
 
-IsMultiple(): boolean;
+  IsMultiple(): boolean;
 
-IsInternal(): boolean;
+  IsInternal(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Contap_SurfFunction: declare class Contap_SurfFunction extends math_FunctionSetWithDerivatives
 
-constructor
+  constructor
 
-Set(S: Adaptor3d_Surface): void;
-Set(Eye: gp_Pnt): void;
-Set(Dir: gp_Dir): void;
-Set(Tolerance: number): void;
-Set(Dir: gp_Dir, Angle: number): void;
-Set(Eye: gp_Pnt, Angle: number): void;
-Set(S: Adaptor3d_Surface): void;
-Set(Eye: gp_Pnt): void;
-Set(Dir: gp_Dir): void;
-Set(Tolerance: number): void;
-Set(Dir: gp_Dir, Angle: number): void;
-Set(Eye: gp_Pnt, Angle: number): void;
-Set(S: Adaptor3d_Surface): void;
-Set(Eye: gp_Pnt): void;
-Set(Dir: gp_Dir): void;
-Set(Tolerance: number): void;
-Set(Dir: gp_Dir, Angle: number): void;
-Set(Eye: gp_Pnt, Angle: number): void;
-Set(S: Adaptor3d_Surface): void;
-Set(Eye: gp_Pnt): void;
-Set(Dir: gp_Dir): void;
-Set(Tolerance: number): void;
-Set(Dir: gp_Dir, Angle: number): void;
-Set(Eye: gp_Pnt, Angle: number): void;
-Set(S: Adaptor3d_Surface): void;
-Set(Eye: gp_Pnt): void;
-Set(Dir: gp_Dir): void;
-Set(Tolerance: number): void;
-Set(Dir: gp_Dir, Angle: number): void;
-Set(Eye: gp_Pnt, Angle: number): void;
-Set(S: Adaptor3d_Surface): void;
-Set(Eye: gp_Pnt): void;
-Set(Dir: gp_Dir): void;
-Set(Tolerance: number): void;
-Set(Dir: gp_Dir, Angle: number): void;
-Set(Eye: gp_Pnt, Angle: number): void;
+  Set(S: Adaptor3d_Surface): void;
+  Set(Eye: gp_Pnt): void;
+  Set(Dir: gp_Dir): void;
+  Set(Tolerance: number): void;
+  Set(Dir: gp_Dir, Angle: number): void;
+  Set(Eye: gp_Pnt, Angle: number): void;
+  Set(S: Adaptor3d_Surface): void;
+  Set(Eye: gp_Pnt): void;
+  Set(Dir: gp_Dir): void;
+  Set(Tolerance: number): void;
+  Set(Dir: gp_Dir, Angle: number): void;
+  Set(Eye: gp_Pnt, Angle: number): void;
+  Set(S: Adaptor3d_Surface): void;
+  Set(Eye: gp_Pnt): void;
+  Set(Dir: gp_Dir): void;
+  Set(Tolerance: number): void;
+  Set(Dir: gp_Dir, Angle: number): void;
+  Set(Eye: gp_Pnt, Angle: number): void;
+  Set(S: Adaptor3d_Surface): void;
+  Set(Eye: gp_Pnt): void;
+  Set(Dir: gp_Dir): void;
+  Set(Tolerance: number): void;
+  Set(Dir: gp_Dir, Angle: number): void;
+  Set(Eye: gp_Pnt, Angle: number): void;
+  Set(S: Adaptor3d_Surface): void;
+  Set(Eye: gp_Pnt): void;
+  Set(Dir: gp_Dir): void;
+  Set(Tolerance: number): void;
+  Set(Dir: gp_Dir, Angle: number): void;
+  Set(Eye: gp_Pnt, Angle: number): void;
+  Set(S: Adaptor3d_Surface): void;
+  Set(Eye: gp_Pnt): void;
+  Set(Dir: gp_Dir): void;
+  Set(Tolerance: number): void;
+  Set(Dir: gp_Dir, Angle: number): void;
+  Set(Eye: gp_Pnt, Angle: number): void;
 
-NbVariables(): number;
+  NbVariables(): number;
 
-NbEquations(): number;
+  NbEquations(): number;
 
-Value(X: math_VectorBase_double, F: math_VectorBase_double): boolean;
+  Value(X: math_VectorBase_double, F: math_VectorBase_double): boolean;
 
-Derivatives(X: math_VectorBase_double, D: math_Matrix): boolean;
+  Derivatives(X: math_VectorBase_double, D: math_Matrix): boolean;
 
-Values(X: math_VectorBase_double, F: math_VectorBase_double, D: math_Matrix): boolean;
+  Values(X: math_VectorBase_double, F: math_VectorBase_double, D: math_Matrix): boolean;
 
-Root(): number;
+  Root(): number;
 
-Tolerance(): number;
+  Tolerance(): number;
 
-Point(): gp_Pnt;
+  Point(): gp_Pnt;
 
-IsTangent(): boolean;
+  IsTangent(): boolean;
 
-Direction3d(): gp_Vec;
+  Direction3d(): gp_Vec;
 
-Direction2d(): gp_Dir2d;
+  Direction2d(): gp_Dir2d;
 
-FunctionType(): Contap_TFunction;
+  FunctionType(): Contap_TFunction;
 
-Eye(): gp_Pnt;
+  Eye(): gp_Pnt;
 
-Direction(): gp_Dir;
+  Direction(): gp_Dir;
 
-Angle(): number;
+  Angle(): number;
 
-Surface(): Adaptor3d_Surface;
+  Surface(): Adaptor3d_Surface;
 
-PSurface(): Adaptor3d_Surface;
+  PSurface(): Adaptor3d_Surface;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Contap_SurfProps: declare class Contap_SurfProps
 
-constructor
+  constructor
 
-static Normale(S: Adaptor3d_Surface, U: number, V: number, P: gp_Pnt, N: gp_Vec): void;
+  static Normale(S: Adaptor3d_Surface, U: number, V: number, P: gp_Pnt, N: gp_Vec): void;
 
-static DerivAndNorm(S: Adaptor3d_Surface, U: number, V: number, P: gp_Pnt, d1u: gp_Vec, d1v: gp_Vec, N: gp_Vec): void;
+  static DerivAndNorm(S: Adaptor3d_Surface, U: number, V: number, P: gp_Pnt, d1u: gp_Vec, d1v: gp_Vec, N: gp_Vec): void;
 
-static NormAndDn(S: Adaptor3d_Surface, U: number, V: number, P: gp_Pnt, N: gp_Vec, Dnu: gp_Vec, Dnv: gp_Vec): void;
+  static NormAndDn(S: Adaptor3d_Surface, U: number, V: number, P: gp_Pnt, N: gp_Vec, Dnu: gp_Vec, Dnv: gp_Vec): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Contap_TFunction: typeof Contap_TFunction[keyof typeof Contap_TFunction]
 
 Contap_TheIWLineOfTheIWalking: declare class Contap_TheIWLineOfTheIWalking extends Standard_Transient
 
-constructor
+  constructor
 
-Reverse(): void;
+  Reverse(): void;
 
-Cut(Index: number): void;
+  Cut(Index: number): void;
 
-AddPoint(P: IntSurf_PntOn2S): void;
+  AddPoint(P: IntSurf_PntOn2S): void;
 
-AddStatusFirst(Closed: boolean, HasFirst: boolean): void;
-AddStatusFirst(Closed: boolean, HasLast: boolean, Index: number, P: IntSurf_PathPoint): void;
-AddStatusFirst(Closed: boolean, HasFirst: boolean): void;
-AddStatusFirst(Closed: boolean, HasLast: boolean, Index: number, P: IntSurf_PathPoint): void;
+  AddStatusFirst(Closed: boolean, HasFirst: boolean): void;
+  AddStatusFirst(Closed: boolean, HasLast: boolean, Index: number, P: IntSurf_PathPoint): void;
+  AddStatusFirst(Closed: boolean, HasFirst: boolean): void;
+  AddStatusFirst(Closed: boolean, HasLast: boolean, Index: number, P: IntSurf_PathPoint): void;
 
-AddStatusFirstLast(Closed: boolean, HasFirst: boolean, HasLast: boolean): void;
+  AddStatusFirstLast(Closed: boolean, HasFirst: boolean, HasLast: boolean): void;
 
-AddStatusLast(HasLast: boolean): void;
-AddStatusLast(HasLast: boolean, Index: number, P: IntSurf_PathPoint): void;
-AddStatusLast(HasLast: boolean): void;
-AddStatusLast(HasLast: boolean, Index: number, P: IntSurf_PathPoint): void;
+  AddStatusLast(HasLast: boolean): void;
+  AddStatusLast(HasLast: boolean, Index: number, P: IntSurf_PathPoint): void;
+  AddStatusLast(HasLast: boolean): void;
+  AddStatusLast(HasLast: boolean, Index: number, P: IntSurf_PathPoint): void;
 
-AddIndexPassing(Index: number): void;
+  AddIndexPassing(Index: number): void;
 
-SetTangentVector(V: gp_Vec, Index: number): void;
+  SetTangentVector(V: gp_Vec, Index: number): void;
 
-SetTangencyAtBegining(IsTangent: boolean): void;
+  SetTangencyAtBegining(IsTangent: boolean): void;
 
-SetTangencyAtEnd(IsTangent: boolean): void;
+  SetTangencyAtEnd(IsTangent: boolean): void;
 
-NbPoints(): number;
+  NbPoints(): number;
 
-Value(Index: number): IntSurf_PntOn2S;
+  Value(Index: number): IntSurf_PntOn2S;
 
-Line(): IntSurf_LineOn2S;
+  Line(): IntSurf_LineOn2S;
 
-IsClosed(): boolean;
+  IsClosed(): boolean;
 
-HasFirstPoint(): boolean;
+  HasFirstPoint(): boolean;
 
-HasLastPoint(): boolean;
+  HasLastPoint(): boolean;
 
-FirstPoint(): IntSurf_PathPoint;
+  FirstPoint(): IntSurf_PathPoint;
 
-FirstPointIndex(): number;
+  FirstPointIndex(): number;
 
-LastPoint(): IntSurf_PathPoint;
+  LastPoint(): IntSurf_PathPoint;
 
-LastPointIndex(): number;
+  LastPointIndex(): number;
 
-NbPassingPoint(): number;
+  NbPassingPoint(): number;
 
-PassingPoint(Index: number, IndexLine?: number, IndexPnts?: number): { IndexLine: number; IndexPnts: number };
+  PassingPoint(Index: number, IndexLine?: number, IndexPnts?: number): { IndexLine: number; IndexPnts: number };
 
-TangentVector(Index?: number): { returnValue: gp_Vec; Index: number; [Symbol.dispose](): void };
+  TangentVector(Index?: number): { returnValue: gp_Vec; Index: number; [Symbol.dispose](): void };
 
-IsTangentAtBegining(): boolean;
+  IsTangentAtBegining(): boolean;
 
-IsTangentAtEnd(): boolean;
+  IsTangentAtEnd(): boolean;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Contap_TheIWalking: declare class Contap_TheIWalking
 
-constructor
+  constructor
 
-SetTolerance(Epsilon: number, Deflection: number, Step: number): void;
+  SetTolerance(Epsilon: number, Deflection: number, Step: number): void;
 
-Perform(Pnts1: NCollection_Sequence_IntSurf_PathPoint, Pnts2: NCollection_Sequence_IntSurf_InteriorPoint, Func: Contap_SurfFunction, S: Adaptor3d_Surface, Reversed: boolean): void;
-Perform(Pnts1: NCollection_Sequence_IntSurf_PathPoint, Func: Contap_SurfFunction, S: Adaptor3d_Surface, Reversed: boolean): void;
-Perform(Pnts1: NCollection_Sequence_IntSurf_PathPoint, Pnts2: NCollection_Sequence_IntSurf_InteriorPoint, Func: Contap_SurfFunction, S: Adaptor3d_Surface, Reversed: boolean): void;
-Perform(Pnts1: NCollection_Sequence_IntSurf_PathPoint, Func: Contap_SurfFunction, S: Adaptor3d_Surface, Reversed: boolean): void;
+  Perform(Pnts1: NCollection_Sequence_IntSurf_PathPoint, Pnts2: NCollection_Sequence_IntSurf_InteriorPoint, Func: Contap_SurfFunction, S: Adaptor3d_Surface, Reversed: boolean): void;
+  Perform(Pnts1: NCollection_Sequence_IntSurf_PathPoint, Func: Contap_SurfFunction, S: Adaptor3d_Surface, Reversed: boolean): void;
+  Perform(Pnts1: NCollection_Sequence_IntSurf_PathPoint, Pnts2: NCollection_Sequence_IntSurf_InteriorPoint, Func: Contap_SurfFunction, S: Adaptor3d_Surface, Reversed: boolean): void;
+  Perform(Pnts1: NCollection_Sequence_IntSurf_PathPoint, Func: Contap_SurfFunction, S: Adaptor3d_Surface, Reversed: boolean): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbLines(): number;
+  NbLines(): number;
 
-Value(Index: number): Contap_TheIWLineOfTheIWalking;
+  Value(Index: number): Contap_TheIWLineOfTheIWalking;
 
-NbSinglePnts(): number;
+  NbSinglePnts(): number;
 
-SinglePnt(Index: number): IntSurf_PathPoint;
+  SinglePnt(Index: number): IntSurf_PathPoint;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Contap_ThePathPointOfTheSearch: declare class Contap_ThePathPointOfTheSearch
 
-constructor
+  constructor
 
-SetValue(P: gp_Pnt, Tol: number, V: Adaptor3d_HVertex, A: Adaptor2d_Curve2d, Parameter: number): void;
-SetValue(P: gp_Pnt, Tol: number, A: Adaptor2d_Curve2d, Parameter: number): void;
-SetValue(P: gp_Pnt, Tol: number, V: Adaptor3d_HVertex, A: Adaptor2d_Curve2d, Parameter: number): void;
-SetValue(P: gp_Pnt, Tol: number, A: Adaptor2d_Curve2d, Parameter: number): void;
+  SetValue(P: gp_Pnt, Tol: number, V: Adaptor3d_HVertex, A: Adaptor2d_Curve2d, Parameter: number): void;
+  SetValue(P: gp_Pnt, Tol: number, A: Adaptor2d_Curve2d, Parameter: number): void;
+  SetValue(P: gp_Pnt, Tol: number, V: Adaptor3d_HVertex, A: Adaptor2d_Curve2d, Parameter: number): void;
+  SetValue(P: gp_Pnt, Tol: number, A: Adaptor2d_Curve2d, Parameter: number): void;
 
-Value(): gp_Pnt;
+  Value(): gp_Pnt;
 
-Tolerance(): number;
+  Tolerance(): number;
 
-IsNew(): boolean;
+  IsNew(): boolean;
 
-Vertex(): Adaptor3d_HVertex;
+  Vertex(): Adaptor3d_HVertex;
 
-Arc(): Adaptor2d_Curve2d;
+  Arc(): Adaptor2d_Curve2d;
 
-Parameter(): number;
+  Parameter(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Contap_TheSearch: declare class Contap_TheSearch
 
-constructor
+  constructor
 
-Perform(F: Contap_ArcFunction, Domain: Adaptor3d_TopolTool, TolBoundary: number, TolTangency: number, RecheckOnRegularity: boolean): void;
+  Perform(F: Contap_ArcFunction, Domain: Adaptor3d_TopolTool, TolBoundary: number, TolTangency: number, RecheckOnRegularity: boolean): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-AllArcSolution(): boolean;
+  AllArcSolution(): boolean;
 
-NbPoints(): number;
+  NbPoints(): number;
 
-Point(Index: number): Contap_ThePathPointOfTheSearch;
+  Point(Index: number): Contap_ThePathPointOfTheSearch;
 
-NbSegments(): number;
+  NbSegments(): number;
 
-Segment(Index: number): Contap_TheSegmentOfTheSearch;
+  Segment(Index: number): Contap_TheSegmentOfTheSearch;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Contap_TheSearchInside: declare class Contap_TheSearchInside
 
-constructor
+  constructor
 
-Perform(F: Contap_SurfFunction, Surf: Adaptor3d_Surface, T: Adaptor3d_TopolTool, Epsilon: number): void;
-Perform(F: Contap_SurfFunction, Surf: Adaptor3d_Surface, UStart: number, VStart: number): void;
-Perform(F: Contap_SurfFunction, Surf: Adaptor3d_Surface, T: Adaptor3d_TopolTool, Epsilon: number): void;
-Perform(F: Contap_SurfFunction, Surf: Adaptor3d_Surface, UStart: number, VStart: number): void;
+  Perform(F: Contap_SurfFunction, Surf: Adaptor3d_Surface, T: Adaptor3d_TopolTool, Epsilon: number): void;
+  Perform(F: Contap_SurfFunction, Surf: Adaptor3d_Surface, UStart: number, VStart: number): void;
+  Perform(F: Contap_SurfFunction, Surf: Adaptor3d_Surface, T: Adaptor3d_TopolTool, Epsilon: number): void;
+  Perform(F: Contap_SurfFunction, Surf: Adaptor3d_Surface, UStart: number, VStart: number): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbPoints(): number;
+  NbPoints(): number;
 
-Value(Index: number): IntSurf_InteriorPoint;
+  Value(Index: number): IntSurf_InteriorPoint;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Contap_TheSegmentOfTheSearch: declare class Contap_TheSegmentOfTheSearch
 
-constructor
+  constructor
 
-SetValue(A: Adaptor2d_Curve2d): void;
+  SetValue(A: Adaptor2d_Curve2d): void;
 
-SetLimitPoint(V: Contap_ThePathPointOfTheSearch, First: boolean): void;
+  SetLimitPoint(V: Contap_ThePathPointOfTheSearch, First: boolean): void;
 
-Curve(): Adaptor2d_Curve2d;
+  Curve(): Adaptor2d_Curve2d;
 
-HasFirstPoint(): boolean;
+  HasFirstPoint(): boolean;
 
-FirstPoint(): Contap_ThePathPointOfTheSearch;
+  FirstPoint(): Contap_ThePathPointOfTheSearch;
 
-HasLastPoint(): boolean;
+  HasLastPoint(): boolean;
 
-LastPoint(): Contap_ThePathPointOfTheSearch;
+  LastPoint(): Contap_ThePathPointOfTheSearch;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

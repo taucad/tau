@@ -5,7 +5,16 @@
   "projectType": "application",
   "tags": ["scope:ui", "type:app", "layer:feature"],
   "targets": {
+    "bake-design-story": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "node --import @oxc-node/core/register scripts/bake-design-story.mts"
+      }
+    },
     "build": {
+      "cache": true,
       "dependsOn": ["copy-assets", "^copy-assets"],
       "outputs": ["{projectRoot}/build"],
       "inputs": [
@@ -22,6 +31,12 @@
         },
         {
           "env": "PORTLESS_URL"
+        },
+        {
+          "env": "TAU_CLOUD_ENABLED"
+        },
+        {
+          "env": "TAU_BILLING_ENVIRONMENT"
         },
         {
           "env": "NETLIFY"
@@ -66,9 +81,10 @@
       }
     },
     "build:desktop": {
+      "cache": true,
       "dependsOn": ["copy-assets", "^copy-assets"],
       "outputs": ["{projectRoot}/desktop/build"],
-      "inputs": ["production", "^production"],
+      "inputs": ["production", "^production", { "env": "TAU_CLOUD_ENABLED" }],
       "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",
       "options": {
         "cwd": "{projectRoot}/desktop",
@@ -79,9 +95,10 @@
       }
     },
     "build:serve": {
+      "cache": true,
       "dependsOn": ["copy-assets", "^copy-assets"],
       "outputs": ["{projectRoot}/serve/build"],
-      "inputs": ["production", "^production"],
+      "inputs": ["production", "^production", { "env": "TAU_CLOUD_ENABLED" }],
       "command": "node ../../../tools/build-lock.mjs build -- react-router build --config vite.config.ts --sourcemapClient hidden",
       "options": {
         "cwd": "{projectRoot}/serve",

@@ -214,6 +214,16 @@ export const toPiToolContent = (content: JsonValue): Array<TextContent | ImageCo
 /** Original host result retained behind pi's model-visible tool content. @public */
 export type HostToolExecutionDetails = HostToolResult & { readonly substituted: boolean };
 
+type HostAgentTool = Omit<AgentTool, 'execute'> & {
+  // eslint-disable-next-line max-params -- Pi's AgentTool contract supplies these four invocation values.
+  readonly execute: (
+    toolCallId: string,
+    input: unknown,
+    signal?: AbortSignal,
+    onUpdate?: (partial: AgentToolResult<HostToolExecutionDetails>) => void,
+  ) => Promise<AgentToolResult<HostToolExecutionDetails>>;
+};
+
 /** Optional eager/cache result source checked before the real tool registry. @public */
 export type ToolResultSubstituter = (
   invocation: HostToolInvocation,
@@ -227,20 +237,31 @@ type CreateAgentToolsOptions = {
 };
 
 /** Wrap the waist tool registry as pi `AgentTool`s, including T4 result substitution. @public */
-export const createAgentTools = (options: CreateAgentToolsOptions): AgentTool[] =>
+export const createAgentTools = (options: CreateAgentToolsOptions): HostAgentTool[] =>
   options.registry.list().map((definition) => ({
     name: definition.name,
     label: definition.name,
     description: definition.description,
     parameters: definition.inputSchema,
     prepareArguments: (input) => normalizeToolInput(definition.name, input),
-    execute: async (toolCallId, input, signal): Promise<AgentToolResult<HostToolExecutionDetails>> => {
+    // eslint-disable-next-line max-params -- Pi's AgentTool contract supplies these four invocation values.
+    execute: async (toolCallId, input, signal, onUpdate): Promise<AgentToolResult<HostToolExecutionDetails>> => {
       const invocation: HostToolInvocation = {
         toolCallId,
         toolName: definition.name,
         input: input as JsonValue,
         signal: signal ?? new AbortController().signal,
         runId: options.runId,
+        ...(onUpdate === undefined
+          ? {}
+          : {
+              onUpdate: (partial: HostToolResult) => {
+                onUpdate({
+                  content: toPiToolContent(partial.content),
+                  details: { ...partial, substituted: false },
+                });
+              },
+            }),
       };
       const substituted = await options.substitute?.(invocation);
       const result = substituted ?? (await options.registry.invoke(invocation));

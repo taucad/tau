@@ -8,13 +8,36 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { act, render, renderHook, screen } from '@testing-library/react';
 import { createMockRuntimeClient } from '@taucad/runtime-testing';
 import type { ActorRefFrom } from 'xstate';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { registry } from '#lib/monaco-language-registry.js';
-import { useGeometryUnitKernelPrefetch } from '#hooks/use-monaco-model-service.js';
+import { MonacoModelServiceProvider, useGeometryUnitKernelPrefetch } from '#hooks/use-monaco-model-service.js';
 import type { AppCapabilitiesManifest } from '#types/runtime-client.alias.js';
+
+const configuration = vi.hoisted(() => Promise.withResolvers<void>());
+const useMonaco = vi.hoisted(() => vi.fn(() => undefined));
+vi.mock('@monaco-editor/react', () => ({ useMonaco }));
+vi.mock('#lib/monaco.lib.client.js', () => ({ configureMonaco: async () => configuration.promise }));
+vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ geometryUnits: new Map() }) }));
+vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => ({}) }));
+
+it('should configure the local loader before mounting Monaco consumers', async () => {
+  render(
+    <MonacoModelServiceProvider>
+      <span>Workspace</span>
+    </MonacoModelServiceProvider>,
+  );
+  expect(useMonaco).not.toHaveBeenCalled();
+  expect(screen.queryByText('Workspace')).not.toBeInTheDocument();
+  await act(async () => {
+    configuration.resolve();
+    await configuration.promise;
+  });
+  expect(await screen.findByText('Workspace')).toBeInTheDocument();
+  expect(useMonaco).toHaveBeenCalled();
+});
 
 type GeometryUnits = Map<string, ActorRefFrom<typeof cadMachine>>;
 

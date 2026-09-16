@@ -184,7 +184,7 @@ LoadStepOptions (type) — Options for loading STEP/XDE/BRep evidence
 StepLoadProgressEvent (type) — Progress event emitted while GeoSpec normalizes a STEP source
 StepSource (type) — STEP source forms accepted by {@link import ('./load-step.js').loadStep}
 StepStreamingMode (type) — STEP reader strategy used by GeoSpec
-XdeDatumPlacement (type) — One native AP242 datum placement row (a coordinate _frame_ from…
+XdeDatumPlacement (type) — One native AP242 datum placement row (a coordinate *frame* from…
 XdeDatumSystem (type) — One GD&T datum reference frame (`DATUM_SYSTEM`) with its precedence compartments,…
 XdeOccurrence (type) — One placed occurrence recovered from an AP242 STEP structure read
 XdeReadResult (type) — Structured AP242 read result produced by the GeoSpec verification kernel's…
@@ -195,8 +195,8 @@ XdeSupplementalPlane (type) — One supplemental-geometry `PLANE` item (e.g
 ## Classs — `api-classs.md`
 
 GeoSpecModelLoadError (class) [2 members] — Error thrown by {@link import ('./load-model.js').loadModel} when geometry cannot be…
-GeoSpecModelLoadError.diagnostics (property) — Structured diagnostics explaining why model loading failed
-GeoSpecModelLoadError.constructor (constructor)
+  GeoSpecModelLoadError.diagnostics (property) — Structured diagnostics explaining why model loading failed
+  GeoSpecModelLoadError.constructor (constructor)
 GeoSpecAssertionError (class) [2 members] — Assertion error thrown by GeoSpec matchers when an expectation does…
-GeoSpecAssertionError.diagnostics (property)
-GeoSpecAssertionError.constructor (constructor)
+  GeoSpecAssertionError.diagnostics (property)
+  GeoSpecAssertionError.constructor (constructor)

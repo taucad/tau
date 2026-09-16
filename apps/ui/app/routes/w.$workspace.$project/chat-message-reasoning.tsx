@@ -299,7 +299,11 @@ export function ChatMessageReasoning({
             )}
           >
             <div ref={setContent}>
-              <MarkdownViewerChat className='text-muted-foreground' isStreaming={isMessageActive}>
+              <MarkdownViewerChat
+                className='text-muted-foreground'
+                isStreaming={isMessageActive}
+                isStreamingFade={isReasoningStreaming}
+              >
                 {displayText}
               </MarkdownViewerChat>
             </div>

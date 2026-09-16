@@ -38,6 +38,37 @@ export const storageLimitBytesByTier: Readonly<Record<BillingTier, number>> = {
 };
 
 /**
+ * How many projects one account may register on the Tau Hosted Remote (P51,
+ * review R5).
+ *
+ * Before P51, a bare repository could only be created by a publish, which costs
+ * a push and a materialization. `PUT /v1/projects/:projectId` makes creation
+ * reachable by any signed-in account, so it needs a ceiling: each registration
+ * is a row plus `git init --bare`, `update-server-info` and a hook install on
+ * the volume.
+ *
+ * One flat number rather than a per-tier table: the plan already bounds what a
+ * project may *hold* (`storageLimitBytesByTier`), and a second per-tier
+ * dimension would be a product decision nobody has made. It is a constant rather
+ * than an operator environment value for the same reason `storageLimitBytesByTier`
+ * is — none of the Hosted Remote's plan numbers is env-tunable today, and one
+ * that is would be the odd one out. Moving it is a one-line change when an
+ * operator first needs to.
+ */
+export const registeredProjectLimitPerOwner = 200;
+
+/**
+ * Daily ceiling on `PUT /v1/projects/:projectId` calls per account.
+ *
+ * Separate from the cap above because the route is idempotent: a caller who is
+ * already at the cap can still re-register projects it owns, and each of those
+ * calls reconciles hooks on the volume. Set well above any human's day — a
+ * person connecting every one of their projects twice over is still inside it —
+ * so it only ever catches a script.
+ */
+export const projectRegistrationsPerOwnerPerDay = 1000;
+
+/**
  * Where one large object lives in the private bucket. Same `oid` layout
  * git-lfs itself uses (`packages/revisions/src/lfs.ts#lfsObjectPath`), under a
  * per-project prefix so quota accounting and deletion are per repository. The
@@ -57,6 +88,18 @@ export const gitLfsObjectKey = (projectId: string, oid: string): string =>
  * blunt "pack exceeds maximum allowed size".
  */
 export const quotaOverrunSlackBytes = 64 * 1024 * 1024;
+
+/**
+ * The ceiling on a `git-upload-pack` request body.
+ *
+ * A fetch's body is `want`/`have` negotiation, never a pack, so this is orders
+ * of magnitude above the largest real one — it exists because git has no
+ * `receive.maxInputSize` equivalent for `upload-pack` and Fastify's `bodyLimit`
+ * does not reach a streamed content-type parser, so the fetch RPC had no bound
+ * at all (review C32). The same figure as the push path's slack, for the same
+ * reason: it is the size at which a request stopped being a plausible one.
+ */
+export const negotiationInputLimitBytes = quotaOverrunSlackBytes;
 
 /**
  * Project ids are `proj_<nanoid>`; anything else never reaches the filesystem.
@@ -110,9 +153,10 @@ export const pktLine = (payload: string): string => `${(payload.length + 4).toSt
 export const serviceAdvertisementPrefix = (service: GitService): string => `${pktLine(`# service=${service}\n`)}0000`;
 
 /**
- * `pre-receive`: the ref allow-list (A39), a fail-closed admission flag, and
- * the quota backstop measured on the quarantine directory receive-pack has
- * already written. A non-zero exit rejects the whole push and git discards the
+ * `pre-receive`: the ref allow-list (A39), a fail-closed admission flag,
+ * compare-and-swap for every ref family (I7/I9, ruling OQ4), and the quota
+ * backstop measured on the quarantine directory receive-pack has already
+ * written. A non-zero exit rejects the whole push and git discards the
  * quarantine, so a refusal is never a partial write (D17).
  */
 export const preReceiveHookScript = `#!/bin/sh
@@ -128,10 +172,39 @@ fi
 status=0
 while read -r _old _new ref; do
   case "$ref" in
+    refs/heads/sync|refs/heads/sync/?*|refs/remotes|refs/remotes/?*|refs/tau/owners|refs/tau/owners/?*|refs/tau/workspaces|refs/tau/workspaces/?*|refs/tau/revisions|refs/tau/revisions/?*|refs/tau/transactions|refs/tau/transactions/?*|refs/tau/head|refs/tau/head/?*|refs/tau/retention|refs/tau/retention/?*)
+      echo "Tau: refused $ref — host-local refs never leave a host." >&2
+      status=1
+      continue
+      ;;
     ${pushableRefPrefixes.map((prefix) => `${prefix}?*`).join('|')}) ;;
     *)
       echo "Tau: refused $ref — host-local refs never leave a host." >&2
       status=1
+      continue
+      ;;
+  esac
+  # Compare-and-swap, for every ref family (charter I7/I9, ruling OQ4).
+  # \`receive.denyDeletes\` and \`receive.denyNonFastForwards\` are set on the
+  # spawn too, but git applies both only to \`refs/heads/*\` — measured: a tag
+  # and a \`refs/tau/chats/*\` ref could still be deleted and force-rewound with
+  # them on. So the rule lives here, where every family is already read, and the
+  # refusal is a sentence the client can read rather than git's own
+  # "deletion prohibited".
+  case "$_new" in
+    *[!0]*) ;;
+    *)
+      echo "Tau: refused $ref — Tau Cloud never deletes a ref; retention is decided on the server." >&2
+      status=1
+      continue
+      ;;
+  esac
+  case "$_old" in
+    *[!0]*)
+      if ! git merge-base --is-ancestor "$_old^{commit}" "$_new^{commit}" 2>/dev/null; then
+        echo "Tau: refused $ref — it does not fast-forward $_old; fetch and merge first." >&2
+        status=1
+      fi
       ;;
   esac
 done
@@ -158,8 +231,7 @@ exit 0
 export const publishedTagSpoolFile = 'tau-published-tags';
 
 /**
- * \`post-receive\`: the dumb-HTTP layout, git's own scheduled maintenance, and
- * the names this push moved.
+ * \`post-receive\`: the dumb-HTTP layout and the names this push moved.
  *
  * Materialization (S32) attaches here as a **record**, not as work: the hook
  * appends the tag refs it saw and returns. Doing the work here would run it
@@ -172,10 +244,13 @@ export const postReceiveHookScript = `#!/bin/sh
 # Tau Hosted Remote post-receive hook — written by apps/api GitService.
 set -eu
 while read -r _old _new ref; do
+  # An all-zero new value is a deletion, and a deleted name cannot be resolved:
+  # spooling it left a publication retrying forever (review C26). Unreachable
+  # since receive-pack runs with receive.denyDeletes, and free to keep.
+  case "$_new" in *[!0]*) ;; *) continue ;; esac
   case "$ref" in
     refs/tags/?*) printf '%s\\n' "$ref" >> "\${GIT_DIR:-.}/${publishedTagSpoolFile}" ;;
   esac
 done
 git update-server-info
-git gc --auto --quiet || true
 `;

@@ -245,14 +245,14 @@ describe('branchMachine', () => {
 
     actor.send({ type: 'discard', branch: 'bracket-fillet' });
     await flush();
-    actor.send({ type: 'operationFailed', reason: 'A lease still holds that checkout.' });
+    actor.send({ type: 'operationFailed', reason: 'An agent is working in feature.' });
 
-    expect(emitted).toEqual([{ type: 'toast.error', message: 'A lease still holds that checkout.' }]);
+    expect(emitted).toEqual([{ type: 'toast.error', message: 'An agent is working in feature.' }]);
     actor.stop();
   });
 
   it('emits branchMerged when a merge settles', async () => {
-    const { actor, promises, emitted } = start();
+    const { actor, promises, parent, emitted } = start();
     promises.script('checkBranch', cleanCheck);
     promises.script('merge', { output: { status: 'merged', revisionId: 'rev-13' } });
 
@@ -264,7 +264,14 @@ describe('branchMachine', () => {
       { type: 'branchMerged', branch: 'bracket-fillet', into: 'main', revisionId: 'rev-13' },
       { type: 'toast.branch', operation: 'merge', branch: 'bracket-fillet' },
     ]);
+    expect(parent.events).toContainEqual({
+      type: 'branchMerged',
+      branch: 'bracket-fillet',
+      into: 'main',
+      revisionId: 'rev-13',
+    });
     actor.stop();
+    parent.stop();
   });
 
   it('emits mergeConflicted with the paths and moves no checkout', async () => {

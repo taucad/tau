@@ -223,6 +223,43 @@ describe('ChatError', () => {
     ).toBeInTheDocument();
   });
 
+  /* The useSyncExternalStore contract requires a cached snapshot. Parsing inside the selector
+   * returned a fresh object with a nested `details` record on every read, which
+   * looped the chat panel into "Maximum update depth exceeded". */
+  it('should select stable snapshots for a structured runtime credit error', () => {
+    const runtimeError = new Error(
+      JSON.stringify({
+        category: errorCategory.credits,
+        title: 'Credit Limit Reached',
+        message: 'Insufficient Tau credit for this model request.',
+        code: 'INSUFFICIENT_CREDIT',
+        httpStatus: 402,
+        details: { requiredCreditAtoms: '3084332', availableCreditAtoms: '2960000', routeId: 'openai-gpt-6-astra' },
+      }),
+    );
+    const state = { error: runtimeError, persistedError: undefined } as unknown as CombinedChatState;
+    const snapshots: Array<[unknown, unknown]> = [];
+    vi.mocked(useChatSelector).mockImplementation((selector) => {
+      const value = selector(state);
+      snapshots.push([value, selector(state)]);
+      return value;
+    });
+    mockRetryAttempt = 0;
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<ChatErrorBanner />, {
+      wrapper: ({ children }: { readonly children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+
+    expect(snapshots.length).toBeGreaterThan(0);
+    for (const [first, second] of snapshots) {
+      expect(Object.is(first, second)).toBe(true);
+    }
+    expect(screen.getByText('Credit Limit Reached')).toBeInTheDocument();
+  });
+
   /* The funded boundary's own 402 copy is credit-denominated and reaches the
    * banner verbatim — the chat never restates a charge in dollars (B4 R2). */
   it('should render a credit error as warning Resume UI outside the tool-error fallback', async () => {

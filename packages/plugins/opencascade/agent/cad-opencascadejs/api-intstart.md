@@ -4,14 +4,14 @@
 
 IntStart_SITopolTool: declare class IntStart_SITopolTool extends Standard_Transient
 
-Classify(P: gp_Pnt2d, Tol: number): TopAbs_State;
+  Classify(P: gp_Pnt2d, Tol: number): TopAbs_State;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

@@ -11,7 +11,6 @@ import type { GatewayFixture } from '#support/gateway-fixture.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
   connectPickedFolder,
-  declineCookieBanner,
   expectCount,
   expectSignedIn,
   expectVisible,
@@ -121,7 +120,6 @@ test('[completed-artifact] captures SVG and GLB geometry and reports GeoSpec pas
   try {
     expect(await page.evaluate(() => (navigator as Navigator & { gpu?: unknown }).gpu)).toBeUndefined();
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-    await declineCookieBanner(page);
     await authenticatePackagedDesktop(session, token);
     await expectSignedIn(page);
     await selectKernel(page, 'Replicad');

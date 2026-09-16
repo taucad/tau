@@ -22,9 +22,9 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   ChatComposerProvider: ({ children }: { readonly children: React.ReactNode }) => (
     <div data-testid='chat-composer-provider'>{children}</div>
   ),
-}));
-vi.mock('#hooks/use-project-manager.js', () => ({
-  useProjectManager: () => ({ getChat: vi.fn(async () => ({ id: 'chat_homepage_main' })), createChat: vi.fn() }),
+  HomeNewProjectComposerProvider: ({ children }: { readonly children: React.ReactNode }) => (
+    <div data-testid='home-new-project-composer-provider'>{children}</div>
+  ),
 }));
 vi.mock('#hooks/use-kernel.js', () => ({
   useKernel: () => ({ kernel: 'openscad', setKernel: vi.fn() }),
@@ -38,9 +38,10 @@ describe('new-project chat composer surfaces', () => {
   it('mounts the shared composer inside the persistent homepage provider', async () => {
     renderWithRootProviders(<HomepageChatHero />);
 
-    expect(await screen.findByTestId('active-chat-provider')).toContainElement(
+    expect(await screen.findByTestId('home-new-project-composer-provider')).toContainElement(
       screen.getByTestId('new-project-chat-composer'),
     );
+    expect(screen.queryByTestId('active-chat-provider')).not.toBeInTheDocument();
     expect(screen.getByTestId('new-project-chat-composer')).toHaveAttribute('data-autofocus', 'true');
   });
 

@@ -15,6 +15,7 @@ import type { ReactNode } from 'react';
 import type { RevisionRow } from '@taucad/revisions';
 import type { TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { useRevisionChanges, useRevisionFileComparison, useRevisions } from '#hooks/use-revisions.js';
+import type { RevisionCard } from '#hooks/use-revisions.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p' }) }));
@@ -75,6 +76,15 @@ describe('useRevisions', () => {
     expect(result.current.canReturnToLatest).toBe(false);
   });
 
+  it('settles an empty branch instead of treating its disabled history query as loading', async () => {
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+    expect(result.current.revisions).toEqual([]);
+  });
+
   it('offers Return to latest only while the checkout sits behind the branch tip', async () => {
     revisionStatusHarness.rows = [
       row({ revisionId: 'rev-2', revisionNumber: 2 }),
@@ -103,6 +113,28 @@ describe('useRevisions', () => {
     await waitFor(() => {
       expect(result.current.isDirty).toBe(true);
     });
+  });
+
+  it('derives each branch revision number and divergence from graph history', async () => {
+    const base = row({ revisionId: 'base', revisionNumber: 1 });
+    revisionStatusHarness.rows = [row({ revisionId: 'main-2', revisionNumber: 2 }), base];
+    revisionStatusHarness.rowsByBranch.set('feature', [row({ revisionId: 'feature-2', revisionNumber: 2 }), base]);
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      headRevisionId: 'main-2',
+      branches: [
+        { name: 'main', head: 'main-2', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        { name: 'feature', head: 'feature-2', checkoutId: 'co-2', checkoutRoot: '/checkouts/co-2', leaseChatIds: [] },
+      ],
+    };
+
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.branchFacts?.get('feature')).toEqual({ revisionNumber: 2, ahead: 1, behind: 1 });
+    });
+    expect(result.current.branchFacts?.get('main')).toEqual({ revisionNumber: 2, ahead: 0, behind: 0 });
   });
 
   it('carries a card for a turn a remote host settled, which this graph does not hold', async () => {
@@ -154,6 +186,100 @@ describe('useRevisions', () => {
     });
   });
 
+  it("keeps a settled turn's branch metadata when another branch is selected", async () => {
+    settlements.push({
+      type: 'turn.finalized',
+      turnId: 'u3',
+      runId: 'run-3',
+      chatId: 'chat-1',
+      projectId: 'p',
+      checkoutId: 'candidate-1',
+      revisionId: 'rev-3',
+      branch: 'isolated-run',
+      changedPaths: ['main.scad'],
+      trigger: 'turn',
+      runIds: ['run-3'],
+    });
+    const candidate = row({
+      revisionId: 'rev-3',
+      revisionNumber: 3,
+      turnId: 'u3',
+      createdAt: 1_788_307_200_000,
+      summary: 'Agent turn u3',
+    });
+    revisionStatusHarness.rowsByBranch.set('isolated-run', [candidate]);
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      branches: [
+        { name: 'main', head: 'rev-2', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'isolated-run',
+          head: 'rev-3',
+          checkoutId: 'candidate-1',
+          checkoutRoot: '/checkouts/candidate-1',
+          leaseChatIds: ['chat-1'],
+        },
+      ],
+    };
+
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.byTurnId.get('u3')).toMatchObject({
+        revisionId: 'rev-3',
+        n: 3,
+        createdAt: 1_788_307_200_000,
+        /* The generator's `Agent turn <turnId>` is never product copy (C37). */
+        summary: 'Agent change',
+      });
+    });
+  });
+
+  it('refreshes a settled branch whose cached facet head predates the settlement', async () => {
+    settlements.push({
+      type: 'turn.finalized',
+      turnId: 'u3',
+      runId: 'run-3',
+      chatId: 'chat-1',
+      projectId: 'p',
+      checkoutId: 'candidate-1',
+      revisionId: 'rev-3',
+      branch: 'isolated-run',
+      changedPaths: ['main.scad'],
+      trigger: 'turn',
+      runIds: ['run-3'],
+    });
+    revisionStatusHarness.rowsByBranch.set('isolated-run', [
+      row({ revisionId: 'rev-3', revisionNumber: 3, turnId: 'u3' }),
+    ]);
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      branches: [
+        { name: 'main', head: 'rev-2', checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'isolated-run',
+          head: 'rev-1',
+          checkoutId: 'candidate-1',
+          checkoutRoot: '/checkouts/candidate-1',
+          leaseChatIds: ['chat-1'],
+        },
+      ],
+    };
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    queryClient.setQueryData(['revision-log', 'p', 'isolated-run', 'rev-1'], []);
+    const cachedWrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(() => useRevisions(), { wrapper: cachedWrapper });
+
+    await waitFor(() => {
+      expect(result.current.byTurnId.get('u3')?.n).toBe(3);
+    });
+  });
+
   it('reads nothing at all until the root has answered with a branch', () => {
     const { result } = renderHook(() => useRevisions(), { wrapper });
     revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: undefined };
@@ -169,7 +295,7 @@ describe('useRevisionChanges', () => {
       { path: 'main.scad', kind: 'modified' },
       { path: 'part.scad', kind: 'added' },
     ];
-    const card = {
+    const card: RevisionCard = {
       revisionId: 'rev-1',
       n: 1,
       createdAt: 0,
@@ -177,6 +303,7 @@ describe('useRevisionChanges', () => {
       actor: '',
       turnId: 'u1',
       conflicted: false,
+      trigger: 'turn',
     };
 
     const { result } = renderHook(() => useRevisionChanges(card), { wrapper });
@@ -210,7 +337,7 @@ describe('useRevisionChanges', () => {
 
   it('serves a remote settlement from the paths its host attested, without asking a graph that lacks it', async () => {
     revisionStatusHarness.diff = [{ path: 'never-read.scad', kind: 'modified' }];
-    const card = {
+    const card: RevisionCard = {
       revisionId: 'rev-remote',
       n: undefined,
       createdAt: 0,
@@ -218,11 +345,73 @@ describe('useRevisionChanges', () => {
       actor: '',
       turnId: 'u9',
       conflicted: false,
+      trigger: 'turn',
       changedPaths: ['main.scad'],
     };
 
     const { result } = renderHook(() => useRevisionChanges(card), { wrapper });
 
     expect(result.current).toEqual([{ path: 'main.scad', kind: 'modified' }]);
+  });
+
+  /*
+   * B9/C51: the view is one object until the graph moves.
+   *
+   * `useQueries` without `combine` hands back a fresh array on every render, so
+   * the memo below it never hit and the whole view — `revisions`, `byTurnId`,
+   * `selectedIds`, `branchFacts` — was rebuilt per render per consumer,
+   * including one per chat turn.
+   */
+  it('returns the same view across renders while the store has not moved', async () => {
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1, turnId: 'u1' })];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-1' };
+
+    const { result, rerender } = renderHook(() => useRevisions(), { wrapper });
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(1);
+    });
+
+    const first = result.current;
+    rerender();
+    rerender();
+
+    expect(result.current).toBe(first);
+  });
+
+  /* C37/C45: no surface renders the generator's placeholder or a raw actor id. */
+  it('formats the title and the actor a person reads', async () => {
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-1', revisionNumber: 1, turnId: 'u1', summary: 'Agent turn u1' }),
+      row({
+        revisionId: 'rev-2',
+        revisionNumber: 2,
+        source: 'user',
+        actor: 'anon:2722de98',
+        summary: 'Saved changes (save)',
+        trigger: 'save',
+      }),
+      row({
+        revisionId: 'rev-3',
+        revisionNumber: 3,
+        source: 'user',
+        actor: 'anon:2722de98',
+        summary: 'Tapered wall',
+        trigger: 'save',
+      }),
+    ];
+
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(3);
+    });
+
+    const summaries = result.current.revisions.map((revision) => revision.summary);
+    expect(summaries).toEqual(['Agent change', 'Saved changes', 'Tapered wall']);
+    expect(summaries.some((summary) => /\(save\)|msg_|Agent turn /u.test(summary))).toBe(false);
+    /* A hand-written title is never rewritten. */
+    expect(result.current.revisions[2]?.summary).toBe('Tapered wall');
+    /* The pseudonym stays stable and per workspace; the scheme is not copy. */
+    expect(result.current.revisions[1]?.actor).toBe('Anonymous · 2722de98');
+    expect(result.current.revisions[0]?.actor).toBe('tau-browser-agent-host');
   });
 });

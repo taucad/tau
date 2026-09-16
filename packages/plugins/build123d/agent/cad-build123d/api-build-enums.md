@@ -5,374 +5,374 @@
 // Align object about Axis
 Align
 
-MIN
+  MIN
 
-CENTER
+  CENTER
 
-MAX
+  MAX
 
-NONE
+  NONE
 
 // Angular rotation direction
 AngularDirection
 
-CLOCKWISE
+  CLOCKWISE
 
-COUNTER_CLOCKWISE
+  COUNTER_CLOCKWISE
 
 // DXF export spline approximation strategy
 ApproxOption
 
-ARC
+  ARC
 
-NONE
+  NONE
 
-SPLINE
+  SPLINE
 
 // Center Options
 CenterOf
 
-GEOMETRY
+  GEOMETRY
 
-MASS
+  MASS
 
-BOUNDING_BOX
+  BOUNDING_BOX
 
 // Continuity level for evaluating geometric connections
 ContinuityLevel
 
-C0
+  C0
 
-C1
+  C1
 
-C2
+  C2
 
 // Order to apply extrinsic rotations by axis
 Extrinsic
 
-XYZ
+  XYZ
 
-XZY
+  XZY
 
-YZX
+  YZX
 
-YXZ
+  YXZ
 
-ZXY
+  ZXY
 
-ZYX
+  ZYX
 
-XYX
+  XYX
 
-XZX
+  XZX
 
-YZY
+  YZY
 
-YXY
+  YXY
 
-ZXZ
+  ZXZ
 
-ZYZ
+  ZYZ
 
 // Text Font Styles
 FontStyle
 
-REGULAR
+  REGULAR
 
-BOLD
+  BOLD
 
-ITALIC
+  ITALIC
 
-BOLDITALIC
+  BOLDITALIC
 
 // Moving frame calculation method
 FrameMethod
 
-FRENET
+  FRENET
 
-CORRECTED
+  CORRECTED
 
 // CAD geometry object type
 GeomType
 
-PLANE
+  PLANE
 
-CYLINDER
+  CYLINDER
 
-CONE
+  CONE
 
-SPHERE
+  SPHERE
 
-TORUS
+  TORUS
 
-BEZIER
+  BEZIER
 
-BSPLINE
+  BSPLINE
 
-REVOLUTION
+  REVOLUTION
 
-EXTRUSION
+  EXTRUSION
 
-OFFSET
+  OFFSET
 
-LINE
+  LINE
 
-CIRCLE
+  CIRCLE
 
-ELLIPSE
+  ELLIPSE
 
-HYPERBOLA
+  HYPERBOLA
 
-PARABOLA
+  PARABOLA
 
-OTHER
+  OTHER
 
 // Arrow head types
 HeadType
 
-STRAIGHT
+  STRAIGHT
 
-CURVED
+  CURVED
 
-FILLETED
+  FILLETED
 
 // Order to apply intrinsic rotations by axis
 Intrinsic
 
-XYZ
+  XYZ
 
-XZY
+  XZY
 
-YZX
+  YZX
 
-YXZ
+  YXZ
 
-ZXY
+  ZXY
 
-ZYX
+  ZYX
 
-XYX
+  XYX
 
-XZX
+  XZX
 
-YZY
+  YZY
 
-YXY
+  YXY
 
-ZXZ
+  ZXZ
 
-ZYZ
+  ZYZ
 
 // Split options
 Keep
 
-ALL
+  ALL
 
-BOTTOM
+  BOTTOM
 
-BOTH
+  BOTH
 
-INSIDE
+  INSIDE
 
-OUTSIDE
+  OUTSIDE
 
-TOP
+  TOP
 
 // Offset corner transition
 Kind
 
-ARC
+  ARC
 
-INTERSECTION
+  INTERSECTION
 
-TANGENT
+  TANGENT
 
 // Method of specifying length along PolarLine
 LengthMode
 
-DIAGONAL
+  DIAGONAL
 
-HORIZONTAL
+  HORIZONTAL
 
-VERTICAL
+  VERTICAL
 
 // 3MF mesh types typically for 3D printing
 MeshType
 
-OTHER
+  OTHER
 
-MODEL
+  MODEL
 
-SUPPORT
+  SUPPORT
 
-SOLIDSUPPORT
+  SOLIDSUPPORT
 
 // Combination Mode
 Mode
 
-ADD
+  ADD
 
-SUBTRACT
+  SUBTRACT
 
-INTERSECT
+  INTERSECT
 
-REPLACE
+  REPLACE
 
-PRIVATE
+  PRIVATE
 
 // Methods for displaying numbers
 NumberDisplay
 
-DECIMAL
+  DECIMAL
 
-FRACTION
+  FRACTION
 
 // Align object about Axis
 PageSize
 
-A0
+  A0
 
-A1
+  A1
 
-A2
+  A2
 
-A3
+  A3
 
-A4
+  A4
 
-A5
+  A5
 
-A6
+  A6
 
-A7
+  A7
 
-A8
+  A8
 
-A9
+  A9
 
-A10
+  A10
 
-LETTER
+  LETTER
 
-LEGAL
+  LEGAL
 
-LEDGER
+  LEDGER
 
 // Position along curve mode
 PositionMode
 
-LENGTH
+  LENGTH
 
-PARAMETER
+  PARAMETER
 
 // When you export a model to a STEP file, the precision of the geometric data
 PrecisionMode
 
-SESSION
+  SESSION
 
-GREATEST
+  GREATEST
 
-AVERAGE
+  AVERAGE
 
-LEAST
+  LEAST
 
 // Sagitta selection
 Sagitta
 
-SHORT
+  SHORT
 
-LONG
+  LONG
 
-BOTH
+  BOTH
 
 // Selector scope - all, last operation or new objects
 Select
 
-ALL
+  ALL
 
-LAST
+  LAST
 
-NEW
+  NEW
 
 // 2D Offset types
 Side
 
-LEFT
+  LEFT
 
-RIGHT
+  RIGHT
 
-BOTH
+  BOTH
 
 // Sorting criteria
 SortBy
 
-LENGTH
+  LENGTH
 
-RADIUS
+  RADIUS
 
-AREA
+  AREA
 
-VOLUME
+  VOLUME
 
-DISTANCE
+  DISTANCE
 
 // Tangency constraint for solvers edge selection
 Tangency
 
-UNQUALIFIED
+  UNQUALIFIED
 
-ENCLOSING
+  ENCLOSING
 
-ENCLOSED
+  ENCLOSED
 
-OUTSIDE
+  OUTSIDE
 
 // Text Alignment
 TextAlign
 
-BOTTOM
+  BOTTOM
 
-CENTER
+  CENTER
 
-LEFT
+  LEFT
 
-RIGHT
+  RIGHT
 
-TOP
+  TOP
 
-TOPFIRSTLINE
+  TOPFIRSTLINE
 
 // Sweep discontinuity handling option
 Transition
 
-RIGHT
+  RIGHT
 
-ROUND
+  ROUND
 
-TRANSFORMED
+  TRANSFORMED
 
 // Standard Units
 Unit
 
-MC
+  MC
 
-MM
+  MM
 
-CM
+  CM
 
-M
+  M
 
-IN
+  IN
 
-FT
+  FT
 
 // Extrude limit
 Until
 
-NEXT
+  NEXT
 
-LAST
+  LAST
 
-PREVIOUS
+  PREVIOUS
 
-FIRST
+  FIRST

@@ -37,7 +37,7 @@ const recordingParent = (): { ref: AnyActorRef; received: Array<EventObject & Re
 const harness = (options?: {
   readonly readyRegions?: readonly ProjectSessionRegion[];
   readonly parentRef?: AnyActorRef;
-  readonly pullNever?: boolean;
+  readonly failCloseStep?: 'cancelRuns' | 'flushProducers' | 'flushSync' | 'releaseLeases' | 'releaseAgentHost';
 }) => {
   const order: string[] = [];
   const live = new Set<string>();
@@ -57,26 +57,38 @@ const harness = (options?: {
   const actor = createActor(
     projectSessionMachine.provide({
       actors: {
-        awaitPull: fromSafeAsync<void, { projectId: string }>(async () => {
-          order.push('pull');
-          if (options?.pullNever === true) {
-            await new Promise<void>(() => {
-              /* Never settles. */
-            });
-          }
-        }),
         cancelRuns: fromSafeAsync<void, { projectId: string; runs: readonly string[] }>(async ({ input }) => {
           order.push(`cancelRuns:${input.runs.join(',')}`);
+          if (options?.failCloseStep === 'cancelRuns') {
+            throw new Error('cancelRuns failed');
+          }
+        }),
+        flushProducers: fromSafeAsync<void, { projectId: string }>(async () => {
+          order.push('flushProducers');
+          if (options?.failCloseStep === 'flushProducers') {
+            throw new Error('flushProducers failed');
+          }
         }),
         flushSync: fromSafeAsync<void, { projectId: string; boundMilliseconds: number }>(async () => {
           order.push('flushSync');
+          if (options?.failCloseStep === 'flushSync') {
+            throw new Error('flushSync failed');
+          }
         }),
         releaseLeases: fromSafeAsync<void, { projectId: string }>(async () => {
           order.push('releaseLeases');
+          if (options?.failCloseStep === 'releaseLeases') {
+            throw new Error('releaseLeases failed');
+          }
+        }),
+        releaseAgentHost: fromSafeAsync<void, { projectId: string }>(async () => {
+          order.push('releaseAgentHost');
+          if (options?.failCloseStep === 'releaseAgentHost') {
+            throw new Error('releaseAgentHost failed');
+          }
         }),
         fileManager: child('fileManager', 'views'),
         project: child('project', 'runtime'),
-        editor: child('editor'),
         agentHost: child('agentHost', 'agentHost'),
         compute: child('compute', 'compute'),
       },
@@ -113,13 +125,20 @@ describe('projectSessionMachine', () => {
     expect(Object.values(machineModule).filter((value) => isMachine(value))).toEqual([projectSessionMachine]);
   });
 
-  it('pulls before it starts anything (A32, P34)', async () => {
-    const { actor, order } = harness({ pullNever: true });
+  /* P48: `opening` has no `pulling`. The open pull's gate is `sync.machine`'s
+   * and the Files tree's; a second copy here waited on nothing. */
+  it('starts its regions as soon as it opens, with nothing to wait for (P48)', async () => {
+    const { actor, order } = harness();
 
-    expect(actor.getSnapshot().matches({ opening: 'pulling' })).toBe(true);
-    await settle();
-
-    expect(order).toEqual(['pull']);
+    /* No `opening.pulling`: the children are spawned on the first tick and the
+     * only thing that has run is starting them. */
+    expect(order.filter((entry) => entry.startsWith('start:'))).toEqual([
+      'start:fileManager',
+      'start:project',
+      'start:agentHost',
+      'start:compute',
+    ]);
+    expect(order.filter((entry) => !entry.startsWith('start:'))).toEqual([]);
     actor.stop();
   });
 
@@ -130,7 +149,6 @@ describe('projectSessionMachine', () => {
     expect(order.filter((entry) => entry.startsWith('start:'))).toEqual([
       'start:fileManager',
       'start:project',
-      'start:editor',
       'start:agentHost',
       'start:compute',
     ]);
@@ -192,6 +210,23 @@ describe('projectSessionMachine', () => {
     actor.stop();
   });
 
+  it('suspends hidden-idle expiry while visible and restarts it when hidden', async () => {
+    const parent = recordingParent();
+    const { actor } = harness({ parentRef: parent.ref });
+    await settle();
+    actor.send({ type: 'visibilityChanged', visible: true });
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(parent.received.some((event) => event.type === 'idleExpired')).toBe(false);
+
+    actor.send({ type: 'visibilityChanged', visible: false });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(parent.received.some((event) => event.type === 'idleExpired')).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(parent.received).toContainEqual({ type: 'idleExpired', projectId: 'proj_a' });
+    actor.stop();
+  });
+
   it('asks before closing a project with a live run, and a cancel keeps it live', async () => {
     const { actor } = harness();
     await settle();
@@ -211,7 +246,7 @@ describe('projectSessionMachine', () => {
     await settle();
     actor.send({ type: 'runStarted', chatId: 'chat-1' });
     actor.send({ type: 'openChat', chatId: 'chat-1' });
-    expect(Object.keys(actor.getSnapshot().children).length).toBe(6);
+    expect(Object.keys(actor.getSnapshot().children).length).toBe(5);
 
     actor.send({ type: 'close', reason: 'user' });
     actor.send({ type: 'confirmClose' });
@@ -220,13 +255,13 @@ describe('projectSessionMachine', () => {
     await settle();
 
     expect(order.filter((entry) => !entry.startsWith('start:'))).toEqual([
-      'pull',
       'cancelRuns:chat-1',
+      'flushProducers',
       'flushSync',
       'releaseLeases',
+      'releaseAgentHost',
       'stop:fileManager',
       'stop:project',
-      'stop:editor',
       'stop:agentHost',
       'stop:compute',
     ]);
@@ -263,6 +298,26 @@ describe('projectSessionMachine', () => {
     actor.stop();
   });
 
+  it.each(['cancelRuns', 'flushProducers', 'flushSync', 'releaseLeases', 'releaseAgentHost'] as const)(
+    'keeps resources live and reports failure when %s fails',
+    async (failCloseStep) => {
+      const parent = recordingParent();
+      const { actor, live } = harness({ parentRef: parent.ref, failCloseStep });
+      await settle();
+      actor.send({ type: 'runStarted', chatId: 'chat-1' });
+      actor.send({ type: 'close', reason: 'quit' });
+      await settle();
+      await settle();
+      await settle();
+
+      expect(actor.getSnapshot().matches('failed')).toBe(true);
+      expect(actor.getSnapshot().context.failures['close']).toBe(`${failCloseStep} failed`);
+      expect(live.size).toBe(4);
+      expect(parent.received.some((event) => event.type === 'sessionClosed')).toBe(false);
+      actor.stop();
+    },
+  );
+
   it('owns one chat session per chat, and drops it when the chat closes', async () => {
     const { actor } = harness();
     await settle();
@@ -292,29 +347,6 @@ describe('projectSessionMachine', () => {
     actor.stop();
   });
 
-  it('restarts only the runtime child when the compute placement changes', async () => {
-    const { actor, order } = harness();
-    await settle();
-    const before = order.length;
-
-    actor.send({ type: 'kernelSelectionChanged', kernelKey: 'remote:2' });
-
-    expect(order.slice(before)).toEqual(['stop:project', 'start:project']);
-    expect(actor.getSnapshot().context.kernelKey).toBe('remote:2');
-    actor.stop();
-  });
-
-  it('ignores a compute placement that did not move', async () => {
-    const { actor, order } = harness();
-    await settle();
-    const before = order.length;
-
-    actor.send({ type: 'kernelSelectionChanged', kernelKey: undefined as unknown as string });
-
-    expect(order.slice(before)).toEqual([]);
-    actor.stop();
-  });
-
   it('reports every state it reaches to the registry', async () => {
     const parent = recordingParent();
     const { actor } = harness({ parentRef: parent.ref });
@@ -336,7 +368,7 @@ describe('projectSessionMachine', () => {
   it('stops every child when the actor itself is stopped', async () => {
     const { actor, live } = harness();
     await settle();
-    expect(live.size).toBe(5);
+    expect(live.size).toBe(4);
 
     actor.stop();
 

@@ -1,3 +1,6 @@
+/* Dependency source may still contain this legacy Tailwind token. Never emit it. */
+@source not inline('cursor-pointer');
+
 :root {
   --radius-4xl: calc(var(--radius-3xl) + 0.5rem);
   --radius-3xl: calc(var(--radius-2xl) + 0.5rem);
@@ -7,6 +10,7 @@
   --radius-md: calc(var(--radius-sm) + 0.125rem);
   --radius-sm: calc(var(--radius-xs) + 0.125rem);
   --radius-xs: 0.4375rem;
+  --cursor-action: default;
 
   --hue-primary: 180deg;
   --hue-secondary: calc(var(--hue-primary) - 10deg);
@@ -28,6 +32,7 @@
   --l-medium: 0.55;
   --l-emphasized: 0.47;
   --l-high: 0.25;
+  --l-sidebar-foreground: 0.43;
   --l-intense: 0.16;
   --l-deepest: 0.16;
   --l-primary: 0.53;
@@ -42,12 +47,23 @@
   --muted-foreground: oklch(var(--l-emphasized) 0 none);
   --primary: oklch(var(--l-primary) var(--c-primary) var(--hue-primary));
   --primary-foreground: oklch(0.985 0 none);
+  --primary-action: oklch(0.4 0.008 var(--hue-primary));
+  --primary-action-foreground: oklch(0.985 0 none);
+  --primary-action-glint: linear-gradient(oklch(1 0 none / 0.08), oklch(1 0 none / 0.08));
+  --primary-action-sheen: linear-gradient(
+    165deg,
+    color-mix(in oklch, white 16%, var(--primary-action)),
+    var(--primary-action) 45%,
+    color-mix(in oklch, black 18%, var(--primary-action)) 50%,
+    var(--primary-action)
+  );
   --secondary: oklch(var(--l-surface) 0 none);
   --secondary-foreground: oklch(var(--l-deepest) 0 none);
   --neutral: oklch(var(--l-medium) 0 none);
   --neutral-foreground: oklch(var(--l-base) 0 none);
   --accent: oklch(0.935 0 none);
   --accent-foreground: oklch(var(--l-deepest) 0 none);
+  --nested-action-hover: color-mix(in oklch, var(--foreground) 8%, var(--accent));
   --border: oklch(var(--l-subtle) 0 none);
   --destructive: oklch(var(--l-medium) 0.25 var(--hue-destructive));
   --success: oklch(var(--l-medium) 0.18 var(--hue-success));
@@ -60,6 +76,17 @@
   --verified: oklch(var(--l-medium) 0.25 var(--hue-verified));
   --input: oklch(var(--l-subtle) 0 none);
   --ring: oklch(var(--l-medium) 0.08 var(--hue-primary));
+
+  /* Focus-indicator geometry. These four values and the `focus-outline` utilities below are the
+     single entry point for every keyboard focus indicator in every Tau surface: change them here
+     and every control that composes `focus-outline` follows. Do not restate the geometry in a
+     component. Inset by default so the indicator has no layout footprint and is never clipped by
+     an `overflow-hidden` ancestor; `focus-outline-outside` exists only for controls too thin to
+     host an inset outline. */
+  --focus-outline-color: var(--ring);
+  --focus-outline-width: 2px;
+  --focus-outline-offset: calc(-1 * var(--focus-outline-width));
+  --focus-outline-offset-outside: var(--focus-outline-width);
   --popover: oklch(var(--l-base) 0 none);
   --popover-foreground: oklch(var(--l-deepest) 0 none);
   --menu-ring: color-mix(in oklch, black 10%, var(--popover));
@@ -68,7 +95,7 @@
   --card: oklch(var(--l-base) 0 none);
   --card-foreground: oklch(var(--l-deepest) 0 none);
   --sidebar-background: oklch(0.99 0 none);
-  --sidebar-foreground: oklch(var(--l-high) 0 none);
+  --sidebar-foreground: oklch(var(--l-sidebar-foreground) 0 none);
   --sidebar-primary: oklch(var(--l-deepest) 0 none);
   --sidebar-primary-foreground: oklch(0.985 0 none);
   --sidebar-accent: oklch(0.935 0 none);
@@ -82,6 +109,10 @@
   --chart-3: oklch(0.55 0.15 180deg);
   --chart-4: oklch(0.55 0.18 150deg);
   --chart-5: oklch(0.55 0.2 30deg);
+}
+
+:root[data-pointer-cursors='true'] {
+  --cursor-action: pointer;
 }
 
 /* The token blocks below switch on a `.dark` ancestor, so the `dark:` utility
@@ -99,6 +130,7 @@
   --l-medium: 0.55;
   --l-emphasized: 0.67;
   --l-high: 0.82;
+  --l-sidebar-foreground: 0.82;
   --l-intense: 0.95;
   --l-deepest: 0.95;
   --l-highlighter: 0.8;
@@ -134,6 +166,7 @@
   --l-medium: 0.5;
   --l-emphasized: 0.65;
   --l-high: 0.82;
+  --l-sidebar-foreground: 0.82;
   --l-intense: 0.95;
   --l-deepest: 0.95;
   --background: oklch(0 0 none);
@@ -156,9 +189,12 @@
   --l-medium: 0.72;
   --l-emphasized: 0.82;
   --l-high: 0.95;
+  --l-sidebar-foreground: 0.95;
   --l-intense: 1;
   --l-deepest: 1;
   --l-primary: 0.4;
+  --primary-action-sheen: none;
+  --primary-action-glint: none;
   --l-highlighter: 0.78;
   --background: oklch(var(--l-base) 0 none);
   --muted: oklch(var(--l-surface) 0 none);
@@ -191,6 +227,7 @@
     --l-medium: 0.42;
     --l-emphasized: 0.4;
     --l-high: 0.14;
+    --l-sidebar-foreground: 0.14;
     --l-intense: 0.08;
     --l-deepest: 0.08;
     --l-primary: 0.4;
@@ -224,6 +261,7 @@
     --l-medium: 0.72;
     --l-emphasized: 0.82;
     --l-high: 0.95;
+    --l-sidebar-foreground: 0.95;
     --l-intense: 1;
     --l-deepest: 1;
     --l-primary: 0.4;
@@ -280,6 +318,90 @@
   :where(svg[stroke-width='2']) {
     stroke-width: var(--icon-stroke-width, 1.5);
   }
+
+  :where(
+      button,
+      summary,
+      select,
+      input:is(
+        [type='button'],
+        [type='checkbox'],
+        [type='color'],
+        [type='file'],
+        [type='radio'],
+        [type='range'],
+        [type='reset'],
+        [type='submit']
+      ),
+      [role='button'],
+      [role='checkbox'],
+      [role='menuitem'],
+      [role='menuitemcheckbox'],
+      [role='menuitemradio'],
+      [role='option'],
+      [role='radio'],
+      [role='slider'],
+      [role='switch'],
+      [role='tab'],
+      [role='treeitem']
+    ):not(:any-link):not(:disabled):not([aria-disabled='true']):not([data-disabled='']):not([data-disabled='true']) {
+    cursor: var(--cursor-action);
+  }
+
+  /* Sidebar navigation is one action surface even when routing uses anchors. */
+  [data-slot='sidebar'] :any-link {
+    cursor: var(--cursor-action);
+  }
+
+  /* Radix positions tooltip content inside this wrapper. The description is
+     never interactive, so its positioning box must not cover nearby controls. */
+  [data-radix-popper-content-wrapper]:has(> [data-slot='tooltip-content']) {
+    pointer-events: none;
+  }
+
+  /* Mermaid injects per-diagram CSS after the app stylesheet. Preserve real
+     SVG links, but route callback-backed diagram actions through this policy. */
+  :where(svg[id^='mermaid-'] .clickable):not(a, a *) {
+    cursor: var(--cursor-action) !important;
+    transition: filter 150ms ease;
+  }
+
+  :where(svg[id^='mermaid-'] .clickable):not(a, a *):hover {
+    filter: drop-shadow(0 0 2px var(--ring));
+  }
+}
+
+@utility cursor-action {
+  cursor: var(--cursor-action);
+}
+
+@utility focus-outline {
+  outline: var(--focus-outline-width) solid var(--focus-outline-color);
+  outline-offset: var(--focus-outline-offset);
+}
+
+@utility focus-outline-outside {
+  outline: var(--focus-outline-width) solid var(--focus-outline-color);
+  outline-offset: var(--focus-outline-offset-outside);
+}
+
+/* Shared by primary actions and selected button-like controls in every theme. */
+@utility primary-action {
+  color: var(--primary-action-foreground);
+  background-color: var(--primary-action);
+  background-image: var(--primary-action-sheen);
+
+  &:hover:not(:disabled):not([aria-disabled='true']) {
+    background-image: var(--primary-action-glint), var(--primary-action-sheen);
+  }
+
+  @media (prefers-contrast: more), (forced-colors: active) {
+    background-image: none;
+
+    &:hover:not(:disabled):not([aria-disabled='true']) {
+      background-image: none;
+    }
+  }
 }
 
 @layer base {
@@ -315,10 +437,12 @@
   --color-neutral-foreground: var(--neutral-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-action-foreground: var(--primary-action-foreground);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-nested-action-hover: var(--nested-action-hover);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
   --color-muted: var(--muted);

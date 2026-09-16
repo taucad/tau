@@ -4,44 +4,44 @@
 
 FilletPoint: declare class FilletPoint
 
-constructor
+  constructor
 
-setParam(theParam: number): void;
+  setParam(theParam: number): void;
 
-getParam(): number;
+  getParam(): number;
 
-getNBValues(): number;
+  getNBValues(): number;
 
-getValue(theIndex: number): number;
+  getValue(theIndex: number): number;
 
-getDiff(theIndex: number): number;
+  getDiff(theIndex: number): number;
 
-isValid(theIndex: number): boolean;
+  isValid(theIndex: number): boolean;
 
-getNear(theIndex: number): number;
+  getNear(theIndex: number): number;
 
-setParam2(theParam2: number): void;
+  setParam2(theParam2: number): void;
 
-getParam2(): number;
+  getParam2(): number;
 
-setCenter(thePoint: gp_Pnt2d): void;
+  setCenter(thePoint: gp_Pnt2d): void;
 
-getCenter(): gp_Pnt2d;
+  getCenter(): gp_Pnt2d;
 
-appendValue(theValue: number, theValid: boolean): void;
+  appendValue(theValue: number, theValid: boolean): void;
 
-calculateDiff(argNo0: FilletPoint): boolean;
+  calculateDiff(argNo0: FilletPoint): boolean;
 
-FilterPoints(argNo0: FilletPoint): void;
+  FilterPoints(argNo0: FilletPoint): void;
 
-Copy(): FilletPoint;
+  Copy(): FilletPoint;
 
-hasSolution(theRadius: number): number;
+  hasSolution(theRadius: number): number;
 
-LowerValue(): number;
+  LowerValue(): number;
 
-remove(theIndex: number): void;
+  remove(theIndex: number): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

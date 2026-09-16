@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- test constants use SCREAMING_SNAKE_CASE */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { resizeImageForChat } from '#utils/resize-image.js';
+import { ImageTooLargeError, MAX_DATA_URL_LENGTH, resizeImageForChat } from '#utils/resize-image.js';
 
 const SMALL_JPEG_DATA_URL = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
 const SMALL_PNG_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==';
@@ -144,6 +144,21 @@ describe('resizeImageForChat', () => {
     const result = await resizeImageForChat(SMALL_PNG_DATA_URL);
     expect(result).toBe(SMALL_JPEG_DATA_URL);
     // Last canvas width set should be 800 (last-resort)
+    expect(canvasWidths.at(-1)).toBe(800);
+  });
+
+  it('should reject rather than return an over-cap data URL when even the last resort does not fit', async () => {
+    mockImageWidth = 4000;
+    mockImageHeight = 4000;
+
+    const bigDataUrl = 'data:image/jpeg;base64,' + 'A'.repeat(2_000_000);
+    mockToDataUrlFunction = () => bigDataUrl;
+
+    const rejection = await resizeImageForChat(SMALL_PNG_DATA_URL).catch((error: unknown) => error);
+
+    expect(rejection).toBeInstanceOf(ImageTooLargeError);
+    expect((rejection as Error).name).toBe('ImageTooLargeError');
+    expect((rejection as Error).message).toContain(String(MAX_DATA_URL_LENGTH));
     expect(canvasWidths.at(-1)).toBe(800);
   });
 

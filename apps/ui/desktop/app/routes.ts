@@ -1,5 +1,7 @@
 import { flatRoutes } from '@react-router/fs-routes';
 import type { RouteConfigEntry } from '@react-router/dev/routes';
+// oxlint-disable-next-line eslint/no-restricted-imports -- route generation runs outside the app alias root.
+import { resolveTauCloudBuildEnabled } from '../../build-environment.js';
 
 /**
  * Desktop route manifest: the web route tree minus every module SPA mode
@@ -17,13 +19,15 @@ import type { RouteConfigEntry } from '@react-router/dev/routes';
  * excluded file drags that file's server code into the client graph, which is
  * why `webManifestLinks` moved to `app/lib/web-manifest.ts`.
  */
-export default flatRoutes({
+const routes: RouteConfigEntry[] = await flatRoutes({
   rootDirectory: '../../app/routes',
   ignoredRouteFiles: [
     // Co-located route tests would otherwise become live routes (and generate
     // `+types/*.test.ts` modules vitest then fails to collect).
     '../../app/routes/**/*.test.{ts,tsx}',
     '../../app/routes/**/*.spec.{ts,tsx}',
+    // oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
+    ...(resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']) ? [] : ['../../app/routes/usage/**']),
 
     // Web-only: the desktop sign-in callback lands in the system browser, not
     // in the shell (see `desktop-auth-signin-blueprint.md`).
@@ -39,6 +43,8 @@ export default flatRoutes({
     '../../app/routes/health.ready.ts',
     '../../app/routes/health.startup.ts',
     '../../app/routes/i.$/**',
+    '../../app/routes/legal/**',
+    '../../app/routes/legal.*/**',
     '../../app/routes/manifest[[].webmanifest[]].ts',
     '../../app/routes/robots[[].[]]txt/**',
     '../../app/routes/sitemap[[].[]]xml/**',
@@ -52,5 +58,10 @@ export default flatRoutes({
     // Browser-only e2e fixtures, all with server loaders.
     '../../app/routes/[[]__e2e[]].*/**',
   ],
-  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- explicit module boundary required here.
-}) as Promise<RouteConfigEntry[]>;
+});
+
+export default routes.map((entry) =>
+  entry.id === '../../app/routes/_index'
+    ? { ...entry, file: '../../app/routes/_index/home-surface.desktop.tsx' }
+    : entry,
+);

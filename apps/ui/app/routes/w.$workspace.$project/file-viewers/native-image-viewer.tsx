@@ -38,7 +38,7 @@ export function NativeImageViewer({ name, format, revision, readAll, renderPane 
   );
 }
 
-function NativeImageViewerContent({ name, format, revision, readAll, renderPane }: NativeImageViewerProps): ReactNode {
+function NativeImageViewerContent({ name, format, readAll, renderPane }: NativeImageViewerProps): ReactNode {
   const [resource, setResource] = useState<ImageResource>({ kind: 'loading' });
   const [dimensions, setDimensions] = useState<Dimensions>();
   const [zoom, setZoom] = useState<Zoom>('fit');
@@ -78,7 +78,7 @@ function NativeImageViewerContent({ name, format, revision, readAll, renderPane 
         URL.revokeObjectURL(url);
       }
     };
-  }, [format.id, format.mimeType, name, readAll, revision]);
+  }, [format.id, format.mimeType, readAll]);
 
   const adjustZoom = (delta: number): void => {
     setZoom((current) => Math.min(maximumZoom, Math.max(minimumZoom, (current === 'fit' ? 100 : current) + delta)));

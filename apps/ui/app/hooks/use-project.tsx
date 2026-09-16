@@ -20,6 +20,7 @@ import type { ObjectStoreWorker } from '#hooks/object-store.worker.js';
 import { projectMachine } from '#machines/project.machine.js';
 import type { ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.machine.js';
 import { editorMachine } from '#machines/editor.machine.js';
+import { disposeCadRuntime } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { logMachine } from '#machines/logs.machine.js';
@@ -264,6 +265,19 @@ export function ProjectProvider({
     },
   );
 
+  useEffect(
+    () => () => {
+      /* XState root stops do not run machine exit actions. This provider is
+       * the project resource boundary, so release each child runtime before
+       * React drops the actor tree. The helper is idempotent with the machine's
+       * normal `destroyKernel` path. */
+      for (const unit of actorRef.getSnapshot().context.geometryUnits.values()) {
+        disposeCadRuntime(unit.getSnapshot().context);
+      }
+    },
+    [actorRef],
+  );
+
   // Get the worker for Editor state persistence
   const getReadiedWorker = useCallback(async (): Promise<Remote<ObjectStoreWorker>> => {
     const snapshot = await waitFor(
@@ -414,6 +428,7 @@ export function ProjectProvider({
     };
   }, [geometryUnits, observeParameters]);
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
+  const resolvedRequestedChatId = useSelector(editorRef, (state) => state.context.requestedChatId);
   const focusedChatResolved = useSelector(editorRef, (state) => state.matches({ ready: { operation: 'idle' } }));
   const modelComponentDisplay = useSelector(editorRef, (state) => state.context.modelComponentDisplay);
   const needsModelComponentDisplayMigration = useSelector(
@@ -442,7 +457,11 @@ export function ProjectProvider({
     if (!focusedChatResolved || restoredModelInteractionRef.current !== modelInteractionRef) {
       return;
     }
-    const componentDisplay = serializeModelComponentDisplayState(modelInteractionRef.getSnapshot().context);
+    const snapshot = modelInteractionRef.getSnapshot();
+    if (snapshot.context.displayRevision !== modelDisplayRevision) {
+      return;
+    }
+    const componentDisplay = serializeModelComponentDisplayState(snapshot.context);
     if (
       !needsModelComponentDisplayMigration &&
       JSON.stringify(componentDisplay) === JSON.stringify(modelComponentDisplay)
@@ -460,10 +479,10 @@ export function ProjectProvider({
   ]);
 
   useEffect(() => {
-    if (focusedChatResolved && focusedChatId !== undefined) {
+    if (focusedChatResolved && focusedChatId !== undefined && resolvedRequestedChatId === requestedChatId) {
       onFocusedChatResolved?.(focusedChatId);
     }
-  }, [focusedChatId, focusedChatResolved, onFocusedChatResolved]);
+  }, [focusedChatId, focusedChatResolved, onFocusedChatResolved, requestedChatId, resolvedRequestedChatId]);
 
   useEffect(() => {
     if (profile === 'shared') {

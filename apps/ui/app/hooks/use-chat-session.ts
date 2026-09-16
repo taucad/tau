@@ -27,6 +27,7 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 type Acquisition = {
   readonly store: ChatSessionStore;
   readonly chatId: string;
+  readonly projectId: string | undefined;
   readonly session: ChatSession;
 };
 
@@ -47,21 +48,22 @@ type Acquisition = {
  *   store disposes the underlying actors only when no other view or active
  *   run holds the chat.
  */
-export function useChatSession(chatId: string): ChatSession {
+export function useChatSession(chatId: string, projectId?: string): ChatSession {
   const store = useChatSessionStore();
 
   const [acquisition, setAcquisition] = useState<Acquisition>(() => ({
     store,
     chatId,
-    session: store.acquire(chatId),
+    projectId,
+    session: store.acquire(chatId, projectId),
   }));
 
   let active: Acquisition = acquisition;
-  if (acquisition.store !== store || acquisition.chatId !== chatId) {
+  if (acquisition.store !== store || acquisition.chatId !== chatId || acquisition.projectId !== projectId) {
     // Acquire eagerly so the same render returns the right session.
     // The previous acquisition is released by the effect cleanup below
     // when its `acquisition` dep changes on the next commit.
-    active = { store, chatId, session: store.acquire(chatId) };
+    active = { store, chatId, projectId, session: store.acquire(chatId, projectId) };
     setAcquisition(active);
   }
 

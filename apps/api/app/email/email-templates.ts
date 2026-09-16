@@ -1,114 +1,241 @@
 import { createElement } from 'react';
+import type { ReactElement } from 'react';
 import { render, toPlainText } from 'react-email';
 import type { EmailTemplate, RenderedEmail } from '#email/email.types.js';
-import { bodyText, fallbackLink, mutedText, primaryAction, tauEmailLayout } from '#email/templates/shared.js';
+import { expiresIn, footerCopy } from '#email/email-copy.js';
+import {
+  details,
+  inlineLink,
+  note,
+  paragraph,
+  primaryAction,
+  strong,
+  tauEmailLayout,
+} from '#email/templates/shared.js';
+import type { DetailRow, LayoutOptions } from '#email/templates/shared.js';
 
-export const subjectForEmailTemplate = (template: EmailTemplate): string => {
+export type EmailSpec = {
+  readonly subject: string;
+  /** Max 90 characters, and never a restatement of the subject. */
+  readonly preheader: string;
+  readonly kicker: string;
+  readonly heading: string;
+  /** Footer sentence explaining why this person received the email. */
+  readonly reason: string;
+  /** Body elements in the fixed order: paragraphs, detail rows, action, note. */
+  readonly body: ReadonlyArray<ReactElement | undefined>;
+};
+
+const row = (label: string, value: string | undefined): DetailRow | undefined =>
+  value === undefined ? undefined : { label, value };
+
+export const specForEmailTemplate = (template: EmailTemplate): EmailSpec => {
   switch (template.kind) {
     case 'magic-link': {
-      return 'Sign in to Tau';
+      return {
+        subject: 'Your sign-in link for Tau',
+        preheader: `This link signs you in once and expires in ${expiresIn('magicLink')}.`,
+        kicker: 'Sign in',
+        heading: 'Sign in to Tau',
+        reason: `You received this email because someone asked to sign in to Tau as ${template.email}.`,
+        body: [
+          createElement(
+            paragraph,
+            null,
+            'Use the button below to sign in as ',
+            createElement(strong, null, template.email),
+            `. The link works once and expires in ${expiresIn('magicLink')}.`,
+          ),
+          createElement(details, { rows: [row('Device', template.device)] }),
+          createElement(primaryAction, { href: template.url }, 'Sign in to Tau'),
+          createElement(
+            note,
+            null,
+            "If you didn't request this, you can ignore this email. Nobody can sign in without this link.",
+          ),
+        ],
+      };
     }
     case 'reset-password': {
-      return 'Reset your Tau password';
+      return {
+        subject: 'Reset your Tau password',
+        preheader: 'Choose a new password within the next hour. Nothing changes until you do.',
+        kicker: 'Password reset',
+        heading: 'Reset your password',
+        reason: `You received this email because a password reset was requested for ${template.email}.`,
+        body: [
+          createElement(
+            paragraph,
+            null,
+            'We received a request to reset the password for ',
+            createElement(strong, null, template.email),
+            `. The link expires in ${expiresIn('resetPassword')}.`,
+          ),
+          createElement(paragraph, null, 'Choosing a new password signs out every other session on your account.'),
+          createElement(details, { rows: [row('Device', template.device)] }),
+          createElement(primaryAction, { href: template.url }, 'Choose a new password'),
+          createElement(
+            note,
+            null,
+            "If you didn't request this, your password stays the same and you can ignore this email.",
+          ),
+        ],
+      };
+    }
+    case 'password-changed': {
+      return {
+        subject: 'Your Tau password was changed',
+        preheader: "If this was you, there's nothing to do. If not, secure your account now.",
+        kicker: 'Security',
+        heading: 'Your password was changed',
+        reason: `You received this email because the password for ${template.email} was changed.`,
+        body: [
+          createElement(
+            paragraph,
+            null,
+            'The password for ',
+            createElement(strong, null, template.email),
+            ' was changed and other sessions were signed out.',
+          ),
+          createElement(details, {
+            rows: [row('Account', template.email), row('When', template.changedAt), row('Device', template.device)],
+          }),
+          createElement(paragraph, null, "If this was you, there's nothing else to do."),
+          createElement(primaryAction, { href: template.url }, "I didn't do this"),
+          createElement(
+            note,
+            null,
+            "That button starts a new password reset for this address. If you can't sign in afterwards, reply to this email and we'll help.",
+          ),
+        ],
+      };
     }
     case 'verify-email': {
-      return 'Verify your Tau email';
+      return {
+        subject: 'Confirm your email for Tau',
+        preheader: `One click finishes setting up your account. The link expires in ${expiresIn('verifyEmail')}.`,
+        kicker: 'Email verification',
+        heading: 'Confirm your email address',
+        reason: `You received this email because a Tau account was created with ${template.email}.`,
+        body: [
+          createElement(
+            paragraph,
+            null,
+            'Confirm ',
+            createElement(strong, null, template.email),
+            ` to finish setting up your Tau account. The link expires in ${expiresIn('verifyEmail')}.`,
+          ),
+          createElement(primaryAction, { href: template.url }, 'Confirm email'),
+          createElement(
+            note,
+            null,
+            "If you didn't create a Tau account, you can ignore this email and no account will be activated.",
+          ),
+        ],
+      };
     }
     case 'publication-invite': {
-      return `${template.ownerName} shared a Tau design with you`;
+      return {
+        subject: `${template.ownerName} shared “${template.publicationTitle}” with you on Tau`,
+        preheader: `Sign in as ${template.recipientEmail} to open this private design.`,
+        kicker: 'Shared with you',
+        heading: `${template.ownerName} shared a design with you`,
+        reason: `You received this email because ${template.ownerName} added ${template.recipientEmail} to a private Tau design.`,
+        body: [
+          createElement(
+            paragraph,
+            null,
+            'This design is private. Sign in with ',
+            createElement(strong, null, template.recipientEmail),
+            ' to view it in the Tau viewer.',
+          ),
+          createElement(details, {
+            rows: [
+              row('Design', template.publicationTitle),
+              row('Shared by', template.ownerName),
+              row('Access', 'Private · invited recipients only'),
+            ],
+          }),
+          createElement(primaryAction, { href: template.url }, 'Open design'),
+          createElement(
+            note,
+            null,
+            "If you weren't expecting this, you can ignore this email. Opening the link only shows the design to you.",
+          ),
+        ],
+      };
     }
     case 'payment-failed': {
-      return 'Action needed: your Tau payment failed';
+      const retry =
+        template.nextAttemptAt === undefined
+          ? 'We retry automatically over the next few days.'
+          : `We retry automatically on ${template.nextAttemptAt}.`;
+      return {
+        subject: 'Action needed: your Tau Pro payment failed',
+        preheader: `Update your payment method to keep Pro. ${retry}`,
+        kicker: 'Billing',
+        heading: "We couldn't process your Pro payment",
+        reason: `You received this email because ${template.email} has an active Tau Pro subscription.`,
+        body: [
+          createElement(
+            paragraph,
+            null,
+            'The renewal payment for ',
+            createElement(strong, null, template.email),
+            " didn't go through. We'll retry automatically; update your payment method to keep Pro without interruption.",
+          ),
+          createElement(details, {
+            rows: [
+              row('Plan', template.plan),
+              row('Amount', template.amount),
+              row('Next attempt', template.nextAttemptAt),
+              row('Payment method', template.paymentMethodSummary),
+            ],
+          }),
+          createElement(primaryAction, { href: template.billingUrl }, 'Update payment method'),
+          createElement(
+            note,
+            null,
+            'Your projects and credits stay safe either way. Questions? Reply to this email or visit ',
+            createElement(inlineLink, { href: footerCopy.helpUrl }, 'the help docs'),
+            '.',
+          ),
+        ],
+      };
     }
   }
 };
 
-export const renderEmailTemplate = async (template: EmailTemplate): Promise<RenderedEmail> => {
-  const element = (() => {
-    switch (template.kind) {
-      case 'magic-link': {
-        return createElement(
-          tauEmailLayout,
-          {
-            preview: 'Use this secure link to continue to Tau.',
-            heading: 'Continue to Tau',
-          },
-          createElement(bodyText, null, `We received a request to sign in as ${template.email}.`),
-          createElement(bodyText, null, 'Use the secure link below to continue.'),
-          createElement(primaryAction, { href: template.url }, 'Continue to Tau'),
-          createElement(fallbackLink, { href: template.url }),
-          createElement(mutedText, null, "If you didn't request this, you can safely ignore this email."),
-        );
-      }
-      case 'reset-password': {
-        return createElement(
-          tauEmailLayout,
-          {
-            preview: 'Reset your Tau password.',
-            heading: 'Reset your password',
-          },
-          createElement(bodyText, null, `We received a password reset request for ${template.email}.`),
-          createElement(primaryAction, { href: template.url }, 'Reset password'),
-          createElement(fallbackLink, { href: template.url }),
-          createElement(mutedText, null, "If you didn't request this, no changes were made."),
-        );
-      }
-      case 'verify-email': {
-        return createElement(
-          tauEmailLayout,
-          {
-            preview: 'Verify your Tau email address.',
-            heading: 'Verify your email',
-          },
-          createElement(bodyText, null, `Confirm ${template.email} so your Tau account is ready to use.`),
-          createElement(primaryAction, { href: template.url }, 'Verify email'),
-          createElement(fallbackLink, { href: template.url }),
-        );
-      }
-      case 'publication-invite': {
-        return createElement(
-          tauEmailLayout,
-          {
-            preview: `${template.ownerName} shared a private Tau design with you.`,
-            heading: 'A private design was shared with you',
-          },
-          createElement(
-            bodyText,
-            null,
-            `${template.ownerName} shared "${template.publicationTitle}" with ${template.recipientEmail}.`,
-          ),
-          createElement(bodyText, null, 'Sign in with this email address to open the private viewer.'),
-          createElement(primaryAction, { href: template.url }, 'Open design'),
-          createElement(fallbackLink, { href: template.url }),
-        );
-      }
-      case 'payment-failed': {
-        return createElement(
-          tauEmailLayout,
-          {
-            preview: 'Your Tau renewal payment failed — update your card to keep Pro.',
-            heading: 'Your payment failed',
-          },
-          createElement(
-            bodyText,
-            null,
-            `We couldn't process the renewal for ${template.email}. We'll retry automatically over the next few days.`,
-          ),
-          createElement(
-            bodyText,
-            null,
-            'Update your payment method to keep Pro without interruption. Your credits and projects are safe either way.',
-          ),
-          createElement(primaryAction, { href: template.billingUrl }, 'Update payment method'),
-          createElement(fallbackLink, { href: template.billingUrl }),
-        );
-      }
-    }
-  })();
+/**
+ * Merged with react-email's own defaults, which skip images and `data-skip-in-text` blocks.
+ * Without these the plain-text part shouts the heading, drops the wordmark and runs each detail
+ * label straight into its value. html-to-text's own image formatter prints the src beside the alt,
+ * which is noise in a mail client, so the wordmark gets a formatter that emits only its alt text.
+ */
+const plainTextOptions = {
+  formatters: {
+    altTextOnly: (
+      element: { readonly attribs?: Record<string, string> },
+      _walk: unknown,
+      builder: { addInline: (text: string) => void },
+    ): void => {
+      builder.addInline(element.attribs?.['alt'] ?? '');
+    },
+  },
+  selectors: [
+    { selector: 'h1', options: { uppercase: false } },
+    { selector: 'img', format: 'altTextOnly' },
+    { selector: '.tau-detail-row', format: 'dataTable' },
+  ],
+};
 
-  const html = await render(element);
+export const subjectForEmailTemplate = (template: EmailTemplate): string => specForEmailTemplate(template).subject;
+
+export const renderEmailTemplate = async (template: EmailTemplate, options: LayoutOptions): Promise<RenderedEmail> => {
+  const { body, ...spec } = specForEmailTemplate(template);
+  const html = await render(createElement(tauEmailLayout, { ...spec, ...options }, ...body));
   return {
     html,
-    text: toPlainText(html),
+    text: toPlainText(html, plainTextOptions),
   };
 };

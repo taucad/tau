@@ -4,18 +4,18 @@
 
 LDOMBasicString: declare class LDOMBasicString
 
-constructor
+  constructor
 
-Type(): LDOMBasicString_StringType;
+  Type(): LDOMBasicString_StringType;
 
-GetInteger(aResult?: number): { returnValue: boolean; aResult: number };
+  GetInteger(aResult?: number): { returnValue: boolean; aResult: number };
 
-GetString(): string;
+  GetString(): string;
 
-equals(anOther: LDOMBasicString): boolean;
+  equals(anOther: LDOMBasicString): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LDOMBasicString_StringType: typeof LDOMBasicString_StringType[keyof typeof LDOMBasicString_StringType]

@@ -691,18 +691,18 @@ function generateMatrixReport(experiments: ExperimentData[], baseline?: Experime
   .legend-swatch { width: 12px; height: 12px; border-radius: 2px; }
   .footer { margin-top: 3rem; color: #9CA3AF; font-size: 0.75rem; border-top: 1px solid #E5E7EB; padding-top: 1rem; }
   .explanation { color: #6B7280; font-size: 0.8rem; margin: 0.5rem 0 1rem; line-height: 1.5; max-width: 80ch; }
-  .sortable-th { cursor: pointer; user-select: none; }
+  .sortable-th { user-select: none; }
   .sortable-th:hover { background: #E5E7EB; }
   .sort-arrow { font-size: 0.65rem; margin-left: 3px; opacity: 0.5; }
   .filter-bar { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.75rem 0 1rem; }
-  .filter-btn { padding: 0.3rem 0.7rem; border: 1px solid #D1D5DB; border-radius: 6px; background: white; font-size: 0.75rem; cursor: pointer; transition: all 0.15s; }
+  .filter-btn { padding: 0.3rem 0.7rem; border: 1px solid #D1D5DB; border-radius: 6px; background: white; font-size: 0.75rem; transition: all 0.15s; }
   .filter-btn:hover { border-color: #9CA3AF; }
   .filter-btn.active { background: #3B82F6; color: white; border-color: #3B82F6; }
   .compile-flags { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.7rem; display: inline-block; }
   .compile-flags:hover { white-space: normal; overflow: visible; }
   .pareto-star { fill: #F59E0B; stroke: #D97706; stroke-width: 1; }
   .ref-th { background: #DBEAFE !important; }
-  .heatmap-th { cursor: pointer; user-select: none; transition: background 0.15s; }
+  .heatmap-th { user-select: none; transition: background 0.15s; }
   .heatmap-th:hover { background: #E5E7EB; }
 </style>
 <script>window.__DATA__=${JSON.stringify(reportData)};${'</'}script>

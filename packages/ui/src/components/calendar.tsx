@@ -73,7 +73,7 @@ function Calendar({
         ),
         // eslint-disable-next-line @typescript-eslint/naming-convention -- react day picker class names
         dropdown_root: cn(
-          'border-input shadow-xs has-focus:ring-2 has-focus:ring-ring relative rounded-md border',
+          'border-input shadow-xs has-focus:focus-outline relative rounded-md border',
           defaultClassNames.dropdown_root,
         ),
         dropdown: cn('bg-popover absolute inset-0 opacity-0', defaultClassNames.dropdown),
@@ -108,7 +108,7 @@ function Calendar({
         // eslint-disable-next-line @typescript-eslint/naming-convention -- react day picker class names
         range_end: cn('bg-accent rounded-r-md', defaultClassNames.range_end),
         today: cn(
-          'bg-accent text-accent-foreground rounded-md data-[selected=true]:rounded-none',
+          'bg-accent text-accent-foreground rounded-md data-[selected=true]:rounded-none has-[[data-selected-single=true]]:bg-transparent',
           defaultClassNames.today,
         ),
         outside: cn('text-muted-foreground aria-selected:text-muted-foreground', defaultClassNames.outside),
@@ -203,7 +203,7 @@ function CalendarDayButton({
       data-range-end={modifiers['range_end']}
       data-range-middle={modifiers['range_middle']}
       className={cn(
-        'data-[range-middle=true]:text-accent-foreground flex aspect-square h-auto w-full min-w-(--cell-size) flex-col gap-1 leading-none font-normal group-data-[focused=true]/day:relative group-data-[focused=true]/day:z-10 group-data-[focused=true]/day:ring-2 group-data-[focused=true]/day:ring-inset group-data-[focused=true]/day:ring-ring data-[range-end=true]:rounded-md data-[range-end=true]:bg-primary data-[range-end=true]:text-primary-foreground data-[range-middle=true]:rounded-none data-[range-middle=true]:bg-accent data-[range-start=true]:rounded-md data-[range-start=true]:bg-primary data-[range-start=true]:text-primary-foreground data-[selected-single=true]:bg-primary data-[selected-single=true]:text-primary-foreground [&>span]:text-xs [&>span]:opacity-70',
+        'data-[range-middle=true]:text-accent-foreground flex aspect-square h-auto w-full min-w-(--cell-size) flex-col gap-1 leading-none font-normal group-data-[focused=true]/day:relative group-data-[focused=true]/day:z-10 group-data-[focused=true]/day:focus-outline data-[range-end=true]:rounded-md data-[range-end=true]:primary-action data-[range-middle=true]:rounded-none data-[range-middle=true]:bg-accent data-[range-start=true]:rounded-md data-[range-start=true]:primary-action data-[selected-single=true]:primary-action [&>span]:text-xs [&>span]:opacity-70',
         defaultClassNames.day,
         className,
       )}

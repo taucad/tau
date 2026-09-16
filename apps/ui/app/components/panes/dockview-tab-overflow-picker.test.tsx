@@ -273,6 +273,23 @@ describe('DockviewTabOverflowPicker', () => {
     expect(observers[0]?.disconnect).toHaveBeenCalledOnce();
   });
 
+  it('clears stale overflow when the last panel closes', () => {
+    const panel = createPanel({ id: 'one', title: 'One' });
+    const { properties } = createProperties({ panels: [panel], clientWidth: 100, scrollWidth: 300 });
+    const view = renderPicker(properties);
+    flushMeasurement();
+    expect(screen.getByRole('button', { name: 'Open tabs' })).toBeInTheDocument();
+
+    view.rerender(
+      <TooltipProvider>
+        <DockviewTabOverflowPicker {...properties} activePanel={undefined} panels={[]} />
+      </TooltipProvider>,
+    );
+    flushMeasurement();
+
+    expect(screen.queryByRole('button', { name: 'Open tabs' })).not.toBeInTheDocument();
+  });
+
   it('responds to tab-strip resize and disposes its observer', () => {
     const panel = createPanel({ id: 'one', title: 'One' });
     const { properties, tabs } = createProperties({ panels: [panel], clientWidth: 100, scrollWidth: 300 });

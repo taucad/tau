@@ -7,7 +7,14 @@
       "version": "0.1.0-beta.0",
       "whenToUse": "Use when creating or editing TypeScript geometry with manifold-3d/manifoldCAD.",
       "directory": "cad-manifold",
-      "files": ["SKILL.md", "api-index.md", "api-functions.md", "api-types.md", "api-classs.md", "api-interfaces.md"],
+      "files": [
+        "SKILL.md",
+        "api-index.md",
+        "api-functions.md",
+        "api-types.md",
+        "api-classs.md",
+        "api-interfaces.md"
+      ],
       "body": "---\nname: cad-manifold\ndescription: Guides robust Manifold mesh CAD in main.ts. Use when creating or editing TypeScript geometry with manifold-3d/manifoldCAD.\n---\n\n# Manifold authoring\n\n## Workflow\n\n1. Author `main.ts` with ES module imports from `manifold-3d/manifoldCAD`, exported `defaultParams`, and a default `main(params)` returning a `Manifold` or a flat array of `Manifold`/GLTF nodes.\n2. Use positive dimensions and built-in primitives, revolves, and booleans.\n3. Choose segment counts deliberately because all curves become mesh geometry.\n4. Keep every standalone test target renderable through a default `main` returning geometry.\n\nFor multiple files, import helpers through explicit ESM paths such as `./lib/widget.js`; keep assembly orchestration in `main.ts`.\n\n## Kernel rules\n\n- For cylinders, spheres, and revolves, start near `max(16, Math.PI * diameter / 0.3)` segments for visible parts; 32 suits small features and 64 large ones.\n- Prefer `Manifold.cylinder`, `Manifold.sphere`, and `Manifold.revolve` over manual point loops.\n- Combine arrays once with `Manifold.compose` or n-ary boolean methods instead of nested Manifold-of-Manifold construction.\n- Do not proliferate segments on small features.\n\n## Canonical pattern\n\n```ts\nimport { Manifold } from 'manifold-3d/manifoldCAD';\n\nexport const defaultParams = { width: 80, depth: 40, height: 20, holeRadius: 6 };\n\nexport default function main(p = defaultParams): Manifold {\n  const body = Manifold.cube([p.width, p.depth, p.height], true);\n  const hole = Manifold.cylinder(p.height + 2, p.holeRadius, -1, 64, true);\n  return body.subtract(Manifold.union([hole.translate([-20, 0, 0]), hole.translate([20, 0, 0])]));\n}\n```\n\nCheck missing imports, undefined returns, invalid boolean inputs, and non-positive dimensions first.\n\n## API reference\n\nAll 160 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.\n\n- `api-functions.md` — Functions\n- `api-types.md` — Types\n- `api-classs.md` — Classs\n- `api-interfaces.md` — Interfaces\n\nRead ranges, not whole files. Never copy a reference into a source file.\n"
     }
   ]

@@ -4,162 +4,162 @@
 
 IFGraph_AllConnected: declare class IFGraph_AllConnected extends Interface_GraphContent
 
-GetFromEntity(ent: Standard_Transient): void;
+  GetFromEntity(ent: Standard_Transient): void;
 
-ResetData(): void;
+  ResetData(): void;
 
-Evaluate(): void;
+  Evaluate(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IFGraph_AllShared: declare class IFGraph_AllShared extends Interface_GraphContent
 
-GetFromEntity(ent: Standard_Transient): void;
+  GetFromEntity(ent: Standard_Transient): void;
 
-ResetData(): void;
+  ResetData(): void;
 
-Evaluate(): void;
+  Evaluate(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IFGraph_Articulations: declare class IFGraph_Articulations extends Interface_GraphContent
 
-GetFromEntity(ent: Standard_Transient): void;
+  GetFromEntity(ent: Standard_Transient): void;
 
-ResetData(): void;
+  ResetData(): void;
 
-Evaluate(): void;
+  Evaluate(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IFGraph_Compare: declare class IFGraph_Compare extends Interface_GraphContent
 
-GetFromEntity(ent: Standard_Transient, first: boolean): void;
+  GetFromEntity(ent: Standard_Transient, first: boolean): void;
 
-Merge(): void;
+  Merge(): void;
 
-RemoveSecond(): void;
+  RemoveSecond(): void;
 
-KeepCommon(): void;
+  KeepCommon(): void;
 
-ResetData(): void;
+  ResetData(): void;
 
-Evaluate(): void;
+  Evaluate(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IFGraph_ConnectedComponants: declare class IFGraph_ConnectedComponants extends IFGraph_SubPartsIterator
 
-Evaluate(): void;
+  Evaluate(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IFGraph_Cumulate: declare class IFGraph_Cumulate extends Interface_GraphContent
 
-GetFromEntity(ent: Standard_Transient): void;
+  GetFromEntity(ent: Standard_Transient): void;
 
-ResetData(): void;
+  ResetData(): void;
 
-Evaluate(): void;
+  Evaluate(): void;
 
-NbTimes(ent: Standard_Transient): number;
+  NbTimes(ent: Standard_Transient): number;
 
-HighestNbTimes(): number;
+  HighestNbTimes(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IFGraph_Cycles: declare class IFGraph_Cycles extends IFGraph_SubPartsIterator
 
-constructor
+  constructor
 
-Evaluate(): void;
+  Evaluate(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IFGraph_ExternalSources: declare class IFGraph_ExternalSources extends Interface_GraphContent
 
-GetFromEntity(ent: Standard_Transient): void;
+  GetFromEntity(ent: Standard_Transient): void;
 
-ResetData(): void;
+  ResetData(): void;
 
-Evaluate(): void;
+  Evaluate(): void;
 
-IsEmpty(): boolean;
+  IsEmpty(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IFGraph_SCRoots: declare class IFGraph_SCRoots extends IFGraph_StrongComponants
 
-constructor
+  constructor
 
-Evaluate(): void;
+  Evaluate(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IFGraph_StrongComponants: declare class IFGraph_StrongComponants extends IFGraph_SubPartsIterator
 
-Evaluate(): void;
+  Evaluate(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IFGraph_SubPartsIterator: declare class IFGraph_SubPartsIterator
 
-Model(): Interface_InterfaceModel;
+  Model(): Interface_InterfaceModel;
 
-AddPart(): void;
+  AddPart(): void;
 
-NbParts(): number;
+  NbParts(): number;
 
-PartNum(): number;
+  PartNum(): number;
 
-SetLoad(): void;
+  SetLoad(): void;
 
-SetPartNum(num: number): void;
+  SetPartNum(num: number): void;
 
-GetFromEntity(ent: Standard_Transient, shared: boolean): void;
+  GetFromEntity(ent: Standard_Transient, shared: boolean): void;
 
-Reset(): void;
+  Reset(): void;
 
-Evaluate(): void;
+  Evaluate(): void;
 
-Loaded(): Interface_GraphContent;
+  Loaded(): Interface_GraphContent;
 
-IsLoaded(ent: Standard_Transient): boolean;
+  IsLoaded(ent: Standard_Transient): boolean;
 
-IsInPart(ent: Standard_Transient): boolean;
+  IsInPart(ent: Standard_Transient): boolean;
 
-EntityPartNum(ent: Standard_Transient): number;
+  EntityPartNum(ent: Standard_Transient): number;
 
-Start(): void;
+  Start(): void;
 
-More(): boolean;
+  More(): boolean;
 
-Next(): void;
+  Next(): void;
 
-IsSingle(): boolean;
+  IsSingle(): boolean;
 
-FirstEntity(): Standard_Transient;
+  FirstEntity(): Standard_Transient;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

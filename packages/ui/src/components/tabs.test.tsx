@@ -16,6 +16,7 @@ describe('TabsTrigger', () => {
 
     const trigger = screen.getByRole('tab', { name: 'General' });
     expect(trigger).toHaveAttribute('href', '/settings');
+    expect(trigger).toHaveClass('hover:bg-accent/60');
     expect(trigger.querySelector('[data-slot="tabs-active-indicator"]')).toBeInTheDocument();
   });
 });

@@ -16,6 +16,7 @@ import {
   sumReceiptCredits,
   useReceiptCredits,
 } from '#routes/w.$workspace.$project/chat-message-data-usage.js';
+import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
 
 type ChatHistoryStatusProps = {
   readonly className?: string;
@@ -103,7 +104,7 @@ export const ChatHistoryStatus = memo(function ({ className }: ChatHistoryStatus
           </div>
         ) : undefined}
 
-        {showCredits && operationIds.length > 0 ? (
+        {tauCloudEnabled && showCredits && operationIds.length > 0 ? (
           <div
             aria-label={`Tau credits: ${formatReceiptTotal(total)}`}
             className='flex items-center gap-1 text-muted-foreground'

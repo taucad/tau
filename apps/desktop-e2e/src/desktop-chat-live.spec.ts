@@ -10,7 +10,6 @@ import { deleteTauTestUser, seedTauTestUser, tauCreditBalanceAtoms, tauTestAccou
 import {
   activeChatId,
   connectPickedFolder,
-  declineCookieBanner,
   expectCount,
   expectGeometryFramed,
   expectLauncher2Turn,
@@ -84,7 +83,6 @@ test.skipIf(!live)('builds a model on disk with a live frontier model', async ()
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-    await declineCookieBanner(page);
     if (packaged) {
       await authenticatePackagedDesktop(session, token);
     }

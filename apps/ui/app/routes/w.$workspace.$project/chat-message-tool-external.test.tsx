@@ -66,6 +66,24 @@ const partFromLog = async (
   return part!;
 };
 
+const partFromEvents = async (events: readonly AgentLogEvent[]): Promise<DynamicToolUIPart> => {
+  const stream = new ReadableStream<UIMessageChunk>({
+    start(controller) {
+      for (const chunk of events.flatMap((event) => [...projectAgentHostEvent(event)])) {
+        controller.enqueue(chunk);
+      }
+      controller.close();
+    },
+  });
+  let last;
+  for await (const message of readUIMessageStream({ stream })) {
+    last = message;
+  }
+  const part = last?.parts.find((candidate) => candidate.type === 'dynamic-tool');
+  expect(part).toBeDefined();
+  return part!;
+};
+
 const listFilesRows = [
   {
     id: 'm1',
@@ -147,6 +165,18 @@ describe('the external tool-call renderer', () => {
     expect(screen.queryByText(/Received unknown part/)).not.toBeInTheDocument();
   });
 
+  it.each([
+    { kind: 'read', title: "Read file '/workspace/main.py'", expected: "Read file '/workspace/main.py'" },
+    { kind: 'search', title: "Search for 'make_bezier'", expected: "Searched for 'make_bezier'" },
+    { kind: 'search', title: 'Searchlight', expected: 'Searched Searchlight' },
+  ])('should not repeat a whole tool-kind verb in $title', async ({ kind, title, expected }) => {
+    const part = await partFromLog(listFilesRows.map((row) => ({ ...row, call: { ...row.call, kind, title } })));
+
+    renderExternal(part);
+    expect(screen.getByRole('button', { name: expected })).toBeVisible();
+    expect(screen.queryByRole('button', { name: /Read Read/u })).not.toBeInTheDocument();
+  });
+
   it('renders an edit call as a file diff, from a refinement the agent only sent once', async () => {
     const user = userEvent.setup();
     const diff = [{ type: 'diff', path: 'main.scad', oldText: 'cube(10);\n', newText: 'cube(12);\n' }];
@@ -184,6 +214,59 @@ describe('the external tool-call renderer', () => {
     await user.click(screen.getByRole('button', { name: /main.scad/ }));
     expect(screen.getByText('cube(12);')).toBeVisible();
     expect(screen.queryByText(/Received unknown part/)).not.toBeInTheDocument();
+  });
+
+  it('applies a terminal ACP input replacement through the real AI SDK stream reader', async () => {
+    const part = await partFromEvents([
+      {
+        ...base,
+        type: 'message.appended',
+        message: {
+          id: 'terminal-input',
+          role: 'tool-input',
+          toolCallId: 'call-terminal',
+          toolName: 'shell',
+          call: { toolCallId: 'vendor-terminal', status: 'pending', title: 'Starting shell' },
+          content: { command: 'old' },
+          metadata: externalMetadata,
+        },
+      },
+      {
+        ...base,
+        type: 'message.envelope-replaced',
+        messageId: 'terminal-input',
+        replacement: {
+          id: 'terminal-input',
+          role: 'tool-input',
+          toolCallId: 'call-terminal',
+          toolName: 'shell',
+          call: { toolCallId: 'vendor-terminal', status: 'completed', title: 'Finished shell' },
+          content: { command: 'final' },
+          metadata: externalMetadata,
+        },
+      },
+      {
+        ...base,
+        type: 'message.appended',
+        message: {
+          id: 'terminal-output',
+          role: 'tool-output',
+          toolCallId: 'call-terminal',
+          toolName: 'shell',
+          content: { stdout: 'done' },
+          isError: false,
+          metadata: externalMetadata,
+        },
+      },
+    ]);
+
+    expect(part).toMatchObject({
+      state: 'output-available',
+      input: { command: 'final' },
+      output: { stdout: 'done' },
+      title: 'Finished shell',
+      toolMetadata: { tau: { toolCallId: 'vendor-terminal', status: 'completed' } },
+    });
   });
 
   it("renders an execute call's captured output, never the terminal id it cannot resolve", async () => {
@@ -269,7 +352,7 @@ describe('the external tool-call renderer', () => {
       },
     ]);
     renderExternal(located);
-    await user.click(screen.getByRole('button', { name: /Read file/ }));
+    await user.click(screen.getByRole('button', { name: 'Reading file' }));
     /* The link still navigates to the path the agent named; only what is read
      * out is stripped, so a reordered name cannot stand in for another file. */
     expect(document.body.textContent).not.toMatch(/[\u202A-\u202E\u2066-\u2069]/u);

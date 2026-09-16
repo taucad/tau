@@ -334,6 +334,14 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     const { dispose: bridgeDispose } = bridge;
     const proxy = createFileSystemBridgeProxy(bridge);
     await proxy.configureProjectRoots(await getProjectRootConfigs(context.onRootSkipped));
+    const previewPrefix = '/previews/';
+    if (context.backendType === 'memory' && context.rootDirectory.startsWith(previewPrefix)) {
+      await proxy.mount(context.rootDirectory, {
+        backend: 'memory',
+        storageRootKey: `memory:preview:${context.rootDirectory.slice(previewPrefix.length)}`,
+        class: 'authored',
+      });
+    }
     const openBridge = (root: string, consumer?: ComposedViewConsumer): FileSystemBridgeConnection =>
       openFileSystemBridge(worker, { root, ...(consumer === undefined ? {} : { consumer }) });
     worker.postMessage({ type: 'computeStoreAdmission', projectId: context.projectId });

@@ -14,8 +14,12 @@ import { base64Loader } from '@taucad/vite/base64-loader';
  */
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- see above.
 import { createUiReactCompilerPlugin, createUiSourceAliasPlugin, uiSsrOptions } from '../vite.config';
+// oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- config-load seam is outside the app alias root.
+import { resolveTauCloudBuildEnabled } from '../build-environment';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
+const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
 
 /**
  * Desktop (Electron) build of `apps/ui`.
@@ -37,11 +41,12 @@ export default defineConfig({
     // No Netlify deploy-preview origin exists for a desktop bundle.
     tauBuildFrontendUrl: JSON.stringify(''),
     tauBuildId: JSON.stringify(Date.now()),
+    tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
     // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
     'import.meta.env.TAU_TARGET': '"desktop"',
   },
   plugins: [
-    createUiSourceAliasPlugin({ emitModuleGraph: true, target: 'desktop' }),
+    createUiSourceAliasPlugin({ emitModuleGraph: true, target: 'desktop', tauCloudEnabled }),
     tauRuntime(),
     base64Loader,
     createUiReactCompilerPlugin(),
@@ -51,7 +56,10 @@ export default defineConfig({
   ],
   worker: {
     // https://vite.dev/config/worker-options.html#worker-plugins
-    plugins: () => [createUiSourceAliasPlugin({ emitModuleGraph: true, target: 'desktop' }), nxViteTsPaths()],
+    plugins: () => [
+      createUiSourceAliasPlugin({ emitModuleGraph: true, target: 'desktop', tauCloudEnabled }),
+      nxViteTsPaths(),
+    ],
   },
   ssr: uiSsrOptions,
   server: {

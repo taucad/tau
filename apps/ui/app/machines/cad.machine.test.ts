@@ -9,7 +9,7 @@ import type { ParameterManifest } from '@taucad/parameters';
 import type { Geometry } from '@taucad/types';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
-import { cadMachine, selectCadFailureIssues } from '#machines/cad.machine.js';
+import { cadMachine, disposeCadRuntime, selectCadFailureIssues } from '#machines/cad.machine.js';
 import type { CadContext } from '#machines/cad.machine.js';
 import { logMachine } from '#machines/logs.machine.js';
 import type { AppRuntimeClient, KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
@@ -1236,6 +1236,24 @@ describe('cadMachine', () => {
   describe('cleanup', () => {
     it('should wire destroyKernel as a root exit action', () => {
       expect(cadMachine.config.exit).toContainEqual('destroyKernel');
+    });
+
+    it('should expose the same runtime cleanup to its React resource boundary', async () => {
+      const cleanup = vi.fn();
+      const mockClient = createMockAppRuntimeClient();
+      const { actor } = await startAndConnect({
+        connectResult: async () => ({
+          type: 'kernelConnected',
+          client: mockClient,
+          cleanups: [cleanup],
+        }),
+      });
+
+      disposeCadRuntime(actor.getSnapshot().context);
+
+      expect(cleanup).toHaveBeenCalledOnce();
+      expect(mockClient.terminate).toHaveBeenCalledOnce();
+      actor.stop();
     });
 
     it('should store event cleanups from connect result', async () => {

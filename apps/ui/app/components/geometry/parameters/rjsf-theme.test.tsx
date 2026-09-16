@@ -616,7 +616,11 @@ describe('composite fields', () => {
       ?.querySelector(':scope > [data-slot="parameter-group-content"]');
     expect(itemTrigger).toHaveAttribute('aria-expanded', 'true');
     expect(itemHeader).toContainElement(remove);
-    expect(itemHeader).toHaveClass('rounded-md', 'hover:bg-accent');
+    expect(itemHeader).toHaveClass(
+      'rounded-md',
+      'group-data-[state=open]/parameter-group:rounded-b-none',
+      'hover:bg-accent',
+    );
     expect(itemTrigger).toHaveClass('hover:bg-transparent');
     expect(outerContent).toHaveClass('px-2.5');
     expect(remove).not.toHaveClass('bg-destructive');

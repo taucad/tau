@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, RefreshCw, Wrench } from 'lucide-react';
+import { Wrench } from 'lucide-react';
 import { memo, useCallback, useMemo, useState } from 'react';
 import { messageRole, toolName } from '@taucad/chat/constants';
 import type { MyMessagePart, ToolInvocation, UsageData } from '@taucad/chat';
@@ -27,20 +27,10 @@ import { ChatMessageDataUsage } from '#routes/w.$workspace.$project/chat-message
 import { ChatMessageContextCompaction } from '#routes/w.$workspace.$project/chat-message-context-compaction.js';
 import { ChatMessageToolUseSkill } from '#routes/w.$workspace.$project/chat-message-tool-use-skill.js';
 import { ChatMessageText } from '#routes/w.$workspace.$project/chat-message-text.js';
-import { Tooltip, TooltipTrigger, TooltipContent } from '@taucad/ui/components/tooltip';
 import { CopyButton } from '#components/copy-button.js';
-import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
-import { menuItemVariants, menuSubTriggerOpenClass } from '@taucad/ui/components/menu.variants';
 import { When } from '#components/ui/utils/when.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-} from '@taucad/ui/components/dropdown-menu';
-import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
 import { ChatMessageToolWebSearch } from '#routes/w.$workspace.$project/chat-message-tool-web-search.js';
 import { ChatMessageToolWebBrowser } from '#routes/w.$workspace.$project/chat-message-tool-web-browser.js';
 import { ChatMessageToolFileEdit } from '#routes/w.$workspace.$project/chat-message-tool-edit-file.js';
@@ -56,12 +46,19 @@ import { ChatMessageToolScreenshot } from '#routes/w.$workspace.$project/chat-me
 import { ChatMessageToolRevisions } from '#routes/w.$workspace.$project/chat-message-tool-revisions.js';
 import { ChatMessageToolExportGeometry } from '#routes/w.$workspace.$project/chat-message-tool-export-geometry.js';
 import { ChatMessagePartUnknown } from '#routes/w.$workspace.$project/chat-message-tool-unknown.js';
-import { ChatMessageToolExternal } from '#routes/w.$workspace.$project/chat-message-tool-external.js';
+import {
+  ChatMessageToolExternal,
+  sanitizeAgentPath,
+  sanitizeAgentText,
+} from '#routes/w.$workspace.$project/chat-message-tool-external.js';
 import { ChatMessageFileAttachments } from '#routes/w.$workspace.$project/chat-message-file.js';
 import { ChatMessagePlanning } from '#routes/w.$workspace.$project/chat-message-planning.js';
 import { ChatStreamingStopButton } from '#components/chat/chat-textarea-submit-button.js';
 import { cancelChatStreamKeyCombination } from '#components/chat/chat-textarea-types.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';
+import { FileLink } from '#components/files/file-link.js';
+import { isSafeRelativePath } from '@taucad/utils/path';
+import { isRecord } from '@taucad/utils/schema';
 
 /**
  * Split a line into chunks of `maxLen` characters without breaking `@path` or `/command` references.
@@ -155,6 +152,73 @@ function TextWithAtReferences({
   );
 }
 
+function ChatMessageAcpPlan({
+  data,
+}: {
+  readonly data: Extract<MyMessagePart, { type: 'data-acp-session' }>['data'];
+}): React.JSX.Element | undefined {
+  const { plan } = data;
+  if (!plan) {
+    return undefined;
+  }
+  const filePath = plan.type === 'file' && isSafeRelativePath(plan.uri) ? plan.uri : undefined;
+  const externalPlanUrl =
+    plan.type === 'file' && ['http:', 'https:'].includes(URL.parse(plan.uri)?.protocol ?? '') ? plan.uri : undefined;
+  return (
+    <section aria-label='Agent plan' className='rounded-lg border bg-background p-3 text-sm'>
+      <h3 className='font-medium'>Plan</h3>
+      {plan.type === 'items' ? (
+        <ul className='mt-2 flex flex-col gap-1.5'>
+          {plan.entries.map((entry, index) => (
+            <li
+              key={`${entry.content}-${String(index)}`}
+              className='flex items-start gap-2 text-xs text-muted-foreground'
+            >
+              <input
+                type='checkbox'
+                checked={entry.status === 'completed'}
+                readOnly
+                tabIndex={-1}
+                aria-label={`${sanitizeAgentText(entry.content, 500)} (${entry.status.replace('_', ' ')})`}
+                className='mt-0.5 size-3.5 shrink-0 rounded-sm'
+              />
+              <span className='min-w-0 flex-1 wrap-break-word' dir='auto'>
+                {sanitizeAgentText(entry.content, 500)}
+              </span>
+              <span className='shrink-0 text-[10px] uppercase' aria-hidden='true'>
+                {entry.status.replace('_', ' ')}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : plan.type === 'markdown' ? (
+        <div className='mt-2 max-h-64 overflow-auto text-xs whitespace-pre-wrap text-muted-foreground' dir='auto'>
+          {sanitizeAgentPath(plan.content).slice(0, 10_000)}
+        </div>
+      ) : filePath === undefined ? (
+        externalPlanUrl === undefined ? (
+          <span className='mt-2 block truncate text-xs text-muted-foreground'>
+            {sanitizeAgentPath(plan.uri).slice(0, 500)}
+          </span>
+        ) : (
+          <a
+            className='mt-2 block truncate text-xs text-primary underline underline-offset-2'
+            href={externalPlanUrl}
+            target='_blank'
+            rel='noreferrer'
+          >
+            {sanitizeAgentPath(externalPlanUrl).slice(0, 500)}
+          </a>
+        )
+      ) : (
+        <FileLink path={filePath} className='mt-2 block truncate text-xs text-primary underline underline-offset-2'>
+          {sanitizeAgentPath(filePath).slice(0, 500)}
+        </FileLink>
+      )}
+    </section>
+  );
+}
+
 type PartRenderContext = {
   readonly messageId: string;
   readonly lastMeaningfulIndex: number;
@@ -182,7 +246,9 @@ function renderAssistantPart(
 
   switch (part.type) {
     case 'text': {
-      return <ChatMessageText key={`${messageId}-message-part-${index}`} part={part} />;
+      return (
+        <ChatMessageText key={`${messageId}-message-part-${index}`} part={part} isMessageActive={isMessageActive} />
+      );
     }
 
     case 'reasoning': {
@@ -203,13 +269,63 @@ function renderAssistantPart(
       return undefined;
     }
 
+    case 'data-acp-session': {
+      return <ChatMessageAcpPlan key={`${messageId}-acp-plan-${index}`} data={part.data} />;
+    }
+
     case 'dynamic-tool': {
       // A host's durable interrupt is presented by `ChatApprovalBanner` above
       // the composer; rendering its projected part here would show the same
       // request twice.
-      return part.toolName === agentApprovalToolName ? undefined : (
-        <ChatMessageToolExternal key={part.toolCallId} part={part} />
-      );
+      if (part.toolName === agentApprovalToolName) {
+        return undefined;
+      }
+      const tau = isRecord(part.toolMetadata?.['tau']) ? part.toolMetadata['tau'] : undefined;
+      const nativeName = typeof tau?.['nativeName'] === 'string' ? tau['nativeName'] : undefined;
+      if (tau?.['presentation'] === 'tau-mcp' && Reflect.get(part, 'preliminary') !== true) {
+        switch (nativeName) {
+          case 'get_kernel_result': {
+            return (
+              <ChatMessageToolGetKernelResult
+                key={part.toolCallId}
+                part={
+                  { ...part, type: 'tool-get_kernel_result' } as Extract<
+                    MyMessagePart,
+                    { type: 'tool-get_kernel_result' }
+                  >
+                }
+              />
+            );
+          }
+          case 'test_model': {
+            return (
+              <ChatMessageToolTestModel
+                key={part.toolCallId}
+                part={{ ...part, type: 'tool-test_model' } as Extract<MyMessagePart, { type: 'tool-test_model' }>}
+              />
+            );
+          }
+          case 'screenshot': {
+            return (
+              <ChatMessageToolScreenshot
+                key={part.toolCallId}
+                part={{ ...part, type: 'tool-screenshot' } as Extract<MyMessagePart, { type: 'tool-screenshot' }>}
+              />
+            );
+          }
+          case 'export_geometry': {
+            return (
+              <ChatMessageToolExportGeometry
+                key={part.toolCallId}
+                part={
+                  { ...part, type: 'tool-export_geometry' } as Extract<MyMessagePart, { type: 'tool-export_geometry' }>
+                }
+              />
+            );
+          }
+        }
+      }
+      return <ChatMessageToolExternal key={part.toolCallId} part={part} />;
     }
 
     case 'source-url': {
@@ -598,7 +714,7 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
     return <div>Message not found</div>;
   }
 
-  const handleEditClick = () => {
+  const toggleEdit = (): void => {
     if (!isUser) {
       return;
     }
@@ -608,6 +724,25 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
     }
 
     setIsEditing((previous) => !previous);
+  };
+
+  const handleEditClick = (event: React.MouseEvent<HTMLDivElement>): void => {
+    const nestedAction =
+      event.target instanceof Element
+        ? event.target.closest('a, button, input, select, textarea, [role="button"], [role="link"]')
+        : null;
+    if (nestedAction && nestedAction !== event.currentTarget) {
+      return;
+    }
+    toggleEdit();
+  };
+
+  const handleEditKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) {
+      return;
+    }
+    event.preventDefault();
+    toggleEdit();
   };
 
   return (
@@ -643,7 +778,7 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
         <When shouldRender={isUser ? isEditing : false}>
           <ChatTextarea
             mode='edit'
-            className='rounded-sm'
+            className='rounded-2xl'
             onSubmit={async (event) => {
               // R10/t17: edit-message routes through the cad chat-client so
               // the wire body's `agent` block is composed from the live
@@ -668,12 +803,16 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
           <div
             className={cn(
               'flex flex-col gap-0 min-w-0',
-              isUser && 'cursor-pointer rounded-sm border bg-background px-3 py-1 hover:border-primary',
+              isUser &&
+                'cursor-action rounded-2xl border bg-background px-3 py-1 outline-none hover:border-primary focus-visible:focus-outline',
               shouldRenderCollapsedUserRows && 'max-h-58.5 overflow-hidden',
               fileParts.length > 0 && 'pt-3',
               showUserBubbleStopShortcut && 'relative',
             )}
-            onClick={handleEditClick}
+            role={isUser ? 'button' : undefined}
+            tabIndex={isUser ? 0 : undefined}
+            onClick={isUser ? handleEditClick : undefined}
+            onKeyDown={isUser ? handleEditKeyDown : undefined}
           >
             {fileParts.length > 0 ? <ChatMessageFileAttachments parts={fileParts} /> : null}
             {shouldRenderCollapsedUserRows ? (
@@ -719,43 +858,6 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
               tooltip='Copy message'
               className='size-7'
             />
-            <Tooltip>
-              <DropdownMenu modal={false}>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <Button size='xs' variant='ghost' className='h-7 gap-1 has-[>svg]:px-1.5'>
-                      <RefreshCw className='size-4' />
-                      <ChevronDown className='size-4' />
-                    </Button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <DropdownMenuContent align='start' side='top' className='min-w-50'>
-                  <DropdownMenuLabel>Switch model</DropdownMenuLabel>
-                  <ChatModelSelector
-                    popoverProperties={{ side: 'right', align: 'start' }}
-                    className='h-fit w-full'
-                    onSelect={(modelId) => {
-                      cadChat.retry(messageId, modelId);
-                    }}
-                  >
-                    {({ selectedModel }) => (
-                      <button
-                        type='button'
-                        className={cn(
-                          menuItemVariants(),
-                          menuSubTriggerOpenClass,
-                          'group w-full hover:bg-neutral/30 hover:text-foreground',
-                        )}
-                      >
-                        <span>{selectedModel.name}</span>
-                        <ChevronRight className='ml-auto size-3.5 text-muted-foreground transition-transform duration-200 ease-in-out group-data-[state=open]:rotate-90' />
-                      </button>
-                    )}
-                  </ChatModelSelector>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <TooltipContent side='bottom'>Switch model</TooltipContent>
-            </Tooltip>
             <div className='flex flex-row items-center justify-end gap-1'>
               <ChatMessageAttribution usageParts={usageParts} />
               {usageParts.length > 0 ? <ChatMessageDataUsage usageParts={usageParts} /> : null}

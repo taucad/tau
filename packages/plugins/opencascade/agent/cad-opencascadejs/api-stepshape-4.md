@@ -4,99 +4,99 @@
 
 StepShape_ValueFormatTypeQualifier: declare class StepShape_ValueFormatTypeQualifier extends Standard_Transient
 
-constructor
+  constructor
 
-Init(theFormatType: TCollection_HAsciiString): void;
+  Init(theFormatType: TCollection_HAsciiString): void;
 
-FormatType(): TCollection_HAsciiString;
+  FormatType(): TCollection_HAsciiString;
 
-SetFormatType(theFormatType: TCollection_HAsciiString): void;
+  SetFormatType(theFormatType: TCollection_HAsciiString): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepShape_ValueQualifier: declare class StepShape_ValueQualifier extends StepData_SelectType
 
-constructor
+  constructor
 
-CaseNum(ent: Standard_Transient): number;
+  CaseNum(ent: Standard_Transient): number;
 
-PrecisionQualifier(): StepShape_PrecisionQualifier;
+  PrecisionQualifier(): StepShape_PrecisionQualifier;
 
-TypeQualifier(): StepShape_TypeQualifier;
+  TypeQualifier(): StepShape_TypeQualifier;
 
-ValueFormatTypeQualifier(): StepShape_ValueFormatTypeQualifier;
+  ValueFormatTypeQualifier(): StepShape_ValueFormatTypeQualifier;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepShape_Vertex: declare class StepShape_Vertex extends StepShape_TopologicalRepresentationItem
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepShape_VertexLoop: declare class StepShape_VertexLoop extends StepShape_Loop
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, aLoopVertex: StepShape_Vertex): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aLoopVertex: StepShape_Vertex): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aLoopVertex: StepShape_Vertex): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aLoopVertex: StepShape_Vertex): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetLoopVertex(aLoopVertex: StepShape_Vertex): void;
+  SetLoopVertex(aLoopVertex: StepShape_Vertex): void;
 
-LoopVertex(): StepShape_Vertex;
+  LoopVertex(): StepShape_Vertex;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepShape_VertexPoint: declare class StepShape_VertexPoint extends StepShape_Vertex
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, aVertexGeometry: StepGeom_Point): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aVertexGeometry: StepGeom_Point): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aVertexGeometry: StepGeom_Point): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aVertexGeometry: StepGeom_Point): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetVertexGeometry(aVertexGeometry: StepGeom_Point): void;
+  SetVertexGeometry(aVertexGeometry: StepGeom_Point): void;
 
-VertexGeometry(): StepGeom_Point;
+  VertexGeometry(): StepGeom_Point;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepShape_Array1OfConnectedEdgeSet: NCollection_Array1_handle_StepShape_ConnectedEdgeSet
 

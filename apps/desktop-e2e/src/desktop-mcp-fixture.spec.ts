@@ -3,21 +3,17 @@ import { join, resolve } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
-import { gatewayFixtureModelName, installGatewayFixture } from '#support/gateway-fixture.js';
+import { installGatewayFixture } from '#support/gateway-fixture.js';
 import type { GatewayFixture } from '#support/gateway-fixture.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
   activeChatId,
   connectPickedFolder,
-  declineCookieBanner,
   expectSignedIn,
   expectVisible,
   openExecutionPicker,
-  selectChatModel,
   selectKernel,
-  sendPrompt,
   submitPrompt,
-  waitForProjectOnDisk,
 } from '#support/scenario.js';
 
 /**
@@ -33,14 +29,14 @@ import {
  *
  * The agent is the repository's fake ACP adapter, admitted through
  * `TAU_ACP_ADAPTER_OVERRIDE` — which `discoverAcpAgents` honours only under
- * `NODE_ENV=test`, so nothing here can arm a shipped app. `noask` skips the
- * fixture's permission round trip (there is no approval under test here) and
- * `mcp` is what makes it call `test_model` through the `tau` server it was
- * handed.
+ * `NODE_ENV=test`, so nothing here can arm a shipped app. `skill-names` proves
+ * that the same utility exposed packaged Tau skills through the adapter's native
+ * root, and `mcp` makes it call `test_model` through the `tau` server it was
+ * handed. A second turn exercises the desktop approval UI and exact ACP option
+ * round trip without pretending Tau owns the downstream standing-grant store.
  */
 
-const seedPrompt = 'Create a cube with a centered cylindrical cutout and verify it.';
-const externalPrompt = 'noask mcp';
+const externalPrompt = 'updates noask skill-names mcp';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 const fakeAcpAgent = join(workspaceRoot, 'packages/host/src/acp/fixtures/fake-agent.ts');
@@ -76,30 +72,28 @@ test('serves the utility MCP endpoint to an agent it spawned', async () => {
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-    await declineCookieBanner(page);
     await expectSignedIn(page);
 
     await selectKernel(page, 'OpenSCAD');
     await connectPickedFolder(session);
-    await selectChatModel(page, gatewayFixtureModelName);
-
-    /* The seeding turn is an ordinary Tau turn: it creates the project, its
-     * chat and the workspace root the utility's launcher is scoped to. */
-    const slug = await submitPrompt(page, seedPrompt);
-    await expect.poll(() => fixture!.gatewayRequests.length, { timeout: 120_000 }).toBeGreaterThanOrEqual(2);
-    const projectRoot = join(session.pickedDirectory, slug);
-    await waitForProjectOnDisk(session.pickedDirectory, slug, { extension: '.scad' });
-    const chatId = activeChatId(page);
-
     const rows = await openExecutionPicker(page);
-    expect(rows.join('\n')).toMatch(/Codex · This computer/u);
+    expect(rows.join('\n')).toMatch(/Codex\s*Runs with your local Codex login/u);
     await page
-      .getByRole('option', { name: /Codex · This computer/u })
+      .getByRole('option', { name: /^Codex/u })
       .first()
       .click();
 
+    /* Run the first project turn through the fake ACP adapter. This fixture
+     * tests the desktop utility boundary, so it must not depend on a separate
+     * Tau-provider seed succeeding before the ACP path can start. */
     const gatewayCallsBefore = fixture.gatewayRequests.length;
-    await sendPrompt(page, externalPrompt);
+    await submitPrompt(page, externalPrompt);
+    await expect.poll(() => new URL(page.url()).searchParams.get('chat'), { timeout: 120_000 }).toBeTruthy();
+    const chatId = activeChatId(page);
+    const projectRootNow = (): string => {
+      const { pathname } = new URL(page.url());
+      return join(session!.pickedDirectory, pathname.slice(pathname.lastIndexOf('/') + 1));
+    };
 
     /* 1. The Electron utility bound a loopback listener — the runtime claim the
      * charter names as unverified. Written by the utility process itself. */
@@ -113,20 +107,75 @@ test('serves the utility MCP endpoint to an agent it spawned', async () => {
      * verdict is `missing_geospec_file` because the project tree this turn
      * ran in holds the seeded `.scad` and no spec — a real answer, and the one
      * thing an unreachable endpoint could never return.) */
-    const eventsPath = join(projectRoot, '.tau/chats', chatId, 'events.jsonl');
+    const eventsPathNow = (): string => join(projectRootNow(), '.tau/chats', chatId, 'events.jsonl');
     await expect
-      .poll(() => (existsSync(eventsPath) ? readFileSync(eventsPath, 'utf8') : ''), { timeout: 300_000 })
+      .poll(() => (existsSync(eventsPathNow()) ? readFileSync(eventsPathNow(), 'utf8') : ''), { timeout: 300_000 })
       .toMatch(/"role":"tool-output","toolCallId":"[^"]+","toolName":"test_model"/u);
+    const eventsPath = eventsPathNow();
     const evidence = readFileSync(eventsPath, 'utf8')
       .split('\n')
       .findLast((line) => line.includes('"role":"tool-output"') && line.includes('"toolName":"test_model"'));
-    expect(evidence).toMatch(/"structuredContent":\{"failures":.*"total":\d+\}/u);
+    expect(evidence).toMatch(/"content":\{"failures":.*"total":\d+\}/u);
     expect(evidence).toMatch(/"agentId":"codex"/u);
+    const durableLog = readFileSync(eventsPath, 'utf8');
+    expect(durableLog).toMatch(/native-skill-names:.*cad-openscad/u);
+    expect(durableLog).toMatch(/"name":"\$cad-openscad"/u);
 
-    /* 3. Still an external turn: the gateway saw nothing. */
+    /* 3. The normalized ACP call uses the same native CAD card as a Tau turn,
+     * instead of the generic external-tool disclosure. */
+    const thought = page.getByRole('button', { name: 'Thought briefly' }).last();
+    await expectVisible(thought, 60_000);
+    await thought.click();
+    const thoughtBody = page.getByRole('button', { name: 'Collapse thought' }).last();
+    await expectVisible(thoughtBody, 60_000);
+    const thoughtSummary = page.getByText('Confirming test completion and readiness', { exact: true });
+    await expectVisible(thoughtSummary, 60_000);
+    expect(await thoughtSummary.evaluate((element) => getComputedStyle(element).fontStyle)).toBe('italic');
+    expect(await thoughtSummary.evaluate((element) => getComputedStyle(element).fontWeight)).toBe('400');
+    await thoughtBody.click();
+    await expect.poll(async () => thought.evaluate((element) => element === document.activeElement)).toBe(true);
+
+    const testActivity = page.getByRole('button', { name: /(?:^|, )ran tests$/iu }).last();
+    await expectVisible(testActivity, 60_000);
+    await testActivity.click();
+    await expectVisible(page.getByText('Tested 1 requirement', { exact: true }), 60_000);
+    await expect.poll(() => readFileSync(eventsPath, 'utf8'), { timeout: 60_000 }).toContain('"state":"completed"');
+
+    /* 4. The real desktop banner returns the exact standing option the user
+     * chose. The fixture echoes that id from the ACP response, while the durable
+     * interrupt proves the UI did not merely dismiss itself locally. */
+    for (const [name, optionId] of [
+      ['Allow', 'allow'],
+      ['Allow for this session', 'allow-session'],
+      ['Always allow', 'allow-always'],
+    ]) {
+      const priorLog = readFileSync(eventsPath, 'utf8');
+      // oxlint-disable-next-line no-await-in-loop -- each choice resolves a separate real ACP permission request.
+      await submitPrompt(page, 'approval round trip');
+      // oxlint-disable-next-line no-await-in-loop -- wait for this request before selecting its exact offered option.
+      await expectVisible(page.getByRole('region', { name: 'Approval required' }), 60_000);
+      // oxlint-disable-next-line no-await-in-loop -- user choices are ordered turns.
+      await page.getByRole('button', { name, exact: true }).click();
+      // oxlint-disable-next-line no-await-in-loop -- the durable outcome must belong to this turn.
+      await expect
+        .poll(() => readFileSync(eventsPath, 'utf8').slice(priorLog.length), { timeout: 60_000 })
+        .toMatch(new RegExp(`"phase":"resolved".*"optionId":"${optionId}"`, 'u'));
+      // oxlint-disable-next-line no-await-in-loop -- adapter echo proves the selected option crossed the wire.
+      await expect
+        .poll(() => readFileSync(eventsPath, 'utf8').slice(priorLog.length), { timeout: 60_000 })
+        .toMatch(new RegExp(`"role":"tool-output".*"optionId":"${optionId}"`, 'u'));
+      // oxlint-disable-next-line no-await-in-loop -- settle the current banner before starting the next turn.
+      await expect.poll(async () => page.getByRole('region', { name: 'Approval required' }).count()).toBe(0);
+      // oxlint-disable-next-line no-await-in-loop -- a resolved tool is not yet a settled turn.
+      await expect
+        .poll(() => readFileSync(eventsPath, 'utf8').slice(priorLog.length), { timeout: 60_000 })
+        .toContain('"state":"completed"');
+    }
+
+    /* 5. Still an external turn: the gateway saw nothing. */
     expect(fixture.gatewayRequests.length).toBe(gatewayCallsBefore);
 
-    console.info(`[desktop-e2e] mcp chat=${chatId} project=${projectRoot}`);
+    console.info(`[desktop-e2e] mcp chat=${chatId} project=${projectRootNow()}`);
   } catch (error) {
     await session.capture('mcp-fixture-failure');
     throw error;

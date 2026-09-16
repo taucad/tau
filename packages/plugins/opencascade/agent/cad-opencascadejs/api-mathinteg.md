@@ -4,50 +4,50 @@
 
 MathInteg_DoubleExpConfig: declare class MathInteg_DoubleExpConfig extends MathUtils_IntegConfig
 
-constructor
+  constructor
 
-NbLevels: number
+  NbLevels: number
 
-StepFactor: number
+  StepFactor: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MathInteg_KronrodConfig: declare class MathInteg_KronrodConfig extends MathUtils_IntegConfig
 
-constructor
+  constructor
 
-NbGaussPoints: number
+  NbGaussPoints: number
 
-Adaptive: boolean
+  Adaptive: boolean
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MathInteg_MultipleConfig: declare class MathInteg_MultipleConfig
 
-constructor
+  constructor
 
-MaxOrder: number
+  MaxOrder: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MathInteg_SetResult: declare class MathInteg_SetResult
 
-constructor
+  constructor
 
-Status: MathUtils_Status
+  Status: MathUtils_Status
 
-Values: math_VectorBase_double | null | undefined
+  Values: math_VectorBase_double | null | undefined
 
-NbEquations: number
+  NbEquations: number
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

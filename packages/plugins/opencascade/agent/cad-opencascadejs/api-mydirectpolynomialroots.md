@@ -4,16 +4,16 @@
 
 MyDirectPolynomialRoots: declare class MyDirectPolynomialRoots
 
-constructor
+  constructor
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-Value(i: number): number;
+  Value(i: number): number;
 
-IsDone(): number;
+  IsDone(): number;
 
-InfiniteRoots(): boolean;
+  InfiniteRoots(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

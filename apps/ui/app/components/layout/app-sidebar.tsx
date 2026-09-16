@@ -19,6 +19,7 @@ import { Commands } from '#components/layout/command-palette.js';
 import { NavUser } from '#components/nav/nav-user.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { cn } from '@taucad/ui/utils/cn';
+import { billingNavRoutes } from '#cloud/nav-billing.js';
 
 export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sidebar>): React.JSX.Element {
   const { state, isMobile } = useSidebar();
@@ -26,7 +27,10 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
   const desktopTarget = isDesktopTarget();
   const isNonMobileCollapsed = !isMobile && state === 'collapsed';
   const navMainItems = React.useMemo(
-    () => navRoutes.navMain.filter((item) => item.featureFlag === undefined || flags[item.featureFlag]),
+    () =>
+      [...navRoutes.navMain, ...billingNavRoutes].filter(
+        (item) => item.featureFlag === undefined || flags[item.featureFlag],
+      ),
     [flags],
   );
 
@@ -74,9 +78,6 @@ export function AppSidebar({ ...properties }: React.ComponentProps<typeof Sideba
             <ProjectNavigation />
             <NavMain items={navMainItems} groupLabel='Platform' />
           </div>
-        </div>
-        <div className='sticky bottom-0 z-10'>
-          <NavMain items={navRoutes.navSecondary} />
         </div>
       </SidebarContent>
       <SidebarFooter className='border-t p-1'>

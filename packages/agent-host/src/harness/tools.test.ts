@@ -73,6 +73,28 @@ describe('EagerDispatch', () => {
     expect(result.details).toEqual({ content: { cached: true }, isError: false, substituted: true });
     expect(applyHostToolResult({ result })).toEqual({ isError: false });
   });
+
+  it('forwards genuine registry progress through Pi tool updates', async () => {
+    const update = vi.fn();
+    const registry: ToolRegistry = {
+      list: () => [{ name: 'render', description: 'Render', inputSchema: { type: 'object' } }],
+      invoke: async (invocation) => {
+        const onUpdate = Reflect.get(invocation, 'onUpdate') as
+          | ((result: { content: string; isError: boolean }) => void)
+          | undefined;
+        onUpdate?.({ content: 'halfway', isError: false });
+        return { content: 'done', isError: false };
+      },
+    };
+    const [tool] = createAgentTools({ registry, runId: 'run-progress' });
+
+    await tool!.execute('call-progress', {}, undefined, update);
+
+    expect(update).toHaveBeenCalledWith({
+      content: [{ type: 'text', text: 'halfway' }],
+      details: { content: 'halfway', isError: false, substituted: false },
+    });
+  });
 });
 
 /**

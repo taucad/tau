@@ -16,6 +16,7 @@ import type {
   FileProvenance,
   FileStat,
 } from '@taucad/types';
+import type { RevisionFileMode } from '#revision-tree.js';
 
 // oxlint-disable-next-line no-barrel-files/no-barrel-files -- re-export for internal consumers that import from #types.js
 export type { ChangeEvent, FileStat, FileStatEntry } from '@taucad/types';
@@ -68,6 +69,10 @@ export type FileSystemProvider = {
   rename(from: string, to: string): Promise<void>;
   exists(path: string): Promise<boolean>;
   lstat(path: string): Promise<FileStat>;
+  /** Read a regular file's Git-compatible executable mode when the backend exposes it. */
+  getFileMode?(path: string): Promise<RevisionFileMode>;
+  /** Apply a Git-compatible regular-file mode without exposing an unrestricted chmod seam. */
+  setFileMode?(path: string, mode: RevisionFileMode): Promise<void>;
   dispose(): void;
   /** Optional streaming read. When present, service routes through this instead of buffered readFile. */
   readFileStream?(path: string, options?: FileReadStreamOptions): ReadableStream<Uint8Array<ArrayBuffer>>;

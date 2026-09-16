@@ -1,10 +1,11 @@
-import { readFileSync } from 'node:fs';
+import { globSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { converter, parse, wcagContrast } from 'culori';
 import { describe, expect, it } from 'vitest';
 
 const tokenStyles = readFileSync(join(process.cwd(), '../../packages/ui/src/styles/tokens.css'), 'utf8');
 const appStyles = readFileSync(join(process.cwd(), 'app/styles/global.css'), 'utf8');
+const appStyleLinks = readFileSync(join(process.cwd(), 'app/styles/global.styles.ts'), 'utf8');
 const globalStyles = `${tokenStyles}\n${appStyles}`;
 
 const structuralTokens = [
@@ -152,6 +153,7 @@ const parseToken = (name: TokenName, tokens: TokenMap) => {
 describe('global structural color tokens', () => {
   it('uses the neutral Codex-matched light sidebar surface', () => {
     expect(resolveToken('--sidebar-background', lightTokens)).toBe('oklch(0.99 0 none)');
+    expect(resolveToken('--sidebar-foreground', lightTokens)).toBe('oklch(0.43 0 none)');
   });
 
   it.each([
@@ -259,6 +261,44 @@ describe('global focus ring token', () => {
         ).toBeGreaterThanOrEqual(3);
       }
     }
+  });
+});
+
+describe('action cursor contract', () => {
+  it('defaults actions to the platform cursor and exposes one opt-in utility', () => {
+    expect(lightTokens).toMatchObject({ '--cursor-action': 'default' });
+
+    const enabled = readRuleStyle(tokenStyles.indexOf(":root[data-pointer-cursors='true']"), tokenStyles);
+    const utility = readRuleStyle(tokenStyles.indexOf('@utility cursor-action'), tokenStyles);
+
+    expect(enabled.getPropertyValue('--cursor-action').trim()).toBe('pointer');
+    expect(utility.cursor).toBe('var(--cursor-action)');
+  });
+
+  it('applies the preference to enabled actions and scoped sidebar navigation', () => {
+    expect(tokenStyles).toContain("[role='button']");
+    expect(tokenStyles).toContain("[role='menuitem']");
+    expect(tokenStyles).toContain("[role='switch']");
+    expect(tokenStyles).toContain(':not(:any-link)');
+    expect(tokenStyles).toContain(":not([aria-disabled='true'])");
+    expect(tokenStyles).toContain(":not([data-disabled='true'])");
+    expect(tokenStyles).toContain("[data-slot='sidebar'] :any-link");
+    expect(tokenStyles).toContain('cursor: var(--cursor-action);');
+  });
+
+  it('blocks dependency pointer utilities and adapts vendor actions to the shared token', () => {
+    const legacyUtility = ['cursor', 'pointer'].join('-');
+    expect(tokenStyles).toContain(`@source not inline('${legacyUtility}');`);
+    expect(tokenStyles).toContain("svg[id^='mermaid-'] .clickable");
+    expect(appStyles).not.toContain("@import 'dockview-react/dist/styles/dockview.css'");
+    expect(appStyleLinks.indexOf('href: dockviewStylesUrl')).toBeLessThan(
+      appStyleLinks.indexOf('href: globalStylesUrl'),
+    );
+    expect(appStyles).toContain('.dockview-theme-tau');
+    expect(appStyles).toContain('cursor: var(--cursor-action) !important;');
+    expect(appStyles).toContain('.monaco-menu-option');
+    expect(appStyles).toContain('[data-sonner-toast] [data-button]');
+    expect(appStyles).toContain('#profiler-toggle');
   });
 });
 
@@ -395,5 +435,27 @@ describe('scroll fades', () => {
       'linear-gradient(to right, black, black calc(100% - var(--scroll-fade-size)), var(--scroll-fade-end))',
     );
     expect(style.getPropertyValue('animation')).toBe('');
+  });
+});
+
+describe('focus outline fallback', () => {
+  it('delegates focus geometry to the shared utility', () => {
+    const fallback = appStyles.slice(
+      appStyles.indexOf(':where(a, button, input, select, textarea, summary, [tabindex]):focus-visible'),
+    );
+
+    expect(fallback.slice(0, fallback.indexOf('}'))).toContain('@apply focus-outline;');
+    expect(appStyles).not.toContain('focus-visible:outline-primary');
+  });
+
+  it('routes every app focus indicator through the utility', () => {
+    const sources = globSync('app/**/*.{ts,tsx}', { exclude: (name) => /\.test\.tsx?$/.test(name) });
+    const restatedGeometry =
+      /[^\s"'`]*focus[a-z-]*]?:(?:ring-\d|ring-ring|ring-inset|ring-offset-\d|outline-\d|outline-solid|outline-ring|outline-sidebar-ring|-?outline-offset-\d)/g;
+    const offenders = sources.flatMap((name) =>
+      [...readFileSync(name, 'utf8').matchAll(restatedGeometry)].map((match) => `${name}: ${match[0]}`),
+    );
+
+    expect(offenders).toEqual([]);
   });
 });

@@ -12,9 +12,8 @@ import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { WorkspaceSelector } from '#components/filesystem/workspace-selector.js';
 
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@taucad/ui/components/accordion';
-import { getKernelRequiredTier } from '@taucad/billing';
 import { getKernelOption } from '#utils/kernel.utils.js';
-import { KernelTierBadge, TierBadge } from '#components/tier-badge.js';
+import { KernelCommercialBadge } from '#cloud/kernel-commerce.js';
 import { toast } from '#components/ui/sonner.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 import type { Handle } from '#types/matches.types.js';
@@ -47,7 +46,7 @@ function KernelDetailsContent({ kernelId }: { readonly kernelId: KernelProvider 
   const selectedOption = getKernelOption(kernelId);
   return (
     <div className='space-y-4'>
-      <TierBadge tier={getKernelRequiredTier(kernelId)} />
+      <KernelCommercialBadge kernelId={kernelId} />
       <p className='text-sm leading-relaxed text-muted-foreground'>{selectedOption.longDescription}</p>
 
       <div className='space-y-3'>
@@ -272,7 +271,7 @@ export default function ProjectsNew(): React.JSX.Element {
                       )}
                     >
                       <div
-                        className='flex cursor-pointer items-start gap-3 p-4'
+                        className='flex cursor-action items-start gap-3 p-4 transition-colors hover:bg-primary/5'
                         onClick={() => {
                           setSelectedKernel(option.id);
                         }}
@@ -281,7 +280,7 @@ export default function ProjectsNew(): React.JSX.Element {
                         <div className='min-w-0 flex-1'>
                           <AccordionTrigger
                             className={cn(
-                              'flex h-auto w-full cursor-pointer items-start justify-between gap-3 border-0 p-0 text-left transition-all hover:no-underline',
+                              'flex h-auto w-full items-start justify-between gap-3 border-0 p-0 text-left transition-all hover:no-underline',
                               'bg-transparent hover:bg-transparent data-[state=open]:bg-transparent',
                             )}
                           >
@@ -291,7 +290,7 @@ export default function ProjectsNew(): React.JSX.Element {
                                 <div className='flex w-full items-start justify-between gap-2'>
                                   <span className='flex items-center gap-1.5 text-sm font-medium'>
                                     {option.name}
-                                    <KernelTierBadge kernelId={option.id} />
+                                    <KernelCommercialBadge kernelId={option.id} />
                                   </span>
                                   <span className='font-mono text-xs text-muted-foreground/70'>
                                     {option.backendProvider}
@@ -330,7 +329,7 @@ export default function ProjectsNew(): React.JSX.Element {
                         key={option.id}
                         htmlFor={option.id}
                         className={cn(
-                          'flex h-auto cursor-pointer items-start justify-start gap-3 border-b border-border p-4 text-left transition-all last:border-b-0 hover:bg-primary/5',
+                          'flex h-auto cursor-action items-start justify-start gap-3 border-b border-border p-4 text-left transition-all last:border-b-0 hover:bg-primary/5',
                           kernel === option.id && 'bg-primary/5 hover:bg-primary/10',
                         )}
                         onClick={() => {
@@ -343,7 +342,7 @@ export default function ProjectsNew(): React.JSX.Element {
                           <div className='flex w-full items-start justify-between gap-2'>
                             <span className='flex items-center gap-1.5 text-sm font-medium'>
                               {option.name}
-                              <KernelTierBadge kernelId={option.id} />
+                              <KernelCommercialBadge kernelId={option.id} />
                             </span>
                             <span className='font-mono text-xs text-muted-foreground/70'>{option.backendProvider}</span>
                           </div>

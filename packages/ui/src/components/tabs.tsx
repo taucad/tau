@@ -229,7 +229,7 @@ function TabsTrigger({
     <TabsPrimitive.Trigger
       data-slot='tabs-trigger'
       className={cn(
-        "relative isolate z-10 flex size-full cursor-pointer items-center justify-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium whitespace-nowrap text-foreground transition-[box-shadow] select-none outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 dark:text-sidebar-foreground dark:data-[state=active]:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "relative isolate z-10 flex size-full items-center justify-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium whitespace-nowrap text-foreground transition-[background-color,box-shadow] select-none outline-none hover:bg-accent/60 focus-visible:focus-outline disabled:pointer-events-none disabled:opacity-50 dark:text-sidebar-foreground dark:data-[state=active]:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className,
       )}
       value={value}
@@ -276,10 +276,7 @@ function TabsContent({ className, transition, enableAnimation, ...properties }: 
   return (
     <TabsPrimitive.Content
       data-slot='tabs-content'
-      className={cn(
-        'flex-1 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-[state=inactive]:hidden',
-        className,
-      )}
+      className={cn('flex-1 outline-none focus-visible:focus-outline data-[state=inactive]:hidden', className)}
       {...properties}
     />
   );

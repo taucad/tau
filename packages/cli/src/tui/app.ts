@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto';
 import type { AgentLogEvent } from '@taucad/agent-host';
 import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
 import { Box, Text, render, useApp, useInput, useStdin, useStdout } from 'ink';
-import { createElement, useCallback, useEffect, useState } from 'react';
+import { createElement, useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
@@ -66,7 +66,7 @@ type Approval = {
   readonly options: readonly ApprovalOption[];
 };
 
-/** One rendered transcript row, keyed by the sequence that produced it. */
+/** One rendered transcript row, keyed by its durable epoch and sequence. */
 type Row = { readonly key: string; readonly text: string };
 
 /** Everything the view derives from the durable log. */
@@ -134,7 +134,13 @@ const approvalOptions = (payload: unknown): readonly ApprovalOption[] => {
 const applyEvent = (session: Session, event: AgentLogEvent): Session => {
   /* `eventLine` already collapses and sanitizes the untrusted half; tabs are
    * the plain-output separator and would measure wrong in a laid-out cell. */
-  const rows = [...session.rows, { key: String(event.sequence), text: eventLine(event).replaceAll('\t', '  ') }];
+  const rows = [
+    ...session.rows,
+    {
+      key: `${event.leaderEpoch}:${String(event.sequence)}`,
+      text: eventLine(event).replaceAll('\t', '  '),
+    },
+  ];
   /* Who ran a turn and how it was refused are facts of *that* run: a chat whose
    * next turn is an ordinary Tau one must not inherit the last agent, or the
    * keyboard would go on refusing to steer a run that steers perfectly well. */
@@ -244,6 +250,8 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
   const { stdout, write } = useStdout();
   const { setRawMode } = useStdin();
   const [session, setSession] = useState<Session>(emptySession);
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
   const [draft, setDraft] = useState('');
   const [notice, setNotice] = useState(`Connecting to ${origin}…`);
   const [rows, setRows] = useState(stdout.rows > 0 ? stdout.rows : fallbackRows);
@@ -401,7 +409,7 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
   }, [act, agent, chatId, client, draft, session.agent, session.runId, session.state]);
 
   const cancel = useCallback((): void => {
-    const { runId } = session;
+    const { runId } = sessionRef.current;
     if (runId === undefined || client === undefined) {
       setNotice('No run has started in this chat yet.');
       return;
@@ -410,11 +418,11 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
       const answer = expectResult(await client.execute({ type: 'cancel', chatId, runId }));
       return `${answer.operation}: ${answer.snapshot.state}`;
     });
-  }, [act, chatId, client, session]);
+  }, [act, chatId, client]);
 
   const resolve = useCallback(
     (approved: boolean): void => {
-      const { approval } = session;
+      const { approval } = sessionRef.current;
       if (approval === undefined || client === undefined) {
         return;
       }
@@ -433,13 +441,13 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
         return `${answer.operation}: ${answer.snapshot.state}`;
       });
     },
-    [act, chatId, client, session],
+    [act, chatId, client],
   );
 
   useInput((input, key) => {
     /* A paused run needs an answer before it needs a prompt, so while an
      * approval is pending the letters are the only thing the keyboard does. */
-    if (session.approval !== undefined) {
+    if (sessionRef.current.approval !== undefined) {
       switch (input) {
         case 'y':
         case 'n': {

@@ -1,4 +1,4 @@
-# build123d — \_minimize
+# build123d — _minimize
 
 1 top-level symbols. Signatures are verbatim python.
 

@@ -18,7 +18,7 @@ degrees(x)
 floor(x)
 
 // Greatest Common Divisor
-gcd(\*integers)
+gcd(*integers)
 
 // Return the base 10 logarithm of x
 log10(x)

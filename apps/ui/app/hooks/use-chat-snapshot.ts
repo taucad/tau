@@ -35,7 +35,7 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
     const sync = (): void => {
       /* The snapshot tells the model what the *project* holds. The pane composes
        * read-only overlays into the same tree (W2), and advertising several
-       * hundred built-in bundle files as project context is exactly the noise the
+       * hundred system skill bundle files as project context is exactly the noise the
        * Exclusion Matrix keeps out, so the rows are filtered on provenance. */
       const items = [...treeService.getTreeSnapshot().values()].filter(
         (entry): entry is Extract<FileEntry, { type: 'file' }> =>

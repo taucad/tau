@@ -4,115 +4,115 @@
 
 OSD: declare class OSD
 
-constructor
+  constructor
 
-static SetSignal(theSignalMode: unknown, theFloatingSignal: boolean): void;
-static SetSignal(theFloatingSignal: boolean): void;
-static SetSignal(theSignalMode: unknown, theFloatingSignal: boolean): void;
-static SetSignal(theFloatingSignal: boolean): void;
+  static SetSignal(theSignalMode: unknown, theFloatingSignal: boolean): void;
+  static SetSignal(theFloatingSignal: boolean): void;
+  static SetSignal(theSignalMode: unknown, theFloatingSignal: boolean): void;
+  static SetSignal(theFloatingSignal: boolean): void;
 
-static SetThreadLocalSignal(theSignalMode: unknown, theFloatingSignal: boolean): void;
+  static SetThreadLocalSignal(theSignalMode: unknown, theFloatingSignal: boolean): void;
 
-static SetFloatingSignal(theFloatingSignal: boolean): void;
+  static SetFloatingSignal(theFloatingSignal: boolean): void;
 
-static SignalMode(): unknown;
+  static SignalMode(): unknown;
 
-static ToCatchFloatingSignals(): boolean;
+  static ToCatchFloatingSignals(): boolean;
 
-static SecSleep(theSeconds: number): void;
+  static SecSleep(theSeconds: number): void;
 
-static MilliSecSleep(theMilliseconds: number): void;
+  static MilliSecSleep(theMilliseconds: number): void;
 
-static CStringToReal(aString: string, aReal?: number): { returnValue: boolean; aReal: number };
+  static CStringToReal(aString: string, aReal?: number): { returnValue: boolean; aReal: number };
 
-static ControlBreak(): void;
+  static ControlBreak(): void;
 
-static SignalStackTraceLength(): number;
+  static SignalStackTraceLength(): number;
 
-static SetSignalStackTraceLength(theLength: number): void;
+  static SetSignalStackTraceLength(theLength: number): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 OSD_Parallel: declare class OSD_Parallel
 
-constructor
+  constructor
 
-static ToUseOcctThreads(): boolean;
+  static ToUseOcctThreads(): boolean;
 
-static SetUseOcctThreads(theToUseOcct: boolean): void;
+  static SetUseOcctThreads(theToUseOcct: boolean): void;
 
-static NbLogicalProcessors(): number;
+  static NbLogicalProcessors(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 OSD_Thread: declare class OSD_Thread
 
-constructor
+  constructor
 
-Assign(other: OSD_Thread): void;
+  Assign(other: OSD_Thread): void;
 
-SetPriority(thePriority: number): void;
+  SetPriority(thePriority: number): void;
 
-Detach(): void;
+  Detach(): void;
 
-GetId(): number;
+  GetId(): number;
 
-static Current(): number;
+  static Current(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 OSD_ThreadPool: declare class OSD_ThreadPool extends Standard_Transient
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-static DefaultPool(theNbThreads?: number): OSD_ThreadPool;
+  static DefaultPool(theNbThreads?: number): OSD_ThreadPool;
 
-HasThreads(): boolean;
+  HasThreads(): boolean;
 
-LowerThreadIndex(): number;
+  LowerThreadIndex(): number;
 
-UpperThreadIndex(): number;
+  UpperThreadIndex(): number;
 
-NbThreads(): number;
+  NbThreads(): number;
 
-NbDefaultThreadsToLaunch(): number;
+  NbDefaultThreadsToLaunch(): number;
 
-SetNbDefaultThreadsToLaunch(theNbThreads: number): void;
+  SetNbDefaultThreadsToLaunch(theNbThreads: number): void;
 
-IsInUse(): boolean;
+  IsInUse(): boolean;
 
-Init(theNbThreads: number): void;
+  Init(theNbThreads: number): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 OSD_ThreadPool_Launcher: declare class OSD_ThreadPool_Launcher
 
-constructor
+  constructor
 
-HasThreads(): boolean;
+  HasThreads(): boolean;
 
-NbThreads(): number;
+  NbThreads(): number;
 
-LowerThreadIndex(): number;
+  LowerThreadIndex(): number;
 
-UpperThreadIndex(): number;
+  UpperThreadIndex(): number;
 
-Release(): void;
+  Release(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

@@ -45,7 +45,7 @@ function KernelPanelBody({ params }: { readonly params: KernelPanelParams }): Re
       data-slot='telemetry-unit-surface'
       className='h-full overflow-hidden rounded-b-xl border border-border bg-card'
     >
-      <GeometryUnitTiming cadRef={params.cadRef} query={params.query} />
+      <GeometryUnitTiming key={params.cadRef.sessionId} cadRef={params.cadRef} query={params.query} />
     </div>
   );
 }

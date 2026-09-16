@@ -14,7 +14,6 @@ import { deleteTauTestUser, seedTauTestUser, tauCreditBalanceAtoms, tauTestAccou
 import {
   activeChatId,
   connectPickedFolder,
-  declineCookieBanner,
   expectGeometryFramed,
   expectLauncher2Turn,
   expectSignedIn,
@@ -92,7 +91,6 @@ test('runs a turn in the services utility through the real Tau gateway', async (
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-    await declineCookieBanner(page);
     await expectSignedIn(page);
 
     await selectKernel(page, 'OpenSCAD');

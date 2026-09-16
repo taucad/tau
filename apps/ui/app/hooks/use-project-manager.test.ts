@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Test fixtures use React component names and literal workspace file paths. */
-import { renderHook, act } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { render, renderHook, act, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ReactNode } from 'react';
-import { createElement } from 'react';
+import { createElement, useEffect, useState } from 'react';
 import type { Chat } from '@taucad/chat';
 import type { ProjectDiscoveryEntry, ProjectDiscoveryResult, ProjectLocator } from '@taucad/filesystem';
 import { projectToManifest, serializeProjectManifest } from '@taucad/types';
@@ -15,6 +15,7 @@ import type { PendingProjectOperation, PendingProjectStorage } from '#types/pend
 import type { ProjectLibraryState } from '#types/project.types.js';
 import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
 import type { ConnectedWorkspace, ProjectListing } from '#hooks/use-project-manager.js';
+import type { ProjectNameInput } from '#chat-clients/use-project-name-client.js';
 
 const fakeProject: ProjectManifest = projectToManifest({
   id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
@@ -104,7 +105,10 @@ const mockCommitPendingProjectDirectory = vi.fn<FileManagerProxy['commitPendingP
 const mockListProjectManifests = vi.fn<() => Promise<ProjectDiscoveryResult>>(async () => ({ roots: [], entries: [] }));
 
 /** Worker change-channel double: one live subscription per event channel. */
-type WorkerChangeSubscription = { readonly interestedIn: (path: string) => boolean; readonly handler: () => void };
+type WorkerChangeSubscription = {
+  readonly interestedIn: (path: string) => boolean;
+  readonly handler: (event: { readonly path: string }) => void;
+};
 const workerChangeSubscriptions = new Map<string, WorkerChangeSubscription>();
 const subscribeWorkerChannel = (channel: string) =>
   vi.fn((subscription: WorkerChangeSubscription) => {
@@ -123,7 +127,7 @@ const mockWorkerChangeChannel = {
 const emitWorkerChange = (channel: string, path: string): void => {
   const subscription = workerChangeSubscriptions.get(channel);
   if (subscription?.interestedIn(path)) {
-    subscription.handler();
+    subscription.handler({ path });
   }
 };
 
@@ -253,7 +257,7 @@ vi.mock('#constants/browser.constants.js', () => ({
         id: options?.id,
         mode: options?.mode ?? 'readwrite',
       });
-      return { backend: 'webaccess' as const, handle };
+      return { backend: 'webaccess', handle };
     },
   }),
   webAccessDirectoryPicker: () =>
@@ -340,7 +344,7 @@ const mockSetProjectDisclosure = vi.fn(async () => {
   phaseOrder.push('disclosure-cleanup');
   return true;
 });
-const mockGenerateProjectName = vi.fn(async () => {
+const mockGenerateProjectName = vi.fn<(input: ProjectNameInput) => Promise<string>>(async (_input) => {
   phaseOrder.push('name');
   return 'Tall Birdhouse';
 });
@@ -388,8 +392,10 @@ const mockTouchProjectActivity = vi.fn(async (projectId: string, activityAt?: nu
  * talks to `createChatFileStore`, so the doubles that used to sit on the worker
  * sit on the store. */
 const mockPutChatRecord = vi.fn(async () => undefined);
+const mockInvalidateChatLog = vi.fn();
 vi.mock('#db/chat-file-storage.js', () => ({
   createChatFileStore: () => ({
+    invalidateLog: mockInvalidateChatLog,
     touchChatRecency: mockTouchChatRecency,
     setChatUnreadState: mockSetChatUnreadState,
     patchChat: mockPatchChat,
@@ -536,6 +542,7 @@ describe('useProjectManager.createProject', () => {
       mockSyncProjectRoots,
       mockTrashProject,
       mockStat,
+      mockReadFile,
       mockWriteFile,
       mockGetHomeStorageBackend,
       mockGetProjectCreationLocation,
@@ -549,6 +556,15 @@ describe('useProjectManager.createProject', () => {
       mock.mockReset();
     }
     mockListProjectManifests.mockResolvedValue({ roots: [], entries: [] });
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/.tau/library.json')) {
+        if (libraryFileContent === undefined) {
+          throw new Error(`ENOENT: ${path}`);
+        }
+        return libraryFileContent;
+      }
+      return manifestBytes;
+    });
     mockCommitPendingProjectDirectory.mockImplementation(async () => {
       phaseOrder.push('commit');
       return { status: 'committed' };
@@ -808,6 +824,34 @@ describe('useProjectManager.createProject', () => {
 
     expect(mockGetPendingProjectOperations).toHaveBeenCalledOnce();
     expect(mockListProjectManifests).toHaveBeenCalledTimes(3);
+  });
+
+  it('waits for a journaled project route before reading its manifest', async () => {
+    let resolveCommit!: () => void;
+    mockGetPendingProjectOperations.mockResolvedValue([pendingCreate]);
+    mockCommitPendingProjectDirectory.mockImplementationOnce(
+      async () =>
+        new Promise<{ status: 'committed' }>((resolve) => {
+          resolveCommit = () => {
+            resolve({ status: 'committed' });
+          };
+        }),
+    );
+    mockReadFile.mockImplementation(async (path: string) => {
+      if (path.endsWith('/tau.json') && !phaseOrder.includes('roots')) {
+        throw new Error('ROOT_UNAVAILABLE');
+      }
+      return manifestBytes;
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    const project = result.current.getProject(fakeProject.id);
+    await vi.waitFor(() => {
+      expect(mockCommitPendingProjectDirectory).toHaveBeenCalledOnce();
+    });
+    resolveCommit();
+
+    await expect(project).resolves.toEqual(fakeProject);
   });
 
   it('classifies duplicate project identities as conflicts', async () => {
@@ -1072,6 +1116,20 @@ describe('useProjectManager.createProject', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("invalidates one chat when another device's projected log segment changes", async () => {
+    const { wrapper, queryClient } = createInspectableWrapper();
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+    renderHook(() => useProjectManager(), { wrapper });
+
+    act(() => {
+      emitWorkerChange('fileWritten', `/projects/${fakeProject.id}/.tau/chats/chat_remote/events/device-b.jsonl`);
+    });
+
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['chats', fakeProject.id] });
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['chat', 'chat_remote'] });
+    expect(mockInvalidateChatLog).toHaveBeenCalledWith('chat_remote');
   });
 
   it('cancels a pending library invalidation when the provider unmounts', async () => {
@@ -1451,6 +1509,65 @@ describe('useProjectManager.createProject', () => {
     expect(mockCompletePending).not.toHaveBeenCalled();
   });
 
+  /*
+   * P66: the route gate re-reads access whenever the manager's value moves
+   * (`project-route.tsx` deps its access effect on `projectManager`), so a
+   * recovery that settles after the first render has to move that value — by
+   * being carried in it, never by a revision counter in a dependency array the
+   * React Compiler erases.
+   */
+  it('re-reads route access when a recovery settles after the first render', async () => {
+    let failCommit!: () => void;
+    mockGetPendingProjectOperations.mockResolvedValue([pendingCreate]);
+    mockCommitPendingProjectDirectory.mockImplementationOnce(
+      async () =>
+        new Promise<{ status: 'committed' }>((_resolve, reject) => {
+          failCommit = () => {
+            reject(new Error('write failed'));
+          };
+        }),
+    );
+    const seen: Array<string | undefined> = [];
+    const published: string[][] = [];
+    function Gate(): ReactNode {
+      const projectManager = useProjectManager();
+      const [status, setStatus] = useState<string>();
+      useEffect(() => {
+        let cancelled = false;
+        const loadAccess = async (): Promise<void> => {
+          const access = await projectManager.getProjectRouteAccess(fakeProject.id);
+          if (!cancelled) {
+            setStatus(access.status);
+          }
+        };
+        // async-iife: bootstrap -- the route gate reads access exactly this way.
+        void loadAccess();
+        return () => {
+          cancelled = true;
+        };
+      }, [projectManager]);
+      seen.push(status);
+      published.push(projectManager.recoveries.map((recovery) => recovery.status));
+      return null;
+    }
+
+    await act(async () => {
+      render(createElement(createWrapper(), undefined, createElement(Gate)));
+    });
+
+    await waitFor(() => {
+      expect(seen.at(-1)).toBe('recovering');
+    });
+    expect(published.at(-1)).toEqual(['recovering']);
+    await act(async () => {
+      failCommit();
+    });
+    await waitFor(() => {
+      expect(seen.at(-1)).toBe('recovery-failed');
+    });
+    expect(published.at(-1)).toEqual(['failed']);
+  });
+
   it('propagates systemic discovery failure instead of presenting an empty library', async () => {
     mockListProjectManifests.mockRejectedValue(new Error('discovery failed'));
     const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
@@ -1483,9 +1600,92 @@ describe('useProjectManager.createProject', () => {
       files: pendingCreate.files,
       manifest: serializeProjectManifest(fakeProject),
     });
+    expect(mockSetProjectFileSystemConfig).toHaveBeenCalledWith({
+      projectId: fakeProject.id,
+      backend: 'opfs',
+      providerBasePath: pendingCreate.providerBasePath,
+    });
     expect(phaseOrder).toEqual(['pending', 'commit', 'locator', 'roots', 'resources', 'complete', 'preference']);
     expect(mockGetProjectCreationLocation).not.toHaveBeenCalled();
     expect(mockSetProjectCreationLocation).toHaveBeenCalledWith({ kind: 'home' });
+  });
+
+  it('waits for pre-commit discovery before publishing a new project to an immediate route', async () => {
+    const { wrapper, queryClient } = createInspectableWrapper();
+    const { result } = renderHook(
+      () => {
+        const projectManager = useProjectManager();
+        const listing = useQuery({
+          queryKey: ['projects', { includeDeleted: true }],
+          queryFn: async () => projectManager.getProjectListing({ includeDeleted: true }),
+        });
+        return { projectManager, listing };
+      },
+      { wrapper },
+    );
+    await waitFor(() => {
+      expect(result.current.listing.data?.projects).toEqual([]);
+    });
+    mockListProjectManifests.mockClear();
+
+    let startCommit!: () => void;
+    const commitStarted = new Promise<void>((resolve) => {
+      startCommit = resolve;
+    });
+    let releaseCommit!: () => void;
+    const commitGate = new Promise<void>((resolve) => {
+      releaseCommit = resolve;
+    });
+    let committed = false;
+    mockCommitPendingProjectDirectory.mockImplementationOnce(async () => {
+      startCommit();
+      await commitGate;
+      phaseOrder.push('commit');
+      committed = true;
+      return { status: 'committed' } as const;
+    });
+    let startPreCommitDiscovery!: () => void;
+    const preCommitDiscoveryStarted = new Promise<void>((resolve) => {
+      startPreCommitDiscovery = resolve;
+    });
+    let releasePreCommitDiscovery!: () => void;
+    const preCommitDiscoveryGate = new Promise<void>((resolve) => {
+      releasePreCommitDiscovery = resolve;
+    });
+    let holdPreCommitDiscovery = false;
+    mockListProjectManifests.mockImplementation(async () => {
+      const entries = committed ? validProjectDiscovery.entries : [];
+      if (holdPreCommitDiscovery && !committed) {
+        startPreCommitDiscovery();
+        await preCommitDiscoveryGate;
+      }
+      return { roots: validProjectDiscovery.roots, entries };
+    });
+    let created: Awaited<ReturnType<typeof result.current.projectManager.createProject>> | undefined;
+    const creation = result.current.projectManager.createProject({
+      project: fakeProject,
+      files: pendingCreate.files,
+      location: { kind: 'home' },
+    });
+    await commitStarted;
+    holdPreCommitDiscovery = true;
+    const preCommitListing = result.current.projectManager.getProjectListing({ includeDeleted: true });
+    await preCommitDiscoveryStarted;
+    releaseCommit();
+    await waitFor(() => {
+      expect(committed).toBe(true);
+    });
+    releasePreCommitDiscovery();
+    await act(async () => {
+      [created] = await Promise.all([creation, preCommitListing]);
+    });
+
+    expect(created?.slugs).toEqual({ workspaceSlug: 'home', projectSlug: 'test-project' });
+    expect(mockListProjectManifests).toHaveBeenCalledTimes(3);
+    const published = queryClient.getQueryData<ProjectListing>(['projects', { includeDeleted: true }])?.projects;
+    expect(published).toHaveLength(1);
+    expect(published?.[0]?.manifest.id).toBe(created?.id);
+    expect(published?.[0]?.slugs).toEqual({ workspaceSlug: 'home', projectSlug: 'test-project' });
   });
 
   it('resolves an omitted location from durable preference immediately before allocation', async () => {
@@ -1606,8 +1806,9 @@ describe('useProjectManager.createProject', () => {
       }),
     );
 
-    expect(mockGenerateProjectName).toHaveBeenCalledWith({
-      projectId: expect.any(String),
+    const generatedRequest = mockGenerateProjectName.mock.calls.at(-1)?.[0];
+    expect(typeof generatedRequest?.projectId).toBe('string');
+    expect(generatedRequest).toMatchObject({
       text: '',
       imageUrls: [imageUrl],
     });
@@ -1676,6 +1877,86 @@ describe('useProjectManager.createProject', () => {
     expect(mockResumeResources).not.toHaveBeenCalled();
     expect(mockCompletePending).not.toHaveBeenCalled();
     expect(mockSetProjectCreationLocation).not.toHaveBeenCalled();
+  });
+
+  /**
+   * W18 DEF-2 red pin (b): a second device must reuse the remote's project id.
+   *
+   * The id *is* the repository path on the Tau Hosted Remote, so a device
+   * opening a project it has never held cannot mint a new one — and it must not
+   * be able to mint an arbitrary string either, because the same id names a
+   * directory here and a repository there.
+   */
+  it('creates a project under an id the caller supplies', async () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () =>
+      result.current.createProject({
+        id: 'proj_ccccccccccccccccccccc',
+        project: fakeProject,
+        files: {},
+        location: { kind: 'home' },
+      }),
+    );
+
+    expect(mockPrepareProjectCreation.mock.calls.at(-1)?.[0].manifest.id).toBe('proj_ccccccccccccccccccccc');
+  });
+
+  /* Review R4: *Open* is offered from a 30 s cache against an asynchronous
+     discovery pass, so the same row can be clicked twice. Two local projects
+     under one id is a `duplicate-id` conflict neither of them recovers from, so
+     the refusal belongs at the owner rather than in the one caller. */
+  it('refuses an id this device already holds', async () => {
+    mockGetProjectFileSystemConfig.mockResolvedValue({
+      projectId: 'proj_ccccccccccccccccccccc',
+      backend: 'opfs',
+      providerBasePath: 'already-here',
+    });
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(
+      result.current.createProject({
+        id: 'proj_ccccccccccccccccccccc',
+        project: fakeProject,
+        files: {},
+        location: { kind: 'home' },
+      }),
+    ).rejects.toThrow(/already on this device/iu);
+    expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
+  });
+
+  /* Review R5: opening someone's project from Tau Cloud must not invent a chat
+     for them. `.tau/chats` is unversioned, so the open pull cannot take one
+     away, and chats ship on their own record refs — an empty *Initial chat*
+     minted here would be offered back to the account on the next push. */
+  it('creates without a chat when the caller asks for none', async () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () =>
+      result.current.createProject({
+        chat: false,
+        project: fakeProject,
+        files: {},
+        location: { kind: 'home' },
+      }),
+    );
+
+    expect(mockPrepareProjectCreation.mock.calls.at(-1)?.[0].chat).toBeUndefined();
+    expect(mockPutChatRecord).not.toHaveBeenCalled();
+  });
+
+  it('refuses an id that is not a project id, before anything is allocated', async () => {
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await expect(
+      result.current.createProject({
+        id: '../escape',
+        project: fakeProject,
+        files: {},
+        location: { kind: 'home' },
+      }),
+    ).rejects.toThrow(/not a project id/iu);
+    expect(mockPrepareProjectCreation).not.toHaveBeenCalled();
   });
 
   it('returns a committed project when preference persistence fails', async () => {

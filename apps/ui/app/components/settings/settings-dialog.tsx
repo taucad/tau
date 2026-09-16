@@ -1,19 +1,11 @@
-import { useCallback } from 'react';
-import type { MouseEvent } from 'react';
-import { Bot, BrainCircuit, Cpu, CreditCard, FlaskConical, HardDrive, Key, Lock, Settings2, User } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import { AccountSettings } from '#components/auth/settings/account/account-settings.js';
 import { SecuritySettings } from '#components/auth/settings/security/security-settings.js';
-import { ApiKeys } from '#components/auth/api-key/api-keys.js';
-import type { LucideIcon } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@taucad/ui/components/dialog';
-import {
-  useSettingsDialog,
-  closeSettingsDialog,
-  setSettingsSection,
-  openSettingsDialog,
-} from '#hooks/use-settings-dialog.js';
+import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import type { SettingsSection } from '#hooks/use-settings-dialog.js';
-import { BillingSettings } from '#components/settings/billing-settings.js';
+import { CloudBillingSettings } from '#cloud/settings-billing.js';
 import { FileSystemSettings } from '#components/settings/filesystem-settings.js';
 import { GeneralSettings } from '#components/settings/general-settings.js';
 import { ExperimentalSettings } from '#components/settings/experimental-settings.js';
@@ -22,194 +14,307 @@ import { AgentSettings } from '#components/settings/agent-settings.js';
 import { SettingsAuthGate } from '#components/settings/settings-auth-gate.js';
 import { RemoteComputeSettings } from '#components/settings/remote-compute-settings.js';
 import { ComputeReuseSettings } from '#components/settings/compute-reuse-settings.js';
-import { cn } from '@taucad/ui/utils/cn';
 import { useKeybinding } from '#hooks/use-keyboard.js';
-import { ResponsiveTabs } from '#components/ui/responsive-tabs.js';
-import type { ResponsiveTabItem } from '#components/ui/responsive-tabs.js';
-import { TabsContent } from '@taucad/ui/components/tabs';
 
-type SettingsGroup = 'platform' | 'ai' | 'advanced';
+import { Button } from '@taucad/ui/components/button';
+import { SearchInput } from '#components/search-input.js';
+import {
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
+} from '#components/ui/sidebar.js';
+import { settingsSections, searchSettings } from '#components/settings/settings-registry.js';
+import { SettingsItem } from '#components/settings/settings-item.js';
 
-type SettingsSectionDefinition = {
-  readonly id: SettingsSection;
-  readonly label: string;
-  readonly icon: LucideIcon;
-  readonly requiresAuth: boolean;
-  readonly group: SettingsGroup;
-};
+/** Keep authenticated sections behind their existing gate and mount only the active section. */
+function SettingsContent({ section }: { readonly section: SettingsSection }): React.JSX.Element {
+  switch (section) {
+    case 'general': {
+      return <GeneralSettings />;
+    }
+    case 'account': {
+      return (
+        <SettingsAuthGate>
+          <SettingsItem settingId='profile'>
+            <AccountSettings />
+          </SettingsItem>
+        </SettingsAuthGate>
+      );
+    }
+    case 'security': {
+      return (
+        <SettingsAuthGate>
+          <SecuritySettings />
+        </SettingsAuthGate>
+      );
+    }
+    case 'billing': {
+      return (
+        <SettingsAuthGate>
+          <CloudBillingSettings />
+        </SettingsAuthGate>
+      );
+    }
+    case 'compute': {
+      return (
+        <>
+          <SettingsItem settingId='compute-reuse'>
+            <ComputeReuseSettings />
+          </SettingsItem>
+          <SettingsAuthGate>
+            <SettingsItem settingId='tau-host'>
+              <RemoteComputeSettings />
+            </SettingsItem>
+          </SettingsAuthGate>
+        </>
+      );
+    }
+    case 'models': {
+      return (
+        <SettingsItem settingId='model-picker'>
+          <ModelSettings />
+        </SettingsItem>
+      );
+    }
+    case 'agents': {
+      return <AgentSettings />;
+    }
+    case 'filesystem': {
+      return <FileSystemSettings />;
+    }
+    case 'experimental': {
+      return <ExperimentalSettings />;
+    }
+  }
+}
 
-const sections: readonly SettingsSectionDefinition[] = [
-  { id: 'general', label: 'General', icon: Settings2, requiresAuth: false, group: 'platform' },
-  { id: 'account', label: 'Account', icon: User, requiresAuth: true, group: 'platform' },
-  { id: 'security', label: 'Security', icon: Lock, requiresAuth: true, group: 'platform' },
-  { id: 'api-keys', label: 'API Keys', icon: Key, requiresAuth: true, group: 'platform' },
-  { id: 'billing', label: 'Billing', icon: CreditCard, requiresAuth: true, group: 'platform' },
-  { id: 'compute', label: 'Compute', icon: Cpu, requiresAuth: true, group: 'platform' },
-  { id: 'models', label: 'Models', icon: Bot, requiresAuth: false, group: 'ai' },
-  { id: 'agents', label: 'Agents', icon: BrainCircuit, requiresAuth: false, group: 'ai' },
-  { id: 'filesystem', label: 'Filesystem', icon: HardDrive, requiresAuth: false, group: 'advanced' },
-  { id: 'experimental', label: 'Experimental', icon: FlaskConical, requiresAuth: false, group: 'advanced' },
-] as const;
-
-const sectionPathMap: Record<SettingsSection, string> = {
-  general: '/settings/general',
-  filesystem: '/settings/filesystem',
-  account: '/settings/account',
-  security: '/settings/security',
-  'api-keys': '/settings/api-keys',
-  billing: '/settings/billing',
-  compute: '/settings/compute',
-  models: '/settings/models',
-  agents: '/settings/agents',
-  experimental: '/settings/experimental',
-};
-
-/**
- * Tabs formatted for ResponsiveTabs. The href values match the original
- * settings routes so that ResponsiveTabs renders correctly. Navigation
- * is intercepted via onClickCapture to prevent actual route changes.
- */
-const settingsTabs: readonly ResponsiveTabItem[] = sections.map((section) => ({
-  label: section.label,
-  href: sectionPathMap[section.id],
-  icon: section.icon,
-  group: section.group,
-}));
-
-/** Reverse lookup: path -> section id */
-const pathToSection = Object.fromEntries(
-  Object.entries(sectionPathMap).map(([id, path]) => [path, id as SettingsSection]),
-) as Record<string, SettingsSection>;
-
-/** Map section id to label */
-const sectionToLabel = Object.fromEntries(sections.map((s) => [s.id, s.label])) as Record<SettingsSection, string>;
-
-/**
- * Global settings dialog with responsive layout using ResponsiveTabs.
- *
- * State is driven by the `?settings=<section>` URL search parameter
- * (see `useSettingsDialog`). Closing the dialog removes the param;
- * switching tabs updates it.
- *
- * - Desktop (md+): vertical tabs on the left, content on the right
- * - Mobile: horizontal scrollable tabs on top, content below
- *
- * Link clicks inside ResponsiveTabs are intercepted during the capture
- * phase to prevent React Router navigation -- the section is updated
- * in-place via the `?settings` search param.
- */
+/** URL-backed settings navigation with a searchable catalogue of individual controls. */
 export function SettingsDialog(): React.JSX.Element {
-  const { isOpen, section: activeSection } = useSettingsDialog();
-
-  const handleOpenChange = useCallback((open: boolean) => {
-    if (!open) {
-      closeSettingsDialog();
-    }
-  }, []);
-
-  // Register Cmd+, keyboard shortcut
+  const { isOpen, section: activeSection, open, close } = useSettingsDialog();
   useKeybinding({ key: ',', modKey: true }, () => {
-    openSettingsDialog();
+    open();
   });
-
-  /**
-   * Intercept tab Link clicks during the CAPTURE phase (before React Router handles them)
-   * to prevent navigation and instead update the settings section store.
-   */
-  const handleClickCapture = useCallback((event: MouseEvent<HTMLDivElement>) => {
-    const anchor = (event.target as HTMLElement).closest('a');
-    const href = anchor?.getAttribute('href');
-    if (href && href in pathToSection) {
-      event.preventDefault();
-      event.stopPropagation();
-      setSettingsSection(pathToSection[href]!);
-    }
-  }, []);
-
-  const activeTab = sectionToLabel[activeSection];
-
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (!nextOpen) {
+        close();
+      }
+    },
+    [close],
+  );
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-      <DialogContent
-        className={cn(
-          'gap-0 overflow-hidden p-0',
-          'h-[min(90vh,900px)] grid-rows-[1fr]',
-          'sm:max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl',
-        )}
-      >
-        <DialogTitle className='sr-only'>Settings</DialogTitle>
-        <DialogDescription className='sr-only'>Application settings and preferences</DialogDescription>
-
-        <div className='size-full min-h-0 overflow-clip' onClickCapture={handleClickCapture}>
-          <ResponsiveTabs
-            tabs={settingsTabs}
-            activeTab={activeTab}
-            enableContentAnimation={false}
-            tabsListClassName={cn(
-              // TabsList has its own `bg-sidebar` background, so we use *margins*
-              // (not padding) to offset the whole sidebar pane from the dialog
-              // edges — padding would only push the items inside the pane.
-              // Mobile: horizontal scroll strip nudged in from the dialog edges.
-              'max-md:mx-6 max-md:mt-6',
-              // Desktop: vertical sidebar offset from the dialog left edge.
-              'md:ml-6 md:mb-6',
-            )}
-            contentClassName={cn(
-              // Top padding takes over from the removed DialogContent p-6.
-              'pt-6 pb-8',
-              // Mobile: keep horizontal padding so content clears the dialog edges.
-              'max-md:px-6',
-              // Desktop: the scroll container extends flush to the dialog's right border
-              // so the scrollbar tucks against it; `pr-6` keeps content visually clear
-              // of the scrollbar. Left padding is supplied via the `md:gap-6` between
-              // TabsList and this column.
-              'md:pr-6',
-            )}
-          >
-            <TabsContent enableAnimation={false} value='Account'>
-              <SettingsAuthGate>
-                <AccountSettings />
-              </SettingsAuthGate>
-            </TabsContent>
-            <TabsContent enableAnimation={false} value='Security'>
-              <SettingsAuthGate>
-                <SecuritySettings />
-              </SettingsAuthGate>
-            </TabsContent>
-            <TabsContent enableAnimation={false} value='API Keys'>
-              <SettingsAuthGate>
-                <ApiKeys />
-              </SettingsAuthGate>
-            </TabsContent>
-            <TabsContent enableAnimation={false} value='General'>
-              <GeneralSettings />
-            </TabsContent>
-            <TabsContent enableAnimation={false} value='Filesystem'>
-              <FileSystemSettings />
-            </TabsContent>
-            <TabsContent enableAnimation={false} value='Billing'>
-              <SettingsAuthGate>
-                <BillingSettings />
-              </SettingsAuthGate>
-            </TabsContent>
-            <TabsContent className='flex flex-col gap-6 pb-6' enableAnimation={false} value='Compute'>
-              <ComputeReuseSettings />
-              <SettingsAuthGate>
-                <RemoteComputeSettings />
-              </SettingsAuthGate>
-            </TabsContent>
-            <TabsContent enableAnimation={false} value='Models'>
-              <ModelSettings />
-            </TabsContent>
-            <TabsContent enableAnimation={false} value='Agents'>
-              <AgentSettings />
-            </TabsContent>
-            <TabsContent enableAnimation={false} value='Experimental'>
-              <ExperimentalSettings />
-            </TabsContent>
-          </ResponsiveTabs>
-        </div>
-      </DialogContent>
+      {isOpen ? <SettingsSurface activeSection={activeSection} /> : null}
     </Dialog>
+  );
+}
+
+function SettingsSurface({ activeSection }: { readonly activeSection: SettingsSection }): React.JSX.Element {
+  const { open: openSection, close } = useSettingsDialog();
+  const [query, setQuery] = useState('');
+  const [destination, setDestination] = useState<{ section: SettingsSection; id?: string }>();
+  const searchRef = useRef<HTMLInputElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const results = searchSettings(query);
+  const isSearching = query.trim().length > 0;
+  const active = settingsSections.find((section) => section.id === activeSection)!;
+  const resultCount = results.reduce((total, group) => total + group.entries.length, 0);
+
+  useEffect(() => {
+    if (!destination || destination.section !== activeSection) {
+      return;
+    }
+    const content = contentRef.current;
+    if (!content) {
+      return;
+    }
+    let frame: number;
+    const reveal = (): boolean => {
+      const target = destination.id
+        ? content.querySelector<HTMLElement>(`#settings-${CSS.escape(destination.id)}`)
+        : undefined;
+      if (!target) {
+        return false;
+      }
+      target.focus({ preventScroll: true });
+      target.scrollIntoView({ block: 'center' });
+      return true;
+    };
+    // Billing and filesystem destinations may arrive after their data finishes loading.
+    const observer = new MutationObserver(() => {
+      if (document.activeElement !== content) {
+        observer.disconnect();
+        return;
+      }
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (document.activeElement === content && reveal()) {
+          observer.disconnect();
+        }
+      });
+    });
+    frame = requestAnimationFrame(() => {
+      if (!reveal()) {
+        content.focus({ preventScroll: true });
+        content.scrollTo({ top: 0 });
+        if (destination.id) {
+          observer.observe(content, { childList: true, subtree: true });
+        }
+      }
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [activeSection, destination]);
+
+  const navigate = (section: SettingsSection, id?: string): void => {
+    openSection(section);
+    setDestination({ section, id });
+  };
+  const clearSearch = (): void => {
+    setQuery('');
+    searchRef.current?.focus();
+  };
+
+  return (
+    <DialogContent
+      className='h-[90dvh] max-w-[calc(100%-2rem)] grid-rows-[1fr] gap-0 overflow-hidden p-0 sm:max-w-6xl'
+      onEscapeKeyDown={(event) => {
+        if (query) {
+          event.preventDefault();
+          clearSearch();
+        }
+      }}
+    >
+      <DialogTitle className='sr-only'>Settings</DialogTitle>
+      <DialogDescription className='sr-only'>Application settings and preferences</DialogDescription>
+      <div className='flex min-h-0 flex-col md:flex-row'>
+        <aside className='flex shrink-0 flex-col gap-4 border-b bg-sidebar p-4 max-md:max-h-[45%] md:w-64 md:border-r md:border-b-0'>
+          <Button variant='ghost' className='w-full justify-start' onClick={close}>
+            <ArrowLeft className='size-4' aria-hidden='true' /> Back to app
+          </Button>
+          <form
+            className='relative'
+            role='search'
+            aria-label='Search settings'
+            onSubmit={(event) => {
+              event.preventDefault();
+              const first = results[0];
+              if (first?.entries[0]) {
+                navigate(first.section.id, first.entries[0].id);
+              }
+            }}
+          >
+            <SearchInput
+              ref={searchRef}
+              aria-label='Search settings'
+              placeholder='Search settings…'
+              value={query}
+              variant='transparent'
+              onClear={clearSearch}
+              onChange={(event) => {
+                setQuery(event.target.value);
+              }}
+            />
+          </form>
+          <nav aria-label='Settings navigation' className='min-h-0 overflow-y-auto'>
+            {isSearching ? (
+              <div className='space-y-4'>
+                <p role='status' className='px-2 text-xs text-muted-foreground'>
+                  {resultCount === 0
+                    ? 'No settings found'
+                    : `${resultCount} ${resultCount === 1 ? 'setting' : 'settings'} found`}
+                </p>
+                {resultCount === 0 ? (
+                  <p className='px-2 text-sm text-muted-foreground'>
+                    Try a setting name or a word like theme, models, or storage.
+                  </p>
+                ) : null}
+                {results.map(({ section, entries }) => (
+                  <SidebarGroup key={section.id} role='group' aria-label={section.label} className='px-0'>
+                    <SidebarMenu>
+                      <SidebarMenuItem>
+                        <SidebarMenuButton
+                          className='text-muted-foreground'
+                          onClick={() => {
+                            navigate(section.id);
+                          }}
+                        >
+                          <section.icon className='size-4 shrink-0' aria-hidden='true' />
+                          <span>{section.label}</span>
+                        </SidebarMenuButton>
+                        <SidebarMenuSub>
+                          {entries.map((entry) => (
+                            <SidebarMenuSubItem key={entry.id}>
+                              <SidebarMenuSubButton
+                                asChild
+                                title={entry.description}
+                                isActive={destination?.section === activeSection && destination.id === entry.id}
+                              >
+                                <button
+                                  type='button'
+                                  onClick={() => {
+                                    navigate(section.id, entry.id);
+                                  }}
+                                >
+                                  <span>{entry.label}</span>
+                                </button>
+                              </SidebarMenuSubButton>
+                            </SidebarMenuSubItem>
+                          ))}
+                        </SidebarMenuSub>
+                      </SidebarMenuItem>
+                    </SidebarMenu>
+                  </SidebarGroup>
+                ))}
+              </div>
+            ) : (
+              <div className='flex md:flex-col'>
+                {[...new Set(settingsSections.map((section) => section.group))].map((group) => (
+                  <SidebarGroup key={group} className='shrink-0 px-0'>
+                    <SidebarGroupLabel className='max-md:hidden'>{group}</SidebarGroupLabel>
+                    <SidebarMenu>
+                      {settingsSections
+                        .filter((section) => section.group === group)
+                        .map((section) => (
+                          <SidebarMenuItem key={section.id}>
+                            <SidebarMenuButton
+                              isActive={activeSection === section.id}
+                              onClick={() => {
+                                navigate(section.id);
+                              }}
+                            >
+                              <section.icon className='size-4' aria-hidden='true' />
+                              <span>{section.label}</span>
+                            </SidebarMenuButton>
+                          </SidebarMenuItem>
+                        ))}
+                    </SidebarMenu>
+                  </SidebarGroup>
+                ))}
+              </div>
+            )}
+          </nav>
+        </aside>
+        <div
+          ref={contentRef}
+          role='region'
+          aria-label={`${active.label} settings`}
+          tabIndex={-1}
+          className='min-h-0 min-w-0 flex-1 overflow-y-auto p-6 focus-visible:focus-outline md:p-10'
+        >
+          <div className='mx-auto flex max-w-3xl flex-col gap-6 [&_[data-settings-section]]:gap-3 [&_[data-settings-section]]:border-0 [&_[data-settings-section]]:bg-transparent [&_[data-settings-section]]:py-0 [&_[data-settings-section]>[data-slot=card-content]]:rounded-xl [&_[data-settings-section]>[data-slot=card-content]]:border [&_[data-settings-section]>[data-slot=card-content]]:bg-card [&_[data-settings-section]>[data-slot=card-content]]:py-4 [&_[data-settings-section]>[data-slot=card-content]:has(>[data-slot=settings-item])]:gap-0 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:pt-4 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:absolute [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:inset-x-0 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:top-0 [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:border-t [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:first-child)]:before:content-[""] [&_[data-settings-section]>[data-slot=card-content]>[data-slot=settings-item]:not(:last-child)]:pb-4 [&_[data-settings-section]>[data-slot=card-header]]:px-0 [&_[data-settings-section]>[data-slot=card-header]_[data-slot=card-description]]:hidden [&_[data-settings-section]>[data-slot=card-header]_[data-slot=card-title]]:text-sm [&_[data-settings-section]>[data-slot=card-header]_[data-slot=card-title]]:font-medium [&_[data-slot=card]]:shadow-none [&_h2]:text-sm [&_h2]:font-medium'>
+            <h1 className='text-lg font-medium'>{active.label}</h1>
+            <SettingsContent section={activeSection} />
+          </div>
+        </div>
+      </div>
+    </DialogContent>
   );
 }

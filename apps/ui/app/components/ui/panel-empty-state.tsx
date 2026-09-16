@@ -1,8 +1,13 @@
-import type { LucideIcon } from 'lucide-react';
 import { cn } from '@taucad/ui/utils/cn';
 
 type PanelEmptyStateProps = Omit<React.ComponentProps<'div'>, 'title'> & {
-  readonly icon: LucideIcon;
+  /**
+   * Any glyph that takes a className — every lucide icon, and the `Loader`
+   * spinner a progress state puts in the same slot.
+   */
+  readonly icon: React.ComponentType<
+    { readonly className?: string } & Pick<React.SVGProps<SVGSVGElement>, 'aria-hidden' | 'strokeWidth'>
+  >;
   readonly title: string;
   readonly description?: React.ReactNode;
   readonly iconClassName?: string;

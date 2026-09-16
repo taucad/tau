@@ -170,6 +170,7 @@ export const projectShareEnvelopeSchema = z
     currentPublication: z
       .object({
         id: z.string(),
+        tag: z.string(),
         title: z.string(),
         description: z.string().nullable(),
         visibility: publicationVisibilitySchema,

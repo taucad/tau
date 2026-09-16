@@ -4,22 +4,22 @@
 
 Interval: declare class Interval
 
-constructor
+  constructor
 
-Binf: number
+  Binf: number
 
-Bsup: number
+  Bsup: number
 
-HasFirstBound: boolean
+  HasFirstBound: boolean
 
-HasLastBound: boolean
+  HasLastBound: boolean
 
-IsNull: boolean
+  IsNull: boolean
 
-Length(): number;
+  Length(): number;
 
-IntersectionWithBounded(Inter: Interval): Interval;
+  IntersectionWithBounded(Inter: Interval): Interval;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

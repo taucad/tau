@@ -109,7 +109,19 @@ describe('configureMonaco', () => {
       },
     });
 
-    await configureMonaco();
+    const pending = Promise.withResolvers<FontFace[]>();
+    vi.mocked(document.fonts.load).mockReturnValue(pending.promise);
+    const first = configureMonaco();
+    const second = configureMonaco();
+    let completed = false;
+    const observing = (async () => {
+      await second;
+      completed = true;
+    })();
+    await Promise.resolve();
+    expect(completed).toBe(false);
+    pending.resolve([]);
+    await Promise.all([first, second, observing]);
 
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- accessing mock structure
     const { getWorker } = (

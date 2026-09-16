@@ -97,7 +97,11 @@ export const SlashCommand = Extension.create<SlashCommandOptions>({
           }
 
           if (item.group === 'Commands') {
-            editor.chain().focus().deleteRange(range).run();
+            const chain = editor.chain().focus().deleteRange(range);
+            if (item.commandText !== undefined) {
+              chain.insertContent(item.commandText);
+            }
+            chain.run();
             onCommand?.(item);
             return;
           }

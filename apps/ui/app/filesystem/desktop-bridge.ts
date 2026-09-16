@@ -30,6 +30,12 @@ type DesktopShell = {
   readonly externalAgents?: readonly ExternalAgentDescriptor[];
   readonly compute?: DesktopBridge['compute'];
   readonly appIcon: { setTheme(theme: 'light' | 'dark'): void };
+  /** The quit hold's renderer half (D31, P49). */
+  readonly quit?: {
+    isReady(): boolean;
+    onAsk(handler: () => void): () => void;
+    reportQuiesced(forced: boolean): void;
+  };
   readonly dialog: DesktopBridge['dialog'];
   readonly openFiles: DesktopBridge['openFiles'];
   readonly quickLook: {
@@ -43,6 +49,10 @@ type DesktopShell = {
   };
   /** Ask main to broker a port for one concern; answered by a relayed message. */
   requestServicesPort(requestId: string, concern: string, context?: Readonly<Record<string, string>>): void;
+  readonly agentHost: {
+    retain(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
+    release(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
+  };
 };
 
 export type DesktopQuickLookResult = { readonly success: true } | { readonly success: false; readonly error: string };
@@ -53,6 +63,29 @@ export const setDesktopAppIconTheme = (theme: 'light' | 'dark'): void => {
     return;
   }
   (globalThis as { tau?: DesktopShell }).tau?.appIcon.setTheme(theme);
+};
+
+/**
+ * Listen for main's quit ask (D31, P49).
+ *
+ * Returns a no-op unsubscribe on the browser build, so the caller has one
+ * shape and no host branch.
+ *
+ * @param handler - Run every live session's closing.
+ * @returns The unsubscribe.
+ * @public
+ */
+export const onDesktopQuitRequested = (handler: () => void): (() => void) => {
+  const shell = isDesktopBuildTarget() ? (globalThis as { tau?: DesktopShell }).tau : undefined;
+  return shell?.quit?.onAsk(handler) ?? ((): void => undefined);
+};
+
+/** Tell main every session has closed, or that the person cut it short. @public */
+export const reportDesktopQuiesced = (forced: boolean): void => {
+  if (!isDesktopBuildTarget()) {
+    return;
+  }
+  (globalThis as { tau?: DesktopShell }).tau?.quit?.reportQuiesced(forced);
 };
 
 /**
@@ -95,7 +128,11 @@ export type DesktopBridge = {
      * over a WebSocket. Main refuses a root the user never granted, and the
      * promise then never settles rather than resolving onto a port to nowhere.
      */
-    connect(workspaceRoot: string, computeMode: 'off' | 'memory' | 'durable'): Promise<MessagePort>;
+    connect(workspaceRoot: string, projectId: string, computeMode: 'off' | 'memory' | 'durable'): Promise<MessagePort>;
+    /** Keep launcher 2 alive for one project session in this renderer. */
+    retain(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
+    /** Release that hold and await launcher shutdown when it was the last one. */
+    release(workspaceRoot: string, projectId: string, attachmentId: string): Promise<void>;
   };
   readonly compute: {
     inspect(projectRoot: string): ReturnType<ComputeStoreControl['inspect']>;
@@ -115,7 +152,7 @@ export type DesktopBridge = {
   };
   readonly openFiles: {
     /** Consume paths delivered by macOS Open With as bounded file payloads. */
-    consume(): Promise<readonly { readonly bytes: Uint8Array<ArrayBuffer>; readonly name: string }[]>;
+    consume(): Promise<ReadonlyArray<{ readonly bytes: Uint8Array<ArrayBuffer>; readonly name: string }>>;
   };
   readonly quickLook: DesktopShell['quickLook'];
 };
@@ -179,8 +216,12 @@ export const desktopBridge = (): DesktopBridge | undefined => {
       connect: async () => connectServices('nodeFs'),
     },
     agentHost: {
-      connect: async (workspaceRoot: string, computeMode: 'off' | 'memory' | 'durable') =>
-        connectServices('agentHost', { workspaceRoot, computeMode }),
+      connect: async (workspaceRoot: string, projectId: string, computeMode: 'off' | 'memory' | 'durable') =>
+        connectServices('agentHost', { workspaceRoot, projectId, computeMode }),
+      retain: async (workspaceRoot, projectId, attachmentId) =>
+        shell.agentHost.retain(workspaceRoot, projectId, attachmentId),
+      release: async (workspaceRoot, projectId, attachmentId) =>
+        shell.agentHost.release(workspaceRoot, projectId, attachmentId),
     },
     compute: shell.compute ?? {
       inspect: async () => {

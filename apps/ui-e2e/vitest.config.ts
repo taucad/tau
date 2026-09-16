@@ -19,7 +19,7 @@ const playwrightProvider = (options?: Parameters<typeof playwright>[0]): Browser
 
 export default defineConfig({
   root: import.meta.dirname,
-  optimizeDeps: { include: ['zod'] },
+  optimizeDeps: { include: ['axe-core', 'zod'] },
   resolve: {
     alias: [
       {
@@ -68,7 +68,10 @@ export default defineConfig({
               channel: 'chromium',
             },
           }),
-          provide: { webGpuProfile: requiredWebGpuProfile },
+          provide: {
+            webGpuProfile: requiredWebGpuProfile,
+            acpLiveEnabled: process.env['TAU_ACP_LIVE_TESTS'] === 'true',
+          },
         },
         {
           browser: 'chromium',
@@ -82,6 +85,20 @@ export default defineConfig({
             },
           }),
           provide: { webGpuProfile: 'disabled' },
+        },
+        {
+          browser: 'chromium',
+          name: 'chromium-touch',
+          include: ['src/revision-ux-visual-matrix.spec.ts'],
+          provider: playwright({
+            actionTimeout: 10_000,
+            contextOptions: { hasTouch: true, isMobile: true },
+            launchOptions: {
+              args: [...chromiumArguments],
+              channel: 'chromium',
+            },
+          }),
+          provide: { webGpuProfile: requiredWebGpuProfile },
         },
         {
           browser: 'firefox',

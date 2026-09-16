@@ -1093,7 +1093,11 @@ export function GltfMesh({
     [isViewerHoverSuppressed, modelUnitState],
   );
   const modelRaycastClipState = useMemo<RaycastClipState | undefined>(() => {
-    return createSectionViewRaycastClipState(sectionView);
+    return createSectionViewRaycastClipState({
+      enableMesh: sectionView.enableMesh,
+      isActive: sectionView.isActive,
+      plane: sectionView.plane,
+    });
   }, [sectionView.enableMesh, sectionView.isActive, sectionView.plane]);
 
   const getModelPickableMeshes = useCallback((): readonly Mesh[] => {
@@ -1490,7 +1494,9 @@ export function GltfMesh({
   // Retire the previous bundle only after React has detached its primitive.
   useEffect(() => {
     for (const retired of retiredPresentationsRef.current.splice(0)) {
-      retired.dispose();
+      if (retired !== presentation) {
+        retired.dispose();
+      }
     }
   }, [presentation]);
 

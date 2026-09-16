@@ -45,6 +45,9 @@ export const projectManifestSchema = z
      * than in a host store because it is a property of the project: a clone
      * inherits the decision instead of quietly re-enabling it. */
     syncChats: z.boolean().optional(),
+    /* Generated exports are large, reproducible records. They stay device-local
+     * unless the project explicitly opts into their dedicated evidence ref. */
+    syncLargeExports: z.boolean().optional(),
   })
   .strict();
 
@@ -174,6 +177,7 @@ export const projectToManifest = (project: Omit<ProjectManifest, '$schema'> | Pr
     },
   },
   ...(project.syncChats === undefined ? {} : { syncChats: project.syncChats }),
+  ...(project.syncLargeExports === undefined ? {} : { syncLargeExports: project.syncLargeExports }),
 });
 
 /** Validate and deterministically encode a project manifest. @public */

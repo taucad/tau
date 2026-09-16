@@ -57,8 +57,8 @@ export function qualifyReloadCustomerLocation(input: {
   if (
     input.customer.id !== input.customerId ||
     input.customer.livemode !== input.livemode ||
-    input.customer.metadata['tau_account_id'] !== input.accountId ||
-    input.customer.metadata['tau_customer_binding_id'] !== input.customerBindingId ||
+    input.customer.metadata?.['tau_account_id'] !== input.accountId ||
+    input.customer.metadata?.['tau_customer_binding_id'] !== input.customerBindingId ||
     address === null ||
     address === undefined ||
     !address.city ||
@@ -234,11 +234,34 @@ export function qualifyManualPayment(input: {
   readonly source: StripePaymentEvidence;
 }): PaymentQualification {
   const { paymentIntent, latestCharge } = input.source;
+  const hosted =
+    input.paymentMethod === null
+      ? hostedCheckoutAmounts({
+          source: input.checkout,
+          offer: input.offer,
+          purchaseId: input.purchaseId,
+          customerId: input.customerId,
+          customerBindingId: input.customerBindingId,
+          providerLegId: input.providerLegId,
+          paymentIntentId: paymentIntent.id,
+        })
+      : undefined;
+  if (input.paymentMethod === null && hosted === undefined) {
+    return {
+      status: input.checkout?.complete === false ? 'pending' : 'unsupported',
+      reason: input.checkout?.complete === false ? 'checkout_pagination_incomplete' : 'checkout_source_mismatch',
+    };
+  }
+  const taxMinor = hosted?.taxMinor ?? input.offer.taxMinor;
+  const grossMinor = hosted?.grossMinor ?? input.offer.grossMinor;
+  if (taxMinor === null || grossMinor === null) {
+    return { status: 'unsupported', reason: 'payment_offer_total_missing' };
+  }
   if (
     paymentIntent.livemode !== input.offer.livemode ||
     stripeId(paymentIntent.customer) !== input.customerId ||
     paymentIntent.currency !== input.offer.currency ||
-    paymentIntent.amount !== Number(input.offer.grossMinor) ||
+    paymentIntent.amount !== Number(grossMinor) ||
     paymentIntent.metadata['tau_purchase_id'] !== input.purchaseId ||
     paymentIntent.metadata['tau_customer_binding_id'] !== input.customerBindingId ||
     paymentIntent.metadata['tau_provider_leg_id'] !== input.providerLegId
@@ -250,7 +273,7 @@ export function qualifyManualPayment(input: {
       customerId: input.customerId,
       livemode: input.offer.livemode,
       paymentIntentId: paymentIntent.id,
-      grossMinor: Number(input.offer.grossMinor),
+      grossMinor: Number(grossMinor),
       purchaseId: input.purchaseId,
       customerBindingId: input.customerBindingId,
       providerLegId: input.providerLegId,
@@ -263,23 +286,6 @@ export function qualifyManualPayment(input: {
     return {
       status: 'pending',
       reason: paymentIntent.status === 'requires_action' ? 'authentication_required' : 'payment_pending',
-    };
-  }
-  if (
-    input.paymentMethod === null &&
-    !qualifiesHostedCheckout({
-      source: input.checkout,
-      offer: input.offer,
-      purchaseId: input.purchaseId,
-      customerId: input.customerId,
-      customerBindingId: input.customerBindingId,
-      providerLegId: input.providerLegId,
-      paymentIntentId: paymentIntent.id,
-    })
-  ) {
-    return {
-      status: input.checkout?.complete === false ? 'pending' : 'unsupported',
-      reason: input.checkout?.complete === false ? 'checkout_pagination_incomplete' : 'checkout_source_mismatch',
     };
   }
   if (
@@ -328,8 +334,8 @@ export function qualifyManualPayment(input: {
     customerId: input.customerId,
     currency: input.offer.currency,
     principalMinor: input.offer.principalMinor,
-    taxMinor: input.offer.taxMinor,
-    grossMinor: input.offer.grossMinor,
+    taxMinor,
+    grossMinor,
     paymentIntentIds: [paymentIntent.id],
     chargeIds: [latestCharge.id],
     invoiceId: null,
@@ -342,7 +348,7 @@ export function qualifyManualPayment(input: {
   return { status: 'paid', evidence };
 }
 
-function qualifiesHostedCheckout(input: {
+function hostedCheckoutAmounts(input: {
   readonly source?: StripeCheckoutEvidence;
   readonly offer: PaymentOfferSnapshot;
   readonly purchaseId: string;
@@ -350,15 +356,21 @@ function qualifiesHostedCheckout(input: {
   readonly customerBindingId: string;
   readonly providerLegId: string;
   readonly paymentIntentId: string;
-}): boolean {
+}): { readonly taxMinor: string; readonly grossMinor: string } | undefined {
   const { source, offer, purchaseId, customerId, customerBindingId, providerLegId, paymentIntentId } = input;
   if (source === undefined || !source.complete || source.lines.length !== 1) {
-    return false;
+    return undefined;
   }
   const { session } = source;
   const line = source.lines.at(0);
   const productId = line === undefined || line.price === null ? undefined : stripeId(line.price.product);
-  return (
+  const taxMinor = session.total_details?.amount_tax;
+  const grossMinor = session.amount_total;
+  const exactOfferMatches =
+    offer.taxMinor === null || offer.grossMinor === null
+      ? offer.taxBasis === 'stripe_checkout'
+      : Number(offer.taxMinor) === taxMinor && Number(offer.grossMinor) === grossMinor;
+  const matches =
     session.livemode === offer.livemode &&
     session.mode === 'payment' &&
     session.status === 'complete' &&
@@ -368,19 +380,27 @@ function qualifiesHostedCheckout(input: {
     session.client_reference_id === purchaseId &&
     session.currency === offer.currency &&
     session.amount_subtotal === Number(offer.principalMinor) &&
-    session.amount_total === Number(offer.grossMinor) &&
-    session.total_details?.amount_tax === Number(offer.taxMinor) &&
+    Number.isSafeInteger(taxMinor) &&
+    taxMinor !== undefined &&
+    taxMinor >= 0 &&
+    Number.isSafeInteger(grossMinor) &&
+    grossMinor !== null &&
+    grossMinor === Number(offer.principalMinor) + taxMinor &&
+    session.automatic_tax?.status === 'complete' &&
+    session.customer_details?.address?.country !== null &&
+    session.customer_details?.address?.country !== undefined &&
     session.metadata?.['tau_purchase_id'] === purchaseId &&
     session.metadata['tau_customer_binding_id'] === customerBindingId &&
     session.metadata['tau_provider_leg_id'] === providerLegId &&
     line !== undefined &&
     line.quantity === 1 &&
     line.amount_subtotal === Number(offer.principalMinor) &&
-    line.amount_total === Number(offer.grossMinor) &&
+    line.amount_total === grossMinor &&
     line.currency === offer.currency &&
     offer.stripeProductId !== null &&
-    productId === offer.stripeProductId
-  );
+    productId === offer.stripeProductId &&
+    exactOfferMatches;
+  return matches ? { taxMinor: String(taxMinor), grossMinor: String(grossMinor) } : undefined;
 }
 
 /** A hosted replacement is allowed only after Stripe proves the old intent received no funds. */
@@ -436,6 +456,13 @@ export function qualifySubscriptionInvoice(input: {
       ? stripeId(invoice.parent.subscription_details?.subscription ?? null)
       : undefined;
   const remoteSubscription = input.subscription;
+  const principalMinor = Number(input.offer.principalMinor);
+  const grossMinor = invoice.total;
+  const taxMinor = grossMinor - invoice.subtotal;
+  const exactOfferMatches =
+    input.offer.taxMinor === null || input.offer.grossMinor === null
+      ? input.offer.taxBasis === 'stripe_checkout'
+      : Number(input.offer.taxMinor) === taxMinor && Number(input.offer.grossMinor) === grossMinor;
   if (
     remoteSubscription.id !== input.subscriptionId ||
     remoteSubscription.livemode !== input.offer.livemode ||
@@ -445,10 +472,17 @@ export function qualifySubscriptionInvoice(input: {
     stripeId(invoice.customer) !== input.customerId ||
     invoiceSubscription !== input.subscriptionId ||
     invoice.currency !== 'usd' ||
-    invoice.amount_paid !== Number(input.offer.grossMinor) ||
+    !Number.isSafeInteger(grossMinor) ||
+    !Number.isSafeInteger(taxMinor) ||
+    taxMinor < 0 ||
+    invoice.subtotal !== principalMinor ||
+    invoice.amount_paid !== grossMinor ||
     invoice.amount_remaining !== 0 ||
-    invoice.total !== Number(input.offer.grossMinor) ||
-    invoice.subtotal !== Number(input.offer.principalMinor) ||
+    invoice.amount_due !== grossMinor ||
+    invoice.automatic_tax?.status !== 'complete' ||
+    invoice.customer_address?.country === null ||
+    invoice.customer_address?.country === undefined ||
+    !exactOfferMatches ||
     lines.length !== 1 ||
     payments.length !== 1
   ) {
@@ -464,8 +498,8 @@ export function qualifySubscriptionInvoice(input: {
     allocation === undefined ||
     line.currency !== 'usd' ||
     line.quantity !== 1 ||
-    line.amount !== Number(input.offer.principalMinor) ||
-    line.subtotal !== Number(input.offer.principalMinor) ||
+    line.amount !== principalMinor ||
+    line.subtotal !== principalMinor ||
     !isStripeTimestamp(line.period.start) ||
     !isStripeTimestamp(line.period.end) ||
     line.period.start >= line.period.end ||
@@ -476,7 +510,7 @@ export function qualifySubscriptionInvoice(input: {
     priceId !== input.offer.stripePriceId ||
     allocation.status !== 'paid' ||
     allocation.currency !== 'usd' ||
-    allocation.amount_paid !== Number(input.offer.grossMinor) ||
+    allocation.amount_paid !== grossMinor ||
     !isStripeTimestamp(paidAt) ||
     allocation.payment.type !== 'payment_intent' ||
     stripeId(allocation.payment.payment_intent ?? null) !== input.payment.paymentIntent.id
@@ -492,9 +526,9 @@ export function qualifySubscriptionInvoice(input: {
     intent.livemode !== input.offer.livemode ||
     intent.status !== 'succeeded' ||
     intent.currency !== 'usd' ||
-    intent.amount !== Number(input.offer.grossMinor) ||
+    intent.amount !== grossMinor ||
     stripeId(intent.customer) !== input.customerId ||
-    intent.amount_received !== Number(input.offer.grossMinor) ||
+    intent.amount_received !== grossMinor ||
     charge === undefined ||
     charge.livemode !== input.offer.livemode ||
     charge.status !== 'succeeded' ||
@@ -506,8 +540,8 @@ export function qualifySubscriptionInvoice(input: {
     stripeId(charge.customer) !== input.customerId ||
     stripeId(intent.payment_method) !== stripeId(charge.payment_method) ||
     charge.currency !== 'usd' ||
-    charge.amount !== Number(input.offer.grossMinor) ||
-    charge.amount_captured !== Number(input.offer.grossMinor)
+    charge.amount !== grossMinor ||
+    charge.amount_captured !== grossMinor
   ) {
     return { status: 'unsupported', reason: 'invoice_cash_settlement_mismatch' };
   }
@@ -528,8 +562,8 @@ export function qualifySubscriptionInvoice(input: {
       customerId: input.customerId,
       currency: 'usd',
       principalMinor: input.offer.principalMinor,
-      taxMinor: input.offer.taxMinor,
-      grossMinor: input.offer.grossMinor,
+      taxMinor: String(taxMinor),
+      grossMinor: String(grossMinor),
       paymentIntentIds: [intent.id],
       chargeIds: [charge.id],
       invoiceId: invoice.id,

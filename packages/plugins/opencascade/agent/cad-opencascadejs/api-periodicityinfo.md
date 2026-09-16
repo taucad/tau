@@ -4,12 +4,12 @@
 
 PeriodicityInfo: declare class PeriodicityInfo
 
-constructor
+  constructor
 
-isPeriodic: boolean
+  isPeriodic: boolean
 
-myPeriod: number
+  myPeriod: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

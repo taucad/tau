@@ -20,9 +20,6 @@ import type { ProjectSessionCloseReason, ProjectSessionState } from '#machines/p
 /** The browser holds at most eight live projects (OQ-W25, operator ruling). */
 export const browserLiveProjectBudget = 8;
 
-/** How long quit waits for every session's `closing` before it cuts (F12). */
-export const sessionsQuitBoundMilliseconds = 15_000;
-
 /** Why a policy refused to close a project. @public */
 export type SessionsCloseRefusal = 'running' | 'dirty' | 'unpushed';
 
@@ -32,6 +29,8 @@ export type SessionsProjectStatus = Readonly<{
   runs: number;
   dirty: boolean;
   pushed: boolean;
+  /** Refs this device has not had acknowledged — quit's `Backing up n`. */
+  pending: number;
 }>;
 
 /** Why a project is no longer live, for the row that shows the reason. @public */
@@ -45,9 +44,6 @@ export type SessionsMachineInput = Readonly<{
   idleWindowMilliseconds?: number;
   startBoundMilliseconds?: number;
   closeFlushMilliseconds?: number;
-  quitBoundMilliseconds?: number;
-  /** The compute placement every session's runtime child is started for. */
-  kernelKey?: string;
 }>;
 
 /** Serializable state owned by sessionsMachine, plus its child refs. @public */
@@ -56,8 +52,6 @@ export type SessionsMachineContext = Readonly<{
   idleWindowMilliseconds: number;
   startBoundMilliseconds: number;
   closeFlushMilliseconds: number;
-  quitBoundMilliseconds: number;
-  kernelKey: string | undefined;
   refs: Readonly<Record<string, ActorRefFrom<typeof projectSessionMachine>>>;
   status: Readonly<Record<string, SessionsProjectStatus>>;
   /**
@@ -73,6 +67,13 @@ export type SessionsMachineContext = Readonly<{
   closed: Readonly<Record<string, SessionsClosedRecord>>;
   /** A policy that declined to close a project, and what stopped it (I24/I25). */
   refusals: Readonly<Record<string, SessionsCloseRefusal>>;
+  /**
+   * The project a budget close is making room for (P47).
+   *
+   * The slot only exists once the closing session has flushed and released, so
+   * the ninth open is remembered here and resumed on `sessionClosed`.
+   */
+  pendingOpen: string | undefined;
 }>;
 
 /** Events accepted by sessionsMachine. @public */
@@ -88,9 +89,10 @@ export type SessionsMachineEvent =
       readonly runs: number;
       readonly dirty: boolean;
       readonly pushed: boolean;
+      readonly pending?: number;
     }
   | { readonly type: 'sessionClosed'; readonly projectId: string; readonly reason: ProjectSessionCloseReason }
-  | { readonly type: 'kernelSelectionChanged'; readonly kernelKey: string }
+  | { readonly type: 'cancelPendingOpen' }
   | { readonly type: 'quit' }
   | { readonly type: 'quitAnyway' };
 
@@ -98,7 +100,7 @@ export type SessionsMachineEvent =
 export type SessionsMachineEmitted =
   | { readonly type: 'liveSetChanged'; readonly projectIds: readonly string[] }
   | { readonly type: 'budgetRefused'; readonly projectId: string; readonly suggestions: readonly string[] }
-  | { readonly type: 'quiesced' };
+  | { readonly type: 'quiesced'; readonly forced: boolean };
 
 /** The app's sessions registry actor. @public */
 export type SessionsActorRef = ActorRefFrom<typeof sessionsMachine>;
@@ -126,6 +128,16 @@ const refusalFor = (context: SessionsMachineContext, projectId: string): Session
   }
   return status.pushed ? undefined : 'unpushed';
 };
+
+/**
+ * How many refs the live set still owes the remote — quit's `Backing up n`.
+ *
+ * @param context - The registry's state.
+ * @returns The total pending count across every live project.
+ * @public
+ */
+export const sessionsPendingRevisions = (context: SessionsMachineContext): number =>
+  Object.keys(context.refs).reduce((total, projectId) => total + (context.status[projectId]?.pending ?? 0), 0);
 
 /**
  * The live projects a person could close to make room, least recently touched
@@ -156,12 +168,14 @@ export const sessionsMachine = setup({
     emitted: {} as SessionsMachineEmitted,
   },
   actors: { projectSession: projectSessionMachine },
-  delays: { quitBound: ({ context }) => context.quitBoundMilliseconds },
   guards: {
     isLive: ({ context, event }) => 'projectId' in event && context.refs[event.projectId] !== undefined,
     hasRoom: ({ context }) => Object.keys(context.refs).length < context.budget,
     canPolicyClose: ({ context, event }) => 'projectId' in event && isClosable(context, event.projectId),
     isQuiet: ({ context }) => Object.keys(context.refs).length === 0,
+    /* P47: a ninth open makes room by closing the least recently touched idle
+     * project. Only when none is idle does the person have to choose. */
+    hasIdleToClose: ({ context }) => sessionsCloseSuggestions(context).length > 0,
   },
   actions: {
     announceLiveSet: emit(
@@ -187,7 +201,6 @@ export const sessionsMachine = setup({
               idleWindowMilliseconds: context.idleWindowMilliseconds,
               startBoundMilliseconds: context.startBoundMilliseconds,
               closeFlushMilliseconds: context.closeFlushMilliseconds,
-              ...(context.kernelKey === undefined ? {} : { kernelKey: context.kernelKey }),
             },
           }),
         };
@@ -209,14 +222,13 @@ export const sessionsMachine = setup({
     idleWindowMilliseconds: input.idleWindowMilliseconds ?? 30 * 60 * 1000,
     startBoundMilliseconds: input.startBoundMilliseconds ?? 30_000,
     closeFlushMilliseconds: input.closeFlushMilliseconds ?? 5000,
-    quitBoundMilliseconds: input.quitBoundMilliseconds ?? sessionsQuitBoundMilliseconds,
-    kernelKey: input.kernelKey,
     refs: {},
     status: {},
     touchOrder: {},
     sequence: 0,
     closed: {},
     refusals: {},
+    pendingOpen: undefined,
   }),
   initial: 'ready',
   on: {
@@ -230,20 +242,22 @@ export const sessionsMachine = setup({
             runs: event.runs,
             dirty: event.dirty,
             pushed: event.pushed,
+            pending: event.pending ?? 0,
           },
         }),
+        /* R6: a refusal is about the facts at the time, not about the project.
+         * The run settled, the tree was saved, the push landed — the reason is
+         * gone, so the row stops saying it and the next `idleExpired` decides
+         * again. */
+        refusals: ({ context, event }) =>
+          context.refusals[event.projectId] !== undefined && event.runs === 0 && !event.dirty && event.pushed
+            ? Object.fromEntries(Object.entries(context.refusals).filter(([id]) => id !== event.projectId))
+            : context.refusals,
       }),
     },
-    kernelSelectionChanged: {
-      actions: [
-        assign({ kernelKey: ({ event }) => event.kernelKey }),
-        enqueueActions(({ enqueue, context, event }) => {
-          for (const ref of Object.values(context.refs)) {
-            enqueue.sendTo(ref, { type: 'kernelSelectionChanged', kernelKey: event.kernelKey });
-          }
-        }),
-      ],
-    },
+    /* The person said *Not now* to the budget: forget the refused open, or the
+     * next close would resume something nobody is waiting for any more. */
+    cancelPendingOpen: { actions: assign({ pendingOpen: undefined }) },
     /* The child finished its own `closing`; only now is the slot free. */
     sessionClosed: {
       actions: [
@@ -257,6 +271,12 @@ export const sessionsMachine = setup({
             status: Object.fromEntries(Object.entries(context.status).filter(([id]) => id !== event.projectId)),
             closed: { ...context.closed, [event.projectId]: { reason: event.reason, at: context.sequence } },
           });
+          /* The slot the budget close was making room for is free now (P47). */
+          if (context.pendingOpen !== undefined) {
+            const resumed = context.pendingOpen;
+            enqueue.assign({ pendingOpen: undefined });
+            enqueue.raise({ type: 'open', projectId: resumed });
+          }
         }),
         'announceLiveSet',
       ],
@@ -270,17 +290,39 @@ export const sessionsMachine = setup({
            * project, which is why returning is instant (I22). */
           { guard: 'isLive', actions: 'touchProject' },
           { guard: 'hasRoom', actions: ['touchProject', 'spawnSession', 'announceLiveSet'] },
-          /* The budget is a guard on `open`, not a region: the ninth open is
-           * refused and names what to close (I28). */
+          /* Over budget with something idle: close the least recently touched
+           * idle project and say so on its row, then open (P47, AC24). The
+           * close is asynchronous — the slot exists after that session's flush
+           * and release — so the open is remembered and resumed. */
           {
-            actions: emit(
-              ({ context, event }) =>
-                ({
-                  type: 'budgetRefused',
-                  projectId: event.projectId,
-                  suggestions: sessionsCloseSuggestions(context),
-                }) as const,
-            ),
+            guard: 'hasIdleToClose',
+            actions: enqueueActions(({ enqueue, context, event }) => {
+              const [victim] = sessionsCloseSuggestions(context);
+              enqueue.assign({ pendingOpen: event.projectId });
+              if (victim !== undefined) {
+                enqueue.sendTo(context.refs[victim]!, { type: 'close', reason: 'budget' });
+              }
+            }),
+          },
+          /* Nothing is idle: the budget refuses and names the candidates, so
+           * the person picks (I28). Never a silent drop.
+           *
+           * The refused open is remembered exactly as a budget close's is (R8):
+           * whichever project the person then closes resumes it, so the dialog
+           * sends one close and not a close plus a second open that would take
+           * the `hasIdleToClose` branch against the still-closing victim. */
+          {
+            actions: [
+              assign({ pendingOpen: ({ event }) => event.projectId }),
+              emit(
+                ({ context, event }) =>
+                  ({
+                    type: 'budgetRefused',
+                    projectId: event.projectId,
+                    suggestions: Object.keys(context.refs),
+                  }) as const,
+              ),
+            ],
           },
         ],
         touch: { guard: 'isLive', actions: 'touchProject' },
@@ -325,12 +367,15 @@ export const sessionsMachine = setup({
         }
       }),
       always: [{ guard: 'isQuiet', target: 'quiesced' }],
-      after: { quitBound: 'quiesced' },
-      on: { quitAnyway: 'quiesced' },
+      on: { quitAnyway: 'forced' },
     },
     quiesced: {
       type: 'final',
-      entry: emit({ type: 'quiesced' }),
+      entry: emit({ type: 'quiesced', forced: false }),
+    },
+    forced: {
+      type: 'final',
+      entry: emit({ type: 'quiesced', forced: true }),
     },
   },
 });

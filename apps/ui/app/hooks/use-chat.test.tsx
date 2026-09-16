@@ -42,6 +42,8 @@ type FakeChat = {
   // as a public spy here so we can assert continuation flows.
   makeRequest: ReturnType<typeof vi.fn>;
   resumeStream: ReturnType<typeof vi.fn>;
+  emitMessages: () => void;
+  emitStatus: () => void;
   onFinish: (event: { messages: MyUIMessage[]; isAbort: boolean; isError: boolean; isDisconnect: boolean }) => void;
   onError: (error: Error) => void;
 };
@@ -123,6 +125,18 @@ vi.mock('@ai-sdk/react', () => ({
       return () => {
         this.#errorListeners.delete(onChange);
       };
+    };
+
+    public emitMessages = (): void => {
+      for (const listener of this.#messagesListeners) {
+        listener();
+      }
+    };
+
+    public emitStatus = (): void => {
+      for (const listener of this.#statusListeners) {
+        listener();
+      }
     };
   },
 }));
@@ -1018,6 +1032,72 @@ describe('hooks resolution rules', () => {
       /activechatprovider/i,
     );
     consoleErrorSpy.mockRestore();
+  });
+
+  it('does not re-render a status selector for message-only streaming updates', async () => {
+    let renderCount = 0;
+    const { result } = renderHook(
+      () => {
+        renderCount++;
+        return useChatSelector((state) => state.status);
+      },
+      { wrapper: createWrapper('chat_selector_stability') },
+    );
+    await waitFor(() => {
+      expect(result.current).toBe('ready');
+    });
+    const fake = getFake('chat_selector_stability');
+    const beforeMessageUpdate = renderCount;
+
+    act(() => {
+      fake.messages = [makeAssistantMessage('assistant_1', 'streaming')];
+      fake.emitMessages();
+    });
+    expect(renderCount).toBe(beforeMessageUpdate);
+
+    act(() => {
+      fake.status = 'streaming';
+      fake.emitStatus();
+    });
+    expect(result.current).toBe('streaming');
+    expect(renderCount).toBe(beforeMessageUpdate + 1);
+  });
+
+  it('does not hide same-sized message order and map replacements', async () => {
+    const { result } = renderHook(
+      () =>
+        useChatSelector((state) => ({
+          order: state.messageOrder,
+          messagesById: state.messagesById,
+        })),
+      { wrapper: createWrapper('chat_selector_structure') },
+    );
+    await waitFor(() => {
+      expect(getFake('chat_selector_structure')).toBeDefined();
+    });
+    const fake = getFake('chat_selector_structure');
+
+    act(() => {
+      fake.messages = [
+        makeAssistantMessage('assistant_1', 'ready'),
+        makeAssistantMessage('assistant_2', 'ready'),
+        makeAssistantMessage('assistant_3', 'ready'),
+      ];
+      fake.emitMessages();
+    });
+    expect(result.current.order).toEqual(['assistant_1', 'assistant_2', 'assistant_3']);
+
+    act(() => {
+      fake.messages = [
+        makeAssistantMessage('assistant_1', 'ready'),
+        makeAssistantMessage('assistant_changed', 'ready'),
+        makeAssistantMessage('assistant_3', 'ready'),
+      ];
+      fake.emitMessages();
+    });
+    expect(result.current.order).toEqual(['assistant_1', 'assistant_changed', 'assistant_3']);
+    expect(result.current.messagesById.has('assistant_changed')).toBe(true);
+    expect(result.current.messagesById.has('assistant_2')).toBe(false);
   });
 
   // =========================================================================

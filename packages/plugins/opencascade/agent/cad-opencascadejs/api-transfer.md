@@ -4,768 +4,768 @@
 
 Transfer_ActorDispatch: declare class Transfer_ActorDispatch extends Transfer_ActorOfTransientProcess
 
-constructor
+  constructor
 
-AddActor(actor: Transfer_ActorOfTransientProcess): void;
+  AddActor(actor: Transfer_ActorOfTransientProcess): void;
 
-TransferDispatch(): Transfer_TransferDispatch;
+  TransferDispatch(): Transfer_TransferDispatch;
 
-Transfer(start: Standard_Transient, TP: Transfer_TransientProcess, theProgress?: Message_ProgressRange): Transfer_Binder;
+  Transfer(start: Standard_Transient, TP: Transfer_TransientProcess, theProgress?: Message_ProgressRange): Transfer_Binder;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_ActorOfFinderProcess: declare class Transfer_ActorOfFinderProcess extends Transfer_ActorOfProcessForFinder
 
-constructor
+  constructor
 
-ModeTrans(): number;
+  ModeTrans(): number;
 
-Transferring(start: Transfer_Finder, TP: Transfer_ProcessForFinder, theProgress?: Message_ProgressRange): Transfer_Binder;
+  Transferring(start: Transfer_Finder, TP: Transfer_ProcessForFinder, theProgress?: Message_ProgressRange): Transfer_Binder;
 
-Transfer(start: Transfer_Finder, TP: Transfer_FinderProcess, theProgress?: Message_ProgressRange): Transfer_Binder;
+  Transfer(start: Transfer_Finder, TP: Transfer_FinderProcess, theProgress?: Message_ProgressRange): Transfer_Binder;
 
-TransferTransient(start: Standard_Transient, TP: Transfer_FinderProcess, theProgress?: Message_ProgressRange): Standard_Transient;
+  TransferTransient(start: Standard_Transient, TP: Transfer_FinderProcess, theProgress?: Message_ProgressRange): Standard_Transient;
 
-SetShapeFixParameters(theParameters: NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString): void;
+  SetShapeFixParameters(theParameters: NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString): void;
 
-GetShapeFixParameters(): NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString;
+  GetShapeFixParameters(): NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString;
 
-SetShapeProcessFlags(theFlags: any): void;
+  SetShapeProcessFlags(theFlags: any): void;
 
-GetShapeProcessFlags(): [any, boolean];
+  GetShapeProcessFlags(): [any, boolean];
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_ActorOfProcessForFinder: declare class Transfer_ActorOfProcessForFinder extends Standard_Transient
 
-constructor
+  constructor
 
-Recognize(start: Transfer_Finder): boolean;
+  Recognize(start: Transfer_Finder): boolean;
 
-Transferring(start: Transfer_Finder, TP: Transfer_ProcessForFinder, theProgress?: Message_ProgressRange): Transfer_Binder;
+  Transferring(start: Transfer_Finder, TP: Transfer_ProcessForFinder, theProgress?: Message_ProgressRange): Transfer_Binder;
 
-TransientResult(res: Standard_Transient): Transfer_SimpleBinderOfTransient;
+  TransientResult(res: Standard_Transient): Transfer_SimpleBinderOfTransient;
 
-NullResult(): Transfer_Binder;
+  NullResult(): Transfer_Binder;
 
-SetLast(mode?: boolean): void;
+  SetLast(mode?: boolean): void;
 
-IsLast(): boolean;
+  IsLast(): boolean;
 
-SetNext(next: Transfer_ActorOfProcessForFinder): void;
+  SetNext(next: Transfer_ActorOfProcessForFinder): void;
 
-Next(): Transfer_ActorOfProcessForFinder;
+  Next(): Transfer_ActorOfProcessForFinder;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_ActorOfProcessForTransient: declare class Transfer_ActorOfProcessForTransient extends Standard_Transient
 
-constructor
+  constructor
 
-Recognize(start: Standard_Transient): boolean;
+  Recognize(start: Standard_Transient): boolean;
 
-Transferring(start: Standard_Transient, TP: Transfer_ProcessForTransient, theProgress?: Message_ProgressRange): Transfer_Binder;
+  Transferring(start: Standard_Transient, TP: Transfer_ProcessForTransient, theProgress?: Message_ProgressRange): Transfer_Binder;
 
-TransientResult(res: Standard_Transient): Transfer_SimpleBinderOfTransient;
+  TransientResult(res: Standard_Transient): Transfer_SimpleBinderOfTransient;
 
-NullResult(): Transfer_Binder;
+  NullResult(): Transfer_Binder;
 
-SetLast(mode?: boolean): void;
+  SetLast(mode?: boolean): void;
 
-IsLast(): boolean;
+  IsLast(): boolean;
 
-SetNext(next: Transfer_ActorOfProcessForTransient): void;
+  SetNext(next: Transfer_ActorOfProcessForTransient): void;
 
-Next(): Transfer_ActorOfProcessForTransient;
+  Next(): Transfer_ActorOfProcessForTransient;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_ActorOfTransientProcess: declare class Transfer_ActorOfTransientProcess extends Transfer_ActorOfProcessForTransient
 
-constructor
+  constructor
 
-Transferring(start: Standard_Transient, TP: Transfer_ProcessForTransient, theProgress?: Message_ProgressRange): Transfer_Binder;
+  Transferring(start: Standard_Transient, TP: Transfer_ProcessForTransient, theProgress?: Message_ProgressRange): Transfer_Binder;
 
-Transfer(start: Standard_Transient, TP: Transfer_TransientProcess, theProgress?: Message_ProgressRange): Transfer_Binder;
+  Transfer(start: Standard_Transient, TP: Transfer_TransientProcess, theProgress?: Message_ProgressRange): Transfer_Binder;
 
-TransferTransient(start: Standard_Transient, TP: Transfer_TransientProcess, theProgress?: Message_ProgressRange): Standard_Transient;
+  TransferTransient(start: Standard_Transient, TP: Transfer_TransientProcess, theProgress?: Message_ProgressRange): Standard_Transient;
 
-SetShapeFixParameters(theParameters: NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString): void;
+  SetShapeFixParameters(theParameters: NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString): void;
 
-GetShapeFixParameters(): NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString;
+  GetShapeFixParameters(): NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString;
 
-SetProcessingFlags(theFlags: any): void;
+  SetProcessingFlags(theFlags: any): void;
 
-GetProcessingFlags(): [any, boolean];
+  GetProcessingFlags(): [any, boolean];
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_Binder: declare class Transfer_Binder extends Standard_Transient
 
-Merge(other: Transfer_Binder): void;
+  Merge(other: Transfer_Binder): void;
 
-IsMultiple(): boolean;
+  IsMultiple(): boolean;
 
-ResultType(): Standard_Type;
+  ResultType(): Standard_Type;
 
-ResultTypeName(): string;
+  ResultTypeName(): string;
 
-AddResult(next: Transfer_Binder): void;
+  AddResult(next: Transfer_Binder): void;
 
-NextResult(): Transfer_Binder;
+  NextResult(): Transfer_Binder;
 
-HasResult(): boolean;
+  HasResult(): boolean;
 
-SetAlreadyUsed(): void;
+  SetAlreadyUsed(): void;
 
-Status(): Transfer_StatusResult;
+  Status(): Transfer_StatusResult;
 
-StatusExec(): Transfer_StatusExec;
+  StatusExec(): Transfer_StatusExec;
 
-SetStatusExec(stat: Transfer_StatusExec): void;
+  SetStatusExec(stat: Transfer_StatusExec): void;
 
-AddFail(mess: string, orig?: string): void;
+  AddFail(mess: string, orig?: string): void;
 
-AddWarning(mess: string, orig?: string): void;
+  AddWarning(mess: string, orig?: string): void;
 
-Check(): Interface_Check;
+  Check(): Interface_Check;
 
-CCheck(): Interface_Check;
+  CCheck(): Interface_Check;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_BinderOfTransientInteger: declare class Transfer_BinderOfTransientInteger extends Transfer_SimpleBinderOfTransient
 
-constructor
+  constructor
 
-SetInteger(value: number): void;
+  SetInteger(value: number): void;
 
-Integer(): number;
+  Integer(): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_DataInfo: declare class Transfer_DataInfo
 
-constructor
+  constructor
 
-static Type(ent: Standard_Transient): Standard_Type;
+  static Type(ent: Standard_Transient): Standard_Type;
 
-static TypeName(ent: Standard_Transient): string;
+  static TypeName(ent: Standard_Transient): string;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_DispatchControl: declare class Transfer_DispatchControl extends Interface_CopyControl
 
-constructor
+  constructor
 
-TransientProcess(): Transfer_TransientProcess;
+  TransientProcess(): Transfer_TransientProcess;
 
-StartingModel(): Interface_InterfaceModel;
+  StartingModel(): Interface_InterfaceModel;
 
-Clear(): void;
+  Clear(): void;
 
-Bind(ent: Standard_Transient, res: Standard_Transient): void;
+  Bind(ent: Standard_Transient, res: Standard_Transient): void;
 
-Search(ent: Standard_Transient): { returnValue: boolean; res: Standard_Transient; [Symbol.dispose](): void };
+  Search(ent: Standard_Transient): { returnValue: boolean; res: Standard_Transient; [Symbol.dispose](): void };
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_FindHasher: declare class Transfer_FindHasher
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_Finder: declare class Transfer_Finder extends Standard_Transient
 
-GetHashCode(): number;
+  GetHashCode(): number;
 
-Equates(other: Transfer_Finder): boolean;
+  Equates(other: Transfer_Finder): boolean;
 
-ValueType(): Standard_Type;
+  ValueType(): Standard_Type;
 
-ValueTypeName(): string;
+  ValueTypeName(): string;
 
-SetAttribute(name: string, val: Standard_Transient): void;
+  SetAttribute(name: string, val: Standard_Transient): void;
 
-RemoveAttribute(name: string): boolean;
+  RemoveAttribute(name: string): boolean;
 
-GetAttribute(name: string, type\_: Standard_Type): { returnValue: boolean; val: Standard_Transient; [Symbol.dispose](): void };
+  GetAttribute(name: string, type_: Standard_Type): { returnValue: boolean; val: Standard_Transient; [Symbol.dispose](): void };
 
-Attribute(name: string): Standard_Transient;
+  Attribute(name: string): Standard_Transient;
 
-AttributeType(name: string): Interface_ParamType;
+  AttributeType(name: string): Interface_ParamType;
 
-SetIntegerAttribute(name: string, val: number): void;
+  SetIntegerAttribute(name: string, val: number): void;
 
-GetIntegerAttribute(name: string, val?: number): { returnValue: boolean; val: number };
+  GetIntegerAttribute(name: string, val?: number): { returnValue: boolean; val: number };
 
-IntegerAttribute(name: string): number;
+  IntegerAttribute(name: string): number;
 
-SetRealAttribute(name: string, val: number): void;
+  SetRealAttribute(name: string, val: number): void;
 
-GetRealAttribute(name: string, val?: number): { returnValue: boolean; val: number };
+  GetRealAttribute(name: string, val?: number): { returnValue: boolean; val: number };
 
-RealAttribute(name: string): number;
+  RealAttribute(name: string): number;
 
-SetStringAttribute(name: string, val: string): void;
+  SetStringAttribute(name: string, val: string): void;
 
-StringAttribute(name: string): string;
+  StringAttribute(name: string): string;
 
-AttrList(): NCollection_DataMap_TCollection_AsciiString_handle_Standard_Transient;
+  AttrList(): NCollection_DataMap_TCollection_AsciiString_handle_Standard_Transient;
 
-SameAttributes(other: Transfer_Finder): void;
+  SameAttributes(other: Transfer_Finder): void;
 
-GetAttributes(other: Transfer_Finder, fromname?: string, copied?: boolean): void;
+  GetAttributes(other: Transfer_Finder, fromname?: string, copied?: boolean): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_FinderProcess: declare class Transfer_FinderProcess extends Transfer_ProcessForFinder
 
-constructor
+  constructor
 
-SetModel(model: Interface_InterfaceModel): void;
+  SetModel(model: Interface_InterfaceModel): void;
 
-Model(): Interface_InterfaceModel;
+  Model(): Interface_InterfaceModel;
 
-NextMappedWithAttribute(name: string, num0: number): number;
+  NextMappedWithAttribute(name: string, num0: number): number;
 
-TransientMapper(obj: Standard_Transient): Transfer_TransientMapper;
+  TransientMapper(obj: Standard_Transient): Transfer_TransientMapper;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_IteratorOfProcessForFinder: declare class Transfer_IteratorOfProcessForFinder extends Transfer_TransferIterator
 
-constructor
+  constructor
 
-Add(binder: Transfer_Binder): void;
-Add(binder: Transfer_Binder, start: Transfer_Finder): void;
-Add(binder: Transfer_Binder): void;
-Add(binder: Transfer_Binder, start: Transfer_Finder): void;
+  Add(binder: Transfer_Binder): void;
+  Add(binder: Transfer_Binder, start: Transfer_Finder): void;
+  Add(binder: Transfer_Binder): void;
+  Add(binder: Transfer_Binder, start: Transfer_Finder): void;
 
-Filter(list: NCollection_HSequence_handle_Transfer_Finder, keep?: boolean): void;
+  Filter(list: NCollection_HSequence_handle_Transfer_Finder, keep?: boolean): void;
 
-HasStarting(): boolean;
+  HasStarting(): boolean;
 
-Starting(): Transfer_Finder;
+  Starting(): Transfer_Finder;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_IteratorOfProcessForTransient: declare class Transfer_IteratorOfProcessForTransient extends Transfer_TransferIterator
 
-constructor
+  constructor
 
-Add(binder: Transfer_Binder): void;
-Add(binder: Transfer_Binder, start: Standard_Transient): void;
-Add(binder: Transfer_Binder): void;
-Add(binder: Transfer_Binder, start: Standard_Transient): void;
+  Add(binder: Transfer_Binder): void;
+  Add(binder: Transfer_Binder, start: Standard_Transient): void;
+  Add(binder: Transfer_Binder): void;
+  Add(binder: Transfer_Binder, start: Standard_Transient): void;
 
-Filter(list: NCollection_HSequence_handle_Standard_Transient, keep?: boolean): void;
+  Filter(list: NCollection_HSequence_handle_Standard_Transient, keep?: boolean): void;
 
-HasStarting(): boolean;
+  HasStarting(): boolean;
 
-Starting(): Standard_Transient;
+  Starting(): Standard_Transient;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_MapContainer: declare class Transfer_MapContainer extends Standard_Transient
 
-constructor
+  constructor
 
-SetMapObjects(theMapObjects: NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient): void;
+  SetMapObjects(theMapObjects: NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient): void;
 
-GetMapObjects(): NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient;
+  GetMapObjects(): NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_MultipleBinder: declare class Transfer_MultipleBinder extends Transfer_Binder
 
-constructor
+  constructor
 
-IsMultiple(): boolean;
+  IsMultiple(): boolean;
 
-ResultType(): Standard_Type;
+  ResultType(): Standard_Type;
 
-ResultTypeName(): string;
+  ResultTypeName(): string;
 
-AddResult(res: Standard_Transient): void;
-AddResult(next: Transfer_Binder): void;
-AddResult(res: Standard_Transient): void;
-AddResult(next: Transfer_Binder): void;
+  AddResult(res: Standard_Transient): void;
+  AddResult(next: Transfer_Binder): void;
+  AddResult(res: Standard_Transient): void;
+  AddResult(next: Transfer_Binder): void;
 
-NbResults(): number;
+  NbResults(): number;
 
-ResultValue(num: number): Standard_Transient;
+  ResultValue(num: number): Standard_Transient;
 
-MultipleResult(): NCollection_HSequence_handle_Standard_Transient;
+  MultipleResult(): NCollection_HSequence_handle_Standard_Transient;
 
-SetMultipleResult(mulres: NCollection_HSequence_handle_Standard_Transient): void;
+  SetMultipleResult(mulres: NCollection_HSequence_handle_Standard_Transient): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_ProcessForFinder: declare class Transfer_ProcessForFinder extends Standard_Transient
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-Clean(): void;
+  Clean(): void;
 
-Resize(nb: number): void;
+  Resize(nb: number): void;
 
-SetActor(actor: Transfer_ActorOfProcessForFinder): void;
+  SetActor(actor: Transfer_ActorOfProcessForFinder): void;
 
-Actor(): Transfer_ActorOfProcessForFinder;
+  Actor(): Transfer_ActorOfProcessForFinder;
 
-Find(start: Transfer_Finder): Transfer_Binder;
+  Find(start: Transfer_Finder): Transfer_Binder;
 
-IsBound(start: Transfer_Finder): boolean;
+  IsBound(start: Transfer_Finder): boolean;
 
-IsAlreadyUsed(start: Transfer_Finder): boolean;
+  IsAlreadyUsed(start: Transfer_Finder): boolean;
 
-Bind(start: Transfer_Finder, binder: Transfer_Binder): void;
+  Bind(start: Transfer_Finder, binder: Transfer_Binder): void;
 
-Rebind(start: Transfer_Finder, binder: Transfer_Binder): void;
+  Rebind(start: Transfer_Finder, binder: Transfer_Binder): void;
 
-Unbind(start: Transfer_Finder): boolean;
+  Unbind(start: Transfer_Finder): boolean;
 
-FindElseBind(start: Transfer_Finder): Transfer_Binder;
+  FindElseBind(start: Transfer_Finder): Transfer_Binder;
 
-SetTraceLevel(tracelev: number): void;
+  SetTraceLevel(tracelev: number): void;
 
-TraceLevel(): number;
+  TraceLevel(): number;
 
-SendFail(start: Transfer_Finder, amsg: Message_Msg): void;
+  SendFail(start: Transfer_Finder, amsg: Message_Msg): void;
 
-SendWarning(start: Transfer_Finder, amsg: Message_Msg): void;
+  SendWarning(start: Transfer_Finder, amsg: Message_Msg): void;
 
-SendMsg(start: Transfer_Finder, amsg: Message_Msg): void;
+  SendMsg(start: Transfer_Finder, amsg: Message_Msg): void;
 
-AddFail(start: Transfer_Finder, mess: string, orig: string): void;
-AddFail(start: Transfer_Finder, amsg: Message_Msg): void;
-AddFail(start: Transfer_Finder, mess: string, orig: string): void;
-AddFail(start: Transfer_Finder, amsg: Message_Msg): void;
+  AddFail(start: Transfer_Finder, mess: string, orig: string): void;
+  AddFail(start: Transfer_Finder, amsg: Message_Msg): void;
+  AddFail(start: Transfer_Finder, mess: string, orig: string): void;
+  AddFail(start: Transfer_Finder, amsg: Message_Msg): void;
 
-AddError(start: Transfer_Finder, mess: string, orig?: string): void;
+  AddError(start: Transfer_Finder, mess: string, orig?: string): void;
 
-AddWarning(start: Transfer_Finder, mess: string, orig: string): void;
-AddWarning(start: Transfer_Finder, amsg: Message_Msg): void;
-AddWarning(start: Transfer_Finder, mess: string, orig: string): void;
-AddWarning(start: Transfer_Finder, amsg: Message_Msg): void;
+  AddWarning(start: Transfer_Finder, mess: string, orig: string): void;
+  AddWarning(start: Transfer_Finder, amsg: Message_Msg): void;
+  AddWarning(start: Transfer_Finder, mess: string, orig: string): void;
+  AddWarning(start: Transfer_Finder, amsg: Message_Msg): void;
 
-Mend(start: Transfer_Finder, pref?: string): void;
+  Mend(start: Transfer_Finder, pref?: string): void;
 
-Check(start: Transfer_Finder): Interface_Check;
+  Check(start: Transfer_Finder): Interface_Check;
 
-BindTransient(start: Transfer_Finder, res: Standard_Transient): void;
+  BindTransient(start: Transfer_Finder, res: Standard_Transient): void;
 
-FindTransient(start: Transfer_Finder): Standard_Transient;
+  FindTransient(start: Transfer_Finder): Standard_Transient;
 
-BindMultiple(start: Transfer_Finder): void;
+  BindMultiple(start: Transfer_Finder): void;
 
-AddMultiple(start: Transfer_Finder, res: Standard_Transient): void;
+  AddMultiple(start: Transfer_Finder, res: Standard_Transient): void;
 
-FindTypedTransient(start: Transfer_Finder, atype: Standard_Type): { returnValue: boolean; val: Standard_Transient; [Symbol.dispose](): void };
+  FindTypedTransient(start: Transfer_Finder, atype: Standard_Type): { returnValue: boolean; val: Standard_Transient; [Symbol.dispose](): void };
 
-GetTypedTransient(binder: Transfer_Binder, atype: Standard_Type): { returnValue: boolean; val: Standard_Transient; [Symbol.dispose](): void };
+  GetTypedTransient(binder: Transfer_Binder, atype: Standard_Type): { returnValue: boolean; val: Standard_Transient; [Symbol.dispose](): void };
 
-NbMapped(): number;
+  NbMapped(): number;
 
-Mapped(num: number): Transfer_Finder;
+  Mapped(num: number): Transfer_Finder;
 
-MapIndex(start: Transfer_Finder): number;
+  MapIndex(start: Transfer_Finder): number;
 
-MapItem(num: number): Transfer_Binder;
+  MapItem(num: number): Transfer_Binder;
 
-SetRoot(start: Transfer_Finder): void;
+  SetRoot(start: Transfer_Finder): void;
 
-SetRootManagement(stat: boolean): void;
+  SetRootManagement(stat: boolean): void;
 
-NbRoots(): number;
+  NbRoots(): number;
 
-Root(num: number): Transfer_Finder;
+  Root(num: number): Transfer_Finder;
 
-RootItem(num: number): Transfer_Binder;
+  RootItem(num: number): Transfer_Binder;
 
-RootIndex(start: Transfer_Finder): number;
+  RootIndex(start: Transfer_Finder): number;
 
-NestingLevel(): number;
+  NestingLevel(): number;
 
-ResetNestingLevel(): void;
+  ResetNestingLevel(): void;
 
-Recognize(start: Transfer_Finder): boolean;
+  Recognize(start: Transfer_Finder): boolean;
 
-Transferring(start: Transfer_Finder, theProgress?: Message_ProgressRange): Transfer_Binder;
+  Transferring(start: Transfer_Finder, theProgress?: Message_ProgressRange): Transfer_Binder;
 
-Transfer(start: Transfer_Finder, theProgress?: Message_ProgressRange): boolean;
+  Transfer(start: Transfer_Finder, theProgress?: Message_ProgressRange): boolean;
 
-SetErrorHandle(err: boolean): void;
+  SetErrorHandle(err: boolean): void;
 
-ErrorHandle(): boolean;
+  ErrorHandle(): boolean;
 
-StartTrace(binder: Transfer_Binder, start: Transfer_Finder, level: number, mode: number): void;
+  StartTrace(binder: Transfer_Binder, start: Transfer_Finder, level: number, mode: number): void;
 
-IsLooping(alevel: number): boolean;
+  IsLooping(alevel: number): boolean;
 
-IsCheckListEmpty(start: Transfer_Finder, level: number, erronly: boolean): boolean;
+  IsCheckListEmpty(start: Transfer_Finder, level: number, erronly: boolean): boolean;
 
-RemoveResult(start: Transfer_Finder, level: number, compute?: boolean): void;
+  RemoveResult(start: Transfer_Finder, level: number, compute?: boolean): void;
 
-CheckNum(start: Transfer_Finder): number;
+  CheckNum(start: Transfer_Finder): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_ProcessForTransient: declare class Transfer_ProcessForTransient extends Standard_Transient
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-Clean(): void;
+  Clean(): void;
 
-Resize(nb: number): void;
+  Resize(nb: number): void;
 
-SetActor(actor: Transfer_ActorOfProcessForTransient): void;
+  SetActor(actor: Transfer_ActorOfProcessForTransient): void;
 
-Actor(): Transfer_ActorOfProcessForTransient;
+  Actor(): Transfer_ActorOfProcessForTransient;
 
-Find(start: Standard_Transient): Transfer_Binder;
+  Find(start: Standard_Transient): Transfer_Binder;
 
-IsBound(start: Standard_Transient): boolean;
+  IsBound(start: Standard_Transient): boolean;
 
-IsAlreadyUsed(start: Standard_Transient): boolean;
+  IsAlreadyUsed(start: Standard_Transient): boolean;
 
-Bind(start: Standard_Transient, binder: Transfer_Binder): void;
+  Bind(start: Standard_Transient, binder: Transfer_Binder): void;
 
-Rebind(start: Standard_Transient, binder: Transfer_Binder): void;
+  Rebind(start: Standard_Transient, binder: Transfer_Binder): void;
 
-Unbind(start: Standard_Transient): boolean;
+  Unbind(start: Standard_Transient): boolean;
 
-FindElseBind(start: Standard_Transient): Transfer_Binder;
+  FindElseBind(start: Standard_Transient): Transfer_Binder;
 
-SetTraceLevel(tracelev: number): void;
+  SetTraceLevel(tracelev: number): void;
 
-TraceLevel(): number;
+  TraceLevel(): number;
 
-SendFail(start: Standard_Transient, amsg: Message_Msg): void;
+  SendFail(start: Standard_Transient, amsg: Message_Msg): void;
 
-SendWarning(start: Standard_Transient, amsg: Message_Msg): void;
+  SendWarning(start: Standard_Transient, amsg: Message_Msg): void;
 
-SendMsg(start: Standard_Transient, amsg: Message_Msg): void;
+  SendMsg(start: Standard_Transient, amsg: Message_Msg): void;
 
-AddFail(start: Standard_Transient, mess: string, orig: string): void;
-AddFail(start: Standard_Transient, amsg: Message_Msg): void;
-AddFail(start: Standard_Transient, mess: string, orig: string): void;
-AddFail(start: Standard_Transient, amsg: Message_Msg): void;
+  AddFail(start: Standard_Transient, mess: string, orig: string): void;
+  AddFail(start: Standard_Transient, amsg: Message_Msg): void;
+  AddFail(start: Standard_Transient, mess: string, orig: string): void;
+  AddFail(start: Standard_Transient, amsg: Message_Msg): void;
 
-AddError(start: Standard_Transient, mess: string, orig?: string): void;
+  AddError(start: Standard_Transient, mess: string, orig?: string): void;
 
-AddWarning(start: Standard_Transient, mess: string, orig: string): void;
-AddWarning(start: Standard_Transient, amsg: Message_Msg): void;
-AddWarning(start: Standard_Transient, mess: string, orig: string): void;
-AddWarning(start: Standard_Transient, amsg: Message_Msg): void;
+  AddWarning(start: Standard_Transient, mess: string, orig: string): void;
+  AddWarning(start: Standard_Transient, amsg: Message_Msg): void;
+  AddWarning(start: Standard_Transient, mess: string, orig: string): void;
+  AddWarning(start: Standard_Transient, amsg: Message_Msg): void;
 
-Mend(start: Standard_Transient, pref?: string): void;
+  Mend(start: Standard_Transient, pref?: string): void;
 
-Check(start: Standard_Transient): Interface_Check;
+  Check(start: Standard_Transient): Interface_Check;
 
-BindTransient(start: Standard_Transient, res: Standard_Transient): void;
+  BindTransient(start: Standard_Transient, res: Standard_Transient): void;
 
-FindTransient(start: Standard_Transient): Standard_Transient;
+  FindTransient(start: Standard_Transient): Standard_Transient;
 
-BindMultiple(start: Standard_Transient): void;
+  BindMultiple(start: Standard_Transient): void;
 
-AddMultiple(start: Standard_Transient, res: Standard_Transient): void;
+  AddMultiple(start: Standard_Transient, res: Standard_Transient): void;
 
-FindTypedTransient(start: Standard_Transient, atype: Standard_Type): { returnValue: boolean; val: Standard_Transient; [Symbol.dispose](): void };
+  FindTypedTransient(start: Standard_Transient, atype: Standard_Type): { returnValue: boolean; val: Standard_Transient; [Symbol.dispose](): void };
 
-GetTypedTransient(binder: Transfer_Binder, atype: Standard_Type): { returnValue: boolean; val: Standard_Transient; [Symbol.dispose](): void };
+  GetTypedTransient(binder: Transfer_Binder, atype: Standard_Type): { returnValue: boolean; val: Standard_Transient; [Symbol.dispose](): void };
 
-NbMapped(): number;
+  NbMapped(): number;
 
-Mapped(num: number): Standard_Transient;
+  Mapped(num: number): Standard_Transient;
 
-MapIndex(start: Standard_Transient): number;
+  MapIndex(start: Standard_Transient): number;
 
-MapItem(num: number): Transfer_Binder;
+  MapItem(num: number): Transfer_Binder;
 
-SetRoot(start: Standard_Transient): void;
+  SetRoot(start: Standard_Transient): void;
 
-SetRootManagement(stat: boolean): void;
+  SetRootManagement(stat: boolean): void;
 
-NbRoots(): number;
+  NbRoots(): number;
 
-Root(num: number): Standard_Transient;
+  Root(num: number): Standard_Transient;
 
-RootItem(num: number): Transfer_Binder;
+  RootItem(num: number): Transfer_Binder;
 
-RootIndex(start: Standard_Transient): number;
+  RootIndex(start: Standard_Transient): number;
 
-NestingLevel(): number;
+  NestingLevel(): number;
 
-ResetNestingLevel(): void;
+  ResetNestingLevel(): void;
 
-Recognize(start: Standard_Transient): boolean;
+  Recognize(start: Standard_Transient): boolean;
 
-Transferring(start: Standard_Transient, theProgress?: Message_ProgressRange): Transfer_Binder;
+  Transferring(start: Standard_Transient, theProgress?: Message_ProgressRange): Transfer_Binder;
 
-Transfer(start: Standard_Transient, theProgress?: Message_ProgressRange): boolean;
+  Transfer(start: Standard_Transient, theProgress?: Message_ProgressRange): boolean;
 
-SetErrorHandle(err: boolean): void;
+  SetErrorHandle(err: boolean): void;
 
-ErrorHandle(): boolean;
+  ErrorHandle(): boolean;
 
-StartTrace(binder: Transfer_Binder, start: Standard_Transient, level: number, mode: number): void;
+  StartTrace(binder: Transfer_Binder, start: Standard_Transient, level: number, mode: number): void;
 
-IsLooping(alevel: number): boolean;
+  IsLooping(alevel: number): boolean;
 
-IsCheckListEmpty(start: Standard_Transient, level: number, erronly: boolean): boolean;
+  IsCheckListEmpty(start: Standard_Transient, level: number, erronly: boolean): boolean;
 
-RemoveResult(start: Standard_Transient, level: number, compute?: boolean): void;
+  RemoveResult(start: Standard_Transient, level: number, compute?: boolean): void;
 
-CheckNum(start: Standard_Transient): number;
+  CheckNum(start: Standard_Transient): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_ResultFromModel: declare class Transfer_ResultFromModel extends Standard_Transient
 
-constructor
+  constructor
 
-SetModel(model: Interface_InterfaceModel): void;
+  SetModel(model: Interface_InterfaceModel): void;
 
-SetFileName(filename: string): void;
+  SetFileName(filename: string): void;
 
-Model(): Interface_InterfaceModel;
+  Model(): Interface_InterfaceModel;
 
-FileName(): string;
+  FileName(): string;
 
-Fill(TP: Transfer_TransientProcess, ent: Standard_Transient): boolean;
+  Fill(TP: Transfer_TransientProcess, ent: Standard_Transient): boolean;
 
-Strip(mode: number): void;
+  Strip(mode: number): void;
 
-FillBack(TP: Transfer_TransientProcess): void;
+  FillBack(TP: Transfer_TransientProcess): void;
 
-HasResult(): boolean;
+  HasResult(): boolean;
 
-MainResult(): Transfer_ResultFromTransient;
+  MainResult(): Transfer_ResultFromTransient;
 
-SetMainResult(amain: Transfer_ResultFromTransient): void;
+  SetMainResult(amain: Transfer_ResultFromTransient): void;
 
-MainLabel(): string;
+  MainLabel(): string;
 
-MainNumber(): number;
+  MainNumber(): number;
 
-ResultFromKey(start: Standard_Transient): Transfer_ResultFromTransient;
+  ResultFromKey(start: Standard_Transient): Transfer_ResultFromTransient;
 
-Results(level: number): NCollection_HSequence_handle_Standard_Transient;
+  Results(level: number): NCollection_HSequence_handle_Standard_Transient;
 
-TransferredList(level?: number): NCollection_HSequence_handle_Standard_Transient;
+  TransferredList(level?: number): NCollection_HSequence_handle_Standard_Transient;
 
-CheckedList(check: Interface_CheckStatus, result: boolean): NCollection_HSequence_handle_Standard_Transient;
+  CheckedList(check: Interface_CheckStatus, result: boolean): NCollection_HSequence_handle_Standard_Transient;
 
-CheckStatus(): Interface_CheckStatus;
+  CheckStatus(): Interface_CheckStatus;
 
-ComputeCheckStatus(enforce: boolean): Interface_CheckStatus;
+  ComputeCheckStatus(enforce: boolean): Interface_CheckStatus;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_ResultFromTransient: declare class Transfer_ResultFromTransient extends Standard_Transient
 
-constructor
+  constructor
 
-SetStart(start: Standard_Transient): void;
+  SetStart(start: Standard_Transient): void;
 
-SetBinder(binder: Transfer_Binder): void;
+  SetBinder(binder: Transfer_Binder): void;
 
-Start(): Standard_Transient;
+  Start(): Standard_Transient;
 
-Binder(): Transfer_Binder;
+  Binder(): Transfer_Binder;
 
-HasResult(): boolean;
+  HasResult(): boolean;
 
-Check(): Interface_Check;
+  Check(): Interface_Check;
 
-CheckStatus(): Interface_CheckStatus;
+  CheckStatus(): Interface_CheckStatus;
 
-ClearSubs(): void;
+  ClearSubs(): void;
 
-AddSubResult(sub: Transfer_ResultFromTransient): void;
+  AddSubResult(sub: Transfer_ResultFromTransient): void;
 
-NbSubResults(): number;
+  NbSubResults(): number;
 
-SubResult(num: number): Transfer_ResultFromTransient;
+  SubResult(num: number): Transfer_ResultFromTransient;
 
-ResultFromKey(key: Standard_Transient): Transfer_ResultFromTransient;
+  ResultFromKey(key: Standard_Transient): Transfer_ResultFromTransient;
 
-FillMap(map: NCollection_IndexedMap_handle_Standard_Transient): void;
+  FillMap(map: NCollection_IndexedMap_handle_Standard_Transient): void;
 
-Fill(TP: Transfer_TransientProcess): void;
+  Fill(TP: Transfer_TransientProcess): void;
 
-Strip(): void;
+  Strip(): void;
 
-FillBack(TP: Transfer_TransientProcess): void;
+  FillBack(TP: Transfer_TransientProcess): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_SimpleBinderOfTransient: declare class Transfer_SimpleBinderOfTransient extends Transfer_Binder
 
-constructor
+  constructor
 
-ResultType(): Standard_Type;
+  ResultType(): Standard_Type;
 
-ResultTypeName(): string;
+  ResultTypeName(): string;
 
-SetResult(res: Standard_Transient): void;
+  SetResult(res: Standard_Transient): void;
 
-Result(): Standard_Transient;
+  Result(): Standard_Transient;
 
-static GetTypedResult(bnd: Transfer_Binder, atype: Standard_Type): { returnValue: boolean; res: Standard_Transient; [Symbol.dispose](): void };
+  static GetTypedResult(bnd: Transfer_Binder, atype: Standard_Type): { returnValue: boolean; res: Standard_Transient; [Symbol.dispose](): void };
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_StatusExec: typeof Transfer_StatusExec[keyof typeof Transfer_StatusExec]
 
@@ -773,57 +773,57 @@ Transfer_StatusResult: typeof Transfer_StatusResult[keyof typeof Transfer_Status
 
 Transfer_TransferDeadLoop: declare class Transfer_TransferDeadLoop extends Transfer_TransferFailure
 
-constructor
+  constructor
 
-ExceptionType(): string;
+  ExceptionType(): string;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_TransferDispatch: declare class Transfer_TransferDispatch extends Interface_CopyTool
 
-constructor
+  constructor
 
-TransientProcess(): Transfer_TransientProcess;
+  TransientProcess(): Transfer_TransientProcess;
 
-Copy(entfrom: Standard_Transient, mapped: boolean, errstat: boolean): { returnValue: boolean; entto: Standard_Transient; [Symbol.dispose](): void };
+  Copy(entfrom: Standard_Transient, mapped: boolean, errstat: boolean): { returnValue: boolean; entto: Standard_Transient; [Symbol.dispose](): void };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_TransferFailure: declare class Transfer_TransferFailure extends Interface_InterfaceError
 
-constructor
+  constructor
 
-ExceptionType(): string;
+  ExceptionType(): string;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Transfer_TransferInput: declare class Transfer_TransferInput
 
-constructor
+  constructor
 
-FillModel(proc: Transfer_TransientProcess, amodel: Interface_InterfaceModel): void;
-FillModel(proc: Transfer_FinderProcess, amodel: Interface_InterfaceModel): void;
-FillModel(proc: Transfer_TransientProcess, amodel: Interface_InterfaceModel, proto: Interface_Protocol, roots: boolean): void;
-FillModel(proc: Transfer_FinderProcess, amodel: Interface_InterfaceModel, proto: Interface_Protocol, roots: boolean): void;
-FillModel(proc: Transfer_TransientProcess, amodel: Interface_InterfaceModel): void;
-FillModel(proc: Transfer_FinderProcess, amodel: Interface_InterfaceModel): void;
-FillModel(proc: Transfer_TransientProcess, amodel: Interface_InterfaceModel, proto: Interface_Protocol, roots: boolean): void;
-FillModel(proc: Transfer_FinderProcess, amodel: Interface_InterfaceModel, proto: Interface_Protocol, roots: boolean): void;
-FillModel(proc: Transfer_TransientProcess, amodel: Interface_InterfaceModel): void;
-FillModel(proc: Transfer_FinderProcess, amodel: Interface_InterfaceModel): void;
-FillModel(proc: Transfer_TransientProcess, amodel: Interface_InterfaceModel, proto: Interface_Protocol, roots: boolean): void;
-FillModel(proc: Transfer_FinderProcess, amodel: Interface_InterfaceModel, proto: Interface_Protocol, roots: boolean): void;
-FillModel(proc: Transfer_TransientProcess, amodel: Interface_InterfaceModel): void;
-FillModel(proc: Transfer_FinderProcess, amodel: Interface_InterfaceModel): void;
-FillModel(proc: Transfer_TransientProcess, amodel: Interface_InterfaceModel, proto: Interface_Protocol, roots: boolean): void;
-FillModel(proc: Transfer_FinderProcess, amodel: Interface_InterfaceModel, proto: Interface_Protocol, roots: boolean): void;
+  FillModel(proc: Transfer_TransientProcess, amodel: Interface_InterfaceModel): void;
+  FillModel(proc: Transfer_FinderProcess, amodel: Interface_InterfaceModel): void;
+  FillModel(proc: Transfer_TransientProcess, amodel: Interface_InterfaceModel, proto: Interface_Protocol, roots: boolean): void;
+  FillModel(proc: Transfer_FinderProcess, amodel: Interface_InterfaceModel, proto: Interface_Protocol, roots: boolean): void;
+  FillModel(proc: Transfer_TransientProcess, amodel: Interface_InterfaceModel): void;
+  FillModel(proc: Transfer_FinderProcess, amodel: Interface_InterfaceModel): void;
+  FillModel(proc: Transfer_TransientProcess, amodel: Interface_InterfaceModel, proto: Interface_Protocol, roots: boolean): void;
+  FillModel(proc: Transfer_FinderProcess, amodel: Interface_InterfaceModel, proto: Interface_Protocol, roots: boolean): void;
+  FillModel(proc: Transfer_TransientProcess, amodel: Interface_InterfaceModel): void;
+  FillModel(proc: Transfer_FinderProcess, amodel: Interface_InterfaceModel): void;
+  FillModel(proc: Transfer_TransientProcess, amodel: Interface_InterfaceModel, proto: Interface_Protocol, roots: boolean): void;
+  FillModel(proc: Transfer_FinderProcess, amodel: Interface_InterfaceModel, proto: Interface_Protocol, roots: boolean): void;
+  FillModel(proc: Transfer_TransientProcess, amodel: Interface_InterfaceModel): void;
+  FillModel(proc: Transfer_FinderProcess, amodel: Interface_InterfaceModel): void;
+  FillModel(proc: Transfer_TransientProcess, amodel: Interface_InterfaceModel, proto: Interface_Protocol, roots: boolean): void;
+  FillModel(proc: Transfer_FinderProcess, amodel: Interface_InterfaceModel, proto: Interface_Protocol, roots: boolean): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

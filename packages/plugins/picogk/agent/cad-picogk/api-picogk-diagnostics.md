@@ -4,13 +4,13 @@
 
 TestCliOutput
 
-// Test function, generates a unique voxel object and tests vectorization and CLI output
-public static void Run()
+  // Test function, generates a unique voxel object and tests vectorization and CLI output
+  public static void Run()
 
 TestProgress
 
-public static void Test()
+  public static void Test()
 
 TestVectorAndComparison
 
-public static void Test()
+  public static void Test()

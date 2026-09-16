@@ -193,14 +193,6 @@ export const GeometryUnitTiming = memo(function GeometryUnitTiming({
   const [filters, setFilters] = useState<FilterCondition[]>([]);
   const [displaySettings, setDisplaySettings] = useState<DisplaySettings>(defaultDisplaySettings);
 
-  useEffect(() => {
-    queueMicrotask(() => {
-      setSelectedTraceId('latest');
-      setSelectedSpanId(undefined);
-      setCollapsedSpans(new Set());
-    });
-  }, [cadRef]);
-
   const selectedTrace =
     selectedTraceId === 'latest' ? latestTrace : (traces.find(({ id }) => id === selectedTraceId) ?? latestTrace);
   const sourceTree = useMemo(() => (selectedTrace ? [selectedTrace.root] : []), [selectedTrace]);

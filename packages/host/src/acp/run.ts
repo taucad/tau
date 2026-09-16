@@ -19,16 +19,24 @@
  * a chat asks for it, a revision checkout rather than the authority root.
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 
-import type { ContentBlock, McpServer } from '@agentclientprotocol/sdk';
+import type { ContentBlock, McpServer, Usage as AcpUsage } from '@agentclientprotocol/sdk';
 
+import { reduceEventLog } from '@taucad/agent-host';
 import type { ExternalAgentPort, ExternalAgentTurn, JsonObject, JsonValue } from '@taucad/agent-host';
+import { createSkillBundleRegistry } from '@taucad/agent-tools/registry';
+import { tauMcpInstructions } from '@taucad/mcp';
+import { isRecord } from '@taucad/utils/schema';
 
 import { openAcpSession } from '#acp/session.js';
 import type { AcpSession } from '#acp/session.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
 import type { AcpAdapter } from '#acp/registry.js';
+import type { HostSystemSkillBundle } from '#agent-tools.js';
+import { defaultConfigDirectory } from '#credential-store.js';
 
 /**
  * Open with the turn's own cancellation in force.
@@ -119,6 +127,8 @@ export type AcpExternalAgentPortOptions = {
   readonly agents: readonly AcpAdapter[];
   /** Absolute workspace root; the agent's `cwd` in direct mode. */
   readonly workspaceRoot: string;
+  /** Package-owned skills published to the adapter's native skill loader. */
+  readonly systemSkillBundles?: readonly HostSystemSkillBundle[] | undefined;
   /**
    * Host-local MCP endpoint (X4). Present, every session is offered the `tau`
    * server with a capability minted for *that chat session*; absent, the agent
@@ -132,6 +142,12 @@ export type AcpExternalAgentPortOptions = {
           /** ISO instant after which the endpoint rejects the token. */
           readonly expiresAt: string;
         };
+        activate(input: {
+          readonly token: string;
+          readonly runId: string;
+          readonly chatId: string;
+          readonly signal: AbortSignal;
+        }): () => void | Promise<void>;
       }
     | undefined;
   readonly onFrame?: ((frame: AcpWireFrame) => void) | undefined;
@@ -160,7 +176,79 @@ type LiveSession = {
   busy: boolean;
   /** Epoch milliseconds when the session's MCP capability expires; absent without MCP. */
   readonly capabilityExpiresAt?: number | undefined;
+  readonly capabilityToken?: string | undefined;
   timer?: NodeJS.Timeout | undefined;
+};
+
+const publishSystemSkills = async (
+  bundles: readonly HostSystemSkillBundle[] | undefined,
+  signal: AbortSignal,
+): Promise<{ readonly root: string } | undefined> => {
+  if (!bundles || bundles.length === 0) {
+    return undefined;
+  }
+  const registry = createSkillBundleRegistry(bundles);
+  const parent = join(defaultConfigDirectory(), 'acp-skills');
+  await mkdir(parent, { recursive: true, mode: 0o700 });
+  /* Codex registers this directory only with its native skill catalog. It is
+   * deliberately outside cwd and the operating-system temporary roots that a
+   * workspace-write sandbox grants by default. Project skill discovery still
+   * runs first and owns native precedence; an invalid project entry cannot
+   * erase a valid package skill before that loader sees either candidate. */
+  const digest = createHash('sha256')
+    .update(
+      JSON.stringify(
+        registry.bundles.map((bundle) => ({
+          slug: bundle.slug,
+          files: bundle.files.map(({ path, sha256 }) => ({ path, sha256 })),
+        })),
+      ),
+    )
+    .digest('hex');
+  const root = join(parent, digest);
+  const stagingRoot = await mkdtemp(join(parent, '.staging-'));
+  const staging = join(stagingRoot, '.agents', 'skills');
+  const verified = new Map<string, string>();
+  try {
+    for (const bundle of registry.bundles) {
+      for (const resource of bundle.files) {
+        signal.throwIfAborted();
+        // oxlint-disable-next-line no-await-in-loop -- resources must be verified and published in their manifest order.
+        const bytes = await readFile(new URL(resource.url), { signal });
+        const fingerprint = createHash('sha256').update(bytes).digest('hex');
+        if (bytes.byteLength !== resource.byteLength || fingerprint !== resource.sha256) {
+          throw new Error(`System skill resource changed after generation: ${bundle.slug}/${resource.path}`);
+        }
+        if (resource.path === 'SKILL.md' && bytes.toString('utf8') !== bundle.body) {
+          throw new Error(`System skill body does not match SKILL.md: ${bundle.slug}`);
+        }
+        const target = join(staging, bundle.slug, resource.path);
+        verified.set(join(bundle.slug, resource.path), fingerprint);
+        // oxlint-disable-next-line no-await-in-loop -- each verified resource needs its parent before its atomic publication.
+        await mkdir(dirname(target), { recursive: true });
+        // oxlint-disable-next-line no-await-in-loop -- resources must be complete before the directory becomes visible.
+        await writeFile(target, bytes, { signal });
+      }
+    }
+    try {
+      await rename(stagingRoot, root);
+    } catch (error) {
+      if (!isRecord(error) || (error['code'] !== 'EEXIST' && error['code'] !== 'ENOTEMPTY')) {
+        throw error;
+      }
+      for (const [path, fingerprint] of verified) {
+        // oxlint-disable-next-line no-await-in-loop -- verify the existing immutable publication before native discovery.
+        const published = await readFile(join(root, '.agents', 'skills', path), { signal });
+        if (createHash('sha256').update(published).digest('hex') !== fingerprint) {
+          throw new Error(`Published system skill resource changed: ${path}`);
+        }
+      }
+    }
+    // Ponytail: retain one tree per content version; GC needs vendor-session reference ownership, not a connection TTL.
+    return { root };
+  } finally {
+    await rm(stagingRoot, { recursive: true, force: true });
+  }
 };
 
 const record = (value: unknown): Record<string, JsonValue> | undefined =>
@@ -189,12 +277,38 @@ const contentBlockOf = (block: unknown): ContentBlock | undefined => {
   if (fields?.['type'] === 'image' && typeof fields['data'] === 'string' && typeof fields['mimeType'] === 'string') {
     return { type: 'image', data: fields['data'], mimeType: fields['mimeType'] };
   }
+  if (fields?.['type'] === 'audio' && typeof fields['data'] === 'string' && typeof fields['mimeType'] === 'string') {
+    return { type: 'audio', data: fields['data'], mimeType: fields['mimeType'] };
+  }
   if (fields?.['type'] === 'resource_link' && typeof fields['uri'] === 'string') {
     return {
       type: 'resource_link',
       uri: fields['uri'],
       name: typeof fields['name'] === 'string' ? fields['name'] : fields['uri'],
     };
+  }
+  if (fields?.['type'] === 'resource') {
+    const resource = record(fields['resource']);
+    if (typeof resource?.['uri'] === 'string' && typeof resource['text'] === 'string') {
+      return {
+        type: 'resource',
+        resource: {
+          uri: resource['uri'],
+          text: resource['text'],
+          ...(typeof resource['mimeType'] === 'string' ? { mimeType: resource['mimeType'] } : {}),
+        },
+      };
+    }
+    if (typeof resource?.['uri'] === 'string' && typeof resource['blob'] === 'string') {
+      return {
+        type: 'resource',
+        resource: {
+          uri: resource['uri'],
+          blob: resource['blob'],
+          ...(typeof resource['mimeType'] === 'string' ? { mimeType: resource['mimeType'] } : {}),
+        },
+      };
+    }
   }
   return undefined;
 };
@@ -219,22 +333,24 @@ const contextBlock = (uri: string, mimeType: string, text: string): ContentBlock
  * *is* the user's project, so writing an `AGENTS.md` there would put a Tau
  * control file in the authored tree (filesystem policy Rule 16) and capture it
  * into every revision. The same bytes ride the prompt instead, on the session's
- * first turn only — the agent keeps its own conversation, so repeating them
- * every turn would pay for the same context again and again (EQ8).
+ * first turn only. Current project facts still ride every turn so a session
+ * resumed after another agent's edit cannot keep stale context (EQ8).
  *
  * This content is transmitted to the vendor, exactly like the tree the agent
  * already reads.
  *
  * @param config - The admission config the client sent for this turn.
+ * @param first - Whether this is the first prompt on the vendor session.
  * @returns The resource blocks, or none when the client sent no context.
  */
-const cadContextBlocks = (config: ExternalAgentTurn['config']): readonly ContentBlock[] => {
+const cadContextBlocks = (config: ExternalAgentTurn['config'], first: boolean): readonly ContentBlock[] => {
   if (!config) {
     return [];
   }
   const skills = config.clientContext?.skills ?? [];
+  const memory = config.clientContext?.memory ?? {};
   return [
-    ...(config.systemPrompt === '' ? [] : [contextBlock('tau://system-prompt', 'text/markdown', config.systemPrompt)]),
+    ...(first ? [contextBlock('tau://agent-guidance', 'text/markdown', tauMcpInstructions)] : []),
     ...(skills.length === 0
       ? []
       : [
@@ -244,6 +360,9 @@ const cadContextBlocks = (config: ExternalAgentTurn['config']): readonly Content
             skills.map((skill) => `- ${skill.name}: ${skill.description}`).join('\n'),
           ),
         ]),
+    ...(Object.keys(memory).length === 0
+      ? []
+      : [contextBlock('tau://memory', 'application/json', JSON.stringify(memory))]),
     ...(config.snapshot === undefined
       ? []
       : [contextBlock('tau://snapshot', 'application/json', JSON.stringify(config.snapshot))]),
@@ -263,17 +382,95 @@ const promptBlocksOf = (turn: ExternalAgentTurn, first: boolean): readonly Conte
     typeof content === 'string'
       ? [{ type: 'text', text: content } satisfies ContentBlock]
       : Array.isArray(content)
-        ? content.flatMap((block) => contentBlockOf(block) ?? [])
+        ? content.map((block) => {
+            const mapped = contentBlockOf(block);
+            if (!mapped) {
+              throw Object.assign(new Error('This user message contains a block ACP cannot carry.'), {
+                code: 'EXTERNAL_AGENT_CONTENT_UNSUPPORTED',
+              });
+            }
+            return mapped;
+          })
         : [];
   if (blocks.length === 0) {
     return undefined;
   }
-  return first ? [...cadContextBlocks(turn.config), ...blocks] : blocks;
+  return [...cadContextBlocks(turn.config, first), ...blocks];
 };
 
 const stringField = (state: JsonObject | undefined, name: string): string | undefined => {
   const value = state?.[name];
   return typeof value === 'string' ? value : undefined;
+};
+
+const usageNumber = (value: unknown): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+
+const usageField = (state: JsonObject | undefined): AcpUsage | undefined => {
+  const value = state?.['acpPriorUsage'];
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const totalTokens = usageNumber(value['totalTokens']);
+  const inputTokens = usageNumber(value['inputTokens']);
+  const outputTokens = usageNumber(value['outputTokens']);
+  const thoughtTokens = usageNumber(value['thoughtTokens']);
+  const cachedReadTokens = usageNumber(value['cachedReadTokens']);
+  const cachedWriteTokens = usageNumber(value['cachedWriteTokens']);
+  if (totalTokens === undefined || inputTokens === undefined || outputTokens === undefined) {
+    return undefined;
+  }
+  return {
+    totalTokens,
+    inputTokens,
+    outputTokens,
+    ...(thoughtTokens === undefined ? {} : { thoughtTokens }),
+    ...(cachedReadTokens === undefined ? {} : { cachedReadTokens }),
+    ...(cachedWriteTokens === undefined ? {} : { cachedWriteTokens }),
+  };
+};
+
+const usageState = (usage: AcpUsage): JsonObject => ({
+  totalTokens: usage.totalTokens,
+  inputTokens: usage.inputTokens,
+  outputTokens: usage.outputTokens,
+  ...(typeof usage.thoughtTokens === 'number' ? { thoughtTokens: usage.thoughtTokens } : {}),
+  ...(typeof usage.cachedReadTokens === 'number' ? { cachedReadTokens: usage.cachedReadTokens } : {}),
+  ...(typeof usage.cachedWriteTokens === 'number' ? { cachedWriteTokens: usage.cachedWriteTokens } : {}),
+});
+
+/** The last vendor counter durably committed for this ACP session. */
+const committedUsage = (turn: ExternalAgentTurn): AcpUsage | undefined => {
+  const remembered = usageField(turn.state);
+  if (remembered) {
+    return remembered;
+  }
+  for (const message of reduceEventLog(turn.history).toReversed()) {
+    const vendorUsage = isRecord(message.metadata?.tauInternal)
+      ? message.metadata.tauInternal['vendorUsage']
+      : undefined;
+    const usage = usageField(isRecord(vendorUsage) ? vendorUsage : undefined);
+    if (usage) {
+      return usage;
+    }
+  }
+  return undefined;
+};
+
+/** The replaceable ACP session-state envelope already present in this chat. */
+const committedSessionMessageId = (turn: ExternalAgentTurn): string | undefined => {
+  for (const message of reduceEventLog(turn.history).toReversed()) {
+    if (
+      message.role === 'assistant' &&
+      Array.isArray(message.content) &&
+      message.content.some(
+        (content) => isRecord(content) && content['type'] === 'acp-session' && content['agentId'] === turn.agentId,
+      )
+    ) {
+      return message.id;
+    }
+  }
+  return undefined;
 };
 
 /**
@@ -380,6 +577,7 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
      * conversation about files this session cannot see; it starts fresh
      * instead (r1 risk 7). */
     const rememberedCwd = stringField(turn.state, 'cwd');
+    const cwdContextLost = rememberedCwd !== undefined && rememberedCwd !== cwd;
     const acpSessionId =
       rememberedCwd === undefined || rememberedCwd === cwd ? stringField(turn.state, 'acpSessionId') : undefined;
     /* Minted once per session, not per turn: the server list an agent is handed
@@ -387,14 +585,20 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
      * Claude tears a session down when that list changes (V7). */
     const capability = options.mcp?.mint({ runId: turn.runId, chatId: turn.chatId });
     const mcpServers = tauMcpServers(capability);
+    const skillPublication = await publishSystemSkills(options.systemSkillBundles, turn.signal);
+    const sessionMessageId = committedSessionMessageId(turn);
     const session = await abortableOpen(
       openAcpSession({
         adapter: input.adapter,
         cwd,
         mcpServers,
+        ...(skillPublication === undefined ? {} : { additionalDirectories: [skillPublication.root] }),
         createId,
         ...(acpSessionId === undefined ? {} : { acpSessionId }),
+        ...(acpSessionId === undefined ? {} : { priorUsage: committedUsage(turn) }),
+        ...(sessionMessageId === undefined ? {} : { sessionMessageId }),
         ...(options.onFrame ? { onFrame: options.onFrame } : {}),
+        signal: turn.signal,
       }),
       turn.signal,
     );
@@ -407,8 +611,17 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
       cwd,
       busy: true,
       capabilityExpiresAt: capability === undefined ? undefined : Date.parse(capability.expiresAt),
+      capabilityToken: capability?.token,
     };
     live.set(input.key, entry);
+    const forgetClosed = async (): Promise<void> => {
+      await session.closed;
+      if (live.get(input.key) === entry) {
+        await forget(input.key);
+      }
+    };
+    // async-iife: lifecycle -- Session closure must retire the cache even when no run is awaiting it.
+    void forgetClosed();
     try {
       if (session.acpSessionId !== acpSessionId) {
         /* One `remember`, not one per field: the record is rewritten from the
@@ -422,7 +635,7 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
           ...(input.model === undefined ? {} : { model: input.model }),
         });
       }
-      if (session.contextLost) {
+      if (session.contextLost || cwdContextLost) {
         /* Never a silent fresh start: the reader has to be able to see why the
          * agent stopped remembering. */
         await turn.append([
@@ -434,7 +647,9 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
               content: [
                 {
                   type: 'text',
-                  text: `${turn.agentId} could not restore this chat's earlier session, so it is starting a new one. Everything before this point is missing from its own context.`,
+                  text: cwdContextLost
+                    ? `${turn.agentId} moved to a different Tau checkout, so it is starting a new session in that tree. Its earlier conversation remains in this chat but is not in the new agent session.`
+                    : `${turn.agentId} could not restore this chat's earlier session, so it is starting a new one. Everything before this point is missing from its own context.`,
                 },
               ],
               metadata: { tauInternal: { origin: 'external', agentId: turn.agentId } },
@@ -509,30 +724,57 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
       }
       entry ??= await start({ key, turn, model, adapter, cwd, mode: checkout?.mode });
       entry.busy = true;
+      let releaseMcp: (() => void | Promise<void>) | undefined;
       try {
+        releaseMcp =
+          options.mcp && entry.capabilityToken
+            ? options.mcp.activate({
+                token: entry.capabilityToken,
+                runId: turn.runId,
+                chatId: turn.chatId,
+                signal: turn.signal,
+              })
+            : undefined;
         /* The vendor session Tau is about to prompt is not the one this chat's
          * record remembers: it is new (or a lost one was replaced), so it has
          * never seen Tau's CAD context and this prompt carries it (V12). */
         const prompt = promptBlocksOf(turn, entry.session.acpSessionId !== stringField(turn.state, 'acpSessionId'));
         if (prompt === undefined) {
-          /* A turn a restart left unanswered: reattaching to the session is the
-           * whole job, and prompting again would ask the agent twice. */
-          return;
+          throw Object.assign(
+            new Error('Tau restored the ACP session, but ACP cannot prove whether the interrupted turn completed.'),
+            { code: 'EXTERNAL_AGENT_RECOVERY_UNKNOWN' },
+          );
         }
-        const outcome = await entry.session.prompt(prompt, turn, model);
+        const selectedConfig = isRecord(turn.agent['config'])
+          ? turn.agent['config']
+          : isRecord(turn.state?.['config'])
+            ? turn.state['config']
+            : undefined;
+        const configuration = selectedConfig
+          ? Object.fromEntries(
+              Object.entries(selectedConfig).filter(
+                (entry): entry is [string, string | boolean] =>
+                  typeof entry[1] === 'string' || typeof entry[1] === 'boolean',
+              ),
+            )
+          : undefined;
+        const outcome = await entry.session.prompt(prompt, turn, model, configuration);
         /* What the agent changed about its own session, written back to the
          * chat's record so the next turn — and the selector above it — start
          * from what actually ran rather than from what was last asked for
          * (V6/VSC3). One `remember`, because each is an append. */
         const moved = {
+          ...(outcome.usage === undefined ? {} : { acpPriorUsage: usageState(outcome.usage) }),
           ...(outcome.model === undefined || outcome.model === model ? {} : { model: outcome.model }),
           ...(outcome.title === undefined ? {} : { title: outcome.title }),
+          config: outcome.configuration,
         };
         if (Object.keys(moved).length > 0) {
           await turn.remember(moved);
         }
         return { stopReason: outcome.stopReason };
       } finally {
+        await releaseMcp?.();
         entry.busy = false;
         touch(key);
       }

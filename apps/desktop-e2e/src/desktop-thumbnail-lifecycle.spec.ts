@@ -12,7 +12,6 @@ import type { GatewayFixture } from '#support/gateway-fixture.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
   connectPickedFolder,
-  declineCookieBanner,
   expectSignedIn,
   expectVisible,
   selectChatModel,
@@ -89,7 +88,6 @@ const launchProject = async (source: string, prompt: string, geometry: 'glb' | '
   });
   await fixture.routeThrough(session.page);
   await expectVisible(session.page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-  await declineCookieBanner(session.page);
   await authenticatePackagedDesktop(session, token);
   await expectSignedIn(session.page);
   await selectKernel(session.page, 'Replicad');

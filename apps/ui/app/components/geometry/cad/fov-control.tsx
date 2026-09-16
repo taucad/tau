@@ -50,9 +50,7 @@ export function FovControl({ className, isCompact = false }: FovControlProps): R
               className: cn(
                 'group relative gap-0 overflow-hidden p-0 transition-[box-shadow] duration-300',
                 'flex items-center',
-                'hover:cursor-pointer',
-                'has-[[data-slot=slider-thumb]:focus-visible]:ring-2',
-                'has-[[data-slot=slider-thumb]:focus-visible]:ring-ring',
+                'has-[[data-slot=slider-thumb]:focus-visible]:focus-outline',
                 className,
               ),
             }),
@@ -77,7 +75,9 @@ export function FovControl({ className, isCompact = false }: FovControlProps): R
               '[&_[data-slot=slider-track]]:rounded-none',
               '[&_[data-slot=slider-track]]:border-none',
               '[&_[data-slot=slider-track]]:bg-transparent',
-              '[&_[data-slot=slider-track]]:ring-0',
+              // The wrapper owns focus via has-[[data-slot=slider-thumb]:focus-visible]; `!` beats the
+              // inset-variant track rule, which is more specific, so only one outline shows.
+              '[&_[data-slot=slider-track]]:outline-none!',
             )}
             onValueChange={handleFovChange}
           />

@@ -5,7 +5,6 @@ import { createRoot, extend, useThree } from '@react-three/fiber';
 import type { RootState } from '@react-three/fiber';
 import { ThreeGraphicsBackendProvider } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 import { MorphingPoints } from '#components/geometry/splash/morphing-points.js';
-import { SplitMorphingPoints } from '#components/geometry/splash/split-morphing-points.js';
 import type { SampledPoints } from '#components/geometry/splash/point-sampler.js';
 
 const sampledPoints = (offset: number): SampledPoints => ({
@@ -74,25 +73,6 @@ describe('shader-displaced splash point culling', () => {
 
       expect(mounted.meshes).toHaveLength(1);
       expect(mounted.meshes[0]!.frustumCulled).toBe(false);
-      mounted.unmount();
-    },
-  );
-
-  it.each(['webgl', 'webgpu'] as const)(
-    'keeps both split morph clouds renderable outside source-only geometry bounds on %s',
-    async (backend) => {
-      const mounted = await mount(
-        <SplitMorphingPoints
-          sourcePoints={sampledPoints(0)}
-          targetPointsA={sampledPoints(1000)}
-          targetPointsB={sampledPoints(-1000)}
-          targetProgress={1}
-        />,
-        backend,
-      );
-
-      expect(mounted.meshes).toHaveLength(2);
-      expect(mounted.meshes.every(({ frustumCulled }) => !frustumCulled)).toBe(true);
       mounted.unmount();
     },
   );

@@ -12,6 +12,7 @@ import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { bufferToStream } from '#backend/stream-utils.js';
 import type { FileSystemProvider } from '#types.js';
 import { ImmutableRevisionTree } from '#revision-tree.js';
+import type { RevisionFileMode, RevisionTreeInput } from '#revision-tree.js';
 
 /** Read capabilities required to capture one immutable revision tree. @public */
 export type RevisionCaptureFileSystem = Pick<FileSystemProvider, 'readFile' | 'readFileStream' | 'readdir' | 'stat'>;
@@ -27,6 +28,8 @@ export type CaptureRevisionTreeOptions = Readonly<{
   exclude?: (path: string) => boolean;
   /** File paths that must be present in the completed capture. */
   requiredPaths?: readonly string[];
+  /** Mode inherited from the checkout's recorded base when this backend has no executable-bit support. */
+  inheritedMode?: (path: string) => RevisionFileMode | undefined;
   /** Maximum number of file streams read at once. Defaults to 16. */
   concurrency?: number;
   /** Maximum aggregate file payload. Defaults to 1 GiB. */
@@ -106,7 +109,7 @@ export const captureRevisionTree = async (
       throw error;
     }
   };
-  const filePaths: string[] = [];
+  const filePaths: Array<Readonly<{ path: string; mode: RevisionFileMode }>> = [];
   const visit = async (path: string): Promise<void> => {
     throwIfAborted();
     const children = await skipIfVanished(async () => filesystem.readdir(path));
@@ -125,19 +128,26 @@ export const captureRevisionTree = async (
         // oxlint-disable-next-line eslint/no-await-in-loop -- Sequential traversal avoids deadlocking nested bounded pools.
         await visit(childPath);
       } else {
-        filePaths.push(childPath);
+        const mode =
+          (filesystem.getFileMode === undefined
+            ? undefined
+            : // oxlint-disable-next-line no-await-in-loop -- mode belongs to the entry reached by sequential traversal.
+              await skipIfVanished(async () => filesystem.getFileMode!(childPath))) ??
+          options?.inheritedMode?.(childPath) ??
+          '100644';
+        filePaths.push({ path: childPath, mode });
       }
     }
   };
   try {
     await visit('');
-    const entries = Array.from<readonly [string, Uint8Array<ArrayBuffer>] | undefined>({
+    const entries = Array.from<RevisionTreeInput | undefined>({
       length: filePaths.length,
     });
     let nextIndex = 0;
     let capturedBytes = 0;
     let firstFailure: unknown;
-    const captureFile = async (path: string, index: number): Promise<void> => {
+    const captureFile = async (path: string, mode: RevisionFileMode, index: number): Promise<void> => {
       let reservedBytes = 0;
       let reader: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>> | undefined;
       let cancellation: Promise<void> | undefined;
@@ -201,7 +211,7 @@ export const captureRevisionTree = async (
           content.set(chunk, offset);
           offset += chunk.byteLength;
         }
-        entries[index] = [path, content];
+        entries[index] = [path, content, mode];
       } catch (error) {
         capturedBytes -= reservedBytes;
         if (!requiredPaths.has(path) && isNotFoundError(error)) {
@@ -244,8 +254,9 @@ export const captureRevisionTree = async (
           return;
         }
         try {
-          // oxlint-disable-next-line eslint/no-await-in-loop -- Each worker owns one sequential lane in the shared pool.
-          await captureFile(filePaths[index]!, index);
+          const file = filePaths[index]!;
+          // oxlint-disable-next-line no-await-in-loop -- Each worker owns one sequential lane in the shared pool.
+          await captureFile(file.path, file.mode, index);
         } catch (error) {
           firstFailure ??= error;
           abortController.abort(error);
@@ -259,9 +270,7 @@ export const captureRevisionTree = async (
         : new Error('Revision tree capture failed.', { cause: firstFailure });
     }
     throwIfAborted();
-    const completeEntries = entries.filter(
-      (entry): entry is readonly [string, Uint8Array<ArrayBuffer>] => entry !== undefined,
-    );
+    const completeEntries = entries.filter((entry): entry is RevisionTreeInput => entry !== undefined);
     const capturedPaths = new Set(completeEntries.map(([path]) => path));
     const missingRequired = [...requiredPaths].filter((path) => !capturedPaths.has(path));
     if (missingRequired.length > 0) {

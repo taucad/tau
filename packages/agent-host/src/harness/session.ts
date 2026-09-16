@@ -1,6 +1,6 @@
 import { Agent } from '@earendil-works/pi-agent-core';
-import type { AgentEvent, AgentMessage, StreamFn } from '@earendil-works/pi-agent-core';
-import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
+import type { AgentEvent, AgentMessage, AgentToolResult, StreamFn } from '@earendil-works/pi-agent-core';
+import { createAssistantMessageEventStream, validateToolArguments } from '@earendil-works/pi-ai';
 import type {
   Api,
   AssistantMessage,
@@ -14,6 +14,7 @@ import type {
 } from '@earendil-works/pi-ai';
 import type {
   AgentLiveEvent,
+  AgentLiveEventPayload,
   DurableEventLog,
   HostRunSnapshot,
   HostToolDefinition,
@@ -27,11 +28,13 @@ import type {
   JsonObject,
   JsonValue,
   ModelProviderKind,
+  ModelReasoningConfig,
   ProviderMessage,
   ProviderMessageMetadata,
   RunFailureDetail,
   RunLifecycleState,
   TurnContextSnapshot,
+  TurnModelConfig,
   UserProviderMessage,
 } from '#log/event-types.js';
 import {
@@ -60,7 +63,7 @@ import {
 } from '#harness/session-record.js';
 import type { MessageIdentities, SessionRecord } from '#harness/session-record.js';
 import { applyHostToolResult, createAgentTools, normalizeToolInput } from '#harness/tools.js';
-import type { ToolResultSubstituter } from '#harness/tools.js';
+import type { HostToolExecutionDetails, ToolResultSubstituter } from '#harness/tools.js';
 import { createInterruptRecoveryMessage } from '#harness/interrupt-recovery.js';
 
 const zeroUsage: Usage = {
@@ -84,11 +87,15 @@ const requestedMaxTokens = (ceiling: number, requested: number | undefined): num
 const modelFor = (options: AgentSessionModel): Model<Api> => ({
   id: options.id,
   name: options.id,
-  // Matches the gateway transport's non-anthropic wire (piModelFor) so durable
-  // metadata records the codec the request actually used — direct OpenAI rows
-  // leave over the Responses wire, every OpenAI-compatible provider over
-  // completions.
-  api: options.api ?? (options.providerKind === 'openai' ? 'openai-responses' : 'openai-completions'),
+  // Keep durable replay on the same codec as the request. Claude is native;
+  // OpenAI and xAI use Responses; the remaining compatible routes use chat.
+  api:
+    options.api ??
+    (options.providerKind === 'anthropic'
+      ? 'anthropic-messages'
+      : options.providerKind === 'openai' || options.providerKind === 'xai'
+        ? 'openai-responses'
+        : 'openai-completions'),
   // Pi drops signed replay metadata when history moves between providers; the
   // gateway is execution placement, while providerKind is the model provider.
   provider: options.provider ?? options.providerKind ?? 'tau-gateway',
@@ -152,13 +159,24 @@ const createPartial = (model: Model<Api>): AssistantMessage => ({
 type CreateTransportStreamOptions = {
   readonly transport: ModelTransport;
   readonly providerKind?: ModelProviderKind | undefined;
+  readonly reasoning?: ModelReasoningConfig | undefined;
   readonly identities: MessageIdentities;
   readonly toolInputIds: Map<string, string>;
   readonly createId: () => string;
   readonly committedContext?: (() => TurnContextSnapshot | undefined) | undefined;
   readonly usePostCompactionContext?: (() => boolean) | undefined;
   readonly systemPromptBlocks?: (() => TurnContextSnapshot['systemPromptBlocks']) | undefined;
-  readonly onLiveDelta?: ((event: Omit<AgentLiveEvent, 'chatId' | 'runId'>) => void | Promise<void>) | undefined;
+  readonly onLiveDelta?: ((event: AgentLiveEventPayload) => void | Promise<void>) | undefined;
+  readonly prestartTool?:
+    // eslint-disable-next-line max-params -- The hook mirrors Pi's streamed tool-call lifecycle.
+    | ((
+        toolCall: ToolCall,
+        contentIndex: number,
+        messageId: string,
+        partial: AssistantMessage,
+        signal: AbortSignal,
+      ) => Promise<void>)
+    | undefined;
   readonly prepareInvocation?:
     | ((purpose: 'generation' | 'compaction', modelId: string, signal: AbortSignal) => Promise<string>)
     | undefined;
@@ -175,12 +193,42 @@ export const createTransportStreamFunction =
     const messageId = options.createId();
     const pump = async (): Promise<void> => {
       let partial = createPartial(model);
-      let active: { readonly kind: 'text' | 'thinking'; readonly index: number } | undefined;
+      let legacyActive: { readonly kind: 'text' | 'thinking'; readonly index: number } | undefined;
       let terminalReason: StopReason | undefined;
       let transportMetadata: ProviderMessageMetadata | undefined;
       let invocationMetadata: ProviderMessageMetadata | undefined;
       let usageSettled = false;
+      const reasoningTimings = new Map<number, { startedAtMs: number; endedAt?: number }>();
       output.push({ type: 'start', partial });
+
+      const startReasoning = (contentIndex: number): number => {
+        const startedAtMs = reasoningTimings.get(contentIndex)?.startedAtMs ?? Date.now();
+        reasoningTimings.set(contentIndex, { startedAtMs });
+        return startedAtMs;
+      };
+
+      const endReasoning = (contentIndex: number): number => {
+        const timing = reasoningTimings.get(contentIndex) ?? { startedAtMs: Date.now() };
+        const endedAt = Date.now();
+        reasoningTimings.set(contentIndex, { ...timing, endedAt });
+        return endedAt;
+      };
+
+      const metadataFor = (reason: StopReason): ProviderMessageMetadata | undefined => {
+        const timings = [...reasoningTimings].map(([contentIndex, timing]) => ({
+          contentIndex,
+          startedAtMs: timing.startedAtMs,
+          ...(timing.endedAt === undefined ? {} : { endedAtMs: timing.endedAt }),
+        }));
+        const metadata: ProviderMessageMetadata = {
+          ...transportMetadata,
+          ...(timings.length === 0 ? {} : { reasoningTimings: timings }),
+          ...(reason === 'aborted' && !usageSettled
+            ? { usageUnsettled: { type: 'tau.usage-unsettled', reason: 'aborted' } }
+            : {}),
+        };
+        return Object.keys(metadata).length === 0 ? undefined : metadata;
+      };
 
       const updateBlock = (index: number, block: AssistantMessage['content'][number]): void => {
         const content = [...partial.content];
@@ -188,27 +236,41 @@ export const createTransportStreamFunction =
         partial = { ...partial, content };
       };
 
-      const closeActive = (): void => {
-        if (!active) {
+      const closeLegacyActive = async (): Promise<void> => {
+        if (!legacyActive) {
           return;
         }
-        const block = partial.content[active.index];
-        if (active.kind === 'text' && block?.type === 'text') {
+        const block = partial.content[legacyActive.index];
+        if (legacyActive.kind === 'text' && block?.type === 'text') {
+          await options.onLiveDelta?.({
+            type: 'text-end',
+            messageId,
+            contentIndex: legacyActive.index,
+            content: block.text,
+          });
           output.push({
             type: 'text_end',
-            contentIndex: active.index,
+            contentIndex: legacyActive.index,
             content: block.text,
             partial,
           });
-        } else if (active.kind === 'thinking' && block?.type === 'thinking') {
+        } else if (legacyActive.kind === 'thinking' && block?.type === 'thinking') {
+          const timestamp = endReasoning(legacyActive.index);
+          await options.onLiveDelta?.({
+            type: 'thinking-end',
+            messageId,
+            contentIndex: legacyActive.index,
+            content: block.thinking,
+            timestamp,
+          });
           output.push({
             type: 'thinking_end',
-            contentIndex: active.index,
+            contentIndex: legacyActive.index,
             content: block.thinking,
             partial,
           });
         }
-        active = undefined;
+        legacyActive = undefined;
       };
 
       const assertBeforeTerminal = (eventType: ModelStreamEvent['type']): void => {
@@ -245,6 +307,7 @@ export const createTransportStreamFunction =
           modelId: model.id,
           modelCost: model.cost,
           providerKind: options.providerKind,
+          reasoning: committedContext?.model?.reasoning ?? options.reasoning,
           maxTokens: requestedMaxTokens(model.maxTokens, streamOptions?.maxTokens),
           contextWindow: model.contextWindow,
           systemPrompt: committedContext?.systemPrompt ?? context.systemPrompt ?? '',
@@ -266,76 +329,211 @@ export const createTransportStreamFunction =
             transportMetadata = { ...transportMetadata, ...event.metadata };
             continue;
           }
+          if (event.type === 'text-start') {
+            updateBlock(event.contentIndex, { type: 'text', text: '' });
+            await options.onLiveDelta?.({
+              type: 'text-start',
+              messageId,
+              contentIndex: event.contentIndex,
+            });
+            output.push({ type: 'text_start', contentIndex: event.contentIndex, partial });
+            continue;
+          }
           if (event.type === 'text-delta') {
-            if (active?.kind !== 'text') {
-              closeActive();
-              const index = partial.content.length;
-              active = { kind: 'text', index };
+            let index = event.contentIndex;
+            if (index === undefined) {
+              if (legacyActive?.kind === 'text') {
+                index = legacyActive.index;
+              } else {
+                await closeLegacyActive();
+                index = partial.content.length;
+                legacyActive = { kind: 'text', index };
+              }
+            }
+            if (partial.content[index]?.type !== 'text') {
               updateBlock(index, { type: 'text', text: '' });
+              await options.onLiveDelta?.({ type: 'text-start', messageId, contentIndex: index });
               output.push({ type: 'text_start', contentIndex: index, partial });
             }
-            const block = partial.content[active.index];
+            const block = partial.content[index];
             if (block?.type === 'text') {
-              updateBlock(active.index, {
+              updateBlock(index, {
                 ...block,
                 text: block.text + event.text,
               });
               await options.onLiveDelta?.({
                 type: 'text-delta',
                 messageId,
-                contentIndex: active.index,
+                contentIndex: index,
                 delta: event.text,
               });
               output.push({
                 type: 'text_delta',
-                contentIndex: active.index,
+                contentIndex: index,
                 delta: event.text,
                 partial,
               });
             }
             continue;
           }
+          if (event.type === 'text-end') {
+            const block = partial.content[event.contentIndex];
+            if (block?.type !== 'text') {
+              throw new Error(`Model transport ended missing text block ${event.contentIndex}.`);
+            }
+            updateBlock(event.contentIndex, { ...block, text: event.content });
+            await options.onLiveDelta?.({
+              type: 'text-end',
+              messageId,
+              contentIndex: event.contentIndex,
+              content: event.content,
+            });
+            output.push({
+              type: 'text_end',
+              contentIndex: event.contentIndex,
+              content: event.content,
+              partial,
+            });
+            continue;
+          }
+          if (event.type === 'thinking-start') {
+            updateBlock(event.contentIndex, { type: 'thinking', thinking: '' });
+            const timestamp = startReasoning(event.contentIndex);
+            await options.onLiveDelta?.({
+              type: 'thinking-start',
+              messageId,
+              contentIndex: event.contentIndex,
+              timestamp,
+            });
+            output.push({ type: 'thinking_start', contentIndex: event.contentIndex, partial });
+            continue;
+          }
           if (event.type === 'thinking-delta') {
-            if (active?.kind !== 'thinking') {
-              closeActive();
-              const index = partial.content.length;
-              active = { kind: 'thinking', index };
+            let index = event.contentIndex;
+            if (index === undefined) {
+              if (legacyActive?.kind === 'thinking') {
+                index = legacyActive.index;
+              } else {
+                await closeLegacyActive();
+                index = partial.content.length;
+                legacyActive = { kind: 'thinking', index };
+              }
+            }
+            if (partial.content[index]?.type !== 'thinking') {
               updateBlock(index, {
                 type: 'thinking',
                 thinking: '',
-                ...(event.signature === undefined ? {} : { thinkingSignature: event.signature }),
               });
+              const timestamp = startReasoning(index);
+              await options.onLiveDelta?.({ type: 'thinking-start', messageId, contentIndex: index, timestamp });
               output.push({
                 type: 'thinking_start',
                 contentIndex: index,
                 partial,
               });
             }
-            const block = partial.content[active.index];
+            const block = partial.content[index];
             if (block?.type === 'thinking') {
-              updateBlock(active.index, {
+              updateBlock(index, {
                 ...block,
                 thinking: block.thinking + event.text,
-                ...(event.signature === undefined ? {} : { thinkingSignature: event.signature }),
               });
               await options.onLiveDelta?.({
                 type: 'thinking-delta',
                 messageId,
-                contentIndex: active.index,
+                contentIndex: index,
                 delta: event.text,
               });
               output.push({
                 type: 'thinking_delta',
-                contentIndex: active.index,
+                contentIndex: index,
                 delta: event.text,
                 partial,
               });
             }
             continue;
           }
+          if (event.type === 'thinking-end') {
+            const block = partial.content[event.contentIndex];
+            if (block?.type !== 'thinking') {
+              throw new Error(`Model transport ended missing thinking block ${event.contentIndex}.`);
+            }
+            updateBlock(event.contentIndex, { ...block, thinking: event.content });
+            const timestamp = endReasoning(event.contentIndex);
+            await options.onLiveDelta?.({
+              type: 'thinking-end',
+              messageId,
+              contentIndex: event.contentIndex,
+              content: event.content,
+              timestamp,
+            });
+            output.push({
+              type: 'thinking_end',
+              contentIndex: event.contentIndex,
+              content: event.content,
+              partial,
+            });
+            continue;
+          }
+          if (event.type === 'thinking-signature') {
+            const block = partial.content[event.contentIndex];
+            if (block?.type !== 'thinking') {
+              throw new Error(`Model transport signed missing thinking block ${event.contentIndex}.`);
+            }
+            updateBlock(event.contentIndex, { ...block, thinkingSignature: event.signature });
+            output.push({
+              type: 'thinking_delta',
+              contentIndex: event.contentIndex,
+              delta: '',
+              partial,
+            });
+            continue;
+          }
+          if (event.type === 'tool-input-start' || event.type === 'tool-input-delta') {
+            const contentIndex = event.contentIndex ?? partial.content.length;
+            let block = partial.content[contentIndex];
+            if (block?.type !== 'toolCall') {
+              block = {
+                type: 'toolCall',
+                id: event.toolCallId,
+                name: event.toolName,
+                arguments: {},
+              };
+              updateBlock(contentIndex, block);
+              await options.onLiveDelta?.({
+                type: 'tool-input-start',
+                messageId,
+                contentIndex,
+                toolCallId: event.toolCallId,
+                toolName: event.toolName,
+              });
+              output.push({ type: 'toolcall_start', contentIndex, partial });
+            }
+            if (event.type === 'tool-input-delta') {
+              await options.onLiveDelta?.({
+                type: 'tool-input-delta',
+                messageId,
+                contentIndex,
+                toolCallId: event.toolCallId,
+                toolName: event.toolName,
+                delta: event.delta,
+              });
+              output.push({
+                type: 'toolcall_delta',
+                contentIndex,
+                delta: event.delta,
+                partial,
+              });
+            }
+            continue;
+          }
           if (event.type === 'tool-input') {
-            closeActive();
-            const contentIndex = partial.content.length;
+            await closeLegacyActive();
+            const existingIndex = partial.content.findIndex(
+              (block) => block.type === 'toolCall' && block.id === event.toolCallId,
+            );
+            const contentIndex = event.contentIndex ?? (existingIndex === -1 ? partial.content.length : existingIndex);
+            const existing = partial.content[contentIndex];
             const toolCall: ToolCall = {
               type: 'toolCall',
               id: event.toolCallId,
@@ -343,14 +541,37 @@ export const createTransportStreamFunction =
               arguments: event.input as Record<string, unknown>,
               ...(event.thoughtSignature === undefined ? {} : { thoughtSignature: event.thoughtSignature }),
             };
-            output.push({ type: 'toolcall_start', contentIndex, partial });
+            if (existing?.type !== 'toolCall') {
+              updateBlock(contentIndex, { ...toolCall, arguments: {} });
+              await options.onLiveDelta?.({
+                type: 'tool-input-start',
+                messageId,
+                contentIndex,
+                toolCallId: event.toolCallId,
+                toolName: event.toolName,
+              });
+              output.push({ type: 'toolcall_start', contentIndex, partial });
+              const delta = JSON.stringify(event.input);
+              await options.onLiveDelta?.({
+                type: 'tool-input-delta',
+                messageId,
+                contentIndex,
+                toolCallId: event.toolCallId,
+                toolName: event.toolName,
+                delta,
+              });
+              output.push({ type: 'toolcall_delta', contentIndex, delta, partial });
+            }
             updateBlock(contentIndex, toolCall);
-            output.push({
-              type: 'toolcall_delta',
+            await options.onLiveDelta?.({
+              type: 'tool-input-end',
+              messageId,
               contentIndex,
-              delta: JSON.stringify(event.input),
-              partial,
+              toolCallId: event.toolCallId,
+              toolName: event.toolName,
+              input: event.input,
             });
+            await options.prestartTool?.(toolCall, contentIndex, messageId, partial, signal);
             output.push({
               type: 'toolcall_end',
               contentIndex,
@@ -364,7 +585,7 @@ export const createTransportStreamFunction =
             usageSettled = true;
             continue;
           }
-          closeActive();
+          await closeLegacyActive();
           terminalReason = event.stopReason;
         }
         if (terminalReason === undefined) {
@@ -388,16 +609,7 @@ export const createTransportStreamFunction =
         if (invocationMetadata) {
           transportMetadata = { ...transportMetadata, ...invocationMetadata };
         }
-        const durableMetadata: ProviderMessageMetadata | undefined =
-          stopReason === 'aborted' && !usageSettled
-            ? {
-                ...transportMetadata,
-                usageUnsettled: {
-                  type: 'tau.usage-unsettled',
-                  reason: 'aborted',
-                },
-              }
-            : transportMetadata;
+        const durableMetadata = metadataFor(stopReason);
         if (durableMetadata) {
           partial = {
             ...partial,
@@ -417,7 +629,7 @@ export const createTransportStreamFunction =
         if (invocationMetadata) {
           transportMetadata = { ...transportMetadata, ...invocationMetadata };
         }
-        closeActive();
+        await closeLegacyActive();
         const reason = signal.aborted ? 'aborted' : 'error';
         const diagnostic = createTransportFailureDiagnostic(error, Date.now());
         const failure: AssistantMessage = {
@@ -430,16 +642,7 @@ export const createTransportStreamFunction =
             ...(diagnostic ? [diagnostic] : []),
           ],
         };
-        const durableMetadata: ProviderMessageMetadata | undefined =
-          reason === 'aborted' && !usageSettled
-            ? {
-                ...transportMetadata,
-                usageUnsettled: {
-                  type: 'tau.usage-unsettled',
-                  reason: 'aborted',
-                },
-              }
-            : transportMetadata;
+        const durableMetadata = metadataFor(reason);
         if (durableMetadata) {
           failure.diagnostics = [
             ...(failure.diagnostics ?? []),
@@ -466,6 +669,7 @@ const asMiddleware =
 const compactionModelsWithTransport = (options: {
   readonly transport: ModelTransport;
   readonly providerKind?: ModelProviderKind | undefined;
+  readonly reasoning?: ModelReasoningConfig | undefined;
   readonly identities: MessageIdentities;
   readonly toolInputIds: Map<string, string>;
   readonly createId: () => string;
@@ -502,6 +706,7 @@ const compactionModelsWithTransport = (options: {
           modelId: model.id,
           modelCost: model.cost,
           providerKind: options.providerKind,
+          reasoning: options.reasoning,
           maxTokens: requestedMaxTokens(model.maxTokens, streamOptions?.maxTokens),
           contextWindow: model.contextWindow,
           systemPrompt: context.systemPrompt ?? '',
@@ -593,6 +798,7 @@ export type AgentSessionModel = {
   readonly api?: Api | undefined;
   readonly provider?: string | undefined;
   readonly providerKind?: ModelProviderKind | undefined;
+  readonly reasoning?: TurnModelConfig['reasoning'] | undefined;
 };
 
 /** Dependencies and host context needed to create one pi-backed session. @public */
@@ -654,28 +860,37 @@ const appendAgentEvent = async (options: {
   readonly event: AgentEvent;
   readonly record: SessionRecord;
   readonly toolInputIds: Map<string, string>;
+  readonly committedMessageIds: Set<string>;
   readonly createId: () => string;
 }): Promise<void> => {
   const { event, record } = options;
   if (event.type === 'message_end') {
-    await record.append({
-      type: 'message.appended',
-      message: piMessageToProvider(event.message, record.messages),
-    });
+    const message = piMessageToProvider(event.message, record.messages);
+    const committed = options.committedMessageIds.has(message.id);
+    await record.append(
+      committed
+        ? { type: 'message.envelope-replaced', messageId: message.id, replacement: message }
+        : { type: 'message.appended', message },
+    );
+    options.committedMessageIds.add(message.id);
     return;
   }
   if (event.type === 'tool_execution_start') {
     const id = options.toolInputIds.get(event.toolCallId) ?? options.createId();
     options.toolInputIds.set(event.toolCallId, id);
-    await record.append({
-      type: 'message.appended',
-      message: toolInputToProvider({
-        id,
-        toolCallId: event.toolCallId,
-        toolName: event.toolName,
-        input: normalizeToolInput(event.toolName, event.args),
-      }),
+    const message = toolInputToProvider({
+      id,
+      toolCallId: event.toolCallId,
+      toolName: event.toolName,
+      input: normalizeToolInput(event.toolName, event.args),
     });
+    const committed = options.committedMessageIds.has(id);
+    await record.append(
+      committed
+        ? { type: 'message.envelope-replaced', messageId: id, replacement: message }
+        : { type: 'message.appended', message },
+    );
+    options.committedMessageIds.add(id);
   }
 };
 
@@ -724,6 +939,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       return hydrated ? [hydrated] : [];
     });
   const initialMessages = hydrateHistory(initialHistory);
+  const committedMessageIds = new Set(initialHistory.map((message) => message.id));
   const toolInputIds = new Map(
     initialHistory.flatMap((message) =>
       message.role === 'tool-input' ? [[message.toolCallId, message.id] as const] : [],
@@ -795,11 +1011,31 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
             isError: true,
           },
   };
-  const tools = createAgentTools({
+  type PrestartedToolResult =
+    | { readonly ok: true; readonly value: AgentToolResult<HostToolExecutionDetails> }
+    | { readonly ok: false; readonly error: unknown };
+  const prestartedToolResults = new Map<string, Promise<PrestartedToolResult>>();
+  const baseTools = createAgentTools({
     registry: toolRegistry,
     runId: options.runId,
     substitute: options.substituteToolResult,
   });
+  const tools: typeof baseTools = baseTools.map((tool) => ({
+    ...tool,
+    // eslint-disable-next-line max-params -- Pi's AgentTool contract supplies these four invocation values.
+    execute: async (toolCallId, input, signal, onUpdate) => {
+      const prestarted = prestartedToolResults.get(toolCallId);
+      if (prestarted) {
+        prestartedToolResults.delete(toolCallId);
+        const settled = await prestarted;
+        if (!settled.ok) {
+          throw settled.error;
+        }
+        return settled.value;
+      }
+      return tool.execute(toolCallId, input, signal, onUpdate);
+    },
+  }));
   const bindInvocation = async (attemptId: string, metadata: ProviderMessageMetadata): Promise<void> => {
     const binding = metadata.tauInternal;
     if (binding?.['kind'] !== 'billing-invocation' || binding['attemptId'] !== attemptId) {
@@ -846,11 +1082,16 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         if (prepared.purpose === 'compaction') {
           return event.type === 'history.compacted';
         }
+        const message =
+          event.type === 'message.appended'
+            ? event.message
+            : event.type === 'message.envelope-replaced'
+              ? event.replacement
+              : undefined;
         return (
-          event.type === 'message.appended' &&
-          event.message.role === 'assistant' &&
-          event.message.metadata?.tauInternal?.['kind'] === 'billing-invocation' &&
-          event.message.metadata.tauInternal['attemptId'] === prepared.attemptId
+          message?.role === 'assistant' &&
+          message.metadata?.tauInternal?.['kind'] === 'billing-invocation' &&
+          message.metadata.tauInternal['attemptId'] === prepared.attemptId
         );
       });
       if (!completed) {
@@ -879,6 +1120,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
   const base = createTransportStreamFunction({
     transport: options.modelTransport,
     providerKind: effectiveModel.providerKind,
+    reasoning: effectiveModel.reasoning,
     identities: record.messages,
     toolInputIds,
     createId,
@@ -886,6 +1128,80 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     committedContext: () => committedContext,
     usePostCompactionContext: () => restoreRecentSkillContent,
     systemPromptBlocks: () => options.systemPromptBlocks,
+    // eslint-disable-next-line max-params -- The hook mirrors Pi's streamed tool-call lifecycle.
+    prestartTool: async (toolCall, contentIndex, messageId, partial, signal) => {
+      if (prestartedToolResults.has(toolCall.id)) {
+        return;
+      }
+      const tool = baseTools.find((candidate) => candidate.name === toolCall.name);
+      if (!tool) {
+        return;
+      }
+      let input: Parameters<typeof tool.execute>[1];
+      try {
+        const prepared = {
+          ...toolCall,
+          arguments: tool.prepareArguments?.(toolCall.arguments) ?? toolCall.arguments,
+        };
+        input = validateToolArguments(tool, prepared);
+      } catch {
+        // Pi emits the canonical validation failure when it processes the final message.
+        return;
+      }
+      record.messages.set(partial, messageId);
+      const assistant = piMessageToProvider(partial, record.messages);
+      await record.append(
+        committedMessageIds.has(messageId)
+          ? { type: 'message.envelope-replaced', messageId, replacement: assistant }
+          : { type: 'message.appended', message: assistant },
+      );
+      committedMessageIds.add(messageId);
+      const inputId = toolInputIds.get(toolCall.id) ?? createId();
+      toolInputIds.set(toolCall.id, inputId);
+      const inputMessage = toolInputToProvider({
+        id: inputId,
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+        input: normalizeToolInput(toolCall.name, input),
+      });
+      await record.append(
+        committedMessageIds.has(inputId)
+          ? { type: 'message.envelope-replaced', messageId: inputId, replacement: inputMessage }
+          : { type: 'message.appended', message: inputMessage },
+      );
+      committedMessageIds.add(inputId);
+      // async-iife: bootstrap -- eager dispatch must settle without an unhandled rejection before Pi awaits it.
+      const result = (async (): Promise<PrestartedToolResult> => {
+        try {
+          const value = await tool.execute(
+            toolCall.id,
+            input,
+            signal,
+            options.onLiveEvent
+              ? (progress: AgentToolResult<HostToolExecutionDetails>) => {
+                  const { details } = progress;
+                  // async-iife: bootstrap -- Pi's progress callback cannot await a live subscriber.
+                  void options.onLiveEvent?.({
+                    type: 'tool-output-update',
+                    chatId: options.chatId,
+                    runId: options.runId,
+                    messageId,
+                    contentIndex,
+                    toolCallId: toolCall.id,
+                    toolName: toolCall.name,
+                    output: details.content,
+                    isError: details.isError,
+                  });
+                }
+              : undefined,
+          );
+          return { ok: true, value };
+        } catch (error) {
+          return { ok: false, error };
+        }
+      })();
+      prestartedToolResults.set(toolCall.id, result);
+    },
     onLiveDelta: options.onLiveEvent
       ? async (event) =>
           options.onLiveEvent?.({
@@ -933,6 +1249,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
       : compactionModelsWithTransport({
           transport: options.modelTransport,
           providerKind: effectiveModel.providerKind,
+          reasoning: effectiveModel.reasoning,
           identities: record.messages,
           toolInputIds,
           createId,
@@ -964,7 +1281,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
   let abortRequested = false;
   const wasAbortRequested = (): boolean => abortRequested;
   agent.subscribe(async (event) => {
-    await appendAgentEvent({ event, record, toolInputIds, createId });
+    await appendAgentEvent({ event, record, toolInputIds, committedMessageIds, createId });
     if (event.type !== 'agent_end') {
       return;
     }
@@ -1016,6 +1333,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
           ...(options.model.maxTokens === undefined ? {} : { maxTokens: options.model.maxTokens }),
           ...(options.model.providerKind === undefined ? {} : { providerKind: options.model.providerKind }),
           ...(options.model.cost === undefined ? {} : { cost: options.model.cost }),
+          ...(options.model.reasoning === undefined ? {} : { reasoning: options.model.reasoning }),
         },
         toolChoice: options.toolChoice,
         allowedTools: options.allowedTools,

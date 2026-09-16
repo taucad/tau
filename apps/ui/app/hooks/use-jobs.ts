@@ -295,7 +295,7 @@ export const useJobs = (): JobsView => {
   const [jobs, setJobs] = useState<readonly JobProjection[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string>();
-  const [generation, setGeneration] = useState(0);
+  const [pollingController, setPollingController] = useState(() => new AbortController());
   const [cancellingJobIds, setCancellingJobIds] = useState<ReadonlySet<string>>(new Set());
   const [cancellationErrors, setCancellationErrors] = useState<Readonly<Record<string, string>>>({});
 
@@ -305,12 +305,12 @@ export const useJobs = (): JobsView => {
   }, []);
 
   const retry = useCallback(() => {
-    setGeneration((current) => current + 1);
+    setPollingController(new AbortController());
   }, []);
 
   useEffect(() => {
     const recover = (): void => {
-      setGeneration((current) => current + 1);
+      setPollingController(new AbortController());
     };
     globalThis.addEventListener('online', recover);
     globalThis.addEventListener('offline', recover);
@@ -333,7 +333,7 @@ export const useJobs = (): JobsView => {
   );
 
   useEffect(() => {
-    const controller = new AbortController();
+    const controller = pollingController.signal.aborted ? new AbortController() : pollingController;
     const streamControllers = new Map<string, AbortController>();
     const streamTasks = new Map<string, Promise<void>>();
     let refreshing = false;
@@ -445,7 +445,7 @@ export const useJobs = (): JobsView => {
         streamController.abort();
       }
     };
-  }, [apiBaseUrl, generation, projectId, publish]);
+  }, [apiBaseUrl, pollingController, projectId, publish]);
 
   const cancel = useCallback(
     async (jobId: string): Promise<void> => {

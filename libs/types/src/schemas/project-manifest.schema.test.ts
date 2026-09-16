@@ -51,6 +51,17 @@ describe('project manifest schema', () => {
     expect(published.properties['syncChats']?.['type']).toBe('boolean');
   });
 
+  it('carries the default-off large-export sync preference', async () => {
+    const enabled = { ...manifest, syncLargeExports: true };
+    expect(parseProjectManifestBytes(serializeProjectManifest(enabled))).toEqual({ success: true, data: enabled });
+    expect(projectToManifest(enabled).syncLargeExports).toBe(true);
+    expect('syncLargeExports' in projectToManifest(manifest)).toBe(false);
+
+    const text = await readFile(fileURLToPath(new URL(publishedSchemaPath, import.meta.url)), 'utf8');
+    const published = publishedSchemaShape.parse(JSON.parse(text));
+    expect(published.properties['syncLargeExports']?.['type']).toBe('boolean');
+  });
+
   it('rejects unknown top-level and nested properties', () => {
     expect(parseProjectManifestBytes(encode({ ...manifest, createdAt: 1 }))).toMatchObject({
       success: false,

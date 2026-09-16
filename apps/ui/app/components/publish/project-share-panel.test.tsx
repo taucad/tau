@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { ReactElement } from 'react';
 import type { ShareProjectSnapshot } from '@taucad/share/snapshot';
 import type { RevisionTag } from '@taucad/revisions';
+import { entitlementsFromTier } from '@taucad/billing';
 import { ProjectSharePanel, nextVersionName } from '#components/publish/project-share-panel.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 import type * as useEntitlementsModule from '@taucad/billing/hooks/use-entitlements';
@@ -76,7 +77,15 @@ vi.mock('@taucad/billing/hooks/use-entitlements', async (importOriginal) => {
 const openSettingsDialogMock = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-settings-dialog.js', async (importOriginal) => {
   const actual = await importOriginal<typeof useSettingsDialogModule>();
-  return { ...actual, openSettingsDialog: openSettingsDialogMock };
+  return {
+    ...actual,
+    useSettingsDialog: () => ({
+      isOpen: false,
+      section: 'general',
+      open: openSettingsDialogMock,
+      close: vi.fn(),
+    }),
+  };
 });
 
 const tag = (name: string): RevisionTag => ({
@@ -118,6 +127,7 @@ const publishedEnvelope = {
   project: { id: 'proj_ui', name: 'Demo', description: 'a beautiful model' },
   currentPublication: {
     id: 'pub_ui',
+    tag: 'v1',
     title: 'Demo',
     description: 'a beautiful model',
     visibility: 'private',
@@ -162,8 +172,7 @@ const renderPanel = (ui: ReactElement, initialEntries?: string[]): ReturnType<ty
   );
 
 describe('ProjectSharePanel', () => {
-  beforeEach(async () => {
-    const { entitlementsFromTier } = await import('@taucad/billing');
+  beforeEach(() => {
     useEntitlementsMock.mockReturnValue(entitlementsFromTier('pro'));
     revisionStatusHarness.reset();
     openSettingsDialogMock.mockClear();
@@ -598,6 +607,18 @@ describe('ProjectSharePanel', () => {
     expect(screen.queryByRole('radio', { name: /private/i })).not.toBeInTheDocument();
   });
 
+  it('republishes the exact named version and makes another version explicit', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(publishedEnvelope));
+    renderPanel(<ProjectSharePanel projectId='proj_ui' projectName='Demo' entryPath='main.ts' />);
+
+    expect(await screen.findByText('Version v1')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Republish this version' }));
+    expect(revisionStatusHarness.commands.publishProject).toHaveBeenCalledWith('v1');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Publish another version' }));
+    expect(screen.getByRole('combobox', { name: /version name/i })).toBeInTheDocument();
+  });
+
   it('switches private publications to public without removing listed grants', async () => {
     vi.mocked(globalThis.fetch)
       .mockResolvedValueOnce(mockJsonResponse(publishedEnvelope))
@@ -721,8 +742,7 @@ describe('nextVersionName', () => {
 });
 
 describe('ProjectSharePanel free-tier visibility gate (T5)', () => {
-  beforeEach(async () => {
-    const { entitlementsFromTier } = await import('@taucad/billing');
+  beforeEach(() => {
     useEntitlementsMock.mockReturnValue(entitlementsFromTier('free'));
     globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(unpublishedEnvelope));
   });

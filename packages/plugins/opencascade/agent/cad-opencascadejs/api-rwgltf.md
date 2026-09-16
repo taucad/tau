@@ -4,168 +4,168 @@
 
 RWGltf_CafReader: declare class RWGltf_CafReader extends RWMesh_CafReader
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-ToParallel(): boolean;
+  ToParallel(): boolean;
 
-SetParallel(theToParallel: boolean): void;
+  SetParallel(theToParallel: boolean): void;
 
-ToSkipEmptyNodes(): boolean;
+  ToSkipEmptyNodes(): boolean;
 
-SetSkipEmptyNodes(theToSkip: boolean): void;
+  SetSkipEmptyNodes(theToSkip: boolean): void;
 
-ToLoadAllScenes(): boolean;
+  ToLoadAllScenes(): boolean;
 
-ToApplyScale(): boolean;
+  ToApplyScale(): boolean;
 
-SetLoadAllScenes(theToLoadAll: boolean): void;
+  SetLoadAllScenes(theToLoadAll: boolean): void;
 
-ToUseMeshNameAsFallback(): boolean;
+  ToUseMeshNameAsFallback(): boolean;
 
-SetMeshNameAsFallback(theToFallback: boolean): void;
+  SetMeshNameAsFallback(theToFallback: boolean): void;
 
-IsDoublePrecision(): boolean;
+  IsDoublePrecision(): boolean;
 
-SetDoublePrecision(theIsDouble: boolean): void;
+  SetDoublePrecision(theIsDouble: boolean): void;
 
-ToSkipLateDataLoading(): boolean;
+  ToSkipLateDataLoading(): boolean;
 
-SetToSkipLateDataLoading(theToSkip: boolean): void;
+  SetToSkipLateDataLoading(theToSkip: boolean): void;
 
-SetToApplyScale(theToApplyScale: boolean): void;
+  SetToApplyScale(theToApplyScale: boolean): void;
 
-ToKeepLateData(): boolean;
+  ToKeepLateData(): boolean;
 
-SetToKeepLateData(theToKeep: boolean): void;
+  SetToKeepLateData(theToKeep: boolean): void;
 
-ToPrintDebugMessages(): boolean;
+  ToPrintDebugMessages(): boolean;
 
-SetToPrintDebugMessages(theToPrint: boolean): void;
+  SetToPrintDebugMessages(theToPrint: boolean): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWGltf_CafWriter: declare class RWGltf_CafWriter extends Standard_Transient
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-CoordinateSystemConverter(): RWMesh_CoordinateSystemConverter;
+  CoordinateSystemConverter(): RWMesh_CoordinateSystemConverter;
 
-ChangeCoordinateSystemConverter(): RWMesh_CoordinateSystemConverter;
+  ChangeCoordinateSystemConverter(): RWMesh_CoordinateSystemConverter;
 
-SetCoordinateSystemConverter(theConverter: RWMesh_CoordinateSystemConverter): void;
+  SetCoordinateSystemConverter(theConverter: RWMesh_CoordinateSystemConverter): void;
 
-IsBinary(): boolean;
+  IsBinary(): boolean;
 
-TransformationFormat(): RWGltf_WriterTrsfFormat;
+  TransformationFormat(): RWGltf_WriterTrsfFormat;
 
-SetTransformationFormat(theFormat: RWGltf_WriterTrsfFormat): void;
+  SetTransformationFormat(theFormat: RWGltf_WriterTrsfFormat): void;
 
-NodeNameFormat(): RWMesh_NameFormat;
+  NodeNameFormat(): RWMesh_NameFormat;
 
-SetNodeNameFormat(theFormat: RWMesh_NameFormat): void;
+  SetNodeNameFormat(theFormat: RWMesh_NameFormat): void;
 
-MeshNameFormat(): RWMesh_NameFormat;
+  MeshNameFormat(): RWMesh_NameFormat;
 
-SetMeshNameFormat(theFormat: RWMesh_NameFormat): void;
+  SetMeshNameFormat(theFormat: RWMesh_NameFormat): void;
 
-IsForcedUVExport(): boolean;
+  IsForcedUVExport(): boolean;
 
-SetForcedUVExport(theToForce: boolean): void;
+  SetForcedUVExport(theToForce: boolean): void;
 
-DefaultStyle(): XCAFPrs_Style;
+  DefaultStyle(): XCAFPrs_Style;
 
-SetDefaultStyle(theStyle: XCAFPrs_Style): void;
+  SetDefaultStyle(theStyle: XCAFPrs_Style): void;
 
-ToEmbedTexturesInGlb(): boolean;
+  ToEmbedTexturesInGlb(): boolean;
 
-SetToEmbedTexturesInGlb(theToEmbedTexturesInGlb: boolean): void;
+  SetToEmbedTexturesInGlb(theToEmbedTexturesInGlb: boolean): void;
 
-ToMergeFaces(): boolean;
+  ToMergeFaces(): boolean;
 
-SetMergeFaces(theToMerge: boolean): void;
+  SetMergeFaces(theToMerge: boolean): void;
 
-ToSplitIndices16(): boolean;
+  ToSplitIndices16(): boolean;
 
-SetSplitIndices16(theToSplit: boolean): void;
+  SetSplitIndices16(theToSplit: boolean): void;
 
-ToParallel(): boolean;
+  ToParallel(): boolean;
 
-SetParallel(theToParallel: boolean): void;
+  SetParallel(theToParallel: boolean): void;
 
-CompressionParameters(): RWGltf_DracoParameters;
+  CompressionParameters(): RWGltf_DracoParameters;
 
-SetCompressionParameters(theDracoParameters: RWGltf_DracoParameters): void;
+  SetCompressionParameters(theDracoParameters: RWGltf_DracoParameters): void;
 
-Perform(theDocument: TDocStd_Document, theRootLabels: NCollection_Sequence_TDF_Label, theLabelFilter: NCollection_Map_TCollection_AsciiString, theFileInfo: any, theProgress: Message_ProgressRange): boolean;
-Perform(theDocument: TDocStd_Document, theFileInfo: any, theProgress: Message_ProgressRange): boolean;
-Perform(theDocument: TDocStd_Document, theRootLabels: NCollection_Sequence_TDF_Label, theLabelFilter: NCollection_Map_TCollection_AsciiString, theFileInfo: any, theProgress: Message_ProgressRange): boolean;
-Perform(theDocument: TDocStd_Document, theFileInfo: any, theProgress: Message_ProgressRange): boolean;
+  Perform(theDocument: TDocStd_Document, theRootLabels: NCollection_Sequence_TDF_Label, theLabelFilter: NCollection_Map_TCollection_AsciiString, theFileInfo: any, theProgress: Message_ProgressRange): boolean;
+  Perform(theDocument: TDocStd_Document, theFileInfo: any, theProgress: Message_ProgressRange): boolean;
+  Perform(theDocument: TDocStd_Document, theRootLabels: NCollection_Sequence_TDF_Label, theLabelFilter: NCollection_Map_TCollection_AsciiString, theFileInfo: any, theProgress: Message_ProgressRange): boolean;
+  Perform(theDocument: TDocStd_Document, theFileInfo: any, theProgress: Message_ProgressRange): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWGltf_DracoParameters: declare class RWGltf_DracoParameters
 
-constructor
+  constructor
 
-DracoCompression: boolean
+  DracoCompression: boolean
 
-CompressionLevel: number
+  CompressionLevel: number
 
-QuantizePositionBits: number
+  QuantizePositionBits: number
 
-QuantizeNormalBits: number
+  QuantizeNormalBits: number
 
-QuantizeTexcoordBits: number
+  QuantizeTexcoordBits: number
 
-QuantizeColorBits: number
+  QuantizeColorBits: number
 
-QuantizeGenericBits: number
+  QuantizeGenericBits: number
 
-UnifiedQuantization: boolean
+  UnifiedQuantization: boolean
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWGltf_GltfAccessor: declare class RWGltf_GltfAccessor
 
-constructor
+  constructor
 
-Id: number
+  Id: number
 
-ByteOffset: number
+  ByteOffset: number
 
-Count: number
+  Count: number
 
-ByteStride: number
+  ByteStride: number
 
-Type: RWGltf_GltfAccessorLayout
+  Type: RWGltf_GltfAccessorLayout
 
-ComponentType: RWGltf_GltfAccessorCompType
+  ComponentType: RWGltf_GltfAccessorCompType
 
-BndBox: any
+  BndBox: any
 
-IsCompressed: boolean
+  IsCompressed: boolean
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWGltf_GltfAccessorCompType: typeof RWGltf_GltfAccessorCompType[keyof typeof RWGltf_GltfAccessorCompType]
 
@@ -177,190 +177,190 @@ RWGltf_GltfArrayType: typeof RWGltf_GltfArrayType[keyof typeof RWGltf_GltfArrayT
 
 RWGltf_GltfBufferView: declare class RWGltf_GltfBufferView
 
-constructor
+  constructor
 
-Id: number
+  Id: number
 
-ByteOffset: number
+  ByteOffset: number
 
-ByteLength: number
+  ByteLength: number
 
-ByteStride: number
+  ByteStride: number
 
-Target: RWGltf_GltfBufferViewTarget
+  Target: RWGltf_GltfBufferViewTarget
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWGltf_GltfBufferViewTarget: typeof RWGltf_GltfBufferViewTarget[keyof typeof RWGltf_GltfBufferViewTarget]
 
 RWGltf_GltfFace: declare class RWGltf_GltfFace extends Standard_Transient
 
-constructor
+  constructor
 
-NodePos: RWGltf_GltfAccessor
+  NodePos: RWGltf_GltfAccessor
 
-NodeNorm: RWGltf_GltfAccessor
+  NodeNorm: RWGltf_GltfAccessor
 
-NodeUV: RWGltf_GltfAccessor
+  NodeUV: RWGltf_GltfAccessor
 
-Indices: RWGltf_GltfAccessor
+  Indices: RWGltf_GltfAccessor
 
-Shape: TopoDS_Shape
+  Shape: TopoDS_Shape
 
-Style: XCAFPrs_Style
+  Style: XCAFPrs_Style
 
-NbIndexedNodes: number
+  NbIndexedNodes: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWGltf_GltfJsonParser: declare class RWGltf_GltfJsonParser
 
-constructor
+  constructor
 
-SetFilePath(theFilePath: TCollection_AsciiString): void;
+  SetFilePath(theFilePath: TCollection_AsciiString): void;
 
-SetProbeHeader(theToProbe: boolean): void;
+  SetProbeHeader(theToProbe: boolean): void;
 
-ErrorPrefix(): TCollection_AsciiString;
+  ErrorPrefix(): TCollection_AsciiString;
 
-SetErrorPrefix(theErrPrefix: TCollection_AsciiString): void;
+  SetErrorPrefix(theErrPrefix: TCollection_AsciiString): void;
 
-SetAttributeMap(theAttribMap: NCollection_DataMap_TopoDS_Shape_RWMesh_NodeAttributes_TopTools_ShapeMapHasher): void;
+  SetAttributeMap(theAttribMap: NCollection_DataMap_TopoDS_Shape_RWMesh_NodeAttributes_TopTools_ShapeMapHasher): void;
 
-SetScaleMap(theScaleMap: NCollection_DataMap_TopoDS_Shape_gp_XYZ_TopTools_ShapeMapHasher): void;
+  SetScaleMap(theScaleMap: NCollection_DataMap_TopoDS_Shape_gp_XYZ_TopTools_ShapeMapHasher): void;
 
-SetExternalFiles(theExternalFiles: NCollection_IndexedMap_TCollection_AsciiString): void;
+  SetExternalFiles(theExternalFiles: NCollection_IndexedMap_TCollection_AsciiString): void;
 
-SetMetadata(theMetadata: any): void;
+  SetMetadata(theMetadata: any): void;
 
-SetReadAssetExtras(theToRead: boolean): void;
+  SetReadAssetExtras(theToRead: boolean): void;
 
-CoordinateSystemConverter(): RWMesh_CoordinateSystemConverter;
+  CoordinateSystemConverter(): RWMesh_CoordinateSystemConverter;
 
-SetCoordinateSystemConverter(theConverter: RWMesh_CoordinateSystemConverter): void;
+  SetCoordinateSystemConverter(theConverter: RWMesh_CoordinateSystemConverter): void;
 
-SetBinaryFormat(theBinBodyOffset: number, theBinBodyLen: number): void;
+  SetBinaryFormat(theBinBodyOffset: number, theBinBodyLen: number): void;
 
-SetSkipEmptyNodes(theToSkip: boolean): void;
+  SetSkipEmptyNodes(theToSkip: boolean): void;
 
-SetLoadAllScenes(theToLoadAll: boolean): void;
+  SetLoadAllScenes(theToLoadAll: boolean): void;
 
-SetMeshNameAsFallback(theToFallback: boolean): void;
+  SetMeshNameAsFallback(theToFallback: boolean): void;
 
-SetToApplyScale(theToApplyScale: boolean): void;
+  SetToApplyScale(theToApplyScale: boolean): void;
 
-Parse(theProgress: Message_ProgressRange): boolean;
+  Parse(theProgress: Message_ProgressRange): boolean;
 
-FaceList(): NCollection_DynamicArray_TopoDS_Face;
+  FaceList(): NCollection_DynamicArray_TopoDS_Face;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWGltf_GltfLatePrimitiveArray: declare class RWGltf_GltfLatePrimitiveArray extends RWMesh_TriangulationSource
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-Id(): TCollection_AsciiString;
+  Id(): TCollection_AsciiString;
 
-Name(): TCollection_AsciiString;
+  Name(): TCollection_AsciiString;
 
-SetName(theName: TCollection_AsciiString): void;
+  SetName(theName: TCollection_AsciiString): void;
 
-PrimitiveMode(): RWGltf_GltfPrimitiveMode;
+  PrimitiveMode(): RWGltf_GltfPrimitiveMode;
 
-SetPrimitiveMode(theMode: RWGltf_GltfPrimitiveMode): void;
+  SetPrimitiveMode(theMode: RWGltf_GltfPrimitiveMode): void;
 
-HasStyle(): boolean;
+  HasStyle(): boolean;
 
-BaseColor(): Quantity_ColorRGBA;
+  BaseColor(): Quantity_ColorRGBA;
 
-MaterialPbr(): RWGltf_MaterialMetallicRoughness;
+  MaterialPbr(): RWGltf_MaterialMetallicRoughness;
 
-SetMaterialPbr(theMat: RWGltf_MaterialMetallicRoughness): void;
+  SetMaterialPbr(theMat: RWGltf_MaterialMetallicRoughness): void;
 
-MaterialCommon(): RWGltf_MaterialCommon;
+  MaterialCommon(): RWGltf_MaterialCommon;
 
-SetMaterialCommon(theMat: RWGltf_MaterialCommon): void;
+  SetMaterialCommon(theMat: RWGltf_MaterialCommon): void;
 
-Data(): NCollection_Sequence_RWGltf_GltfPrimArrayData;
+  Data(): NCollection_Sequence_RWGltf_GltfPrimArrayData;
 
-AddPrimArrayData(theType: RWGltf_GltfArrayType): RWGltf_GltfPrimArrayData;
+  AddPrimArrayData(theType: RWGltf_GltfArrayType): RWGltf_GltfPrimArrayData;
 
-HasDeferredData(): boolean;
+  HasDeferredData(): boolean;
 
-LoadStreamData(): Poly_Triangulation;
+  LoadStreamData(): Poly_Triangulation;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWGltf_GltfMaterialMap: declare class RWGltf_GltfMaterialMap extends RWMesh_MaterialMap
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-FlushGlbBufferViews(theWriter: RWGltf_GltfOStreamWriter, theBinDataBufferId: number, theBuffViewId?: number): { theBuffViewId: number };
+  FlushGlbBufferViews(theWriter: RWGltf_GltfOStreamWriter, theBinDataBufferId: number, theBuffViewId?: number): { theBuffViewId: number };
 
-FlushGlbImages(theWriter: RWGltf_GltfOStreamWriter): void;
+  FlushGlbImages(theWriter: RWGltf_GltfOStreamWriter): void;
 
-AddImages(theWriter: RWGltf_GltfOStreamWriter, theStyle: XCAFPrs_Style, theIsStarted?: boolean): { theIsStarted: boolean };
+  AddImages(theWriter: RWGltf_GltfOStreamWriter, theStyle: XCAFPrs_Style, theIsStarted?: boolean): { theIsStarted: boolean };
 
-AddMaterial(theWriter: RWGltf_GltfOStreamWriter, theStyle: XCAFPrs_Style, theIsStarted: boolean): void;
-AddMaterial(theStyle: XCAFPrs_Style): TCollection_AsciiString;
-AddMaterial(theWriter: RWGltf_GltfOStreamWriter, theStyle: XCAFPrs_Style, theIsStarted: boolean): void;
-AddMaterial(theStyle: XCAFPrs_Style): TCollection_AsciiString;
+  AddMaterial(theWriter: RWGltf_GltfOStreamWriter, theStyle: XCAFPrs_Style, theIsStarted: boolean): void;
+  AddMaterial(theStyle: XCAFPrs_Style): TCollection_AsciiString;
+  AddMaterial(theWriter: RWGltf_GltfOStreamWriter, theStyle: XCAFPrs_Style, theIsStarted: boolean): void;
+  AddMaterial(theStyle: XCAFPrs_Style): TCollection_AsciiString;
 
-AddTextures(theWriter: RWGltf_GltfOStreamWriter, theStyle: XCAFPrs_Style, theIsStarted?: boolean): { theIsStarted: boolean };
+  AddTextures(theWriter: RWGltf_GltfOStreamWriter, theStyle: XCAFPrs_Style, theIsStarted?: boolean): { theIsStarted: boolean };
 
-NbImages(): number;
+  NbImages(): number;
 
-NbTextures(): number;
+  NbTextures(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWGltf_GltfOStreamWriter: declare class RWGltf_GltfOStreamWriter
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWGltf_GltfPrimArrayData: declare class RWGltf_GltfPrimArrayData
 
-constructor
+  constructor
 
-StreamData: NCollection_Buffer
+  StreamData: NCollection_Buffer
 
-StreamUri: TCollection_AsciiString
+  StreamUri: TCollection_AsciiString
 
-StreamOffset: number
+  StreamOffset: number
 
-StreamLength: number
+  StreamLength: number
 
-Accessor: RWGltf_GltfAccessor
+  Accessor: RWGltf_GltfAccessor
 
-Type: RWGltf_GltfArrayType
+  Type: RWGltf_GltfArrayType
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWGltf_GltfPrimitiveMode: typeof RWGltf_GltfPrimitiveMode[keyof typeof RWGltf_GltfPrimitiveMode]
 
@@ -368,104 +368,104 @@ RWGltf_GltfRootElement: typeof RWGltf_GltfRootElement[keyof typeof RWGltf_GltfRo
 
 RWGltf_GltfSceneNodeMap: declare class RWGltf_GltfSceneNodeMap
 
-constructor
+  constructor
 
-FindIndex(theNodeId: TCollection_AsciiString): number;
+  FindIndex(theNodeId: TCollection_AsciiString): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWGltf_MaterialCommon: declare class RWGltf_MaterialCommon extends Standard_Transient
 
-constructor
+  constructor
 
-AmbientTexture: unknown
+  AmbientTexture: unknown
 
-DiffuseTexture: unknown
+  DiffuseTexture: unknown
 
-SpecularTexture: unknown
+  SpecularTexture: unknown
 
-Id: TCollection_AsciiString
+  Id: TCollection_AsciiString
 
-Name: TCollection_AsciiString
+  Name: TCollection_AsciiString
 
-AmbientColor: Quantity_Color
+  AmbientColor: Quantity_Color
 
-DiffuseColor: Quantity_Color
+  DiffuseColor: Quantity_Color
 
-SpecularColor: Quantity_Color
+  SpecularColor: Quantity_Color
 
-EmissiveColor: Quantity_Color
+  EmissiveColor: Quantity_Color
 
-Shininess: number
+  Shininess: number
 
-Transparency: number
+  Transparency: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWGltf_MaterialMetallicRoughness: declare class RWGltf_MaterialMetallicRoughness extends Standard_Transient
 
-constructor
+  constructor
 
-BaseColorTexture: unknown
+  BaseColorTexture: unknown
 
-MetallicRoughnessTexture: unknown
+  MetallicRoughnessTexture: unknown
 
-EmissiveTexture: unknown
+  EmissiveTexture: unknown
 
-OcclusionTexture: unknown
+  OcclusionTexture: unknown
 
-NormalTexture: unknown
+  NormalTexture: unknown
 
-Id: TCollection_AsciiString
+  Id: TCollection_AsciiString
 
-Name: TCollection_AsciiString
+  Name: TCollection_AsciiString
 
-BaseColor: Quantity_ColorRGBA
+  BaseColor: Quantity_ColorRGBA
 
-EmissiveFactor: [number, number, number]
+  EmissiveFactor: [number, number, number]
 
-Metallic: number
+  Metallic: number
 
-Roughness: number
+  Roughness: number
 
-AlphaCutOff: number
+  AlphaCutOff: number
 
-AlphaMode: RWGltf_GltfAlphaMode
+  AlphaMode: RWGltf_GltfAlphaMode
 
-IsDoubleSided: boolean
+  IsDoubleSided: boolean
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWGltf_TriangulationReader: declare class RWGltf_TriangulationReader extends RWMesh_TriangulationReader
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-LoadStreamData(theSourceMesh: RWMesh_TriangulationSource, theDestMesh: Poly_Triangulation): boolean;
+  LoadStreamData(theSourceMesh: RWMesh_TriangulationSource, theDestMesh: Poly_Triangulation): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 RWGltf_WriterTrsfFormat: typeof RWGltf_WriterTrsfFormat[keyof typeof RWGltf_WriterTrsfFormat]
 
 RWGltf_CafWriter_Mesh: interface RWGltf_CafWriter_Mesh
 
-NodesVec: [number, number, number][]
+  NodesVec: [number, number, number][]
 
-NormalsVec: [number, number, number][]
+  NormalsVec: [number, number, number][]
 
-TexCoordsVec: [number, number][]
+  TexCoordsVec: [number, number][]
 
-IndicesVec: Poly_Triangle[]
+  IndicesVec: Poly_Triangle[]

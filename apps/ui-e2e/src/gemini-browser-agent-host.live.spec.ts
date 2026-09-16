@@ -48,7 +48,10 @@ const submit = async (prompt: string): Promise<void> => {
   }
 };
 
-const readProjectFiles = async (): Promise<{ readonly source: string; readonly spec: string }> => {
+const readProjectFiles = async (): Promise<{
+  readonly source: string;
+  readonly spec: string;
+}> => {
   const storage = await readProjectStorageState();
   const config = storage.configs.at(-1);
   if (!config) {
@@ -64,7 +67,9 @@ const readProjectFiles = async (): Promise<{ readonly source: string; readonly s
 };
 
 const testedCounts = async (): Promise<readonly number[]> => {
-  const buttons = selectors.getByRole('button', { name: /Tested \d+ requirements?/u });
+  const buttons = selectors.getByRole('button', {
+    name: /Tested \d+ requirements?/u,
+  });
   const buttonState = await target.read(buttons);
   const total = buttonState.count;
   const counts: number[] = [];
@@ -143,7 +148,9 @@ const readGeminiUsage = async (): Promise<readonly UsageReceipt[]> => {
     if (origin === undefined) {
       throw new Error('The page did not publish TAU_API_URL.');
     }
-    const response = await fetch(`${origin}${query}`, { credentials: 'include' });
+    const response = await fetch(`${origin}${query}`, {
+      credentials: 'include',
+    });
     if (!response.ok) {
       throw new Error(`Billing usage returned HTTP ${String(response.status)}.`);
     }
@@ -249,7 +256,7 @@ test('Gemini creates a cube, then adds a vertical cylinder cutout on the next us
   await target.click(selectors.getByText('Revisions', { exact: true }).last());
   // The published revisions are the graph's list items; only superseded ones
   // expose a Restore control, so the current revision is not counted by label.
-  await target.expectCount(selectors.getByCss('[aria-label="Revision branch graph"] > li'), 1, 60_000);
+  await target.expectCount(selectors.getByCss('[aria-label="Recent revision history"] > li'), 1, 60_000);
   const firstTurnUsage = await expectSettledGeminiUsage(2);
   const firstTurnOperations = await expectTerminalVertexOperations(email, 2);
 
@@ -265,7 +272,7 @@ test('Gemini creates a cube, then adds a vertical cylinder cutout on the next us
   const secondTurnUsage = await expectSettledGeminiUsage(firstTurnUsage.length + 2);
   const secondTurnOperations = await expectTerminalVertexOperations(email, firstTurnOperations.length + 2);
 
-  await target.expectCount(selectors.getByCss('[aria-label="Revision branch graph"] > li'), 2, 60_000);
+  await target.expectCount(selectors.getByCss('[aria-label="Recent revision history"] > li'), 2, 60_000);
   await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first(), 60_000);
   await target.writeArtifact(
     'gemini-browser-agent-host-live-evidence.json',

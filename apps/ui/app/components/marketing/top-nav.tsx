@@ -20,7 +20,7 @@ export function MarketingTopNav(): React.JSX.Element {
   const { signIn } = useAuthLinks();
 
   return (
-    <header className='sticky top-0 z-40 border-b bg-background/80 backdrop-blur-md'>
+    <header className='sticky top-0 z-40 border-b bg-background/80 backdrop-blur-md [app-region:no-drag]'>
       <div className='container mx-auto flex h-14 items-center justify-between gap-4 px-4'>
         <div className='flex items-center gap-6'>
           <Link to='/' className='flex items-center' aria-label='Tau home'>

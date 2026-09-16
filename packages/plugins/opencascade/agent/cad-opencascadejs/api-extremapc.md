@@ -4,67 +4,67 @@
 
 ExtremaPC_Config: declare class ExtremaPC_Config
 
-constructor
+  constructor
 
-Tolerance: number
+  Tolerance: number
 
-Domain: unknown | null | undefined
+  Domain: unknown | null | undefined
 
-NbSamples: number
+  NbSamples: number
 
-Mode: ExtremaPC_SearchMode
+  Mode: ExtremaPC_SearchMode
 
-IncludeEndpoints: boolean
+  IncludeEndpoints: boolean
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 ExtremaPC_ExtremumResult: declare class ExtremaPC_ExtremumResult
 
-constructor
+  constructor
 
-Parameter: number
+  Parameter: number
 
-Point: gp_Pnt
+  Point: gp_Pnt
 
-SquareDistance: number
+  SquareDistance: number
 
-IsMinimum: boolean
+  IsMinimum: boolean
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 ExtremaPC_Result: declare class ExtremaPC_Result
 
-constructor
+  constructor
 
-Status: ExtremaPC_Status
+  Status: ExtremaPC_Status
 
-Extrema: NCollection_DynamicArray_ExtremaPC_ExtremumResult
+  Extrema: NCollection_DynamicArray_ExtremaPC_ExtremumResult
 
-InfiniteSquareDistance: number
+  InfiniteSquareDistance: number
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-IsInfinite(): boolean;
+  IsInfinite(): boolean;
 
-NbExt(): number;
+  NbExt(): number;
 
-MinSquareDistance(): number;
+  MinSquareDistance(): number;
 
-MinIndex(): number;
+  MinIndex(): number;
 
-MaxSquareDistance(): number;
+  MaxSquareDistance(): number;
 
-MaxIndex(): number;
+  MaxIndex(): number;
 
-Clear(): void;
+  Clear(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 ExtremaPC_SearchMode: typeof ExtremaPC_SearchMode[keyof typeof ExtremaPC_SearchMode]
 
@@ -72,248 +72,248 @@ ExtremaPC_Status: typeof ExtremaPC_Status[keyof typeof ExtremaPC_Status]
 
 ExtremaPC_BSplineCurve: declare class ExtremaPC_BSplineCurve
 
-constructor
+  constructor
 
-Value(theU: number): gp_Pnt;
+  Value(theU: number): gp_Pnt;
 
-IsBounded(): boolean;
+  IsBounded(): boolean;
 
-Domain(): unknown;
+  Domain(): unknown;
 
-Perform(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
+  Perform(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
 
-PerformWithEndpoints(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
+  PerformWithEndpoints(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
 
-Curve(): Geom_BSplineCurve;
+  Curve(): Geom_BSplineCurve;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 ExtremaPC_BezierCurve: declare class ExtremaPC_BezierCurve
 
-constructor
+  constructor
 
-Value(theU: number): gp_Pnt;
+  Value(theU: number): gp_Pnt;
 
-IsBounded(): boolean;
+  IsBounded(): boolean;
 
-Domain(): unknown;
+  Domain(): unknown;
 
-Perform(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
+  Perform(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
 
-PerformWithEndpoints(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
+  PerformWithEndpoints(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
 
-Curve(): Geom_BezierCurve;
+  Curve(): Geom_BezierCurve;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 ExtremaPC_Circle: declare class ExtremaPC_Circle
 
-constructor
+  constructor
 
-Value(theU: number): gp_Pnt;
+  Value(theU: number): gp_Pnt;
 
-IsBounded(): boolean;
+  IsBounded(): boolean;
 
-Domain(): unknown;
+  Domain(): unknown;
 
-Perform(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
+  Perform(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
 
-PerformWithEndpoints(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
+  PerformWithEndpoints(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
 
-Circle(): gp_Circ;
+  Circle(): gp_Circ;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 ExtremaPC_Curve: declare class ExtremaPC_Curve
 
-constructor
+  constructor
 
-Perform(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
+  Perform(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
 
-PerformWithEndpoints(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
+  PerformWithEndpoints(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
 
-IsInitialized(): boolean;
+  IsInitialized(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 ExtremaPC_DistanceFunction: declare class ExtremaPC_DistanceFunction
 
-constructor
+  constructor
 
-Value(theU: number, theF?: number): { returnValue: boolean; theF: number };
+  Value(theU: number, theF?: number): { returnValue: boolean; theF: number };
 
-Values(theU: number, theF?: number, theDF?: number): { returnValue: boolean; theF: number; theDF: number };
+  Values(theU: number, theF?: number, theDF?: number): { returnValue: boolean; theF: number; theDF: number };
 
-Derivative(theU: number, theDF?: number): { returnValue: boolean; theDF: number };
+  Derivative(theU: number, theDF?: number): { returnValue: boolean; theDF: number };
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-Point(): gp_Pnt;
+  Point(): gp_Pnt;
 
-Curve(): Adaptor3d_Curve;
+  Curve(): Adaptor3d_Curve;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 ExtremaPC_Ellipse: declare class ExtremaPC_Ellipse
 
-constructor
+  constructor
 
-Value(theU: number): gp_Pnt;
+  Value(theU: number): gp_Pnt;
 
-IsBounded(): boolean;
+  IsBounded(): boolean;
 
-Domain(): unknown;
+  Domain(): unknown;
 
-Perform(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
+  Perform(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
 
-PerformWithEndpoints(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
+  PerformWithEndpoints(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
 
-Ellipse(): gp_Elips;
+  Ellipse(): gp_Elips;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 ExtremaPC_GridEvaluator: declare class ExtremaPC_GridEvaluator
 
-constructor
+  constructor
 
-Grid(): any;
+  Grid(): any;
 
-Result(): ExtremaPC_Result;
+  Result(): ExtremaPC_Result;
 
-Perform(theCurve: Adaptor3d_Curve, theP: gp_Pnt, theDomain: unknown, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
+  Perform(theCurve: Adaptor3d_Curve, theP: gp_Pnt, theDomain: unknown, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
 
-static BuildUniformParams(theUMin: number, theUMax: number, theNbSamples: number): math_VectorBase_double;
+  static BuildUniformParams(theUMin: number, theUMax: number, theNbSamples: number): math_VectorBase_double;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 ExtremaPC_GridEvaluator_CandidateType: typeof ExtremaPC_GridEvaluator_CandidateType[keyof typeof ExtremaPC_GridEvaluator_CandidateType]
 
 ExtremaPC_Hyperbola: declare class ExtremaPC_Hyperbola
 
-constructor
+  constructor
 
-Value(theU: number): gp_Pnt;
+  Value(theU: number): gp_Pnt;
 
-IsBounded(): boolean;
+  IsBounded(): boolean;
 
-Domain(): unknown;
+  Domain(): unknown;
 
-Perform(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
+  Perform(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
 
-PerformWithEndpoints(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
+  PerformWithEndpoints(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
 
-Hyperbola(): gp_Hypr;
+  Hyperbola(): gp_Hypr;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 ExtremaPC_Line: declare class ExtremaPC_Line
 
-constructor
+  constructor
 
-Value(theU: number): gp_Pnt;
+  Value(theU: number): gp_Pnt;
 
-IsBounded(): boolean;
+  IsBounded(): boolean;
 
-Domain(): unknown;
+  Domain(): unknown;
 
-Perform(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
+  Perform(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
 
-PerformWithEndpoints(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
+  PerformWithEndpoints(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
 
-Line(): gp_Lin;
+  Line(): gp_Lin;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 ExtremaPC_OffsetCurve: declare class ExtremaPC_OffsetCurve
 
-constructor
+  constructor
 
-Value(theU: number): gp_Pnt;
+  Value(theU: number): gp_Pnt;
 
-IsBounded(): boolean;
+  IsBounded(): boolean;
 
-Domain(): unknown;
+  Domain(): unknown;
 
-Perform(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
+  Perform(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
 
-PerformWithEndpoints(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
+  PerformWithEndpoints(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 ExtremaPC_OtherCurve: declare class ExtremaPC_OtherCurve
 
-constructor
+  constructor
 
-Value(theU: number): gp_Pnt;
+  Value(theU: number): gp_Pnt;
 
-IsBounded(): boolean;
+  IsBounded(): boolean;
 
-Domain(): unknown;
+  Domain(): unknown;
 
-Perform(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
+  Perform(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
 
-PerformWithEndpoints(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
+  PerformWithEndpoints(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 ExtremaPC_Parabola: declare class ExtremaPC_Parabola
 
-constructor
+  constructor
 
-Value(theU: number): gp_Pnt;
+  Value(theU: number): gp_Pnt;
 
-IsBounded(): boolean;
+  IsBounded(): boolean;
 
-Domain(): unknown;
+  Domain(): unknown;
 
-Perform(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
+  Perform(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
 
-PerformWithEndpoints(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
+  PerformWithEndpoints(theP: gp_Pnt, theTol: number, theMode: ExtremaPC_SearchMode): ExtremaPC_Result;
 
-Parabola(): gp_Parab;
+  Parabola(): gp_Parab;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 ExtremaPC_GridEvaluator_GridPoint: interface ExtremaPC_GridEvaluator_GridPoint
 
-Param: number
+  Param: number
 
-Point: gp_Pnt
+  Point: gp_Pnt
 
-D1: gp_Vec
+  D1: gp_Vec
 
 ExtremaPC_GridEvaluator_Candidate: interface ExtremaPC_GridEvaluator_Candidate
 
-Type: ExtremaPC_GridEvaluator_CandidateType
+  Type: ExtremaPC_GridEvaluator_CandidateType
 
-IdxLo: number
+  IdxLo: number
 
-IdxHi: number
+  IdxHi: number
 
-StartU: number
+  StartU: number

@@ -1,4 +1,4 @@
-/* eslint-disable no-await-in-loop, max-lines, complexity -- financial mutations execute sequentially in one lock order */
+/* oxlint-disable no-await-in-loop, max-lines, complexity -- financial mutations execute sequentially in one lock order */
 import { cashBlockingFinancialCaseKinds } from '#api/billing/billing-cash-reconciliation.service.js';
 import {
   paymentOfferSnapshotSchema,
@@ -2814,8 +2814,9 @@ export class CreditLedgerService {
       offer.stripeAccountId !== evidence.stripeAccountId ||
       offer.livemode !== evidence.livemode ||
       offer.principalMinor !== evidence.principalMinor ||
-      offer.taxMinor !== evidence.taxMinor ||
-      offer.grossMinor !== evidence.grossMinor ||
+      (offer.taxBasis === 'stripe_checkout'
+        ? offer.taxMinor !== null || offer.grossMinor !== null
+        : offer.taxMinor !== evidence.taxMinor || offer.grossMinor !== evidence.grossMinor) ||
       new Date(evidence.paidAt).getTime() !== cause.paidAt.getTime() ||
       (source === 'plan') !== (offer.term === 'month')
     ) {

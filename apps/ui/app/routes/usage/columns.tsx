@@ -3,7 +3,6 @@ import type { ReactNode } from 'react';
 import { format } from 'date-fns';
 import { DataTableColumnHeader } from '#components/ui/data-table.js';
 import { formatNumberAbbreviation } from '#utils/number.utils.js';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party usage surface owns the direct billing client contract
 import { formatCreditAtomsDisplay } from '@taucad/billing';
 import type { WireUsageEvent } from '@taucad/billing';
 import { getUsageColor } from '#routes/usage/provider-colors.js';

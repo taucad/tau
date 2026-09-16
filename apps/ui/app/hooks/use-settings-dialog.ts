@@ -1,14 +1,15 @@
-import { useSearchParams } from 'react-router';
-import type { SetURLSearchParams } from 'react-router';
-import { useEffect } from 'react';
+import { useMemo } from 'react';
 import { z } from 'zod';
+import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
+import { useSearchParameter } from '#hooks/use-search-parameter.js';
+import { enumParameter } from '#utils/search-parameter.codecs.js';
 
-const settingsSectionSchema = z.enum([
+/** Sections the dialog can show, and the single source of truth for `?settings=`. */
+export const settingsSectionSchema = z.enum([
   'general',
   'filesystem',
   'account',
   'security',
-  'api-keys',
   'billing',
   'compute',
   'models',
@@ -18,105 +19,53 @@ const settingsSectionSchema = z.enum([
 
 export type SettingsSection = z.infer<typeof settingsSectionSchema>;
 
-type SettingsDialogState = {
-  readonly isOpen: boolean;
-  readonly section: SettingsSection;
-};
-
 const defaultSection: SettingsSection = 'general';
 
 /**
- * Module-level reference to the latest `setSearchParams` from React Router.
- * Updated on every render of `useSettingsDialog()` so that imperative
- * functions (`openSettingsDialog`, `closeSettingsDialog`, etc.) can
- * manipulate the URL outside of React component context.
+ * `''` is the closed dialog. The codec's fallback is the absent parameter, so
+ * the closed state has to be a value that is *not* a section — otherwise
+ * `open('general')` would serialize to the fallback and delete the parameter it
+ * just wrote.
  */
-let setSearchParametersRef: SetURLSearchParams | undefined;
+const settingsParameter = enumParameter<SettingsSection | ''>(z.union([settingsSectionSchema, z.literal('')]), '');
+
+type SettingsDialogState = {
+  readonly isOpen: boolean;
+  readonly section: SettingsSection;
+  /** Opens the dialog, on `section` when given. */
+  readonly open: (section?: SettingsSection) => void;
+  /** Closes the dialog by deleting the parameter. */
+  readonly close: () => void;
+};
 
 /**
- * Opens the settings dialog, optionally navigating to a specific section.
- * Safe to call from event handlers outside React components.
- */
-export function openSettingsDialog(section?: SettingsSection): void {
-  if (!setSearchParametersRef) {
-    return;
-  }
-
-  setSearchParametersRef(
-    (previous) => {
-      const next = new URLSearchParams(previous);
-      next.set('settings', section ?? defaultSection);
-      return next;
-    },
-    { replace: true },
-  );
-}
-
-/**
- * Closes the settings dialog by removing the `?settings` param.
- * Safe to call from event handlers outside React components.
- */
-export function closeSettingsDialog(): void {
-  if (!setSearchParametersRef) {
-    return;
-  }
-
-  setSearchParametersRef(
-    (previous) => {
-      const next = new URLSearchParams(previous);
-      next.delete('settings');
-      return next;
-    },
-    { replace: true },
-  );
-}
-
-/**
- * Sets the active section within the settings dialog.
- * Safe to call from event handlers outside React components.
- */
-export function setSettingsSection(section: SettingsSection): void {
-  if (!setSearchParametersRef) {
-    return;
-  }
-
-  setSearchParametersRef(
-    (previous) => {
-      const next = new URLSearchParams(previous);
-      next.set('settings', section);
-      return next;
-    },
-    { replace: true },
-  );
-}
-
-/**
- * Hook to observe the settings dialog state, derived from the
- * `?settings=<section>` URL search parameter.
+ * Settings dialog state, held in `?settings=<section>` through the shared
+ * search-parameter owner.
  *
- * Must be rendered inside a React Router context. Stores the
- * `setSearchParams` reference for imperative access by the
- * exported helper functions.
+ * Must be called inside a React Router context. It replaces rather than pushes:
+ * Back should leave the surface behind the dialog, not step through sections.
+ *
+ * @returns Whether the dialog is open, its section, and the open/close writers.
  */
 export function useSettingsDialog(): SettingsDialogState {
-  const [searchParameters, setSearchParameters] = useSearchParams();
-
-  useEffect(() => {
-    setSearchParametersRef = setSearchParameters;
-    return () => {
-      if (setSearchParametersRef === setSearchParameters) {
-        setSearchParametersRef = undefined;
-      }
-    };
-  }, [setSearchParameters]);
-
-  const rawSection = searchParameters.get('settings');
-
-  if (rawSection === null) {
-    return { isOpen: false, section: defaultSection };
-  }
-
-  const parsed = settingsSectionSchema.safeParse(rawSection);
-  const section = parsed.success ? parsed.data : defaultSection;
-  return { isOpen: true, section };
+  const [value, setValue] = useSearchParameter('settings', settingsParameter);
+  /* One object per setter identity. React Router renews `setSearchParams` on
+   * every URL change, so these are stable between navigations but not across
+   * them — fine for handlers, not for an effect that must outlive its write. */
+  const actions = useMemo(
+    () => ({
+      open: (next?: SettingsSection): void => {
+        setValue(next ?? defaultSection);
+      },
+      close: (): void => {
+        setValue('');
+      },
+    }),
+    [setValue],
+  );
+  return {
+    isOpen: value !== '',
+    section: value === '' || (value === 'billing' && !tauCloudEnabled) ? defaultSection : value,
+    ...actions,
+  };
 }

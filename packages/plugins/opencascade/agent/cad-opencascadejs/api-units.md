@@ -4,541 +4,541 @@
 
 Units: declare class Units
 
-constructor
+  constructor
 
-static UnitsFile(afile: string): void;
+  static UnitsFile(afile: string): void;
 
-static LexiconFile(afile: string): void;
+  static LexiconFile(afile: string): void;
 
-static DictionaryOfUnits(amode?: boolean): Units_UnitsDictionary;
+  static DictionaryOfUnits(amode?: boolean): Units_UnitsDictionary;
 
-static Quantity(aquantity: string): Units_Quantity;
+  static Quantity(aquantity: string): Units_Quantity;
 
-static FirstQuantity(aunit: string): string;
+  static FirstQuantity(aunit: string): string;
 
-static LexiconUnits(amode?: boolean): Units_Lexicon;
+  static LexiconUnits(amode?: boolean): Units_Lexicon;
 
-static LexiconFormula(): Units_Lexicon;
+  static LexiconFormula(): Units_Lexicon;
 
-static NullDimensions(): Units_Dimensions;
+  static NullDimensions(): Units_Dimensions;
 
-static Convert(avalue: number, afirstunit: string, asecondunit: string): number;
+  static Convert(avalue: number, afirstunit: string, asecondunit: string): number;
 
-static ToSI(aData: number, aUnit: string): number;
+  static ToSI(aData: number, aUnit: string): number;
 
-static ToSI_1(aData: number, aUnit: string): number;
+  static ToSI_1(aData: number, aUnit: string): number;
 
-static ToSI_2(aData: number, aUnit: string): { returnValue: number; aDim: Units_Dimensions; [Symbol.dispose](): void };
+  static ToSI_2(aData: number, aUnit: string): { returnValue: number; aDim: Units_Dimensions; [Symbol.dispose](): void };
 
-static FromSI(aData: number, aUnit: string): number;
+  static FromSI(aData: number, aUnit: string): number;
 
-static FromSI_1(aData: number, aUnit: string): number;
+  static FromSI_1(aData: number, aUnit: string): number;
 
-static FromSI_2(aData: number, aUnit: string): { returnValue: number; aDim: Units_Dimensions; [Symbol.dispose](): void };
+  static FromSI_2(aData: number, aUnit: string): { returnValue: number; aDim: Units_Dimensions; [Symbol.dispose](): void };
 
-static Dimensions(aType: string): Units_Dimensions;
+  static Dimensions(aType: string): Units_Dimensions;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Units_Dimensions: declare class Units_Dimensions extends Standard_Transient
 
-constructor
+  constructor
 
-Mass(): number;
+  Mass(): number;
 
-Length(): number;
+  Length(): number;
 
-Time(): number;
+  Time(): number;
 
-ElectricCurrent(): number;
+  ElectricCurrent(): number;
 
-ThermodynamicTemperature(): number;
+  ThermodynamicTemperature(): number;
 
-AmountOfSubstance(): number;
+  AmountOfSubstance(): number;
 
-LuminousIntensity(): number;
+  LuminousIntensity(): number;
 
-PlaneAngle(): number;
+  PlaneAngle(): number;
 
-SolidAngle(): number;
+  SolidAngle(): number;
 
-Quantity(): string;
+  Quantity(): string;
 
-Multiply(adimensions: Units_Dimensions): Units_Dimensions;
+  Multiply(adimensions: Units_Dimensions): Units_Dimensions;
 
-Divide(adimensions: Units_Dimensions): Units_Dimensions;
+  Divide(adimensions: Units_Dimensions): Units_Dimensions;
 
-Power(anexponent: number): Units_Dimensions;
+  Power(anexponent: number): Units_Dimensions;
 
-IsEqual(adimensions: Units_Dimensions): boolean;
+  IsEqual(adimensions: Units_Dimensions): boolean;
 
-IsNotEqual(adimensions: Units_Dimensions): boolean;
+  IsNotEqual(adimensions: Units_Dimensions): boolean;
 
-Dump(ashift: number): void;
+  Dump(ashift: number): void;
 
-static ALess(): Units_Dimensions;
+  static ALess(): Units_Dimensions;
 
-static AMass(): Units_Dimensions;
+  static AMass(): Units_Dimensions;
 
-static ALength(): Units_Dimensions;
+  static ALength(): Units_Dimensions;
 
-static ATime(): Units_Dimensions;
+  static ATime(): Units_Dimensions;
 
-static AElectricCurrent(): Units_Dimensions;
+  static AElectricCurrent(): Units_Dimensions;
 
-static AThermodynamicTemperature(): Units_Dimensions;
+  static AThermodynamicTemperature(): Units_Dimensions;
 
-static AAmountOfSubstance(): Units_Dimensions;
+  static AAmountOfSubstance(): Units_Dimensions;
 
-static ALuminousIntensity(): Units_Dimensions;
+  static ALuminousIntensity(): Units_Dimensions;
 
-static APlaneAngle(): Units_Dimensions;
+  static APlaneAngle(): Units_Dimensions;
 
-static ASolidAngle(): Units_Dimensions;
+  static ASolidAngle(): Units_Dimensions;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Units_Explorer: declare class Units_Explorer
 
-constructor
+  constructor
 
-Init(aunitssystem: Units_UnitsSystem): void;
-Init(aunitsdictionary: Units_UnitsDictionary): void;
-Init(aunitssystem: Units_UnitsSystem, aquantity: string): void;
-Init(aunitsdictionary: Units_UnitsDictionary, aquantity: string): void;
-Init(aunitssystem: Units_UnitsSystem): void;
-Init(aunitsdictionary: Units_UnitsDictionary): void;
-Init(aunitssystem: Units_UnitsSystem, aquantity: string): void;
-Init(aunitsdictionary: Units_UnitsDictionary, aquantity: string): void;
-Init(aunitssystem: Units_UnitsSystem): void;
-Init(aunitsdictionary: Units_UnitsDictionary): void;
-Init(aunitssystem: Units_UnitsSystem, aquantity: string): void;
-Init(aunitsdictionary: Units_UnitsDictionary, aquantity: string): void;
-Init(aunitssystem: Units_UnitsSystem): void;
-Init(aunitsdictionary: Units_UnitsDictionary): void;
-Init(aunitssystem: Units_UnitsSystem, aquantity: string): void;
-Init(aunitsdictionary: Units_UnitsDictionary, aquantity: string): void;
+  Init(aunitssystem: Units_UnitsSystem): void;
+  Init(aunitsdictionary: Units_UnitsDictionary): void;
+  Init(aunitssystem: Units_UnitsSystem, aquantity: string): void;
+  Init(aunitsdictionary: Units_UnitsDictionary, aquantity: string): void;
+  Init(aunitssystem: Units_UnitsSystem): void;
+  Init(aunitsdictionary: Units_UnitsDictionary): void;
+  Init(aunitssystem: Units_UnitsSystem, aquantity: string): void;
+  Init(aunitsdictionary: Units_UnitsDictionary, aquantity: string): void;
+  Init(aunitssystem: Units_UnitsSystem): void;
+  Init(aunitsdictionary: Units_UnitsDictionary): void;
+  Init(aunitssystem: Units_UnitsSystem, aquantity: string): void;
+  Init(aunitsdictionary: Units_UnitsDictionary, aquantity: string): void;
+  Init(aunitssystem: Units_UnitsSystem): void;
+  Init(aunitsdictionary: Units_UnitsDictionary): void;
+  Init(aunitssystem: Units_UnitsSystem, aquantity: string): void;
+  Init(aunitsdictionary: Units_UnitsDictionary, aquantity: string): void;
 
-MoreQuantity(): boolean;
+  MoreQuantity(): boolean;
 
-NextQuantity(): void;
+  NextQuantity(): void;
 
-Quantity(): TCollection_AsciiString;
+  Quantity(): TCollection_AsciiString;
 
-MoreUnit(): boolean;
+  MoreUnit(): boolean;
 
-NextUnit(): void;
+  NextUnit(): void;
 
-Unit(): TCollection_AsciiString;
+  Unit(): TCollection_AsciiString;
 
-IsActive(): boolean;
+  IsActive(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Units_Lexicon: declare class Units_Lexicon extends Standard_Transient
 
-constructor
+  constructor
 
-Creates(): void;
+  Creates(): void;
 
-Sequence(): NCollection_HSequence_handle_Units_Token;
+  Sequence(): NCollection_HSequence_handle_Units_Token;
 
-AddToken(aword: string, amean: string, avalue: number): void;
+  AddToken(aword: string, amean: string, avalue: number): void;
 
-Dump(): void;
+  Dump(): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Units_MathSentence: declare class Units_MathSentence extends Units_Sentence
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Units_Measurement: declare class Units_Measurement
 
-constructor
+  constructor
 
-Convert(aunit: string): void;
+  Convert(aunit: string): void;
 
-Integer(): Units_Measurement;
+  Integer(): Units_Measurement;
 
-Fractional(): Units_Measurement;
+  Fractional(): Units_Measurement;
 
-Measurement(): number;
+  Measurement(): number;
 
-Token(): Units_Token;
+  Token(): Units_Token;
 
-Add(ameasurement: Units_Measurement): Units_Measurement;
+  Add(ameasurement: Units_Measurement): Units_Measurement;
 
-Subtract(ameasurement: Units_Measurement): Units_Measurement;
+  Subtract(ameasurement: Units_Measurement): Units_Measurement;
 
-Multiply(ameasurement: Units_Measurement): Units_Measurement;
-Multiply(avalue: number): Units_Measurement;
-Multiply(ameasurement: Units_Measurement): Units_Measurement;
-Multiply(avalue: number): Units_Measurement;
+  Multiply(ameasurement: Units_Measurement): Units_Measurement;
+  Multiply(avalue: number): Units_Measurement;
+  Multiply(ameasurement: Units_Measurement): Units_Measurement;
+  Multiply(avalue: number): Units_Measurement;
 
-Divide(ameasurement: Units_Measurement): Units_Measurement;
-Divide(avalue: number): Units_Measurement;
-Divide(ameasurement: Units_Measurement): Units_Measurement;
-Divide(avalue: number): Units_Measurement;
+  Divide(ameasurement: Units_Measurement): Units_Measurement;
+  Divide(avalue: number): Units_Measurement;
+  Divide(ameasurement: Units_Measurement): Units_Measurement;
+  Divide(avalue: number): Units_Measurement;
 
-Power(anexponent: number): Units_Measurement;
+  Power(anexponent: number): Units_Measurement;
 
-HasToken(): boolean;
+  HasToken(): boolean;
 
-Dump(): void;
+  Dump(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Units_NoSuchType: declare class Units_NoSuchType extends Standard_NoSuchObject
 
-constructor
+  constructor
 
-ExceptionType(): string;
+  ExceptionType(): string;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Units_NoSuchUnit: declare class Units_NoSuchUnit extends Standard_NoSuchObject
 
-constructor
+  constructor
 
-ExceptionType(): string;
+  ExceptionType(): string;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Units_Quantity: declare class Units_Quantity extends Standard_Transient
 
-constructor
+  constructor
 
-Name(): TCollection_AsciiString;
+  Name(): TCollection_AsciiString;
 
-Dimensions(): Units_Dimensions;
+  Dimensions(): Units_Dimensions;
 
-Sequence(): NCollection_HSequence_handle_Units_Unit;
+  Sequence(): NCollection_HSequence_handle_Units_Unit;
 
-IsEqual(astring: string): boolean;
+  IsEqual(astring: string): boolean;
 
-Dump(ashift: number, alevel: number): void;
+  Dump(ashift: number, alevel: number): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Units_Sentence: declare class Units_Sentence
 
-constructor
+  constructor
 
-SetConstants(): void;
+  SetConstants(): void;
 
-Sequence(): NCollection_HSequence_handle_Units_Token;
-Sequence(asequenceoftokens: NCollection_HSequence_handle_Units_Token): void;
-Sequence(): NCollection_HSequence_handle_Units_Token;
-Sequence(asequenceoftokens: NCollection_HSequence_handle_Units_Token): void;
+  Sequence(): NCollection_HSequence_handle_Units_Token;
+  Sequence(asequenceoftokens: NCollection_HSequence_handle_Units_Token): void;
+  Sequence(): NCollection_HSequence_handle_Units_Token;
+  Sequence(asequenceoftokens: NCollection_HSequence_handle_Units_Token): void;
 
-Evaluate(): Units_Token;
+  Evaluate(): Units_Token;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-Dump(): void;
+  Dump(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Units_ShiftedToken: declare class Units_ShiftedToken extends Units_Token
 
-constructor
+  constructor
 
-Creates(): Units_Token;
+  Creates(): Units_Token;
 
-Move(): number;
+  Move(): number;
 
-Multiplied(avalue: number): number;
+  Multiplied(avalue: number): number;
 
-Divided(avalue: number): number;
+  Divided(avalue: number): number;
 
-Dump(ashift: number, alevel: number): void;
+  Dump(ashift: number, alevel: number): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Units_ShiftedUnit: declare class Units_ShiftedUnit extends Units_Unit
 
-constructor
+  constructor
 
-Move(amove: number): void;
-Move(): number;
-Move(amove: number): void;
-Move(): number;
+  Move(amove: number): void;
+  Move(): number;
+  Move(amove: number): void;
+  Move(): number;
 
-Token(): Units_Token;
+  Token(): Units_Token;
 
-Dump(ashift: number, alevel: number): void;
+  Dump(ashift: number, alevel: number): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Units_Token: declare class Units_Token extends Standard_Transient
 
-constructor
+  constructor
 
-Creates(): Units_Token;
+  Creates(): Units_Token;
 
-Length(): number;
+  Length(): number;
 
-Word(): TCollection_AsciiString;
-Word(aword: string): void;
-Word(): TCollection_AsciiString;
-Word(aword: string): void;
+  Word(): TCollection_AsciiString;
+  Word(aword: string): void;
+  Word(): TCollection_AsciiString;
+  Word(aword: string): void;
 
-Mean(): TCollection_AsciiString;
-Mean(amean: string): void;
-Mean(): TCollection_AsciiString;
-Mean(amean: string): void;
+  Mean(): TCollection_AsciiString;
+  Mean(amean: string): void;
+  Mean(): TCollection_AsciiString;
+  Mean(amean: string): void;
 
-Value(): number;
-Value(avalue: number): void;
-Value(): number;
-Value(avalue: number): void;
+  Value(): number;
+  Value(avalue: number): void;
+  Value(): number;
+  Value(avalue: number): void;
 
-Dimensions(): Units_Dimensions;
-Dimensions(adimensions: Units_Dimensions): void;
-Dimensions(): Units_Dimensions;
-Dimensions(adimensions: Units_Dimensions): void;
+  Dimensions(): Units_Dimensions;
+  Dimensions(adimensions: Units_Dimensions): void;
+  Dimensions(): Units_Dimensions;
+  Dimensions(adimensions: Units_Dimensions): void;
 
-Update(amean: string): void;
+  Update(amean: string): void;
 
-Add(aninteger: number): Units_Token;
-Add(atoken: Units_Token): Units_Token;
-Add(aninteger: number): Units_Token;
-Add(atoken: Units_Token): Units_Token;
+  Add(aninteger: number): Units_Token;
+  Add(atoken: Units_Token): Units_Token;
+  Add(aninteger: number): Units_Token;
+  Add(atoken: Units_Token): Units_Token;
 
-Subtract(atoken: Units_Token): Units_Token;
+  Subtract(atoken: Units_Token): Units_Token;
 
-Multiply(atoken: Units_Token): Units_Token;
+  Multiply(atoken: Units_Token): Units_Token;
 
-Multiplied(avalue: number): number;
+  Multiplied(avalue: number): number;
 
-Divide(atoken: Units_Token): Units_Token;
+  Divide(atoken: Units_Token): Units_Token;
 
-Divided(avalue: number): number;
+  Divided(avalue: number): number;
 
-Power(atoken: Units_Token): Units_Token;
-Power(anexponent: number): Units_Token;
-Power(atoken: Units_Token): Units_Token;
-Power(anexponent: number): Units_Token;
+  Power(atoken: Units_Token): Units_Token;
+  Power(anexponent: number): Units_Token;
+  Power(atoken: Units_Token): Units_Token;
+  Power(anexponent: number): Units_Token;
 
-IsEqual(astring: string): boolean;
-IsEqual(atoken: Units_Token): boolean;
-IsEqual(astring: string): boolean;
-IsEqual(atoken: Units_Token): boolean;
+  IsEqual(astring: string): boolean;
+  IsEqual(atoken: Units_Token): boolean;
+  IsEqual(astring: string): boolean;
+  IsEqual(atoken: Units_Token): boolean;
 
-IsNotEqual(astring: string): boolean;
-IsNotEqual(atoken: Units_Token): boolean;
-IsNotEqual(astring: string): boolean;
-IsNotEqual(atoken: Units_Token): boolean;
+  IsNotEqual(astring: string): boolean;
+  IsNotEqual(atoken: Units_Token): boolean;
+  IsNotEqual(astring: string): boolean;
+  IsNotEqual(atoken: Units_Token): boolean;
 
-IsLessOrEqual(astring: string): boolean;
+  IsLessOrEqual(astring: string): boolean;
 
-IsGreater(astring: string): boolean;
-IsGreater(atoken: Units_Token): boolean;
-IsGreater(astring: string): boolean;
-IsGreater(atoken: Units_Token): boolean;
+  IsGreater(astring: string): boolean;
+  IsGreater(atoken: Units_Token): boolean;
+  IsGreater(astring: string): boolean;
+  IsGreater(atoken: Units_Token): boolean;
 
-IsGreaterOrEqual(atoken: Units_Token): boolean;
+  IsGreaterOrEqual(atoken: Units_Token): boolean;
 
-Dump(ashift: number, alevel: number): void;
+  Dump(ashift: number, alevel: number): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Units_Unit: declare class Units_Unit extends Standard_Transient
 
-constructor
+  constructor
 
-Name(): TCollection_AsciiString;
+  Name(): TCollection_AsciiString;
 
-Symbol(asymbol: string): void;
+  Symbol(asymbol: string): void;
 
-Value(): number;
-Value(avalue: number): void;
-Value(): number;
-Value(avalue: number): void;
+  Value(): number;
+  Value(avalue: number): void;
+  Value(): number;
+  Value(avalue: number): void;
 
-Quantity(): Units_Quantity;
-Quantity(aquantity: Units_Quantity): void;
-Quantity(): Units_Quantity;
-Quantity(aquantity: Units_Quantity): void;
+  Quantity(): Units_Quantity;
+  Quantity(aquantity: Units_Quantity): void;
+  Quantity(): Units_Quantity;
+  Quantity(aquantity: Units_Quantity): void;
 
-SymbolsSequence(): NCollection_HSequence_handle_TCollection_HAsciiString;
+  SymbolsSequence(): NCollection_HSequence_handle_TCollection_HAsciiString;
 
-Token(): Units_Token;
+  Token(): Units_Token;
 
-IsEqual(astring: string): boolean;
+  IsEqual(astring: string): boolean;
 
-Dump(ashift: number, alevel: number): void;
+  Dump(ashift: number, alevel: number): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Units_UnitSentence: declare class Units_UnitSentence extends Units_Sentence
 
-constructor
+  constructor
 
-Analyse(): void;
+  Analyse(): void;
 
-SetUnits(aquantitiessequence: NCollection_HSequence_handle_Units_Quantity): void;
+  SetUnits(aquantitiessequence: NCollection_HSequence_handle_Units_Quantity): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Units_UnitsDictionary: declare class Units_UnitsDictionary extends Standard_Transient
 
-constructor
+  constructor
 
-Creates(): void;
+  Creates(): void;
 
-Sequence(): NCollection_HSequence_handle_Units_Quantity;
+  Sequence(): NCollection_HSequence_handle_Units_Quantity;
 
-ActiveUnit(aquantity: string): TCollection_AsciiString;
+  ActiveUnit(aquantity: string): TCollection_AsciiString;
 
-Dump(alevel: number): void;
-Dump(adimensions: Units_Dimensions): void;
-Dump(alevel: number): void;
-Dump(adimensions: Units_Dimensions): void;
+  Dump(alevel: number): void;
+  Dump(adimensions: Units_Dimensions): void;
+  Dump(alevel: number): void;
+  Dump(adimensions: Units_Dimensions): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Units_UnitsLexicon: declare class Units_UnitsLexicon extends Units_Lexicon
 
-constructor
+  constructor
 
-Creates(amode?: boolean): void;
-Creates(): void;
-Creates(amode?: boolean): void;
-Creates(): void;
+  Creates(amode?: boolean): void;
+  Creates(): void;
+  Creates(amode?: boolean): void;
+  Creates(): void;
 
-Dump(): void;
+  Dump(): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Units_UnitsSystem: declare class Units_UnitsSystem extends Standard_Transient
 
-constructor
+  constructor
 
-QuantitiesSequence(): NCollection_HSequence_handle_Units_Quantity;
+  QuantitiesSequence(): NCollection_HSequence_handle_Units_Quantity;
 
-ActiveUnitsSequence(): NCollection_HSequence_int;
+  ActiveUnitsSequence(): NCollection_HSequence_int;
 
-Specify(aquantity: string, aunit: string): void;
+  Specify(aquantity: string, aunit: string): void;
 
-Remove(aquantity: string, aunit: string): void;
+  Remove(aquantity: string, aunit: string): void;
 
-Activate(aquantity: string, aunit: string): void;
+  Activate(aquantity: string, aunit: string): void;
 
-Activates(): void;
+  Activates(): void;
 
-ActiveUnit(aquantity: string): TCollection_AsciiString;
+  ActiveUnit(aquantity: string): TCollection_AsciiString;
 
-ConvertValueToUserSystem(aquantity: string, avalue: number, aunit: string): number;
+  ConvertValueToUserSystem(aquantity: string, avalue: number, aunit: string): number;
 
-ConvertSIValueToUserSystem(aquantity: string, avalue: number): number;
+  ConvertSIValueToUserSystem(aquantity: string, avalue: number): number;
 
-ConvertUserSystemValueToSI(aquantity: string, avalue: number): number;
+  ConvertUserSystemValueToSI(aquantity: string, avalue: number): number;
 
-Dump(): void;
+  Dump(): void;
 
-IsEmpty(): boolean;
+  IsEmpty(): boolean;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Units_QtsSequence: NCollection_Sequence_handle_Units_Quantity
 

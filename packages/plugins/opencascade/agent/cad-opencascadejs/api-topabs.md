@@ -4,27 +4,27 @@
 
 TopAbs: declare class TopAbs
 
-constructor
+  constructor
 
-static Complement(Or: TopAbs_Orientation): TopAbs_Orientation;
+  static Complement(Or: TopAbs_Orientation): TopAbs_Orientation;
 
-static ShapeTypeToString(theType: TopAbs_ShapeEnum): string;
+  static ShapeTypeToString(theType: TopAbs_ShapeEnum): string;
 
-static ShapeTypeFromString(theTypeString: string): TopAbs_ShapeEnum;
-static ShapeTypeFromString(theTypeString: string, theType?: TopAbs_ShapeEnum): { returnValue: boolean; theType: TopAbs_ShapeEnum };
-static ShapeTypeFromString(theTypeString: string): TopAbs_ShapeEnum;
-static ShapeTypeFromString(theTypeString: string, theType?: TopAbs_ShapeEnum): { returnValue: boolean; theType: TopAbs_ShapeEnum };
+  static ShapeTypeFromString(theTypeString: string): TopAbs_ShapeEnum;
+  static ShapeTypeFromString(theTypeString: string, theType?: TopAbs_ShapeEnum): { returnValue: boolean; theType: TopAbs_ShapeEnum };
+  static ShapeTypeFromString(theTypeString: string): TopAbs_ShapeEnum;
+  static ShapeTypeFromString(theTypeString: string, theType?: TopAbs_ShapeEnum): { returnValue: boolean; theType: TopAbs_ShapeEnum };
 
-static ShapeOrientationToString(theOrientation: TopAbs_Orientation): string;
+  static ShapeOrientationToString(theOrientation: TopAbs_Orientation): string;
 
-static ShapeOrientationFromString(theOrientationString: string): TopAbs_Orientation;
-static ShapeOrientationFromString(theOrientationString: string, theOrientation?: TopAbs_Orientation): { returnValue: boolean; theOrientation: TopAbs_Orientation };
-static ShapeOrientationFromString(theOrientationString: string): TopAbs_Orientation;
-static ShapeOrientationFromString(theOrientationString: string, theOrientation?: TopAbs_Orientation): { returnValue: boolean; theOrientation: TopAbs_Orientation };
+  static ShapeOrientationFromString(theOrientationString: string): TopAbs_Orientation;
+  static ShapeOrientationFromString(theOrientationString: string, theOrientation?: TopAbs_Orientation): { returnValue: boolean; theOrientation: TopAbs_Orientation };
+  static ShapeOrientationFromString(theOrientationString: string): TopAbs_Orientation;
+  static ShapeOrientationFromString(theOrientationString: string, theOrientation?: TopAbs_Orientation): { returnValue: boolean; theOrientation: TopAbs_Orientation };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TopAbs_Orientation: typeof TopAbs_Orientation[keyof typeof TopAbs_Orientation]
 

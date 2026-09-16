@@ -4,142 +4,142 @@
 
 LProp_SurfaceUtils_DirectAccess: declare class LProp_SurfaceUtils_DirectAccess
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LProp_BadContinuity: declare class LProp_BadContinuity extends Standard_Failure
 
-constructor
+  constructor
 
-ExceptionType(): string;
+  ExceptionType(): string;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LProp_CIType: typeof LProp_CIType[keyof typeof LProp_CIType]
 
 LProp_CLProps3d: declare class LProp_CLProps3d
 
-constructor
+  constructor
 
-SetParameter(U: number): void;
+  SetParameter(U: number): void;
 
-SetCurve(C: Adaptor3d_Curve): void;
+  SetCurve(C: Adaptor3d_Curve): void;
 
-Value(): gp_Pnt;
+  Value(): gp_Pnt;
 
-D1(): gp_Vec;
+  D1(): gp_Vec;
 
-D2(): gp_Vec;
+  D2(): gp_Vec;
 
-D3(): gp_Vec;
+  D3(): gp_Vec;
 
-IsTangentDefined(): boolean;
+  IsTangentDefined(): boolean;
 
-Tangent(D: gp_Dir): void;
+  Tangent(D: gp_Dir): void;
 
-Curvature(): number;
+  Curvature(): number;
 
-Normal(N: gp_Dir): void;
+  Normal(N: gp_Dir): void;
 
-CentreOfCurvature(P: gp_Pnt): void;
+  CentreOfCurvature(P: gp_Pnt): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LProp_CurAndInf: declare class LProp_CurAndInf
 
-constructor
+  constructor
 
-AddInflection(Param: number): void;
+  AddInflection(Param: number): void;
 
-AddExtCur(Param: number, IsMin: boolean): void;
+  AddExtCur(Param: number, IsMin: boolean): void;
 
-Clear(): void;
+  Clear(): void;
 
-IsEmpty(): boolean;
+  IsEmpty(): boolean;
 
-NbPoints(): number;
+  NbPoints(): number;
 
-Parameter(N: number): number;
+  Parameter(N: number): number;
 
-Type(N: number): LProp_CIType;
+  Type(N: number): LProp_CIType;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LProp_CurveUtils_DirectAccess: declare class LProp_CurveUtils_DirectAccess
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LProp_NotDefined: declare class LProp_NotDefined extends Standard_Failure
 
-constructor
+  constructor
 
-ExceptionType(): string;
+  ExceptionType(): string;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LProp_SLProps3d: declare class LProp_SLProps3d
 
-constructor
+  constructor
 
-SetSurface(S: Adaptor3d_Surface): void;
+  SetSurface(S: Adaptor3d_Surface): void;
 
-SetParameters(U: number, V: number): void;
+  SetParameters(U: number, V: number): void;
 
-Value(): gp_Pnt;
+  Value(): gp_Pnt;
 
-D1U(): gp_Vec;
+  D1U(): gp_Vec;
 
-D1V(): gp_Vec;
+  D1V(): gp_Vec;
 
-D2U(): gp_Vec;
+  D2U(): gp_Vec;
 
-D2V(): gp_Vec;
+  D2V(): gp_Vec;
 
-DUV(): gp_Vec;
+  DUV(): gp_Vec;
 
-IsTangentUDefined(): boolean;
+  IsTangentUDefined(): boolean;
 
-TangentU(D: gp_Dir): void;
+  TangentU(D: gp_Dir): void;
 
-IsTangentVDefined(): boolean;
+  IsTangentVDefined(): boolean;
 
-TangentV(D: gp_Dir): void;
+  TangentV(D: gp_Dir): void;
 
-IsNormalDefined(): boolean;
+  IsNormalDefined(): boolean;
 
-Normal(): gp_Dir;
+  Normal(): gp_Dir;
 
-IsCurvatureDefined(): boolean;
+  IsCurvatureDefined(): boolean;
 
-IsUmbilic(): boolean;
+  IsUmbilic(): boolean;
 
-MaxCurvature(): number;
+  MaxCurvature(): number;
 
-MinCurvature(): number;
+  MinCurvature(): number;
 
-CurvatureDirections(MaxD: gp_Dir, MinD: gp_Dir): void;
+  CurvatureDirections(MaxD: gp_Dir, MinD: gp_Dir): void;
 
-MeanCurvature(): number;
+  MeanCurvature(): number;
 
-GaussianCurvature(): number;
+  GaussianCurvature(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LProp_Status: typeof LProp_Status[keyof typeof LProp_Status]

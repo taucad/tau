@@ -4,770 +4,770 @@
 
 BRepFill: declare class BRepFill
 
-constructor
+  constructor
 
-static Face(Edge1: TopoDS_Edge, Edge2: TopoDS_Edge): TopoDS_Face;
+  static Face(Edge1: TopoDS_Edge, Edge2: TopoDS_Edge): TopoDS_Face;
 
-static Shell(Wire1: TopoDS_Wire, Wire2: TopoDS_Wire): TopoDS_Shell;
+  static Shell(Wire1: TopoDS_Wire, Wire2: TopoDS_Wire): TopoDS_Shell;
 
-static Axe(Spine: TopoDS_Shape, Profile: TopoDS_Wire, AxeProf: gp_Ax3, ProfOnSpine: boolean, Tol: number): { ProfOnSpine: boolean };
+  static Axe(Spine: TopoDS_Shape, Profile: TopoDS_Wire, AxeProf: gp_Ax3, ProfOnSpine: boolean, Tol: number): { ProfOnSpine: boolean };
 
-static ComputeACR(wire: TopoDS_Wire, ACR: NCollection_Array1_double): void;
+  static ComputeACR(wire: TopoDS_Wire, ACR: NCollection_Array1_double): void;
 
-static InsertACR(wire: TopoDS_Wire, ACRcuts: NCollection_Array1_double, prec: number): TopoDS_Wire;
+  static InsertACR(wire: TopoDS_Wire, ACRcuts: NCollection_Array1_double, prec: number): TopoDS_Wire;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_ACRLaw: declare class BRepFill_ACRLaw extends BRepFill_LocationLaw
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_AdvancedEvolved: declare class BRepFill_AdvancedEvolved
 
-constructor
+  constructor
 
-Perform(theSpine: TopoDS_Wire, theProfile: TopoDS_Wire, theTolerance: number, theSolidReq?: boolean): void;
+  Perform(theSpine: TopoDS_Wire, theProfile: TopoDS_Wire, theTolerance: number, theSolidReq?: boolean): void;
 
-IsDone(theErrorCode?: number): boolean;
+  IsDone(theErrorCode?: number): boolean;
 
-Shape(): TopoDS_Shape;
+  Shape(): TopoDS_Shape;
 
-SetTemporaryDirectory(thePath: string): void;
+  SetTemporaryDirectory(thePath: string): void;
 
-SetParallelMode(theVal: boolean): void;
+  SetParallelMode(theVal: boolean): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_ApproxSeewing: declare class BRepFill_ApproxSeewing
 
-constructor
+  constructor
 
-Perform(ML: BRepFill_MultiLine): void;
+  Perform(ML: BRepFill_MultiLine): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-Curve(): Geom_Curve;
+  Curve(): Geom_Curve;
 
-CurveOnF1(): Geom2d_Curve;
+  CurveOnF1(): Geom2d_Curve;
 
-CurveOnF2(): Geom2d_Curve;
+  CurveOnF2(): Geom2d_Curve;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_CompatibleWires: declare class BRepFill_CompatibleWires
 
-constructor
+  constructor
 
-Init(Sections: NCollection_Sequence_TopoDS_Shape): void;
+  Init(Sections: NCollection_Sequence_TopoDS_Shape): void;
 
-SetPercent(percent?: number): void;
+  SetPercent(percent?: number): void;
 
-Perform(WithRotation?: boolean): void;
+  Perform(WithRotation?: boolean): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-GetStatus(): BRepFill_ThruSectionErrorStatus;
+  GetStatus(): BRepFill_ThruSectionErrorStatus;
 
-Shape(): NCollection_Sequence_TopoDS_Shape;
+  Shape(): NCollection_Sequence_TopoDS_Shape;
 
-GeneratedShapes(SubSection: TopoDS_Edge): NCollection_List_TopoDS_Shape;
+  GeneratedShapes(SubSection: TopoDS_Edge): NCollection_List_TopoDS_Shape;
 
-Generated(): NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher;
+  Generated(): NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher;
 
-IsDegeneratedFirstSection(): boolean;
+  IsDegeneratedFirstSection(): boolean;
 
-IsDegeneratedLastSection(): boolean;
+  IsDegeneratedLastSection(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_ComputeCLine: declare class BRepFill_ComputeCLine
 
-constructor
+  constructor
 
-Perform(Line: BRepFill_MultiLine): void;
+  Perform(Line: BRepFill_MultiLine): void;
 
-SetDegrees(degreemin: number, degreemax: number): void;
+  SetDegrees(degreemin: number, degreemax: number): void;
 
-SetTolerances(Tolerance3d: number, Tolerance2d: number): void;
+  SetTolerances(Tolerance3d: number, Tolerance2d: number): void;
 
-SetConstraints(FirstC: AppParCurves_Constraint, LastC: AppParCurves_Constraint): void;
+  SetConstraints(FirstC: AppParCurves_Constraint, LastC: AppParCurves_Constraint): void;
 
-SetMaxSegments(theMaxSegments: number): void;
+  SetMaxSegments(theMaxSegments: number): void;
 
-SetInvOrder(theInvOrder: boolean): void;
+  SetInvOrder(theInvOrder: boolean): void;
 
-SetHangChecking(theHangChecking: boolean): void;
+  SetHangChecking(theHangChecking: boolean): void;
 
-IsAllApproximated(): boolean;
+  IsAllApproximated(): boolean;
 
-IsToleranceReached(): boolean;
+  IsToleranceReached(): boolean;
 
-Error(Index: number, tol3d?: number, tol2d?: number): { tol3d: number; tol2d: number };
+  Error(Index: number, tol3d?: number, tol2d?: number): { tol3d: number; tol2d: number };
 
-NbMultiCurves(): number;
+  NbMultiCurves(): number;
 
-Value(Index?: number): AppParCurves_MultiCurve;
+  Value(Index?: number): AppParCurves_MultiCurve;
 
-Parameters(Index: number, firstp?: number, lastp?: number): { firstp: number; lastp: number };
+  Parameters(Index: number, firstp?: number, lastp?: number): { firstp: number; lastp: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_CurveConstraint: declare class BRepFill_CurveConstraint extends Standard_Transient
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_Draft: declare class BRepFill_Draft
 
-constructor
+  constructor
 
-SetOptions(Style?: BRepFill_TransitionStyle, AngleMin?: number, AngleMax?: number): void;
+  SetOptions(Style?: BRepFill_TransitionStyle, AngleMin?: number, AngleMax?: number): void;
 
-SetDraft(IsInternal?: boolean): void;
+  SetDraft(IsInternal?: boolean): void;
 
-Perform(LengthMax: number): void;
-Perform(Surface: Geom_Surface, KeepInsideSurface: boolean): void;
-Perform(StopShape: TopoDS_Shape, KeepOutSide: boolean): void;
-Perform(LengthMax: number): void;
-Perform(Surface: Geom_Surface, KeepInsideSurface: boolean): void;
-Perform(StopShape: TopoDS_Shape, KeepOutSide: boolean): void;
-Perform(LengthMax: number): void;
-Perform(Surface: Geom_Surface, KeepInsideSurface: boolean): void;
-Perform(StopShape: TopoDS_Shape, KeepOutSide: boolean): void;
+  Perform(LengthMax: number): void;
+  Perform(Surface: Geom_Surface, KeepInsideSurface: boolean): void;
+  Perform(StopShape: TopoDS_Shape, KeepOutSide: boolean): void;
+  Perform(LengthMax: number): void;
+  Perform(Surface: Geom_Surface, KeepInsideSurface: boolean): void;
+  Perform(StopShape: TopoDS_Shape, KeepOutSide: boolean): void;
+  Perform(LengthMax: number): void;
+  Perform(Surface: Geom_Surface, KeepInsideSurface: boolean): void;
+  Perform(StopShape: TopoDS_Shape, KeepOutSide: boolean): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-Shell(): TopoDS_Shell;
+  Shell(): TopoDS_Shell;
 
-Generated(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  Generated(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-Shape(): TopoDS_Shape;
+  Shape(): TopoDS_Shape;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_DraftLaw: declare class BRepFill_DraftLaw extends BRepFill_Edge3DLaw
 
-constructor
+  constructor
 
-CleanLaw(TolAngular: number): void;
+  CleanLaw(TolAngular: number): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_Edge3DLaw: declare class BRepFill_Edge3DLaw extends BRepFill_LocationLaw
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_EdgeFaceAndOrder: declare class BRepFill_EdgeFaceAndOrder
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_EdgeOnSurfLaw: declare class BRepFill_EdgeOnSurfLaw extends BRepFill_LocationLaw
 
-constructor
+  constructor
 
-HasResult(): boolean;
+  HasResult(): boolean;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_Evolved: declare class BRepFill_Evolved
 
-constructor
+  constructor
 
-Perform(Spine: TopoDS_Wire, Profile: TopoDS_Wire, AxeProf: gp_Ax3, Join: GeomAbs_JoinType, Solid: boolean): void;
-Perform(Spine: TopoDS_Face, Profile: TopoDS_Wire, AxeProf: gp_Ax3, Join: GeomAbs_JoinType, Solid: boolean): void;
-Perform(Spine: TopoDS_Wire, Profile: TopoDS_Wire, AxeProf: gp_Ax3, Join: GeomAbs_JoinType, Solid: boolean): void;
-Perform(Spine: TopoDS_Face, Profile: TopoDS_Wire, AxeProf: gp_Ax3, Join: GeomAbs_JoinType, Solid: boolean): void;
+  Perform(Spine: TopoDS_Wire, Profile: TopoDS_Wire, AxeProf: gp_Ax3, Join: GeomAbs_JoinType, Solid: boolean): void;
+  Perform(Spine: TopoDS_Face, Profile: TopoDS_Wire, AxeProf: gp_Ax3, Join: GeomAbs_JoinType, Solid: boolean): void;
+  Perform(Spine: TopoDS_Wire, Profile: TopoDS_Wire, AxeProf: gp_Ax3, Join: GeomAbs_JoinType, Solid: boolean): void;
+  Perform(Spine: TopoDS_Face, Profile: TopoDS_Wire, AxeProf: gp_Ax3, Join: GeomAbs_JoinType, Solid: boolean): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-Shape(): TopoDS_Shape;
+  Shape(): TopoDS_Shape;
 
-GeneratedShapes(SpineShape: TopoDS_Shape, ProfShape: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  GeneratedShapes(SpineShape: TopoDS_Shape, ProfShape: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-JoinType(): GeomAbs_JoinType;
+  JoinType(): GeomAbs_JoinType;
 
-Top(): TopoDS_Shape;
+  Top(): TopoDS_Shape;
 
-Bottom(): TopoDS_Shape;
+  Bottom(): TopoDS_Shape;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_FaceAndOrder: declare class BRepFill_FaceAndOrder
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_Filling: declare class BRepFill_Filling
 
-constructor
+  constructor
 
-SetConstrParam(Tol2d?: number, Tol3d?: number, TolAng?: number, TolCurv?: number): void;
+  SetConstrParam(Tol2d?: number, Tol3d?: number, TolAng?: number, TolCurv?: number): void;
 
-SetResolParam(Degree?: number, NbPtsOnCur?: number, NbIter?: number, Anisotropie?: boolean): void;
+  SetResolParam(Degree?: number, NbPtsOnCur?: number, NbIter?: number, Anisotropie?: boolean): void;
 
-SetApproxParam(MaxDeg?: number, MaxSegments?: number): void;
+  SetApproxParam(MaxDeg?: number, MaxSegments?: number): void;
 
-LoadInitSurface(aFace: TopoDS_Face): void;
+  LoadInitSurface(aFace: TopoDS_Face): void;
 
-Add(Point: gp_Pnt): number;
-Add(Support: TopoDS_Face, Order: GeomAbs_Shape): number;
-Add(anEdge: TopoDS_Edge, Order: GeomAbs_Shape, IsBound: boolean): number;
-Add(anEdge: TopoDS_Edge, Support: TopoDS_Face, Order: GeomAbs_Shape, IsBound: boolean): number;
-Add(U: number, V: number, Support: TopoDS_Face, Order: GeomAbs_Shape): number;
-Add(Point: gp_Pnt): number;
-Add(Support: TopoDS_Face, Order: GeomAbs_Shape): number;
-Add(anEdge: TopoDS_Edge, Order: GeomAbs_Shape, IsBound: boolean): number;
-Add(anEdge: TopoDS_Edge, Support: TopoDS_Face, Order: GeomAbs_Shape, IsBound: boolean): number;
-Add(U: number, V: number, Support: TopoDS_Face, Order: GeomAbs_Shape): number;
-Add(Point: gp_Pnt): number;
-Add(Support: TopoDS_Face, Order: GeomAbs_Shape): number;
-Add(anEdge: TopoDS_Edge, Order: GeomAbs_Shape, IsBound: boolean): number;
-Add(anEdge: TopoDS_Edge, Support: TopoDS_Face, Order: GeomAbs_Shape, IsBound: boolean): number;
-Add(U: number, V: number, Support: TopoDS_Face, Order: GeomAbs_Shape): number;
-Add(Point: gp_Pnt): number;
-Add(Support: TopoDS_Face, Order: GeomAbs_Shape): number;
-Add(anEdge: TopoDS_Edge, Order: GeomAbs_Shape, IsBound: boolean): number;
-Add(anEdge: TopoDS_Edge, Support: TopoDS_Face, Order: GeomAbs_Shape, IsBound: boolean): number;
-Add(U: number, V: number, Support: TopoDS_Face, Order: GeomAbs_Shape): number;
-Add(Point: gp_Pnt): number;
-Add(Support: TopoDS_Face, Order: GeomAbs_Shape): number;
-Add(anEdge: TopoDS_Edge, Order: GeomAbs_Shape, IsBound: boolean): number;
-Add(anEdge: TopoDS_Edge, Support: TopoDS_Face, Order: GeomAbs_Shape, IsBound: boolean): number;
-Add(U: number, V: number, Support: TopoDS_Face, Order: GeomAbs_Shape): number;
+  Add(Point: gp_Pnt): number;
+  Add(Support: TopoDS_Face, Order: GeomAbs_Shape): number;
+  Add(anEdge: TopoDS_Edge, Order: GeomAbs_Shape, IsBound: boolean): number;
+  Add(anEdge: TopoDS_Edge, Support: TopoDS_Face, Order: GeomAbs_Shape, IsBound: boolean): number;
+  Add(U: number, V: number, Support: TopoDS_Face, Order: GeomAbs_Shape): number;
+  Add(Point: gp_Pnt): number;
+  Add(Support: TopoDS_Face, Order: GeomAbs_Shape): number;
+  Add(anEdge: TopoDS_Edge, Order: GeomAbs_Shape, IsBound: boolean): number;
+  Add(anEdge: TopoDS_Edge, Support: TopoDS_Face, Order: GeomAbs_Shape, IsBound: boolean): number;
+  Add(U: number, V: number, Support: TopoDS_Face, Order: GeomAbs_Shape): number;
+  Add(Point: gp_Pnt): number;
+  Add(Support: TopoDS_Face, Order: GeomAbs_Shape): number;
+  Add(anEdge: TopoDS_Edge, Order: GeomAbs_Shape, IsBound: boolean): number;
+  Add(anEdge: TopoDS_Edge, Support: TopoDS_Face, Order: GeomAbs_Shape, IsBound: boolean): number;
+  Add(U: number, V: number, Support: TopoDS_Face, Order: GeomAbs_Shape): number;
+  Add(Point: gp_Pnt): number;
+  Add(Support: TopoDS_Face, Order: GeomAbs_Shape): number;
+  Add(anEdge: TopoDS_Edge, Order: GeomAbs_Shape, IsBound: boolean): number;
+  Add(anEdge: TopoDS_Edge, Support: TopoDS_Face, Order: GeomAbs_Shape, IsBound: boolean): number;
+  Add(U: number, V: number, Support: TopoDS_Face, Order: GeomAbs_Shape): number;
+  Add(Point: gp_Pnt): number;
+  Add(Support: TopoDS_Face, Order: GeomAbs_Shape): number;
+  Add(anEdge: TopoDS_Edge, Order: GeomAbs_Shape, IsBound: boolean): number;
+  Add(anEdge: TopoDS_Edge, Support: TopoDS_Face, Order: GeomAbs_Shape, IsBound: boolean): number;
+  Add(U: number, V: number, Support: TopoDS_Face, Order: GeomAbs_Shape): number;
 
-Build(): void;
+  Build(): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-Face(): TopoDS_Face;
+  Face(): TopoDS_Face;
 
-Generated(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  Generated(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-G0Error(): number;
-G0Error(Index: number): number;
-G0Error(): number;
-G0Error(Index: number): number;
+  G0Error(): number;
+  G0Error(Index: number): number;
+  G0Error(): number;
+  G0Error(Index: number): number;
 
-G1Error(): number;
-G1Error(Index: number): number;
-G1Error(): number;
-G1Error(Index: number): number;
+  G1Error(): number;
+  G1Error(Index: number): number;
+  G1Error(): number;
+  G1Error(Index: number): number;
 
-G2Error(): number;
-G2Error(Index: number): number;
-G2Error(): number;
-G2Error(Index: number): number;
+  G2Error(): number;
+  G2Error(Index: number): number;
+  G2Error(): number;
+  G2Error(Index: number): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_Generator: declare class BRepFill_Generator
 
-constructor
+  constructor
 
-AddWire(Wire: TopoDS_Wire): void;
+  AddWire(Wire: TopoDS_Wire): void;
 
-Perform(): void;
+  Perform(): void;
 
-Shell(): TopoDS_Shell;
+  Shell(): TopoDS_Shell;
 
-Generated(): NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher;
+  Generated(): NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher;
 
-GeneratedShapes(SSection: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  GeneratedShapes(SSection: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-ResultShape(theShape: TopoDS_Shape): TopoDS_Shape;
+  ResultShape(theShape: TopoDS_Shape): TopoDS_Shape;
 
-SetMutableInput(theIsMutableInput: boolean): void;
+  SetMutableInput(theIsMutableInput: boolean): void;
 
-IsMutableInput(): boolean;
+  IsMutableInput(): boolean;
 
-GetStatus(): BRepFill_ThruSectionErrorStatus;
+  GetStatus(): BRepFill_ThruSectionErrorStatus;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_LocationLaw: declare class BRepFill_LocationLaw extends Standard_Transient
 
-constructor
+  constructor
 
-GetStatus(): GeomFill_PipeError;
+  GetStatus(): GeomFill_PipeError;
 
-TransformInG0Law(): void;
+  TransformInG0Law(): void;
 
-TransformInCompatibleLaw(AngularTolerance: number): void;
+  TransformInCompatibleLaw(AngularTolerance: number): void;
 
-DeleteTransform(): void;
+  DeleteTransform(): void;
 
-NbHoles(Tol?: number): number;
+  NbHoles(Tol?: number): number;
 
-Holes(Interval: NCollection_Array1_int): void;
+  Holes(Interval: NCollection_Array1_int): void;
 
-NbLaw(): number;
+  NbLaw(): number;
 
-Law(Index: number): GeomFill_LocationLaw;
+  Law(Index: number): GeomFill_LocationLaw;
 
-Wire(): TopoDS_Wire;
+  Wire(): TopoDS_Wire;
 
-Edge(Index: number): TopoDS_Edge;
+  Edge(Index: number): TopoDS_Edge;
 
-Vertex(Index: number): TopoDS_Vertex;
+  Vertex(Index: number): TopoDS_Vertex;
 
-PerformVertex(Index: number, InputVertex: TopoDS_Vertex, TolMin: number, OutputVertex: TopoDS_Vertex, Location: number): void;
+  PerformVertex(Index: number, InputVertex: TopoDS_Vertex, TolMin: number, OutputVertex: TopoDS_Vertex, Location: number): void;
 
-CurvilinearBounds(Index: number, First?: number, Last?: number): { First: number; Last: number };
+  CurvilinearBounds(Index: number, First?: number, Last?: number): { First: number; Last: number };
 
-IsClosed(): boolean;
+  IsClosed(): boolean;
 
-IsG1(Index: number, SpatialTolerance?: number, AngularTolerance?: number): number;
+  IsG1(Index: number, SpatialTolerance?: number, AngularTolerance?: number): number;
 
-D0(Abscissa: number, Section: TopoDS_Shape): void;
+  D0(Abscissa: number, Section: TopoDS_Shape): void;
 
-Parameter(Abscissa: number, Index?: number, Param?: number): { Index: number; Param: number };
+  Parameter(Abscissa: number, Index?: number, Param?: number): { Index: number; Param: number };
 
-Abscissa(Index: number, Param: number): number;
+  Abscissa(Index: number, Param: number): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_MultiLine: declare class BRepFill_MultiLine extends AppCont_Function
 
-constructor
+  constructor
 
-IsParticularCase(): boolean;
+  IsParticularCase(): boolean;
 
-Continuity(): GeomAbs_Shape;
+  Continuity(): GeomAbs_Shape;
 
-Curves(): { Curve: Geom_Curve; PCurve1: Geom2d_Curve; PCurve2: Geom2d_Curve; [Symbol.dispose](): void };
+  Curves(): { Curve: Geom_Curve; PCurve1: Geom2d_Curve; PCurve2: Geom2d_Curve; [Symbol.dispose](): void };
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-Value(U: number): gp_Pnt;
-Value(theU: number, thePnt2d: NCollection_Array1_gp_Pnt2d, thePnt: NCollection_Array1_gp_Pnt): boolean;
-Value(U: number): gp_Pnt;
-Value(theU: number, thePnt2d: NCollection_Array1_gp_Pnt2d, thePnt: NCollection_Array1_gp_Pnt): boolean;
+  Value(U: number): gp_Pnt;
+  Value(theU: number, thePnt2d: NCollection_Array1_gp_Pnt2d, thePnt: NCollection_Array1_gp_Pnt): boolean;
+  Value(U: number): gp_Pnt;
+  Value(theU: number, thePnt2d: NCollection_Array1_gp_Pnt2d, thePnt: NCollection_Array1_gp_Pnt): boolean;
 
-ValueOnF1(U: number): gp_Pnt2d;
+  ValueOnF1(U: number): gp_Pnt2d;
 
-ValueOnF2(U: number): gp_Pnt2d;
+  ValueOnF2(U: number): gp_Pnt2d;
 
-Value3dOnF1OnF2(U: number, P3d: gp_Pnt, PF1: gp_Pnt2d, PF2: gp_Pnt2d): void;
+  Value3dOnF1OnF2(U: number, P3d: gp_Pnt, PF1: gp_Pnt2d, PF2: gp_Pnt2d): void;
 
-D1(theU: number, theVec2d: NCollection_Array1_gp_Vec2d, theVec: NCollection_Array1_gp_Vec): boolean;
+  D1(theU: number, theVec2d: NCollection_Array1_gp_Vec2d, theVec: NCollection_Array1_gp_Vec): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_NSections: declare class BRepFill_NSections extends BRepFill_SectionLaw
 
-constructor
+  constructor
 
-IsVertex(): boolean;
+  IsVertex(): boolean;
 
-IsConstant(): boolean;
+  IsConstant(): boolean;
 
-ConcatenedLaw(): GeomFill_SectionLaw;
+  ConcatenedLaw(): GeomFill_SectionLaw;
 
-Continuity(Index: number, TolAngular: number): GeomAbs_Shape;
+  Continuity(Index: number, TolAngular: number): GeomAbs_Shape;
 
-VertexTol(Index: number, Param: number): number;
+  VertexTol(Index: number, Param: number): number;
 
-Vertex(Index: number, Param: number): TopoDS_Vertex;
+  Vertex(Index: number, Param: number): TopoDS_Vertex;
 
-D0(U: number, S: TopoDS_Shape): void;
+  D0(U: number, S: TopoDS_Shape): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_OffsetAncestors: declare class BRepFill_OffsetAncestors
 
-constructor
+  constructor
 
-Perform(Paral: BRepFill_OffsetWire): void;
+  Perform(Paral: BRepFill_OffsetWire): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-HasAncestor(S1: TopoDS_Edge): boolean;
+  HasAncestor(S1: TopoDS_Edge): boolean;
 
-Ancestor(S1: TopoDS_Edge): TopoDS_Shape;
+  Ancestor(S1: TopoDS_Edge): TopoDS_Shape;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_OffsetWire: declare class BRepFill_OffsetWire
 
-constructor
+  constructor
 
-Init(Spine: TopoDS_Face, Join?: GeomAbs_JoinType, IsOpenResult?: boolean): void;
+  Init(Spine: TopoDS_Face, Join?: GeomAbs_JoinType, IsOpenResult?: boolean): void;
 
-Perform(Offset: number, Alt?: number): void;
+  Perform(Offset: number, Alt?: number): void;
 
-PerformWithBiLo(WSP: TopoDS_Face, Offset: number, Locus: BRepMAT2d_BisectingLocus, Link: BRepMAT2d_LinkTopoBilo, Join: GeomAbs_JoinType, Alt: number): void;
+  PerformWithBiLo(WSP: TopoDS_Face, Offset: number, Locus: BRepMAT2d_BisectingLocus, Link: BRepMAT2d_LinkTopoBilo, Join: GeomAbs_JoinType, Alt: number): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-Spine(): TopoDS_Face;
+  Spine(): TopoDS_Face;
 
-Shape(): TopoDS_Shape;
+  Shape(): TopoDS_Shape;
 
-GeneratedShapes(SpineShape: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  GeneratedShapes(SpineShape: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-JoinType(): GeomAbs_JoinType;
+  JoinType(): GeomAbs_JoinType;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_Pipe: declare class BRepFill_Pipe
 
-constructor
+  constructor
 
-Perform(Spine: TopoDS_Wire, Profile: TopoDS_Shape, GeneratePartCase?: boolean): void;
+  Perform(Spine: TopoDS_Wire, Profile: TopoDS_Shape, GeneratePartCase?: boolean): void;
 
-Spine(): TopoDS_Shape;
+  Spine(): TopoDS_Shape;
 
-Profile(): TopoDS_Shape;
+  Profile(): TopoDS_Shape;
 
-Shape(): TopoDS_Shape;
+  Shape(): TopoDS_Shape;
 
-ErrorOnSurface(): number;
+  ErrorOnSurface(): number;
 
-FirstShape(): TopoDS_Shape;
+  FirstShape(): TopoDS_Shape;
 
-LastShape(): TopoDS_Shape;
+  LastShape(): TopoDS_Shape;
 
-Generated(S: TopoDS_Shape, L: NCollection_List_TopoDS_Shape): void;
+  Generated(S: TopoDS_Shape, L: NCollection_List_TopoDS_Shape): void;
 
-Face(ESpine: TopoDS_Edge, EProfile: TopoDS_Edge): TopoDS_Face;
+  Face(ESpine: TopoDS_Edge, EProfile: TopoDS_Edge): TopoDS_Face;
 
-Edge(ESpine: TopoDS_Edge, VProfile: TopoDS_Vertex): TopoDS_Edge;
+  Edge(ESpine: TopoDS_Edge, VProfile: TopoDS_Vertex): TopoDS_Edge;
 
-Section(VSpine: TopoDS_Vertex): TopoDS_Shape;
+  Section(VSpine: TopoDS_Vertex): TopoDS_Shape;
 
-PipeLine(Point: gp_Pnt): TopoDS_Wire;
+  PipeLine(Point: gp_Pnt): TopoDS_Wire;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_PipeShell: declare class BRepFill_PipeShell extends Standard_Transient
 
-constructor
+  constructor
 
-Set(Frenet: boolean): void;
-Set(Axe: gp_Ax2): void;
-Set(BiNormal: gp_Dir): void;
-Set(SpineSupport: TopoDS_Shape): boolean;
-Set(AuxiliarySpine: TopoDS_Wire, CurvilinearEquivalence: boolean, KeepContact: BRepFill_TypeOfContact): void;
-Set(Frenet: boolean): void;
-Set(Axe: gp_Ax2): void;
-Set(BiNormal: gp_Dir): void;
-Set(SpineSupport: TopoDS_Shape): boolean;
-Set(AuxiliarySpine: TopoDS_Wire, CurvilinearEquivalence: boolean, KeepContact: BRepFill_TypeOfContact): void;
-Set(Frenet: boolean): void;
-Set(Axe: gp_Ax2): void;
-Set(BiNormal: gp_Dir): void;
-Set(SpineSupport: TopoDS_Shape): boolean;
-Set(AuxiliarySpine: TopoDS_Wire, CurvilinearEquivalence: boolean, KeepContact: BRepFill_TypeOfContact): void;
-Set(Frenet: boolean): void;
-Set(Axe: gp_Ax2): void;
-Set(BiNormal: gp_Dir): void;
-Set(SpineSupport: TopoDS_Shape): boolean;
-Set(AuxiliarySpine: TopoDS_Wire, CurvilinearEquivalence: boolean, KeepContact: BRepFill_TypeOfContact): void;
-Set(Frenet: boolean): void;
-Set(Axe: gp_Ax2): void;
-Set(BiNormal: gp_Dir): void;
-Set(SpineSupport: TopoDS_Shape): boolean;
-Set(AuxiliarySpine: TopoDS_Wire, CurvilinearEquivalence: boolean, KeepContact: BRepFill_TypeOfContact): void;
+  Set(Frenet: boolean): void;
+  Set(Axe: gp_Ax2): void;
+  Set(BiNormal: gp_Dir): void;
+  Set(SpineSupport: TopoDS_Shape): boolean;
+  Set(AuxiliarySpine: TopoDS_Wire, CurvilinearEquivalence: boolean, KeepContact: BRepFill_TypeOfContact): void;
+  Set(Frenet: boolean): void;
+  Set(Axe: gp_Ax2): void;
+  Set(BiNormal: gp_Dir): void;
+  Set(SpineSupport: TopoDS_Shape): boolean;
+  Set(AuxiliarySpine: TopoDS_Wire, CurvilinearEquivalence: boolean, KeepContact: BRepFill_TypeOfContact): void;
+  Set(Frenet: boolean): void;
+  Set(Axe: gp_Ax2): void;
+  Set(BiNormal: gp_Dir): void;
+  Set(SpineSupport: TopoDS_Shape): boolean;
+  Set(AuxiliarySpine: TopoDS_Wire, CurvilinearEquivalence: boolean, KeepContact: BRepFill_TypeOfContact): void;
+  Set(Frenet: boolean): void;
+  Set(Axe: gp_Ax2): void;
+  Set(BiNormal: gp_Dir): void;
+  Set(SpineSupport: TopoDS_Shape): boolean;
+  Set(AuxiliarySpine: TopoDS_Wire, CurvilinearEquivalence: boolean, KeepContact: BRepFill_TypeOfContact): void;
+  Set(Frenet: boolean): void;
+  Set(Axe: gp_Ax2): void;
+  Set(BiNormal: gp_Dir): void;
+  Set(SpineSupport: TopoDS_Shape): boolean;
+  Set(AuxiliarySpine: TopoDS_Wire, CurvilinearEquivalence: boolean, KeepContact: BRepFill_TypeOfContact): void;
 
-SetDiscrete(): void;
+  SetDiscrete(): void;
 
-SetMaxDegree(NewMaxDegree: number): void;
+  SetMaxDegree(NewMaxDegree: number): void;
 
-SetMaxSegments(NewMaxSegments: number): void;
+  SetMaxSegments(NewMaxSegments: number): void;
 
-SetForceApproxC1(ForceApproxC1: boolean): void;
+  SetForceApproxC1(ForceApproxC1: boolean): void;
 
-SetIsBuildHistory(theIsBuildHistory: boolean): void;
+  SetIsBuildHistory(theIsBuildHistory: boolean): void;
 
-IsBuildHistory(): boolean;
+  IsBuildHistory(): boolean;
 
-Add(Profile: TopoDS_Shape, WithContact: boolean, WithCorrection: boolean): void;
-Add(Profile: TopoDS_Shape, Location: TopoDS_Vertex, WithContact: boolean, WithCorrection: boolean): void;
-Add(Profile: TopoDS_Shape, WithContact: boolean, WithCorrection: boolean): void;
-Add(Profile: TopoDS_Shape, Location: TopoDS_Vertex, WithContact: boolean, WithCorrection: boolean): void;
+  Add(Profile: TopoDS_Shape, WithContact: boolean, WithCorrection: boolean): void;
+  Add(Profile: TopoDS_Shape, Location: TopoDS_Vertex, WithContact: boolean, WithCorrection: boolean): void;
+  Add(Profile: TopoDS_Shape, WithContact: boolean, WithCorrection: boolean): void;
+  Add(Profile: TopoDS_Shape, Location: TopoDS_Vertex, WithContact: boolean, WithCorrection: boolean): void;
 
-SetLaw(Profile: TopoDS_Shape, L: Law_Function, WithContact: boolean, WithCorrection: boolean): void;
-SetLaw(Profile: TopoDS_Shape, L: Law_Function, Location: TopoDS_Vertex, WithContact: boolean, WithCorrection: boolean): void;
-SetLaw(Profile: TopoDS_Shape, L: Law_Function, WithContact: boolean, WithCorrection: boolean): void;
-SetLaw(Profile: TopoDS_Shape, L: Law_Function, Location: TopoDS_Vertex, WithContact: boolean, WithCorrection: boolean): void;
+  SetLaw(Profile: TopoDS_Shape, L: Law_Function, WithContact: boolean, WithCorrection: boolean): void;
+  SetLaw(Profile: TopoDS_Shape, L: Law_Function, Location: TopoDS_Vertex, WithContact: boolean, WithCorrection: boolean): void;
+  SetLaw(Profile: TopoDS_Shape, L: Law_Function, WithContact: boolean, WithCorrection: boolean): void;
+  SetLaw(Profile: TopoDS_Shape, L: Law_Function, Location: TopoDS_Vertex, WithContact: boolean, WithCorrection: boolean): void;
 
-DeleteProfile(Profile: TopoDS_Shape): void;
+  DeleteProfile(Profile: TopoDS_Shape): void;
 
-IsReady(): boolean;
+  IsReady(): boolean;
 
-GetStatus(): GeomFill_PipeError;
+  GetStatus(): GeomFill_PipeError;
 
-SetTolerance(Tol3d?: number, BoundTol?: number, TolAngular?: number): void;
+  SetTolerance(Tol3d?: number, BoundTol?: number, TolAngular?: number): void;
 
-SetTransition(Mode?: BRepFill_TransitionStyle, Angmin?: number, Angmax?: number): void;
+  SetTransition(Mode?: BRepFill_TransitionStyle, Angmin?: number, Angmax?: number): void;
 
-Simulate(NumberOfSection: number, Sections: NCollection_List_TopoDS_Shape): void;
+  Simulate(NumberOfSection: number, Sections: NCollection_List_TopoDS_Shape): void;
 
-Build(): boolean;
+  Build(): boolean;
 
-MakeSolid(): boolean;
+  MakeSolid(): boolean;
 
-Shape(): TopoDS_Shape;
+  Shape(): TopoDS_Shape;
 
-ErrorOnSurface(): number;
+  ErrorOnSurface(): number;
 
-FirstShape(): TopoDS_Shape;
+  FirstShape(): TopoDS_Shape;
 
-LastShape(): TopoDS_Shape;
+  LastShape(): TopoDS_Shape;
 
-Profiles(theProfiles: NCollection_List_TopoDS_Shape): void;
+  Profiles(theProfiles: NCollection_List_TopoDS_Shape): void;
 
-Spine(): TopoDS_Wire;
+  Spine(): TopoDS_Wire;
 
-Generated(S: TopoDS_Shape, L: NCollection_List_TopoDS_Shape): void;
+  Generated(S: TopoDS_Shape, L: NCollection_List_TopoDS_Shape): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_Section: declare class BRepFill_Section
 
-constructor
+  constructor
 
-Set(IsLaw: boolean): void;
+  Set(IsLaw: boolean): void;
 
-OriginalShape(): TopoDS_Shape;
+  OriginalShape(): TopoDS_Shape;
 
-Wire(): TopoDS_Wire;
+  Wire(): TopoDS_Wire;
 
-Vertex(): TopoDS_Vertex;
+  Vertex(): TopoDS_Vertex;
 
-ModifiedShape(theShape: TopoDS_Shape): TopoDS_Shape;
+  ModifiedShape(theShape: TopoDS_Shape): TopoDS_Shape;
 
-IsLaw(): boolean;
+  IsLaw(): boolean;
 
-IsPunctual(): boolean;
+  IsPunctual(): boolean;
 
-WithContact(): boolean;
+  WithContact(): boolean;
 
-WithCorrection(): boolean;
+  WithCorrection(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_SectionLaw: declare class BRepFill_SectionLaw extends Standard_Transient
 
-NbLaw(): number;
+  NbLaw(): number;
 
-Law(Index: number): GeomFill_SectionLaw;
+  Law(Index: number): GeomFill_SectionLaw;
 
-IndexOfEdge(anEdge: TopoDS_Shape): number;
+  IndexOfEdge(anEdge: TopoDS_Shape): number;
 
-IsConstant(): boolean;
+  IsConstant(): boolean;
 
-IsUClosed(): boolean;
+  IsUClosed(): boolean;
 
-IsVClosed(): boolean;
+  IsVClosed(): boolean;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-IsVertex(): boolean;
+  IsVertex(): boolean;
 
-ConcatenedLaw(): GeomFill_SectionLaw;
+  ConcatenedLaw(): GeomFill_SectionLaw;
 
-Continuity(Index: number, TolAngular: number): GeomAbs_Shape;
+  Continuity(Index: number, TolAngular: number): GeomAbs_Shape;
 
-VertexTol(Index: number, Param: number): number;
+  VertexTol(Index: number, Param: number): number;
 
-Vertex(Index: number, Param: number): TopoDS_Vertex;
+  Vertex(Index: number, Param: number): TopoDS_Vertex;
 
-D0(U: number, S: TopoDS_Shape): void;
+  D0(U: number, S: TopoDS_Shape): void;
 
-Init(W: TopoDS_Wire): void;
+  Init(W: TopoDS_Wire): void;
 
-CurrentEdge(): TopoDS_Edge;
+  CurrentEdge(): TopoDS_Edge;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_SectionPlacement: declare class BRepFill_SectionPlacement
 
-constructor
+  constructor
 
-Transformation(): gp_Trsf;
+  Transformation(): gp_Trsf;
 
-AbscissaOnPath(): number;
+  AbscissaOnPath(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_ShapeLaw: declare class BRepFill_ShapeLaw extends BRepFill_SectionLaw
 
-constructor
+  constructor
 
-IsVertex(): boolean;
+  IsVertex(): boolean;
 
-IsConstant(): boolean;
+  IsConstant(): boolean;
 
-ConcatenedLaw(): GeomFill_SectionLaw;
+  ConcatenedLaw(): GeomFill_SectionLaw;
 
-Continuity(Index: number, TolAngular: number): GeomAbs_Shape;
+  Continuity(Index: number, TolAngular: number): GeomAbs_Shape;
 
-VertexTol(Index: number, Param: number): number;
+  VertexTol(Index: number, Param: number): number;
 
-Vertex(Index: number, Param: number): TopoDS_Vertex;
+  Vertex(Index: number, Param: number): TopoDS_Vertex;
 
-D0(U: number, S: TopoDS_Shape): void;
+  D0(U: number, S: TopoDS_Shape): void;
 
-Edge(Index: number): TopoDS_Edge;
+  Edge(Index: number): TopoDS_Edge;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_Sweep: declare class BRepFill_Sweep
 
-constructor
+  constructor
 
-SetBounds(FirstShape: TopoDS_Wire, LastShape: TopoDS_Wire): void;
+  SetBounds(FirstShape: TopoDS_Wire, LastShape: TopoDS_Wire): void;
 
-SetTolerance(Tol3d: number, BoundTol?: number, Tol2d?: number, TolAngular?: number): void;
+  SetTolerance(Tol3d: number, BoundTol?: number, Tol2d?: number, TolAngular?: number): void;
 
-SetAngularControl(AngleMin?: number, AngleMax?: number): void;
+  SetAngularControl(AngleMin?: number, AngleMax?: number): void;
 
-SetForceApproxC1(ForceApproxC1: boolean): void;
+  SetForceApproxC1(ForceApproxC1: boolean): void;
 
-Build(ReversedEdges: NCollection_Map_TopoDS_Shape_TopTools_ShapeMapHasher, Tapes: NCollection_DataMap_TopoDS_Shape_handle_NCollection_HArray2_TopoDS_Shape_TopTools_ShapeMapHasher, Rails: NCollection_DataMap_TopoDS_Shape_handle_NCollection_HArray2_TopoDS_Shape_TopTools_ShapeMapHasher, Transition: BRepFill_TransitionStyle, Continuity: GeomAbs_Shape, Approx: GeomFill_ApproxStyle, Degmax: number, Segmax: number): void;
+  Build(ReversedEdges: NCollection_Map_TopoDS_Shape_TopTools_ShapeMapHasher, Tapes: NCollection_DataMap_TopoDS_Shape_handle_NCollection_HArray2_TopoDS_Shape_TopTools_ShapeMapHasher, Rails: NCollection_DataMap_TopoDS_Shape_handle_NCollection_HArray2_TopoDS_Shape_TopTools_ShapeMapHasher, Transition: BRepFill_TransitionStyle, Continuity: GeomAbs_Shape, Approx: GeomFill_ApproxStyle, Degmax: number, Segmax: number): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-Shape(): TopoDS_Shape;
+  Shape(): TopoDS_Shape;
 
-ErrorOnSurface(): number;
+  ErrorOnSurface(): number;
 
-SubShape(): NCollection_HArray2_TopoDS_Shape;
+  SubShape(): NCollection_HArray2_TopoDS_Shape;
 
-InterFaces(): NCollection_HArray2_TopoDS_Shape;
+  InterFaces(): NCollection_HArray2_TopoDS_Shape;
 
-Sections(): NCollection_HArray2_TopoDS_Shape;
+  Sections(): NCollection_HArray2_TopoDS_Shape;
 
-Tape(Index: number): TopoDS_Shape;
+  Tape(Index: number): TopoDS_Shape;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_ThruSectionErrorStatus: typeof BRepFill_ThruSectionErrorStatus[keyof typeof BRepFill_ThruSectionErrorStatus]
 
@@ -775,39 +775,39 @@ BRepFill_TransitionStyle: typeof BRepFill_TransitionStyle[keyof typeof BRepFill_
 
 BRepFill_TrimEdgeTool: declare class BRepFill_TrimEdgeTool
 
-constructor
+  constructor
 
-IntersectWith(Edge1: TopoDS_Edge, Edge2: TopoDS_Edge, InitShape1: TopoDS_Shape, InitShape2: TopoDS_Shape, End1: TopoDS_Vertex, End2: TopoDS_Vertex, theJoinType: GeomAbs_JoinType, IsOpenResult: boolean, Params: NCollection_Sequence_gp_Pnt): void;
+  IntersectWith(Edge1: TopoDS_Edge, Edge2: TopoDS_Edge, InitShape1: TopoDS_Shape, InitShape2: TopoDS_Shape, End1: TopoDS_Vertex, End2: TopoDS_Vertex, theJoinType: GeomAbs_JoinType, IsOpenResult: boolean, Params: NCollection_Sequence_gp_Pnt): void;
 
-AddOrConfuse(Start: boolean, Edge1: TopoDS_Edge, Edge2: TopoDS_Edge, Params: NCollection_Sequence_gp_Pnt): void;
+  AddOrConfuse(Start: boolean, Edge1: TopoDS_Edge, Edge2: TopoDS_Edge, Params: NCollection_Sequence_gp_Pnt): void;
 
-IsInside(P: gp_Pnt2d): boolean;
+  IsInside(P: gp_Pnt2d): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_TrimShellCorner: declare class BRepFill_TrimShellCorner
 
-constructor
+  constructor
 
-AddBounds(Bounds: NCollection_HArray2_TopoDS_Shape): void;
+  AddBounds(Bounds: NCollection_HArray2_TopoDS_Shape): void;
 
-AddUEdges(theUEdges: NCollection_HArray2_TopoDS_Shape): void;
+  AddUEdges(theUEdges: NCollection_HArray2_TopoDS_Shape): void;
 
-AddVEdges(theVEdges: NCollection_HArray2_TopoDS_Shape, theIndex: number): void;
+  AddVEdges(theVEdges: NCollection_HArray2_TopoDS_Shape, theIndex: number): void;
 
-Perform(): void;
+  Perform(): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-HasSection(): boolean;
+  HasSection(): boolean;
 
-Modified(S: TopoDS_Shape, theModified: NCollection_List_TopoDS_Shape): void;
+  Modified(S: TopoDS_Shape, theModified: NCollection_List_TopoDS_Shape): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepFill_TypeOfContact: typeof BRepFill_TypeOfContact[keyof typeof BRepFill_TypeOfContact]
 

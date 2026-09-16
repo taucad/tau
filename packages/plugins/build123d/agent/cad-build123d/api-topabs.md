@@ -5,21 +5,21 @@
 // Identifies the orientation of a topological shape
 TopAbs_Orientation
 
-// **init**(self
-**init**(self: OCP.OCP.TopAbs.TopAbs_Orientation, value: int) -> None
+  // __init__(self
+  __init__(self: OCP.OCP.TopAbs.TopAbs_Orientation, value: int) -> None
 
-// name(self
-name
+  // name(self
+  name
 
-value
+  value
 
 // Identifies various topological shapes
 TopAbs_ShapeEnum
 
-// **init**(self
-**init**(self: OCP.OCP.TopAbs.TopAbs_ShapeEnum, value: int) -> None
+  // __init__(self
+  __init__(self: OCP.OCP.TopAbs.TopAbs_ShapeEnum, value: int) -> None
 
-// name(self
-name
+  // name(self
+  name
 
-value
+  value

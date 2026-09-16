@@ -4,30 +4,30 @@
 
 PeriodicInterval: declare class PeriodicInterval
 
-constructor
+  constructor
 
-Binf: number
+  Binf: number
 
-Bsup: number
+  Bsup: number
 
-isnull: boolean
+  isnull: boolean
 
-SetNull(): void;
+  SetNull(): void;
 
-IsNull(): boolean;
+  IsNull(): boolean;
 
-Complement(): void;
+  Complement(): void;
 
-Length(): number;
+  Length(): number;
 
-SetValues(a: number, b: number): void;
+  SetValues(a: number, b: number): void;
 
-Normalize(): void;
+  Normalize(): void;
 
-FirstIntersection(I1: PeriodicInterval): PeriodicInterval;
+  FirstIntersection(I1: PeriodicInterval): PeriodicInterval;
 
-SecondIntersection(I2: PeriodicInterval): PeriodicInterval;
+  SecondIntersection(I2: PeriodicInterval): PeriodicInterval;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

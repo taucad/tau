@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -562,9 +562,13 @@ describe('createServicesHost — agent host configuration', () => {
   it('keeps tracking the credential main pushes in, for the launcher that will read it', () => {
     const { host, log } = hostHarness();
     host.handleMessage(frame({ type: 'authToken', token: 'first' }));
-    expect(log).toHaveBeenLastCalledWith('credential-updated', { present: true });
+    expect(log).toHaveBeenLastCalledWith('credential-updated', {
+      present: true,
+    });
     host.handleMessage(frame({ type: 'authToken', token: undefined }));
-    expect(log).toHaveBeenLastCalledWith('credential-updated', { present: false });
+    expect(log).toHaveBeenLastCalledWith('credential-updated', {
+      present: false,
+    });
   });
 });
 
@@ -598,9 +602,14 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
        is still finishing its own creation holds the directory: retry rather than
        fail the test on the teardown of a host that is already going away. */
     await Promise.all(
-      workspaces
-        .splice(0)
-        .map(async (root) => rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })),
+      workspaces.splice(0).map(async (root) =>
+        rm(root, {
+          recursive: true,
+          force: true,
+          maxRetries: 20,
+          retryDelay: 50,
+        }),
+      ),
     );
   });
 
@@ -636,7 +645,11 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
       chatId: `chat-${agentId}`,
       runId: `run-${agentId}`,
       message: { id: 'message-1', role: 'user', content: 'Model a bracket.' },
-      config: { agent: { kind: 'acp', id: agentId }, systemPrompt: 'You are Tau.', toolChoice: 'auto' },
+      config: {
+        agent: { kind: 'acp', id: agentId },
+        systemPrompt: 'You are Tau.',
+        toolChoice: 'auto',
+      },
     });
 
   /**
@@ -645,13 +658,26 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
    * `MessagePort` there speaks `on/off/start/close` exactly as Electron's
    * `MessagePortMain` does, which is why one binding spans both.
    */
-  const connect = (host: ReturnType<typeof hostHarness>['host'], workspaceRoot: string): AgentChannelClient => {
+  const connect = (
+    host: ReturnType<typeof hostHarness>['host'],
+    workspaceRoot: string,
+    projectId = 'proj_test',
+  ): AgentChannelClient => {
     const channel = new MessageChannel();
     channels.push(channel);
     host.handleMessage(
-      frame({ type: 'concern', concern: 'agentHost', context: { workspaceRoot, nativeTrustFile: '/trust/widget' } }, [
-        channel.port1 as unknown as UtilityPort,
-      ]),
+      frame(
+        {
+          type: 'concern',
+          concern: 'agentHost',
+          context: {
+            workspaceRoot,
+            nativeTrustFile: '/trust/widget',
+            projectId,
+          },
+        },
+        [channel.port1 as unknown as UtilityPort],
+      ),
     );
     const client = createAgentChannelClient(channel.port2 as unknown as Parameters<typeof createAgentChannelClient>[0]);
     clients.push(client);
@@ -688,7 +714,10 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     const { host, workspaceRoot } = await configuredHost(
       {},
       {
-        requestRuntimePort: vi.fn(async () => ({ port: runtimePort, release: vi.fn() })),
+        requestRuntimePort: vi.fn(async () => ({
+          port: runtimePort,
+          release: vi.fn(),
+        })),
       },
     );
     connect(host, workspaceRoot);
@@ -714,6 +743,39 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
       /* A second window on the same project attaches to the run already
          executing; a second launcher would fork the durable log. */
       ['agent-host-served', { workspaceRoot, reused: true }],
+    ]);
+  });
+
+  it('awaits one project release without stopping another launcher', async () => {
+    const released = vi.fn();
+    const { host, log, workspaceRoot } = await configuredHost({}, { agentHostReleased: released });
+    const otherRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-agent-other-'));
+    workspaces.push(otherRoot);
+    host.handleMessage(frame({ type: 'allowRoots', roots: [workspaceRoot, otherRoot] }));
+    const projectA = connect(host, workspaceRoot, 'project-a');
+    connect(host, otherRoot, 'project-b');
+    projectA.close();
+
+    host.handleMessage(
+      frame({
+        type: 'agent-host-release',
+        requestId: 'release-a',
+        workspaceRoot,
+        projectId: 'project-a',
+      }),
+    );
+    await vi.waitFor(
+      () => {
+        expect(released).toHaveBeenCalledWith('release-a');
+      },
+      { timeout: 10_000 },
+    );
+
+    connect(host, otherRoot, 'project-b');
+    connect(host, workspaceRoot, 'project-a');
+    expect(log.mock.calls.filter(([event]) => event === 'agent-host-served').slice(-2)).toEqual([
+      ['agent-host-served', { workspaceRoot: otherRoot, reused: true }],
+      ['agent-host-served', { workspaceRoot, reused: false }],
     ]);
   });
 
@@ -767,8 +829,12 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     /* The socket binds a tick after the connection is served, exactly as the
      * daemon's own URL resolves per run rather than at wiring time. */
     await expect.poll(() => wired!.mcp?.url ?? '').toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp\//u);
+    const [skillBundle] = wired!.systemSkillBundles ?? [];
+    expect(typeof skillBundle?.slug).toBe('string');
+    expect(skillBundle?.files.some(({ path }) => path === 'SKILL.md')).toBe(true);
+    expect(wired!.mcp?.activate).toEqual(expect.any(Function));
     /* A capability, not the channel token (VI4): a distinct prefix, a distinct
-     * secret, and a grant of the four read-only tools. */
+     * secret, and a grant of the four CAD tools. */
     expect(wired!.mcp?.mint({ runId: 'run-1', chatId: 'chat-1' }).token).toMatch(/^tau-mcp-host-v1\./u);
 
     /* The listener is real and the route reaches the endpoint: an unadmitted
@@ -786,7 +852,8 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
   it('records one finalized revision per turn on launcher 2 (V17)', async () => {
     const { host, workspaceRoot } = await configuredHost();
     await writeFile(join(workspaceRoot, 'main.ts'), 'export const size = 1;\n');
-    const client = connect(host, workspaceRoot);
+    const projectId = 'proj_revision';
+    const client = connect(host, workspaceRoot, projectId);
 
     /* The gateway is main's real URL and nothing is listening, so the turn is
        admitted and then fails. That is the point: a revision is recorded for
@@ -801,7 +868,11 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
       config: {
         systemPrompt: 'You are Tau.',
         toolChoice: 'auto',
-        model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
+        model: {
+          id: 'fixture-model',
+          providerKind: 'vertexai',
+          contextWindow: 200_000,
+        },
       },
     });
 
@@ -818,6 +889,25 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
       }
     };
     await expect.poll(head, { timeout: 10_000 }).toMatch(/^[\da-f]{40}$/u);
+    const finalized = async (): Promise<unknown> => {
+      const result = await client.execute({
+        type: 'tail',
+        chatId: 'chat-revision',
+        cursor: 0,
+        limit: 16,
+      });
+      return result.type === 'tail' ? result.batch.events.find((event) => event.type === 'turn.finalized') : undefined;
+    };
+    await expect.poll(finalized, { timeout: 10_000 }).toMatchObject({ type: 'turn.finalized', projectId });
+    const nativeHistory = await client.execute({
+      type: 'revision',
+      request: { command: 'log', limit: 8 },
+    });
+    expect(nativeHistory).toMatchObject({
+      type: 'revision',
+      status: { projectId, branch: 'main' },
+      result: [expect.objectContaining({ revisionNumber: 1 })],
+    });
     /* The turn held a lease while it ran and the settlement retired it, so the
        next window's open sweep finds nothing of this run. */
     const leases = async (): Promise<readonly string[]> => {
@@ -835,7 +925,10 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
    * launched from Finder has `/usr/bin:/bin:/usr/sbin:/sbin` on PATH, and
    * Homebrew's `git-lfs` is not on it. */
   it('names the binaries it is missing, and records with the ones main gives it', async () => {
-    const unavailable: Array<{ readonly reason: string; readonly missing: readonly string[] }> = [];
+    const unavailable: Array<{
+      readonly reason: string;
+      readonly missing: readonly string[];
+    }> = [];
     const previousPath = process.env['PATH'] ?? '';
     process.env['PATH'] = '';
     try {
@@ -859,22 +952,40 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     /* Environment names, not identifiers: assigned rather than spelled as keys. */
     const searchPath: NodeJS.ProcessEnv = {};
     searchPath['PATH'] = previousPath;
-    const git = execFileSync('which', ['git'], { encoding: 'utf8', env: searchPath }).trim();
-    const gitLfs = execFileSync('which', ['git-lfs'], { encoding: 'utf8', env: searchPath }).trim();
+    const git = execFileSync('which', ['git'], {
+      encoding: 'utf8',
+      env: searchPath,
+    }).trim();
+    const gitLfs = execFileSync('which', ['git-lfs'], {
+      encoding: 'utf8',
+      env: searchPath,
+    }).trim();
+    /* The bundled layout OQ3 ships: one `git` whose own exec path carries
+     * `git-lfs`, so `git lfs` resolves through it with nothing on `PATH` and
+     * this host names a single binary. A system git has no such exec path,
+     * hence the stand-in. */
+    const bundleRoot = await mkdtemp(join(tmpdir(), 'tau-services-git-bundle-'));
+    workspaces.push(bundleRoot);
+    const bundledGit = join(bundleRoot, 'bundled-git');
+    await writeFile(bundledGit, `#!/bin/sh\nPATH="${dirname(gitLfs)}"\nexport PATH\nexec "${git}" "$@"\n`);
+    await chmod(bundledGit, 0o755);
     process.env['PATH'] = '';
     try {
       const bundled = await configuredHost(
         {},
         {
-          gitExecutable: git,
-          gitLfsExecutable: gitLfs,
+          gitExecutable: bundledGit,
           onRevisionsUnavailable: (_root, event) => {
             unavailable.push(event);
           },
         },
       );
       connect(bundled.host, bundled.workspaceRoot);
-      await expect.poll(() => existsSync(join(bundled.workspaceRoot, '.git')), { timeout: 10_000 }).toBe(true);
+      await expect
+        .poll(() => existsSync(join(bundled.workspaceRoot, '.git')), {
+          timeout: 10_000,
+        })
+        .toBe(true);
       expect(unavailable).toHaveLength(1);
     } finally {
       process.env['PATH'] = previousPath;
@@ -895,7 +1006,11 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
       config: {
         systemPrompt: 'You are Tau.',
         toolChoice: 'auto',
-        model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
+        model: {
+          id: 'fixture-model',
+          providerKind: 'vertexai',
+          contextWindow: 200_000,
+        },
       },
     });
 
@@ -907,9 +1022,20 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
   it('refuses a root the user never granted, and closes the port', async () => {
     const { host, log } = await configuredHost();
     const port = stubPort();
-    host.handleMessage(frame({ type: 'concern', concern: 'agentHost', context: { workspaceRoot: '/etc' } }, [port]));
+    host.handleMessage(
+      frame(
+        {
+          type: 'concern',
+          concern: 'agentHost',
+          context: { workspaceRoot: '/etc' },
+        },
+        [port],
+      ),
+    );
 
-    expect(log).toHaveBeenCalledWith('agent-host.untrusted-root', { workspaceRoot: '/etc' });
+    expect(log).toHaveBeenCalledWith('agent-host.untrusted-root', {
+      workspaceRoot: '/etc',
+    });
     expect(port.close).toHaveBeenCalled();
   });
 
@@ -918,7 +1044,9 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     const port = stubPort();
     host.handleMessage(frame({ type: 'concern', concern: 'agentHost' }, [port]));
 
-    expect(log).toHaveBeenCalledWith('agent-host.untrusted-root', { workspaceRoot: undefined });
+    expect(log).toHaveBeenCalledWith('agent-host.untrusted-root', {
+      workspaceRoot: undefined,
+    });
     expect(port.close).toHaveBeenCalled();
   });
 
@@ -929,12 +1057,19 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     host.handleMessage(frame({ type: 'allowRoots', roots: [workspaceRoot] }));
     const port = stubPort();
     host.handleMessage(
-      frame({ type: 'concern', concern: 'agentHost', context: { workspaceRoot, nativeTrustFile: '/trust/widget' } }, [
-        port,
-      ]),
+      frame(
+        {
+          type: 'concern',
+          concern: 'agentHost',
+          context: { workspaceRoot, nativeTrustFile: '/trust/widget' },
+        },
+        [port],
+      ),
     );
 
-    expect(log).toHaveBeenCalledWith('agent-host.not-configured', { workspaceRoot });
+    expect(log).toHaveBeenCalledWith('agent-host.not-configured', {
+      workspaceRoot,
+    });
     expect(port.close).toHaveBeenCalled();
   });
 });

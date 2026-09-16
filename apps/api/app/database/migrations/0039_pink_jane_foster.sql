@@ -1,0 +1,1 @@
+ALTER TABLE "project_git_lfs_object" ADD COLUMN "unreachable_at" timestamp with time zone;

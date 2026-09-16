@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { formatDistanceToNowStrict } from 'date-fns';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@taucad/ui/components/table';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party usage surface owns the direct billing client contract
 import { formatCreditAtomsDisplay } from '@taucad/billing';
 import type { WireOpenHolds } from '@taucad/billing';
 import { useOpenHolds } from '@taucad/billing/hooks/use-open-holds';

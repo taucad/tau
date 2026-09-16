@@ -126,6 +126,7 @@
   },
   "dependencies": {
     "@taucad/filesystem": "workspace:*",
+    "buffer": "catalog:",
     "isomorphic-git": "catalog:",
     "zod": "catalog:"
   },

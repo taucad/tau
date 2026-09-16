@@ -19,17 +19,36 @@ const emptyStatus = (): RevisionStatusProjection => ({
   checkoutId: 'live',
   checkoutRoot: '/projects/p',
   branch: 'main',
+  projectDirty: false,
   dirty: false,
   minting: false,
   headRevisionId: undefined,
   follow: 'chat',
   attention: 0,
   restore: { asking: false, busy: false, removedPathCount: 0, dirty: false, revisionNumber: undefined },
-  remote: { kind: 'none', url: undefined, phase: 'none', storage: undefined, overQuota: [], error: undefined },
+  remote: {
+    kind: 'none',
+    url: undefined,
+    phase: 'none',
+    storage: undefined,
+    overQuota: [],
+    error: undefined,
+    fetchOnly: false,
+    provider: undefined,
+    repositoryId: undefined,
+    quota: undefined,
+  },
   branches: [{ name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] }],
   branchVerb: { busy: false, asking: false, operation: undefined, branch: undefined, question: undefined },
   publish: { phase: 'idle', tags: [], publicationId: undefined, shareUrl: undefined, error: undefined },
-  sync: { state: 'noRemote', pendingCount: 0, online: true, conflictRef: undefined, error: undefined },
+  sync: {
+    state: 'noRemote',
+    pendingCount: 0,
+    online: true,
+    conflictRef: undefined,
+    error: undefined,
+    reason: undefined,
+  },
   conflicts: [],
 });
 
@@ -42,8 +61,12 @@ export const revisionStatusHarness = {
    * render as nothing rather than as an empty project. */
   connected: true,
   rows: [] as readonly RevisionRow[],
+  rowsByBranch: new Map<string, readonly RevisionRow[]>(),
   diff: [] as readonly RevisionDiffEntry[],
+  /** Every revision a surface asked for a diff of, in order (C52). */
+  diffRequests: [] as string[],
   comparison: emptyComparison(),
+  comparisonError: undefined as Error | undefined,
   toasts: new Set<(toast: RevisionToast) => void>(),
   commands: {
     restore: vi.fn<(revisionId: string) => void>(),
@@ -67,6 +90,10 @@ export const revisionStatusHarness = {
     followChat: vi.fn<(chatId: string) => void>(),
     pinTo: vi.fn<(checkoutId: string) => void>(),
     connectRemote: vi.fn<(kind: 'none' | 'tau' | 'git', url?: string) => void>(),
+    syncNow: vi.fn(),
+    saveRevision: vi.fn<(trigger?: 'save' | 'hidden' | 'close') => void>(),
+    tag: vi.fn(),
+    deleteTag: vi.fn(),
     publishProject: vi.fn<(tag?: string) => void>(),
     confirmPublish: vi.fn(),
     cancelPublish: vi.fn(),
@@ -78,8 +105,11 @@ export const revisionStatusHarness = {
     this.status = emptyStatus();
     this.connected = true;
     this.rows = [];
+    this.rowsByBranch.clear();
     this.diff = [];
+    this.diffRequests.length = 0;
     this.comparison = emptyComparison();
+    this.comparisonError = undefined;
     this.toasts.clear();
     for (const command of Object.values(this.commands)) {
       command.mockClear();
@@ -92,10 +122,12 @@ export const revisionStatusHarness = {
  *
  * @returns The hook surface, backed by {@link revisionStatusHarness}.
  */
-export const revisionStatusMock = (): Record<string, unknown> => ({
-  useRevisionStatus: () => (revisionStatusHarness.connected ? revisionStatusHarness.status : undefined),
-  useRevisionCommands: () => revisionStatusHarness.commands,
-  useRevisionClient: () => ({
+export const revisionStatusMock = (): Record<string, unknown> => {
+  /* One client object for the whole suite, because the product's
+   * `useRevisionClient` is memoized on the worker: a mock that minted a fresh
+   * object per render made every downstream `useMemo` miss, which is the very
+   * defect B9 exists to catch. */
+  const client = {
     status: () => revisionStatusHarness.status,
     subscribe: () => () => undefined,
     subscribeEvents: () => () => undefined,
@@ -104,11 +136,25 @@ export const revisionStatusMock = (): Record<string, unknown> => ({
       return () => revisionStatusHarness.toasts.delete(listener);
     },
     admitTurn: async () => ({ checkoutId: 'live', root: '/projects/p', baseRevisionId: '' }),
-    log: async () => revisionStatusHarness.rows,
-    diff: async () => revisionStatusHarness.diff,
-    compare: async () => revisionStatusHarness.comparison,
+    log: async (request?: { readonly branch?: string }) =>
+      (request?.branch === undefined ? undefined : revisionStatusHarness.rowsByBranch.get(request.branch)) ??
+      revisionStatusHarness.rows,
+    diff: async (revisionId: string) => {
+      revisionStatusHarness.diffRequests.push(revisionId);
+      return revisionStatusHarness.diff;
+    },
+    compare: async () => {
+      if (revisionStatusHarness.comparisonError !== undefined) throw revisionStatusHarness.comparisonError;
+      return revisionStatusHarness.comparison;
+    },
     send: () => undefined,
+    saveRevision: async () => undefined,
     open: () => undefined,
     close: () => undefined,
-  }),
-});
+  };
+  return {
+    useRevisionStatus: () => (revisionStatusHarness.connected ? revisionStatusHarness.status : undefined),
+    useRevisionCommands: () => revisionStatusHarness.commands,
+    useRevisionClient: () => client,
+  };
+};

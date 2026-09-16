@@ -50,6 +50,26 @@ const requests: string[] = [];
 const stripeAccountId = 'acct_payments_foundation';
 let latestCustomerId = `cus_${randomUUID().replaceAll('-', '')}`;
 let latestCustomerMetadata: Record<string, string> = {};
+const latestCustomerAddress = {
+  city: 'Wellington',
+  country: 'NZ',
+  line1: '1 Willis Street',
+  line2: null,
+  postal_code: '6011',
+  state: null,
+};
+let taxCalculation:
+  | {
+      readonly id: string;
+      readonly customerId: string;
+      readonly productId: string;
+      readonly reference: string;
+      readonly amount: number;
+    }
+  | undefined;
+let taxTransaction:
+  | { readonly id: string; readonly calculationId: string; readonly reference: string; readonly postedAt: number }
+  | undefined;
 let paymentFixture:
   | { purchaseId: string; providerLegId: string; customerBindingId: string; customerId: string }
   | undefined;
@@ -57,6 +77,14 @@ let paymentStatus: 'requires_action' | 'succeeded' = 'succeeded';
 let paymentIntentFixtureId = 'pi_foundation_paid';
 let paymentChargeFixtureId = 'ch_foundation_paid';
 let ambiguousCustomerSearch = false;
+// Hosted Checkout saves a card without setting the customer's invoice default.
+let customerInvoiceDefaultCard = true;
+const foundationCard = {
+  id: 'pm_foundation',
+  object: 'payment_method',
+  type: 'card',
+  card: { brand: 'visa', last4: '4242' },
+};
 let invoiceFixture:
   | {
       invoiceId: string;
@@ -89,9 +117,74 @@ const server = createServer((request, response) => {
       };
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(
-        JSON.stringify({ id: latestCustomerId, object: 'customer', livemode: false, metadata: latestCustomerMetadata }),
+        JSON.stringify({
+          id: latestCustomerId,
+          object: 'customer',
+          address: latestCustomerAddress,
+          livemode: false,
+          metadata: latestCustomerMetadata,
+        }),
       );
     });
+    return;
+  }
+  if (url.pathname === '/v1/tax/calculations' && request.method === 'POST') {
+    const chunks: string[] = [];
+    request.setEncoding('utf8');
+    request.on('data', (chunk: string) => chunks.push(chunk));
+    request.on('end', () => {
+      const form = new URLSearchParams(chunks.join(''));
+      taxCalculation = {
+        id: `taxcalc_${randomUUID().replaceAll('-', '')}`,
+        customerId: form.get('customer') ?? '',
+        productId: form.get('line_items[0][product]') ?? '',
+        reference: form.get('line_items[0][reference]') ?? '',
+        amount: Number(form.get('line_items[0][amount]')),
+      };
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(taxCalculationObject()));
+    });
+    return;
+  }
+  const calculationId = /^\/v1\/tax\/calculations\/(?<id>[\w-]+)(?:\/line_items)?$/u.exec(url.pathname)?.groups?.['id'];
+  if (calculationId !== undefined && taxCalculation?.id === calculationId) {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(
+      JSON.stringify(
+        url.pathname.endsWith('/line_items')
+          ? { object: 'list', data: [taxCalculationLine()], has_more: false, url: url.pathname }
+          : taxCalculationObject(),
+      ),
+    );
+    return;
+  }
+  if (url.pathname === '/v1/tax/transactions/create_from_calculation' && request.method === 'POST') {
+    const chunks: string[] = [];
+    request.setEncoding('utf8');
+    request.on('data', (chunk: string) => chunks.push(chunk));
+    request.on('end', () => {
+      const form = new URLSearchParams(chunks.join(''));
+      taxTransaction = {
+        id: `tax_${randomUUID().replaceAll('-', '')}`,
+        calculationId: form.get('calculation') ?? '',
+        reference: form.get('reference') ?? '',
+        postedAt: Number(form.get('posted_at')),
+      };
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(taxTransactionObject()));
+    });
+    return;
+  }
+  const transactionId = /^\/v1\/tax\/transactions\/(?<id>[\w-]+)(?:\/line_items)?$/u.exec(url.pathname)?.groups?.['id'];
+  if (transactionId !== undefined && taxTransaction?.id === transactionId) {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(
+      JSON.stringify(
+        url.pathname.endsWith('/line_items')
+          ? { object: 'list', data: [taxTransactionLine()], has_more: false, url: url.pathname }
+          : taxTransactionObject(),
+      ),
+    );
     return;
   }
   const paymentIntent =
@@ -131,11 +224,14 @@ const server = createServer((request, response) => {
           billing_reason: 'subscription_cycle',
           currency: 'usd',
           customer: invoice.customerId,
+          customer_address: latestCustomerAddress,
           livemode: false,
           parent: { type: 'subscription_details', subscription_details: { subscription: invoice.subscriptionId } },
           status: invoice.paid ? 'paid' : 'open',
           subtotal: 2000,
           total: 2000,
+          automatic_tax: { status: 'complete' },
+          total_taxes: [{ amount: 0 }],
         };
   const invoiceLine =
     invoice === undefined
@@ -175,128 +271,196 @@ const server = createServer((request, response) => {
         ? {
             id: latestCustomerId,
             object: 'customer',
+            address: latestCustomerAddress,
             deleted: false,
             livemode: false,
+            metadata: latestCustomerMetadata,
             invoice_settings: {
-              default_payment_method: {
-                id: 'pm_foundation',
-                object: 'payment_method',
-                customer: latestCustomerId,
-                type: 'card',
-                card: { brand: 'visa', last4: '4242' },
-              },
+              default_payment_method: customerInvoiceDefaultCard
+                ? { ...foundationCard, customer: latestCustomerId }
+                : null,
             },
           }
-        : url.pathname === '/v1/payment_intents' && paymentIntent !== undefined
-          ? paymentIntent
-          : url.pathname === `/v1/payment_intents/${paymentIntentFixtureId}` && paymentIntent !== undefined
+        : url.pathname === '/v1/payment_methods'
+          ? {
+              object: 'list',
+              data: [{ ...foundationCard, customer: latestCustomerId }],
+              has_more: false,
+              url: '/v1/payment_methods',
+            }
+          : url.pathname === '/v1/payment_intents' && paymentIntent !== undefined
             ? paymentIntent
-            : invoice !== undefined && url.pathname === `/v1/invoices/${invoice.invoiceId}`
-              ? invoiceObject
-              : invoice !== undefined && url.pathname === `/v1/invoices/${invoice.invoiceId}/lines`
-                ? {
-                    object: 'list',
-                    data: [invoiceLine],
-                    has_more: false,
-                    url: `/v1/invoices/${invoice.invoiceId}/lines`,
-                  }
-                : invoice !== undefined && url.pathname === '/v1/invoice_payments'
+            : url.pathname === `/v1/payment_intents/${paymentIntentFixtureId}` && paymentIntent !== undefined
+              ? paymentIntent
+              : invoice !== undefined && url.pathname === `/v1/invoices/${invoice.invoiceId}`
+                ? invoiceObject
+                : invoice !== undefined && url.pathname === `/v1/invoices/${invoice.invoiceId}/lines`
                   ? {
                       object: 'list',
-                      data: invoice.paid
-                        ? [
-                            {
-                              id: `inpay_${invoice.invoiceId}`,
-                              object: 'invoice_payment',
-                              amount_paid: 2000,
-                              currency: 'usd',
-                              payment: { type: 'payment_intent', payment_intent: invoicePaymentIntentId },
-                              status: 'paid',
-                              status_transitions: { canceled_at: null, paid_at: 1_788_650_100 },
-                            },
-                          ]
-                        : [],
+                      data: [invoiceLine],
                       has_more: false,
-                      url: '/v1/invoice_payments',
+                      url: `/v1/invoices/${invoice.invoiceId}/lines`,
                     }
-                  : invoice !== undefined && url.pathname === `/v1/subscriptions/${invoice.subscriptionId}`
+                  : invoice !== undefined && url.pathname === '/v1/invoice_payments'
                     ? {
-                        id: invoice.subscriptionId,
-                        object: 'subscription',
-                        customer: invoice.customerId,
-                        livemode: false,
-                        status: invoice.subscriptionStatus ?? 'active',
-                        cancel_at_period_end: false,
-                        canceled_at: invoice.subscriptionStatus === 'canceled' ? 1_788_650_200 : null,
-                        ended_at: invoice.subscriptionStatus === 'canceled' ? 1_788_650_200 : null,
-                        items: {
-                          object: 'list',
-                          data: [{ id: 'si_foundation', price: { id: 'price_monthly', product: 'prod_monthly' } }],
-                          has_more: false,
-                          url: '/v1/subscription_items',
-                        },
+                        object: 'list',
+                        data: invoice.paid
+                          ? [
+                              {
+                                id: `inpay_${invoice.invoiceId}`,
+                                object: 'invoice_payment',
+                                amount_paid: 2000,
+                                currency: 'usd',
+                                payment: { type: 'payment_intent', payment_intent: invoicePaymentIntentId },
+                                status: 'paid',
+                                status_transitions: { canceled_at: null, paid_at: 1_788_650_100 },
+                              },
+                            ]
+                          : [],
+                        has_more: false,
+                        url: '/v1/invoice_payments',
                       }
-                    : url.pathname === `/v1/payment_intents/${invoicePaymentIntentId}` && invoice !== undefined
+                    : invoice !== undefined && url.pathname === `/v1/subscriptions/${invoice.subscriptionId}`
                       ? {
-                          id: invoicePaymentIntentId,
-                          object: 'payment_intent',
-                          amount: 2000,
-                          amount_capturable: 0,
-                          amount_received: 2000,
-                          created: 1_788_650_000,
-                          currency: 'usd',
+                          id: invoice.subscriptionId,
+                          object: 'subscription',
                           customer: invoice.customerId,
-                          latest_charge: invoiceChargeId,
                           livemode: false,
-                          metadata: {},
-                          payment_method: 'pm_invoice',
-                          status: 'succeeded',
+                          status: invoice.subscriptionStatus ?? 'active',
+                          cancel_at_period_end: false,
+                          canceled_at: invoice.subscriptionStatus === 'canceled' ? 1_788_650_200 : null,
+                          ended_at: invoice.subscriptionStatus === 'canceled' ? 1_788_650_200 : null,
+                          items: {
+                            object: 'list',
+                            data: [{ id: 'si_foundation', price: { id: 'price_monthly', product: 'prod_monthly' } }],
+                            has_more: false,
+                            url: '/v1/subscription_items',
+                          },
                         }
-                      : url.pathname === `/v1/charges/${invoiceChargeId}` && invoice !== undefined
+                      : url.pathname === `/v1/payment_intents/${invoicePaymentIntentId}` && invoice !== undefined
                         ? {
-                            id: invoiceChargeId,
-                            object: 'charge',
+                            id: invoicePaymentIntentId,
+                            object: 'payment_intent',
                             amount: 2000,
-                            amount_captured: 2000,
-                            amount_refunded: 0,
-                            created: 1_788_650_001,
+                            amount_capturable: 0,
+                            amount_received: 2000,
+                            created: 1_788_650_000,
                             currency: 'usd',
                             customer: invoice.customerId,
+                            latest_charge: invoiceChargeId,
                             livemode: false,
-                            paid: true,
-                            payment_intent: invoicePaymentIntentId,
+                            metadata: {},
                             payment_method: 'pm_invoice',
-                            payment_method_details: { card: { brand: 'visa', last4: '4242' } },
-                            refunded: false,
                             status: 'succeeded',
                           }
-                        : url.pathname === `/v1/charges/${paymentChargeFixtureId}`
+                        : url.pathname === `/v1/charges/${invoiceChargeId}` && invoice !== undefined
                           ? {
-                              id: paymentChargeFixtureId,
+                              id: invoiceChargeId,
                               object: 'charge',
-                              amount: 537,
-                              amount_captured: 537,
+                              amount: 2000,
+                              amount_captured: 2000,
                               amount_refunded: 0,
                               created: 1_788_650_001,
                               currency: 'usd',
-                              customer: paymentFixture?.customerId,
+                              customer: invoice.customerId,
                               livemode: false,
                               paid: true,
-                              payment_intent: paymentIntentFixtureId,
-                              payment_method: 'pm_foundation',
+                              payment_intent: invoicePaymentIntentId,
+                              payment_method: 'pm_invoice',
                               payment_method_details: { card: { brand: 'visa', last4: '4242' } },
                               refunded: false,
                               status: 'succeeded',
                             }
-                          : {
-                              error: { message: `Missing fixture for ${url.pathname}`, type: 'invalid_request_error' },
-                            };
+                          : url.pathname === `/v1/charges/${paymentChargeFixtureId}`
+                            ? {
+                                id: paymentChargeFixtureId,
+                                object: 'charge',
+                                amount: 537,
+                                amount_captured: 537,
+                                amount_refunded: 0,
+                                created: 1_788_650_001,
+                                currency: 'usd',
+                                customer: paymentFixture?.customerId,
+                                livemode: false,
+                                paid: true,
+                                payment_intent: paymentIntentFixtureId,
+                                payment_method: 'pm_foundation',
+                                payment_method_details: { card: { brand: 'visa', last4: '4242' } },
+                                refunded: false,
+                                status: 'succeeded',
+                              }
+                            : {
+                                error: {
+                                  message: `Missing fixture for ${url.pathname}`,
+                                  type: 'invalid_request_error',
+                                },
+                              };
   const responseBody = body ?? {
     error: { message: `Incomplete fixture for ${url.pathname}`, type: 'invalid_request_error' },
   };
   response.writeHead('error' in responseBody ? 404 : 200, { 'content-type': 'application/json' });
   response.end(JSON.stringify(responseBody));
 });
+
+function taxCalculationObject() {
+  const value = taxCalculation!;
+  return {
+    id: value.id,
+    object: 'tax.calculation',
+    amount_total: value.amount,
+    currency: 'usd',
+    customer: value.customerId,
+    customer_details: { address: latestCustomerAddress, address_source: 'billing' },
+    expires_at: 2_000_000_000,
+    livemode: false,
+    tax_amount_exclusive: 0,
+    tax_amount_inclusive: 0,
+  };
+}
+
+function taxCalculationLine() {
+  const value = taxCalculation!;
+  return {
+    id: `taxli_${value.id}`,
+    object: 'tax.calculation_line_item',
+    amount: value.amount,
+    amount_tax: 0,
+    livemode: false,
+    product: value.productId,
+    quantity: 1,
+    reference: value.reference,
+    tax_behavior: 'exclusive',
+  };
+}
+
+function taxTransactionObject() {
+  const value = taxTransaction!;
+  return {
+    id: value.id,
+    object: 'tax.transaction',
+    currency: 'usd',
+    customer: taxCalculation?.customerId,
+    customer_details: { address: latestCustomerAddress, address_source: 'billing', tax_ids: [] },
+    livemode: false,
+    posted_at: value.postedAt,
+    reference: value.reference,
+    type: 'transaction',
+  };
+}
+
+function taxTransactionLine() {
+  const value = taxCalculation!;
+  return {
+    id: `taxli_${taxTransaction?.id ?? 'missing'}`,
+    object: 'tax.transaction_line_item',
+    amount: value.amount,
+    amount_tax: 0,
+    livemode: false,
+    tax_behavior: 'exclusive',
+    tax_code: 'txcd_10103000',
+    type: 'transaction',
+  };
+}
 
 let payments: BillingPaymentsService;
 let fixtureStripe: ReturnType<typeof createBillingStripeClient>;
@@ -358,7 +522,7 @@ beforeAll(async () => {
           kind: 'top_up',
           currency: 'usd',
           minimumPrincipalMinor: '500',
-          maximumPrincipalMinor: '50000',
+          maximumPrincipalMinor: '500000',
           creditAtomsPerPrincipalMinor: '10000',
         },
       ],
@@ -522,6 +686,25 @@ describe('billing payments PostgreSQL foundation', () => {
     expect(await database.select().from(billingPurchase).where(eq(billingPurchase.accountId, accountId))).toHaveLength(
       0,
     );
+  });
+
+  it('charges a Checkout-saved card that is not the invoice default', async () => {
+    const userId = randomUUID();
+    await database
+      .insert(user)
+      .values({ id: userId, name: 'Checkout Saved Card', email: `${userId}@test.invalid`, emailVerified: true });
+    customerInvoiceDefaultCard = false;
+    try {
+      const prepared = await payments.prepareTopup(userId, {
+        requestId: randomUUID(),
+        returnPath: '/settings/billing',
+        amountMinor: '537',
+        method: 'saved_card',
+      });
+      expect(prepared.frozen?.paymentMethod).toMatchObject({ brand: 'visa', last4: '4242' });
+    } finally {
+      customerInvoiceDefaultCard = true;
+    }
   });
 
   it('retains verified cash as paid_unfulfilled when its grant fails and grants it once on recovery', async () => {
@@ -707,11 +890,25 @@ describe('billing payments PostgreSQL foundation', () => {
       customerBindingId: leg.customerBindingId,
       customerId: 'cus_foreign',
     };
+    // This recovery assertion owns the only due item; prior foundation rows must not win its bounded claim.
+    await database
+      .update(billingStripeSource)
+      .set({ nextAttemptAt: new Date('9999-12-31T00:00:00Z') })
+      .where(eq(billingStripeSource.stripeAccountId, stripeAccountId));
+    await database
+      .update(billingProviderLeg)
+      .set({ nextAttemptAt: new Date('9999-12-31T00:00:00Z') })
+      .where(eq(billingProviderLeg.environment, 'development'));
     await database
       .update(billingProviderLeg)
       .set({ nextAttemptAt: sql`transaction_timestamp() - interval '1 second'` })
       .where(eq(billingProviderLeg.id, leg.id));
-    expect(await payments.recoverPayments({ environment: 'development', limit: 1 })).toMatchObject({
+    const recovery = await payments.recoverPayments({ environment: 'development', limit: 1 });
+    const [recoveredLeg] = await database
+      .select({ state: billingProviderLeg.state, errorCode: billingProviderLeg.errorCode })
+      .from(billingProviderLeg)
+      .where(eq(billingProviderLeg.id, leg.id));
+    expect(recovery, JSON.stringify({ recoveredLeg, requests: requests.slice(-20) })).toMatchObject({
       processed: [leg.id],
       pending: [],
       failed: [],

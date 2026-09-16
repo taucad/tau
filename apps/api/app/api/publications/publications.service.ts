@@ -6,6 +6,7 @@ import {
   GoneException,
   HttpException,
   HttpStatus,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -40,7 +41,8 @@ import { PublicationRateLimiterService } from '#api/publications/publication-rat
 import { GitRepositoryService } from '#api/git/git.service.js';
 import { DatabaseService } from '#database/database.service.js';
 import { EmailService } from '#email/email.service.js';
-import { BillingService } from '#api/billing/billing.service.js';
+import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
+import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
 import { RedisService } from '#redis/redis.service.js';
 import * as schema from '#database/schema.js';
 import { ObjectStorageService, isS3ObjectMissing } from '#storage/object-storage.service.js';
@@ -102,7 +104,7 @@ export class PublicationsService {
     private readonly publicationRateLimiter: PublicationRateLimiterService,
     private readonly metrics: MetricsService,
     private readonly emailService: EmailService,
-    private readonly billingService: BillingService,
+    @Inject(commercialEntitlementsKey) private readonly entitlementsService: CommercialEntitlementsService,
     private readonly gitRepositories: GitRepositoryService,
   ) {}
 
@@ -124,7 +126,7 @@ export class PublicationsService {
   }
 
   private async assertPrivateVisibilityAllowed(args: { ownerId: string; projectId?: string }): Promise<void> {
-    const entitlements = await this.billingService.getEntitlements(args.ownerId);
+    const entitlements = await this.entitlementsService.getEntitlements(args.ownerId);
     if (entitlements.canCreatePrivateShares) {
       return;
     }
@@ -198,6 +200,19 @@ export class PublicationsService {
 
     if (request.visibility === 'private') {
       await this.assertPrivateVisibilityAllowed({ ownerId, projectId: request.projectId });
+    }
+
+    /* The other route that reaches `ensureRepository`, checked in the same pass
+       as N5. Publishing a named version presupposes the push that created it,
+       and a push needs this entitlement — so this refuses nobody who could
+       otherwise have succeeded, and it stops an un-entitled caller creating a
+       bare repository on the volume for a tag that can never exist (review C11). */
+    const publishEntitlements = await this.entitlementsService.getEntitlements(ownerId);
+    if (!publishEntitlements.canSyncFiles) {
+      throw new ForbiddenException({
+        code: 'GIT_SYNC_NOT_ENTITLED',
+        message: 'Syncing files to Tau Cloud is a paid plan feature.',
+      });
     }
 
     const frontendUrl = this.configService.get('TAU_FRONTEND_URL', { infer: true }).replace(/\/$/u, '');
@@ -604,6 +619,7 @@ export class PublicationsService {
       project: projectSummary,
       currentPublication: {
         id: publication.id,
+        tag: publication.tag,
         title: publication.title,
         description: publication.description,
         visibility: publication.visibility as ProjectShareCurrentPublication['visibility'],

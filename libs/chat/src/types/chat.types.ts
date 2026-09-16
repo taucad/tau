@@ -40,6 +40,8 @@ export type Chat = {
    * fall back to the cookie default.
    */
   activeKernel?: KernelId;
+  /** Durable checkout for this chat's future turns. */
+  checkoutId?: string;
   /** Product recency for chat ordering, in Unix epoch milliseconds. */
   recencyAt?: number;
   /** Whether this browser profile has an unattended turn requiring review. */

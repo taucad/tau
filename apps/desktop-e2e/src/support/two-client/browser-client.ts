@@ -28,6 +28,72 @@ export type BrowserClient = Readonly<{
   close: () => Promise<void>;
 }>;
 
+/** Byte length and SHA-256 of one OPFS file, without copying a large body through Playwright. */
+export const browserFileDigest = async (
+  client: BrowserClient,
+  slug: string,
+  path: readonly string[],
+): Promise<Readonly<{ bytes: number; sha256: string }> | undefined> =>
+  client.page.evaluate(
+    async ([project, ...segments]: readonly string[]) => {
+      try {
+        const filename = segments.at(-1);
+        if (!project || !filename) {
+          return undefined;
+        }
+        const root = await navigator.storage.getDirectory();
+        let directory = await root.getDirectoryHandle(project);
+        for (const segment of segments.slice(0, -1)) {
+          // oxlint-disable-next-line no-await-in-loop -- each child handle is rooted in the directory resolved immediately before it.
+          directory = await directory.getDirectoryHandle(segment);
+        }
+        const handle = await directory.getFileHandle(filename);
+        const file = await handle.getFile();
+        const bytes = await file.arrayBuffer();
+        const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+        return {
+          bytes: bytes.byteLength,
+          sha256: [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join(''),
+        };
+      } catch {
+        return undefined;
+      }
+    },
+    [slug, ...path],
+  );
+
+/** Open one known chat through the same sidebar link a person uses. */
+export const openBrowserChat = async (client: Pick<BrowserClient, 'page'>, chatId: string): Promise<void> => {
+  await client.page
+    .locator(`a[aria-describedby="chat-status-${chatId}"][href*="chat="]`)
+    .first()
+    .click({ timeout: 120_000 });
+  await client.page.waitForURL((url) => url.searchParams.get('chat') === chatId, { timeout: 60_000 });
+};
+
+/** Require two unique chat markers to render in their recorded order. */
+export const requireRenderedOrder = async (
+  client: Pick<BrowserClient, 'page'>,
+  options: Readonly<{ first: string; second: string; row: string }>,
+): Promise<void> => {
+  const { first, second, row } = options;
+  await client.page.waitForFunction(
+    ({ firstMarker, secondMarker }: { firstMarker: string; secondMarker: string }) => {
+      const text = String(document.body.textContent);
+      const firstIndex = text.indexOf(firstMarker);
+      return firstIndex !== -1 && text.indexOf(secondMarker) > firstIndex;
+    },
+    { firstMarker: first, secondMarker: second },
+    { timeout: 120_000 },
+  );
+  const text = (await client.page.locator('body').textContent()) ?? '';
+  const firstIndex = text.indexOf(first);
+  const secondIndex = text.indexOf(second);
+  if (firstIndex === -1 || secondIndex <= firstIndex) {
+    throw new Error(`${row}: expected the first device reply to render before the second device reply.`);
+  }
+};
+
 /**
  * Launch a signed-in browser client against the UI server.
  *
@@ -61,6 +127,13 @@ export const launchBrowserClient = async (options: {
     viewport: { width: 1600, height: 1000 },
   });
   context.setDefaultTimeout(60_000);
+  await context.addCookies([
+    {
+      name: 'tau-cookie-consent',
+      value: encodeURIComponent(JSON.stringify({ status: 'declined', version: 1 })),
+      url: desktopE2EFrontendUrl,
+    },
+  ]);
 
   const verified = await context.request.post(`${desktopE2EApiUrl}/v1/auth/one-time-token/verify`, {
     data: { token: options.oneTimeToken },

@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 
 import { Spinner } from '#components/ui/spinner.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { useFinancialSession } from '#providers/financial-session-provider.js';
+import { useCloudFinancialPurge } from '#cloud/financial-purge.js';
 
 export type SignOutProps = {
   className?: string;
@@ -18,7 +18,7 @@ export type SignOutProps = {
  */
 export function SignOut({ className }: SignOutProps): React.JSX.Element {
   const { authClient, basePaths, navigate, viewPaths } = useAuth();
-  const financialSession = useFinancialSession();
+  const purgeFinancial = useCloudFinancialPurge();
 
   const { mutate: signOut } = useSignOut(authClient, {
     onError: (error) => {
@@ -46,9 +46,9 @@ export function SignOut({ className }: SignOutProps): React.JSX.Element {
     }
     hasSignedOut.current = true;
 
-    financialSession.purge('logout');
+    purgeFinancial?.('logout');
     signOut();
-  }, [financialSession, signOut]);
+  }, [purgeFinancial, signOut]);
 
   return <Spinner className={cn('mx-auto my-auto', className)} />;
 }

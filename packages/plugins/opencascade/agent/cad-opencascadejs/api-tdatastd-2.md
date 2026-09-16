@@ -4,774 +4,774 @@
 
 TDataStd_IntegerList: declare class TDataStd_IntegerList extends TDF_Attribute
 
-constructor
+  constructor
 
-static GetID(): Standard_GUID;
+  static GetID(): Standard_GUID;
 
-static Set(label: TDF_Label): TDataStd_IntegerList;
-static Set(label: TDF_Label, theGuid: Standard_GUID): TDataStd_IntegerList;
-static Set(label: TDF_Label): TDataStd_IntegerList;
-static Set(label: TDF_Label, theGuid: Standard_GUID): TDataStd_IntegerList;
+  static Set(label: TDF_Label): TDataStd_IntegerList;
+  static Set(label: TDF_Label, theGuid: Standard_GUID): TDataStd_IntegerList;
+  static Set(label: TDF_Label): TDataStd_IntegerList;
+  static Set(label: TDF_Label, theGuid: Standard_GUID): TDataStd_IntegerList;
 
-IsEmpty(): boolean;
+  IsEmpty(): boolean;
 
-Extent(): number;
+  Extent(): number;
 
-Prepend(value: number): void;
+  Prepend(value: number): void;
 
-Append(value: number): void;
+  Append(value: number): void;
 
-SetID(argNo0: Standard_GUID): void;
-SetID(): void;
-SetID(argNo0: Standard_GUID): void;
-SetID(): void;
+  SetID(argNo0: Standard_GUID): void;
+  SetID(): void;
+  SetID(argNo0: Standard_GUID): void;
+  SetID(): void;
 
-InsertBefore(value: number, before_value: number): boolean;
+  InsertBefore(value: number, before_value: number): boolean;
 
-InsertBeforeByIndex(index: number, before_value: number): boolean;
+  InsertBeforeByIndex(index: number, before_value: number): boolean;
 
-InsertAfter(value: number, after_value: number): boolean;
+  InsertAfter(value: number, after_value: number): boolean;
 
-InsertAfterByIndex(index: number, after_value: number): boolean;
+  InsertAfterByIndex(index: number, after_value: number): boolean;
 
-Remove(value: number): boolean;
+  Remove(value: number): boolean;
 
-RemoveByIndex(index: number): boolean;
+  RemoveByIndex(index: number): boolean;
 
-Clear(): void;
+  Clear(): void;
 
-First(): number;
+  First(): number;
 
-Last(): number;
+  Last(): number;
 
-List(): NCollection_List_int;
+  List(): NCollection_List_int;
 
-ID(): Standard_GUID;
+  ID(): Standard_GUID;
 
-Restore(anAttribute: TDF_Attribute): void;
+  Restore(anAttribute: TDF_Attribute): void;
 
-NewEmpty(): TDF_Attribute;
+  NewEmpty(): TDF_Attribute;
 
-Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
+  Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TDataStd_Name: declare class TDataStd_Name extends TDataStd_GenericExtString
 
-constructor
+  constructor
 
-static GetID(): Standard_GUID;
+  static GetID(): Standard_GUID;
 
-static Set(label: TDF*Label, string*: TCollection*ExtendedString): TDataStd_Name;
-static Set(label: TDF_Label, guid: Standard_GUID, string*: TCollection*ExtendedString): TDataStd_Name;
-static Set(label: TDF_Label, string*: TCollection*ExtendedString): TDataStd_Name;
-static Set(label: TDF_Label, guid: Standard_GUID, string*: TCollection_ExtendedString): TDataStd_Name;
-Set(S: TCollection_ExtendedString): void;
+  static Set(label: TDF_Label, string_: TCollection_ExtendedString): TDataStd_Name;
+  static Set(label: TDF_Label, guid: Standard_GUID, string_: TCollection_ExtendedString): TDataStd_Name;
+  static Set(label: TDF_Label, string_: TCollection_ExtendedString): TDataStd_Name;
+  static Set(label: TDF_Label, guid: Standard_GUID, string_: TCollection_ExtendedString): TDataStd_Name;
+  Set(S: TCollection_ExtendedString): void;
 
-SetID(argNo0: Standard_GUID): void;
-SetID(): void;
-SetID(argNo0: Standard_GUID): void;
-SetID(): void;
+  SetID(argNo0: Standard_GUID): void;
+  SetID(): void;
+  SetID(argNo0: Standard_GUID): void;
+  SetID(): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-NewEmpty(): TDF_Attribute;
+  NewEmpty(): TDF_Attribute;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TDataStd_NamedData: declare class TDataStd_NamedData extends TDF_Attribute
 
-constructor
+  constructor
 
-static GetID(): Standard_GUID;
+  static GetID(): Standard_GUID;
 
-static Set(label: TDF_Label): TDataStd_NamedData;
+  static Set(label: TDF_Label): TDataStd_NamedData;
 
-HasIntegers(): boolean;
+  HasIntegers(): boolean;
 
-HasInteger(theName: TCollection_ExtendedString): boolean;
+  HasInteger(theName: TCollection_ExtendedString): boolean;
 
-GetInteger(theName: TCollection_ExtendedString): number;
+  GetInteger(theName: TCollection_ExtendedString): number;
 
-SetInteger(theName: TCollection_ExtendedString, theInteger: number): void;
+  SetInteger(theName: TCollection_ExtendedString, theInteger: number): void;
 
-GetIntegersContainer(): NCollection_DataMap_TCollection_ExtendedString_int;
+  GetIntegersContainer(): NCollection_DataMap_TCollection_ExtendedString_int;
 
-ChangeIntegers(theIntegers: NCollection_DataMap_TCollection_ExtendedString_int): void;
+  ChangeIntegers(theIntegers: NCollection_DataMap_TCollection_ExtendedString_int): void;
 
-HasReals(): boolean;
+  HasReals(): boolean;
 
-HasReal(theName: TCollection_ExtendedString): boolean;
+  HasReal(theName: TCollection_ExtendedString): boolean;
 
-GetReal(theName: TCollection_ExtendedString): number;
+  GetReal(theName: TCollection_ExtendedString): number;
 
-SetReal(theName: TCollection_ExtendedString, theReal: number): void;
+  SetReal(theName: TCollection_ExtendedString, theReal: number): void;
 
-GetRealsContainer(): NCollection_DataMap_TCollection_ExtendedString_double;
+  GetRealsContainer(): NCollection_DataMap_TCollection_ExtendedString_double;
 
-ChangeReals(theReals: NCollection_DataMap_TCollection_ExtendedString_double): void;
+  ChangeReals(theReals: NCollection_DataMap_TCollection_ExtendedString_double): void;
 
-HasStrings(): boolean;
+  HasStrings(): boolean;
 
-HasString(theName: TCollection_ExtendedString): boolean;
+  HasString(theName: TCollection_ExtendedString): boolean;
 
-GetString(theName: TCollection_ExtendedString): TCollection_ExtendedString;
+  GetString(theName: TCollection_ExtendedString): TCollection_ExtendedString;
 
-SetString(theName: TCollection_ExtendedString, theString: TCollection_ExtendedString): void;
+  SetString(theName: TCollection_ExtendedString, theString: TCollection_ExtendedString): void;
 
-GetStringsContainer(): NCollection_DataMap_TCollection_ExtendedString_TCollection_ExtendedString;
+  GetStringsContainer(): NCollection_DataMap_TCollection_ExtendedString_TCollection_ExtendedString;
 
-ChangeStrings(theStrings: NCollection_DataMap_TCollection_ExtendedString_TCollection_ExtendedString): void;
+  ChangeStrings(theStrings: NCollection_DataMap_TCollection_ExtendedString_TCollection_ExtendedString): void;
 
-HasBytes(): boolean;
+  HasBytes(): boolean;
 
-HasByte(theName: TCollection_ExtendedString): boolean;
+  HasByte(theName: TCollection_ExtendedString): boolean;
 
-GetByte(theName: TCollection_ExtendedString): number;
+  GetByte(theName: TCollection_ExtendedString): number;
 
-SetByte(theName: TCollection_ExtendedString, theByte: number): void;
+  SetByte(theName: TCollection_ExtendedString, theByte: number): void;
 
-GetBytesContainer(): NCollection_DataMap_TCollection_ExtendedString_uint8_t;
+  GetBytesContainer(): NCollection_DataMap_TCollection_ExtendedString_uint8_t;
 
-ChangeBytes(theBytes: NCollection_DataMap_TCollection_ExtendedString_uint8_t): void;
+  ChangeBytes(theBytes: NCollection_DataMap_TCollection_ExtendedString_uint8_t): void;
 
-HasArraysOfIntegers(): boolean;
+  HasArraysOfIntegers(): boolean;
 
-HasArrayOfIntegers(theName: TCollection_ExtendedString): boolean;
+  HasArrayOfIntegers(theName: TCollection_ExtendedString): boolean;
 
-GetArrayOfIntegers(theName: TCollection_ExtendedString): NCollection_HArray1_int;
+  GetArrayOfIntegers(theName: TCollection_ExtendedString): NCollection_HArray1_int;
 
-SetArrayOfIntegers(theName: TCollection_ExtendedString, theArrayOfIntegers: NCollection_HArray1_int): void;
+  SetArrayOfIntegers(theName: TCollection_ExtendedString, theArrayOfIntegers: NCollection_HArray1_int): void;
 
-GetArraysOfIntegersContainer(): NCollection_DataMap_TCollection_ExtendedString_handle_NCollection_HArray1_int;
+  GetArraysOfIntegersContainer(): NCollection_DataMap_TCollection_ExtendedString_handle_NCollection_HArray1_int;
 
-ChangeArraysOfIntegers(theArraysOfIntegers: NCollection_DataMap_TCollection_ExtendedString_handle_NCollection_HArray1_int): void;
+  ChangeArraysOfIntegers(theArraysOfIntegers: NCollection_DataMap_TCollection_ExtendedString_handle_NCollection_HArray1_int): void;
 
-HasArraysOfReals(): boolean;
+  HasArraysOfReals(): boolean;
 
-HasArrayOfReals(theName: TCollection_ExtendedString): boolean;
+  HasArrayOfReals(theName: TCollection_ExtendedString): boolean;
 
-GetArrayOfReals(theName: TCollection_ExtendedString): NCollection_HArray1_double;
+  GetArrayOfReals(theName: TCollection_ExtendedString): NCollection_HArray1_double;
 
-SetArrayOfReals(theName: TCollection_ExtendedString, theArrayOfReals: NCollection_HArray1_double): void;
+  SetArrayOfReals(theName: TCollection_ExtendedString, theArrayOfReals: NCollection_HArray1_double): void;
 
-GetArraysOfRealsContainer(): NCollection_DataMap_TCollection_ExtendedString_handle_NCollection_HArray1_double;
+  GetArraysOfRealsContainer(): NCollection_DataMap_TCollection_ExtendedString_handle_NCollection_HArray1_double;
 
-ChangeArraysOfReals(theArraysOfReals: NCollection_DataMap_TCollection_ExtendedString_handle_NCollection_HArray1_double): void;
+  ChangeArraysOfReals(theArraysOfReals: NCollection_DataMap_TCollection_ExtendedString_handle_NCollection_HArray1_double): void;
 
-Clear(): void;
+  Clear(): void;
 
-HasDeferredData(): boolean;
+  HasDeferredData(): boolean;
 
-LoadDeferredData(theToKeepDeferred?: boolean): boolean;
+  LoadDeferredData(theToKeepDeferred?: boolean): boolean;
 
-UnloadDeferredData(): boolean;
+  UnloadDeferredData(): boolean;
 
-clear(): void;
+  clear(): void;
 
-setInteger(theName: TCollection_ExtendedString, theInteger: number): void;
+  setInteger(theName: TCollection_ExtendedString, theInteger: number): void;
 
-setReal(theName: TCollection_ExtendedString, theReal: number): void;
+  setReal(theName: TCollection_ExtendedString, theReal: number): void;
 
-setString(theName: TCollection_ExtendedString, theString: TCollection_ExtendedString): void;
+  setString(theName: TCollection_ExtendedString, theString: TCollection_ExtendedString): void;
 
-setByte(theName: TCollection_ExtendedString, theByte: number): void;
+  setByte(theName: TCollection_ExtendedString, theByte: number): void;
 
-setArrayOfIntegers(theName: TCollection_ExtendedString, theArrayOfIntegers: NCollection_HArray1_int): void;
+  setArrayOfIntegers(theName: TCollection_ExtendedString, theArrayOfIntegers: NCollection_HArray1_int): void;
 
-setArrayOfReals(theName: TCollection_ExtendedString, theArrayOfReals: NCollection_HArray1_double): void;
+  setArrayOfReals(theName: TCollection_ExtendedString, theArrayOfReals: NCollection_HArray1_double): void;
 
-ID(): Standard_GUID;
+  ID(): Standard_GUID;
 
-Restore(anAttribute: TDF_Attribute): void;
+  Restore(anAttribute: TDF_Attribute): void;
 
-NewEmpty(): TDF_Attribute;
+  NewEmpty(): TDF_Attribute;
 
-Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
+  Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TDataStd_NoteBook: declare class TDataStd_NoteBook extends TDataStd_GenericEmpty
 
-constructor
+  constructor
 
-static Find(current: TDF_Label): { returnValue: boolean; N: TDataStd_NoteBook; [Symbol.dispose](): void };
+  static Find(current: TDF_Label): { returnValue: boolean; N: TDataStd_NoteBook; [Symbol.dispose](): void };
 
-static New(label: TDF_Label): TDataStd_NoteBook;
+  static New(label: TDF_Label): TDataStd_NoteBook;
 
-static GetID(): Standard_GUID;
+  static GetID(): Standard_GUID;
 
-Append(value: number, isExported: boolean): TDataStd_Real;
-Append(value: number, isExported: boolean): TDataStd_Integer;
-Append(value: number, isExported: boolean): TDataStd_Real;
-Append(value: number, isExported: boolean): TDataStd_Integer;
+  Append(value: number, isExported: boolean): TDataStd_Real;
+  Append(value: number, isExported: boolean): TDataStd_Integer;
+  Append(value: number, isExported: boolean): TDataStd_Real;
+  Append(value: number, isExported: boolean): TDataStd_Integer;
 
-ID(): Standard_GUID;
+  ID(): Standard_GUID;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-NewEmpty(): TDF_Attribute;
+  NewEmpty(): TDF_Attribute;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TDataStd_Real: declare class TDataStd_Real extends TDF_Attribute
 
-constructor
+  constructor
 
-static GetID(): Standard_GUID;
+  static GetID(): Standard_GUID;
 
-static Set(label: TDF_Label, value: number): TDataStd_Real;
-static Set(label: TDF_Label, guid: Standard_GUID, value: number): TDataStd_Real;
-static Set(label: TDF_Label, value: number): TDataStd_Real;
-static Set(label: TDF_Label, guid: Standard_GUID, value: number): TDataStd_Real;
-Set(V: number): void;
+  static Set(label: TDF_Label, value: number): TDataStd_Real;
+  static Set(label: TDF_Label, guid: Standard_GUID, value: number): TDataStd_Real;
+  static Set(label: TDF_Label, value: number): TDataStd_Real;
+  static Set(label: TDF_Label, guid: Standard_GUID, value: number): TDataStd_Real;
+  Set(V: number): void;
 
-// DEPRECATED
-SetDimension(DIM: TDataStd_RealEnum): void;
+  // DEPRECATED
+  SetDimension(DIM: TDataStd_RealEnum): void;
 
-// DEPRECATED
-GetDimension(): TDataStd_RealEnum;
+  // DEPRECATED
+  GetDimension(): TDataStd_RealEnum;
 
-SetID(argNo0: Standard_GUID): void;
-SetID(): void;
-SetID(argNo0: Standard_GUID): void;
-SetID(): void;
+  SetID(argNo0: Standard_GUID): void;
+  SetID(): void;
+  SetID(argNo0: Standard_GUID): void;
+  SetID(): void;
 
-Get(): number;
+  Get(): number;
 
-IsCaptured(): boolean;
+  IsCaptured(): boolean;
 
-ID(): Standard_GUID;
+  ID(): Standard_GUID;
 
-Restore(anAttribute: TDF_Attribute): void;
+  Restore(anAttribute: TDF_Attribute): void;
 
-NewEmpty(): TDF_Attribute;
+  NewEmpty(): TDF_Attribute;
 
-Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
+  Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TDataStd_RealArray: declare class TDataStd_RealArray extends TDF_Attribute
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-static GetID(): Standard_GUID;
+  static GetID(): Standard_GUID;
 
-static Set(label: TDF_Label, lower: number, upper: number, isDelta: boolean): TDataStd_RealArray;
-static Set(label: TDF_Label, theGuid: Standard_GUID, lower: number, upper: number, isDelta: boolean): TDataStd_RealArray;
-static Set(label: TDF_Label, lower: number, upper: number, isDelta: boolean): TDataStd_RealArray;
-static Set(label: TDF_Label, theGuid: Standard_GUID, lower: number, upper: number, isDelta: boolean): TDataStd_RealArray;
+  static Set(label: TDF_Label, lower: number, upper: number, isDelta: boolean): TDataStd_RealArray;
+  static Set(label: TDF_Label, theGuid: Standard_GUID, lower: number, upper: number, isDelta: boolean): TDataStd_RealArray;
+  static Set(label: TDF_Label, lower: number, upper: number, isDelta: boolean): TDataStd_RealArray;
+  static Set(label: TDF_Label, theGuid: Standard_GUID, lower: number, upper: number, isDelta: boolean): TDataStd_RealArray;
 
-Init(lower: number, upper: number): void;
+  Init(lower: number, upper: number): void;
 
-SetID(argNo0: Standard_GUID): void;
-SetID(): void;
-SetID(argNo0: Standard_GUID): void;
-SetID(): void;
+  SetID(argNo0: Standard_GUID): void;
+  SetID(): void;
+  SetID(argNo0: Standard_GUID): void;
+  SetID(): void;
 
-SetValue(Index: number, Value: number): void;
+  SetValue(Index: number, Value: number): void;
 
-Value(Index: number): number;
+  Value(Index: number): number;
 
-Lower(): number;
+  Lower(): number;
 
-Upper(): number;
+  Upper(): number;
 
-Length(): number;
+  Length(): number;
 
-ChangeArray(newArray: NCollection_HArray1_double, isCheckItems?: boolean): void;
+  ChangeArray(newArray: NCollection_HArray1_double, isCheckItems?: boolean): void;
 
-Array(): NCollection_HArray1_double;
+  Array(): NCollection_HArray1_double;
 
-GetDelta(): boolean;
+  GetDelta(): boolean;
 
-SetDelta(isDelta: boolean): void;
+  SetDelta(isDelta: boolean): void;
 
-ID(): Standard_GUID;
+  ID(): Standard_GUID;
 
-Restore(anAttribute: TDF_Attribute): void;
+  Restore(anAttribute: TDF_Attribute): void;
 
-NewEmpty(): TDF_Attribute;
+  NewEmpty(): TDF_Attribute;
 
-Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
+  Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
 
-DeltaOnModification(anOldAttribute: TDF_Attribute): TDF_DeltaOnModification;
-DeltaOnModification(aDelta: TDF_DeltaOnModification): void;
-DeltaOnModification(anOldAttribute: TDF_Attribute): TDF_DeltaOnModification;
-DeltaOnModification(aDelta: TDF_DeltaOnModification): void;
+  DeltaOnModification(anOldAttribute: TDF_Attribute): TDF_DeltaOnModification;
+  DeltaOnModification(aDelta: TDF_DeltaOnModification): void;
+  DeltaOnModification(anOldAttribute: TDF_Attribute): TDF_DeltaOnModification;
+  DeltaOnModification(aDelta: TDF_DeltaOnModification): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TDataStd_RealEnum: typeof TDataStd_RealEnum[keyof typeof TDataStd_RealEnum]
 
 TDataStd_RealList: declare class TDataStd_RealList extends TDF_Attribute
 
-constructor
+  constructor
 
-static GetID(): Standard_GUID;
+  static GetID(): Standard_GUID;
 
-static Set(label: TDF_Label): TDataStd_RealList;
-static Set(label: TDF_Label, theGuid: Standard_GUID): TDataStd_RealList;
-static Set(label: TDF_Label): TDataStd_RealList;
-static Set(label: TDF_Label, theGuid: Standard_GUID): TDataStd_RealList;
+  static Set(label: TDF_Label): TDataStd_RealList;
+  static Set(label: TDF_Label, theGuid: Standard_GUID): TDataStd_RealList;
+  static Set(label: TDF_Label): TDataStd_RealList;
+  static Set(label: TDF_Label, theGuid: Standard_GUID): TDataStd_RealList;
 
-IsEmpty(): boolean;
+  IsEmpty(): boolean;
 
-Extent(): number;
+  Extent(): number;
 
-Prepend(value: number): void;
+  Prepend(value: number): void;
 
-Append(value: number): void;
+  Append(value: number): void;
 
-SetID(argNo0: Standard_GUID): void;
-SetID(): void;
-SetID(argNo0: Standard_GUID): void;
-SetID(): void;
+  SetID(argNo0: Standard_GUID): void;
+  SetID(): void;
+  SetID(argNo0: Standard_GUID): void;
+  SetID(): void;
 
-InsertBefore(value: number, before_value: number): boolean;
+  InsertBefore(value: number, before_value: number): boolean;
 
-InsertBeforeByIndex(index: number, before_value: number): boolean;
+  InsertBeforeByIndex(index: number, before_value: number): boolean;
 
-InsertAfter(value: number, after_value: number): boolean;
+  InsertAfter(value: number, after_value: number): boolean;
 
-InsertAfterByIndex(index: number, after_value: number): boolean;
+  InsertAfterByIndex(index: number, after_value: number): boolean;
 
-Remove(value: number): boolean;
+  Remove(value: number): boolean;
 
-RemoveByIndex(index: number): boolean;
+  RemoveByIndex(index: number): boolean;
 
-Clear(): void;
+  Clear(): void;
 
-First(): number;
+  First(): number;
 
-Last(): number;
+  Last(): number;
 
-List(): NCollection_List_double;
+  List(): NCollection_List_double;
 
-ID(): Standard_GUID;
+  ID(): Standard_GUID;
 
-Restore(anAttribute: TDF_Attribute): void;
+  Restore(anAttribute: TDF_Attribute): void;
 
-NewEmpty(): TDF_Attribute;
+  NewEmpty(): TDF_Attribute;
 
-Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
+  Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TDataStd_ReferenceArray: declare class TDataStd_ReferenceArray extends TDF_Attribute
 
-constructor
+  constructor
 
-static GetID(): Standard_GUID;
+  static GetID(): Standard_GUID;
 
-static Set(label: TDF_Label, lower: number, upper: number): TDataStd_ReferenceArray;
-static Set(label: TDF_Label, theGuid: Standard_GUID, lower: number, upper: number): TDataStd_ReferenceArray;
-static Set(label: TDF_Label, lower: number, upper: number): TDataStd_ReferenceArray;
-static Set(label: TDF_Label, theGuid: Standard_GUID, lower: number, upper: number): TDataStd_ReferenceArray;
+  static Set(label: TDF_Label, lower: number, upper: number): TDataStd_ReferenceArray;
+  static Set(label: TDF_Label, theGuid: Standard_GUID, lower: number, upper: number): TDataStd_ReferenceArray;
+  static Set(label: TDF_Label, lower: number, upper: number): TDataStd_ReferenceArray;
+  static Set(label: TDF_Label, theGuid: Standard_GUID, lower: number, upper: number): TDataStd_ReferenceArray;
 
-Init(lower: number, upper: number): void;
+  Init(lower: number, upper: number): void;
 
-SetValue(index: number, value: TDF_Label): void;
+  SetValue(index: number, value: TDF_Label): void;
 
-SetID(argNo0: Standard_GUID): void;
-SetID(): void;
-SetID(argNo0: Standard_GUID): void;
-SetID(): void;
+  SetID(argNo0: Standard_GUID): void;
+  SetID(): void;
+  SetID(argNo0: Standard_GUID): void;
+  SetID(): void;
 
-Value(Index: number): TDF_Label;
+  Value(Index: number): TDF_Label;
 
-Lower(): number;
+  Lower(): number;
 
-Upper(): number;
+  Upper(): number;
 
-Length(): number;
+  Length(): number;
 
-InternalArray(): NCollection_HArray1_TDF_Label;
+  InternalArray(): NCollection_HArray1_TDF_Label;
 
-SetInternalArray(values: NCollection_HArray1_TDF_Label, isCheckItems?: boolean): void;
+  SetInternalArray(values: NCollection_HArray1_TDF_Label, isCheckItems?: boolean): void;
 
-ID(): Standard_GUID;
+  ID(): Standard_GUID;
 
-Restore(anAttribute: TDF_Attribute): void;
+  Restore(anAttribute: TDF_Attribute): void;
 
-NewEmpty(): TDF_Attribute;
+  NewEmpty(): TDF_Attribute;
 
-Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
+  Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
 
-References(aDataSet: TDF_DataSet): void;
+  References(aDataSet: TDF_DataSet): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TDataStd_ReferenceList: declare class TDataStd_ReferenceList extends TDF_Attribute
 
-constructor
+  constructor
 
-static GetID(): Standard_GUID;
+  static GetID(): Standard_GUID;
 
-static Set(label: TDF_Label): TDataStd_ReferenceList;
-static Set(label: TDF_Label, theGuid: Standard_GUID): TDataStd_ReferenceList;
-static Set(label: TDF_Label): TDataStd_ReferenceList;
-static Set(label: TDF_Label, theGuid: Standard_GUID): TDataStd_ReferenceList;
+  static Set(label: TDF_Label): TDataStd_ReferenceList;
+  static Set(label: TDF_Label, theGuid: Standard_GUID): TDataStd_ReferenceList;
+  static Set(label: TDF_Label): TDataStd_ReferenceList;
+  static Set(label: TDF_Label, theGuid: Standard_GUID): TDataStd_ReferenceList;
 
-IsEmpty(): boolean;
+  IsEmpty(): boolean;
 
-Extent(): number;
+  Extent(): number;
 
-Prepend(value: TDF_Label): void;
+  Prepend(value: TDF_Label): void;
 
-Append(value: TDF_Label): void;
+  Append(value: TDF_Label): void;
 
-SetID(argNo0: Standard_GUID): void;
-SetID(): void;
-SetID(argNo0: Standard_GUID): void;
-SetID(): void;
+  SetID(argNo0: Standard_GUID): void;
+  SetID(): void;
+  SetID(argNo0: Standard_GUID): void;
+  SetID(): void;
 
-InsertBefore(value: TDF_Label, before_value: TDF_Label): boolean;
-InsertBefore(index: number, before_value: TDF_Label): boolean;
-InsertBefore(value: TDF_Label, before_value: TDF_Label): boolean;
-InsertBefore(index: number, before_value: TDF_Label): boolean;
+  InsertBefore(value: TDF_Label, before_value: TDF_Label): boolean;
+  InsertBefore(index: number, before_value: TDF_Label): boolean;
+  InsertBefore(value: TDF_Label, before_value: TDF_Label): boolean;
+  InsertBefore(index: number, before_value: TDF_Label): boolean;
 
-InsertAfter(value: TDF_Label, after_value: TDF_Label): boolean;
-InsertAfter(index: number, after_value: TDF_Label): boolean;
-InsertAfter(value: TDF_Label, after_value: TDF_Label): boolean;
-InsertAfter(index: number, after_value: TDF_Label): boolean;
+  InsertAfter(value: TDF_Label, after_value: TDF_Label): boolean;
+  InsertAfter(index: number, after_value: TDF_Label): boolean;
+  InsertAfter(value: TDF_Label, after_value: TDF_Label): boolean;
+  InsertAfter(index: number, after_value: TDF_Label): boolean;
 
-Remove(value: TDF_Label): boolean;
-Remove(index: number): boolean;
-Remove(value: TDF_Label): boolean;
-Remove(index: number): boolean;
+  Remove(value: TDF_Label): boolean;
+  Remove(index: number): boolean;
+  Remove(value: TDF_Label): boolean;
+  Remove(index: number): boolean;
 
-Clear(): void;
+  Clear(): void;
 
-First(): TDF_Label;
+  First(): TDF_Label;
 
-Last(): TDF_Label;
+  Last(): TDF_Label;
 
-List(): NCollection_List_TDF_Label;
+  List(): NCollection_List_TDF_Label;
 
-ID(): Standard_GUID;
+  ID(): Standard_GUID;
 
-Restore(anAttribute: TDF_Attribute): void;
+  Restore(anAttribute: TDF_Attribute): void;
 
-NewEmpty(): TDF_Attribute;
+  NewEmpty(): TDF_Attribute;
 
-Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
+  Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
 
-References(aDataSet: TDF_DataSet): void;
+  References(aDataSet: TDF_DataSet): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TDataStd_Relation: declare class TDataStd_Relation extends TDataStd_Expression
 
-constructor
+  constructor
 
-static GetID(): Standard_GUID;
+  static GetID(): Standard_GUID;
 
-static Set(label: TDF_Label): TDataStd_Relation;
+  static Set(label: TDF_Label): TDataStd_Relation;
 
-SetRelation(E: TCollection_ExtendedString): void;
+  SetRelation(E: TCollection_ExtendedString): void;
 
-GetRelation(): TCollection_ExtendedString;
+  GetRelation(): TCollection_ExtendedString;
 
-ID(): Standard_GUID;
+  ID(): Standard_GUID;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-NewEmpty(): TDF_Attribute;
+  NewEmpty(): TDF_Attribute;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TDataStd_Tick: declare class TDataStd_Tick extends TDataStd_GenericEmpty
 
-constructor
+  constructor
 
-static GetID(): Standard_GUID;
+  static GetID(): Standard_GUID;
 
-static Set(label: TDF_Label): TDataStd_Tick;
+  static Set(label: TDF_Label): TDataStd_Tick;
 
-ID(): Standard_GUID;
+  ID(): Standard_GUID;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-NewEmpty(): TDF_Attribute;
+  NewEmpty(): TDF_Attribute;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TDataStd_TreeNode: declare class TDataStd_TreeNode extends TDF_Attribute
 
-constructor
+  constructor
 
-static Find(L: TDF_Label): { returnValue: boolean; T: TDataStd_TreeNode; [Symbol.dispose](): void };
+  static Find(L: TDF_Label): { returnValue: boolean; T: TDataStd_TreeNode; [Symbol.dispose](): void };
 
-static Set(L: TDF_Label): TDataStd_TreeNode;
-static Set(L: TDF_Label, ExplicitTreeID: Standard_GUID): TDataStd_TreeNode;
-static Set(L: TDF_Label): TDataStd_TreeNode;
-static Set(L: TDF_Label, ExplicitTreeID: Standard_GUID): TDataStd_TreeNode;
+  static Set(L: TDF_Label): TDataStd_TreeNode;
+  static Set(L: TDF_Label, ExplicitTreeID: Standard_GUID): TDataStd_TreeNode;
+  static Set(L: TDF_Label): TDataStd_TreeNode;
+  static Set(L: TDF_Label, ExplicitTreeID: Standard_GUID): TDataStd_TreeNode;
 
-static GetDefaultTreeID(): Standard_GUID;
+  static GetDefaultTreeID(): Standard_GUID;
 
-Append(Child: TDataStd_TreeNode): boolean;
+  Append(Child: TDataStd_TreeNode): boolean;
 
-Prepend(Child: TDataStd_TreeNode): boolean;
+  Prepend(Child: TDataStd_TreeNode): boolean;
 
-InsertBefore(Node: TDataStd_TreeNode): boolean;
+  InsertBefore(Node: TDataStd_TreeNode): boolean;
 
-InsertAfter(Node: TDataStd_TreeNode): boolean;
+  InsertAfter(Node: TDataStd_TreeNode): boolean;
 
-Remove(): boolean;
+  Remove(): boolean;
 
-Depth(): number;
+  Depth(): number;
 
-NbChildren(allLevels?: boolean): number;
+  NbChildren(allLevels?: boolean): number;
 
-IsAscendant(of\_: TDataStd_TreeNode): boolean;
+  IsAscendant(of_: TDataStd_TreeNode): boolean;
 
-IsDescendant(of\_: TDataStd_TreeNode): boolean;
+  IsDescendant(of_: TDataStd_TreeNode): boolean;
 
-IsRoot(): boolean;
+  IsRoot(): boolean;
 
-Root(): TDataStd_TreeNode;
+  Root(): TDataStd_TreeNode;
 
-IsFather(of\_: TDataStd_TreeNode): boolean;
+  IsFather(of_: TDataStd_TreeNode): boolean;
 
-IsChild(of\_: TDataStd_TreeNode): boolean;
+  IsChild(of_: TDataStd_TreeNode): boolean;
 
-HasFather(): boolean;
+  HasFather(): boolean;
 
-Father(): TDataStd_TreeNode;
+  Father(): TDataStd_TreeNode;
 
-HasNext(): boolean;
+  HasNext(): boolean;
 
-Next(): TDataStd_TreeNode;
+  Next(): TDataStd_TreeNode;
 
-HasPrevious(): boolean;
+  HasPrevious(): boolean;
 
-Previous(): TDataStd_TreeNode;
+  Previous(): TDataStd_TreeNode;
 
-HasFirst(): boolean;
+  HasFirst(): boolean;
 
-First(): TDataStd_TreeNode;
+  First(): TDataStd_TreeNode;
 
-HasLast(): boolean;
+  HasLast(): boolean;
 
-Last(): TDataStd_TreeNode;
+  Last(): TDataStd_TreeNode;
 
-FindLast(): TDataStd_TreeNode;
+  FindLast(): TDataStd_TreeNode;
 
-SetTreeID(explicitID: Standard_GUID): void;
+  SetTreeID(explicitID: Standard_GUID): void;
 
-SetFather(F: TDataStd_TreeNode): void;
+  SetFather(F: TDataStd_TreeNode): void;
 
-SetNext(F: TDataStd_TreeNode): void;
+  SetNext(F: TDataStd_TreeNode): void;
 
-SetPrevious(F: TDataStd_TreeNode): void;
+  SetPrevious(F: TDataStd_TreeNode): void;
 
-SetFirst(F: TDataStd_TreeNode): void;
+  SetFirst(F: TDataStd_TreeNode): void;
 
-SetLast(F: TDataStd_TreeNode): void;
+  SetLast(F: TDataStd_TreeNode): void;
 
-AfterAddition(): void;
+  AfterAddition(): void;
 
-BeforeForget(): void;
+  BeforeForget(): void;
 
-AfterResume(): void;
+  AfterResume(): void;
 
-BeforeUndo(anAttDelta: TDF_AttributeDelta, forceIt?: boolean): boolean;
+  BeforeUndo(anAttDelta: TDF_AttributeDelta, forceIt?: boolean): boolean;
 
-AfterUndo(anAttDelta: TDF_AttributeDelta, forceIt?: boolean): boolean;
+  AfterUndo(anAttDelta: TDF_AttributeDelta, forceIt?: boolean): boolean;
 
-ID(): Standard_GUID;
+  ID(): Standard_GUID;
 
-Restore(anAttribute: TDF_Attribute): void;
+  Restore(anAttribute: TDF_Attribute): void;
 
-Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
+  Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
 
-NewEmpty(): TDF_Attribute;
+  NewEmpty(): TDF_Attribute;
 
-References(aDataSet: TDF_DataSet): void;
+  References(aDataSet: TDF_DataSet): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TDataStd_UAttribute: declare class TDataStd_UAttribute extends TDF_Attribute
 
-constructor
+  constructor
 
-static Set(label: TDF_Label, LocalID: Standard_GUID): TDataStd_UAttribute;
+  static Set(label: TDF_Label, LocalID: Standard_GUID): TDataStd_UAttribute;
 
-SetID(argNo0: Standard_GUID): void;
-SetID(): void;
-SetID(argNo0: Standard_GUID): void;
-SetID(): void;
+  SetID(argNo0: Standard_GUID): void;
+  SetID(): void;
+  SetID(argNo0: Standard_GUID): void;
+  SetID(): void;
 
-ID(): Standard_GUID;
+  ID(): Standard_GUID;
 
-Restore(anAttribute: TDF_Attribute): void;
+  Restore(anAttribute: TDF_Attribute): void;
 
-NewEmpty(): TDF_Attribute;
+  NewEmpty(): TDF_Attribute;
 
-Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
+  Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
 
-References(aDataSet: TDF_DataSet): void;
+  References(aDataSet: TDF_DataSet): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TDataStd_Variable: declare class TDataStd_Variable extends TDF_Attribute
 
-constructor
+  constructor
 
-static GetID(): Standard_GUID;
+  static GetID(): Standard_GUID;
 
-static Set(label: TDF_Label): TDataStd_Variable;
-Set(value: number): void;
-Set(value: number, dimension: TDataStd_RealEnum): void;
-Set(value: number): void;
-Set(value: number, dimension: TDataStd_RealEnum): void;
+  static Set(label: TDF_Label): TDataStd_Variable;
+  Set(value: number): void;
+  Set(value: number, dimension: TDataStd_RealEnum): void;
+  Set(value: number): void;
+  Set(value: number, dimension: TDataStd_RealEnum): void;
 
-Name(string*: TCollection_ExtendedString): void;
-Name(): TCollection_ExtendedString;
-Name(string*: TCollection_ExtendedString): void;
-Name(): TCollection_ExtendedString;
+  Name(string_: TCollection_ExtendedString): void;
+  Name(): TCollection_ExtendedString;
+  Name(string_: TCollection_ExtendedString): void;
+  Name(): TCollection_ExtendedString;
 
-IsValued(): boolean;
+  IsValued(): boolean;
 
-Get(): number;
+  Get(): number;
 
-Real(): TDataStd_Real;
+  Real(): TDataStd_Real;
 
-IsAssigned(): boolean;
+  IsAssigned(): boolean;
 
-Assign(): TDataStd_Expression;
+  Assign(): TDataStd_Expression;
 
-Desassign(): void;
+  Desassign(): void;
 
-Expression(): TDataStd_Expression;
+  Expression(): TDataStd_Expression;
 
-IsCaptured(): boolean;
+  IsCaptured(): boolean;
 
-IsConstant(): boolean;
+  IsConstant(): boolean;
 
-Unit(unit: TCollection_AsciiString): void;
-Unit(): TCollection_AsciiString;
-Unit(unit: TCollection_AsciiString): void;
-Unit(): TCollection_AsciiString;
+  Unit(unit: TCollection_AsciiString): void;
+  Unit(): TCollection_AsciiString;
+  Unit(unit: TCollection_AsciiString): void;
+  Unit(): TCollection_AsciiString;
 
-Constant(status: boolean): void;
+  Constant(status: boolean): void;
 
-ID(): Standard_GUID;
+  ID(): Standard_GUID;
 
-Restore(anAttribute: TDF_Attribute): void;
+  Restore(anAttribute: TDF_Attribute): void;
 
-NewEmpty(): TDF_Attribute;
+  NewEmpty(): TDF_Attribute;
 
-Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
+  Paste(intoAttribute: TDF_Attribute, aRelocationTable: TDF_RelocationTable): void;
 
-References(aDataSet: TDF_DataSet): void;
+  References(aDataSet: TDF_DataSet): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TDataStd_HLabelArray1: NCollection_HArray1_TDF_Label
 

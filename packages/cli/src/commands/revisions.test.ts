@@ -163,4 +163,20 @@ describe.runIf(gitOnPath)('revisionsCommand', () => {
     });
     expect(stdout.join('')).toContain('part.ts');
   }, 60_000);
+
+  it('names the current revision and can remove that name', async () => {
+    await seed();
+    const command = await importCommand();
+
+    await runCommand(command, { rawArgs: ['tag', 'v1', '--project', project] });
+    const revisions = openProjectRevisions({ workspaceRoot: project, projectId: 'cli-project' });
+    try {
+      expect((await revisions.log())[0]?.tags).toContain('v1');
+    } finally {
+      await revisions.close();
+    }
+
+    await runCommand(command, { rawArgs: ['tag', 'v1', '--delete', '--project', project] });
+    expect(stdout.join('')).toContain('Removed version name v1.');
+  }, 60_000);
 });

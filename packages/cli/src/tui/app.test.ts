@@ -13,7 +13,7 @@
 
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { Server as HttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -22,7 +22,7 @@ import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
 import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 
 import { runTui } from '#tui/app.js';
@@ -182,13 +182,18 @@ const startServe = async (options: {
   readonly configDirectory: string;
   readonly relayUrl: URL;
   readonly gatewayUrl: URL;
+  readonly liveCodex?: boolean;
 }): Promise<URL> => {
   const environment = childEnvironment(undefined);
   environment['TAU_CONFIG_DIR'] = options.configDirectory;
   environment['CONSOLA_LEVEL'] = '4';
   /* Honoured only under `NODE_ENV=test`, which vitest sets and the child
    * inherits: the daemon then advertises the deterministic fixture as `codex`. */
-  environment['TAU_ACP_ADAPTER_OVERRIDE'] = `${fakeAcpAgent}:codex`;
+  if (options.liveCodex) {
+    delete environment['TAU_ACP_ADAPTER_OVERRIDE'];
+  } else {
+    environment['TAU_ACP_ADAPTER_OVERRIDE'] = `${fakeAcpAgent}:codex`;
+  }
 
   const child: ChildProcess = spawn(
     process.execPath,
@@ -434,7 +439,7 @@ describe('tau tui', () => {
       // oxlint-disable-next-line eslint/no-await-in-loop -- teardown is ordered: children first, then their servers.
       await dispose();
     }
-  });
+  }, 30_000);
 
   it('should start a run from a typed prompt, render its transcript, and restore the terminal on q', async () => {
     const { terminal, finished } = mount('chat-tui-run');
@@ -455,6 +460,51 @@ describe('tau tui', () => {
     // Detached, not stopped: the daemon still holds the run this chat started.
     expect(await chatLog('chat-tui-run')).not.toContain('"state":"cancelled"');
   }, 120_000);
+
+  it.skipIf(process.env['TAU_ACP_LIVE_TESTS'] !== 'true')(
+    'runs a live Codex turn from the TUI keyboard',
+    async () => {
+      const liveWorkspace = await mkdtemp(join(tmpdir(), 'tau-tui-live-ws-'));
+      const configDirectory = await mkdtemp(join(tmpdir(), 'tau-tui-live-cfg-'));
+      disposers.push(async () => {
+        await rm(liveWorkspace, { recursive: true, force: true });
+        await rm(configDirectory, { recursive: true, force: true });
+      });
+      await writeFile(
+        join(configDirectory, 'host.json'),
+        JSON.stringify({ v: 1, deviceId: 'device-live', credential: 'integration-device-credential-32-chars-min' }),
+      );
+      const liveOrigin = await startServe({
+        workspace: liveWorkspace,
+        configDirectory,
+        relayUrl: await startStubRelay(),
+        gatewayUrl: await startHeldGateway(),
+        liveCodex: true,
+      });
+      const terminal = createTerminal();
+      const model = process.env['TAU_ACP_LIVE_CODEX_MODEL'] ?? 'gpt-5.6-sol';
+      const finished = runTui({
+        host: liveOrigin.href,
+        chatId: 'chat-live-tui',
+        from: 0,
+        stdin: terminal.stdin,
+        stdout: terminal.stdout,
+        agent: { id: 'codex', model },
+      });
+      mounted.push({ terminal, finished });
+      await submit(terminal, 'Reply only with the word seahorse.');
+      await expect.poll(terminal.output, { timeout: 120_000 }).toContain('completed');
+      expect(terminal.output()).toContain('seahorse');
+      expect(terminal.output()).toContain('codex');
+      const log = await readFile(join(liveWorkspace, '.tau/chats/chat-live-tui/events.jsonl'), 'utf8');
+      expect(log).toContain(`"model":"${model}"`);
+      expect(log).toContain('"state":"completed"');
+      terminal.stdin.write('q');
+      await expect(finished).resolves.toBeUndefined();
+      expect(terminal.rawModeCalls().at(-1)).toBe(false);
+    },
+    180_000,
+  );
 
   it('should resolve a pending approval with the option id the request offered', async () => {
     const { terminal, finished } = mount('chat-tui-approve');
@@ -534,6 +584,57 @@ describe('tau tui', () => {
     await settle();
     terminal.stdin.write('q');
     await expect(finished).resolves.toBeUndefined();
+  }, 120_000);
+
+  it('shows an interrupted ACP outcome as unknown on reattach without repeating the turn', async () => {
+    const chatId = 'chat-tui-acp-recovery';
+    const directory = join(workspace, '.tau', 'chats', chatId);
+    await mkdir(directory, { recursive: true });
+    const base = {
+      version: 1,
+      leaderEpoch: 'epoch-before-restart',
+      recordedAt: new Date(0).toISOString(),
+      runId: 'run-tui-acp-recovery',
+    };
+    // The same interrupted durable tail used by the host's recovery gate.
+    await writeFile(
+      join(directory, 'events.jsonl'),
+      [
+        {
+          ...base,
+          sequence: 0,
+          type: 'message.appended',
+          message: {
+            id: 'user-recovery',
+            role: 'user',
+            content: 'do not repeat this turn',
+            metadata: {
+              tauInternal: { kind: 'external-agent', agentId: 'codex', acpSessionId: 'fake-session-1' },
+            },
+          },
+        },
+        { ...base, sequence: 1, type: 'run.lifecycle', state: 'admitted', storageDurability: 'exclusive-append' },
+        { ...base, sequence: 2, type: 'run.lifecycle', state: 'running' },
+      ]
+        .map((event) => JSON.stringify(event))
+        .join('\n'),
+    );
+
+    const errors = vi.spyOn(console, 'error');
+    try {
+      const { terminal, finished } = mount(chatId, { id: 'codex' });
+      await untilPainted(terminal, /EXTERNAL_AGENT_RECOVERY_UNKNOWN/u);
+      await untilPainted(terminal, /run failed/u);
+      const log = await chatLog(chatId);
+      expect(log.match(/"role":"user"/gu)).toHaveLength(1);
+      expect(log).not.toContain('"role":"tool-input"');
+      expect(log).not.toContain('"state":"completed"');
+      expect(errors.mock.calls.filter(([message]) => String(message).includes('same key'))).toHaveLength(0);
+      terminal.stdin.write('q');
+      await expect(finished).resolves.toBeUndefined();
+    } finally {
+      errors.mockRestore();
+    }
   }, 120_000);
 
   it('should render a typed external-agent refusal with the code the host returned', async () => {

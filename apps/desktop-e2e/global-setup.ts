@@ -111,6 +111,18 @@ export const setup = async (): Promise<() => void> => {
   environment['TAU_API_URL'] = desktopE2EApiUrl;
   environment['TAU_FRONTEND_URL'] = desktopE2EFrontendUrl;
   environment['TAU_TEST_MODE'] = 'true';
+  /* `TAU_GIT_ROOT` defaults to `.tau-git`, resolved against the API's cwd
+   * (`apps/api` here), so without this every run that pushes writes bare
+   * repositories into the source tree — 825 MB of them by the time W18's review
+   * counted (W18 review R7, defects review R12). `out/test-results` is this
+   * tier's own log home and is gitignored. Kept at teardown: a push that lands
+   * wrongly is only diagnosable from the volume it landed on. */
+  environment['TAU_GIT_ROOT'] = resolve(import.meta.dirname, '../../out/test-results/desktop-e2e/git-root');
+  /* P50, for the two-client tier only: the local `git http-backend` fixture
+   * charter AC18 is written around lives on `127.0.0.1`, which the proxy
+   * refuses by default. `apps/api-e2e` must never set this — three of its rows
+   * assert exactly those refusals. */
+  environment['TAU_GIT_REMOTE_ALLOW_PRIVATE'] = '1';
   /* D16/D19: the deterministic tier drives the *real* gateway — admission,
    * qualification, the catalog→supplier rewrite and metering all run — and only the
    * last hop lands on this suite's own stub. Process environment beats
@@ -125,6 +137,17 @@ export const setup = async (): Promise<() => void> => {
    * completed-artifact tier: its isolated API has no billing environment, and
    * `environmentSchema` refuses this name without `BILLING_ENVIRONMENT=development`. */
   if (!desktopE2ECompletedArtifact) {
+    environment['TAU_CLOUD_ENABLED'] = 'true';
+    environment['BILLING_ENVIRONMENT'] = 'development';
+    environment['BILLING_USAGE_CURSOR_SECRET'] = 'desktop-e2e-usage-cursor-secret-min-32-chars';
+    environment['BILLING_REQUEST_DIGEST_SECRET'] = 'desktop-e2e-request-digest-secret-min-32-chars';
+    environment['STRIPE_SECRET_KEY'] = 'rk_test_desktop_e2e_create';
+    environment['STRIPE_READ_SECRET_KEY'] = 'rk_test_desktop_e2e';
+    environment['STRIPE_ACCOUNT_ID'] = 'acct_desktop_e2e';
+    environment['STRIPE_LIVEMODE'] = 'false';
+    environment['STRIPE_WEBHOOK_SECRET'] = 'whsec_desktop_e2e';
+    environment['STRIPE_PRICE_ID_PRO_MONTHLY'] = 'price_desktop_e2e';
+    environment['STRIPE_PRODUCT_ID_CREDIT_PACK'] = 'prod_desktop_e2e';
     environment['TAU_LLM_PROVIDER_UPSTREAM_URL'] = desktopE2EProviderStubUrl;
     environment['ANTHROPIC_API_KEY'] = desktopE2EProviderStubKey;
   }
@@ -133,6 +156,7 @@ export const setup = async (): Promise<() => void> => {
    * server-side is otherwise invisible from the Electron side of the glass. */
   const logDirectory = resolve(import.meta.dirname, '../../out/test-results/desktop-e2e');
   mkdirSync(logDirectory, { recursive: true });
+  mkdirSync(environment['TAU_GIT_ROOT'], { recursive: true });
   const apiLog = createWriteStream(resolve(logDirectory, 'api.log'), { flags: 'w' });
   // Nest also loads .env from cwd. Completed-package tests use the fixture's
   // private directory so neither Node nor Nest can read real API credentials.

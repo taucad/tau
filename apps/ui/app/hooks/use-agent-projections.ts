@@ -1,15 +1,14 @@
-import { useCallback, useMemo, useSyncExternalStore } from 'react';
+import { useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
 import type { Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
-import { isAnyToolPart } from '@taucad/chat';
-import type { ChatStatus } from 'ai';
 import { useChats } from '#hooks/use-chats.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useModels } from '#hooks/use-models.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { useProject } from '#hooks/use-project.js';
+import { chatStatusLabel, selectChatStatus } from '#hooks/use-sidebar-status.js';
+import type { ChatSidebarState, ChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import type { ChatSession, ChatSessionStore } from '#services/chat-session-store.js';
-import type { ChatSessionActorRef } from '#machines/chat-session.machine.js';
 
 export type AgentProjectionState = 'waiting' | 'running' | 'error' | 'idle';
 
@@ -63,13 +62,9 @@ export type AgentProjectionsView = {
   readonly retry: () => Promise<unknown>;
 };
 
-type AgentRequestLifecycle = 'idle' | 'invoking' | 'retrying' | 'stopping';
-
 type AgentProjectionInput = {
   readonly chat: ChatEntity;
   readonly session?: ChatSession;
-  readonly status?: ChatStatus;
-  readonly lifecycle: AgentRequestLifecycle;
   readonly focusedChatId?: string;
   readonly defaultModel: ResolvedModel;
   readonly resolveModel: (id: string) => ResolvedModel;
@@ -79,29 +74,41 @@ type AgentProjectionInput = {
 
 const emptyMetadataByChatId: Readonly<Record<string, AgentProjectionMetadata>> = {};
 
-const readLifecycle = (session: ChatSession | undefined): AgentRequestLifecycle => {
-  const snapshot = session?.persistenceActorRef.getSnapshot();
-  if (!snapshot) {
-    return 'idle';
-  }
-  for (const lifecycle of ['invoking', 'retrying', 'stopping'] as const) {
-    if (snapshot.matches({ requestLifecycle: lifecycle })) {
-      return lifecycle;
-    }
-  }
-  return 'idle';
+/**
+ * The pane's four-state vocabulary, folded from the chat's own machine (D32).
+ *
+ * There is no second derivation any more (R12): the `chat-session` machine is
+ * the one thing that says what a chat is doing, this only coarsens its ten
+ * states into the four this pane's rail draws, and the row's detail is the
+ * sidebar's own sentence so both surfaces say the same words.
+ *
+ * Ponytail: a chat with no machine is `idle`, full stop. A project session owns
+ * a machine for every one of its chats, so the only rows without one are in a
+ * project that is not live — and a closed project has no agent running. The one
+ * fact this loses is a *persisted* error from a previous session, which used to
+ * colour the row off `chat.error`; the honest place to restore it is the store
+ * replaying it as `runLifecycle{phase:'failed'}` when it rehydrates the chat,
+ * not a second status here.
+ */
+const paneState: Readonly<Record<ChatSidebarState, AgentProjectionState>> = {
+  idle: 'idle',
+  queued: 'running',
+  working: 'running',
+  tool: 'running',
+  approval: 'waiting',
+  question: 'waiting',
+  reconnecting: 'waiting',
+  /* P71: the run reported completion but the host has not attested the turn's
+   * cut and lease retirement yet — still the agent's. */
+  finishing: 'running',
+  done: 'idle',
+  failed: 'error',
+  stopped: 'idle',
 };
 
-const countPendingApprovals = (messages: readonly MyUIMessage[]): number => {
-  let count = 0;
-  for (const message of messages) {
-    for (const part of message.parts) {
-      if (isAnyToolPart(part) && part.state === 'approval-requested') {
-        count += 1;
-      }
-    }
-  }
-  return count;
+const chatStatusOf = (session: ChatSession | undefined): ChatSidebarStatus | undefined => {
+  const snapshot = session?.stateActorRef?.getSnapshot();
+  return snapshot === undefined ? undefined : selectChatStatus(snapshot);
 };
 
 const lastMessageActivityAt = (messages: readonly MyUIMessage[], fallback: number): number => {
@@ -124,134 +131,23 @@ const usageOperationIds = (messages: readonly MyUIMessage[]): string[] => {
   return [...ids].sort();
 };
 
-const errorDetail = (input: Pick<AgentProjectionInput, 'chat' | 'session'>): string | undefined => {
-  const runtimeError = input.session?.chat.error;
-  if (runtimeError) {
-    return runtimeError.message;
-  }
-  return input.session?.persistenceActorRef.getSnapshot().context.persistedError?.message ?? input.chat.error?.message;
-};
-
-/**
- * The pane's four-state vocabulary, read off the chat's own machine (D32).
- *
- * The machine is the one derivation of what a chat is doing; this only folds
- * its states into the coarser row the Agents pane draws. A chat with no live
- * session — a parked row, or a jsdom unit that never opened one — falls back to
- * the flags below.
- *
- * @param ref - The chat's state machine, when the project session owns one.
- * @returns The row's state and detail, or `undefined` when there is no machine.
- */
-const stateFromMachine = (
-  ref: ChatSessionActorRef | undefined,
-): { readonly state: AgentProjectionState; readonly detail?: string } | undefined => {
-  if (ref === undefined) {
-    return undefined;
-  }
-  const snapshot = ref.getSnapshot();
-  const { pendingApprovalCount, toolName, failureReason } = snapshot.context;
-  if (snapshot.matches({ run: { running: { waiting: 'approval' } } })) {
-    return {
-      state: 'waiting',
-      detail: `${pendingApprovalCount} approval${pendingApprovalCount === 1 ? '' : 's'} required`,
-    };
-  }
-  if (snapshot.matches({ run: { running: { waiting: 'input' } } })) {
-    return { state: 'waiting', detail: 'Waiting for input' };
-  }
-  if (snapshot.matches({ run: { running: 'reconnecting' } })) {
-    return { state: 'waiting', detail: 'Retrying connection' };
-  }
-  if (snapshot.matches({ run: { running: 'tool' } })) {
-    return { state: 'running', detail: toolName === undefined ? 'Running a tool' : `Running ${toolName}` };
-  }
-  if (snapshot.matches({ run: { running: 'generating' } })) {
-    return { state: 'running', detail: 'Streaming response' };
-  }
-  if (snapshot.matches({ run: 'queued' })) {
-    return { state: 'running', detail: 'Queued' };
-  }
-  if (snapshot.matches({ run: 'failed' })) {
-    return { state: 'error', detail: failureReason ?? 'Request failed' };
-  }
-  return { state: 'idle' };
-};
-
-const resolveState = ({
-  pendingApprovalCount,
-  lifecycle,
-  status,
-  hasError,
-}: {
-  readonly pendingApprovalCount: number;
-  readonly lifecycle: AgentRequestLifecycle;
-  readonly status?: ChatStatus;
-  readonly hasError: boolean;
-}): AgentProjectionState => {
-  if (pendingApprovalCount > 0 || lifecycle === 'retrying') {
-    return 'waiting';
-  }
-  if (lifecycle !== 'idle' || status === 'submitted' || status === 'streaming') {
-    return 'running';
-  }
-  return hasError ? 'error' : 'idle';
-};
-
-const resolveDetail = ({
-  pendingApprovalCount,
-  lifecycle,
-  state,
-  failure,
-}: {
-  readonly pendingApprovalCount: number;
-  readonly lifecycle: AgentRequestLifecycle;
-  readonly state: AgentProjectionState;
-  readonly failure?: string;
-}): string | undefined => {
-  if (pendingApprovalCount > 0) {
-    return `${pendingApprovalCount} approval${pendingApprovalCount === 1 ? '' : 's'} required`;
-  }
-  if (lifecycle === 'retrying') {
-    return 'Retrying connection';
-  }
-  if (state === 'running') {
-    return lifecycle === 'stopping' ? 'Stopping' : 'Streaming response';
-  }
-  return state === 'error' ? (failure ?? 'Request failed') : undefined;
-};
-
 /** Pure projection builder used by the hook and contract tests. */
 export const buildAgentProjection = (input: AgentProjectionInput): AgentProjection => {
-  const { chat, session, status, lifecycle, focusedChatId, defaultModel, resolveModel, defaultWorkspace, metadata } =
-    input;
+  const { chat, session, focusedChatId, defaultModel, resolveModel, defaultWorkspace, metadata } = input;
   const messages = session?.chat.messages ?? chat.messages;
-  const pendingApprovalCount = countPendingApprovals(messages);
+  const status = chatStatusOf(session);
   const persistedSnapshot = session?.persistenceActorRef.getSnapshot();
   const activeExecution = persistedSnapshot?.context.activeExecution ?? chat.activeExecution;
   const activeModelId = activeExecution?.kind === 'tau' ? activeExecution.model : defaultModel.id;
   const model = activeModelId === defaultModel.id ? defaultModel : resolveModel(activeModelId);
-  const failure = errorDetail(input);
-  const fromMachine = stateFromMachine(session?.stateActorRef);
-  const state =
-    fromMachine?.state ??
-    resolveState({
-      pendingApprovalCount,
-      lifecycle,
-      status,
-      hasError: failure !== undefined || status === 'error',
-    });
-  const lastActivityAt = lastMessageActivityAt(messages, chat.createdAt);
-  const detail = fromMachine
-    ? (fromMachine.detail ?? (state === 'error' ? (failure ?? 'Request failed') : undefined))
-    : resolveDetail({ pendingApprovalCount, lifecycle, state, failure });
+  const detail = status === undefined ? undefined : chatStatusLabel(status);
 
   return {
     chatId: chat.id,
     name: chat.name,
-    state,
+    state: status === undefined ? 'idle' : paneState[status.state],
     focused: chat.id === focusedChatId,
-    lastActivityAt,
+    lastActivityAt: lastMessageActivityAt(messages, chat.createdAt),
     model: {
       id: model.id,
       name: model.name,
@@ -261,11 +157,13 @@ export const buildAgentProjection = (input: AgentProjectionInput): AgentProjecti
     workspace: metadata?.workspace ?? defaultWorkspace,
     /* No chat has a branch of its own: turns attach to the chat's checkout and
      * never create one (A29, S11). The row shows the checkout's branch, which
-     * the caller passes as metadata when it knows it. */
-    branch: metadata?.branch ?? 'main',
-    pendingApprovalCount,
+     * the machine carries once a turn has landed on one. */
+    branch: metadata?.branch ?? status?.branch ?? 'main',
+    pendingApprovalCount: status?.pendingApprovalCount ?? 0,
     operationIds: usageOperationIds(messages),
-    unread: chat.id !== focusedChatId && chat.hasUnreadTurn === true,
+    /* The machine's `read` region when there is one, the per-client record
+     * otherwise — never a third answer (I26). */
+    unread: chat.id !== focusedChatId && (status?.unread ?? chat.hasUnreadTurn === true),
     ...(detail === undefined ? {} : { detail }),
   };
 };
@@ -297,15 +195,10 @@ const liveProjectionSnapshot = (store: ChatSessionStore, chatIds: readonly strin
       const persistenceSnapshot = session.persistenceActorRef.getSnapshot();
       return [
         chatId,
-        store.getStatus(chatId),
-        readLifecycle(session),
-        countPendingApprovals(messages),
+        chatStatusOf(session),
         usageOperationIds(messages),
         lastMessageActivityAt(messages, 0),
         persistenceSnapshot.context.activeExecution,
-        persistenceSnapshot.context.persistedError?.message,
-        session.chat.error?.message,
-        session.stateActorRef?.getSnapshot().value,
       ];
     }),
   );
@@ -365,29 +258,45 @@ export const useAgentProjections = (options?: UseAgentProjectionsOptions): Agent
     [chatIds, store],
   );
 
-  const getSnapshot = useCallback(() => liveProjectionSnapshot(store, chatIds), [chatIds, store]);
-  const liveSnapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-
-  const agents = useMemo(
-    () =>
+  /*
+   * P66: the pane reads the value, never a key it then re-derives from.
+   *
+   * This used to be `useMemo(build, [..., liveSnapshot, ...])` over a JSON key
+   * the callback never read — and React Compiler infers a memo's dependencies
+   * from what the callback reads, so the key was dropped and the pane froze on
+   * whatever the store said first. The projections are the snapshot now, held
+   * stable while the store's settled key is unchanged; the closure is rebuilt
+   * when React's own inputs move, which is the other half of the same bailout.
+   */
+  const build = useCallback(
+    (): readonly AgentProjection[] =>
       sortAgentProjections(
-        chats.map((chat) => {
-          const session = store.get(chat.id);
-          return buildAgentProjection({
+        chats.map((chat) =>
+          buildAgentProjection({
             chat,
-            session,
-            status: store.getStatus(chat.id),
-            lifecycle: readLifecycle(session),
+            session: store.get(chat.id),
             focusedChatId,
             defaultModel: selectedModel,
             resolveModel,
             defaultWorkspace,
             metadata: metadataByChatId[chat.id],
-          });
-        }),
+          }),
+        ),
       ),
-    [chats, defaultWorkspace, focusedChatId, liveSnapshot, metadataByChatId, resolveModel, selectedModel, store],
+    [chats, defaultWorkspace, focusedChatId, metadataByChatId, resolveModel, selectedModel, store],
   );
+  const cache = useRef<{ build: typeof build; key: string; value: readonly AgentProjection[] } | undefined>(undefined);
+  const getSnapshot = useCallback(() => {
+    /* Stable while the store's settled key and React's own inputs are
+     * unchanged — `build`'s identity is the second half, and it moves exactly
+     * when what it reads does. */
+    const key = liveProjectionSnapshot(store, chatIds);
+    if (cache.current?.key !== key || cache.current.build !== build) {
+      cache.current = { build, key, value: build() };
+    }
+    return cache.current.value;
+  }, [build, chatIds, store]);
+  const agents = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   return { agents, isLoading, error, retry };
 };

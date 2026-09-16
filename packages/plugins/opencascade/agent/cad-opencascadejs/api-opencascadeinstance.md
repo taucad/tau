@@ -3,19 +3,18 @@
 1 top-level symbols. Signatures are verbatim typescript.
 
 OpenCascadeInstance: {
-/** Emscripten virtual filesystem for reading/writing files in the WASM heap. \*/
-FS: typeof FS;
-/**
-
-- The live `WebAssembly.Memory` instance backing the WASM linear memory.
--
-- Use `wasmMemory.buffer` to obtain the current `ArrayBuffer` after any
-- call that may have grown memory (e.g. allocations during `extract()`).
-- Existing typed-array views may be detached after growth; create fresh
-- views from `wasmMemory.buffer` after calls that may allocate.
-  \*/
+  /** Emscripten virtual filesystem for reading/writing files in the WASM heap. */
+  FS: typeof FS;
+  /**
+   * The live `WebAssembly.Memory` instance backing the WASM linear memory.
+   *
+   * Use `wasmMemory.buffer` to obtain the current `ArrayBuffer` after any
+   * call that may have grown memory (e.g. allocations during `extract()`).
+   * Existing typed-array views may be detached after growth; create fresh
+   * views from `wasmMemory.buffer` after calls that may allocate.
+   */
   wasmMemory: WebAssembly.Memory;
-  } & {
+} & {
   AppStd_Application: typeof AppStd_Application;
   TDataXtd: typeof TDataXtd;
   TDataXtd_Axis: typeof TDataXtd_Axis;
@@ -5132,4 +5131,4 @@ FS: typeof FS;
   getExceptionMessage: typeof getExceptionMessage;
   incrementExceptionRefcount: typeof incrementExceptionRefcount;
   decrementExceptionRefcount: typeof decrementExceptionRefcount;
-  }
+}

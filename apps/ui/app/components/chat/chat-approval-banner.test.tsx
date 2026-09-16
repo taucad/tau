@@ -121,6 +121,9 @@ describe('ChatApprovalBanner', () => {
     expect(screen.getByText(/Reject/u)).toBeInTheDocument();
     // SP-4 Result 3: never a promise of per-action confinement.
     expect(screen.getByText(/keep working in this chat's tree/u)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Standing-grant persistence is controlled by the connected agent or MCP server/u),
+    ).toBeInTheDocument();
   });
 
   it('claims a branch only for the placement that actually materializes one', () => {

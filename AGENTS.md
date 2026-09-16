@@ -55,21 +55,21 @@ Nothing under `packages/**` or `libs/**` depends on `apps/libs/**`. Query projec
 
 ## Required policy routes
 
-Read these exact owners when the task touches the corresponding concern:
+Read these owners when a task touches each concern:
 
-- TypeScript/JavaScript or declarations: [lint](docs/policy/lint-policy.md), [TypeScript](docs/policy/typescript-policy.md), [JSDoc](docs/policy/jsdoc-policy.md); public APIs also [library API](docs/policy/library-api-policy.md)
-- Tests/specs/harnesses: [testing](docs/policy/testing-policy.md); React/jsdom also [React testing](docs/policy/react-testing-policy.md)
-- XState machines or actors: [XState](docs/policy/xstate-policy.md)
+- TS/JS/declarations: [lint](docs/policy/lint-policy.md), [TypeScript](docs/policy/typescript-policy.md), [JSDoc](docs/policy/jsdoc-policy.md); public APIs also [library API](docs/policy/library-api-policy.md)
+- Tests/specs/harnesses: [testing](docs/policy/testing-policy.md); React/jsdom adds [React testing](docs/policy/react-testing-policy.md)
+- XState: [XState](docs/policy/xstate-policy.md); revision graphs/checkouts/machines/sync also [revisions](docs/policy/revisions-policy.md)
 - React/Tailwind/tokens/accessibility: [DESIGN](DESIGN.md), [React](docs/policy/react-policy.md), [UI](docs/policy/ui-policy.md), [color](docs/policy/color-policy.md), [accessibility](docs/policy/accessibility-policy.md)
 - Prompts/tools/transcripts/compaction/offloading: [context engineering](docs/policy/context-engineering-policy.md), [filesystem context](docs/policy/filesystem-context-policy.md)
-- App-library placement/manifests: [workspace projects](docs/policy/workspace-project-policy.md); use the `create-package` skill
-- Event fan-out across filesystem, runtime, app facades or UI services: [event fan-out](docs/policy/event-fanout-policy.md)
-- Filesystem authority and watches: [filesystem](docs/policy/filesystem-policy.md)
+- App-library placement/manifests: [workspace projects](docs/policy/workspace-project-policy.md); use `create-package`
+- Filesystem/runtime/app/UI event fan-out: [event fan-out](docs/policy/event-fanout-policy.md)
+- Filesystem authority, rooted views, mounts or watches: [filesystem](docs/policy/filesystem-policy.md), [authority](docs/policy/filesystem-authority-policy.md)
 - Three.js/TSL, cameras, materials, graphics machines or capture: [graphics backend](docs/policy/graphics-backend-policy.md)
 - Geometry assertions/GeoSpec: [GeoSpec](docs/policy/geospec-policy.md), [testing](docs/policy/testing-policy.md)
-- Policy/research/MDX documents: [documentation](docs/policy/documentation-policy.md); use `create-policy` or `create-research`; docs-site gates apply to published content
-- AGENTS/CLAUDE, skills, native agent/MCP config: [agent instructions](docs/policy/agents-md-policy.md), [MCP capabilities](docs/policy/mcp-tool-budget-policy.md); use `create-skill` for procedures
-- Dependencies/commits/releases: [npm](docs/policy/npm-policy.md), [commit](docs/policy/commit-policy.md); applicable procedure and action authorization
+- Policy/research/MDX: [documentation](docs/policy/documentation-policy.md); use `create-policy`/`create-research`; published content also follows docs-site gates
+- AGENTS/CLAUDE, skills, agent/MCP config: [agent instructions](docs/policy/agents-md-policy.md), [MCP capabilities](docs/policy/mcp-tool-budget-policy.md); use `create-skill`
+- Dependencies/commits/releases: [npm](docs/policy/npm-policy.md), [commit](docs/policy/commit-policy.md), applicable procedure and authorization
 - Generated outputs or temporary files: [tool output locations](docs/policy/tool-output-location-policy.md)
 
 ## Skills and collaboration

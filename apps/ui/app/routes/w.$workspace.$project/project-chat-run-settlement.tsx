@@ -162,10 +162,22 @@ function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): React
     durableRunState === 'reattaching' ||
     durableRunState === 'active';
   useEffect(() => {
-    if (workspace?.runId && store.getDurableRunId(chatId) !== workspace.runId) {
-      store.retainDurableRun({ chatId, runId: workspace.runId, state: 'active' });
+    /* Mount-time `reclaimAll` owns recovery. A workspace created by this page
+     * appears one microtask before its explicit send changes `ready` to
+     * `submitted`; retaining it in that gap starts a read-only reattach stream
+     * that serializes the real send behind itself. */
+    if (
+      workspace?.runId &&
+      (status === 'submitted' || status === 'streaming') &&
+      store.getDurableRunId(chatId) !== workspace.runId
+    ) {
+      store.retainDurableRun({
+        chatId,
+        runId: workspace.runId,
+        state: 'active',
+      });
     }
-  }, [chatId, store, workspace?.runId]);
+  }, [chatId, status, store, workspace?.runId]);
   useEffect(() => {
     if (isLoadingChat || !workspace?.admitted || mutatingRunActive || durableRunState !== 'terminal' || !durableRunId) {
       return;
@@ -215,7 +227,11 @@ function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): React
         return undefined;
       }
       if (localRun.state !== 'completed') {
-        store.retainDurableRun({ chatId, runId: authoritativeRunId, state: 'active' });
+        store.retainDurableRun({
+          chatId,
+          runId: authoritativeRunId,
+          state: 'active',
+        });
         return undefined;
       }
       return localRun;
@@ -233,7 +249,11 @@ function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): React
         if (localRun.turnId !== undefined && localRun.userMessage.id !== localRun.turnId) {
           throw new TypeError('Browser host snapshot user message does not match its authoritative turn id.');
         }
-        store.reconcileDurableUserMessage({ chatId, runId: authoritativeRunId, message: localRun.userMessage });
+        store.reconcileDurableUserMessage({
+          chatId,
+          runId: authoritativeRunId,
+          message: localRun.userMessage,
+        });
       }
       const turnId = localRun.turnId ?? workspace.turnId ?? lastUserTurnId();
       if (!turnId) {
@@ -294,17 +314,7 @@ function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): React
         globalThis.clearTimeout(retryTimer);
       }
     };
-  }, [
-    chatId,
-    durableRunId,
-    durableRunState,
-    isLoadingChat,
-    mutatingRunActive,
-    status,
-    store,
-    workspace,
-    workspaceAuthority,
-  ]);
+  }, [chatId, durableRunId, durableRunState, isLoadingChat, mutatingRunActive, store, workspace, workspaceAuthority]);
   return null;
 }
 

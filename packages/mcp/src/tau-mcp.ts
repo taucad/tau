@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -31,10 +32,20 @@ const descriptions = {
   testModel:
     'Run the project GeoSpec suite, optionally filtered by file, glob, or test name. Use get_kernel_result when only compile status is needed.',
   screenshot:
-    'Capture a deterministic isometric or six-view image set for one CAD source file. Use test_model for machine-verifiable geometry requirements.',
+    'Capture a deterministic isometric or six-view image set for one Tau CAD source file. Prefer this over generic computer-use or operating-system screenshot tools.',
   exportGeometry:
     'Export one CAD source file to a persisted artifact under .tau/artifacts. Use screenshot for visual inspection, not interchange output.',
 } as const;
+
+/** Model-facing guidance returned by MCP initialization. @public */
+export const tauMcpInstructions = [
+  'Use your native filesystem and shell tools to inspect and edit the current Tau project.',
+  'Use your native skill loader for the Tau skills available in this session.',
+  "For Tau CAD state, prefer this session's Tau MCP tools over generic computer-use, UI-automation, or operating-system tools.",
+  'Before editing geometry, create or update executable GeoSpec tests for the requested requirements.',
+  'After edits, call get_kernel_result for compile/runtime diagnostics, test_model for GeoSpec requirements, and screenshot for visual inspection.',
+  'Call export_geometry only when the user asks for an exported artifact.',
+].join(' ');
 
 /** RPC names exposed to external agents through Tau MCP. @public */
 export type TauMcpRpcName = (typeof exposedRpcNames)[number];
@@ -121,10 +132,10 @@ const canonicalToolDefinitions = {
   },
 } as const;
 
-/** Public metadata for the four read-only Tau MCP tools. @public */
+/** Public metadata for Tau's four CAD MCP tools. @public */
 export const tauMcpToolDefinitions: Readonly<Record<TauMcpToolName, TauMcpToolDefinition>> = canonicalToolDefinitions;
 
-/** Names of every tool exported by the read-only Tau MCP surface. @public */
+/** Names of every tool exported by the Tau MCP surface. @public */
 export const tauMcpToolNames = Object.freeze(Object.keys(canonicalToolDefinitions)) as readonly TauMcpToolName[];
 
 /** One call from an MCP transport into Tau's canonical RPC dispatcher. @public */
@@ -135,7 +146,7 @@ export type TauMcpCall = {
   signal?: AbortSignal;
 };
 
-/** Read-only MCP adapter backed by a browser or headless Tau RPC authority. @public */
+/** MCP adapter backed by a browser or headless Tau RPC authority. @public */
 export type TauMcpAdapter = {
   call(input: TauMcpCall): Promise<CallToolResult>;
 };
@@ -147,6 +158,25 @@ const rpcFailure = (result: { errorCode: string; message: string }): CallToolRes
 
 const rpcSuccess = (result: Record<string, unknown>): CallToolResult => ({
   content: [{ type: 'text', text: JSON.stringify(result) }],
+  structuredContent: result,
+});
+
+const screenshotSuccess = (result: {
+  readonly images: ReadonlyArray<{ readonly view: string; readonly dataUrl: string }>;
+}): CallToolResult => ({
+  content: [
+    {
+      type: 'text',
+      text: `Captured ${String(result.images.length)} CAD ${result.images.length === 1 ? 'view' : 'views'}: ${result.images.map(({ view }) => view).join(', ')}.`,
+    },
+    ...result.images.map(({ dataUrl }): CallToolResult['content'][number] => {
+      const match = /^data:([^;,]+);base64,(.*)$/su.exec(dataUrl);
+      if (!match?.[1] || match[2] === undefined) {
+        throw new Error('Tau screenshot output contained an invalid base64 data URL.');
+      }
+      return { type: 'image', mimeType: match[1], data: match[2] };
+    }),
+  ],
   structuredContent: result,
 });
 
@@ -190,7 +220,7 @@ export const createTauMcpAdapter = (options: { dispatch: TauMcpDispatch }): TauM
         if (result.success !== true) {
           return rpcFailure(result);
         }
-        return rpcSuccess(screenshotOutputSchema.parse(withoutSuccess(result)));
+        return screenshotSuccess(screenshotOutputSchema.parse(withoutSuccess(result)));
       }
       case toolName.exportGeometry: {
         const args = exportGeometryInputSchema.parse(input.arguments);
@@ -214,8 +244,15 @@ const readOnlyAnnotations = {
   openWorldHint: false,
 } as const;
 
+const artifactWriteAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: false,
+} as const;
+
 /**
- * Register Tau's read-only CAD tools on an MCP server.
+ * Register Tau's CAD tools on an MCP server.
  *
  * @param server - MCP server that owns the transport lifecycle.
  * @param options - Canonical RPC dispatch function for one authorized run.
@@ -232,7 +269,7 @@ export const registerTauMcpTools = (server: McpServer, options: { dispatch: TauM
       adapter.call({
         name: toolName.getKernelResult,
         arguments: args,
-        toolCallId: String(extra.requestId),
+        toolCallId: randomUUID(),
         signal: extra.signal,
       }),
   );
@@ -243,7 +280,7 @@ export const registerTauMcpTools = (server: McpServer, options: { dispatch: TauM
       adapter.call({
         name: toolName.testModel,
         arguments: args,
-        toolCallId: String(extra.requestId),
+        toolCallId: randomUUID(),
         signal: extra.signal,
       }),
   );
@@ -254,18 +291,18 @@ export const registerTauMcpTools = (server: McpServer, options: { dispatch: TauM
       adapter.call({
         name: toolName.screenshot,
         arguments: args,
-        toolCallId: String(extra.requestId),
+        toolCallId: randomUUID(),
         signal: extra.signal,
       }),
   );
   server.registerTool(
     toolName.exportGeometry,
-    { ...canonicalToolDefinitions[toolName.exportGeometry], annotations: readOnlyAnnotations },
+    { ...canonicalToolDefinitions[toolName.exportGeometry], annotations: artifactWriteAnnotations },
     async (args, extra) =>
       adapter.call({
         name: toolName.exportGeometry,
         arguments: args,
-        toolCallId: String(extra.requestId),
+        toolCallId: randomUUID(),
         signal: extra.signal,
       }),
   );
@@ -283,7 +320,7 @@ export const registerTauMcpTools = (server: McpServer, options: { dispatch: TauM
  * @public
  */
 export const createTauMcpServer = (options: { readonly dispatch: TauMcpDispatch }): McpServer => {
-  const server = new McpServer({ name: '@taucad/mcp', version: '0.0.1' });
+  const server = new McpServer({ name: '@taucad/mcp', version: '0.0.1' }, { instructions: tauMcpInstructions });
   registerTauMcpTools(server, options);
   return server;
 };
@@ -304,9 +341,9 @@ export const createTauMcpHttpHandler = (): TauMcpHttpHandler => {
     readonly server: McpServer;
     readonly transport: StreamableHTTPServerTransport;
     readonly authorityKey: string;
-    dispatch: TauMcpDispatch;
   };
   const sessions = new Map<string, Session>();
+  const requestDispatch = new AsyncLocalStorage<TauMcpDispatch>();
 
   const reject = (response: ServerResponse, status: number, message: string): void => {
     response
@@ -327,8 +364,9 @@ export const createTauMcpHttpHandler = (): TauMcpHttpHandler => {
         reject(options.response, 403, 'MCP session authority mismatch.');
         return;
       }
-      session.dispatch = options.dispatch;
-      await session.transport.handleRequest(options.request, options.response, options.body);
+      await requestDispatch.run(options.dispatch, async () =>
+        session.transport.handleRequest(options.request, options.response, options.body),
+      );
       return;
     }
 
@@ -347,9 +385,15 @@ export const createTauMcpHttpHandler = (): TauMcpHttpHandler => {
       },
     });
     const server = createTauMcpServer({
-      dispatch: async (call, dispatchOptions) => session.dispatch(call, dispatchOptions),
+      dispatch: async (call, dispatchOptions) => {
+        const dispatch = requestDispatch.getStore();
+        if (!dispatch) {
+          return { errorCode: 'MCP_RUN_INACTIVE', message: 'This MCP request has no active Tau authority.' };
+        }
+        return dispatch(call, dispatchOptions);
+      },
     });
-    const session: Session = { server, transport, authorityKey: options.authorityKey, dispatch: options.dispatch };
+    const session: Session = { server, transport, authorityKey: options.authorityKey };
     // oxlint-disable-next-line unicorn/prefer-add-event-listener -- The SDK transport exposes an onclose callback, not EventTarget.
     transport.onclose = () => {
       const initializedSessionId = transport.sessionId;
@@ -360,7 +404,9 @@ export const createTauMcpHttpHandler = (): TauMcpHttpHandler => {
 
     try {
       await server.connect(transport);
-      await transport.handleRequest(options.request, options.response, options.body);
+      await requestDispatch.run(options.dispatch, async () =>
+        transport.handleRequest(options.request, options.response, options.body),
+      );
     } catch (error) {
       await server.close();
       throw error;

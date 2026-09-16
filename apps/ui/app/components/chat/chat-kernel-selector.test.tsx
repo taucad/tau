@@ -54,7 +54,7 @@ vi.mock('@taucad/billing/hooks/use-entitlements', () => ({
 
 const openSettingsDialogMock = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-settings-dialog.js', () => ({
-  openSettingsDialog: openSettingsDialogMock,
+  useSettingsDialog: () => ({ isOpen: false, section: 'general', open: openSettingsDialogMock, close: vi.fn() }),
 }));
 
 const capturedComboBox: {
@@ -129,25 +129,25 @@ describe('ChatKernelSelector — chat-scoped read + dual-write', () => {
   });
 });
 
-// T3/B4: Pro kernels route free users to the upgrade surface instead of
-// activating — the websocket gate enforces server-side regardless.
-describe('ChatKernelSelector — tier gating', () => {
+// Project selection remains available on Free; the execution boundary owns
+// entitlement denial so the source and project context stay intact.
+describe('ChatKernelSelector — project access', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useEntitlementsMock.mockReturnValue(entitlementsFromTier('pro'));
     chatKernelState.current = stubKernel;
   });
 
-  it('routes locked Zoo selections to billing settings without activating (free tier)', () => {
+  it('should let Free users select Zoo without opening billing settings', () => {
     useEntitlementsMock.mockReturnValue(entitlementsFromTier('free'));
     const onSelect = vi.fn();
     renderSelector(onSelect);
 
     capturedComboBox.onSelect?.('zoo');
 
-    expect(openSettingsDialogMock).toHaveBeenCalledWith('billing');
-    expect(setActiveKernel).not.toHaveBeenCalled();
-    expect(onSelect).not.toHaveBeenCalled();
+    expect(setActiveKernel).toHaveBeenCalledWith('zoo');
+    expect(onSelect).toHaveBeenCalledWith('zoo');
+    expect(openSettingsDialogMock).not.toHaveBeenCalled();
   });
 
   it('lets free users pick free kernels without any billing detour', () => {

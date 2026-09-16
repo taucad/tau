@@ -176,7 +176,7 @@ export const ChatTextareaMobile = memo(function ({
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const {
     execution: { execution },
-    session,
+    canSelectExecution,
   } = useChatComposer();
 
   useEffect(() => {
@@ -223,7 +223,7 @@ export const ChatTextareaMobile = memo(function ({
           'relative flex size-full flex-row items-end gap-1 border bg-background',
           'overflow-hidden',
           'shadow-md',
-          'has-[[data-slot=textarea]:focus-visible]:ring-2 has-[[data-slot=textarea]:focus-visible]:ring-ring',
+          'has-[[data-slot=textarea]:focus-visible]:focus-outline',
           'h-auto min-h-9 p-1.25 md:min-h-10',
           'rounded-2xl',
           className,
@@ -260,7 +260,7 @@ export const ChatTextareaMobile = memo(function ({
               <CommandList className='max-h-none'>
                 {/* Settings Group */}
                 <CommandGroup heading='Settings'>
-                  {session ? (
+                  {canSelectExecution ? (
                     <ChatExecutionSelector
                       isNested
                       data-chat-textarea-focustrap={focusTrapAttribute}
@@ -475,7 +475,7 @@ export const ChatTextareaMobile = memo(function ({
               className={cn(
                 'p-0 py-0.5',
                 'h-full min-h-4 w-full resize-none overflow-hidden rounded-none border-none bg-transparent dark:bg-transparent',
-                'shadow-none ring-0 focus-visible:ring-0 focus-visible:outline-none',
+                'shadow-none focus-visible:outline-none',
                 '[grid-area:1/1]',
                 // Shimmer while `await onSubmit` is in-flight (homepage path).
                 isSubmitting &&

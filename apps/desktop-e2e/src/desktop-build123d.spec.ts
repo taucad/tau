@@ -21,7 +21,6 @@ import type { GatewayFixture } from '#support/gateway-fixture.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
   connectPickedFolder,
-  declineCookieBanner,
   ensureFilesPane,
   expectCount,
   expectGeometryFramed,
@@ -407,7 +406,6 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-    await declineCookieBanner(page);
     if (desktopE2ECompletedArtifact) {
       await authenticatePackagedDesktop(session, token);
     }
@@ -530,7 +528,6 @@ test('renders a persisted Replicad project card without relaxing the Electron CS
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-    await declineCookieBanner(page);
     if (desktopE2ECompletedArtifact) {
       await authenticatePackagedDesktop(session, token);
     }
@@ -588,7 +585,6 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-    await declineCookieBanner(page);
     await authenticatePackagedDesktop(session, token);
     await expectSignedIn(page);
     await selectKernel(page, 'PicoGK');

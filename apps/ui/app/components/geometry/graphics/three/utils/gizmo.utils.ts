@@ -83,6 +83,8 @@ type GizmoRefLike = Readonly<{
 export function useGizmoResizeSync(gizmoRef: GizmoRefLike): void {
   const size = useThree((state) => state.size);
   useEffect(() => {
-    gizmoRef.current?.update();
+    if (size.width > 0 && size.height > 0) {
+      gizmoRef.current?.update();
+    }
   }, [gizmoRef, size.width, size.height]);
 }

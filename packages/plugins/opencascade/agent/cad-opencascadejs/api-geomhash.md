@@ -4,72 +4,72 @@
 
 GeomHash_CurveHasher: declare class GeomHash_CurveHasher
 
-constructor
+  constructor
 
-CompTolerance: number
+  CompTolerance: number
 
-HashTolerance: number
+  HashTolerance: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomHash_Polygon2DHasher: declare class GeomHash_Polygon2DHasher
 
-constructor
+  constructor
 
-CompTolerance: number
+  CompTolerance: number
 
-HashTolerance: number
+  HashTolerance: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomHash_Polygon3DHasher: declare class GeomHash_Polygon3DHasher
 
-constructor
+  constructor
 
-CompTolerance: number
+  CompTolerance: number
 
-HashTolerance: number
+  HashTolerance: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomHash_PolygonOnTriHasher: declare class GeomHash_PolygonOnTriHasher
 
-constructor
+  constructor
 
-CompTolerance: number
+  CompTolerance: number
 
-HashTolerance: number
+  HashTolerance: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomHash_SurfaceHasher: declare class GeomHash_SurfaceHasher
 
-constructor
+  constructor
 
-CompTolerance: number
+  CompTolerance: number
 
-HashTolerance: number
+  HashTolerance: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomHash_TriangulationHasher: declare class GeomHash_TriangulationHasher
 
-constructor
+  constructor
 
-CompTolerance: number
+  CompTolerance: number
 
-HashTolerance: number
+  HashTolerance: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

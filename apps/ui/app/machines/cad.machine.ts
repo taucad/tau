@@ -224,6 +224,14 @@ type CadInput = {
   fileSystemRoot: string;
 };
 
+/** Release the runtime resources held by one CAD unit. */
+export const disposeCadRuntime = (context: Pick<CadContext, 'eventCleanups' | 'kernelClient'>): void => {
+  for (const cleanup of context.eventCleanups) {
+    safeDispose(cleanup);
+  }
+  safeDispose(() => context.kernelClient?.terminate());
+};
+
 type ConnectKernelInput = {
   kernelOptionsFactory: LazyKernelOptionsFactory;
   fileManagerRef?: ActorRefFrom<typeof fileManagerMachine>;
@@ -1055,10 +1063,7 @@ export const cadMachine = setup({
       },
     }),
     destroyKernel: assign(({ context }) => {
-      for (const cleanup of context.eventCleanups) {
-        safeDispose(cleanup);
-      }
-      safeDispose(() => context.kernelClient?.terminate());
+      disposeCadRuntime(context);
       return {
         eventCleanups: [],
         kernelClient: undefined,

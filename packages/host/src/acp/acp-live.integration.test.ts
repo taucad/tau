@@ -12,7 +12,8 @@
  * the suite still skips unless both adapters resolve and both CLIs answer.
  */
 
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,17 +23,20 @@ import { afterAll, describe, expect, it } from 'vitest';
 
 import { createNodeAgentLauncher } from '@taucad/agent-host/node-launcher';
 import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
-import type { AgentLogEvent, ProviderMessage } from '@taucad/agent-host';
+import { reduceEventLog } from '@taucad/agent-host';
+import type { AgentChannelLiveEvent, AgentLogEvent, ProviderMessage } from '@taucad/agent-host';
 
 import { createAcpExternalAgentPort } from '#acp/run.js';
 import { discoverAcpAgents } from '#acp/registry.js';
 import type { AcpAdapter } from '#acp/registry.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
+import { openAcpSession } from '#acp/session.js';
+import { defaultConfigDirectory } from '#credential-store.js';
 
 const execFileAsync = promisify(execFile);
 
-/** The one prompt: short, deterministic, and cheap on every model. */
-const prompt = 'Reply with the single word pong.';
+/** A bounded prompt that must exercise the adapter's real filesystem tool. */
+const prompt = 'Use your filesystem read tool to read main.scad, then report the cube dimension. You must call a tool.';
 
 /**
  * The adapters this host may actually bill against.
@@ -44,13 +48,28 @@ const prompt = 'Reply with the single word pong.';
  *
  * @returns The resolved adapters, or an empty list when this host is not live.
  */
-const liveAdapters = async (): Promise<readonly AcpAdapter[]> => {
-  if (process.env['TAU_ACP_LIVE'] !== '1') {
-    return [];
+const liveEnabled = process.env['TAU_ACP_LIVE'] === '1';
+const selectedAgentIds = liveEnabled
+  ? (process.env['TAU_ACP_LIVE_AGENTS'] ?? 'codex,claude')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean)
+  : [];
+
+const liveAdapters = async (): Promise<{
+  readonly adapters: readonly AcpAdapter[];
+  readonly unavailable: readonly string[];
+}> => {
+  if (!liveEnabled) {
+    return { adapters: [], unavailable: [] };
   }
-  const { agents } = await discoverAcpAgents({ resolveFrom: import.meta.url, probeTimeout: 10_000 });
+  const discovery = await discoverAcpAgents({
+    // Qualification may run this suite under packaged Electron against its own adapter closure.
+    resolveFrom: process.env['TAU_ACP_LIVE_RESOLVE_FROM'] ?? import.meta.url,
+    probeTimeout: 10_000,
+  });
   const authenticated = await Promise.all(
-    agents.map(async (adapter) => {
+    discovery.agents.map(async (adapter) => {
       if (adapter.id !== 'codex') {
         return true;
       }
@@ -60,10 +79,21 @@ const liveAdapters = async (): Promise<readonly AcpAdapter[]> => {
       );
     }),
   );
-  return agents.filter((_adapter, index) => authenticated[index] === true);
+  const authenticatedAgents = discovery.agents.filter((_adapter, index) => authenticated[index] === true);
+  const adapters = authenticatedAgents.filter((adapter) => selectedAgentIds.includes(adapter.id));
+  const unavailable = selectedAgentIds.flatMap((id) => {
+    if (adapters.some((adapter) => adapter.id === id)) {
+      return [];
+    }
+    const refusal = discovery.refused.find((candidate) => candidate.id === id);
+    return [`${id}: ${refusal?.code ?? 'CLI_NOT_AUTHENTICATED_OR_UNKNOWN'}`];
+  });
+  return { adapters, unavailable };
 };
 
-const adapters = await liveAdapters();
+const { adapters, unavailable } = await liveAdapters();
+const selectedModel = (agentId: string): string | undefined =>
+  process.env[`TAU_ACP_LIVE_${agentId.toUpperCase()}_MODEL`];
 const roots: string[] = [];
 const closers: Array<() => Promise<void>> = [];
 
@@ -118,8 +148,7 @@ const readLog = async (workspaceRoot: string, chatId: string): Promise<readonly 
     .map((line) => JSON.parse(line) as AgentLogEvent);
 };
 
-const messagesOf = (events: readonly AgentLogEvent[]): readonly ProviderMessage[] =>
-  events.flatMap((event) => (event.type === 'message.appended' ? [event.message] : []));
+const messagesOf = (events: readonly AgentLogEvent[]): readonly ProviderMessage[] => reduceEventLog(events);
 
 const textOf = (message: ProviderMessage): string =>
   typeof message.content === 'string'
@@ -163,7 +192,15 @@ const settled = async (read: () => Promise<readonly AgentLogEvent[]>): Promise<s
   throw new Error(`The run never settled. Log: ${JSON.stringify(await read().catch(() => []))}`);
 };
 
-describe.skipIf(adapters.length < 2)('a live ACP turn', () => {
+describe.skipIf(!liveEnabled)('live ACP selection', () => {
+  it('requires every explicitly selected adapter to be available', () => {
+    expect(selectedAgentIds, 'TAU_ACP_LIVE_AGENTS must select at least one adapter').not.toEqual([]);
+    expect(unavailable, 'selected ACP adapters unavailable').toEqual([]);
+    expect(adapters).toHaveLength(selectedAgentIds.length);
+  });
+});
+
+describe.skipIf(!liveEnabled)('a live ACP turn', () => {
   /* No model is named: V5 deleted the pin's default, so a live turn runs on
    * whatever the user's own CLI has selected — which is exactly what a turn
    * with no picker selection does in production. */
@@ -174,6 +211,15 @@ describe.skipIf(adapters.length < 2)('a live ACP turn', () => {
       const chatId = `chat-live-${agentId}`;
       const runId = `run-live-${agentId}`;
       const started = Date.now();
+      const liveAbort = new AbortController();
+      const live: AgentChannelLiveEvent[] = [];
+      const liveDone = (async () => {
+        for await (const event of launcher.liveEvents(liveAbort.signal)) {
+          if (event.event.runId === runId) {
+            live.push(event);
+          }
+        }
+      })();
 
       const accepted = await launcher.execute({
         type: 'start',
@@ -182,7 +228,11 @@ describe.skipIf(adapters.length < 2)('a live ACP turn', () => {
         runId,
         message: { id: `user-${agentId}`, role: 'user', content: prompt },
         config: {
-          agent: { kind: 'acp', id: agentId },
+          agent: {
+            kind: 'acp',
+            id: agentId,
+            ...(selectedModel(agentId) === undefined ? {} : { model: selectedModel(agentId) }),
+          },
           systemPrompt: '',
           toolChoice: 'auto',
         },
@@ -190,6 +240,8 @@ describe.skipIf(adapters.length < 2)('a live ACP turn', () => {
       expect(accepted).toMatchObject({ type: 'result', operation: 'start' });
 
       const state = await settled(async () => readLog(workspaceRoot, chatId));
+      liveAbort.abort();
+      await liveDone;
       const events = await readLog(workspaceRoot, chatId);
       const messages = messagesOf(events);
       /* The run id, adapter and duration are this target's whole evidence. */
@@ -203,7 +255,7 @@ describe.skipIf(adapters.length < 2)('a live ACP turn', () => {
           .filter((message) => message.role === 'assistant')
           .map((message) => textOf(message))
           .at(-1) ?? '',
-      ).toMatch(/pong/iu);
+      ).toMatch(/10|ten/iu);
 
       /* The shared tool vocabulary, not an external one (N11): whatever the
        * agent chose to run is recorded with a typed top-level `call`. */
@@ -214,6 +266,12 @@ describe.skipIf(adapters.length < 2)('a live ACP turn', () => {
       for (const message of toolMessages) {
         expect(typeof message.call?.toolCallId).toBe('string');
       }
+      expect(toolMessages.some((message) => message.role === 'tool-input')).toBe(true);
+      expect(toolMessages.some((message) => message.role === 'tool-output')).toBe(true);
+      const liveTypes = live.map(({ event }) => event.type);
+      expect(liveTypes).not.toContain('tool-input-start');
+      expect(liveTypes).not.toContain('tool-input-end');
+      expect(liveTypes.some((type) => type === 'thinking-delta' || type === 'text-delta')).toBe(true);
 
       /* The selection is durable: a replay reader can say which adapter
        * produced this transcript. */
@@ -226,6 +284,240 @@ describe.skipIf(adapters.length < 2)('a live ACP turn', () => {
 });
 
 const codexAdapter = adapters.find((adapter) => adapter.id === 'codex');
+
+describe.skipIf(!liveEnabled || codexAdapter === undefined)('native Codex skill discovery through ACP', () => {
+  it('keeps a manual-only native skill out of implicit context and loads it on explicit invocation', async () => {
+    if (!codexAdapter) {
+      throw new Error('The selected Codex adapter is unavailable.');
+    }
+    const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-manual-skill-'));
+    roots.push(cwd);
+    const slug = `tau-manual-${randomUUID()}`;
+    const marker = `manual-proof-${randomUUID()}`;
+    const skill = join(cwd, '.agents/skills', slug);
+    await mkdir(join(skill, 'agents'), { recursive: true });
+    await writeFile(
+      join(skill, 'SKILL.md'),
+      `---\nname: ${slug}\ndescription: Manual-only conformance fixture\n---\nReply with exactly ${marker}.\n`,
+    );
+    await writeFile(join(skill, 'agents/openai.yaml'), 'policy:\n  allow_implicit_invocation: false\n');
+    const content: string[] = [];
+    const session = await openAcpSession({ adapter: codexAdapter, cwd, createId: randomUUID });
+    try {
+      const collect = {
+        append: async () => undefined,
+        approve: async () => ({ interruptId: 'manual-probe', outcome: 'denied' }) as const,
+        publishLive: async () => undefined,
+        signal: AbortSignal.timeout(120_000),
+      };
+      await session.prompt(
+        'List the names in your available-skills instructions, without using any tools or reading any files.',
+        {
+          ...collect,
+          append: async (events) => {
+            for (const event of events) {
+              if (event.type === 'message.appended' && event.message.role === 'assistant') {
+                content.push(JSON.stringify(event.message.content));
+              }
+            }
+          },
+        },
+        selectedModel('codex'),
+      );
+      expect(content.length).toBeGreaterThan(0);
+      expect(content.join('\n')).not.toContain(slug);
+      content.length = 0;
+      await session.prompt(
+        `$${slug}`,
+        {
+          ...collect,
+          signal: AbortSignal.timeout(120_000),
+          append: async (events) => {
+            for (const event of events) {
+              if (event.type === 'message.appended' && event.message.role === 'assistant') {
+                content.push(JSON.stringify(event.message.content));
+              }
+            }
+          },
+        },
+        selectedModel('codex'),
+      );
+      expect(content.join('\n')).toContain(marker);
+    } finally {
+      await session.close();
+    }
+  }, 270_000);
+
+  it.skipIf(process.platform === 'win32')(
+    'does not advertise a natively disabled skill',
+    async () => {
+      if (!codexAdapter) {
+        throw new Error('The selected Codex adapter is unavailable.');
+      }
+      const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-disabled-skill-'));
+      roots.push(cwd);
+      const slug = `tau-disabled-${randomUUID()}`;
+      const skill = join(cwd, '.agents/skills', slug);
+      await mkdir(skill, { recursive: true });
+      await writeFile(
+        join(skill, 'SKILL.md'),
+        `---\nname: ${slug}\ndescription: Disabled native conformance skill\n---\nDo not invoke this disabled fixture.\n`,
+      );
+      // Configure only this test child through Codex's own CLI. User configuration is untouched.
+      const wrapper = join(cwd, 'codex-fixture');
+      await writeFile(wrapper, `#!/bin/sh\nexec codex -c 'skills.config=[{name="${slug}",enabled=false}]' "$@"\n`);
+      await chmod(wrapper, 0o700);
+      const frames: AcpWireFrame[] = [];
+      const session = await openAcpSession({
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- The native adapter reads this environment name.
+        adapter: { ...codexAdapter, spawnEnv: { ...codexAdapter.spawnEnv, CODEX_PATH: wrapper } },
+        cwd,
+        createId: randomUUID,
+        onFrame: (frame) => frames.push(frame),
+      });
+      try {
+        await expect
+          .poll(() => frames.some(({ frame }) => frame.includes('available_commands_update')), { timeout: 30_000 })
+          .toBe(true);
+        const commands = frames
+          .filter(
+            ({ direction, frame }) => direction === 'agent->client' && frame.includes('available_commands_update'),
+          )
+          .map(({ frame }) => frame)
+          .join('\n');
+        expect(commands).not.toContain(`$${slug}`);
+      } finally {
+        await session.close();
+      }
+    },
+    60_000,
+  );
+
+  it.each(['read-only', 'agent', 'agent-full-access'])(
+    'preserves native %s authority for an additional skill root',
+    async (mode) => {
+      if (!codexAdapter) {
+        throw new Error('The selected Codex adapter is unavailable.');
+      }
+      const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-policy-project-'));
+      await mkdir(defaultConfigDirectory(), { recursive: true });
+      const additional = await mkdtemp(join(defaultConfigDirectory(), 'acp-policy-test-'));
+      roots.push(cwd, additional);
+      const skill = join(additional, '.agents/skills/policy-probe');
+      await mkdir(skill, { recursive: true });
+      await writeFile(
+        join(skill, 'SKILL.md'),
+        '---\nname: policy-probe\ndescription: Local authority conformance fixture\n---\nA test fixture, not a request for extra authority.\n',
+      );
+      const marker = join(skill, 'marker.txt');
+      const attempted = join(cwd, 'attempted.txt');
+      await writeFile(marker, 'original');
+      const session = await openAcpSession({
+        adapter: codexAdapter,
+        cwd,
+        additionalDirectories: [additional],
+        createId: randomUUID,
+      });
+      try {
+        const result = await session.prompt(
+          `I own this disposable authority-conformance fixture and authorize these test writes. Execute exactly one ordinary shell command with your command tool: printf attempted > '${attempted}'; printf changed > '${marker}'. Use the current sandbox permissions without escalation. Do not retry with another tool or change any other file. Report the command's actual exit status, including a sandbox refusal if that is the result; do not predict its outcome without invoking the tool.`,
+          {
+            append: async () => undefined,
+            approve: async () => ({ interruptId: 'policy-probe', outcome: 'denied' }),
+            publishLive: async () => undefined,
+            signal: AbortSignal.timeout(120_000),
+          },
+          selectedModel('codex'),
+          { mode },
+        );
+        expect(result.configuration['mode']).toBe(mode);
+        // Actual disk IO proves the command ran; model narration is not authority evidence.
+        expect(await readFile(attempted, 'utf8')).toBe('attempted');
+        expect(await readFile(marker, 'utf8')).toBe(mode === 'agent-full-access' ? 'changed' : 'original');
+      } finally {
+        await session.close();
+      }
+    },
+    150_000,
+  );
+
+  it('honours valid project precedence without letting invalid overrides hide the package skill', async () => {
+    if (!codexAdapter) {
+      throw new Error('The selected Codex adapter is unavailable.');
+    }
+    const root = await mkdtemp(join(tmpdir(), 'tau-acp-native-skills-'));
+    roots.push(root);
+    const cwd = join(root, 'project');
+    const additional = join(root, 'package');
+    const slug = `tau-conformance-${randomUUID()}`;
+    const projectSkill = join(cwd, '.agents/skills', slug);
+    const packageSkill = join(additional, '.agents/skills', slug);
+    await mkdir(projectSkill, { recursive: true });
+    await mkdir(packageSkill, { recursive: true });
+    const body = (description: string): string =>
+      `---\nname: ${slug}\ndescription: ${description}\n---\nRead references/guide.md.\n`;
+    await writeFile(join(packageSkill, 'SKILL.md'), body('Package conformance marker'));
+    await mkdir(join(packageSkill, 'references'));
+    await writeFile(join(packageSkill, 'references/guide.md'), 'Retained support resource.\n');
+
+    for (const variant of ['valid', 'empty', 'malformed', 'dangling', 'removed']) {
+      // oxlint-disable-next-line no-await-in-loop -- each fresh native session observes the preceding on-disk change.
+      await rm(join(projectSkill, 'SKILL.md'), { force: true });
+      if (variant === 'dangling') {
+        // oxlint-disable-next-line no-await-in-loop -- deliberate invalid native-loader input.
+        await symlink(join(root, 'missing.md'), join(projectSkill, 'SKILL.md'));
+      } else if (variant !== 'removed') {
+        // oxlint-disable-next-line no-await-in-loop -- deliberate native-loader precedence fixtures.
+        await writeFile(
+          join(projectSkill, 'SKILL.md'),
+          variant === 'valid' ? body('Project conformance marker') : variant === 'empty' ? '' : '---\nname: [broken\n',
+        );
+      }
+      const frames: AcpWireFrame[] = [];
+      // oxlint-disable-next-line no-await-in-loop -- each session owns a distinct native discovery snapshot.
+      const session = await openAcpSession({
+        adapter: codexAdapter,
+        cwd,
+        additionalDirectories: [additional],
+        createId: randomUUID,
+        onFrame: (frame) => frames.push(frame),
+      });
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- wait for the adapter's asynchronous command advertisement.
+        await expect
+          .poll(
+            () =>
+              frames
+                .filter((frame) => frame.direction === 'agent->client')
+                .map((frame) => frame.frame)
+                .join('\n'),
+            { timeout: 30_000 },
+          )
+          .toContain(`$${slug}`);
+        const updates = frames
+          .filter((frame) => frame.direction === 'agent->client')
+          .map(
+            (frame) =>
+              JSON.parse(frame.frame) as {
+                params?: { update?: { availableCommands?: Array<{ name: string; description: string }> } };
+              },
+          );
+        const command = updates
+          .flatMap((frame) => frame.params?.update?.availableCommands ?? [])
+          .find((entry) => entry.name === `$${slug}`);
+        expect(command?.description, variant).toBe(
+          variant === 'valid' ? 'Project conformance marker' : 'Package conformance marker',
+        );
+      } finally {
+        // oxlint-disable-next-line no-await-in-loop -- no native child survives its test case.
+        await session.close();
+      }
+    }
+    await expect(readFile(join(packageSkill, 'references/guide.md'), 'utf8')).resolves.toBe(
+      'Retained support resource.\n',
+    );
+  }, 180_000);
+});
 
 /**
  * How many times the client sent one ACP method.
@@ -240,7 +532,7 @@ const sentFrames = (frames: readonly AcpWireFrame[], method: string): number =>
 /* The one claim source alone cannot settle (r1 risk 1): `codex-acp` calls the
  * same `threadResume` for `session/resume` and `session/load`, which says the
  * transcript survives — but only a real turn can prove the model *uses* it. */
-describe.skipIf(codexAdapter === undefined)('a live ACP chat across two turns', () => {
+describe.skipIf(!liveEnabled || codexAdapter === undefined)('a live ACP chat across two turns', () => {
   it('recalls the first turn on the second, in one session', async () => {
     const { launcher, workspaceRoot, frames } = await startHarness();
     const chatId = 'chat-live-continuity';
@@ -255,7 +547,11 @@ describe.skipIf(codexAdapter === undefined)('a live ACP chat across two turns', 
         runId,
         message: { id: `user-${runId}`, role: 'user', content: text },
         config: {
-          agent: { kind: 'acp', id: agentId },
+          agent: {
+            kind: 'acp',
+            id: agentId,
+            ...(selectedModel(agentId) === undefined ? {} : { model: selectedModel(agentId) }),
+          },
           systemPrompt: '',
           toolChoice: 'auto',
         },
@@ -277,8 +573,12 @@ describe.skipIf(codexAdapter === undefined)('a live ACP chat across two turns', 
     expect(answered, JSON.stringify(events.slice(-3))).toBe('completed');
 
     const secondTurn = events.filter((event) => event.runId === 'run-live-continuity-2');
+    const secondTurnMessageIds = new Set(
+      secondTurn.flatMap((event) => (event.type === 'message.appended' ? [event.message.id] : [])),
+    );
     expect(
-      messagesOf(secondTurn)
+      messagesOf(events)
+        .filter((message) => secondTurnMessageIds.has(message.id))
         .filter((message) => message.role === 'assistant')
         .map((message) => textOf(message))
         .join(' '),

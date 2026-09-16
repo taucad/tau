@@ -1,0 +1,116 @@
+             RF, 26 Merfield Street, 1072 Auckland
+
+
+Mangawhai Hills Limited
+Patrick Fontein
+19/67 Sarsfield Street
+Auckland
+Auckland 1011
+
+
+
+
+Invoice                             Reference                                   Due                       Invoice Date
+MH-003                              MH-003                                      14/10/2026                14/09/2026
+
+
+
+Mangawhai Hills professional services completed between July and September 2026.
+No GST charged. Richard Fontein is not registered for GST.
+
+Quantity           Description                                                               Unit price                   Price
+
+
+00:45 h            Digital Twin Technology Evaluation                                          150.00                    112.50
+30/07/2026         Assessed the supplied Lot 25 architectural PDF and compared
+                   Archicad/Twinmotion, Planner5D, RoomSketcher, Snaptrude,
+                   IfcOpenShell/Bonsai and Blender/code-CAD routes. Recommended
+                   an evidence-preserving workflow and identified the need for native
+                   BIM/IFC source files where available.
+
+00:15 h            Website Traffic & Analytics Review                                          150.00                     37.50
+11/08/2026         Investigated the radio/talkback traffic question through Mangawhai
+                   Hills Gmail accounts, Google Analytics, Tag Manager, Search
+                   Console, Vercel, Apple Mail and Google Trends. Identified a
+                   same-day search-interest spike, confirmed the analytics
+                   ownership/access gap, and prepared a response to Steve with the
+                   evidence and agency follow-up needed for exact visitor counts.
+
+01:30 h            Digital Twin & Lot 25 Blueprint                                             150.00                    225.00
+12/08/2026         Developed the source-traceable Blender/Cycles architecture, terrain
+                   and lot packaging, GLB/3D Tiles future-streaming strategy, QA
+                   gates and compositional modelling rules. Scoped the Lot 25 vertical
+                   slice across real terrain, the complete house and interiors, PBR
+                   materials, asset libraries, landscaping, cameras, automation and
+                   export.
+
+03:30 h            Lot 25 Digital Twin Implementation                                          150.00                    525.00
+13/08/2026         Built and validated the source-grounded Lot 25 Blender/GLB model.
+                   Repaired A201 roof topology and overhangs, gables, road, footpath,
+                   curved driveway and terrain interfaces; refined solar orientation,
+                   portico, deck, interior details, materials, cabinetry and native
+                   landscape assets. Reduced repeat export/publish cycles to seconds
+                   and produced a Khronos-valid GLB with checked camera views.
+
+
+
+
+RF                                                   Mail: richard@fontein.co                    Bank A/C: 06-0185-0142610-00
+Richard Fontein                                      Phone: +64 22 626 9523
+26 Merfield Street, Auckland 1072
+                                                 Invoice MH-003 | Page 1
+Invoice MH-003 - continued                                                                                     Mangawhai Hills Limited
+
+
+
+Quantity           Description                                                                   Unit price                      Price
+
+
+01:15 h            Lot 25 Buyer Render Production                                                     150.00                   187.50
+17/08/2026         Produced and iterated golden-hour Lot 25 exterior, arrival, rear and
+                   street visualisations. Grounded planting in Mangawhai/Northland
+                   native ecology and preserved view-dependent Brynderwyn context;
+                   refined the black vertical-timber and Abodo palette, deck supports,
+                   gables, hardscape and landscaping for buyer presentation.
+
+02:15 h            Lot 45 Twin & Combined Site Model                                                  150.00                   337.50
+03/09/2026         Prepared the Lot 45 source, terrain and asset-reuse blueprint;
+                   updated Double's Blender environment; and built the independent
+                   preliminary Lot 45 module, combined Lot 25/45 explorer and GLB.
+                   Added interpreted architecture, furnished interiors, hardscape and
+                   native planting, produced east-alfresco and driveway beauty tests,
+                   and verified protected Lot 25 assets remained unchanged.
+                   Documented missing CI046/DXF, garage and finish-source
+                   limitations.
+
+01:30 h            Reusable Roof Solver & QA                                                          150.00                   225.00
+11/09/2026         Audited roof failures and measured uncovered and overlapping
+                   areas; designed and implemented a reusable per-wall roof intent
+                   and solver path with coverage, junction, pitch, fall and valley tests.
+                   Verified Lot 25 and Lot 45 headlessly, corrected Lot 45 junctions,
+                   and refined Lot 25 garage gable, tail, gutter, seam, driveway and
+                   interior visibility through isolated variants backed by 23 regression
+                   checks.
+
+01:00 h            Operator Render Workflow Automation                                                150.00                   150.00
+14/09/2026         Simplified more than 26 project skills into non-technical
+                   /capture-render, /modify-lot, /create-lot, /help and /update-skills
+                   workflows. Implemented headless high-quality Cycles defaults, a
+                   fast dry mode, fresh-context ImageGen enhancement, fidelity gates,
+                   reproducible dependencies and permanent opt-in learning for
+                   repeatable lot production.
+
+
+                                                                                Total       12:00 h                 NZD 1,800.00
+
+Payment of NZD 1,800.00 is due by 14/10/2026 by direct credit to RF bank account 06-0185-0142610-00. Please use MH-003
+as the payment reference.
+
+
+
+
+RF                                                   Mail: richard@fontein.co                          Bank A/C: 06-0185-0142610-00
+Richard Fontein                                      Phone: +64 22 626 9523
+26 Merfield Street, Auckland 1072
+                                                   Invoice MH-003 | Page 2
+

@@ -186,11 +186,11 @@ const startStubGateway = async (): Promise<{
 
 /** A relay that accepts the daemon's control socket and offers it nothing. */
 const startStubRelay = async (): Promise<{ readonly url: URL; readonly server: HttpServer }> => {
-  const { WebSocketServer } = await import('ws');
+  const ws = await import('ws');
   const server = createServer((_request, response) => {
     response.writeHead(404).end();
   });
-  const sockets = new WebSocketServer({ noServer: true });
+  const sockets = new ws.WebSocketServer({ noServer: true });
   server.on('upgrade', (request, socket, head) => {
     sockets.handleUpgrade(request, socket, head, (accepted) => {
       accepted.on('message', () => undefined);
@@ -230,7 +230,7 @@ export type TauServeFixtureOptions = {
    * machine running the suite, which would make the selector's contents
    * machine-dependent.
    */
-  readonly externalAgents?: boolean | undefined;
+  readonly externalAgents?: boolean | 'codex' | undefined;
 };
 
 /**
@@ -270,11 +270,11 @@ export const startTauServeFixture = async (options: TauServeFixtureOptions = {})
       `--gateway=${gateway.url.href}`,
       '--model=fixture-model',
       '--modelProvider=anthropic',
-      options.externalAgents === true ? '--external-agents' : '--no-external-agents',
+      options.externalAgents ? '--external-agents' : '--no-external-agents',
     ],
     {
       cwd: repoRoot,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment variables are not camelCase
+      /* eslint-disable @typescript-eslint/naming-convention -- child-process environment variable names. */
       env: {
         ...process.env,
         TAU_CONFIG_DIR: configDirectory,
@@ -286,6 +286,7 @@ export const startTauServeFixture = async (options: TauServeFixtureOptions = {})
          * silences the line naming the port this fixture connects to. */
         CONSOLA_LEVEL: '4',
       },
+      /* eslint-enable @typescript-eslint/naming-convention -- environment literal ends here. */
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );

@@ -70,7 +70,8 @@ export function pickDuplicatedFocusedChatId(args: {
 
 const createInitialEditorState = (args: {
   readonly project: ProjectManifest;
-  readonly chatId: string;
+  /** Absent when the project was created without a chat (review R5). */
+  readonly chatId: string | undefined;
   readonly overrides?: InitialEditorState;
   readonly timestamp: number;
 }): EditorState => {
@@ -127,22 +128,26 @@ const objectStoreWorker = {
   /** Prepare stable replay data before any cross-store project creation writes. */
   async prepareProjectCreation(options: {
     manifest: ProjectManifest;
-    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt' | 'hasUnreadTurn'>;
+    /** Omitted to create the project and no chat at all (review R5). */
+    chat?: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt' | 'hasUnreadTurn'>;
     editorState?: InitialEditorState;
-    files: Record<string, { content: Uint8Array<ArrayBuffer> }>;
+    files: Record<string, { content: Uint8Array<ArrayBuffer>; mode?: '100644' | '100755' }>;
     storage: PendingProjectStorage;
   }): Promise<PendingCreateProjectOperation> {
     const timestamp = Date.now();
     const project = options.manifest;
-    const chat: Chat = {
-      ...options.chat,
-      id: generatePrefixedId(idPrefix.chat),
-      resourceId: project.id,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      recencyAt: timestamp,
-      hasUnreadTurn: false,
-    };
+    const chat: Chat | undefined =
+      options.chat === undefined
+        ? undefined
+        : {
+            ...options.chat,
+            id: generatePrefixedId(idPrefix.chat),
+            resourceId: project.id,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            recencyAt: timestamp,
+            hasUnreadTurn: false,
+          };
     const operationId = generatePrefixedId(idPrefix.request);
     const operation: PendingCreateProjectOperation = {
       operationId,
@@ -151,10 +156,10 @@ const objectStoreWorker = {
       manifest: project,
       library: { projectId: project.id, lastActivityAt: timestamp },
       files: options.files,
-      chat,
+      ...(chat === undefined ? {} : { chat }),
       editorState: createInitialEditorState({
         project,
-        chatId: chat.id,
+        chatId: chat?.id,
         overrides: options.editorState,
         timestamp,
       }),
@@ -258,7 +263,10 @@ const objectStoreWorker = {
     if (operation.editorState) {
       await storage.putEditorStateRecord(operation.editorState);
     }
-    return operation.kind === 'create' ? [operation.chat] : operation.chats;
+    if (operation.kind !== 'create') {
+      return operation.chats;
+    }
+    return operation.chat === undefined ? [] : [operation.chat];
   },
 
   async completePendingProjectOperation(operationId: string): Promise<void> {

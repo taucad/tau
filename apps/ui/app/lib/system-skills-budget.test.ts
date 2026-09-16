@@ -1,6 +1,6 @@
 import { kernelConfigurations } from '@taucad/types/constants';
 import { describe, expect, it } from 'vitest';
-import { builtInSystemSkills } from '#lib/system-skills-catalog.js';
+import { systemSkillsCatalog } from '#lib/system-skills-catalog.js';
 
 const maxDescriptionCharacters = 160;
 
@@ -13,7 +13,7 @@ const maxDescriptionCharacters = 160;
  * each package's own manifest, so asserting over it covers exactly what the app
  * actually loads.
  */
-const packageSkills = builtInSystemSkills.filter(({ slug }) => slug !== 'create-skill' && slug !== 'create-model');
+const packageSkills = systemSkillsCatalog.filter(({ slug }) => slug !== 'create-skill' && slug !== 'create-model');
 
 const assertSkillBudget = (skillName: string, skillMarkdown: string, maxBodyTokens = 800): void => {
   const description = /^description:\s*(.+)$/m.exec(skillMarkdown)?.[1]?.trim();
@@ -31,7 +31,7 @@ const assertSkillBudget = (skillName: string, skillMarkdown: string, maxBodyToke
 };
 
 const getCreateModelSkillMarkdown = (): string => {
-  const skillMarkdown = builtInSystemSkills.find(({ slug }) => slug === 'create-model')?.skillMarkdown;
+  const skillMarkdown = systemSkillsCatalog.find(({ slug }) => slug === 'create-model')?.skillMarkdown;
   if (!skillMarkdown) {
     throw new Error('create-model is not registered');
   }

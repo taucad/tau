@@ -156,6 +156,29 @@ describe('ComboBoxResponsive (controlled)', () => {
     expect(screen.getByText('beta')).toBeInTheDocument();
   });
 
+  it('continues a paged search when the loaded page has no match', async () => {
+    const loadMore = vi.fn();
+    render(
+      <ComboBoxResponsive<Row>
+        title='Pick'
+        description='Pick one.'
+        groupedItems={[{ name: 'Rows', items: [{ id: 'alpha' }] }]}
+        getValue={(item) => item.id}
+        renderLabel={(item) => <span>{item.id}</span>}
+        searchPlaceHolder='Filter rows...'
+        withVirtualization
+        onLoadMore={loadMore}
+      >
+        <button type='button'>Trigger</button>
+      </ComboBoxResponsive>,
+    );
+
+    await userEvent.type(screen.getByPlaceholderText('Filter rows...'), 'later-page');
+    await vi.waitFor(() => {
+      expect(loadMore).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('rebinds dropdown selection highlight when `value` changes across re-renders', () => {
     function RowLabel(props: { readonly row: Row; readonly selected: Row | undefined }) {
       const picked = props.selected?.id === props.row.id;

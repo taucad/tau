@@ -19,10 +19,11 @@ import type { AgentChannelEndpoint } from '#channel/endpoint.js';
 import { agentChannelProtocolSchemas } from '#launchers/node/agent-wire.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type {
-  AgentChannelCommand,
   AgentChannelEvent,
   AgentChannelLiveEvent,
   AgentChannelProtocol,
+  AgentChannelRequest,
+  AgentChannelRevisionEvent,
   AgentChannelResponse,
 } from '#launchers/node/agent-wire.js';
 
@@ -74,11 +75,13 @@ export type AgentChannelClient = {
    * far side and rejects here, so a host that stops answering surfaces as a
    * typed failure instead of a pending promise.
    */
-  execute(command: AgentChannelCommand, signal?: AbortSignal): Promise<AgentChannelResponse>;
+  execute(command: AgentChannelRequest, signal?: AbortSignal): Promise<AgentChannelResponse>;
   /** Durable events for every chat this daemon owns. */
   events(signal?: AbortSignal): AsyncIterable<AgentChannelEvent>;
   /** Ephemeral model deltas for every chat this daemon owns. */
   liveEvents(signal?: AbortSignal): AsyncIterable<AgentChannelLiveEvent>;
+  /** Host-authoritative revision projections and outcomes for this workspace. */
+  revisionEvents(signal?: AbortSignal): AsyncIterable<AgentChannelRevisionEvent>;
   /** Subscribe to the typed close reason. Fires once; returns an unsubscribe. */
   onClose(handler: (reason: AgentChannelCloseReason) => void): () => void;
   /** Say goodbye and tear down this connection. Idempotent. */
@@ -159,7 +162,7 @@ export const createAgentChannelClient = (
     );
   };
 
-  const listen = async function* listenStream<Name extends 'events' | 'liveEvents'>(
+  const listen = async function* listenStream<Name extends 'events' | 'liveEvents' | 'revisionEvents'>(
     name: Name,
     signal?: AbortSignal,
   ): AsyncGenerator<AgentChannelProtocol['listens'][Name]['event']> {
@@ -186,9 +189,15 @@ export const createAgentChannelClient = (
     },
     events: (signal) => listen('events', signal),
     liveEvents: (signal) => listen('liveEvents', signal),
+    revisionEvents: (signal) => listen('revisionEvents', signal),
     onClose: (handler) =>
       channel.onClose((info) => {
-        handler(closed ?? { origin: info.origin, message: closeMessages[info.origin] });
+        handler(
+          closed ?? {
+            origin: info.origin,
+            message: closeMessages[info.origin],
+          },
+        );
       }),
     close: (reason) => {
       channel.close(reason);

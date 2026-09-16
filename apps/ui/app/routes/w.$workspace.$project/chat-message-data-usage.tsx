@@ -21,6 +21,7 @@ import { useModels } from '#hooks/use-models.js';
 import { formatNumberAbbreviation } from '#utils/number.utils.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
+import { recordBillingRevisionMinimum } from '#db/billing-snapshot-store.js';
 
 /** What the account's own authority says one funded operation cost. @public */
 export type ReceiptCredit =
@@ -98,6 +99,12 @@ export const useReceiptCredits = (operationIds: readonly string[]): ReadonlyMap<
         if (receipt.operationId !== operationId) {
           throw new Error('Receipt answers for a different operation');
         }
+        await recordBillingRevisionMinimum({
+          environment: receipt.environment,
+          ownerId: receipt.ownerId,
+          subjectId: receipt.subjectId,
+          revision: receipt.snapshotRevision,
+        });
         return receipt;
       },
     })),

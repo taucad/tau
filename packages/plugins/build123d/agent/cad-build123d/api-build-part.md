@@ -5,15 +5,15 @@
 // BuildPart
 BuildPart
 
-BuildPart(\*workplanes: Face | Plane | Location, mode: Mode = Mode.ADD)
-// workplanes: initial plane to work on
-// mode: combination mode
+  BuildPart(*workplanes: Face | Plane | Location, mode: Mode = Mode.ADD)
+  //   workplanes: initial plane to work on
+  //   mode: combination mode
 
-// Get the current part
-part: Part | None
+  // Get the current part
+  part: Part | None
 
-// Return a wire representation of the pending edges
-pending_edges_as_wire: Wire
+  // Return a wire representation of the pending edges
+  pending_edges_as_wire: Wire
 
-// Builder's location
-location: Location | None
+  // Builder's location
+  location: Location | None

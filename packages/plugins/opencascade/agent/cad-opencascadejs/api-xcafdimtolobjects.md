@@ -8,94 +8,94 @@ XCAFDimTolObjects_DatumModifWithValue: typeof XCAFDimTolObjects_DatumModifWithVa
 
 XCAFDimTolObjects_DatumObject: declare class XCAFDimTolObjects_DatumObject extends Standard_Transient
 
-constructor
+  constructor
 
-GetSemanticName(): TCollection_HAsciiString;
+  GetSemanticName(): TCollection_HAsciiString;
 
-SetSemanticName(theName: TCollection_HAsciiString): void;
+  SetSemanticName(theName: TCollection_HAsciiString): void;
 
-GetName(): TCollection_HAsciiString;
+  GetName(): TCollection_HAsciiString;
 
-SetName(theTag: TCollection_HAsciiString): void;
+  SetName(theTag: TCollection_HAsciiString): void;
 
-GetModifiers(): NCollection_Sequence_XCAFDimTolObjects_DatumSingleModif;
+  GetModifiers(): NCollection_Sequence_XCAFDimTolObjects_DatumSingleModif;
 
-SetModifiers(theModifiers: NCollection_Sequence_XCAFDimTolObjects_DatumSingleModif): void;
+  SetModifiers(theModifiers: NCollection_Sequence_XCAFDimTolObjects_DatumSingleModif): void;
 
-GetModifierWithValue(theModifier?: XCAFDimTolObjects_DatumModifWithValue, theValue?: number): { theModifier: XCAFDimTolObjects_DatumModifWithValue; theValue: number };
+  GetModifierWithValue(theModifier?: XCAFDimTolObjects_DatumModifWithValue, theValue?: number): { theModifier: XCAFDimTolObjects_DatumModifWithValue; theValue: number };
 
-SetModifierWithValue(theModifier: XCAFDimTolObjects_DatumModifWithValue, theValue: number): void;
+  SetModifierWithValue(theModifier: XCAFDimTolObjects_DatumModifWithValue, theValue: number): void;
 
-AddModifier(theModifier: XCAFDimTolObjects_DatumSingleModif): void;
+  AddModifier(theModifier: XCAFDimTolObjects_DatumSingleModif): void;
 
-GetDatumTarget(): TopoDS_Shape;
+  GetDatumTarget(): TopoDS_Shape;
 
-SetDatumTarget(theShape: TopoDS_Shape): void;
+  SetDatumTarget(theShape: TopoDS_Shape): void;
 
-GetPosition(): number;
+  GetPosition(): number;
 
-SetPosition(thePosition: number): void;
+  SetPosition(thePosition: number): void;
 
-IsDatumTarget(): boolean;
-IsDatumTarget(theIsDT: boolean): void;
-IsDatumTarget(): boolean;
-IsDatumTarget(theIsDT: boolean): void;
+  IsDatumTarget(): boolean;
+  IsDatumTarget(theIsDT: boolean): void;
+  IsDatumTarget(): boolean;
+  IsDatumTarget(theIsDT: boolean): void;
 
-GetDatumTargetType(): XCAFDimTolObjects_DatumTargetType;
+  GetDatumTargetType(): XCAFDimTolObjects_DatumTargetType;
 
-SetDatumTargetType(theType: XCAFDimTolObjects_DatumTargetType): void;
+  SetDatumTargetType(theType: XCAFDimTolObjects_DatumTargetType): void;
 
-GetDatumTargetAxis(): gp_Ax2;
+  GetDatumTargetAxis(): gp_Ax2;
 
-SetDatumTargetAxis(theAxis: gp_Ax2): void;
+  SetDatumTargetAxis(theAxis: gp_Ax2): void;
 
-GetDatumTargetLength(): number;
+  GetDatumTargetLength(): number;
 
-SetDatumTargetLength(theLength: number): void;
+  SetDatumTargetLength(theLength: number): void;
 
-GetDatumTargetWidth(): number;
+  GetDatumTargetWidth(): number;
 
-SetDatumTargetWidth(theWidth: number): void;
+  SetDatumTargetWidth(theWidth: number): void;
 
-GetDatumTargetNumber(): number;
+  GetDatumTargetNumber(): number;
 
-SetDatumTargetNumber(theNumber: number): void;
+  SetDatumTargetNumber(theNumber: number): void;
 
-SetPlane(thePlane: gp_Ax2): void;
+  SetPlane(thePlane: gp_Ax2): void;
 
-GetPlane(): gp_Ax2;
+  GetPlane(): gp_Ax2;
 
-SetPoint(thePnt: gp_Pnt): void;
+  SetPoint(thePnt: gp_Pnt): void;
 
-GetPoint(): gp_Pnt;
+  GetPoint(): gp_Pnt;
 
-SetPointTextAttach(thePntText: gp_Pnt): void;
+  SetPointTextAttach(thePntText: gp_Pnt): void;
 
-GetPointTextAttach(): gp_Pnt;
+  GetPointTextAttach(): gp_Pnt;
 
-HasPlane(): boolean;
+  HasPlane(): boolean;
 
-HasPoint(): boolean;
+  HasPoint(): boolean;
 
-HasPointText(): boolean;
+  HasPointText(): boolean;
 
-SetPresentation(thePresentation: TopoDS_Shape, thePresentationName: TCollection_HAsciiString): void;
+  SetPresentation(thePresentation: TopoDS_Shape, thePresentationName: TCollection_HAsciiString): void;
 
-GetPresentation(): TopoDS_Shape;
+  GetPresentation(): TopoDS_Shape;
 
-GetPresentationName(): TCollection_HAsciiString;
+  GetPresentationName(): TCollection_HAsciiString;
 
-HasDatumTargetParams(): boolean;
+  HasDatumTargetParams(): boolean;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 XCAFDimTolObjects_DatumSingleModif: typeof XCAFDimTolObjects_DatumSingleModif[keyof typeof XCAFDimTolObjects_DatumSingleModif]
 
@@ -109,155 +109,155 @@ XCAFDimTolObjects_DimensionModif: typeof XCAFDimTolObjects_DimensionModif[keyof 
 
 XCAFDimTolObjects_DimensionObject: declare class XCAFDimTolObjects_DimensionObject extends Standard_Transient
 
-constructor
+  constructor
 
-GetSemanticName(): TCollection_HAsciiString;
+  GetSemanticName(): TCollection_HAsciiString;
 
-SetSemanticName(theName: TCollection_HAsciiString): void;
+  SetSemanticName(theName: TCollection_HAsciiString): void;
 
-SetQualifier(theQualifier: XCAFDimTolObjects_DimensionQualifier): void;
+  SetQualifier(theQualifier: XCAFDimTolObjects_DimensionQualifier): void;
 
-GetQualifier(): XCAFDimTolObjects_DimensionQualifier;
+  GetQualifier(): XCAFDimTolObjects_DimensionQualifier;
 
-HasQualifier(): boolean;
+  HasQualifier(): boolean;
 
-SetAngularQualifier(theAngularQualifier: XCAFDimTolObjects_AngularQualifier): void;
+  SetAngularQualifier(theAngularQualifier: XCAFDimTolObjects_AngularQualifier): void;
 
-GetAngularQualifier(): XCAFDimTolObjects_AngularQualifier;
+  GetAngularQualifier(): XCAFDimTolObjects_AngularQualifier;
 
-HasAngularQualifier(): boolean;
+  HasAngularQualifier(): boolean;
 
-SetType(theTyupe: XCAFDimTolObjects_DimensionType): void;
+  SetType(theTyupe: XCAFDimTolObjects_DimensionType): void;
 
-GetType(): XCAFDimTolObjects_DimensionType;
+  GetType(): XCAFDimTolObjects_DimensionType;
 
-GetValue(): number;
+  GetValue(): number;
 
-GetValues(): NCollection_HArray1_double;
+  GetValues(): NCollection_HArray1_double;
 
-SetValue(theValue: number): void;
+  SetValue(theValue: number): void;
 
-SetValues(theValue: NCollection_HArray1_double): void;
+  SetValues(theValue: NCollection_HArray1_double): void;
 
-IsDimWithRange(): boolean;
+  IsDimWithRange(): boolean;
 
-SetUpperBound(theUpperBound: number): void;
+  SetUpperBound(theUpperBound: number): void;
 
-SetLowerBound(theLowerBound: number): void;
+  SetLowerBound(theLowerBound: number): void;
 
-GetUpperBound(): number;
+  GetUpperBound(): number;
 
-GetLowerBound(): number;
+  GetLowerBound(): number;
 
-IsDimWithPlusMinusTolerance(): boolean;
+  IsDimWithPlusMinusTolerance(): boolean;
 
-SetUpperTolValue(theUperTolValue: number): boolean;
+  SetUpperTolValue(theUperTolValue: number): boolean;
 
-SetLowerTolValue(theLowerTolValue: number): boolean;
+  SetLowerTolValue(theLowerTolValue: number): boolean;
 
-GetUpperTolValue(): number;
+  GetUpperTolValue(): number;
 
-GetLowerTolValue(): number;
+  GetLowerTolValue(): number;
 
-IsDimWithClassOfTolerance(): boolean;
+  IsDimWithClassOfTolerance(): boolean;
 
-SetClassOfTolerance(theHole: boolean, theFormVariance: XCAFDimTolObjects_DimensionFormVariance, theGrade: XCAFDimTolObjects_DimensionGrade): void;
+  SetClassOfTolerance(theHole: boolean, theFormVariance: XCAFDimTolObjects_DimensionFormVariance, theGrade: XCAFDimTolObjects_DimensionGrade): void;
 
-GetClassOfTolerance(theHole?: boolean, theFormVariance?: XCAFDimTolObjects_DimensionFormVariance, theGrade?: XCAFDimTolObjects_DimensionGrade): { returnValue: boolean; theHole: boolean; theFormVariance: XCAFDimTolObjects_DimensionFormVariance; theGrade: XCAFDimTolObjects_DimensionGrade };
+  GetClassOfTolerance(theHole?: boolean, theFormVariance?: XCAFDimTolObjects_DimensionFormVariance, theGrade?: XCAFDimTolObjects_DimensionGrade): { returnValue: boolean; theHole: boolean; theFormVariance: XCAFDimTolObjects_DimensionFormVariance; theGrade: XCAFDimTolObjects_DimensionGrade };
 
-SetNbOfDecimalPlaces(theL: number, theR: number): void;
+  SetNbOfDecimalPlaces(theL: number, theR: number): void;
 
-GetNbOfDecimalPlaces(theL?: number, theR?: number): { theL: number; theR: number };
+  GetNbOfDecimalPlaces(theL?: number, theR?: number): { theL: number; theR: number };
 
-GetModifiers(): NCollection_Sequence_XCAFDimTolObjects_DimensionModif;
+  GetModifiers(): NCollection_Sequence_XCAFDimTolObjects_DimensionModif;
 
-SetModifiers(theModifiers: NCollection_Sequence_XCAFDimTolObjects_DimensionModif): void;
+  SetModifiers(theModifiers: NCollection_Sequence_XCAFDimTolObjects_DimensionModif): void;
 
-AddModifier(theModifier: XCAFDimTolObjects_DimensionModif): void;
+  AddModifier(theModifier: XCAFDimTolObjects_DimensionModif): void;
 
-GetPath(): TopoDS_Edge;
+  GetPath(): TopoDS_Edge;
 
-SetPath(thePath: TopoDS_Edge): void;
+  SetPath(thePath: TopoDS_Edge): void;
 
-GetDirection(theDir: gp_Dir): boolean;
+  GetDirection(theDir: gp_Dir): boolean;
 
-SetDirection(theDir: gp_Dir): boolean;
+  SetDirection(theDir: gp_Dir): boolean;
 
-SetPointTextAttach(thePntText: gp_Pnt): void;
+  SetPointTextAttach(thePntText: gp_Pnt): void;
 
-GetPointTextAttach(): gp_Pnt;
+  GetPointTextAttach(): gp_Pnt;
 
-HasTextPoint(): boolean;
+  HasTextPoint(): boolean;
 
-SetPlane(thePlane: gp_Ax2): void;
+  SetPlane(thePlane: gp_Ax2): void;
 
-GetPlane(): gp_Ax2;
+  GetPlane(): gp_Ax2;
 
-HasPlane(): boolean;
+  HasPlane(): boolean;
 
-HasPoint(): boolean;
+  HasPoint(): boolean;
 
-HasPoint2(): boolean;
+  HasPoint2(): boolean;
 
-IsPointConnection(): boolean;
+  IsPointConnection(): boolean;
 
-IsPointConnection2(): boolean;
+  IsPointConnection2(): boolean;
 
-SetPoint(thePnt: gp_Pnt): void;
+  SetPoint(thePnt: gp_Pnt): void;
 
-SetPoint2(thePnt: gp_Pnt): void;
+  SetPoint2(thePnt: gp_Pnt): void;
 
-SetConnectionAxis(theAxis: gp_Ax2): void;
+  SetConnectionAxis(theAxis: gp_Ax2): void;
 
-SetConnectionAxis2(theAxis: gp_Ax2): void;
+  SetConnectionAxis2(theAxis: gp_Ax2): void;
 
-GetPoint(): gp_Pnt;
+  GetPoint(): gp_Pnt;
 
-GetPoint2(): gp_Pnt;
+  GetPoint2(): gp_Pnt;
 
-GetConnectionAxis(): gp_Ax2;
+  GetConnectionAxis(): gp_Ax2;
 
-GetConnectionAxis2(): gp_Ax2;
+  GetConnectionAxis2(): gp_Ax2;
 
-GetConnectionName(): TCollection_HAsciiString;
+  GetConnectionName(): TCollection_HAsciiString;
 
-GetConnectionName2(): TCollection_HAsciiString;
+  GetConnectionName2(): TCollection_HAsciiString;
 
-SetConnectionName(theName: TCollection_HAsciiString): void;
+  SetConnectionName(theName: TCollection_HAsciiString): void;
 
-SetConnectionName2(theName: TCollection_HAsciiString): void;
+  SetConnectionName2(theName: TCollection_HAsciiString): void;
 
-SetPresentation(thePresentation: TopoDS_Shape, thePresentationName: TCollection_HAsciiString): void;
+  SetPresentation(thePresentation: TopoDS_Shape, thePresentationName: TCollection_HAsciiString): void;
 
-GetPresentation(): TopoDS_Shape;
+  GetPresentation(): TopoDS_Shape;
 
-GetPresentationName(): TCollection_HAsciiString;
+  GetPresentationName(): TCollection_HAsciiString;
 
-HasDescriptions(): boolean;
+  HasDescriptions(): boolean;
 
-NbDescriptions(): number;
+  NbDescriptions(): number;
 
-GetDescription(theNumber: number): TCollection_HAsciiString;
+  GetDescription(theNumber: number): TCollection_HAsciiString;
 
-GetDescriptionName(theNumber: number): TCollection_HAsciiString;
+  GetDescriptionName(theNumber: number): TCollection_HAsciiString;
 
-RemoveDescription(theNumber: number): void;
+  RemoveDescription(theNumber: number): void;
 
-AddDescription(theDescription: TCollection_HAsciiString, theName: TCollection_HAsciiString): void;
+  AddDescription(theDescription: TCollection_HAsciiString, theName: TCollection_HAsciiString): void;
 
-static IsDimensionalLocation(theType: XCAFDimTolObjects_DimensionType): boolean;
+  static IsDimensionalLocation(theType: XCAFDimTolObjects_DimensionType): boolean;
 
-static IsDimensionalSize(theType: XCAFDimTolObjects_DimensionType): boolean;
+  static IsDimensionalSize(theType: XCAFDimTolObjects_DimensionType): boolean;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 XCAFDimTolObjects_DimensionQualifier: typeof XCAFDimTolObjects_DimensionQualifier[keyof typeof XCAFDimTolObjects_DimensionQualifier]
 
@@ -269,98 +269,98 @@ XCAFDimTolObjects_GeomToleranceModif: typeof XCAFDimTolObjects_GeomToleranceModi
 
 XCAFDimTolObjects_GeomToleranceObject: declare class XCAFDimTolObjects_GeomToleranceObject extends Standard_Transient
 
-constructor
+  constructor
 
-GetSemanticName(): TCollection_HAsciiString;
+  GetSemanticName(): TCollection_HAsciiString;
 
-SetSemanticName(theName: TCollection_HAsciiString): void;
+  SetSemanticName(theName: TCollection_HAsciiString): void;
 
-SetType(theType: XCAFDimTolObjects_GeomToleranceType): void;
+  SetType(theType: XCAFDimTolObjects_GeomToleranceType): void;
 
-GetType(): XCAFDimTolObjects_GeomToleranceType;
+  GetType(): XCAFDimTolObjects_GeomToleranceType;
 
-SetTypeOfValue(theTypeOfValue: XCAFDimTolObjects_GeomToleranceTypeValue): void;
+  SetTypeOfValue(theTypeOfValue: XCAFDimTolObjects_GeomToleranceTypeValue): void;
 
-GetTypeOfValue(): XCAFDimTolObjects_GeomToleranceTypeValue;
+  GetTypeOfValue(): XCAFDimTolObjects_GeomToleranceTypeValue;
 
-SetValue(theValue: number): void;
+  SetValue(theValue: number): void;
 
-GetValue(): number;
+  GetValue(): number;
 
-SetMaterialRequirementModifier(theMatReqModif: XCAFDimTolObjects_GeomToleranceMatReqModif): void;
+  SetMaterialRequirementModifier(theMatReqModif: XCAFDimTolObjects_GeomToleranceMatReqModif): void;
 
-GetMaterialRequirementModifier(): XCAFDimTolObjects_GeomToleranceMatReqModif;
+  GetMaterialRequirementModifier(): XCAFDimTolObjects_GeomToleranceMatReqModif;
 
-SetZoneModifier(theZoneModif: XCAFDimTolObjects_GeomToleranceZoneModif): void;
+  SetZoneModifier(theZoneModif: XCAFDimTolObjects_GeomToleranceZoneModif): void;
 
-GetZoneModifier(): XCAFDimTolObjects_GeomToleranceZoneModif;
+  GetZoneModifier(): XCAFDimTolObjects_GeomToleranceZoneModif;
 
-SetValueOfZoneModifier(theValue: number): void;
+  SetValueOfZoneModifier(theValue: number): void;
 
-GetValueOfZoneModifier(): number;
+  GetValueOfZoneModifier(): number;
 
-SetModifiers(theModifiers: NCollection_Sequence_XCAFDimTolObjects_GeomToleranceModif): void;
+  SetModifiers(theModifiers: NCollection_Sequence_XCAFDimTolObjects_GeomToleranceModif): void;
 
-AddModifier(theModifier: XCAFDimTolObjects_GeomToleranceModif): void;
+  AddModifier(theModifier: XCAFDimTolObjects_GeomToleranceModif): void;
 
-GetModifiers(): NCollection_Sequence_XCAFDimTolObjects_GeomToleranceModif;
+  GetModifiers(): NCollection_Sequence_XCAFDimTolObjects_GeomToleranceModif;
 
-SetMaxValueModifier(theModifier: number): void;
+  SetMaxValueModifier(theModifier: number): void;
 
-GetMaxValueModifier(): number;
+  GetMaxValueModifier(): number;
 
-SetAxis(theAxis: gp_Ax2): void;
+  SetAxis(theAxis: gp_Ax2): void;
 
-GetAxis(): gp_Ax2;
+  GetAxis(): gp_Ax2;
 
-HasAxis(): boolean;
+  HasAxis(): boolean;
 
-SetPlane(thePlane: gp_Ax2): void;
+  SetPlane(thePlane: gp_Ax2): void;
 
-GetPlane(): gp_Ax2;
+  GetPlane(): gp_Ax2;
 
-SetPoint(thePnt: gp_Pnt): void;
+  SetPoint(thePnt: gp_Pnt): void;
 
-GetPoint(): gp_Pnt;
+  GetPoint(): gp_Pnt;
 
-SetPointTextAttach(thePntText: gp_Pnt): void;
+  SetPointTextAttach(thePntText: gp_Pnt): void;
 
-GetPointTextAttach(): gp_Pnt;
+  GetPointTextAttach(): gp_Pnt;
 
-HasPlane(): boolean;
+  HasPlane(): boolean;
 
-HasPoint(): boolean;
+  HasPoint(): boolean;
 
-HasPointText(): boolean;
+  HasPointText(): boolean;
 
-SetPresentation(thePresentation: TopoDS_Shape, thePresentationName: TCollection_HAsciiString): void;
+  SetPresentation(thePresentation: TopoDS_Shape, thePresentationName: TCollection_HAsciiString): void;
 
-GetPresentation(): TopoDS_Shape;
+  GetPresentation(): TopoDS_Shape;
 
-GetPresentationName(): TCollection_HAsciiString;
+  GetPresentationName(): TCollection_HAsciiString;
 
-HasAffectedPlane(): boolean;
+  HasAffectedPlane(): boolean;
 
-GetAffectedPlaneType(): XCAFDimTolObjects_ToleranceZoneAffectedPlane;
+  GetAffectedPlaneType(): XCAFDimTolObjects_ToleranceZoneAffectedPlane;
 
-SetAffectedPlaneType(theType: XCAFDimTolObjects_ToleranceZoneAffectedPlane): void;
+  SetAffectedPlaneType(theType: XCAFDimTolObjects_ToleranceZoneAffectedPlane): void;
 
-SetAffectedPlane(thePlane: gp_Pln): void;
-SetAffectedPlane(thePlane: gp_Pln, theType: XCAFDimTolObjects_ToleranceZoneAffectedPlane): void;
-SetAffectedPlane(thePlane: gp_Pln): void;
-SetAffectedPlane(thePlane: gp_Pln, theType: XCAFDimTolObjects_ToleranceZoneAffectedPlane): void;
+  SetAffectedPlane(thePlane: gp_Pln): void;
+  SetAffectedPlane(thePlane: gp_Pln, theType: XCAFDimTolObjects_ToleranceZoneAffectedPlane): void;
+  SetAffectedPlane(thePlane: gp_Pln): void;
+  SetAffectedPlane(thePlane: gp_Pln, theType: XCAFDimTolObjects_ToleranceZoneAffectedPlane): void;
 
-GetAffectedPlane(): gp_Pln;
+  GetAffectedPlane(): gp_Pln;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 XCAFDimTolObjects_GeomToleranceType: typeof XCAFDimTolObjects_GeomToleranceType[keyof typeof XCAFDimTolObjects_GeomToleranceType]
 
@@ -372,21 +372,21 @@ XCAFDimTolObjects_ToleranceZoneAffectedPlane: typeof XCAFDimTolObjects_Tolerance
 
 XCAFDimTolObjects_Tool: declare class XCAFDimTolObjects_Tool
 
-constructor
+  constructor
 
-GetDimensions(theDimensionObjectSequence: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
+  GetDimensions(theDimensionObjectSequence: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
 
-GetRefDimensions(theShape: TopoDS_Shape, theDimensions: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): boolean;
+  GetRefDimensions(theShape: TopoDS_Shape, theDimensions: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): boolean;
 
-GetGeomTolerances(theGeomToleranceObjectSequence: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject, theDatumObjectSequence: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject, theMap: NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject): void;
+  GetGeomTolerances(theGeomToleranceObjectSequence: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject, theDatumObjectSequence: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject, theMap: NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject): void;
 
-GetRefGeomTolerances(theShape: TopoDS_Shape, theGeomToleranceObjectSequence: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject, theDatumObjectSequence: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject, theMap: NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject): boolean;
+  GetRefGeomTolerances(theShape: TopoDS_Shape, theGeomToleranceObjectSequence: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject, theDatumObjectSequence: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject, theMap: NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject): boolean;
 
-GetRefDatum(theShape: TopoDS_Shape): { returnValue: boolean; theDatum: XCAFDimTolObjects_DatumObject; [Symbol.dispose](): void };
+  GetRefDatum(theShape: TopoDS_Shape): { returnValue: boolean; theDatum: XCAFDimTolObjects_DatumObject; [Symbol.dispose](): void };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 XCAFDimTolObjects_DatumModifiersSequence: NCollection_Sequence_XCAFDimTolObjects_DatumSingleModif
 

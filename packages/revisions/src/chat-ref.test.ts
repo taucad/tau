@@ -101,6 +101,31 @@ const readChatFile = async (checkout: FileSystemProvider, path: string, id = cha
   }
 };
 
+const readChatBytes = async (
+  checkout: FileSystemProvider,
+  path: string,
+  id = chatId,
+): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+  try {
+    return await checkout.readFile(`${chatRecordsPath(id)}/${path}`);
+  } catch {
+    return undefined;
+  }
+};
+
+/* Attachments as the closed tree spells them (D12): bytes named by their
+ * lowercase SHA-256 hex and one of the five stored media types. The hashes here
+ * are shaped, not computed — `chat-ref` validates the spelling, and the store
+ * that mints the name is the UI's own. */
+const imageHash = 'a1'.repeat(32);
+const documentHash = 'b2'.repeat(32);
+const imagePath = `attachments/${imageHash}.jpg`;
+const documentPath = `attachments/${documentHash}.pdf`;
+/* Binary on purpose: a JPEG's SOI/APP0 and a PDF header, so a leg that decoded
+ * or re-encoded a blob on the way through would not round-trip. */
+const imageBytes = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+const documentBytes = Uint8Array.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37, 0x0a, 0x00]);
+
 describe('chat ref naming', () => {
   it('reads a chat id from a local ref and from its remote-tracking spelling', () => {
     expect(chatIdOfRef(chatRefName(chatId))).toBe(chatId);
@@ -403,6 +428,71 @@ describe.each([
     expect(await readChatFile(target, chatSegmentPath('device-a'), 'malformed')).toBeUndefined();
   });
 
+  /* One entry family was widened, not the tree: an attachment is admitted only
+   * when it is content-addressed under `attachments/`, and everything else is
+   * still refused before a byte is written (Finding 11). */
+  it.runIf(enabled)('admits content-addressed attachments and refuses every other sibling', async () => {
+    const id = `attachments_${_engine}`;
+    const carried = await harness.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([
+        ['chat.json', '{"name":"with attachments"}'],
+        ['events/device-a.jsonl', 'A0\n'],
+        [imagePath, imageBytes],
+        [documentPath, documentBytes],
+      ]),
+      provenance: { source: 'user', actorId, createdAt: now },
+      summary: { generated: 'Chat with attachments' },
+    });
+    const target = await createMemoryProvider();
+    await projectChats({
+      port: harness.port,
+      filesystem: target,
+      deviceId: 'device-b',
+      refs: [{ name: chatRefName(id), head: revisionId(carried.commitId) }],
+    });
+    expect(await readChatBytes(target, imagePath, id)).toEqual(imageBytes);
+    expect(await readChatBytes(target, documentPath, id)).toEqual(documentBytes);
+
+    /* Sequential on purpose: each row is one `writeRevision`, which on the
+     * native leg is one `git fast-import` against one repository, and six of
+     * them at once contend on its object store. */
+    for (const path of [
+      /* 63 hex digits: a name no content-addressed write produces. */
+      `attachments/${imageHash.slice(1)}.jpg`,
+      /* Outside the five stored media types (D12). */
+      `attachments/${imageHash}.exe`,
+      /* Upper-case hex: the store writes lower-case, so two spellings of one
+       * blob would be two entries for one object. */
+      `attachments/${imageHash.toUpperCase()}.jpg`,
+      /* No sub-directories: the family is one flat level. */
+      `attachments/nested/${imageHash}.jpg`,
+      'attachments/notes.txt',
+      'notes.txt',
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one tree per refused name, against one repository.
+      const written = await harness.port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([
+          ['chat.json', '{"name":"remote"}'],
+          [path, imageBytes],
+        ]),
+        provenance: { source: 'user', actorId, createdAt: now },
+        summary: { generated: `Chat carrying ${path}` },
+      });
+      await expect(
+        projectChats({
+          port: harness.port,
+          filesystem: await createMemoryProvider(),
+          deviceId: 'device-b',
+          refs: [{ name: chatRefName(`${id}_refused`), head: revisionId(written.commitId) }],
+        }),
+        `expected ${path} to be refused`,
+        // oxlint-disable-next-line no-await-in-loop -- the refusal is asserted against the tree written one statement earlier.
+      ).rejects.toMatchObject({ code: 'UNSUPPORTED_OPERATION' });
+    }
+  });
+
   it.runIf(enabled)(
     'keeps newer projected segments and local metadata when recording from a stale parent',
     async () => {
@@ -663,5 +753,73 @@ describe.runIf(gitOnPath)('two devices, two stores, one remote', () => {
     });
     expect(await readChatFile(deviceA.checkout, chatSegmentPath('device-b'), sharedChatId)).toBe('B0\n');
     expect(await readChatFile(deviceA.checkout, 'events.jsonl', sharedChatId)).toBe('A0\n');
+  }, 180_000);
+
+  /* An image and a PDF beside the log: one entry each in the ref's tree, exact
+   * bytes, and never re-entered once the device already holds them. */
+  it('carries an image and a PDF as one object each, and stops at the P20 gate', async () => {
+    const base = await fetchChat(deviceA);
+    await deviceA.checkout.writeFile(`${chatRecordsPath(sharedChatId)}/${imagePath}`, imageBytes);
+    await deviceA.checkout.writeFile(`${chatRecordsPath(sharedChatId)}/${documentPath}`, documentBytes);
+
+    const withAttachments = await replayChatSegment({
+      port: deviceA.port,
+      filesystem: deviceA.checkout,
+      deviceId: 'device-a',
+      chatId: sharedChatId,
+      syncChats: true,
+      actorId,
+      now,
+      onto: base,
+    });
+    expect(withAttachments.status).toBe('updated');
+    const carried = await deviceA.port.readTree(withAttachments.head!);
+    expect(carried?.entries().map((entry) => entry.path)).toEqual([
+      imagePath,
+      documentPath,
+      'chat.json',
+      chatSegmentPath('device-a'),
+      chatSegmentPath('device-b'),
+    ]);
+    /* Read back through the port, which smudges: the *stored* blob at each of
+     * these paths is a 127-byte LFS pointer, because `writeTreeObject` cleans
+     * every tree it writes and `isLargeObjectPath` calls `.jpg` and `.pdf`
+     * large-object families whatever they weigh. The real bytes are in this
+     * store's `.git/lfs/objects/`, which no ref carries. See the blocker below. */
+    expect(carried?.get(imagePath)).toEqual(imageBytes);
+    expect(carried?.get(documentPath)).toEqual(documentBytes);
+
+    /* Written once: the same bytes recorded again are the tree the ref already
+     * holds, so content addressing costs one object per blob however many turns
+     * reference it. */
+    const again = await replayChatSegment({
+      port: deviceA.port,
+      filesystem: deviceA.checkout,
+      deviceId: 'device-a',
+      chatId: sharedChatId,
+      syncChats: true,
+      actorId,
+      now,
+      onto: withAttachments.head,
+    });
+    expect(again.status).toBe('upToDate');
+    expect(again.head).toBe(withAttachments.head);
+
+    /*
+     * BLOCKER, and the refusal is *correct* — the defect is upstream of it.
+     * `writeTreeObject` runs `cleanLargeObjects` on every tree this port
+     * records, and `isLargeObjectPath` is extension-only, so a chat attachment
+     * is pointerised on write however small it is: the tree carries a pointer
+     * and the bytes stay in this host's private `.git/lfs/objects/`. `git lfs
+     * ls-files` then names them because they really are pointers, and P20
+     * rightly refuses to offer them to a remote that cannot serve the objects.
+     * Both legs clean identically (`isomorphic-git-adapter` writeRevision), so
+     * this is not a leg disagreement. Owner: whether record refs should be
+     * cleaned at all, in `native-git-port.ts` / `lfs.ts`, outside this lane.
+     * This row inverts when a chat attachment stops being pointerised.
+     */
+    await expect(
+      deviceA.port.push({ remote: 'origin', refs: [{ name: chatRefName(sharedChatId), expected: base }] }),
+    ).rejects.toMatchObject({ code: 'LFS_REMOTE_UNSUPPORTED' });
   }, 180_000);
 });

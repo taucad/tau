@@ -37,6 +37,29 @@ export type ProviderMessageMetadata = {
   readonly tauInternal?: JsonObject | undefined;
 };
 
+/**
+ * A content-addressed attachment a durable message references rather than inlines.
+ *
+ * `path` is relative to the directory that owns the log (`attachments/<sha256>.<ext>`),
+ * so the same row resolves in every checkout of the chat. Bytes are read back at
+ * materialisation; the durable row never carries them. The legacy inline
+ * `{ type: 'image', mimeType, data }` block stays readable forever (D14).
+ *
+ * `byteLength` is optional (P29): a writer that has the size records it, and a
+ * writer that does not — a draft hydrated from a record, whose file part carries
+ * no size — omits it rather than fabricating one. No reader requires it;
+ * materialisation and render both resolve the bytes themselves.
+ *
+ * @public
+ */
+export type FileRefContentBlock = {
+  readonly type: 'file-ref';
+  readonly path: string;
+  readonly mimeType: string;
+  readonly byteLength?: number;
+  readonly filename?: string;
+};
+
 type MessageBase = {
   readonly id: string;
   readonly content: JsonValue;

@@ -9,6 +9,7 @@ import {
   agentApprovalToolName,
   projectAgentHostEvent,
   projectAgentHostLiveEvent,
+  projectAgentHostUserMessage,
   projectAgentHostUserTurn,
   projectTurnFinalized,
   latestAcpSessionData,
@@ -1387,5 +1388,97 @@ describe('external attribution', () => {
       type: 'tool-input-available',
       input: { agentId: 'claude', options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }] },
     });
+  });
+});
+
+/* W9: a transcript rebuilt from the log has to render the same attachment the
+   composer sent, whether the row references the bytes (`file-ref`) or still
+   inlines them (the legacy `image` arm, D14). */
+describe('projectAgentHostUserMessage attachments', () => {
+  const attachmentHash = 'd'.repeat(64);
+
+  it('should round-trip a file-ref image block to its attachment file part', () => {
+    const message = projectAgentHostUserMessage({
+      id: 'user-image-ref',
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Match this.' },
+        { type: 'file-ref', path: `attachments/${attachmentHash}.png`, mimeType: 'image/png', byteLength: 1234 },
+      ],
+    });
+
+    expect(message.parts).toEqual([
+      { type: 'text', text: 'Match this.' },
+      {
+        type: 'file',
+        mediaType: 'image/png',
+        url: `attachments/${attachmentHash}.png`,
+        providerMetadata: { common: { byteLength: 1234 } },
+      },
+    ]);
+  });
+
+  it('should round-trip a file-ref document block with its filename', () => {
+    const message = projectAgentHostUserMessage({
+      id: 'user-document-ref',
+      role: 'user',
+      content: [
+        {
+          type: 'file-ref',
+          path: `attachments/${attachmentHash}.pdf`,
+          mimeType: 'application/pdf',
+          byteLength: 20_480,
+          filename: 'bracket-spec.pdf',
+        },
+      ],
+    });
+
+    expect(message.parts).toEqual([
+      {
+        type: 'file',
+        mediaType: 'application/pdf',
+        url: `attachments/${attachmentHash}.pdf`,
+        filename: 'bracket-spec.pdf',
+        providerMetadata: { common: { byteLength: 20_480 } },
+      },
+    ]);
+  });
+
+  /* P29: the size is optional in the durable row, so the part it projects to
+     carries no `providerMetadata` at all rather than a fabricated zero. W13
+     renders that as an unknown size. */
+  it('should round-trip a file-ref block that names no byte length, without provider metadata', () => {
+    const message = projectAgentHostUserMessage({
+      id: 'user-sizeless-ref',
+      role: 'user',
+      content: [{ type: 'file-ref', path: `attachments/${attachmentHash}.pdf`, mimeType: 'application/pdf' }],
+    });
+
+    expect(message.parts).toEqual([
+      { type: 'file', mediaType: 'application/pdf', url: `attachments/${attachmentHash}.pdf` },
+    ]);
+  });
+
+  it('should still re-synthesize a data URL from a legacy inline image block', () => {
+    const message = projectAgentHostUserMessage({
+      id: 'user-legacy-image',
+      role: 'user',
+      content: [{ type: 'image', mimeType: 'image/png', data: 'AAAA' }],
+    });
+
+    expect(message.parts).toEqual([{ type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,AAAA' }]);
+  });
+
+  it('should drop a file-ref block whose path is not a resolvable attachment', () => {
+    const message = projectAgentHostUserMessage({
+      id: 'user-bad-ref',
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Still readable.' },
+        { type: 'file-ref', path: '../escape.png', mimeType: 'image/png', byteLength: 1 },
+      ],
+    });
+
+    expect(message.parts).toEqual([{ type: 'text', text: 'Still readable.' }]);
   });
 });

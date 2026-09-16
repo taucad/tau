@@ -42,9 +42,9 @@ const white = new Color(1, 1, 1);
  */
 const studioEmitters = (palette: MetalMorphEnvironmentPalette): Emitter[] => [
   // A tall soft window front-right: the broad bright reflection every chrome product shot leans on.
-  { color: scaled(white, palette.keyIntensity * 0.55), position: [10, 5, 13], width: 14, height: 10 },
+  { color: scaled(white, palette.keyIntensity * 0.6), position: [10, 5, 13], width: 16, height: 11 },
   // Key softbox overhead, slightly forward.
-  { color: scaled(white, palette.keyIntensity), position: [0, 15, 6], width: 10, height: 6 },
+  { color: scaled(white, palette.keyIntensity), position: [0, 15, 6], width: 12, height: 7 },
   // Long thin rim strips behind the body for the signature streaks.
   { color: scaled(white, palette.rimIntensity), position: [16, 6, -10], width: 0.6, height: 16 },
   { color: scaled(white, palette.rimIntensity * 0.55), position: [-14, 9, -12], width: 0.5, height: 12 },

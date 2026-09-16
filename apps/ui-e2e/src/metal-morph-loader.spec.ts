@@ -57,8 +57,19 @@ const expectedVertexCount = 40_962;
 const readState = async (): Promise<LoaderState | undefined> =>
   target.evaluate(() => (globalThis as LoaderWindow).__TAU_METAL_MORPH__?.getState());
 
+/** Milliseconds; software adapters prefilter the studio and compile the pipelines slowly. */
+const readyTimeout = 120_000;
+/** Milliseconds; two transitions at the default timing plus software-renderer slack. */
+const sequenceTimeout = 90_000;
+/** Milliseconds for a playback toggle to settle. */
+const playbackTimeout = 15_000;
+
 const waitForReady = async (): Promise<LoaderState> => {
-  await target.waitFor(() => (globalThis as LoaderWindow).__TAU_METAL_MORPH__?.getState().status === 'ready');
+  await target.waitFor(
+    () => (globalThis as LoaderWindow).__TAU_METAL_MORPH__?.getState().status === 'ready',
+    undefined,
+    { timeout: readyTimeout },
+  );
   const state = await readState();
   if (!state) {
     throw new Error('The metal morph loader debug bridge is missing.');
@@ -230,6 +241,8 @@ test.describe('metal morph loader', () => {
       await waitForReady();
       await target.waitFor(
         () => ((globalThis as LoaderWindow).__TAU_METAL_MORPH__?.getState().transitionCount ?? 0) >= 2,
+        undefined,
+        { timeout: sequenceTimeout },
       );
       const advanced = await readState();
       expect(advanced?.history.length).toBeGreaterThanOrEqual(3);
@@ -237,7 +250,11 @@ test.describe('metal morph loader', () => {
       expect(new Set(advanced?.history).size).toBeGreaterThanOrEqual(2);
 
       await target.click(selectors.getByRole('button', { name: /pause loader animation/i }));
-      await target.waitFor(() => (globalThis as LoaderWindow).__TAU_METAL_MORPH__?.getState().isPlaying === false);
+      await target.waitFor(
+        () => (globalThis as LoaderWindow).__TAU_METAL_MORPH__?.getState().isPlaying === false,
+        undefined,
+        { timeout: playbackTimeout },
+      );
       const paused = await readState();
       await target.delay(400);
       const held = await readState();
@@ -245,7 +262,11 @@ test.describe('metal morph loader', () => {
       expect(held?.isPlaying).toBe(false);
 
       await target.click(selectors.getByRole('button', { name: /play loader animation/i }));
-      await target.waitFor(() => (globalThis as LoaderWindow).__TAU_METAL_MORPH__?.getState().isPlaying === true);
+      await target.waitFor(
+        () => (globalThis as LoaderWindow).__TAU_METAL_MORPH__?.getState().isPlaying === true,
+        undefined,
+        { timeout: playbackTimeout },
+      );
     });
   }
 

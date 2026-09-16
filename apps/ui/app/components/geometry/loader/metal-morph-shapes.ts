@@ -46,20 +46,34 @@ export type MetalMorphShapeDefinition = Readonly<{
   scale: number;
   /** Distance from the origin to the apex of the pyramid raised on every core face; absent for plain solids. */
   spikeApexRadius?: number;
+  /**
+   * Log-sum-exp temperature, in render units, that fillets every edge, corner, ridge, tip and crease. Planes
+   * meeting at a flatter dihedral blend over a wider band at the same temperature, so shallow solids are cooler.
+   */
+  roundness: number;
 }>;
 
 export type RadialSample = Readonly<{
-  /** Distance from the origin to the surface along the sampled direction. */
+  /** Distance from the origin to the rounded surface along the sampled direction. */
   radius: number;
-  /** Unit outward normal of the face hit along the sampled direction. */
+  /** Unit outward normal of the rounded surface, blended from the planes that shape it there. */
   normal: Vector3Tuple;
+}>;
+
+/** A plane bounding the solid: everything the radial samplers need from a {@link ConvexFace}. */
+export type RadialPlane = Readonly<{
+  normal: Vector3Tuple;
+  offset: number;
 }>;
 
 export type PreparedSolid = Readonly<{
   id: MetalMorphShapeId;
+  roundness: number;
   faces: readonly ConvexFace[];
   /** Side planes of the pyramid raised on `faces[index]`, when the solid is stellated. */
   spikes?: ReadonlyArray<readonly ConvexFace[]>;
+  /** For `spikes[face][side]`, the neighbouring pyramid's side plane raised on the same core edge. */
+  creases?: ReadonlyArray<readonly ConvexFace[]>;
 }>;
 
 export type MetalMorphGeometryData = Readonly<{
@@ -117,13 +131,28 @@ const icosahedronVertices = cyclicPermutations([0, 1, goldenRatio]);
 const dodecahedronVertices = [...cubeVertices, ...cyclicPermutations([0, 1 / goldenRatio, goldenRatio])];
 const rhombicDodecahedronVertices = [...cubeVertices, ...cyclicPermutations([2, 0, 0])];
 
-/** The five forms, framed so their extremes sit near one render unit from the origin. */
+/**
+ * The five forms, framed so their extremes sit near one render unit from the origin. Each temperature was
+ * chosen so the fillet reaches about 0.075 render units into every face from its edges, whatever the dihedral.
+ */
 export const metalMorphShapeDefinitions: Readonly<Record<MetalMorphShapeId, MetalMorphShapeDefinition>> = {
-  'escher-star': { id: 'escher-star', vertices: rhombicDodecahedronVertices, scale: 0.3, spikeApexRadius: 1 },
-  'stella-octangula': { id: 'stella-octangula', vertices: octahedronVertices, scale: 0.36, spikeApexRadius: 1 },
-  cube: { id: 'cube', vertices: cubeVertices, scale: 0.6 },
-  dodecahedron: { id: 'dodecahedron', vertices: dodecahedronVertices, scale: 0.57 },
-  icosahedron: { id: 'icosahedron', vertices: icosahedronVertices, scale: 0.52 },
+  'escher-star': {
+    id: 'escher-star',
+    vertices: rhombicDodecahedronVertices,
+    scale: 0.3,
+    spikeApexRadius: 1,
+    roundness: 0.026,
+  },
+  'stella-octangula': {
+    id: 'stella-octangula',
+    vertices: octahedronVertices,
+    scale: 0.36,
+    spikeApexRadius: 1,
+    roundness: 0.03,
+  },
+  cube: { id: 'cube', vertices: cubeVertices, scale: 0.6, roundness: 0.044 },
+  dodecahedron: { id: 'dodecahedron', vertices: dodecahedronVertices, scale: 0.57, roundness: 0.029 },
+  icosahedron: { id: 'icosahedron', vertices: icosahedronVertices, scale: 0.52, roundness: 0.02 },
 };
 
 const centroidOf = (points: readonly Vector3Tuple[]): Vector3Tuple => {
@@ -233,21 +262,59 @@ const pyramidSidePlanes = (face: ConvexFace, apex: Vector3Tuple): ConvexFace[] =
   });
 };
 
+const vertexKey = (point: Vector3Tuple): string => point.map((component) => Math.round(component * 1e5) + 0).join(',');
+
+const edgeKey = (start: Vector3Tuple, end: Vector3Tuple): string => {
+  const first = vertexKey(start);
+  const second = vertexKey(end);
+  return first < second ? `${first}|${second}` : `${second}|${first}`;
+};
+
+/**
+ * For every side plane of every spike, the neighbouring spike's side plane raised on the same core edge: the
+ * two planes meet along the concave crease between the spikes.
+ */
+const pairCreases = (spikes: ReadonlyArray<readonly ConvexFace[]>): ConvexFace[][] => {
+  const owners = new Map<string, ConvexFace[]>();
+  for (const sides of spikes) {
+    for (const side of sides) {
+      const key = edgeKey(side.vertices[0]!, side.vertices[1]!);
+      const claimants = owners.get(key) ?? [];
+      claimants.push(side);
+      owners.set(key, claimants);
+    }
+  }
+  return spikes.map((sides) =>
+    sides.map((side) => {
+      const twin = owners.get(edgeKey(side.vertices[0]!, side.vertices[1]!))?.find((claimant) => claimant !== side);
+      if (twin === undefined) {
+        throw new Error('Every core edge must be shared by exactly two spikes.');
+      }
+      return twin;
+    }),
+  );
+};
+
 /** Build the plane sets a radial sampler needs for one shape definition. */
 export const prepareSolid = (definition: MetalMorphShapeDefinition): PreparedSolid => {
   const faces = extractConvexFaces(definition.vertices.map((vertex) => scaleVector(vertex, definition.scale)));
+  const solid: PreparedSolid = { id: definition.id, roundness: definition.roundness, faces };
   if (definition.spikeApexRadius === undefined) {
-    return { id: definition.id, faces };
+    return solid;
   }
   const apexRadius = definition.spikeApexRadius;
-  return {
-    id: definition.id,
-    faces,
-    spikes: faces.map((face) => pyramidSidePlanes(face, scaleVector(face.normal, apexRadius))),
-  };
+  const spikes = faces.map((face) => pyramidSidePlanes(face, scaleVector(face.normal, apexRadius)));
+  return { ...solid, spikes, creases: pairCreases(spikes) };
 };
 
-const nearestExit = (planes: readonly ConvexFace[], direction: Vector3Tuple): { index: number; radius: number } => {
+/** A direction to sample together with the temperature that rounds the sampled solid. */
+type RadialQuery = Readonly<{
+  direction: Vector3Tuple;
+  roundness: number;
+}>;
+
+/** Exit through the nearest facing plane along `direction`, or `index: -1` when no plane faces it. */
+const nearestExit = (planes: readonly RadialPlane[], direction: Vector3Tuple): { index: number; radius: number } => {
   let bestIndex = -1;
   let bestRadius = Number.POSITIVE_INFINITY;
   for (const [index, plane] of planes.entries()) {
@@ -264,22 +331,84 @@ const nearestExit = (planes: readonly ConvexFace[], direction: Vector3Tuple): { 
   return { index: bestIndex, radius: bestRadius };
 };
 
-/** Distance and face normal where a ray from the origin along `direction` leaves the solid. */
+/**
+ * Smooth exit through a plane set: a log-sum-exp minimum over the radial exits of every facing plane. Where
+ * several planes tie (edges, corners, ridges, tips) the surface is filleted over a band that scales with the
+ * temperature, while a face centre, many temperatures away from any other plane, stays exact. The normal
+ * blends the plane normals with the same weights. `undefined` when no plane faces the direction.
+ */
+const softExit = (planes: readonly RadialPlane[], query: RadialQuery): RadialSample | undefined => {
+  const nearest = nearestExit(planes, query.direction);
+  if (nearest.index < 0) {
+    return undefined;
+  }
+  let total = 0;
+  let x = 0;
+  let y = 0;
+  let z = 0;
+  for (const plane of planes) {
+    const denominator = dot(plane.normal, query.direction);
+    if (denominator <= grazingDenominatorTolerance) {
+      continue;
+    }
+    const weight = Math.exp(-(plane.offset / denominator - nearest.radius) / query.roundness);
+    total += weight;
+    x += weight * plane.normal[0];
+    y += weight * plane.normal[1];
+    z += weight * plane.normal[2];
+  }
+  return { radius: nearest.radius - query.roundness * Math.log(total), normal: normalize([x, y, z]) };
+};
+
+/**
+ * Smooth union of a spike with its neighbours across the base edges: a log-sum-exp maximum over the spike's
+ * own exit and the neighbouring side planes through those edges. Under this spike a neighbour's plane lies
+ * beneath the surface, so it only shows along the shared crease, which fills by the band a convex edge loses.
+ */
+const fillCreases = (spike: RadialSample, twins: readonly RadialPlane[], query: RadialQuery): RadialSample => {
+  const candidates: RadialSample[] = [spike];
+  let peak = spike.radius;
+  for (const twin of twins) {
+    const denominator = dot(twin.normal, query.direction);
+    if (denominator <= grazingDenominatorTolerance) {
+      continue;
+    }
+    const radius = twin.offset / denominator;
+    candidates.push({ radius, normal: twin.normal });
+    peak = Math.max(peak, radius);
+  }
+  let total = 0;
+  let x = 0;
+  let y = 0;
+  let z = 0;
+  for (const candidate of candidates) {
+    const weight = Math.exp((candidate.radius - peak) / query.roundness);
+    total += weight;
+    x += weight * candidate.normal[0];
+    y += weight * candidate.normal[1];
+    z += weight * candidate.normal[2];
+  }
+  return { radius: peak + query.roundness * Math.log(total), normal: normalize([x, y, z]) };
+};
+
+/** Distance and surface normal where a ray from the origin along `direction` leaves the rounded solid. */
 export const sampleRadial = (solid: PreparedSolid, direction: Vector3Tuple): RadialSample => {
+  const query: RadialQuery = { direction, roundness: solid.roundness };
   const core = nearestExit(solid.faces, direction);
-  const coreFace = solid.faces[core.index];
-  if (coreFace === undefined) {
-    throw new Error(`No face of ${solid.id} faces the sampled direction.`);
+  const sides = solid.spikes?.[core.index];
+  const twins = solid.creases?.[core.index];
+  if (sides === undefined || twins === undefined) {
+    const body = softExit(solid.faces, query);
+    if (body === undefined) {
+      throw new Error(`No face of ${solid.id} faces the sampled direction.`);
+    }
+    return body;
   }
-  const spike = solid.spikes?.[core.index];
+  const spike = softExit(sides, query);
   if (spike === undefined) {
-    return { radius: core.radius, normal: coreFace.normal };
+    throw new Error(`No side of the ${solid.id} spike faces the sampled direction.`);
   }
-  const exit = nearestExit(spike, direction);
-  const plane = spike[exit.index];
-  return plane === undefined
-    ? { radius: core.radius, normal: coreFace.normal }
-    : { radius: exit.radius, normal: plane.normal };
+  return fillCreases(spike, twins, query);
 };
 
 const icosahedronFaces: ReadonlyArray<readonly [number, number, number]> = [
@@ -409,61 +538,62 @@ export type PlaneDescriptor = readonly [number, number, number, number];
 export type MetalMorphPlaneTable = Readonly<{
   /** `normal.xyz, offset` per plane: each shape's core planes followed by its pyramid side planes. */
   planes: readonly PlaneTuple[];
+  /** Aligned with `planes`: for a side plane, the neighbouring spike's plane through the same core edge; zero for core planes. */
+  twins: readonly PlaneTuple[];
   /** Indexed like {@link metalMorphShapeIds}. */
   descriptors: readonly PlaneDescriptor[];
+  /** Log-sum-exp temperature per shape, indexed like {@link metalMorphShapeIds}. */
+  roundness: readonly number[];
 }>;
+
+type PlaneRange = Readonly<{ start: number; count: number }>;
+
+const planeOf = (plane: RadialPlane): PlaneTuple => [plane.normal[0], plane.normal[1], plane.normal[2], plane.offset];
+
+const planesInRange = (planes: readonly PlaneTuple[], range: PlaneRange): RadialPlane[] =>
+  planes
+    .slice(range.start, range.start + range.count)
+    .map((plane) => ({ normal: [plane[0], plane[1], plane[2]], offset: plane[3] }));
 
 let planeTableCache: MetalMorphPlaneTable | undefined;
 
 /**
- * Flatten every shape's planes into one table so a fragment shader can recover the exact face normal along any
- * direction with two bounded loops instead of relying on interpolated vertex normals.
+ * Flatten every shape's planes into one table so a fragment shader can recover the rounded surface normal
+ * along any direction with bounded loops instead of relying on interpolated vertex normals.
  */
 export const getMetalMorphPlaneTable = (): MetalMorphPlaneTable => {
   if (planeTableCache !== undefined) {
     return planeTableCache;
   }
   const planes: PlaneTuple[] = [];
+  const twins: PlaneTuple[] = [];
   const descriptors: PlaneDescriptor[] = [];
+  const roundness: number[] = [];
   for (const id of metalMorphShapeIds) {
     const solid = prepareSolid(metalMorphShapeDefinitions[id]);
     const coreStart = planes.length;
     for (const face of solid.faces) {
-      planes.push([face.normal[0], face.normal[1], face.normal[2], face.offset]);
+      planes.push(planeOf(face));
+      twins.push([0, 0, 0, 0]);
     }
     const sideStart = planes.length;
-    const sidesPerFace = solid.spikes?.[0]?.length ?? 0;
-    for (const sides of solid.spikes ?? []) {
-      for (const plane of sides) {
-        planes.push([plane.normal[0], plane.normal[1], plane.normal[2], plane.offset]);
+    const spikes = solid.spikes ?? [];
+    const creases = solid.creases ?? [];
+    for (const [faceIndex, sides] of spikes.entries()) {
+      for (const [sideIndex, plane] of sides.entries()) {
+        const twin = creases[faceIndex]?.[sideIndex];
+        if (twin === undefined) {
+          throw new Error(`Spike ${faceIndex} of ${id} has no crease pairing for side ${sideIndex}.`);
+        }
+        planes.push(planeOf(plane));
+        twins.push(planeOf(twin));
       }
     }
-    descriptors.push([coreStart, solid.faces.length, sideStart, sidesPerFace]);
+    descriptors.push([coreStart, solid.faces.length, sideStart, spikes[0]?.length ?? 0]);
+    roundness.push(solid.roundness);
   }
-  planeTableCache = { planes, descriptors };
+  planeTableCache = { planes, twins, descriptors, roundness };
   return planeTableCache;
-};
-
-const nearestTablePlane = (
-  table: MetalMorphPlaneTable,
-  range: { readonly start: number; readonly count: number },
-  direction: Vector3Tuple,
-): { index: number; radius: number } => {
-  let bestIndex = -1;
-  let bestRadius = Number.POSITIVE_INFINITY;
-  for (let offset = 0; offset < range.count; offset += 1) {
-    const plane = table.planes[range.start + offset]!;
-    const denominator = plane[0] * direction[0] + plane[1] * direction[1] + plane[2] * direction[2];
-    if (denominator <= grazingDenominatorTolerance) {
-      continue;
-    }
-    const radius = plane[3] / denominator;
-    if (radius < bestRadius) {
-      bestRadius = radius;
-      bestIndex = offset;
-    }
-  }
-  return { index: bestIndex, radius: bestRadius };
 };
 
 /** CPU twin of the fragment shader's plane-table lookup; must agree with {@link sampleRadial}. */
@@ -473,20 +603,25 @@ export const sampleFromPlaneTable = (
   direction: Vector3Tuple,
 ): RadialSample => {
   const descriptor = table.descriptors[shapeIndex];
-  if (descriptor === undefined) {
+  const roundness = table.roundness[shapeIndex];
+  if (descriptor === undefined || roundness === undefined) {
     throw new Error(`No plane descriptor for shape index ${shapeIndex}.`);
   }
   const [coreStart, coreCount, sideStart, sidesPerFace] = descriptor;
-  const core = nearestTablePlane(table, { start: coreStart, count: coreCount }, direction);
-  const corePlane = table.planes[coreStart + core.index]!;
+  const query: RadialQuery = { direction, roundness };
+  const corePlanes = planesInRange(table.planes, { start: coreStart, count: coreCount });
   if (sidesPerFace === 0) {
-    return { radius: core.radius, normal: [corePlane[0], corePlane[1], corePlane[2]] };
+    const body = softExit(corePlanes, query);
+    if (body === undefined) {
+      throw new Error(`No core plane of shape ${shapeIndex} faces the sampled direction.`);
+    }
+    return body;
   }
-  const side = nearestTablePlane(
-    table,
-    { start: sideStart + core.index * sidesPerFace, count: sidesPerFace },
-    direction,
-  );
-  const sidePlane = table.planes[sideStart + core.index * sidesPerFace + side.index]!;
-  return { radius: side.radius, normal: [sidePlane[0], sidePlane[1], sidePlane[2]] };
+  const core = nearestExit(corePlanes, direction);
+  const range: PlaneRange = { start: sideStart + core.index * sidesPerFace, count: sidesPerFace };
+  const spike = softExit(planesInRange(table.planes, range), query);
+  if (spike === undefined) {
+    throw new Error(`No side plane of shape ${shapeIndex} faces the sampled direction.`);
+  }
+  return fillCreases(spike, planesInRange(table.twins, range), query);
 };

@@ -161,12 +161,14 @@ export const shaderEvidence = {
   'metal-morph-loader': {
     reference: [
       `${metalMorphLoaderRoot}/metal-morph-shapes.test.ts::should measure a cube face at its inradius and a corner at its circumradius`,
+      `${metalMorphLoaderRoot}/metal-morph-shapes.test.ts::should fillet an edge over a band that scales with the temperature`,
       `${metalMorphLoaderRoot}/metal-morph-sequence.test.ts::should move the front monotonically from source to target during a morph`,
     ],
     'generated-source': [
       `${metalMorphLoaderRoot}/metal-morph-material.node.test.ts::matches stable stripped physical node material snapshot`,
       `${metalMorphLoaderEndToEnd}::compiles the liquid metal body through Three`,
     ],
+    'real-compile': [`${metalMorphLoaderEndToEnd}::compiles the liquid metal body through Three`],
     pixels: [`${metalMorphLoaderEndToEnd}::renders a chrome body with highlights and dark facets through`],
     'depth-clipping': [
       `${metalMorphLoaderEndToEnd}::keeps the transparent canvas clear outside the body silhouette through`,

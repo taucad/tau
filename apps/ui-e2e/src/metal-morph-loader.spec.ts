@@ -6,8 +6,10 @@ import * as target from '#support/external-target.js';
  * Metal morph loader backend evidence (`shader-policy.ts` site `metal-morph-loader`).
  *
  * The `/loader` route exposes `__TAU_METAL_MORPH__` under `TAU_DEBUG`; the spec drives both node-renderer
- * backends through the `?graphicsBackend=` override, reads the generated shader stages, samples the rendered
- * stage for a chrome signature and checks the loop keeps advancing without WebGPU validation noise.
+ * backends through the `?graphicsBackend=` override, reads the generated shader stages, reads a frame back
+ * through each backend for a chrome signature (independent of canvas presentation, which headless WebGPU
+ * adapters may not provide), samples the presented WebGL canvas, and checks the loop keeps advancing without
+ * WebGPU validation noise.
  */
 
 type LoaderBackend = 'webgl' | 'webgpu';
@@ -26,7 +28,20 @@ type LoaderState = Readonly<{
   vertexCount: number;
 }>;
 
+type LoaderCapture = Readonly<{
+  backend: 'webgl2' | 'webgpu';
+  bodyContrast: number;
+  bodyLuminance: number;
+  cornerAlpha: number;
+  coverage: number;
+  distinctColors: number;
+  highlightShare: number;
+  shadowShare: number;
+  size: number;
+}>;
+
 type LoaderBridge = Readonly<{
+  captureFrame: () => Promise<LoaderCapture>;
   getShaderSource: () => Promise<{ readonly fragmentShader: string; readonly vertexShader: string }>;
   getState: () => LoaderState;
 }>;
@@ -57,6 +72,21 @@ const expectedVertexCount = 40_962;
 const readState = async (): Promise<LoaderState | undefined> =>
   target.evaluate(() => (globalThis as LoaderWindow).__TAU_METAL_MORPH__?.getState());
 
+const readField = async <Key extends keyof LoaderState>(key: Key): Promise<LoaderState[Key] | undefined> => {
+  const state = await readState();
+  return state?.[key];
+};
+
+/** Read the current pose back through the active backend and keep the statistics as a test artifact. */
+const captureStage = async (name: string): Promise<LoaderCapture> => {
+  const capture = await target.evaluate(async () => (globalThis as LoaderWindow).__TAU_METAL_MORPH__?.captureFrame());
+  if (!capture) {
+    throw new Error('The metal morph loader debug bridge is missing.');
+  }
+  await target.writeArtifact(`metal-morph-capture-${name}.json`, JSON.stringify(capture));
+  return capture;
+};
+
 /** Milliseconds; software adapters prefilter the studio and compile the pipelines slowly. */
 const readyTimeout = 120_000;
 /** Milliseconds; two transitions at the default timing plus software-renderer slack. */
@@ -64,17 +94,19 @@ const sequenceTimeout = 90_000;
 /** Milliseconds for a playback toggle to settle. */
 const playbackTimeout = 15_000;
 
+/** Poll from the runner rather than `target.waitFor`: the command transport drops the optional timeout. */
 const waitForReady = async (): Promise<LoaderState> => {
-  await target.waitFor(
-    () => (globalThis as LoaderWindow).__TAU_METAL_MORPH__?.getState().status === 'ready',
-    undefined,
-    { timeout: readyTimeout },
-  );
+  await expect.poll(async () => readField('status'), { timeout: readyTimeout }).toBe('ready');
   const state = await readState();
   if (!state) {
     throw new Error('The metal morph loader debug bridge is missing.');
   }
   return state;
+};
+
+/** The consent banner floats over the stage's bottom-right corner until it is answered. */
+const dismissCookieBanner = async (): Promise<void> => {
+  await target.click(selectors.getByRole('button', { name: /^decline$/iu }), { timeout: 5000 }).catch(() => undefined);
 };
 
 const analyseStage = async (pngBase64: string): Promise<StageStatistics> =>
@@ -107,6 +139,8 @@ const analyseStage = async (pngBase64: string): Promise<StageStatistics> =>
     let highlights = 0;
     let shadows = 0;
     const cornerReach = 6;
+    // The renderer badge sits over the top-left corner, so the page surface is sampled at the other three.
+    const isBadgeCorner = (x: number, y: number): boolean => x < cornerReach && y < cornerReach;
     for (let index = 0; index < pixels.length; index += 4) {
       const luminance = (pixels[index]! * 0.2126 + pixels[index + 1]! * 0.7152 + pixels[index + 2]! * 0.0722) / 255;
       const bucket =
@@ -129,7 +163,7 @@ const analyseStage = async (pngBase64: string): Promise<StageStatistics> =>
         }
       }
       const nearCorner = (x < cornerReach || x >= size - cornerReach) && (y < cornerReach || y >= size - cornerReach);
-      if (nearCorner) {
+      if (nearCorner && !isBadgeCorner(x, y)) {
         corners.push(luminance);
       }
     }
@@ -157,16 +191,13 @@ const hasSameShapePairRun = (history: readonly string[]): boolean => {
 };
 
 /** Reduced motion holds the loop at its deterministic first frame, so both backends draw the same pose. */
-const captureRestingStage = async (backend: LoaderBackend): Promise<StageStatistics> => {
+const captureRestingStage = async (backend: LoaderBackend): Promise<LoaderCapture> => {
   await target.navigate(`/loader?graphicsBackend=${backend}`);
   const state = await waitForReady();
   expect(state.isPlaying).toBe(false);
-  await target.delay(300);
-  const screenshot = await target.screenshot(
-    selectors.getByRole('img', { name: stageName }),
-    `metal-morph-resting-${backend}.png`,
-  );
-  return analyseStage(screenshot);
+  const capture = await captureStage(`resting-${backend}`);
+  expect(capture.backend).toBe(backend === 'webgpu' ? 'webgpu' : 'webgl2');
+  return capture;
 };
 
 const expectNoRendererNoise = async (pageErrorStart: number, consoleStart: number): Promise<void> => {
@@ -204,57 +235,64 @@ test.describe('metal morph loader', () => {
 
     test(`renders a chrome body with highlights and dark facets through ${backend}`, async () => {
       await target.navigate(`/loader?graphicsBackend=${backend}`);
-      await waitForReady();
-      await target.delay(600);
+      const state = await waitForReady();
+      expect(state.backend).toBe(backend === 'webgpu' ? 'webgpu' : 'webgl2');
 
-      const screenshot = await target.screenshot(
-        selectors.getByRole('img', { name: stageName }),
-        `metal-morph-stage-${backend}.png`,
-      );
-      const stage = await analyseStage(screenshot);
-      expect(stage.distinctBuckets, `${backend}: chrome must carry a wide tonal range`).toBeGreaterThan(40);
-      expect(stage.dominantShare, `${backend}: the stage must not collapse to one colour`).toBeLessThan(0.7);
-      expect(stage.centreContrast, `${backend}: facets must alternate highlights and shadows`).toBeGreaterThan(0.08);
+      const capture = await captureStage(`body-${backend}`);
+      expect(capture.backend).toBe(state.backend);
+      expect(capture.size).toBe(256);
+      expect(capture.coverage, `${backend}: the body must fill a fair share of the stage`).toBeGreaterThan(0.08);
+      expect(capture.coverage, `${backend}: the body must leave air around it`).toBeLessThan(0.75);
+      expect(capture.distinctColors, `${backend}: chrome must carry a wide tonal range`).toBeGreaterThan(40);
       expect(
-        stage.highlightShare + stage.shadowShare,
-        `${backend}: chrome needs both bright and dark facets`,
+        capture.bodyContrast,
+        `${backend}: fillets and flats must alternate highlights and shadows`,
+      ).toBeGreaterThan(0.08);
+      expect(
+        capture.highlightShare + capture.shadowShare,
+        `${backend}: chrome needs both bright and dark regions`,
       ).toBeGreaterThan(0.05);
     });
 
     test(`keeps the transparent canvas clear outside the body silhouette through ${backend}`, async () => {
       await target.navigate(`/loader?graphicsBackend=${backend}`);
       await waitForReady();
-      await target.delay(300);
 
-      const screenshot = await target.screenshot(
-        selectors.getByRole('img', { name: stageName }),
-        `metal-morph-stage-corners-${backend}.png`,
-      );
-      const stage = await analyseStage(screenshot);
-      expect(stage.cornerSpread, `${backend}: the page surface must show through the canvas corners`).toBeLessThan(
-        0.08,
-      );
+      const capture = await captureStage(`corners-${backend}`);
+      expect(
+        capture.cornerAlpha,
+        `${backend}: the readback corners must stay clear of the body and its halo`,
+      ).toBeLessThan(0.05);
+      if (backend === 'webgl') {
+        // The presented canvas composites over the page; WebGL always presents, headless WebGPU may not.
+        await dismissCookieBanner();
+        await target.delay(300);
+        const screenshot = await target.screenshot(
+          selectors.getByRole('img', { name: stageName }),
+          `metal-morph-stage-corners-${backend}.png`,
+        );
+        const stage = await analyseStage(screenshot);
+        expect(stage.cornerSpread, 'the page surface must show through the canvas corners').toBeLessThan(0.08);
+        expect(stage.distinctBuckets, 'the presented canvas must carry the chrome').toBeGreaterThan(40);
+        expect(stage.centreContrast, 'the presented canvas must alternate highlights and shadows').toBeGreaterThan(
+          0.08,
+        );
+      }
     });
 
     test(`advances the sequence under the pair rule and holds when paused through ${backend}`, async () => {
       await target.navigate(`/loader?graphicsBackend=${backend}`);
       await waitForReady();
-      await target.waitFor(
-        () => ((globalThis as LoaderWindow).__TAU_METAL_MORPH__?.getState().transitionCount ?? 0) >= 2,
-        undefined,
-        { timeout: sequenceTimeout },
-      );
+      await expect
+        .poll(async () => readField('transitionCount'), { timeout: sequenceTimeout })
+        .toBeGreaterThanOrEqual(2);
       const advanced = await readState();
       expect(advanced?.history.length).toBeGreaterThanOrEqual(3);
       expect(hasSameShapePairRun(advanced?.history ?? [])).toBe(false);
       expect(new Set(advanced?.history).size).toBeGreaterThanOrEqual(2);
 
       await target.click(selectors.getByRole('button', { name: /pause loader animation/i }));
-      await target.waitFor(
-        () => (globalThis as LoaderWindow).__TAU_METAL_MORPH__?.getState().isPlaying === false,
-        undefined,
-        { timeout: playbackTimeout },
-      );
+      await expect.poll(async () => readField('isPlaying'), { timeout: playbackTimeout }).toBe(false);
       const paused = await readState();
       await target.delay(400);
       const held = await readState();
@@ -262,11 +300,7 @@ test.describe('metal morph loader', () => {
       expect(held?.isPlaying).toBe(false);
 
       await target.click(selectors.getByRole('button', { name: /play loader animation/i }));
-      await target.waitFor(
-        () => (globalThis as LoaderWindow).__TAU_METAL_MORPH__?.getState().isPlaying === true,
-        undefined,
-        { timeout: playbackTimeout },
-      );
+      await expect.poll(async () => readField('isPlaying'), { timeout: playbackTimeout }).toBe(true);
     });
   }
 
@@ -321,9 +355,10 @@ test.describe('metal morph loader', () => {
     try {
       const webgpu = await captureRestingStage('webgpu');
       const webgl = await captureRestingStage('webgl');
-      expect(Math.abs(webgpu.centreLuminance - webgl.centreLuminance)).toBeLessThan(0.12);
-      expect(Math.abs(webgpu.centreContrast - webgl.centreContrast)).toBeLessThan(0.1);
-      expect(Math.abs(webgpu.dominantShare - webgl.dominantShare)).toBeLessThan(0.2);
+      expect(Math.abs(webgpu.coverage - webgl.coverage)).toBeLessThan(0.03);
+      expect(Math.abs(webgpu.bodyLuminance - webgl.bodyLuminance)).toBeLessThan(0.12);
+      expect(Math.abs(webgpu.bodyContrast - webgl.bodyContrast)).toBeLessThan(0.1);
+      expect(Math.abs(webgpu.highlightShare - webgl.highlightShare)).toBeLessThan(0.15);
     } finally {
       await target.emulateReducedMotion('no-preference');
     }

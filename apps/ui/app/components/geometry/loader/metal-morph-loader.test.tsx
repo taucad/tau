@@ -2,7 +2,12 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type * as GraphicsBackendModule from '#components/geometry/graphics/graphics-backend.js';
-import type { MetalMorphLoaderController } from '#components/geometry/loader/metal-morph-controller.js';
+import type {
+  MetalMorphFrameCapture,
+  MetalMorphLoaderController,
+  MetalMorphLoaderStatistics,
+  MetalMorphSequenceState,
+} from '#components/geometry/loader/metal-morph-controller.js';
 
 const hoisted = vi.hoisted(() => ({
   controllers: [] as MetalMorphLoaderController[],
@@ -25,21 +30,38 @@ vi.mock('#components/geometry/loader/metal-morph-controller.js', () => ({
       setTheme: vi.fn(),
       setSpeed: vi.fn(),
       jumpTo: vi.fn(),
-      getSequenceState: vi.fn(() => ({
-        phase: 'rest',
-        currentShape: 'cube',
-        nextShape: 'cube',
-        history: ['cube'],
-        transitionCount: 0,
-      })),
-      getStatistics: vi.fn(() => ({
-        backend: 'webgl2',
-        framesPerSecond: 0,
-        vertexCount: 0,
-        isBloomEnabled: false,
-        isPlaying: false,
-      })),
+      getSequenceState: vi.fn(
+        (): MetalMorphSequenceState => ({
+          phase: 'rest',
+          currentShape: 'cube',
+          nextShape: 'cube',
+          history: ['cube'],
+          transitionCount: 0,
+        }),
+      ),
+      getStatistics: vi.fn(
+        (): MetalMorphLoaderStatistics => ({
+          backend: 'webgl2',
+          framesPerSecond: 0,
+          vertexCount: 0,
+          isBloomEnabled: false,
+          isPlaying: false,
+        }),
+      ),
       getShaderSource: vi.fn(async () => ({ vertexShader: '', fragmentShader: '' })),
+      captureFrame: vi.fn(
+        async (): Promise<MetalMorphFrameCapture> => ({
+          backend: 'webgl2',
+          size: 0,
+          coverage: 0,
+          bodyLuminance: 0,
+          bodyContrast: 0,
+          highlightShare: 0,
+          shadowShare: 0,
+          distinctColors: 0,
+          cornerAlpha: 0,
+        }),
+      ),
       dispose: vi.fn(),
     };
     hoisted.controllers.push(controller);

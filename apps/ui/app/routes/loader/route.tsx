@@ -8,6 +8,7 @@ import { Switch } from '@taucad/ui/components/switch';
 import { ToggleGroup, ToggleGroupItem } from '@taucad/ui/components/toggle-group';
 import { cn } from '@taucad/ui/utils/cn';
 import type {
+  MetalMorphFrameCapture,
   MetalMorphLoaderController,
   MetalMorphLoaderStatistics,
   MetalMorphSequenceState,
@@ -30,6 +31,8 @@ type PlaybackSpeed = '0.5' | '1' | '1.5';
 type MetalMorphDebugBridge = Readonly<{
   getState: () => MetalMorphSequenceState & MetalMorphLoaderStatistics & { readonly status: MetalMorphLoaderStatus };
   getShaderSource: () => Promise<{ readonly vertexShader: string; readonly fragmentShader: string }>;
+  /** Offscreen readback of the current pose through the active backend. */
+  captureFrame: () => Promise<MetalMorphFrameCapture>;
 }>;
 
 type MetalMorphDebugGlobal = typeof globalThis & { __TAU_METAL_MORPH__?: MetalMorphDebugBridge };
@@ -123,6 +126,7 @@ export default function LoaderShowcase(): React.JSX.Element {
     const bridge: MetalMorphDebugBridge = {
       getState: () => ({ ...controller.getSequenceState(), ...controller.getStatistics(), status }),
       getShaderSource: async () => controller.getShaderSource(),
+      captureFrame: async () => controller.captureFrame(),
     };
     (globalThis as MetalMorphDebugGlobal).__TAU_METAL_MORPH__ = bridge;
     return () => {

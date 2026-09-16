@@ -639,6 +639,7 @@ describe('projectRevisionsMachine', () => {
       quota: undefined,
       overQuota: [],
       error: undefined,
+      reason: undefined,
     });
 
     harness.actor.stop();

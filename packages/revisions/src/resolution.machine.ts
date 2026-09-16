@@ -106,6 +106,16 @@ export type ResolutionMachineEmitted =
   | Readonly<{ type: 'turnRequested'; revisionId: string; checkoutId: string | undefined; paths: readonly string[] }>
   /** The marker text one file was opened with. */
   | Readonly<{ type: 'conflictMaterialized'; path: string; text: string; ours: string; theirs: string }>
+  /**
+   * That file could not be opened for resolution, and why (C44).
+   *
+   * The counterpart of `conflictMaterialized`, emitted on the same edges and
+   * routed through the parent the same way. Without it a surface that asked for
+   * a file could only *wait* to conclude that nothing was coming — which is what
+   * the Branches pane did, on a 10 s `setTimeout`, and why a failure took ten
+   * seconds to read and an offline tab read as a failure that never was.
+   */
+  | Readonly<{ type: 'conflictMaterializationFailed'; path: string; reason: string }>
   | Readonly<{ type: 'toast.error'; message: string }>;
 
 /** What `loadConflict` answers about one conflicted revision. @public */
@@ -149,6 +159,9 @@ export type ResolutionSeedTurnActorOutput = Readonly<{
   checkoutId: string | undefined;
   paths: readonly string[];
 }>;
+
+/** One sentence for a file with no text form, said in both places it is said. */
+const unopenableMessage = 'That file cannot be opened as text. Keep one side instead.';
 
 const describeFailure = (error: unknown): string =>
   error instanceof Error ? error.message : typeof error === 'string' ? error : 'That resolution step failed.';
@@ -353,32 +366,50 @@ export const resolutionMachine = setup({
             onDone: {
               target: 'idle',
               actions: enqueueActions(({ context, enqueue, event }) => {
+                const fact: ResolutionMachineEmitted =
+                  event.output.text === undefined
+                    ? {
+                        type: 'conflictMaterializationFailed',
+                        path: event.output.path,
+                        reason: unopenableMessage,
+                      }
+                    : {
+                        type: 'conflictMaterialized',
+                        path: event.output.path,
+                        text: event.output.text,
+                        ours: event.output.ours,
+                        theirs: event.output.theirs,
+                      };
                 if (event.output.text === undefined) {
-                  enqueue.emit({
-                    type: 'toast.error',
-                    message: 'That file cannot be opened as text. Keep one side instead.',
-                  });
-                } else {
-                  const fact: ResolutionMachineEmitted = {
-                    type: 'conflictMaterialized',
-                    path: event.output.path,
-                    text: event.output.text,
-                    ours: event.output.ours,
-                    theirs: event.output.theirs,
-                  };
-                  enqueue.emit(fact);
-                  /* Through the parent as well: the editor that shows this is on
-                   * a page, and a page holds the root and nothing else (A38). */
-                  if (context.parentRef !== undefined) {
-                    enqueue.sendTo(context.parentRef, { ...fact, revisionId: context.revisionId });
-                  }
+                  enqueue.emit({ type: 'toast.error', message: unopenableMessage });
+                }
+                enqueue.emit(fact);
+                /* Through the parent as well: the editor that shows this is on
+                 * a page, and a page holds the root and nothing else (A38). */
+                if (context.parentRef !== undefined) {
+                  enqueue.sendTo(context.parentRef, { ...fact, revisionId: context.revisionId });
                 }
                 enqueue.assign({ pending: undefined });
               }),
             },
+            /* C44: the surface that asked for this file hears the refusal for
+             * *that path*, rather than inferring one from a timer. The machine
+             * still enters `failed` with its reason, which is what the region's
+             * own error row renders. */
             onError: {
               target: 'failed',
-              actions: assign({ reason: ({ event }) => describeFailure(event.error), pending: undefined }),
+              actions: enqueueActions(({ context, enqueue, event }) => {
+                const fact: ResolutionMachineEmitted = {
+                  type: 'conflictMaterializationFailed',
+                  path: context.pending?.path ?? '',
+                  reason: describeFailure(event.error),
+                };
+                enqueue.emit(fact);
+                if (context.parentRef !== undefined) {
+                  enqueue.sendTo(context.parentRef, { ...fact, revisionId: context.revisionId });
+                }
+                enqueue.assign({ reason: describeFailure(event.error), pending: undefined });
+              }),
             },
           },
         },

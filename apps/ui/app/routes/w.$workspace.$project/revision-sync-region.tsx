@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import { AlertTriangle, Cloud, CloudOff, GitBranch } from 'lucide-react';
 import { Link } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
@@ -320,6 +321,64 @@ export function RevisionSyncRegion({
   const [changingBackup, setChangingBackup] = useState(remote.phase !== 'connected');
   const syncState = syncCopy(sync);
   const failureAction = syncFailureAction(sync.reason, remote);
+  /*
+   * One renderer for rule 19's action, because there are now two surfaces that
+   * must offer exactly one: the Sync row's refused push, and a refused connect.
+   * They differ only in what *Retry* does — a push retries the push, a connect
+   * reopens the draft — so that is the one parameter.
+   */
+  const renderFailureAction = (
+    action: ReturnType<typeof syncFailureAction>,
+    onRetry: () => void = onSync,
+  ): ReactNode => {
+    switch (action) {
+      case 'signIn': {
+        return signInHref === undefined ? undefined : (
+          <Button asChild size='xs' variant='outline'>
+            <Link to={signInHref}>Sign in</Link>
+          </Button>
+        );
+      }
+      case 'upgrade': {
+        return onUpgrade === undefined ? undefined : (
+          <Button size='xs' variant='outline' onClick={onUpgrade}>
+            <CommercialUpgradeLabel />
+          </Button>
+        );
+      }
+      case 'reconnectGithub': {
+        return (
+          <Button
+            size='xs'
+            variant='outline'
+            onClick={() => {
+              setChoice('git');
+              setChangingBackup(true);
+            }}
+          >
+            Reconnect GitHub
+          </Button>
+        );
+      }
+      case 'syncNow': {
+        return (
+          <Button size='xs' variant='outline' onClick={onSync}>
+            Sync now
+          </Button>
+        );
+      }
+      case 'retry': {
+        return (
+          <Button size='xs' variant='outline' onClick={onRetry}>
+            Retry
+          </Button>
+        );
+      }
+      default: {
+        return undefined;
+      }
+    }
+  };
   const [connectionError, setConnectionError] = useState<string | undefined>(undefined);
   const percentage =
     remote.storage === undefined || remote.storage.quota <= 0
@@ -627,38 +686,7 @@ export function RevisionSyncRegion({
           {sync.error === undefined ? undefined : (
             <span className='flex flex-wrap items-center gap-2 text-xs'>
               <span className='min-w-0 flex-1'>{sync.error}</span>
-              {failureAction === 'signIn' && signInHref !== undefined ? (
-                <Button asChild size='xs' variant='outline'>
-                  <Link to={signInHref}>Sign in</Link>
-                </Button>
-              ) : undefined}
-              {failureAction === 'upgrade' && onUpgrade !== undefined ? (
-                <Button size='xs' variant='outline' onClick={onUpgrade}>
-                  <CommercialUpgradeLabel />
-                </Button>
-              ) : undefined}
-              {failureAction === 'reconnectGithub' ? (
-                <Button
-                  size='xs'
-                  variant='outline'
-                  onClick={() => {
-                    setChoice('git');
-                    setChangingBackup(true);
-                  }}
-                >
-                  Reconnect GitHub
-                </Button>
-              ) : undefined}
-              {failureAction === 'syncNow' ? (
-                <Button size='xs' variant='outline' onClick={onSync}>
-                  Sync now
-                </Button>
-              ) : undefined}
-              {failureAction === 'retry' ? (
-                <Button size='xs' variant='outline' onClick={onSync}>
-                  Retry
-                </Button>
-              ) : undefined}
+              {renderFailureAction(failureAction)}
             </span>
           )}
         </div>
@@ -787,7 +815,7 @@ export function RevisionSyncRegion({
               setChangingBackup(true);
             }}
           >
-            Try again
+            Retry
           </Button>
         </div>
       )}
@@ -826,19 +854,21 @@ export function RevisionSyncRegion({
         </div>
       ) : undefined}
 
+      {/*
+        A refused *connect*, classified the same way a refused push is (rule 19).
+
+        `remote.reason` comes from the one classifier `sync.machine` owns, so the
+        `403 GIT_SYNC_NOT_ENTITLED` that opened this closeout offers *Upgrade*
+        here exactly as it does on the Sync row, instead of the unclassified
+        *Retry* this block could once offer for every class alike.
+      */}
       {remote.phase === 'failed' && remote.error !== undefined ? (
         <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-sm'>
           <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
           <span className='min-w-0 flex-1'>{remote.error}</span>
-          <Button
-            size='xs'
-            variant='outline'
-            onClick={() => {
-              setChangingBackup(true);
-            }}
-          >
-            Try again
-          </Button>
+          {renderFailureAction(syncFailureAction(remote.reason, remote) ?? 'retry', () => {
+            setChangingBackup(true);
+          })}
         </div>
       ) : undefined}
     </section>

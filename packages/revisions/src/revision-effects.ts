@@ -3050,9 +3050,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
            * paths, so nothing merges a line (S39, P27). */
           try {
             // oxlint-disable-next-line no-await-in-loop -- a rejected record is replayed before its result is recorded.
-            results.push(
-              await replayRejectedChat({ chatId, name, remote: input.remote, syncChats, refusal: outcome.reason }),
-            );
+            const replayed = await replayRejectedChat({
+              chatId,
+              name,
+              remote: input.remote,
+              syncChats,
+              refusal: outcome.reason,
+            });
+            results.push(replayed);
           } catch (error) {
             results.push({
               name,
@@ -3263,12 +3268,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
          * fetch is exactly "what I have already applied".
          */
         const priorEvidenceHead = trackingBefore.find((entry) => entry.name === fetchedEvidence?.name)?.head;
-        if (fetchedEvidence !== undefined && String(priorEvidenceHead) === fetchedEvidence.head) {
+        const fetchedEvidenceHead = fetchedEvidence?.head;
+        if (fetchedEvidenceHead !== undefined && String(priorEvidenceHead) === fetchedEvidenceHead) {
           recordTasks.push(
-            Promise.resolve({
+            Promise.resolve<SyncRefOutcome>({
               name: evidenceRefName,
-              status: 'upToDate' as const,
-              head: fetchedEvidence.head,
+              status: 'upToDate',
+              head: fetchedEvidenceHead,
             }),
           );
         } else if (syncLargeExports && fetchedEvidence !== undefined) {
@@ -3571,7 +3577,7 @@ export const awaitSyncSettled = async (
 ): Promise<void> => {
   const inspect = (): 'settled' | 'waiting' | Error => {
     const snapshot = actor.getSnapshot();
-    const sync = selectRevisionStatus(snapshot).sync;
+    const { sync } = selectRevisionStatus(snapshot);
     if (snapshot.status !== 'active') {
       return new Error('Revision backup stopped before it settled.');
     }

@@ -33,6 +33,7 @@ const emptyStatus = (): RevisionStatusProjection => ({
     storage: undefined,
     overQuota: [],
     error: undefined,
+    reason: undefined,
     fetchOnly: false,
     provider: undefined,
     repositoryId: undefined,
@@ -65,6 +66,8 @@ export const revisionStatusHarness = {
   diff: [] as readonly RevisionDiffEntry[],
   /** Every revision a surface asked for a diff of, in order (C52). */
   diffRequests: [] as string[],
+  /** Every branch a surface re-walked the graph for, in order (B8). */
+  logRequests: [] as string[],
   comparison: emptyComparison(),
   comparisonError: undefined as Error | undefined,
   toasts: new Set<(toast: RevisionToast) => void>(),
@@ -108,6 +111,7 @@ export const revisionStatusHarness = {
     this.rowsByBranch.clear();
     this.diff = [];
     this.diffRequests.length = 0;
+    this.logRequests.length = 0;
     this.comparison = emptyComparison();
     this.comparisonError = undefined;
     this.toasts.clear();
@@ -136,15 +140,21 @@ export const revisionStatusMock = (): Record<string, unknown> => {
       return () => revisionStatusHarness.toasts.delete(listener);
     },
     admitTurn: async () => ({ checkoutId: 'live', root: '/projects/p', baseRevisionId: '' }),
-    log: async (request?: { readonly branch?: string }) =>
-      (request?.branch === undefined ? undefined : revisionStatusHarness.rowsByBranch.get(request.branch)) ??
-      revisionStatusHarness.rows,
+    log: async (request?: { readonly branch?: string }) => {
+      revisionStatusHarness.logRequests.push(request?.branch ?? '');
+      return (
+        (request?.branch === undefined ? undefined : revisionStatusHarness.rowsByBranch.get(request.branch)) ??
+        revisionStatusHarness.rows
+      );
+    },
     diff: async (revisionId: string) => {
       revisionStatusHarness.diffRequests.push(revisionId);
       return revisionStatusHarness.diff;
     },
     compare: async () => {
-      if (revisionStatusHarness.comparisonError !== undefined) throw revisionStatusHarness.comparisonError;
+      if (revisionStatusHarness.comparisonError !== undefined) {
+        throw revisionStatusHarness.comparisonError;
+      }
       return revisionStatusHarness.comparison;
     },
     send: () => undefined,

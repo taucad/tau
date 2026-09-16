@@ -360,7 +360,7 @@ export const checkoutsMachine = setup({
                 actions: {
                   type: 'announceFailure',
                   params: ({ context, event }) => ({
-                    operation: 'remove' as const,
+                    operation: 'remove',
                     reason: `An agent is working in ${
                       context.checkouts.find((checkout) => checkout.id === event.id)?.branch ?? 'this branch'
                     }.`,

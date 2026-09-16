@@ -12,7 +12,7 @@
  *   no user gate ever reads it.
  * - **Dimming is `versioned === false`.** A row whose bytes never enter a
  *   revision is quieter than the design, whatever serves it — with one
- *   exception the canvas draws: a built-in bundle keeps the full foreground,
+ *   exception the canvas draws: a system skill bundle keeps the full foreground,
  *   because its badge already says what it is (a1 review R7).
  *
  * @module
@@ -23,10 +23,10 @@ import type { FileProvenance } from '@taucad/types';
 
 /** How one row presents its provenance. @public */
 export type FileProvenanceLabel = Readonly<{
-  /** Leading status glyph, or absent when the row needs none. */
+  /** Leading status glyph, reserved for read-only sources without a badge. */
   glyph?: 'lock';
   /** Trailing badge text, set on the root of a non-project subtree only. */
-  badge?: 'Built-in';
+  badge?: 'system';
   /** Accessible description and hover line; empty when the row is an ordinary project file. */
   description: string;
   /** Whether the name renders muted because the bytes are not saved in revisions. */
@@ -72,14 +72,14 @@ const slugOfIdentity = (identity: string): string => identity.replace(/^skill:/u
  * @returns The row's glyph, badge, description, dimming and user access.
  * @public
  *
- * @example <caption>A built-in skill bundle</caption>
+ * @example <caption>A system skill bundle</caption>
  * ```typescript
  * import { fileProvenanceLabel } from '#lib/file-provenance-labels.js';
  *
  * export const example = fileProvenanceLabel(
  *   { source: 'system-skills', versioned: false, agentAccess: 'read-only' },
  *   '.agents/skills/cad-openscad',
- * ).description; // 'Built-in skill · read-only'
+ * ).description; // 'system skill · read-only'
  * ```
  */
 export const fileProvenanceLabel = (provenance: FileProvenance | undefined, path: string): FileProvenanceLabel => {
@@ -90,9 +90,8 @@ export const fileProvenanceLabel = (provenance: FileProvenance | undefined, path
   switch (provenance.source) {
     case 'system-skills': {
       return {
-        glyph: 'lock',
-        badge: 'Built-in',
-        description: 'Built-in skill · read-only',
+        badge: 'system',
+        description: 'system skill · read-only',
         /* The one row the dimming rule does not reach: the badge carries it. */
         dimmed: false,
         readOnly: true,
@@ -109,7 +108,7 @@ export const fileProvenanceLabel = (provenance: FileProvenance | undefined, path
     case 'project': {
       if (provenance.overrides !== undefined) {
         return {
-          description: `Overrides built-in skill ${slugOfIdentity(provenance.overrides)}`,
+          description: `Overrides system skill ${slugOfIdentity(provenance.overrides)}`,
           dimmed: false,
           readOnly: false,
         };

@@ -3,17 +3,20 @@ import type { UIMatch } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ExportFile } from '@taucad/types';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
+import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 
 let registeredItems: CommandPaletteItem[] = [];
 let isTauDebugEnabled = false;
 let geometryFormat: 'gltf' | 'svg' | undefined;
 let cameraState: Record<string, unknown> | undefined;
 let cameraRegistryVersion = 0;
+let hasProjectContext = true;
 const openPanel = vi.fn();
 const captureCadImages = vi.fn<(options: unknown) => Promise<ExportFile[]>>();
 const downloadBlob = vi.fn<(blob: Blob, filename: string) => void>();
 const runtimeFileSystem = {};
 const imageService = { export: vi.fn() };
+const saveRequest = vi.fn(async () => undefined);
 
 const cadActor = {
   getSnapshot: () => ({ context: { geometry: geometryFormat ? { format: geometryFormat } : undefined } }),
@@ -30,17 +33,25 @@ vi.mock('@xstate/react', () => ({
 }));
 
 vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({
-    geometryUnits: new Map([['main.ts', cadActor]]),
-    mainEntryPath: 'main.ts',
-    projectRef: {
-      getSnapshot: () => ({
-        context: {
-          project: { id: 'test-project', name: 'test-project' },
-        },
-      }),
-    },
-  }),
+  useProject: (options?: { readonly enableNoContext?: boolean }) => {
+    if (!hasProjectContext) {
+      if (options?.enableNoContext) {
+        return undefined;
+      }
+      throw new Error('useProject must be used within a ProjectProvider');
+    }
+    return {
+      geometryUnits: new Map([['main.ts', cadActor]]),
+      mainEntryPath: 'main.ts',
+      projectRef: {
+        getSnapshot: () => ({
+          context: {
+            project: { id: 'test-project', name: 'test-project' },
+          },
+        }),
+      },
+    };
+  },
   useMainGraphics: () => graphicsActor,
 }));
 
@@ -100,6 +111,9 @@ vi.mock('#hooks/use-revision-status.js', async () => {
 vi.mock('#hooks/use-revisions.js', () => ({
   useRevisions: () => ({ canReturnToLatest: false, revisions: [], headRevisionId: undefined, isDirty: false }),
 }));
+vi.mock('#routes/w.$workspace.$project/revision-save-shortcut.js', () => ({
+  useSaveRevisionRequest: () => saveRequest,
+}));
 
 vi.mock('#hooks/use-thumbnail-generator.js', () => ({
   useThumbnailGenerator: () => ({ regenerate: vi.fn() }),
@@ -141,9 +155,22 @@ describe('ProjectCommandPaletteItems', () => {
     geometryFormat = undefined;
     cameraState = undefined;
     cameraRegistryVersion = 0;
+    hasProjectContext = true;
     openPanel.mockClear();
     captureCadImages.mockReset();
     downloadBlob.mockReset();
+    saveRequest.mockReset();
+    revisionStatusHarness.reset();
+  });
+
+  it('should defer command registration until project context exists', () => {
+    hasProjectContext = false;
+    const view = render(<ProjectCommandPaletteItems match={match} />);
+    expect(registeredItems).toEqual([]);
+
+    hasProjectContext = true;
+    view.rerender(<ProjectCommandPaletteItems match={match} />);
+    expect(registeredItems.find((item) => item.id === 'share-project')).toBeDefined();
   });
 
   it('keeps Export navigation available while geometry is pending', () => {
@@ -176,6 +203,16 @@ describe('ProjectCommandPaletteItems', () => {
       expect(openPanel).toHaveBeenLastCalledWith(panelId);
     }
     expect(openPanel).toHaveBeenCalledTimes(expectedPanels.size);
+  });
+
+  it('routes backup choices through Revisions and uses the shared save request', () => {
+    render(<ProjectCommandPaletteItems match={match} />);
+
+    registeredItems.find((item) => item.id === 'connect-tau-cloud')?.action?.();
+    expect(openPanel).toHaveBeenLastCalledWith('revisions');
+    registeredItems.find((item) => item.id === 'save-revision')?.action?.();
+    expect(saveRequest).toHaveBeenCalledOnce();
+    expect(registeredItems.find((item) => item.id === 'sync-now')?.visible).toBe(false);
   });
 
   it('keeps Kernel hidden unless tauDebug is enabled', () => {

@@ -19,7 +19,7 @@ const createService = (resendApiKey: string): EmailService => {
     RESEND_API_KEY: resendApiKey,
     TAU_FRONTEND_URL: 'https://tau.new',
     TAU_EMAIL_FROM: 'Tau <identity@tau.new>',
-    TAU_EMAIL_REPLY_TO: 'identity@tau.new',
+    TAU_EMAIL_REPLY_TO: 'help@tau.new',
   };
 
   return new EmailService({
@@ -59,8 +59,9 @@ describe('EmailService delivery gate', () => {
       expect.objectContaining({
         from: 'Tau <identity@tau.new>',
         to: 'user@example.com',
-        replyTo: 'identity@tau.new',
-        subject: 'Sign in to Tau',
+        replyTo: 'help@tau.new',
+        // The subject comes from the template, not the call site.
+        subject: 'Your sign-in link for Tau',
       }),
     );
   });

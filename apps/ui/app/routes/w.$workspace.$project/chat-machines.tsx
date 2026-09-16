@@ -33,6 +33,14 @@ import { randomUuid } from '@taucad/utils/id';
 import { Parameters } from '#components/geometry/parameters/parameters.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { useProject } from '#hooks/use-project.js';
+import type { ParameterManifest } from '@taucad/parameters';
+
+// ponytail: machine settings carry no unit bindings, so an empty manifest renders a plain form; compile a real manifest if they gain units.
+const unboundConfigurationManifest = {
+  bindings: {},
+  bindingDeclarations: {},
+  provenance: {},
+} as unknown as ParameterManifest;
 
 type MachinePresentation = Readonly<{
   label: string;
@@ -300,8 +308,9 @@ const Discovery = ({
             }));
           }}
           enableSearch={false}
-          units={{ length: { sourceSymbol: 'mm', displaySymbol: 'mm' } }}
-          parameterSemantics='configuration'
+          units={{ length: { displaySymbol: 'mm' } }}
+          parameterManifest={unboundConfigurationManifest}
+          parameterEdit={{ kind: 'transient' }}
           emptyMessage='No discovery settings'
         />
       </div>

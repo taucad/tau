@@ -76,5 +76,24 @@ describe('buildTurnGroups', () => {
       expect(second).not.toBe(first);
       expect(idsByGroup(second)).toEqual(idsByGroup(first));
     });
+
+    it('should preserve groups when only the active assistant object changes', () => {
+      const user = message('u1', 'user');
+      const first = buildTurnGroups([user, message('a1', 'assistant')]);
+      const second = buildTurnGroups([user, message('a1', 'assistant')]);
+
+      expect(second).toBe(first);
+    });
+
+    it('should invalidate when a middle message id or role changes', () => {
+      const firstMessage = message('u1', 'user');
+      const first = buildTurnGroups([firstMessage, message('a1', 'assistant'), message('a2', 'assistant')]);
+      const changedId = buildTurnGroups([firstMessage, message('a-changed', 'assistant'), message('a2', 'assistant')]);
+      const changedRole = buildTurnGroups([firstMessage, message('a-changed', 'user'), message('a2', 'assistant')]);
+
+      expect(changedId).not.toBe(first);
+      expect(changedRole).not.toBe(changedId);
+      expect(idsByGroup(changedRole)).toEqual([['u1'], ['a-changed', 'a2']]);
+    });
   });
 });

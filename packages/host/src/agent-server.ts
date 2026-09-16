@@ -31,7 +31,7 @@ import type { WebSocket } from 'ws';
 
 import { isOriginAllowed } from '@taucad/runtime/transport/websocket-host';
 import { serveAgentChannel } from '@taucad/agent-host/node-launcher';
-import type { NodeAgentLauncher } from '@taucad/agent-host/node-launcher';
+import type { NodeAgentLauncher, ServeAgentChannelOptions } from '@taucad/agent-host/node-launcher';
 
 import type { ExternalAgentDescriptor } from '@taucad/agent-host';
 import type { HostSessionHandle } from '@taucad/runtime/host';
@@ -95,6 +95,8 @@ export type AgentServerOptions = {
         workspaceId: string;
       }>
     | undefined;
+  /** The launcher workspace's single revision root. */
+  readonly revisions?: ServeAgentChannelOptions['revisions'];
   /**
    * Shared secret admitting an upgrade, as `Authorization: Bearer` (a Node
    * client, including the daemon's own relay splice) or as the
@@ -224,7 +226,7 @@ export const startAgentServer = (options: AgentServerOptions): AgentServerHandle
     /* The binding lives in the launcher, not here: the Electron services
      * utility hands the same launcher a `MessagePortMain` and gets the same
      * channel, so launcher 2 consumes this host rather than forking it. */
-    const channel = serveAgentChannel(socket, options.launcher);
+    const channel = serveAgentChannel(socket, options.launcher, { revisions: options.revisions });
     channels.add(channel);
     socket.on('close', () => {
       sockets.delete(socket);

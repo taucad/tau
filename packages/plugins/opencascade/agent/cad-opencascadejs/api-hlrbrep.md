@@ -4,888 +4,888 @@
 
 HLRBRep: declare class HLRBRep
 
-constructor
+  constructor
 
-static MakeEdge(ec: HLRBRep_Curve, U1: number, U2: number): TopoDS_Edge;
+  static MakeEdge(ec: HLRBRep_Curve, U1: number, U2: number): TopoDS_Edge;
 
-static MakeEdge3d(ec: HLRBRep_Curve, U1: number, U2: number): TopoDS_Edge;
+  static MakeEdge3d(ec: HLRBRep_Curve, U1: number, U2: number): TopoDS_Edge;
 
-static PolyHLRAngleAndDeflection(InAngl: number, OutAngl?: number, OutDefl?: number): { OutAngl: number; OutDefl: number };
+  static PolyHLRAngleAndDeflection(InAngl: number, OutAngl?: number, OutDefl?: number): { OutAngl: number; OutDefl: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_Algo: declare class HLRBRep_Algo extends HLRBRep_InternalAlgo
 
-constructor
+  constructor
 
-Add(S: TopoDS_Shape, SData: Standard_Transient, nbIso: number): void;
-Add(S: TopoDS_Shape, nbIso: number): void;
-Add(S: TopoDS_Shape, SData: Standard_Transient, nbIso: number): void;
-Add(S: TopoDS_Shape, nbIso: number): void;
+  Add(S: TopoDS_Shape, SData: Standard_Transient, nbIso: number): void;
+  Add(S: TopoDS_Shape, nbIso: number): void;
+  Add(S: TopoDS_Shape, SData: Standard_Transient, nbIso: number): void;
+  Add(S: TopoDS_Shape, nbIso: number): void;
 
-Index(S: TopoDS_Shape): number;
-Index(S: HLRTopoBRep_OutLiner): number;
-Index(S: TopoDS_Shape): number;
-Index(S: HLRTopoBRep_OutLiner): number;
+  Index(S: TopoDS_Shape): number;
+  Index(S: HLRTopoBRep_OutLiner): number;
+  Index(S: TopoDS_Shape): number;
+  Index(S: HLRTopoBRep_OutLiner): number;
 
-OutLinedShapeNullify(): void;
+  OutLinedShapeNullify(): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_AreaLimit: declare class HLRBRep_AreaLimit extends Standard_Transient
 
-constructor
+  constructor
 
-StateBefore(St: TopAbs_State): void;
-StateBefore(): TopAbs_State;
-StateBefore(St: TopAbs_State): void;
-StateBefore(): TopAbs_State;
+  StateBefore(St: TopAbs_State): void;
+  StateBefore(): TopAbs_State;
+  StateBefore(St: TopAbs_State): void;
+  StateBefore(): TopAbs_State;
 
-StateAfter(St: TopAbs_State): void;
-StateAfter(): TopAbs_State;
-StateAfter(St: TopAbs_State): void;
-StateAfter(): TopAbs_State;
+  StateAfter(St: TopAbs_State): void;
+  StateAfter(): TopAbs_State;
+  StateAfter(St: TopAbs_State): void;
+  StateAfter(): TopAbs_State;
 
-EdgeBefore(St: TopAbs_State): void;
-EdgeBefore(): TopAbs_State;
-EdgeBefore(St: TopAbs_State): void;
-EdgeBefore(): TopAbs_State;
+  EdgeBefore(St: TopAbs_State): void;
+  EdgeBefore(): TopAbs_State;
+  EdgeBefore(St: TopAbs_State): void;
+  EdgeBefore(): TopAbs_State;
 
-EdgeAfter(St: TopAbs_State): void;
-EdgeAfter(): TopAbs_State;
-EdgeAfter(St: TopAbs_State): void;
-EdgeAfter(): TopAbs_State;
+  EdgeAfter(St: TopAbs_State): void;
+  EdgeAfter(): TopAbs_State;
+  EdgeAfter(St: TopAbs_State): void;
+  EdgeAfter(): TopAbs_State;
 
-Previous(P: HLRBRep_AreaLimit): void;
-Previous(): HLRBRep_AreaLimit;
-Previous(P: HLRBRep_AreaLimit): void;
-Previous(): HLRBRep_AreaLimit;
+  Previous(P: HLRBRep_AreaLimit): void;
+  Previous(): HLRBRep_AreaLimit;
+  Previous(P: HLRBRep_AreaLimit): void;
+  Previous(): HLRBRep_AreaLimit;
 
-Next(N: HLRBRep_AreaLimit): void;
-Next(): HLRBRep_AreaLimit;
-Next(N: HLRBRep_AreaLimit): void;
-Next(): HLRBRep_AreaLimit;
+  Next(N: HLRBRep_AreaLimit): void;
+  Next(): HLRBRep_AreaLimit;
+  Next(N: HLRBRep_AreaLimit): void;
+  Next(): HLRBRep_AreaLimit;
 
-Vertex(): HLRAlgo_Intersection;
+  Vertex(): HLRAlgo_Intersection;
 
-IsBoundary(): boolean;
+  IsBoundary(): boolean;
 
-IsInterference(): boolean;
+  IsInterference(): boolean;
 
-Clear(): void;
+  Clear(): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_BCurveTool: declare class HLRBRep_BCurveTool
 
-constructor
+  constructor
 
-static FirstParameter(C: BRepAdaptor_Curve): number;
+  static FirstParameter(C: BRepAdaptor_Curve): number;
 
-static LastParameter(C: BRepAdaptor_Curve): number;
+  static LastParameter(C: BRepAdaptor_Curve): number;
 
-static Continuity(C: BRepAdaptor_Curve): GeomAbs_Shape;
+  static Continuity(C: BRepAdaptor_Curve): GeomAbs_Shape;
 
-static NbIntervals(C: BRepAdaptor_Curve, S: GeomAbs_Shape): number;
+  static NbIntervals(C: BRepAdaptor_Curve, S: GeomAbs_Shape): number;
 
-static Intervals(C: BRepAdaptor_Curve, T: NCollection_Array1_double, S: GeomAbs_Shape): void;
+  static Intervals(C: BRepAdaptor_Curve, T: NCollection_Array1_double, S: GeomAbs_Shape): void;
 
-static IsClosed(C: BRepAdaptor_Curve): boolean;
+  static IsClosed(C: BRepAdaptor_Curve): boolean;
 
-static IsPeriodic(C: BRepAdaptor_Curve): boolean;
+  static IsPeriodic(C: BRepAdaptor_Curve): boolean;
 
-static Period(C: BRepAdaptor_Curve): number;
+  static Period(C: BRepAdaptor_Curve): number;
 
-static Value(C: BRepAdaptor_Curve, U: number): gp_Pnt;
+  static Value(C: BRepAdaptor_Curve, U: number): gp_Pnt;
 
-static D0(C: BRepAdaptor_Curve, U: number, P: gp_Pnt): void;
+  static D0(C: BRepAdaptor_Curve, U: number, P: gp_Pnt): void;
 
-static D1(C: BRepAdaptor_Curve, U: number, P: gp_Pnt, V: gp_Vec): void;
+  static D1(C: BRepAdaptor_Curve, U: number, P: gp_Pnt, V: gp_Vec): void;
 
-static D2(C: BRepAdaptor_Curve, U: number, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec): void;
+  static D2(C: BRepAdaptor_Curve, U: number, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec): void;
 
-static D3(C: BRepAdaptor_Curve, U: number, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec, V3: gp_Vec): void;
+  static D3(C: BRepAdaptor_Curve, U: number, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec, V3: gp_Vec): void;
 
-static DN(C: BRepAdaptor_Curve, U: number, N: number): gp_Vec;
+  static DN(C: BRepAdaptor_Curve, U: number, N: number): gp_Vec;
 
-static Resolution(C: BRepAdaptor_Curve, R3d: number): number;
+  static Resolution(C: BRepAdaptor_Curve, R3d: number): number;
 
-static GetType(C: BRepAdaptor_Curve): GeomAbs_CurveType;
+  static GetType(C: BRepAdaptor_Curve): GeomAbs_CurveType;
 
-static Line(C: BRepAdaptor_Curve): gp_Lin;
+  static Line(C: BRepAdaptor_Curve): gp_Lin;
 
-static Circle(C: BRepAdaptor_Curve): gp_Circ;
+  static Circle(C: BRepAdaptor_Curve): gp_Circ;
 
-static Ellipse(C: BRepAdaptor_Curve): gp_Elips;
+  static Ellipse(C: BRepAdaptor_Curve): gp_Elips;
 
-static Hyperbola(C: BRepAdaptor_Curve): gp_Hypr;
+  static Hyperbola(C: BRepAdaptor_Curve): gp_Hypr;
 
-static Parabola(C: BRepAdaptor_Curve): gp_Parab;
+  static Parabola(C: BRepAdaptor_Curve): gp_Parab;
 
-static Bezier(C: BRepAdaptor_Curve): Geom_BezierCurve;
+  static Bezier(C: BRepAdaptor_Curve): Geom_BezierCurve;
 
-static BSpline(C: BRepAdaptor_Curve): Geom_BSplineCurve;
+  static BSpline(C: BRepAdaptor_Curve): Geom_BSplineCurve;
 
-static Degree(C: BRepAdaptor_Curve): number;
+  static Degree(C: BRepAdaptor_Curve): number;
 
-static IsRational(C: BRepAdaptor_Curve): boolean;
+  static IsRational(C: BRepAdaptor_Curve): boolean;
 
-static NbPoles(C: BRepAdaptor_Curve): number;
+  static NbPoles(C: BRepAdaptor_Curve): number;
 
-static NbKnots(C: BRepAdaptor_Curve): number;
+  static NbKnots(C: BRepAdaptor_Curve): number;
 
-static Poles(C: BRepAdaptor_Curve, T: NCollection_Array1_gp_Pnt): void;
+  static Poles(C: BRepAdaptor_Curve, T: NCollection_Array1_gp_Pnt): void;
 
-static PolesAndWeights(C: BRepAdaptor_Curve, T: NCollection_Array1_gp_Pnt, W: NCollection_Array1_double): void;
+  static PolesAndWeights(C: BRepAdaptor_Curve, T: NCollection_Array1_gp_Pnt, W: NCollection_Array1_double): void;
 
-static NbSamples(C: BRepAdaptor_Curve, U0: number, U1: number): number;
+  static NbSamples(C: BRepAdaptor_Curve, U0: number, U1: number): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_BiPnt2D: declare class HLRBRep_BiPnt2D
 
-constructor
+  constructor
 
-P1(): gp_Pnt2d;
+  P1(): gp_Pnt2d;
 
-P2(): gp_Pnt2d;
+  P2(): gp_Pnt2d;
 
-Shape(): TopoDS_Shape;
-Shape(S: TopoDS_Shape): void;
-Shape(): TopoDS_Shape;
-Shape(S: TopoDS_Shape): void;
+  Shape(): TopoDS_Shape;
+  Shape(S: TopoDS_Shape): void;
+  Shape(): TopoDS_Shape;
+  Shape(S: TopoDS_Shape): void;
 
-Rg1Line(): boolean;
-Rg1Line(B: boolean): void;
-Rg1Line(): boolean;
-Rg1Line(B: boolean): void;
+  Rg1Line(): boolean;
+  Rg1Line(B: boolean): void;
+  Rg1Line(): boolean;
+  Rg1Line(B: boolean): void;
 
-RgNLine(): boolean;
-RgNLine(B: boolean): void;
-RgNLine(): boolean;
-RgNLine(B: boolean): void;
+  RgNLine(): boolean;
+  RgNLine(B: boolean): void;
+  RgNLine(): boolean;
+  RgNLine(B: boolean): void;
 
-OutLine(): boolean;
-OutLine(B: boolean): void;
-OutLine(): boolean;
-OutLine(B: boolean): void;
+  OutLine(): boolean;
+  OutLine(B: boolean): void;
+  OutLine(): boolean;
+  OutLine(B: boolean): void;
 
-IntLine(): boolean;
-IntLine(B: boolean): void;
-IntLine(): boolean;
-IntLine(B: boolean): void;
+  IntLine(): boolean;
+  IntLine(B: boolean): void;
+  IntLine(): boolean;
+  IntLine(B: boolean): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_BiPoint: declare class HLRBRep_BiPoint
 
-constructor
+  constructor
 
-P1(): gp_Pnt;
+  P1(): gp_Pnt;
 
-P2(): gp_Pnt;
+  P2(): gp_Pnt;
 
-Shape(): TopoDS_Shape;
-Shape(S: TopoDS_Shape): void;
-Shape(): TopoDS_Shape;
-Shape(S: TopoDS_Shape): void;
+  Shape(): TopoDS_Shape;
+  Shape(S: TopoDS_Shape): void;
+  Shape(): TopoDS_Shape;
+  Shape(S: TopoDS_Shape): void;
 
-Rg1Line(): boolean;
-Rg1Line(B: boolean): void;
-Rg1Line(): boolean;
-Rg1Line(B: boolean): void;
+  Rg1Line(): boolean;
+  Rg1Line(B: boolean): void;
+  Rg1Line(): boolean;
+  Rg1Line(B: boolean): void;
 
-RgNLine(): boolean;
-RgNLine(B: boolean): void;
-RgNLine(): boolean;
-RgNLine(B: boolean): void;
+  RgNLine(): boolean;
+  RgNLine(B: boolean): void;
+  RgNLine(): boolean;
+  RgNLine(B: boolean): void;
 
-OutLine(): boolean;
-OutLine(B: boolean): void;
-OutLine(): boolean;
-OutLine(B: boolean): void;
+  OutLine(): boolean;
+  OutLine(B: boolean): void;
+  OutLine(): boolean;
+  OutLine(B: boolean): void;
 
-IntLine(): boolean;
-IntLine(B: boolean): void;
-IntLine(): boolean;
-IntLine(B: boolean): void;
+  IntLine(): boolean;
+  IntLine(B: boolean): void;
+  IntLine(): boolean;
+  IntLine(B: boolean): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_CInter: declare class HLRBRep_CInter extends IntRes2d_Intersection
 
-constructor
+  constructor
 
-SetMinNbSamples(theMinNbSamples: number): void;
+  SetMinNbSamples(theMinNbSamples: number): void;
 
-GetMinNbSamples(): number;
+  GetMinNbSamples(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_CLPropsATool: declare class HLRBRep_CLPropsATool
 
-constructor
+  constructor
 
-static Value(A: HLRBRep_Curve, U: number, P: gp_Pnt2d): void;
+  static Value(A: HLRBRep_Curve, U: number, P: gp_Pnt2d): void;
 
-static D1(A: HLRBRep_Curve, U: number, P: gp_Pnt2d, V1: gp_Vec2d): void;
+  static D1(A: HLRBRep_Curve, U: number, P: gp_Pnt2d, V1: gp_Vec2d): void;
 
-static D2(A: HLRBRep_Curve, U: number, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d): void;
+  static D2(A: HLRBRep_Curve, U: number, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d): void;
 
-static D3(A: HLRBRep_Curve, U: number, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d, V3: gp_Vec2d): void;
+  static D3(A: HLRBRep_Curve, U: number, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d, V3: gp_Vec2d): void;
 
-static Continuity(A: HLRBRep_Curve): number;
+  static Continuity(A: HLRBRep_Curve): number;
 
-static FirstParameter(A: HLRBRep_Curve): number;
+  static FirstParameter(A: HLRBRep_Curve): number;
 
-static LastParameter(A: HLRBRep_Curve): number;
+  static LastParameter(A: HLRBRep_Curve): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_Curve: declare class HLRBRep_Curve
 
-constructor
+  constructor
 
-Projector(Proj: HLRAlgo_Projector): void;
+  Projector(Proj: HLRAlgo_Projector): void;
 
-Curve(): BRepAdaptor_Curve;
-Curve(E: TopoDS_Edge): void;
-Curve(): BRepAdaptor_Curve;
-Curve(E: TopoDS_Edge): void;
+  Curve(): BRepAdaptor_Curve;
+  Curve(E: TopoDS_Edge): void;
+  Curve(): BRepAdaptor_Curve;
+  Curve(E: TopoDS_Edge): void;
 
-GetCurve(): BRepAdaptor_Curve;
+  GetCurve(): BRepAdaptor_Curve;
 
-Parameter2d(P3d: number): number;
+  Parameter2d(P3d: number): number;
 
-Parameter3d(P2d: number): number;
+  Parameter3d(P2d: number): number;
 
-Update(TotMin: [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number], TotMax: [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number]): number;
+  Update(TotMin: [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number], TotMax: [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number]): number;
 
-UpdateMinMax(TotMin: [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number], TotMax: [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number]): number;
+  UpdateMinMax(TotMin: [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number], TotMax: [number, number, number, number, number, number, number, number, number, number, number, number, number, number, number, number]): number;
 
-Z(U: number): number;
+  Z(U: number): number;
 
-Value3D(U: number): gp_Pnt;
+  Value3D(U: number): gp_Pnt;
 
-D0(U: number, P: gp_Pnt): void;
-D0(U: number, P: gp_Pnt2d): void;
-D0(U: number, P: gp_Pnt): void;
-D0(U: number, P: gp_Pnt2d): void;
+  D0(U: number, P: gp_Pnt): void;
+  D0(U: number, P: gp_Pnt2d): void;
+  D0(U: number, P: gp_Pnt): void;
+  D0(U: number, P: gp_Pnt2d): void;
 
-D1(U: number, P: gp_Pnt, V: gp_Vec): void;
-D1(U: number, P: gp_Pnt2d, V: gp_Vec2d): void;
-D1(U: number, P: gp_Pnt, V: gp_Vec): void;
-D1(U: number, P: gp_Pnt2d, V: gp_Vec2d): void;
+  D1(U: number, P: gp_Pnt, V: gp_Vec): void;
+  D1(U: number, P: gp_Pnt2d, V: gp_Vec2d): void;
+  D1(U: number, P: gp_Pnt, V: gp_Vec): void;
+  D1(U: number, P: gp_Pnt2d, V: gp_Vec2d): void;
 
-Tangent(AtStart: boolean, P: gp_Pnt2d, D: gp_Dir2d): void;
+  Tangent(AtStart: boolean, P: gp_Pnt2d, D: gp_Dir2d): void;
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-Continuity(): GeomAbs_Shape;
+  Continuity(): GeomAbs_Shape;
 
-NbIntervals(S: GeomAbs_Shape): number;
+  NbIntervals(S: GeomAbs_Shape): number;
 
-Intervals(T: NCollection_Array1_double, S: GeomAbs_Shape): void;
+  Intervals(T: NCollection_Array1_double, S: GeomAbs_Shape): void;
 
-IsClosed(): boolean;
+  IsClosed(): boolean;
 
-IsPeriodic(): boolean;
+  IsPeriodic(): boolean;
 
-Period(): number;
+  Period(): number;
 
-Value(U: number): gp_Pnt2d;
+  Value(U: number): gp_Pnt2d;
 
-D2(U: number, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d): void;
+  D2(U: number, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d): void;
 
-D3(U: number, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d, V3: gp_Vec2d): void;
+  D3(U: number, P: gp_Pnt2d, V1: gp_Vec2d, V2: gp_Vec2d, V3: gp_Vec2d): void;
 
-DN(U: number, N: number): gp_Vec2d;
+  DN(U: number, N: number): gp_Vec2d;
 
-Resolution(R3d: number): number;
+  Resolution(R3d: number): number;
 
-GetType(): GeomAbs_CurveType;
+  GetType(): GeomAbs_CurveType;
 
-Line(): gp_Lin2d;
+  Line(): gp_Lin2d;
 
-Circle(): gp_Circ2d;
+  Circle(): gp_Circ2d;
 
-Ellipse(): gp_Elips2d;
+  Ellipse(): gp_Elips2d;
 
-Hyperbola(): gp_Hypr2d;
+  Hyperbola(): gp_Hypr2d;
 
-Parabola(): gp_Parab2d;
+  Parabola(): gp_Parab2d;
 
-IsRational(): boolean;
+  IsRational(): boolean;
 
-Degree(): number;
+  Degree(): number;
 
-NbPoles(): number;
+  NbPoles(): number;
 
-Poles(TP: NCollection_Array1_gp_Pnt2d): void;
-Poles(aCurve: Geom_BSplineCurve, TP: NCollection_Array1_gp_Pnt2d): void;
-Poles(TP: NCollection_Array1_gp_Pnt2d): void;
-Poles(aCurve: Geom_BSplineCurve, TP: NCollection_Array1_gp_Pnt2d): void;
+  Poles(TP: NCollection_Array1_gp_Pnt2d): void;
+  Poles(aCurve: Geom_BSplineCurve, TP: NCollection_Array1_gp_Pnt2d): void;
+  Poles(TP: NCollection_Array1_gp_Pnt2d): void;
+  Poles(aCurve: Geom_BSplineCurve, TP: NCollection_Array1_gp_Pnt2d): void;
 
-PolesAndWeights(TP: NCollection_Array1_gp_Pnt2d, TW: NCollection_Array1_double): void;
-PolesAndWeights(aCurve: Geom_BSplineCurve, TP: NCollection_Array1_gp_Pnt2d, TW: NCollection_Array1_double): void;
-PolesAndWeights(TP: NCollection_Array1_gp_Pnt2d, TW: NCollection_Array1_double): void;
-PolesAndWeights(aCurve: Geom_BSplineCurve, TP: NCollection_Array1_gp_Pnt2d, TW: NCollection_Array1_double): void;
+  PolesAndWeights(TP: NCollection_Array1_gp_Pnt2d, TW: NCollection_Array1_double): void;
+  PolesAndWeights(aCurve: Geom_BSplineCurve, TP: NCollection_Array1_gp_Pnt2d, TW: NCollection_Array1_double): void;
+  PolesAndWeights(TP: NCollection_Array1_gp_Pnt2d, TW: NCollection_Array1_double): void;
+  PolesAndWeights(aCurve: Geom_BSplineCurve, TP: NCollection_Array1_gp_Pnt2d, TW: NCollection_Array1_double): void;
 
-NbKnots(): number;
+  NbKnots(): number;
 
-Knots(kn: NCollection_Array1_double): void;
+  Knots(kn: NCollection_Array1_double): void;
 
-Multiplicities(mu: NCollection_Array1_int): void;
+  Multiplicities(mu: NCollection_Array1_int): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_CurveTool: declare class HLRBRep_CurveTool
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_EdgeBuilder: declare class HLRBRep_EdgeBuilder
 
-constructor
+  constructor
 
-InitAreas(): void;
+  InitAreas(): void;
 
-NextArea(): void;
+  NextArea(): void;
 
-PreviousArea(): void;
+  PreviousArea(): void;
 
-HasArea(): boolean;
+  HasArea(): boolean;
 
-AreaState(): TopAbs_State;
+  AreaState(): TopAbs_State;
 
-AreaEdgeState(): TopAbs_State;
+  AreaEdgeState(): TopAbs_State;
 
-LeftLimit(): HLRBRep_AreaLimit;
+  LeftLimit(): HLRBRep_AreaLimit;
 
-RightLimit(): HLRBRep_AreaLimit;
+  RightLimit(): HLRBRep_AreaLimit;
 
-Builds(ToBuild: TopAbs_State): void;
+  Builds(ToBuild: TopAbs_State): void;
 
-MoreEdges(): boolean;
+  MoreEdges(): boolean;
 
-NextEdge(): void;
+  NextEdge(): void;
 
-MoreVertices(): boolean;
+  MoreVertices(): boolean;
 
-NextVertex(): void;
+  NextVertex(): void;
 
-Current(): HLRAlgo_Intersection;
+  Current(): HLRAlgo_Intersection;
 
-IsBoundary(): boolean;
+  IsBoundary(): boolean;
 
-IsInterference(): boolean;
+  IsInterference(): boolean;
 
-Orientation(): TopAbs_Orientation;
+  Orientation(): TopAbs_Orientation;
 
-Destroy(): void;
+  Destroy(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_EdgeData: declare class HLRBRep_EdgeData
 
-constructor
+  constructor
 
-Set(Reg1: boolean, RegN: boolean, EG: TopoDS_Edge, V1: number, V2: number, Out1: boolean, Out2: boolean, Cut1: boolean, Cut2: boolean, Start: number, TolStart: number, End: number, TolEnd: number): void;
+  Set(Reg1: boolean, RegN: boolean, EG: TopoDS_Edge, V1: number, V2: number, Out1: boolean, Out2: boolean, Cut1: boolean, Cut2: boolean, Start: number, TolStart: number, End: number, TolEnd: number): void;
 
-Selected(): boolean;
-Selected(B: boolean): void;
-Selected(): boolean;
-Selected(B: boolean): void;
+  Selected(): boolean;
+  Selected(B: boolean): void;
+  Selected(): boolean;
+  Selected(B: boolean): void;
 
-Rg1Line(): boolean;
-Rg1Line(B: boolean): void;
-Rg1Line(): boolean;
-Rg1Line(B: boolean): void;
+  Rg1Line(): boolean;
+  Rg1Line(B: boolean): void;
+  Rg1Line(): boolean;
+  Rg1Line(B: boolean): void;
 
-RgNLine(): boolean;
-RgNLine(B: boolean): void;
-RgNLine(): boolean;
-RgNLine(B: boolean): void;
+  RgNLine(): boolean;
+  RgNLine(B: boolean): void;
+  RgNLine(): boolean;
+  RgNLine(B: boolean): void;
 
-Vertical(): boolean;
-Vertical(B: boolean): void;
-Vertical(): boolean;
-Vertical(B: boolean): void;
+  Vertical(): boolean;
+  Vertical(B: boolean): void;
+  Vertical(): boolean;
+  Vertical(B: boolean): void;
 
-Simple(): boolean;
-Simple(B: boolean): void;
-Simple(): boolean;
-Simple(B: boolean): void;
+  Simple(): boolean;
+  Simple(B: boolean): void;
+  Simple(): boolean;
+  Simple(B: boolean): void;
 
-OutLVSta(): boolean;
-OutLVSta(B: boolean): void;
-OutLVSta(): boolean;
-OutLVSta(B: boolean): void;
+  OutLVSta(): boolean;
+  OutLVSta(B: boolean): void;
+  OutLVSta(): boolean;
+  OutLVSta(B: boolean): void;
 
-OutLVEnd(): boolean;
-OutLVEnd(B: boolean): void;
-OutLVEnd(): boolean;
-OutLVEnd(B: boolean): void;
+  OutLVEnd(): boolean;
+  OutLVEnd(B: boolean): void;
+  OutLVEnd(): boolean;
+  OutLVEnd(B: boolean): void;
 
-CutAtSta(): boolean;
-CutAtSta(B: boolean): void;
-CutAtSta(): boolean;
-CutAtSta(B: boolean): void;
+  CutAtSta(): boolean;
+  CutAtSta(B: boolean): void;
+  CutAtSta(): boolean;
+  CutAtSta(B: boolean): void;
 
-CutAtEnd(): boolean;
-CutAtEnd(B: boolean): void;
-CutAtEnd(): boolean;
-CutAtEnd(B: boolean): void;
+  CutAtEnd(): boolean;
+  CutAtEnd(B: boolean): void;
+  CutAtEnd(): boolean;
+  CutAtEnd(B: boolean): void;
 
-VerAtSta(): boolean;
-VerAtSta(B: boolean): void;
-VerAtSta(): boolean;
-VerAtSta(B: boolean): void;
+  VerAtSta(): boolean;
+  VerAtSta(B: boolean): void;
+  VerAtSta(): boolean;
+  VerAtSta(B: boolean): void;
 
-VerAtEnd(): boolean;
-VerAtEnd(B: boolean): void;
-VerAtEnd(): boolean;
-VerAtEnd(B: boolean): void;
+  VerAtEnd(): boolean;
+  VerAtEnd(B: boolean): void;
+  VerAtEnd(): boolean;
+  VerAtEnd(B: boolean): void;
 
-AutoIntersectionDone(): boolean;
-AutoIntersectionDone(B: boolean): void;
-AutoIntersectionDone(): boolean;
-AutoIntersectionDone(B: boolean): void;
+  AutoIntersectionDone(): boolean;
+  AutoIntersectionDone(B: boolean): void;
+  AutoIntersectionDone(): boolean;
+  AutoIntersectionDone(B: boolean): void;
 
-Used(): boolean;
-Used(B: boolean): void;
-Used(): boolean;
-Used(B: boolean): void;
+  Used(): boolean;
+  Used(B: boolean): void;
+  Used(): boolean;
+  Used(B: boolean): void;
 
-HideCount(): number;
-HideCount(I: number): void;
-HideCount(): number;
-HideCount(I: number): void;
+  HideCount(): number;
+  HideCount(I: number): void;
+  HideCount(): number;
+  HideCount(I: number): void;
 
-VSta(): number;
-VSta(I: number): void;
-VSta(): number;
-VSta(I: number): void;
+  VSta(): number;
+  VSta(I: number): void;
+  VSta(): number;
+  VSta(I: number): void;
 
-VEnd(): number;
-VEnd(I: number): void;
-VEnd(): number;
-VEnd(I: number): void;
+  VEnd(): number;
+  VEnd(I: number): void;
+  VEnd(): number;
+  VEnd(I: number): void;
 
-UpdateMinMax(theTotMinMax: HLRAlgo_EdgesBlock_MinMaxIndices): void;
+  UpdateMinMax(theTotMinMax: HLRAlgo_EdgesBlock_MinMaxIndices): void;
 
-MinMax(): HLRAlgo_EdgesBlock_MinMaxIndices;
+  MinMax(): HLRAlgo_EdgesBlock_MinMaxIndices;
 
-Status(): HLRAlgo_EdgeStatus;
+  Status(): HLRAlgo_EdgeStatus;
 
-ChangeGeometry(): HLRBRep_Curve;
+  ChangeGeometry(): HLRBRep_Curve;
 
-Geometry(): HLRBRep_Curve;
+  Geometry(): HLRBRep_Curve;
 
-Curve(): HLRBRep_Curve;
+  Curve(): HLRBRep_Curve;
 
-Tolerance(): number;
+  Tolerance(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_EdgeFaceTool: declare class HLRBRep_EdgeFaceTool
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_EdgeIList: declare class HLRBRep_EdgeIList
 
-constructor
+  constructor
 
-static AddInterference(IL: NCollection_List_HLRAlgo_Interference, I: HLRAlgo_Interference, T: HLRBRep_EdgeInterferenceTool): void;
+  static AddInterference(IL: NCollection_List_HLRAlgo_Interference, I: HLRAlgo_Interference, T: HLRBRep_EdgeInterferenceTool): void;
 
-static ProcessComplex(IL: NCollection_List_HLRAlgo_Interference, T: HLRBRep_EdgeInterferenceTool): void;
+  static ProcessComplex(IL: NCollection_List_HLRAlgo_Interference, T: HLRBRep_EdgeInterferenceTool): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_EdgeInterferenceTool: declare class HLRBRep_EdgeInterferenceTool
 
-LoadEdge(): void;
+  LoadEdge(): void;
 
-InitVertices(): void;
+  InitVertices(): void;
 
-MoreVertices(): boolean;
+  MoreVertices(): boolean;
 
-NextVertex(): void;
+  NextVertex(): void;
 
-CurrentVertex(): HLRAlgo_Intersection;
+  CurrentVertex(): HLRAlgo_Intersection;
 
-CurrentOrientation(): TopAbs_Orientation;
+  CurrentOrientation(): TopAbs_Orientation;
 
-CurrentParameter(): number;
+  CurrentParameter(): number;
 
-IsPeriodic(): boolean;
+  IsPeriodic(): boolean;
 
-EdgeGeometry(Param: number, Tgt: gp_Dir, Nrm: gp_Dir, Curv?: number): { Curv: number };
+  EdgeGeometry(Param: number, Tgt: gp_Dir, Nrm: gp_Dir, Curv?: number): { Curv: number };
 
-ParameterOfInterference(I: HLRAlgo_Interference): number;
+  ParameterOfInterference(I: HLRAlgo_Interference): number;
 
-SameInterferences(I1: HLRAlgo_Interference, I2: HLRAlgo_Interference): boolean;
+  SameInterferences(I1: HLRAlgo_Interference, I2: HLRAlgo_Interference): boolean;
 
-SameVertexAndInterference(I: HLRAlgo_Interference): boolean;
+  SameVertexAndInterference(I: HLRAlgo_Interference): boolean;
 
-InterferenceBoundaryGeometry(I: HLRAlgo_Interference, Tang: gp_Dir, Norm: gp_Dir, Curv?: number): { Curv: number };
+  InterferenceBoundaryGeometry(I: HLRAlgo_Interference, Tang: gp_Dir, Norm: gp_Dir, Curv?: number): { Curv: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_ExactIntersectionPointOfTheIntPCurvePCurveOfCInter: declare class HLRBRep_ExactIntersectionPointOfTheIntPCurvePCurveOfCInter
 
-Perform(Poly1: HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter, Poly2: HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter, NumSegOn1: number, NumSegOn2: number, ParamOnSeg1: number, ParamOnSeg2: number): { NumSegOn1: number; NumSegOn2: number; ParamOnSeg1: number; ParamOnSeg2: number };
-Perform(Uo: number, Vo: number, UInf: number, VInf: number, USup: number, VSup: number): void;
-Perform(Poly1: HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter, Poly2: HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter, NumSegOn1: number, NumSegOn2: number, ParamOnSeg1: number, ParamOnSeg2: number): { NumSegOn1: number; NumSegOn2: number; ParamOnSeg1: number; ParamOnSeg2: number };
-Perform(Uo: number, Vo: number, UInf: number, VInf: number, USup: number, VSup: number): void;
+  Perform(Poly1: HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter, Poly2: HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter, NumSegOn1: number, NumSegOn2: number, ParamOnSeg1: number, ParamOnSeg2: number): { NumSegOn1: number; NumSegOn2: number; ParamOnSeg1: number; ParamOnSeg2: number };
+  Perform(Uo: number, Vo: number, UInf: number, VInf: number, USup: number, VSup: number): void;
+  Perform(Poly1: HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter, Poly2: HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter, NumSegOn1: number, NumSegOn2: number, ParamOnSeg1: number, ParamOnSeg2: number): { NumSegOn1: number; NumSegOn2: number; ParamOnSeg1: number; ParamOnSeg2: number };
+  Perform(Uo: number, Vo: number, UInf: number, VInf: number, USup: number, VSup: number): void;
 
-NbRoots(): number;
+  NbRoots(): number;
 
-Roots(U?: number, V?: number): { U: number; V: number };
+  Roots(U?: number, V?: number): { U: number; V: number };
 
-AnErrorOccurred(): boolean;
+  AnErrorOccurred(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_FaceData: declare class HLRBRep_FaceData
 
-constructor
+  constructor
 
-Set(FG: TopoDS_Face, Or: TopAbs_Orientation, Cl: boolean, NW: number): void;
+  Set(FG: TopoDS_Face, Or: TopAbs_Orientation, Cl: boolean, NW: number): void;
 
-SetWire(WI: number, NE: number): void;
+  SetWire(WI: number, NE: number): void;
 
-SetWEdge(WI: number, EWI: number, EI: number, Or: TopAbs_Orientation, OutL: boolean, Inte: boolean, Dble: boolean, IsoL: boolean): void;
+  SetWEdge(WI: number, EWI: number, EI: number, Or: TopAbs_Orientation, OutL: boolean, Inte: boolean, Dble: boolean, IsoL: boolean): void;
 
-Selected(): boolean;
-Selected(B: boolean): void;
-Selected(): boolean;
-Selected(B: boolean): void;
+  Selected(): boolean;
+  Selected(B: boolean): void;
+  Selected(): boolean;
+  Selected(B: boolean): void;
 
-Back(): boolean;
-Back(B: boolean): void;
-Back(): boolean;
-Back(B: boolean): void;
+  Back(): boolean;
+  Back(B: boolean): void;
+  Back(): boolean;
+  Back(B: boolean): void;
 
-Side(): boolean;
-Side(B: boolean): void;
-Side(): boolean;
-Side(B: boolean): void;
+  Side(): boolean;
+  Side(B: boolean): void;
+  Side(): boolean;
+  Side(B: boolean): void;
 
-Closed(): boolean;
-Closed(B: boolean): void;
-Closed(): boolean;
-Closed(B: boolean): void;
+  Closed(): boolean;
+  Closed(B: boolean): void;
+  Closed(): boolean;
+  Closed(B: boolean): void;
 
-Hiding(): boolean;
-Hiding(B: boolean): void;
-Hiding(): boolean;
-Hiding(B: boolean): void;
+  Hiding(): boolean;
+  Hiding(B: boolean): void;
+  Hiding(): boolean;
+  Hiding(B: boolean): void;
 
-Simple(): boolean;
-Simple(B: boolean): void;
-Simple(): boolean;
-Simple(B: boolean): void;
+  Simple(): boolean;
+  Simple(B: boolean): void;
+  Simple(): boolean;
+  Simple(B: boolean): void;
 
-Cut(): boolean;
-Cut(B: boolean): void;
-Cut(): boolean;
-Cut(B: boolean): void;
+  Cut(): boolean;
+  Cut(B: boolean): void;
+  Cut(): boolean;
+  Cut(B: boolean): void;
 
-WithOutL(): boolean;
-WithOutL(B: boolean): void;
-WithOutL(): boolean;
-WithOutL(B: boolean): void;
+  WithOutL(): boolean;
+  WithOutL(B: boolean): void;
+  WithOutL(): boolean;
+  WithOutL(B: boolean): void;
 
-Plane(): boolean;
-Plane(B: boolean): void;
-Plane(): boolean;
-Plane(B: boolean): void;
+  Plane(): boolean;
+  Plane(B: boolean): void;
+  Plane(): boolean;
+  Plane(B: boolean): void;
 
-Cylinder(): boolean;
-Cylinder(B: boolean): void;
-Cylinder(): boolean;
-Cylinder(B: boolean): void;
+  Cylinder(): boolean;
+  Cylinder(B: boolean): void;
+  Cylinder(): boolean;
+  Cylinder(B: boolean): void;
 
-Cone(): boolean;
-Cone(B: boolean): void;
-Cone(): boolean;
-Cone(B: boolean): void;
+  Cone(): boolean;
+  Cone(B: boolean): void;
+  Cone(): boolean;
+  Cone(B: boolean): void;
 
-Sphere(): boolean;
-Sphere(B: boolean): void;
-Sphere(): boolean;
-Sphere(B: boolean): void;
+  Sphere(): boolean;
+  Sphere(B: boolean): void;
+  Sphere(): boolean;
+  Sphere(B: boolean): void;
 
-Torus(): boolean;
-Torus(B: boolean): void;
-Torus(): boolean;
-Torus(B: boolean): void;
+  Torus(): boolean;
+  Torus(B: boolean): void;
+  Torus(): boolean;
+  Torus(B: boolean): void;
 
-Size(): number;
-Size(S: number): void;
-Size(): number;
-Size(S: number): void;
+  Size(): number;
+  Size(S: number): void;
+  Size(): number;
+  Size(S: number): void;
 
-Orientation(): TopAbs_Orientation;
-Orientation(O: TopAbs_Orientation): void;
-Orientation(): TopAbs_Orientation;
-Orientation(O: TopAbs_Orientation): void;
+  Orientation(): TopAbs_Orientation;
+  Orientation(O: TopAbs_Orientation): void;
+  Orientation(): TopAbs_Orientation;
+  Orientation(O: TopAbs_Orientation): void;
 
-Wires(): HLRAlgo_WiresBlock;
+  Wires(): HLRAlgo_WiresBlock;
 
-Tolerance(): number;
+  Tolerance(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_FaceIterator: declare class HLRBRep_FaceIterator
 
-constructor
+  constructor
 
-InitEdge(fd: HLRBRep_FaceData): void;
+  InitEdge(fd: HLRBRep_FaceData): void;
 
-MoreEdge(): boolean;
+  MoreEdge(): boolean;
 
-NextEdge(): void;
+  NextEdge(): void;
 
-BeginningOfWire(): boolean;
+  BeginningOfWire(): boolean;
 
-EndOfWire(): boolean;
+  EndOfWire(): boolean;
 
-SkipWire(): void;
+  SkipWire(): void;
 
-Wire(): HLRAlgo_EdgesBlock;
+  Wire(): HLRAlgo_EdgesBlock;
 
-Edge(): number;
+  Edge(): number;
 
-Orientation(): TopAbs_Orientation;
+  Orientation(): TopAbs_Orientation;
 
-OutLine(): boolean;
+  OutLine(): boolean;
 
-Internal(): boolean;
+  Internal(): boolean;
 
-Double(): boolean;
+  Double(): boolean;
 
-IsoLine(): boolean;
+  IsoLine(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_HLRToShape: declare class HLRBRep_HLRToShape
 
-constructor
+  constructor
 
-VCompound(): TopoDS_Shape;
-VCompound(S: TopoDS_Shape): TopoDS_Shape;
-VCompound(): TopoDS_Shape;
-VCompound(S: TopoDS_Shape): TopoDS_Shape;
+  VCompound(): TopoDS_Shape;
+  VCompound(S: TopoDS_Shape): TopoDS_Shape;
+  VCompound(): TopoDS_Shape;
+  VCompound(S: TopoDS_Shape): TopoDS_Shape;
 
-Rg1LineVCompound(): TopoDS_Shape;
-Rg1LineVCompound(S: TopoDS_Shape): TopoDS_Shape;
-Rg1LineVCompound(): TopoDS_Shape;
-Rg1LineVCompound(S: TopoDS_Shape): TopoDS_Shape;
+  Rg1LineVCompound(): TopoDS_Shape;
+  Rg1LineVCompound(S: TopoDS_Shape): TopoDS_Shape;
+  Rg1LineVCompound(): TopoDS_Shape;
+  Rg1LineVCompound(S: TopoDS_Shape): TopoDS_Shape;
 
-RgNLineVCompound(): TopoDS_Shape;
-RgNLineVCompound(S: TopoDS_Shape): TopoDS_Shape;
-RgNLineVCompound(): TopoDS_Shape;
-RgNLineVCompound(S: TopoDS_Shape): TopoDS_Shape;
+  RgNLineVCompound(): TopoDS_Shape;
+  RgNLineVCompound(S: TopoDS_Shape): TopoDS_Shape;
+  RgNLineVCompound(): TopoDS_Shape;
+  RgNLineVCompound(S: TopoDS_Shape): TopoDS_Shape;
 
-OutLineVCompound(): TopoDS_Shape;
-OutLineVCompound(S: TopoDS_Shape): TopoDS_Shape;
-OutLineVCompound(): TopoDS_Shape;
-OutLineVCompound(S: TopoDS_Shape): TopoDS_Shape;
+  OutLineVCompound(): TopoDS_Shape;
+  OutLineVCompound(S: TopoDS_Shape): TopoDS_Shape;
+  OutLineVCompound(): TopoDS_Shape;
+  OutLineVCompound(S: TopoDS_Shape): TopoDS_Shape;
 
-OutLineVCompound3d(): TopoDS_Shape;
+  OutLineVCompound3d(): TopoDS_Shape;
 
-IsoLineVCompound(): TopoDS_Shape;
-IsoLineVCompound(S: TopoDS_Shape): TopoDS_Shape;
-IsoLineVCompound(): TopoDS_Shape;
-IsoLineVCompound(S: TopoDS_Shape): TopoDS_Shape;
+  IsoLineVCompound(): TopoDS_Shape;
+  IsoLineVCompound(S: TopoDS_Shape): TopoDS_Shape;
+  IsoLineVCompound(): TopoDS_Shape;
+  IsoLineVCompound(S: TopoDS_Shape): TopoDS_Shape;
 
-HCompound(): TopoDS_Shape;
-HCompound(S: TopoDS_Shape): TopoDS_Shape;
-HCompound(): TopoDS_Shape;
-HCompound(S: TopoDS_Shape): TopoDS_Shape;
+  HCompound(): TopoDS_Shape;
+  HCompound(S: TopoDS_Shape): TopoDS_Shape;
+  HCompound(): TopoDS_Shape;
+  HCompound(S: TopoDS_Shape): TopoDS_Shape;
 
-Rg1LineHCompound(): TopoDS_Shape;
-Rg1LineHCompound(S: TopoDS_Shape): TopoDS_Shape;
-Rg1LineHCompound(): TopoDS_Shape;
-Rg1LineHCompound(S: TopoDS_Shape): TopoDS_Shape;
+  Rg1LineHCompound(): TopoDS_Shape;
+  Rg1LineHCompound(S: TopoDS_Shape): TopoDS_Shape;
+  Rg1LineHCompound(): TopoDS_Shape;
+  Rg1LineHCompound(S: TopoDS_Shape): TopoDS_Shape;
 
-RgNLineHCompound(): TopoDS_Shape;
-RgNLineHCompound(S: TopoDS_Shape): TopoDS_Shape;
-RgNLineHCompound(): TopoDS_Shape;
-RgNLineHCompound(S: TopoDS_Shape): TopoDS_Shape;
+  RgNLineHCompound(): TopoDS_Shape;
+  RgNLineHCompound(S: TopoDS_Shape): TopoDS_Shape;
+  RgNLineHCompound(): TopoDS_Shape;
+  RgNLineHCompound(S: TopoDS_Shape): TopoDS_Shape;
 
-OutLineHCompound(): TopoDS_Shape;
-OutLineHCompound(S: TopoDS_Shape): TopoDS_Shape;
-OutLineHCompound(): TopoDS_Shape;
-OutLineHCompound(S: TopoDS_Shape): TopoDS_Shape;
+  OutLineHCompound(): TopoDS_Shape;
+  OutLineHCompound(S: TopoDS_Shape): TopoDS_Shape;
+  OutLineHCompound(): TopoDS_Shape;
+  OutLineHCompound(S: TopoDS_Shape): TopoDS_Shape;
 
-IsoLineHCompound(): TopoDS_Shape;
-IsoLineHCompound(S: TopoDS_Shape): TopoDS_Shape;
-IsoLineHCompound(): TopoDS_Shape;
-IsoLineHCompound(S: TopoDS_Shape): TopoDS_Shape;
+  IsoLineHCompound(): TopoDS_Shape;
+  IsoLineHCompound(S: TopoDS_Shape): TopoDS_Shape;
+  IsoLineHCompound(): TopoDS_Shape;
+  IsoLineHCompound(S: TopoDS_Shape): TopoDS_Shape;
 
-CompoundOfEdges(type*: HLRBRep_TypeOfResultingEdge, visible: boolean, In3d: boolean): TopoDS_Shape;
-CompoundOfEdges(S: TopoDS_Shape, type*: HLRBRep*TypeOfResultingEdge, visible: boolean, In3d: boolean): TopoDS_Shape;
-CompoundOfEdges(type*: HLRBRep*TypeOfResultingEdge, visible: boolean, In3d: boolean): TopoDS_Shape;
-CompoundOfEdges(S: TopoDS_Shape, type*: HLRBRep_TypeOfResultingEdge, visible: boolean, In3d: boolean): TopoDS_Shape;
+  CompoundOfEdges(type_: HLRBRep_TypeOfResultingEdge, visible: boolean, In3d: boolean): TopoDS_Shape;
+  CompoundOfEdges(S: TopoDS_Shape, type_: HLRBRep_TypeOfResultingEdge, visible: boolean, In3d: boolean): TopoDS_Shape;
+  CompoundOfEdges(type_: HLRBRep_TypeOfResultingEdge, visible: boolean, In3d: boolean): TopoDS_Shape;
+  CompoundOfEdges(S: TopoDS_Shape, type_: HLRBRep_TypeOfResultingEdge, visible: boolean, In3d: boolean): TopoDS_Shape;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_Hider: declare class HLRBRep_Hider
 
-OwnHiding(FI: number): void;
+  OwnHiding(FI: number): void;
 
-Hide(FI: number, MST: NCollection_DataMap_TopoDS_Shape_BRepTopAdaptor_Tool_TopTools_ShapeMapHasher): void;
+  Hide(FI: number, MST: NCollection_DataMap_TopoDS_Shape_BRepTopAdaptor_Tool_TopTools_ShapeMapHasher): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_IntConicCurveOfCInter: declare class HLRBRep_IntConicCurveOfCInter extends IntRes2d_Intersection
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_InterCSurf: declare class HLRBRep_InterCSurf extends IntCurveSurface_Intersection
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 HLRBRep_InternalAlgo: declare class HLRBRep_InternalAlgo extends Standard_Transient
 
-constructor
+  constructor
 
-Projector(P: HLRAlgo_Projector): void;
-Projector(): HLRAlgo_Projector;
-Projector(P: HLRAlgo_Projector): void;
-Projector(): HLRAlgo_Projector;
+  Projector(P: HLRAlgo_Projector): void;
+  Projector(): HLRAlgo_Projector;
+  Projector(P: HLRAlgo_Projector): void;
+  Projector(): HLRAlgo_Projector;
 
-Update(): void;
+  Update(): void;
 
-Load(S: HLRTopoBRep_OutLiner, SData: Standard_Transient, nbIso: number): void;
-Load(S: HLRTopoBRep_OutLiner, nbIso: number): void;
-Load(S: HLRTopoBRep_OutLiner, SData: Standard_Transient, nbIso: number): void;
-Load(S: HLRTopoBRep_OutLiner, nbIso: number): void;
+  Load(S: HLRTopoBRep_OutLiner, SData: Standard_Transient, nbIso: number): void;
+  Load(S: HLRTopoBRep_OutLiner, nbIso: number): void;
+  Load(S: HLRTopoBRep_OutLiner, SData: Standard_Transient, nbIso: number): void;
+  Load(S: HLRTopoBRep_OutLiner, nbIso: number): void;
 
-Index(S: HLRTopoBRep_OutLiner): number;
+  Index(S: HLRTopoBRep_OutLiner): number;
 
-Remove(I: number): void;
+  Remove(I: number): void;
 
-ShapeData(I: number, SData: Standard_Transient): void;
+  ShapeData(I: number, SData: Standard_Transient): void;
 
-SeqOfShapeBounds(): NCollection_Sequence_HLRBRep_ShapeBounds;
+  SeqOfShapeBounds(): NCollection_Sequence_HLRBRep_ShapeBounds;
 
-NbShapes(): number;
+  NbShapes(): number;
 
-ShapeBounds(I: number): HLRBRep_ShapeBounds;
+  ShapeBounds(I: number): HLRBRep_ShapeBounds;
 
-InitEdgeStatus(): void;
+  InitEdgeStatus(): void;
 
-Select(): void;
-Select(I: number): void;
-Select(): void;
-Select(I: number): void;
+  Select(): void;
+  Select(I: number): void;
+  Select(): void;
+  Select(I: number): void;
 
-SelectEdge(I: number): void;
+  SelectEdge(I: number): void;
 
-SelectFace(I: number): void;
+  SelectFace(I: number): void;
 
-ShowAll(): void;
-ShowAll(I: number): void;
-ShowAll(): void;
-ShowAll(I: number): void;
+  ShowAll(): void;
+  ShowAll(I: number): void;
+  ShowAll(): void;
+  ShowAll(I: number): void;
 
-HideAll(): void;
-HideAll(I: number): void;
-HideAll(): void;
-HideAll(I: number): void;
+  HideAll(): void;
+  HideAll(I: number): void;
+  HideAll(): void;
+  HideAll(I: number): void;
 
-PartialHide(): void;
+  PartialHide(): void;
 
-Hide(): void;
-Hide(I: number): void;
-Hide(I: number, J: number): void;
-Hide(): void;
-Hide(I: number): void;
-Hide(I: number, J: number): void;
-Hide(): void;
-Hide(I: number): void;
-Hide(I: number, J: number): void;
+  Hide(): void;
+  Hide(I: number): void;
+  Hide(I: number, J: number): void;
+  Hide(): void;
+  Hide(I: number): void;
+  Hide(I: number, J: number): void;
+  Hide(): void;
+  Hide(I: number): void;
+  Hide(I: number, J: number): void;
 
-Debug(deb: boolean): void;
-Debug(): boolean;
-Debug(deb: boolean): void;
-Debug(): boolean;
+  Debug(deb: boolean): void;
+  Debug(): boolean;
+  Debug(deb: boolean): void;
+  Debug(): boolean;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

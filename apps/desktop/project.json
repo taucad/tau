@@ -7,7 +7,7 @@
   "targets": {
     "prepare-build123d-python": {
       "executor": "nx:run-commands",
-      "outputs": ["{projectRoot}/resources/python/{platform}-{arch}"],
+      "outputs": ["{projectRoot}/resources/python"],
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-build123d-python.mts"
@@ -24,7 +24,7 @@
     },
     "prepare-picogk-dotnet": {
       "executor": "nx:run-commands",
-      "outputs": ["{projectRoot}/resources/picogk/{platform}-{arch}"],
+      "outputs": ["{projectRoot}/resources/picogk"],
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-picogk-dotnet.mts"
@@ -40,9 +40,10 @@
       }
     },
     "build": {
+      "cache": true,
       "executor": "nx:run-commands",
       "outputs": ["{projectRoot}/dist"],
-      "inputs": ["production", "^production"],
+      "inputs": ["production", "^production", { "env": "TAU_CLOUD_ENABLED" }],
       "dependsOn": [
         "prepare-build123d-python",
         "prepare-picogk-dotnet",

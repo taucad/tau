@@ -12,6 +12,8 @@ import { Button } from '@taucad/ui/components/button';
 import type { ProjectActions } from '#components/project-library/project-library.js';
 import { Popover, PopoverContent } from '@taucad/ui/components/popover';
 import { Input } from '@taucad/ui/components/input';
+import { CloseProjectDialog } from '#components/nav/project-close-dialogs.js';
+import { useProjectSidebarRow } from '#hooks/use-sidebar-status.js';
 
 type ProjectActionDropdownProps = {
   readonly project: ProjectListItem;
@@ -21,7 +23,9 @@ type ProjectActionDropdownProps = {
 export function ProjectActionDropdown({ project, actions }: ProjectActionDropdownProps): ReactNode {
   const isDeleted = Boolean(project.deletedAt);
   const [isRenaming, setIsRenaming] = useState(false);
+  const [isConfirmingClose, setIsConfirmingClose] = useState(false);
   const [newName, setNewName] = useState(project.name);
+  const row = useProjectSidebarRow(project.id);
 
   const handleRename = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -101,7 +105,11 @@ export function ProjectActionDropdown({ project, actions }: ProjectActionDropdow
                 data-id={project.id}
                 data-name={project.name}
                 onClick={() => {
-                  actions.handleDelete(project);
+                  if (row.runs > 0) {
+                    setIsConfirmingClose(true);
+                  } else {
+                    actions.handleDelete(project);
+                  }
                 }}
               >
                 <Trash />
@@ -133,6 +141,17 @@ export function ProjectActionDropdown({ project, actions }: ProjectActionDropdow
           </form>
         </PopoverContent>
       </Popover>
+      {isConfirmingClose ? (
+        <CloseProjectDialog
+          row={row}
+          name={project.name}
+          isOpen
+          onOpenChange={setIsConfirmingClose}
+          onConfirm={() => {
+            actions.handleDelete(project);
+          }}
+        />
+      ) : null}
     </>
   );
 }

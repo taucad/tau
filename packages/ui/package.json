@@ -64,6 +64,7 @@
     "./components/input-group": "./src/components/input-group.tsx",
     "./components/label": "./src/components/label.tsx",
     "./components/menu.variants": "./src/components/menu.variants.ts",
+    "./components/nested-action.variants": "./src/components/nested-action.variants.ts",
     "./components/navigation-menu": "./src/components/navigation-menu.tsx",
     "./components/popover": "./src/components/popover.tsx",
     "./components/popover.variants": "./src/components/popover.variants.ts",
@@ -220,6 +221,11 @@
         "types": "./dist/components/menu.variants.d.mts",
         "import": "./dist/components/menu.variants.mjs",
         "default": "./dist/components/menu.variants.mjs"
+      },
+      "./components/nested-action.variants": {
+        "types": "./dist/components/nested-action.variants.d.mts",
+        "import": "./dist/components/nested-action.variants.mjs",
+        "default": "./dist/components/nested-action.variants.mjs"
       },
       "./components/navigation-menu": {
         "types": "./dist/components/navigation-menu.d.mts",

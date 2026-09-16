@@ -2,6 +2,12 @@ import { resolve } from 'node:path';
 import { defineConfig } from 'electron-vite';
 import { electronRuntimeConfig } from '@taucad/runtime/electron/vite';
 
+const cloudValue = process.env['TAU_CLOUD_ENABLED'];
+if (cloudValue !== undefined && cloudValue !== 'true' && cloudValue !== 'false') {
+  throw new Error('TAU_CLOUD_ENABLED must be exactly true or false.');
+}
+const define = { tauCloudBuildEnabled: JSON.stringify(cloudValue === 'true') } as const;
+
 const bundledWorkspaceDependencies = [
   '@taucad/agent-host',
   '@taucad/agent-tools',
@@ -10,6 +16,7 @@ const bundledWorkspaceDependencies = [
   '@taucad/build123d',
   '@taucad/esbuild',
   '@taucad/filesystem',
+  '@taucad/geospec-engine',
   '@taucad/gltf',
   '@taucad/host',
   '@taucad/image',
@@ -61,6 +68,7 @@ export const desktopExternalizedDependencies = [
 export default defineConfig(
   electronRuntimeConfig({
     main: {
+      define,
       build: {
         externalizeDeps: {
           exclude: [...bundledWorkspaceDependencies],
@@ -70,6 +78,7 @@ export default defineConfig(
       },
     },
     preload: {
+      define,
       build: {
         outDir: 'dist/preload',
         lib: {

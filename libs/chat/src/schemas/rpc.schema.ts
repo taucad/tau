@@ -35,6 +35,12 @@ import { screenshotInputSchema, screenshotOutputSchema } from '#schemas/tools/sc
 import { editFileInputSchema, editFileOutputSchema } from '#schemas/tools/edit-file.tool.schema.js';
 import { useSkillInputSchema, useSkillOutputSchema } from '#schemas/tools/use-skill.tool.schema.js';
 import { revisionsInputSchema, revisionsOutputSchema } from '#schemas/tools/revisions.tool.schema.js';
+import {
+  applyParameterOperationInputSchema,
+  applyParameterOperationOutputSchema,
+  getParametersInputSchema,
+  getParametersOutputSchema,
+} from '#schemas/tools/parameter.tool.schema.js';
 import { binaryFileContentMetadataSchema, textFileContentMetadataSchema } from '#schemas/file-metadata.schema.js';
 
 // =============================================================================
@@ -127,8 +133,8 @@ export const rpcClientErrorSchema = zod.object({
  * });
  * ```
  */
-function defineRpc<Input extends zod.ZodRawShape, Success extends zod.ZodRawShape>(config: {
-  input: zod.ZodObject<Input>;
+function defineRpc<Input extends zod.ZodType, Success extends zod.ZodRawShape>(config: {
+  input: Input;
   success: zod.ZodObject<Success>;
 }) {
   const successSchema = config.success.extend({ success: zod.literal(true) });
@@ -261,6 +267,16 @@ const readRevisionsRpc = defineRpc({
   success: revisionsOutputSchema,
 });
 
+const getParametersRpc = defineRpc({
+  input: getParametersInputSchema,
+  success: getParametersOutputSchema,
+});
+
+const applyParameterOperationRpc = defineRpc({
+  input: applyParameterOperationInputSchema,
+  success: applyParameterOperationOutputSchema,
+});
+
 // =============================================================================
 // RPC Schemas Registry
 // =============================================================================
@@ -290,6 +306,8 @@ export type RpcSchemasRegistry = {
   [rpcName.editFile]: RpcSchemaEntry<EditFileRpcInput, EditFileRpcResult>;
   [rpcName.resolveSkill]: RpcSchemaEntry<ResolveSkillRpcInput, ResolveSkillRpcResult>;
   [rpcName.readRevisions]: RpcSchemaEntry<ReadRevisionsRpcInput, ReadRevisionsRpcResult>;
+  [rpcName.getParameters]: RpcSchemaEntry<GetParametersRpcInput, GetParametersRpcResult>;
+  [rpcName.applyParameterOperation]: RpcSchemaEntry<ApplyParameterOperationRpcInput, ApplyParameterOperationRpcResult>;
 };
 
 /**
@@ -353,6 +371,14 @@ export const rpcSchemasRegistry: RpcSchemasRegistry = {
   [rpcName.readRevisions]: {
     inputSchema: readRevisionsRpc.inputSchema,
     resultSchema: readRevisionsRpc.resultSchema,
+  },
+  [rpcName.getParameters]: {
+    inputSchema: getParametersRpc.inputSchema,
+    resultSchema: getParametersRpc.resultSchema,
+  },
+  [rpcName.applyParameterOperation]: {
+    inputSchema: applyParameterOperationRpc.inputSchema,
+    resultSchema: applyParameterOperationRpc.resultSchema,
   },
 };
 
@@ -529,3 +555,17 @@ export type ReadRevisionsRpcInput = z.infer<typeof readRevisionsRpc.inputSchema>
 export type ReadRevisionsRpcSuccess = z.infer<typeof readRevisionsRpc.successSchema>;
 /** @public */
 export type ReadRevisionsRpcResult = z.infer<typeof readRevisionsRpc.resultSchema>;
+
+/** @public */
+export type GetParametersRpcInput = z.infer<typeof getParametersRpc.inputSchema>;
+/** @public */
+export type GetParametersRpcSuccess = z.infer<typeof getParametersRpc.successSchema>;
+/** @public */
+export type GetParametersRpcResult = z.infer<typeof getParametersRpc.resultSchema>;
+
+/** @public */
+export type ApplyParameterOperationRpcInput = z.infer<typeof applyParameterOperationRpc.inputSchema>;
+/** @public */
+export type ApplyParameterOperationRpcSuccess = z.infer<typeof applyParameterOperationRpc.successSchema>;
+/** @public */
+export type ApplyParameterOperationRpcResult = z.infer<typeof applyParameterOperationRpc.resultSchema>;

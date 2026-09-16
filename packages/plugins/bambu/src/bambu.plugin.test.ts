@@ -1,14 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from 'vitest';
 
-import { plugin, bambu } from "#index.js";
+import { plugin, bambu } from '#index.js';
 
-describe("@taucad/bambu", () => {
-  it("binds the mechanical plugin alias to the package-named factory", () => {
+describe('@taucad/bambu', () => {
+  it('binds the mechanical plugin alias to the package-named factory', () => {
     expect(bambu).toBe(plugin);
   });
 
-  it("exports the named plugin", async () => {
-    const { plugin: importedPlugin } = await import("#index.js");
+  it('exports the named plugin', async () => {
+    const { plugin: importedPlugin } = await import('#index.js');
     expect(importedPlugin).toBe(plugin);
     const { capabilities } = plugin();
     expect(capabilities.kernels.map(({ id }) => id)).toEqual([]);
@@ -16,6 +16,6 @@ describe("@taucad/bambu", () => {
     expect(capabilities.bundlers.map(({ id }) => id)).toEqual([]);
     expect(capabilities.transcoders.map(({ id }) => id)).toEqual([]);
     expect(capabilities.jobs.map(({ id }) => id)).toEqual([]);
-    expect(capabilities.machines.map(({ id }) => id)).toEqual(["bambu"]);
+    expect(capabilities.machines.map(({ id }) => id)).toEqual(['bambu']);
   });
 });

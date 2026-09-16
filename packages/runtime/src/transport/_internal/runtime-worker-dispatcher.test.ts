@@ -19,6 +19,7 @@ import { RuntimeAlreadyInitializedError } from '#transport/runtime-transport.typ
 import { contentDigest, sceneDigest } from '@taucad/cache-core';
 import type { ProgressiveSceneUpdate, SceneNodeId } from '#types/runtime-scene.types.js';
 import { createMemoryComputeEngine } from '#cache/memory-compute-engine.js';
+import { compileParameterManifest } from '@taucad/parameters';
 import { createComputeCapabilityHost } from '#cache/kernel-compute-runtime.js';
 import { exposeComputeStoreChannel } from '#transport/_internal/compute-store-channel.js';
 import type { ComputeBinding } from '#types/runtime-compute.types.js';
@@ -963,8 +964,26 @@ describe('createWorkerDispatcher', () => {
       // Wire callbacks via initialize.
       await fixture.client.call('initialize', {});
 
+      const digest = contentDigest({ value: `sha256:${'1'.repeat(64)}` });
+      const manifest = await compileParameterManifest({
+        declaration: {
+          schema: {
+            $schema: 'https://json-structure.org/meta/extended/v0/#',
+            $id: 'urn:taucad:test:dispatcher-parameters',
+            $uses: ['JSONSchemaUnits'],
+            name: 'DispatcherParameters',
+            type: 'object',
+          },
+          defaults: {},
+        },
+        scope: { kind: 'source', authority: 'test', root: '', entry: 'main.ts' },
+        source: { id: 'test', version: '1', revision: digest, capability: 'json-structure' },
+        dependency: digest,
+        middleware: digest,
+      });
+
       onParametersResolved!({
-        result: { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] },
+        result: { success: true, data: manifest, issues: [] },
         renderId,
       });
       onProgressUpdate!({ phase: 'bundling', renderId });

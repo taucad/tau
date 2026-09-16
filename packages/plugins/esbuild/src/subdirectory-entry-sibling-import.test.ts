@@ -27,7 +27,7 @@ import type {
 } from '@taucad/runtime/types';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { defineKernel } from '@taucad/runtime/kernel';
+import { createKernelParameterDeclaration, defineKernel } from '@taucad/runtime/kernel';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
 import { defineRuntime } from '@taucad/runtime/worker';
@@ -64,7 +64,14 @@ describe('subdirectory entry importing a sibling directory', () => {
       },
       getParameters: async () => ({
         success: true,
-        data: { defaultParameters: {}, jsonSchema: {} },
+        data: createKernelParameterDeclaration(
+          {},
+          { type: 'object', properties: {} },
+          {
+            id: 'urn:taucad:test:sibling-probe',
+            name: 'SiblingProbeParameters',
+          },
+        ),
         issues: [],
       }),
       createGeometry: async () => ({ geometry: testGeometry, nativeHandle: {} }),

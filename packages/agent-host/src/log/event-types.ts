@@ -37,6 +37,29 @@ export type ProviderMessageMetadata = {
   readonly tauInternal?: JsonObject | undefined;
 };
 
+/**
+ * A content-addressed attachment a durable message references rather than inlines.
+ *
+ * `path` is relative to the directory that owns the log (`attachments/<sha256>.<ext>`),
+ * so the same row resolves in every checkout of the chat. Bytes are read back at
+ * materialisation; the durable row never carries them. The legacy inline
+ * `{ type: 'image', mimeType, data }` block stays readable forever (D14).
+ *
+ * `byteLength` is optional (P29): a writer that has the size records it, and a
+ * writer that does not — a draft hydrated from a record, whose file part carries
+ * no size — omits it rather than fabricating one. No reader requires it;
+ * materialisation and render both resolve the bytes themselves.
+ *
+ * @public
+ */
+export type FileRefContentBlock = {
+  readonly type: 'file-ref';
+  readonly path: string;
+  readonly mimeType: string;
+  readonly byteLength?: number;
+  readonly filename?: string;
+};
+
 type MessageBase = {
   readonly id: string;
   readonly content: JsonValue;
@@ -287,6 +310,14 @@ export type StorageDurabilityClass = (typeof storageDurabilityClasses)[number];
 /** Provider-visible tool selection committed with one admission. @public */
 export type AgentToolChoice = 'none' | 'auto' | 'any' | 'custom' | readonly string[];
 
+/** Provider reasoning controls frozen with one admitted model row. @public */
+export type ModelReasoningConfig = {
+  readonly effort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max' | undefined;
+  readonly summary?: 'auto' | 'concise' | 'detailed' | undefined;
+  readonly display?: 'summarized' | 'omitted' | undefined;
+  readonly budgetTokens?: number | undefined;
+};
+
 /** Model selection committed with one admission so takeover can resume it exactly. @public */
 export type TurnModelConfig = {
   readonly id: string;
@@ -294,6 +325,7 @@ export type TurnModelConfig = {
   readonly maxTokens?: number | undefined;
   readonly providerKind?: ModelProviderKind | undefined;
   readonly cost?: ModelCostRates | undefined;
+  readonly reasoning?: ModelReasoningConfig | undefined;
 };
 
 /**

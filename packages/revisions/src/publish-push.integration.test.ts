@@ -238,7 +238,10 @@ describe.runIf(gitOnPath)('P40 — a native push to a Tau remote carries the ses
         refs: [{ name: 'refs/heads/main', expected: undefined }],
         atomic: true,
       }),
-    ).rejects.toThrow(/could not reach the remote/iu);
+      /* The remote *was* reached and refused (N1): a 401 is a credential to
+       * grant again, not a network that is down, and `origin` is a non-Tau
+       * name so it is the remote's own credential that was refused. */
+    ).rejects.toMatchObject({ code: 'REMOTE_REAUTHORIZATION_REQUIRED' });
     expect(await remote.git(['for-each-ref', '--format=%(refname)'])).toBe('');
 
     /* The same port, the same repository: only the held session differs. */

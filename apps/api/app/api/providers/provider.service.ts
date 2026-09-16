@@ -8,7 +8,7 @@ import type { ChatVertexAIInput } from '@langchain/google-vertexai';
 import { ChatOllama } from '@langchain/ollama';
 import type { ChatOllamaInput } from '@langchain/ollama';
 import { ChatAnthropic } from '@langchain/anthropic';
-import type { ChatAnthropicCallOptions } from '@langchain/anthropic';
+import type { ChatAnthropicInput } from '@langchain/anthropic';
 import type { BaseChatModel } from '@langchain/core/language_models/chat_models';
 import { ChatCerebras } from '@langchain/cerebras';
 import type { ChatCerebrasInput } from '@langchain/cerebras';
@@ -25,7 +25,7 @@ import type { TauChatKimiCompletionsInput } from '#api/providers/kimi-completion
 type ProviderOptionsMap = {
   openai: ChatOpenAIFields;
   ollama: ChatOllamaInput;
-  anthropic: ChatAnthropicCallOptions;
+  anthropic: ChatAnthropicInput;
   vertexai: ChatVertexAIInput & { model: string };
   cerebras: ChatCerebrasInput;
   together: ChatOpenAIFields;
@@ -45,6 +45,7 @@ type ProviderOptionsMap = {
 
 type ProviderRuntimeOptions = {
   diagnosticsContext?: ProviderDiagnosticsContext;
+  maximumOutputTokens?: number;
 };
 
 // Enhanced type that includes the createClass method
@@ -85,11 +86,12 @@ export class ProviderService {
         },
         inputTokensIncludesCacheReadTokens: true,
         inputTokensIncludesCacheWriteTokens: false,
-        createClass: (options) =>
+        createClass: (options, runtimeOptions) =>
           new ChatOpenAI({
             useResponsesApi: true,
             outputVersion: 'v1',
             ...options,
+            maxTokens: runtimeOptions?.maximumOutputTokens ?? options.maxTokens,
           }),
       },
       ollama: {
@@ -100,7 +102,11 @@ export class ProviderService {
         },
         inputTokensIncludesCacheReadTokens: false,
         inputTokensIncludesCacheWriteTokens: false,
-        createClass: (options) => new ChatOllama(options),
+        createClass: (options, runtimeOptions) =>
+          new ChatOllama({
+            ...options,
+            numPredict: runtimeOptions?.maximumOutputTokens ?? options.numPredict,
+          }),
       },
       anthropic: {
         provider: 'anthropic',
@@ -111,9 +117,10 @@ export class ProviderService {
         // LangChain's buildUsageMetadata sums API input_tokens + cache_read + cache_creation into usage_metadata.input_tokens
         inputTokensIncludesCacheReadTokens: true,
         inputTokensIncludesCacheWriteTokens: true,
-        createClass: (options) =>
+        createClass: (options, runtimeOptions) =>
           new ChatAnthropic({
             ...options,
+            maxTokens: runtimeOptions?.maximumOutputTokens ?? options.maxTokens,
             outputVersion: 'v1',
             betas: [
               // Stream tool use parameters without buffering / JSON validation, reducing the latency to begin receiving large parameters.
@@ -139,6 +146,9 @@ export class ProviderService {
         inputTokensIncludesCacheWriteTokens: false,
         createClass(options, runtimeOptions) {
           const credentials = configService.get('GOOGLE_VERTEX_AI_CREDENTIALS', { infer: true });
+          if (!credentials) {
+            throw new Error('GOOGLE_VERTEX_AI_CREDENTIALS is required for Vertex AI');
+          }
           const diagnosticsFetch = runtimeOptions?.diagnosticsContext
             ? createGoogleProviderDiagnosticsFetch({
                 baseFetch: globalThis.fetch,
@@ -148,6 +158,7 @@ export class ProviderService {
 
           return new ChatVertexAI({
             ...options,
+            maxOutputTokens: runtimeOptions?.maximumOutputTokens ?? options.maxOutputTokens,
             outputVersion: 'v1',
             location: 'global',
             streaming: true,
@@ -175,7 +186,11 @@ export class ProviderService {
         },
         inputTokensIncludesCacheReadTokens: false,
         inputTokensIncludesCacheWriteTokens: false,
-        createClass: (options) => new ChatCerebras(options),
+        createClass: (options, runtimeOptions) =>
+          new ChatCerebras({
+            ...options,
+            maxTokens: runtimeOptions?.maximumOutputTokens ?? options.maxTokens,
+          }),
       },
       together: {
         provider: 'together',
@@ -186,10 +201,11 @@ export class ProviderService {
         },
         inputTokensIncludesCacheReadTokens: true,
         inputTokensIncludesCacheWriteTokens: false,
-        createClass: (options) => {
+        createClass: (options, runtimeOptions) => {
           if (options.model === 'moonshotai/Kimi-K3') {
             return new TauChatKimiCompletions({
               ...options,
+              maxTokens: runtimeOptions?.maximumOutputTokens ?? options.maxTokens,
               modelProvider: 'together',
               outputVersion: 'v1',
             });
@@ -198,6 +214,7 @@ export class ProviderService {
           return new ChatOpenAI({
             outputVersion: 'v1',
             ...options,
+            maxTokens: runtimeOptions?.maximumOutputTokens ?? options.maxTokens,
           });
         },
       },
@@ -210,10 +227,11 @@ export class ProviderService {
         },
         inputTokensIncludesCacheReadTokens: false,
         inputTokensIncludesCacheWriteTokens: false,
-        createClass: (options) =>
+        createClass: (options, runtimeOptions) =>
           new ChatOpenAI({
             outputVersion: 'v1',
             ...options,
+            maxTokens: runtimeOptions?.maximumOutputTokens ?? options.maxTokens,
           }),
       },
       xai: {
@@ -231,6 +249,7 @@ export class ProviderService {
             baseURL: 'https://api.x.ai/v1',
             conversationId: runtimeOptions?.diagnosticsContext?.chatId,
             ...options,
+            maxOutputTokens: runtimeOptions?.maximumOutputTokens ?? options.maxOutputTokens,
           }),
       },
       moonshot: {
@@ -245,6 +264,7 @@ export class ProviderService {
         createClass: (options, runtimeOptions) =>
           new TauChatKimiCompletions({
             ...options,
+            maxTokens: runtimeOptions?.maximumOutputTokens ?? options.maxTokens,
             modelProvider: 'moonshot',
             configuration: {
               apiKey: configService.get('MOONSHOT_API_KEY', { infer: true }),

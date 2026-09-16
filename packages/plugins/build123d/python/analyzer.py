@@ -15,6 +15,7 @@ MAX_AST_DEPTH = 100
 MAX_COLLECTION_ITEMS = 1_000
 MAX_STRING_LENGTH = 65_536
 MAX_SAFE_INTEGER = 2**53 - 1
+SOURCE_UNIT_CAPABILITY = "change-source-unit:preserve-size:v1"
 
 SCALAR_TYPES = {"bool": bool, "int": int, "float": float, "str": str}
 EXECUTION_HINT_KEYS = {
@@ -384,6 +385,11 @@ def _parameters(tree: ast.Module, metadata: dict[str, Any]) -> tuple[dict[str, A
             ],
         }
         binding = {key: hint[key] for key in SEMANTIC_HINT_KEYS if key in hint}
+        unit = hint.get("ucumUnit") or (BIPM_UNIT_TO_UCUM.get(hint.get("unit")) if hint.get("unit") else None)
+        if unit is not None:
+            binding["unit"] = unit
+        if field["type"] == "number" and unit is not None and hint.get("space", "linear") != "point":
+            binding["sourceUnitCapability"] = SOURCE_UNIT_CAPABILITY
         if binding:
             bindings[f"/{name}"] = binding
 

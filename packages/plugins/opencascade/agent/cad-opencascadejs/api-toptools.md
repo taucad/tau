@@ -4,73 +4,73 @@
 
 TopTools: declare class TopTools
 
-constructor
+  constructor
 
-static Dummy(I: number): void;
+  static Dummy(I: number): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TopTools_FormatVersion: typeof TopTools_FormatVersion[keyof typeof TopTools_FormatVersion]
 
 TopTools_LocationSet: declare class TopTools_LocationSet
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-Add(L: TopLoc_Location): number;
+  Add(L: TopLoc_Location): number;
 
-Location(I: number): TopLoc_Location;
+  Location(I: number): TopLoc_Location;
 
-Index(L: TopLoc_Location): number;
+  Index(L: TopLoc_Location): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TopTools_ShapeMapHasher: declare class TopTools_ShapeMapHasher
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TopTools_ShapeSet: declare class TopTools_ShapeSet
 
-constructor
+  constructor
 
-SetFormatNb(theFormatNb: number): void;
+  SetFormatNb(theFormatNb: number): void;
 
-FormatNb(): number;
+  FormatNb(): number;
 
-Clear(): void;
+  Clear(): void;
 
-Add(S: TopoDS_Shape): number;
+  Add(S: TopoDS_Shape): number;
 
-Shape(I: number): TopoDS_Shape;
+  Shape(I: number): TopoDS_Shape;
 
-Index(S: TopoDS_Shape): number;
+  Index(S: TopoDS_Shape): number;
 
-Locations(): TopTools_LocationSet;
+  Locations(): TopTools_LocationSet;
 
-ChangeLocations(): TopTools_LocationSet;
+  ChangeLocations(): TopTools_LocationSet;
 
-DumpExtent(S: TCollection_AsciiString): void;
+  DumpExtent(S: TCollection_AsciiString): void;
 
-AddGeometry(S: TopoDS_Shape): void;
+  AddGeometry(S: TopoDS_Shape): void;
 
-AddShapes(S1: TopoDS_Shape, S2: TopoDS_Shape): void;
+  AddShapes(S1: TopoDS_Shape, S2: TopoDS_Shape): void;
 
-Check(T: TopAbs_ShapeEnum, S: TopoDS_Shape): void;
+  Check(T: TopAbs_ShapeEnum, S: TopoDS_Shape): void;
 
-NbShapes(): number;
+  NbShapes(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TopTools_Array1OfShape: NCollection_Array1_TopoDS_Shape
 

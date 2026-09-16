@@ -4,4 +4,4 @@
 
 // Import shapes from a DXF file
 import_dxf(dxf_file: str | PathLike | TextIO | BinaryIO) -> ShapeList
-// dxf_file: dxf file path or readable stream
+//   dxf_file: dxf file path or readable stream

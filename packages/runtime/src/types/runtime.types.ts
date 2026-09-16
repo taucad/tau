@@ -11,7 +11,7 @@
 import type { backendProviders, kernelProviders } from '@taucad/types/constants';
 import type { ExportFidelity, ExportFile, Geometry, GeometryResponse } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
-import type { ParameterDeclaration, ParameterManifest } from '#parameter/manifest.js';
+import type { ParameterDeclaration, ParameterManifest } from '@taucad/parameters';
 import type {
   CollectFormatMap,
   CollectKernelIds,

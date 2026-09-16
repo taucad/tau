@@ -15,7 +15,6 @@ import type { GatewayFixture } from '#support/gateway-fixture.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
   connectPickedFolder,
-  declineCookieBanner,
   expectSignedIn,
   expectVisible,
   selectChatModel,
@@ -175,7 +174,6 @@ test.for(cases)(
     const { page } = session;
     try {
       await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-      await declineCookieBanner(page);
       await authenticatePackagedDesktop(session, token);
       await expectSignedIn(page);
       await selectKernel(page, kernelCase.kernel === 'OpenRSCAD' ? 'OpenSCAD' : kernelCase.kernel);

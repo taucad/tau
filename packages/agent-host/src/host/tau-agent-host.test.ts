@@ -130,7 +130,15 @@ describe('createTauAgentHost', () => {
       message: { id: 'turn-live', role: 'user', content: 'Stream.' },
     });
 
-    expect(order).toEqual(['text-delta:live-0', 'thinking-delta:live-0', 'durable:live-0']);
+    expect(order).toEqual([
+      'text-start:live-0',
+      'text-delta:live-0',
+      'text-end:live-0',
+      'thinking-start:live-0',
+      'thinking-delta:live-0',
+      'thinking-end:live-0',
+      'durable:live-0',
+    ]);
     await host.close();
   });
 
@@ -196,6 +204,53 @@ describe('createTauAgentHost', () => {
       },
     });
     expect(invoke).not.toHaveBeenCalled();
+    await host.close();
+  });
+
+  it('records a revision settlement through the chat log writer', async () => {
+    const file = createMemoryLogFile();
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'settlement',
+      }),
+    );
+    await host.admit({
+      chatId: 'chat-settlement',
+      runId: 'run-settlement',
+      trigger: 'submit',
+      message: { id: 'turn-settlement', role: 'user', content: 'Settle.' },
+    });
+
+    await host.recordSettlement({
+      chatId: 'chat-settlement',
+      runId: 'run-settlement',
+      event: {
+        type: 'turn.finalized',
+        turnId: 'turn-settlement',
+        chatId: 'chat-settlement',
+        projectId: 'project-settlement',
+        checkoutId: 'live',
+        revisionId: 'revision-settlement',
+        branch: 'main',
+        changedPaths: ['main.ts'],
+        treeId: 'tree-settlement',
+        trigger: 'turn',
+        runIds: ['run-settlement'],
+      },
+    });
+
+    expect((await (await file.open()).read()).at(-1)).toMatchObject({
+      type: 'turn.finalized',
+      runId: 'run-settlement',
+      revisionId: 'revision-settlement',
+    });
     await host.close();
   });
 

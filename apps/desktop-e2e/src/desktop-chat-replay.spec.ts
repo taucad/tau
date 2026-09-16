@@ -11,7 +11,6 @@ import {
   activeChatId,
   cancelRun,
   connectPickedFolder,
-  declineCookieBanner,
   expectCount,
   expectGeometryFramed,
   expectKernelReparsed,
@@ -77,7 +76,6 @@ test('builds an openrscad model on disk from the desktop composer', async () => 
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-    await declineCookieBanner(page);
     await expectSignedIn(page);
 
     await selectKernel(page, 'OpenSCAD');
@@ -142,7 +140,6 @@ test('signs in and creates a project on real disk from the composer', async () =
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
     // O9 (G23): desktop cold-start baseline.
     console.info(`[desktop-e2e] launch-to-composer: ${String(Date.now() - launched)} ms`);
-    await declineCookieBanner(page);
     await expectSignedIn(page);
 
     await selectKernel(page, 'OpenSCAD');
@@ -198,7 +195,6 @@ test('renders an external write through the native kernel utility', async () => 
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-    await declineCookieBanner(page);
     await selectKernel(page, 'OpenSCAD');
     if (location === 'picked') {
       await connectPickedFolder(session);

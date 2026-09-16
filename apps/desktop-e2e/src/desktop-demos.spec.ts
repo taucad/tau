@@ -7,7 +7,6 @@ import { getBoundingBoxFromInspect, getInspectReport, validateGlbData } from '@t
 
 import { captureNextDesktopDownload, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
-import { declineCookieBanner } from '#support/scenario.js';
 
 let session: DesktopSession | undefined;
 
@@ -55,7 +54,6 @@ test('[completed-artifact] exports both native QR demos and animates both auth s
   session = await launchDesktopApp({ packaged: true, token: 'desktop-demos-probe' });
   const { page } = session;
   await page.goto('app://tau/', { waitUntil: 'domcontentloaded' });
-  await declineCookieBanner(page);
   const legacyDownload = page.getByRole('button', { name: /^Download as /u });
   await revealLazyContent(page, legacyDownload);
   await expectQrExport(session, legacyDownload);

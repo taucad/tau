@@ -4,247 +4,247 @@
 
 BRepClass3d: declare class BRepClass3d
 
-constructor
+  constructor
 
-static OuterShell(S: TopoDS_Solid): TopoDS_Shell;
+  static OuterShell(S: TopoDS_Solid): TopoDS_Shell;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepClass3d_BndBoxTreeSelectorLine: declare class BRepClass3d_BndBoxTreeSelectorLine
 
-constructor
+  constructor
 
-Reject(argNo0: Bnd_Box): boolean;
+  Reject(argNo0: Bnd_Box): boolean;
 
-Accept(argNo0: number): boolean;
+  Accept(argNo0: number): boolean;
 
-SetCurrentLine(theL: gp_Lin, theMaxParam: number): void;
+  SetCurrentLine(theL: gp_Lin, theMaxParam: number): void;
 
-GetEdgeParam(i: number, theOutE: TopoDS_Edge, theOutParam?: number, outLParam?: number): { theOutParam: number; outLParam: number };
+  GetEdgeParam(i: number, theOutE: TopoDS_Edge, theOutParam?: number, outLParam?: number): { theOutParam: number; outLParam: number };
 
-GetVertParam(i: number, theOutV: TopoDS_Vertex, outLParam?: number): { outLParam: number };
+  GetVertParam(i: number, theOutV: TopoDS_Vertex, outLParam?: number): { outLParam: number };
 
-GetNbEdgeParam(): number;
+  GetNbEdgeParam(): number;
 
-GetNbVertParam(): number;
+  GetNbVertParam(): number;
 
-ClearResults(): void;
+  ClearResults(): void;
 
-IsCorrect(): boolean;
+  IsCorrect(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepClass3d_BndBoxTreeSelectorPoint: declare class BRepClass3d_BndBoxTreeSelectorPoint
 
-constructor
+  constructor
 
-Reject(argNo0: Bnd_Box): boolean;
+  Reject(argNo0: Bnd_Box): boolean;
 
-Accept(argNo0: number): boolean;
+  Accept(argNo0: number): boolean;
 
-SetCurrentPoint(theP: gp_Pnt): void;
+  SetCurrentPoint(theP: gp_Pnt): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepClass3d_Intersector3d: declare class BRepClass3d_Intersector3d
 
-constructor
+  constructor
 
-Perform(L: gp_Lin, Prm: number, Tol: number, F: TopoDS_Face): void;
+  Perform(L: gp_Lin, Prm: number, Tol: number, F: TopoDS_Face): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-HasAPoint(): boolean;
+  HasAPoint(): boolean;
 
-UParameter(): number;
+  UParameter(): number;
 
-VParameter(): number;
+  VParameter(): number;
 
-WParameter(): number;
+  WParameter(): number;
 
-Pnt(): gp_Pnt;
+  Pnt(): gp_Pnt;
 
-Transition(): IntCurveSurface_TransitionOnCurve;
+  Transition(): IntCurveSurface_TransitionOnCurve;
 
-State(): TopAbs_State;
+  State(): TopAbs_State;
 
-Face(): TopoDS_Face;
+  Face(): TopoDS_Face;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepClass3d_SClassifier: declare class BRepClass3d_SClassifier
 
-constructor
+  constructor
 
-Perform(S: BRepClass3d_SolidExplorer, P: gp_Pnt, Tol: number): void;
+  Perform(S: BRepClass3d_SolidExplorer, P: gp_Pnt, Tol: number): void;
 
-PerformInfinitePoint(S: BRepClass3d_SolidExplorer, Tol: number): void;
+  PerformInfinitePoint(S: BRepClass3d_SolidExplorer, Tol: number): void;
 
-Rejected(): boolean;
+  Rejected(): boolean;
 
-State(): TopAbs_State;
+  State(): TopAbs_State;
 
-IsOnAFace(): boolean;
+  IsOnAFace(): boolean;
 
-Face(): TopoDS_Face;
+  Face(): TopoDS_Face;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepClass3d_SolidClassifier: declare class BRepClass3d_SolidClassifier extends BRepClass3d_SClassifier
 
-constructor
+  constructor
 
-Load(S: TopoDS_Shape): void;
+  Load(S: TopoDS_Shape): void;
 
-Perform(P: gp_Pnt, Tol: number): void;
-Perform(S: BRepClass3d_SolidExplorer, P: gp_Pnt, Tol: number): void;
-Perform(P: gp_Pnt, Tol: number): void;
-Perform(S: BRepClass3d_SolidExplorer, P: gp_Pnt, Tol: number): void;
+  Perform(P: gp_Pnt, Tol: number): void;
+  Perform(S: BRepClass3d_SolidExplorer, P: gp_Pnt, Tol: number): void;
+  Perform(P: gp_Pnt, Tol: number): void;
+  Perform(S: BRepClass3d_SolidExplorer, P: gp_Pnt, Tol: number): void;
 
-PerformInfinitePoint(Tol: number): void;
-PerformInfinitePoint(S: BRepClass3d_SolidExplorer, Tol: number): void;
-PerformInfinitePoint(Tol: number): void;
-PerformInfinitePoint(S: BRepClass3d_SolidExplorer, Tol: number): void;
+  PerformInfinitePoint(Tol: number): void;
+  PerformInfinitePoint(S: BRepClass3d_SolidExplorer, Tol: number): void;
+  PerformInfinitePoint(Tol: number): void;
+  PerformInfinitePoint(S: BRepClass3d_SolidExplorer, Tol: number): void;
 
-Destroy(): void;
+  Destroy(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepClass3d_SolidExplorer: declare class BRepClass3d_SolidExplorer
 
-constructor
+  constructor
 
-InitShape(S: TopoDS_Shape): void;
+  InitShape(S: TopoDS_Shape): void;
 
-Reject(P: gp_Pnt): boolean;
+  Reject(P: gp_Pnt): boolean;
 
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt): boolean;
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, Param: number): { returnValue: boolean; Param: number };
-static FindAPointInTheFace(F: TopoDS_Face, u: number, v: number): { returnValue: boolean; u: number; v: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number): { returnValue: boolean; u: number; v: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number, Param?: number): { returnValue: boolean; u: number; v: number; Param: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, theVecD1U: gp_Vec, theVecD1V: gp_Vec): { returnValue: boolean; u: number; v: number; Param: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt): boolean;
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, Param: number): { returnValue: boolean; Param: number };
-static FindAPointInTheFace(F: TopoDS_Face, u: number, v: number): { returnValue: boolean; u: number; v: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number): { returnValue: boolean; u: number; v: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number, Param?: number): { returnValue: boolean; u: number; v: number; Param: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, theVecD1U: gp_Vec, theVecD1V: gp_Vec): { returnValue: boolean; u: number; v: number; Param: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt): boolean;
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, Param: number): { returnValue: boolean; Param: number };
-static FindAPointInTheFace(F: TopoDS_Face, u: number, v: number): { returnValue: boolean; u: number; v: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number): { returnValue: boolean; u: number; v: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number, Param?: number): { returnValue: boolean; u: number; v: number; Param: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, theVecD1U: gp_Vec, theVecD1V: gp_Vec): { returnValue: boolean; u: number; v: number; Param: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt): boolean;
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, Param: number): { returnValue: boolean; Param: number };
-static FindAPointInTheFace(F: TopoDS_Face, u: number, v: number): { returnValue: boolean; u: number; v: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number): { returnValue: boolean; u: number; v: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number, Param?: number): { returnValue: boolean; u: number; v: number; Param: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, theVecD1U: gp_Vec, theVecD1V: gp_Vec): { returnValue: boolean; u: number; v: number; Param: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt): boolean;
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, Param: number): { returnValue: boolean; Param: number };
-static FindAPointInTheFace(F: TopoDS_Face, u: number, v: number): { returnValue: boolean; u: number; v: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number): { returnValue: boolean; u: number; v: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number, Param?: number): { returnValue: boolean; u: number; v: number; Param: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, theVecD1U: gp_Vec, theVecD1V: gp_Vec): { returnValue: boolean; u: number; v: number; Param: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt): boolean;
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, Param: number): { returnValue: boolean; Param: number };
-static FindAPointInTheFace(F: TopoDS_Face, u: number, v: number): { returnValue: boolean; u: number; v: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number): { returnValue: boolean; u: number; v: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number, Param?: number): { returnValue: boolean; u: number; v: number; Param: number };
-static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, theVecD1U: gp_Vec, theVecD1V: gp_Vec): { returnValue: boolean; u: number; v: number; Param: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt): boolean;
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, Param: number): { returnValue: boolean; Param: number };
+  static FindAPointInTheFace(F: TopoDS_Face, u: number, v: number): { returnValue: boolean; u: number; v: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number): { returnValue: boolean; u: number; v: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number, Param?: number): { returnValue: boolean; u: number; v: number; Param: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, theVecD1U: gp_Vec, theVecD1V: gp_Vec): { returnValue: boolean; u: number; v: number; Param: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt): boolean;
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, Param: number): { returnValue: boolean; Param: number };
+  static FindAPointInTheFace(F: TopoDS_Face, u: number, v: number): { returnValue: boolean; u: number; v: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number): { returnValue: boolean; u: number; v: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number, Param?: number): { returnValue: boolean; u: number; v: number; Param: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, theVecD1U: gp_Vec, theVecD1V: gp_Vec): { returnValue: boolean; u: number; v: number; Param: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt): boolean;
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, Param: number): { returnValue: boolean; Param: number };
+  static FindAPointInTheFace(F: TopoDS_Face, u: number, v: number): { returnValue: boolean; u: number; v: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number): { returnValue: boolean; u: number; v: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number, Param?: number): { returnValue: boolean; u: number; v: number; Param: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, theVecD1U: gp_Vec, theVecD1V: gp_Vec): { returnValue: boolean; u: number; v: number; Param: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt): boolean;
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, Param: number): { returnValue: boolean; Param: number };
+  static FindAPointInTheFace(F: TopoDS_Face, u: number, v: number): { returnValue: boolean; u: number; v: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number): { returnValue: boolean; u: number; v: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number, Param?: number): { returnValue: boolean; u: number; v: number; Param: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, theVecD1U: gp_Vec, theVecD1V: gp_Vec): { returnValue: boolean; u: number; v: number; Param: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt): boolean;
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, Param: number): { returnValue: boolean; Param: number };
+  static FindAPointInTheFace(F: TopoDS_Face, u: number, v: number): { returnValue: boolean; u: number; v: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number): { returnValue: boolean; u: number; v: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number, Param?: number): { returnValue: boolean; u: number; v: number; Param: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, theVecD1U: gp_Vec, theVecD1V: gp_Vec): { returnValue: boolean; u: number; v: number; Param: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt): boolean;
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, Param: number): { returnValue: boolean; Param: number };
+  static FindAPointInTheFace(F: TopoDS_Face, u: number, v: number): { returnValue: boolean; u: number; v: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number): { returnValue: boolean; u: number; v: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number, Param?: number): { returnValue: boolean; u: number; v: number; Param: number };
+  static FindAPointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, theVecD1U: gp_Vec, theVecD1V: gp_Vec): { returnValue: boolean; u: number; v: number; Param: number };
 
-PointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number, Param?: number, Index?: number): { returnValue: boolean; u: number; v: number; Param: number; Index: number };
-PointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, Index: number, surf: BRepAdaptor_Surface, u1: number, v1: number, u2: number, v2: number): { returnValue: boolean; u: number; v: number; Param: number; Index: number };
-PointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, Index: number, surf: BRepAdaptor_Surface, u1: number, v1: number, u2: number, v2: number, theVecD1U: gp_Vec, theVecD1V: gp_Vec): { returnValue: boolean; u: number; v: number; Param: number; Index: number };
-PointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number, Param?: number, Index?: number): { returnValue: boolean; u: number; v: number; Param: number; Index: number };
-PointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, Index: number, surf: BRepAdaptor_Surface, u1: number, v1: number, u2: number, v2: number): { returnValue: boolean; u: number; v: number; Param: number; Index: number };
-PointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, Index: number, surf: BRepAdaptor_Surface, u1: number, v1: number, u2: number, v2: number, theVecD1U: gp_Vec, theVecD1V: gp_Vec): { returnValue: boolean; u: number; v: number; Param: number; Index: number };
-PointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number, Param?: number, Index?: number): { returnValue: boolean; u: number; v: number; Param: number; Index: number };
-PointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, Index: number, surf: BRepAdaptor_Surface, u1: number, v1: number, u2: number, v2: number): { returnValue: boolean; u: number; v: number; Param: number; Index: number };
-PointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, Index: number, surf: BRepAdaptor_Surface, u1: number, v1: number, u2: number, v2: number, theVecD1U: gp_Vec, theVecD1V: gp_Vec): { returnValue: boolean; u: number; v: number; Param: number; Index: number };
+  PointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number, Param?: number, Index?: number): { returnValue: boolean; u: number; v: number; Param: number; Index: number };
+  PointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, Index: number, surf: BRepAdaptor_Surface, u1: number, v1: number, u2: number, v2: number): { returnValue: boolean; u: number; v: number; Param: number; Index: number };
+  PointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, Index: number, surf: BRepAdaptor_Surface, u1: number, v1: number, u2: number, v2: number, theVecD1U: gp_Vec, theVecD1V: gp_Vec): { returnValue: boolean; u: number; v: number; Param: number; Index: number };
+  PointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number, Param?: number, Index?: number): { returnValue: boolean; u: number; v: number; Param: number; Index: number };
+  PointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, Index: number, surf: BRepAdaptor_Surface, u1: number, v1: number, u2: number, v2: number): { returnValue: boolean; u: number; v: number; Param: number; Index: number };
+  PointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, Index: number, surf: BRepAdaptor_Surface, u1: number, v1: number, u2: number, v2: number, theVecD1U: gp_Vec, theVecD1V: gp_Vec): { returnValue: boolean; u: number; v: number; Param: number; Index: number };
+  PointInTheFace(F: TopoDS_Face, P: gp_Pnt, u?: number, v?: number, Param?: number, Index?: number): { returnValue: boolean; u: number; v: number; Param: number; Index: number };
+  PointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, Index: number, surf: BRepAdaptor_Surface, u1: number, v1: number, u2: number, v2: number): { returnValue: boolean; u: number; v: number; Param: number; Index: number };
+  PointInTheFace(F: TopoDS_Face, P: gp_Pnt, u: number, v: number, Param: number, Index: number, surf: BRepAdaptor_Surface, u1: number, v1: number, u2: number, v2: number, theVecD1U: gp_Vec, theVecD1V: gp_Vec): { returnValue: boolean; u: number; v: number; Param: number; Index: number };
 
-InitShell(): void;
+  InitShell(): void;
 
-MoreShell(): boolean;
+  MoreShell(): boolean;
 
-NextShell(): void;
+  NextShell(): void;
 
-CurrentShell(): TopoDS_Shell;
+  CurrentShell(): TopoDS_Shell;
 
-RejectShell(L: gp_Lin): boolean;
+  RejectShell(L: gp_Lin): boolean;
 
-InitFace(): void;
+  InitFace(): void;
 
-MoreFace(): boolean;
+  MoreFace(): boolean;
 
-NextFace(): void;
+  NextFace(): void;
 
-CurrentFace(): TopoDS_Face;
+  CurrentFace(): TopoDS_Face;
 
-RejectFace(L: gp_Lin): boolean;
+  RejectFace(L: gp_Lin): boolean;
 
-Segment(P: gp_Pnt, L: gp_Lin, Par?: number): { returnValue: number; Par: number };
+  Segment(P: gp_Pnt, L: gp_Lin, Par?: number): { returnValue: number; Par: number };
 
-OtherSegment(P: gp_Pnt, L: gp_Lin, Par?: number): { returnValue: number; Par: number };
+  OtherSegment(P: gp_Pnt, L: gp_Lin, Par?: number): { returnValue: number; Par: number };
 
-GetFaceSegmentIndex(): number;
+  GetFaceSegmentIndex(): number;
 
-DumpSegment(P: gp_Pnt, L: gp_Lin, Par: number, S: TopAbs_State): void;
+  DumpSegment(P: gp_Pnt, L: gp_Lin, Par: number, S: TopAbs_State): void;
 
-GetShape(): TopoDS_Shape;
+  GetShape(): TopoDS_Shape;
 
-GetMapEV(): NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher;
+  GetMapEV(): NCollection_IndexedMap_TopoDS_Shape_TopTools_ShapeMapHasher;
 
-Destroy(): void;
+  Destroy(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepClass3d_SolidPassiveClassifier: declare class BRepClass3d_SolidPassiveClassifier
 
-constructor
+  constructor
 
-Reset(L: gp_Lin, P: number, Tol: number): void;
+  Reset(L: gp_Lin, P: number, Tol: number): void;
 
-Compare(F: TopoDS_Face, Or: TopAbs_Orientation): void;
+  Compare(F: TopoDS_Face, Or: TopAbs_Orientation): void;
 
-Parameter(): number;
+  Parameter(): number;
 
-HasIntersection(): boolean;
+  HasIntersection(): boolean;
 
-Intersector(): BRepClass3d_Intersector3d;
+  Intersector(): BRepClass3d_Intersector3d;
 
-State(): TopAbs_State;
+  State(): TopAbs_State;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepClass3d_BndBoxTreeSelectorLine_EdgeParam: interface BRepClass3d_BndBoxTreeSelectorLine_EdgeParam
 
-myE: TopoDS_Edge
+  myE: TopoDS_Edge
 
-myParam: number
+  myParam: number
 
-myLParam: number
+  myLParam: number
 
 BRepClass3d_BndBoxTreeSelectorLine_VertParam: interface BRepClass3d_BndBoxTreeSelectorLine_VertParam
 
-myV: TopoDS_Vertex
+  myV: TopoDS_Vertex
 
-myLParam: number
+  myLParam: number

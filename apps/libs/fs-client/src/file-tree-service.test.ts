@@ -4,7 +4,7 @@ import { FileTreeService } from '#file-tree-service.js';
 import type { ExternalPollTelemetry } from '#file-tree-service.js';
 import type { FileSystemClient } from '#file-system-client.js';
 import type { FileTreeNode } from '@taucad/filesystem';
-import type { ChangeEvent, FileEntry, FileStat } from '@taucad/types';
+import type { ChangeEvent, FileEntry, FileProvenance, FileStat } from '@taucad/types';
 import { WorkerChangeChannel } from '#worker-change-channel.js';
 import { DirectoryListingErrorCode, DirectoryListingFailedError } from '#directory-listing.js';
 import { WorkspacePathResolver } from '#workspace-path-resolver.js';
@@ -23,7 +23,7 @@ const skillBytes = new TextEncoder().encode(skillContents);
 const skillsRoot = '.agents/skills';
 const skillIdentity = 'skill:cad-replicad@1.0.0#fingerprint';
 
-/** The built-in bundle overlay, shaped as `libs/agent-tools` produces it. */
+/** The system skill bundle overlay, shaped as `libs/agent-tools` produces it. */
 const skillOverlay = (): ComposedViewOverlay => {
   const nodes = new Map<string, { type: 'dir'; children: readonly string[] } | { type: 'file' }>([
     ['', { type: 'dir', children: ['.agents'] }],
@@ -110,6 +110,13 @@ const directoryNode = (name: string): FileTreeNode => ({
   children: [],
 });
 
+/** A project row's provenance, with only `versioned` moving. */
+const provenanceOf = (versioned: boolean): FileProvenance => ({
+  source: 'project',
+  versioned,
+  agentAccess: 'read-write',
+});
+
 const directoryEntry = (path: string): FileEntry => ({
   path,
   name: path.split('/').pop() ?? path,
@@ -184,10 +191,10 @@ describe('FileTreeService composed-view provenance (north star W2)', () => {
   /*
    * North-star W2 pin (execution-queue ruling P2). The Files pane and the
    * agent's tools read one composed view (charter D1, architecture L4), so a
-   * built-in skill bundle is a row in the tree with `source: 'system-skills'`
+   * system skill bundle is a row in the tree with `source: 'system-skills'`
    * and read-only access — data, never a label on the wire (blueprint S14).
    */
-  it('should stamp a built-in skill entry with system-skills provenance', async () => {
+  it('should stamp a system skill entry with system-skills provenance', async () => {
     const harness = createTreeHarness({ proxy: await createComposedProxy() });
     try {
       const entries = await harness.tree.listDirectory('.agents/skills/cad-replicad');
@@ -582,6 +589,52 @@ describe('FileTreeService mergeChildren / isDirectoryResolved', () => {
     expect(ref2).toBe(ref1);
     tree.dispose();
     vi.useRealTimers();
+  });
+
+  /*
+   * W4 sweep (W14): a row is stale when *any* provenance field moved, not only
+   * `source` and `agentAccess` — an `exports/**` file becoming versioned, or a
+   * project file taking over an overlay unit (`overrides`), changes what the
+   * pane draws while size and mtime stand still.
+   */
+  it.each([
+    {
+      row: 'file',
+      node: (versioned: boolean): FileTreeNode => ({
+        ...textNode('a.ts', { size: 1 }),
+        provenance: provenanceOf(versioned),
+      }),
+    },
+    {
+      row: 'directory',
+      node: (versioned: boolean): FileTreeNode => ({
+        ...directoryNode('exports'),
+        provenance: provenanceOf(versioned),
+      }),
+    },
+  ])('should refresh a $row row whose provenance alone changed', async ({ node }) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { tree, proxy, disposeChannel } = createTreeHarness({
+      proxy: mock<FileSystemClient>({
+        readDirectory: vi.fn().mockResolvedValue([node(false)]),
+        readdir: vi.fn().mockResolvedValue([]),
+        stat: vi.fn().mockResolvedValue(textStat()),
+        getDirectoryStat: vi.fn().mockResolvedValue([]),
+      }),
+    });
+    try {
+      await tree.listDirectory('');
+      const listed = [...tree.getTreeSnapshot().keys()];
+      vi.mocked(proxy.readDirectory).mockResolvedValue([node(true)]);
+      tree.scheduleRefresh('');
+      await vi.advanceTimersByTimeAsync(200);
+
+      expect(tree.getTreeSnapshot().get(listed[0] ?? '')?.provenance).toMatchObject({ versioned: true });
+    } finally {
+      tree.dispose();
+      disposeChannel();
+      vi.useRealTimers();
+    }
   });
 
   it('should keep a pending root refresh when a narrower write arrives inside the debounce window', async () => {

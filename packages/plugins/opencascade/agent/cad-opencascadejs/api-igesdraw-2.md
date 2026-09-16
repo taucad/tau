@@ -4,73 +4,73 @@
 
 IGESDraw_ViewsVisible: declare class IGESDraw_ViewsVisible extends IGESData_ViewKindEntity
 
-constructor
+  constructor
 
-Init(allViewEntities: NCollection_HArray1_handle_IGESData_ViewKindEntity, allDisplayEntity: NCollection_HArray1_handle_IGESData_IGESEntity): void;
+  Init(allViewEntities: NCollection_HArray1_handle_IGESData_ViewKindEntity, allDisplayEntity: NCollection_HArray1_handle_IGESData_IGESEntity): void;
 
-InitImplied(allDisplayEntity: NCollection_HArray1_handle_IGESData_IGESEntity): void;
+  InitImplied(allDisplayEntity: NCollection_HArray1_handle_IGESData_IGESEntity): void;
 
-IsSingle(): boolean;
+  IsSingle(): boolean;
 
-NbViews(): number;
+  NbViews(): number;
 
-NbDisplayedEntities(): number;
+  NbDisplayedEntities(): number;
 
-ViewItem(num: number): IGESData_ViewKindEntity;
+  ViewItem(num: number): IGESData_ViewKindEntity;
 
-DisplayedEntity(Index: number): IGESData_IGESEntity;
+  DisplayedEntity(Index: number): IGESData_IGESEntity;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IGESDraw_ViewsVisibleWithAttr: declare class IGESDraw_ViewsVisibleWithAttr extends IGESData_ViewKindEntity
 
-constructor
+  constructor
 
-Init(allViewEntities: NCollection_HArray1_handle_IGESData_ViewKindEntity, allLineFonts: NCollection_HArray1_int, allLineDefinitions: NCollection_HArray1_handle_IGESData_LineFontEntity, allColorValues: NCollection_HArray1_int, allColorDefinitions: NCollection_HArray1_handle_IGESGraph_Color, allLineWeights: NCollection_HArray1_int, allDisplayEntities: NCollection_HArray1_handle_IGESData_IGESEntity): void;
+  Init(allViewEntities: NCollection_HArray1_handle_IGESData_ViewKindEntity, allLineFonts: NCollection_HArray1_int, allLineDefinitions: NCollection_HArray1_handle_IGESData_LineFontEntity, allColorValues: NCollection_HArray1_int, allColorDefinitions: NCollection_HArray1_handle_IGESGraph_Color, allLineWeights: NCollection_HArray1_int, allDisplayEntities: NCollection_HArray1_handle_IGESData_IGESEntity): void;
 
-InitImplied(allDisplayEntity: NCollection_HArray1_handle_IGESData_IGESEntity): void;
+  InitImplied(allDisplayEntity: NCollection_HArray1_handle_IGESData_IGESEntity): void;
 
-IsSingle(): boolean;
+  IsSingle(): boolean;
 
-NbViews(): number;
+  NbViews(): number;
 
-NbDisplayedEntities(): number;
+  NbDisplayedEntities(): number;
 
-ViewItem(num: number): IGESData_ViewKindEntity;
+  ViewItem(num: number): IGESData_ViewKindEntity;
 
-LineFontValue(Index: number): number;
+  LineFontValue(Index: number): number;
 
-IsFontDefinition(Index: number): boolean;
+  IsFontDefinition(Index: number): boolean;
 
-FontDefinition(Index: number): IGESData_LineFontEntity;
+  FontDefinition(Index: number): IGESData_LineFontEntity;
 
-ColorValue(Index: number): number;
+  ColorValue(Index: number): number;
 
-IsColorDefinition(Index: number): boolean;
+  IsColorDefinition(Index: number): boolean;
 
-ColorDefinition(Index: number): IGESGraph_Color;
+  ColorDefinition(Index: number): IGESGraph_Color;
 
-LineWeightItem(Index: number): number;
+  LineWeightItem(Index: number): number;
 
-DisplayedEntity(Index: number): IGESData_IGESEntity;
+  DisplayedEntity(Index: number): IGESData_IGESEntity;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IGESDraw_Array1OfConnectPoint: NCollection_Array1_handle_IGESDraw_ConnectPoint
 

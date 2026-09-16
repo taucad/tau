@@ -35,7 +35,7 @@ export function MarketingLanding(): React.JSX.Element {
         {/* Live, in-browser demo (R6): JSCAD gear + live geometry checks, with a
             lazy OpenSCAD QR tab. Viewport-gated so the runtime never loads until
             the section scrolls into view. */}
-        <section className='border-b'>
+        <section aria-label='Live CAD demo' className='border-b'>
           <div className='container mx-auto px-4 py-20'>
             <LazySection minHeight='560px' fallback={<HeroViewerSkeleton />}>
               <LazyLiveDemo />

@@ -128,6 +128,11 @@ describe('imageEdgeSchemas', () => {
         .map((branch) => requireSchema(branch, 'Expected an object branch'))
         .find((branch) => branch.title === 'Single');
       const camera = requireSchema(single?.properties?.['camera'], 'Expected the camera JSON Schema');
+      const lighting = requireSchema(single?.properties?.['lighting'], 'Expected the lighting JSON Schema');
+
+      expect((lighting.anyOf ?? []).map((branch) => requireSchema(branch, 'Expected a lighting branch').title)).toEqual(
+        ['Studio', 'Directional lights'],
+      );
 
       const cameraBranches = (camera.oneOf ?? []).map((branch) => requireSchema(branch, 'Expected a camera branch'));
       expect(cameraBranches.map((branch) => branch.title)).toEqual(['Fit', 'Bounds', 'Fixed']);

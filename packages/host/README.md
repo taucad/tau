@@ -49,4 +49,12 @@ This package is therefore restricted to explicitly trusted projects. Public/gene
 - Chromium, Firefox, and automated WebKit have focused remote-transport coverage
 - Safari support requires a separate branded `safaridriver` release run; WebKit is not called Safari
 
+## Live ACP acceptance
+
+`pnpm nx run host:test:acp-live` spends the operator's Codex and Claude quota
+and requires both pinned adapters by default. Select a subset with
+`TAU_ACP_LIVE_AGENTS=codex` and override an adapter model with
+`TAU_ACP_LIVE_CODEX_MODEL=<model>` or `TAU_ACP_LIVE_CLAUDE_MODEL=<model>`.
+Every selected unavailable adapter fails explicitly.
+
 See the [implementation charter](../../docs/research/tau-host-daemon-remote-kernel-implementation-charter.md) for architecture, acceptance evidence, and remaining promotion gates.

@@ -99,17 +99,11 @@ export const loadPublication = async ({ request, params }: LoaderFunctionArgs): 
     throwPublicationLock('service-unavailable', 503);
   })) as PublicationRouteLoaderData;
 
-  // Forward upstream Set-Cookie (tau_view_id issuance) to the browser.
-  const upstreamSetCookie = response.headers.get('set-cookie');
   const publication = parsePublicationRecord(body.publication, body.viewerRole);
   const responseHeaders =
     publication?.visibility === 'private'
       ? new Headers({ 'Cache-Control': 'private, no-store' })
       : new Headers(cdnBackedSsrRouteHeaders(cacheTag.publicationViewer, 'long'));
-  if (upstreamSetCookie !== null) {
-    responseHeaders.append('Set-Cookie', upstreamSetCookie);
-  }
-
   return data(body, { headers: responseHeaders });
 };
 

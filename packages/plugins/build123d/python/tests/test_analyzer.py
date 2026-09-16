@@ -82,12 +82,16 @@ class AnalyzerTest(unittest.TestCase):
             declaration["bindings"],
             {
                 "/length": {
+                    "unit": "mm",
                     "quantityKind": "http://qudt.org/vocab/quantitykind/Length",
                     "space": "linear",
+                    "sourceUnitCapability": "change-source-unit:preserve-size:v1",
                 },
                 "/angle": {
+                    "unit": "deg",
                     "quantityKind": "http://qudt.org/vocab/quantitykind/PlaneAngle",
                     "space": "linear",
+                    "sourceUnitCapability": "change-source-unit:preserve-size:v1",
                 },
             },
         )

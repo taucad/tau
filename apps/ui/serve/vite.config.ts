@@ -14,8 +14,12 @@ import { base64Loader } from '@taucad/vite/base64-loader';
  */
 // oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- see above.
 import { createUiReactCompilerPlugin, createUiSourceAliasPlugin, uiSsrOptions } from '../vite.config';
+// oxlint-disable-next-line eslint/no-restricted-imports, import/extensions -- config-load seam is outside the app alias root.
+import { resolveTauCloudBuildEnabled } from '../build-environment';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+// oxlint-disable-next-line eslint/dot-notation -- ProcessEnv is index-signature-only with noPropertyAccessFromIndexSignature.
+const tauCloudEnabled = resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
 
 /**
  * Serve build of `apps/ui` — the SPA a daemon hands to a browser.
@@ -41,13 +45,14 @@ export default defineConfig({
     // No Netlify deploy-preview origin exists for a daemon-served bundle.
     tauBuildFrontendUrl: JSON.stringify(''),
     tauBuildId: JSON.stringify(Date.now()),
+    tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
     /* Not `desktop`: `isDesktopTarget()` must fold to `false` here, or the
      * bundle takes the Electron preload's ENV and IPC paths in a plain tab. */
     // oxlint-disable-next-line @typescript-eslint/naming-convention -- Vite define key is a member expression.
     'import.meta.env.TAU_TARGET': '"web"',
   },
   plugins: [
-    createUiSourceAliasPlugin(),
+    createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
     tauRuntime(),
     base64Loader,
     createUiReactCompilerPlugin(),
@@ -57,7 +62,7 @@ export default defineConfig({
   ],
   worker: {
     // https://vite.dev/config/worker-options.html#worker-plugins
-    plugins: () => [createUiSourceAliasPlugin(), nxViteTsPaths()],
+    plugins: () => [createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }), nxViteTsPaths()],
   },
   ssr: uiSsrOptions,
   server: {

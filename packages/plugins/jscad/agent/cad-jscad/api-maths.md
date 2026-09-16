@@ -4,7 +4,7 @@
 
 maths
 
-constants
+  constants
 
     EPS: number
 
@@ -12,7 +12,7 @@ constants
 
     spatialResolution: number
 
-line2
+  line2
 
     declare function clone(line: Line2): Line2
 
@@ -46,7 +46,7 @@ line2
 
     Line2: [number, number, number]
 
-line3
+  line3
 
     declare function clone(line: Line3): Line3
 
@@ -80,7 +80,7 @@ line3
 
     Line3: [Vec3, Vec3]
 
-mat4
+  mat4
 
     declare function add(out: Mat4, a: Mat4, b: Mat4): Mat4
 
@@ -141,7 +141,7 @@ mat4
       number, number, number, number,
     ]
 
-plane
+  plane
 
     declare function clone(plane: Plane): Plane
 
@@ -173,7 +173,7 @@ plane
 
     Plane: [number, number, number, number]
 
-utils
+  utils
 
     declare function aboutEqualNormals(a: Vec3, b: Vec3): boolean
 
@@ -189,7 +189,7 @@ utils
 
     export function cos(radians: number): number
 
-vec2
+  vec2
 
     declare function abs(out: Vec2, vector: Vec2): Vec2
 
@@ -259,7 +259,7 @@ vec2
 
     Vec2: [number, number]
 
-vec3
+  vec3
 
     declare function abs(out: Vec3, vector: Vec3): Vec3
 
@@ -327,7 +327,7 @@ vec3
 
     Vec3: [number, number, number]
 
-vec4
+  vec4
 
     declare function clone(vec: Vec4): Vec4
 

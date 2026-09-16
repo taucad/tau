@@ -20,7 +20,7 @@ import { systemSkillBundles } from '@taucad/skills/resources';
 
 import { createModelSkillMarkdown } from '#lib/create-model-skill.js';
 
-export type BuiltInSystemSkill = {
+export type SystemSkill = {
   readonly slug: string;
   readonly name: string;
   readonly description: string;
@@ -34,8 +34,8 @@ export type BuiltInSystemSkill = {
 };
 
 /** Every package-owned bundle, flattened: one package may ship more than one. */
-const packageSkills: readonly BuiltInSystemSkill[] = systemSkillBundles.map(
-  (bundle): BuiltInSystemSkill => ({
+const packageSkills: readonly SystemSkill[] = systemSkillBundles.map(
+  (bundle): SystemSkill => ({
     slug: bundle.slug,
     name: bundle.name,
     description: bundle.description,
@@ -49,7 +49,7 @@ const packageSkills: readonly BuiltInSystemSkill[] = systemSkillBundles.map(
   }),
 );
 
-export const builtInSystemSkills: readonly BuiltInSystemSkill[] = [
+export const systemSkillsCatalog: readonly SystemSkill[] = [
   {
     slug: 'create-skill',
     name: 'Create Skill',
@@ -74,7 +74,7 @@ Use this skill to create or update Tau agent skills that teach the agent a speci
 ## Tau storage model
 
 - Canonical workspace skills live at \`.agents/skills/<skill-name>/SKILL.md\`.
-- Installed and built-in skills can be shadowed by a user-authored skill with the same name in \`.agents/skills\`.
+- Installed and system skills can be shadowed by a user-authored skill with the same name in \`.agents/skills\`.
 - Before applying an existing skill, the agent should call \`use_skill({ skillName: "<name>" })\` so skill usage is visible.
 
 ## Discovery

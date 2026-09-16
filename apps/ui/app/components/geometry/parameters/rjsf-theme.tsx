@@ -12,8 +12,9 @@ import type {
   ErrorListProps,
   RJSFSchema,
 } from '@rjsf/utils';
-import { ChevronDown, SearchX, Trash2 } from 'lucide-react';
+import { ChevronDown, Info, SearchX, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { projectParameterField } from '@taucad/parameters';
 import { Button } from '@taucad/ui/components/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { Input } from '@taucad/ui/components/input';
@@ -39,7 +40,7 @@ import {
   rjsfLayoutContext,
   useRjsfLayoutContext,
 } from '#components/geometry/parameters/rjsf-context.js';
-import { useRenderedFieldPath } from '#components/geometry/parameters/rjsf-field-path.js';
+import { toInstancePointer, useRenderedFieldPath } from '#components/geometry/parameters/rjsf-field-path.js';
 import type { RJSFContext, RjsfLayoutContextValue } from '#components/geometry/parameters/rjsf-context.js';
 
 const ArrayItemRemoveAction = ({ action }: { readonly action: RjsfLayoutContextValue['arrayItemAction'] }) => {
@@ -128,10 +129,10 @@ function CompositeFieldTemplate({
     >
       <div
         data-slot='parameter-group-header'
-        className='group/parameter-group-header flex items-center rounded-md transition-colors duration-150 hover:bg-accent motion-reduce:transition-none'
+        className='group/parameter-group-header flex items-center rounded-md transition-colors duration-150 group-data-[state=open]/parameter-group:rounded-b-none hover:bg-accent motion-reduce:transition-none'
       >
         <CollapsibleTrigger
-          className='group/collapsible flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-transparent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[state=open]:rounded-b-none motion-reduce:transition-none'
+          className='group/collapsible flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-transparent focus-visible:focus-outline data-[state=open]:rounded-b-none motion-reduce:transition-none'
           aria-label={`Group: ${prettyTitle}`}
         >
           <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
@@ -259,6 +260,22 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
     fieldPath !== undefined &&
     (Object.is(formData, null) ? !Object.is(defaultValue, null) : hasCustomValue(formData, defaultValue, fieldPath));
   const canReset = !(renderedField?.isArrayItem && defaultValue === undefined);
+  const instancePointer = fieldPath === undefined ? undefined : toInstancePointer(fieldPath);
+  const fieldProjection =
+    instancePointer === undefined
+      ? undefined
+      : projectParameterField(
+          formContext.parameterManifest,
+          instancePointer,
+          {},
+          formContext.parameterBindings?.[instancePointer],
+        );
+  const inferredHint =
+    fieldProjection?.guessed === true
+      ? fieldProjection.inferredFields?.includes('unit') === true
+        ? 'Inferred unit'
+        : 'Inferred semantics'
+      : undefined;
 
   const handleReset = () => {
     if (fieldPath !== undefined && canReset) {
@@ -270,16 +287,34 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
     <div className='group/field @container/parameter my-1.5 flex flex-col gap-0.5 px-2.5 transition-colors'>
       <div className='flex items-center gap-2 @[240px]/parameter:flex-row'>
         <div className='flex min-w-0 shrink-0 items-center gap-1.5 @[240px]/parameter:w-[40%]'>
-          <span
-            className={cn(
-              'truncate text-sm',
-              fieldHasValue ? 'font-medium text-foreground' : 'font-normal text-muted-foreground',
-            )}
-            aria-label={`Parameter: ${prettyLabel}`}
-          >
-            <HighlightText text={prettyLabel} searchTerm={formContext.searchTerm} />
-            {required ? <span className='text-destructive/50'>*</span> : null}
-          </span>
+          <div className='flex min-w-0 items-center gap-0.5'>
+            <span
+              className={cn(
+                'min-w-0 truncate text-sm',
+                fieldHasValue ? 'font-medium text-foreground' : 'font-normal text-muted-foreground',
+              )}
+              aria-label={`Parameter: ${prettyLabel}`}
+            >
+              <HighlightText text={prettyLabel} searchTerm={formContext.searchTerm} />
+              {required ? <span className='text-destructive/50'>*</span> : null}
+            </span>
+            {inferredHint ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='icon-xs'
+                    className='text-muted-foreground/60 hover:bg-transparent hover:text-foreground'
+                    aria-label={`${inferredHint} for ${prettyLabel}`}
+                  >
+                    <Info aria-hidden='true' className='size-3' />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{inferredHint}</TooltipContent>
+              </Tooltip>
+            ) : null}
+          </div>
           {fieldHasValue && canReset ? (
             <ModifiedIndicator
               onReset={handleReset}
@@ -421,10 +456,10 @@ function ObjectFieldTemplate(
     >
       <div
         data-slot='parameter-group-header'
-        className='group/parameter-group-header flex items-center rounded-md transition-colors duration-150 hover:bg-accent motion-reduce:transition-none'
+        className='group/parameter-group-header flex items-center rounded-md transition-colors duration-150 group-data-[state=open]/parameter-group:rounded-b-none hover:bg-accent motion-reduce:transition-none'
       >
         <CollapsibleTrigger
-          className='group/collapsible flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-transparent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[state=open]:rounded-b-none motion-reduce:transition-none'
+          className='group/collapsible flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-transparent focus-visible:focus-outline data-[state=open]:rounded-b-none motion-reduce:transition-none'
           aria-label={`Group: ${prettyTitle}`}
         >
           <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>
@@ -502,7 +537,7 @@ function ArrayFieldTemplate(
       onOpenChange={setIsOpen}
     >
       <CollapsibleTrigger
-        className='group/collapsible flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset data-[state=open]:rounded-b-none motion-reduce:transition-none'
+        className='group/collapsible flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 hover:bg-accent focus-visible:focus-outline data-[state=open]:rounded-b-none motion-reduce:transition-none'
         aria-label={`Group: ${prettyTitle}`}
       >
         <h3 className='min-w-0 flex-1 truncate text-sm font-medium text-foreground'>

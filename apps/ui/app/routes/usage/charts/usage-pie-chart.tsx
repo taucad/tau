@@ -4,7 +4,6 @@ import type { PieLabelRenderProps } from 'recharts';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@taucad/ui/components/chart';
 import type { ChartConfig } from '@taucad/ui/components/chart';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party usage surface owns the direct billing client contract
 import { formatCreditAtomsDisplay } from '@taucad/billing';
 import type { WireUsageActivityPage } from '@taucad/billing';
 import { getUsageColor } from '#routes/usage/provider-colors.js';

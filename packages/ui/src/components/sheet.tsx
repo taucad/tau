@@ -111,7 +111,7 @@ function SheetContent({
         {...properties}
       >
         {children}
-        <SheetPrimitive.Close className='absolute top-4 right-4 rounded-xs opacity-70 hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none data-[state=open]:bg-secondary'>
+        <SheetPrimitive.Close className='absolute top-4 right-4 rounded-xs opacity-70 hover:opacity-100 focus-visible:focus-outline disabled:pointer-events-none data-[state=open]:bg-secondary'>
           <XIcon className='size-4' />
           <span className='sr-only'>Close</span>
         </SheetPrimitive.Close>

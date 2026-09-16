@@ -4,38 +4,38 @@
 
 XCAFNoteObjects_NoteObject: declare class XCAFNoteObjects_NoteObject extends Standard_Transient
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-HasPlane(): boolean;
+  HasPlane(): boolean;
 
-GetPlane(): gp_Ax2;
+  GetPlane(): gp_Ax2;
 
-SetPlane(thePlane: gp_Ax2): void;
+  SetPlane(thePlane: gp_Ax2): void;
 
-HasPoint(): boolean;
+  HasPoint(): boolean;
 
-GetPoint(): gp_Pnt;
+  GetPoint(): gp_Pnt;
 
-SetPoint(thePnt: gp_Pnt): void;
+  SetPoint(thePnt: gp_Pnt): void;
 
-HasPointText(): boolean;
+  HasPointText(): boolean;
 
-GetPointText(): gp_Pnt;
+  GetPointText(): gp_Pnt;
 
-SetPointText(thePnt: gp_Pnt): void;
+  SetPointText(thePnt: gp_Pnt): void;
 
-GetPresentation(): TopoDS_Shape;
+  GetPresentation(): TopoDS_Shape;
 
-SetPresentation(thePresentation: TopoDS_Shape): void;
+  SetPresentation(thePresentation: TopoDS_Shape): void;
 
-Reset(): void;
+  Reset(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

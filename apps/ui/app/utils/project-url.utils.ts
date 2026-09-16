@@ -8,6 +8,7 @@
 
 import type { ProjectLocator } from '@taucad/filesystem';
 import type { Workspace } from '#filesystem/handle-store.js';
+import { searchParameterName } from '#constants/search-parameter.constants.js';
 
 /** The two segments of a canonical project URL. */
 export type ProjectSlugs = {
@@ -25,19 +26,31 @@ export const homeWorkspaceSlug = 'home';
 export const projectUrl = ({ workspaceSlug, projectSlug }: ProjectSlugs): string =>
   `/w/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(projectSlug)}`;
 
-/** Canonical project URL with an optional focused-chat selection. */
-export const projectChatUrl = (slugs: ProjectSlugs, chatId?: string): string => {
-  const url = projectUrl(slugs);
-  if (!chatId) {
-    return url;
+/**
+ * Canonical project URL with an optional focused-chat selection.
+ *
+ * A builder rather than {@link useSearchParameter} because links need the href
+ * before anything is clicked, but it obeys the same merge rule (D3): pass the
+ * URL's current `search` and every other parameter — an open workbench, the
+ * settings dialog — survives the chat switch instead of being dropped. Only
+ * pass it when the target *is* the current project; merging one project's
+ * parameters into another's URL would carry state across the move.
+ */
+export const projectChatUrl = (slugs: ProjectSlugs, chatId?: string, search?: string | URLSearchParams): string => {
+  const parameters = new URLSearchParams(search);
+  if (chatId) {
+    parameters.set(searchParameterName.chat, chatId);
+  } else {
+    parameters.delete(searchParameterName.chat);
   }
 
-  return `${url}?${new URLSearchParams({ chat: chatId })}`;
+  const query = parameters.toString();
+  return query ? `${projectUrl(slugs)}?${query}` : projectUrl(slugs);
 };
 
 /** Requested chat ID from a route search string, if one was supplied. */
 export const projectChatIdFromSearch = (search: string | URLSearchParams): string | undefined => {
-  const chatId = (typeof search === 'string' ? new URLSearchParams(search) : search).get('chat');
+  const chatId = (typeof search === 'string' ? new URLSearchParams(search) : search).get(searchParameterName.chat);
   return chatId === null || chatId.length === 0 ? undefined : chatId;
 };
 

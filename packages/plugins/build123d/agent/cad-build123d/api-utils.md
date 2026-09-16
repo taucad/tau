@@ -12,9 +12,9 @@ find_max_dimension(shapes: Shape | Iterable[Shape]) -> float
 isclose_b(x: float, y: float, rel_tol = 1e-09, abs_tol = 1e-14) -> bool
 
 // new_edges
-new_edges(\*objects: Shape, combined: Shape) -> ShapeList[Edge]
-// objects: sequence of shapes
-// combined: result of the combination of objects
+new_edges(*objects: Shape, combined: Shape) -> ShapeList[Edge]
+//   objects: sequence of shapes
+//   combined: result of the combination of objects
 
 // Convert polar coordinates into cartesian coordinates
 polar(length: float, angle: float) -> tuple[float, float]

@@ -12,12 +12,22 @@ import type {
   FileSystemBridgeRuntimeService,
 } from '@taucad/fs-bridge';
 import { useFileManager } from '#hooks/use-file-manager.js';
+import { useProjectManager } from '#hooks/use-project-manager.js';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import { useChats } from '#hooks/use-chats.js';
 import type { FileSystemClientFacade } from '#hooks/use-file-manager.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionClient } from '#hooks/use-revision-status.js';
 import type { RevisionClient } from '#hooks/use-revision-status.js';
-import { recordHostFinalizedTurn } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import type { WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
+import {
+  getHostFinalizedTurns,
+  recordHostTurnSettlement,
+  persistBrowserTurnSettlement,
+  subscribeHostTurnSettlements,
+} from '#chat-clients/_internal/browser-agent-host-transport.js';
+import type { HostTurnSettlement } from '#chat-clients/_internal/browser-agent-host-transport.js';
 
 /**
  * One chat's turn, as the page holds it while the turn runs.
@@ -42,7 +52,7 @@ export type PreparedChatWorkspace = Readonly<{
   admitted: boolean;
   reclaimed: boolean;
   cancelled: boolean;
-  /** The browser agent host's own run id, once it has one. */
+  /** The one run id shared by the revision lease and host request. */
   runId?: string;
   turnId?: string;
 }>;
@@ -67,7 +77,11 @@ type ChatWorkspaceAuthorityContextValue = Readonly<{
    */
   bindConflict: (
     chatId: string,
-    conflict: Readonly<{ revisionId: string; paths: readonly string[]; checkoutId: string | undefined }>,
+    conflict: Readonly<{
+      revisionId: string;
+      paths: readonly string[];
+      checkoutId: string | undefined;
+    }>,
   ) => void;
   reclaim: (chatId: string) => Promise<PreparedChatWorkspace | undefined>;
   reclaimAll: () => Promise<readonly PreparedChatWorkspace[]>;
@@ -237,8 +251,10 @@ export const createRootedBridgeFileSystem = (binding: WorkspaceFileSystemBinding
       const proxy = await connect();
       return proxy.writeFile(path, data);
     },
-    writeFileChecked: async (input) => {
+    writeFileChecked: async ({ signal, ...input }) => {
+      signal?.throwIfAborted();
       const proxy = await connect();
+      signal?.throwIfAborted();
       return proxy.writeFileChecked(input);
     },
     appendFile: async (path, data) => {
@@ -279,7 +295,9 @@ export const createRootedBridgeFileSystem = (binding: WorkspaceFileSystemBinding
     },
     dispose: () => undefined,
     watch: (request, handler) => {
-      const subscription: { stop?: () => void; cancelled: boolean } = { cancelled: false };
+      const subscription: { stop?: () => void; cancelled: boolean } = {
+        cancelled: false,
+      };
       // async-iife: bootstrap -- `watch` answers synchronously with its own
       // unsubscribe; the connection it needs resolves after that answer.
       void (async () => {
@@ -354,7 +372,11 @@ type BrowserWorkspaceAuthorityState = {
   /** Chats seeded by *Ask chat to resolve*, by chat id (S33). */
   readonly conflicts: Map<
     string,
-    Readonly<{ revisionId: string; paths: readonly string[]; checkoutId: string | undefined }>
+    Readonly<{
+      revisionId: string;
+      paths: readonly string[];
+      checkoutId: string | undefined;
+    }>
   >;
   readonly listeners: Set<() => void>;
   readonly hostId: string;
@@ -411,6 +433,9 @@ export const browserWorkspaceAuthorityTestApi = {
 export function ChatWorkspaceAuthorityProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const { projectId } = useProject();
   const fileManager = useFileManager();
+  const { invalidateProjectedChats } = useProjectManager();
+  const { chats } = useChats(projectId);
+  const chatSessions = useChatSessionStore();
   const { rootDirectory, proxy: providerIdentity } = fileManager.fileManagerRef.getSnapshot().context;
   const state = getBrowserWorkspaceAuthority({
     projectId,
@@ -429,22 +454,69 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
       },
     },
   });
-  /* The hook owns the connection's lifetime: it opens on mount, closes when the
-   * project scope ends or the document is hidden, and reopens on the worker the
-   * file-manager replaced it with (A38). */
+  /* This is a passive consumer of the retained project session's connection;
+   * `ProjectSessionBinding` owns its lifecycle once for the whole subtree. */
   const revisions: RevisionClient | undefined = useRevisionClient();
   /* One store for both transports: a turn this document placed settles in the
    * worker and arrives here, and a turn a remote host placed arrives as a
    * `turn.finalized` record in the chat's own durable log. Same schema (S9). */
-  useEffect(
-    () =>
-      revisions?.subscribeEvents((event) => {
-        if (event.type === 'turn.finalized') {
-          recordHostFinalizedTurn(event);
-        }
-      }),
-    [revisions],
-  );
+  useEffect(() => {
+    const handleRevisionEvent = async (event: WorkerRevisionEvent): Promise<void> => {
+      if (event.type === 'chats.projected') {
+        invalidateProjectedChats(event.projectId, event.chatIds);
+        await Promise.all(event.chatIds.map(async (chatId) => chatSessions.refreshFromStorage(chatId)));
+        return;
+      }
+      let persisted = false;
+      try {
+        persisted = await persistBrowserTurnSettlement(event);
+      } catch (error) {
+        console.error('[browserAgentHost] turn settlement was not persisted', error);
+      }
+      recordHostTurnSettlement(event);
+      if (persisted) {
+        revisions?.send({ command: 'recordsChanged' });
+      }
+    };
+    return revisions?.subscribeEvents((event) => {
+      void handleRevisionEvent(event);
+    });
+  }, [chatSessions, invalidateProjectedChats, revisions]);
+  /* A daemon-hosted turn updates Git outside this worker. Adopt its attested
+   * head into the retained projection so the next native or ACP turn starts
+   * from the same checkout without requiring a page reload. */
+  useEffect(() => {
+    const adopted = new Set<string>();
+    const adopt = (event: HostTurnSettlement): void => {
+      if (
+        revisions === undefined ||
+        event.type !== 'turn.finalized' ||
+        event.projectId !== projectId ||
+        event.checkoutId === undefined ||
+        event.revisionId === undefined ||
+        event.treeId === undefined ||
+        revisions.status()?.headRevisionId === event.revisionId
+      ) {
+        return;
+      }
+      if (adopted.has(event.revisionId)) {
+        return;
+      }
+      adopted.add(event.revisionId);
+      revisions.send({
+        command: 'adoptHostFinalized',
+        checkoutId: event.checkoutId,
+        revisionId: event.revisionId,
+        treeId: event.treeId,
+        ...(event.branch === undefined ? {} : { branch: event.branch }),
+      });
+    };
+    const unsubscribe = subscribeHostTurnSettlements(adopt);
+    for (const event of getHostFinalizedTurns()) {
+      adopt(event);
+    }
+    return unsubscribe;
+  }, [projectId, revisions]);
   const notify = useCallback(() => {
     for (const listener of state.listeners) {
       listener();
@@ -480,30 +552,37 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
           throw new Error('This project has no revision root; the file manager is not connected.');
         }
         await ensureProviderCapabilities(state.binding);
-        /* The lease key. The browser agent host mints its own run id later
-         * (`markRunId`); the lease is this document's and is what the root
-         * retires, so it is minted here and never re-derived. */
+        /* The lease key is also the host request id. Mint it before admission
+         * so the revision settlement and chat lifecycle can only name the same
+         * run. */
         const runId = generatePrefixedId(idPrefix.run);
         const leaseTurnId = options?.turnId ?? runId;
         state.placing.set(chatId, leaseTurnId);
         const conflict = state.conflicts.get(chatId);
+        const checkoutId = conflict?.checkoutId ?? chats.find((chat) => chat.id === chatId)?.checkoutId;
         const placement = await revisions.admitTurn({
           turnId: leaseTurnId,
           chatId,
           runId,
-          ...(conflict?.checkoutId === undefined ? {} : { checkoutId: conflict.checkoutId }),
+          ...(checkoutId === undefined ? {} : { checkoutId }),
         });
         const preparedFileSystems = await createPreparedWorkspaceFileSystems(state.rootedFileSystem);
         const prepared: PreparedChatWorkspace = Object.freeze({
           chatId,
           projectId,
+          runId,
           execution: Object.freeze({
             hostId: state.hostId,
             workspaceId: placement.checkoutId,
             ...(placement.baseRevisionId === '' ? {} : { baseRevisionId: placement.baseRevisionId }),
             ...(conflict === undefined
               ? {}
-              : { conflict: { revisionId: conflict.revisionId, paths: [...conflict.paths] } }),
+              : {
+                  conflict: {
+                    revisionId: conflict.revisionId,
+                    paths: [...conflict.paths],
+                  },
+                }),
           }),
           ...preparedFileSystems,
           admitted: false,
@@ -527,7 +606,7 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         state.pending.delete(chatId);
       }
     },
-    [notify, projectId, revisions, state],
+    [chats, notify, projectId, revisions, state],
   );
 
   const update = useCallback(
@@ -582,7 +661,11 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
        * open against the authority epoch (F13). */
       reclaimAll: async () => [...state.turns.values()].map((record) => record.prepared),
       markAdmitted: async (chatId, turnId) => {
-        update(chatId, { admitted: true, cancelled: false, ...(turnId === undefined ? {} : { turnId }) });
+        update(chatId, {
+          admitted: true,
+          cancelled: false,
+          ...(turnId === undefined ? {} : { turnId }),
+        });
       },
       markCancelled: async (chatId) => {
         update(chatId, { cancelled: true });

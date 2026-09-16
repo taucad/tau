@@ -42,9 +42,11 @@
     "@taucad/agent-host": "workspace:*",
     "@taucad/chat": "workspace:*",
     "@taucad/filesystem": "workspace:*",
+    "@taucad/parameters": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/utils": "workspace:*",
     "geospec": "workspace:*",
+    "xstate": "catalog:",
     "zod": "catalog:"
   },
   "imports": {

@@ -351,7 +351,7 @@ function addDeletedDescendantPaths(options: {
 }
 
 type ChatEditorFileTreeProps = {
-  readonly actionsContainer?: Element | DocumentFragment | null;
+  readonly actionsContainer?: Element | DocumentFragment;
   readonly closeButton?: React.ReactNode;
   readonly showTitle?: boolean;
   readonly borderless?: boolean;
@@ -374,7 +374,7 @@ export const ChatEditorFileTree = memo(function ({
   // It's necessary to opt out of React Compiler auto-memoization for this component due to:
   // https://headless-tree.lukasbach.com/guides/react-compiler/
   'use no memo'; // Opt out of React Compiler memoization
-  const { projectRef, editorRef } = useProject();
+  const { projectRef, editorRef, parameterService } = useProject();
   const fileManager = useFileManager();
   const {
     client,
@@ -421,23 +421,31 @@ export const ChatEditorFileTree = memo(function ({
     // participant does it once, centrally.
     const participantDispose =
       contentService && !readOnly
-        ? mountFileOperationParticipants({ contentService, editorRef, projectRef })
+        ? mountFileOperationParticipants({
+            contentService,
+            editorRef,
+            projectRef,
+            parameterFiles: parameterService,
+            onError: (error) => {
+              toast.error(error instanceof Error ? error.message : 'Parameter sidecar operation failed.');
+            },
+          })
         : undefined;
 
     return () => {
       fileOpenedSub.unsubscribe();
       participantDispose?.();
     };
-  }, [projectRef, editorRef, contentService, readFile, readOnly]);
+  }, [projectRef, editorRef, contentService, readFile, readOnly, parameterService]);
 
   const requestOpenFile = useCallback(
     (path: string, fileReadOnly?: boolean) => {
       const shouldReadOnly = readOnly || fileReadOnly;
       if (onOpenFile) {
-        onOpenFile(path, shouldReadOnly || undefined);
+        onOpenFile(path, shouldReadOnly ? true : undefined);
         return;
       }
-      editorRef.send({ type: 'openFile', path, source: 'user', readOnly: shouldReadOnly || undefined });
+      editorRef.send({ type: 'openFile', path, source: 'user', readOnly: shouldReadOnly ? true : undefined });
     },
     [editorRef, onOpenFile, readOnly],
   );
@@ -1041,9 +1049,10 @@ export const ChatEditorFileTree = memo(function ({
 
   // Rebuild tree when file data changes
   useEffect(() => {
+    tree.setConfig((current) => ({ ...current, dataLoader }));
     tree.rebuildTree();
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- tree object is not stable, only rebuild when fileTree changes
-  }, [fileTree]);
+  }, [dataLoader]);
 
   useEffect(() => {
     focusedItemRef.current = focusedItem;
@@ -1349,12 +1358,20 @@ export const ChatEditorFileTree = memo(function ({
             try {
               zipBlob = await getZippedDirectory(path);
             } catch (error) {
-              throw createFileTreeDownloadError({ code: 'zip-generation-failed', path, cause: error });
+              throw createFileTreeDownloadError({
+                code: 'zip-generation-failed',
+                path,
+                cause: error,
+              });
             }
             try {
               downloadBlob(zipBlob, `${name}.zip`);
             } catch (error) {
-              throw createFileTreeDownloadError({ code: 'browser-download-failed', path, cause: error });
+              throw createFileTreeDownloadError({
+                code: 'browser-download-failed',
+                path,
+                cause: error,
+              });
             }
           },
           {
@@ -1370,7 +1387,11 @@ export const ChatEditorFileTree = memo(function ({
             try {
               content = await readFile(path);
             } catch (error) {
-              throw createFileTreeDownloadError({ code: 'path-not-found', path, cause: error });
+              throw createFileTreeDownloadError({
+                code: 'path-not-found',
+                path,
+                cause: error,
+              });
             }
             const blob = new Blob([asBuffer(content.buffer)], {
               type: 'application/octet-stream',
@@ -1378,7 +1399,11 @@ export const ChatEditorFileTree = memo(function ({
             try {
               downloadBlob(blob, name);
             } catch (error) {
-              throw createFileTreeDownloadError({ code: 'browser-download-failed', path, cause: error });
+              throw createFileTreeDownloadError({
+                code: 'browser-download-failed',
+                path,
+                cause: error,
+              });
             }
           },
           {
@@ -1402,12 +1427,14 @@ export const ChatEditorFileTree = memo(function ({
 
       toast.error(result.message, result.description ? { description: result.description } : undefined);
     } catch (error) {
-      toast.error('Failed to copy path', { description: error instanceof Error ? error.message : String(error) });
+      toast.error('Failed to copy path', {
+        description: error instanceof Error ? error.message : String(error),
+      });
     }
   }, []);
 
   /**
-   * Place a whole built-in bundle into the project so the project owns it
+   * Place a whole system skill bundle into the project so the project owns it
    * (V8, ruling P11): the one write allowed under a read-only overlay, and the
    * client — not this menu — keeps it whole.
    */
@@ -1419,7 +1446,7 @@ export const ChatEditorFileTree = memo(function ({
       };
       toast.promise(copyToProject(), {
         loading: 'Copying to project…',
-        success: 'Copied to project. Your version replaces the built-in one.',
+        success: 'Copied to project. Your version replaces the system skill.',
         error: (error: unknown) => `Copy failed: ${error instanceof Error ? error.message : String(error)}`,
       });
     },
@@ -1441,7 +1468,10 @@ export const ChatEditorFileTree = memo(function ({
   // Shared import processing logic for both drag-drop and upload button.
   const processDroppedEntries = useCallback(
     async (
-      entries: { readonly files: readonly DroppedFile[]; readonly directories: readonly DroppedDirectory[] },
+      entries: {
+        readonly files: readonly DroppedFile[];
+        readonly directories: readonly DroppedDirectory[];
+      },
       targetDirectory: string,
     ) => {
       const directoryPaths = collectDropDirectoryPaths({
@@ -1533,7 +1563,9 @@ export const ChatEditorFileTree = memo(function ({
         toast.success(summary.success.message);
       }
       if (summary.failure) {
-        toast.error(summary.failure.message, { description: summary.failure.description });
+        toast.error(summary.failure.message, {
+          description: summary.failure.description,
+        });
       }
     },
     [
@@ -1661,7 +1693,10 @@ export const ChatEditorFileTree = memo(function ({
       event.preventDefault();
       event.stopPropagation();
       if (!readOnly) {
-        void handleForeignDrop({ ...getForeignDropTargetFromEvent(event), dataTransfer });
+        void handleForeignDrop({
+          ...getForeignDropTargetFromEvent(event),
+          dataTransfer,
+        });
       }
     };
 
@@ -1790,7 +1825,10 @@ export const ChatEditorFileTree = memo(function ({
           <AlertDialogFooter className='gap-2'>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className={buttonVariants({ variant: 'destructive', className: 'pr-3' })}
+              className={buttonVariants({
+                variant: 'destructive',
+                className: 'pr-3',
+              })}
               onClick={confirmDelete}
             >
               Delete
@@ -1939,7 +1977,7 @@ export const ChatEditorFileTree = memo(function ({
                             <TreeItem
                               item={item}
                               presentation={presentationFor(itemId)}
-                              readOnly={readOnly}
+                              isReadOnly={readOnly}
                               isActive={activeFilePath === itemId}
                               isOpen={openFiles.some((f) => f.path === itemId)}
                               searchQuery={tree.getState().search ?? ''}
@@ -2038,7 +2076,7 @@ export const ChatEditorFileTree = memo(function ({
 type TreeItemProps = {
   readonly item: ItemInstance<TreeItemData>;
   readonly presentation: RowPresentation;
-  readonly readOnly?: boolean;
+  readonly isReadOnly?: boolean;
   readonly isActive: boolean;
   readonly isOpen: boolean;
   readonly searchQuery: string;
@@ -2060,7 +2098,7 @@ type TreeItemProps = {
 function TreeItem({
   item,
   presentation,
-  readOnly: parentReadOnly = false,
+  isReadOnly: parentReadOnly = false,
   isActive,
   isOpen,
   searchQuery,
@@ -2095,7 +2133,7 @@ function TreeItem({
     const renameInputProps = item.getRenameInputProps() as React.InputHTMLAttributes<HTMLInputElement>;
     return (
       <div
-        className='relative flex h-7 items-center border border-input py-1 pr-1 pl-2 focus-within:ring-2 focus-within:ring-ring focus-within:ring-inset'
+        className='relative flex h-7 items-center border border-input py-1 pr-1 pl-2 focus-within:focus-outline'
         style={{ paddingLeft: `${paddingLeft}px` }}
       >
         {/* Indent guide lines (VS Code-style) */}
@@ -2125,7 +2163,7 @@ function TreeItem({
             <FileExtensionIcon filename={item.getItemName()} className='size-3.5 shrink-0 text-muted-foreground' />
           )}
           <input
-            className='h-full min-w-0 flex-1 border-none bg-transparent px-0 text-sm shadow-none outline-none focus:border-transparent focus:ring-0 focus:ring-offset-0'
+            className='h-full min-w-0 flex-1 border-none bg-transparent px-0 text-sm shadow-none outline-none focus:border-transparent focus-visible:outline-none'
             autoCorrect='off'
             {...renameInputProps}
             onFocus={(event) => {
@@ -2163,7 +2201,8 @@ function TreeItem({
           data-file-tree-kind={isFolder ? 'directory' : 'file'}
           {...(description ? { 'aria-describedby': descriptionId, title: description } : {})}
           className={cn(
-            'group/file relative flex h-7 w-full cursor-pointer items-center justify-between rounded-md py-1 pr-1 pl-2 text-sm text-sidebar-foreground transition-colors',
+            // Own compositing layer so the native drag image keeps transparent rounded corners.
+            'group/file relative flex h-7 w-full transform-gpu items-center justify-between rounded-md py-1 pr-1 pl-2 text-sm text-sidebar-foreground transition-colors',
             !isActive && 'hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground',
             isActive && !isSelected && 'bg-sidebar-accent',
             isSelected && 'bg-sidebar-accent/70 text-sidebar-accent-foreground',
@@ -2261,7 +2300,7 @@ function TreeItem({
               <HighlightText text={item.getItemName()} searchTerm={searchQuery} />
             </span>
             {presentation.isSubtreeRoot && presentation.badge ? (
-              <Badge variant='secondary' className='shrink-0 px-1.5 py-0 font-normal'>
+              <Badge variant='secondary' className='ml-auto shrink-0 px-1.5 py-0 font-normal'>
                 {presentation.badge}
               </Badge>
             ) : null}
@@ -2602,7 +2641,7 @@ function PendingFolderInput({
   return (
     <div className='flex w-full flex-col gap-0.5'>
       <div
-        className='flex h-7 w-full items-center border border-input py-1 pr-1 focus-within:ring-2 focus-within:ring-ring focus-within:ring-inset'
+        className='flex h-7 w-full items-center border border-input py-1 pr-1 focus-within:focus-outline'
         style={{ paddingLeft: `${paddingLeft}px` }}
       >
         <div className='flex min-w-0 flex-1 items-center gap-2'>
@@ -2610,7 +2649,7 @@ function PendingFolderInput({
           <input
             autoFocus
             value={value}
-            className='h-full min-w-0 flex-1 border-none bg-transparent px-0 text-sm shadow-none outline-none focus:border-transparent focus:ring-0 focus:ring-offset-0'
+            className='h-full min-w-0 flex-1 border-none bg-transparent px-0 text-sm shadow-none outline-none focus:border-transparent focus-visible:outline-none'
             placeholder='Folder name'
             onChange={(event) => {
               setValue(event.target.value);
@@ -2730,7 +2769,7 @@ function PendingFileInput({
   return (
     <div className='flex w-full flex-col gap-0.5'>
       <div
-        className='flex h-7 w-full items-center border border-input py-1 pr-1 focus-within:ring-2 focus-within:ring-ring focus-within:ring-inset'
+        className='flex h-7 w-full items-center border border-input py-1 pr-1 focus-within:focus-outline'
         style={{ paddingLeft: `${paddingLeft}px` }}
       >
         <div className='flex min-w-0 flex-1 items-center gap-2'>
@@ -2741,7 +2780,7 @@ function PendingFileInput({
           <input
             ref={inputRef}
             value={value}
-            className='h-full min-w-0 flex-1 border-none bg-transparent px-0 text-sm shadow-none outline-none focus:border-transparent focus:ring-0 focus:ring-offset-0'
+            className='h-full min-w-0 flex-1 border-none bg-transparent px-0 text-sm shadow-none outline-none focus:border-transparent focus-visible:outline-none'
             placeholder='New File'
             onChange={(event) => {
               setValue(event.target.value);

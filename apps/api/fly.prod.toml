@@ -20,11 +20,16 @@ release_command = 'node /app/dist/billing-command.js migrate --environment prod-
 app = 'node /app/dist/main.js'
 # One worker opens at most one PostgreSQL connection (billing-command postgres max: 1).
 billing-recovery = 'node /app/dist/billing-command.js recover-llm-worker --environment prod-us --limit 100 --poll-milliseconds 5000'
+# One Stripe/DB worker fulfils webhook-queued payment sources every five seconds and runs
+# the independent journal sweep every fifteen minutes. Without it paid purchases are never credited.
+billing-operations = 'node /app/dist/billing-command.js billing-operations-worker --environment prod-us --limit 100 --poll-milliseconds 5000'
 
 [env]
 NODE_ENV = 'production'
 WEB_CONCURRENCY = '1'
 TAU_FRONTEND_URL = 'https://tau.new'
+# Replies to transactional email land here (OQ8); the mailbox must exist before this deploys.
+TAU_EMAIL_REPLY_TO = 'help@tau.new'
 LANGSMITH_TRACING = true
 LANGSMITH_ENDPOINT = 'https://api.smith.langchain.com'
 LANGSMITH_PROJECT = 'tau-api-prod'
@@ -56,10 +61,22 @@ TAU_S3_FORCE_PATH_STYLE = 'false'
 # the repositories a Machine serves are the repositories on its own disk. The
 # `app` process must stay single-Machine (or gain request routing by project)
 # until a shared-storage backend exists — see the W11a report's operator items.
+#
+# Sized against the plan, not against today's usage (ruling OQ1, review C27).
+# `storageLimitBytesByTier.pro` is 10 GiB, so a 10gb volume meant the *first*
+# paying customer could fill the disk and the second could not be served at all;
+# an Enterprise allowance (100 GiB) did not fit under any circumstances. Fly
+# bills the provisioned size, so the volume starts at five Pro allowances and
+# extends itself rather than being over-provisioned up front. Nothing in
+# `apps/api` reads free disk: the plan is the quota, and a second free-disk
+# quota system beside it is exactly what OQ1 declines.
 [[mounts]]
 source = 'tau_git_data'
 destination = '/data'
-initial_size = '10gb'
+initial_size = '50gb'
+auto_extend_size_threshold = 80
+auto_extend_size_increment = '10gb'
+auto_extend_size_limit = '250gb'
 processes = ['app']
 
 [http_service]
@@ -80,7 +97,7 @@ timeout = "2s"
 [[metrics]]
 port = 9464
 path = "/metrics"
-processes = ['app', 'billing-recovery']
+processes = ['app', 'billing-recovery', 'billing-operations']
 
 [[vm]]
 memory = '2gb'
@@ -93,3 +110,9 @@ memory = '256mb'
 cpu_kind = 'shared'
 cpus = 1
 processes = ['billing-recovery']
+
+[[vm]]
+memory = '256mb'
+cpu_kind = 'shared'
+cpus = 1
+processes = ['billing-operations']

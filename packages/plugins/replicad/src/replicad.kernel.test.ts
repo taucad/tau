@@ -13,7 +13,7 @@ import type {
   RuntimeContentInput,
   TelemetryEntry,
 } from '@taucad/runtime/types';
-import type { ParameterManifest } from '@taucad/runtime/parameter';
+import type { ParameterManifest } from '@taucad/parameters';
 import type { ExportResult } from '@taucad/runtime';
 
 import { replicadKernel } from '#replicad.kernel.js';

@@ -4,8 +4,8 @@
 
 // A three dimensional box, aligned to the coordinate system
 Box: {
-min: Vec3,
-max: Vec3
+    min: Vec3,
+    max: Vec3
 }
 
 ErrorStatus: 'NoError'|'NonFiniteVertex'|'NotManifold'|
@@ -55,15 +55,15 @@ Polygons: SimplePolygon|SimplePolygon[]
 
 // A two dimensional rectangle, aligned to the coordinate system
 Rect: {
-min: Vec2,
-max: Vec2
+    min: Vec2,
+    max: Vec2
 }
 
 SimplePolygon: Vec2[]
 
 Smoothness: {
-halfedge: number,
-smoothness: number
+    halfedge: number,
+    smoothness: number
 }
 
 // A vector in two dimensional space

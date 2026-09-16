@@ -1,4 +1,4 @@
-import { assign, emit, enqueueActions, setup } from 'xstate';
+import { assign, emit, setup } from 'xstate';
 import type { ActorRefFrom, AnyActorRef } from 'xstate';
 
 /**
@@ -10,10 +10,17 @@ import type { ActorRefFrom, AnyActorRef } from 'xstate';
  * second status from flags — `use-agent-projections.ts` and W20's sidebar read
  * these snapshots.
  *
- * It never spawns a `turn.machine`: settlement is requested by sending
- * `prepare` / `turnCompleted` to the project session, which forwards to the
- * worker-side `project-revisions` root (architecture, "Ownership has no
- * cycles").
+ * It never spawns a `turn.machine`. Settlement is not this machine's verb
+ * either: `ProjectChatRunSettlement` at the route still sends `prepare` /
+ * `turnCompleted` straight to the worker-side `project-revisions` root, and
+ * this machine only *reads* the outcome (`turnFinalizedObserved`,
+ * `turnFailedObserved`, `turnConflictedObserved`) through the host-event
+ * bridge, while revision facets (`turnFinalized`, `dirtyChanged`, `syncState`)
+ * arrive through its project session.
+ * Moving the send here would give
+ * the chat a second path to the revisions root; the architecture's
+ * "Ownership has no cycles" is satisfied either way, and the route already
+ * owns the run it settles.
  */
 
 /** How the chat's run reached the state it is in. @public */
@@ -51,11 +58,26 @@ export type ChatSessionMachineContext = Readonly<{
   failureReason: string | undefined;
   /** The branch the chat's last settled turn landed on. */
   branch: string | undefined;
+  /** The run whose lifecycle this actor currently presents. */
+  activeRunId: string | undefined;
+  /** A matching host outcome that arrived before `run.lifecycle: completed`. */
+  pendingSettlement: ChatTurnSettlementObservation | undefined;
 }>;
+
+/** One host-attested outcome, kept correlated through the UI state machine. @public */
+export type ChatTurnSettlementObservation =
+  | {
+      readonly type: 'turnFinalizedObserved';
+      readonly runId?: string;
+      readonly turnId?: string;
+      readonly branch?: string;
+    }
+  | { readonly type: 'turnFailedObserved'; readonly runId?: string; readonly turnId?: string; readonly reason: string }
+  | { readonly type: 'turnConflictedObserved'; readonly runId?: string; readonly turnId?: string };
 
 /** Events accepted by chatSessionMachine. @public */
 export type ChatSessionMachineEvent =
-  | { readonly type: 'runLifecycle'; readonly phase: ChatRunPhase; readonly reason?: string }
+  | { readonly type: 'runLifecycle'; readonly phase: ChatRunPhase; readonly runId?: string; readonly reason?: string }
   | { readonly type: 'interruptRecorded'; readonly state: 'requested' | 'resolved'; readonly count?: number }
   | { readonly type: 'toolParts'; readonly inFlight: number; readonly approvals: number; readonly toolName?: string }
   | { readonly type: 'requestLifecycle'; readonly phase: ChatRequestLifecycle }
@@ -63,6 +85,7 @@ export type ChatSessionMachineEvent =
   | { readonly type: 'viewed' }
   | { readonly type: 'close' }
   | { readonly type: 'turnFinalized'; readonly branch: string }
+  | ChatTurnSettlementObservation
   | { readonly type: 'dirtyChanged'; readonly dirty: boolean }
   | { readonly type: 'syncState'; readonly state: ChatSyncState };
 
@@ -97,18 +120,54 @@ export const chatSessionMachine = setup({
     isRetrying: ({ event }) => event.type === 'requestLifecycle' && event.phase === 'retrying',
     isStopping: ({ event }) => event.type === 'requestLifecycle' && event.phase === 'stopping',
     isReattaching: ({ event }) => event.type === 'durableRunState' && event.state === 'reattaching',
+    matchesActiveRun: ({ context, event }) =>
+      (event.type === 'turnFinalizedObserved' ||
+        event.type === 'turnFailedObserved' ||
+        event.type === 'turnConflictedObserved') &&
+      event.runId === context.activeRunId,
+    completedWithFinalizedSettlement: ({ context, event }) =>
+      event.type === 'runLifecycle' &&
+      event.phase === 'completed' &&
+      context.pendingSettlement?.type === 'turnFinalizedObserved' &&
+      context.pendingSettlement.runId === (event.runId ?? context.activeRunId),
+    completedWithFailedSettlement: ({ context, event }) =>
+      event.type === 'runLifecycle' &&
+      event.phase === 'completed' &&
+      context.pendingSettlement?.type === 'turnFailedObserved' &&
+      context.pendingSettlement.runId === (event.runId ?? context.activeRunId),
+    completedWithConflictedSettlement: ({ context, event }) =>
+      event.type === 'runLifecycle' &&
+      event.phase === 'completed' &&
+      context.pendingSettlement?.type === 'turnConflictedObserved' &&
+      context.pendingSettlement.runId === (event.runId ?? context.activeRunId),
   },
   actions: {
     announce: emit(({ context }) => ({ type: 'statusChanged', chatId: context.chatId }) as const),
     /* The run is over: whatever the transport last said about tools and
      * approvals is no longer true of this chat. */
     clearRunDetail: assign({ pendingApprovalCount: 0, toolsInFlight: 0, toolName: undefined }),
-    /* Close cancels the run and releases the lease; the record stays. The
-     * project session owns both — this only tells it which chat let go. */
-    askProjectToRelease: enqueueActions(({ enqueue, context }) => {
-      if (context.parentRef !== undefined) {
-        enqueue.sendTo(context.parentRef, { type: 'chatClosed', chatId: context.chatId });
+    captureRunIdentity: assign(({ context, event }) => {
+      if (event.type !== 'runLifecycle' || event.runId === undefined) {
+        return {};
       }
+      return event.runId === context.activeRunId
+        ? { activeRunId: event.runId }
+        : { activeRunId: event.runId, pendingSettlement: undefined, failureReason: undefined };
+    }),
+    bufferSettlement: assign({
+      pendingSettlement: ({ event }) =>
+        event.type === 'turnFinalizedObserved' ||
+        event.type === 'turnFailedObserved' ||
+        event.type === 'turnConflictedObserved'
+          ? event
+          : undefined,
+    }),
+    clearPendingSettlement: assign({ pendingSettlement: undefined }),
+    recordPendingFailure: assign({
+      failureReason: ({ context }) =>
+        context.pendingSettlement?.type === 'turnFailedObserved'
+          ? context.pendingSettlement.reason
+          : 'revision conflict',
     }),
   },
 }).createMachine({
@@ -122,6 +181,8 @@ export const chatSessionMachine = setup({
     toolName: undefined,
     failureReason: undefined,
     branch: undefined,
+    activeRunId: undefined,
+    pendingSettlement: undefined,
   }),
   type: 'parallel',
   on: {
@@ -153,7 +214,13 @@ export const chatSessionMachine = setup({
       states: {
         /* No session, no run. */
         idle: {},
-        queued: {},
+        queued: {
+          on: {
+            turnFinalizedObserved: { guard: 'matchesActiveRun', actions: 'bufferSettlement' },
+            turnFailedObserved: { guard: 'matchesActiveRun', actions: 'bufferSettlement' },
+            turnConflictedObserved: { guard: 'matchesActiveRun', actions: 'bufferSettlement' },
+          },
+        },
         running: {
           initial: 'generating',
           states: {
@@ -190,6 +257,9 @@ export const chatSessionMachine = setup({
             reconnecting: {},
           },
           on: {
+            turnFinalizedObserved: { guard: 'matchesActiveRun', actions: 'bufferSettlement' },
+            turnFailedObserved: { guard: 'matchesActiveRun', actions: 'bufferSettlement' },
+            turnConflictedObserved: { guard: 'matchesActiveRun', actions: 'bufferSettlement' },
             requestLifecycle: [
               { guard: 'isRetrying', target: '.reconnecting' },
               { guard: 'isStopping', target: 'stopped', actions: ['clearRunDetail', 'announce'] },
@@ -211,40 +281,105 @@ export const chatSessionMachine = setup({
             },
           },
         },
+        finishing: {
+          on: {
+            turnFinalizedObserved: { guard: 'matchesActiveRun', target: 'done', actions: 'announce' },
+            turnFailedObserved: {
+              guard: 'matchesActiveRun',
+              target: 'failed',
+              actions: [assign({ failureReason: ({ event }) => event.reason }), 'announce'],
+            },
+            turnConflictedObserved: {
+              guard: 'matchesActiveRun',
+              target: 'failed',
+              actions: [assign({ failureReason: 'revision conflict' }), 'announce'],
+            },
+          },
+        },
         done: {},
         failed: {},
         stopped: {},
       },
       on: {
         runLifecycle: [
-          { guard: ({ event }) => event.phase === 'admitted', target: '.queued', actions: 'announce' },
-          { guard: ({ event }) => event.phase === 'running', target: '.running', actions: 'announce' },
+          {
+            guard: ({ event }) => event.phase === 'admitted',
+            target: '.queued',
+            actions: ['captureRunIdentity', 'announce'],
+          },
+          {
+            guard: ({ event }) => event.phase === 'running',
+            target: '.running',
+            actions: ['captureRunIdentity', 'announce'],
+          },
           {
             guard: ({ event }) => event.phase === 'paused',
             target: '.running.waiting.input',
-            actions: 'announce',
+            actions: ['captureRunIdentity', 'announce'],
+          },
+          {
+            guard: 'completedWithFinalizedSettlement',
+            target: '.done',
+            actions: ['captureRunIdentity', 'clearRunDetail', 'clearPendingSettlement', 'announce'],
+          },
+          {
+            guard: 'completedWithFailedSettlement',
+            target: '.failed',
+            actions: [
+              'captureRunIdentity',
+              'recordPendingFailure',
+              'clearRunDetail',
+              'clearPendingSettlement',
+              'announce',
+            ],
+          },
+          {
+            guard: 'completedWithConflictedSettlement',
+            target: '.failed',
+            actions: [
+              'captureRunIdentity',
+              'recordPendingFailure',
+              'clearRunDetail',
+              'clearPendingSettlement',
+              'announce',
+            ],
           },
           {
             guard: ({ event }) => event.phase === 'completed',
-            target: '.done',
-            actions: ['clearRunDetail', 'announce'],
+            target: '.finishing',
+            actions: ['captureRunIdentity', 'clearRunDetail', 'announce'],
           },
           {
             guard: ({ event }) => event.phase === 'failed',
             target: '.failed',
-            actions: [assign({ failureReason: ({ event }) => event.reason }), 'clearRunDetail', 'announce'],
+            actions: [
+              'captureRunIdentity',
+              assign({ failureReason: ({ event }) => event.reason }),
+              'clearRunDetail',
+              'clearPendingSettlement',
+              'announce',
+            ],
           },
           {
             guard: ({ event }) => event.phase === 'cancelled',
             target: '.stopped',
-            actions: ['clearRunDetail', 'announce'],
+            actions: ['captureRunIdentity', 'clearRunDetail', 'clearPendingSettlement', 'announce'],
           },
         ],
         /* Reload discovery can substantiate a run for a chat that never left
          * `idle` on this page (`retainDurableRun`). */
         durableRunState: { guard: 'isReattaching', target: '.running.reconnecting', actions: 'announce' },
-        /* *Close* on a chat cancels its run and releases its lease (A35). */
-        close: { target: '.stopped', actions: ['askProjectToRelease', 'clearRunDetail', 'announce'] },
+        /*
+         * *Close* on a chat (A35, P63).
+         *
+         * The cancel belongs to the run's owner — the store dispatches
+         * `stopRequest` to the persistence machine, whose settlement comes back
+         * here as `runLifecycle{phase:'cancelled'}` and releases the lease with
+         * it. This machine only records that the person stopped, and it stays
+         * alive so the row reads `Stopped`: telling the project session to let
+         * go would stop this actor and blank the row.
+         */
+        close: { target: '.stopped', actions: ['clearRunDetail', 'announce'] },
       },
     },
     read: {
@@ -253,7 +388,11 @@ export const chatSessionMachine = setup({
         read: {
           on: {
             runLifecycle: {
-              guard: ({ event }) => event.phase === 'completed',
+              /* P57: a run that *failed* while the person was elsewhere is as
+               * unseen as one that finished. The architecture's project row is
+               * red for "a run failed and is unread", which this is what makes
+               * reachable. */
+              guard: ({ event }) => event.phase === 'completed' || event.phase === 'failed',
               target: 'unread',
               actions: 'announce',
             },

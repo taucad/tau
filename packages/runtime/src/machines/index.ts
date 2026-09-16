@@ -1,13 +1,6 @@
-export {
-  defineMachine,
-  defineMachineQuery,
-  parseMachineProvider,
-} from "#machines/machine.js";
-export { connectMachineChannel } from "#machines/machine-channel.js";
-export type {
-  MachineChannelClient,
-  MachineChannelEndpoint,
-} from "#machines/machine-channel.js";
+export { defineMachine, defineMachineQuery, parseMachineProvider } from '#machines/machine.js';
+export { connectMachineChannel } from '#machines/machine-channel.js';
+export type { MachineChannelClient, MachineChannelEndpoint } from '#machines/machine-channel.js';
 export type {
   MachineBeginBindingInput,
   MachineCaptureStillClientInput,
@@ -25,13 +18,13 @@ export type {
   MachineStartPrintInput,
   MachineControlRunInput,
   MachineWatchInput,
-} from "#machines/machine-client.js";
+} from '#machines/machine-client.js';
 export type {
   MachineDirectoryCursor,
   MachineDirectoryEntry,
   MachineDirectoryFrame,
   MachineDirectorySnapshot,
-} from "#machines/machine-directory.js";
+} from '#machines/machine-directory.js';
 export type {
   MachineAcceptedContainer,
   MachineAlertSnapshot,
@@ -93,4 +86,4 @@ export type {
   MachineToolCapability,
   MachineTemperatureSnapshot,
   MachineTransportTrust,
-} from "#machines/machine.js";
+} from '#machines/machine.js';

@@ -135,6 +135,26 @@ export const spendProjectStorage = async (projectId: string, bytes: number): Pro
   );
 };
 
+/** Spend LFS storage while preserving a precise amount of the project's plan headroom. */
+export const leaveProjectStorageHeadroom = async (
+  projectId: string,
+  planBytes: number,
+  remainingBytes: number,
+): Promise<void> => {
+  await psql(
+    `INSERT INTO project_git (project_id, storage_bytes, lfs_bytes) ` +
+      `VALUES ('${projectId}', 0, ${String(planBytes - remainingBytes)}) ` +
+      `ON CONFLICT (project_id) DO UPDATE SET lfs_bytes = ` +
+      `GREATEST(0, ${String(planBytes)} - project_git.storage_bytes - ${String(remainingBytes)});`,
+  );
+};
+
+/** Read the verified LFS bytes charged to one Tau Hosted Remote project. */
+export const projectLfsBytes = async (projectId: string): Promise<number> => {
+  const value = await psql(`SELECT lfs_bytes FROM project_git WHERE project_id = '${projectId}';`);
+  return value === '' ? 0 : Number(value);
+};
+
 /** Remove the projects one owner registered, so a re-run starts from the same state. */
 export const forgetSeededProjects = async (owner: TauCloudOwnerIds): Promise<void> => {
   await psql(`DELETE FROM project WHERE owner_id = '${owner.userId}';`);

@@ -9,7 +9,7 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "One real turn through each pinned ACP adapter, against the operator's own Codex and Claude logins. Kept off the default test target because it spends their quota; the suite still skips unless both adapters resolve and both CLIs answer."
+        "description": "One real tool turn through each selected pinned ACP adapter, against the operator's own Codex and Claude logins. Kept off the default test target because it spends their quota; a selected unavailable adapter fails explicitly."
       },
       "options": {
         "cwd": "{workspaceRoot}/packages/host",

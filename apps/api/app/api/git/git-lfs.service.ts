@@ -1,5 +1,6 @@
 /* oxlint-disable new-cap, @typescript-eslint/consistent-type-imports -- NestJS decorators are factories and DI metadata needs runtime class imports */
 /* eslint-disable @typescript-eslint/naming-convention -- git-lfs wire fields are snake_case */
+import { createHash } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 import { gitLfsObjectKey } from '#api/git/git.constants.js';
@@ -70,24 +71,28 @@ export class GitLfsService {
     /** Absolute base of this repository's LFS endpoints. */
     endpoint: string;
   }): Promise<LfsBatchOutcome> {
-    const present = await Promise.all(
-      args.objects.map(async (object) =>
-        this.objectStorage.headBlob({
-          namespace: 'blobs',
-          key: gitLfsObjectKey(args.access.projectId, object.oid),
-          tier: 'private',
-        }),
-      ),
-    );
-
     if (args.operation === 'download') {
+      const records = await this.repositories.readLfsObjects(
+        args.access.projectId,
+        args.objects.map((object) => object.oid),
+      );
+      const finalized = new Map(records.map((object) => [object.oid, object]));
       return {
         status: 200,
         body: {
           transfer: 'basic',
           objects: await Promise.all(
-            args.objects.map(async (object, index): Promise<LfsObjectResponse> => {
-              if (present[index] === undefined) {
+            args.objects.map(async (object): Promise<LfsObjectResponse> => {
+              const record = finalized.get(object.oid);
+              const stored =
+                record?.finalized === true && record.size === object.size
+                  ? await this.objectStorage.headBlob({
+                      namespace: 'blobs',
+                      key: gitLfsObjectKey(args.access.projectId, object.oid),
+                      tier: 'private',
+                    })
+                  : undefined;
+              if (stored === undefined || stored.size !== object.size) {
                 return {
                   oid: object.oid,
                   size: object.size,
@@ -120,25 +125,36 @@ export class GitLfsService {
       };
     }
 
-    const missing = args.objects.filter((_object, index) => present[index] === undefined);
-    const incoming = missing.reduce((total, object) => total + object.size, 0);
-    if (incoming > args.access.remainingBytes) {
+    const reservation = await this.repositories.reserveLfsObjects({ access: args.access, objects: args.objects });
+    if (reservation.status === 'quota') {
       // D16/AC16: the whole batch is refused with the objects that do not fit,
       // and the client maps them back to paths.
       return {
         status: 413,
         body: {
           code: 'GIT_LFS_QUOTA_EXCEEDED',
-          message: `Storage quota exceeded: this push needs ${String(incoming - args.access.remainingBytes)} bytes more than the plan allows.`,
-          shortfallBytes: incoming - args.access.remainingBytes,
-          remainingBytes: args.access.remainingBytes,
-          files: missing.map((object) => ({
-            oid: object.oid,
-            size: object.size,
-          })),
+          message: `Storage quota exceeded: this push needs ${String(reservation.shortfallBytes)} bytes more than the plan allows.`,
+          shortfallBytes: reservation.shortfallBytes,
+          remainingBytes: reservation.remainingBytes,
+          files: reservation.files,
         },
       };
     }
+    const states = new Map(reservation.objects.map((object) => [object.oid, object]));
+    const present = await Promise.all(
+      args.objects.map(async (object) => {
+        const record = states.get(object.oid);
+        if (record?.finalized !== true || record.size !== object.size) {
+          return false;
+        }
+        const stored = await this.objectStorage.headBlob({
+          namespace: 'blobs',
+          key: gitLfsObjectKey(args.access.projectId, object.oid),
+          tier: 'private',
+        });
+        return stored?.size === object.size;
+      }),
+    );
 
     return {
       status: 200,
@@ -146,7 +162,7 @@ export class GitLfsService {
         transfer: 'basic',
         objects: await Promise.all(
           args.objects.map(async (object, index): Promise<LfsObjectResponse> => {
-            if (present[index] !== undefined) {
+            if (present[index] === true) {
               // Already stored: git-lfs skips an object that has no actions.
               return {
                 oid: object.oid,
@@ -164,10 +180,16 @@ export class GitLfsService {
                     namespace: 'blobs',
                     key: gitLfsObjectKey(args.access.projectId, object.oid),
                     contentType: objectContentType,
+                    contentLength: object.size,
+                    checksumSha256: Buffer.from(object.oid, 'hex').toString('base64'),
                     expiresInSeconds: transferExpirySeconds,
                     tier: 'private',
                   }),
-                  header: { 'Content-Type': objectContentType },
+                  header: {
+                    'Content-Type': objectContentType,
+                    'Content-Length': String(object.size),
+                    'x-amz-checksum-sha256': Buffer.from(object.oid, 'hex').toString('base64'),
+                  },
                   expires_in: transferExpirySeconds,
                 },
                 verify: {
@@ -183,24 +205,35 @@ export class GitLfsService {
     };
   }
 
-  /**
-   * Git-lfs calls this once per object it uploaded, and only for objects the
-   * batch response said were missing — so counting the size here is exact for
-   * every honest client and cannot inflate another account's usage.
-   */
+  /** Verify exact stored bytes before making the reserved object readable. */
   public async verify(args: { access: GitAccess; oid: string; size: number }): Promise<boolean> {
     const stored = await this.objectStorage.headBlob({
       namespace: 'blobs',
       key: gitLfsObjectKey(args.access.projectId, args.oid),
       tier: 'private',
     });
-    if (stored === undefined) {
+    if (stored === undefined || stored.size !== args.size) {
       return false;
     }
-    await this.repositories.recordUsage({
-      projectId: args.access.projectId,
-      lfsBytesDelta: stored.size,
+    const blob = await this.objectStorage.getBlob({
+      namespace: 'blobs',
+      key: gitLfsObjectKey(args.access.projectId, args.oid),
+      tier: 'private',
     });
-    return true;
+    const hash = createHash('sha256');
+    let size = 0;
+    for await (const chunk of blob.body) {
+      const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : Buffer.from(chunk as Uint8Array<ArrayBuffer>);
+      size += bytes.byteLength;
+      if (size > args.size) {
+        blob.body.destroy();
+        return false;
+      }
+      hash.update(bytes);
+    }
+    if (size !== args.size || hash.digest('hex') !== args.oid) {
+      return false;
+    }
+    return (await this.repositories.finalizeLfsObject(args)) !== 'unreserved';
   }
 }

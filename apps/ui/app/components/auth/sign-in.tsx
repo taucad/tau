@@ -213,7 +213,10 @@ export function SignIn({ className, socialLayout, socialPosition = 'bottom' }: S
                     <div className='flex items-center gap-3'>
                       <Checkbox id='rememberMe' name='rememberMe' disabled={isPending} />
 
-                      <Label htmlFor='rememberMe' className='cursor-pointer text-sm font-normal'>
+                      <Label
+                        htmlFor='rememberMe'
+                        className='cursor-action rounded-sm px-1 py-0.5 text-sm font-normal transition-colors hover:bg-accent'
+                      >
                         {localization.auth.rememberMe}
                       </Label>
                     </div>

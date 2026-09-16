@@ -92,11 +92,12 @@ export { UnboundProjectRouteError } from '#workspace-file-service.js';
 export type { WorkspaceMutationErrorCode } from '#workspace-errors.js';
 
 export { ImmutableRevisionTree, revisionId } from '#revision-tree.js';
-export type { RevisionId, RevisionTreeEntry } from '#revision-tree.js';
+export type { RevisionFileMode, RevisionId, RevisionTreeEntry, RevisionTreeInput } from '#revision-tree.js';
 export { mergeRevisionTrees } from '#revision-merge.js';
 export type {
   AddAddConflict,
   BinaryConflict,
+  ModeConflict,
   ModifyDeleteConflict,
   RevisionTreeConflict,
   RevisionTreeMergeResult,

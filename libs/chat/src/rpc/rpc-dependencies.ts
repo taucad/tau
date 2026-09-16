@@ -17,6 +17,10 @@ import type {
   RunGeoSpecTestsRpcInput,
   RunGeoSpecTestsRpcResult,
   ResolveSkillRpcResult,
+  ApplyParameterOperationRpcInput,
+  ApplyParameterOperationRpcResult,
+  GetParametersRpcInput,
+  GetParametersRpcResult,
 } from '#schemas/rpc.schema.js';
 import type { DiffStatsWithContent } from '#schemas/tools/diff.schema.js';
 import type { ExportFile, FileContentMetadata, FileProvenance } from '@taucad/types';
@@ -135,6 +139,15 @@ export type RpcRuntimeClient = {
   getKernelResult(targetFile: string, context?: RpcInvocationContext): Promise<GetKernelResultRpcResult>;
 };
 
+/** Shared semantic parameter client attached by a host with checked authority. @public */
+export type RpcParameterClient = {
+  getParameters(input: GetParametersRpcInput, context?: RpcInvocationContext): Promise<GetParametersRpcResult>;
+  applyParameterOperation(
+    input: ApplyParameterOperationRpcInput,
+    context?: RpcInvocationContext,
+  ): Promise<ApplyParameterOperationRpcResult>;
+};
+
 /**
  * Success/failure surface for {@link RpcGraphicsClient.exportGeometry} before
  * the RPC handler persists bytes to `.tau/artifacts/`.
@@ -205,7 +218,10 @@ export type RpcSkillResolver = {
  */
 export type RpcRevisionsClient = {
   log(
-    request: Readonly<{ branch?: string | undefined; limit?: number | undefined }>,
+    request: Readonly<{
+      branch?: string | undefined;
+      limit?: number | undefined;
+    }>,
   ): Promise<readonly RevisionRowOutput[]>;
   diff(from: string | undefined, to: string): Promise<readonly RevisionChangeOutput[]>;
   describe(): Promise<
@@ -233,6 +249,7 @@ export type RpcDependencies = {
   geospec?: RpcGeoSpecClient;
   skillResolver?: RpcSkillResolver;
   revisions?: RpcRevisionsClient;
+  parameters?: RpcParameterClient;
 };
 
 /**

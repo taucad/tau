@@ -4,253 +4,253 @@
 
 FEmTool_Assembly: declare class FEmTool_Assembly
 
-constructor
+  constructor
 
-NullifyMatrix(): void;
+  NullifyMatrix(): void;
 
-AddMatrix(Element: number, Dimension1: number, Dimension2: number, Mat: math_Matrix): void;
+  AddMatrix(Element: number, Dimension1: number, Dimension2: number, Mat: math_Matrix): void;
 
-NullifyVector(): void;
+  NullifyVector(): void;
 
-AddVector(Element: number, Dimension: number, Vec: math_VectorBase_double): void;
+  AddVector(Element: number, Dimension: number, Vec: math_VectorBase_double): void;
 
-ResetConstraint(): void;
+  ResetConstraint(): void;
 
-NullifyConstraint(): void;
+  NullifyConstraint(): void;
 
-AddConstraint(IndexofConstraint: number, Element: number, Dimension: number, LinearForm: math_VectorBase_double, Value: number): void;
+  AddConstraint(IndexofConstraint: number, Element: number, Dimension: number, LinearForm: math_VectorBase_double, Value: number): void;
 
-Solve(): boolean;
+  Solve(): boolean;
 
-Solution(Solution: math_VectorBase_double): void;
+  Solution(Solution: math_VectorBase_double): void;
 
-NbGlobVar(): number;
+  NbGlobVar(): number;
 
-AssemblyTable(): NCollection_HArray2_handle_NCollection_HArray1_int;
+  AssemblyTable(): NCollection_HArray2_handle_NCollection_HArray1_int;
 
-// DEPRECATED
-GetAssemblyTable(): { AssTable: NCollection_HArray2_handle_NCollection_HArray1_int; [Symbol.dispose](): void };
+  // DEPRECATED
+  GetAssemblyTable(): { AssTable: NCollection_HArray2_handle_NCollection_HArray1_int; [Symbol.dispose](): void };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 FEmTool_Curve: declare class FEmTool_Curve extends Standard_Transient
 
-constructor
+  constructor
 
-Knots(): NCollection_Array1_double;
+  Knots(): NCollection_Array1_double;
 
-SetElement(IndexOfElement: number, Coeffs: NCollection_Array2_double): void;
+  SetElement(IndexOfElement: number, Coeffs: NCollection_Array2_double): void;
 
-D0(U: number, Pnt: NCollection_Array1_double): void;
+  D0(U: number, Pnt: NCollection_Array1_double): void;
 
-D1(U: number, Vec: NCollection_Array1_double): void;
+  D1(U: number, Vec: NCollection_Array1_double): void;
 
-D2(U: number, Vec: NCollection_Array1_double): void;
+  D2(U: number, Vec: NCollection_Array1_double): void;
 
-Length(FirstU: number, LastU: number, Length?: number): { Length: number };
+  Length(FirstU: number, LastU: number, Length?: number): { Length: number };
 
-GetElement(IndexOfElement: number, Coeffs: NCollection_Array2_double): void;
+  GetElement(IndexOfElement: number, Coeffs: NCollection_Array2_double): void;
 
-GetPolynom(Coeffs: NCollection_Array1_double): void;
+  GetPolynom(Coeffs: NCollection_Array1_double): void;
 
-NbElements(): number;
+  NbElements(): number;
 
-Dimension(): number;
+  Dimension(): number;
 
-Base(): PLib_HermitJacobi;
+  Base(): PLib_HermitJacobi;
 
-Degree(IndexOfElement: number): number;
+  Degree(IndexOfElement: number): number;
 
-SetDegree(IndexOfElement: number, Degree: number): void;
+  SetDegree(IndexOfElement: number, Degree: number): void;
 
-ReduceDegree(IndexOfElement: number, Tol: number, NewDegree?: number, MaxError?: number): { NewDegree: number; MaxError: number };
+  ReduceDegree(IndexOfElement: number, Tol: number, NewDegree?: number, MaxError?: number): { NewDegree: number; MaxError: number };
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 FEmTool_ElementaryCriterion: declare class FEmTool_ElementaryCriterion extends Standard_Transient
 
-Set(Coeff: NCollection_HArray2_double): void;
-Set(FirstKnot: number, LastKnot: number): void;
-Set(Coeff: NCollection_HArray2_double): void;
-Set(FirstKnot: number, LastKnot: number): void;
+  Set(Coeff: NCollection_HArray2_double): void;
+  Set(FirstKnot: number, LastKnot: number): void;
+  Set(Coeff: NCollection_HArray2_double): void;
+  Set(FirstKnot: number, LastKnot: number): void;
 
-DependenceTable(): NCollection_HArray2_int;
+  DependenceTable(): NCollection_HArray2_int;
 
-Value(): number;
+  Value(): number;
 
-Hessian(Dim1: number, Dim2: number, H: math_Matrix): void;
+  Hessian(Dim1: number, Dim2: number, H: math_Matrix): void;
 
-Gradient(Dim: number, G: math_VectorBase_double): void;
+  Gradient(Dim: number, G: math_VectorBase_double): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 FEmTool_ElementsOfRefMatrix: declare class FEmTool_ElementsOfRefMatrix extends math_FunctionSet
 
-constructor
+  constructor
 
-NbVariables(): number;
+  NbVariables(): number;
 
-NbEquations(): number;
+  NbEquations(): number;
 
-Value(X: math_VectorBase_double, F: math_VectorBase_double): boolean;
+  Value(X: math_VectorBase_double, F: math_VectorBase_double): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 FEmTool_LinearFlexion: declare class FEmTool_LinearFlexion extends FEmTool_ElementaryCriterion
 
-constructor
+  constructor
 
-DependenceTable(): NCollection_HArray2_int;
+  DependenceTable(): NCollection_HArray2_int;
 
-Value(): number;
+  Value(): number;
 
-Hessian(Dim1: number, Dim2: number, H: math_Matrix): void;
+  Hessian(Dim1: number, Dim2: number, H: math_Matrix): void;
 
-Gradient(Dim: number, G: math_VectorBase_double): void;
+  Gradient(Dim: number, G: math_VectorBase_double): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 FEmTool_LinearJerk: declare class FEmTool_LinearJerk extends FEmTool_ElementaryCriterion
 
-constructor
+  constructor
 
-DependenceTable(): NCollection_HArray2_int;
+  DependenceTable(): NCollection_HArray2_int;
 
-Value(): number;
+  Value(): number;
 
-Hessian(Dim1: number, Dim2: number, H: math_Matrix): void;
+  Hessian(Dim1: number, Dim2: number, H: math_Matrix): void;
 
-Gradient(Dim: number, G: math_VectorBase_double): void;
+  Gradient(Dim: number, G: math_VectorBase_double): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 FEmTool_LinearTension: declare class FEmTool_LinearTension extends FEmTool_ElementaryCriterion
 
-constructor
+  constructor
 
-DependenceTable(): NCollection_HArray2_int;
+  DependenceTable(): NCollection_HArray2_int;
 
-Value(): number;
+  Value(): number;
 
-Hessian(Dim1: number, Dim2: number, H: math_Matrix): void;
+  Hessian(Dim1: number, Dim2: number, H: math_Matrix): void;
 
-Gradient(Dim: number, G: math_VectorBase_double): void;
+  Gradient(Dim: number, G: math_VectorBase_double): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 FEmTool_ProfileMatrix: declare class FEmTool_ProfileMatrix extends FEmTool_SparseMatrix
 
-constructor
+  constructor
 
-Init(Value: number): void;
+  Init(Value: number): void;
 
-ChangeValue(I: number, J: number): number;
+  ChangeValue(I: number, J: number): number;
 
-Decompose(): boolean;
+  Decompose(): boolean;
 
-Solve(B: math_VectorBase_double, X: math_VectorBase_double): void;
-Solve(B: math_VectorBase_double, Init: math_VectorBase_double, X: math_VectorBase_double, Residual: math_VectorBase_double, Tolerance: number, NbIterations: number): void;
-Solve(B: math_VectorBase_double, X: math_VectorBase_double): void;
-Solve(B: math_VectorBase_double, Init: math_VectorBase_double, X: math_VectorBase_double, Residual: math_VectorBase_double, Tolerance: number, NbIterations: number): void;
+  Solve(B: math_VectorBase_double, X: math_VectorBase_double): void;
+  Solve(B: math_VectorBase_double, Init: math_VectorBase_double, X: math_VectorBase_double, Residual: math_VectorBase_double, Tolerance: number, NbIterations: number): void;
+  Solve(B: math_VectorBase_double, X: math_VectorBase_double): void;
+  Solve(B: math_VectorBase_double, Init: math_VectorBase_double, X: math_VectorBase_double, Residual: math_VectorBase_double, Tolerance: number, NbIterations: number): void;
 
-Prepare(): boolean;
+  Prepare(): boolean;
 
-Multiplied(X: math_VectorBase_double, MX: math_VectorBase_double): void;
+  Multiplied(X: math_VectorBase_double, MX: math_VectorBase_double): void;
 
-RowNumber(): number;
+  RowNumber(): number;
 
-ColNumber(): number;
+  ColNumber(): number;
 
-IsInProfile(i: number, j: number): boolean;
+  IsInProfile(i: number, j: number): boolean;
 
-OutM(): void;
+  OutM(): void;
 
-OutS(): void;
+  OutS(): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 FEmTool_SparseMatrix: declare class FEmTool_SparseMatrix extends Standard_Transient
 
-Init(Value: number): void;
+  Init(Value: number): void;
 
-ChangeValue(I: number, J: number): number;
+  ChangeValue(I: number, J: number): number;
 
-Decompose(): boolean;
+  Decompose(): boolean;
 
-Solve(B: math_VectorBase_double, X: math_VectorBase_double): void;
-Solve(B: math_VectorBase_double, Init: math_VectorBase_double, X: math_VectorBase_double, Residual: math_VectorBase_double, Tolerance: number, NbIterations: number): void;
-Solve(B: math_VectorBase_double, X: math_VectorBase_double): void;
-Solve(B: math_VectorBase_double, Init: math_VectorBase_double, X: math_VectorBase_double, Residual: math_VectorBase_double, Tolerance: number, NbIterations: number): void;
+  Solve(B: math_VectorBase_double, X: math_VectorBase_double): void;
+  Solve(B: math_VectorBase_double, Init: math_VectorBase_double, X: math_VectorBase_double, Residual: math_VectorBase_double, Tolerance: number, NbIterations: number): void;
+  Solve(B: math_VectorBase_double, X: math_VectorBase_double): void;
+  Solve(B: math_VectorBase_double, Init: math_VectorBase_double, X: math_VectorBase_double, Residual: math_VectorBase_double, Tolerance: number, NbIterations: number): void;
 
-Prepare(): boolean;
+  Prepare(): boolean;
 
-Multiplied(X: math_VectorBase_double, MX: math_VectorBase_double): void;
+  Multiplied(X: math_VectorBase_double, MX: math_VectorBase_double): void;
 
-RowNumber(): number;
+  RowNumber(): number;
 
-ColNumber(): number;
+  ColNumber(): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 FEmTool_AssemblyTable: NCollection_Array2_handle_NCollection_HArray1_int
 

@@ -9,6 +9,7 @@ import { Test } from '@nestjs/testing';
 import { describe, expect, it } from 'vitest';
 import { AppModule } from '#app.module.js';
 import { ChatController } from '#api/chat/chat.controller.js';
+import { DirectModelInvocationService } from '#api/llm/direct-model-invocation.service.js';
 
 /**
  * Whole-graph DI guard. `compile()` instantiates every module, provider and
@@ -26,15 +27,17 @@ import { ChatController } from '#api/chat/chat.controller.js';
 describe('AppModule', () => {
   it('should resolve every provider and controller in the application graph', async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [AppModule],
+      imports: [AppModule.forRoot({ ...getEnvironment(), TAU_CLOUD_ENABLED: false })],
     }).compile();
 
     // ChatController is the deepest consumer — it spans chat, billing, models
     // and telemetry in one constructor.
     expect(moduleRef.get(ChatController)).toBeInstanceOf(ChatController);
+    expect(moduleRef.get(DirectModelInvocationService)).toBeInstanceOf(DirectModelInvocationService);
+    expect(() => moduleRef.get(BillingPaymentsService)).toThrow();
   });
 
-  it('configures the inbox financial environment while keeping collection structurally closed', async () => {
+  it('should configure Stripe test collection and preserve webhook persistence failure', async () => {
     const database = mockDeep<DatabaseService>();
     database.database.transaction.mockRejectedValue(new Error('Controlled unavailable storage'));
     const webhookSecret = 'whsec_module_fixture';
@@ -47,7 +50,9 @@ describe('AppModule', () => {
       STRIPE_READ_SECRET_KEY: 'rk_test_module',
       STRIPE_WEBHOOK_SECRET: webhookSecret,
     });
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+    const moduleRef = await Test.createTestingModule({
+      imports: [AppModule.forRoot({ ...getEnvironment(), TAU_CLOUD_ENABLED: true })],
+    })
       .overrideProvider(ConfigService)
       .useValue(config)
       .overrideProvider(DatabaseService)
@@ -61,7 +66,8 @@ describe('AppModule', () => {
         amountMinor: '500',
         method: 'checkout',
       }),
-    ).rejects.toThrow('payment_collection_disabled');
+    ).rejects.toThrow('Controlled unavailable storage');
+    expect(database.database.transaction).toHaveBeenCalledOnce();
     const payload = JSON.stringify({
       id: 'evt_module',
       object: 'event',
@@ -81,7 +87,7 @@ describe('AppModule', () => {
     await expect(payments.receiveWebhook(new TextEncoder().encode(payload), signature)).rejects.toThrow(
       'stripe_webhook_persistence_failed',
     );
-    expect(database.database.transaction).toHaveBeenCalledOnce();
+    expect(database.database.transaction).toHaveBeenCalledTimes(2);
     await expect(payments.recoverPayments({ environment: 'prod-us', limit: 1 })).rejects.toThrow(
       'Invalid payment recovery scope',
     );

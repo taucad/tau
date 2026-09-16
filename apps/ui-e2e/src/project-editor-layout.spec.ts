@@ -84,7 +84,7 @@ const readLayoutMetrics = async (): Promise<LayoutMetrics> =>
       scrollLeft: root.scrollLeft,
       scrollTop: root.scrollTop,
       sidebarOpen:
-        document.querySelector<HTMLElement>('[data-slot="application-shell"]')?.dataset.sidebarOpen === 'true',
+        document.querySelector<HTMLElement>('[data-slot="application-shell"]')?.dataset['sidebarOpen'] === 'true',
       sidebarRight: sidebarBounds.right,
       viewportBottom: window.innerHeight,
       viewportRight: window.innerWidth,

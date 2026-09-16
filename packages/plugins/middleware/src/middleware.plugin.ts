@@ -23,6 +23,7 @@ export const middleware = definePlugin({
     default: [
       'middleware.parameterFileResolver',
       'middleware.parameterCache',
+      'middleware.parameterUnits',
       'middleware.geometryCache',
       'middleware.gltfEdgeDetection',
     ],

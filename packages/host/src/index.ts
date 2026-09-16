@@ -49,6 +49,7 @@ export type {
   ProjectRevisions,
   ProjectRevisionsOptions,
   RevisionDiscardOutcome,
+  RevisionOpenOutcome,
   RevisionPublishOutcome,
   RevisionSwitchOutcome,
   TurnCheckout,

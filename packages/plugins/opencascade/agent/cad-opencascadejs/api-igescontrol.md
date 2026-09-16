@@ -4,138 +4,138 @@
 
 IGESControl_ActorWrite: declare class IGESControl_ActorWrite extends Transfer_ActorOfFinderProcess
 
-constructor
+  constructor
 
-Recognize(start: Transfer_Finder): boolean;
+  Recognize(start: Transfer_Finder): boolean;
 
-Transfer(start: Transfer_Finder, TP: Transfer_FinderProcess, theProgress?: Message_ProgressRange): Transfer_Binder;
+  Transfer(start: Transfer_Finder, TP: Transfer_FinderProcess, theProgress?: Message_ProgressRange): Transfer_Binder;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IGESControl_AlgoContainer: declare class IGESControl_AlgoContainer extends IGESToBRep_AlgoContainer
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IGESControl_Controller: declare class IGESControl_Controller extends XSControl_Controller
 
-constructor
+  constructor
 
-NewModel(): Interface_InterfaceModel;
+  NewModel(): Interface_InterfaceModel;
 
-ActorRead(model: Interface_InterfaceModel): Transfer_ActorOfTransientProcess;
+  ActorRead(model: Interface_InterfaceModel): Transfer_ActorOfTransientProcess;
 
-TransferWriteShape(shape: TopoDS_Shape, FP: Transfer_FinderProcess, model: Interface_InterfaceModel, modetrans?: number, theProgress?: Message_ProgressRange): IFSelect_ReturnStatus;
+  TransferWriteShape(shape: TopoDS_Shape, FP: Transfer_FinderProcess, model: Interface_InterfaceModel, modetrans?: number, theProgress?: Message_ProgressRange): IFSelect_ReturnStatus;
 
-static Init(): boolean;
+  static Init(): boolean;
 
-Customise(): { WS: XSControl_WorkSession; [Symbol.dispose](): void };
+  Customise(): { WS: XSControl_WorkSession; [Symbol.dispose](): void };
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IGESControl_IGESBoundary: declare class IGESControl_IGESBoundary extends IGESToBRep_IGESBoundary
 
-constructor
+  constructor
 
-Check(result: boolean, checkclosure: boolean, okCurve3d: boolean, okCurve2d: boolean): void;
+  Check(result: boolean, checkclosure: boolean, okCurve3d: boolean, okCurve2d: boolean): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IGESControl_Reader: declare class IGESControl_Reader extends XSControl_Reader
 
-constructor
+  constructor
 
-SetReadVisible(ReadRoot: boolean): void;
+  SetReadVisible(ReadRoot: boolean): void;
 
-GetReadVisible(): boolean;
+  GetReadVisible(): boolean;
 
-IGESModel(): IGESData_IGESModel;
+  IGESModel(): IGESData_IGESModel;
 
-NbRootsForTransfer(): number;
+  NbRootsForTransfer(): number;
 
-PrintTransferInfo(failwarn: IFSelect_PrintFail, mode: IFSelect_PrintCount): void;
+  PrintTransferInfo(failwarn: IFSelect_PrintFail, mode: IFSelect_PrintCount): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IGESControl_ToolContainer: declare class IGESControl_ToolContainer extends IGESToBRep_ToolContainer
 
-constructor
+  constructor
 
-IGESBoundary(): IGESToBRep_IGESBoundary;
+  IGESBoundary(): IGESToBRep_IGESBoundary;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IGESControl_Writer: declare class IGESControl_Writer
 
-constructor
+  constructor
 
-Model(): IGESData_IGESModel;
+  Model(): IGESData_IGESModel;
 
-TransferProcess(): Transfer_FinderProcess;
+  TransferProcess(): Transfer_FinderProcess;
 
-SetTransferProcess(TP: Transfer_FinderProcess): void;
+  SetTransferProcess(TP: Transfer_FinderProcess): void;
 
-AddShape(sh: TopoDS_Shape, theProgress?: Message_ProgressRange): boolean;
+  AddShape(sh: TopoDS_Shape, theProgress?: Message_ProgressRange): boolean;
 
-AddGeom(geom: Standard_Transient): boolean;
+  AddGeom(geom: Standard_Transient): boolean;
 
-AddEntity(ent: IGESData_IGESEntity): boolean;
+  AddEntity(ent: IGESData_IGESEntity): boolean;
 
-ComputeModel(): void;
+  ComputeModel(): void;
 
-Write(file: string, fnes: boolean): boolean;
+  Write(file: string, fnes: boolean): boolean;
 
-SetShapeFixParameters(theParameters: NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString): void;
+  SetShapeFixParameters(theParameters: NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString): void;
 
-GetShapeFixParameters(): NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString;
+  GetShapeFixParameters(): NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString;
 
-SetShapeProcessFlags(theFlags: any): void;
+  SetShapeProcessFlags(theFlags: any): void;
 
-GetShapeProcessFlags(): any;
+  GetShapeProcessFlags(): any;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

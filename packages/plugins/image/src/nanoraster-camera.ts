@@ -1,6 +1,6 @@
 import type { CameraState } from '@taucad/camera';
-import type { RenderCamera } from 'nanoraster';
-import { renderImageVerticalFieldOfViewRange, renderImageZoomRange } from 'nanoraster';
+import type { RenderCamera } from 'nanoraster/options';
+import { renderImageVerticalFieldOfViewRange, renderImageZoomRange } from 'nanoraster/options';
 
 type NanorasterFixedProjection = Extract<RenderCamera, { framing: 'fixed' }>['projection'];
 

@@ -4,12 +4,12 @@
 
 PolygonOnTriHashKey: declare class PolygonOnTriHashKey
 
-constructor
+  constructor
 
-Poly: Poly_PolygonOnTriangulation
+  Poly: Poly_PolygonOnTriangulation
 
-TriRepId: number
+  TriRepId: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

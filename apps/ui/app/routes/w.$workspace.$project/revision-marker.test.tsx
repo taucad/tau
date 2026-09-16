@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { RevisionMarker } from '#routes/w.$workspace.$project/revision-marker.js';
 import type { RevisionMarkerProps } from '#routes/w.$workspace.$project/revision-marker.js';
 import type { RevisionDiffEntry } from '@taucad/revisions';
@@ -37,6 +37,7 @@ const revision = (over: Partial<RevisionCard> = {}): RevisionCard => ({
   actor: 'tau-browser-agent-host',
   turnId: 'u1',
   conflicted: false,
+  trigger: 'turn',
   ...over,
 });
 
@@ -84,10 +85,41 @@ describe('RevisionMarker', () => {
     expect(diff.textContent).toBe('before|after');
   });
 
+  it('T-RM-COMPARE-RETRY: distinguishes a failed comparison from an empty file', async () => {
+    revisionStatusHarness.comparisonError = new Error('Tree is unavailable');
+    renderMarker();
+    fireEvent.click(screen.getByRole('button', { name: 'Compare main.geospec.ts' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Could not compare main.geospec.ts. Tree is unavailable',
+    );
+    revisionStatusHarness.comparisonError = undefined;
+    revisionStatusHarness.comparison = { original: '', modified: '' };
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByTestId('diff')).toHaveTextContent('|');
+  });
+
   it('T-RM-UNNUMBERED: a revision this branch does not number says so instead of inventing one', () => {
     renderMarker({ revision: revision({ n: undefined }) });
     expect(screen.getAllByText('Revision').length).toBeGreaterThan(0);
     expect(screen.queryByText(/Rev \d/)).toBeNull();
+  });
+
+  it('names a revision and removes an existing version name', async () => {
+    const onTag = vi.fn(async () => undefined);
+    const onDeleteTag = vi.fn(async () => undefined);
+    renderMarker({ revision: revision({ tags: ['v1'] }), onTag, onDeleteTag });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Name version' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Name Revision 2' }), { target: { value: 'release' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
+    await waitFor(() => {
+      expect(onTag).toHaveBeenCalledWith('release');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove version name v1' }));
+    expect(onDeleteTag).toHaveBeenCalledWith('v1');
   });
 
   it('T-RM-DATE: switches from time-only to date + time at the component-width breakpoint', () => {

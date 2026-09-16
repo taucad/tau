@@ -8,7 +8,6 @@ import {
   DataTableColumnVisibilityDropdown,
 } from '#components/ui/data-table.js';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@taucad/ui/components/card';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party usage surface owns the direct billing client contract
 import { formatCreditAtoms } from '@taucad/billing';
 import type { WireUsageEvent } from '@taucad/billing';
 import { usageColumns, usageEventId, usageEventNetAtoms } from '#routes/usage/columns.js';

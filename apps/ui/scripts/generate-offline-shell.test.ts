@@ -56,6 +56,40 @@ it('resolves every entry the prerendered document needs to an existing build ass
   ]);
 });
 
+it('ignores query strings and fragments when resolving same-origin assets', () => {
+  const decoratedFiles = new Map(files);
+  decoratedFiles.set(
+    'usage/index.html',
+    '<link rel="stylesheet" href="/assets/app-bbb.css?v=1#theme"><script src="/assets/entry-aaa.js?module=1#boot"></script>',
+  );
+  const decoratedBuild: ClientBuildView = {
+    ...build,
+    readText: (relativePath) => decoratedFiles.get(relativePath),
+    exists: (relativePath) => decoratedFiles.has(relativePath),
+  };
+
+  expect(collectOfflineShellAssets(['/usage'], decoratedBuild)).toStrictEqual([
+    '/assets/app-bbb.css',
+    '/assets/entry-aaa.js',
+    '/assets/shared-ddd.js',
+    '/fonts/GeistMono-Variable.woff2',
+  ]);
+});
+
+it.each(['/assets/kernel.wasm?v=1#x', '/assets/kernel.js.map?debug=1#x', String.raw`/\other.invalid/assets/entry.js`])(
+  'excludes %s after URL normalization',
+  (reference) => {
+    const referenceBuild: ClientBuildView = {
+      readText: (relativePath) =>
+        relativePath === 'usage/index.html' ? `<script src="${reference}"></script>` : undefined,
+      exists: () => false,
+      manifest: {},
+    };
+
+    expect(collectOfflineShellAssets(['/usage'], referenceBuild)).toStrictEqual([]);
+  },
+);
+
 it('excludes cross-origin references, dynamic imports and kernel binaries', () => {
   const assets = collectOfflineShellAssets(['/usage'], build);
 
@@ -71,6 +105,21 @@ it('fails when a referenced asset is missing from the build output', () => {
   };
 
   expect(() => collectOfflineShellAssets(['/usage'], withoutShared)).toThrow(/missing build asset/u);
+});
+
+it('collects a directly linked hashed stylesheet absent from the build manifest', () => {
+  const directCssFiles = new Map(files);
+  directCssFiles.set('usage/index.html', '<link rel="stylesheet" href="/assets/app-bbb.css">');
+  const directCssBuild: ClientBuildView = {
+    readText: (relativePath) => directCssFiles.get(relativePath),
+    exists: (relativePath) => directCssFiles.has(relativePath),
+    manifest: {},
+  };
+
+  expect(collectOfflineShellAssets(['/usage'], directCssBuild)).toStrictEqual([
+    '/assets/app-bbb.css',
+    '/fonts/GeistMono-Variable.woff2',
+  ]);
 });
 
 it('fails when a hashed asset is absent from the build manifest', () => {

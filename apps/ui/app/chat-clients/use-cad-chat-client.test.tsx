@@ -20,6 +20,7 @@ const workspaceHarness = vi.hoisted(() => ({
     | {
         execution: { hostId: string; workspaceId: string; baseRevisionId: string };
         admitted: boolean;
+        runId: string;
       }
     | undefined,
   listeners: new Set<() => void>(),
@@ -116,6 +117,7 @@ vi.mock('#hooks/use-models.js', () => ({
           knowledgeCutoff: '2025-06',
           cost: { inputTokens: 1, outputTokens: 4, cacheReadTokens: 0.1, cacheWriteTokens: 1.25 },
         },
+        configuration: { streaming: true, reasoning: { effort: 'high', summary: 'auto' } },
         support: { modalities: { input: ['text', ...(retry ? [] : ['image'])], output: ['text'] }, tools: true },
       };
       return {
@@ -294,7 +296,7 @@ const expectRunBody = (agent: CadAgentConfigInput = buildAgent()): Record<string
   execution: { hostId: 'host_test', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
   admission: {
     version: 1,
-    idempotencyKey: expect.stringMatching(/^req_/u) as unknown,
+    idempotencyKey: 'run_workspace_test',
   },
   // The browser host is the only Tau placement: every Tau turn admits one.
   browserHost: expectAnyHostAdmission,
@@ -312,12 +314,14 @@ beforeEach(() => {
   workspaceHarness.current = {
     execution: { hostId: 'host_test', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
     admitted: false,
+    runId: 'run_workspace_test',
   };
   // The real authority stamps the claim's own mode onto the target it hands
   // back; the harness has to do the same or the wire assertion proves nothing.
   const mintedClaim: NonNullable<typeof workspaceHarness.current> = {
     execution: { hostId: 'host_test', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
     admitted: false,
+    runId: 'run_workspace_test',
   };
   workspaceHarness.prepare.mockImplementation(async () => {
     workspaceHarness.current = workspaceHarness.current ?? mintedClaim;
@@ -354,6 +358,7 @@ describe('useCadChatClient', () => {
     const [transport] = browserHostHarness.createDaemonClient.mock.calls.at(-1) as [{ dial: () => Promise<unknown> }];
     await expect(transport.dial()).resolves.toEqual({ hostId: 'desktop' });
     expect(browserHostHarness.openAgentHostChannel).toHaveBeenCalledWith('desktop', {
+      projectId: 'proj_test',
       workspaceRoot: '/Users/test/Tau/home/proj_test',
     });
     expect(browserHostHarness.createClient).not.toHaveBeenCalled();
@@ -445,6 +450,7 @@ describe('useCadChatClient', () => {
       id: 'openai-gpt-5.5',
       providerKind: 'openai',
       cost: { input: 1, output: 4, cacheRead: 0.1, cacheWrite: 1.25 },
+      reasoning: { effort: 'high', summary: 'auto' },
     });
     expect(options?.systemPrompt).toContain('<role>');
     // Two blocks, not three: the workspace slot is empty on this path, and
@@ -809,7 +815,7 @@ describe('useCadChatClient', () => {
     expect(body.browserHost.config.systemPrompt).toContain('<plan_mode>');
     expect(body.browserHost.config.systemPromptBlocks[1]?.text).toContain('Model: openai-gpt-retry');
     const [snapshotContext] = body.browserHost.config.contextMessages;
-    expect(snapshotContext?.id).toMatch(/^tau:snapshot-context:req_/u);
+    expect(snapshotContext?.id).toBe('tau:snapshot-context:run_workspace_test');
     expect(snapshotContext?.content).toContain('The file currently being rendered by the CAD engine: main.ts');
     expect(snapshotContext).toMatchObject({
       role: 'user',
@@ -989,6 +995,7 @@ describe('useCadChatClient', () => {
     workspaceHarness.current = {
       execution: { hostId: 'host_test', workspaceId: 'workspace_old', baseRevisionId: 'rev_old' },
       admitted: true,
+      runId: 'run_workspace_old',
     };
     const chat = mock<Chat<MyUIMessage>>();
     Object.defineProperty(chat, 'messages', {
@@ -1010,6 +1017,7 @@ describe('useCadChatClient', () => {
     workspaceHarness.current = {
       execution: { hostId: 'host_test', workspaceId: 'workspace_retry', baseRevisionId: 'rev_retry' },
       admitted: false,
+      runId: 'run_workspace_retry',
     };
     act(() => {
       for (const listener of workspaceHarness.listeners) {
@@ -1208,6 +1216,7 @@ describe('useCadChatClient', () => {
           baseRevisionId: 'rev_second',
         },
         admitted: false,
+        runId: 'run_workspace_second',
       };
       return workspaceHarness.current;
     });
@@ -1329,6 +1338,7 @@ describe('useCadChatClient', () => {
     workspaceHarness.current = {
       execution: { hostId: 'host_test', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
       admitted: false,
+      runId: 'run_workspace_test',
     };
     act(() => {
       for (const listener of workspaceHarness.listeners) {

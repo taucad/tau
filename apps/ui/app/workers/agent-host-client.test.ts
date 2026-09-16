@@ -110,7 +110,12 @@ class FakeAgentHostWorker {
                 }
               : { type: 'tail', chatId: request.chatId, batch };
           }
-          const runId = request.type === 'resume' ? 'resumed-run' : request.runId;
+          const runId =
+            request.type === 'resume'
+              ? 'resumed-run'
+              : request.type === 'record-settlement'
+                ? request.event.runId
+                : request.runId;
           const state = request.type === 'cancel' ? 'cancelled' : this.deferRunCompletion ? 'running' : 'completed';
           const snapshot: HostRunSnapshot = {
             chatId: request.chatId,

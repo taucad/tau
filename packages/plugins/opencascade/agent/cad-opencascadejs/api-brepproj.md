@@ -4,20 +4,20 @@
 
 BRepProj_Projection: declare class BRepProj_Projection
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-Init(): void;
+  Init(): void;
 
-More(): boolean;
+  More(): boolean;
 
-Next(): void;
+  Next(): void;
 
-Current(): TopoDS_Wire;
+  Current(): TopoDS_Wire;
 
-Shape(): TopoDS_Compound;
+  Shape(): TopoDS_Compound;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

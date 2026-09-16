@@ -16,8 +16,18 @@ const snapshot = (): ShareProjectSnapshot => ({
       sha256: 'parameters',
       role: 'project-metadata',
     },
-    { path: 'main.ts', content: bytes('export default 1;'), sha256: 'main', role: 'entry' },
-    { path: 'tau.json', content: bytes('{"name":"Demo"}'), sha256: 'manifest', role: 'project-metadata' },
+    {
+      path: 'main.ts',
+      content: bytes('export default 1;'),
+      sha256: 'main',
+      role: 'entry',
+    },
+    {
+      path: 'tau.json',
+      content: bytes('{"name":"Demo"}'),
+      sha256: 'manifest',
+      role: 'project-metadata',
+    },
   ],
   warnings: [],
 });
@@ -25,7 +35,10 @@ const snapshot = (): ShareProjectSnapshot => ({
 describe('portable share artifacts', () => {
   it('creates deterministic archives and round trips plain and password-protected artifacts', async () => {
     const first = await createShareArchive(snapshot());
-    const second = await createShareArchive({ ...snapshot(), files: [...snapshot().files].reverse() });
+    const second = await createShareArchive({
+      ...snapshot(),
+      files: [...snapshot().files].reverse(),
+    });
     expect(first).toEqual(second);
 
     const packed = await shareArtifactCodec.pack(snapshot());
@@ -33,7 +46,10 @@ describe('portable share artifacts', () => {
     expect(plainOpened.archive).toEqual(packed.archive);
 
     const sealed = await shareArtifactCodec.sealWithPassword(snapshot(), password);
-    const opened = await shareArtifactCodec.openWithPassword({ compactJwe: sealed.compactJwe, password });
+    const opened = await shareArtifactCodec.openWithPassword({
+      compactJwe: sealed.compactJwe,
+      password,
+    });
     expect(opened.archive).toEqual(sealed.archive);
     expect(opened.files.map(({ path }) => path)).toEqual(['.tau/parameters/main.ts.json', 'main.ts', 'tau.json']);
     await expect(
@@ -42,6 +58,23 @@ describe('portable share artifacts', () => {
         password: 'wrong password value that is long enough',
       }),
     ).rejects.toMatchObject({ code: 'SHARE_ARTIFACT_INVALID' });
+  });
+
+  it.each([
+    '{"activeGroup":"default","groups":{"default":{"values":{"width":12}}}}',
+    '{"recordVersion":1,"profile":"tau-json-structure-units-03-v1","activeGroup":"default","groups":{"default":{"values":{"width":12}}}}',
+    '{"recordVersion":2,"profile":"future","activeGroup":"alternate","groups":{"alternate":{"values":{"width":"12.500"}}}}',
+    '{"activeGroup":"default","groups":{"default":{"values":{"exact":"1.2300"}}}}',
+    '{',
+  ])('preserves parameter record bytes without interpreting %s', async (record) => {
+    const content = bytes(record);
+    const files = snapshot().files.map((file) =>
+      file.path === '.tau/parameters/main.ts.json' ? { ...file, content } : file,
+    );
+
+    const opened = await openShareArchive(await createShareArchive({ ...snapshot(), files }));
+
+    expect(opened.files.find(({ path }) => path === '.tau/parameters/main.ts.json')?.content).toEqual(content);
   });
 
   it('rejects unexpected JWE headers', async () => {
@@ -66,7 +99,10 @@ describe('portable share artifacts', () => {
     const segments = sealed.compactJwe.split('.');
     segments[3] = `${segments[3]?.startsWith('A') ? 'B' : 'A'}${segments[3]?.slice(1)}`;
     await expect(
-      shareArtifactCodec.openWithPassword({ compactJwe: segments.join('.'), password }),
+      shareArtifactCodec.openWithPassword({
+        compactJwe: segments.join('.'),
+        password,
+      }),
     ).rejects.toMatchObject({ code: 'SHARE_ARTIFACT_INVALID' });
     await expect(shareArtifactCodec.sealWithPassword(snapshot(), 'short')).rejects.toMatchObject({
       code: 'SHARE_ARTIFACT_INVALID',
@@ -113,7 +149,14 @@ describe('portable share artifacts', () => {
     bomb.file('tau.json', '{}');
     bomb.file('zeros.bin', new Uint8Array(1024 * 1024));
     await expect(
-      openShareArchive(new Uint8Array(await bomb.generateAsync({ type: 'uint8array', compression: 'DEFLATE' }))),
+      openShareArchive(
+        new Uint8Array(
+          await bomb.generateAsync({
+            type: 'uint8array',
+            compression: 'DEFLATE',
+          }),
+        ),
+      ),
     ).rejects.toMatchObject({ code: 'SHARE_ARTIFACT_LIMIT' });
 
     await expect(
@@ -121,7 +164,12 @@ describe('portable share artifacts', () => {
         ...snapshot(),
         files: [
           ...snapshot().files,
-          { path: '.tau/private', content: bytes('x'), sha256: 'x', role: 'project-metadata' },
+          {
+            path: '.tau/private',
+            content: bytes('x'),
+            sha256: 'x',
+            role: 'project-metadata',
+          },
         ],
       }),
     ).rejects.toMatchObject({ code: 'SHARE_ARTIFACT_INVALID' });
@@ -131,8 +179,18 @@ describe('portable share artifacts', () => {
         ...snapshot(),
         files: [
           ...snapshot().files,
-          { path: 'assets', content: bytes('x'), sha256: 'x', role: 'project-metadata' },
-          { path: 'assets/model.step', content: bytes('x'), sha256: 'x', role: 'project-metadata' },
+          {
+            path: 'assets',
+            content: bytes('x'),
+            sha256: 'x',
+            role: 'project-metadata',
+          },
+          {
+            path: 'assets/model.step',
+            content: bytes('x'),
+            sha256: 'x',
+            role: 'project-metadata',
+          },
         ],
       }),
     ).rejects.toMatchObject({ code: 'SHARE_ARTIFACT_INVALID' });
@@ -142,7 +200,15 @@ describe('portable share artifacts', () => {
         expect(
           createShareArchive({
             ...snapshot(),
-            files: [...snapshot().files, { path, content: bytes('x'), sha256: 'x', role: 'project-metadata' }],
+            files: [
+              ...snapshot().files,
+              {
+                path,
+                content: bytes('x'),
+                sha256: 'x',
+                role: 'project-metadata',
+              },
+            ],
           }),
         ).rejects.toMatchObject({ code: 'SHARE_ARTIFACT_INVALID' }),
       ),
@@ -151,7 +217,15 @@ describe('portable share artifacts', () => {
     await expect(
       createShareArchive({
         ...snapshot(),
-        files: [...snapshot().files, { path: 'MAIN.ts', content: bytes('x'), sha256: 'x', role: 'project-metadata' }],
+        files: [
+          ...snapshot().files,
+          {
+            path: 'MAIN.ts',
+            content: bytes('x'),
+            sha256: 'x',
+            role: 'project-metadata',
+          },
+        ],
       }),
     ).rejects.toMatchObject({ code: 'SHARE_ARTIFACT_INVALID' });
 

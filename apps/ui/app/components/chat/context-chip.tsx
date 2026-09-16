@@ -29,7 +29,7 @@ type ContextChipProps = React.ComponentPropsWithRef<'span'> & {
   readonly chipType: ChipType;
   /** When provided, hovering swaps the type icon for an X button that calls this handler. */
   readonly onRemove?: () => void;
-  /** Enables pointer cursor and hover background highlight (for clickable chips). */
+  /** Enables the hover background highlight used by clickable chips. */
   readonly isInteractive?: boolean;
 };
 
@@ -88,7 +88,7 @@ export function ContextChip({
       className={cn(
         'inline-flex items-center gap-0.5 rounded-xs px-1.5 py-px text-xs',
         chipColorClass[chipType].base,
-        isInteractive ? `cursor-pointer ${chipColorClass[chipType].hover}` : 'cursor-default',
+        isInteractive ? chipColorClass[chipType].hover : 'cursor-default',
         className,
       )}
       {...hoverProps}

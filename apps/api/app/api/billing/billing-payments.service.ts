@@ -22,6 +22,7 @@ import type { QualifiedCashTaxCorrection } from '#api/billing/billing-tax.servic
 import {
   cashOccurredAt,
   checkoutExpiryEvidenceSchema,
+  exactPaymentOfferTotals,
   noChargeEvidenceSchema,
   paidPaymentEvidenceSchema,
   paymentOfferSnapshotSchema,
@@ -32,11 +33,13 @@ import {
   createStripeReloadTaxCalculationOnce,
   createStripeSetupCheckoutOnce,
   createStripeSubscriptionScheduleOnce,
+  createStripeTaxTransactionOnce,
   dispatchStripeLegOnce,
   expireStripeCheckoutSession,
   fetchStripeCheckoutSource,
   fetchStripeInvoiceEvidence,
   fetchStripeTaxCalculationEvidence,
+  fetchStripeTaxTransactionEvidence,
   isLoopbackBillingStripeClient,
   parseStripeCreateLeg,
   parseVerifiedStripeEvent,
@@ -125,7 +128,7 @@ export type BillingPaymentsConfig = {
   readonly webhookSecret: string;
   // oxlint-disable-next-line typescript/no-restricted-types -- null structurally disables collection
   readonly collection: null | {
-    readonly kind: 'local_fixture';
+    readonly kind: 'local_fixture' | 'stripe_test';
     readonly monthlyPriceId: string;
     readonly topupProductId: string;
   };
@@ -179,6 +182,27 @@ export type BillingCashQualification = {
     readonly maximumRefundPages: number;
   }): Promise<CashQualificationResult | UnclaimedCashProjection>;
 };
+
+/** Detail rows for the renewal-failed notice, as display strings. Absent fields drop their row. */
+const describeRenewalFailure = (
+  invoice: Stripe.Invoice,
+): { readonly amount?: string; readonly nextAttemptAt?: string } => ({
+  ...(invoice.amount_due > 0
+    ? {
+        amount: new Intl.NumberFormat('en-US', {
+          style: 'currency',
+          currency: invoice.currency.toUpperCase(),
+        }).format(invoice.amount_due / 100),
+      }
+    : {}),
+  ...(invoice.next_payment_attempt === null || invoice.next_payment_attempt === undefined
+    ? {}
+    : {
+        nextAttemptAt: new Intl.DateTimeFormat('en-NZ', { dateStyle: 'medium', timeZone: 'UTC' }).format(
+          new Date(invoice.next_payment_attempt * 1000),
+        ),
+      }),
+});
 
 export type BillingRecoveryNoticeTransport = {
   deliver(input: {
@@ -402,6 +426,17 @@ export class BillingPaymentsService {
     const binding = await this.ensureCustomer(owner);
     const paymentMethod =
       input.method === 'saved_card' ? await this.selectOwnedDefaultCard(binding.stripeCustomerId) : null;
+    const savedCardTax =
+      input.method === 'saved_card'
+        ? await this.quoteSavedCardTax({
+            accountId: owner.accountId,
+            customerBindingId: binding.id,
+            customerId: binding.stripeCustomerId,
+            principalMinor: Number(principal),
+            productId: this.config.collection?.topupProductId ?? '',
+            requestId: input.requestId,
+          })
+        : undefined;
     const snapshot = paymentOfferSnapshotSchema.parse({
       version: 'payment-offer-v1',
       policyId: effective.policyId,
@@ -412,16 +447,16 @@ export class BillingPaymentsService {
       livemode: this.config.livemode,
       currency: 'usd',
       principalMinor: principal.toString(),
-      taxMinor: '0',
-      grossMinor: principal.toString(),
-      maximumGrossMinor: offer.maximumPrincipalMinor,
+      taxMinor: savedCardTax === undefined ? null : String(savedCardTax.taxMinor),
+      grossMinor: savedCardTax === undefined ? null : String(savedCardTax.grossMinor),
+      maximumGrossMinor: savedCardTax === undefined ? null : String(savedCardTax.grossMinor),
       creditAtoms: (principal * BigInt(offer.creditAtomsPerPrincipalMinor)).toString(),
       ceilingCreditAtoms: null,
       stripePriceId: null,
       stripeProductId: this.config.collection?.topupProductId ?? null,
       quantity: 1,
       term: 'one_time',
-      taxBasis: 'synthetic_local_zero_tax',
+      taxBasis: savedCardTax === undefined ? 'stripe_checkout' : 'stripe_tax',
       paymentMethod,
     });
     const actionId = randomUUID();
@@ -467,6 +502,7 @@ export class BillingPaymentsService {
           requestId: input.requestId,
           requestHash,
           purpose,
+          taxEvidence: savedCardTax?.evidence,
           returnPath: input.returnPath,
           stripeAccountId: this.config.stripeAccountId,
           livemode: this.config.livemode,
@@ -661,13 +697,15 @@ export class BillingPaymentsService {
       policyId: effective.policyId,
       offerId: offer.offerId,
       principalMinor: offer.principalMinor,
-      taxMinor: '0',
-      grossMinor: offer.principalMinor,
-      maximumGrossMinor: offer.principalMinor,
+      taxMinor: null,
+      grossMinor: null,
+      maximumGrossMinor: null,
       creditAtoms: offer.grantCreditAtoms,
       ceilingCreditAtoms: offer.ceilingCreditAtoms,
       stripePriceId: this.config.collection?.monthlyPriceId ?? null,
       stripeProductId: null,
+      taxBasis: 'stripe_checkout',
+      paymentMethod: null,
     });
     const id = randomUUID();
     const evidence = {
@@ -912,7 +950,7 @@ export class BillingPaymentsService {
       !isConclusiveNoCharge(cancellationEvidence, {
         customerId: binding[0].stripeCustomerId,
         customerBindingId: original.customerBindingId,
-        grossMinor: Number(offer.grossMinor),
+        grossMinor: Number(exactPaymentOfferTotals(offer).grossMinor),
         livemode: offer.livemode,
         paymentIntentId: original.providerObjectId,
         paymentMethodId: paymentMethodId(original.request),
@@ -964,12 +1002,22 @@ export class BillingPaymentsService {
       cancel_url: returnUrl,
       line_items: [
         {
-          price_data: { currency: 'usd', product: offer.stripeProductId, unit_amount: Number(offer.principalMinor) },
+          price_data: {
+            currency: 'usd',
+            product: offer.stripeProductId,
+            tax_behavior: 'exclusive',
+            unit_amount: Number(offer.principalMinor),
+          },
           quantity: 1,
         },
       ],
       metadata,
-      payment_intent_data: { metadata },
+      automatic_tax: { enabled: true },
+      billing_address_collection: 'required',
+      customer_update: { address: 'auto', name: 'auto' },
+      payment_method_types: ['card'],
+      payment_intent_data: { metadata, setup_future_usage: 'on_session' },
+      tax_id_collection: { enabled: true },
     };
     const replacementWon = await this.databaseService.database.transaction(async (tx) => {
       const closed = await tx
@@ -1018,6 +1066,7 @@ export class BillingPaymentsService {
           productId: offer.stripeProductId,
           principalMinor: Number(offer.principalMinor),
         },
+        onSessionSaveConsent: true,
       }),
     );
     if (result.kind !== 'checkout') throw new Error('Unexpected recovery Checkout result');
@@ -1064,16 +1113,16 @@ export class BillingPaymentsService {
       livemode: this.config.livemode,
       currency: 'usd',
       principalMinor: offer.principalMinor,
-      taxMinor: '0',
-      grossMinor: offer.principalMinor,
-      maximumGrossMinor: offer.principalMinor,
+      taxMinor: null,
+      grossMinor: null,
+      maximumGrossMinor: null,
       creditAtoms: offer.grantCreditAtoms,
       ceilingCreditAtoms: offer.ceilingCreditAtoms,
       stripePriceId: this.config.collection?.monthlyPriceId ?? null,
       stripeProductId: null,
       quantity: 1,
       term: 'month',
-      taxBasis: 'synthetic_local_zero_tax',
+      taxBasis: 'stripe_checkout',
       paymentMethod: null,
     });
     const active = await this.databaseService.database
@@ -1110,6 +1159,10 @@ export class BillingPaymentsService {
       line_items: [{ price: snapshot.stripePriceId, quantity: 1 }],
       metadata: { tau_subscription_id: actionId },
       subscription_data: { metadata: { tau_subscription_id: actionId } },
+      automatic_tax: { enabled: true },
+      billing_address_collection: 'required',
+      customer_update: { address: 'auto', name: 'auto' },
+      tax_id_collection: { enabled: true },
     };
     const won = await this.databaseService.database.transaction(async (tx) => {
       await this.lockPaymentAccount(tx, owner.accountId);
@@ -1978,9 +2031,10 @@ export class BillingPaymentsService {
           and(
             eq(paymentLeg.environment, this.config.environment),
             sql`${paymentLeg.nextAttemptAt} <= clock_timestamp()`,
-            // Tax Calculation legs are owned by `claimReloadTaxCalculation`: the generic recovery has no
-            // source query for them and would re-claim a stuck one forever as `provider_source_unknown`.
+            // Tax source legs are recovered by their owning payment path. Generic source recovery cannot
+            // qualify their provider objects and would re-claim them forever as `provider_source_unknown`.
             ne(paymentLeg.kind, 'tax_calculation'),
+            ne(paymentLeg.kind, 'tax_transaction'),
             or(
               and(
                 eq(paymentLeg.state, 'prepared'),
@@ -2116,6 +2170,158 @@ export class BillingPaymentsService {
       )
       .returning({ id: billingProviderLeg.id });
     if (finished === undefined) throw new ConflictException({ code: 'stale_renewal_leg' });
+  }
+
+  private async quoteSavedCardTax(input: {
+    readonly accountId: string;
+    readonly customerBindingId: string;
+    readonly customerId: string;
+    readonly principalMinor: number;
+    readonly productId: string;
+    readonly requestId: string;
+  }): Promise<{
+    readonly taxMinor: number;
+    readonly grossMinor: number;
+    readonly evidence: Record<string, unknown>;
+  }> {
+    const customer = await retrieveStripeBillingCustomer(this.sourceStripe, input.customerId);
+    const location = qualifyReloadCustomerLocation({
+      accountId: input.accountId,
+      customerBindingId: input.customerBindingId,
+      customerId: input.customerId,
+      livemode: this.config.livemode,
+      customer,
+    });
+    if (location === undefined) throw new ConflictException({ code: 'customer_tax_location_invalid' });
+    const reference = `manual:${input.requestId}`;
+    const calculationId = await this.claimReloadTaxCalculation({
+      accountId: input.accountId,
+      customerBindingId: input.customerBindingId,
+      customerId: input.customerId,
+      reloadConsentId: null,
+      requestId: `manual-tax:${input.requestId}`,
+      reference,
+      principalMinor: input.principalMinor,
+      productId: input.productId,
+      locationRevision: location.revision,
+    });
+    const source = await fetchStripeTaxCalculationEvidence(this.sourceStripe, {
+      calculationId,
+      maximumLinePages: 10,
+    });
+    const qualified = qualifyReloadTaxCalculation({
+      customerId: input.customerId,
+      livemode: this.config.livemode,
+      principalMinor: input.principalMinor,
+      productId: input.productId,
+      reference,
+      location,
+      observedAt: new Date(),
+      source,
+    });
+    if (qualified.status !== 'qualified') throw new ConflictException({ code: qualified.reason });
+    return {
+      taxMinor: qualified.taxMinor,
+      grossMinor: qualified.grossMinor,
+      evidence: {
+        version: 'stripe-payment-tax-v1',
+        calculationId: qualified.calculationId,
+        locationRevision: location.revision,
+        reference,
+        sourceDigest: digest(source),
+        expiresAt: qualified.expiresAt.toISOString(),
+      },
+    };
+  }
+
+  private async paidTaxTransaction(
+    purchase: typeof billingPurchase.$inferSelect,
+    paid: ReturnType<typeof paidPaymentEvidenceSchema.parse>,
+  ): Promise<Awaited<ReturnType<typeof fetchStripeTaxTransactionEvidence>> | undefined> {
+    const offer = paymentOfferSnapshotSchema.parse(purchase.offerSnapshot);
+    if (offer.taxBasis !== 'stripe_tax') return undefined;
+    const calculationId = purchase.taxEvidence?.['calculationId'];
+    if (typeof calculationId !== 'string' || purchase.customerBindingId === null) {
+      throw new ConflictException({ code: 'tax_calculation_lineage_missing' });
+    }
+    const postedAt = Math.floor(new Date(paid.paidAt).getTime() / 1000);
+    const reference = `tau:${this.config.environment}:purchase:${purchase.id}`;
+    const request = { calculationId, reference, postedAt };
+    const owned = and(
+      eq(billingProviderLeg.accountId, purchase.accountId),
+      eq(billingProviderLeg.kind, 'tax_transaction'),
+      eq(billingProviderLeg.requestId, purchase.id),
+    );
+    const intent = await this.databaseService.database.transaction(async (tx) => {
+      await this.lockPaymentAccount(tx, purchase.accountId);
+      let [leg] = await tx.select().from(billingProviderLeg).where(owned).limit(1).for('update');
+      if (leg === undefined) {
+        const id = randomUUID();
+        [leg] = await tx
+          .insert(billingProviderLeg)
+          .values({
+            id,
+            accountId: purchase.accountId,
+            environment: this.config.environment,
+            customerBindingId: purchase.customerBindingId!,
+            purchaseId: purchase.id,
+            kind: 'tax_transaction',
+            requestId: purchase.id,
+            requestHash: digest(request),
+            request,
+            idempotencyKey: `tau:${id}`,
+            nextAttemptAt: new Date(),
+          })
+          .onConflictDoNothing()
+          .returning();
+        if (leg === undefined) [leg] = await tx.select().from(billingProviderLeg).where(owned).limit(1).for('update');
+      }
+      if (leg === undefined || leg.requestHash !== digest(request)) {
+        throw new ConflictException({ code: 'tax_transaction_request_conflict' });
+      }
+      if (leg.providerObjectId !== null) return { leg, dispatch: false };
+      if (
+        leg.state === 'dispatched' &&
+        (leg.dispatchStartedAt === null || Date.now() - leg.dispatchStartedAt.getTime() >= 23 * 60 * 60 * 1000)
+      ) {
+        throw new ConflictException({ code: 'tax_transaction_outcome_unknown' });
+      }
+      if (leg.state === 'prepared') {
+        const [claimed] = await tx
+          .update(billingProviderLeg)
+          .set({ state: 'dispatched', dispatchStartedAt: new Date() })
+          .where(and(eq(billingProviderLeg.id, leg.id), eq(billingProviderLeg.state, 'prepared')))
+          .returning();
+        if (claimed === undefined) throw new ConflictException({ code: 'tax_transaction_outcome_unknown' });
+        leg = claimed;
+      }
+      if (leg.state !== 'dispatched') throw new ConflictException({ code: 'tax_transaction_outcome_unknown' });
+      return { leg, dispatch: true };
+    });
+    let transactionId = intent.leg.providerObjectId;
+    if (intent.dispatch) {
+      const created = await createStripeTaxTransactionOnce(this.stripe, {
+        calculationId,
+        reference,
+        postedAt,
+        idempotencyKey: intent.leg.idempotencyKey,
+      });
+      const [stored] = await this.databaseService.database
+        .update(billingProviderLeg)
+        .set({ state: 'known', providerObjectId: created.id, errorCode: null })
+        .where(and(eq(billingProviderLeg.id, intent.leg.id), isNull(billingProviderLeg.providerObjectId)))
+        .returning({ providerObjectId: billingProviderLeg.providerObjectId });
+      transactionId = stored?.providerObjectId ?? created.id;
+    }
+    if (transactionId === null) throw new ConflictException({ code: 'tax_transaction_identity_missing' });
+    const evidence = await fetchStripeTaxTransactionEvidence(this.sourceStripe, {
+      transactionId,
+      maximumLinePages: 10,
+    });
+    if (evidence.transaction.reference !== reference) {
+      throw new ConflictException({ code: 'tax_transaction_reference_mismatch' });
+    }
+    return evidence;
   }
 
   /**
@@ -3114,13 +3320,21 @@ export class BillingPaymentsService {
             ? onlyLine.pricing.price_details.price
             : onlyLine.pricing.price_details.price.id;
       const offer = parsedOffer;
+      const failureTaxMinor = source.invoice.amount_due - source.invoice.subtotal;
+      const exactFailureMatches =
+        offer.taxMinor === null || offer.grossMinor === null
+          ? offer.taxBasis === 'stripe_checkout'
+          : Number(offer.taxMinor) === failureTaxMinor && Number(offer.grossMinor) === source.invoice.amount_due;
       const qualifiedFailure =
         claim.hasFailureEvent &&
         source.complete &&
         source.invoice.billing_reason === 'subscription_cycle' &&
         source.invoice.livemode === offer.livemode &&
         source.invoice.currency === offer.currency &&
-        source.invoice.amount_due === Number(offer.grossMinor) &&
+        source.invoice.subtotal === Number(offer.principalMinor) &&
+        failureTaxMinor >= 0 &&
+        source.invoice.automatic_tax?.status === 'complete' &&
+        exactFailureMatches &&
         source.invoice.amount_paid === 0 &&
         (typeof source.invoice.customer === 'string' ? source.invoice.customer : source.invoice.customer?.id) ===
           customerId &&
@@ -3131,7 +3345,7 @@ export class BillingPaymentsService {
         !details.proration &&
         details.subscription === remoteSubscriptionId &&
         priceId === offer.stripePriceId &&
-        onlyLine.amount === Number(offer.grossMinor) &&
+        onlyLine.amount === Number(offer.principalMinor) &&
         onlyLine.period.end > onlyLine.period.start;
       const boundary = qualifiedFailure && onlyLine !== undefined ? new Date(onlyLine.period.start * 1000) : undefined;
       if (boundary !== undefined) {
@@ -3174,7 +3388,14 @@ export class BillingPaymentsService {
                   dedupeKey: `renewal-failed:${invoiceId}`,
                   subscriptionId: owned.id,
                   invoiceId,
-                  payload: { subscriptionId: owned.id, invoiceId },
+                  payload: {
+                    subscriptionId: owned.id,
+                    invoiceId,
+                    accountId,
+                    // Pre-formatted here, where the Stripe invoice is already in hand, so the
+                    // notice transport never has to call Stripe or format money and dates itself.
+                    ...describeRenewalFailure(source.invoice),
+                  },
                 })
                 .onConflictDoNothing();
             }
@@ -3439,7 +3660,7 @@ export class BillingPaymentsService {
       this.config.collection === null ||
       this.config.livemode ||
       this.config.environment.startsWith('prod-') ||
-      !isLoopbackBillingStripeClient(this.stripe)
+      (this.config.collection.kind === 'local_fixture') !== isLoopbackBillingStripeClient(this.stripe)
     ) {
       throw new ForbiddenException('payment_collection_disabled');
     }
@@ -3595,7 +3816,11 @@ export class BillingPaymentsService {
       expand: ['invoice_settings.default_payment_method'],
     });
     if (customer.deleted) throw new ConflictException({ code: 'customer_deleted' });
-    const value = customer.invoice_settings.default_payment_method;
+    // Same preference as resolveDefaultCard (the card shown is the card charged): the invoice default,
+    // else the most recent saved card. Hosted Checkout saves cards without setting an invoice default.
+    const value =
+      customer.invoice_settings.default_payment_method ??
+      (await this.sourceStripe.paymentMethods.list({ customer: customerId, type: 'card', limit: 1 })).data[0];
     const id = typeof value === 'string' ? value : value?.id;
     if (id === undefined) throw new ConflictException({ code: 'saved_card_not_found' });
     const method =
@@ -3624,15 +3849,17 @@ export class BillingPaymentsService {
       tau_provider_leg_id: providerLegId,
       tau_customer_binding_id: customerBindingId,
     };
-    if (input.method === 'saved_card')
+    if (input.method === 'saved_card') {
+      const totals = exactPaymentOfferTotals(offer);
       return {
-        amount: Number(offer.grossMinor),
+        amount: Number(totals.grossMinor),
         currency: 'usd',
         customer: customerId,
         payment_method: offer.paymentMethod?.id,
         confirm: true,
         metadata,
       };
+    }
     return {
       mode: 'payment',
       customer: customerId,
@@ -3641,12 +3868,22 @@ export class BillingPaymentsService {
       cancel_url: returnUrl.href,
       line_items: [
         {
-          price_data: { currency: 'usd', product: offer.stripeProductId, unit_amount: Number(offer.principalMinor) },
+          price_data: {
+            currency: 'usd',
+            product: offer.stripeProductId,
+            tax_behavior: 'exclusive',
+            unit_amount: Number(offer.principalMinor),
+          },
           quantity: 1,
         },
       ],
       metadata,
-      payment_intent_data: { metadata },
+      automatic_tax: { enabled: true },
+      billing_address_collection: 'required',
+      customer_update: { address: 'auto', name: 'auto' },
+      payment_method_types: ['card'],
+      payment_intent_data: { metadata, setup_future_usage: 'on_session' },
+      tax_id_collection: { enabled: true },
     };
   }
 
@@ -3664,6 +3901,27 @@ export class BillingPaymentsService {
         .for('update');
       const row = rows[0];
       if (row === undefined) return undefined;
+      if (row.kind === 'payment_intent' && purchase.purpose === 'manual_saved_card') {
+        const frozenExpiry = purchase.taxEvidence?.['expiresAt'];
+        const quotedUntil = typeof frozenExpiry === 'string' ? new Date(frozenExpiry) : undefined;
+        const [quote] =
+          quotedUntil === undefined || Number.isNaN(quotedUntil.getTime())
+            ? []
+            : await tx.execute<{ expired: boolean }>(
+                sql`select ${quotedUntil.toISOString()}::timestamptz <= clock_timestamp() as expired`,
+              );
+        if (quote?.expired !== false) {
+          await tx
+            .update(billingProviderLeg)
+            .set({ state: 'no_charge', errorCode: 'manual_tax_calculation_expired' })
+            .where(and(eq(billingProviderLeg.id, row.id), eq(billingProviderLeg.state, 'prepared')));
+          await tx
+            .update(billingPurchase)
+            .set({ state: 'failed', updatedAt: new Date() })
+            .where(and(eq(billingPurchase.id, actionId), eq(billingPurchase.state, 'prepared')));
+          return undefined;
+        }
+      }
       await tx
         .update(billingPurchase)
         .set({ state: 'creating', updatedAt: new Date() })
@@ -3698,6 +3956,7 @@ export class BillingPaymentsService {
             productId: offer.stripeProductId ?? '',
             principalMinor: Number(offer.principalMinor),
           },
+          onSessionSaveConsent: true,
         }),
       };
     });
@@ -3834,13 +4093,15 @@ export class BillingPaymentsService {
       source: paymentSource,
     });
     if (qualification.status !== 'paid') {
+      const quotedGrossMinor = offer.grossMinor === null ? undefined : Number(offer.grossMinor);
       const authenticationRequired =
         paymentSource.paymentIntent.status === 'requires_action' &&
         paymentSource.paymentIntent.id === paymentIntentId &&
         paymentSource.paymentIntent.livemode === offer.livemode &&
         stripeObjectId(paymentSource.paymentIntent.customer) === binding.stripeCustomerId &&
         paymentSource.paymentIntent.currency === offer.currency &&
-        paymentSource.paymentIntent.amount === Number(offer.grossMinor) &&
+        quotedGrossMinor !== undefined &&
+        paymentSource.paymentIntent.amount === quotedGrossMinor &&
         paymentSource.paymentIntent.metadata['tau_purchase_id'] === purchaseId &&
         paymentSource.paymentIntent.metadata['tau_provider_leg_id'] === expected.providerLegId &&
         paymentSource.paymentIntent.metadata['tau_customer_binding_id'] === expected.customerBindingId &&
@@ -4008,6 +4269,7 @@ export class BillingPaymentsService {
           .where(eq(billingReloadConsent.id, purchase.reloadConsentId));
       }
     });
+    const taxTransaction = await this.paidTaxTransaction(purchase, qualification.evidence);
     const cash = await this.qualifyInitialCash(accountId, purchaseId, 'purchased', qualification.evidence);
     if (cash.status !== 'qualified' || !('sourceClaimId' in cash)) return false;
     try {
@@ -4025,6 +4287,7 @@ export class BillingPaymentsService {
         accountId,
         paidEvidence: qualification.evidence,
         ...(checkout === undefined ? {} : { checkout: checkout.session }),
+        ...(taxTransaction === undefined ? {} : { taxTransaction }),
       });
       await this.databaseService.database.transaction(async (tx) => {
         await this.lockPaymentAccount(tx, accountId);

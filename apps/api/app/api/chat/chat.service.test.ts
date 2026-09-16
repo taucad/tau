@@ -1,19 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { ConfigService } from '@nestjs/config';
 import { convertToModelMessages, DefaultChatTransport, readUIMessageStream } from 'ai';
 import { ChatService } from '#api/chat/chat.service.js';
-import type { BillableModelInvocationService } from '#api/billing/billable-model-invocation.service.js';
+import type { ModelInvocationIntent, ModelInvocationService } from '#api/llm/model-invocation.types.js';
 import { CodeOwnedBillableModelQualificationResolver } from '#api/billing/billable-model-qualification.js';
-import type {
-  BillableInvocationIntent,
-  BillableModelProviderAdapter,
-} from '#api/billing/billable-model-invocation.types.js';
-
-const fixtureEnvironment = {
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- actual configuration key
-  BILLING_ENVIRONMENT: 'development',
-};
+import type { BillableModelProviderAdapter } from '#api/billing/billable-model-invocation.types.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- synthetic supplier fixture uses exact Responses fields */
 const nativeStream = (terminal: 'completed' | 'incomplete' = 'completed') =>
@@ -66,17 +57,17 @@ const nativeStream = (terminal: 'completed' | 'incomplete' = 'completed') =>
 const validPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
 it('uses the installed SDK for native text/image input and the actual UI stream consumer', async () => {
-  const owner = mock<BillableModelInvocationService>();
+  const owner = mock<ModelInvocationService>();
   const resolver = new CodeOwnedBillableModelQualificationResolver({
     adapters: new Map([['openai-gpt-5.6-luna', mock<BillableModelProviderAdapter>()]]),
     credentialAccounts: new Map([['openai', 'fixture']]),
     executionTimeout: 1000,
   });
-  let captured: BillableInvocationIntent | undefined;
+  let captured: ModelInvocationIntent | undefined;
   let admitted = false;
   owner.invoke.mockImplementation(async (intent) => {
     captured = intent;
-    resolver.resolve(intent);
+    resolver.resolve({ ...intent, environment: 'development' });
     intent.onAdmitted?.('operation-fixture');
     return {
       state: 'streaming',
@@ -85,7 +76,7 @@ it('uses the installed SDK for native text/image input and the actual UI stream 
       completion: Promise.resolve(),
     };
   });
-  const service = new ChatService(owner, new ConfigService(fixtureEnvironment));
+  const service = new ChatService(owner);
   const messages = await convertToModelMessages([
     {
       role: 'user',
@@ -141,8 +132,8 @@ it('uses the installed SDK for native text/image input and the actual UI stream 
 });
 
 it('returns bounded commit text from a max-output response without retrying', async () => {
-  const owner = mock<BillableModelInvocationService>();
-  let captured: BillableInvocationIntent | undefined;
+  const owner = mock<ModelInvocationService>();
+  let captured: ModelInvocationIntent | undefined;
   owner.invoke.mockImplementation(async (intent) => {
     captured = intent;
     return {
@@ -152,7 +143,7 @@ it('returns bounded commit text from a max-output response without retrying', as
       completion: Promise.resolve(),
     };
   });
-  const service = new ChatService(owner, new ConfigService(fixtureEnvironment));
+  const service = new ChatService(owner);
   const result = await service.getCommitMessageGenerator(
     [{ role: 'user', content: 'Describe the change' }],
     'owner',
@@ -197,8 +188,8 @@ it('returns bounded commit text from a max-output response without retrying', as
 
 describe('secondary generator admission outcomes', () => {
   it('settles replay and owner failure without hanging or retrying', async () => {
-    const owner = mock<BillableModelInvocationService>();
-    const service = new ChatService(owner, new ConfigService(fixtureEnvironment));
+    const owner = mock<ModelInvocationService>();
+    const service = new ChatService(owner);
     owner.invoke.mockResolvedValue({ state: 'terminal', operationId: 'old-operation' });
     await expect(
       service.getCommitMessageGenerator(
@@ -224,7 +215,7 @@ describe('secondary generator admission outcomes', () => {
   });
 
   it('retains billing completion failures after SDK output completes', async () => {
-    const owner = mock<BillableModelInvocationService>();
+    const owner = mock<ModelInvocationService>();
     const completed = Promise.withResolvers<void>();
     owner.invoke.mockResolvedValue({
       state: 'streaming',
@@ -232,7 +223,7 @@ describe('secondary generator admission outcomes', () => {
       response: new Response(nativeStream(), { headers: { 'content-type': 'text/event-stream' } }),
       completion: completed.promise,
     });
-    const service = new ChatService(owner, new ConfigService(fixtureEnvironment));
+    const service = new ChatService(owner);
     const result = await service.getBuildNameGenerator(
       [{ role: 'user', content: 'name it' }],
       'owner',
@@ -250,8 +241,8 @@ describe('secondary generator admission outcomes', () => {
   });
 
   it('settles SDK validation failure before funded fetch', async () => {
-    const owner = mock<BillableModelInvocationService>();
-    const service = new ChatService(owner, new ConfigService(fixtureEnvironment));
+    const owner = mock<ModelInvocationService>();
+    const service = new ChatService(owner);
     await expect(
       service.getBuildNameGenerator([], 'owner', 'attempt', 'project', new AbortController().signal),
     ).rejects.toThrow();
@@ -259,8 +250,8 @@ describe('secondary generator admission outcomes', () => {
   });
 
   it('propagates cancellation while admission is pending', async () => {
-    const owner = mock<BillableModelInvocationService>();
-    const service = new ChatService(owner, new ConfigService(fixtureEnvironment));
+    const owner = mock<ModelInvocationService>();
+    const service = new ChatService(owner);
     const started = Promise.withResolvers<void>();
     owner.invoke.mockImplementation(async ({ signal }) => {
       started.resolve();
@@ -290,8 +281,8 @@ describe('secondary generator admission outcomes', () => {
   });
 
   it('rejects an already aborted request without admission', async () => {
-    const owner = mock<BillableModelInvocationService>();
-    const service = new ChatService(owner, new ConfigService(fixtureEnvironment));
+    const owner = mock<ModelInvocationService>();
+    const service = new ChatService(owner);
     await expect(
       service.getBuildNameGenerator([], 'owner', 'attempt', 'project', AbortSignal.abort(new Error('Cancelled'))),
     ).rejects.toThrow('Cancelled');

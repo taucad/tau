@@ -4,310 +4,310 @@
 
 BVH_BuildQueue: declare class BVH_BuildQueue
 
-constructor
+  constructor
 
-Size(): number;
+  Size(): number;
 
-Enqueue(theWorkItem: number): void;
+  Enqueue(theWorkItem: number): void;
 
-Fetch(wasBusy?: boolean): { returnValue: number; wasBusy: boolean };
+  Fetch(wasBusy?: boolean): { returnValue: number; wasBusy: boolean };
 
-HasBusyThreads(): boolean;
+  HasBusyThreads(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_BuildThread: declare class BVH_BuildThread extends Standard_Transient
 
-constructor
+  constructor
 
-Run(): void;
+  Run(): void;
 
-Wait(): void;
+  Wait(): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_BuildTool: declare class BVH_BuildTool
 
-Perform(theNode: number): void;
+  Perform(theNode: number): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_BuilderTransient: declare class BVH_BuilderTransient extends Standard_Transient
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-MaxTreeDepth(): number;
+  MaxTreeDepth(): number;
 
-LeafNodeSize(): number;
+  LeafNodeSize(): number;
 
-IsParallel(): boolean;
+  IsParallel(): boolean;
 
-SetParallel(isParallel: boolean): void;
+  SetParallel(isParallel: boolean): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_ObjectTransient: declare class BVH_ObjectTransient extends Standard_Transient
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-Properties(): BVH_Properties;
+  Properties(): BVH_Properties;
 
-SetProperties(theProperties: BVH_Properties): void;
+  SetProperties(theProperties: BVH_Properties): void;
 
-IsDirty(): boolean;
+  IsDirty(): boolean;
 
-MarkDirty(): void;
+  MarkDirty(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_Properties: declare class BVH_Properties extends Standard_Transient
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_BitComparator: declare class BVH_BitComparator
 
-constructor
+  constructor
 
-myBit: number
+  myBit: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_BitPredicate: declare class BVH_BitPredicate
 
-constructor
+  constructor
 
-myBit: number
+  myBit: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_RadixSorter: declare class BVH_RadixSorter
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_BinaryTree: declare class BVH_BinaryTree
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_QuadTree: declare class BVH_QuadTree
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_TreeBaseTransient: declare class BVH_TreeBaseTransient extends Standard_Transient
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_Array2d: declare class BVH_Array2d
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_Array2f: declare class BVH_Array2f
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_Array2i: declare class BVH_Array2i
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_Array3d: declare class BVH_Array3d
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_Array3f: declare class BVH_Array3f
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_Array3i: declare class BVH_Array3i
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_Array4d: declare class BVH_Array4d
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_Array4f: declare class BVH_Array4f
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_Array4i: declare class BVH_Array4i
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_Mat4d: declare class BVH_Mat4d
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_Mat4f: declare class BVH_Mat4f
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_Vec2d: declare class BVH_Vec2d
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_Vec2f: declare class BVH_Vec2f
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_Vec2i: declare class BVH_Vec2i
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_Vec3d: declare class BVH_Vec3d
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_Vec3f: declare class BVH_Vec3f
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_Vec3i: declare class BVH_Vec3i
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_Vec4d: declare class BVH_Vec4d
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_Vec4f: declare class BVH_Vec4f
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BVH_Vec4i: declare class BVH_Vec4i
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

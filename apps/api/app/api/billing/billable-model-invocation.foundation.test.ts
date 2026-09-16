@@ -52,10 +52,12 @@ import { CodeCompletionService } from '#api/code-completion/code-completion.serv
 import { LlmGatewayController } from '#api/llm/llm-gateway.controller.js';
 import { LlmGatewayAuthGuard } from '#api/llm/llm-gateway.guard.js';
 import { LlmGatewayService } from '#api/llm/llm-gateway.service.js';
+import { modelInvocationServiceKey } from '#api/llm/model-invocation.types.js';
 import { AuthGuard } from '#auth/auth.guard.js';
 import { HostsService } from '#api/hosts/hosts.service.js';
 import { authInstanceKey } from '#constants/auth.constant.js';
 import { DatabaseService } from '#database/database.service.js';
+import type { MetricsService } from '#telemetry/metrics.js';
 import { seedBillingFixturePolicy } from '#testing/billing-policy.fixture.js';
 
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];
@@ -338,10 +340,12 @@ const createFixture = async (options: { promotion?: boolean; longContextPremium?
   };
 };
 
+// oxlint-disable-next-line eslint/max-params -- compact test factory varies three independent failure controls.
 const createOwner = (
   providerUrl: string,
   executionTimeout = 60_000,
   inputCounters?: ReadonlyMap<string, InputCountCapability | undefined>,
+  metrics?: MetricsService,
 ): BillableModelInvocationService => {
   const adapters = createBillableModelProviderAdapters(
     { get: (key: string): unknown => (key === 'OPENAI_API_KEY' ? 'fixture-key' : undefined) },
@@ -355,9 +359,13 @@ const createOwner = (
       executionTimeout,
       ...(inputCounters === undefined ? {} : { inputCounters }),
     }),
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
-    new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'c04-foundation-request-digest-secret' }),
-    undefined,
+    new ConfigService({
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      BILLING_ENVIRONMENT: 'development',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      BILLING_REQUEST_DIGEST_SECRET: 'c04-foundation-request-digest-secret',
+    }),
+    metrics,
     { database },
   );
 };
@@ -929,6 +937,13 @@ describe('funded invocation HTTP boundary', () => {
             { provide: ConfigService, useValue: config },
             { provide: DatabaseService, useValue: databaseService },
             { provide: BillableModelInvocationService, useValue: owner },
+            {
+              provide: modelInvocationServiceKey,
+              useValue: {
+                invoke: async (intent: Omit<Parameters<typeof owner.invoke>[0], 'environment'>) =>
+                  owner.invoke({ ...intent, environment: 'development' }),
+              },
+            },
             { provide: BillingUsageService, useValue: usage },
             { provide: BillingService, useValue: {} },
             { provide: BillingEstimatesService, useValue: mockDeep<BillingEstimatesService>() },
@@ -1482,7 +1497,7 @@ it('pauses the whole route, not one tier, when a long-context settlement overrun
   }
 });
 
-/* eslint-disable no-await-in-loop -- fixture modes mutate one account and endpoint sequentially */
+/* oxlint-disable no-await-in-loop -- fixture modes mutate one account and endpoint sequentially */
 it('bounds selected count I/O, denies ineligible owners, fences contention and retains overflow', async () => {
   let counts = 0;
   let activeCounts = 0;
@@ -1667,15 +1682,15 @@ it('bounds selected count I/O, denies ineligible owners, fences contention and r
     await expect.poll(() => activeCounts).toBe(0);
     expect(generations).toBe(1);
     countDelay = 80;
-    generationDelay = 200;
-    const sharedOwner = createOwner(url, 150, counters);
+    generationDelay = 600;
+    const sharedOwner = createOwner(url, 500, counters);
     const deadlineAttempt = randomUUID();
     await expect(
       invoke({ owner: sharedOwner, authUserId: fixture.authUserId, attemptKey: deadlineAttempt }),
     ).rejects.toThrow();
     const deadlineOperation = await lookup(deadlineAttempt);
     expect(deadlineOperation?.invocation?.inputCount?.inputTokens).toBe('1');
-    expect(deadlineOperation!.dueAt.getTime() - deadlineOperation!.admittedAt!.getTime()).toBeLessThan(100);
+    expect(deadlineOperation!.dueAt.getTime() - deadlineOperation!.admittedAt!.getTime()).toBeLessThan(450);
     countDelay = 0;
     generationDelay = 0;
     actualInput = 0;
@@ -1764,7 +1779,7 @@ it('bounds selected count I/O, denies ineligible owners, fences contention and r
   }
 }, 60_000);
 
-/* eslint-enable no-await-in-loop -- sequential endpoint fixture complete */
+/* oxlint-enable no-await-in-loop -- sequential endpoint fixture complete */
 
 /* B7 I3 / R8: the in-stream ceiling stops the supplier spend. It proves nothing was delivered, so
  * the customer is charged what the stream proved and an operator owns the mis-sized ceiling. */
@@ -1934,7 +1949,8 @@ it('pauses only the route an open supplier case names', async () => {
   if (!address || typeof address === 'string') {
     throw new Error('Missing local provider address');
   }
-  const owner = createOwner(`http://127.0.0.1:${address.port}`);
+  const metrics = mockDeep<MetricsService>();
+  const owner = createOwner(`http://127.0.0.1:${address.port}`, 60_000, undefined, metrics);
   const fixture = await createFixture();
   try {
     const operationId = await settle(`pause-seed-${randomUUID()}`);
@@ -1964,6 +1980,11 @@ it('pauses only the route an open supplier case names', async () => {
     expect(await database.select().from(creditOperation).where(eq(creditOperation.attemptKey, deniedKey))).toHaveLength(
       0,
     );
+    expect(metrics.billingFundedOperationDenials.add).toHaveBeenCalledWith(1, {
+      'deployment.environment': 'development',
+      'tau.billing.capacity_pool': 'primary',
+      'tau.billing.denial.reason': 'supplier_route_paused',
+    });
 
     // A different route reaches admission instead of the pause.
     await expect(

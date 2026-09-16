@@ -17,6 +17,8 @@ export const cadProviderFacingToolNames = [
   toolName.testModel,
   toolName.getKernelResult,
   toolName.exportGeometry,
+  toolName.getParameters,
+  toolName.applyParameterOperation,
   toolName.screenshot,
   toolName.editFile,
   toolName.useSkill,
@@ -85,7 +87,10 @@ export const getProviderFacingToolInputSchemas = ({
 }: ProviderFacingToolSchemaOptions): ProviderFacingToolSchemaEntry[] => {
   const selectedTools = Array.isArray(toolChoice) ? new Set<ToolName>(toolChoice) : undefined;
   const allowedTools = new Set(
-    filterProviderFacingToolNamesByModelSupport({ toolNames: cadProviderFacingToolNames, modelSupport }),
+    filterProviderFacingToolNamesByModelSupport({
+      toolNames: cadProviderFacingToolNames,
+      modelSupport,
+    }),
   );
 
   return cadProviderFacingToolNames.flatMap((name) => {

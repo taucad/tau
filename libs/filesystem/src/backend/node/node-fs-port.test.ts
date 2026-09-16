@@ -762,6 +762,16 @@ describe('node filesystem client/host round trip', () => {
     });
   });
 
+  it('round-trips only supported regular-file modes through the protected seam', async () => {
+    const { provider } = connect();
+    await provider.writeFile('run.sh', '#!/bin/sh\n');
+
+    await provider.setFileMode('run.sh', '100755');
+    await expect(provider.getFileMode('run.sh')).resolves.toBe('100755');
+    await provider.setFileMode('run.sh', '100644');
+    await expect(provider.getFileMode('run.sh')).resolves.toBe('100644');
+  });
+
   it('hides an in-flight atomic-write temp file from directory listings', async () => {
     const { root, provider } = connect();
     // What `_atomicWrite` parks beside its target for a few milliseconds, plus

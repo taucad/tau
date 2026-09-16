@@ -14,8 +14,6 @@ import { useProject } from '#hooks/use-project.js';
 import { useProjects } from '#hooks/use-projects.js';
 import { parseGithubGistAuthorizationReturn } from '#lib/share-providers.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { encodeTextFile } from '#utils/filesystem.utils.js';
-import { serializeParameterEntry } from '#utils/parameter-config.utils.js';
 
 type ProjectShareNavigationIntent = {
   readonly shouldOpen: boolean;
@@ -75,7 +73,7 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
   const [navigationIntent] = useState(() => parseProjectShareNavigationIntent(location.search));
-  const { parameterEntries, projectId, projectRef } = useProject();
+  const { parameterService, projectId, projectRef } = useProject();
   const { client: fileClient } = useFileManager();
   const { projects } = useProjects();
   const project = useSelector(projectRef, (state) => state.context.project);
@@ -138,8 +136,7 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
       const role = (value: (typeof result.data.files)[number]['role']): ShareSnapshotFileRole =>
         value === 'additional' ? 'project-metadata' : value;
       const manifestContent = serializeProjectManifest(projectToManifest(project));
-      const parameterEntry = parameterEntries.get(entryPath);
-      const parameterContent = parameterEntry ? encodeTextFile(serializeParameterEntry(parameterEntry)) : undefined;
+      const parameterContent = await parameterService.readSettled(entryPath);
       const files = result.data.files
         .filter(
           ({ path }) =>
@@ -152,7 +149,7 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
         sha256: await hashBytes(manifestContent),
         role: 'project-metadata',
       });
-      if (parameterContent) {
+      if (parameterContent !== undefined) {
         files.push({
           path: parameterEntryPath(entryPath),
           content: parameterContent,
@@ -169,7 +166,7 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
         })),
       };
     },
-    [fileClient, parameterEntries, project, projectId, projectRef],
+    [fileClient, parameterService, project, projectId, projectRef],
   );
 
   const entryPath = project?.assets.main.entryPath ?? '';

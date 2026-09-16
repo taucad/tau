@@ -14,7 +14,7 @@ import type * as RuntimeTypes from '#types/runtime.types.js';
 import type { CapabilitiesManifest, ExportRoute, GetParametersResult, RenderCapability } from '#types/runtime.types.js';
 import type { KernelPlugin, MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
-import type { JsonStructureSchema } from '@taucad/runtime/parameter';
+import type { JsonStructureSchema } from '@taucad/parameters';
 
 // =============================================================================
 // Wide-default (on-wire) shape — preserved for the worker-emitted manifest

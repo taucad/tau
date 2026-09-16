@@ -47,7 +47,7 @@ export function FormatSelector({
               />
               <Label
                 htmlFor={formatId}
-                className='cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
+                className='cursor-action rounded-sm text-sm leading-none font-normal transition-colors peer-disabled:cursor-not-allowed peer-disabled:opacity-70 hover:bg-accent'
               >
                 {formatDisplayName(format)}
               </Label>

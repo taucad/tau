@@ -52,8 +52,17 @@ const readEntryPath = async (workspaceRoot: string): Promise<string> => {
   return entryPath;
 };
 
-/** The API this leg publishes to, refusing before anything is named. */
-const requireApi = (): Readonly<{ apiBaseUrl: string; apiToken: string }> => {
+/**
+ * The API this leg reaches, refusing before anything is named.
+ *
+ * Shared with `tau open` (W18 DEF-2): both verbs need the same two values and
+ * refuse in the same words, and a second copy could drift from this one.
+ *
+ * @returns The API origin and the session token.
+ * @throws CliError When either is unset.
+ * @internal
+ */
+export const requireApi = (): Readonly<{ apiBaseUrl: string; apiToken: string }> => {
   const apiBaseUrl = process.env['TAU_API_URL'];
   const apiToken = process.env['TAU_API_TOKEN'];
   if (apiBaseUrl === undefined || apiBaseUrl === '') {
@@ -66,7 +75,7 @@ const requireApi = (): Readonly<{ apiBaseUrl: string; apiToken: string }> => {
   if (apiToken === undefined || apiToken === '') {
     throw cliError(
       'NO_API_TOKEN',
-      'Set TAU_API_TOKEN to a Tau session token. `tau publish` never asks for a password and stores nothing.',
+      'Set TAU_API_TOKEN to a Tau session token. Tau never asks for a password and stores nothing.',
       exitCodes.refused,
     );
   }

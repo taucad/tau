@@ -80,6 +80,8 @@ export type RevisionHttpClientOptions = Readonly<{
    * server without Tau copying a token anywhere (I8).
    */
   credentials?: RequestCredentials;
+  /** Refuse a response body after this many bytes, per request URL. */
+  maximumResponseBytes?: number | ((url: string) => number | undefined);
   /** Injected in tests and on hosts whose `fetch` is not the global one. */
   fetch?: typeof globalThis.fetch;
 }>;
@@ -170,8 +172,9 @@ const collect = async (
 };
 
 /* The response body as the library reads it: one async iterator of chunks. */
-const iterate = (response: Response): AsyncIterableIterator<GitChunk> => {
+const iterate = (response: Response, maximumBytes?: number): AsyncIterableIterator<GitChunk> => {
   const reader = response.body?.getReader();
+  let received = 0;
   type Chunk = IteratorResult<GitChunk>;
   const iterator: AsyncIterableIterator<GitChunk> = {
     next: async (): Promise<Chunk> => {
@@ -179,7 +182,15 @@ const iterate = (response: Response): AsyncIterableIterator<GitChunk> => {
         return { done: true, value: undefined };
       }
       const read = await reader.read();
-      return read.done ? { done: true, value: undefined } : { done: false, value: read.value };
+      if (read.done) {
+        return { done: true, value: undefined };
+      }
+      received += read.value.byteLength;
+      if (maximumBytes !== undefined && received > maximumBytes) {
+        await reader.cancel();
+        throw new Error(`A Git response may carry at most ${String(maximumBytes)} bytes.`);
+      }
+      return { done: false, value: read.value };
     },
     return: async (): Promise<Chunk> => {
       await reader?.cancel();
@@ -248,6 +259,13 @@ export const createRevisionHttpClient = (options: RevisionHttpClientOptions = {}
       }
       const method = request.method ?? 'GET';
       const signal = signalFor(options.signal, request.signal);
+      const maximumBytes =
+        typeof options.maximumResponseBytes === 'function'
+          ? options.maximumResponseBytes(request.url)
+          : options.maximumResponseBytes;
+      if (maximumBytes !== undefined && (!Number.isSafeInteger(maximumBytes) || maximumBytes <= 0)) {
+        throw new TypeError('maximumResponseBytes must be a positive safe integer.');
+      }
       const response = await call(request.url, {
         method,
         headers,
@@ -258,11 +276,16 @@ export const createRevisionHttpClient = (options: RevisionHttpClientOptions = {}
          * answer to "whichever fires first". */
         ...(signal === undefined ? {} : { signal }),
       });
+      const declaredLength = Number(response.headers.get('content-length'));
+      if (maximumBytes !== undefined && Number.isFinite(declaredLength) && declaredLength > maximumBytes) {
+        await response.body?.cancel();
+        throw new Error(`A Git response may carry at most ${String(maximumBytes)} bytes.`);
+      }
       return Object.freeze({
         url: response.url === '' ? request.url : response.url,
         method,
         headers: Object.fromEntries(response.headers.entries()),
-        body: iterate(response),
+        body: iterate(response, maximumBytes),
         statusCode: response.status,
         statusMessage: response.statusText,
       });

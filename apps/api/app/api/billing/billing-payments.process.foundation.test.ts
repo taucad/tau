@@ -1170,7 +1170,7 @@ const seedPreparedManual = async () => {
     stripeProductId: 'prod_topup',
     quantity: 1,
     term: 'one_time',
-    taxBasis: 'synthetic_local_zero_tax',
+    taxBasis: 'stripe_tax',
     paymentMethod: { id: 'pm_old', brand: 'visa', last4: '4242' },
   };
   await database.insert(schema.billingPurchase).values({
@@ -1184,6 +1184,14 @@ const seedPreparedManual = async () => {
     requestId: randomUUID(),
     requestHash: '8'.repeat(64),
     purpose: 'manual_saved_card',
+    taxEvidence: {
+      version: 'stripe-payment-tax-v1',
+      calculationId: `taxcalc_${'1'.repeat(24)}`,
+      locationRevision: 'process-fixture',
+      reference: `tau:development:purchase:${purchaseId}`,
+      sourceDigest: 'a'.repeat(64),
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    },
     returnPath: '/settings/billing',
     stripeAccountId: 'acct_fixture',
     livemode: false,
@@ -1331,7 +1339,7 @@ beforeAll(async () => {
           kind: 'top_up',
           currency: 'usd',
           minimumPrincipalMinor: '500',
-          maximumPrincipalMinor: '50000',
+          maximumPrincipalMinor: '500000',
           creditAtomsPerPrincipalMinor: '10000',
         },
       ],

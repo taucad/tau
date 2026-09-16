@@ -4,727 +4,727 @@
 
 StepBasic_LengthMeasureWithUnit: declare class StepBasic_LengthMeasureWithUnit extends StepBasic_MeasureWithUnit
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_LengthUnit: declare class StepBasic_LengthUnit extends StepBasic_NamedUnit
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_LocalTime: declare class StepBasic_LocalTime extends Standard_Transient
 
-constructor
+  constructor
 
-Init(aHourComponent: number, hasAminuteComponent: boolean, aMinuteComponent: number, hasAsecondComponent: boolean, aSecondComponent: number, aZone: StepBasic_CoordinatedUniversalTimeOffset): void;
+  Init(aHourComponent: number, hasAminuteComponent: boolean, aMinuteComponent: number, hasAsecondComponent: boolean, aSecondComponent: number, aZone: StepBasic_CoordinatedUniversalTimeOffset): void;
 
-SetHourComponent(aHourComponent: number): void;
+  SetHourComponent(aHourComponent: number): void;
 
-HourComponent(): number;
+  HourComponent(): number;
 
-SetMinuteComponent(aMinuteComponent: number): void;
+  SetMinuteComponent(aMinuteComponent: number): void;
 
-UnSetMinuteComponent(): void;
+  UnSetMinuteComponent(): void;
 
-MinuteComponent(): number;
+  MinuteComponent(): number;
 
-HasMinuteComponent(): boolean;
+  HasMinuteComponent(): boolean;
 
-SetSecondComponent(aSecondComponent: number): void;
+  SetSecondComponent(aSecondComponent: number): void;
 
-UnSetSecondComponent(): void;
+  UnSetSecondComponent(): void;
 
-SecondComponent(): number;
+  SecondComponent(): number;
 
-HasSecondComponent(): boolean;
+  HasSecondComponent(): boolean;
 
-SetZone(aZone: StepBasic_CoordinatedUniversalTimeOffset): void;
+  SetZone(aZone: StepBasic_CoordinatedUniversalTimeOffset): void;
 
-Zone(): StepBasic_CoordinatedUniversalTimeOffset;
+  Zone(): StepBasic_CoordinatedUniversalTimeOffset;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_MassMeasureWithUnit: declare class StepBasic_MassMeasureWithUnit extends StepBasic_MeasureWithUnit
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_MassUnit: declare class StepBasic_MassUnit extends StepBasic_NamedUnit
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_MeasureValueMember: declare class StepBasic_MeasureValueMember extends StepData_SelectReal
 
-constructor
+  constructor
 
-HasName(): boolean;
+  HasName(): boolean;
 
-Name(): string;
+  Name(): string;
 
-SetName(name: string): boolean;
+  SetName(name: string): boolean;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_MeasureWithUnit: declare class StepBasic_MeasureWithUnit extends Standard_Transient
 
-constructor
+  constructor
 
-Init(aValueComponent: StepBasic_MeasureValueMember, aUnitComponent: StepBasic_Unit): void;
+  Init(aValueComponent: StepBasic_MeasureValueMember, aUnitComponent: StepBasic_Unit): void;
 
-SetValueComponent(aValueComponent: number): void;
+  SetValueComponent(aValueComponent: number): void;
 
-ValueComponent(): number;
+  ValueComponent(): number;
 
-ValueComponentMember(): StepBasic_MeasureValueMember;
+  ValueComponentMember(): StepBasic_MeasureValueMember;
 
-SetValueComponentMember(val: StepBasic_MeasureValueMember): void;
+  SetValueComponentMember(val: StepBasic_MeasureValueMember): void;
 
-SetUnitComponent(aUnitComponent: StepBasic_Unit): void;
+  SetUnitComponent(aUnitComponent: StepBasic_Unit): void;
 
-UnitComponent(): StepBasic_Unit;
+  UnitComponent(): StepBasic_Unit;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_MechanicalContext: declare class StepBasic_MechanicalContext extends StepBasic_ProductContext
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_NameAssignment: declare class StepBasic_NameAssignment extends Standard_Transient
 
-constructor
+  constructor
 
-Init(aAssignedName: TCollection_HAsciiString): void;
+  Init(aAssignedName: TCollection_HAsciiString): void;
 
-AssignedName(): TCollection_HAsciiString;
+  AssignedName(): TCollection_HAsciiString;
 
-SetAssignedName(AssignedName: TCollection_HAsciiString): void;
+  SetAssignedName(AssignedName: TCollection_HAsciiString): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_NamedUnit: declare class StepBasic_NamedUnit extends Standard_Transient
 
-constructor
+  constructor
 
-Init(aDimensions: StepBasic_DimensionalExponents): void;
+  Init(aDimensions: StepBasic_DimensionalExponents): void;
 
-SetDimensions(aDimensions: StepBasic_DimensionalExponents): void;
+  SetDimensions(aDimensions: StepBasic_DimensionalExponents): void;
 
-Dimensions(): StepBasic_DimensionalExponents;
+  Dimensions(): StepBasic_DimensionalExponents;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_ObjectRole: declare class StepBasic_ObjectRole extends Standard_Transient
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString): void;
 
-Name(): TCollection_HAsciiString;
+  Name(): TCollection_HAsciiString;
 
-SetName(Name: TCollection_HAsciiString): void;
+  SetName(Name: TCollection_HAsciiString): void;
 
-Description(): TCollection_HAsciiString;
+  Description(): TCollection_HAsciiString;
 
-SetDescription(Description: TCollection_HAsciiString): void;
+  SetDescription(Description: TCollection_HAsciiString): void;
 
-HasDescription(): boolean;
+  HasDescription(): boolean;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_OrdinalDate: declare class StepBasic_OrdinalDate extends StepBasic_Date
 
-constructor
+  constructor
 
-Init(aYearComponent: number, aDayComponent: number): void;
-Init(aYearComponent: number): void;
-Init(aYearComponent: number, aDayComponent: number): void;
-Init(aYearComponent: number): void;
+  Init(aYearComponent: number, aDayComponent: number): void;
+  Init(aYearComponent: number): void;
+  Init(aYearComponent: number, aDayComponent: number): void;
+  Init(aYearComponent: number): void;
 
-SetDayComponent(aDayComponent: number): void;
+  SetDayComponent(aDayComponent: number): void;
 
-DayComponent(): number;
+  DayComponent(): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_Organization: declare class StepBasic_Organization extends Standard_Transient
 
-constructor
+  constructor
 
-Init(hasAid: boolean, aId: TCollection_HAsciiString, aName: TCollection_HAsciiString, aDescription: TCollection_HAsciiString): void;
+  Init(hasAid: boolean, aId: TCollection_HAsciiString, aName: TCollection_HAsciiString, aDescription: TCollection_HAsciiString): void;
 
-SetId(aId: TCollection_HAsciiString): void;
+  SetId(aId: TCollection_HAsciiString): void;
 
-UnSetId(): void;
+  UnSetId(): void;
 
-Id(): TCollection_HAsciiString;
+  Id(): TCollection_HAsciiString;
 
-HasId(): boolean;
+  HasId(): boolean;
 
-SetName(aName: TCollection_HAsciiString): void;
+  SetName(aName: TCollection_HAsciiString): void;
 
-Name(): TCollection_HAsciiString;
+  Name(): TCollection_HAsciiString;
 
-SetDescription(aDescription: TCollection_HAsciiString): void;
+  SetDescription(aDescription: TCollection_HAsciiString): void;
 
-Description(): TCollection_HAsciiString;
+  Description(): TCollection_HAsciiString;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_OrganizationAssignment: declare class StepBasic_OrganizationAssignment extends Standard_Transient
 
-constructor
+  constructor
 
-Init(aAssignedOrganization: StepBasic_Organization, aRole: StepBasic_OrganizationRole): void;
+  Init(aAssignedOrganization: StepBasic_Organization, aRole: StepBasic_OrganizationRole): void;
 
-SetAssignedOrganization(aAssignedOrganization: StepBasic_Organization): void;
+  SetAssignedOrganization(aAssignedOrganization: StepBasic_Organization): void;
 
-AssignedOrganization(): StepBasic_Organization;
+  AssignedOrganization(): StepBasic_Organization;
 
-SetRole(aRole: StepBasic_OrganizationRole): void;
+  SetRole(aRole: StepBasic_OrganizationRole): void;
 
-Role(): StepBasic_OrganizationRole;
+  Role(): StepBasic_OrganizationRole;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_OrganizationRole: declare class StepBasic_OrganizationRole extends Standard_Transient
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetName(aName: TCollection_HAsciiString): void;
+  SetName(aName: TCollection_HAsciiString): void;
 
-Name(): TCollection_HAsciiString;
+  Name(): TCollection_HAsciiString;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_OrganizationalAddress: declare class StepBasic_OrganizationalAddress extends StepBasic_Address
 
-constructor
+  constructor
 
-Init(hasAinternalLocation: boolean, aInternalLocation: TCollection_HAsciiString, hasAstreetNumber: boolean, aStreetNumber: TCollection_HAsciiString, hasAstreet: boolean, aStreet: TCollection_HAsciiString, hasApostalBox: boolean, aPostalBox: TCollection_HAsciiString, hasAtown: boolean, aTown: TCollection_HAsciiString, hasAregion: boolean, aRegion: TCollection_HAsciiString, hasApostalCode: boolean, aPostalCode: TCollection_HAsciiString, hasAcountry: boolean, aCountry: TCollection_HAsciiString, hasAfacsimileNumber: boolean, aFacsimileNumber: TCollection_HAsciiString, hasAtelephoneNumber: boolean, aTelephoneNumber: TCollection_HAsciiString, hasAelectronicMailAddress: boolean, aElectronicMailAddress: TCollection_HAsciiString, hasAtelexNumber: boolean, aTelexNumber: TCollection_HAsciiString, aOrganizations: NCollection_HArray1_handle_StepBasic_Organization, aDescription: TCollection_HAsciiString): void;
-Init(hasAinternalLocation: boolean, aInternalLocation: TCollection_HAsciiString, hasAstreetNumber: boolean, aStreetNumber: TCollection_HAsciiString, hasAstreet: boolean, aStreet: TCollection_HAsciiString, hasApostalBox: boolean, aPostalBox: TCollection_HAsciiString, hasAtown: boolean, aTown: TCollection_HAsciiString, hasAregion: boolean, aRegion: TCollection_HAsciiString, hasApostalCode: boolean, aPostalCode: TCollection_HAsciiString, hasAcountry: boolean, aCountry: TCollection_HAsciiString, hasAfacsimileNumber: boolean, aFacsimileNumber: TCollection_HAsciiString, hasAtelephoneNumber: boolean, aTelephoneNumber: TCollection_HAsciiString, hasAelectronicMailAddress: boolean, aElectronicMailAddress: TCollection_HAsciiString, hasAtelexNumber: boolean, aTelexNumber: TCollection_HAsciiString): void;
-Init(hasAinternalLocation: boolean, aInternalLocation: TCollection_HAsciiString, hasAstreetNumber: boolean, aStreetNumber: TCollection_HAsciiString, hasAstreet: boolean, aStreet: TCollection_HAsciiString, hasApostalBox: boolean, aPostalBox: TCollection_HAsciiString, hasAtown: boolean, aTown: TCollection_HAsciiString, hasAregion: boolean, aRegion: TCollection_HAsciiString, hasApostalCode: boolean, aPostalCode: TCollection_HAsciiString, hasAcountry: boolean, aCountry: TCollection_HAsciiString, hasAfacsimileNumber: boolean, aFacsimileNumber: TCollection_HAsciiString, hasAtelephoneNumber: boolean, aTelephoneNumber: TCollection_HAsciiString, hasAelectronicMailAddress: boolean, aElectronicMailAddress: TCollection_HAsciiString, hasAtelexNumber: boolean, aTelexNumber: TCollection_HAsciiString, aOrganizations: NCollection_HArray1_handle_StepBasic_Organization, aDescription: TCollection_HAsciiString): void;
-Init(hasAinternalLocation: boolean, aInternalLocation: TCollection_HAsciiString, hasAstreetNumber: boolean, aStreetNumber: TCollection_HAsciiString, hasAstreet: boolean, aStreet: TCollection_HAsciiString, hasApostalBox: boolean, aPostalBox: TCollection_HAsciiString, hasAtown: boolean, aTown: TCollection_HAsciiString, hasAregion: boolean, aRegion: TCollection_HAsciiString, hasApostalCode: boolean, aPostalCode: TCollection_HAsciiString, hasAcountry: boolean, aCountry: TCollection_HAsciiString, hasAfacsimileNumber: boolean, aFacsimileNumber: TCollection_HAsciiString, hasAtelephoneNumber: boolean, aTelephoneNumber: TCollection_HAsciiString, hasAelectronicMailAddress: boolean, aElectronicMailAddress: TCollection_HAsciiString, hasAtelexNumber: boolean, aTelexNumber: TCollection_HAsciiString): void;
+  Init(hasAinternalLocation: boolean, aInternalLocation: TCollection_HAsciiString, hasAstreetNumber: boolean, aStreetNumber: TCollection_HAsciiString, hasAstreet: boolean, aStreet: TCollection_HAsciiString, hasApostalBox: boolean, aPostalBox: TCollection_HAsciiString, hasAtown: boolean, aTown: TCollection_HAsciiString, hasAregion: boolean, aRegion: TCollection_HAsciiString, hasApostalCode: boolean, aPostalCode: TCollection_HAsciiString, hasAcountry: boolean, aCountry: TCollection_HAsciiString, hasAfacsimileNumber: boolean, aFacsimileNumber: TCollection_HAsciiString, hasAtelephoneNumber: boolean, aTelephoneNumber: TCollection_HAsciiString, hasAelectronicMailAddress: boolean, aElectronicMailAddress: TCollection_HAsciiString, hasAtelexNumber: boolean, aTelexNumber: TCollection_HAsciiString, aOrganizations: NCollection_HArray1_handle_StepBasic_Organization, aDescription: TCollection_HAsciiString): void;
+  Init(hasAinternalLocation: boolean, aInternalLocation: TCollection_HAsciiString, hasAstreetNumber: boolean, aStreetNumber: TCollection_HAsciiString, hasAstreet: boolean, aStreet: TCollection_HAsciiString, hasApostalBox: boolean, aPostalBox: TCollection_HAsciiString, hasAtown: boolean, aTown: TCollection_HAsciiString, hasAregion: boolean, aRegion: TCollection_HAsciiString, hasApostalCode: boolean, aPostalCode: TCollection_HAsciiString, hasAcountry: boolean, aCountry: TCollection_HAsciiString, hasAfacsimileNumber: boolean, aFacsimileNumber: TCollection_HAsciiString, hasAtelephoneNumber: boolean, aTelephoneNumber: TCollection_HAsciiString, hasAelectronicMailAddress: boolean, aElectronicMailAddress: TCollection_HAsciiString, hasAtelexNumber: boolean, aTelexNumber: TCollection_HAsciiString): void;
+  Init(hasAinternalLocation: boolean, aInternalLocation: TCollection_HAsciiString, hasAstreetNumber: boolean, aStreetNumber: TCollection_HAsciiString, hasAstreet: boolean, aStreet: TCollection_HAsciiString, hasApostalBox: boolean, aPostalBox: TCollection_HAsciiString, hasAtown: boolean, aTown: TCollection_HAsciiString, hasAregion: boolean, aRegion: TCollection_HAsciiString, hasApostalCode: boolean, aPostalCode: TCollection_HAsciiString, hasAcountry: boolean, aCountry: TCollection_HAsciiString, hasAfacsimileNumber: boolean, aFacsimileNumber: TCollection_HAsciiString, hasAtelephoneNumber: boolean, aTelephoneNumber: TCollection_HAsciiString, hasAelectronicMailAddress: boolean, aElectronicMailAddress: TCollection_HAsciiString, hasAtelexNumber: boolean, aTelexNumber: TCollection_HAsciiString, aOrganizations: NCollection_HArray1_handle_StepBasic_Organization, aDescription: TCollection_HAsciiString): void;
+  Init(hasAinternalLocation: boolean, aInternalLocation: TCollection_HAsciiString, hasAstreetNumber: boolean, aStreetNumber: TCollection_HAsciiString, hasAstreet: boolean, aStreet: TCollection_HAsciiString, hasApostalBox: boolean, aPostalBox: TCollection_HAsciiString, hasAtown: boolean, aTown: TCollection_HAsciiString, hasAregion: boolean, aRegion: TCollection_HAsciiString, hasApostalCode: boolean, aPostalCode: TCollection_HAsciiString, hasAcountry: boolean, aCountry: TCollection_HAsciiString, hasAfacsimileNumber: boolean, aFacsimileNumber: TCollection_HAsciiString, hasAtelephoneNumber: boolean, aTelephoneNumber: TCollection_HAsciiString, hasAelectronicMailAddress: boolean, aElectronicMailAddress: TCollection_HAsciiString, hasAtelexNumber: boolean, aTelexNumber: TCollection_HAsciiString): void;
 
-SetOrganizations(aOrganizations: NCollection_HArray1_handle_StepBasic_Organization): void;
+  SetOrganizations(aOrganizations: NCollection_HArray1_handle_StepBasic_Organization): void;
 
-Organizations(): NCollection_HArray1_handle_StepBasic_Organization;
+  Organizations(): NCollection_HArray1_handle_StepBasic_Organization;
 
-OrganizationsValue(num: number): StepBasic_Organization;
+  OrganizationsValue(num: number): StepBasic_Organization;
 
-NbOrganizations(): number;
+  NbOrganizations(): number;
 
-SetDescription(aDescription: TCollection_HAsciiString): void;
+  SetDescription(aDescription: TCollection_HAsciiString): void;
 
-Description(): TCollection_HAsciiString;
+  Description(): TCollection_HAsciiString;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_Person: declare class StepBasic_Person extends Standard_Transient
 
-constructor
+  constructor
 
-Init(aId: TCollection_HAsciiString, hasAlastName: boolean, aLastName: TCollection_HAsciiString, hasAfirstName: boolean, aFirstName: TCollection_HAsciiString, hasAmiddleNames: boolean, aMiddleNames: NCollection_HArray1_handle_TCollection_HAsciiString, hasAprefixTitles: boolean, aPrefixTitles: NCollection_HArray1_handle_TCollection_HAsciiString, hasAsuffixTitles: boolean, aSuffixTitles: NCollection_HArray1_handle_TCollection_HAsciiString): void;
+  Init(aId: TCollection_HAsciiString, hasAlastName: boolean, aLastName: TCollection_HAsciiString, hasAfirstName: boolean, aFirstName: TCollection_HAsciiString, hasAmiddleNames: boolean, aMiddleNames: NCollection_HArray1_handle_TCollection_HAsciiString, hasAprefixTitles: boolean, aPrefixTitles: NCollection_HArray1_handle_TCollection_HAsciiString, hasAsuffixTitles: boolean, aSuffixTitles: NCollection_HArray1_handle_TCollection_HAsciiString): void;
 
-SetId(aId: TCollection_HAsciiString): void;
+  SetId(aId: TCollection_HAsciiString): void;
 
-Id(): TCollection_HAsciiString;
+  Id(): TCollection_HAsciiString;
 
-SetLastName(aLastName: TCollection_HAsciiString): void;
+  SetLastName(aLastName: TCollection_HAsciiString): void;
 
-UnSetLastName(): void;
+  UnSetLastName(): void;
 
-LastName(): TCollection_HAsciiString;
+  LastName(): TCollection_HAsciiString;
 
-HasLastName(): boolean;
+  HasLastName(): boolean;
 
-SetFirstName(aFirstName: TCollection_HAsciiString): void;
+  SetFirstName(aFirstName: TCollection_HAsciiString): void;
 
-UnSetFirstName(): void;
+  UnSetFirstName(): void;
 
-FirstName(): TCollection_HAsciiString;
+  FirstName(): TCollection_HAsciiString;
 
-HasFirstName(): boolean;
+  HasFirstName(): boolean;
 
-SetMiddleNames(aMiddleNames: NCollection_HArray1_handle_TCollection_HAsciiString): void;
+  SetMiddleNames(aMiddleNames: NCollection_HArray1_handle_TCollection_HAsciiString): void;
 
-UnSetMiddleNames(): void;
+  UnSetMiddleNames(): void;
 
-MiddleNames(): NCollection_HArray1_handle_TCollection_HAsciiString;
+  MiddleNames(): NCollection_HArray1_handle_TCollection_HAsciiString;
 
-HasMiddleNames(): boolean;
+  HasMiddleNames(): boolean;
 
-MiddleNamesValue(num: number): TCollection_HAsciiString;
+  MiddleNamesValue(num: number): TCollection_HAsciiString;
 
-NbMiddleNames(): number;
+  NbMiddleNames(): number;
 
-SetPrefixTitles(aPrefixTitles: NCollection_HArray1_handle_TCollection_HAsciiString): void;
+  SetPrefixTitles(aPrefixTitles: NCollection_HArray1_handle_TCollection_HAsciiString): void;
 
-UnSetPrefixTitles(): void;
+  UnSetPrefixTitles(): void;
 
-PrefixTitles(): NCollection_HArray1_handle_TCollection_HAsciiString;
+  PrefixTitles(): NCollection_HArray1_handle_TCollection_HAsciiString;
 
-HasPrefixTitles(): boolean;
+  HasPrefixTitles(): boolean;
 
-PrefixTitlesValue(num: number): TCollection_HAsciiString;
+  PrefixTitlesValue(num: number): TCollection_HAsciiString;
 
-NbPrefixTitles(): number;
+  NbPrefixTitles(): number;
 
-SetSuffixTitles(aSuffixTitles: NCollection_HArray1_handle_TCollection_HAsciiString): void;
+  SetSuffixTitles(aSuffixTitles: NCollection_HArray1_handle_TCollection_HAsciiString): void;
 
-UnSetSuffixTitles(): void;
+  UnSetSuffixTitles(): void;
 
-SuffixTitles(): NCollection_HArray1_handle_TCollection_HAsciiString;
+  SuffixTitles(): NCollection_HArray1_handle_TCollection_HAsciiString;
 
-HasSuffixTitles(): boolean;
+  HasSuffixTitles(): boolean;
 
-SuffixTitlesValue(num: number): TCollection_HAsciiString;
+  SuffixTitlesValue(num: number): TCollection_HAsciiString;
 
-NbSuffixTitles(): number;
+  NbSuffixTitles(): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_PersonAndOrganization: declare class StepBasic_PersonAndOrganization extends Standard_Transient
 
-constructor
+  constructor
 
-Init(aThePerson: StepBasic_Person, aTheOrganization: StepBasic_Organization): void;
+  Init(aThePerson: StepBasic_Person, aTheOrganization: StepBasic_Organization): void;
 
-SetThePerson(aThePerson: StepBasic_Person): void;
+  SetThePerson(aThePerson: StepBasic_Person): void;
 
-ThePerson(): StepBasic_Person;
+  ThePerson(): StepBasic_Person;
 
-SetTheOrganization(aTheOrganization: StepBasic_Organization): void;
+  SetTheOrganization(aTheOrganization: StepBasic_Organization): void;
 
-TheOrganization(): StepBasic_Organization;
+  TheOrganization(): StepBasic_Organization;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_PersonAndOrganizationAssignment: declare class StepBasic_PersonAndOrganizationAssignment extends Standard_Transient
 
-constructor
+  constructor
 
-Init(aAssignedPersonAndOrganization: StepBasic_PersonAndOrganization, aRole: StepBasic_PersonAndOrganizationRole): void;
+  Init(aAssignedPersonAndOrganization: StepBasic_PersonAndOrganization, aRole: StepBasic_PersonAndOrganizationRole): void;
 
-SetAssignedPersonAndOrganization(aAssignedPersonAndOrganization: StepBasic_PersonAndOrganization): void;
+  SetAssignedPersonAndOrganization(aAssignedPersonAndOrganization: StepBasic_PersonAndOrganization): void;
 
-AssignedPersonAndOrganization(): StepBasic_PersonAndOrganization;
+  AssignedPersonAndOrganization(): StepBasic_PersonAndOrganization;
 
-SetRole(aRole: StepBasic_PersonAndOrganizationRole): void;
+  SetRole(aRole: StepBasic_PersonAndOrganizationRole): void;
 
-Role(): StepBasic_PersonAndOrganizationRole;
+  Role(): StepBasic_PersonAndOrganizationRole;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_PersonAndOrganizationRole: declare class StepBasic_PersonAndOrganizationRole extends Standard_Transient
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetName(aName: TCollection_HAsciiString): void;
+  SetName(aName: TCollection_HAsciiString): void;
 
-Name(): TCollection_HAsciiString;
+  Name(): TCollection_HAsciiString;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_PersonOrganizationSelect: declare class StepBasic_PersonOrganizationSelect extends StepData_SelectType
 
-constructor
+  constructor
 
-CaseNum(ent: Standard_Transient): number;
+  CaseNum(ent: Standard_Transient): number;
 
-Person(): StepBasic_Person;
+  Person(): StepBasic_Person;
 
-Organization(): StepBasic_Organization;
+  Organization(): StepBasic_Organization;
 
-PersonAndOrganization(): StepBasic_PersonAndOrganization;
+  PersonAndOrganization(): StepBasic_PersonAndOrganization;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_PersonalAddress: declare class StepBasic_PersonalAddress extends StepBasic_Address
 
-constructor
+  constructor
 
-Init(hasAinternalLocation: boolean, aInternalLocation: TCollection_HAsciiString, hasAstreetNumber: boolean, aStreetNumber: TCollection_HAsciiString, hasAstreet: boolean, aStreet: TCollection_HAsciiString, hasApostalBox: boolean, aPostalBox: TCollection_HAsciiString, hasAtown: boolean, aTown: TCollection_HAsciiString, hasAregion: boolean, aRegion: TCollection_HAsciiString, hasApostalCode: boolean, aPostalCode: TCollection_HAsciiString, hasAcountry: boolean, aCountry: TCollection_HAsciiString, hasAfacsimileNumber: boolean, aFacsimileNumber: TCollection_HAsciiString, hasAtelephoneNumber: boolean, aTelephoneNumber: TCollection_HAsciiString, hasAelectronicMailAddress: boolean, aElectronicMailAddress: TCollection_HAsciiString, hasAtelexNumber: boolean, aTelexNumber: TCollection_HAsciiString, aPeople: NCollection_HArray1_handle_StepBasic_Person, aDescription: TCollection_HAsciiString): void;
-Init(hasAinternalLocation: boolean, aInternalLocation: TCollection_HAsciiString, hasAstreetNumber: boolean, aStreetNumber: TCollection_HAsciiString, hasAstreet: boolean, aStreet: TCollection_HAsciiString, hasApostalBox: boolean, aPostalBox: TCollection_HAsciiString, hasAtown: boolean, aTown: TCollection_HAsciiString, hasAregion: boolean, aRegion: TCollection_HAsciiString, hasApostalCode: boolean, aPostalCode: TCollection_HAsciiString, hasAcountry: boolean, aCountry: TCollection_HAsciiString, hasAfacsimileNumber: boolean, aFacsimileNumber: TCollection_HAsciiString, hasAtelephoneNumber: boolean, aTelephoneNumber: TCollection_HAsciiString, hasAelectronicMailAddress: boolean, aElectronicMailAddress: TCollection_HAsciiString, hasAtelexNumber: boolean, aTelexNumber: TCollection_HAsciiString): void;
-Init(hasAinternalLocation: boolean, aInternalLocation: TCollection_HAsciiString, hasAstreetNumber: boolean, aStreetNumber: TCollection_HAsciiString, hasAstreet: boolean, aStreet: TCollection_HAsciiString, hasApostalBox: boolean, aPostalBox: TCollection_HAsciiString, hasAtown: boolean, aTown: TCollection_HAsciiString, hasAregion: boolean, aRegion: TCollection_HAsciiString, hasApostalCode: boolean, aPostalCode: TCollection_HAsciiString, hasAcountry: boolean, aCountry: TCollection_HAsciiString, hasAfacsimileNumber: boolean, aFacsimileNumber: TCollection_HAsciiString, hasAtelephoneNumber: boolean, aTelephoneNumber: TCollection_HAsciiString, hasAelectronicMailAddress: boolean, aElectronicMailAddress: TCollection_HAsciiString, hasAtelexNumber: boolean, aTelexNumber: TCollection_HAsciiString, aPeople: NCollection_HArray1_handle_StepBasic_Person, aDescription: TCollection_HAsciiString): void;
-Init(hasAinternalLocation: boolean, aInternalLocation: TCollection_HAsciiString, hasAstreetNumber: boolean, aStreetNumber: TCollection_HAsciiString, hasAstreet: boolean, aStreet: TCollection_HAsciiString, hasApostalBox: boolean, aPostalBox: TCollection_HAsciiString, hasAtown: boolean, aTown: TCollection_HAsciiString, hasAregion: boolean, aRegion: TCollection_HAsciiString, hasApostalCode: boolean, aPostalCode: TCollection_HAsciiString, hasAcountry: boolean, aCountry: TCollection_HAsciiString, hasAfacsimileNumber: boolean, aFacsimileNumber: TCollection_HAsciiString, hasAtelephoneNumber: boolean, aTelephoneNumber: TCollection_HAsciiString, hasAelectronicMailAddress: boolean, aElectronicMailAddress: TCollection_HAsciiString, hasAtelexNumber: boolean, aTelexNumber: TCollection_HAsciiString): void;
+  Init(hasAinternalLocation: boolean, aInternalLocation: TCollection_HAsciiString, hasAstreetNumber: boolean, aStreetNumber: TCollection_HAsciiString, hasAstreet: boolean, aStreet: TCollection_HAsciiString, hasApostalBox: boolean, aPostalBox: TCollection_HAsciiString, hasAtown: boolean, aTown: TCollection_HAsciiString, hasAregion: boolean, aRegion: TCollection_HAsciiString, hasApostalCode: boolean, aPostalCode: TCollection_HAsciiString, hasAcountry: boolean, aCountry: TCollection_HAsciiString, hasAfacsimileNumber: boolean, aFacsimileNumber: TCollection_HAsciiString, hasAtelephoneNumber: boolean, aTelephoneNumber: TCollection_HAsciiString, hasAelectronicMailAddress: boolean, aElectronicMailAddress: TCollection_HAsciiString, hasAtelexNumber: boolean, aTelexNumber: TCollection_HAsciiString, aPeople: NCollection_HArray1_handle_StepBasic_Person, aDescription: TCollection_HAsciiString): void;
+  Init(hasAinternalLocation: boolean, aInternalLocation: TCollection_HAsciiString, hasAstreetNumber: boolean, aStreetNumber: TCollection_HAsciiString, hasAstreet: boolean, aStreet: TCollection_HAsciiString, hasApostalBox: boolean, aPostalBox: TCollection_HAsciiString, hasAtown: boolean, aTown: TCollection_HAsciiString, hasAregion: boolean, aRegion: TCollection_HAsciiString, hasApostalCode: boolean, aPostalCode: TCollection_HAsciiString, hasAcountry: boolean, aCountry: TCollection_HAsciiString, hasAfacsimileNumber: boolean, aFacsimileNumber: TCollection_HAsciiString, hasAtelephoneNumber: boolean, aTelephoneNumber: TCollection_HAsciiString, hasAelectronicMailAddress: boolean, aElectronicMailAddress: TCollection_HAsciiString, hasAtelexNumber: boolean, aTelexNumber: TCollection_HAsciiString): void;
+  Init(hasAinternalLocation: boolean, aInternalLocation: TCollection_HAsciiString, hasAstreetNumber: boolean, aStreetNumber: TCollection_HAsciiString, hasAstreet: boolean, aStreet: TCollection_HAsciiString, hasApostalBox: boolean, aPostalBox: TCollection_HAsciiString, hasAtown: boolean, aTown: TCollection_HAsciiString, hasAregion: boolean, aRegion: TCollection_HAsciiString, hasApostalCode: boolean, aPostalCode: TCollection_HAsciiString, hasAcountry: boolean, aCountry: TCollection_HAsciiString, hasAfacsimileNumber: boolean, aFacsimileNumber: TCollection_HAsciiString, hasAtelephoneNumber: boolean, aTelephoneNumber: TCollection_HAsciiString, hasAelectronicMailAddress: boolean, aElectronicMailAddress: TCollection_HAsciiString, hasAtelexNumber: boolean, aTelexNumber: TCollection_HAsciiString, aPeople: NCollection_HArray1_handle_StepBasic_Person, aDescription: TCollection_HAsciiString): void;
+  Init(hasAinternalLocation: boolean, aInternalLocation: TCollection_HAsciiString, hasAstreetNumber: boolean, aStreetNumber: TCollection_HAsciiString, hasAstreet: boolean, aStreet: TCollection_HAsciiString, hasApostalBox: boolean, aPostalBox: TCollection_HAsciiString, hasAtown: boolean, aTown: TCollection_HAsciiString, hasAregion: boolean, aRegion: TCollection_HAsciiString, hasApostalCode: boolean, aPostalCode: TCollection_HAsciiString, hasAcountry: boolean, aCountry: TCollection_HAsciiString, hasAfacsimileNumber: boolean, aFacsimileNumber: TCollection_HAsciiString, hasAtelephoneNumber: boolean, aTelephoneNumber: TCollection_HAsciiString, hasAelectronicMailAddress: boolean, aElectronicMailAddress: TCollection_HAsciiString, hasAtelexNumber: boolean, aTelexNumber: TCollection_HAsciiString): void;
 
-SetPeople(aPeople: NCollection_HArray1_handle_StepBasic_Person): void;
+  SetPeople(aPeople: NCollection_HArray1_handle_StepBasic_Person): void;
 
-People(): NCollection_HArray1_handle_StepBasic_Person;
+  People(): NCollection_HArray1_handle_StepBasic_Person;
 
-PeopleValue(num: number): StepBasic_Person;
+  PeopleValue(num: number): StepBasic_Person;
 
-NbPeople(): number;
+  NbPeople(): number;
 
-SetDescription(aDescription: TCollection_HAsciiString): void;
+  SetDescription(aDescription: TCollection_HAsciiString): void;
 
-Description(): TCollection_HAsciiString;
+  Description(): TCollection_HAsciiString;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_PhysicallyModeledProductDefinition: declare class StepBasic_PhysicallyModeledProductDefinition extends StepBasic_ProductDefinition
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_PlaneAngleMeasureWithUnit: declare class StepBasic_PlaneAngleMeasureWithUnit extends StepBasic_MeasureWithUnit
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_PlaneAngleUnit: declare class StepBasic_PlaneAngleUnit extends StepBasic_NamedUnit
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_Product: declare class StepBasic_Product extends Standard_Transient
 
-constructor
+  constructor
 
-Init(aId: TCollection_HAsciiString, aName: TCollection_HAsciiString, aDescription: TCollection_HAsciiString, aFrameOfReference: NCollection_HArray1_handle_StepBasic_ProductContext): void;
+  Init(aId: TCollection_HAsciiString, aName: TCollection_HAsciiString, aDescription: TCollection_HAsciiString, aFrameOfReference: NCollection_HArray1_handle_StepBasic_ProductContext): void;
 
-SetId(aId: TCollection_HAsciiString): void;
+  SetId(aId: TCollection_HAsciiString): void;
 
-Id(): TCollection_HAsciiString;
+  Id(): TCollection_HAsciiString;
 
-SetName(aName: TCollection_HAsciiString): void;
+  SetName(aName: TCollection_HAsciiString): void;
 
-Name(): TCollection_HAsciiString;
+  Name(): TCollection_HAsciiString;
 
-SetDescription(aDescription: TCollection_HAsciiString): void;
+  SetDescription(aDescription: TCollection_HAsciiString): void;
 
-Description(): TCollection_HAsciiString;
+  Description(): TCollection_HAsciiString;
 
-SetFrameOfReference(aFrameOfReference: NCollection_HArray1_handle_StepBasic_ProductContext): void;
+  SetFrameOfReference(aFrameOfReference: NCollection_HArray1_handle_StepBasic_ProductContext): void;
 
-FrameOfReference(): NCollection_HArray1_handle_StepBasic_ProductContext;
+  FrameOfReference(): NCollection_HArray1_handle_StepBasic_ProductContext;
 
-FrameOfReferenceValue(num: number): StepBasic_ProductContext;
+  FrameOfReferenceValue(num: number): StepBasic_ProductContext;
 
-NbFrameOfReference(): number;
+  NbFrameOfReference(): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_ProductCategory: declare class StepBasic_ProductCategory extends Standard_Transient
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, hasAdescription: boolean, aDescription: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, hasAdescription: boolean, aDescription: TCollection_HAsciiString): void;
 
-SetName(aName: TCollection_HAsciiString): void;
+  SetName(aName: TCollection_HAsciiString): void;
 
-Name(): TCollection_HAsciiString;
+  Name(): TCollection_HAsciiString;
 
-SetDescription(aDescription: TCollection_HAsciiString): void;
+  SetDescription(aDescription: TCollection_HAsciiString): void;
 
-UnSetDescription(): void;
+  UnSetDescription(): void;
 
-Description(): TCollection_HAsciiString;
+  Description(): TCollection_HAsciiString;
 
-HasDescription(): boolean;
+  HasDescription(): boolean;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_ProductCategoryRelationship: declare class StepBasic_ProductCategoryRelationship extends Standard_Transient
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString, aCategory: StepBasic_ProductCategory, aSubCategory: StepBasic_ProductCategory): void;
+  Init(aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString, aCategory: StepBasic_ProductCategory, aSubCategory: StepBasic_ProductCategory): void;
 
-Name(): TCollection_HAsciiString;
+  Name(): TCollection_HAsciiString;
 
-SetName(Name: TCollection_HAsciiString): void;
+  SetName(Name: TCollection_HAsciiString): void;
 
-Description(): TCollection_HAsciiString;
+  Description(): TCollection_HAsciiString;
 
-SetDescription(Description: TCollection_HAsciiString): void;
+  SetDescription(Description: TCollection_HAsciiString): void;
 
-HasDescription(): boolean;
+  HasDescription(): boolean;
 
-Category(): StepBasic_ProductCategory;
+  Category(): StepBasic_ProductCategory;
 
-SetCategory(Category: StepBasic_ProductCategory): void;
+  SetCategory(Category: StepBasic_ProductCategory): void;
 
-SubCategory(): StepBasic_ProductCategory;
+  SubCategory(): StepBasic_ProductCategory;
 
-SetSubCategory(SubCategory: StepBasic_ProductCategory): void;
+  SetSubCategory(SubCategory: StepBasic_ProductCategory): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_ProductConceptContext: declare class StepBasic_ProductConceptContext extends StepBasic_ApplicationContextElement
 
-constructor
+  constructor
 
-Init(aApplicationContextElement_Name: TCollection_HAsciiString, aApplicationContextElement_FrameOfReference: StepBasic_ApplicationContext, aMarketSegmentType: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aFrameOfReference: StepBasic_ApplicationContext): void;
-Init(aApplicationContextElement_Name: TCollection_HAsciiString, aApplicationContextElement_FrameOfReference: StepBasic_ApplicationContext, aMarketSegmentType: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aFrameOfReference: StepBasic_ApplicationContext): void;
+  Init(aApplicationContextElement_Name: TCollection_HAsciiString, aApplicationContextElement_FrameOfReference: StepBasic_ApplicationContext, aMarketSegmentType: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aFrameOfReference: StepBasic_ApplicationContext): void;
+  Init(aApplicationContextElement_Name: TCollection_HAsciiString, aApplicationContextElement_FrameOfReference: StepBasic_ApplicationContext, aMarketSegmentType: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aFrameOfReference: StepBasic_ApplicationContext): void;
 
-MarketSegmentType(): TCollection_HAsciiString;
+  MarketSegmentType(): TCollection_HAsciiString;
 
-SetMarketSegmentType(MarketSegmentType: TCollection_HAsciiString): void;
+  SetMarketSegmentType(MarketSegmentType: TCollection_HAsciiString): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepBasic_ProductContext: declare class StepBasic_ProductContext extends StepBasic_ApplicationContextElement
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, aFrameOfReference: StepBasic_ApplicationContext, aDisciplineType: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aFrameOfReference: StepBasic_ApplicationContext): void;
-Init(aName: TCollection_HAsciiString, aFrameOfReference: StepBasic_ApplicationContext, aDisciplineType: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aFrameOfReference: StepBasic_ApplicationContext): void;
+  Init(aName: TCollection_HAsciiString, aFrameOfReference: StepBasic_ApplicationContext, aDisciplineType: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aFrameOfReference: StepBasic_ApplicationContext): void;
+  Init(aName: TCollection_HAsciiString, aFrameOfReference: StepBasic_ApplicationContext, aDisciplineType: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aFrameOfReference: StepBasic_ApplicationContext): void;
 
-SetDisciplineType(aDisciplineType: TCollection_HAsciiString): void;
+  SetDisciplineType(aDisciplineType: TCollection_HAsciiString): void;
 
-DisciplineType(): TCollection_HAsciiString;
+  DisciplineType(): TCollection_HAsciiString;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

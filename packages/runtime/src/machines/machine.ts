@@ -1,35 +1,25 @@
-import type {
-  StandardJSONSchemaV1,
-  StandardSchemaV1,
-} from "@standard-schema/spec";
-import type { CacheValue, ContentDigest } from "@taucad/cache-core";
-import type { RevisionId } from "@taucad/filesystem/revisions";
-import type { Quantity } from "@taucad/units/quantity";
-import { z } from "zod";
+import type { StandardJSONSchemaV1, StandardSchemaV1 } from '@standard-schema/spec';
+import type { CacheValue, ContentDigest } from '@taucad/cache-core';
+import type { RevisionId } from '@taucad/filesystem/revisions';
+import type { Quantity } from '@taucad/units/quantity';
+import { z } from 'zod';
 
-import { cloneBoundedJson } from "#configuration/bounded-json.js";
-import {
-  admitConfigurationManifest,
-  materializeConfigurationJsonSchema,
-} from "#configuration/configuration.js";
-import type {
-  ConfigurationDefinition,
-  ConfigurationManifestV1,
-  JsonSchema,
-} from "#configuration/index.js";
-import { admitJsonSchema } from "#configuration/admission.js";
+import { cloneBoundedJson } from '@taucad/parameters/json';
+import { admitConfigurationManifest, materializeConfigurationJsonSchema } from '#configuration/configuration.js';
+import type { ConfigurationDefinition, ConfigurationManifestV1, JsonSchema } from '#configuration/index.js';
+import { admitJsonSchema } from '@taucad/parameters/schema';
 import {
   attachRuntimePluginDefinition,
   attachRuntimePluginFactoryOptions,
-} from "#plugins/plugin-runtime-definition.js";
-import type { RuntimePluginDefinitionCarrier } from "#plugins/plugin-runtime-definition.js";
+} from '#plugins/plugin-runtime-definition.js';
+import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 
 /** Semantic container contract accepted by a machine provider. @public */
 export type MachineAcceptedContainer = Readonly<{
   contract: Readonly<{ id: string; version: number }>;
   mediaType: string;
   requiredMembers: readonly string[];
-  payloadSelection: "plate" | "single";
+  payloadSelection: 'plate' | 'single';
   technology: string;
 }>;
 
@@ -40,10 +30,7 @@ export type MachineQueryManifest = Readonly<{
 }>;
 
 /** Frozen serializable machine-provider registration metadata. @public */
-export type MachineProvider<
-  Id extends string = string,
-  QueryName extends string = string,
-> = Readonly<{
+export type MachineProvider<Id extends string = string, QueryName extends string = string> = Readonly<{
   id: Id;
   name: string;
   version: string;
@@ -61,19 +48,17 @@ export type MachineClock = Readonly<{ now(): string }>;
 
 /** Redacted provider log entry. @public */
 export type MachineLogEntry = Readonly<{
-  level: "debug" | "error" | "info" | "warning";
+  level: 'debug' | 'error' | 'info' | 'warning';
   message: string;
 }>;
 
 /** Host-approved certificate trust for one machine service. @public */
-export type MachineTransportTrust =
-  | Readonly<{ type: "system" }>
-  | Readonly<{ type: "pinned"; digest: ContentDigest }>;
+export type MachineTransportTrust = Readonly<{ type: 'system' }> | Readonly<{ type: 'pinned'; digest: ContentDigest }>;
 
 /** Bounded transport request delegated to a host-owned network adapter. @public */
 export type MachineNetworkRequest = Readonly<{
   endpoint: Readonly<{ address: string; port: number }>;
-  transport: "tcp" | "tls";
+  transport: 'tcp' | 'tls';
   trust: MachineTransportTrust;
   /** Milliseconds. */
   connectTimeout: number;
@@ -132,7 +117,7 @@ export type MachineQuantityDeclaration = Readonly<{
   value: number;
   unit: string;
   kind: string;
-  space: "difference" | "linear" | "point";
+  space: 'difference' | 'linear' | 'point';
 }>;
 
 /** Qualified immutable prepared-artifact identity. @public */
@@ -156,9 +141,7 @@ export type MachineArtifactReadInput = Readonly<{
 /** Least-privilege services available during discovery. @public */
 export type MachineDiscoveryRuntime = Readonly<{
   clock: MachineClock;
-  listenDatagrams(
-    input: MachineDatagramListenInput,
-  ): AsyncIterable<MachineDatagram>;
+  listenDatagrams(input: MachineDatagramListenInput): AsyncIterable<MachineDatagram>;
 }>;
 
 /** Host-owned services available only while establishing a trusted connection. @public */
@@ -166,12 +149,8 @@ export type MachineConnectionRuntime = Readonly<{
   clock: MachineClock;
   log(entry: MachineLogEntry): Promise<void>;
   connectStream(input: MachineNetworkRequest): Promise<MachineNetworkStream>;
-  readArtifact(
-    input: MachineArtifactReadInput,
-  ): AsyncIterable<Uint8Array<ArrayBuffer>>;
-  resolveSecret(
-    input: Readonly<{ reference: string; signal: AbortSignal }>,
-  ): Promise<string>;
+  readArtifact(input: MachineArtifactReadInput): AsyncIterable<Uint8Array<ArrayBuffer>>;
+  resolveSecret(input: Readonly<{ reference: string; signal: AbortSignal }>): Promise<string>;
   captureNetworkStill?(input: MachineNetworkStillInput): Promise<MachineStill>;
   uploadFile?(input: MachineFileUploadInput): Promise<MachineFileUploadReceipt>;
 }>;
@@ -215,13 +194,13 @@ export type MachineCandidate = Readonly<{
 
 /** One discovery stream event. @public */
 export type MachineDiscoveryEvent =
-  | Readonly<{ type: "found" | "updated"; candidate: MachineCandidate }>
-  | Readonly<{ type: "lost"; candidateId: string; observedAt: string }>;
+  | Readonly<{ type: 'found' | 'updated'; candidate: MachineCandidate }>
+  | Readonly<{ type: 'lost'; candidateId: string; observedAt: string }>;
 
 /** Non-secret outcome of starting a host-local binding ceremony. @public */
 export type MachineBindingOutcome =
-  | Readonly<{ status: "bound"; machineId: string }>
-  | Readonly<{ status: "operator-action-required"; ceremonyId: string }>;
+  | Readonly<{ status: 'bound'; machineId: string }>
+  | Readonly<{ status: 'operator-action-required'; ceremonyId: string }>;
 
 /** Named discovery operation input. @public */
 export type MachineDiscoveryInput<Configuration> = Readonly<{
@@ -265,7 +244,7 @@ export type MachineEnvelope = Readonly<{
   width: number;
   depth: number;
   height: number;
-  unit: "m";
+  unit: 'm';
 }>;
 
 /** Tool fact needed for machine/profile compatibility. Nozzle diameter is a positive executable length quantity. @public */
@@ -284,7 +263,7 @@ export type MachineMaterialSystem = Readonly<{
 /** One observed material slot with explicit occupancy. @public */
 export type MachineObservedMaterial = Readonly<{
   slot: number;
-  state: "empty" | "loaded" | "unknown";
+  state: 'empty' | 'loaded' | 'unknown';
   materialId?: string;
   brand?: string;
   color?: string;
@@ -300,15 +279,7 @@ export type MachineObservedSetup = Readonly<{
 
 /** Normalized active-run facts; provider values outside this set map to `unknown`. @public */
 export type MachineRunSnapshot = Readonly<{
-  state:
-    | "failed"
-    | "finishing"
-    | "idle"
-    | "paused"
-    | "preparing"
-    | "printing"
-    | "succeeded"
-    | "unknown";
+  state: 'failed' | 'finishing' | 'idle' | 'paused' | 'preparing' | 'printing' | 'succeeded' | 'unknown';
   progress?: number;
   remainingSeconds?: number;
   name?: string;
@@ -317,7 +288,7 @@ export type MachineRunSnapshot = Readonly<{
   totalLayers?: number;
   stage?: string;
   printType?: string;
-  speedProfile?: "silent" | "standard" | "sport" | "ludicrous" | "unknown";
+  speedProfile?: 'silent' | 'standard' | 'sport' | 'ludicrous' | 'unknown';
   speedPercent?: number;
 }>;
 
@@ -356,7 +327,7 @@ export type MachineNetworkSnapshot = Readonly<{ wifiSignalDbm?: number }>;
 
 /** Live machine light state. @public */
 export type MachineLightSnapshot = Readonly<{
-  chamber?: "off" | "on" | "unknown";
+  chamber?: 'off' | 'on' | 'unknown';
 }>;
 
 /** One normalized active diagnostic without provider payload detail. @public */
@@ -364,8 +335,8 @@ export type MachineAlertSnapshot = Readonly<{ code: string }>;
 
 /** Current connection and readiness snapshot. @public */
 export type MachineSnapshot = Readonly<{
-  connection: "connected" | "disconnected" | "unreachable";
-  readiness: "busy" | "idle" | "not-ready" | "unknown";
+  connection: 'connected' | 'disconnected' | 'unreachable';
+  readiness: 'busy' | 'idle' | 'not-ready' | 'unknown';
   activeRunId?: string;
   observedAt: string;
   setup: MachineObservedSetup;
@@ -375,13 +346,13 @@ export type MachineSnapshot = Readonly<{
   materialSystem?: MachineMaterialSystemSnapshot;
   network?: MachineNetworkSnapshot;
   lights?: MachineLightSnapshot;
-  removableStorage?: "absent" | "present";
+  removableStorage?: 'absent' | 'present';
   alerts?: readonly MachineAlertSnapshot[];
 }>;
 
 /** Pull-stream observation emitted by one live session. @public */
 export type MachineObservation = Readonly<{
-  type: "snapshot";
+  type: 'snapshot';
   snapshot: MachineSnapshot;
 }>;
 
@@ -408,7 +379,7 @@ export type MachineSubmitInput<Configuration> = Readonly<{
 /** Provider-local lookup for a late semantic command reply. @public */
 export type MachineReconcileInput = Readonly<{
   operationId: string;
-  command: "cancel" | "pause" | "project_file" | "resume" | "stop";
+  command: 'cancel' | 'pause' | 'project_file' | 'resume' | 'stop';
   signal: AbortSignal;
 }>;
 
@@ -424,7 +395,7 @@ export type MachineProviderPreparePrintInput<Configuration> = Readonly<{
 /** Provider proof that an immutable artifact was transferred without starting it. @public */
 export type MachinePreparationReceipt =
   | Readonly<{
-      status: "transferred";
+      status: 'transferred';
       remoteName: string;
       digest: ContentDigest;
       length: number;
@@ -433,7 +404,7 @@ export type MachinePreparationReceipt =
       observedAt: string;
     }>
   | Readonly<{
-      status: "rejected";
+      status: 'rejected';
       code: string;
       message: string;
       observedAt: string;
@@ -442,13 +413,13 @@ export type MachinePreparationReceipt =
 /** Named run-control input with stale-run preconditions. @public */
 export type MachineControlInput =
   | Readonly<{
-      command: "cancel" | "pause" | "resume";
+      command: 'cancel' | 'pause' | 'resume';
       operationId: string;
       expectedProviderRunId: string;
       signal: AbortSignal;
     }>
   | Readonly<{
-      command: "urgent-stop";
+      command: 'urgent-stop';
       operationId: string;
       expectedProviderRunId?: string;
       signal: AbortSignal;
@@ -456,15 +427,15 @@ export type MachineControlInput =
 
 /** Provider result for one physical submission attempt. @public */
 export type MachineSubmissionReceipt =
-  | Readonly<{ status: "accepted"; providerRunId?: string; observedAt: string }>
+  | Readonly<{ status: 'accepted'; providerRunId?: string; observedAt: string }>
   | Readonly<{
-      status: "rejected";
+      status: 'rejected';
       code: string;
       message: string;
       observedAt: string;
     }>
   | Readonly<{
-      status: "unknown";
+      status: 'unknown';
       reason: string;
       providerRunId?: string;
       observedAt: string;
@@ -479,16 +450,16 @@ export type MachineCaptureStillInput = Readonly<{ signal: AbortSignal }>;
 /** Bounded short-lived still image returned outside durable job/event storage. @public */
 export type MachineStill = Readonly<{
   bytes: Uint8Array<ArrayBuffer>;
-  mediaType: "image/jpeg";
+  mediaType: 'image/jpeg';
   capturedAt: string;
   expiresAt: string;
 }>;
 
 /** Required discriminated still-capture facet. @public */
 export type MachineStillCaptureCapability =
-  | Readonly<{ type: "unsupported" }>
+  | Readonly<{ type: 'unsupported' }>
   | Readonly<{
-      type: "supported";
+      type: 'supported';
       capture(input: MachineCaptureStillInput): Promise<MachineStill>;
     }>;
 
@@ -498,12 +469,8 @@ export type MachineSession<SubmissionConfiguration = unknown> = Readonly<{
   getDescriptor(input: MachineGetDescriptorInput): Promise<MachineDescriptor>;
   getSnapshot(input: MachineGetSnapshotInput): Promise<MachineSnapshot>;
   observe(input: MachineObserveInput): AsyncIterable<MachineObservation>;
-  preparePrint?(
-    input: MachineProviderPreparePrintInput<SubmissionConfiguration>,
-  ): Promise<MachinePreparationReceipt>;
-  submit(
-    input: MachineSubmitInput<SubmissionConfiguration>,
-  ): Promise<MachineSubmissionReceipt>;
+  preparePrint?(input: MachineProviderPreparePrintInput<SubmissionConfiguration>): Promise<MachinePreparationReceipt>;
+  submit(input: MachineSubmitInput<SubmissionConfiguration>): Promise<MachineSubmissionReceipt>;
   control(input: MachineControlInput): Promise<MachineCommandReceipt>;
   reconcile?(input: MachineReconcileInput): Promise<MachineCommandReceipt>;
   close(): Promise<void>;
@@ -531,10 +498,7 @@ export type MachineDeclaredQuery<
  * @returns The unchanged typed query.
  * @public
  */
-export const defineMachineQuery = <
-  InputSchema extends ProviderSchema,
-  ResultSchema extends ProviderSchema,
->(
+export const defineMachineQuery = <InputSchema extends ProviderSchema, ResultSchema extends ProviderSchema>(
   query: MachineDeclaredQuery<InputSchema, ResultSchema>,
 ): MachineDeclaredQuery<InputSchema, ResultSchema> => query;
 
@@ -583,11 +547,10 @@ export type MachineProviderDefinition<
 }>;
 
 /** Callable machine capability factory using the shared toolkit ABI. @public */
-export type MachineProviderFactory<
-  Id extends string,
-  QueryName extends string,
-  Definition,
-> = () => MachineProvider<Id, QueryName> &
+export type MachineProviderFactory<Id extends string, QueryName extends string, Definition> = () => MachineProvider<
+  Id,
+  QueryName
+> &
   RuntimePluginDefinitionCarrier<Definition>;
 
 const assertIdentity = (value: string, field: string): void => {
@@ -597,7 +560,7 @@ const assertIdentity = (value: string, field: string): void => {
 };
 
 const freezeJson = <Value>(value: Value): Value => {
-  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
     for (const child of Object.values(value)) {
       freezeJson(child);
     }
@@ -613,10 +576,10 @@ const queryManifest = (
   }>,
 ): MachineQueryManifest => {
   const inputSchema = materializeConfigurationJsonSchema(
-    query.inputSchema["~standard"].jsonSchema.input({ target: "draft-07" }),
+    query.inputSchema['~standard'].jsonSchema.input({ target: 'draft-07' }),
   );
   const resultSchema = materializeConfigurationJsonSchema(
-    query.resultSchema["~standard"].jsonSchema.output({ target: "draft-07" }),
+    query.resultSchema['~standard'].jsonSchema.output({ target: 'draft-07' }),
   );
   admitJsonSchema(inputSchema);
   admitJsonSchema(resultSchema);
@@ -626,15 +589,15 @@ const queryManifest = (
 const isCanonicalArchiveMember = (member: string): boolean =>
   member.length > 0 &&
   member.length <= 512 &&
-  member.normalize("NFC") === member &&
-  !member.startsWith("/") &&
+  member.normalize('NFC') === member &&
+  !member.startsWith('/') &&
   !/^[A-Za-z]:/u.test(member) &&
-  !member.includes("\\") &&
-  member.split("/").every(
+  !member.includes('\\') &&
+  member.split('/').every(
     (segment) =>
-      segment !== "" &&
-      segment !== "." &&
-      segment !== ".." &&
+      segment !== '' &&
+      segment !== '.' &&
+      segment !== '..' &&
       [...segment].every((character) => {
         const code = character.codePointAt(0)!;
         return code > 31 && code !== 127;
@@ -653,72 +616,56 @@ const assertDefinition = (definition: {
   readonly queries?: Readonly<Record<string, unknown>>;
 }): void => {
   for (const [field, value] of [
-    ["id", definition.id],
-    ["name", definition.name],
-    ["version", definition.version],
-    ["vendor", definition.vendor],
+    ['id', definition.id],
+    ['name', definition.name],
+    ['version', definition.version],
+    ['vendor', definition.vendor],
   ] as const) {
     assertIdentity(value, field);
   }
   if (definition.protocolVersion !== 1) {
-    throw new TypeError("defineMachine: protocolVersion must be 1.");
+    throw new TypeError('defineMachine: protocolVersion must be 1.');
   }
   if (
     definition.technologies.length === 0 ||
     definition.technologies.length > 64 ||
     new Set(definition.technologies).size !== definition.technologies.length
   ) {
-    throw new TypeError(
-      "defineMachine: technologies must be non-empty and unique.",
-    );
+    throw new TypeError('defineMachine: technologies must be non-empty and unique.');
   }
   for (const technology of definition.technologies) {
-    assertIdentity(technology, "technology");
+    assertIdentity(technology, 'technology');
   }
   if (definition.accepts.length === 0 || definition.accepts.length > 128) {
-    throw new TypeError(
-      "defineMachine: accepts must be non-empty and bounded.",
-    );
+    throw new TypeError('defineMachine: accepts must be non-empty and bounded.');
   }
   const contracts = new Set<string>();
   for (const accepted of definition.accepts) {
-    assertIdentity(accepted.contract.id, "accepts.contract.id");
-    assertIdentity(accepted.mediaType, "accepts.mediaType");
+    assertIdentity(accepted.contract.id, 'accepts.contract.id');
+    assertIdentity(accepted.mediaType, 'accepts.mediaType');
     if (
       !Number.isSafeInteger(accepted.contract.version) ||
       accepted.contract.version < 1 ||
       accepted.requiredMembers.length > 128 ||
-      accepted.requiredMembers.some(
-        (member) => !isCanonicalArchiveMember(member),
-      ) ||
+      accepted.requiredMembers.some((member) => !isCanonicalArchiveMember(member)) ||
       new Set(accepted.requiredMembers).size !== accepted.requiredMembers.length
     ) {
-      throw new TypeError("defineMachine: accepted container is invalid.");
+      throw new TypeError('defineMachine: accepted container is invalid.');
     }
     // oxlint-disable-next-line typescript/no-unnecessary-condition -- unchecked authoring values cross this runtime guard.
-    if (
-      accepted.payloadSelection !== "plate" &&
-      accepted.payloadSelection !== "single"
-    ) {
-      throw new TypeError(
-        "defineMachine: accepted payload selection is invalid.",
-      );
+    if (accepted.payloadSelection !== 'plate' && accepted.payloadSelection !== 'single') {
+      throw new TypeError('defineMachine: accepted payload selection is invalid.');
     }
-    assertIdentity(accepted.technology, "accepts.technology");
+    assertIdentity(accepted.technology, 'accepts.technology');
     const identity = `${accepted.contract.id}@${accepted.contract.version}`;
     if (contracts.has(identity)) {
-      throw new TypeError(
-        `defineMachine: duplicate accepted contract ${identity}.`,
-      );
+      throw new TypeError(`defineMachine: duplicate accepted contract ${identity}.`);
     }
     contracts.add(identity);
   }
   const queryNames = Object.keys(definition.queries ?? {});
-  if (
-    queryNames.length > 128 ||
-    queryNames.some((name) => name.length === 0 || name.length > 256)
-  ) {
-    throw new TypeError("defineMachine: query names are invalid.");
+  if (queryNames.length > 128 || queryNames.some((name) => name.length === 0 || name.length > 256)) {
+    throw new TypeError('defineMachine: query names are invalid.');
   }
 };
 
@@ -732,8 +679,8 @@ const configurationManifestSchema = z.unknown().transform((value, context) => {
     return admitConfigurationManifest(value).manifest;
   } catch {
     context.addIssue({
-      code: "custom",
-      message: "Invalid configuration manifest.",
+      code: 'custom',
+      message: 'Invalid configuration manifest.',
     });
     return z.NEVER;
   }
@@ -745,7 +692,7 @@ const acceptedContainerSchema = z.strictObject({
   }),
   mediaType: providerIdentitySchema,
   requiredMembers: z.array(z.string().min(1).max(512)).max(128),
-  payloadSelection: z.enum(["plate", "single"]),
+  payloadSelection: z.enum(['plate', 'single']),
   technology: providerIdentitySchema,
 });
 const machineProviderSchema = z.strictObject({
@@ -758,43 +705,38 @@ const machineProviderSchema = z.strictObject({
   accepts: z.array(acceptedContainerSchema).min(1).max(128),
   bindingConfiguration: configurationManifestSchema,
   submissionConfiguration: configurationManifestSchema,
-  queries: z.record(
-    providerIdentitySchema,
-    z.strictObject({ inputSchema: z.unknown(), resultSchema: z.unknown() }),
-  ),
+  queries: z.record(providerIdentitySchema, z.strictObject({ inputSchema: z.unknown(), resultSchema: z.unknown() })),
 });
 
 const providerKeys = [
-  "id",
-  "name",
-  "version",
-  "protocolVersion",
-  "vendor",
-  "technologies",
-  "accepts",
-  "bindingConfiguration",
-  "submissionConfiguration",
-  "queries",
+  'id',
+  'name',
+  'version',
+  'protocolVersion',
+  'vendor',
+  'technologies',
+  'accepts',
+  'bindingConfiguration',
+  'submissionConfiguration',
+  'queries',
 ] as const;
 
-const providerWireValue = (
-  value: unknown,
-): Readonly<Record<string, unknown>> => {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("INVALID_MACHINE_PROVIDER_DESCRIPTOR");
+const providerWireValue = (value: unknown): Readonly<Record<string, unknown>> => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('INVALID_MACHINE_PROVIDER_DESCRIPTOR');
   }
   const descriptors = Object.getOwnPropertyDescriptors(value);
   const unexpected = Object.keys(descriptors).find(
     (key) => !providerKeys.includes(key as (typeof providerKeys)[number]),
   );
   if (unexpected !== undefined) {
-    throw new TypeError("INVALID_MACHINE_PROVIDER_DESCRIPTOR");
+    throw new TypeError('INVALID_MACHINE_PROVIDER_DESCRIPTOR');
   }
   return Object.fromEntries(
     providerKeys.map((key) => {
       const descriptor = descriptors[key];
-      if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) {
-        throw new TypeError("INVALID_MACHINE_PROVIDER_DESCRIPTOR");
+      if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) {
+        throw new TypeError('INVALID_MACHINE_PROVIDER_DESCRIPTOR');
       }
       return [key, descriptor.value];
     }),
@@ -809,7 +751,7 @@ const providerWireValue = (
 export const parseMachineProvider = (value: unknown): MachineProvider => {
   const candidate = machineProviderSchema.parse(
     cloneBoundedJson(providerWireValue(value), {
-      code: "MACHINE_PROVIDER_DESCRIPTOR",
+      code: 'MACHINE_PROVIDER_DESCRIPTOR',
       maximumDepth: 32,
       maximumNodes: 16_384,
       maximumCharacters: 524_288,
@@ -837,23 +779,11 @@ export const defineMachine = <
   SubmissionSchema extends StandardSchemaV1,
   const Queries extends QueryMap = Readonly<Record<never, never>>,
 >(
-  definition: MachineProviderDefinition<
-    Id,
-    BindingSchema,
-    SubmissionSchema,
-    Queries
-  >,
-): MachineProviderFactory<
-  Id,
-  Extract<keyof Queries, string>,
-  typeof definition
-> => {
+  definition: MachineProviderDefinition<Id, BindingSchema, SubmissionSchema, Queries>,
+): MachineProviderFactory<Id, Extract<keyof Queries, string>, typeof definition> => {
   assertDefinition(definition);
   const queries = Object.fromEntries(
-    Object.entries(definition.queries ?? {}).map(([name, query]) => [
-      name,
-      queryManifest(query),
-    ]),
+    Object.entries(definition.queries ?? {}).map(([name, query]) => [name, queryManifest(query)]),
   ) as Record<Extract<keyof Queries, string>, MachineQueryManifest>;
   const descriptor: MachineProvider<Id, Extract<keyof Queries, string>> = {
     id: definition.id,
@@ -868,14 +798,11 @@ export const defineMachine = <
     queries,
   };
   const owned = cloneBoundedJson(descriptor, {
-    code: "MACHINE_PROVIDER_DESCRIPTOR",
+    code: 'MACHINE_PROVIDER_DESCRIPTOR',
     maximumDepth: 32,
     maximumNodes: 16_384,
     maximumCharacters: 524_288,
   }) as MachineProvider<Id, Extract<keyof Queries, string>>;
-  const factory = () =>
-    freezeJson(
-      attachRuntimePluginDefinition(structuredClone(owned), () => definition),
-    );
+  const factory = () => freezeJson(attachRuntimePluginDefinition(structuredClone(owned), () => definition));
   return attachRuntimePluginFactoryOptions(factory, false);
 };

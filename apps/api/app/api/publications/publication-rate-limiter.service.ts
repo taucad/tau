@@ -53,6 +53,34 @@ export class PublicationRateLimiterService {
     return { allowed: count <= inviteEmailRateLimitMaxPerOwnerPerDay, count };
   }
 
+  /**
+   * Consume slots from any daily per-caller budget.
+   *
+   * The two methods above are publication budgets; this one is the same Redis
+   * bucket with the caller naming its own key and ceiling, so a second route
+   * does not have to re-implement the Lua or the calendar-day expiry. The day
+   * is appended here, so a caller cannot get the bucketing wrong.
+   *
+   * ponytail: this service is the API's only rate limiter and lives under
+   * `publications` for historical reasons; moving it is a rename, not a fix,
+   * and belongs to whoever next owns both modules.
+   *
+   * @param args - The key prefix, the daily ceiling, and how many slots to take.
+   * @returns Whether the call is within budget, and the running count.
+   */
+  public async consumeDailyBudget(args: {
+    key: string;
+    limit: number;
+    count?: number;
+  }): Promise<{ allowed: boolean; count: number }> {
+    const count = await this.consumeDailySlots({
+      key: `${args.key}:${dayBucket()}`,
+      count: args.count ?? 1,
+    });
+
+    return { allowed: count <= args.limit, count };
+  }
+
   private async consumeDailySlots(args: { key: string; count: number }): Promise<number> {
     const countRaw = await this.redisService.client.eval(
       incrByExpireLua,

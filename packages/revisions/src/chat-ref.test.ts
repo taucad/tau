@@ -11,12 +11,12 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createMemoryProvider } from '@taucad/filesystem/backend';
 import { classify } from '@taucad/filesystem/path-registry';
-import { revisionId } from '@taucad/filesystem/revisions';
+import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -100,6 +100,31 @@ const readChatFile = async (checkout: FileSystemProvider, path: string, id = cha
     return undefined;
   }
 };
+
+const readChatBytes = async (
+  checkout: FileSystemProvider,
+  path: string,
+  id = chatId,
+): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+  try {
+    return await checkout.readFile(`${chatRecordsPath(id)}/${path}`);
+  } catch {
+    return undefined;
+  }
+};
+
+/* Attachments as the closed tree spells them (D12): bytes named by their
+ * lowercase SHA-256 hex and one of the five stored media types. The hashes here
+ * are shaped, not computed — `chat-ref` validates the spelling, and the store
+ * that mints the name is the UI's own. */
+const imageHash = 'a1'.repeat(32);
+const documentHash = 'b2'.repeat(32);
+const imagePath = `attachments/${imageHash}.jpg`;
+const documentPath = `attachments/${documentHash}.pdf`;
+/* Binary on purpose: a JPEG's SOI/APP0 and a PDF header, so a leg that decoded
+ * or re-encoded a blob on the way through would not round-trip. */
+const imageBytes = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+const documentBytes = Uint8Array.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37, 0x0a, 0x00]);
 
 describe('chat ref naming', () => {
   it('reads a chat id from a local ref and from its remote-tracking spelling', () => {
@@ -264,6 +289,101 @@ describe.each([
     ).toEqual([]);
   });
 
+  it.runIf(enabled)('never truncates a compatible foreign segment and rejects divergent bytes', async () => {
+    const id = `append_${_engine}`;
+    const old = await harness.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['events/device-a.jsonl', '{"leaderEpoch":"a","sequence":0}\n']]),
+      provenance: { source: 'user', actorId, createdAt: now },
+      summary: { generated: 'Old segment' },
+    });
+    const oldHead = revisionId(old.commitId);
+    const longer = await harness.port.writeRevision({
+      parents: [oldHead],
+      tree: new ImmutableRevisionTree([
+        ['events/device-a.jsonl', '{"leaderEpoch":"a","sequence":0}\n{"leaderEpoch":"a","sequence":1}\n'],
+      ]),
+      provenance: { source: 'user', actorId, createdAt: now + 1 },
+      summary: { generated: 'Longer segment' },
+    });
+    const longerHead = revisionId(longer.commitId);
+    const target = await createMemoryProvider();
+
+    await projectChats({
+      port: harness.port,
+      filesystem: target,
+      deviceId: 'device-c',
+      refs: [{ name: chatRefName(id), head: longerHead }],
+    });
+    await projectChats({
+      port: harness.port,
+      filesystem: target,
+      deviceId: 'device-c',
+      refs: [{ name: chatRefName(id), head: oldHead }],
+    });
+    expect(await readChatFile(target, 'events/device-a.jsonl', id)).toBe(
+      '{"leaderEpoch":"a","sequence":0}\n{"leaderEpoch":"a","sequence":1}\n',
+    );
+
+    const divergent = await harness.port.writeRevision({
+      parents: [oldHead],
+      tree: new ImmutableRevisionTree([
+        ['events/device-a.jsonl', '{"leaderEpoch":"a","sequence":0}\n{"different":true}\n'],
+      ]),
+      provenance: { source: 'user', actorId, createdAt: now + 2 },
+      summary: { generated: 'Divergent segment' },
+    });
+    await expect(
+      projectChats({
+        port: harness.port,
+        filesystem: target,
+        deviceId: 'device-c',
+        refs: [{ name: chatRefName(id), head: revisionId(divergent.commitId) }],
+      }),
+    ).rejects.toMatchObject({ code: 'CHECKOUT_CONFLICT' });
+    expect(await readChatFile(target, 'events/device-a.jsonl', id)).toBe(
+      '{"leaderEpoch":"a","sequence":0}\n{"leaderEpoch":"a","sequence":1}\n',
+    );
+  });
+
+  it.runIf(enabled)('applies remote-only metadata changes and preserves conflicting local edits', async () => {
+    const id = `metadata_${_engine}`;
+    const first = await harness.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([['chat.json', '{"name":"First"}']]),
+      provenance: { source: 'user', actorId, createdAt: now },
+      summary: { generated: 'First metadata' },
+    });
+    const firstHead = revisionId(first.commitId);
+    const renamed = await harness.port.writeRevision({
+      parents: [firstHead],
+      tree: new ImmutableRevisionTree([['chat.json', '{"name":"Renamed remotely"}']]),
+      provenance: { source: 'user', actorId, createdAt: now + 1 },
+      summary: { generated: 'Renamed metadata' },
+    });
+    const target = await createMemoryProvider();
+    for (const head of [firstHead, revisionId(renamed.commitId)]) {
+      await projectChats({
+        port: harness.port,
+        filesystem: target,
+        deviceId: 'device-c',
+        refs: [{ name: chatRefName(id), head }],
+      });
+    }
+    expect(await readChatFile(target, 'chat.json', id)).toBe('{"name":"Renamed remotely"}');
+
+    await target.writeFile(`${chatRecordsPath(id)}/chat.json`, '{"name":"Local edit"}');
+    await expect(
+      projectChats({
+        port: harness.port,
+        filesystem: target,
+        deviceId: 'device-c',
+        refs: [{ name: chatRefName(id), head: firstHead }],
+      }),
+    ).rejects.toMatchObject({ code: 'CHECKOUT_CONFLICT' });
+    expect(await readChatFile(target, 'chat.json', id)).toBe('{"name":"Local edit"}');
+  });
+
   it.runIf(enabled)('never projects this device back over its own segment', async () => {
     const head = await harness.port.readRef(chatRefName(chatId));
     const target = await createMemoryProvider();
@@ -279,6 +399,162 @@ describe.each([
     expect(await readChatFile(target, 'events.jsonl')).toBe('live and growing\n');
     expect(await readChatFile(target, chatSegmentPath('device-a'))).toBeUndefined();
   });
+
+  it.runIf(enabled)('rejects a malformed chat tree before changing any local record', async () => {
+    const target = await createMemoryProvider();
+    await target.writeFile(`${chatRecordsPath('malformed')}/chat.json`, '{"name":"local"}');
+    await target.writeFile(`${chatRecordsPath('malformed')}/events.jsonl`, 'local live log\n');
+    const malicious = await harness.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([
+        ['chat.json', '{"name":"remote"}'],
+        ['events.jsonl', 'remote live log\n'],
+        ['events/device-a.jsonl', 'remote segment\n'],
+      ]),
+      provenance: { source: 'user', actorId, createdAt: now },
+      summary: { generated: 'Malformed chat' },
+    });
+
+    await expect(
+      projectChats({
+        port: harness.port,
+        filesystem: target,
+        deviceId: 'device-b',
+        refs: [{ name: chatRefName('malformed'), head: revisionId(malicious.commitId) }],
+      }),
+    ).rejects.toMatchObject({ code: 'UNSUPPORTED_OPERATION' });
+    expect(await readChatFile(target, 'chat.json', 'malformed')).toBe('{"name":"local"}');
+    expect(await readChatFile(target, 'events.jsonl', 'malformed')).toBe('local live log\n');
+    expect(await readChatFile(target, chatSegmentPath('device-a'), 'malformed')).toBeUndefined();
+  });
+
+  /* One entry family was widened, not the tree: an attachment is admitted only
+   * when it is content-addressed under `attachments/`, and everything else is
+   * still refused before a byte is written (Finding 11). */
+  it.runIf(enabled)('admits content-addressed attachments and refuses every other sibling', async () => {
+    const id = `attachments_${_engine}`;
+    const carried = await harness.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([
+        ['chat.json', '{"name":"with attachments"}'],
+        ['events/device-a.jsonl', 'A0\n'],
+        [imagePath, imageBytes],
+        [documentPath, documentBytes],
+      ]),
+      provenance: { source: 'user', actorId, createdAt: now },
+      summary: { generated: 'Chat with attachments' },
+    });
+    const target = await createMemoryProvider();
+    await projectChats({
+      port: harness.port,
+      filesystem: target,
+      deviceId: 'device-b',
+      refs: [{ name: chatRefName(id), head: revisionId(carried.commitId) }],
+    });
+    expect(await readChatBytes(target, imagePath, id)).toEqual(imageBytes);
+    expect(await readChatBytes(target, documentPath, id)).toEqual(documentBytes);
+
+    /**
+     * Offer one tree carrying `path` beside the record, and require a refusal.
+     *
+     * @param path - The sibling the closed tree must not admit.
+     */
+    const refusesSibling = async (path: string): Promise<void> => {
+      const written = await harness.port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([
+          ['chat.json', '{"name":"remote"}'],
+          [path, imageBytes],
+        ]),
+        provenance: { source: 'user', actorId, createdAt: now },
+        summary: { generated: `Chat carrying ${path}` },
+      });
+      await expect(
+        projectChats({
+          port: harness.port,
+          filesystem: await createMemoryProvider(),
+          deviceId: 'device-b',
+          refs: [{ name: chatRefName(`${id}_refused`), head: revisionId(written.commitId) }],
+        }),
+        `expected ${path} to be refused`,
+      ).rejects.toMatchObject({ code: 'UNSUPPORTED_OPERATION' });
+    };
+
+    for (const path of [
+      /* 63 hex digits: a name no content-addressed write produces. */
+      `attachments/${imageHash.slice(1)}.jpg`,
+      /* Outside the five stored media types (D12). */
+      `attachments/${imageHash}.exe`,
+      /* Upper-case hex: the store writes lower-case, so two spellings of one
+       * blob would be two entries for one object. */
+      `attachments/${imageHash.toUpperCase()}.jpg`,
+      /* No sub-directories: the family is one flat level. */
+      `attachments/nested/${imageHash}.jpg`,
+      'attachments/notes.txt',
+      'notes.txt',
+    ]) {
+      /* One at a time: each is a `git fast-import` against one repository on
+       * the native leg, and six at once contend on its object store. */
+      // oxlint-disable-next-line no-await-in-loop -- see above.
+      await refusesSibling(path);
+    }
+  });
+
+  it.runIf(enabled)(
+    'keeps newer projected segments and local metadata when recording from a stale parent',
+    async () => {
+      const staleChat = `stale_${_engine}`;
+      const old = await harness.port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([
+          ['chat.json', '{"name":"old"}'],
+          ['events/other.jsonl', 'old remote segment\n'],
+        ]),
+        provenance: { source: 'user', actorId, createdAt: now },
+        summary: { generated: 'Old chat' },
+      });
+      const oldHead = revisionId(old.commitId);
+      await harness.port.updateRef({ name: chatRefName(staleChat), expectedHead: undefined, head: oldHead });
+      await writeChatFiles(
+        harness.checkout,
+        {
+          'chat.json': '{"name":"local edit"}',
+          'events.jsonl': 'mine\n',
+          'events/other.jsonl': 'old remote segment\nnew remote event\n',
+        },
+        staleChat,
+      );
+
+      const written = await writeChatRef({
+        port: harness.port,
+        filesystem: harness.checkout,
+        deviceId: 'mine',
+        chatId: staleChat,
+        syncChats: true,
+        actorId,
+        now,
+      });
+      expect(written.status).toBe('updated');
+      expect(await readChatFile(harness.checkout, 'events/other.jsonl', staleChat)).toBe(
+        'old remote segment\nnew remote event\n',
+      );
+      const union = await harness.port.readTree(written.head!);
+      expect(decoder.decode(union?.get('events/other.jsonl'))).toBe('old remote segment\nnew remote event\n');
+      expect(decoder.decode(union?.get('chat.json'))).toBe('{"name":"local edit"}');
+
+      const projected = await createMemoryProvider();
+      await projected.writeFile(`${chatRecordsPath(staleChat)}/chat.json`, '{"name":"pending local edit"}');
+      await expect(
+        projectChats({
+          port: harness.port,
+          filesystem: projected,
+          deviceId: 'third',
+          refs: [{ name: chatRefName(staleChat), head: written.head! }],
+        }),
+      ).rejects.toMatchObject({ code: 'CHECKOUT_CONFLICT' });
+      expect(await readChatFile(projected, 'chat.json', staleChat)).toBe('{"name":"pending local edit"}');
+    },
+  );
 
   it.runIf(enabled)("replays a second device's segment onto a head it did not write, losing no record", async () => {
     const remoteHead = await harness.port.readRef(chatRefName(chatId));
@@ -335,7 +611,9 @@ describe.each([
       writeRevision: async (revisionInput) => {
         if (!interleaved) {
           interleaved = true;
-          await writeChatFiles(harness.checkout, { 'events.jsonl': 'the other writer won\n' });
+          await writeChatFiles(harness.checkout, {
+            'events.jsonl': '{"leaderEpoch":"e1","sequence":0}\n{"s":1}\nthe other writer won\n',
+          });
           await write('device-a');
         }
         return harness.port.writeRevision(revisionInput);
@@ -454,15 +732,16 @@ describe.runIf(gitOnPath)('two devices, two stores, one remote', () => {
     expect(replayedRecord?.parents).toEqual([remoteHead]);
     expect(await deviceB.port.readRef(chatRefName(sharedChatId))).toBe(replayed.head);
 
-    /* Project before write: B never called `projectChats`, and the tree it
-     * published still carries A's segment — and so does B's own checkout. */
+    /* Recording never projects remote bytes: B's published union carries A's
+     * segment from the fetched base, while only the fetch projection owner may
+     * write that segment into B's checkout. */
     const union = await deviceB.port.readTree(replayed.head!);
     expect(union?.entries().map((entry) => entry.path)).toEqual([
       'chat.json',
       chatSegmentPath('device-a'),
       chatSegmentPath('device-b'),
     ]);
-    expect(await readChatFile(deviceB.checkout, chatSegmentPath('device-a'), sharedChatId)).toBe('A0\n');
+    expect(await readChatFile(deviceB.checkout, chatSegmentPath('device-a'), sharedChatId)).toBeUndefined();
     expect(await readChatFile(deviceB.checkout, 'events.jsonl', sharedChatId)).toBe('B0\n');
 
     /* P18: the push lease is the head B last fetched, never what the local
@@ -481,5 +760,77 @@ describe.runIf(gitOnPath)('two devices, two stores, one remote', () => {
     });
     expect(await readChatFile(deviceA.checkout, chatSegmentPath('device-b'), sharedChatId)).toBe('B0\n');
     expect(await readChatFile(deviceA.checkout, 'events.jsonl', sharedChatId)).toBe('A0\n');
+  }, 180_000);
+
+  /* An image and a PDF beside the log: one entry each in the ref's tree, exact
+   * bytes, and never re-entered once the device already holds them. */
+  it('carries an image and a PDF to the other device as plain blobs, never pointers', async () => {
+    const base = await fetchChat(deviceA);
+    await deviceA.checkout.writeFile(`${chatRecordsPath(sharedChatId)}/${imagePath}`, imageBytes);
+    await deviceA.checkout.writeFile(`${chatRecordsPath(sharedChatId)}/${documentPath}`, documentBytes);
+
+    const withAttachments = await replayChatSegment({
+      port: deviceA.port,
+      filesystem: deviceA.checkout,
+      deviceId: 'device-a',
+      chatId: sharedChatId,
+      syncChats: true,
+      actorId,
+      now,
+      onto: base,
+    });
+    expect(withAttachments.status).toBe('updated');
+    const carried = await deviceA.port.readTree(withAttachments.head!);
+    expect(carried?.entries().map((entry) => entry.path)).toEqual([
+      imagePath,
+      documentPath,
+      'chat.json',
+      chatSegmentPath('device-a'),
+      chatSegmentPath('device-b'),
+    ]);
+    expect(carried?.get(imagePath)).toEqual(imageBytes);
+    expect(carried?.get(documentPath)).toEqual(documentBytes);
+
+    /*
+     * Raw, not through the port: `readTree` smudges, so it would answer with the
+     * real bytes even if the stored blob were a pointer. A chat ref is recorded
+     * with `largeObjects: false`, so nothing on this path is ever pointerised
+     * and the store has no LFS object directory at all.
+     */
+    await expect(stat(join(root, 'device-a-store', '.git', 'lfs'))).rejects.toMatchObject({ code: 'ENOENT' });
+
+    /* Written once: the same bytes recorded again are the tree the ref already
+     * holds, so content addressing costs one object per blob however many turns
+     * reference it. */
+    const again = await replayChatSegment({
+      port: deviceA.port,
+      filesystem: deviceA.checkout,
+      deviceId: 'device-a',
+      chatId: sharedChatId,
+      syncChats: true,
+      actorId,
+      now,
+      onto: withAttachments.head,
+    });
+    expect(again.status).toBe('upToDate');
+    expect(again.head).toBe(withAttachments.head);
+
+    /*
+     * A plain remote carries them. Nothing in the tree is a pointer, so the P20
+     * gate has nothing to refuse: attachments reach the other device as ordinary
+     * git blobs, which is what "one object each, written once" has to mean for a
+     * closed tree that can never carry a `.gitattributes` to smudge against.
+     */
+    const pushed = await deviceA.port.push({
+      remote: 'origin',
+      refs: [{ name: chatRefName(sharedChatId), expected: base }],
+    });
+    expect(pushed.refs[0]?.status).toBe('updated');
+
+    const fetchedB = await fetchChat(deviceB);
+    const onB = await deviceB.port.readTree(fetchedB);
+    expect(onB?.get(imagePath)).toEqual(imageBytes);
+    expect(onB?.get(documentPath)).toEqual(documentBytes);
+    await expect(stat(join(root, 'device-b-store', '.git', 'lfs'))).rejects.toMatchObject({ code: 'ENOENT' });
   }, 180_000);
 });

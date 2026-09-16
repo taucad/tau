@@ -6,6 +6,8 @@ import type { UsageData } from '@taucad/chat';
 import { BillingSessionProvider } from '@taucad/billing/hooks/billing-session';
 import { ChatMessageDataUsage } from '#routes/w.$workspace.$project/chat-message-data-usage.js';
 
+const recordBillingRevisionMinimum = vi.hoisted(() => vi.fn(async () => undefined));
+
 vi.mock('#components/icons/svg-icon.js', () => ({
   SvgIcon: ({ id }: { readonly id: string }) => <span data-testid={`model-icon-${id}`} />,
 }));
@@ -17,6 +19,7 @@ vi.mock('#hooks/use-models.js', () => ({
 }));
 
 vi.mock('#hooks/use-cookie.js', () => ({ useCookie: (_name: string, fallback: boolean) => [fallback, vi.fn()] }));
+vi.mock('#db/billing-snapshot-store.js', () => ({ recordBillingRevisionMinimum }));
 
 const identity = { schemaVersion: 1, environment: 'development', ownerId: 'user', subjectId: 'account' };
 const activity = { kind: 'agent', projectHint: null, chatHint: null, parentAttemptKey: null };
@@ -116,6 +119,7 @@ function renderUsage(usageParts: UsageData[], userId: string | undefined = 'user
 
 afterEach(() => {
   cleanup();
+  recordBillingRevisionMinimum.mockClear();
   vi.unstubAllGlobals();
 });
 
@@ -126,6 +130,12 @@ describe('ChatMessageDataUsage', () => {
 
     await waitFor(() => {
       expect(screen.getByLabelText('Tau credits: 1.23')).toBeInTheDocument();
+    });
+    expect(recordBillingRevisionMinimum).toHaveBeenCalledWith({
+      environment: 'development',
+      ownerId: 'user',
+      subjectId: 'account',
+      revision: '9',
     });
     expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
   });

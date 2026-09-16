@@ -11,8 +11,8 @@ import type { ActionDigest, ComputeEvaluationInput, ComputeEvaluationResult } fr
 import { createRuntimeClient } from '@taucad/runtime/client';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { compileParameterManifest } from '@taucad/runtime/parameter';
-import type { ParameterManifest } from '@taucad/runtime/parameter';
+import { compileParameterManifest } from '@taucad/parameters';
+import type { ParameterManifest } from '@taucad/parameters';
 import type {
   AnyKernelDefinition,
   ComputeGeneration,

@@ -141,15 +141,15 @@ const expand = async (name: string): Promise<void> => {
 };
 
 describe('Files tree provenance rows (north star W4)', () => {
-  it('names a built-in bundle root read-only, with a lock glyph and no mutation verbs', async () => {
+  it('right-aligns a lowercase system badge without a redundant lock or mutation verbs', async () => {
     renderTree();
     await expand('.agents');
     await expand('skills');
 
     const row = screen.getByRole('treeitem', { name: 'cad-openscad' });
-    expect(row).toHaveAccessibleDescription('Built-in skill · read-only');
-    expect(within(row).getByText('Built-in')).toBeInTheDocument();
-    expect(row.querySelector('[data-provenance-glyph="lock"]')).not.toBeNull();
+    expect(row).toHaveAccessibleDescription('system skill · read-only');
+    expect(within(row).getByText('system')).toHaveClass('ml-auto');
+    expect(row.querySelector('[data-provenance-glyph="lock"]')).toBeNull();
 
     await userEvent.pointer({ keys: '[MouseRight]', target: row });
     const menu = await screen.findByRole('menu');
@@ -160,7 +160,7 @@ describe('Files tree provenance rows (north star W4)', () => {
 
   /* Ruling P11: placing the whole bundle is the only override gesture, and it
    * lives on the unit root — not on a file inside it, and not on the mount. */
-  it('offers Copy to project on a built-in bundle root and on nothing else', async () => {
+  it('offers Copy to project on a system skill bundle root and on nothing else', async () => {
     renderTree();
     await expand('.agents');
     await expand('skills');

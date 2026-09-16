@@ -17,9 +17,15 @@ import type { ReactNode } from 'react';
  */
 export type FlushPhase = 'hidden' | 'pagehide';
 
+/** Producer flushes settle before session close preparation begins. */
+export type FlushStage = 'producer' | 'session';
+
+type FlushCallback = (phase: FlushPhase) => void | Promise<void>;
+
 type FlushRegistration = {
   id: symbol;
-  callbackRef: React.RefObject<(phase: FlushPhase) => void>;
+  stage: FlushStage;
+  callbackRef: React.RefObject<FlushCallback>;
 };
 
 type UnloadContextValue = {
@@ -66,19 +72,35 @@ export function UnloadProvider({ children }: { readonly children: ReactNode }): 
   }, []);
 
   useEffect(() => {
-    const flush = (phase: FlushPhase): void => {
-      for (const reg of registryRef.current) {
-        reg.callbackRef.current(phase);
+    const flushStage = async (registrations: readonly FlushRegistration[], stage: FlushStage): Promise<void> => {
+      await Promise.allSettled(
+        registrations
+          .filter((registration) => registration.stage === stage)
+          .map(async (registration) => registration.callbackRef.current('hidden')),
+      );
+    };
+    const flushHidden = async (): Promise<void> => {
+      const registrations = [...registryRef.current];
+      await flushStage(registrations, 'producer');
+      await flushStage(registrations, 'session');
+    };
+    const flushPageHide = (): void => {
+      for (const registration of registryRef.current) {
+        if (registration.stage === 'session') {
+          /* Synchronous by contract: pagehide can only emit data prepared by
+           * hidden and cannot wait for a fresh producer flush. */
+          void registration.callbackRef.current('pagehide');
+        }
       }
     };
 
     const handleVisibilityChange = (): void => {
       if (document.visibilityState === 'hidden') {
-        flush('hidden');
+        void flushHidden();
       }
     };
     const handlePageHide = (): void => {
-      flush('pagehide');
+      flushPageHide();
     };
 
     globalThis.addEventListener('pagehide', handlePageHide);
@@ -115,21 +137,23 @@ function useUnloadContext(): UnloadContextValue {
 /**
  * Register a callback for both phases of the unload (A38).
  *
- * It receives the {@link FlushPhase}: `hidden` can still send and await,
- * `pagehide` cannot. A callback that does not care about the difference ignores
- * the argument and runs twice, which is what every existing flush wants.
+ * Producer callbacks run first and may await their persistence acknowledgements
+ * during `hidden`; session callbacks run only after all producers settle.
+ * `pagehide` invokes session callbacks synchronously and skips producers, so it
+ * can send prepared data but cannot start another persistence flush.
  *
  * The callback is stored via ref -- it never causes re-registration when
  * the closure changes. Registration is effect-based and StrictMode-safe.
  *
  * @example
  * ```tsx
- * useFlushOnClose((phase) => {
- *   actorRef.send({ type: phase === 'hidden' ? 'flushNow' : 'flushBestEffort' });
- * });
+ * useFlushOnClose(async () => {
+ *   actorRef.send({ type: 'flushNow' });
+ *   await waitUntilIdle(actorRef);
+ * }, { stage: 'producer' });
  * ```
  */
-export function useFlushOnClose(callback: (phase: FlushPhase) => void): void {
+export function useFlushOnClose(callback: FlushCallback, options: Readonly<{ stage: FlushStage }>): void {
   const { register, unregister } = useUnloadContext();
 
   // Stable callback ref -- updated every render, read in handler
@@ -143,6 +167,7 @@ export function useFlushOnClose(callback: (phase: FlushPhase) => void): void {
     const id = Symbol('flush-on-close');
     const registration: FlushRegistration = {
       id,
+      stage: options.stage,
       callbackRef,
     };
 
@@ -151,5 +176,5 @@ export function useFlushOnClose(callback: (phase: FlushPhase) => void): void {
     return () => {
       unregister(id);
     };
-  }, [register, unregister]);
+  }, [options.stage, register, unregister]);
 }

@@ -16,6 +16,12 @@ import type { GetKernelResultInput, GetKernelResultOutput } from '#schemas/tools
 import type { ExportGeometryInput, ExportGeometryOutput } from '#schemas/tools/export-geometry.tool.schema.js';
 import type { ScreenshotInput, ScreenshotOutput } from '#schemas/tools/screenshot.tool.schema.js';
 import type { RevisionsInput, RevisionsOutput } from '#schemas/tools/revisions.tool.schema.js';
+import type {
+  ApplyParameterOperationInput,
+  ApplyParameterOperationOutput,
+  GetParametersInput,
+  GetParametersOutput,
+} from '#schemas/tools/parameter.tool.schema.js';
 
 // =============================================================================
 // Tool Error Types
@@ -205,6 +211,8 @@ export type MyTools = InferUITools<{
   [toolName.exportGeometry]: AiTool<ExportGeometryInput, ExportGeometryOutput>;
   [toolName.screenshot]: AiTool<ScreenshotInput, ScreenshotOutput>;
   [toolName.revisions]: AiTool<RevisionsInput, RevisionsOutput>;
+  [toolName.getParameters]: AiTool<GetParametersInput, GetParametersOutput>;
+  [toolName.applyParameterOperation]: AiTool<ApplyParameterOperationInput, ApplyParameterOperationOutput>;
 }>;
 
 /**

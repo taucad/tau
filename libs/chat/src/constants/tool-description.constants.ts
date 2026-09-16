@@ -40,6 +40,12 @@ Examples: \`format: "stl"\`, \`format: "step"\`, \`format: "glb"\`, \`format: "3
 Returns an ordered \`files\` array with each producer name, persisted \`artifactPath\`, \`mimeType\`, and \`byteLength\`. The first entry is the primary artifact and later entries are required companions.
 
 For deterministic measurement runs, create or edit \`*.geospec.ts\` tests and use \`${toolName.testModel}\` instead.`,
+  [toolName.getParameters]: `Read the admitted parameter manifest and current checked parameter record for one geometry source file.
+
+Use resolutionMode "declared-only" when inferred semantics are not acceptable. The result retains native values, semantic bindings, provenance, assumptions, diagnostics, and the exact identity required by apply_parameter_operation.`,
+  [toolName.applyParameterOperation]: `Propose one checked parameter operation, or confirm/cancel a previously returned source-unit plan.
+
+Call get_parameters first and pass its exact identity as expected. Reuse requestId only for an identical retry. The returned outcome distinguishes committed, rejected, cancelled, known-not-applied, and indeterminate operations; inspect it before continuing.`,
   [toolName.screenshot]: `Capture a screenshot of a specific geometry unit's 3D model for visual inspection.
 
 You MUST pass \`targetFile\` (the source file path of the geometry unit to screenshot, e.g. "main.ts" or "lib/bracket.scad"). There is no project-level fallback. The requested geometry unit is resolved or created, then its render is awaited before headless capture. The call fails for a missing source file, render failure or render timeout, an unavailable renderer, or invalid image artifacts.

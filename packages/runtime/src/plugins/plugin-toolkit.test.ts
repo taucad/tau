@@ -9,6 +9,7 @@ import {
   resolveRuntimePluginDefinition,
 } from '#plugins/plugin-runtime-definition.js';
 import { defineRuntime, resolveRuntimeDefinition } from '#worker/runtime-definition.js';
+import { defineConfiguration } from '#configuration/configuration.js';
 
 const defineUncheckedPlugin = definePlugin as unknown as (definition: unknown) => PluginFactory;
 const defineUncheckedRuntime = defineRuntime as unknown as (options: {
@@ -43,19 +44,19 @@ const configuredTranscoder = vi.fn((options?: { readonly quality?: number }) => 
   id: 'configured-transcoder',
   options,
 }));
+const testConfiguration = defineConfiguration({
+  id: 'simulation.fake.configuration',
+  version: '1.0.0',
+  schema: z.object({}),
+  defaults: {},
+  ui: { version: 1, rjsf: {} },
+}).manifest;
 const jobRegistration = {
   id: 'local',
   kind: 'simulation.fake',
   version: '1.0.0',
   kindVersion: 1,
-  configuration: {
-    version: 1,
-    source: { id: 'simulation.fake.configuration', version: '1.0.0' },
-    dialect: 'draft-07',
-    inputSchema: {},
-    outputSchema: {},
-    ui: { version: 1, rjsf: {} },
-  },
+  configuration: testConfiguration,
   resultSchema: {},
   recovery: { type: 'restart-from-input' },
   requirements: [],

@@ -5,35 +5,35 @@
 // Instances of the UUID class represent UUIDs as specified in RFC 4122
 UUID
 
-// Create a UUID from either a string of 32 hexadecimal digits,
-UUID(hex = None, bytes = None, bytes_le = None, fields = None, int = None, version = None, is_safe = SafeUUID.unknown)
+  // Create a UUID from either a string of 32 hexadecimal digits,
+  UUID(hex = None, bytes = None, bytes_le = None, fields = None, int = None, version = None, is_safe = SafeUUID.unknown)
 
-bytes
+  bytes
 
-bytes_le
+  bytes_le
 
-fields
+  fields
 
-time_low
+  time_low
 
-time_mid
+  time_mid
 
-time_hi_version
+  time_hi_version
 
-clock_seq_hi_variant
+  clock_seq_hi_variant
 
-clock_seq_low
+  clock_seq_low
 
-time
+  time
 
-clock_seq
+  clock_seq
 
-node
+  node
 
-hex
+  hex
 
-urn
+  urn
 
-variant
+  variant
 
-version
+  version

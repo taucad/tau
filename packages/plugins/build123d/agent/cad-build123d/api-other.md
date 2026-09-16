@@ -130,7 +130,7 @@ XCAFDoc_ColorGen: XCAFDoc_ColorType.XCAFDoc_ColorGen
 
 XCAFDoc_ColorSurf: XCAFDoc_ColorType.XCAFDoc_ColorSurf
 
-annotations: \_Feature((3, 7, 0, 'beta', 1), None, 16777216)
+annotations: _Feature((3, 7, 0, 'beta', 1), None, 16777216)
 
 // inf
 inf: float

@@ -1,6 +1,7 @@
 import process from 'node:process';
 import { resolve } from 'node:path';
 import { defineConfig } from 'vitest/config';
+import type { BrowserProviderOption } from 'vitest/node';
 import { playwright } from '@vitest/browser-playwright';
 // oxlint-disable-next-line no-restricted-imports -- Vitest config bootstraps this server-side command before test aliases exist.
 import { uiBrowserCommands } from './src/support/browser-command.ts';
@@ -13,10 +14,12 @@ const chromiumArguments = webGpuLaunchArguments(requiredWebGpuProfile);
 const chromiumDisabledArguments = webGpuLaunchArguments('disabled');
 const liveGeminiSpec = 'src/gemini-browser-agent-host.live.spec.ts';
 const liveGeminiEnabled = process.env['TAU_E2E_LIVE_GEMINI'] === 'true';
+const playwrightProvider = (options?: Parameters<typeof playwright>[0]): BrowserProviderOption =>
+  playwright(options) as unknown as BrowserProviderOption;
 
 export default defineConfig({
   root: import.meta.dirname,
-  optimizeDeps: { include: ['zod'] },
+  optimizeDeps: { include: ['axe-core', 'zod'] },
   resolve: {
     alias: [
       {
@@ -43,7 +46,7 @@ export default defineConfig({
       headless: true,
       // Artifact requirement: browser-side evidence writes and child-context trace attachments need Vitest write access.
       api: { allowWrite: true },
-      provider: playwright({ actionTimeout: 10_000 }),
+      provider: playwrightProvider({ actionTimeout: 10_000 }),
       commands: uiBrowserCommands,
       screenshotFailures: false,
       screenshotDirectory: resolve(
@@ -58,20 +61,23 @@ export default defineConfig({
             'src/headless-chat-image-capture.no-webgpu.spec.ts',
             ...(liveGeminiEnabled ? [] : [liveGeminiSpec]),
           ],
-          provider: playwright({
+          provider: playwrightProvider({
             actionTimeout: 10_000,
             launchOptions: {
               args: [...chromiumArguments],
               channel: 'chromium',
             },
           }),
-          provide: { webGpuProfile: requiredWebGpuProfile },
+          provide: {
+            webGpuProfile: requiredWebGpuProfile,
+            acpLiveEnabled: process.env['TAU_ACP_LIVE_TESTS'] === 'true',
+          },
         },
         {
           browser: 'chromium',
           name: 'chromium-no-webgpu',
           include: ['src/headless-chat-image-capture.no-webgpu.spec.ts'],
-          provider: playwright({
+          provider: playwrightProvider({
             actionTimeout: 10_000,
             launchOptions: {
               args: [...chromiumDisabledArguments],
@@ -79,6 +85,20 @@ export default defineConfig({
             },
           }),
           provide: { webGpuProfile: 'disabled' },
+        },
+        {
+          browser: 'chromium',
+          name: 'chromium-touch',
+          include: ['src/revision-ux-visual-matrix.spec.ts'],
+          provider: playwrightProvider({
+            actionTimeout: 10_000,
+            contextOptions: { hasTouch: true, isMobile: true },
+            launchOptions: {
+              args: [...chromiumArguments],
+              channel: 'chromium',
+            },
+          }),
+          provide: { webGpuProfile: requiredWebGpuProfile },
         },
         {
           browser: 'firefox',

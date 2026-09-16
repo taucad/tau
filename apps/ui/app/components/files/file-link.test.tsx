@@ -11,7 +11,7 @@ vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ editorRef: { send: editorSend } }),
 }));
 
-const builtIn: FileProvenance = {
+const systemSkill: FileProvenance = {
   source: 'system-skills',
   versioned: false,
   agentAccess: 'read-only',
@@ -36,7 +36,7 @@ describe('FileLink', () => {
   it('opens a non-project file read-only and reveals it in the composed tree', async () => {
     const path = '.agents/skills/cad-openscad/SKILL.md';
     render(
-      <FileLink path={path} provenance={builtIn}>
+      <FileLink path={path} provenance={systemSkill}>
         cad-openscad
       </FileLink>,
     );

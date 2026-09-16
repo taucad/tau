@@ -1,5 +1,5 @@
 import { useAuth, useSession } from '@better-auth-ui/react';
-import { ChevronsUpDown, LogIn, LogOut, Settings, UserPlus2 } from 'lucide-react';
+import { ChevronsUpDown, LogIn, LogOut, Settings } from 'lucide-react';
 import { isValidElement } from 'react';
 import type { ComponentType, ReactElement, ReactNode } from 'react';
 
@@ -72,7 +72,7 @@ function renderUserLink(
  * Render a user dropdown button that shows user info, settings, theme controls, and authentication actions.
  *
  * Includes user profile, settings link, optional multi-session account switching, theme picker,
- * and sign-in/sign-up/sign-out actions depending on authentication state.
+ * and login/sign-out actions depending on authentication state.
  */
 export function UserButton({
   className,
@@ -106,7 +106,7 @@ export function UserButton({
     <DropdownMenu>
       <DropdownMenuTrigger
         className={cn(
-          size === 'icon' && 'rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          size === 'icon' && 'rounded-full outline-none focus-visible:focus-outline',
           size === 'icon' && className,
         )}
         asChild={size !== 'icon'}
@@ -188,16 +188,7 @@ export function UserButton({
             <DropdownMenuItem asChild>
               <Link href={`${basePaths.auth}/${viewPaths.auth.signIn}`}>
                 <LogIn className='text-muted-foreground' />
-
-                {localization.auth.signIn}
-              </Link>
-            </DropdownMenuItem>
-
-            <DropdownMenuItem asChild>
-              <Link href={`${basePaths.auth}/${viewPaths.auth.signUp}`}>
-                <UserPlus2 className='text-muted-foreground' />
-
-                {localization.auth.signUp}
+                Log in
               </Link>
             </DropdownMenuItem>
 

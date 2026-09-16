@@ -37,7 +37,10 @@ import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.
  * @returns The child's stdout.
  */
 const realGit: MaterializerDependencies['git'] = async (repositoryPath, args, stdin) => {
-  const result = spawnSync('git', [...args], { cwd: repositoryPath, ...(stdin === undefined ? {} : { input: stdin }) });
+  const result = spawnSync('git', [...args], {
+    cwd: repositoryPath,
+    ...(stdin === undefined ? {} : { input: stdin }),
+  });
   if (result.status !== 0) {
     throw new Error(`git ${args.join(' ')} exited ${String(result.status)}`);
   }
@@ -79,7 +82,10 @@ const utf8 = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode
 /** Storage that remembers every blob it was given, keyed as the CDN keys it. */
 const createRecordingStorage = (
   lfsObjects: ReadonlyMap<string, Uint8Array<ArrayBuffer>> = new Map(),
-): Readonly<{ dependencies: MaterializerDependencies; written: Map<string, Uint8Array<ArrayBuffer>> }> => {
+): Readonly<{
+  dependencies: MaterializerDependencies;
+  written: Map<string, Uint8Array<ArrayBuffer>>;
+}> => {
   const written = new Map<string, Uint8Array<ArrayBuffer>>();
   const storage: ObjectStorageServiceContract = {
     putBlob: vi.fn(async (args) => {
@@ -91,7 +97,11 @@ const createRecordingStorage = (
       if (stored === undefined) {
         throw Object.assign(new Error('missing'), { name: 'NoSuchKey' });
       }
-      return { body: Readable.from([Buffer.from(stored)]), contentType: 'application/octet-stream', etag: 'etag' };
+      return {
+        body: Readable.from([Buffer.from(stored)]),
+        contentType: 'application/octet-stream',
+        etag: 'etag',
+      };
     }),
     headBlob: vi.fn(async () => undefined),
     deleteBlob: vi.fn(async () => undefined),
@@ -149,6 +159,32 @@ describe('publication materializer against real git', () => {
     expect(materialized.manifestKey).toContain(git(clonePath, 'rev-parse', 'refs/tags/v1^{commit}').trim());
   });
 
+  it('preserves unsupported parameter record bytes as authored publication data', async () => {
+    const parameterBytes = utf8(
+      '{"recordVersion":2,"profile":"future","activeGroup":"alternate","groups":{"alternate":{"values":{"exact":"1.2300"}}}}',
+    );
+    const repositoryPath = seed(
+      new Map([
+        ['main.ts', utf8('// entry\n')],
+        ['.tau/parameters/main.ts.json', parameterBytes],
+      ]),
+    );
+    const { dependencies, written } = createRecordingStorage();
+
+    await materializePublication(dependencies, {
+      publicationId: 'pub_parameter_bytes',
+      projectId: 'proj_parameter_bytes',
+      repositoryPath,
+      tag: 'v1',
+      visibility: 'public',
+      entryPath: 'main.ts',
+    });
+
+    expect(written.get(`blobs/${blobKeyFromSha256Hex(sha256HexFromBytes(parameterBytes))}`)).toStrictEqual(
+      parameterBytes,
+    );
+  });
+
   it('b: resolves an LFS pointer to the object bytes, not the pointer', async () => {
     const objectBytes = utf8(`ISO-10303-21;\n${'X'.repeat(4096)}\nEND-ISO-10303-21;\n`);
     const oid = sha256HexFromBytes(objectBytes);
@@ -192,7 +228,11 @@ describe('publication materializer against real git', () => {
     const { dependencies } = createRecordingStorage();
 
     await expect(
-      readPublishedTree(dependencies, { repositoryPath, projectId: 'proj_missing', tag: 'v1' }),
+      readPublishedTree(dependencies, {
+        repositoryPath,
+        projectId: 'proj_missing',
+        tag: 'v1',
+      }),
     ).rejects.toThrow(NotFoundException);
   });
 
@@ -248,7 +288,10 @@ describe('publication materializer against real git', () => {
         entryPath: 'main.ts',
       }),
     ).rejects.toMatchObject({
-      response: { code: 'NOT_FOUND', message: 'This project has no version named v9 in the cloud.' },
+      response: {
+        code: 'NOT_FOUND',
+        message: 'This project has no version named v9 in the cloud.',
+      },
     });
   });
 
@@ -274,7 +317,11 @@ describe('publication materializer against real git', () => {
     };
 
     await expect(
-      readPublishedTree(oversized, { repositoryPath, projectId: 'proj_big', tag: 'v1' }),
+      readPublishedTree(oversized, {
+        repositoryPath,
+        projectId: 'proj_big',
+        tag: 'v1',
+      }),
     ).rejects.toMatchObject({ response: { code: 'FILE_TOO_LARGE' } });
     expect(commands).not.toContain('cat-file');
   });
@@ -303,7 +350,11 @@ describe('publication materializer against real git', () => {
     };
 
     await expect(
-      readPublishedTree(truncating, { repositoryPath, projectId: 'proj_missing_object', tag: 'v1' }),
+      readPublishedTree(truncating, {
+        repositoryPath,
+        projectId: 'proj_missing_object',
+        tag: 'v1',
+      }),
     ).rejects.toMatchObject({ response: { code: 'NOT_FOUND' } });
   });
 

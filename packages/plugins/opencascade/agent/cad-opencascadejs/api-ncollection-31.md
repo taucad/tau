@@ -4,311 +4,311 @@
 
 NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject: declare class NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject extends NCollection_BaseSequence
 
-constructor
+  constructor
 
-static Lower(): number;
+  static Lower(): number;
 
-Upper(): number;
+  Upper(): number;
 
-IsEmpty(): boolean;
+  IsEmpty(): boolean;
 
-Reverse(): void;
+  Reverse(): void;
 
-Exchange(I: number, J: number): void;
+  Exchange(I: number, J: number): void;
 
-Clear(theAllocator?: NCollection_BaseAllocator): void;
+  Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-Assign(theOther: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject;
+  Assign(theOther: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject;
 
-Remove(theIndex: number): void;
-Remove(theFromIndex: number, theToIndex: number): void;
-Remove(theIndex: number): void;
-Remove(theFromIndex: number, theToIndex: number): void;
+  Remove(theIndex: number): void;
+  Remove(theFromIndex: number, theToIndex: number): void;
+  Remove(theIndex: number): void;
+  Remove(theFromIndex: number, theToIndex: number): void;
 
-Append(theItem: XCAFDimTolObjects_DatumObject): void;
-Append(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
-Append(theItem: XCAFDimTolObjects_DatumObject): void;
-Append(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
+  Append(theItem: XCAFDimTolObjects_DatumObject): void;
+  Append(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
+  Append(theItem: XCAFDimTolObjects_DatumObject): void;
+  Append(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
 
-Prepend(theItem: XCAFDimTolObjects_DatumObject): void;
-Prepend(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
-Prepend(theItem: XCAFDimTolObjects_DatumObject): void;
-Prepend(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
+  Prepend(theItem: XCAFDimTolObjects_DatumObject): void;
+  Prepend(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
+  Prepend(theItem: XCAFDimTolObjects_DatumObject): void;
+  Prepend(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
 
-InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_DatumObject): void;
-InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
-InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_DatumObject): void;
-InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
+  InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_DatumObject): void;
+  InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
+  InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_DatumObject): void;
+  InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
 
-InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
-InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_DatumObject): void;
-InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
-InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_DatumObject): void;
+  InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
+  InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_DatumObject): void;
+  InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
+  InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_DatumObject): void;
 
-Split(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
+  Split(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DatumObject): void;
 
-First(): XCAFDimTolObjects_DatumObject;
+  First(): XCAFDimTolObjects_DatumObject;
 
-ChangeFirst(): XCAFDimTolObjects_DatumObject;
+  ChangeFirst(): XCAFDimTolObjects_DatumObject;
 
-Last(): XCAFDimTolObjects_DatumObject;
+  Last(): XCAFDimTolObjects_DatumObject;
 
-ChangeLast(): XCAFDimTolObjects_DatumObject;
+  ChangeLast(): XCAFDimTolObjects_DatumObject;
 
-Value(theIndex: number): XCAFDimTolObjects_DatumObject;
+  Value(theIndex: number): XCAFDimTolObjects_DatumObject;
 
-ChangeValue(theIndex: number): XCAFDimTolObjects_DatumObject;
+  ChangeValue(theIndex: number): XCAFDimTolObjects_DatumObject;
 
-SetValue(theIndex: number, theItem: XCAFDimTolObjects_DatumObject): void;
+  SetValue(theIndex: number, theItem: XCAFDimTolObjects_DatumObject): void;
 
-At(theIndex: number): XCAFDimTolObjects_DatumObject;
+  At(theIndex: number): XCAFDimTolObjects_DatumObject;
 
-ChangeAt(theIndex: number): XCAFDimTolObjects_DatumObject;
+  ChangeAt(theIndex: number): XCAFDimTolObjects_DatumObject;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject: declare class NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject extends NCollection_BaseSequence
 
-constructor
+  constructor
 
-static Lower(): number;
+  static Lower(): number;
 
-Upper(): number;
+  Upper(): number;
 
-IsEmpty(): boolean;
+  IsEmpty(): boolean;
 
-Reverse(): void;
+  Reverse(): void;
 
-Exchange(I: number, J: number): void;
+  Exchange(I: number, J: number): void;
 
-Clear(theAllocator?: NCollection_BaseAllocator): void;
+  Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-Assign(theOther: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject;
+  Assign(theOther: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject;
 
-Remove(theIndex: number): void;
-Remove(theFromIndex: number, theToIndex: number): void;
-Remove(theIndex: number): void;
-Remove(theFromIndex: number, theToIndex: number): void;
+  Remove(theIndex: number): void;
+  Remove(theFromIndex: number, theToIndex: number): void;
+  Remove(theIndex: number): void;
+  Remove(theFromIndex: number, theToIndex: number): void;
 
-Append(theItem: XCAFDimTolObjects_DimensionObject): void;
-Append(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
-Append(theItem: XCAFDimTolObjects_DimensionObject): void;
-Append(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
+  Append(theItem: XCAFDimTolObjects_DimensionObject): void;
+  Append(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
+  Append(theItem: XCAFDimTolObjects_DimensionObject): void;
+  Append(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
 
-Prepend(theItem: XCAFDimTolObjects_DimensionObject): void;
-Prepend(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
-Prepend(theItem: XCAFDimTolObjects_DimensionObject): void;
-Prepend(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
+  Prepend(theItem: XCAFDimTolObjects_DimensionObject): void;
+  Prepend(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
+  Prepend(theItem: XCAFDimTolObjects_DimensionObject): void;
+  Prepend(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
 
-InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_DimensionObject): void;
-InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
-InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_DimensionObject): void;
-InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
+  InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_DimensionObject): void;
+  InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
+  InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_DimensionObject): void;
+  InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
 
-InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
-InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_DimensionObject): void;
-InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
-InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_DimensionObject): void;
+  InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
+  InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_DimensionObject): void;
+  InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
+  InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_DimensionObject): void;
 
-Split(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
+  Split(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_DimensionObject): void;
 
-First(): XCAFDimTolObjects_DimensionObject;
+  First(): XCAFDimTolObjects_DimensionObject;
 
-ChangeFirst(): XCAFDimTolObjects_DimensionObject;
+  ChangeFirst(): XCAFDimTolObjects_DimensionObject;
 
-Last(): XCAFDimTolObjects_DimensionObject;
+  Last(): XCAFDimTolObjects_DimensionObject;
 
-ChangeLast(): XCAFDimTolObjects_DimensionObject;
+  ChangeLast(): XCAFDimTolObjects_DimensionObject;
 
-Value(theIndex: number): XCAFDimTolObjects_DimensionObject;
+  Value(theIndex: number): XCAFDimTolObjects_DimensionObject;
 
-ChangeValue(theIndex: number): XCAFDimTolObjects_DimensionObject;
+  ChangeValue(theIndex: number): XCAFDimTolObjects_DimensionObject;
 
-SetValue(theIndex: number, theItem: XCAFDimTolObjects_DimensionObject): void;
+  SetValue(theIndex: number, theItem: XCAFDimTolObjects_DimensionObject): void;
 
-At(theIndex: number): XCAFDimTolObjects_DimensionObject;
+  At(theIndex: number): XCAFDimTolObjects_DimensionObject;
 
-ChangeAt(theIndex: number): XCAFDimTolObjects_DimensionObject;
+  ChangeAt(theIndex: number): XCAFDimTolObjects_DimensionObject;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject: declare class NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject extends NCollection_BaseSequence
 
-constructor
+  constructor
 
-static Lower(): number;
+  static Lower(): number;
 
-Upper(): number;
+  Upper(): number;
 
-IsEmpty(): boolean;
+  IsEmpty(): boolean;
 
-Reverse(): void;
+  Reverse(): void;
 
-Exchange(I: number, J: number): void;
+  Exchange(I: number, J: number): void;
 
-Clear(theAllocator?: NCollection_BaseAllocator): void;
+  Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-Assign(theOther: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject;
+  Assign(theOther: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject;
 
-Remove(theIndex: number): void;
-Remove(theFromIndex: number, theToIndex: number): void;
-Remove(theIndex: number): void;
-Remove(theFromIndex: number, theToIndex: number): void;
+  Remove(theIndex: number): void;
+  Remove(theFromIndex: number, theToIndex: number): void;
+  Remove(theIndex: number): void;
+  Remove(theFromIndex: number, theToIndex: number): void;
 
-Append(theItem: XCAFDimTolObjects_GeomToleranceObject): void;
-Append(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
-Append(theItem: XCAFDimTolObjects_GeomToleranceObject): void;
-Append(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
+  Append(theItem: XCAFDimTolObjects_GeomToleranceObject): void;
+  Append(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
+  Append(theItem: XCAFDimTolObjects_GeomToleranceObject): void;
+  Append(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
 
-Prepend(theItem: XCAFDimTolObjects_GeomToleranceObject): void;
-Prepend(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
-Prepend(theItem: XCAFDimTolObjects_GeomToleranceObject): void;
-Prepend(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
+  Prepend(theItem: XCAFDimTolObjects_GeomToleranceObject): void;
+  Prepend(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
+  Prepend(theItem: XCAFDimTolObjects_GeomToleranceObject): void;
+  Prepend(theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
 
-InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_GeomToleranceObject): void;
-InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
-InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_GeomToleranceObject): void;
-InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
+  InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_GeomToleranceObject): void;
+  InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
+  InsertBefore(theIndex: number, theItem: XCAFDimTolObjects_GeomToleranceObject): void;
+  InsertBefore(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
 
-InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
-InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_GeomToleranceObject): void;
-InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
-InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_GeomToleranceObject): void;
+  InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
+  InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_GeomToleranceObject): void;
+  InsertAfter(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
+  InsertAfter(theIndex: number, theItem: XCAFDimTolObjects_GeomToleranceObject): void;
 
-Split(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
+  Split(theIndex: number, theSeq: NCollection_Sequence_handle_XCAFDimTolObjects_GeomToleranceObject): void;
 
-First(): XCAFDimTolObjects_GeomToleranceObject;
+  First(): XCAFDimTolObjects_GeomToleranceObject;
 
-ChangeFirst(): XCAFDimTolObjects_GeomToleranceObject;
+  ChangeFirst(): XCAFDimTolObjects_GeomToleranceObject;
 
-Last(): XCAFDimTolObjects_GeomToleranceObject;
+  Last(): XCAFDimTolObjects_GeomToleranceObject;
 
-ChangeLast(): XCAFDimTolObjects_GeomToleranceObject;
+  ChangeLast(): XCAFDimTolObjects_GeomToleranceObject;
 
-Value(theIndex: number): XCAFDimTolObjects_GeomToleranceObject;
+  Value(theIndex: number): XCAFDimTolObjects_GeomToleranceObject;
 
-ChangeValue(theIndex: number): XCAFDimTolObjects_GeomToleranceObject;
+  ChangeValue(theIndex: number): XCAFDimTolObjects_GeomToleranceObject;
 
-SetValue(theIndex: number, theItem: XCAFDimTolObjects_GeomToleranceObject): void;
+  SetValue(theIndex: number, theItem: XCAFDimTolObjects_GeomToleranceObject): void;
 
-At(theIndex: number): XCAFDimTolObjects_GeomToleranceObject;
+  At(theIndex: number): XCAFDimTolObjects_GeomToleranceObject;
 
-ChangeAt(theIndex: number): XCAFDimTolObjects_GeomToleranceObject;
+  ChangeAt(theIndex: number): XCAFDimTolObjects_GeomToleranceObject;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_Sequence_int: declare class NCollection_Sequence_int extends NCollection_BaseSequence
 
-constructor
+  constructor
 
-static Lower(): number;
+  static Lower(): number;
 
-Upper(): number;
+  Upper(): number;
 
-IsEmpty(): boolean;
+  IsEmpty(): boolean;
 
-Reverse(): void;
+  Reverse(): void;
 
-Exchange(I: number, J: number): void;
+  Exchange(I: number, J: number): void;
 
-Clear(theAllocator?: NCollection_BaseAllocator): void;
+  Clear(theAllocator?: NCollection_BaseAllocator): void;
 
-Assign(theOther: NCollection_Sequence_int): NCollection_Sequence_int;
+  Assign(theOther: NCollection_Sequence_int): NCollection_Sequence_int;
 
-Remove(theIndex: number): void;
-Remove(theFromIndex: number, theToIndex: number): void;
-Remove(theIndex: number): void;
-Remove(theFromIndex: number, theToIndex: number): void;
+  Remove(theIndex: number): void;
+  Remove(theFromIndex: number, theToIndex: number): void;
+  Remove(theIndex: number): void;
+  Remove(theFromIndex: number, theToIndex: number): void;
 
-Append(theItem: number): void;
-Append(theSeq: NCollection_Sequence_int): void;
-Append(theItem: number): void;
-Append(theSeq: NCollection_Sequence_int): void;
+  Append(theItem: number): void;
+  Append(theSeq: NCollection_Sequence_int): void;
+  Append(theItem: number): void;
+  Append(theSeq: NCollection_Sequence_int): void;
 
-Prepend(theItem: number): void;
-Prepend(theSeq: NCollection_Sequence_int): void;
-Prepend(theItem: number): void;
-Prepend(theSeq: NCollection_Sequence_int): void;
+  Prepend(theItem: number): void;
+  Prepend(theSeq: NCollection_Sequence_int): void;
+  Prepend(theItem: number): void;
+  Prepend(theSeq: NCollection_Sequence_int): void;
 
-InsertBefore(theIndex: number, theItem: number): void;
-InsertBefore(theIndex: number, theSeq: NCollection_Sequence_int): void;
-InsertBefore(theIndex: number, theItem: number): void;
-InsertBefore(theIndex: number, theSeq: NCollection_Sequence_int): void;
+  InsertBefore(theIndex: number, theItem: number): void;
+  InsertBefore(theIndex: number, theSeq: NCollection_Sequence_int): void;
+  InsertBefore(theIndex: number, theItem: number): void;
+  InsertBefore(theIndex: number, theSeq: NCollection_Sequence_int): void;
 
-InsertAfter(theIndex: number, theSeq: NCollection_Sequence_int): void;
-InsertAfter(theIndex: number, theItem: number): void;
-InsertAfter(theIndex: number, theSeq: NCollection_Sequence_int): void;
-InsertAfter(theIndex: number, theItem: number): void;
+  InsertAfter(theIndex: number, theSeq: NCollection_Sequence_int): void;
+  InsertAfter(theIndex: number, theItem: number): void;
+  InsertAfter(theIndex: number, theSeq: NCollection_Sequence_int): void;
+  InsertAfter(theIndex: number, theItem: number): void;
 
-Split(theIndex: number, theSeq: NCollection_Sequence_int): void;
+  Split(theIndex: number, theSeq: NCollection_Sequence_int): void;
 
-First(): number;
+  First(): number;
 
-ChangeFirst(): number;
+  ChangeFirst(): number;
 
-Last(): number;
+  Last(): number;
 
-ChangeLast(): number;
+  ChangeLast(): number;
 
-Value(theIndex: number): number;
+  Value(theIndex: number): number;
 
-ChangeValue(theIndex: number): number;
+  ChangeValue(theIndex: number): number;
 
-SetValue(theIndex: number, theItem: number): void;
+  SetValue(theIndex: number, theItem: number): void;
 
-At(theIndex: number): number;
+  At(theIndex: number): number;
 
-ChangeAt(theIndex: number): number;
+  ChangeAt(theIndex: number): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_Shared_NCollection_DynamicArray_BRepMesh_Circle_void: declare class NCollection_Shared_NCollection_DynamicArray_BRepMesh_Circle_void extends Standard_Transient
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_Shared_NCollection_DynamicArray_BRepMesh_Vertex_void: declare class NCollection_Shared_NCollection_DynamicArray_BRepMesh_Vertex_void extends Standard_Transient
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_Shared_Standard_Mutex_void: declare class NCollection_Shared_Standard_Mutex_void extends Standard_Transient
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_TListIterator_HLRAlgo_Interference: declare class NCollection_TListIterator_HLRAlgo_Interference extends NCollection_BaseList_Iterator
 
-constructor
+  constructor
 
-More(): boolean;
+  More(): boolean;
 
-Next(): void;
+  Next(): void;
 
-Value(): HLRAlgo_Interference;
+  Value(): HLRAlgo_Interference;
 
-ChangeValue(): HLRAlgo_Interference;
+  ChangeValue(): HLRAlgo_Interference;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NCollection_Array1_BRepGraph_NodeId_Typed_BRepGraph_NodeId_Kind_CoEdge: NCollection_Array1_BRepGraph_CoEdgeId
 

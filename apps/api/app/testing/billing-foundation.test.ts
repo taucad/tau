@@ -46,7 +46,7 @@ const launchPolicy = {
       kind: 'top_up',
       currency: 'usd',
       minimumPrincipalMinor: '500',
-      maximumPrincipalMinor: '50000',
+      maximumPrincipalMinor: '500000',
       creditAtomsPerPrincipalMinor: '10000',
     },
   ],
@@ -54,11 +54,32 @@ const launchPolicy = {
 };
 
 describe('billing database protections and real command', () => {
+  it('should refuse every billing command before opening a database when Cloud is disabled', () => {
+    const childEnvironment: Record<string, string | undefined> = {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment key
+      PATH: process.env['PATH'],
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment key
+      TAU_CLOUD_ENABLED: 'false',
+    };
+    const result = spawnSync(
+      process.execPath,
+      [resolve(import.meta.dirname, '../../dist/billing-command.js'), 'protect'],
+      {
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- raw process environments contain strings before schema parsing
+        env: childEnvironment as NodeJS.ProcessEnv,
+        encoding: 'utf8',
+      },
+    );
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('billing-command requires TAU_CLOUD_ENABLED=true');
+  });
+
   it('should run the credential-free recovery worker and stop cleanly', async () => {
     const childEnvironment: Record<string, string | undefined> = {};
     childEnvironment['PATH'] = process.env['PATH'];
     childEnvironment['BILLING_DATABASE_URL'] = databaseUrl;
     childEnvironment['BILLING_ENVIRONMENT'] = 'prod-eu';
+    childEnvironment['TAU_CLOUD_ENABLED'] = 'true';
     childEnvironment['OTEL_METRICS_PORT'] = '0';
     const child = spawn(
       process.execPath,
@@ -90,6 +111,187 @@ describe('billing database protections and real command', () => {
         environment: 'prod-eu',
         failed: 0,
       });
+      child.kill('SIGTERM');
+      const [code, signal] = (await once(child, 'close')) as unknown[];
+      expect({ code, signal, stderr }).toEqual({ code: 0, signal: null, stderr: '' });
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL');
+      }
+    }
+  });
+
+  it('should execute consented reload work on the collection worker', async () => {
+    const childEnvironment: Record<string, string | undefined> = {};
+    childEnvironment['PATH'] = process.env['PATH'];
+    childEnvironment['BILLING_DATABASE_URL'] = databaseUrl;
+    // Collection is refused outside Stripe test mode and in every prod- environment, so the worker runs on staging.
+    childEnvironment['BILLING_ENVIRONMENT'] = 'staging';
+    childEnvironment['TAU_CLOUD_ENABLED'] = 'true';
+    childEnvironment['STRIPE_SECRET_KEY'] = 'rk_test_reload_worker';
+    childEnvironment['STRIPE_READ_SECRET_KEY'] = 'rk_test_reload_worker_read';
+    childEnvironment['STRIPE_ACCOUNT_ID'] = 'acct_reload_worker';
+    childEnvironment['STRIPE_LIVEMODE'] = 'false';
+    childEnvironment['STRIPE_PRICE_ID_PRO_MONTHLY'] = 'price_reload_worker';
+    childEnvironment['STRIPE_PRODUCT_ID_CREDIT_PACK'] = 'prod_reload_worker';
+    childEnvironment['OTEL_METRICS_PORT'] = '0';
+    const child = spawn(
+      process.execPath,
+      [
+        resolve(import.meta.dirname, '../../dist/billing-command.js'),
+        'billing-reload-worker',
+        '--environment',
+        'staging',
+        '--limit',
+        '100',
+        '--poll-milliseconds',
+        '1000',
+      ],
+      {
+        // The empty environment has no consented reload work, so this verifies scheduling without provider I/O.
+        env: childEnvironment as NodeJS.ProcessEnv,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    try {
+      const deadline = Date.now() + 10_000;
+      while (!stdout.includes('billing.reload_work_batch')) {
+        if (Date.now() >= deadline) {
+          throw new Error(`Timed out waiting for billing reload worker: ${stdout}\n${stderr}`);
+        }
+        // oxlint-disable-next-line no-await-in-loop -- the probe waits for the first cycle
+        await wait(25);
+      }
+      const events = stdout
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ event: 'billing.reload_work_batch', environment: 'staging', failed: 0 }),
+        ]),
+      );
+      child.kill('SIGTERM');
+      const [code, signal] = (await once(child, 'close')) as unknown[];
+      expect({ code, signal, stderr }).toEqual({ code: 0, signal: null, stderr: '' });
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL');
+      }
+    }
+  });
+
+  it('should refuse to start the collection worker for a production environment', async () => {
+    const childEnvironment: Record<string, string | undefined> = {};
+    childEnvironment['PATH'] = process.env['PATH'];
+    childEnvironment['BILLING_DATABASE_URL'] = databaseUrl;
+    childEnvironment['BILLING_ENVIRONMENT'] = 'prod-us';
+    childEnvironment['TAU_CLOUD_ENABLED'] = 'true';
+    childEnvironment['STRIPE_SECRET_KEY'] = 'rk_test_reload_worker';
+    childEnvironment['STRIPE_READ_SECRET_KEY'] = 'rk_test_reload_worker_read';
+    childEnvironment['STRIPE_ACCOUNT_ID'] = 'acct_reload_worker';
+    childEnvironment['STRIPE_LIVEMODE'] = 'false';
+    childEnvironment['STRIPE_PRICE_ID_PRO_MONTHLY'] = 'price_reload_worker';
+    childEnvironment['STRIPE_PRODUCT_ID_CREDIT_PACK'] = 'prod_reload_worker';
+    childEnvironment['OTEL_METRICS_PORT'] = '0';
+    const child = spawn(
+      process.execPath,
+      [
+        resolve(import.meta.dirname, '../../dist/billing-command.js'),
+        'billing-reload-worker',
+        '--environment',
+        'prod-us',
+        '--limit',
+        '100',
+        '--poll-milliseconds',
+        '1000',
+      ],
+      { env: childEnvironment as NodeJS.ProcessEnv, stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    const [code] = (await once(child, 'close')) as unknown[];
+    expect(code).not.toBe(0);
+    expect(stderr).toContain('Automatic reload collection is not enabled for production environments');
+  });
+
+  it('should run payment recovery and journal reconciliation on the operations worker', async () => {
+    const childEnvironment: Record<string, string | undefined> = {};
+    childEnvironment['PATH'] = process.env['PATH'];
+    childEnvironment['BILLING_DATABASE_URL'] = databaseUrl;
+    childEnvironment['BILLING_ENVIRONMENT'] = 'prod-us';
+    childEnvironment['TAU_CLOUD_ENABLED'] = 'true';
+    childEnvironment['STRIPE_READ_SECRET_KEY'] = 'rk_test_operations_worker';
+    childEnvironment['STRIPE_ACCOUNT_ID'] = 'acct_operations_worker';
+    childEnvironment['STRIPE_LIVEMODE'] = 'false';
+    childEnvironment['OTEL_METRICS_PORT'] = '0';
+    const child = spawn(
+      process.execPath,
+      [
+        resolve(import.meta.dirname, '../../dist/billing-command.js'),
+        'billing-operations-worker',
+        '--environment',
+        'prod-us',
+        '--limit',
+        '100',
+        '--poll-milliseconds',
+        '1000',
+      ],
+      {
+        // The empty environment has no payment sources, so this verifies scheduling without provider I/O.
+        env: childEnvironment as NodeJS.ProcessEnv,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    try {
+      const deadline = Date.now() + 10_000;
+      while (!stdout.includes('billing.payment_recovery_batch') || !stdout.includes('billing.journal_reconciliation')) {
+        if (Date.now() >= deadline) {
+          throw new Error(`Timed out waiting for billing operations worker: ${stdout}\n${stderr}`);
+        }
+        // oxlint-disable-next-line no-await-in-loop -- the probe waits for both first-cycle events
+        await wait(25);
+      }
+      const events = stdout
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            event: 'billing.payment_recovery_batch',
+            environment: 'prod-us',
+            failed: 0,
+          }),
+          expect.objectContaining({
+            event: 'billing.journal_reconciliation',
+            environment: 'prod-us',
+          }),
+        ]),
+      );
       child.kill('SIGTERM');
       const [code, signal] = (await once(child, 'close')) as unknown[];
       expect({ code, signal, stderr }).toEqual({ code: 0, signal: null, stderr: '' });
@@ -137,6 +339,7 @@ describe('billing database protections and real command', () => {
           ...Object.fromEntries([
             ['BILLING_DATABASE_URL', databaseUrl],
             ['BILLING_ENVIRONMENT', environment],
+            ['TAU_CLOUD_ENABLED', 'true'],
           ]),
         };
         return spawnSync(process.execPath, args, {
@@ -160,6 +363,7 @@ describe('billing database protections and real command', () => {
         ...Object.fromEntries([
           ['BILLING_DATABASE_URL', databaseUrl],
           ['BILLING_ENVIRONMENT', 'prod-eu'],
+          ['TAU_CLOUD_ENABLED', 'true'],
         ]),
       };
       const duplicate = spawnSync(process.execPath, [...args, '--environment', 'prod-us'], {
@@ -176,6 +380,86 @@ describe('billing database protections and real command', () => {
         await client`SELECT content_hash, canonical_content FROM billing.billing_policy WHERE environment = 'prod-eu'`;
       expect(rows).toHaveLength(1);
       expect(JSON.parse(String(rows[0]?.['canonical_content']))).toEqual(launchPolicy);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('should provision an exact supplier budget proposal idempotently and reject drift', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'tau-billing-budgets-'));
+    const file = join(directory, 'budgets.json');
+    const proposal = {
+      schemaVersion: 1,
+      environment: 'prod-eu',
+      funding: [
+        { id: 'command-spend-funding', kind: 'spend', scope: 'command', fundedLifetime: '500000000000000' },
+        { id: 'command-risk-funding', kind: 'risk', scope: 'command', fundedLifetime: '500000000000000' },
+      ],
+      budgets: [
+        {
+          id: 'command-spend',
+          fundingId: 'command-spend-funding',
+          kind: 'spend',
+          scope: 'command',
+          periodStart: '2026-01-01T00:00:00.000Z',
+          periodEnd: '2030-01-01T00:00:00.000Z',
+          quantum: 'pico_usd',
+          approvedCap: '500000000000000',
+        },
+        {
+          id: 'command-risk',
+          fundingId: 'command-risk-funding',
+          kind: 'risk',
+          scope: 'command',
+          periodStart: '2026-01-01T00:00:00.000Z',
+          periodEnd: '2030-01-01T00:00:00.000Z',
+          quantum: 'pico_usd',
+          approvedCap: '500000000000000',
+        },
+      ],
+    };
+    const environment = Object.fromEntries([
+      ['PATH', process.env['PATH']],
+      ['BILLING_DATABASE_URL', databaseUrl],
+      ['BILLING_ENVIRONMENT', 'prod-eu'],
+      ['TAU_CLOUD_ENABLED', 'true'],
+    ]);
+    const run = () =>
+      spawnSync(
+        process.execPath,
+        [
+          resolve(import.meta.dirname, '../../dist/billing-command.js'),
+          'provision-budgets',
+          '--environment',
+          'prod-eu',
+          '--file',
+          file,
+        ],
+        {
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the child receives only string variables
+          env: environment as NodeJS.ProcessEnv,
+          encoding: 'utf8',
+        },
+      );
+    try {
+      writeFileSync(file, JSON.stringify(proposal));
+      expect(run()).toMatchObject({ status: 0, stderr: '' });
+      expect(JSON.parse(run().stdout)).toEqual({
+        environment: 'prod-eu',
+        budgets: ['command-spend', 'command-risk'],
+      });
+      writeFileSync(
+        file,
+        JSON.stringify({
+          ...proposal,
+          budgets: proposal.budgets.map((budget) =>
+            budget.kind === 'spend' ? { ...budget, approvedCap: '499999999999999' } : budget,
+          ),
+        }),
+      );
+      const drift = run();
+      expect(drift.status).toBe(1);
+      expect(drift.stderr).toContain('Existing billing budget differs from proposal: command-spend');
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -438,6 +722,7 @@ describe('funded LLM recovery worker under a mid-run database outage', () => {
     childEnvironment['PATH'] = process.env['PATH'];
     childEnvironment['BILLING_DATABASE_URL'] = databaseUrl;
     childEnvironment['BILLING_ENVIRONMENT'] = 'prod-eu';
+    childEnvironment['TAU_CLOUD_ENABLED'] = 'true';
     childEnvironment['OTEL_METRICS_PORT'] = '0';
     // Names the worker's backend so the outage terminates exactly that session.
     childEnvironment['PGAPPNAME'] = applicationName;

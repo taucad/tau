@@ -4,104 +4,104 @@
 
 MathRoot_AllRootsResult: declare class MathRoot_AllRootsResult
 
-constructor
+  constructor
 
-Status: MathUtils_Status
+  Status: MathUtils_Status
 
-Roots: NCollection_DynamicArray_double
+  Roots: NCollection_DynamicArray_double
 
-RootStates: NCollection_DynamicArray_int
+  RootStates: NCollection_DynamicArray_int
 
-NullIntervals: NCollection_DynamicArray_MathRoot_NullInterval
+  NullIntervals: NCollection_DynamicArray_MathRoot_NullInterval
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbRoots(): number;
+  NbRoots(): number;
 
-NbIntervals(): number;
+  NbIntervals(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MathRoot_NullInterval: declare class MathRoot_NullInterval
 
-constructor
+  constructor
 
-A: number
+  A: number
 
-B: number
+  B: number
 
-State: number
+  State: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MathRoot_MultipleConfig: declare class MathRoot_MultipleConfig
 
-constructor
+  constructor
 
-NbSamples: number
+  NbSamples: number
 
-XTolerance: number
+  XTolerance: number
 
-FTolerance: number
+  FTolerance: number
 
-NullTolerance: number
+  NullTolerance: number
 
-MaxIterations: number
+  MaxIterations: number
 
-Offset: number
+  Offset: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MathRoot_MultipleNoExtraHandler: declare class MathRoot_MultipleNoExtraHandler
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MathRoot_MultipleResult: declare class MathRoot_MultipleResult
 
-constructor
+  constructor
 
-Status: MathUtils_Status
+  Status: MathUtils_Status
 
-NbIterations: number
+  NbIterations: number
 
-Roots: NCollection_DynamicArray_double
+  Roots: NCollection_DynamicArray_double
 
-Values: NCollection_DynamicArray_double
+  Values: NCollection_DynamicArray_double
 
-IsAllNull: boolean
+  IsAllNull: boolean
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbRoots(): number;
+  NbRoots(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 MathRoot_TrigResult: declare class MathRoot_TrigResult
 
-constructor
+  constructor
 
-Status: MathUtils_Status
+  Status: MathUtils_Status
 
-Roots: [number, number, number, number]
+  Roots: [number, number, number, number]
 
-NbRoots: number
+  NbRoots: number
 
-InfiniteRoots: boolean
+  InfiniteRoots: boolean
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

@@ -5,10 +5,12 @@ import type { ProjectLocator } from '@taucad/filesystem';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { CreatedProject } from '#hooks/use-project-manager.js';
 import { projectLibraryEntryToListItem } from '#types/project.types.js';
+import { useSessions } from '#hooks/use-sessions.js';
 
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- let types be inferred
 export function useProjects(options?: { includeDeleted?: boolean }) {
   const queryClient = useQueryClient();
+  const sessions = useSessions();
   const includeDeleted = options?.includeDeleted ?? false;
   const {
     getProjectListing,
@@ -40,14 +42,33 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
     staleTime: 3000,
   });
 
+  const closeProjectSession = useCallback(
+    async (projectId: string): Promise<void> => {
+      if (sessions.getSnapshot().context.refs[projectId] === undefined) {
+        return;
+      }
+      await new Promise<void>((resolve) => {
+        const subscription = sessions.subscribe((snapshot) => {
+          if (snapshot.context.refs[projectId] === undefined) {
+            subscription.unsubscribe();
+            resolve();
+          }
+        });
+        sessions.send({ type: 'close', projectId, reason: 'user' });
+      });
+    },
+    [sessions],
+  );
+
   const handleDeleteProject = useCallback(
     async (projectId: string): Promise<boolean> => {
+      await closeProjectSession(projectId);
       const trashed = await deleteProject(projectId);
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
       void queryClient.invalidateQueries({ queryKey: ['project', projectId] });
       return trashed;
     },
-    [deleteProject, queryClient],
+    [closeProjectSession, deleteProject, queryClient],
   );
 
   const handleRestoreProject = useCallback(
@@ -67,11 +88,12 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
 
   const handlePermanentlyDeleteProject = useCallback(
     async (projectId: string) => {
+      await closeProjectSession(projectId);
       await permanentlyDeleteProject(projectId);
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
       queryClient.removeQueries({ queryKey: ['project', projectId] });
     },
-    [permanentlyDeleteProject, queryClient],
+    [closeProjectSession, permanentlyDeleteProject, queryClient],
   );
 
   const handleDuplicateProject = useCallback(
@@ -109,7 +131,12 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
     conflicts: listing.conflicts,
     recoveries: listing.recoveries,
     workspaceBindingRepairs: listing.workspaceBindingRepairs,
-    isLoading,
+    /* The worker window counts as loading (P67): the query is disabled until
+     * the object store is up, and a disabled query is pending-but-not-loading,
+     * so without this every consumer reads an empty listing that never ran as
+     * "no projects" — which is how the sidebar came to say `No projects yet`
+     * over a project it was counting as live. */
+    isLoading: isLoading || isWorkerLoading,
     error: error instanceof Error ? error : undefined,
     retry: refetch,
     deleteProject: handleDeleteProject,

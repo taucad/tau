@@ -143,6 +143,7 @@
     "src/matchers/support.ts",
     "src/matchers/types.ts",
     "src/matchers/mesh-matchers.ts",
+    "src/matchers/bounding-box.test.ts",
     "src/matchers/brep-matchers.ts",
     "src/matchers/proof-matchers.ts",
     "src/matchers/proof-matchers.test.ts",

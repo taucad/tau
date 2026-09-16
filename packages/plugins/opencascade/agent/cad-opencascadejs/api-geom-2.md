@@ -4,905 +4,905 @@
 
 Geom_BezierSurface: declare class Geom_BezierSurface extends Geom_BoundedSurface
 
-constructor
+  constructor
 
-HasEvalRepresentation(): boolean;
+  HasEvalRepresentation(): boolean;
 
-EvalRepresentation(): GeomEval_RepSurfaceDesc_Base;
+  EvalRepresentation(): GeomEval_RepSurfaceDesc_Base;
 
-SetEvalRepresentation(theDesc: GeomEval_RepSurfaceDesc_Base): void;
+  SetEvalRepresentation(theDesc: GeomEval_RepSurfaceDesc_Base): void;
 
-ClearEvalRepresentation(): void;
+  ClearEvalRepresentation(): void;
 
-ExchangeUV(): void;
+  ExchangeUV(): void;
 
-Increase(UDeg: number, VDeg: number): void;
+  Increase(UDeg: number, VDeg: number): void;
 
-InsertPoleColAfter(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-InsertPoleColAfter(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
-InsertPoleColAfter(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-InsertPoleColAfter(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
+  InsertPoleColAfter(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
+  InsertPoleColAfter(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
+  InsertPoleColAfter(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
+  InsertPoleColAfter(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
 
-InsertPoleColBefore(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-InsertPoleColBefore(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
-InsertPoleColBefore(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-InsertPoleColBefore(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
+  InsertPoleColBefore(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
+  InsertPoleColBefore(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
+  InsertPoleColBefore(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
+  InsertPoleColBefore(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
 
-InsertPoleRowAfter(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-InsertPoleRowAfter(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
-InsertPoleRowAfter(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-InsertPoleRowAfter(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
+  InsertPoleRowAfter(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
+  InsertPoleRowAfter(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
+  InsertPoleRowAfter(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
+  InsertPoleRowAfter(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
 
-InsertPoleRowBefore(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-InsertPoleRowBefore(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
-InsertPoleRowBefore(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-InsertPoleRowBefore(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
+  InsertPoleRowBefore(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
+  InsertPoleRowBefore(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
+  InsertPoleRowBefore(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
+  InsertPoleRowBefore(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
 
-RemovePoleCol(VIndex: number): void;
+  RemovePoleCol(VIndex: number): void;
 
-RemovePoleRow(UIndex: number): void;
+  RemovePoleRow(UIndex: number): void;
 
-Segment(U1: number, U2: number, V1: number, V2: number): void;
+  Segment(U1: number, U2: number, V1: number, V2: number): void;
 
-SetPole(UIndex: number, VIndex: number, P: gp_Pnt): void;
-SetPole(UIndex: number, VIndex: number, P: gp_Pnt, Weight: number): void;
-SetPole(UIndex: number, VIndex: number, P: gp_Pnt): void;
-SetPole(UIndex: number, VIndex: number, P: gp_Pnt, Weight: number): void;
+  SetPole(UIndex: number, VIndex: number, P: gp_Pnt): void;
+  SetPole(UIndex: number, VIndex: number, P: gp_Pnt, Weight: number): void;
+  SetPole(UIndex: number, VIndex: number, P: gp_Pnt): void;
+  SetPole(UIndex: number, VIndex: number, P: gp_Pnt, Weight: number): void;
 
-SetPoleCol(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-SetPoleCol(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
-SetPoleCol(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-SetPoleCol(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
+  SetPoleCol(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
+  SetPoleCol(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
+  SetPoleCol(VIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
+  SetPoleCol(VIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
 
-SetPoleRow(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-SetPoleRow(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
-SetPoleRow(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
-SetPoleRow(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
+  SetPoleRow(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
+  SetPoleRow(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
+  SetPoleRow(UIndex: number, CPoles: NCollection_Array1_gp_Pnt): void;
+  SetPoleRow(UIndex: number, CPoles: NCollection_Array1_gp_Pnt, CPoleWeights: NCollection_Array1_double): void;
 
-SetWeight(UIndex: number, VIndex: number, Weight: number): void;
+  SetWeight(UIndex: number, VIndex: number, Weight: number): void;
 
-SetWeightCol(VIndex: number, CPoleWeights: NCollection_Array1_double): void;
+  SetWeightCol(VIndex: number, CPoleWeights: NCollection_Array1_double): void;
 
-SetWeightRow(UIndex: number, CPoleWeights: NCollection_Array1_double): void;
+  SetWeightRow(UIndex: number, CPoleWeights: NCollection_Array1_double): void;
 
-UReverse(): void;
+  UReverse(): void;
 
-UReversedParameter(U: number): number;
+  UReversedParameter(U: number): number;
 
-VReverse(): void;
+  VReverse(): void;
 
-VReversedParameter(V: number): number;
+  VReversedParameter(V: number): number;
 
-Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
+  Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
 
-Continuity(): GeomAbs_Shape;
+  Continuity(): GeomAbs_Shape;
 
-EvalD0(U: number, V: number): gp_Pnt;
+  EvalD0(U: number, V: number): gp_Pnt;
 
-EvalD1(U: number, V: number): Geom_Surface_ResD1;
+  EvalD1(U: number, V: number): Geom_Surface_ResD1;
 
-EvalD2(U: number, V: number): Geom_Surface_ResD2;
+  EvalD2(U: number, V: number): Geom_Surface_ResD2;
 
-EvalD3(U: number, V: number): Geom_Surface_ResD3;
+  EvalD3(U: number, V: number): Geom_Surface_ResD3;
 
-EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
+  EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
 
-NbUPoles(): number;
+  NbUPoles(): number;
 
-NbVPoles(): number;
+  NbVPoles(): number;
 
-Pole(UIndex: number, VIndex: number): gp_Pnt;
+  Pole(UIndex: number, VIndex: number): gp_Pnt;
 
-// DEPRECATED
-Poles(P: NCollection_Array2_gp_Pnt): void;
-Poles(): NCollection_Array2_gp_Pnt;
-Poles(P: NCollection_Array2_gp_Pnt): void;
-Poles(): NCollection_Array2_gp_Pnt;
+  // DEPRECATED
+  Poles(P: NCollection_Array2_gp_Pnt): void;
+  Poles(): NCollection_Array2_gp_Pnt;
+  Poles(P: NCollection_Array2_gp_Pnt): void;
+  Poles(): NCollection_Array2_gp_Pnt;
 
-UDegree(): number;
+  UDegree(): number;
 
-UIso(U: number): Geom_Curve;
+  UIso(U: number): Geom_Curve;
 
-VDegree(): number;
+  VDegree(): number;
 
-VIso(V: number): Geom_Curve;
+  VIso(V: number): Geom_Curve;
 
-Weight(UIndex: number, VIndex: number): number;
+  Weight(UIndex: number, VIndex: number): number;
 
-// DEPRECATED
-Weights(W: NCollection_Array2_double): void;
-Weights(): NCollection_Array2_double;
-Weights(W: NCollection_Array2_double): void;
-Weights(): NCollection_Array2_double;
+  // DEPRECATED
+  Weights(W: NCollection_Array2_double): void;
+  Weights(): NCollection_Array2_double;
+  Weights(W: NCollection_Array2_double): void;
+  Weights(): NCollection_Array2_double;
 
-WeightsArray(): NCollection_Array2_double;
+  WeightsArray(): NCollection_Array2_double;
 
-IsUClosed(): boolean;
+  IsUClosed(): boolean;
 
-IsVClosed(): boolean;
+  IsVClosed(): boolean;
 
-IsCNu(N: number): boolean;
+  IsCNu(N: number): boolean;
 
-IsCNv(N: number): boolean;
+  IsCNv(N: number): boolean;
 
-IsUPeriodic(): boolean;
+  IsUPeriodic(): boolean;
 
-IsVPeriodic(): boolean;
+  IsVPeriodic(): boolean;
 
-IsURational(): boolean;
+  IsURational(): boolean;
 
-IsVRational(): boolean;
+  IsVRational(): boolean;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-static MaxDegree(): number;
+  static MaxDegree(): number;
 
-Resolution(Tolerance3D: number, UTolerance?: number, VTolerance?: number): { UTolerance: number; VTolerance: number };
+  Resolution(Tolerance3D: number, UTolerance?: number, VTolerance?: number): { UTolerance: number; VTolerance: number };
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-UKnots(): NCollection_Array1_double;
+  UKnots(): NCollection_Array1_double;
 
-VKnots(): NCollection_Array1_double;
+  VKnots(): NCollection_Array1_double;
 
-UMultiplicities(): NCollection_Array1_int;
+  UMultiplicities(): NCollection_Array1_int;
 
-VMultiplicities(): NCollection_Array1_int;
+  VMultiplicities(): NCollection_Array1_int;
 
-UKnotSequence(): NCollection_Array1_double;
+  UKnotSequence(): NCollection_Array1_double;
 
-VKnotSequence(): NCollection_Array1_double;
+  VKnotSequence(): NCollection_Array1_double;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom_BoundedCurve: declare class Geom_BoundedCurve extends Geom_Curve
 
-EndPoint(): gp_Pnt;
+  EndPoint(): gp_Pnt;
 
-StartPoint(): gp_Pnt;
+  StartPoint(): gp_Pnt;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom_BoundedSurface: declare class Geom_BoundedSurface extends Geom_Surface
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom_CartesianPoint: declare class Geom_CartesianPoint extends Geom_Point
 
-constructor
+  constructor
 
-SetCoord(X: number, Y: number, Z: number): void;
+  SetCoord(X: number, Y: number, Z: number): void;
 
-SetPnt(P: gp_Pnt): void;
+  SetPnt(P: gp_Pnt): void;
 
-SetX(X: number): void;
+  SetX(X: number): void;
 
-SetY(Y: number): void;
+  SetY(Y: number): void;
 
-SetZ(Z: number): void;
+  SetZ(Z: number): void;
 
-Coord(X: number, Y: number, Z: number): { X: number; Y: number; Z: number };
+  Coord(X: number, Y: number, Z: number): { X: number; Y: number; Z: number };
 
-Pnt(): gp_Pnt;
+  Pnt(): gp_Pnt;
 
-X(): number;
+  X(): number;
 
-Y(): number;
+  Y(): number;
 
-Z(): number;
+  Z(): number;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom_Circle: declare class Geom_Circle extends Geom_Conic
 
-constructor
+  constructor
 
-SetCirc(C: gp_Circ): void;
+  SetCirc(C: gp_Circ): void;
 
-SetRadius(R: number): void;
+  SetRadius(R: number): void;
 
-Circ(): gp_Circ;
+  Circ(): gp_Circ;
 
-Radius(): number;
+  Radius(): number;
 
-ReversedParameter(U: number): number;
+  ReversedParameter(U: number): number;
 
-Eccentricity(): number;
+  Eccentricity(): number;
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-IsClosed(): boolean;
+  IsClosed(): boolean;
 
-IsPeriodic(): boolean;
+  IsPeriodic(): boolean;
 
-EvalD0(U: number): gp_Pnt;
+  EvalD0(U: number): gp_Pnt;
 
-EvalD1(U: number): Geom_Curve_ResD1;
+  EvalD1(U: number): Geom_Curve_ResD1;
 
-EvalD2(U: number): Geom_Curve_ResD2;
+  EvalD2(U: number): Geom_Curve_ResD2;
 
-EvalD3(U: number): Geom_Curve_ResD3;
+  EvalD3(U: number): Geom_Curve_ResD3;
 
-EvalDN(U: number, N: number): gp_Vec;
+  EvalDN(U: number, N: number): gp_Vec;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom_Conic: declare class Geom_Conic extends Geom_Curve
 
-SetAxis(theA1: gp_Ax1): void;
+  SetAxis(theA1: gp_Ax1): void;
 
-SetLocation(theP: gp_Pnt): void;
+  SetLocation(theP: gp_Pnt): void;
 
-SetPosition(theA2: gp_Ax2): void;
+  SetPosition(theA2: gp_Ax2): void;
 
-Axis(): gp_Ax1;
+  Axis(): gp_Ax1;
 
-Location(): gp_Pnt;
+  Location(): gp_Pnt;
 
-Position(): gp_Ax2;
+  Position(): gp_Ax2;
 
-Eccentricity(): number;
+  Eccentricity(): number;
 
-XAxis(): gp_Ax1;
+  XAxis(): gp_Ax1;
 
-YAxis(): gp_Ax1;
+  YAxis(): gp_Ax1;
 
-Reverse(): void;
+  Reverse(): void;
 
-ReversedParameter(U: number): number;
+  ReversedParameter(U: number): number;
 
-Continuity(): GeomAbs_Shape;
+  Continuity(): GeomAbs_Shape;
 
-IsCN(N: number): boolean;
+  IsCN(N: number): boolean;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom_ConicalSurface: declare class Geom_ConicalSurface extends Geom_ElementarySurface
 
-constructor
+  constructor
 
-SetCone(C: gp_Cone): void;
+  SetCone(C: gp_Cone): void;
 
-SetRadius(R: number): void;
+  SetRadius(R: number): void;
 
-SetSemiAngle(Ang: number): void;
+  SetSemiAngle(Ang: number): void;
 
-Cone(): gp_Cone;
+  Cone(): gp_Cone;
 
-UReversedParameter(U: number): number;
+  UReversedParameter(U: number): number;
 
-VReversedParameter(V: number): number;
+  VReversedParameter(V: number): number;
 
-VReverse(): void;
+  VReverse(): void;
 
-TransformParameters(U: number, V: number, T: gp_Trsf): { U: number; V: number };
+  TransformParameters(U: number, V: number, T: gp_Trsf): { U: number; V: number };
 
-ParametricTransformation(T: gp_Trsf): gp_GTrsf2d;
+  ParametricTransformation(T: gp_Trsf): gp_GTrsf2d;
 
-Apex(): gp_Pnt;
+  Apex(): gp_Pnt;
 
-Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
+  Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
 
-Coefficients(A1?: number, A2?: number, A3?: number, B1?: number, B2?: number, B3?: number, C1?: number, C2?: number, C3?: number, D?: number): { A1: number; A2: number; A3: number; B1: number; B2: number; B3: number; C1: number; C2: number; C3: number; D: number };
+  Coefficients(A1?: number, A2?: number, A3?: number, B1?: number, B2?: number, B3?: number, C1?: number, C2?: number, C3?: number, D?: number): { A1: number; A2: number; A3: number; B1: number; B2: number; B3: number; C1: number; C2: number; C3: number; D: number };
 
-RefRadius(): number;
+  RefRadius(): number;
 
-SemiAngle(): number;
+  SemiAngle(): number;
 
-IsUClosed(): boolean;
+  IsUClosed(): boolean;
 
-IsVClosed(): boolean;
+  IsVClosed(): boolean;
 
-IsUPeriodic(): boolean;
+  IsUPeriodic(): boolean;
 
-IsVPeriodic(): boolean;
+  IsVPeriodic(): boolean;
 
-UIso(U: number): Geom_Curve;
+  UIso(U: number): Geom_Curve;
 
-VIso(V: number): Geom_Curve;
+  VIso(V: number): Geom_Curve;
 
-EvalD0(U: number, V: number): gp_Pnt;
+  EvalD0(U: number, V: number): gp_Pnt;
 
-EvalD1(U: number, V: number): Geom_Surface_ResD1;
+  EvalD1(U: number, V: number): Geom_Surface_ResD1;
 
-EvalD2(U: number, V: number): Geom_Surface_ResD2;
+  EvalD2(U: number, V: number): Geom_Surface_ResD2;
 
-EvalD3(U: number, V: number): Geom_Surface_ResD3;
+  EvalD3(U: number, V: number): Geom_Surface_ResD3;
 
-EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
+  EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom_Curve: declare class Geom_Curve extends Geom_Geometry
 
-Reverse(): void;
+  Reverse(): void;
 
-ReversedParameter(U: number): number;
+  ReversedParameter(U: number): number;
 
-TransformedParameter(U: number, T: gp_Trsf): number;
+  TransformedParameter(U: number, T: gp_Trsf): number;
 
-ParametricTransformation(T: gp_Trsf): number;
+  ParametricTransformation(T: gp_Trsf): number;
 
-Reversed(): Geom_Curve;
+  Reversed(): Geom_Curve;
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-IsClosed(): boolean;
+  IsClosed(): boolean;
 
-IsPeriodic(): boolean;
+  IsPeriodic(): boolean;
 
-Period(): number;
+  Period(): number;
 
-Continuity(): GeomAbs_Shape;
+  Continuity(): GeomAbs_Shape;
 
-IsCN(N: number): boolean;
+  IsCN(N: number): boolean;
 
-EvalD0(U: number): gp_Pnt;
+  EvalD0(U: number): gp_Pnt;
 
-EvalD1(U: number): Geom_Curve_ResD1;
+  EvalD1(U: number): Geom_Curve_ResD1;
 
-EvalD2(U: number): Geom_Curve_ResD2;
+  EvalD2(U: number): Geom_Curve_ResD2;
 
-EvalD3(U: number): Geom_Curve_ResD3;
+  EvalD3(U: number): Geom_Curve_ResD3;
 
-EvalDN(U: number, N: number): gp_Vec;
+  EvalDN(U: number, N: number): gp_Vec;
 
-D0(U: number, P: gp_Pnt): void;
+  D0(U: number, P: gp_Pnt): void;
 
-D1(U: number, P: gp_Pnt, V1: gp_Vec): void;
+  D1(U: number, P: gp_Pnt, V1: gp_Vec): void;
 
-D2(U: number, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec): void;
+  D2(U: number, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec): void;
 
-D3(U: number, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec, V3: gp_Vec): void;
+  D3(U: number, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec, V3: gp_Vec): void;
 
-DN(U: number, N: number): gp_Vec;
+  DN(U: number, N: number): gp_Vec;
 
-Value(U: number): gp_Pnt;
+  Value(U: number): gp_Pnt;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom_CylindricalSurface: declare class Geom_CylindricalSurface extends Geom_ElementarySurface
 
-constructor
+  constructor
 
-SetCylinder(C: gp_Cylinder): void;
+  SetCylinder(C: gp_Cylinder): void;
 
-SetRadius(R: number): void;
+  SetRadius(R: number): void;
 
-Cylinder(): gp_Cylinder;
+  Cylinder(): gp_Cylinder;
 
-UReversedParameter(U: number): number;
+  UReversedParameter(U: number): number;
 
-VReversedParameter(V: number): number;
+  VReversedParameter(V: number): number;
 
-TransformParameters(U: number, V: number, T: gp_Trsf): { U: number; V: number };
+  TransformParameters(U: number, V: number, T: gp_Trsf): { U: number; V: number };
 
-ParametricTransformation(T: gp_Trsf): gp_GTrsf2d;
+  ParametricTransformation(T: gp_Trsf): gp_GTrsf2d;
 
-Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
+  Bounds(U1: number, U2: number, V1: number, V2: number): { U1: number; U2: number; V1: number; V2: number };
 
-Coefficients(A1?: number, A2?: number, A3?: number, B1?: number, B2?: number, B3?: number, C1?: number, C2?: number, C3?: number, D?: number): { A1: number; A2: number; A3: number; B1: number; B2: number; B3: number; C1: number; C2: number; C3: number; D: number };
+  Coefficients(A1?: number, A2?: number, A3?: number, B1?: number, B2?: number, B3?: number, C1?: number, C2?: number, C3?: number, D?: number): { A1: number; A2: number; A3: number; B1: number; B2: number; B3: number; C1: number; C2: number; C3: number; D: number };
 
-Radius(): number;
+  Radius(): number;
 
-IsUClosed(): boolean;
+  IsUClosed(): boolean;
 
-IsVClosed(): boolean;
+  IsVClosed(): boolean;
 
-IsUPeriodic(): boolean;
+  IsUPeriodic(): boolean;
 
-IsVPeriodic(): boolean;
+  IsVPeriodic(): boolean;
 
-UIso(U: number): Geom_Curve;
+  UIso(U: number): Geom_Curve;
 
-VIso(V: number): Geom_Curve;
+  VIso(V: number): Geom_Curve;
 
-EvalD0(U: number, V: number): gp_Pnt;
+  EvalD0(U: number, V: number): gp_Pnt;
 
-EvalD1(U: number, V: number): Geom_Surface_ResD1;
+  EvalD1(U: number, V: number): Geom_Surface_ResD1;
 
-EvalD2(U: number, V: number): Geom_Surface_ResD2;
+  EvalD2(U: number, V: number): Geom_Surface_ResD2;
 
-EvalD3(U: number, V: number): Geom_Surface_ResD3;
+  EvalD3(U: number, V: number): Geom_Surface_ResD3;
 
-EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
+  EvalDN(U: number, V: number, Nu: number, Nv: number): gp_Vec;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom_Direction: declare class Geom_Direction extends Geom_Vector
 
-constructor
+  constructor
 
-SetCoord(X: number, Y: number, Z: number): void;
+  SetCoord(X: number, Y: number, Z: number): void;
 
-SetDir(V: gp_Dir): void;
+  SetDir(V: gp_Dir): void;
 
-SetX(X: number): void;
+  SetX(X: number): void;
 
-SetY(Y: number): void;
+  SetY(Y: number): void;
 
-SetZ(Z: number): void;
+  SetZ(Z: number): void;
 
-Dir(): gp_Dir;
+  Dir(): gp_Dir;
 
-Magnitude(): number;
+  Magnitude(): number;
 
-SquareMagnitude(): number;
+  SquareMagnitude(): number;
 
-Cross(Other: Geom_Vector): void;
+  Cross(Other: Geom_Vector): void;
 
-CrossCross(V1: Geom_Vector, V2: Geom_Vector): void;
+  CrossCross(V1: Geom_Vector, V2: Geom_Vector): void;
 
-Crossed(Other: Geom_Vector): Geom_Vector;
+  Crossed(Other: Geom_Vector): Geom_Vector;
 
-CrossCrossed(V1: Geom_Vector, V2: Geom_Vector): Geom_Vector;
+  CrossCrossed(V1: Geom_Vector, V2: Geom_Vector): Geom_Vector;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom_ElementarySurface: declare class Geom_ElementarySurface extends Geom_Surface
 
-SetAxis(theA1: gp_Ax1): void;
+  SetAxis(theA1: gp_Ax1): void;
 
-SetLocation(theLoc: gp_Pnt): void;
+  SetLocation(theLoc: gp_Pnt): void;
 
-SetPosition(theAx3: gp_Ax3): void;
+  SetPosition(theAx3: gp_Ax3): void;
 
-Axis(): gp_Ax1;
+  Axis(): gp_Ax1;
 
-Location(): gp_Pnt;
+  Location(): gp_Pnt;
 
-Position(): gp_Ax3;
+  Position(): gp_Ax3;
 
-UReverse(): void;
+  UReverse(): void;
 
-UReversedParameter(U: number): number;
+  UReversedParameter(U: number): number;
 
-VReverse(): void;
+  VReverse(): void;
 
-VReversedParameter(V: number): number;
+  VReversedParameter(V: number): number;
 
-Continuity(): GeomAbs_Shape;
+  Continuity(): GeomAbs_Shape;
 
-IsCNu(N: number): boolean;
+  IsCNu(N: number): boolean;
 
-IsCNv(N: number): boolean;
+  IsCNv(N: number): boolean;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom_Ellipse: declare class Geom_Ellipse extends Geom_Conic
 
-constructor
+  constructor
 
-SetElips(E: gp_Elips): void;
+  SetElips(E: gp_Elips): void;
 
-SetMajorRadius(MajorRadius: number): void;
+  SetMajorRadius(MajorRadius: number): void;
 
-SetMinorRadius(MinorRadius: number): void;
+  SetMinorRadius(MinorRadius: number): void;
 
-Elips(): gp_Elips;
+  Elips(): gp_Elips;
 
-ReversedParameter(U: number): number;
+  ReversedParameter(U: number): number;
 
-Directrix1(): gp_Ax1;
+  Directrix1(): gp_Ax1;
 
-Directrix2(): gp_Ax1;
+  Directrix2(): gp_Ax1;
 
-Eccentricity(): number;
+  Eccentricity(): number;
 
-Focal(): number;
+  Focal(): number;
 
-Focus1(): gp_Pnt;
+  Focus1(): gp_Pnt;
 
-Focus2(): gp_Pnt;
+  Focus2(): gp_Pnt;
 
-MajorRadius(): number;
+  MajorRadius(): number;
 
-MinorRadius(): number;
+  MinorRadius(): number;
 
-Parameter(): number;
+  Parameter(): number;
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-IsClosed(): boolean;
+  IsClosed(): boolean;
 
-IsPeriodic(): boolean;
+  IsPeriodic(): boolean;
 
-EvalD0(U: number): gp_Pnt;
+  EvalD0(U: number): gp_Pnt;
 
-EvalD1(U: number): Geom_Curve_ResD1;
+  EvalD1(U: number): Geom_Curve_ResD1;
 
-EvalD2(U: number): Geom_Curve_ResD2;
+  EvalD2(U: number): Geom_Curve_ResD2;
 
-EvalD3(U: number): Geom_Curve_ResD3;
+  EvalD3(U: number): Geom_Curve_ResD3;
 
-EvalDN(U: number, N: number): gp_Vec;
+  EvalDN(U: number, N: number): gp_Vec;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom_Geometry: declare class Geom_Geometry extends Standard_Transient
 
-Mirror(P: gp_Pnt): void;
-Mirror(A1: gp_Ax1): void;
-Mirror(A2: gp_Ax2): void;
-Mirror(P: gp_Pnt): void;
-Mirror(A1: gp_Ax1): void;
-Mirror(A2: gp_Ax2): void;
-Mirror(P: gp_Pnt): void;
-Mirror(A1: gp_Ax1): void;
-Mirror(A2: gp_Ax2): void;
+  Mirror(P: gp_Pnt): void;
+  Mirror(A1: gp_Ax1): void;
+  Mirror(A2: gp_Ax2): void;
+  Mirror(P: gp_Pnt): void;
+  Mirror(A1: gp_Ax1): void;
+  Mirror(A2: gp_Ax2): void;
+  Mirror(P: gp_Pnt): void;
+  Mirror(A1: gp_Ax1): void;
+  Mirror(A2: gp_Ax2): void;
 
-Rotate(A1: gp_Ax1, Ang: number): void;
+  Rotate(A1: gp_Ax1, Ang: number): void;
 
-Scale(P: gp_Pnt, S: number): void;
+  Scale(P: gp_Pnt, S: number): void;
 
-Translate(V: gp_Vec): void;
-Translate(P1: gp_Pnt, P2: gp_Pnt): void;
-Translate(V: gp_Vec): void;
-Translate(P1: gp_Pnt, P2: gp_Pnt): void;
+  Translate(V: gp_Vec): void;
+  Translate(P1: gp_Pnt, P2: gp_Pnt): void;
+  Translate(V: gp_Vec): void;
+  Translate(P1: gp_Pnt, P2: gp_Pnt): void;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-Mirrored(P: gp_Pnt): Geom_Geometry;
-Mirrored(A1: gp_Ax1): Geom_Geometry;
-Mirrored(A2: gp_Ax2): Geom_Geometry;
-Mirrored(P: gp_Pnt): Geom_Geometry;
-Mirrored(A1: gp_Ax1): Geom_Geometry;
-Mirrored(A2: gp_Ax2): Geom_Geometry;
-Mirrored(P: gp_Pnt): Geom_Geometry;
-Mirrored(A1: gp_Ax1): Geom_Geometry;
-Mirrored(A2: gp_Ax2): Geom_Geometry;
+  Mirrored(P: gp_Pnt): Geom_Geometry;
+  Mirrored(A1: gp_Ax1): Geom_Geometry;
+  Mirrored(A2: gp_Ax2): Geom_Geometry;
+  Mirrored(P: gp_Pnt): Geom_Geometry;
+  Mirrored(A1: gp_Ax1): Geom_Geometry;
+  Mirrored(A2: gp_Ax2): Geom_Geometry;
+  Mirrored(P: gp_Pnt): Geom_Geometry;
+  Mirrored(A1: gp_Ax1): Geom_Geometry;
+  Mirrored(A2: gp_Ax2): Geom_Geometry;
 
-Rotated(A1: gp_Ax1, Ang: number): Geom_Geometry;
+  Rotated(A1: gp_Ax1, Ang: number): Geom_Geometry;
 
-Scaled(P: gp_Pnt, S: number): Geom_Geometry;
+  Scaled(P: gp_Pnt, S: number): Geom_Geometry;
 
-Transformed(T: gp_Trsf): Geom_Geometry;
+  Transformed(T: gp_Trsf): Geom_Geometry;
 
-Translated(V: gp_Vec): Geom_Geometry;
-Translated(P1: gp_Pnt, P2: gp_Pnt): Geom_Geometry;
-Translated(V: gp_Vec): Geom_Geometry;
-Translated(P1: gp_Pnt, P2: gp_Pnt): Geom_Geometry;
+  Translated(V: gp_Vec): Geom_Geometry;
+  Translated(P1: gp_Pnt, P2: gp_Pnt): Geom_Geometry;
+  Translated(V: gp_Vec): Geom_Geometry;
+  Translated(P1: gp_Pnt, P2: gp_Pnt): Geom_Geometry;
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom_Hyperbola: declare class Geom_Hyperbola extends Geom_Conic
 
-constructor
+  constructor
 
-SetHypr(H: gp_Hypr): void;
+  SetHypr(H: gp_Hypr): void;
 
-SetMajorRadius(MajorRadius: number): void;
+  SetMajorRadius(MajorRadius: number): void;
 
-SetMinorRadius(MinorRadius: number): void;
+  SetMinorRadius(MinorRadius: number): void;
 
-Hypr(): gp_Hypr;
+  Hypr(): gp_Hypr;
 
-ReversedParameter(U: number): number;
+  ReversedParameter(U: number): number;
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-IsClosed(): boolean;
+  IsClosed(): boolean;
 
-IsPeriodic(): boolean;
+  IsPeriodic(): boolean;
 
-Asymptote1(): gp_Ax1;
+  Asymptote1(): gp_Ax1;
 
-Asymptote2(): gp_Ax1;
+  Asymptote2(): gp_Ax1;
 
-ConjugateBranch1(): gp_Hypr;
+  ConjugateBranch1(): gp_Hypr;
 
-ConjugateBranch2(): gp_Hypr;
+  ConjugateBranch2(): gp_Hypr;
 
-Directrix1(): gp_Ax1;
+  Directrix1(): gp_Ax1;
 
-Directrix2(): gp_Ax1;
+  Directrix2(): gp_Ax1;
 
-Eccentricity(): number;
+  Eccentricity(): number;
 
-Focal(): number;
+  Focal(): number;
 
-Focus1(): gp_Pnt;
+  Focus1(): gp_Pnt;
 
-Focus2(): gp_Pnt;
+  Focus2(): gp_Pnt;
 
-MajorRadius(): number;
+  MajorRadius(): number;
 
-MinorRadius(): number;
+  MinorRadius(): number;
 
-OtherBranch(): gp_Hypr;
+  OtherBranch(): gp_Hypr;
 
-Parameter(): number;
+  Parameter(): number;
 
-EvalD0(U: number): gp_Pnt;
+  EvalD0(U: number): gp_Pnt;
 
-EvalD1(U: number): Geom_Curve_ResD1;
+  EvalD1(U: number): Geom_Curve_ResD1;
 
-EvalD2(U: number): Geom_Curve_ResD2;
+  EvalD2(U: number): Geom_Curve_ResD2;
 
-EvalD3(U: number): Geom_Curve_ResD3;
+  EvalD3(U: number): Geom_Curve_ResD3;
 
-EvalDN(U: number, N: number): gp_Vec;
+  EvalDN(U: number, N: number): gp_Vec;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom_Line: declare class Geom_Line extends Geom_Curve
 
-constructor
+  constructor
 
-SetLin(L: gp_Lin): void;
+  SetLin(L: gp_Lin): void;
 
-SetDirection(V: gp_Dir): void;
+  SetDirection(V: gp_Dir): void;
 
-SetLocation(P: gp_Pnt): void;
+  SetLocation(P: gp_Pnt): void;
 
-SetPosition(A1: gp_Ax1): void;
+  SetPosition(A1: gp_Ax1): void;
 
-Lin(): gp_Lin;
+  Lin(): gp_Lin;
 
-Position(): gp_Ax1;
+  Position(): gp_Ax1;
 
-Reverse(): void;
+  Reverse(): void;
 
-ReversedParameter(U: number): number;
+  ReversedParameter(U: number): number;
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-IsClosed(): boolean;
+  IsClosed(): boolean;
 
-IsPeriodic(): boolean;
+  IsPeriodic(): boolean;
 
-Continuity(): GeomAbs_Shape;
+  Continuity(): GeomAbs_Shape;
 
-IsCN(N: number): boolean;
+  IsCN(N: number): boolean;
 
-EvalD0(U: number): gp_Pnt;
+  EvalD0(U: number): gp_Pnt;
 
-EvalD1(U: number): Geom_Curve_ResD1;
+  EvalD1(U: number): Geom_Curve_ResD1;
 
-EvalD2(U: number): Geom_Curve_ResD2;
+  EvalD2(U: number): Geom_Curve_ResD2;
 
-EvalD3(U: number): Geom_Curve_ResD3;
+  EvalD3(U: number): Geom_Curve_ResD3;
 
-EvalDN(U: number, N: number): gp_Vec;
+  EvalDN(U: number, N: number): gp_Vec;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-TransformedParameter(U: number, T: gp_Trsf): number;
+  TransformedParameter(U: number, T: gp_Trsf): number;
 
-ParametricTransformation(T: gp_Trsf): number;
+  ParametricTransformation(T: gp_Trsf): number;
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom_OffsetCurve: declare class Geom_OffsetCurve extends Geom_Curve
 
-constructor
+  constructor
 
-HasEvalRepresentation(): boolean;
+  HasEvalRepresentation(): boolean;
 
-EvalRepresentation(): GeomEval_RepCurveDesc_Base;
+  EvalRepresentation(): GeomEval_RepCurveDesc_Base;
 
-SetEvalRepresentation(theDesc: GeomEval_RepCurveDesc_Base): void;
+  SetEvalRepresentation(theDesc: GeomEval_RepCurveDesc_Base): void;
 
-ClearEvalRepresentation(): void;
+  ClearEvalRepresentation(): void;
 
-Reverse(): void;
+  Reverse(): void;
 
-ReversedParameter(U: number): number;
+  ReversedParameter(U: number): number;
 
-SetBasisCurve(C: Geom_Curve, isNotCheckC0?: boolean): void;
+  SetBasisCurve(C: Geom_Curve, isNotCheckC0?: boolean): void;
 
-SetDirection(V: gp_Dir): void;
+  SetDirection(V: gp_Dir): void;
 
-SetOffsetValue(D: number): void;
+  SetOffsetValue(D: number): void;
 
-BasisCurve(): Geom_Curve;
+  BasisCurve(): Geom_Curve;
 
-Continuity(): GeomAbs_Shape;
+  Continuity(): GeomAbs_Shape;
 
-Direction(): gp_Dir;
+  Direction(): gp_Dir;
 
-EvalD0(U: number): gp_Pnt;
+  EvalD0(U: number): gp_Pnt;
 
-EvalD1(U: number): Geom_Curve_ResD1;
+  EvalD1(U: number): Geom_Curve_ResD1;
 
-EvalD2(U: number): Geom_Curve_ResD2;
+  EvalD2(U: number): Geom_Curve_ResD2;
 
-EvalD3(U: number): Geom_Curve_ResD3;
+  EvalD3(U: number): Geom_Curve_ResD3;
 
-EvalDN(U: number, N: number): gp_Vec;
+  EvalDN(U: number, N: number): gp_Vec;
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-Offset(): number;
+  Offset(): number;
 
-IsClosed(): boolean;
+  IsClosed(): boolean;
 
-IsCN(N: number): boolean;
+  IsCN(N: number): boolean;
 
-IsPeriodic(): boolean;
+  IsPeriodic(): boolean;
 
-Period(): number;
+  Period(): number;
 
-Transform(T: gp_Trsf): void;
+  Transform(T: gp_Trsf): void;
 
-TransformedParameter(U: number, T: gp_Trsf): number;
+  TransformedParameter(U: number, T: gp_Trsf): number;
 
-ParametricTransformation(T: gp_Trsf): number;
+  ParametricTransformation(T: gp_Trsf): number;
 
-Copy(): Geom_Geometry;
+  Copy(): Geom_Geometry;
 
-GetBasisCurveContinuity(): GeomAbs_Shape;
+  GetBasisCurveContinuity(): GeomAbs_Shape;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

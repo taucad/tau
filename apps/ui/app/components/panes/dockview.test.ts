@@ -477,7 +477,7 @@ describe('dockviewStyleOverrides', () => {
       '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button]:!bg-transparent',
     );
     expect(dockviewStyleOverrides).toContain(
-      '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button:hover]:!bg-muted-foreground/15',
+      '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button:hover]:!bg-nested-action-hover',
     );
   });
 
@@ -501,13 +501,19 @@ describe('dockviewStyleOverrides', () => {
     expect(dockviewStyleOverrides).toContain('[&_.dv-tab]:rounded-sm');
     expect(dockviewStyleOverrides).toContain('[&_.dv-tab:not(.dv-active-tab):hover]:!bg-accent');
     expect(dockviewStyleOverrides).toContain('[&_.dv-tab:not(.dv-active-tab):hover]:!text-muted-foreground');
-    expect(dockviewStyleOverrides).toContain('[&_.dv-tab:focus-visible]:ring-2');
-    expect(dockviewStyleOverrides).toContain('[&_.dv-tab:focus-visible]:ring-ring/50');
+    expect(dockviewStyleOverrides).toContain('[&_.dv-tab:focus-visible]:focus-outline');
   });
 
   it('preserves the active title fade and smooth close-action overlay', () => {
     expect(dockviewStyleOverrides).not.toContain('[&_.dv-tab.dv-active-tab_.dockview-tab-title]:[mask-image:none]');
-    expect(dockviewStyleOverrides).toContain('[&_.dv-tab.dv-active-tab_.dockview-tab-title]:[--scroll-fade-size:42px]');
+    /* The active tab always shows its close action, so it always carries the wide fade. The size
+       comes from the shared `--fade-label-size-actions` token, never a restated pixel value. */
+    expect(dockviewStyleOverrides).toContain(
+      '[&_.dv-tab.dv-active-tab_.dockview-tab-title]:[--fade-label-size:var(--fade-label-size-actions)]',
+    );
+    /* The tabs container keeps its own `--scroll-fade-size` for horizontal scroll; only the title
+       moved onto the shared label token. */
+    expect(dockviewStyleOverrides).not.toContain('.dockview-tab-title]:[--scroll-fade-size');
     expect(dockviewStyleOverrides).not.toContain(
       '[&_.dv-tab.dv-active-tab_.dv-default-tab-action::before]:![content:none]',
     );
@@ -524,7 +530,9 @@ describe('dockviewStyleOverrides', () => {
     expect(dockviewStyleOverrides).toContain(
       '[&_.dv-tab.dv-active-tab_.dv-default-tab_.dv-default-tab-action:not(:hover)]:!bg-accent',
     );
-    expect(dockviewStyleOverrides).toContain('[&_.dv-tab_.dv-default-tab_.dv-default-tab-action:hover]:!bg-input');
+    expect(dockviewStyleOverrides).toContain(
+      '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action:hover]:!bg-nested-action-hover',
+    );
   });
 
   it('shows short dividers only between adjacent inactive tabs', () => {

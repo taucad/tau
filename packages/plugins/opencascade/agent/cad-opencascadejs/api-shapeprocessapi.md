@@ -4,18 +4,18 @@
 
 ShapeProcessAPI_ApplySequence: declare class ShapeProcessAPI_ApplySequence
 
-constructor
+  constructor
 
-Context(): ShapeProcess_ShapeContext;
+  Context(): ShapeProcess_ShapeContext;
 
-PrepareShape(shape: TopoDS_Shape, fillmap?: boolean, until?: TopAbs_ShapeEnum, theProgress?: Message_ProgressRange): TopoDS_Shape;
+  PrepareShape(shape: TopoDS_Shape, fillmap?: boolean, until?: TopAbs_ShapeEnum, theProgress?: Message_ProgressRange): TopoDS_Shape;
 
-ClearMap(): void;
+  ClearMap(): void;
 
-Map(): NCollection_DataMap_TopoDS_Shape_TopoDS_Shape_TopTools_ShapeMapHasher;
+  Map(): NCollection_DataMap_TopoDS_Shape_TopoDS_Shape_TopTools_ShapeMapHasher;
 
-PrintPreparationResult(): void;
+  PrintPreparationResult(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

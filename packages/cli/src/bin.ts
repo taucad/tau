@@ -61,6 +61,10 @@ const subCommands: Record<string, CommandDef> = {
     const { revisionsCommand } = await import('./commands/revisions.js');
     return revisionsCommand as CommandDef;
   }),
+  open: lazyCommand('open', 'Open one of this account’s Tau Cloud projects on this machine', async () => {
+    const { openCommand } = await import('./commands/open.js');
+    return openCommand as CommandDef;
+  }),
   publish: lazyCommand('publish', 'Publish a named version of a project to Tau Cloud and print its link', async () => {
     const { publishCommand } = await import('./commands/publish.js');
     return publishCommand as CommandDef;
@@ -144,13 +148,17 @@ try {
   // A machine-mode stream whose last record is missing is indistinguishable from
   // a truncated one, so a failed `--jsonl` run still ends with its outcome.
   if (rawArgs.includes('--json') || rawArgs.includes('--jsonl')) {
-    const { code } = error as { readonly code?: unknown };
+    const { code, details } = error as {
+      readonly code?: unknown;
+      readonly details?: unknown;
+    };
     await emit({
       kind: 'outcome',
       ok: false,
       code: typeof code === 'string' ? code : 'CLI_FAILED',
       exit,
       message,
+      ...(details === undefined ? {} : { details }),
     });
   }
 }

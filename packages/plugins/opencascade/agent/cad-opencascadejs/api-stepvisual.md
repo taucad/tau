@@ -4,707 +4,707 @@
 
 StepVisual_AnnotationCurveOccurrence: declare class StepVisual_AnnotationCurveOccurrence extends StepVisual_AnnotationOccurrence
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_AnnotationCurveOccurrenceAndGeomReprItem: declare class StepVisual_AnnotationCurveOccurrenceAndGeomReprItem extends StepVisual_AnnotationCurveOccurrence
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_AnnotationFillArea: declare class StepVisual_AnnotationFillArea extends StepShape_GeometricCurveSet
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_AnnotationFillAreaOccurrence: declare class StepVisual_AnnotationFillAreaOccurrence extends StepVisual_AnnotationOccurrence
 
-constructor
+  constructor
 
-Init(theName: TCollection_HAsciiString, theStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, theItem: Standard_Transient, theFillStyleTarget: StepGeom_GeometricRepresentationItem): void;
-Init(aName: TCollection_HAsciiString, aStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, aItem: Standard_Transient): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(theName: TCollection_HAsciiString, theStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, theItem: Standard_Transient, theFillStyleTarget: StepGeom_GeometricRepresentationItem): void;
-Init(aName: TCollection_HAsciiString, aStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, aItem: Standard_Transient): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(theName: TCollection_HAsciiString, theStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, theItem: Standard_Transient, theFillStyleTarget: StepGeom_GeometricRepresentationItem): void;
-Init(aName: TCollection_HAsciiString, aStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, aItem: Standard_Transient): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(theName: TCollection_HAsciiString, theStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, theItem: Standard_Transient, theFillStyleTarget: StepGeom_GeometricRepresentationItem): void;
+  Init(aName: TCollection_HAsciiString, aStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, aItem: Standard_Transient): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(theName: TCollection_HAsciiString, theStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, theItem: Standard_Transient, theFillStyleTarget: StepGeom_GeometricRepresentationItem): void;
+  Init(aName: TCollection_HAsciiString, aStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, aItem: Standard_Transient): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(theName: TCollection_HAsciiString, theStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, theItem: Standard_Transient, theFillStyleTarget: StepGeom_GeometricRepresentationItem): void;
+  Init(aName: TCollection_HAsciiString, aStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, aItem: Standard_Transient): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-FillStyleTarget(): StepGeom_GeometricRepresentationItem;
+  FillStyleTarget(): StepGeom_GeometricRepresentationItem;
 
-SetFillStyleTarget(theTarget: StepGeom_GeometricRepresentationItem): void;
+  SetFillStyleTarget(theTarget: StepGeom_GeometricRepresentationItem): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_AnnotationOccurrence: declare class StepVisual_AnnotationOccurrence extends StepVisual_StyledItem
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_AnnotationPlane: declare class StepVisual_AnnotationPlane extends StepVisual_AnnotationOccurrence
 
-constructor
+  constructor
 
-Init(theName: TCollection_HAsciiString, theStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, theItem: Standard_Transient, theElements: NCollection_HArray1_StepVisual_AnnotationPlaneElement): void;
-Init(aName: TCollection_HAsciiString, aStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, aItem: Standard_Transient): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(theName: TCollection_HAsciiString, theStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, theItem: Standard_Transient, theElements: NCollection_HArray1_StepVisual_AnnotationPlaneElement): void;
-Init(aName: TCollection_HAsciiString, aStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, aItem: Standard_Transient): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(theName: TCollection_HAsciiString, theStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, theItem: Standard_Transient, theElements: NCollection_HArray1_StepVisual_AnnotationPlaneElement): void;
-Init(aName: TCollection_HAsciiString, aStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, aItem: Standard_Transient): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(theName: TCollection_HAsciiString, theStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, theItem: Standard_Transient, theElements: NCollection_HArray1_StepVisual_AnnotationPlaneElement): void;
+  Init(aName: TCollection_HAsciiString, aStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, aItem: Standard_Transient): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(theName: TCollection_HAsciiString, theStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, theItem: Standard_Transient, theElements: NCollection_HArray1_StepVisual_AnnotationPlaneElement): void;
+  Init(aName: TCollection_HAsciiString, aStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, aItem: Standard_Transient): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(theName: TCollection_HAsciiString, theStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, theItem: Standard_Transient, theElements: NCollection_HArray1_StepVisual_AnnotationPlaneElement): void;
+  Init(aName: TCollection_HAsciiString, aStyles: NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment, aItem: Standard_Transient): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-Elements(): NCollection_HArray1_StepVisual_AnnotationPlaneElement;
+  Elements(): NCollection_HArray1_StepVisual_AnnotationPlaneElement;
 
-SetElements(theElements: NCollection_HArray1_StepVisual_AnnotationPlaneElement): void;
+  SetElements(theElements: NCollection_HArray1_StepVisual_AnnotationPlaneElement): void;
 
-NbElements(): number;
+  NbElements(): number;
 
-ElementsValue(theNum: number): StepVisual_AnnotationPlaneElement;
+  ElementsValue(theNum: number): StepVisual_AnnotationPlaneElement;
 
-SetElementsValue(theNum: number, theItem: StepVisual_AnnotationPlaneElement): void;
+  SetElementsValue(theNum: number, theItem: StepVisual_AnnotationPlaneElement): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_AnnotationPlaneElement: declare class StepVisual_AnnotationPlaneElement extends StepData_SelectType
 
-constructor
+  constructor
 
-CaseNum(ent: Standard_Transient): number;
+  CaseNum(ent: Standard_Transient): number;
 
-DraughtingCallout(): StepVisual_DraughtingCallout;
+  DraughtingCallout(): StepVisual_DraughtingCallout;
 
-StyledItem(): StepVisual_StyledItem;
+  StyledItem(): StepVisual_StyledItem;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_AnnotationText: declare class StepVisual_AnnotationText extends StepRepr_MappedItem
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_AnnotationTextOccurrence: declare class StepVisual_AnnotationTextOccurrence extends StepVisual_AnnotationOccurrence
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_AreaInSet: declare class StepVisual_AreaInSet extends Standard_Transient
 
-constructor
+  constructor
 
-Init(aArea: StepVisual_PresentationArea, aInSet: StepVisual_PresentationSet): void;
+  Init(aArea: StepVisual_PresentationArea, aInSet: StepVisual_PresentationSet): void;
 
-SetArea(aArea: StepVisual_PresentationArea): void;
+  SetArea(aArea: StepVisual_PresentationArea): void;
 
-Area(): StepVisual_PresentationArea;
+  Area(): StepVisual_PresentationArea;
 
-SetInSet(aInSet: StepVisual_PresentationSet): void;
+  SetInSet(aInSet: StepVisual_PresentationSet): void;
 
-InSet(): StepVisual_PresentationSet;
+  InSet(): StepVisual_PresentationSet;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_AreaOrView: declare class StepVisual_AreaOrView extends StepData_SelectType
 
-constructor
+  constructor
 
-CaseNum(ent: Standard_Transient): number;
+  CaseNum(ent: Standard_Transient): number;
 
-PresentationArea(): StepVisual_PresentationArea;
+  PresentationArea(): StepVisual_PresentationArea;
 
-PresentationView(): StepVisual_PresentationView;
+  PresentationView(): StepVisual_PresentationView;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_BackgroundColour: declare class StepVisual_BackgroundColour extends StepVisual_Colour
 
-constructor
+  constructor
 
-Init(aPresentation: StepVisual_AreaOrView): void;
+  Init(aPresentation: StepVisual_AreaOrView): void;
 
-SetPresentation(aPresentation: StepVisual_AreaOrView): void;
+  SetPresentation(aPresentation: StepVisual_AreaOrView): void;
 
-Presentation(): StepVisual_AreaOrView;
+  Presentation(): StepVisual_AreaOrView;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_BoxCharacteristicSelect: declare class StepVisual_BoxCharacteristicSelect
 
-constructor
+  constructor
 
-TypeOfContent(): number;
+  TypeOfContent(): number;
 
-SetTypeOfContent(aType: number): void;
+  SetTypeOfContent(aType: number): void;
 
-RealValue(): number;
+  RealValue(): number;
 
-SetRealValue(aValue: number): void;
+  SetRealValue(aValue: number): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_CameraImage: declare class StepVisual_CameraImage extends StepRepr_MappedItem
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_CameraImage2dWithScale: declare class StepVisual_CameraImage2dWithScale extends StepVisual_CameraImage
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_CameraImage3dWithScale: declare class StepVisual_CameraImage3dWithScale extends StepVisual_CameraImage
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_CameraModel: declare class StepVisual_CameraModel extends StepGeom_GeometricRepresentationItem
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_CameraModelD2: declare class StepVisual_CameraModelD2 extends StepVisual_CameraModel
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, aViewWindow: StepVisual_PlanarBox, aViewWindowClipping: boolean): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aViewWindow: StepVisual_PlanarBox, aViewWindowClipping: boolean): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aViewWindow: StepVisual_PlanarBox, aViewWindowClipping: boolean): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aViewWindow: StepVisual_PlanarBox, aViewWindowClipping: boolean): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetViewWindow(aViewWindow: StepVisual_PlanarBox): void;
+  SetViewWindow(aViewWindow: StepVisual_PlanarBox): void;
 
-ViewWindow(): StepVisual_PlanarBox;
+  ViewWindow(): StepVisual_PlanarBox;
 
-SetViewWindowClipping(aViewWindowClipping: boolean): void;
+  SetViewWindowClipping(aViewWindowClipping: boolean): void;
 
-ViewWindowClipping(): boolean;
+  ViewWindowClipping(): boolean;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_CameraModelD3: declare class StepVisual_CameraModelD3 extends StepVisual_CameraModel
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, aViewReferenceSystem: StepGeom_Axis2Placement3d, aPerspectiveOfVolume: StepVisual_ViewVolume): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aViewReferenceSystem: StepGeom_Axis2Placement3d, aPerspectiveOfVolume: StepVisual_ViewVolume): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aViewReferenceSystem: StepGeom_Axis2Placement3d, aPerspectiveOfVolume: StepVisual_ViewVolume): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aViewReferenceSystem: StepGeom_Axis2Placement3d, aPerspectiveOfVolume: StepVisual_ViewVolume): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetViewReferenceSystem(aViewReferenceSystem: StepGeom_Axis2Placement3d): void;
+  SetViewReferenceSystem(aViewReferenceSystem: StepGeom_Axis2Placement3d): void;
 
-ViewReferenceSystem(): StepGeom_Axis2Placement3d;
+  ViewReferenceSystem(): StepGeom_Axis2Placement3d;
 
-SetPerspectiveOfVolume(aPerspectiveOfVolume: StepVisual_ViewVolume): void;
+  SetPerspectiveOfVolume(aPerspectiveOfVolume: StepVisual_ViewVolume): void;
 
-PerspectiveOfVolume(): StepVisual_ViewVolume;
+  PerspectiveOfVolume(): StepVisual_ViewVolume;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_CameraModelD3MultiClipping: declare class StepVisual_CameraModelD3MultiClipping extends StepVisual_CameraModelD3
 
-constructor
+  constructor
 
-Init(theName: TCollection_HAsciiString, theViewReferenceSystem: StepGeom_Axis2Placement3d, thePerspectiveOfVolume: StepVisual_ViewVolume, theShapeClipping: NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect): void;
-Init(aName: TCollection_HAsciiString, aViewReferenceSystem: StepGeom_Axis2Placement3d, aPerspectiveOfVolume: StepVisual_ViewVolume): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(theName: TCollection_HAsciiString, theViewReferenceSystem: StepGeom_Axis2Placement3d, thePerspectiveOfVolume: StepVisual_ViewVolume, theShapeClipping: NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect): void;
-Init(aName: TCollection_HAsciiString, aViewReferenceSystem: StepGeom_Axis2Placement3d, aPerspectiveOfVolume: StepVisual_ViewVolume): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(theName: TCollection_HAsciiString, theViewReferenceSystem: StepGeom_Axis2Placement3d, thePerspectiveOfVolume: StepVisual_ViewVolume, theShapeClipping: NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect): void;
-Init(aName: TCollection_HAsciiString, aViewReferenceSystem: StepGeom_Axis2Placement3d, aPerspectiveOfVolume: StepVisual_ViewVolume): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(theName: TCollection_HAsciiString, theViewReferenceSystem: StepGeom_Axis2Placement3d, thePerspectiveOfVolume: StepVisual_ViewVolume, theShapeClipping: NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect): void;
+  Init(aName: TCollection_HAsciiString, aViewReferenceSystem: StepGeom_Axis2Placement3d, aPerspectiveOfVolume: StepVisual_ViewVolume): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(theName: TCollection_HAsciiString, theViewReferenceSystem: StepGeom_Axis2Placement3d, thePerspectiveOfVolume: StepVisual_ViewVolume, theShapeClipping: NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect): void;
+  Init(aName: TCollection_HAsciiString, aViewReferenceSystem: StepGeom_Axis2Placement3d, aPerspectiveOfVolume: StepVisual_ViewVolume): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(theName: TCollection_HAsciiString, theViewReferenceSystem: StepGeom_Axis2Placement3d, thePerspectiveOfVolume: StepVisual_ViewVolume, theShapeClipping: NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect): void;
+  Init(aName: TCollection_HAsciiString, aViewReferenceSystem: StepGeom_Axis2Placement3d, aPerspectiveOfVolume: StepVisual_ViewVolume): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetShapeClipping(theShapeClipping: NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect): void;
+  SetShapeClipping(theShapeClipping: NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect): void;
 
-ShapeClipping(): NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect;
+  ShapeClipping(): NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_CameraModelD3MultiClippingInterectionSelect: declare class StepVisual_CameraModelD3MultiClippingInterectionSelect extends StepData_SelectType
 
-constructor
+  constructor
 
-CaseNum(ent: Standard_Transient): number;
+  CaseNum(ent: Standard_Transient): number;
 
-Plane(): StepGeom_Plane;
+  Plane(): StepGeom_Plane;
 
-CameraModelD3MultiClippingUnion(): StepVisual_CameraModelD3MultiClippingUnion;
+  CameraModelD3MultiClippingUnion(): StepVisual_CameraModelD3MultiClippingUnion;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_CameraModelD3MultiClippingIntersection: declare class StepVisual_CameraModelD3MultiClippingIntersection extends StepGeom_GeometricRepresentationItem
 
-constructor
+  constructor
 
-Init(theName: TCollection_HAsciiString, theShapeClipping: NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(theName: TCollection_HAsciiString, theShapeClipping: NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(theName: TCollection_HAsciiString, theShapeClipping: NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(theName: TCollection_HAsciiString, theShapeClipping: NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetShapeClipping(theShapeClipping: NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect): void;
+  SetShapeClipping(theShapeClipping: NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect): void;
 
-ShapeClipping(): NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect;
+  ShapeClipping(): NCollection_HArray1_StepVisual_CameraModelD3MultiClippingInterectionSelect;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_CameraModelD3MultiClippingUnion: declare class StepVisual_CameraModelD3MultiClippingUnion extends StepGeom_GeometricRepresentationItem
 
-constructor
+  constructor
 
-Init(theName: TCollection_HAsciiString, theShapeClipping: NCollection_HArray1_StepVisual_CameraModelD3MultiClippingUnionSelect): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(theName: TCollection_HAsciiString, theShapeClipping: NCollection_HArray1_StepVisual_CameraModelD3MultiClippingUnionSelect): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(theName: TCollection_HAsciiString, theShapeClipping: NCollection_HArray1_StepVisual_CameraModelD3MultiClippingUnionSelect): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(theName: TCollection_HAsciiString, theShapeClipping: NCollection_HArray1_StepVisual_CameraModelD3MultiClippingUnionSelect): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetShapeClipping(theShapeClipping: NCollection_HArray1_StepVisual_CameraModelD3MultiClippingUnionSelect): void;
+  SetShapeClipping(theShapeClipping: NCollection_HArray1_StepVisual_CameraModelD3MultiClippingUnionSelect): void;
 
-ShapeClipping(): NCollection_HArray1_StepVisual_CameraModelD3MultiClippingUnionSelect;
+  ShapeClipping(): NCollection_HArray1_StepVisual_CameraModelD3MultiClippingUnionSelect;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_CameraModelD3MultiClippingUnionSelect: declare class StepVisual_CameraModelD3MultiClippingUnionSelect extends StepData_SelectType
 
-constructor
+  constructor
 
-CaseNum(ent: Standard_Transient): number;
+  CaseNum(ent: Standard_Transient): number;
 
-Plane(): StepGeom_Plane;
+  Plane(): StepGeom_Plane;
 
-CameraModelD3MultiClippingIntersection(): StepVisual_CameraModelD3MultiClippingIntersection;
+  CameraModelD3MultiClippingIntersection(): StepVisual_CameraModelD3MultiClippingIntersection;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_CameraUsage: declare class StepVisual_CameraUsage extends StepRepr_RepresentationMap
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_CentralOrParallel: typeof StepVisual_CentralOrParallel[keyof typeof StepVisual_CentralOrParallel]
 
 StepVisual_CharacterizedObjAndRepresentationAndDraughtingModel: declare class StepVisual_CharacterizedObjAndRepresentationAndDraughtingModel extends StepVisual_DraughtingModel
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_Colour: declare class StepVisual_Colour extends Standard_Transient
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_ColourRgb: declare class StepVisual_ColourRgb extends StepVisual_ColourSpecification
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, aRed: number, aGreen: number, aBlue: number): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aRed: number, aGreen: number, aBlue: number): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aRed: number, aGreen: number, aBlue: number): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aRed: number, aGreen: number, aBlue: number): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetRed(aRed: number): void;
+  SetRed(aRed: number): void;
 
-Red(): number;
+  Red(): number;
 
-SetGreen(aGreen: number): void;
+  SetGreen(aGreen: number): void;
 
-Green(): number;
+  Green(): number;
 
-SetBlue(aBlue: number): void;
+  SetBlue(aBlue: number): void;
 
-Blue(): number;
+  Blue(): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_ColourSpecification: declare class StepVisual_ColourSpecification extends StepVisual_Colour
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetName(aName: TCollection_HAsciiString): void;
+  SetName(aName: TCollection_HAsciiString): void;
 
-Name(): TCollection_HAsciiString;
+  Name(): TCollection_HAsciiString;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_ComplexTriangulatedFace: declare class StepVisual_ComplexTriangulatedFace extends StepVisual_TessellatedFace
 
-constructor
+  constructor
 
-Init(theRepresentationItem_Name: TCollection_HAsciiString, theTessellatedFace_Coordinates: StepVisual_CoordinatesList, theTessellatedFace_Pnmax: number, theTessellatedFace_Normals: NCollection_HArray2_double, theHasTessellatedFace_GeometricLink: boolean, theTessellatedFace_GeometricLink: StepVisual_FaceOrSurface, thePnindex: NCollection_HArray1_int, theTriangleStrips: NCollection_HArray1_handle_Standard_Transient, theTriangleFans: NCollection_HArray1_handle_Standard_Transient): void;
-Init(theRepresentationItem_Name: TCollection_HAsciiString, theCoordinates: StepVisual_CoordinatesList, thePnmax: number, theNormals: NCollection_HArray2_double, theHasGeometricLink: boolean, theGeometricLink: StepVisual_FaceOrSurface): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(theRepresentationItem_Name: TCollection_HAsciiString, theTessellatedFace_Coordinates: StepVisual_CoordinatesList, theTessellatedFace_Pnmax: number, theTessellatedFace_Normals: NCollection_HArray2_double, theHasTessellatedFace_GeometricLink: boolean, theTessellatedFace_GeometricLink: StepVisual_FaceOrSurface, thePnindex: NCollection_HArray1_int, theTriangleStrips: NCollection_HArray1_handle_Standard_Transient, theTriangleFans: NCollection_HArray1_handle_Standard_Transient): void;
-Init(theRepresentationItem_Name: TCollection_HAsciiString, theCoordinates: StepVisual_CoordinatesList, thePnmax: number, theNormals: NCollection_HArray2_double, theHasGeometricLink: boolean, theGeometricLink: StepVisual_FaceOrSurface): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(theRepresentationItem_Name: TCollection_HAsciiString, theTessellatedFace_Coordinates: StepVisual_CoordinatesList, theTessellatedFace_Pnmax: number, theTessellatedFace_Normals: NCollection_HArray2_double, theHasTessellatedFace_GeometricLink: boolean, theTessellatedFace_GeometricLink: StepVisual_FaceOrSurface, thePnindex: NCollection_HArray1_int, theTriangleStrips: NCollection_HArray1_handle_Standard_Transient, theTriangleFans: NCollection_HArray1_handle_Standard_Transient): void;
-Init(theRepresentationItem_Name: TCollection_HAsciiString, theCoordinates: StepVisual_CoordinatesList, thePnmax: number, theNormals: NCollection_HArray2_double, theHasGeometricLink: boolean, theGeometricLink: StepVisual_FaceOrSurface): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(theRepresentationItem_Name: TCollection_HAsciiString, theTessellatedFace_Coordinates: StepVisual_CoordinatesList, theTessellatedFace_Pnmax: number, theTessellatedFace_Normals: NCollection_HArray2_double, theHasTessellatedFace_GeometricLink: boolean, theTessellatedFace_GeometricLink: StepVisual_FaceOrSurface, thePnindex: NCollection_HArray1_int, theTriangleStrips: NCollection_HArray1_handle_Standard_Transient, theTriangleFans: NCollection_HArray1_handle_Standard_Transient): void;
+  Init(theRepresentationItem_Name: TCollection_HAsciiString, theCoordinates: StepVisual_CoordinatesList, thePnmax: number, theNormals: NCollection_HArray2_double, theHasGeometricLink: boolean, theGeometricLink: StepVisual_FaceOrSurface): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(theRepresentationItem_Name: TCollection_HAsciiString, theTessellatedFace_Coordinates: StepVisual_CoordinatesList, theTessellatedFace_Pnmax: number, theTessellatedFace_Normals: NCollection_HArray2_double, theHasTessellatedFace_GeometricLink: boolean, theTessellatedFace_GeometricLink: StepVisual_FaceOrSurface, thePnindex: NCollection_HArray1_int, theTriangleStrips: NCollection_HArray1_handle_Standard_Transient, theTriangleFans: NCollection_HArray1_handle_Standard_Transient): void;
+  Init(theRepresentationItem_Name: TCollection_HAsciiString, theCoordinates: StepVisual_CoordinatesList, thePnmax: number, theNormals: NCollection_HArray2_double, theHasGeometricLink: boolean, theGeometricLink: StepVisual_FaceOrSurface): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(theRepresentationItem_Name: TCollection_HAsciiString, theTessellatedFace_Coordinates: StepVisual_CoordinatesList, theTessellatedFace_Pnmax: number, theTessellatedFace_Normals: NCollection_HArray2_double, theHasTessellatedFace_GeometricLink: boolean, theTessellatedFace_GeometricLink: StepVisual_FaceOrSurface, thePnindex: NCollection_HArray1_int, theTriangleStrips: NCollection_HArray1_handle_Standard_Transient, theTriangleFans: NCollection_HArray1_handle_Standard_Transient): void;
+  Init(theRepresentationItem_Name: TCollection_HAsciiString, theCoordinates: StepVisual_CoordinatesList, thePnmax: number, theNormals: NCollection_HArray2_double, theHasGeometricLink: boolean, theGeometricLink: StepVisual_FaceOrSurface): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-Pnindex(): NCollection_HArray1_int;
+  Pnindex(): NCollection_HArray1_int;
 
-SetPnindex(thePnindex: NCollection_HArray1_int): void;
+  SetPnindex(thePnindex: NCollection_HArray1_int): void;
 
-NbPnindex(): number;
+  NbPnindex(): number;
 
-PnindexValue(theNum: number): number;
+  PnindexValue(theNum: number): number;
 
-TriangleStrips(): NCollection_HArray1_handle_Standard_Transient;
+  TriangleStrips(): NCollection_HArray1_handle_Standard_Transient;
 
-SetTriangleStrips(theTriangleStrips: NCollection_HArray1_handle_Standard_Transient): void;
+  SetTriangleStrips(theTriangleStrips: NCollection_HArray1_handle_Standard_Transient): void;
 
-NbTriangleStrips(): number;
+  NbTriangleStrips(): number;
 
-TriangleFans(): NCollection_HArray1_handle_Standard_Transient;
+  TriangleFans(): NCollection_HArray1_handle_Standard_Transient;
 
-SetTriangleFans(theTriangleFans: NCollection_HArray1_handle_Standard_Transient): void;
+  SetTriangleFans(theTriangleFans: NCollection_HArray1_handle_Standard_Transient): void;
 
-NbTriangleFans(): number;
+  NbTriangleFans(): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_ComplexTriangulatedSurfaceSet: declare class StepVisual_ComplexTriangulatedSurfaceSet extends StepVisual_TessellatedSurfaceSet
 
-constructor
+  constructor
 
-Init(theRepresentationItem_Name: TCollection_HAsciiString, theTessellatedSurfaceSet_Coordinates: StepVisual_CoordinatesList, theTessellatedSurfaceSet_Pnmax: number, theTessellatedSurfaceSet_Normals: NCollection_HArray2_double, thePnindex: NCollection_HArray1_int, theTriangleStrips: NCollection_HArray1_handle_Standard_Transient, theTriangleFans: NCollection_HArray1_handle_Standard_Transient): void;
-Init(theRepresentationItem_Name: TCollection_HAsciiString, theCoordinates: StepVisual_CoordinatesList, thePnmax: number, theNormals: NCollection_HArray2_double): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(theRepresentationItem_Name: TCollection_HAsciiString, theTessellatedSurfaceSet_Coordinates: StepVisual_CoordinatesList, theTessellatedSurfaceSet_Pnmax: number, theTessellatedSurfaceSet_Normals: NCollection_HArray2_double, thePnindex: NCollection_HArray1_int, theTriangleStrips: NCollection_HArray1_handle_Standard_Transient, theTriangleFans: NCollection_HArray1_handle_Standard_Transient): void;
-Init(theRepresentationItem_Name: TCollection_HAsciiString, theCoordinates: StepVisual_CoordinatesList, thePnmax: number, theNormals: NCollection_HArray2_double): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(theRepresentationItem_Name: TCollection_HAsciiString, theTessellatedSurfaceSet_Coordinates: StepVisual_CoordinatesList, theTessellatedSurfaceSet_Pnmax: number, theTessellatedSurfaceSet_Normals: NCollection_HArray2_double, thePnindex: NCollection_HArray1_int, theTriangleStrips: NCollection_HArray1_handle_Standard_Transient, theTriangleFans: NCollection_HArray1_handle_Standard_Transient): void;
-Init(theRepresentationItem_Name: TCollection_HAsciiString, theCoordinates: StepVisual_CoordinatesList, thePnmax: number, theNormals: NCollection_HArray2_double): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(theRepresentationItem_Name: TCollection_HAsciiString, theTessellatedSurfaceSet_Coordinates: StepVisual_CoordinatesList, theTessellatedSurfaceSet_Pnmax: number, theTessellatedSurfaceSet_Normals: NCollection_HArray2_double, thePnindex: NCollection_HArray1_int, theTriangleStrips: NCollection_HArray1_handle_Standard_Transient, theTriangleFans: NCollection_HArray1_handle_Standard_Transient): void;
+  Init(theRepresentationItem_Name: TCollection_HAsciiString, theCoordinates: StepVisual_CoordinatesList, thePnmax: number, theNormals: NCollection_HArray2_double): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(theRepresentationItem_Name: TCollection_HAsciiString, theTessellatedSurfaceSet_Coordinates: StepVisual_CoordinatesList, theTessellatedSurfaceSet_Pnmax: number, theTessellatedSurfaceSet_Normals: NCollection_HArray2_double, thePnindex: NCollection_HArray1_int, theTriangleStrips: NCollection_HArray1_handle_Standard_Transient, theTriangleFans: NCollection_HArray1_handle_Standard_Transient): void;
+  Init(theRepresentationItem_Name: TCollection_HAsciiString, theCoordinates: StepVisual_CoordinatesList, thePnmax: number, theNormals: NCollection_HArray2_double): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(theRepresentationItem_Name: TCollection_HAsciiString, theTessellatedSurfaceSet_Coordinates: StepVisual_CoordinatesList, theTessellatedSurfaceSet_Pnmax: number, theTessellatedSurfaceSet_Normals: NCollection_HArray2_double, thePnindex: NCollection_HArray1_int, theTriangleStrips: NCollection_HArray1_handle_Standard_Transient, theTriangleFans: NCollection_HArray1_handle_Standard_Transient): void;
+  Init(theRepresentationItem_Name: TCollection_HAsciiString, theCoordinates: StepVisual_CoordinatesList, thePnmax: number, theNormals: NCollection_HArray2_double): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-Pnindex(): NCollection_HArray1_int;
+  Pnindex(): NCollection_HArray1_int;
 
-SetPnindex(thePnindex: NCollection_HArray1_int): void;
+  SetPnindex(thePnindex: NCollection_HArray1_int): void;
 
-NbPnindex(): number;
+  NbPnindex(): number;
 
-PnindexValue(theNum: number): number;
+  PnindexValue(theNum: number): number;
 
-TriangleStrips(): NCollection_HArray1_handle_Standard_Transient;
+  TriangleStrips(): NCollection_HArray1_handle_Standard_Transient;
 
-SetTriangleStrips(theTriangleStrips: NCollection_HArray1_handle_Standard_Transient): void;
+  SetTriangleStrips(theTriangleStrips: NCollection_HArray1_handle_Standard_Transient): void;
 
-NbTriangleStrips(): number;
+  NbTriangleStrips(): number;
 
-TriangleFans(): NCollection_HArray1_handle_Standard_Transient;
+  TriangleFans(): NCollection_HArray1_handle_Standard_Transient;
 
-SetTriangleFans(theTriangleFans: NCollection_HArray1_handle_Standard_Transient): void;
+  SetTriangleFans(theTriangleFans: NCollection_HArray1_handle_Standard_Transient): void;
 
-NbTriangleFans(): number;
+  NbTriangleFans(): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_CompositeText: declare class StepVisual_CompositeText extends StepGeom_GeometricRepresentationItem
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetCollectedText(aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter): void;
+  SetCollectedText(aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter): void;
 
-CollectedText(): NCollection_HArray1_StepVisual_TextOrCharacter;
+  CollectedText(): NCollection_HArray1_StepVisual_TextOrCharacter;
 
-CollectedTextValue(num: number): StepVisual_TextOrCharacter;
+  CollectedTextValue(num: number): StepVisual_TextOrCharacter;
 
-NbCollectedText(): number;
+  NbCollectedText(): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_CompositeTextWithExtent: declare class StepVisual_CompositeTextWithExtent extends StepVisual_CompositeText
 
-constructor
+  constructor
 
-Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter, aExtent: StepVisual_PlanarExtent): void;
-Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter, aExtent: StepVisual_PlanarExtent): void;
-Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter): void;
-Init(aName: TCollection_HAsciiString): void;
-Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter, aExtent: StepVisual_PlanarExtent): void;
-Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter): void;
-Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter, aExtent: StepVisual_PlanarExtent): void;
+  Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter, aExtent: StepVisual_PlanarExtent): void;
+  Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter): void;
+  Init(aName: TCollection_HAsciiString): void;
+  Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter, aExtent: StepVisual_PlanarExtent): void;
+  Init(aName: TCollection_HAsciiString, aCollectedText: NCollection_HArray1_StepVisual_TextOrCharacter): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-SetExtent(aExtent: StepVisual_PlanarExtent): void;
+  SetExtent(aExtent: StepVisual_PlanarExtent): void;
 
-Extent(): StepVisual_PlanarExtent;
+  Extent(): StepVisual_PlanarExtent;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepVisual_ContextDependentInvisibility: declare class StepVisual_ContextDependentInvisibility extends StepVisual_Invisibility
 
-constructor
+  constructor
 
-Init(aInvisibleItems: NCollection_HArray1_StepVisual_InvisibleItem, aPresentationContext: StepVisual_InvisibilityContext): void;
-Init(aInvisibleItems: NCollection_HArray1_StepVisual_InvisibleItem): void;
-Init(aInvisibleItems: NCollection_HArray1_StepVisual_InvisibleItem, aPresentationContext: StepVisual_InvisibilityContext): void;
-Init(aInvisibleItems: NCollection_HArray1_StepVisual_InvisibleItem): void;
+  Init(aInvisibleItems: NCollection_HArray1_StepVisual_InvisibleItem, aPresentationContext: StepVisual_InvisibilityContext): void;
+  Init(aInvisibleItems: NCollection_HArray1_StepVisual_InvisibleItem): void;
+  Init(aInvisibleItems: NCollection_HArray1_StepVisual_InvisibleItem, aPresentationContext: StepVisual_InvisibilityContext): void;
+  Init(aInvisibleItems: NCollection_HArray1_StepVisual_InvisibleItem): void;
 
-SetPresentationContext(aPresentationContext: StepVisual_InvisibilityContext): void;
+  SetPresentationContext(aPresentationContext: StepVisual_InvisibilityContext): void;
 
-PresentationContext(): StepVisual_InvisibilityContext;
+  PresentationContext(): StepVisual_InvisibilityContext;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

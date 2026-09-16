@@ -28,6 +28,15 @@ export const httpHeader = {
   // The key mirrors the value by the constants contract, so it keeps the
   // `x-tau-` prefix of `x-tau-attempt-id` rather than RFC 6648's advice.
   xTauProxyAuthorization: 'x-tau-proxy-authorization',
+  /**
+   * Git's own protocol-version request header (`version=2`), which
+   * `isomorphic-git` sends on every smart-HTTP request the browser leg makes.
+   *
+   * It is not CORS-safelisted, so without it in the allow-list Chromium answers
+   * the preflight `204` and then silently drops the request that follows — the
+   * browser leg of Tau Cloud cannot make one call (W18 DEF-5).
+   */
+  gitProtocol: 'git-protocol',
 } as const;
 
 /**

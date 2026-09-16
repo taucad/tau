@@ -1,4 +1,4 @@
-# build123d — \_warnings
+# build123d — _warnings
 
 1 top-level symbols. Signatures are verbatim python.
 

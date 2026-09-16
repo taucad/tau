@@ -5,11 +5,22 @@ declare const revisionIdBrand: unique symbol;
 /** Opaque identity of one immutable revision. @public */
 export type RevisionId = string & { readonly [revisionIdBrand]: true };
 
+/** Git mode supported for materialized regular files. @public */
+export type RevisionFileMode = '100644' | '100755';
+
 /** One immutable file entry in a revision tree. @public */
 export type RevisionTreeEntry = Readonly<{
   path: string;
   content: Uint8Array<ArrayBuffer>;
+  mode: RevisionFileMode;
 }>;
+
+/** Constructor input for one immutable revision entry. @public */
+export type RevisionTreeInput = readonly [
+  path: string,
+  content: Uint8Array<ArrayBuffer> | string,
+  mode?: RevisionFileMode,
+];
 
 const textEncoder = new TextEncoder();
 
@@ -44,6 +55,7 @@ const ownedBytes = (content: Uint8Array<ArrayBuffer> | string): Uint8Array<Array
   typeof content === 'string' ? textEncoder.encode(content) : new Uint8Array(content);
 
 const comparePath = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
+const defaultFileMode: RevisionFileMode = '100644';
 
 /**
  * Runtime-immutable file tree. Inputs and returned bytes are defensively copied,
@@ -53,7 +65,7 @@ const comparePath = (left: string, right: string): number => (left < right ? -1 
  * @public
  */
 export class ImmutableRevisionTree {
-  readonly #files: ReadonlyMap<string, Uint8Array<ArrayBuffer>>;
+  readonly #files: ReadonlyMap<string, Readonly<{ content: Uint8Array<ArrayBuffer>; mode: RevisionFileMode }>>;
   readonly #byteLength: number;
 
   /**
@@ -61,16 +73,20 @@ export class ImmutableRevisionTree {
    *
    * @param entries - File paths and their bytes or UTF-8 text.
    */
-  public constructor(entries: Iterable<readonly [string, Uint8Array<ArrayBuffer> | string]>) {
-    const files = new Map<string, Uint8Array<ArrayBuffer>>();
+  public constructor(entries: Iterable<RevisionTreeInput>) {
+    const files = new Map<string, Readonly<{ content: Uint8Array<ArrayBuffer>; mode: RevisionFileMode }>>();
     let byteLength = 0;
-    for (const [rawPath, content] of entries) {
+    for (const [rawPath, content, mode = defaultFileMode] of entries) {
       const path = canonicalFilePath(rawPath);
+      const candidateMode: string = mode;
+      if (candidateMode !== '100644' && candidateMode !== '100755') {
+        throw new TypeError(`Unsupported revision file mode for ${path}: ${String(mode)}`);
+      }
       if (files.has(path)) {
         throw new TypeError(`Duplicate revision tree path: ${path}`);
       }
       const bytes = ownedBytes(content);
-      files.set(path, bytes);
+      files.set(path, { content: bytes, mode });
       byteLength += bytes.byteLength;
     }
     /* A path that is also a directory prefix is a shape Git cannot represent:
@@ -108,8 +124,13 @@ export class ImmutableRevisionTree {
    * @returns Owned bytes, or `undefined` when absent.
    */
   public get(path: string): Uint8Array<ArrayBuffer> | undefined {
-    const bytes = this.#files.get(canonicalFilePath(path));
-    return bytes === undefined ? undefined : new Uint8Array(bytes);
+    const entry = this.#files.get(canonicalFilePath(path));
+    return entry === undefined ? undefined : new Uint8Array(entry.content);
+  }
+
+  /** Read one file's supported Git mode. */
+  public mode(path: string): RevisionFileMode | undefined {
+    return this.#files.get(canonicalFilePath(path))?.mode;
   }
 
   /** Test whether a path exists in the tree. */
@@ -125,6 +146,6 @@ export class ImmutableRevisionTree {
   public entries(): readonly RevisionTreeEntry[] {
     return [...this.#files.entries()]
       .sort(([left], [right]) => comparePath(left, right))
-      .map(([path, content]) => ({ path, content: new Uint8Array(content) }));
+      .map(([path, entry]) => ({ path, content: new Uint8Array(entry.content), mode: entry.mode }));
   }
 }

@@ -2,13 +2,14 @@
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party billing persistence owns the direct wire contract
 import { wireUsageSnapshotSchema } from '@taucad/billing';
 import type { UsageSnapshotQuery } from '@taucad/billing/hooks/use-usage-snapshot';
 import {
   canonicalUsageQueryKey,
   purgeSavedUsage,
+  readBillingRevisionMinimum,
   readSavedUsage,
+  recordBillingRevisionMinimum,
   writeSavedUsage,
 } from '#db/billing-snapshot-store.js';
 
@@ -202,6 +203,27 @@ describe('billing snapshot store', () => {
 
     await expect(readSavedUsage(queryKey, session, '8')).resolves.toBeUndefined();
     await expect(readSavedUsage(queryKey, session, '7')).resolves.toMatchObject({ snapshot: snapshotA });
+  });
+
+  it('should persist an owned receipt minimum and apply it after a cold restart', async () => {
+    await writeSavedUsage(snapshotA, queryKey);
+    await recordBillingRevisionMinimum({
+      environment: 'development',
+      ownerId: 'user-a',
+      subjectId: 'account-a',
+      revision: '8',
+    });
+
+    await expect(readBillingRevisionMinimum(session)).resolves.toEqual({
+      environment: 'development',
+      ownerId: 'user-a',
+      subjectId: 'account-a',
+      revision: '8',
+    });
+    await expect(readSavedUsage(queryKey, session)).resolves.toBeUndefined();
+    await expect(
+      readBillingRevisionMinimum({ environment: 'development', ownerId: 'user-b' }),
+    ).resolves.toBeUndefined();
   });
 
   // ── Local ceiling ────────────────────────────────────────────────────────

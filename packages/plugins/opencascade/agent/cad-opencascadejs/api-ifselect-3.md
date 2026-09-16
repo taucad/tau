@@ -4,307 +4,307 @@
 
 IFSelect_WorkSession: declare class IFSelect_WorkSession extends Standard_Transient
 
-constructor
+  constructor
 
-SetErrorHandle(toHandle: boolean): void;
+  SetErrorHandle(toHandle: boolean): void;
 
-ErrorHandle(): boolean;
+  ErrorHandle(): boolean;
 
-ShareOut(): IFSelect_ShareOut;
+  ShareOut(): IFSelect_ShareOut;
 
-SetShareOut(shareout: IFSelect_ShareOut): void;
+  SetShareOut(shareout: IFSelect_ShareOut): void;
 
-SetModeStat(theMode: boolean): void;
+  SetModeStat(theMode: boolean): void;
 
-GetModeStat(): boolean;
+  GetModeStat(): boolean;
 
-SetLibrary(theLib: IFSelect_WorkLibrary): void;
+  SetLibrary(theLib: IFSelect_WorkLibrary): void;
 
-WorkLibrary(): IFSelect_WorkLibrary;
+  WorkLibrary(): IFSelect_WorkLibrary;
 
-SetProtocol(protocol: Interface_Protocol): void;
+  SetProtocol(protocol: Interface_Protocol): void;
 
-Protocol(): Interface_Protocol;
+  Protocol(): Interface_Protocol;
 
-SetSignType(signtype: IFSelect_Signature): void;
+  SetSignType(signtype: IFSelect_Signature): void;
 
-SignType(): IFSelect_Signature;
+  SignType(): IFSelect_Signature;
 
-HasModel(): boolean;
+  HasModel(): boolean;
 
-SetModel(model: Interface_InterfaceModel, clearpointed?: boolean): void;
+  SetModel(model: Interface_InterfaceModel, clearpointed?: boolean): void;
 
-Model(): Interface_InterfaceModel;
+  Model(): Interface_InterfaceModel;
 
-SetLoadedFile(theFileName: string): void;
+  SetLoadedFile(theFileName: string): void;
 
-LoadedFile(): string;
+  LoadedFile(): string;
 
-ReadFile(filename: string): IFSelect_ReturnStatus;
+  ReadFile(filename: string): IFSelect_ReturnStatus;
 
-NbStartingEntities(): number;
+  NbStartingEntities(): number;
 
-StartingEntity(num: number): Standard_Transient;
+  StartingEntity(num: number): Standard_Transient;
 
-StartingNumber(ent: Standard_Transient): number;
+  StartingNumber(ent: Standard_Transient): number;
 
-NumberFromLabel(val: string, afternum?: number): number;
+  NumberFromLabel(val: string, afternum?: number): number;
 
-EntityLabel(ent: Standard_Transient): TCollection_HAsciiString;
+  EntityLabel(ent: Standard_Transient): TCollection_HAsciiString;
 
-EntityName(ent: Standard_Transient): TCollection_HAsciiString;
+  EntityName(ent: Standard_Transient): TCollection_HAsciiString;
 
-CategoryNumber(ent: Standard_Transient): number;
+  CategoryNumber(ent: Standard_Transient): number;
 
-CategoryName(ent: Standard_Transient): string;
+  CategoryName(ent: Standard_Transient): string;
 
-ValidityName(ent: Standard_Transient): string;
+  ValidityName(ent: Standard_Transient): string;
 
-ClearData(mode: number): void;
+  ClearData(mode: number): void;
 
-ComputeGraph(enforce?: boolean): boolean;
+  ComputeGraph(enforce?: boolean): boolean;
 
-Shareds(ent: Standard_Transient): NCollection_HSequence_handle_Standard_Transient;
+  Shareds(ent: Standard_Transient): NCollection_HSequence_handle_Standard_Transient;
 
-Sharings(ent: Standard_Transient): NCollection_HSequence_handle_Standard_Transient;
+  Sharings(ent: Standard_Transient): NCollection_HSequence_handle_Standard_Transient;
 
-IsLoaded(): boolean;
+  IsLoaded(): boolean;
 
-ComputeCheck(enforce?: boolean): boolean;
+  ComputeCheck(enforce?: boolean): boolean;
 
-MaxIdent(): number;
+  MaxIdent(): number;
 
-Item(id: number): Standard_Transient;
+  Item(id: number): Standard_Transient;
 
-ItemIdent(item: Standard_Transient): number;
+  ItemIdent(item: Standard_Transient): number;
 
-NamedItem(name: string): Standard_Transient;
-NamedItem(name: TCollection_HAsciiString): Standard_Transient;
-NamedItem(name: string): Standard_Transient;
-NamedItem(name: TCollection_HAsciiString): Standard_Transient;
+  NamedItem(name: string): Standard_Transient;
+  NamedItem(name: TCollection_HAsciiString): Standard_Transient;
+  NamedItem(name: string): Standard_Transient;
+  NamedItem(name: TCollection_HAsciiString): Standard_Transient;
 
-NameIdent(name: string): number;
+  NameIdent(name: string): number;
 
-HasName(item: Standard_Transient): boolean;
+  HasName(item: Standard_Transient): boolean;
 
-Name(item: Standard_Transient): TCollection_HAsciiString;
+  Name(item: Standard_Transient): TCollection_HAsciiString;
 
-AddItem(item: Standard_Transient, active?: boolean): number;
+  AddItem(item: Standard_Transient, active?: boolean): number;
 
-AddNamedItem(name: string, item: Standard_Transient, active?: boolean): number;
+  AddNamedItem(name: string, item: Standard_Transient, active?: boolean): number;
 
-SetActive(item: Standard_Transient, mode: boolean): boolean;
+  SetActive(item: Standard_Transient, mode: boolean): boolean;
 
-RemoveNamedItem(name: string): boolean;
+  RemoveNamedItem(name: string): boolean;
 
-RemoveName(name: string): boolean;
+  RemoveName(name: string): boolean;
 
-RemoveItem(item: Standard_Transient): boolean;
+  RemoveItem(item: Standard_Transient): boolean;
 
-ClearItems(): void;
+  ClearItems(): void;
 
-ItemLabel(id: number): TCollection_HAsciiString;
+  ItemLabel(id: number): TCollection_HAsciiString;
 
-ItemIdents(type\_: Standard_Type): NCollection_HSequence_int;
+  ItemIdents(type_: Standard_Type): NCollection_HSequence_int;
 
-ItemNames(type\_: Standard_Type): NCollection_HSequence_handle_TCollection_HAsciiString;
+  ItemNames(type_: Standard_Type): NCollection_HSequence_handle_TCollection_HAsciiString;
 
-ItemNamesForLabel(label: string): NCollection_HSequence_handle_TCollection_HAsciiString;
+  ItemNamesForLabel(label: string): NCollection_HSequence_handle_TCollection_HAsciiString;
 
-NextIdentForLabel(label: string, id: number, mode?: number): number;
+  NextIdentForLabel(label: string, id: number, mode?: number): number;
 
-NewParamFromStatic(statname: string, name?: string): Standard_Transient;
+  NewParamFromStatic(statname: string, name?: string): Standard_Transient;
 
-TextParam(id: number): TCollection_HAsciiString;
+  TextParam(id: number): TCollection_HAsciiString;
 
-TextValue(par: TCollection_HAsciiString): TCollection_AsciiString;
+  TextValue(par: TCollection_HAsciiString): TCollection_AsciiString;
 
-NewTextParam(name?: string): TCollection_HAsciiString;
+  NewTextParam(name?: string): TCollection_HAsciiString;
 
-SetTextValue(par: TCollection_HAsciiString, val: string): boolean;
+  SetTextValue(par: TCollection_HAsciiString, val: string): boolean;
 
-Signature(id: number): IFSelect_Signature;
+  Signature(id: number): IFSelect_Signature;
 
-SignValue(sign: IFSelect_Signature, ent: Standard_Transient): string;
+  SignValue(sign: IFSelect_Signature, ent: Standard_Transient): string;
 
-Selection(id: number): IFSelect_Selection;
+  Selection(id: number): IFSelect_Selection;
 
-SelectionResult(sel: IFSelect_Selection): NCollection_HSequence_handle_Standard_Transient;
+  SelectionResult(sel: IFSelect_Selection): NCollection_HSequence_handle_Standard_Transient;
 
-SelectionResultFromList(sel: IFSelect_Selection, list: NCollection_HSequence_handle_Standard_Transient): NCollection_HSequence_handle_Standard_Transient;
+  SelectionResultFromList(sel: IFSelect_Selection, list: NCollection_HSequence_handle_Standard_Transient): NCollection_HSequence_handle_Standard_Transient;
 
-SetItemSelection(item: Standard_Transient, sel: IFSelect_Selection): boolean;
+  SetItemSelection(item: Standard_Transient, sel: IFSelect_Selection): boolean;
 
-ResetItemSelection(item: Standard_Transient): boolean;
+  ResetItemSelection(item: Standard_Transient): boolean;
 
-ItemSelection(item: Standard_Transient): IFSelect_Selection;
+  ItemSelection(item: Standard_Transient): IFSelect_Selection;
 
-SignCounter(id: number): IFSelect_SignCounter;
+  SignCounter(id: number): IFSelect_SignCounter;
 
-ComputeCounter(counter: IFSelect_SignCounter, forced?: boolean): boolean;
+  ComputeCounter(counter: IFSelect_SignCounter, forced?: boolean): boolean;
 
-ComputeCounterFromList(counter: IFSelect_SignCounter, list: NCollection_HSequence_handle_Standard_Transient, clear?: boolean): boolean;
+  ComputeCounterFromList(counter: IFSelect_SignCounter, list: NCollection_HSequence_handle_Standard_Transient, clear?: boolean): boolean;
 
-AppliedDispatches(): NCollection_HSequence_int;
+  AppliedDispatches(): NCollection_HSequence_int;
 
-ClearShareOut(onlydisp: boolean): void;
+  ClearShareOut(onlydisp: boolean): void;
 
-Dispatch(id: number): IFSelect_Dispatch;
+  Dispatch(id: number): IFSelect_Dispatch;
 
-DispatchRank(disp: IFSelect_Dispatch): number;
+  DispatchRank(disp: IFSelect_Dispatch): number;
 
-ModelCopier(): IFSelect_ModelCopier;
+  ModelCopier(): IFSelect_ModelCopier;
 
-SetModelCopier(copier: IFSelect_ModelCopier): void;
+  SetModelCopier(copier: IFSelect_ModelCopier): void;
 
-NbFinalModifiers(formodel: boolean): number;
+  NbFinalModifiers(formodel: boolean): number;
 
-FinalModifierIdents(formodel: boolean): NCollection_HSequence_int;
+  FinalModifierIdents(formodel: boolean): NCollection_HSequence_int;
 
-GeneralModifier(id: number): IFSelect_GeneralModifier;
+  GeneralModifier(id: number): IFSelect_GeneralModifier;
 
-ModelModifier(id: number): IFSelect_Modifier;
+  ModelModifier(id: number): IFSelect_Modifier;
 
-ModifierRank(item: IFSelect_GeneralModifier): number;
+  ModifierRank(item: IFSelect_GeneralModifier): number;
 
-ChangeModifierRank(formodel: boolean, before: number, after: number): boolean;
+  ChangeModifierRank(formodel: boolean, before: number, after: number): boolean;
 
-ClearFinalModifiers(): void;
+  ClearFinalModifiers(): void;
 
-SetAppliedModifier(modif: IFSelect_GeneralModifier, item: Standard_Transient): boolean;
+  SetAppliedModifier(modif: IFSelect_GeneralModifier, item: Standard_Transient): boolean;
 
-ResetAppliedModifier(modif: IFSelect_GeneralModifier): boolean;
+  ResetAppliedModifier(modif: IFSelect_GeneralModifier): boolean;
 
-UsesAppliedModifier(modif: IFSelect_GeneralModifier): Standard_Transient;
+  UsesAppliedModifier(modif: IFSelect_GeneralModifier): Standard_Transient;
 
-Transformer(id: number): IFSelect_Transformer;
+  Transformer(id: number): IFSelect_Transformer;
 
-RunTransformer(transf: IFSelect_Transformer): number;
+  RunTransformer(transf: IFSelect_Transformer): number;
 
-RunModifier(modif: IFSelect_Modifier, copy: boolean): number;
+  RunModifier(modif: IFSelect_Modifier, copy: boolean): number;
 
-RunModifierSelected(modif: IFSelect_Modifier, sel: IFSelect_Selection, copy: boolean): number;
+  RunModifierSelected(modif: IFSelect_Modifier, sel: IFSelect_Selection, copy: boolean): number;
 
-NewTransformStandard(copy: boolean, name?: string): IFSelect_Transformer;
+  NewTransformStandard(copy: boolean, name?: string): IFSelect_Transformer;
 
-SetModelContent(sel: IFSelect_Selection, keep: boolean): boolean;
+  SetModelContent(sel: IFSelect_Selection, keep: boolean): boolean;
 
-FilePrefix(): TCollection_HAsciiString;
+  FilePrefix(): TCollection_HAsciiString;
 
-DefaultFileRoot(): TCollection_HAsciiString;
+  DefaultFileRoot(): TCollection_HAsciiString;
 
-FileExtension(): TCollection_HAsciiString;
+  FileExtension(): TCollection_HAsciiString;
 
-FileRoot(disp: IFSelect_Dispatch): TCollection_HAsciiString;
+  FileRoot(disp: IFSelect_Dispatch): TCollection_HAsciiString;
 
-SetFilePrefix(name: string): void;
+  SetFilePrefix(name: string): void;
 
-SetDefaultFileRoot(name: string): boolean;
+  SetDefaultFileRoot(name: string): boolean;
 
-SetFileExtension(name: string): void;
+  SetFileExtension(name: string): void;
 
-SetFileRoot(disp: IFSelect_Dispatch, name: string): boolean;
+  SetFileRoot(disp: IFSelect_Dispatch, name: string): boolean;
 
-GiveFileRoot(file: string): string;
+  GiveFileRoot(file: string): string;
 
-GiveFileComplete(file: string): string;
+  GiveFileComplete(file: string): string;
 
-ClearFile(): void;
+  ClearFile(): void;
 
-EvaluateFile(): void;
+  EvaluateFile(): void;
 
-NbFiles(): number;
+  NbFiles(): number;
 
-FileModel(num: number): Interface_InterfaceModel;
+  FileModel(num: number): Interface_InterfaceModel;
 
-FileName(num: number): TCollection_AsciiString;
+  FileName(num: number): TCollection_AsciiString;
 
-BeginSentFiles(record: boolean): void;
+  BeginSentFiles(record: boolean): void;
 
-SentFiles(): NCollection_HSequence_handle_TCollection_HAsciiString;
+  SentFiles(): NCollection_HSequence_handle_TCollection_HAsciiString;
 
-SendSplit(): boolean;
+  SendSplit(): boolean;
 
-EvalSplit(): IFSelect_PacketList;
+  EvalSplit(): IFSelect_PacketList;
 
-MaxSendingCount(): number;
+  MaxSendingCount(): number;
 
-SetRemaining(mode: IFSelect_RemainMode): boolean;
+  SetRemaining(mode: IFSelect_RemainMode): boolean;
 
-SendAll(filename: string, computegraph?: boolean): IFSelect_ReturnStatus;
+  SendAll(filename: string, computegraph?: boolean): IFSelect_ReturnStatus;
 
-SendSelected(filename: string, sel: IFSelect_Selection, computegraph?: boolean): IFSelect_ReturnStatus;
+  SendSelected(filename: string, sel: IFSelect_Selection, computegraph?: boolean): IFSelect_ReturnStatus;
 
-WriteFile(filename: string): IFSelect_ReturnStatus;
-WriteFile(filename: string, sel: IFSelect_Selection): IFSelect_ReturnStatus;
-WriteFile(filename: string): IFSelect_ReturnStatus;
-WriteFile(filename: string, sel: IFSelect_Selection): IFSelect_ReturnStatus;
+  WriteFile(filename: string): IFSelect_ReturnStatus;
+  WriteFile(filename: string, sel: IFSelect_Selection): IFSelect_ReturnStatus;
+  WriteFile(filename: string): IFSelect_ReturnStatus;
+  WriteFile(filename: string, sel: IFSelect_Selection): IFSelect_ReturnStatus;
 
-NbSources(sel: IFSelect_Selection): number;
+  NbSources(sel: IFSelect_Selection): number;
 
-Source(sel: IFSelect_Selection, num?: number): IFSelect_Selection;
+  Source(sel: IFSelect_Selection, num?: number): IFSelect_Selection;
 
-IsReversedSelectExtract(sel: IFSelect_Selection): boolean;
+  IsReversedSelectExtract(sel: IFSelect_Selection): boolean;
 
-ToggleSelectExtract(sel: IFSelect_Selection): boolean;
+  ToggleSelectExtract(sel: IFSelect_Selection): boolean;
 
-SetInputSelection(sel: IFSelect_Selection, input: IFSelect_Selection): boolean;
+  SetInputSelection(sel: IFSelect_Selection, input: IFSelect_Selection): boolean;
 
-SetControl(sel: IFSelect_Selection, sc: IFSelect_Selection, formain?: boolean): boolean;
+  SetControl(sel: IFSelect_Selection, sc: IFSelect_Selection, formain?: boolean): boolean;
 
-CombineAdd(selcomb: IFSelect_Selection, seladd: IFSelect_Selection, atnum?: number): number;
+  CombineAdd(selcomb: IFSelect_Selection, seladd: IFSelect_Selection, atnum?: number): number;
 
-CombineRemove(selcomb: IFSelect_Selection, selrem: IFSelect_Selection): boolean;
+  CombineRemove(selcomb: IFSelect_Selection, selrem: IFSelect_Selection): boolean;
 
-NewSelectPointed(list: NCollection_HSequence_handle_Standard_Transient, name: string): IFSelect_Selection;
+  NewSelectPointed(list: NCollection_HSequence_handle_Standard_Transient, name: string): IFSelect_Selection;
 
-SetSelectPointed(sel: IFSelect_Selection, list: NCollection_HSequence_handle_Standard_Transient, mode: number): boolean;
+  SetSelectPointed(sel: IFSelect_Selection, list: NCollection_HSequence_handle_Standard_Transient, mode: number): boolean;
 
-GiveSelection(selname: string): IFSelect_Selection;
+  GiveSelection(selname: string): IFSelect_Selection;
 
-GiveList(obj: Standard_Transient): NCollection_HSequence_handle_Standard_Transient;
-GiveList(first: string, second: string): NCollection_HSequence_handle_Standard_Transient;
-GiveList(obj: Standard_Transient): NCollection_HSequence_handle_Standard_Transient;
-GiveList(first: string, second: string): NCollection_HSequence_handle_Standard_Transient;
+  GiveList(obj: Standard_Transient): NCollection_HSequence_handle_Standard_Transient;
+  GiveList(first: string, second: string): NCollection_HSequence_handle_Standard_Transient;
+  GiveList(obj: Standard_Transient): NCollection_HSequence_handle_Standard_Transient;
+  GiveList(first: string, second: string): NCollection_HSequence_handle_Standard_Transient;
 
-GiveListFromList(selname: string, ent: Standard_Transient): NCollection_HSequence_handle_Standard_Transient;
+  GiveListFromList(selname: string, ent: Standard_Transient): NCollection_HSequence_handle_Standard_Transient;
 
-GiveListCombined(l1: NCollection_HSequence_handle_Standard_Transient, l2: NCollection_HSequence_handle_Standard_Transient, mode: number): NCollection_HSequence_handle_Standard_Transient;
+  GiveListCombined(l1: NCollection_HSequence_handle_Standard_Transient, l2: NCollection_HSequence_handle_Standard_Transient, mode: number): NCollection_HSequence_handle_Standard_Transient;
 
-QueryCheckStatus(ent: Standard_Transient): number;
+  QueryCheckStatus(ent: Standard_Transient): number;
 
-QueryParent(entdad: Standard_Transient, entson: Standard_Transient): number;
+  QueryParent(entdad: Standard_Transient, entson: Standard_Transient): number;
 
-SetParams(params: NCollection_DynamicArray_handle_Standard_Transient, uselist: NCollection_DynamicArray_int): void;
+  SetParams(params: NCollection_DynamicArray_handle_Standard_Transient, uselist: NCollection_DynamicArray_int): void;
 
-TraceStatics(use: number, mode?: number): void;
+  TraceStatics(use: number, mode?: number): void;
 
-DumpShare(): void;
+  DumpShare(): void;
 
-ListItems(label?: string): void;
+  ListItems(label?: string): void;
 
-ListFinalModifiers(formodel: boolean): void;
+  ListFinalModifiers(formodel: boolean): void;
 
-DumpSelection(sel: IFSelect_Selection): void;
+  DumpSelection(sel: IFSelect_Selection): void;
 
-TraceDumpModel(mode: number): void;
+  TraceDumpModel(mode: number): void;
 
-TraceDumpEntity(ent: Standard_Transient, level: number): void;
+  TraceDumpEntity(ent: Standard_Transient, level: number): void;
 
-EvaluateSelection(sel: IFSelect_Selection): void;
+  EvaluateSelection(sel: IFSelect_Selection): void;
 
-EvaluateDispatch(disp: IFSelect_Dispatch, mode?: number): void;
+  EvaluateDispatch(disp: IFSelect_Dispatch, mode?: number): void;
 
-EvaluateComplete(mode?: number): void;
+  EvaluateComplete(mode?: number): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IFSelect_TSeqOfSelection: NCollection_Sequence_handle_IFSelect_Selection

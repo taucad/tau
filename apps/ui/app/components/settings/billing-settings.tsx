@@ -1,3 +1,4 @@
+import { SettingsItem, SettingsSectionCard } from '#components/settings/settings-item.js';
 import { useRef, useState } from 'react';
 import { CreditCard, ExternalLink, Plus } from 'lucide-react';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party settings surface owns the direct billing client contract
@@ -9,7 +10,7 @@ import { useBillingSession } from '@taucad/billing/hooks/billing-session';
 import { createPaymentRequestId, createPortalAction, followPaymentRedirect } from '#lib/billing-payment-client.js';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { TierBadge } from '#components/tier-badge.js';
 import { TopupModal } from '#components/billing/topup-modal.js';
 import { PlanCards } from '#components/billing/plan-cards.js';
@@ -166,102 +167,114 @@ export function BillingSettings(): React.JSX.Element {
         </div>
       ) : undefined}
 
-      <Card>
-        <CardHeader className='flex flex-row items-center justify-between space-y-0'>
-          <CardTitle className='flex items-center gap-2 text-base'>
-            Current plan
-            <TierBadge tier={entitlements.tier} />
-            {entitlements.status === 'past_due' ? <Badge variant='outline'>Past due</Badge> : undefined}
-          </CardTitle>
-          {isPaidTier ? (
-            <Button
-              variant='outline'
-              size='sm'
-              disabled={stateIsCurrent && isRedirecting}
-              onClick={async () => {
-                await openPortal();
-              }}
-            >
-              <CreditCard className='size-4' />
-              Manage Subscription
-              <ExternalLink className='size-3' />
-            </Button>
-          ) : undefined}
-          {stateIsCurrent && portalError ? <span className='text-xs text-warning'>{portalError}</span> : undefined}
-        </CardHeader>
-        <CardContent className='flex flex-col gap-2 text-sm text-muted-foreground'>
-          {entitlements.tier === 'pro' ? <span>{proMonthlyPriceLabel}</span> : undefined}
-          {entitlements.tier === 'enterprise' ? (
-            <>
-              <span>Custom plan — contact enterprise@tau.new for changes.</span>
-              {availableBalance && BigInt(availableBalance.planGrantCreditAtoms) > 0n ? (
-                <span>Plan credits: {formatCreditAtoms(BigInt(availableBalance.planGrantCreditAtoms))}</span>
-              ) : undefined}
-              <div>
-                <Button asChild variant='outline' size='sm'>
-                  <a href='mailto:enterprise@tau.new'>Contact your Tau team</a>
-                </Button>
-              </div>
-            </>
-          ) : undefined}
-          {isPaidTier && entitlements.currentPeriodEnd && !entitlements.cancelAtPeriodEnd ? (
-            <span>Renews on {formatRenewalDate(entitlements.currentPeriodEnd)}</span>
-          ) : undefined}
-          {isPaidTier ? <PaidTierQuotas entitlements={entitlements} /> : undefined}
-          {entitlements.tier === 'free' ? (
-            // U2/T7: the free state shows the full plan grid — same catalogue
-            // as the landing pricing section, "Current plan" pinned to Free.
-            <PlanCards currentTier='free' className='pt-2' isFeatureListScrollable />
-          ) : undefined}
-        </CardContent>
-      </Card>
-
-      {availableBalance ? (
-        <Card>
+      <SettingsItem settingId='plan'>
+        <SettingsSectionCard>
           <CardHeader className='flex flex-row items-center justify-between space-y-0'>
-            <CardTitle className='text-base'>Credit balance</CardTitle>
-            <div className='flex items-center gap-3'>
+            <CardTitle className='flex items-center gap-2 text-base'>
+              Current plan
+              <TierBadge tier={entitlements.tier} />
+              {entitlements.status === 'past_due' ? <Badge variant='outline'>Past due</Badge> : undefined}
+            </CardTitle>
+            {isPaidTier ? (
               <Button
                 variant='outline'
                 size='sm'
-                onClick={() => {
-                  setIsTopupOpen(true);
+                disabled={stateIsCurrent && isRedirecting}
+                onClick={async () => {
+                  await openPortal();
                 }}
               >
-                <Plus className='size-3.5' />
-                Add credits
+                <CreditCard className='size-4' />
+                Manage Subscription
+                <ExternalLink className='size-3' />
               </Button>
-              <span className='font-mono text-lg' data-testid='credit-balance'>
-                {formatCreditAtoms(BigInt(availableBalance.eligibleAvailableCreditAtoms))}
-              </span>
-            </div>
+            ) : undefined}
+            {stateIsCurrent && portalError ? <span className='text-xs text-warning'>{portalError}</span> : undefined}
           </CardHeader>
-          <CardContent className='flex flex-col gap-1 text-sm text-muted-foreground'>
-            {BigInt(availableBalance.netBalanceCreditAtoms) < 0n ? (
-              <span className='text-warning'>
-                Your balance is negative — add credits to resume AI usage. Your projects are unaffected.
-              </span>
+          <CardContent className='flex flex-col gap-2 text-sm text-muted-foreground'>
+            {entitlements.tier === 'pro' ? <span>{proMonthlyPriceLabel}</span> : undefined}
+            {entitlements.tier === 'enterprise' ? (
+              <>
+                <span>Custom plan — contact enterprise@tau.new for changes.</span>
+                {availableBalance && BigInt(availableBalance.planGrantCreditAtoms) > 0n ? (
+                  <span>Plan credits: {formatCreditAtoms(BigInt(availableBalance.planGrantCreditAtoms))}</span>
+                ) : undefined}
+                <div>
+                  <Button asChild variant='outline' size='sm'>
+                    <a href='mailto:enterprise@tau.new'>Contact your Tau team</a>
+                  </Button>
+                </div>
+              </>
             ) : undefined}
-            {BigInt(availableBalance.purchasedCreditAtoms) > 0n ? (
-              <span>
-                {formatCreditAtoms(BigInt(availableBalance.planGrantCreditAtoms))} from your plan +{' '}
-                {formatCreditAtoms(BigInt(availableBalance.purchasedCreditAtoms))} purchased (never expire)
-              </span>
+            {isPaidTier && entitlements.currentPeriodEnd && !entitlements.cancelAtPeriodEnd ? (
+              <span>Renews on {formatRenewalDate(entitlements.currentPeriodEnd)}</span>
             ) : undefined}
-            {BigInt(availableBalance.planHeldCreditAtoms) + BigInt(availableBalance.purchasedHeldCreditAtoms) > 0n ? (
-              <span>
-                {formatCreditAtoms(
-                  BigInt(availableBalance.planHeldCreditAtoms) + BigInt(availableBalance.purchasedHeldCreditAtoms),
-                )}{' '}
-                held for active work
-              </span>
+            {isPaidTier ? <PaidTierQuotas entitlements={entitlements} /> : undefined}
+            {entitlements.tier === 'free' ? (
+              // U2/T7: the free state shows the full plan grid — same catalogue
+              // as the landing pricing section, "Current plan" pinned to Free.
+              <PlanCards currentTier='free' className='pt-2' isFeatureListScrollable />
             ) : undefined}
           </CardContent>
-        </Card>
+        </SettingsSectionCard>
+      </SettingsItem>
+
+      {availableBalance ? (
+        <SettingsItem settingId='credit-balance'>
+          <SettingsSectionCard>
+            <CardHeader className='flex flex-row items-center justify-between space-y-0'>
+              <CardTitle className='text-base'>Credit balance</CardTitle>
+              <div className='flex items-center gap-3'>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  onClick={() => {
+                    setIsTopupOpen(true);
+                  }}
+                >
+                  <Plus className='size-3.5' />
+                  Add credits
+                </Button>
+                <span className='font-mono text-lg' data-testid='credit-balance'>
+                  {formatCreditAtoms(BigInt(availableBalance.eligibleAvailableCreditAtoms))}
+                </span>
+              </div>
+            </CardHeader>
+            <CardContent className='flex flex-col gap-1 text-sm text-muted-foreground'>
+              {BigInt(availableBalance.netBalanceCreditAtoms) < 0n ? (
+                <span className='text-warning'>
+                  Your balance is negative — add credits to resume AI usage. Your projects are unaffected.
+                </span>
+              ) : undefined}
+              {BigInt(availableBalance.purchasedCreditAtoms) > 0n ? (
+                <span>
+                  {formatCreditAtoms(BigInt(availableBalance.planGrantCreditAtoms))} from your plan +{' '}
+                  {formatCreditAtoms(BigInt(availableBalance.purchasedCreditAtoms))} purchased (never expire)
+                </span>
+              ) : undefined}
+              {BigInt(availableBalance.planHeldCreditAtoms) + BigInt(availableBalance.purchasedHeldCreditAtoms) > 0n ? (
+                <span>
+                  {formatCreditAtoms(
+                    BigInt(availableBalance.planHeldCreditAtoms) + BigInt(availableBalance.purchasedHeldCreditAtoms),
+                  )}{' '}
+                  held for active work
+                </span>
+              ) : undefined}
+              {BigInt(availableBalance.netBalanceCreditAtoms) >= 0n &&
+              BigInt(availableBalance.eligibleAvailableCreditAtoms) === 0n ? (
+                <span>No credits yet. Add credits to start using AI.</span>
+              ) : undefined}
+            </CardContent>
+          </SettingsSectionCard>
+        </SettingsItem>
       ) : undefined}
 
-      <AutoReloadSettings binding={binding} />
-      <AccountClosureSettings binding={binding} />
+      <SettingsItem settingId='automatic-reload'>
+        <AutoReloadSettings binding={binding} />
+      </SettingsItem>
+      <SettingsItem settingId='close-account'>
+        <AccountClosureSettings binding={binding} />
+      </SettingsItem>
 
       <TopupModal isOpen={isTopupOpen} onOpenChange={setIsTopupOpen} />
     </div>

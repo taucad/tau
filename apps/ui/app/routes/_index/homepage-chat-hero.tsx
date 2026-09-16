@@ -1,56 +1,11 @@
 import { NavLink } from 'react-router';
-import { useEffect, useRef, useState } from 'react';
 import { NewProjectChatComposer } from '#components/chat/new-project-chat-composer.js';
 import { KernelSelector } from '#components/chat/kernel-selector.js';
-import { ActiveChatProvider } from '#hooks/active-chat-provider.js';
+import { HomeNewProjectComposerProvider } from '#hooks/active-chat-provider.js';
 import { Separator } from '@taucad/ui/components/separator';
 import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
-import { toast } from '#components/ui/sonner.js';
 import { Loader } from '#components/ui/loader.js';
-import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useKernel } from '#hooks/use-kernel.js';
-
-const homepageChatResourceId = 'homepage_main_chat_resource';
-const homepageChatId = 'chat_homepage_main';
-
-function useHomepageChatSession(): { chatId: string | undefined; isReady: boolean } {
-  const projectManager = useProjectManager();
-  const [isReady, setIsReady] = useState(false);
-  const createInFlightRef = useRef(false);
-
-  useEffect(() => {
-    if (isReady || createInFlightRef.current) {
-      return;
-    }
-
-    createInFlightRef.current = true;
-    const ensureHomepageChat = async (): Promise<void> => {
-      try {
-        const existingChat = await projectManager.getChat(homepageChatId);
-        if (!existingChat) {
-          await projectManager.createChat(homepageChatResourceId, {
-            id: homepageChatId,
-            name: 'Homepage chat',
-            messages: [],
-          });
-        }
-        setIsReady(true);
-      } catch (error) {
-        console.error('Failed to initialize homepage chat session:', error);
-        toast.error('Failed to restore homepage chat draft');
-      } finally {
-        createInFlightRef.current = false;
-      }
-    };
-
-    void ensureHomepageChat();
-  }, [isReady, projectManager]);
-
-  return {
-    chatId: isReady ? homepageChatId : undefined,
-    isReady,
-  };
-}
 
 /**
  * The homepage chat hero: "What can I help you build?" over the real chat
@@ -60,7 +15,6 @@ function useHomepageChatSession(): { chatId: string | undefined; isReady: boolea
  */
 export function HomepageChatHero(): React.JSX.Element {
   const { kernel, setKernel } = useKernel();
-  const homepageChatSession = useHomepageChatSession();
 
   return (
     <div className='container mx-auto px-4 py-6 pb-12 md:px-6 md:pt-32'>
@@ -71,20 +25,20 @@ export function HomepageChatHero(): React.JSX.Element {
           </h1>
         </div>
 
-        {homepageChatSession.chatId ? (
-          <ActiveChatProvider chatId={homepageChatSession.chatId}>
-            <NewProjectChatComposer />
-          </ActiveChatProvider>
-        ) : (
-          <div className='space-y-4'>
-            <div className='flex justify-center'>
-              <KernelSelector selectedKernel={kernel} onKernelChange={setKernel} />
+        <HomeNewProjectComposerProvider
+          fallback={
+            <div className='space-y-4'>
+              <div className='flex justify-center'>
+                <KernelSelector selectedKernel={kernel} onKernelChange={setKernel} />
+              </div>
+              <div className='flex justify-center py-6'>
+                <Loader />
+              </div>
             </div>
-            <div className='flex justify-center py-6'>
-              <Loader />
-            </div>
-          </div>
-        )}
+          }
+        >
+          <NewProjectChatComposer />
+        </HomeNewProjectComposerProvider>
         <div className='mx-auto my-6 flex w-20 items-center justify-center'>
           <Separator />
           <div className='mx-4 text-sm font-light text-muted-foreground'>or</div>

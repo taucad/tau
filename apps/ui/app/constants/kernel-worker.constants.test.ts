@@ -58,6 +58,7 @@ describe('kernel-worker constants', () => {
       'observability',
       'parameterFileResolver',
       'parameterCache',
+      'parameterUnits',
       'geometryCache',
       'gltfEdgeDetection',
     ]);
@@ -65,7 +66,10 @@ describe('kernel-worker constants', () => {
 
   it('createDefaultKernelOptions builds client options with boot config and a wired TransportPlugin', () => {
     const fileSystem = fromMemoryFs();
-    const options = createDefaultKernelOptions({ fileSystem, runtimeConfig: expectedConfig });
+    const options = createDefaultKernelOptions({
+      fileSystem,
+      runtimeConfig: expectedConfig,
+    });
 
     expect(options.config).toEqual(expectedConfig);
     expect(options.transport).toBeDefined();
@@ -83,7 +87,10 @@ describe('kernel-worker constants', () => {
 
   it('createDebugKernelOptions inherits transport composition from default', () => {
     const fileSystem = fromMemoryFs();
-    const debugOptions = createDebugKernelOptions({ fileSystem, runtimeConfig: expectedConfig });
+    const debugOptions = createDebugKernelOptions({
+      fileSystem,
+      runtimeConfig: expectedConfig,
+    });
 
     expect(debugOptions.transport).toBeDefined();
     expect(debugOptions.config).toEqual(expectedConfig);

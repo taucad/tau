@@ -8,11 +8,8 @@ import { availableKernelConfigurations } from '#constants/available-kernel-confi
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@taucad/ui/components/hover-card';
-import { isKernelAllowed } from '@taucad/billing';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
-import { KernelTierBadge } from '#components/tier-badge.js';
-import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
-import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
+import { KernelCommercialBadge } from '#cloud/kernel-commerce.js';
 
 function formatKernelDimensions(dimensions: KernelConfiguration['dimensions']): string {
   return dimensions.map((d) => `${d}D`).join(' & ');
@@ -64,24 +61,16 @@ export const ChatKernelSelector = memo(function ({
   const {
     kernel: { kernel: selectedKernel, setActiveKernel },
   } = useChatComposer();
-  const entitlements = useEntitlements();
-
   const handleSelectKernel = useCallback(
     (item: string) => {
       const kernel = availableKernelConfigurations().find((k) => k.id === item);
 
       if (kernel) {
-        // T3: Pro kernels route to the upgrade surface for un-entitled users
-        // (the websocket gate enforces server-side regardless).
-        if (!isKernelAllowed(kernel.id, entitlements.tier)) {
-          openSettingsDialog('billing');
-          return;
-        }
         setActiveKernel(kernel.id);
         onSelect?.(kernel.id);
       }
     },
-    [entitlements.tier, onSelect, setActiveKernel],
+    [onSelect, setActiveKernel],
   );
 
   return (
@@ -108,7 +97,7 @@ export const ChatKernelSelector = memo(function ({
                 <div className='flex min-w-0 flex-col'>
                   <span className='flex min-w-0 items-center gap-1.5 truncate'>
                     {item.name}
-                    <KernelTierBadge kernelId={item.id} />
+                    <KernelCommercialBadge kernelId={item.id} />
                   </span>
                   <span className='truncate text-xs text-muted-foreground'>{item.description}</span>
                 </div>
@@ -122,7 +111,7 @@ export const ChatKernelSelector = memo(function ({
                 <SvgIcon id={item.id} className='size-5 shrink-0' />
                 <h4 className='flex items-center gap-1.5 text-sm font-semibold'>
                   {item.name}
-                  <KernelTierBadge kernelId={item.id} />
+                  <KernelCommercialBadge kernelId={item.id} />
                 </h4>
               </div>
               <p className='text-sm text-muted-foreground'>{item.longDescription}</p>

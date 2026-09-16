@@ -390,14 +390,18 @@ export const branchMachine = setup({
               },
               {
                 target: '#branch.applied',
-                actions: emit(
-                  ({ context, event }): BranchMachineEmitted => ({
+                actions: enqueueActions(({ context, enqueue, event }) => {
+                  const fact: BranchMachineEmitted = {
                     type: 'branchMerged',
                     branch: context.branch ?? '',
                     into: context.currentBranch ?? '',
                     revisionId: event.output.status === 'merged' ? event.output.revisionId : '',
-                  }),
-                ),
+                  };
+                  enqueue.emit(fact);
+                  if (context.parentRef !== undefined) {
+                    enqueue.sendTo(context.parentRef, fact);
+                  }
+                }),
               },
             ],
             onError: {

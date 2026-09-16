@@ -12,6 +12,7 @@ import type { OpenCascadeInstance } from 'replicad-opencascadejs';
 import type { AnyShape } from 'replicad';
 import type * as ReplicadModule from 'replicad';
 import { digestContent } from '@taucad/cache-core';
+import type { CacheValue, ComputeAction } from '@taucad/cache-core';
 import { createExportFile } from '@taucad/runtime/types';
 import type {
   GeometryGltf,
@@ -209,7 +210,9 @@ type ReplicadContext = {
   libraryExportNames: Set<string>;
   tracingSummary?: OcTracingSummary;
   libraryTrace: KernelLibraryTraceHandle<ReplicadLibrary>;
-  computeReuse: ReplicadComputeReuseAdapter | undefined;
+  computeReuse: ReplicadComputeReuseAdapter<ReplicadLibrary> | undefined;
+  computeProducer: ComputeAction['producer'];
+  computeEnvironment: CacheValue;
 };
 
 type ReplicadLibrary = typeof ReplicadModule;
@@ -420,7 +423,7 @@ export const replicadKernel = defineKernel({
       content: ['includeEdges', 'includeTopology'],
     },
   },
-  async initialize(options, runtime) {
+  async initialize(options, runtime): Promise<ReplicadContext> {
     const replicadLibrary = await import('replicad');
     const { mangledToOriginal: exportNameMap, exportNames: libraryExportNames } = preserveExportNames(replicadLibrary);
 
@@ -476,7 +479,8 @@ export const replicadKernel = defineKernel({
 
     try {
       const fontSpan = tracer.startSpan('replicad.font-load');
-      if (!(replicadLibrary.getFont as (fontFamily?: string) => unknown)('default')) {
+      // The dependency declaration says this is always present, but its registry lookup returns undefined before load.
+      if (Object.is(replicadLibrary.getFont('default'), undefined)) {
         logger.debug('Loading default font for text rendering');
         const fontData = await loadBinaryFile(geistRegularUrl);
         if (!fontData) {
@@ -531,7 +535,7 @@ export const replicadKernel = defineKernel({
         })
       : undefined;
     const libraryTrace = createKernelLibraryTracer({
-      library: (computeReuse?.library ?? replicadLibrary) as unknown as ReplicadLibrary,
+      library: computeReuse?.library ?? replicadLibrary,
       tracer,
       mode: libraryTracing,
       policy: replicadLibraryTracePolicy,
@@ -613,7 +617,7 @@ export const replicadKernel = defineKernel({
     }
   },
 
-  async createGeometry({ entryPath, parameters }, runtime, context) {
+  async createGeometry({ entryPath, parameters }, runtime, context: ReplicadContext) {
     const { tracer } = runtime;
     const relativeFilePath = toVmEntryPath(entryPath);
     let bundleSourceMap: string | undefined;

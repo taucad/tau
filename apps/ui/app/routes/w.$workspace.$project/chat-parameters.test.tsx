@@ -464,9 +464,9 @@ describe('ChatParameters', () => {
 
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
-    const filter = screen.getByRole('textbox', { name: 'Filter parameters' });
+    const filter = screen.getByRole('searchbox', { name: 'Filter parameters' });
     expect(filter).toHaveAttribute('placeholder', 'Filter parameters...');
-    expect(screen.getAllByRole('textbox', { name: 'Filter parameters' })).toHaveLength(1);
+    expect(screen.getAllByRole('searchbox', { name: 'Filter parameters' })).toHaveLength(1);
     expect(screen.queryByRole('button', { name: /show search|hide search/iu })).toBeNull();
 
     await user.type(filter, 'radius');
@@ -487,7 +487,7 @@ describe('ChatParameters', () => {
   it('keeps the filter and sidebar surface visible without geometry units', async () => {
     const { container } = render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
-    expect(screen.getByRole('textbox', { name: 'Filter parameters' })).toBeVisible();
+    expect(screen.getByRole('searchbox', { name: 'Filter parameters' })).toBeVisible();
     expect(screen.getByText('No geometry units.')).toBeVisible();
 
     const body = container.querySelector('[data-slot="parameters-panel-body"]');

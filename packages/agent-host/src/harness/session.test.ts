@@ -4,19 +4,20 @@ import type { ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#wais
 import { createMemoryEventLogFile } from '#harness/harness.fixture.js';
 import { hasFileRef, providerMessageToPi } from '#harness/session-record.js';
 import type { AttachmentReader } from '#harness/session-record.js';
+import type * as SessionRecordModule from '#harness/session-record.js';
 import { createAgentSession } from '#harness/session.js';
 
 vi.mock('#harness/session-record.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('#harness/session-record.js')>();
+  const actual = await importOriginal<typeof SessionRecordModule>();
   return { ...actual, providerMessageToPi: vi.fn(actual.providerMessageToPi) };
 });
 
 const imagePath = `attachments/${'c'.repeat(64)}.jpg`;
 const pdfHash = 'd'.repeat(64);
 const pdfPath = `attachments/${pdfHash}.pdf`;
-const imageBytes = new Uint8Array([255, 216, 255]);
+const imageBytes: Uint8Array<ArrayBuffer> = new Uint8Array([255, 216, 255]);
 const pdfBytes = new TextEncoder().encode('%PDF-1.4 body');
-const base64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64');
+const base64 = (bytes: Uint8Array<ArrayBuffer>): string => Buffer.from(bytes).toString('base64');
 
 class RecordingTransport implements ModelTransport {
   public readonly requests: ModelStreamRequest[] = [];
@@ -28,7 +29,9 @@ class RecordingTransport implements ModelTransport {
   }
 }
 
-const attachmentsFrom = (files: Record<string, Uint8Array>): AttachmentReader & { read: ReturnType<typeof vi.fn> } => ({
+const attachmentsFrom = (
+  files: Record<string, Uint8Array<ArrayBuffer>>,
+): AttachmentReader & { read: ReturnType<typeof vi.fn> } => ({
   read: vi.fn(async (_chatId: string, path: string) => files[path]),
 });
 
@@ -105,7 +108,8 @@ describe('attachment materialisation in the session (D15)', () => {
     const serialized = JSON.stringify(await log.read());
     expect(serialized).not.toContain(base64(pdfBytes));
     expect(serialized).not.toContain('⟃tau:document');
-    const committed = (await log.read()).find((event) => event.type === 'turn.history-projection-committed');
+    const events = await log.read();
+    const committed = events.find((event) => event.type === 'turn.history-projection-committed');
     expect(committed?.type === 'turn.history-projection-committed' && committed.message).toEqual(userWithAttachments);
   });
 

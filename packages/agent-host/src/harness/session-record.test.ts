@@ -6,9 +6,9 @@ const imageHash = 'a'.repeat(64);
 const pdfHash = 'b'.repeat(64);
 const imagePath = `attachments/${imageHash}.png`;
 const pdfPath = `attachments/${pdfHash}.pdf`;
-const imageBytes = new Uint8Array([137, 80, 78, 71]);
+const imageBytes: Uint8Array<ArrayBuffer> = new Uint8Array([137, 80, 78, 71]);
 const pdfBytes = new TextEncoder().encode('%PDF-1.7');
-const base64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64');
+const base64 = (bytes: Uint8Array<ArrayBuffer>): string => Buffer.from(bytes).toString('base64');
 
 const history = (): ProviderMessage[] => [
   {
@@ -16,7 +16,7 @@ const history = (): ProviderMessage[] => [
     role: 'user',
     content: [
       { type: 'text', text: 'look at these' },
-      // byteLength is optional (P29): this row carries none.
+      // `byteLength` is optional (P29): this row carries none.
       { type: 'file-ref', path: imagePath, mimeType: 'image/png' },
       { type: 'file-ref', path: pdfPath, mimeType: 'application/pdf', byteLength: 8, filename: 'spec.pdf' },
     ],
@@ -34,8 +34,8 @@ const history = (): ProviderMessage[] => [
   },
 ];
 
-const reader = (files: Record<string, Uint8Array>) =>
-  vi.fn(async (path: string): Promise<Uint8Array | undefined> => files[path]);
+const reader = (files: Record<string, Uint8Array<ArrayBuffer>>) =>
+  vi.fn(async (path: string): Promise<Uint8Array<ArrayBuffer> | undefined> => files[path]);
 
 describe('materializeAttachments', () => {
   it('replaces an image file-ref with a base64 image and a document file-ref with a sentinel and a side-table entry', async () => {

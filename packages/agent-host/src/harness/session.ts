@@ -946,7 +946,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
   const materializedById = new Map<string, ProviderMessage>();
   const documents = new Map<string, MaterializedDocument>();
   const warnedAbsent = new Set<string>();
-  const readAttachment = async (path: string): Promise<Uint8Array | undefined> =>
+  const readAttachment = async (path: string): Promise<Uint8Array<ArrayBuffer> | undefined> =>
     options.attachments?.read(options.chatId, path);
   const materializeHistory = async (history: readonly ProviderMessage[]): Promise<ProviderMessage[]> => {
     const pending = history.filter((message) => !materializedById.has(message.id) && hasFileRef(message));

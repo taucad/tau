@@ -1,315 +1,217 @@
 import type { ReasoningUIPart } from 'ai';
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-// `useState` setter functions are stable across renders, so passing them as
-// callback refs is safe — React only invokes them when the underlying element
-// changes. Storing the elements in state (rather than refs) is what makes the
-// auto-pin effect re-run the moment the scroll container actually attaches,
-// even when an earlier render took a different JSX path that omitted the refs.
-import { Brain, ChevronRight } from 'lucide-react';
-import { getReasoningStartedAtMs, getReasoningDurationMs } from '@taucad/chat';
-import { MarkdownViewerChat } from '#components/markdown/markdown-viewer-chat.js';
-import { ChatToolCard, ChatToolCardHeader, ChatToolCardTitle } from '#components/chat/chat-tool-card.js';
-import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
-import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { ChevronRight } from 'lucide-react';
+import { getReasoningEndedAtMs, getReasoningStartedAtMs } from '@taucad/chat';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { Button } from '@taucad/ui/components/button';
-import { cn } from '@taucad/ui/utils/cn';
-import { formatReasoningDuration } from '#utils/format-reasoning-duration.js';
-import { useReasoningStopwatch } from '#utils/use-reasoning-stopwatch.js';
+import { ThoughtBubble } from '#components/icons/thought-bubble.js';
+import { MarkdownViewerChat } from '#components/markdown/markdown-viewer-chat.js';
 
-/**
- * Maximum characters rendered in preview mode.
- * Tail-truncation keeps the DOM lightweight while showing the most recent reasoning.
- * ~3000 chars fills roughly 20-30 lines of prose at text-sm, providing enough
- * context in the constrained viewport without building an oversized markdown tree.
- */
-const previewTextBudget = 3000;
-
-/**
- * Distance (px) from the bottom that still counts as "stuck to bottom".
- * Handles sub-pixel rounding and lets the user be effectively at the bottom
- * without having to land exactly on `scrollHeight - clientHeight`.
- */
 const bottomTolerance = 8;
 
 type ChatMessageReasoningProperties = {
-  readonly part: ReasoningUIPart;
-  /**
-   * Whether the message has content parts after this reasoning part.
-   * When true, reasoning auto-collapses to keep focus on the response.
-   */
+  readonly parts: readonly ReasoningUIPart[];
   readonly hasContent: boolean;
-  /**
-   * Whether this reasoning part belongs to the trailing message AND the chat is
-   * currently streaming. Drives every "live" affordance: the present-tense
-   * "Thinking for Ns" stopwatch, the auto-pin scroll effect, the streamdown
-   * incomplete-token mode, and the no-text shimmer card. Callers must derive
-   * this from `messageOrder.at(-1) === messageId && status === 'streaming'`;
-   * a chat-wide streaming flag would re-light prior messages whenever the user
-   * sends a follow-up.
-   */
   readonly isMessageActive: boolean;
 };
 
+/** Union valid completed reasoning intervals so overlap is never double counted. */
+export const reasoningDurationMs = (parts: readonly ReasoningUIPart[]): number | undefined => {
+  const intervals: Array<{ start: number; end: number }> = [];
+  for (const part of parts) {
+    const start = getReasoningStartedAtMs(part);
+    const end = getReasoningEndedAtMs(part);
+    if (start === undefined || end === undefined || end < start) {
+      return undefined;
+    }
+    intervals.push({ start, end });
+  }
+  if (intervals.length === 0) {
+    return undefined;
+  }
+  intervals.sort((left, right) => left.start - right.start);
+  let total = 0;
+  let currentStart = intervals[0]!.start;
+  let currentEnd = intervals[0]!.end;
+  for (const reasoningInterval of intervals.slice(1)) {
+    if (reasoningInterval.start <= currentEnd) {
+      currentEnd = Math.max(currentEnd, reasoningInterval.end);
+    } else {
+      total += currentEnd - currentStart;
+      currentStart = reasoningInterval.start;
+      currentEnd = reasoningInterval.end;
+    }
+  }
+  return total + currentEnd - currentStart;
+};
+
+const thoughtLabel = (parts: readonly ReasoningUIPart[]): string => {
+  const duration = reasoningDurationMs(parts);
+  if (duration === undefined || duration < 1000) {
+    return 'Thought briefly';
+  }
+  const seconds = Math.max(1, Math.round(duration / 1000));
+  return `Thought for ${seconds} ${seconds === 1 ? 'second' : 'seconds'}`;
+};
+
+// oxlint-disable-next-line @typescript-eslint/no-restricted-types -- DOM event targets are nullable by platform contract.
+const isInteractive = (target: EventTarget | null): boolean =>
+  target instanceof Element && Boolean(target.closest('a, button, input, textarea, select, summary, [role="link"]'));
+
+/** One collapsible, chronological reasoning body shared by Tau and ACP agents. */
 export function ChatMessageReasoning({
-  part,
+  parts,
   hasContent,
   isMessageActive,
-}: ChatMessageReasoningProperties): React.JSX.Element {
+}: ChatMessageReasoningProperties): React.JSX.Element | undefined {
   'use no memo';
 
-  const [userToggleState, setUserToggleState] = useState<'expanded' | 'collapsed' | undefined>(undefined);
-  const [scrollContainer, setScrollContainerState] = useState<HTMLDivElement | undefined>(undefined);
-  const [content, setContentState] = useState<HTMLDivElement | undefined>(undefined);
-
-  // Callback refs receive `null` from React on unmount; normalize to `undefined`
-  // so the state matches our `null`-free convention while still letting the
-  // effect re-run on attach/detach.
-  // oxlint-disable @typescript-eslint/no-restricted-types -- React's callback ref contract passes `null` on unmount.
-  const setScrollContainer = useCallback((element: HTMLDivElement | null): void => {
-    setScrollContainerState(element ?? undefined);
-  }, []);
-  const setContent = useCallback((element: HTMLDivElement | null): void => {
-    setContentState(element ?? undefined);
-  }, []);
-  // oxlint-enable @typescript-eslint/no-restricted-types
-  // Tracks whether auto-pinning is active. Defaults to true so the initial mount
-  // and any open-during-streaming transition snap to the latest reasoning. Flips
-  // to false only when the user scrolls away from the bottom; flips back to true
-  // when the user returns to within `bottomTolerance` of the bottom.
+  const visibleParts = useMemo(() => parts.filter((part) => part.text.trim() !== ''), [parts]);
+  const contentId = useId();
+  const [userOpen, setUserOpen] = useState<boolean | undefined>(undefined);
+  const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | undefined>(undefined);
+  const [content, setContent] = useState<HTMLDivElement | undefined>(undefined);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // Pointer collapses restore focus without the keyboard focus indicator.
+  const restoreFocusRef = useRef<'keyboard' | 'pointer' | undefined>(undefined);
   const stickToBottomRef = useRef(true);
-
-  const trimmedText = useMemo(() => part.text.trim(), [part.text]);
-  const hasReasoningText = trimmedText !== '';
-
-  // Three-state header label: idle / live stopwatch / completed duration.
-  // Computed early because `isReasoningStreaming` also gates `isContentVisible`
-  // below: while reasoning is actively streaming the chevron must never fully
-  // hide the scrolling preview — it can only toggle preview ↔ expanded so the
-  // user always retains a multi-line view of the live thoughts.
-  //
-  // We deliberately ignore `part.state` for the live gate. The AI SDK reducer
-  // (`processUIMessageStream`) only flips `parts[i].state` to `'done'` inside
-  // the `case "reasoning-end"` branch; on `case "finish-step"` it merely clears
-  // the `activeReasoningParts` lookup map, leaving any unmatched part stuck at
-  // `'streaming'` for the lifetime of the message. Trusting `isMessageActive`
-  // instead is the canonical "is *this* message still arriving?" signal and
-  // stops the live counter the instant the stream closes — and never relights
-  // it on prior messages when a follow-up turn begins.
-  const reasoningStartedAtMs = getReasoningStartedAtMs(part);
-  const finalReasoningDurationMs = getReasoningDurationMs(part);
-  const isReasoningStreaming = isMessageActive && finalReasoningDurationMs === undefined;
-
-  // Three visual states:
-  //   preview  — during streaming (or `hasContent === false`): half-height, auto-scroll
-  //   collapsed — after completion (hasContent): header only
-  //   expanded  — user explicitly toggled open: full height
-  //
-  // While reasoning is still streaming we force preview-or-expanded, never
-  // fully hidden — the chevron toggles between the two. This keeps the live
-  // thoughts visible at the scrolling-area height even after the user clicks
-  // to "collapse", since losing all visibility on an in-flight reasoning
-  // block was disorienting.
-  const isContentVisible = isReasoningStreaming
-    ? true
-    : hasContent
-      ? userToggleState === 'expanded'
-      : userToggleState !== 'collapsed';
-
-  const isExpanded = userToggleState === 'expanded';
-
-  // Outside streaming the chevron mirrors visibility (rotated when open) so
-  // done-collapsed flips back to a right-pointing chevron. While streaming,
-  // visibility is pinned to true so we instead rotate only on the full
-  // expansion — preview keeps the chevron pointing right to invite "click to
-  // see more".
-  const isChevronRotated = isReasoningStreaming ? isExpanded : isContentVisible;
-
-  const displayText = useMemo(() => {
-    if (!isContentVisible) {
-      return '';
-    }
-
-    if (isExpanded || trimmedText.length <= previewTextBudget) {
-      return trimmedText;
-    }
-
-    const tail = trimmedText.slice(-previewTextBudget);
-    const paragraphBreak = tail.indexOf('\n\n');
-    return paragraphBreak > 0 ? tail.slice(paragraphBreak + 2) : tail;
-  }, [trimmedText, isExpanded, isContentVisible]);
+  const isOpen = userOpen ?? (isMessageActive || !hasContent);
+  const label = thoughtLabel(visibleParts);
+  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React callback refs receive null on detach.
+  const handleScrollContainerRef = useCallback((element: HTMLDivElement | null): void => {
+    setScrollContainer(element ?? undefined);
+  }, []);
+  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React callback refs receive null on detach.
+  const handleContentRef = useCallback((element: HTMLDivElement | null): void => {
+    setContent(element ?? undefined);
+  }, []);
 
   useEffect(() => {
-    if (!isMessageActive || !isContentVisible || isExpanded) {
+    if (!isOpen && restoreFocusRef.current) {
+      const focusVisible = restoreFocusRef.current === 'keyboard';
+      restoreFocusRef.current = undefined;
+      triggerRef.current?.focus({ focusVisible });
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isMessageActive || !isOpen || !scrollContainer || !content || typeof ResizeObserver === 'undefined') {
       return;
     }
-
-    if (!scrollContainer || !content) {
-      return;
-    }
-
-    // The browser dispatches scroll events as deferred tasks after a scrollTop
-    // write, with the *final* scrollTop reflecting any clamps. Under continuous
-    // streaming, scrollHeight grows between the pin write and the deferred
-    // scroll event, which would make a naive distance-from-bottom calculation
-    // see a stale (small) scrollTop against a fresh (large) scrollHeight and
-    // wrongly conclude the user moved away. We sidestep this by only mutating
-    // stickiness when an actual user-input event preceded the scroll event.
     let userInteracting = false;
-    let interactionTimer: ReturnType<typeof setTimeout> | undefined;
-    let pinFrame = 0;
-
-    const pinNow = (): void => {
-      if (!stickToBottomRef.current) {
-        return;
-      }
-      // oxlint-disable-next-line react/immutability -- The `use no memo` boundary preserves synchronous DOM scroll pinning for the imperative preview viewport.
-      scrollContainer.scrollTop = scrollContainer.scrollHeight;
-    };
-
-    // ResizeObserver callbacks that synchronously mutate layout can trip the
-    // browser's "ResizeObserver loop limit exceeded" guard. Defer the write to
-    // the next animation frame; multiple resize bursts within one frame
-    // coalesce into a single pin.
-    const schedulePin = (): void => {
-      if (pinFrame !== 0) {
-        return;
-      }
-      pinFrame = globalThis.requestAnimationFrame(() => {
-        pinFrame = 0;
-        pinNow();
-      });
-    };
-
-    // 150ms covers the next-task delivery window for the queued scroll event
-    // following a user input burst, while staying short enough that subsequent
-    // programmatic pin scrolls fall outside it.
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const markUserInteraction = (): void => {
       userInteracting = true;
-      globalThis.clearTimeout(interactionTimer);
-      interactionTimer = globalThis.setTimeout(() => {
+      globalThis.clearTimeout(timer);
+      timer = globalThis.setTimeout(() => {
         userInteracting = false;
       }, 150);
     };
-
-    const handleScroll = (): void => {
+    const updateStickiness = (): void => {
       if (!userInteracting) {
         return;
       }
-      const distanceFromBottom =
-        scrollContainer.scrollHeight - scrollContainer.clientHeight - scrollContainer.scrollTop;
-      stickToBottomRef.current = distanceFromBottom <= bottomTolerance;
+      const distance = scrollContainer.scrollHeight - scrollContainer.clientHeight - scrollContainer.scrollTop;
+      stickToBottomRef.current = distance <= bottomTolerance;
     };
-
-    pinNow();
-
-    // `pointerdown` catches scrollbar-thumb drags (no wheel/touch precursor).
+    const pin = (): void => {
+      if (stickToBottomRef.current) {
+        // oxlint-disable-next-line react/immutability -- keeping a live transcript pinned is an imperative DOM operation.
+        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      }
+    };
+    pin();
+    const observer = new ResizeObserver(pin);
+    observer.observe(content);
     scrollContainer.addEventListener('wheel', markUserInteraction, { passive: true });
     scrollContainer.addEventListener('touchstart', markUserInteraction, { passive: true });
-    scrollContainer.addEventListener('keydown', markUserInteraction, { passive: true });
     scrollContainer.addEventListener('pointerdown', markUserInteraction, { passive: true });
-    scrollContainer.addEventListener('scroll', handleScroll, { passive: true });
-    // ResizeObserver fires post-layout, so reads of scrollHeight are accurate
-    // even when Streamdown / KaTeX / Shiki reflow asynchronously.
-    const observer = new ResizeObserver(schedulePin);
-    observer.observe(content);
-
+    scrollContainer.addEventListener('scroll', updateStickiness, { passive: true });
     return () => {
       observer.disconnect();
-      if (pinFrame !== 0) {
-        globalThis.cancelAnimationFrame(pinFrame);
-      }
-      globalThis.clearTimeout(interactionTimer);
+      globalThis.clearTimeout(timer);
       scrollContainer.removeEventListener('wheel', markUserInteraction);
       scrollContainer.removeEventListener('touchstart', markUserInteraction);
-      scrollContainer.removeEventListener('keydown', markUserInteraction);
       scrollContainer.removeEventListener('pointerdown', markUserInteraction);
-      scrollContainer.removeEventListener('scroll', handleScroll);
+      scrollContainer.removeEventListener('scroll', updateStickiness);
     };
-  }, [isMessageActive, isContentVisible, isExpanded, scrollContainer, content]);
+  }, [content, isMessageActive, isOpen, scrollContainer]);
 
-  const handleToggle = useCallback((): void => {
-    setUserToggleState((previous) => {
-      if (previous === 'expanded') {
-        return 'collapsed';
-      }
-
-      return 'expanded';
-    });
+  const collapse = useCallback((event: React.MouseEvent): void => {
+    // A keyboard-activated click reports `detail === 0`.
+    restoreFocusRef.current = event.detail === 0 ? 'keyboard' : 'pointer';
+    setUserOpen(false);
   }, []);
 
-  // Header label state machine:
-  //   1. Live      — this is the trailing message, the chat is still streaming,
-  //                  and we have not yet observed a server-derived final
-  //                  duration → "Thinking for Ns" ticks.
-  //   2. Final     — server stamped both endpoints → "Thought for Ns".
-  //   3. Fallback  — orphaned (chat ended without `reasoning-end`) or legacy /
-  //                  uninstrumented part → "Thought briefly".
-  // (`isReasoningStreaming` is computed above so it can also gate visibility.)
-  const liveReasoningElapsed = useReasoningStopwatch(reasoningStartedAtMs, isReasoningStreaming);
+  const handleBodyClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>): void => {
+      if (isInteractive(event.target) || globalThis.getSelection()?.toString()) {
+        return;
+      }
+      collapse(event);
+    },
+    [collapse],
+  );
 
-  const reasoningLabel = isReasoningStreaming
-    ? formatReasoningDuration(liveReasoningElapsed, { verb: 'Thinking' })
-    : finalReasoningDurationMs === undefined
-      ? 'Thought briefly'
-      : formatReasoningDuration(finalReasoningDurationMs);
-
-  // Two-tone presentation: leading verb ("Thought" / "Thinking") in the
-  // foreground, the trailing duration suffix in muted color so the most
-  // important word reads first while the suffix recedes. Spacing between the
-  // verb and suffix is owned by `ChatToolLabel` (literal inline space), so the
-  // suffix string here is the raw remainder with no leading-space padding.
-  const [reasoningLabelVerb = reasoningLabel, ...reasoningLabelRest] = reasoningLabel.split(' ');
-  const reasoningLabelSuffix = reasoningLabelRest.join(' ');
-
-  if (!hasReasoningText) {
-    return (
-      <ChatToolCard variant='minimal' status={isMessageActive ? 'loading' : 'ready'} isDefaultOpen={false}>
-        <ChatToolCardHeader>
-          <Brain className='size-3 shrink-0' />
-          <ChatToolCardTitle>{isMessageActive ? 'Thinking...' : 'Thought briefly'}</ChatToolCardTitle>
-        </ChatToolCardHeader>
-      </ChatToolCard>
-    );
+  if (visibleParts.length === 0) {
+    return undefined;
   }
 
   return (
-    <div>
-      <Button
-        variant='ghost'
-        size='xs'
-        className='group/chat-tool-trigger -ml-2 flex h-6 w-full min-w-0 justify-start gap-1.5 overflow-hidden font-medium text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent'
-        onClick={handleToggle}
-      >
-        <Brain className='size-3 shrink-0' />
-        <ChatToolLabel verb={reasoningLabelVerb}>
-          {reasoningLabelSuffix && <ChatToolDescription>{reasoningLabelSuffix}</ChatToolDescription>}
-        </ChatToolLabel>
-        <ChevronRight
-          className={cn('size-3 shrink-0 transition-transform duration-200', isChevronRotated && 'rotate-90')}
-        />
-      </Button>
-
-      {isContentVisible ? (
-        <div className='pl-1.5'>
-          <div
-            ref={setScrollContainer}
-            className={cn(
-              'border-l border-foreground/20 pl-4 text-sm italic',
-              !isExpanded && 'max-h-48 overflow-y-auto',
-            )}
+    <Collapsible open={isOpen} onOpenChange={setUserOpen}>
+      {!isOpen && (
+        <CollapsibleTrigger asChild>
+          <Button
+            ref={triggerRef}
+            variant='ghost'
+            size='xs'
+            className='group/chat-tool-trigger -ml-2 flex w-full min-w-0 items-center justify-start gap-1.5 overflow-hidden font-normal text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent'
           >
-            <div ref={setContent}>
+            <ThoughtBubble aria-hidden='true' className='size-3 shrink-0' />
+            <span className='min-w-0 truncate'>{label}</span>
+            <ChevronRight
+              aria-hidden='true'
+              className='size-3 shrink-0 opacity-0 transition-[opacity,transform] duration-200 group-hover/chat-tool-trigger:opacity-100 group-focus-visible/chat-tool-trigger:opacity-100'
+            />
+          </Button>
+        </CollapsibleTrigger>
+      )}
+      <CollapsibleContent>
+        <div
+          ref={handleScrollContainerRef}
+          role='group'
+          aria-label='Collapse thought'
+          onClick={handleBodyClick}
+          className='reasoning-body group/reasoning-body relative max-h-[min(30rem,60svh)] scroll-shadows-y overflow-y-auto overscroll-contain text-sm font-normal text-muted-foreground italic [&_*]:font-normal [&_*]:italic [&_h1]:text-inherit [&_h2]:text-inherit [&_h3]:text-inherit [&_h4]:text-inherit [&_h5]:text-inherit [&_h6]:text-inherit'
+        >
+          <ThoughtBubble aria-hidden='true' className='pointer-events-none absolute top-1 left-0 size-3 shrink-0' />
+          <button
+            type='button'
+            aria-controls={contentId}
+            aria-expanded='true'
+            aria-label='Collapse thought'
+            onClick={(event) => {
+              event.stopPropagation();
+              collapse(event);
+            }}
+            className='absolute top-0 right-0 z-10 inline-flex size-5 items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity outline-none group-hover/reasoning-body:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring'
+          >
+            <ChevronRight aria-hidden='true' className='size-3 rotate-90' />
+          </button>
+          <div id={contentId} ref={handleContentRef} className='pr-6 pl-5'>
+            {visibleParts.map((part, index) => (
               <MarkdownViewerChat
+                key={`${String(getReasoningStartedAtMs(part))}:${String(getReasoningEndedAtMs(part))}:${part.text}:${String(index)}`}
                 className='text-muted-foreground'
-                isStreaming={isMessageActive}
-                isStreamingFade={isReasoningStreaming}
+                isStreaming={isMessageActive && index === visibleParts.length - 1}
+                isStreamingFade={isMessageActive && index === visibleParts.length - 1}
               >
-                {displayText}
+                {part.text.trim()}
               </MarkdownViewerChat>
-            </div>
+            ))}
           </div>
         </div>
-      ) : null}
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

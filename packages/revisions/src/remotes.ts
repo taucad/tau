@@ -349,7 +349,7 @@ export type RemoteTransportContext = Readonly<{
    * session to renew.
    */
   remote?: string;
-  /** git's own stderr, on the leg that has one. */
+  /** Git's own stderr, on the leg that has one. */
   stderr?: string;
 }>;
 
@@ -391,7 +391,7 @@ const refusalBody = (body: string | undefined): RemoteRefusal => {
 };
 
 /**
- * git's own sideband line for "a hook said no".
+ * Git's own sideband line for "a hook said no".
  *
  * `receive-pack` writes it beside whatever the hook itself printed, so it is
  * git's restatement of the per-ref status rather than anything the server said —
@@ -417,7 +417,7 @@ const gitStderrRefusal = (stderr: string): RemoteRefusal => {
     /(?:The requested URL returned error|RPC failed; HTTP|error: HTTP)[: ]\s*(?<status>\d{3})/u.exec(stderr)?.groups?.[
       'status'
     ] ??
-    /* git answers a `WWW-Authenticate` by asking for a user name, so with
+    /* Git answers a `WWW-Authenticate` by asking for a user name, so with
      * prompts disabled *that* refusal is the 401, and the status never appears. */
     (/could not read (?:Username|Password) for|Authentication failed/u.test(stderr)
       ? '401'

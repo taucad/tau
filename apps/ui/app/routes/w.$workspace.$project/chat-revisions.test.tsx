@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
@@ -357,6 +357,70 @@ describe('Revisions pane', () => {
     /* A27/D19's third *Compare* surface, on the conflict row (review R9). */
     await user.click(screen.getByRole('button', { name: 'Compare src/bracket.ts' }));
     expect(screen.getByTestId('conflict-diff').textContent).toBe('thick = 4\n|thick = 6\n');
+  });
+
+  /*
+   * C44. `openConflictInEditor` is fire-and-forget, so the pane used to decide a
+   * materialization had failed by waiting 10 s for one that never came — which
+   * made every slow answer read as a failure and every real failure take ten
+   * seconds to read. The worker now forwards the machine's own refusal and the
+   * row reacts to it, with no timer anywhere in the file.
+   */
+  it('shows a conflict materialization failure the moment the worker says so (C44)', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      branches: [
+        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'bracket-fillet',
+          head: 'rev-c',
+          checkoutId: 'co-2',
+          checkoutRoot: '/checkouts/co-2',
+          leaseChatIds: [],
+        },
+      ],
+      conflicts: [
+        {
+          revisionId: 'rev-c',
+          branch: 'bracket-fillet',
+          labels: { ours: 'main', theirs: 'bracket-fillet' },
+          paths: [{ path: 'src/bracket.ts', openable: true, side: undefined }],
+          busy: false,
+          ready: false,
+        },
+      ],
+    };
+
+    renderPane();
+    await user.click(await screen.findByRole('button', { name: 'Edit src/bracket.ts manually' }));
+
+    /* An answer that has not arrived is not a failure — which is the whole of
+       what the timer got wrong. Until the worker says something, the row is
+       still loading and there is no alert to read. */
+    expect(await screen.findByRole('status', { name: 'Conflict view for src/bracket.ts' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    expect(screen.queryByRole('alert', { name: 'Conflict view for src/bracket.ts' })).not.toBeInTheDocument();
+
+    act(() => {
+      for (const listener of revisionStatusHarness.toasts) {
+        listener({
+          type: 'conflictTextFailed',
+          revisionId: 'rev-c',
+          path: 'src/bracket.ts',
+          reason: 'That file is no longer in this revision.',
+        });
+      }
+    });
+
+    /* And the moment it does, the refusal is the server's own sentence. */
+    const alert = await screen.findByRole('alert', { name: 'Conflict view for src/bracket.ts' });
+    expect(alert).toHaveTextContent('That file is no longer in this revision.');
+    expect(within(alert).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.queryByRole('status', { name: 'Conflict view for src/bracket.ts' })).not.toBeInTheDocument();
   });
 
   it('switches to a branch the person picked', async () => {

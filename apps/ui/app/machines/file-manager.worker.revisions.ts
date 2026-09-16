@@ -284,6 +284,8 @@ export type RevisionToast =
    * holds the root and nothing else (A38).
    */
   | Readonly<{ type: 'conflictText'; revisionId: string; path: string; text: string; ours: string; theirs: string }>
+  /** That conflicted file could not be opened, and why (C44). */
+  | Readonly<{ type: 'conflictTextFailed'; revisionId: string; path: string; reason: string }>
   /** *Ask chat to resolve*: whatever starts chat turns on this page should. */
   | Readonly<{
       type: 'resolveWithChat';
@@ -930,6 +932,16 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       text: materialized.text,
       ours: materialized.ours,
       theirs: materialized.theirs,
+    });
+  });
+  /* C44: the refusal travels the same way the text does, so the pane that asked
+   * for a file learns that nothing is coming instead of waiting to assume it. */
+  actor.on('conflictMaterializationFailed', (failed) => {
+    toasts.emit({
+      type: 'conflictTextFailed',
+      revisionId: failed.revisionId,
+      path: failed.path,
+      reason: failed.reason,
     });
   });
   actor.on('turnRequested', (requested) => {

@@ -345,6 +345,15 @@ function useConflictTexts(): Readonly<Record<string, ConflictMaterialization>> {
       return undefined;
     }
     return client.subscribeToasts((entry) => {
+      /* Both answers are settled facts about one path, so both land here and
+       * the row reads whichever arrived — no timer decides (C44). */
+      if (entry.type === 'conflictTextFailed') {
+        setTexts((current) => ({
+          ...current,
+          [`${entry.revisionId}\u0000${entry.path}`]: { failure: entry.reason },
+        }));
+        return;
+      }
       if (entry.type !== 'conflictText') {
         return;
       }

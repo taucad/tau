@@ -26,6 +26,8 @@
 import { assign, emit, enqueueActions, fromPromise, raise, setup } from 'xstate';
 import type { AnyActorRef, SnapshotFrom } from 'xstate';
 
+import { syncFailureReason } from '#sync.machine.js';
+import type { SyncFailureReason } from '#sync.machine.js';
 import type { RemoteKind, RemoteReauthorizationCode } from '#remotes.js';
 import type { RemoteStorageRefusal } from '#revision-port.js';
 
@@ -50,6 +52,17 @@ export type RemoteFacet = Readonly<{
   quota: RemoteStorageRefusal | undefined;
   /** The last failure, already safe to render. */
   error: string | undefined;
+  /**
+   * What class of failure that was, from `sync.machine`'s own classifier.
+   *
+   * Rule 19 asks every surface showing a remote failure for exactly one action
+   * matching its class. Without this the *connect* path had only a sentence, so
+   * the `403 GIT_SYNC_NOT_ENTITLED` that opened this closeout could offer only
+   * *Retry* on connect where the identical refusal on a push offered *Upgrade*.
+   * `undefined` whenever {@link RemoteFacet.error} is, so a surface never shows
+   * a class with no sentence beside it.
+   */
+  reason: SyncFailureReason | undefined;
   /** True when this project may fetch but must never push to the remote. */
   fetchOnly: boolean;
   provider: 'github' | undefined;
@@ -86,6 +99,8 @@ export type RemoteMachineContext = Readonly<{
   quota: RemoteStorageRefusal | undefined;
   overQuota: readonly string[];
   error: string | undefined;
+  /** The class of {@link RemoteMachineContext.error}, for the facet (rule 19). */
+  reason: SyncFailureReason | undefined;
   /**
    * This attempt wrote the remote into git's config and has not finished (C10).
    *
@@ -263,7 +278,12 @@ export const remoteMachine = setup({
     attemptWroteRemote: ({ context }) => context.attemptWroteRemote,
   },
   actions: {
-    failWith: assign({ error: (_, params: Readonly<{ error: string }>) => params.error }),
+    /* One place converts a rejection into what a surface renders: the sentence
+     * and the class beside it, from the classifier `sync.machine` owns. */
+    failWith: assign({
+      error: (_, params: Readonly<{ error: unknown }>) => reason(params.error),
+      reason: (_, params: Readonly<{ error: unknown }>) => syncFailureReason(params.error),
+    }),
     /** Everything this abandoned attempt wrote, forgotten; the reason stays. */
     forgetAttempt: assign({
       remote: undefined,
@@ -286,6 +306,7 @@ export const remoteMachine = setup({
     quota: undefined,
     overQuota: [],
     error: undefined,
+    reason: undefined,
     attemptWroteRemote: false,
   }),
   initial: 'reading',
@@ -314,7 +335,7 @@ export const remoteMachine = setup({
         ],
         onError: {
           target: 'failed',
-          actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
+          actions: { type: 'failWith', params: ({ event }) => ({ error: event.error }) },
         },
       },
       /* A route can carry a connect gesture into the project before this
@@ -355,7 +376,7 @@ export const remoteMachine = setup({
         },
         onError: {
           target: 'failed',
-          actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
+          actions: { type: 'failWith', params: ({ event }) => ({ error: event.error }) },
         },
       },
       /* Nothing has been written yet, so there is nothing to remove: going
@@ -385,14 +406,14 @@ export const remoteMachine = setup({
           {
             guard: ({ event }) => isReauthorizationRequired(event.error),
             target: 'reconnectRequired',
-            actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
+            actions: { type: 'failWith', params: ({ event }) => ({ error: event.error }) },
           },
           {
             guard: 'attemptWroteRemote',
             target: 'abandoning',
-            actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
+            actions: { type: 'failWith', params: ({ event }) => ({ error: event.error }) },
           },
-          { target: 'failed', actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) } },
+          { target: 'failed', actions: { type: 'failWith', params: ({ event }) => ({ error: event.error }) } },
         ],
       },
       on: { authorized: { target: 'validating' }, cancel: { target: 'disconnecting' } },
@@ -408,14 +429,14 @@ export const remoteMachine = setup({
           {
             guard: ({ event }) => isReauthorizationRequired(event.error),
             target: 'reconnectRequired',
-            actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
+            actions: { type: 'failWith', params: ({ event }) => ({ error: event.error }) },
           },
           {
             guard: 'attemptWroteRemote',
             target: 'abandoning',
-            actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
+            actions: { type: 'failWith', params: ({ event }) => ({ error: event.error }) },
           },
-          { target: 'failed', actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) } },
+          { target: 'failed', actions: { type: 'failWith', params: ({ event }) => ({ error: event.error }) } },
         ],
       },
       on: {
@@ -513,20 +534,20 @@ export const remoteMachine = setup({
           {
             guard: ({ event }) => isReauthorizationRequired(event.error),
             target: 'reconnectRequired',
-            actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
+            actions: { type: 'failWith', params: ({ event }) => ({ error: event.error }) },
           },
           {
             guard: 'attemptWroteRemote',
             target: 'abandoning',
             actions: [
-              { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
+              { type: 'failWith', params: ({ event }) => ({ error: event.error }) },
               emit(({ event }): RemoteMachineEmitted => ({ type: 'toast.error', message: reason(event.error) })),
             ],
           },
           {
             target: 'failed',
             actions: [
-              { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
+              { type: 'failWith', params: ({ event }) => ({ error: event.error }) },
               emit(({ event }): RemoteMachineEmitted => ({ type: 'toast.error', message: reason(event.error) })),
             ],
           },
@@ -606,7 +627,7 @@ export const remoteMachine = setup({
         },
         onError: {
           target: 'failed',
-          actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
+          actions: { type: 'failWith', params: ({ event }) => ({ error: event.error }) },
         },
       },
     },
@@ -692,6 +713,9 @@ export const selectRemoteFacet = (snapshot: SnapshotFrom<typeof remoteMachine>):
   overQuota: snapshot.context.overQuota,
   quota: snapshot.context.quota,
   error: snapshot.context.error,
+  /* Never a class with no sentence: the reset edges clear `error`, and this
+   * keeps the two halves of one failure from drifting apart. */
+  reason: snapshot.context.error === undefined ? undefined : snapshot.context.reason,
   fetchOnly: snapshot.context.remote?.fetchOnly === true,
   provider: snapshot.context.remote?.provider,
   repositoryId: snapshot.context.remote?.repositoryId,

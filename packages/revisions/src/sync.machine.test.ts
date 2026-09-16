@@ -1136,4 +1136,63 @@ describe('syncMachine', () => {
     expect(harness.actor.getSnapshot().status).toBe('stopped');
     harness.parent.stop();
   });
+
+  /*
+   * **B7** (policy rule 20): *mint → push request issued, connected and online,
+   * within 2.1 s — the debounce plus 100 ms.*
+   *
+   * It lives here rather than in `apps/ui-e2e` for two reasons. The budget is a
+   * property of this machine's debounce, and contract §7 gives a benchmark to
+   * the lane that owns the file under test; and `apps/ui-e2e` boots no API, no
+   * account and no remote, so it cannot reach the *connected and online*
+   * precondition the row states (lane C proved that, `C-ui/report.md` §2.1).
+   *
+   * Driven by the machine's *own* clock, never a wall clock: a millisecond row
+   * measured against `Date.now()` would be a reading of the machine this runs
+   * on, and the coordinator's verification of lane B showed a B-row varying 5×
+   * with load. What is asserted here is what the machine *schedules*, which is
+   * a property of the code.
+   */
+  it('B7 (rule 20): a mint on a connected, online project issues its push inside the debounce plus 100 ms', async () => {
+    const harness = start();
+    await openCleanly(harness);
+    expect(selectSyncFacet(harness.actor.getSnapshot()).online).toBe(true);
+    expect(harness.actor.getSnapshot().context.remote).toBe('tau');
+
+    harness.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r1' });
+
+    /* Nothing at the debounce's last instant: the window is the whole of the
+       wait, and a push before it would defeat the coalescing row 5 pins. */
+    harness.clock.advance(1999);
+    expect(harness.effects.running('push')).toBe(0);
+
+    /* And the request is out within the remaining 101 ms of the budget. */
+    harness.clock.advance(101);
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    expect(harness.effects.inputsFor('push')).toHaveLength(1);
+
+    harness.effects.settle('push', { output: pushResult({ name: mainRef, status: 'updated', head: 'h1' }) });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+
+    harness.stop();
+  });
+
+  it('B7: an offline or unconnected project issues nothing, which is what makes the row about the debounce', async () => {
+    const offline = start({ online: false });
+    offline.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r1' });
+    offline.clock.advance(2100);
+    expect(offline.effects.running('push')).toBe(0);
+    offline.stop();
+
+    const unconnected = start({ remote: undefined });
+    await vi.waitFor(() => {
+      expect(unconnected.actor.getSnapshot().matches('noRemote')).toBe(true);
+    });
+    unconnected.actor.send({ type: 'revisionMinted', checkoutId: 'live', trigger: 'save', revisionId: 'r1' });
+    unconnected.clock.advance(2100);
+    expect(unconnected.effects.running('push')).toBe(0);
+    unconnected.stop();
+  });
 });

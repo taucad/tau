@@ -51,6 +51,7 @@ const facet = (overrides: Partial<RemoteFacet> = {}): RemoteFacet => ({
   storage: undefined,
   overQuota: [],
   error: undefined,
+  reason: undefined,
   fetchOnly: false,
   provider: undefined,
   repositoryId: undefined,
@@ -512,20 +513,61 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
     /* Before the fix this rendered three radios and *zero* buttons, so the
      * region was an inert dead end and focus fell to `<body>`. */
     expect(screen.getByRole('button', { name: 'Apply backup change' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    /* Policy rule 19 names six actions and *Retry* is the one for a failure with
+       no class; *Try again* was a seventh word for the same verb, in the same
+       region that already renders *Retry* from `syncFailureAction`. */
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+
+  /*
+   * Rule 19 asks for one action matching the failure's class on *every* surface
+   * showing a remote failure, and a refused connect is one of them. Before
+   * `RemoteFacet.reason` this block had only a sentence, so the `403
+   * GIT_SYNC_NOT_ENTITLED` this closeout began with offered *Retry* on connect
+   * and *Upgrade* on a push — the same refusal, two answers.
+   */
+  it.each([
+    { reason: 'notEntitled', action: 'Pro Upgrade' },
+    { reason: 'quota', action: 'Pro Upgrade' },
+    { reason: 'unauthorized', action: 'Sign in' },
+    { reason: 'rejected', action: 'Sync now' },
+    { reason: 'unknown', action: 'Retry' },
+  ] as const)('classifies a refused connect as $reason and offers $action (rule 19)', ({ reason, action }) => {
+    renderRegion(
+      facet({ kind: 'tau', phase: 'failed', error: 'Syncing files to Tau Cloud is a paid plan feature.', reason }),
+    );
+
+    const alert = screen.getByRole('alert', { name: 'Backup connection error' });
+    expect(alert).toHaveTextContent('Syncing files to Tau Cloud is a paid plan feature.');
+    const actions = within(alert)
+      .getAllByRole(action === 'Sign in' ? 'link' : 'button')
+      .map((element) => element.textContent.trim());
+    expect(actions).toStrictEqual([action]);
+  });
+
+  it('answers a failed connect in the vocabulary rule 19 allows (C4)', () => {
+    renderRegion(facet({ kind: 'tau', phase: 'failed', error: 'Tau Cloud has no project with this id.' }));
+
+    const alert = screen.getByRole('alert', { name: 'Backup connection error' });
+    expect(alert).toHaveTextContent('Tau Cloud has no project with this id.');
+    const actions = within(alert)
+      .getAllByRole('button')
+      .map((button) => button.textContent.trim());
+    expect(actions).toStrictEqual(['Retry']);
   });
 
   it.each([
-    ['unauthorized' as const, 'link', 'Sign in'],
-    ['notEntitled' as const, 'button', 'Pro Upgrade'],
-    ['quota' as const, 'button', 'Pro Upgrade'],
-    ['rejected' as const, 'button', 'Sync now'],
-    ['unknown' as const, 'button', 'Retry'],
-  ])('renders the %s reason with its one action (C4, N3)', (reason, role, action) => {
-    renderRegion(
-      connected,
-      syncFacet({ state: 'failed', pendingCount: 2, error: 'The plan does not allow it.', reason }),
-    );
+    { reason: 'unauthorized', role: 'link', action: 'Sign in', state: 'failed' },
+    { reason: 'notEntitled', role: 'button', action: 'Pro Upgrade', state: 'failed' },
+    { reason: 'quota', role: 'button', action: 'Pro Upgrade', state: 'failed' },
+    { reason: 'rejected', role: 'button', action: 'Sync now', state: 'failed' },
+    { reason: 'unknown', role: 'button', action: 'Retry', state: 'failed' },
+    /* W2: a `queued` refusal reads the same sentence and offers the same one
+       verb as a `failed` one — the difference is only whether this device will
+       retry by itself, which the row's *Offline* line says. */
+    { reason: 'offline', role: 'button', action: 'Sync now', state: 'queued' },
+  ] as const)('renders the $reason reason with its one action (C4, N3)', ({ reason, role, action, state }) => {
+    renderRegion(connected, syncFacet({ state, pendingCount: 2, error: 'The plan does not allow it.', reason }));
 
     const row = screen.getByRole('status', { name: 'Backup status' });
     expect(row).toHaveTextContent('The plan does not allow it.');

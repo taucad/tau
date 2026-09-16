@@ -425,10 +425,19 @@ const isFatal = (error: unknown): boolean => terminalFailureCodes.has(codeOf(err
 /**
  * Which action the surface beside this failure should offer (N3).
  *
+ * The one classifier, exported because `remote.machine` needs the same answer
+ * for a refused *connect*: rule 19 asks every surface showing a remote failure
+ * for exactly one action matching its class, and the connect path used to have
+ * no class at all, so a `403 GIT_SYNC_NOT_ENTITLED` on connect could only offer
+ * *Retry* where the identical refusal on a push offered *Upgrade*. It lives
+ * here rather than in `remotes.ts` because a machine may import only *types*
+ * from this package's contracts (I20, AC22) and may import a sibling machine.
+ *
  * @param error - The rejection, as the actor reported it.
  * @returns The class, `'unknown'` when the code says nothing.
+ * @public
  */
-const reasonOf = (error: unknown): SyncFailureReason => {
+export const syncFailureReason = (error: unknown): SyncFailureReason => {
   switch (codeOf(error)) {
     case 'REMOTE_REAUTHORIZATION_REQUIRED':
     case 'REMOTE_UNAUTHORIZED': {
@@ -983,7 +992,7 @@ export const syncMachine = setup({
               target: '#sync.queued',
               actions: assign({
                 error: ({ event }) => reason(event.error),
-                reason: ({ event }) => reasonOf(event.error),
+                reason: ({ event }) => syncFailureReason(event.error),
               }),
             },
           },
@@ -1000,7 +1009,7 @@ export const syncMachine = setup({
               target: '#sync.queued',
               actions: assign({
                 error: ({ event }) => reason(event.error),
-                reason: ({ event }) => reasonOf(event.error),
+                reason: ({ event }) => syncFailureReason(event.error),
               }),
             },
           },
@@ -1040,7 +1049,7 @@ export const syncMachine = setup({
               target: '#sync.queued',
               actions: assign({
                 error: ({ event }) => reason(event.error),
-                reason: ({ event }) => reasonOf(event.error),
+                reason: ({ event }) => syncFailureReason(event.error),
               }),
             },
           },
@@ -1186,7 +1195,7 @@ export const syncMachine = setup({
             failure: ({ event }) => (isFatal(event.error) ? 'fatal' : 'retry'),
             attempt: ({ context }) => context.attempt + 1,
             error: ({ event }) => reason(event.error),
-            reason: ({ event }) => reasonOf(event.error),
+            reason: ({ event }) => syncFailureReason(event.error),
             pending: ({ context, event }) =>
               nextPending({
                 pending: context.pending,

@@ -189,7 +189,7 @@ export type UiBrowserCommands = {
   uiSetTargetOffline(offline: boolean): Promise<void>;
   uiSetViewport(viewport: TargetViewport, surface?: TargetSurface): Promise<void>;
   uiStartHostFixture(): Promise<string>;
-  uiStartTauServeFixture(options?: { readonly externalAgents?: boolean }): Promise<TargetTauServeFixture>;
+  uiStartTauServeFixture(options?: { readonly externalAgents?: boolean | 'codex' }): Promise<TargetTauServeFixture>;
   uiStopTauServeFixture(): Promise<void>;
   uiReleaseTauServeGateway(): Promise<void>;
   uiReadTauServeFile(relativePath: string): Promise<string | undefined>;

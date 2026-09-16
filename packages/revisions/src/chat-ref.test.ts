@@ -11,7 +11,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createMemoryProvider } from '@taucad/filesystem/backend';
@@ -764,7 +764,7 @@ describe.runIf(gitOnPath)('two devices, two stores, one remote', () => {
 
   /* An image and a PDF beside the log: one entry each in the ref's tree, exact
    * bytes, and never re-entered once the device already holds them. */
-  it('carries an image and a PDF as one object each, and stops at the P20 gate', async () => {
+  it('carries an image and a PDF to the other device as plain blobs, never pointers', async () => {
     const base = await fetchChat(deviceA);
     await deviceA.checkout.writeFile(`${chatRecordsPath(sharedChatId)}/${imagePath}`, imageBytes);
     await deviceA.checkout.writeFile(`${chatRecordsPath(sharedChatId)}/${documentPath}`, documentBytes);
@@ -788,13 +788,16 @@ describe.runIf(gitOnPath)('two devices, two stores, one remote', () => {
       chatSegmentPath('device-a'),
       chatSegmentPath('device-b'),
     ]);
-    /* Read back through the port, which smudges: the *stored* blob at each of
-     * these paths is a 127-byte LFS pointer, because `writeTreeObject` cleans
-     * every tree it writes and `isLargeObjectPath` calls `.jpg` and `.pdf`
-     * large-object families whatever they weigh. The real bytes are in this
-     * store's `.git/lfs/objects/`, which no ref carries. See the blocker below. */
     expect(carried?.get(imagePath)).toEqual(imageBytes);
     expect(carried?.get(documentPath)).toEqual(documentBytes);
+
+    /*
+     * Raw, not through the port: `readTree` smudges, so it would answer with the
+     * real bytes even if the stored blob were a pointer. A chat ref is recorded
+     * with `largeObjects: false`, so nothing on this path is ever pointerised
+     * and the store has no LFS object directory at all.
+     */
+    await expect(stat(join(root, 'device-a-store', '.git', 'lfs'))).rejects.toMatchObject({ code: 'ENOENT' });
 
     /* Written once: the same bytes recorded again are the tree the ref already
      * holds, so content addressing costs one object per blob however many turns
@@ -813,20 +816,21 @@ describe.runIf(gitOnPath)('two devices, two stores, one remote', () => {
     expect(again.head).toBe(withAttachments.head);
 
     /*
-     * BLOCKER, and the refusal is *correct* — the defect is upstream of it.
-     * `writeTreeObject` runs `cleanLargeObjects` on every tree this port
-     * records, and `isLargeObjectPath` is extension-only, so a chat attachment
-     * is pointerised on write however small it is: the tree carries a pointer
-     * and the bytes stay in this host's private `.git/lfs/objects/`. `git lfs
-     * ls-files` then names them because they really are pointers, and P20
-     * rightly refuses to offer them to a remote that cannot serve the objects.
-     * Both legs clean identically (`isomorphic-git-adapter` writeRevision), so
-     * this is not a leg disagreement. Owner: whether record refs should be
-     * cleaned at all, in `native-git-port.ts` / `lfs.ts`, outside this lane.
-     * This row inverts when a chat attachment stops being pointerised.
+     * A plain remote carries them. Nothing in the tree is a pointer, so the P20
+     * gate has nothing to refuse: attachments reach the other device as ordinary
+     * git blobs, which is what "one object each, written once" has to mean for a
+     * closed tree that can never carry a `.gitattributes` to smudge against.
      */
-    await expect(
-      deviceA.port.push({ remote: 'origin', refs: [{ name: chatRefName(sharedChatId), expected: base }] }),
-    ).rejects.toMatchObject({ code: 'LFS_REMOTE_UNSUPPORTED' });
+    const pushed = await deviceA.port.push({
+      remote: 'origin',
+      refs: [{ name: chatRefName(sharedChatId), expected: base }],
+    });
+    expect(pushed.refs[0]?.status).toBe('updated');
+
+    const fetchedB = await fetchChat(deviceB);
+    const onB = await deviceB.port.readTree(fetchedB);
+    expect(onB?.get(imagePath)).toEqual(imageBytes);
+    expect(onB?.get(documentPath)).toEqual(documentBytes);
+    await expect(stat(join(root, 'device-b-store', '.git', 'lfs'))).rejects.toMatchObject({ code: 'ENOENT' });
   }, 180_000);
 });

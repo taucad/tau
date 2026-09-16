@@ -865,6 +865,58 @@ describe.runIf(gitOnPath)('cross-adapter identity (I4)', () => {
       await Promise.all(harnesses.map(async (harness) => harness.dispose()));
     }
   }, 180_000);
+
+  /*
+   * `largeObjects: false` records the tree byte for byte on both legs (I4). A
+   * record ref needs it: its closed tree can carry no `.gitattributes`, so a
+   * pointer written into one is a pointer nothing could ever smudge against.
+   * The family here is a tracked one, so the default path would pointerise it
+   * however little it weighs.
+   */
+  it('records a tracked family verbatim on both legs when large objects are declined', async () => {
+    const harnesses = await Promise.all([isomorphicHarness(), createNativeHarness()]);
+    try {
+      const small = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46]);
+      const recorded = await Promise.all(
+        harnesses.map(async (harness) => {
+          await harness.port.init({ author });
+          const receipt = await harness.port.writeRevision({
+            parents: [],
+            tree: tree({ 'attachments/photo.jpg': small }),
+            largeObjects: false,
+            provenance: provenance('user'),
+            summary: summary('Verbatim attachment'),
+          });
+          const id = revisionId(receipt.commitId);
+          const record = await harness.port.readRevision(id);
+          const stored = await harness.port.readTree(id);
+          return { treeId: record?.treeId, content: stored?.get('attachments/photo.jpg') };
+        }),
+      );
+      expect(recorded[1]?.treeId).toBe(recorded[0]?.treeId);
+      expect(recorded[0]?.content).toStrictEqual(small);
+      expect(recorded[1]?.content).toStrictEqual(small);
+      /*
+       * The decisive pin, and the reason this row is not just the one above with
+       * a smaller file: `readTree` smudges, so reading the bytes back proves
+       * nothing about what was stored. Recording the *same* bytes through the
+       * default path instead yields a different tree id — a 127-byte pointer
+       * blob rather than these eight — so an implementation that ignored the
+       * flag would make these two ids equal and fail here.
+       */
+      const [first] = harnesses;
+      const cleaned = await first.port.writeRevision({
+        parents: [],
+        tree: tree({ 'attachments/photo.jpg': small }),
+        provenance: provenance('user'),
+        summary: summary('Cleaned attachment'),
+      });
+      const cleanedRecord = await first.port.readRevision(revisionId(cleaned.commitId));
+      expect(cleanedRecord?.treeId).not.toBe(recorded[0]?.treeId);
+    } finally {
+      await Promise.all(harnesses.map(async (harness) => harness.dispose()));
+    }
+  }, 180_000);
 });
 
 /**

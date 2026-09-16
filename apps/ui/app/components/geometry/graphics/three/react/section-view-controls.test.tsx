@@ -72,9 +72,11 @@ function SceneProbe({ onScene }: { readonly onScene: (scene: THREE.Scene) => voi
   return undefined;
 }
 
-async function renderSectionViewControls(
-  element: React.ReactElement,
-): Promise<{ readonly scene: THREE.Scene; readonly cleanup: () => void }> {
+async function renderSectionViewControls(element: React.ReactElement): Promise<{
+  readonly scene: THREE.Scene;
+  readonly rerender: (next: React.ReactElement) => Promise<void>;
+  readonly cleanup: () => void;
+}> {
   const stubGl = createStubWebGlRenderer();
   const canvas = stubGl.domElement;
   document.body.append(canvas);
@@ -85,6 +87,7 @@ async function renderSectionViewControls(
     await root.configure({
       camera: new THREE.PerspectiveCamera(75, 800 / 600, 0.1, 100_000),
       gl: stubGl,
+      frameloop: 'never',
       size: { height: 600, left: 0, top: 0, width: 800 },
     });
 
@@ -106,6 +109,20 @@ async function renderSectionViewControls(
 
   return {
     scene,
+    rerender: async (next): Promise<void> => {
+      await act(async () => {
+        root.render(
+          <>
+            {next}
+            <SceneProbe
+              onScene={(nextScene) => {
+                scene = nextScene;
+              }}
+            />
+          </>,
+        );
+      });
+    },
     cleanup: (): void => {
       act(() => {
         root.unmount();
@@ -281,6 +298,39 @@ describe('SectionViewControls', () => {
           expect(hasSceneTag(child, sceneTag.sectionViewHelper)).toBe(true);
         });
       }
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('should apply controlled transform changes in the demand frame', async () => {
+    const properties: React.ComponentProps<typeof SectionViewControls> = {
+      ...baseProperties(),
+      availablePlanes: [{ id: 'xy', normal: [0, 0, 1], constant: 0 }],
+      selectedPlaneId: 'xy',
+    };
+    const { scene, rerender, cleanup } = await renderSectionViewControls(
+      <SectionViewControls {...properties} renderPivot={[1, 2, 3]} />,
+    );
+    try {
+      let controlledObject: THREE.Mesh | undefined;
+      scene.traverse((child) => {
+        if (
+          child instanceof THREE.Mesh &&
+          child.geometry instanceof THREE.BoxGeometry &&
+          child.material instanceof THREE.MeshBasicMaterial &&
+          !child.material.visible
+        ) {
+          controlledObject = child;
+        }
+      });
+      expect(controlledObject).toBeDefined();
+
+      controlledObject?.position.set(1, 2, 3);
+      expect(controlledObject?.position.toArray()).toEqual([1, 2, 3]);
+
+      await rerender(<SectionViewControls {...properties} renderPivot={[4, 5, 6]} />);
+      expect(controlledObject?.position.toArray()).toEqual([1, 2, 3]);
     } finally {
       cleanup();
     }

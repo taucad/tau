@@ -58,10 +58,10 @@ describe('DockviewTab', () => {
       'before:bg-linear-to-r',
       'before:from-transparent',
       'before:to-accent',
-      'hover:bg-input!',
+      'hover:bg-nested-action-hover!',
     );
     expect(close).not.toHaveClass('rounded-[5px]!');
-    expect(close).not.toHaveClass('group-hover/default-tab:bg-input!');
+    expect(close).not.toHaveClass('group-hover/default-tab:bg-nested-action-hover!');
     expect(close).not.toHaveClass('right-0', 'right-0.5', 'bg-muted-foreground/10');
   });
 

@@ -1,20 +1,33 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AlertTriangle, Cloud, CloudOff, GitBranch } from 'lucide-react';
+import { Link } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
-import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Input } from '@taucad/ui/components/input';
 import { Label } from '@taucad/ui/components/label';
 import { RadioGroup, RadioGroupItem } from '@taucad/ui/components/radio-group';
 import { cn } from '@taucad/ui/utils/cn';
-import { gitRemoteUrlProblem, isGithubRemoteUrl } from '@taucad/revisions';
+import { gitRemoteUrlProblem } from '@taucad/revisions';
 import type { RemoteFacet, SyncFacet } from '@taucad/revisions';
-import { authorizeGithubRemote } from '#lib/share-providers.js';
-import type { GithubRemoteVisibility } from '#lib/share-providers.js';
+/* The machine's own subpath: `SyncFailureReason` is not on the package barrel,
+   and a second copy of the union here would be exactly the dual vocabulary the
+   contract forbids (§3). */
+import type { SyncFailureReason } from '@taucad/revisions/sync-machine';
+import { CommercialUpgradeLabel } from '#cloud/commercial-features.js';
+import { GithubRepositoryPicker } from '#components/github/github-repository-picker.js';
+import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';
+import { githubConnections } from '#lib/github-connections.js';
 import { formatBytes } from '#lib/format-bytes.js';
+import { ENV } from '#environment.config.js';
 import { Spinner } from '#components/ui/spinner.js';
+import { Switch } from '@taucad/ui/components/switch';
 
 /** Which remote a person can pick. @public */
 export type RemoteChoice = 'none' | 'tau' | 'git';
+
+type PendingConnection =
+  | Readonly<{ kind: 'tau' }>
+  | Readonly<{ kind: 'git'; url: string }>
+  | Readonly<{ kind: 'github'; selection: GithubRepositorySelection }>;
 
 export type RevisionSyncRegionProps = {
   /** The remote facet from the project's `RevisionStatus` projection. */
@@ -30,10 +43,36 @@ export type RevisionSyncRegionProps = {
   readonly onConnect: (
     kind: RemoteChoice,
     url?: string,
-    options?: Readonly<{ visibility?: GithubRemoteVisibility }>,
+    options?: Readonly<{
+      authorization?: string;
+      provider?: 'github';
+      repositoryId?: string;
+      connectionId?: string;
+      generation?: number;
+      fetchOnly?: boolean;
+    }>,
   ) => void | Promise<void>;
   readonly onDisconnect: () => void;
   readonly onCancel: () => void;
+  readonly onSync: () => void;
+  readonly syncChats: boolean;
+  readonly onSyncChatsChange: (enabled: boolean) => void;
+  /** EQ7/D16: generated evidence is opt-in, per project, beside *Sync chats*. */
+  readonly syncLargeExports: boolean;
+  readonly onSyncLargeExportsChange: (enabled: boolean) => void;
+  /**
+   * Whether this account may back a project up at all (N4).
+   *
+   * Read once by the pane from `useCommercialFeatures`, because this component
+   * is presentational and a plan is a session fact, not a projection fact. The
+   * default is "entitled", which is what a self-host build always answers.
+   */
+  readonly canSyncFiles?: boolean;
+  readonly canConnectGitHub?: boolean;
+  /** Take a free account to the plan surface; the pane supplies the route. */
+  readonly onUpgrade?: () => void;
+  /** Where *Sign in* goes when the remote answered 401 (N3). */
+  readonly signInHref?: string;
   readonly className?: string;
 };
 
@@ -60,7 +99,9 @@ const syncCopy = (sync: SyncFacet): string | undefined => {
       return 'Backed up';
     }
     case 'pending': {
-      return sync.pendingCount > 0 ? `Backing up… ${String(sync.pendingCount)}` : 'Backing up…';
+      return sync.pendingCount > 0
+        ? `Backing up… ${String(sync.pendingCount)} revision${sync.pendingCount === 1 ? '' : 's'}`
+        : 'Backing up…';
     }
     case 'conflicted': {
       return 'Needs resolution';
@@ -69,7 +110,49 @@ const syncCopy = (sync: SyncFacet): string | undefined => {
       /* `queued` and `failed` read the same to a person: their work is not on
        * the server. What differs is whether this device will retry by itself,
        * which the offline line below says. */
-      return sync.pendingCount > 0 ? `Not backed up · ${String(sync.pendingCount)}` : 'Not backed up';
+      return sync.pendingCount > 0
+        ? `Not backed up · ${String(sync.pendingCount)} revision${sync.pendingCount === 1 ? '' : 's'}`
+        : 'Not backed up';
+    }
+  }
+};
+
+/**
+ * The one action a failure class implies (N3).
+ *
+ * Keyed on the machine's own `reason`, never on the sentence: the text is the
+ * server's and changes with it, while the class is a contract (contract §3).
+ * `Open Revisions` is deliberately absent — this *is* Revisions.
+ *
+ * @param reason - The failure class the sync machine recorded.
+ * @param remote - The connection, so a credential problem names its provider.
+ * @returns Which action to render, or `undefined` when there is nothing to do.
+ */
+const syncFailureAction = (
+  reason: SyncFailureReason | undefined,
+  remote: RemoteFacet,
+): 'signIn' | 'upgrade' | 'reconnectGithub' | 'syncNow' | 'retry' | undefined => {
+  switch (reason) {
+    case 'unauthorized': {
+      return remote.provider === 'github' ? 'reconnectGithub' : 'signIn';
+    }
+    case 'notEntitled':
+    case 'quota': {
+      return 'upgrade';
+    }
+    case 'forbidden':
+    case 'notFound': {
+      return remote.provider === 'github' ? 'reconnectGithub' : 'retry';
+    }
+    case 'rejected':
+    case 'offline': {
+      return 'syncNow';
+    }
+    case 'unknown': {
+      return 'retry';
+    }
+    default: {
+      return undefined;
     }
   }
 };
@@ -81,6 +164,17 @@ const connectingCopy = (remote: RemoteFacet): string =>
       ? 'Connecting to Tau Cloud…'
       : 'Connecting…';
 
+const gitRemoteLabel = (url: string | undefined, github = false): string => {
+  if (url === undefined) return github ? 'GitHub repository' : 'Git remote';
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname.replace(/^\/+|\/+$/gu, '').replace(/\.git$/u, '');
+    return github && path !== '' ? path : parsed.host;
+  } catch {
+    return github ? 'GitHub repository' : 'Git remote';
+  }
+};
+
 /**
  * What Tau is about to ask for, in the words of the thing being asked (A18).
  *
@@ -88,18 +182,31 @@ const connectingCopy = (remote: RemoteFacet): string =>
  * it names the authority rather than the mechanism: a person deciding whether
  * to grant `repo` is deciding whether Tau may read their private repositories.
  *
- * @param url - The address typed so far.
- * @param visibility - Whether the person said the repository is private.
  * @returns The sentence to show under the field.
  */
-const authoritySentence = (url: string, visibility: GithubRemoteVisibility): string => {
-  if (!isGithubRemoteUrl(url)) {
-    return 'Tau can sign in to GitHub only, so another host has to allow access without one.';
+const authoritySentence = (): string =>
+  'Advanced HTTPS remotes are anonymous. Use the GitHub picker above for private or writable repositories.';
+
+/**
+ * *Available on Pro*, with the route the rest of the app already uses (N4).
+ *
+ * @param props - The upgrade verb the pane supplied, when this build has one.
+ * @returns The label, or nothing on a build with no plans to sell.
+ */
+function PlanGate({ onUpgrade }: { readonly onUpgrade: (() => void) | undefined }): React.JSX.Element | undefined {
+  if (onUpgrade === undefined) {
+    return undefined;
   }
-  return visibility === 'private'
-    ? 'GitHub will ask you to let Tau read and write your repositories, including private ones.'
-    : 'GitHub will ask you to let Tau read and write your public repositories.';
-};
+  return (
+    <button
+      type='button'
+      className='inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline'
+      onClick={onUpgrade}
+    >
+      Available on Pro · <CommercialUpgradeLabel />
+    </button>
+  );
+}
 
 /**
  * The *Git remote* half of the choice: an address, a visibility, and what
@@ -114,18 +221,17 @@ const authoritySentence = (url: string, visibility: GithubRemoteVisibility): str
  */
 function GitRemoteForm({
   url,
-  visibility,
   onUrlChange,
-  onVisibilityChange,
   onConnect,
 }: {
   readonly url: string;
-  readonly visibility: GithubRemoteVisibility;
   readonly onUrlChange: (url: string) => void;
-  readonly onVisibilityChange: (visibility: GithubRemoteVisibility) => void;
   readonly onConnect: () => void;
 }): React.JSX.Element {
-  const problem = url === '' ? undefined : gitRemoteUrlProblem(url);
+  /* P50: what this deployment allows, read from the page's own environment —
+   * the server never tells the page to relax a client-side guard. */
+  const allowPrivate = ENV.TAU_GIT_REMOTE_ALLOW_PRIVATE;
+  const problem = url === '' ? undefined : gitRemoteUrlProblem(url, { allowPrivate });
   return (
     <div className='flex flex-col gap-2'>
       <Label htmlFor='remote-git-url' className='text-sm font-normal'>
@@ -143,20 +249,8 @@ function GitRemoteForm({
           onUrlChange(event.target.value);
         }}
       />
-      <div className='flex items-center gap-2'>
-        <Checkbox
-          id='remote-git-private'
-          checked={visibility === 'private'}
-          onCheckedChange={(checked) => {
-            onVisibilityChange(checked === true ? 'private' : 'public');
-          }}
-        />
-        <Label htmlFor='remote-git-private' className='font-normal'>
-          This repository is private
-        </Label>
-      </div>
       <p id='remote-git-authority' className='text-xs text-muted-foreground'>
-        {authoritySentence(url, visibility)}
+        {authoritySentence()}
       </p>
       {/*
         Large objects do not cross this wire, and the port refuses the push by
@@ -165,10 +259,10 @@ function GitRemoteForm({
         at the first push.
       */}
       <p className='text-xs text-muted-foreground'>
-        Files over 1 MB stay on this device: Tau transfers large files to Tau Cloud only.
+        GitHub repositories selected above use their Git LFS storage. Other hosts may reject large files.
       </p>
       {problem === undefined ? undefined : (
-        <p role='alert' className='text-sm text-destructive'>
+        <p role='alert' className='text-sm'>
           {problem}
         </p>
       )}
@@ -202,6 +296,15 @@ export function RevisionSyncRegion({
   onConnect,
   onDisconnect,
   onCancel,
+  onSync,
+  syncChats,
+  onSyncChatsChange,
+  syncLargeExports,
+  onSyncLargeExportsChange,
+  canSyncFiles = true,
+  canConnectGitHub = true,
+  onUpgrade,
+  signInHref,
   className,
 }: RevisionSyncRegionProps): React.JSX.Element {
   const busy = remote.phase === 'connecting' || remote.phase === 'disconnecting';
@@ -212,102 +315,278 @@ export function RevisionSyncRegion({
   const [picked, setChoice] = useState<RemoteChoice | undefined>(undefined);
   const choice = picked ?? remote.kind;
   const [url, setUrl] = useState(remote.kind === 'git' ? (remote.url ?? '') : '');
-  const [visibility, setVisibility] = useState<GithubRemoteVisibility>('public');
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
+  const [pendingConnection, setPendingConnection] = useState<PendingConnection>();
+  const [changingBackup, setChangingBackup] = useState(remote.phase !== 'connected');
   const syncState = syncCopy(sync);
-  const [consentError, setConsentError] = useState<string | undefined>(undefined);
+  const failureAction = syncFailureAction(sync.reason, remote);
+  const [connectionError, setConnectionError] = useState<string | undefined>(undefined);
   const percentage =
     remote.storage === undefined || remote.storage.quota <= 0
       ? 0
       : Math.min((remote.storage.used / remote.storage.quota) * 100, 100);
 
-  /**
-   * Connect, or grant the credential again — the same two steps either way.
-   *
-   * @param reconnect - Ask GitHub again for a scope the session already records.
-   */
-  const connectGitRemote = async (reconnect: boolean): Promise<void> => {
-    const target = reconnect ? (remote.url ?? url) : url;
-    setConsentError(undefined);
-    /* Opened inside the click, before the first `await`, or the browser
-     * refuses it. Only GitHub needs one. */
-    const consent = isGithubRemoteUrl(target)
-      ? (globalThis.open('', 'tau-github-consent', 'width=720,height=820') ?? undefined)
-      : undefined;
-    try {
-      if (isGithubRemoteUrl(target)) {
-        await authorizeGithubRemote({ visibility, consent, reconnect });
-      }
-      await onConnect('git', target, { visibility });
-    } catch (error) {
-      consent?.close();
-      setConsentError(error instanceof Error ? error.message : 'GitHub permission was not granted.');
+  /* Symmetric on purpose (C9): the draft is open exactly while there is no
+   * settled connection. An effect that only ever *closed* it left a connection
+   * that fell out of `connected` rendering three radios and no verb at all —
+   * no Connect, no Cancel, no summary — with focus on `<body>`. */
+  useEffect(() => {
+    setChangingBackup(remote.phase !== 'connected');
+    if (remote.phase === 'connected') {
+      setChoice(undefined);
     }
+  }, [remote.phase]);
+
+  const connectedLabel = remote.kind === 'tau' ? 'Tau Cloud' : gitRemoteLabel(remote.url, remote.provider === 'github');
+  const pendingLabel =
+    pendingConnection?.kind === 'tau'
+      ? 'Tau Cloud'
+      : pendingConnection?.kind === 'github'
+        ? (pendingConnection.selection.repository.fullName ??
+          gitRemoteLabel(pendingConnection.selection.repository.cloneUrl, true))
+        : pendingConnection?.kind === 'git'
+          ? gitRemoteLabel(pendingConnection.url)
+          : undefined;
+
+  const commitConnection = async (pending: PendingConnection): Promise<void> => {
+    setConnectionError(undefined);
+    try {
+      if (pending.kind === 'tau') {
+        await onConnect('tau');
+      } else if (pending.kind === 'git') {
+        await onConnect('git', pending.url);
+      } else {
+        const { selection } = pending;
+        const token = await githubConnections.token(selection.connection.id);
+        const authorization = `Basic ${globalThis.btoa(`x-access-token:${token.accessToken}`)}`;
+        await onConnect('git', selection.repository.cloneUrl, {
+          authorization,
+          provider: 'github',
+          repositoryId: String(selection.repository.id),
+          connectionId: selection.connection.id,
+          generation: token.generation,
+          fetchOnly: selection.repository.access !== 'write',
+        });
+      }
+      setPendingConnection(undefined);
+      setChangingBackup(false);
+      setChoice(undefined);
+    } catch (error) {
+      setConnectionError(error instanceof Error ? error.message : 'The backup could not be connected.');
+    }
+  };
+
+  const requestConnection = async (pending: PendingConnection): Promise<void> => {
+    /* N4: a free account issues **no** connect. The radio is already disabled;
+     * this is the one funnel every kind passes through, including the GitHub
+     * picker's own `onSelect`. */
+    if (pending.kind === 'tau' ? !canSyncFiles : !canConnectGitHub) {
+      onUpgrade?.();
+      return;
+    }
+    const same =
+      pending.kind === 'tau'
+        ? remote.kind === 'tau'
+        : pending.kind === 'github'
+          ? remote.kind === 'git' &&
+            remote.provider === 'github' &&
+            remote.repositoryId === String(pending.selection.repository.id)
+          : remote.kind === 'git' && remote.provider === undefined && remote.url === pending.url;
+    if (same) {
+      setChangingBackup(false);
+      setChoice(undefined);
+      return;
+    }
+    if (remote.phase === 'connected' && remote.kind !== 'none') {
+      setPendingConnection(pending);
+      return;
+    }
+    await commitConnection(pending);
+  };
+
+  const selectRemote = (value: string): void => {
+    const next = value as RemoteChoice;
+    setPendingConnection(undefined);
+    setChoice(next);
+  };
+
+  const applyRemote = async (): Promise<void> => {
+    if (choice === 'git') return;
+    if (choice === 'none' && remote.kind !== 'none') {
+      setConfirmingDisconnect(true);
+      return;
+    }
+    if (choice === 'none') return;
+    await requestConnection({ kind: 'tau' });
   };
 
   return (
     <section aria-labelledby='revision-sync-heading' className={cn('flex flex-col gap-3', className)}>
-      <h3 id='revision-sync-heading' className='font-mono text-xs tracking-wide text-muted-foreground uppercase'>
+      <h3 id='revision-sync-heading' className='text-xs font-medium text-muted-foreground'>
         Sync
       </h3>
 
-      <RadioGroup
-        aria-label='Where this project syncs'
-        value={choice}
-        disabled={busy}
-        onValueChange={(value) => {
-          const next = value as RemoteChoice;
-          setChoice(next);
-          /* *Git remote* opens the form; the other two are the whole answer. */
-          if (next !== 'git') {
-            void onConnect(next);
-          }
-        }}
-        className='gap-2'
-      >
-        <div className='flex items-center gap-2'>
-          <RadioGroupItem id='remote-none' value='none' />
-          <CloudOff aria-hidden className='size-4 shrink-0 text-muted-foreground' />
-          <Label htmlFor='remote-none' className='font-normal'>
-            No remote
-          </Label>
+      {remote.phase === 'connected' && !changingBackup ? (
+        <div className='flex flex-wrap items-center gap-2 rounded-md border bg-card p-2'>
+          {remote.kind === 'tau' ? (
+            <Cloud aria-hidden className='size-4 text-muted-foreground' />
+          ) : (
+            <GitBranch aria-hidden className='size-4 text-muted-foreground' />
+          )}
+          <span className='min-w-0 flex-1 text-sm'>{connectedLabel}</span>
+          {remote.fetchOnly ? <span className='text-xs text-muted-foreground'>Read only</span> : null}
+          {remote.kind === 'tau' ? (
+            <span className='flex items-center gap-2'>
+              <Switch aria-label='Sync chats' checked={syncChats} onCheckedChange={onSyncChatsChange} />
+              <span className='text-xs'>Sync chats</span>
+              {/* EQ7/D16: the project's own `syncLargeExports`, on the row that
+                  already owns the other per-project transfer choice. Only the
+                  import route wrote it before, so a connected project could
+                  never turn it on (C14). */}
+              <Switch aria-label='Sync exports' checked={syncLargeExports} onCheckedChange={onSyncLargeExportsChange} />
+              <span className='text-xs'>Sync exports</span>
+            </span>
+          ) : null}
+          {remote.fetchOnly ? null : (
+            <Button variant='outline' size='sm' onClick={onSync}>
+              Sync now
+            </Button>
+          )}
+          <Button
+            variant='ghost'
+            size='sm'
+            onClick={() => {
+              setPendingConnection(undefined);
+              setChoice(remote.kind);
+              setChangingBackup(true);
+            }}
+          >
+            Change backup
+          </Button>
         </div>
-        <div className='flex items-center gap-2'>
-          <RadioGroupItem id='remote-tau' value='tau' />
-          <Cloud aria-hidden className='size-4 shrink-0 text-muted-foreground' />
-          <Label htmlFor='remote-tau' className='font-normal'>
-            Tau Cloud
-          </Label>
-        </div>
-        <div className='flex items-center gap-2'>
-          <RadioGroupItem id='remote-git' value='git' />
-          <GitBranch aria-hidden className='size-4 shrink-0 text-muted-foreground' />
-          <Label htmlFor='remote-git' className='font-normal'>
-            Git remote
-          </Label>
-        </div>
-      </RadioGroup>
-
-      {choice === 'git' ? undefined : (
-        <p className='text-xs text-muted-foreground'>
-          Connecting signs this project’s files, history and chats in to your Tau account and keeps them backed up.
-        </p>
+      ) : (
+        <RadioGroup
+          aria-label='Where this project syncs'
+          value={choice}
+          disabled={busy}
+          onValueChange={selectRemote}
+          className='gap-2'
+        >
+          <div className='flex items-center gap-2'>
+            <RadioGroupItem id='remote-none' value='none' />
+            <CloudOff aria-hidden className='size-4 shrink-0 text-muted-foreground' />
+            <Label htmlFor='remote-none' className='font-normal'>
+              No remote
+            </Label>
+          </div>
+          {/* N4: a plan that cannot back files up is not offered a backup. The
+              row still exists — hiding it would make the capability invisible
+              — but it says what it costs and routes to the plan surface, the
+              way `project-share-panel` already gates private shares. */}
+          <div className='flex items-center gap-2'>
+            <RadioGroupItem id='remote-tau' value='tau' disabled={!canSyncFiles} />
+            <Cloud aria-hidden className='size-4 shrink-0 text-muted-foreground' />
+            <Label htmlFor='remote-tau' className={cn('font-normal', !canSyncFiles && 'text-muted-foreground')}>
+              Tau Cloud
+            </Label>
+            {canSyncFiles ? null : <PlanGate onUpgrade={onUpgrade} />}
+          </div>
+          <div className='flex items-center gap-2'>
+            <RadioGroupItem id='remote-git' value='git' disabled={!canConnectGitHub} />
+            <GitBranch aria-hidden className='size-4 shrink-0 text-muted-foreground' />
+            <Label htmlFor='remote-git' className={cn('font-normal', !canConnectGitHub && 'text-muted-foreground')}>
+              Git remote
+            </Label>
+            {canConnectGitHub ? null : <PlanGate onUpgrade={onUpgrade} />}
+          </div>
+        </RadioGroup>
       )}
 
-      {choice === 'git' && remote.phase !== 'connected' && !busy ? (
-        <GitRemoteForm
-          url={url}
-          visibility={visibility}
-          onUrlChange={setUrl}
-          onVisibilityChange={setVisibility}
-          onConnect={() => {
-            void connectGitRemote(false);
-          }}
-        />
+      {changingBackup && choice === 'tau' ? (
+        <p className='text-xs text-muted-foreground'>Files and history are backed up to your Tau account.</p>
+      ) : null}
+
+      {changingBackup && choice === 'tau' ? (
+        <div className='flex items-center gap-2 rounded-md border bg-card p-2'>
+          <Switch aria-label='Sync chats' id='sync-chats' checked={syncChats} onCheckedChange={onSyncChatsChange} />
+          <Label htmlFor='sync-chats' className='flex-1 font-normal'>
+            <span className='block text-sm'>Sync chats</span>
+            <span className='block text-xs text-muted-foreground'>
+              Included by default; turn off before connecting to keep chats on this device.
+            </span>
+          </Label>
+        </div>
+      ) : null}
+
+      {changingBackup && choice !== 'git' ? (
+        <div className='flex flex-wrap gap-2'>
+          <Button
+            size='sm'
+            disabled={(remote.kind === 'none' && choice === 'none') || (choice === 'tau' && !canSyncFiles)}
+            onClick={() => {
+              void applyRemote();
+            }}
+          >
+            {remote.kind === 'none' ? 'Connect backup' : 'Apply backup change'}
+          </Button>
+          {remote.phase === 'connected' ? (
+            <Button
+              size='sm'
+              variant='ghost'
+              onClick={() => {
+                setChoice(undefined);
+                setChangingBackup(false);
+              }}
+            >
+              Cancel
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {changingBackup && choice === 'git' && !busy ? (
+        <div className='flex flex-col gap-4'>
+          <GithubRepositoryPicker
+            actionLabel='Connect repository'
+            returnTo={globalThis.location.pathname}
+            onSelect={async (selection) => requestConnection({ kind: 'github', selection })}
+          />
+          <details>
+            <summary className='text-sm text-muted-foreground'>Advanced HTTPS remote</summary>
+            <div className='mt-3'>
+              <GitRemoteForm
+                url={url}
+                onUrlChange={setUrl}
+                onConnect={() => {
+                  void requestConnection({ kind: 'git', url });
+                }}
+              />
+            </div>
+          </details>
+          {remote.phase === 'connected' ? (
+            <Button
+              variant='ghost'
+              size='sm'
+              className='self-start'
+              onClick={() => {
+                setChoice(undefined);
+                setPendingConnection(undefined);
+                setChangingBackup(false);
+              }}
+            >
+              Keep current repository
+            </Button>
+          ) : undefined}
+        </div>
       ) : undefined}
 
       {busy ? (
-        <div role='status' aria-busy='true' className='flex items-center gap-2 text-sm'>
+        <div
+          role='status'
+          aria-label='Backup connection progress'
+          aria-busy='true'
+          className='flex items-center gap-2 text-sm'
+        >
           {/* The region's own `status` carries the message; the glyph is decoration. */}
           <Spinner role={undefined} aria-hidden aria-label={undefined} className='size-4' />
           <span>{connectingCopy(remote)}</span>
@@ -328,38 +607,95 @@ export function RevisionSyncRegion({
         count is the whole of what they can act on.
       */}
       {syncState === undefined ? undefined : (
-        <div role='status' className='flex items-center gap-2 text-sm'>
-          {sync.state === 'conflicted' || sync.state === 'failed' || sync.state === 'queued' ? (
-            <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
-          ) : (
-            <Cloud aria-hidden className='size-4 shrink-0 text-muted-foreground' />
+        <div role='status' aria-label='Backup status' className='flex flex-col gap-1.5 text-sm'>
+          <span className='flex items-center gap-2'>
+            {sync.state === 'conflicted' || sync.state === 'failed' || sync.state === 'queued' ? (
+              <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
+            ) : (
+              <Cloud aria-hidden className='size-4 shrink-0 text-muted-foreground' />
+            )}
+            <span className='tabular-nums'>{syncState}</span>
+            {sync.online ? undefined : <span className='text-xs text-muted-foreground'>Offline</span>}
+          </span>
+          {/*
+            The reason, and exactly one action for its class (N3, C4).
+
+            `sync.error` is the server's own sentence; the *action* is chosen
+            from `sync.reason`, which is a contract. A count is not a reason,
+            and a reason with no verb is not an answer.
+          */}
+          {sync.error === undefined ? undefined : (
+            <span className='flex flex-wrap items-center gap-2 text-xs'>
+              <span className='min-w-0 flex-1'>{sync.error}</span>
+              {failureAction === 'signIn' && signInHref !== undefined ? (
+                <Button asChild size='xs' variant='outline'>
+                  <Link to={signInHref}>Sign in</Link>
+                </Button>
+              ) : undefined}
+              {failureAction === 'upgrade' && onUpgrade !== undefined ? (
+                <Button size='xs' variant='outline' onClick={onUpgrade}>
+                  <CommercialUpgradeLabel />
+                </Button>
+              ) : undefined}
+              {failureAction === 'reconnectGithub' ? (
+                <Button
+                  size='xs'
+                  variant='outline'
+                  onClick={() => {
+                    setChoice('git');
+                    setChangingBackup(true);
+                  }}
+                >
+                  Reconnect GitHub
+                </Button>
+              ) : undefined}
+              {failureAction === 'syncNow' ? (
+                <Button size='xs' variant='outline' onClick={onSync}>
+                  Sync now
+                </Button>
+              ) : undefined}
+              {failureAction === 'retry' ? (
+                <Button size='xs' variant='outline' onClick={onSync}>
+                  Retry
+                </Button>
+              ) : undefined}
+            </span>
           )}
-          <span className='tabular-nums'>{syncState}</span>
-          {sync.online ? undefined : <span className='text-xs text-muted-foreground'>Offline</span>}
         </div>
       )}
 
-      {remote.phase === 'connected' && remote.url !== undefined ? (
-        <div className='flex items-center justify-between gap-2'>
-          <span className='truncate font-mono text-xs text-muted-foreground'>{remote.url}</span>
+      {remote.phase === 'connected' && !changingBackup && remote.url !== undefined && remote.kind === 'git' ? (
+        <div className='flex flex-wrap items-center justify-between gap-2'>
+          <details className='min-w-0 flex-1'>
+            <summary className='cursor-pointer text-xs text-muted-foreground'>Connection details</summary>
+            {remote.provider === 'github' ? (
+              <span className='block text-xs font-medium'>GitHub repository</span>
+            ) : undefined}
+            <span className='block truncate font-mono text-xs text-muted-foreground'>{remote.url}</span>
+            {remote.fetchOnly ? (
+              <span className='block text-xs text-muted-foreground'>Read-only link · Tau will not push</span>
+            ) : undefined}
+          </details>
           {confirmingDisconnect ? undefined : (
-            <Button
-              variant='ghost'
-              size='sm'
-              onClick={() => {
-                setConfirmingDisconnect(true);
-              }}
-            >
-              Disconnect
-            </Button>
+            <span className='flex shrink-0 items-center gap-1'>
+              {remote.provider === 'github' ? (
+                <>
+                  <Button asChild variant='ghost' size='sm'>
+                    <a href={remote.url.replace(/\.git$/u, '')} target='_blank' rel='noreferrer'>
+                      Open GitHub
+                    </a>
+                  </Button>
+                </>
+              ) : undefined}
+            </span>
           )}
         </div>
       ) : undefined}
 
       {confirmingDisconnect && remote.phase === 'connected' ? (
         <div className='flex flex-col gap-2'>
-          <p className='text-sm'>Disconnect this remote? Every revision stays on this device.</p>
-          <div className='flex items-center gap-2'>
+          <p className='text-sm'>{`Disconnect ${connectedLabel}? Every revision stays on this device.`}</p>
+          <div className='flex flex-wrap items-center gap-2'>
             <Button
               size='sm'
               variant='destructive'
@@ -372,13 +708,15 @@ export function RevisionSyncRegion({
                 onDisconnect();
               }}
             >
-              Disconnect
+              {`Disconnect ${connectedLabel}`}
             </Button>
             <Button
               size='sm'
               variant='ghost'
               onClick={() => {
                 setConfirmingDisconnect(false);
+                setChoice(undefined);
+                setChangingBackup(false);
               }}
             >
               Keep it
@@ -386,6 +724,32 @@ export function RevisionSyncRegion({
           </div>
         </div>
       ) : undefined}
+
+      {pendingConnection === undefined || pendingLabel === undefined ? null : (
+        <div className='flex flex-col gap-2'>
+          <p className='text-sm'>{`Replace ${connectedLabel} with ${pendingLabel}? Every revision stays on this device.`}</p>
+          <div className='flex flex-wrap items-center gap-2'>
+            <Button
+              autoFocus
+              size='sm'
+              onClick={() => {
+                void commitConnection(pendingConnection);
+              }}
+            >
+              Replace backup
+            </Button>
+            <Button
+              size='sm'
+              variant='ghost'
+              onClick={() => {
+                setPendingConnection(undefined);
+              }}
+            >
+              Keep current backup
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/*
         The credential, not the remote (charter W12). An `AUTH_SECRET` rotation
@@ -395,7 +759,7 @@ export function RevisionSyncRegion({
       */}
       {remote.phase === 'reconnectRequired' ? (
         <div className='flex flex-col gap-2'>
-          <p role='alert' className='flex items-center gap-2 text-sm'>
+          <p role='alert' aria-label='GitHub connection' className='flex items-center gap-2 text-sm'>
             <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
             <span>{remote.error ?? 'Your GitHub connection needs to be renewed.'}</span>
           </p>
@@ -403,7 +767,7 @@ export function RevisionSyncRegion({
             size='sm'
             className='self-start'
             onClick={() => {
-              void connectGitRemote(true);
+              setChoice('git');
             }}
           >
             Reconnect GitHub
@@ -411,11 +775,21 @@ export function RevisionSyncRegion({
         </div>
       ) : undefined}
 
-      {consentError === undefined ? undefined : (
-        <p role='alert' className='flex items-center gap-2 text-sm'>
+      {connectionError === undefined ? undefined : (
+        <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-sm'>
           <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
-          <span>{consentError}</span>
-        </p>
+          <span className='min-w-0 flex-1'>{connectionError}</span>
+          <Button
+            size='xs'
+            variant='outline'
+            onClick={() => {
+              setConnectionError(undefined);
+              setChangingBackup(true);
+            }}
+          >
+            Try again
+          </Button>
+        </div>
       )}
 
       {remote.storage === undefined ? undefined : (
@@ -453,10 +827,19 @@ export function RevisionSyncRegion({
       ) : undefined}
 
       {remote.phase === 'failed' && remote.error !== undefined ? (
-        <p role='alert' className='flex items-center gap-2 text-sm'>
+        <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-sm'>
           <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
-          <span>{remote.error}</span>
-        </p>
+          <span className='min-w-0 flex-1'>{remote.error}</span>
+          <Button
+            size='xs'
+            variant='outline'
+            onClick={() => {
+              setChangingBackup(true);
+            }}
+          >
+            Try again
+          </Button>
+        </div>
       ) : undefined}
     </section>
   );

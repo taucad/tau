@@ -10,7 +10,8 @@ import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau
 import {
   activeChatId,
   connectPickedFolder,
-  declineCookieBanner,
+  expectDesktopSurfaceBoundary,
+  expectNoDesktopAnalytics,
   expectLauncher2Turn,
   expectModelBuilt,
   expectSignedIn,
@@ -70,7 +71,7 @@ test('builds an openrscad model on disk from the project chat', async () => {
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-    await declineCookieBanner(page);
+    await expectDesktopSurfaceBoundary(session);
     await expectSignedIn(page);
 
     await selectKernel(page, 'OpenSCAD');
@@ -125,6 +126,7 @@ test('builds an openrscad model on disk from the project chat', async () => {
     await expectModelBuilt({ finalText: gatewayFixtureFinalText, logPath: session.logPath, page, sourcePath });
     console.info(`[desktop-e2e] in-project prompt-to-framed-geometry: ${String(Date.now() - promptStart)} ms`);
     console.info(`[desktop-e2e] in-project API chat calls: ${JSON.stringify(fixture.apiChatRequests)}`);
+    expectNoDesktopAnalytics(session);
   } catch (error) {
     await session.capture('in-project-failure');
     throw error;

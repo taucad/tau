@@ -29,6 +29,7 @@
 import { lfsPointerFor } from '#lfs.js';
 import type { LfsPointer } from '#lfs.js';
 import type { RevisionHttpClient, RevisionHttpResponse } from '#http-client.js';
+import { z } from 'zod';
 
 /**
  * What a remote refused to store, in the shape the Sync region renders.
@@ -93,6 +94,20 @@ type BatchObject = Readonly<{
   actions?: Readonly<{ upload?: BatchAction; download?: BatchAction; verify?: BatchAction }>;
   error?: Readonly<{ code: number; message: string }>;
 }>;
+const batchActionSchema = z.object({ href: z.url(), header: z.record(z.string(), z.string()).optional() });
+const batchObjectSchema = z.object({
+  oid: z.string().regex(/^[0-9a-f]{64}$/u),
+  size: z.number().int().nonnegative(),
+  actions: z
+    .object({
+      upload: batchActionSchema.optional(),
+      download: batchActionSchema.optional(),
+      verify: batchActionSchema.optional(),
+    })
+    .optional(),
+  error: z.object({ code: z.number().int(), message: z.string() }).optional(),
+});
+const batchResponseSchema = z.object({ objects: z.array(batchObjectSchema) });
 
 const encoder = new TextEncoder();
 
@@ -191,7 +206,39 @@ export const withQuotaPaths = (refusal: LfsQuotaRefusal, paths: ReadonlyMap<stri
  * ```
  */
 export const createLfsClient = (options: LfsClientOptions): LfsClient => {
-  const transfer = options.fetch ?? globalThis.fetch.bind(globalThis);
+  const transfer: typeof globalThis.fetch =
+    options.fetch ??
+    (async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      const body = init?.body;
+      const bytes =
+        body instanceof Uint8Array ? new Uint8Array(body) : typeof body === 'string' ? encoder.encode(body) : undefined;
+      const headers = Object.fromEntries(new Headers(init?.headers).entries());
+      const result = await options.http.request({
+        url,
+        method: init?.method,
+        headers,
+        ...(bytes === undefined ? {} : { body: oneChunk(bytes) }),
+      });
+      const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+      let size = 0;
+      for await (const chunk of result.body) {
+        const owned = new Uint8Array(chunk);
+        chunks.push(owned);
+        size += owned.byteLength;
+      }
+      const responseBody = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) {
+        responseBody.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      return new Response(responseBody, {
+        status: result.statusCode,
+        statusText: result.statusMessage,
+        headers: result.headers,
+      });
+    });
   const endpoint = `${options.url.replace(/\/+$/u, '')}/info/lfs/objects/batch`;
 
   const batch = async (
@@ -220,8 +267,20 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
     if (response.statusCode >= 400) {
       throw new Error(`The remote refused the LFS batch request (${String(response.statusCode)}).`);
     }
-    const parsed = JSON.parse(body) as Readonly<{ objects?: readonly BatchObject[] }>;
-    return parsed.objects ?? [];
+    const answers: readonly BatchObject[] = batchResponseSchema.parse(JSON.parse(body)).objects;
+    const requested = new Map(objects.map((pointer) => [pointer.oid, pointer.size] as const));
+    const seen = new Set<string>();
+    for (const answer of answers) {
+      if (seen.has(answer.oid) || requested.get(answer.oid) !== answer.size) {
+        throw new Error(`The remote returned an invalid LFS batch entry for ${answer.oid}.`);
+      }
+      seen.add(answer.oid);
+    }
+    const missing = objects.find((pointer) => !seen.has(pointer.oid));
+    if (missing !== undefined) {
+      throw new Error(`The remote omitted large object ${missing.oid} from its LFS batch response.`);
+    }
+    return answers;
   };
 
   return Object.freeze({
@@ -309,7 +368,7 @@ export const createLfsClient = (options: LfsClientOptions): LfsClient => {
       const content = new Uint8Array(await response.arrayBuffer());
       /* Content-addressed both ways: a store that hands back the wrong bytes is
        * caught here rather than in a tree id hours later. */
-      if (lfsPointerFor(content).pointer.oid !== pointer.oid) {
+      if (content.byteLength !== pointer.size || lfsPointerFor(content).pointer.oid !== pointer.oid) {
         throw new Error(`Large object ${pointer.oid} did not hash to its own id.`);
       }
       return content;

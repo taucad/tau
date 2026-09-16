@@ -316,6 +316,7 @@ export function useChatTextareaLogic({
   const inputTextRef = useRef(inputText);
   const imagesRef = useRef(images);
   const isSubmittingRef = useRef(isSubmitting);
+  const submitInFlightRef = useRef(false);
   const isSubmitDisabledRef = useRef(isSubmitDisabled);
   const onSubmitRef = useRef(onSubmit);
   useEffect(() => {
@@ -330,11 +331,13 @@ export function useChatTextareaLogic({
     if (
       (inputTextRef.current.trim().length === 0 && imagesRef.current.length === 0) ||
       isSubmittingRef.current ||
+      submitInFlightRef.current ||
       isSubmitDisabledRef.current
     ) {
       return;
     }
 
+    submitInFlightRef.current = true;
     setIsSubmitting(true);
     try {
       await onSubmitRef.current({
@@ -342,6 +345,7 @@ export function useChatTextareaLogic({
         imageUrls: imagesRef.current,
       });
     } finally {
+      submitInFlightRef.current = false;
       setIsSubmitting(false);
     }
   }, []);

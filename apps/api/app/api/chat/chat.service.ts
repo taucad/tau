@@ -1,23 +1,19 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { streamText } from 'ai';
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { Inject, Injectable } from '@nestjs/common';
 import type { ModelMessage } from 'ai';
 import { commitMessageGenerationSystemPrompt, projectNameGenerationSystemPrompt } from '@taucad/chat/prompts';
-import { BillableModelInvocationService } from '#api/billing/billable-model-invocation.service.js';
 import type {
-  BillableInvocationResult,
-  BillableInvocationSurface,
-} from '#api/billing/billable-model-invocation.types.js';
-import type { BillingEnvironment } from '#api/billing/credit-ledger.types.js';
+  ModelInvocationResult,
+  ModelInvocationService,
+  ModelInvocationSurface,
+} from '#api/llm/model-invocation.types.js';
+import { modelInvocationServiceKey } from '#api/llm/model-invocation.types.js';
 
 /** Runs the two API-hosted secondary generators through funded admission. */
 @Injectable()
 export class ChatService {
-  public constructor(
-    private readonly invocations: BillableModelInvocationService,
-    private readonly config: ConfigService,
-  ) {}
+  public constructor(@Inject(modelInvocationServiceKey) private readonly invocations: ModelInvocationService) {}
 
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- authenticated invocation identity
   public async getBuildNameGenerator(
@@ -27,7 +23,7 @@ export class ChatService {
     projectHint: string,
     signal: AbortSignal,
     onAdmitted?: (operationId: string) => void,
-  ): Promise<BillableInvocationResult> {
+  ): Promise<ModelInvocationResult> {
     return this.generate(
       'project_name',
       projectNameGenerationSystemPrompt,
@@ -48,7 +44,7 @@ export class ChatService {
     projectHint: string,
     signal: AbortSignal,
     onAdmitted?: (operationId: string) => void,
-  ): Promise<BillableInvocationResult> {
+  ): Promise<ModelInvocationResult> {
     return this.generate(
       'commit_name',
       commitMessageGenerationSystemPrompt,
@@ -63,7 +59,7 @@ export class ChatService {
 
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- authenticated invocation identity
   private async generate(
-    surface: BillableInvocationSurface,
+    surface: ModelInvocationSurface,
     system: string,
     messages: ModelMessage[],
     authUserId: string,
@@ -71,13 +67,9 @@ export class ChatService {
     projectHint: string,
     signal: AbortSignal,
     onAdmitted?: (operationId: string) => void,
-  ): Promise<BillableInvocationResult> {
-    const environment = this.config.get<BillingEnvironment>('BILLING_ENVIRONMENT');
-    if (!environment) {
-      throw new ServiceUnavailableException('Billing environment is unavailable');
-    }
+  ): Promise<ModelInvocationResult> {
     signal.throwIfAborted();
-    const outcome = Promise.withResolvers<BillableInvocationResult>();
+    const outcome = Promise.withResolvers<ModelInvocationResult>();
     const replayAbort = new AbortController();
     const sdkSignal = AbortSignal.any([signal, replayAbort.signal]);
     const abortBeforeAdmission = (): void => {
@@ -92,7 +84,6 @@ export class ChatService {
           throw new TypeError('Expected a native Responses JSON request');
         }
         const result = await this.invocations.invoke({
-          environment,
           authUserId,
           surface,
           attempt: { version: 1, key: attemptKey },
@@ -101,6 +92,7 @@ export class ChatService {
           priceHeaders: {},
           activity: surface === 'project_name' ? 'title' : 'commit',
           projectHint,
+          directPrompt: { system, messages, maximumOutputTokens: 64 },
           signal: sdkSignal,
           onAdmitted,
         });

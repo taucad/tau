@@ -27,6 +27,7 @@ import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import type { UiRuntimeConfigInput } from '#runtime/ui-runtime.config.js';
 import { z } from 'zod';
 import { skillMetadataSchema } from '@taucad/chat/schemas';
+import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 
 /** Maximum durable events transferred in one follower replay window. */
 export const agentHostTailBatchLimit = 16;
@@ -125,7 +126,12 @@ export type AgentHostWorkerInitializeRequest = {
  *
  * @public
  */
-export type AgentHostExternalAgent = { readonly kind: 'acp'; readonly id: string; readonly model?: string };
+export type AgentHostExternalAgent = {
+  readonly kind: 'acp';
+  readonly id: string;
+  readonly model?: string;
+  readonly config?: Readonly<Record<string, string | boolean>>;
+};
 
 /**
  * The CAD context an external turn carries (V12).
@@ -176,11 +182,21 @@ export type AgentHostWorkerStartRequest = AgentHostWorkerStartRequestBase &
     | { readonly trigger: Exclude<RunTrigger, 'submit'>; readonly retainedMessageIds: readonly string[] }
   );
 
+type AgentHostWorkerSettlement =
+  | (Omit<TurnFinalizedEvent, 'checkoutId'> & { readonly checkoutId?: string | undefined })
+  | (Omit<TurnConflictedEvent, 'checkoutId'> & { readonly checkoutId?: string | undefined })
+  | (Omit<TurnFailedEvent, 'checkoutId'> & { readonly checkoutId?: string | undefined });
+
 export type AgentHostWorkerCommandInput =
   | AgentHostWorkerStartRequest
   | { readonly type: 'steer'; readonly chatId: string; readonly runId: string; readonly message: string }
   | { readonly type: 'cancel'; readonly chatId: string; readonly runId: string }
   | { readonly type: 'resume'; readonly chatId: string }
+  | {
+      readonly type: 'record-settlement';
+      readonly chatId: string;
+      readonly event: AgentHostWorkerSettlement;
+    }
   | {
       readonly type: 'resolve-interrupt';
       readonly chatId: string;
@@ -349,6 +365,7 @@ export const agentHostExternalAgentSchema = z.strictObject({
   kind: z.literal('acp'),
   id: nonEmptyString,
   model: nonEmptyString.optional(),
+  config: z.record(nonEmptyString, z.union([z.string(), z.boolean()])).optional(),
 });
 
 /**
@@ -392,6 +409,41 @@ const commandSchemas = [
   z.strictObject({ ...commandBase, type: z.literal('steer'), runId: nonEmptyString, message: z.string() }),
   z.strictObject({ ...commandBase, type: z.literal('cancel'), runId: nonEmptyString }),
   z.strictObject({ ...commandBase, type: z.literal('resume') }),
+  z.strictObject({
+    ...commandBase,
+    type: z.literal('record-settlement'),
+    event: z.discriminatedUnion('type', [
+      z.strictObject({
+        type: z.literal('turn.finalized'),
+        turnId: nonEmptyString,
+        runId: nonEmptyString,
+        chatId: nonEmptyString,
+        projectId: nonEmptyString,
+        checkoutId: nonEmptyString.optional(),
+        revisionId: nonEmptyString.optional(),
+        branch: nonEmptyString.optional(),
+        changedPaths: z.array(z.string()),
+        treeId: nonEmptyString.optional(),
+        trigger: z.literal('turn'),
+        runIds: z.array(nonEmptyString),
+      }),
+      z.strictObject({
+        type: z.literal('turn.conflicted'),
+        turnId: nonEmptyString,
+        runId: nonEmptyString,
+        chatId: nonEmptyString,
+        checkoutId: nonEmptyString.optional(),
+      }),
+      z.strictObject({
+        type: z.literal('turn.failed'),
+        turnId: nonEmptyString,
+        runId: nonEmptyString,
+        chatId: nonEmptyString,
+        checkoutId: nonEmptyString.optional(),
+        reason: z.string(),
+      }),
+    ]),
+  }),
   z.strictObject({
     ...commandBase,
     type: z.literal('resolve-interrupt'),
@@ -502,14 +554,42 @@ export const eventLogBatchSchema = z
     message: 'before nextCursor',
   });
 
-export const agentLiveEventSchema = z.strictObject({
-  type: z.enum(['text-delta', 'thinking-delta']),
+const agentLiveEventBase = {
   chatId: nonEmptyString,
   runId: nonEmptyString,
   messageId: nonEmptyString,
   contentIndex: z.number().int().nonnegative(),
-  delta: z.string(),
-});
+};
+const agentLiveToolEventBase = {
+  ...agentLiveEventBase,
+  toolCallId: nonEmptyString,
+  toolName: nonEmptyString,
+};
+export const agentLiveEventSchema = z.discriminatedUnion('type', [
+  z.strictObject({ type: z.literal('text-start'), ...agentLiveEventBase }),
+  z.strictObject({
+    type: z.literal('thinking-start'),
+    ...agentLiveEventBase,
+    timestamp: z.number().int().nonnegative().optional(),
+  }),
+  z.strictObject({ type: z.enum(['text-delta', 'thinking-delta']), ...agentLiveEventBase, delta: z.string() }),
+  z.strictObject({ type: z.literal('text-end'), ...agentLiveEventBase, content: z.string() }),
+  z.strictObject({
+    type: z.literal('thinking-end'),
+    ...agentLiveEventBase,
+    content: z.string(),
+    timestamp: z.number().int().nonnegative().optional(),
+  }),
+  z.strictObject({ type: z.literal('tool-input-start'), ...agentLiveToolEventBase }),
+  z.strictObject({ type: z.literal('tool-input-delta'), ...agentLiveToolEventBase, delta: z.string() }),
+  z.strictObject({ type: z.literal('tool-input-end'), ...agentLiveToolEventBase, input: jsonValueSchema }),
+  z.strictObject({
+    type: z.literal('tool-output-update'),
+    ...agentLiveToolEventBase,
+    output: jsonValueSchema,
+    isError: z.boolean(),
+  }),
+]);
 const leadershipSchema = z.union([
   z.strictObject({ role: z.literal('leader'), generation: nonEmptyString }),
   z.strictObject({ role: z.literal('follower'), generation: z.string().optional() }),
@@ -520,7 +600,7 @@ export const forwardedAgentHostResponseSchema = z.union([
   z.strictObject({
     type: z.literal('result'),
     requestId: nonEmptyString,
-    operation: z.enum(['start', 'steer', 'cancel', 'resume', 'resolve-interrupt']),
+    operation: z.enum(['start', 'steer', 'cancel', 'resume', 'record-settlement', 'resolve-interrupt']),
     snapshot: hostRunSnapshotSchema,
   }),
   z.strictObject({
@@ -545,7 +625,7 @@ const agentHostWorkerCallResponseSchema = z.union([
   z.strictObject({ type: z.literal('initialized') }),
   z.strictObject({
     type: z.literal('result'),
-    operation: z.enum(['start', 'steer', 'cancel', 'resume', 'resolve-interrupt']),
+    operation: z.enum(['start', 'steer', 'cancel', 'resume', 'record-settlement', 'resolve-interrupt']),
     snapshot: hostRunSnapshotSchema,
   }),
   z.strictObject({ type: z.literal('tail'), chatId: nonEmptyString, batch: eventLogBatchSchema }),

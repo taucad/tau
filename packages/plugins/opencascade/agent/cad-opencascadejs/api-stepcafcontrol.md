@@ -4,245 +4,245 @@
 
 STEPCAFControl_ActorWrite: declare class STEPCAFControl_ActorWrite extends STEPControl_ActorWrite
 
-constructor
+  constructor
 
-IsAssembly(theModel: StepData_StepModel, S: TopoDS_Shape): boolean;
+  IsAssembly(theModel: StepData_StepModel, S: TopoDS_Shape): boolean;
 
-SetStdMode(stdmode?: boolean): void;
+  SetStdMode(stdmode?: boolean): void;
 
-ClearMap(): void;
+  ClearMap(): void;
 
-RegisterAssembly(S: TopoDS_Shape): void;
+  RegisterAssembly(S: TopoDS_Shape): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 STEPCAFControl_Controller: declare class STEPCAFControl_Controller extends STEPControl_Controller
 
-constructor
+  constructor
 
-static Init(): boolean;
+  static Init(): boolean;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 STEPCAFControl_ExternFile: declare class STEPCAFControl_ExternFile extends Standard_Transient
 
-constructor
+  constructor
 
-SetWS(WS: XSControl_WorkSession): void;
+  SetWS(WS: XSControl_WorkSession): void;
 
-GetWS(): XSControl_WorkSession;
+  GetWS(): XSControl_WorkSession;
 
-SetLoadStatus(stat: IFSelect_ReturnStatus): void;
+  SetLoadStatus(stat: IFSelect_ReturnStatus): void;
 
-GetLoadStatus(): IFSelect_ReturnStatus;
+  GetLoadStatus(): IFSelect_ReturnStatus;
 
-SetTransferStatus(isok: boolean): void;
+  SetTransferStatus(isok: boolean): void;
 
-GetTransferStatus(): boolean;
+  GetTransferStatus(): boolean;
 
-SetWriteStatus(stat: IFSelect_ReturnStatus): void;
+  SetWriteStatus(stat: IFSelect_ReturnStatus): void;
 
-GetWriteStatus(): IFSelect_ReturnStatus;
+  GetWriteStatus(): IFSelect_ReturnStatus;
 
-SetName(name: TCollection_HAsciiString): void;
+  SetName(name: TCollection_HAsciiString): void;
 
-GetName(): TCollection_HAsciiString;
+  GetName(): TCollection_HAsciiString;
 
-SetLabel(L: TDF_Label): void;
+  SetLabel(L: TDF_Label): void;
 
-GetLabel(): TDF_Label;
+  GetLabel(): TDF_Label;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 STEPCAFControl_Reader: declare class STEPCAFControl_Reader
 
-constructor
+  constructor
 
-Init(WS: XSControl_WorkSession, scratch?: boolean): void;
+  Init(WS: XSControl_WorkSession, scratch?: boolean): void;
 
-ReadFile(theFileName: string): IFSelect_ReturnStatus;
+  ReadFile(theFileName: string): IFSelect_ReturnStatus;
 
-NbRootsForTransfer(): number;
+  NbRootsForTransfer(): number;
 
-TransferOneRoot(num: number, doc: TDocStd_Document, theProgress?: Message_ProgressRange): boolean;
+  TransferOneRoot(num: number, doc: TDocStd_Document, theProgress?: Message_ProgressRange): boolean;
 
-Transfer(doc: TDocStd_Document, theProgress: Message_ProgressRange): boolean;
+  Transfer(doc: TDocStd_Document, theProgress: Message_ProgressRange): boolean;
 
-Perform(filename: TCollection_AsciiString, doc: TDocStd_Document, theProgress: Message_ProgressRange): boolean;
-Perform(filename: string, doc: TDocStd_Document, theProgress: Message_ProgressRange): boolean;
-Perform(filename: TCollection_AsciiString, doc: TDocStd_Document, theProgress: Message_ProgressRange): boolean;
-Perform(filename: string, doc: TDocStd_Document, theProgress: Message_ProgressRange): boolean;
+  Perform(filename: TCollection_AsciiString, doc: TDocStd_Document, theProgress: Message_ProgressRange): boolean;
+  Perform(filename: string, doc: TDocStd_Document, theProgress: Message_ProgressRange): boolean;
+  Perform(filename: TCollection_AsciiString, doc: TDocStd_Document, theProgress: Message_ProgressRange): boolean;
+  Perform(filename: string, doc: TDocStd_Document, theProgress: Message_ProgressRange): boolean;
 
-ExternFiles(): NCollection_DataMap_TCollection_AsciiString_handle_STEPCAFControl_ExternFile;
+  ExternFiles(): NCollection_DataMap_TCollection_AsciiString_handle_STEPCAFControl_ExternFile;
 
-ExternFile(name: string): { returnValue: boolean; ef: STEPCAFControl_ExternFile; [Symbol.dispose](): void };
+  ExternFile(name: string): { returnValue: boolean; ef: STEPCAFControl_ExternFile; [Symbol.dispose](): void };
 
-ChangeReader(): STEPControl_Reader;
+  ChangeReader(): STEPControl_Reader;
 
-Reader(): STEPControl_Reader;
+  Reader(): STEPControl_Reader;
 
-static FindInstance(NAUO: StepRepr_NextAssemblyUsageOccurrence, STool: XCAFDoc_ShapeTool, Tool: STEPConstruct_Tool, ShapeLabelMap: NCollection_DataMap_TopoDS_Shape_TDF_Label_TopTools_ShapeMapHasher): TDF_Label;
+  static FindInstance(NAUO: StepRepr_NextAssemblyUsageOccurrence, STool: XCAFDoc_ShapeTool, Tool: STEPConstruct_Tool, ShapeLabelMap: NCollection_DataMap_TopoDS_Shape_TDF_Label_TopTools_ShapeMapHasher): TDF_Label;
 
-SetColorMode(colormode: boolean): void;
+  SetColorMode(colormode: boolean): void;
 
-GetColorMode(): boolean;
+  GetColorMode(): boolean;
 
-SetNameMode(namemode: boolean): void;
+  SetNameMode(namemode: boolean): void;
 
-GetNameMode(): boolean;
+  GetNameMode(): boolean;
 
-SetLayerMode(layermode: boolean): void;
+  SetLayerMode(layermode: boolean): void;
 
-GetLayerMode(): boolean;
+  GetLayerMode(): boolean;
 
-SetPropsMode(propsmode: boolean): void;
+  SetPropsMode(propsmode: boolean): void;
 
-GetPropsMode(): boolean;
+  GetPropsMode(): boolean;
 
-SetMetaMode(theMetaMode: boolean): void;
+  SetMetaMode(theMetaMode: boolean): void;
 
-GetMetaMode(): boolean;
+  GetMetaMode(): boolean;
 
-SetProductMetaMode(theProductMetaMode: boolean): void;
+  SetProductMetaMode(theProductMetaMode: boolean): void;
 
-GetProductMetaMode(): boolean;
+  GetProductMetaMode(): boolean;
 
-SetSHUOMode(shuomode: boolean): void;
+  SetSHUOMode(shuomode: boolean): void;
 
-GetSHUOMode(): boolean;
+  GetSHUOMode(): boolean;
 
-SetGDTMode(gdtmode: boolean): void;
+  SetGDTMode(gdtmode: boolean): void;
 
-GetGDTMode(): boolean;
+  GetGDTMode(): boolean;
 
-SetMatMode(matmode: boolean): void;
+  SetMatMode(matmode: boolean): void;
 
-GetMatMode(): boolean;
+  GetMatMode(): boolean;
 
-SetViewMode(viewmode: boolean): void;
+  SetViewMode(viewmode: boolean): void;
 
-GetViewMode(): boolean;
+  GetViewMode(): boolean;
 
-GetShapeLabelMap(): NCollection_DataMap_TopoDS_Shape_TDF_Label_TopTools_ShapeMapHasher;
+  GetShapeLabelMap(): NCollection_DataMap_TopoDS_Shape_TDF_Label_TopTools_ShapeMapHasher;
 
-SetShapeFixParameters(theParameters: NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString): void;
+  SetShapeFixParameters(theParameters: NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString): void;
 
-GetShapeFixParameters(): NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString;
+  GetShapeFixParameters(): NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString;
 
-SetShapeProcessFlags(theFlags: any): void;
+  SetShapeProcessFlags(theFlags: any): void;
 
-GetShapeProcessFlags(): [any, boolean];
+  GetShapeProcessFlags(): [any, boolean];
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 STEPCAFControl_Writer: declare class STEPCAFControl_Writer
 
-constructor
+  constructor
 
-Init(theWS: XSControl_WorkSession, theScratch?: boolean): void;
+  Init(theWS: XSControl_WorkSession, theScratch?: boolean): void;
 
-Write(theFileName: string): IFSelect_ReturnStatus;
+  Write(theFileName: string): IFSelect_ReturnStatus;
 
-Transfer(theDoc: TDocStd_Document, theMode: STEPControl_StepModelType, theIsMulti: string, theProgress: Message_ProgressRange): boolean;
-Transfer(theLabel: TDF_Label, theMode: STEPControl_StepModelType, theIsMulti: string, theProgress: Message_ProgressRange): boolean;
-Transfer(theLabelSeq: NCollection_Sequence_TDF_Label, theMode: STEPControl_StepModelType, theIsMulti: string, theProgress: Message_ProgressRange): boolean;
-Transfer(theDoc: TDocStd_Document, theMode: STEPControl_StepModelType, theIsMulti: string, theProgress: Message_ProgressRange): boolean;
-Transfer(theLabel: TDF_Label, theMode: STEPControl_StepModelType, theIsMulti: string, theProgress: Message_ProgressRange): boolean;
-Transfer(theLabelSeq: NCollection_Sequence_TDF_Label, theMode: STEPControl_StepModelType, theIsMulti: string, theProgress: Message_ProgressRange): boolean;
-Transfer(theDoc: TDocStd_Document, theMode: STEPControl_StepModelType, theIsMulti: string, theProgress: Message_ProgressRange): boolean;
-Transfer(theLabel: TDF_Label, theMode: STEPControl_StepModelType, theIsMulti: string, theProgress: Message_ProgressRange): boolean;
-Transfer(theLabelSeq: NCollection_Sequence_TDF_Label, theMode: STEPControl_StepModelType, theIsMulti: string, theProgress: Message_ProgressRange): boolean;
+  Transfer(theDoc: TDocStd_Document, theMode: STEPControl_StepModelType, theIsMulti: string, theProgress: Message_ProgressRange): boolean;
+  Transfer(theLabel: TDF_Label, theMode: STEPControl_StepModelType, theIsMulti: string, theProgress: Message_ProgressRange): boolean;
+  Transfer(theLabelSeq: NCollection_Sequence_TDF_Label, theMode: STEPControl_StepModelType, theIsMulti: string, theProgress: Message_ProgressRange): boolean;
+  Transfer(theDoc: TDocStd_Document, theMode: STEPControl_StepModelType, theIsMulti: string, theProgress: Message_ProgressRange): boolean;
+  Transfer(theLabel: TDF_Label, theMode: STEPControl_StepModelType, theIsMulti: string, theProgress: Message_ProgressRange): boolean;
+  Transfer(theLabelSeq: NCollection_Sequence_TDF_Label, theMode: STEPControl_StepModelType, theIsMulti: string, theProgress: Message_ProgressRange): boolean;
+  Transfer(theDoc: TDocStd_Document, theMode: STEPControl_StepModelType, theIsMulti: string, theProgress: Message_ProgressRange): boolean;
+  Transfer(theLabel: TDF_Label, theMode: STEPControl_StepModelType, theIsMulti: string, theProgress: Message_ProgressRange): boolean;
+  Transfer(theLabelSeq: NCollection_Sequence_TDF_Label, theMode: STEPControl_StepModelType, theIsMulti: string, theProgress: Message_ProgressRange): boolean;
 
-Perform(theDoc: TDocStd_Document, theFileName: TCollection_AsciiString, theProgress: Message_ProgressRange): boolean;
-Perform(theDoc: TDocStd_Document, theFileName: string, theProgress: Message_ProgressRange): boolean;
-Perform(theDoc: TDocStd_Document, theFileName: TCollection_AsciiString, theProgress: Message_ProgressRange): boolean;
-Perform(theDoc: TDocStd_Document, theFileName: string, theProgress: Message_ProgressRange): boolean;
+  Perform(theDoc: TDocStd_Document, theFileName: TCollection_AsciiString, theProgress: Message_ProgressRange): boolean;
+  Perform(theDoc: TDocStd_Document, theFileName: string, theProgress: Message_ProgressRange): boolean;
+  Perform(theDoc: TDocStd_Document, theFileName: TCollection_AsciiString, theProgress: Message_ProgressRange): boolean;
+  Perform(theDoc: TDocStd_Document, theFileName: string, theProgress: Message_ProgressRange): boolean;
 
-ExternFiles(): NCollection_DataMap_TCollection_AsciiString_handle_STEPCAFControl_ExternFile;
+  ExternFiles(): NCollection_DataMap_TCollection_AsciiString_handle_STEPCAFControl_ExternFile;
 
-ExternFile(theLabel: TDF_Label): { returnValue: boolean; theExtFile: STEPCAFControl_ExternFile; [Symbol.dispose](): void };
-ExternFile(theName: string): { returnValue: boolean; theExtFile: STEPCAFControl_ExternFile; [Symbol.dispose](): void };
-ExternFile(theLabel: TDF_Label): { returnValue: boolean; theExtFile: STEPCAFControl_ExternFile; [Symbol.dispose](): void };
-ExternFile(theName: string): { returnValue: boolean; theExtFile: STEPCAFControl_ExternFile; [Symbol.dispose](): void };
+  ExternFile(theLabel: TDF_Label): { returnValue: boolean; theExtFile: STEPCAFControl_ExternFile; [Symbol.dispose](): void };
+  ExternFile(theName: string): { returnValue: boolean; theExtFile: STEPCAFControl_ExternFile; [Symbol.dispose](): void };
+  ExternFile(theLabel: TDF_Label): { returnValue: boolean; theExtFile: STEPCAFControl_ExternFile; [Symbol.dispose](): void };
+  ExternFile(theName: string): { returnValue: boolean; theExtFile: STEPCAFControl_ExternFile; [Symbol.dispose](): void };
 
-ChangeWriter(): STEPControl_Writer;
+  ChangeWriter(): STEPControl_Writer;
 
-Writer(): STEPControl_Writer;
+  Writer(): STEPControl_Writer;
 
-SetColorMode(theColorMode: boolean): void;
+  SetColorMode(theColorMode: boolean): void;
 
-GetColorMode(): boolean;
+  GetColorMode(): boolean;
 
-SetNameMode(theNameMode: boolean): void;
+  SetNameMode(theNameMode: boolean): void;
 
-GetNameMode(): boolean;
+  GetNameMode(): boolean;
 
-SetLayerMode(theLayerMode: boolean): void;
+  SetLayerMode(theLayerMode: boolean): void;
 
-GetLayerMode(): boolean;
+  GetLayerMode(): boolean;
 
-SetPropsMode(thePropsMode: boolean): void;
+  SetPropsMode(thePropsMode: boolean): void;
 
-GetPropsMode(): boolean;
+  GetPropsMode(): boolean;
 
-SetMetadataMode(theMetadataMode: boolean): void;
+  SetMetadataMode(theMetadataMode: boolean): void;
 
-GetMetadataMode(): boolean;
+  GetMetadataMode(): boolean;
 
-SetSHUOMode(theSHUOMode: boolean): void;
+  SetSHUOMode(theSHUOMode: boolean): void;
 
-GetSHUOMode(): boolean;
+  GetSHUOMode(): boolean;
 
-SetDimTolMode(theDimTolMode: boolean): void;
+  SetDimTolMode(theDimTolMode: boolean): void;
 
-GetDimTolMode(): boolean;
+  GetDimTolMode(): boolean;
 
-SetMaterialMode(theMaterialMode: boolean): void;
+  SetMaterialMode(theMaterialMode: boolean): void;
 
-GetMaterialMode(): boolean;
+  GetMaterialMode(): boolean;
 
-SetVisualMaterialMode(theVisualMaterialMode: boolean): void;
+  SetVisualMaterialMode(theVisualMaterialMode: boolean): void;
 
-GetVisualMaterialMode(): boolean;
+  GetVisualMaterialMode(): boolean;
 
-SetCleanDuplicates(theCleanDuplicates: boolean): void;
+  SetCleanDuplicates(theCleanDuplicates: boolean): void;
 
-GetCleanDuplicates(): boolean;
+  GetCleanDuplicates(): boolean;
 
-SetShapeFixParameters(theParameters: NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString): void;
+  SetShapeFixParameters(theParameters: NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString): void;
 
-GetShapeFixParameters(): NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString;
+  GetShapeFixParameters(): NCollection_DataMap_TCollection_AsciiString_TCollection_AsciiString;
 
-SetShapeProcessFlags(theFlags: any): void;
+  SetShapeProcessFlags(theFlags: any): void;
 
-GetShapeProcessFlags(): [any, boolean];
+  GetShapeProcessFlags(): [any, boolean];
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

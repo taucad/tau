@@ -4,36 +4,36 @@
 
 AppCont_Function: declare class AppCont_Function
 
-GetNumberOfPoints(theNbPnt?: number, theNbPnt2d?: number): { theNbPnt: number; theNbPnt2d: number };
+  GetNumberOfPoints(theNbPnt?: number, theNbPnt2d?: number): { theNbPnt: number; theNbPnt2d: number };
 
-GetNbOf3dPoints(): number;
+  GetNbOf3dPoints(): number;
 
-GetNbOf2dPoints(): number;
+  GetNbOf2dPoints(): number;
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-Value(theU: number, thePnt2d: NCollection_Array1_gp_Pnt2d, thePnt: NCollection_Array1_gp_Pnt): boolean;
+  Value(theU: number, thePnt2d: NCollection_Array1_gp_Pnt2d, thePnt: NCollection_Array1_gp_Pnt): boolean;
 
-D1(theU: number, theVec2d: NCollection_Array1_gp_Vec2d, theVec: NCollection_Array1_gp_Vec): boolean;
+  D1(theU: number, theVec2d: NCollection_Array1_gp_Vec2d, theVec: NCollection_Array1_gp_Vec): boolean;
 
-PeriodInformation(argNo0: number, IsPeriodic: boolean, thePeriod: number): { IsPeriodic: boolean; thePeriod: number };
+  PeriodInformation(argNo0: number, IsPeriodic: boolean, thePeriod: number): { IsPeriodic: boolean; thePeriod: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 AppCont_LeastSquare: declare class AppCont_LeastSquare
 
-constructor
+  constructor
 
-Value(): AppParCurves_MultiCurve;
+  Value(): AppParCurves_MultiCurve;
 
-Error(F?: number, MaxE3d?: number, MaxE2d?: number): { F: number; MaxE3d: number; MaxE2d: number };
+  Error(F?: number, MaxE3d?: number, MaxE2d?: number): { F: number; MaxE3d: number; MaxE2d: number };
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

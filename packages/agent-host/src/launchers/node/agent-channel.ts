@@ -27,7 +27,9 @@ import type {
   AgentChannelLiveEvent,
   AgentChannelProtocol,
   AgentChannelResponse,
+  AgentChannelRevisionEvent,
 } from '#launchers/node/agent-wire.js';
+import type { JsonValue } from '#log/event-types.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { NodeAgentLauncher } from '#launchers/node/node-agent-launcher.js';
 
@@ -39,6 +41,13 @@ export type { AgentChannelEndpoint } from '#channel/endpoint.js';
 export type ServeAgentChannelOptions = {
   /** Context label carried on every dispatch; defaults to `tau-agent`. */
   readonly sessionKey?: string | undefined;
+  /** The single revision root owned by this host connection, when present. */
+  readonly revisions?:
+    | Readonly<{
+        request(input: JsonValue): Promise<Readonly<{ result: JsonValue; status: JsonValue }>>;
+        events(signal: AbortSignal): AsyncIterable<AgentChannelRevisionEvent>;
+      }>
+    | undefined;
 };
 
 /**
@@ -74,11 +83,26 @@ export const serveAgentChannel = (
 ): ChannelServerHandle<AgentChannelProtocol> => {
   const implementation: ChannelServer<AgentChannelProtocol> = {
     // oxlint-disable-next-line eslint/max-params -- @taucad/rpc ChannelServer callback contract.
-    call: async (_context, _name, request): Promise<AgentChannelResponse> => launcher.execute(request),
+    call: async (_context, _name, request): Promise<AgentChannelResponse> => {
+      if (request.type !== 'revision') {
+        return launcher.execute(request);
+      }
+      if (options.revisions === undefined) {
+        throw Object.assign(new Error('This agent host does not serve revisions.'), { code: 'REVISIONS_UNAVAILABLE' });
+      }
+      return {
+        type: 'revision',
+        ...(await options.revisions.request(request.request)),
+      };
+    },
     // oxlint-disable-next-line eslint/max-params -- @taucad/rpc ChannelServer callback contract.
     listen: (_context, name, _args, signal) =>
-      (name === 'events' ? launcher.events(signal) : launcher.liveEvents(signal)) as AsyncIterable<
-        AgentChannelEvent & AgentChannelLiveEvent
+      (name === 'events'
+        ? launcher.events(signal)
+        : name === 'liveEvents'
+          ? launcher.liveEvents(signal)
+          : (options.revisions?.events(signal) ?? emptyRevisionEvents())) as AsyncIterable<
+        AgentChannelEvent & AgentChannelLiveEvent & AgentChannelRevisionEvent
       >,
   };
   return createChannelServer<AgentChannelProtocol>({
@@ -87,4 +111,9 @@ export const serveAgentChannel = (
     protocolSchemas: agentChannelProtocolSchemas,
     impl: implementation,
   });
+};
+
+/** An absent optional revision surface is an empty stream, not a hanging one. */
+const emptyRevisionEvents = async function* (): AsyncGenerator<AgentChannelRevisionEvent> {
+  yield* [];
 };

@@ -4,83 +4,83 @@
 
 BRepMAT2d_BisectingLocus: declare class BRepMAT2d_BisectingLocus
 
-constructor
+  constructor
 
-Compute(anExplo: BRepMAT2d_Explorer, LineIndex: number, aSide: MAT_Side, aJoinType: GeomAbs_JoinType, IsOpenResult: boolean): void;
+  Compute(anExplo: BRepMAT2d_Explorer, LineIndex: number, aSide: MAT_Side, aJoinType: GeomAbs_JoinType, IsOpenResult: boolean): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-Graph(): MAT_Graph;
+  Graph(): MAT_Graph;
 
-NumberOfContours(): number;
+  NumberOfContours(): number;
 
-NumberOfElts(IndLine: number): number;
+  NumberOfElts(IndLine: number): number;
 
-NumberOfSections(IndLine: number, Index: number): number;
+  NumberOfSections(IndLine: number, Index: number): number;
 
-BasicElt(IndLine: number, Index: number): MAT_BasicElt;
+  BasicElt(IndLine: number, Index: number): MAT_BasicElt;
 
-GeomElt(aBasicElt: MAT_BasicElt): Geom2d_Geometry;
-GeomElt(aNode: MAT_Node): gp_Pnt2d;
-GeomElt(aBasicElt: MAT_BasicElt): Geom2d_Geometry;
-GeomElt(aNode: MAT_Node): gp_Pnt2d;
+  GeomElt(aBasicElt: MAT_BasicElt): Geom2d_Geometry;
+  GeomElt(aNode: MAT_Node): gp_Pnt2d;
+  GeomElt(aBasicElt: MAT_BasicElt): Geom2d_Geometry;
+  GeomElt(aNode: MAT_Node): gp_Pnt2d;
 
-GeomBis(anArc: MAT_Arc, Reverse?: boolean): { returnValue: Bisector_Bisec; Reverse: boolean; [Symbol.dispose](): void };
+  GeomBis(anArc: MAT_Arc, Reverse?: boolean): { returnValue: Bisector_Bisec; Reverse: boolean; [Symbol.dispose](): void };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepMAT2d_Explorer: declare class BRepMAT2d_Explorer
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-Perform(aFace: TopoDS_Face): void;
+  Perform(aFace: TopoDS_Face): void;
 
-NumberOfContours(): number;
+  NumberOfContours(): number;
 
-NumberOfCurves(IndexContour: number): number;
+  NumberOfCurves(IndexContour: number): number;
 
-Init(IndexContour: number): void;
+  Init(IndexContour: number): void;
 
-More(): boolean;
+  More(): boolean;
 
-Next(): void;
+  Next(): void;
 
-Value(): Geom2d_Curve;
+  Value(): Geom2d_Curve;
 
-Shape(): TopoDS_Shape;
+  Shape(): TopoDS_Shape;
 
-Contour(IndexContour: number): NCollection_Sequence_handle_Geom2d_Curve;
+  Contour(IndexContour: number): NCollection_Sequence_handle_Geom2d_Curve;
 
-IsModified(aShape: TopoDS_Shape): boolean;
+  IsModified(aShape: TopoDS_Shape): boolean;
 
-ModifiedShape(aShape: TopoDS_Shape): TopoDS_Shape;
+  ModifiedShape(aShape: TopoDS_Shape): TopoDS_Shape;
 
-GetIsClosed(): NCollection_Sequence_bool;
+  GetIsClosed(): NCollection_Sequence_bool;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepMAT2d_LinkTopoBilo: declare class BRepMAT2d_LinkTopoBilo
 
-constructor
+  constructor
 
-Perform(Explo: BRepMAT2d_Explorer, BiLo: BRepMAT2d_BisectingLocus): void;
+  Perform(Explo: BRepMAT2d_Explorer, BiLo: BRepMAT2d_BisectingLocus): void;
 
-Init(S: TopoDS_Shape): void;
+  Init(S: TopoDS_Shape): void;
 
-More(): boolean;
+  More(): boolean;
 
-Next(): void;
+  Next(): void;
 
-Value(): MAT_BasicElt;
+  Value(): MAT_BasicElt;
 
-GeneratingShape(aBE: MAT_BasicElt): TopoDS_Shape;
+  GeneratingShape(aBE: MAT_BasicElt): TopoDS_Shape;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

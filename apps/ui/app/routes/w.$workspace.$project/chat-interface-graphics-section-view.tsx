@@ -351,7 +351,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
               <span>Apply to</span>
             </div>
             <div className='grid gap-2'>
-              <label className='flex cursor-pointer items-center justify-between rounded-md border bg-card px-2 py-1.5 text-sm select-none'>
+              <label className='flex cursor-action items-center justify-between rounded-md border bg-card px-2 py-1.5 text-sm transition-colors select-none hover:border-primary/50 hover:bg-accent/50'>
                 <span className='flex items-center gap-2'>
                   <Box className='size-4 text-muted-foreground' /> Surfaces
                 </span>
@@ -362,7 +362,7 @@ export function ChatInterfaceGraphicsSectionView(): React.JSX.Element {
                   }}
                 />
               </label>
-              <label className='flex cursor-pointer items-center justify-between rounded-md border bg-card px-2 py-1.5 text-sm select-none'>
+              <label className='flex cursor-action items-center justify-between rounded-md border bg-card px-2 py-1.5 text-sm transition-colors select-none hover:border-primary/50 hover:bg-accent/50'>
                 <span className='flex items-center gap-2'>
                   <PenLine className='size-4 text-muted-foreground' /> Lines
                 </span>

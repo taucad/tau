@@ -46,22 +46,27 @@ const sidebarToggleKeyCombo = {
 
 const useSidebar = useDesignSystemSidebar;
 
+const MobileSidebarRouteReset = () => {
+  const { isMobile, setOpenMobile } = useSidebar();
+  React.useEffect(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+  }, [isMobile, setOpenMobile]);
+
+  return null;
+};
+
 const SidebarBehavior = () => {
-  const { isMobile, setOpenMobile, toggleSidebar } = useSidebar();
-  const location = useLocation();
+  const { toggleSidebar } = useSidebar();
+  const { key } = useLocation();
 
   useKeybinding(sidebarToggleKeyCombo, toggleSidebar, {
     preventDefault: true,
     stopPropagation: true,
   });
 
-  React.useEffect(() => {
-    if (isMobile) {
-      setOpenMobile(false);
-    }
-  }, [location, isMobile, setOpenMobile]);
-
-  return null;
+  return <MobileSidebarRouteReset key={key} />;
 };
 
 const SidebarProvider = ({

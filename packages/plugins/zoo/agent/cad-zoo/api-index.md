@@ -228,7 +228,7 @@ types (module) — KCL types
 turns::ZERO (constant) — No turn, zero degrees/radians
 turns::QUARTER_TURN (constant) — A quarter turn, 90 degrees or π/2 radians
 turns::HALF_TURN (constant) — A half turn, 180 degrees or π radians
-turns::THREE_QUARTER_TURN (constant) — Three quarters of a turn, 270 degrees or 1.5\*π radians
+turns::THREE_QUARTER_TURN (constant) — Three quarters of a turn, 270 degrees or 1.5*π radians
 turns (module) — This module contains a few handy constants for defining turns
 
 ## std.sweep — `api-std-sweep.md`

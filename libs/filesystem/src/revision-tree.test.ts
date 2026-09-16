@@ -55,4 +55,24 @@ describe('ImmutableRevisionTree', () => {
     ]);
     expect(tree.entries().map((entry) => entry.path)).toStrictEqual(['a.txt', 'a/b.txt']);
   });
+
+  it('defaults ordinary files and preserves executable mode in owned entries', () => {
+    const tree = new ImmutableRevisionTree([
+      ['plain.sh', 'echo plain\n'],
+      ['run.sh', 'echo run\n', '100755'],
+    ]);
+
+    expect(tree.mode('plain.sh')).toBe('100644');
+    expect(tree.entries().map(({ path, mode }) => [path, mode])).toEqual([
+      ['plain.sh', '100644'],
+      ['run.sh', '100755'],
+    ]);
+  });
+
+  it('refuses unsupported Git modes at the shared tree boundary', () => {
+    const untrusted = [['link', 'target', '120000']] as unknown as ConstructorParameters<
+      typeof ImmutableRevisionTree
+    >[0];
+    expect(() => new ImmutableRevisionTree(untrusted)).toThrow(/Unsupported revision file mode/u);
+  });
 });

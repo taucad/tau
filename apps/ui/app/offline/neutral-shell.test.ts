@@ -5,9 +5,26 @@
  * `meta` export; the invariants under test are the shell's, not the usage
  * view's.
  */
-import { expect, it } from 'vitest';
+/* eslint-disable @typescript-eslint/naming-convention -- client environment keys are an external contract. */
+import { expect, it, vi } from 'vitest';
+import type * as EnvironmentConfig from '#environment.config.js';
 import { loader, shouldRevalidate } from '#root.js';
 import { meta } from '#routes/usage/route.js';
+
+vi.mock('#environment.config.js', async (loadOriginal) => ({
+  ...(await loadOriginal<typeof EnvironmentConfig>()),
+  getClientEnvironment: async () => ({
+    NODE_ENV: 'test',
+    POSTHOG_API_HOST: 'https://analytics.test',
+    POSTHOG_ASSET_HOST: 'assets.test',
+    POSTHOG_UI_HOST: 'https://analytics.test',
+    TAU_API_URL: 'https://api.test',
+    TAU_DEBUG: false,
+    TAU_FRONTEND_URL: 'https://tau.test',
+    TAU_GIT_REMOTE_ALLOW_PRIVATE: false,
+    TAU_WEBSOCKET_URL: 'wss://api.test',
+  }),
+}));
 
 type LoaderArguments = Parameters<typeof loader>[0];
 
@@ -20,9 +37,7 @@ const callLoader = async (cookie: string): ReturnType<typeof loader> => {
     request: new Request(url, { headers: { cookie } }),
     params: {},
     context: emptyContext,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's own unstable argument names.
     unstable_url: url,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's own unstable argument names.
     unstable_pattern: '/usage',
   };
   return loader(loaderArguments);
@@ -33,7 +48,6 @@ const metaArguments: Parameters<typeof meta>[0] = {
   data: undefined,
   loaderData: undefined,
   params: {},
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router's own unstable field name.
   location: { pathname: '/usage', search: '', hash: '', state: undefined, key: 'test', unstable_mask: undefined },
   matches: [],
 };
@@ -46,12 +60,13 @@ it('marks the prerendered usage document noindex, nofollow', () => {
   );
 });
 
-it('keeps a synthetic authentication cookie out of loader data while a preference survives', async () => {
+it('keeps request cookies out of loader data', async () => {
   const data = await callLoader('tau-cad-kernel=%22openscad%22; better-auth.session_token=synthetic-session-value');
 
-  expect(data.cookies).toStrictEqual({ 'tau-cad-kernel': '"openscad"' });
+  expect(data.consentStatus).toBe('unknown');
   expect(JSON.stringify(data)).not.toContain('synthetic-session-value');
   expect(JSON.stringify(data)).not.toContain('session_token');
+  expect(JSON.stringify(data)).not.toContain('openscad');
 });
 
 it('never revalidates the root server loader for the offline shell route', () => {

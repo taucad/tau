@@ -12,8 +12,9 @@ const payload: BundledTypesPayload = [
 
 /**
  * @param nodeModulesBasePath - When set, `/node_modules` gets its own provider
- *   under that base path, mirroring the worker's OPFS `/tau-node-modules`
- *   mount. (`service.mount` itself pins that prefix to the OPFS backend, which
+ *   under that base path, mirroring the worker's OPFS `tau-node-modules`
+ *   mount. A provider base path is rooted, so it carries no leading slash
+ *   (`assertRootedPath`, `1c6436dfa`). (`service.mount` itself pins that prefix to the OPFS backend, which
  *   does not exist under vitest, so the mount table is loaded directly.)
  */
 const createService = async (nodeModulesBasePath?: string): Promise<WorkspaceFileService> => {

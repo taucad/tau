@@ -9,7 +9,6 @@
     "@aws-sdk/client-s3": "catalog:",
     "@aws-sdk/lib-storage": "catalog:",
     "@aws-sdk/s3-request-presigner": "catalog:",
-    "@fastify/multipart": "catalog:",
     "@hatchet-dev/typescript-sdk": "catalog:",
     "@pyroscope/nodejs": "catalog:",
     "@taucad/api-extractor": "workspace:*",
@@ -30,6 +29,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@taucad/agent-tools": "workspace:*",
     "@taucad/geospec-engine": "workspace:*",
     "@taucad/runtime": "workspace:*",
     "@taucad/vite": "workspace:*",

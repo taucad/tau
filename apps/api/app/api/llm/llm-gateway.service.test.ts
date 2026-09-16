@@ -1,10 +1,9 @@
-import { ConfigService } from '@nestjs/config';
 import { Logger } from '@nestjs/common';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { FastifyReply } from 'fastify';
 import { LlmGatewayService } from '#api/llm/llm-gateway.service.js';
-import type { BillableModelInvocationService } from '#api/billing/billable-model-invocation.service.js';
+import type { ModelInvocationService } from '#api/llm/model-invocation.types.js';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -16,11 +15,7 @@ describe('LlmGatewayService', () => {
         operationId: 'operation',
       })),
     };
-    const service = new LlmGatewayService(
-      invocations as unknown as BillableModelInvocationService,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
-      new ConfigService({ BILLING_ENVIRONMENT: 'development' }),
-    );
+    const service = new LlmGatewayService(invocations as unknown as ModelInvocationService);
     const reply = { header: vi.fn(), status: vi.fn(), send: vi.fn() };
     reply.header.mockReturnValue(reply);
     reply.status.mockReturnValue(reply);
@@ -42,11 +37,7 @@ describe('LlmGatewayService', () => {
         throw new Error('provider rejected');
       }),
     };
-    const service = new LlmGatewayService(
-      invocations as unknown as BillableModelInvocationService,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
-      new ConfigService({ BILLING_ENVIRONMENT: 'development' }),
-    );
+    const service = new LlmGatewayService(invocations as unknown as ModelInvocationService);
     const reply = { header: vi.fn(), status: vi.fn(), send: vi.fn() };
     reply.header.mockReturnValue(reply);
 
@@ -66,7 +57,7 @@ describe('LlmGatewayService', () => {
   it('should log a settlement failure without sending a second response', async () => {
     const settlement = Promise.withResolvers<void>();
     const error = new Error('ledger unavailable');
-    const invocations = mock<BillableModelInvocationService>();
+    const invocations = mock<ModelInvocationService>();
     invocations.invoke.mockResolvedValue({
       state: 'streaming',
       operationId: 'operation',
@@ -75,11 +66,7 @@ describe('LlmGatewayService', () => {
       }),
       completion: settlement.promise,
     });
-    const service = new LlmGatewayService(
-      invocations,
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
-      new ConfigService({ BILLING_ENVIRONMENT: 'development' }),
-    );
+    const service = new LlmGatewayService(invocations);
     const reply = mock<FastifyReply>();
     reply.header.mockReturnValue(reply);
     reply.status.mockReturnValue(reply);

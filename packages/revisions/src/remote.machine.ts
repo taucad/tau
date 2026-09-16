@@ -23,10 +23,11 @@
  * requests reach the remote only through the API's git proxy (S34, P17).
  */
 
-import { assign, emit, fromPromise, raise, setup } from 'xstate';
-import type { SnapshotFrom } from 'xstate';
+import { assign, emit, enqueueActions, fromPromise, raise, setup } from 'xstate';
+import type { AnyActorRef, SnapshotFrom } from 'xstate';
 
 import type { RemoteKind, RemoteReauthorizationCode } from '#remotes.js';
+import type { RemoteStorageRefusal } from '#revision-port.js';
 
 /** Which remote a project is connected to, and what it costs. @public */
 export type RemoteFacet = Readonly<{
@@ -38,35 +39,79 @@ export type RemoteFacet = Readonly<{
   storage: Readonly<{ used: number; quota: number }> | undefined;
   /** Files a refused push named as over the plan (D16, AC16). */
   overQuota: readonly string[];
+  /**
+   * The numbers that came with that refusal, when the remote sent them (C13).
+   *
+   * Distinct from {@link RemoteFacet.storage}, which is a `{ used, quota }`
+   * pair no host has ever filled in: these are what the Tau API's LFS batch
+   * refusal actually carries, and they were parsed and then dropped one hop
+   * before the Sync region could render them.
+   */
+  quota: RemoteStorageRefusal | undefined;
   /** The last failure, already safe to render. */
   error: string | undefined;
+  /** True when this project may fetch but must never push to the remote. */
+  fetchOnly: boolean;
+  provider: 'github' | undefined;
+  repositoryId: string | undefined;
 }>;
 
 /** One remote as this machine records it. @public */
-export type RemoteRecord = Readonly<{ name: string; url: string; kind: RemoteKind }>;
+export type RemoteRecord = Readonly<{
+  name: string;
+  url: string;
+  kind: RemoteKind;
+  provider?: 'github';
+  repositoryId?: string;
+  fetchOnly?: boolean;
+}>;
 
 /** Input accepted when creating the remoteMachine actor. @public */
 export type RemoteMachineInput = Readonly<{
   projectId: string;
   /** The branch the initial sync pushes. Defaults to `main`. */
   branch?: string;
+  /** The root, so `sync` hears connect/disconnect through it (A38, P53). */
+  parentRef?: AnyActorRef;
 }>;
 
 /** Serializable state owned by remoteMachine. @public */
 export type RemoteMachineContext = Readonly<{
   projectId: string;
+  parentRef: AnyActorRef | undefined;
   branch: string;
   kind: RemoteKind | 'none';
   remote: RemoteRecord | undefined;
   storage: Readonly<{ used: number; quota: number }> | undefined;
+  quota: RemoteStorageRefusal | undefined;
   overQuota: readonly string[];
   error: string | undefined;
+  /**
+   * This attempt wrote the remote into git's config and has not finished (C10).
+   *
+   * The config write happens in `choosing`, before `authorize`, `validate` or
+   * the first sync has asked the remote anything — which is what makes the
+   * connect sequence recoverable. What it also made possible was a *failed*
+   * attempt leaving that remote behind: the next open read it back as
+   * **connected** and `sync.machine`, which finds the remote through git's
+   * config and not through this machine's phase, started pushing to a remote
+   * nobody had validated. This bit is what lets the failure edges undo exactly
+   * their own write, and nothing else's.
+   */
+  attemptWroteRemote: boolean;
 }>;
 
 /** Events accepted by remoteMachine. @public */
 export type RemoteMachineEvent =
   /** The user picked a kind. `'none'` disconnects whatever is connected. */
-  | Readonly<{ type: 'connect'; kind: RemoteKind | 'none'; url?: string }>
+  | Readonly<{
+      type: 'connect';
+      kind: RemoteKind | 'none';
+      url?: string;
+      provider?: 'github';
+      repositoryId?: string;
+      fetchOnly?: boolean;
+    }>
   /**
    * A host whose authorization finished out of band says so (P22).
    *
@@ -90,7 +135,14 @@ export type RemoteMachineEvent =
    * renders the over-quota file list, and the refusal happens during a push
    * (`sync.machine`, W13), not during a connection.
    */
-  | Readonly<{ type: 'quotaRefused'; paths: readonly string[]; used?: number; quota?: number }>;
+  | Readonly<{
+      type: 'quotaRefused';
+      paths: readonly string[];
+      used?: number;
+      quota?: number;
+      /** What the remote said about room, when it said anything (C13). */
+      storage?: RemoteStorageRefusal;
+    }>;
 
 /** Facts remoteMachine emits for a host that holds only the root. @public */
 export type RemoteMachineEmitted =
@@ -103,7 +155,14 @@ export type RemoteMachineEmitted =
 export type RemoteReadActorOutput = Readonly<{ remote: RemoteRecord | undefined }>;
 
 /** What `writeRemote` is asked to record. @public */
-export type RemoteWriteActorInput = Readonly<{ projectId: string; kind: RemoteKind; url: string | undefined }>;
+export type RemoteWriteActorInput = Readonly<{
+  projectId: string;
+  kind: RemoteKind;
+  url: string | undefined;
+  provider?: 'github';
+  repositoryId?: string;
+  fetchOnly?: boolean;
+}>;
 
 /** What `writeRemote` answers: the remote as it was recorded. @public */
 export type RemoteWriteActorOutput = Readonly<{ remote: RemoteRecord }>;
@@ -136,6 +195,8 @@ export type RemoteInitialSyncActorOutput = Readonly<{
   overQuota?: readonly string[];
   /** The server's own words, for the toast. */
   message?: string;
+  /** What it said about room, when it said anything (C13). */
+  storage?: RemoteStorageRefusal;
 }>;
 
 const defaultBranch = 'main';
@@ -199,20 +260,33 @@ export const remoteMachine = setup({
   },
   guards: {
     choseNone: (_, params: Readonly<{ kind: RemoteKind | 'none' }>) => params.kind === 'none',
+    attemptWroteRemote: ({ context }) => context.attemptWroteRemote,
   },
   actions: {
     failWith: assign({ error: (_, params: Readonly<{ error: string }>) => params.error }),
+    /** Everything this abandoned attempt wrote, forgotten; the reason stays. */
+    forgetAttempt: assign({
+      remote: undefined,
+      kind: 'none',
+      storage: undefined,
+      quota: undefined,
+      overQuota: [],
+      attemptWroteRemote: false,
+    }),
   },
 }).createMachine({
   id: 'remote',
   context: ({ input }) => ({
     projectId: input.projectId,
+    parentRef: input.parentRef,
     branch: input.branch ?? defaultBranch,
     kind: 'none',
     remote: undefined,
     storage: undefined,
+    quota: undefined,
     overQuota: [],
     error: undefined,
+    attemptWroteRemote: false,
   }),
   initial: 'reading',
   states: {
@@ -243,6 +317,15 @@ export const remoteMachine = setup({
           actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
         },
       },
+      /* A route can carry a connect gesture into the project before this
+       * first config read settles. The gesture is newer than the read, so it
+       * wins instead of being dropped. */
+      on: {
+        connect: [
+          { guard: { type: 'choseNone', params: ({ event }) => ({ kind: event.kind }) } },
+          { target: 'choosing', actions: assign({ kind: ({ event }) => event.kind, error: undefined }) },
+        ],
+      },
     },
 
     none: {
@@ -262,8 +345,14 @@ export const remoteMachine = setup({
           projectId: context.projectId,
           kind: context.kind === 'none' ? 'tau' : context.kind,
           url: event.type === 'connect' ? event.url : context.remote?.url,
+          ...(event.type === 'connect' && event.provider !== undefined ? { provider: event.provider } : {}),
+          ...(event.type === 'connect' && event.repositoryId !== undefined ? { repositoryId: event.repositoryId } : {}),
+          ...(event.type === 'connect' && event.fetchOnly === true ? { fetchOnly: true } : {}),
         }),
-        onDone: { target: 'authorizing', actions: assign({ remote: ({ event }) => event.output.remote }) },
+        onDone: {
+          target: 'authorizing',
+          actions: assign({ remote: ({ event }) => event.output.remote, attemptWroteRemote: true }),
+        },
         onError: {
           target: 'failed',
           actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
@@ -298,6 +387,11 @@ export const remoteMachine = setup({
             target: 'reconnectRequired',
             actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
           },
+          {
+            guard: 'attemptWroteRemote',
+            target: 'abandoning',
+            actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
+          },
           { target: 'failed', actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) } },
         ],
       },
@@ -314,6 +408,11 @@ export const remoteMachine = setup({
           {
             guard: ({ event }) => isReauthorizationRequired(event.error),
             target: 'reconnectRequired',
+            actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
+          },
+          {
+            guard: 'attemptWroteRemote',
+            target: 'abandoning',
             actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
           },
           { target: 'failed', actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) } },
@@ -347,13 +446,31 @@ export const remoteMachine = setup({
                   url: context.remote?.url ?? '',
                 }),
               ),
+              enqueueActions(({ context, enqueue }) => {
+                /* Siblings hear it through the parent (A38): `sync` starts on
+                 * this fact, not on the next open (W18 review DEF-6b, P53). */
+                if (context.parentRef !== undefined && context.remote !== undefined) {
+                  enqueue.sendTo(context.parentRef, {
+                    type: 'remoteConnected',
+                    kind: context.remote.kind,
+                    url: context.remote.url,
+                    name: context.remote.name,
+                  });
+                }
+              }),
               emit(
                 ({ event }): RemoteMachineEmitted => ({
                   type: 'toast.error',
                   message: event.output.message ?? 'Some files are over this project’s storage plan.',
                 }),
               ),
-              raise(({ event }): RemoteMachineEvent => ({ type: 'quotaRefused', paths: event.output.overQuota ?? [] })),
+              raise(
+                ({ event }): RemoteMachineEvent => ({
+                  type: 'quotaRefused',
+                  paths: event.output.overQuota ?? [],
+                  ...(event.output.storage === undefined ? {} : { storage: event.output.storage }),
+                }),
+              ),
             ],
           },
           {
@@ -368,7 +485,27 @@ export const remoteMachine = setup({
                   url: context.remote?.url ?? '',
                 }),
               ),
-              emit((): RemoteMachineEmitted => ({ type: 'toast.info', message: 'This project is backed up.' })),
+              enqueueActions(({ context, enqueue }) => {
+                /* Siblings hear it through the parent (A38): `sync` starts on
+                 * this fact, not on the next open (W18 review DEF-6b, P53). */
+                if (context.parentRef !== undefined && context.remote !== undefined) {
+                  enqueue.sendTo(context.parentRef, {
+                    type: 'remoteConnected',
+                    kind: context.remote.kind,
+                    url: context.remote.url,
+                    name: context.remote.name,
+                  });
+                }
+              }),
+              emit(
+                ({ context }): RemoteMachineEmitted => ({
+                  type: 'toast.info',
+                  message:
+                    context.remote?.fetchOnly === true
+                      ? 'This project is linked read-only.'
+                      : 'This project is backed up.',
+                }),
+              ),
             ],
           },
         ],
@@ -377,6 +514,14 @@ export const remoteMachine = setup({
             guard: ({ event }) => isReauthorizationRequired(event.error),
             target: 'reconnectRequired',
             actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
+          },
+          {
+            guard: 'attemptWroteRemote',
+            target: 'abandoning',
+            actions: [
+              { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
+              emit(({ event }): RemoteMachineEmitted => ({ type: 'toast.error', message: reason(event.error) })),
+            ],
           },
           {
             target: 'failed',
@@ -390,7 +535,30 @@ export const remoteMachine = setup({
       on: { cancel: { target: 'disconnecting' } },
     },
 
+    /**
+     * Undo the config write a failed attempt made, and keep its reason (C10).
+     *
+     * Not `disconnecting`: that is the verb for a remote that *was* connected,
+     * it announces `remoteDisconnected` to every sibling and it lands in
+     * `none`. Nothing here was ever connected and nobody was told it was, so
+     * the only thing to undo is the one config line `choosing` wrote — and the
+     * person is left in `failed`, where the reason is rendered and *Retry* is
+     * the same `connect` it always was. This is what the module header has
+     * always promised: never a half-connected project.
+     */
+    abandoning: {
+      invoke: {
+        src: 'removeRemote',
+        input: ({ context }) => ({ name: context.remote?.name ?? '' }),
+        /* A remote this host could not even remove is still not one it will
+         * push to, so both edges land in the same place. */
+        onDone: { target: 'failed', actions: 'forgetAttempt' },
+        onError: { target: 'failed', actions: 'forgetAttempt' },
+      },
+    },
+
     connected: {
+      entry: assign({ attemptWroteRemote: false }),
       on: {
         disconnect: { target: 'disconnecting' },
         connect: [
@@ -402,6 +570,7 @@ export const remoteMachine = setup({
         quotaRefused: {
           actions: assign({
             overQuota: ({ event }) => event.paths,
+            quota: ({ context, event }) => event.storage ?? context.quota,
             storage: ({ context, event }) =>
               event.used === undefined || event.quota === undefined
                 ? context.storage
@@ -419,8 +588,20 @@ export const remoteMachine = setup({
         onDone: {
           target: 'none',
           actions: [
-            assign({ remote: undefined, kind: 'none', storage: undefined, overQuota: [], error: undefined }),
+            assign({
+              remote: undefined,
+              kind: 'none',
+              storage: undefined,
+              quota: undefined,
+              overQuota: [],
+              error: undefined,
+            }),
             emit((): RemoteMachineEmitted => ({ type: 'remoteDisconnected' })),
+            enqueueActions(({ context, enqueue }) => {
+              if (context.parentRef !== undefined) {
+                enqueue.sendTo(context.parentRef, { type: 'remoteDisconnected' });
+              }
+            }),
           ],
         },
         onError: {
@@ -441,7 +622,9 @@ export const remoteMachine = setup({
      */
     reconnectRequired: {
       on: {
-        authorized: { target: 'validating', actions: assign({ error: undefined }) },
+        /* The remote here is an established one, not this attempt's write, so a
+         * later validate failure must not remove it (C10). */
+        authorized: { target: 'validating', actions: assign({ error: undefined, attemptWroteRemote: false }) },
         connect: [
           { guard: { type: 'choseNone', params: ({ event }) => ({ kind: event.kind }) }, target: 'disconnecting' },
           { target: 'choosing', actions: assign({ kind: ({ event }) => event.kind, error: undefined }) },
@@ -479,6 +662,11 @@ const phaseOf = (value: string): RemoteFacet['phase'] => {
     case 'disconnecting': {
       return 'disconnecting';
     }
+    /* Undoing a failed attempt's own config write is still the failure the
+     * person is looking at, not a phase of its own (C10). */
+    case 'abandoning': {
+      return 'failed';
+    }
     case 'none':
     case 'reading': {
       return 'none';
@@ -502,5 +690,9 @@ export const selectRemoteFacet = (snapshot: SnapshotFrom<typeof remoteMachine>):
   phase: phaseOf(String(snapshot.value)),
   storage: snapshot.context.storage,
   overQuota: snapshot.context.overQuota,
+  quota: snapshot.context.quota,
   error: snapshot.context.error,
+  fetchOnly: snapshot.context.remote?.fetchOnly === true,
+  provider: snapshot.context.remote?.provider,
+  repositoryId: snapshot.context.remote?.repositoryId,
 });

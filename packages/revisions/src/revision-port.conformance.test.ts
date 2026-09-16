@@ -12,9 +12,10 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { createMemoryProvider } from '@taucad/filesystem/backend';
 import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
 import type { FileSystemProvider } from '@taucad/filesystem';
@@ -30,6 +31,7 @@ import type { Checkout, RevisionPort } from '#revision-port.js';
 import { conflictLabels, materializeConflict, readConflictTerms } from '#revision-conflict.js';
 import { readRevisionLog } from '#revision-verbs.js';
 import { startGitHttpBackend } from '#test/git-http-backend.js';
+import { gitOnPath, nativeHarness } from '#test/native-git-harness.js';
 import { generatedIgnorePath } from '#workspace-config.js';
 
 const encoder = new TextEncoder();
@@ -37,15 +39,6 @@ const decoder = new TextDecoder();
 const author = { name: 'Tau', email: 'tau@example.com' };
 const createdAt = Date.UTC(2026, 8, 8, 12, 0, 0);
 const projectId = 'project-conformance';
-
-const gitOnPath = ((): boolean => {
-  try {
-    execFileSync('git', ['--version'], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-})();
 
 const gitExitCode = (cwd: string, args: readonly string[]): number => {
   try {
@@ -84,19 +77,6 @@ const providerFiles = async (provider: FileSystemProvider, path = ''): Promise<r
       const stat = await provider.stat(child);
       return stat.type === 'dir' ? providerFiles(provider, child) : [child];
     }),
-  );
-  return nested.flat().toSorted();
-};
-
-const directoryFiles = async (directory: string, path = ''): Promise<readonly string[]> => {
-  const entries = await readdir(join(directory, path), { withFileTypes: true }).catch(() => []);
-  const nested = await Promise.all(
-    entries
-      .filter((entry) => entry.name !== '.git')
-      .map(async (entry) => {
-        const child = path === '' ? entry.name : `${path}/${entry.name}`;
-        return entry.isDirectory() ? directoryFiles(directory, child) : [child];
-      }),
   );
   return nested.flat().toSorted();
 };
@@ -175,31 +155,7 @@ const isomorphicHarness = async (): Promise<Harness> => {
   };
 };
 
-const nativeHarness = async (): Promise<Harness> => {
-  const root = await mkdtemp(join(tmpdir(), 'tau-revisions-conformance-'));
-  const repositoryPath = join(root, 'project');
-  await mkdir(repositoryPath, { recursive: true });
-  // Never inside the repository's own worktree: native Git refuses that.
-  const checkouts = { projectId, directory: join(root, 'checkouts') };
-  const create = (): RevisionPort => createNativeGitRevisionPort({ repositoryPath, checkouts });
-  return {
-    port: create(),
-    withTransport: create,
-    writeRawRef: async (name, head) => {
-      execFileSync('git', ['update-ref', name, head], { cwd: repositoryPath, stdio: 'ignore' });
-    },
-    readGenerated: async (path) => readFile(join(repositoryPath, path), 'utf8'),
-    // Git reports a resolved path, and on macOS that is `/private/var/…`.
-    liveRoot: await realpath(repositoryPath),
-    checkoutFiles: async (checkout) => directoryFiles(checkout.root),
-    writeCheckoutFile: async (checkout, path, content) => {
-      await mkdir(dirname(join(checkout.root, path)), { recursive: true });
-      await writeFile(join(checkout.root, path), content);
-    },
-    reopen: create,
-    dispose: async () => rm(root, { force: true, recursive: true }),
-  };
-};
+const createNativeHarness = async (): Promise<Harness> => nativeHarness(projectId, 'tau-revisions-conformance-');
 
 type Adapter = Readonly<{
   name: 'isomorphic-git' | 'native-git';
@@ -209,8 +165,25 @@ type Adapter = Readonly<{
 
 const adapters: readonly Adapter[] = [
   { name: 'isomorphic-git', create: isomorphicHarness, enabled: true },
-  { name: 'native-git', create: nativeHarness, enabled: gitOnPath },
+  { name: 'native-git', create: createNativeHarness, enabled: gitOnPath },
 ];
+
+/* AC23's pin on the table itself: two rows, both live, nothing skipped. `git`
+ * on `PATH` is a prerequisite of this suite — the transport rows already spawn
+ * `git http-backend` — so a red here means the comparison stopped being one. */
+describe('the conformance table', () => {
+  it('runs at least two enabled adapters', () => {
+    /* AC23 says "at least two", and `toHaveLength(2)` said "exactly two"
+     * (review R11) — a third adapter row would have failed the pin that exists
+     * to keep rows from going dark. */
+    expect(adapters.filter((adapter) => adapter.enabled).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('skips no row', async () => {
+    const source = await readFile(new URL(import.meta.url), 'utf8');
+    expect(source).not.toMatch(/describe\.skip/u);
+  });
+});
 
 const conformance = (adapter: Adapter): void => {
   describe.runIf(adapter.enabled)(`RevisionPort conformance — ${adapter.name}`, () => {
@@ -392,6 +365,27 @@ const conformance = (adapter: Adapter): void => {
       const entries = recovered?.entries() ?? [];
       expect(entries.map((entry) => entry.path)).toStrictEqual(['a.txt', 'c.txt']);
       expect(decoder.decode(recovered?.get('a.txt'))).toBe('a2\n');
+    });
+
+    it('round-trips executable mode and reports a mode-only diff', async () => {
+      const plain = await port.writeRevision({
+        parents: [child],
+        tree: new ImmutableRevisionTree([['run.sh', '#!/bin/sh\n']]),
+        provenance: provenance(),
+        summary: summary('Plain script'),
+      });
+      const executable = await port.writeRevision({
+        parents: [revisionId(plain.commitId)],
+        tree: new ImmutableRevisionTree([['run.sh', '#!/bin/sh\n', '100755']]),
+        provenance: provenance(),
+        summary: summary('Executable script'),
+      });
+
+      const recovered = await port.readTree(revisionId(executable.commitId));
+      expect(recovered?.mode('run.sh')).toBe('100755');
+      await expect(
+        port.diff({ from: revisionId(plain.commitId), to: revisionId(executable.commitId) }),
+      ).resolves.toEqual([{ path: 'run.sh', kind: 'modified' }]);
     });
 
     it('answers an unknown revision with undefined, not a throw', async () => {
@@ -782,7 +776,7 @@ for (const adapter of adapters) {
  */
 describe.runIf(gitOnPath)('cross-adapter identity (I4)', () => {
   it('names the same tree — and the same revision — from the same scripted edits', async () => {
-    const harnesses = await Promise.all([isomorphicHarness(), nativeHarness()]);
+    const harnesses = await Promise.all([isomorphicHarness(), createNativeHarness()]);
     try {
       const records = await Promise.all(
         harnesses.map(async (harness) => {
@@ -844,7 +838,7 @@ describe.runIf(gitOnPath)('cross-adapter identity (I4)', () => {
    * clean step the disk leg does (`lfs.ts`), so a tracked large object is a
    * pointer in the tree on both legs and the two name the same tree. */
   it('names the same tree for a large object on both legs', async () => {
-    const harnesses = await Promise.all([isomorphicHarness(), nativeHarness()]);
+    const harnesses = await Promise.all([isomorphicHarness(), createNativeHarness()]);
     try {
       const large = Uint8Array.from({ length: 1024 * 1024 + 1 }, (_, index) => (index * 31) % 256);
       const recorded = await Promise.all(
@@ -959,7 +953,7 @@ describe('log reads are bounded by the limit (review 4 R28)', () => {
             '    *) verb="$argument"; break ;;',
             '  esac',
             'done',
-            `echo "$verb" >> ${log}`,
+            `echo "$verb	$*" >> ${log}`,
             'exec git "$@"',
             '',
           ].join('\n'),
@@ -971,8 +965,18 @@ describe('log reads are bounded by the limit (review 4 R28)', () => {
         expect(limited.map((entry) => entry.id)).toStrictEqual(chain.slice(-chainLimit).toReversed());
         const recorded = await readFile(log, 'utf8');
         const commands = recorded.split('\n').filter((line) => line !== '');
-        expect(commands.filter((command) => command === 'cat-file')).toHaveLength(commands.length);
+        /* Object reads only — no `log`, no `show`, nothing that would read a
+         * tree — and a handful of processes rather than one per revision (B5). */
+        expect(commands.map((command) => command.split('\t')[0])).toStrictEqual(
+          commands.map((command) => (command.startsWith('rev-list') ? 'rev-list' : 'cat-file')),
+        );
         expect(commands.length).toBeLessThanOrEqual(readCeiling);
+        /* The bound reaches the engine, which is what keeps a limited log off
+         * the whole history now that the objects arrive in one batch: the
+         * process count alone can no longer show it (review 4 R28). */
+        const bound = Number(/--max-count=(?<count>\d+)/u.exec(recorded)?.groups?.['count']);
+        expect(bound).toBeGreaterThanOrEqual(chainLimit);
+        expect(bound).toBeLessThan(chainLength);
       } finally {
         await rm(root, { force: true, recursive: true });
       }
@@ -1200,6 +1204,7 @@ describe.runIf(gitOnPath)('transport against a git http-backend fixture', () => 
         });
         head = revisionId(receipt.commitId);
         await port.updateRef({ name: 'main', expectedHead: undefined, head });
+        await port.tag({ name: 'v1', revisionId: head, note: 'First version' });
         await port.setRemote({ name: 'tau', url: fixture.url });
       }, 180_000);
 
@@ -1228,12 +1233,18 @@ describe.runIf(gitOnPath)('transport against a git http-backend fixture', () => 
 
         const result = await port.push({
           remote: 'tau',
-          refs: [{ name: 'refs/tau/chats/refused' }, { name: 'refs/tau/chats/kept' }, { name: 'refs/heads/main' }],
+          refs: [
+            { name: 'refs/tau/chats/refused' },
+            { name: 'refs/tau/chats/kept' },
+            { name: 'refs/tags/v1' },
+            { name: 'refs/heads/main' },
+          ],
         });
 
         expect(result.refs.map((entry) => [entry.name, entry.status])).toStrictEqual([
           ['refs/tau/chats/refused', 'rejected'],
           ['refs/tau/chats/kept', 'updated'],
+          ['refs/tags/v1', 'updated'],
           ['refs/heads/main', 'updated'],
         ]);
         // The server is the witness, not the client's own bookkeeping.
@@ -1261,6 +1272,8 @@ describe.runIf(gitOnPath)('transport against a git http-backend fixture', () => 
 
           expect(fetched.refs.find((entry) => entry.name === 'refs/remotes/tau/main')?.head).toBe(head);
           expect(fetched.refs.find((entry) => entry.name === 'refs/remotes/tau/tau/chats/kept')?.head).toBe(head);
+          expect(fetched.refs.find((entry) => entry.name === 'refs/remotes/tau/tags/v1')?.head).toBeDefined();
+          expect(await reader.readRef('refs/tags/v1')).toBeDefined();
           // A fetch is not a merge: the local branch is still unborn (A22).
           expect(await reader.readRef('main')).toBeUndefined();
           const fetchedRecord = await reader.readRevision(head);
@@ -1306,6 +1319,160 @@ describe.runIf(gitOnPath)('transport against a git http-backend fixture', () => 
   }
 });
 
+describe.runIf(gitOnPath)('native remote credential transport', () => {
+  it('passes the credential only through the child environment', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-credential-'));
+    const fixture = await startGitHttpBackend({ root });
+    const repositoryPath = join(root, 'project');
+    const argumentsLog = join(root, 'arguments.log');
+    const environmentLog = join(root, 'environment.log');
+    const wrapper = join(root, 'git-credential-check');
+    const authorization = 'Bearer github-secret-value';
+    try {
+      await mkdir(repositoryPath, { recursive: true });
+      await writeFile(
+        wrapper,
+        [
+          '#!/bin/sh',
+          `printf '%s\\n' "$@" > ${argumentsLog}`,
+          `printf '%s\n%s\n%s\n%s' "$GIT_CONFIG_KEY_0" "$GIT_CONFIG_VALUE_0" "$GIT_CONFIG_KEY_1" "$GIT_CONFIG_VALUE_1" > ${environmentLog}`,
+          'exec git "$@"',
+          '',
+        ].join('\n'),
+        { mode: 0o755 },
+      );
+      const port = createNativeGitRevisionPort({
+        repositoryPath,
+        gitExecutable: wrapper,
+        remoteCredential: () => ({ repositoryUrl: fixture.url, authorization }),
+      });
+      await port.init({ author });
+      await port.setRemote({ name: 'origin', url: fixture.url });
+
+      await port.listRemoteRefs('origin');
+
+      expect(await readFile(argumentsLog, 'utf8')).not.toContain(authorization);
+      expect(await readFile(environmentLog, 'utf8')).toBe(
+        `http.${fixture.url}.extraHeader\nAuthorization: ${authorization}\nlfs.url\n${fixture.url}/info/lfs`,
+      );
+      expect(await readFile(join(repositoryPath, '.git', 'config'), 'utf8')).not.toContain(authorization);
+    } finally {
+      await fixture.close();
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 180_000);
+});
+
+/**
+ * What the native leg says a remote said (N1, C2, C66).
+ *
+ * The parity gap L8 measured: `runCommand` captures git's stderr and both throw
+ * sites discarded it, so 401, 403, 404, 413 and 500 all reached the Sync row as
+ * one sentence — *Native Git could not reach the remote.* — which is false in
+ * every one of those cases and left the only recovery path unreachable on this
+ * leg. These rows are the browser leg's `isomorphic-git-adapter.test.ts` table,
+ * asked of the binary.
+ */
+describe.runIf(gitOnPath)('native remote refusals (N1)', () => {
+  it.each([
+    { status: 401, code: 'REMOTE_UNAUTHORIZED' },
+    { status: 403, code: 'REMOTE_FORBIDDEN' },
+    { status: 404, code: 'REMOTE_NOT_FOUND' },
+    { status: 413, code: 'REMOTE_QUOTA_EXCEEDED' },
+    { status: 500, code: 'REMOTE_UNAVAILABLE' },
+  ])(
+    'answers HTTP $status with $code on every remote verb',
+    async ({ status, code }) => {
+      const root = await mkdtemp(join(tmpdir(), 'tau-revisions-native-refusal-'));
+      const server = createServer((_request, response) => {
+        response.writeHead(status, { 'Content-Type': 'application/json' });
+        response.end('{"code":"X","message":"server sentence"}');
+      });
+      await new Promise<void>((resolve) => {
+        server.listen(0, '127.0.0.1', resolve);
+      });
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- `AddressInfo` on a listening TCP server.
+      const { port: listening } = server.address() as { port: number };
+      const origin = `http://127.0.0.1:${String(listening)}`;
+      const repositoryPath = join(root, 'project');
+      try {
+        await mkdir(repositoryPath, { recursive: true });
+        const port = createNativeGitRevisionPort({
+          repositoryPath,
+          tauCredential: () => ({ apiBaseUrl: origin, authorization: 'Bearer session-token' }),
+        });
+        await port.init({ author });
+        const receipt = await port.writeRevision({
+          parents: [],
+          tree: tree({ 'part.ts': 'export const a = 1;\n' }),
+          provenance: provenance('user'),
+          summary: summary('First'),
+        });
+        await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(receipt.commitId) });
+        await port.setRemote({ name: 'tau', url: `${origin}/v1/git/p1.git` });
+
+        await expect(port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] })).rejects.toMatchObject({ code });
+        await expect(port.fetch({ remote: 'tau', refs: ['refs/heads/main'] })).rejects.toMatchObject({ code });
+        await expect(port.listRemoteRefs('tau')).rejects.toMatchObject({ code });
+      } finally {
+        await new Promise<void>((resolve) => {
+          server.close(() => {
+            resolve();
+          });
+        });
+        await rm(root, { force: true, recursive: true });
+      }
+    },
+    180_000,
+  );
+
+  it('names the files a push over the storage plan could not carry (C66, Rule 13)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-native-quota-'));
+    const fixture = await startGitHttpBackend({
+      root,
+      quotaRefusal: {
+        message: 'Storage quota exceeded: this push needs 5242880 bytes more than the plan allows.',
+        shortfallBytes: 5_242_880,
+        remainingBytes: 0,
+      },
+    });
+    const repositoryPath = join(root, 'project');
+    const large = new Uint8Array(new ArrayBuffer(1024 * 1024 + 1));
+    for (let index = 0; index < large.length; index += 1) {
+      large[index] = (index * 31) % 256;
+    }
+    try {
+      await mkdir(repositoryPath, { recursive: true });
+      const port = createNativeGitRevisionPort({
+        repositoryPath,
+        tauCredential: () => ({ apiBaseUrl: fixture.url, authorization: 'Bearer session-token' }),
+      });
+      await port.init({ author });
+      const receipt = await port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([['models/bracket.step', large]]),
+        provenance: provenance('user'),
+        summary: summary('Large object'),
+      });
+      await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(receipt.commitId) });
+      await port.setRemote({ name: 'tau', url: fixture.url });
+
+      /* The same class the browser leg raises, so `remote.machine` reaches
+       * `quotaRefused` on desktop and the CLI too — with the paths the port
+       * already computed, and the server's own sentence off git-lfs's
+       * `batch response:` line. */
+      await expect(port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] })).rejects.toMatchObject({
+        name: 'LfsQuotaError',
+        refusal: { paths: ['models/bracket.step'] },
+      });
+      expect(fixture.trail().some((entry) => entry.endsWith('/git-receive-pack'))).toBe(false);
+    } finally {
+      await fixture.close();
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 180_000);
+});
+
 /**
  * The browser's LFS client, end to end over the batch API (S49, V13, AC16).
  *
@@ -1314,7 +1481,7 @@ describe.runIf(gitOnPath)('transport against a git http-backend fixture', () => 
  * goes up *before* the ref that names it, it goes up *once*, and a second store
  * that only fetched pointers reads the bytes back.
  */
-describe.runIf(gitOnPath)('the browser LFS client over the batch API', () => {
+describe.runIf(gitOnPath)('LFS clients over the batch API', () => {
   const large = ((): Uint8Array<ArrayBuffer> => {
     const bytes = new Uint8Array(new ArrayBuffer(5 * 1024 * 1024));
     for (let index = 0; index < bytes.length; index += 1) {
@@ -1372,6 +1539,18 @@ describe.runIf(gitOnPath)('the browser LFS client over the batch API', () => {
       const writtenRecord = await port.readRevision(head);
       expect(fetchedTree?.get('models/bracket.step')).toStrictEqual(large);
       expect(fetchedRecord?.treeId).toBe(writtenRecord?.treeId);
+
+      const nativeReader = await createNativeHarness();
+      try {
+        const nativePort = nativeReader.withTransport();
+        await nativePort.init({ author });
+        await nativePort.setRemote({ name: 'tau', url: fixture.url });
+        await nativePort.fetch({ remote: 'tau' });
+        const nativeTree = await nativePort.readTree(head);
+        expect(nativeTree?.get('models/bracket.step')).toStrictEqual(large);
+      } finally {
+        await nativeReader.dispose();
+      }
       expect(fixture.uploadCount()).toBe(1);
     } finally {
       await fixture.close();

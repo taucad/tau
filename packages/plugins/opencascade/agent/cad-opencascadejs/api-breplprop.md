@@ -4,113 +4,113 @@
 
 BRepLProp: declare class BRepLProp
 
-constructor
+  constructor
 
-static Continuity(C1: BRepAdaptor_Curve, C2: BRepAdaptor_Curve, u1: number, u2: number, tl: number, ta: number): GeomAbs_Shape;
-static Continuity(C1: BRepAdaptor_Curve, C2: BRepAdaptor_Curve, u1: number, u2: number): GeomAbs_Shape;
-static Continuity(C1: BRepAdaptor_Curve, C2: BRepAdaptor_Curve, u1: number, u2: number, tl: number, ta: number): GeomAbs_Shape;
-static Continuity(C1: BRepAdaptor_Curve, C2: BRepAdaptor_Curve, u1: number, u2: number): GeomAbs_Shape;
+  static Continuity(C1: BRepAdaptor_Curve, C2: BRepAdaptor_Curve, u1: number, u2: number, tl: number, ta: number): GeomAbs_Shape;
+  static Continuity(C1: BRepAdaptor_Curve, C2: BRepAdaptor_Curve, u1: number, u2: number): GeomAbs_Shape;
+  static Continuity(C1: BRepAdaptor_Curve, C2: BRepAdaptor_Curve, u1: number, u2: number, tl: number, ta: number): GeomAbs_Shape;
+  static Continuity(C1: BRepAdaptor_Curve, C2: BRepAdaptor_Curve, u1: number, u2: number): GeomAbs_Shape;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepLProp_CLProps: declare class BRepLProp_CLProps
 
-constructor
+  constructor
 
-SetParameter(U: number): void;
+  SetParameter(U: number): void;
 
-SetCurve(C: BRepAdaptor_Curve): void;
+  SetCurve(C: BRepAdaptor_Curve): void;
 
-Value(): gp_Pnt;
+  Value(): gp_Pnt;
 
-D1(): gp_Vec;
+  D1(): gp_Vec;
 
-D2(): gp_Vec;
+  D2(): gp_Vec;
 
-D3(): gp_Vec;
+  D3(): gp_Vec;
 
-IsTangentDefined(): boolean;
+  IsTangentDefined(): boolean;
 
-Tangent(D: gp_Dir): void;
+  Tangent(D: gp_Dir): void;
 
-Curvature(): number;
+  Curvature(): number;
 
-Normal(N: gp_Dir): void;
+  Normal(N: gp_Dir): void;
 
-CentreOfCurvature(P: gp_Pnt): void;
+  CentreOfCurvature(P: gp_Pnt): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepLProp_SLProps: declare class BRepLProp_SLProps
 
-constructor
+  constructor
 
-SetSurface(S: BRepAdaptor_Surface): void;
+  SetSurface(S: BRepAdaptor_Surface): void;
 
-SetParameters(U: number, V: number): void;
+  SetParameters(U: number, V: number): void;
 
-Value(): gp_Pnt;
+  Value(): gp_Pnt;
 
-D1U(): gp_Vec;
+  D1U(): gp_Vec;
 
-D1V(): gp_Vec;
+  D1V(): gp_Vec;
 
-D2U(): gp_Vec;
+  D2U(): gp_Vec;
 
-D2V(): gp_Vec;
+  D2V(): gp_Vec;
 
-DUV(): gp_Vec;
+  DUV(): gp_Vec;
 
-IsTangentUDefined(): boolean;
+  IsTangentUDefined(): boolean;
 
-TangentU(D: gp_Dir): void;
+  TangentU(D: gp_Dir): void;
 
-IsTangentVDefined(): boolean;
+  IsTangentVDefined(): boolean;
 
-TangentV(D: gp_Dir): void;
+  TangentV(D: gp_Dir): void;
 
-IsNormalDefined(): boolean;
+  IsNormalDefined(): boolean;
 
-Normal(): gp_Dir;
+  Normal(): gp_Dir;
 
-IsCurvatureDefined(): boolean;
+  IsCurvatureDefined(): boolean;
 
-IsUmbilic(): boolean;
+  IsUmbilic(): boolean;
 
-MaxCurvature(): number;
+  MaxCurvature(): number;
 
-MinCurvature(): number;
+  MinCurvature(): number;
 
-CurvatureDirections(MaxD: gp_Dir, MinD: gp_Dir): void;
+  CurvatureDirections(MaxD: gp_Dir, MinD: gp_Dir): void;
 
-MeanCurvature(): number;
+  MeanCurvature(): number;
 
-GaussianCurvature(): number;
+  GaussianCurvature(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepLProp_SurfaceTool: declare class BRepLProp_SurfaceTool
 
-constructor
+  constructor
 
-static Value(S: BRepAdaptor_Surface, U: number, V: number, P: gp_Pnt): void;
+  static Value(S: BRepAdaptor_Surface, U: number, V: number, P: gp_Pnt): void;
 
-static D1(S: BRepAdaptor_Surface, U: number, V: number, P: gp_Pnt, D1U: gp_Vec, D1V: gp_Vec): void;
+  static D1(S: BRepAdaptor_Surface, U: number, V: number, P: gp_Pnt, D1U: gp_Vec, D1V: gp_Vec): void;
 
-static D2(S: BRepAdaptor_Surface, U: number, V: number, P: gp_Pnt, D1U: gp_Vec, D1V: gp_Vec, D2U: gp_Vec, D2V: gp_Vec, DUV: gp_Vec): void;
+  static D2(S: BRepAdaptor_Surface, U: number, V: number, P: gp_Pnt, D1U: gp_Vec, D1V: gp_Vec, D2U: gp_Vec, D2V: gp_Vec, DUV: gp_Vec): void;
 
-static DN(S: BRepAdaptor_Surface, U: number, V: number, IU: number, IV: number): gp_Vec;
+  static DN(S: BRepAdaptor_Surface, U: number, V: number, IU: number, IV: number): gp_Vec;
 
-static Continuity(S: BRepAdaptor_Surface): number;
+  static Continuity(S: BRepAdaptor_Surface): number;
 
-static Bounds(S: BRepAdaptor_Surface, U1?: number, V1?: number, U2?: number, V2?: number): { U1: number; V1: number; U2: number; V2: number };
+  static Bounds(S: BRepAdaptor_Surface, U1?: number, V1?: number, U2?: number, V2?: number): { U1: number; V1: number; U2: number; V2: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

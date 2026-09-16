@@ -114,12 +114,15 @@ const valuesEqual = (left: unknown, right: unknown): boolean => {
  * @internal
  */
 // oxlint-disable-next-line tau-lint/require-public-export-jsdoc -- @internal, app-scoped.
-export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage {
+export function createChatFileStore(
+  options: ChatFileStoreOptions,
+): ChatStorage & { invalidateLog(chatId: string): void } {
   const mutex = new KeyedMutex<string>();
   /** `chatId -> projectId`, filled by every read and every create. */
   const located = new Map<string, string>();
   /** The fields the record does not carry, per chat (P26, A36/I26). */
   const client = new Map<string, ClientChatState>();
+  const staleLogs = new Set<string>();
   const encoder = new TextEncoder();
 
   const readText = async (path: string): Promise<string | undefined> => {
@@ -170,10 +173,14 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
    */
   const clientState = async (projectId: string, chatId: string): Promise<ClientChatState> => {
     const held = client.get(chatId);
-    if (held !== undefined) {
+    if (held !== undefined && !staleLogs.delete(chatId)) {
       return held;
     }
-    const derived: ClientChatState = { messages: await deriveMessages(projectId, chatId), hasUnreadTurn: false };
+    const derived: ClientChatState = {
+      ...held,
+      messages: await deriveMessages(projectId, chatId),
+      hasUnreadTurn: held?.hasUnreadTurn ?? false,
+    };
     client.set(chatId, derived);
     return derived;
   };
@@ -334,6 +341,9 @@ export function createChatFileStore(options: ChatFileStoreOptions): ChatStorage 
   };
 
   return {
+    invalidateLog: (chatId) => {
+      staleLogs.add(chatId);
+    },
     createChat: async (resourceId, chat) => create(resourceId, chat),
 
     createNavigationRepairChat: async (resourceId) =>

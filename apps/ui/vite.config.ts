@@ -15,6 +15,8 @@ import { defineConfig } from 'vite';
 import type { Plugin, UserConfig } from 'vite';
 import { tauRuntime } from '@taucad/runtime/vite';
 import { base64Loader } from '@taucad/vite/base64-loader';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Vite configuration lives outside the app alias root.
+import { resolveTauCloudBuildEnabled } from './build-environment.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testScriptsAlias = '#scripts';
@@ -73,8 +75,21 @@ export const uiSsrOptions = {
 
 type UiSourceAliasPluginOptions = {
   readonly emitModuleGraph?: boolean;
+  readonly tauCloudEnabled?: boolean;
   readonly target?: 'web' | 'desktop';
 };
+
+const cloudBoundarySpecifiers = new Set([
+  '#cloud/commercial-features.js',
+  '#cloud/environment-billing.js',
+  '#cloud/financial-purge.js',
+  '#cloud/gateway-model-transport.js',
+  '#cloud/nav-billing.js',
+  '#cloud/kernel-commerce.js',
+  '#cloud/root-billing.js',
+  '#cloud/settings-billing.js',
+  '#cloud/zoo-upgrade-banner.js',
+]);
 
 const desktopSourceOverrides = new Map([
   ['#constants/local-kernel-options.js', '#constants/local-kernel-options.desktop.js'],
@@ -83,6 +98,28 @@ const desktopSourceOverrides = new Map([
   ['#runtime/demo-client-options.js', '#runtime/demo-client-options.desktop.js'],
   ['#services/headless-image-backend.js', '#services/headless-image-backend.desktop.js'],
   ['#services/browser-agent-worker.js', '#services/browser-agent-worker.desktop.js'],
+  ['#components/layout/route-footer.js', '#components/layout/route-footer.desktop.js'],
+]);
+
+const selfHostSourceOverrides = new Map([
+  ['#components/billing/credit-estimate.js', '#components/billing/credit-estimate.self-host.js'],
+  ['#components/chat/chat-model-selector.js', '#components/chat/chat-model-selector.self-host.js'],
+  ['#components/icons/svg-sprite-mount.js', '#components/icons/svg-sprite-mount.self-host.js'],
+  ['#hooks/use-credit-preflight.js', '#hooks/use-credit-preflight.self-host.js'],
+  ['#offline/offline-shell.js', '#offline/offline-shell.self-host.js'],
+  ['#routes/_index/billing-section.js', '#routes/_index/billing-section.self-host.js'],
+  [
+    '#routes/w.$workspace.$project/chat-details-usage.js',
+    '#routes/w.$workspace.$project/chat-details-usage.self-host.js',
+  ],
+  [
+    '#routes/w.$workspace.$project/chat-error-credits.js',
+    '#routes/w.$workspace.$project/chat-error-credits.self-host.js',
+  ],
+  [
+    '#routes/w.$workspace.$project/chat-message-data-usage.js',
+    '#routes/w.$workspace.$project/chat-message-data-usage.self-host.js',
+  ],
 ]);
 
 const normalizeProvenancePath = (moduleId: string): string => {
@@ -103,7 +140,11 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
       viteRoot = config.root;
     },
     resolveId(source, importer) {
-      if (source === 'shiki' && importer?.includes('/streamdown/') && importer.includes('/code-block-')) {
+      if (
+        source === 'shiki' &&
+        (importer?.includes('/@streamdown/code/') === true ||
+          (importer?.includes('/streamdown/') === true && importer.includes('/code-block-')))
+      ) {
         return streamdownShikiFacade;
       }
       if (!source.startsWith('#')) {
@@ -122,10 +163,18 @@ export const createUiSourceAliasPlugin = (options: UiSourceAliasPluginOptions = 
       }
 
       const [requestedSpecifier, query] = source.split('?', 2);
-      const specifier =
+      const hostSpecifier =
         options.target === 'desktop' && requestedSpecifier
           ? (desktopSourceOverrides.get(requestedSpecifier) ?? requestedSpecifier)
           : requestedSpecifier;
+      const targetSpecifier =
+        options.tauCloudEnabled === false && hostSpecifier
+          ? (selfHostSourceOverrides.get(hostSpecifier) ?? hostSpecifier)
+          : hostSpecifier;
+      const specifier =
+        targetSpecifier && cloudBoundarySpecifiers.has(targetSpecifier)
+          ? targetSpecifier.replace(/\.js$/u, options.tauCloudEnabled ? '.cloud.js' : '.self-host.js')
+          : targetSpecifier;
       if (specifier === undefined) {
         return null;
       }
@@ -316,6 +365,7 @@ export default defineConfig(({ mode }) => {
   const isTest = mode === 'test';
   const isNetlify = process.env['NETLIFY'] === 'true';
   const buildFrontendUrl = resolveBuildFrontendUrl(process.env);
+  const tauCloudEnabled = isTest ? true : resolveTauCloudBuildEnabled(process.env['TAU_CLOUD_ENABLED']);
 
   return {
     root: __dirname,
@@ -326,6 +376,7 @@ export default defineConfig(({ mode }) => {
       // Evaluated once per build / dev-server start, which is exactly the
       // granularity at which a tab's app-logic vintage can diverge.
       tauBuildId: JSON.stringify(Date.now()),
+      tauCloudBuildEnabled: JSON.stringify(tauCloudEnabled),
       /*
        * Compile-time host seam (charter D2). `desktop/vite.config.ts` sets
        * `"desktop"`. Left undefined under `mode === 'test'` so unit tests can
@@ -345,7 +396,7 @@ export default defineConfig(({ mode }) => {
       ...(isTest ? {} : { 'import.meta.env.TAU_OFFLINE_SHELL': '"enabled"' }),
     },
     plugins: [
-      createUiSourceAliasPlugin(),
+      createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }),
 
       /*
        * @taucad/runtime contract: COOP/COEP for SharedArrayBuffer, keep .wasm
@@ -386,7 +437,7 @@ export default defineConfig(({ mode }) => {
     worker: {
       // Workers need their own plugins.
       // https://vite.dev/config/worker-options.html#worker-plugins
-      plugins: () => [createUiSourceAliasPlugin(), nxViteTsPaths()],
+      plugins: () => [createUiSourceAliasPlugin({ emitModuleGraph: true, tauCloudEnabled }), nxViteTsPaths()],
     },
     resolve: {
       alias: isTest ? [{ find: testScriptsAlias, replacement: path.resolve(__dirname, 'scripts') }] : [],

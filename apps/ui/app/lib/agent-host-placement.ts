@@ -436,8 +436,10 @@ type OpenAgentHostChannelOptions = {
   readonly openTimeout?: number | undefined;
   /** Absolute node root for a `desktop` placement; required for that host only. */
   readonly workspaceRoot?: string | undefined;
+  /** Canonical manifest project id for a `desktop` placement. */
+  readonly projectId?: string | undefined;
   /** Bridge override, for tests. */
-  readonly bridge?: (() => Pick<DesktopBridge, 'agentHost'> | undefined) | undefined;
+  readonly bridge?: (() => { readonly agentHost: Pick<DesktopBridge['agentHost'], 'connect'> } | undefined) | undefined;
 };
 
 /**
@@ -450,7 +452,8 @@ type OpenAgentHostChannelOptions = {
 const desktopAgentPort = async (options: OpenAgentHostChannelOptions): Promise<MessagePort> => {
   const bridge = (options.bridge ?? desktopBridge)();
   const workspaceRoot = options.workspaceRoot ?? '';
-  if (!bridge || workspaceRoot === '') {
+  const projectId = options.projectId ?? '';
+  if (!bridge || workspaceRoot === '' || projectId === '') {
     throw new AgentHostPlacementError(
       'DESKTOP_ROOT_NOT_GRANTED',
       'in-process',
@@ -467,7 +470,7 @@ const desktopAgentPort = async (options: OpenAgentHostChannelOptions): Promise<M
       `Tau has no permission to work in ${workspaceRoot}. Reopen the folder from the desktop app and try again.`,
     );
   };
-  return Promise.race([bridge.agentHost.connect(workspaceRoot, getComputeReuseMode()), refusal()]);
+  return Promise.race([bridge.agentHost.connect(workspaceRoot, projectId, getComputeReuseMode()), refusal()]);
 };
 
 /**

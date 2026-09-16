@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
   exportGeometryInputSchema,
   getKernelResultInputSchema,
@@ -6,11 +8,11 @@ import {
   testModelInputSchema,
 } from '@taucad/chat';
 import { rpcName, toolName } from '@taucad/chat/constants';
-import { createTauMcpAdapter, tauMcpToolDefinitions, tauMcpToolNames } from '#tau-mcp.js';
+import { createTauMcpAdapter, createTauMcpServer, tauMcpToolDefinitions, tauMcpToolNames } from '#tau-mcp.js';
 import type { TauMcpDispatch } from '#tau-mcp.js';
 
 describe('@taucad/mcp', () => {
-  it('exports only the four read-only CAD tools with canonical schemas', () => {
+  it('exports only the four CAD tools with canonical schemas', () => {
     expect(tauMcpToolNames).toEqual([
       toolName.getKernelResult,
       toolName.testModel,
@@ -36,6 +38,31 @@ describe('@taucad/mcp', () => {
     ).resolves.toMatchObject({
       structuredContent: { status: 'ready' },
     });
+  });
+
+  it('assigns independent MCP requests distinct host tool identities', async () => {
+    const ids: string[] = [];
+    await Promise.all(
+      Array.from({ length: 2 }, async () => {
+        const server = createTauMcpServer({
+          dispatch: async (_call, options) => {
+            ids.push(options.toolCallId);
+            return { success: true, status: 'ready' };
+          },
+        });
+        const client = new Client({ name: 'tau-mcp-test', version: '1' });
+        const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+        try {
+          await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+          await client.callTool({ name: toolName.getKernelResult, arguments: { targetFile: 'main.ts' } });
+        } finally {
+          await client.close();
+          await server.close();
+        }
+      }),
+    );
+
+    expect(new Set(ids).size).toBe(2);
   });
 
   it('maps export requests to the canonical RPC and forwards cancellation metadata', async () => {
@@ -104,5 +131,25 @@ describe('@taucad/mcp', () => {
       isError: true,
       content: [{ type: 'text', text: 'RENDER_TIMEOUT: Renderer did not settle.' }],
     });
+  });
+
+  it('returns screenshot bytes as MCP images without a JSON data-url copy', async () => {
+    const dataUrl = 'data:image/webp;base64,AQID';
+    const adapter = createTauMcpAdapter({
+      dispatch: async () => ({ success: true, images: [{ view: 'isometric', dataUrl }] }),
+    });
+
+    const result = await adapter.call({
+      name: toolName.screenshot,
+      arguments: { mode: 'single', targetFile: 'main.ts' },
+      toolCallId: 'tool-image',
+    });
+
+    expect(result.content).toEqual([
+      { type: 'text', text: 'Captured 1 CAD view: isometric.' },
+      { type: 'image', mimeType: 'image/webp', data: 'AQID' },
+    ]);
+    expect(result.structuredContent).toEqual({ images: [{ view: 'isometric', dataUrl }] });
+    expect(JSON.stringify(result.content)).not.toContain(dataUrl);
   });
 });

@@ -135,6 +135,14 @@ describe('ProjectWorkspaceProvider', () => {
       type: 'setPanelState',
       panelState: { mobileActiveTab: 'share' },
     });
+
+    act(() => {
+      workspace.openPanel('revisions');
+    });
+    expect(send).toHaveBeenLastCalledWith({
+      type: 'setPanelState',
+      panelState: { mobileActiveTab: 'revisions' },
+    });
   });
 
   it('does not mutate desktop state for unsupported mobile-only actions', () => {
@@ -147,7 +155,6 @@ describe('ProjectWorkspaceProvider', () => {
 
     act(() => {
       workspace.openPanel('model');
-      workspace.openPanel('revisions');
       workspace.openPanel('kernel');
     });
 

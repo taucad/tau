@@ -578,6 +578,14 @@ export const materializePublishedTags = async (
   input: Readonly<{ projectId: string; repositoryPath: string; tags: readonly string[] }>,
 ): Promise<readonly string[]> => {
   const materialized: string[] = [];
+  /* One tag that cannot be resolved — a name whose tree lost its entry path, a
+     thumbnail that stopped being a WebP — used to abort every *later* tag in
+     the same spool, and the spool is retried at every push and every boot, so
+     the later names were never materialized at all (review C26). Each tag is
+     independent work; the failures are re-raised together so the caller still
+     keeps the spool on disk and retries, which is idempotent (an unchanged
+     manifest key is a no-op). */
+  const failures: unknown[] = [];
   for (const tag of new Set(input.tags)) {
     // oxlint-disable-next-line no-await-in-loop -- one publication's bytes at a time; this runs in the background set, not on a request.
     const rows = await dependencies.databaseService.database
@@ -585,37 +593,44 @@ export const materializePublishedTags = async (
       .from(schema.publication)
       .where(and(eq(schema.publication.projectId, input.projectId), eq(schema.publication.tag, tag)));
     for (const row of rows) {
-      // oxlint-disable-next-line no-await-in-loop -- sequential by design, see above.
-      const result = await materializePublication(dependencies, {
-        publicationId: row.id,
-        projectId: input.projectId,
-        repositoryPath: input.repositoryPath,
-        tag,
-        visibility: row.visibility === 'private' ? 'private' : 'public',
-        entryPath: row.entryPath,
-      });
-      if (result.manifestKey === row.manifestKey) {
-        continue;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- sequential by design, see above.
+        const result = await materializePublication(dependencies, {
+          publicationId: row.id,
+          projectId: input.projectId,
+          repositoryPath: input.repositoryPath,
+          tag,
+          visibility: row.visibility === 'private' ? 'private' : 'public',
+          entryPath: row.entryPath,
+        });
+        if (result.manifestKey === row.manifestKey) {
+          continue;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- sequential by design, see above.
+        await dependencies.databaseService.database.transaction(async (transaction) => {
+          await applyBlobReferences(transaction, result.blobRefs);
+          await transaction
+            .update(schema.publication)
+            .set({
+              manifestKey: result.manifestKey,
+              thumbnailKey: result.thumbnailKey,
+              kernels: [...result.kernels],
+              /* The name moved, so the row must say which revision a viewer is
+               * now being served (the manifest is keyed by it). */
+              revisionId: result.revisionId,
+            })
+            .where(eq(schema.publication.id, row.id));
+        });
+        // oxlint-disable-next-line no-await-in-loop -- sequential by design, see above.
+        await releaseManifestBlobs(dependencies, row.manifestKey);
+        materialized.push(row.id);
+      } catch (error) {
+        failures.push(error);
       }
-      // oxlint-disable-next-line no-await-in-loop -- sequential by design, see above.
-      await dependencies.databaseService.database.transaction(async (transaction) => {
-        await applyBlobReferences(transaction, result.blobRefs);
-        await transaction
-          .update(schema.publication)
-          .set({
-            manifestKey: result.manifestKey,
-            thumbnailKey: result.thumbnailKey,
-            kernels: [...result.kernels],
-            /* The name moved, so the row must say which revision a viewer is
-             * now being served (the manifest is keyed by it). */
-            revisionId: result.revisionId,
-          })
-          .where(eq(schema.publication.id, row.id));
-      });
-      // oxlint-disable-next-line no-await-in-loop -- sequential by design, see above.
-      await releaseManifestBlobs(dependencies, row.manifestKey);
-      materialized.push(row.id);
     }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, `${String(failures.length)} publication(s) could not be re-materialized.`);
   }
   return materialized;
 };

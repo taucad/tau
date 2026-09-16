@@ -327,11 +327,10 @@ export const ChatConsole = memo(function ChatConsole(): React.JSX.Element {
   const [query, setQuery] = useState('');
   const [enabledLevels, setEnabledLevels] = useCookie(cookieName.consoleLogLevel, defaultLogLevels);
   const [displayConfig, setDisplayConfig] = useCookie(cookieName.consoleDisplayConfig, defaultDisplayConfig);
-  const logVersion = useSelector(logRef, (state) => state.context.logVersion);
-  const allLogs = useMemo(
-    () => logRef.getSnapshot().context.logBuffer.toArray(),
-    // oxlint-disable-next-line react-hooks/exhaustive-deps -- logVersion is the mutable buffer's reactive version
-    [logRef, logVersion],
+  const [, allLogs] = useSelector(
+    logRef,
+    (state) => [state.context.logVersion, state.context.logBuffer.toArray()] as const,
+    (previous, next) => previous[0] === next[0],
   );
   const entries = useMemo(() => [...geometryUnits.entries()], [geometryUnits]);
   const entryPaths = useMemo(

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { WireAccountClosure } from '@taucad/billing';
 import { Button } from '@taucad/ui/components/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
+import { SettingsSectionCard } from '#components/settings/settings-item.js';
 import { authClient } from '#lib/auth-client.js';
 import { createPaymentRequestId } from '#lib/billing-payment-client.js';
 import type { PaymentActionBinding } from '#lib/billing-payment-client.js';
@@ -27,11 +28,17 @@ export function AccountClosureSettings({
     if (!binding) {
       return;
     }
+    const currentBinding = {
+      apiBaseUrl: binding.apiBaseUrl,
+      environment: binding.environment,
+      ownerId: binding.ownerId,
+      subjectId: binding.subjectId,
+    };
     const token = financial.capture();
     // async-iife: bootstrap
     void (async () => {
       try {
-        const value = await getCurrentAccountClosure({ ...binding, financialSession: token });
+        const value = await getCurrentAccountClosure({ ...currentBinding, financialSession: token });
         if (token.isCurrent()) {
           setClosure(value);
           if (value) {
@@ -69,11 +76,11 @@ export function AccountClosureSettings({
   };
 
   return (
-    <Card className='border-destructive/40'>
+    <SettingsSectionCard>
       <CardHeader>
         <CardTitle className='text-base'>Close Tau account</CardTitle>
       </CardHeader>
-      <CardContent className='flex flex-col gap-3 text-sm'>
+      <CardContent className='flex flex-col gap-3 border-destructive/40 text-sm'>
         <p className='text-muted-foreground'>
           This immediately ends this billing session, turns off automatic reload, and starts subscription cancellation.
           Cancellation may finish after sign-out.
@@ -154,7 +161,7 @@ export function AccountClosureSettings({
         ) : undefined}
         {error ? <p className='text-warning'>{error}</p> : undefined}
       </CardContent>
-    </Card>
+    </SettingsSectionCard>
   );
 }
 /* oxlint-enable no-void, unicorn/no-negated-condition */

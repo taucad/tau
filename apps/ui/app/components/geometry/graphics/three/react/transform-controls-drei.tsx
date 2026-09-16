@@ -127,7 +127,7 @@ export const TransformControls: ForwardRefComponent<TransformControlsProps, Tran
         const target = object instanceof THREE.Object3D ? object : object?.current;
         if (target instanceof THREE.Object3D) {
           controls.attach(target);
-        } else if (group.current instanceof THREE.Object3D) {
+        } else if (React.Children.count(children) > 0 && group.current instanceof THREE.Object3D) {
           controls.attach(group.current);
         }
 

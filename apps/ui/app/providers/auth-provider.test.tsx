@@ -17,7 +17,6 @@ import type { TauDesktopAuthBridge } from '#providers/auth-provider.js';
 import { FinancialSessionProvider } from '#providers/financial-session-provider.js';
 
 const mocks = vi.hoisted(() => ({
-  notify: vi.fn(),
   routerLink: vi.fn(),
   resolvedAuth: vi.fn(() => 'indeterminate' as 'authed' | 'anonymous' | 'indeterminate'),
   purgeSavedUsage: vi.fn(async () => undefined),
@@ -40,7 +39,7 @@ vi.mock('react-router', () => ({
 }));
 
 vi.mock('#lib/auth-client.js', () => ({
-  authClient: { $store: { notify: mocks.notify } },
+  authClient: {},
 }));
 
 const createBridge = () => {
@@ -86,7 +85,7 @@ describe('DesktopAuthBridge', () => {
     delete globalThis.window.tauAuth;
   });
 
-  it('invalidates both session caches when the desktop shell reports an auth change', () => {
+  it('invalidates the shared session cache when the desktop shell reports an auth change', () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
     const { bridge, emit } = createBridge();
     globalThis.window.tauAuth = bridge;
@@ -96,7 +95,6 @@ describe('DesktopAuthBridge', () => {
     emit();
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['auth'] });
-    expect(mocks.notify).toHaveBeenCalledWith('$sessionSignal');
     expect(queryClient.getQueryData(['billing', 'credits'])).toBeUndefined();
   });
 
@@ -126,15 +124,15 @@ describe('DesktopAuthBridge', () => {
     expect(() => renderBridge(queryClient)).not.toThrow();
   });
 
-  it('still refreshes the nanostore when mounted outside a QueryClientProvider', () => {
+  it('tolerates a focused mount outside a QueryClientProvider', () => {
     vi.stubEnv('TAU_TARGET', 'desktop');
     const { bridge, emit } = createBridge();
     globalThis.window.tauAuth = bridge;
 
-    render(<DesktopAuthBridge />);
-    emit();
-
-    expect(mocks.notify).toHaveBeenCalledWith('$sessionSignal');
+    expect(() => {
+      render(<DesktopAuthBridge />);
+      emit();
+    }).not.toThrow();
   });
 });
 
@@ -243,6 +241,15 @@ describe('AuthConfigLink', () => {
     await userEvent.click(screen.getByText('Sign out'));
 
     expect(bridge.signOut).toHaveBeenCalled();
+  });
+
+  it('never routes a shell-owned destination in-app when the desktop bridge is missing', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+
+    render(<AuthConfigLink href='/auth/sign-in'>Sign in</AuthConfigLink>);
+    await userEvent.click(screen.getByText('Sign in'));
+
+    expect(routerLink).not.toHaveBeenCalled();
   });
 
   it('renders an ordinary router link in the web build', () => {

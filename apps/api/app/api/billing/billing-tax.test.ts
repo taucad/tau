@@ -232,6 +232,44 @@ describe('paid tax source projection', () => {
     expect(classifyTaxEvidence(projected!)).toBe('eu_b2c');
   });
 
+  it('accepts a paid standalone Tax Transaction as immutable saved-card evidence', async () => {
+    const standalonePaid = {
+      ...paidEvidence,
+      invoiceId: null,
+      subscriptionId: null,
+      subscriptionItemId: null,
+    };
+    const taxTransaction = {
+      transaction: {
+        id: 'tax_1',
+        type: 'transaction',
+        livemode: false,
+        customer: 'cus_1',
+        currency: 'usd',
+        customer_details: { address: { country: 'FR' }, tax_ids: [] },
+      } as unknown as Stripe.Tax.Transaction,
+      lines: [
+        {
+          id: 'taxli_1',
+          type: 'transaction',
+          livemode: false,
+          tax_behavior: 'exclusive',
+          amount: 1000,
+          amount_tax: 200,
+          tax_code: 'txcd_10103000',
+        } as unknown as Stripe.Tax.TransactionLineItem,
+      ],
+      complete: true,
+    };
+    expect(paidTaxSourceIncompleteness({ paidEvidence: standalonePaid, taxTransaction })).toBeUndefined();
+    await expect(projectPaidTaxEvidence({ paidEvidence: standalonePaid, taxTransaction })).resolves.toMatchObject({
+      countryCode: 'FR',
+      countryEvidenceSource: 'tax_transaction',
+      taxMinor: '200',
+      productTaxCode: 'txcd_10103000',
+    });
+  });
+
   it('leaves an immutable snapshot without a customer country in unknown review', async () => {
     const session = {
       id: 'cs_1',

@@ -5,13 +5,16 @@ import type { Chat } from '@taucad/chat';
 import { projectToManifest } from '@taucad/types';
 import type { useChats } from '#hooks/use-chats.js';
 import type { ProjectListItem } from '#types/project.types.js';
+import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
 
 const mockUseChats = vi.fn();
+const mockUseChatSession = vi.fn();
 const mockNavigate = vi.fn();
 let search = '?chat=chat_12';
 let pendingLocation: { readonly pathname: string; readonly search: string } | undefined;
 
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => mockUseChats() as ReturnType<typeof useChats> }));
+vi.mock('#hooks/use-chat-session.js', () => ({ useChatSession: mockUseChatSession }));
 vi.mock('react-router', () => ({
   Link: ({ children, to, ...properties }: { readonly children: ReactNode; readonly to: string }) => (
     <a href={to} {...properties} rel='noreferrer'>
@@ -48,8 +51,16 @@ vi.mock('@taucad/ui/components/dropdown-menu', () => ({
   DropdownMenuTrigger: ({ children }: { readonly children: ReactNode }) => <span>{children}</span>,
   DropdownMenuContent: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
   DropdownMenuSeparator: () => <hr />,
-  DropdownMenuItem: ({ children, onSelect }: { readonly children: ReactNode; readonly onSelect?: () => void }) => (
-    <button type='button' onClick={onSelect}>
+  DropdownMenuItem: ({
+    children,
+    onSelect,
+    ...properties
+  }: {
+    readonly children: ReactNode;
+    readonly onSelect?: () => void;
+    readonly 'aria-label'?: string;
+  }) => (
+    <button type='button' onClick={onSelect} {...properties}>
       {children}
     </button>
   ),
@@ -58,6 +69,36 @@ vi.mock('#components/inline-text-editor.js', () => ({
   InlineTextEditor: ({ value }: { readonly value: string }) => <input value={value} readOnly />,
 }));
 vi.mock('@taucad/ui/components/skeleton', () => ({ Skeleton: () => <span data-testid='skeleton' /> }));
+
+/* The chat machines are pinned in `use-sidebar-status.test.tsx`; this suite is
+ * about what the row does with what they say. */
+const mockChatStatus = vi.fn();
+const mockCloseChat = vi.fn();
+const mockRetryChat = vi.fn();
+vi.mock('#hooks/use-sidebar-status.js', async (importOriginal) => {
+  const original = await importOriginal<typeof SidebarStatusModule>();
+  return {
+    ...original,
+    useChatSidebarStatus: (projectId: string, chatId: string) => mockChatStatus(projectId, chatId) as unknown,
+    useSidebarCommands: () => ({
+      closeChat: mockCloseChat,
+      retryChat: mockRetryChat,
+      closeProject: vi.fn(),
+      openProject: vi.fn(),
+    }),
+  };
+});
+
+const status = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  state: 'idle',
+  unread: false,
+  toolName: undefined,
+  pendingApprovalCount: 0,
+  failureReason: undefined,
+  branch: undefined,
+  dirty: false,
+  ...over,
+});
 
 const chat = (index: number, updatedAt = index): Chat => ({
   id: `chat_${index}`,
@@ -99,6 +140,7 @@ describe('ProjectChatList', () => {
     pendingLocation = undefined;
     mockUseChats.mockReturnValue(defaultChatsResult);
     mockNavigate.mockResolvedValue(undefined);
+    mockChatStatus.mockReturnValue(undefined);
   });
 
   it('sorts by user activity, ignoring newer passive row updates, then breaks ties deterministically', () => {
@@ -158,5 +200,72 @@ describe('ProjectChatList', () => {
       expect(deleteChat).toHaveBeenCalledWith('chat_1');
       expect(mockNavigate).toHaveBeenCalledWith('/w/home/project%20one?chat=chat_2', { replace: true });
     });
+  });
+
+  it('draws the state glyph, the second line and the screen-reader sentence beside the link', () => {
+    mockChatStatus.mockImplementation((_projectId: string, chatId: string) =>
+      chatId === 'chat_12'
+        ? status({ state: 'approval', pendingApprovalCount: 1, branch: 'sweep', unread: true })
+        : undefined,
+    );
+    render(<ProjectChatList project={project} isProjectActive />);
+
+    const link = screen.getByRole('link', { name: 'Chat 12' });
+    expect(link).toHaveAttribute('aria-describedby', 'chat-status-chat_12');
+    expect(document.querySelector('#chat-status-chat_12')?.textContent).toBe(
+      'Chat 12, needs your approval, 1 pending, unread, on branch sweep.',
+    );
+    expect(screen.getByText('Needs your approval · 1')).toBeInTheDocument();
+    expect(screen.getByText('sweep')).toBeInTheDocument();
+    expect(document.querySelector('[data-glyph=approval]')).toBeInTheDocument();
+  });
+
+  it('shows nothing about a chat with no state at all', () => {
+    render(<ProjectChatList project={project} isProjectActive />);
+    expect(mockUseChatSession).toHaveBeenCalledWith('chat_12', 'proj_one');
+    expect(screen.getByRole('link', { name: 'Chat 12' })).not.toHaveAttribute('aria-describedby');
+    expect(document.querySelector('[data-glyph]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-slot=branch-chip]')).not.toBeInTheDocument();
+  });
+
+  it('closes one chat without touching the record', () => {
+    render(<ProjectChatList project={project} isProjectActive />);
+    fireEvent.click(screen.getByRole('button', { name: 'Close Chat 12' }));
+    expect(mockCloseChat).toHaveBeenCalledExactlyOnceWith('proj_one', 'chat_12');
+  });
+
+  /* R12: a failed row that only says "Failed" is a dead end — the two things
+   * a person wants are the run again and the transcript. */
+  it('offers Retry and Open log on a failed chat, and on no other', () => {
+    mockChatStatus.mockImplementation((_projectId: string, chatId: string) =>
+      chatId === 'chat_12' ? status({ state: 'failed', failureReason: 'the model refused' }) : status(),
+    );
+    render(<ProjectChatList project={project} isProjectActive />);
+
+    expect(screen.getAllByRole('button', { name: /^Retry / })).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry Chat 12' }));
+    expect(mockRetryChat).toHaveBeenCalledExactlyOnceWith('chat_12');
+    expect(screen.getByRole('link', { name: 'Open log for Chat 12' })).toHaveAttribute(
+      'href',
+      '/w/home/project%20one?chat=chat_12',
+    );
+  });
+
+  it('groups chats by day only when both days are on screen', () => {
+    const now = Date.now();
+    mockUseChats.mockReturnValue({
+      ...defaultChatsResult,
+      chats: [
+        { ...chat(1), recencyAt: now },
+        { ...chat(2), recencyAt: 1 },
+      ],
+    });
+    render(<ProjectChatList project={project} isProjectActive />);
+    expect(screen.getByText('Today')).toBeInTheDocument();
+    expect(screen.getByText('Earlier')).toBeInTheDocument();
+
+    mockUseChats.mockReturnValue({ ...defaultChatsResult, chats: [{ ...chat(1), recencyAt: now }] });
+    render(<ProjectChatList project={project} isProjectActive />);
+    expect(screen.queryAllByText('Earlier')).toHaveLength(1);
   });
 });

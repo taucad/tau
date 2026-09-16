@@ -4,76 +4,76 @@
 
 GeomFill_UniformSection: declare class GeomFill_UniformSection extends GeomFill_SectionLaw
 
-constructor
+  constructor
 
-D0(Param: number, Poles: NCollection_Array1_gp_Pnt, Weigths: NCollection_Array1_double): boolean;
+  D0(Param: number, Poles: NCollection_Array1_gp_Pnt, Weigths: NCollection_Array1_double): boolean;
 
-D1(Param: number, Poles: NCollection_Array1_gp_Pnt, DPoles: NCollection_Array1_gp_Vec, Weigths: NCollection_Array1_double, DWeigths: NCollection_Array1_double): boolean;
+  D1(Param: number, Poles: NCollection_Array1_gp_Pnt, DPoles: NCollection_Array1_gp_Vec, Weigths: NCollection_Array1_double, DWeigths: NCollection_Array1_double): boolean;
 
-D2(Param: number, Poles: NCollection_Array1_gp_Pnt, DPoles: NCollection_Array1_gp_Vec, D2Poles: NCollection_Array1_gp_Vec, Weigths: NCollection_Array1_double, DWeigths: NCollection_Array1_double, D2Weigths: NCollection_Array1_double): boolean;
+  D2(Param: number, Poles: NCollection_Array1_gp_Pnt, DPoles: NCollection_Array1_gp_Vec, D2Poles: NCollection_Array1_gp_Vec, Weigths: NCollection_Array1_double, DWeigths: NCollection_Array1_double, D2Weigths: NCollection_Array1_double): boolean;
 
-BSplineSurface(): Geom_BSplineSurface;
+  BSplineSurface(): Geom_BSplineSurface;
 
-SectionShape(NbPoles: number, NbKnots: number, Degree: number): { NbPoles: number; NbKnots: number; Degree: number };
+  SectionShape(NbPoles: number, NbKnots: number, Degree: number): { NbPoles: number; NbKnots: number; Degree: number };
 
-Knots(TKnots: NCollection_Array1_double): void;
+  Knots(TKnots: NCollection_Array1_double): void;
 
-Mults(TMults: NCollection_Array1_int): void;
+  Mults(TMults: NCollection_Array1_int): void;
 
-IsRational(): boolean;
+  IsRational(): boolean;
 
-IsUPeriodic(): boolean;
+  IsUPeriodic(): boolean;
 
-IsVPeriodic(): boolean;
+  IsVPeriodic(): boolean;
 
-NbIntervals(S: GeomAbs_Shape): number;
+  NbIntervals(S: GeomAbs_Shape): number;
 
-Intervals(T: NCollection_Array1_double, S: GeomAbs_Shape): void;
+  Intervals(T: NCollection_Array1_double, S: GeomAbs_Shape): void;
 
-SetInterval(First: number, Last: number): void;
+  SetInterval(First: number, Last: number): void;
 
-GetInterval(First: number, Last: number): { First: number; Last: number };
+  GetInterval(First: number, Last: number): { First: number; Last: number };
 
-GetDomain(First: number, Last: number): { First: number; Last: number };
+  GetDomain(First: number, Last: number): { First: number; Last: number };
 
-GetTolerance(BoundTol: number, SurfTol: number, AngleTol: number, Tol3d: NCollection_Array1_double): void;
+  GetTolerance(BoundTol: number, SurfTol: number, AngleTol: number, Tol3d: NCollection_Array1_double): void;
 
-BarycentreOfSurf(): gp_Pnt;
+  BarycentreOfSurf(): gp_Pnt;
 
-MaximalSection(): number;
+  MaximalSection(): number;
 
-GetMinimalWeight(Weigths: NCollection_Array1_double): void;
+  GetMinimalWeight(Weigths: NCollection_Array1_double): void;
 
-IsConstant(Error: number): { returnValue: boolean; Error: number };
+  IsConstant(Error: number): { returnValue: boolean; Error: number };
 
-ConstantSection(): Geom_Curve;
+  ConstantSection(): Geom_Curve;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomFill_Gordon_BuildReport: interface GeomFill_Gordon_BuildReport
 
-Status: GeomFill_Gordon_ResultStatus
+  Status: GeomFill_Gordon_ResultStatus
 
-FailedStage: GeomFill_Gordon_BuildStage
+  FailedStage: GeomFill_Gordon_BuildStage
 
-IsApproximate: boolean
+  IsApproximate: boolean
 
-MaxContactGap: number
+  MaxContactGap: number
 
-MaxReparametrizationDeviation: number
+  MaxReparametrizationDeviation: number
 
-MaxProfileDeviation: number
+  MaxProfileDeviation: number
 
-MaxGuideDeviation: number
+  MaxGuideDeviation: number
 
-MaxApproximationDeviation: number
+  MaxApproximationDeviation: number
 
 GeomFill_SequenceOfTrsf: NCollection_Sequence_gp_Trsf

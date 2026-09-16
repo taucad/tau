@@ -61,6 +61,57 @@ if (typeof document !== 'undefined' && typeof document.queryCommandSupported !==
   });
 }
 
+// Monaco primes and re-measures Geist Mono through `document.fonts` — the
+// `FontFaceSet` jsdom does not implement — so `configureMonaco` threw at collect
+// in every suite that renders an editor (W14). The stub is here rather than a
+// guard in product code (review R13): a missing web-font API is a property of
+// this environment, and the browser path stays unconditional. `load` resolves
+// with no faces, which is the same answer an offline browser gives.
+// oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- DOM types claim `fonts` is always there; jsdom omits it
+if (typeof document !== 'undefined' && (document.fonts as FontFaceSet | undefined) === undefined) {
+  Object.defineProperty(document, 'fonts', {
+    configurable: true,
+    value: {
+      load: async (): Promise<FontFace[]> => [],
+      addEventListener: (): void => undefined,
+      removeEventListener: (): void => undefined,
+      dispatchEvent: (): boolean => true,
+      ready: Promise.resolve(),
+      status: 'loaded',
+      check: (): boolean => true,
+    },
+  });
+}
+
+// Monaco's clipboard service answers every `copy` event on the body with
+// `navigator.clipboard.write([new ClipboardItem({'text/plain': deferred})])`.
+// jsdom implements neither name, so a suite that renders an editor collected
+// the call as an unhandled `ReferenceError` (W14 sweep). Each test that asserts
+// on the clipboard still installs its own spy over this, the way they do today.
+// oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition, @typescript-eslint/no-extraneous-class -- DOM types claim ClipboardItem is always defined and jsdom omits it; the stub is a constructor-only class because the platform's is
+globalThis.ClipboardItem ??= class ClipboardItem {
+  public constructor(items: Record<string, unknown>) {
+    /* Monaco hands one deferred promise per MIME type and cancels it when the
+     * next write supersedes it. A real clipboard consumes those promises, so
+     * this stub has to as well, or every cancelled write lands as an unhandled
+     * `Canceled` rejection. `allSettled` subscribes and never rejects. */
+    void Promise.allSettled(Object.values(items));
+  }
+} as unknown as typeof ClipboardItem;
+
+// oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- DOM types claim `clipboard` is always there; jsdom omits it
+if (typeof navigator !== 'undefined' && (navigator.clipboard as Clipboard | undefined) === undefined) {
+  Object.defineProperty(navigator, 'clipboard', {
+    configurable: true,
+    value: {
+      read: async (): Promise<ClipboardItems> => [],
+      readText: async (): Promise<string> => '',
+      write: async (): Promise<void> => undefined,
+      writeText: async (): Promise<void> => undefined,
+    },
+  });
+}
+
 const g = globalThis as typeof globalThis & {
   MonacoEnvironment?: { getWorkerUrl?: (moduleId: string, label: string) => string };
 };

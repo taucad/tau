@@ -190,7 +190,7 @@ describe('Tau publication loader', () => {
     expect(headers.get('Cache-Tag')).toBe('publication-viewer');
   });
 
-  it('forwards upstream Set-Cookie (tau_view_id) to the browser', async () => {
+  it('does not forward an upstream identifier cookie to the browser', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify(sampleLoaderData), {
         status: 200,
@@ -208,7 +208,7 @@ describe('Tau publication loader', () => {
       }),
     );
 
-    expect(loaderHeaders(result).get('Set-Cookie')).toContain('tau_view_id=abc.def');
+    expect(loaderHeaders(result).get('Set-Cookie')).toBeNull();
   });
 
   it('propagates 404 / 410 / 429 as typed lock reasons', async () => {

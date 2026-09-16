@@ -249,7 +249,9 @@ export type PermanentDeleteProjectDirectoryResult =
 export type CommitPendingProjectDirectoryInput = {
   readonly providerBasePath: string;
   readonly scope: StorageRootConfig;
-  readonly files: Readonly<Record<string, { readonly content: Uint8Array<ArrayBuffer> }>>;
+  readonly files: Readonly<
+    Record<string, { readonly content: Uint8Array<ArrayBuffer>; readonly mode?: '100644' | '100755' }>
+  >;
   readonly manifest: Uint8Array<ArrayBuffer>;
 };
 

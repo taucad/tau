@@ -51,6 +51,9 @@ apps/api/app/testing/harness-bench/results/
 # Environment variables
 .env
 
+# Local API bare Git repositories
+/apps/api/.tau-git/
+
 # Bundler stats
 stats.html
 

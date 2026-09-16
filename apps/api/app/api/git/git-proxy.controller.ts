@@ -1,25 +1,83 @@
 /* oxlint-disable new-cap, @typescript-eslint/consistent-type-imports -- NestJS decorators are factories and DI metadata needs runtime class imports */
+/* eslint-disable max-params-no-constructor/max-params-no-constructor -- Nest request facets and relay identity remain explicit. */
 import { isIPv4, isIPv6 } from 'node:net';
+import { lookup } from 'node:dns/promises';
+import type { LookupAddress } from 'node:dns';
+import { randomUUID } from 'node:crypto';
 import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 import { Readable } from 'node:stream';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import {
   BadGatewayException,
   BadRequestException,
   Controller,
   Get,
+  Logger,
   Post,
+  Put,
+  Param,
+  PayloadTooLargeException,
   Query,
   Req,
   Res,
   StreamableFile,
+  Inject,
+  Optional,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { UseAuth } from '#auth/decorators/auth.decorator.js';
+import type { Environment } from '#config/environment.config.js';
+import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
 import { httpHeader } from '#constants/http-header.constant.js';
 import { GitProxyQueryDto } from '#api/git/git.dto.js';
+import { RedisService } from '#redis/redis.service.js';
+import { z } from 'zod';
 
 /** Only git's own smart-HTTP endpoints are reachable through the proxy. */
-const gitEndpointPattern = /\/(?:info\/refs|git-upload-pack|git-receive-pack)$/u;
+const gitEndpointPattern = /\/(?:info\/refs|git-upload-pack|git-receive-pack|info\/lfs\/objects\/batch)$/u;
+const lfsBatchSuffix = '/info/lfs/objects/batch';
+const lfsHandleTtlSeconds = 300;
+const lfsBatchSchema = z
+  .object({
+    objects: z.array(
+      z
+        .object({
+          oid: z.string().regex(/^[0-9a-f]{64}$/u),
+          size: z.number().int().nonnegative(),
+          actions: z
+            .object({
+              upload: z.object({ href: z.url(), header: z.record(z.string(), z.string()).optional() }).optional(),
+              download: z.object({ href: z.url(), header: z.record(z.string(), z.string()).optional() }).optional(),
+              verify: z.object({ href: z.url(), header: z.record(z.string(), z.string()).optional() }).optional(),
+            })
+            .optional(),
+        })
+        .loose(),
+    ),
+  })
+  .loose();
+type LfsRelayRecord = Readonly<{
+  userId: string;
+  repositoryUrl: string;
+  oid: string;
+  size: number;
+  url: string;
+  method: 'GET' | 'POST' | 'PUT';
+  headers: Record<string, string>;
+  expiresAt: number;
+}>;
+const lfsRelayRecordSchema = z.object({
+  userId: z.string().min(1),
+  repositoryUrl: z.url(),
+  oid: z.string().regex(/^[0-9a-f]{64}$/u),
+  size: z.number().int().nonnegative(),
+  url: z.url(),
+  method: z.enum(['GET', 'POST', 'PUT']),
+  headers: z.record(z.string(), z.string()),
+  expiresAt: z.number().int().positive(),
+});
+const relayHandlePattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 /**
  * The remote's credential travels in its own header, never in the query string
@@ -28,6 +86,16 @@ const gitEndpointPattern = /\/(?:info\/refs|git-upload-pack|git-receive-pack)$/u
  * catalogue so the CORS allow-list carries it and the logger redacts it.
  */
 const proxyAuthorizationHeader = httpHeader.xTauProxyAuthorization;
+const refusedActionHeaders = new Set([
+  'connection',
+  'content-length',
+  'cookie',
+  'host',
+  'proxy-authorization',
+  'set-cookie',
+  'transfer-encoding',
+  proxyAuthorizationHeader,
+]);
 
 /**
  * Addresses the API must not reach on a caller's behalf: loopback, the cloud
@@ -80,12 +148,7 @@ const mappedIpv4 = (address: string): string | undefined => {
   return [Math.floor(high / 256), high % 256, Math.floor(low / 256), low % 256].join('.');
 };
 
-/**
- * A hostname that merely *resolves* to a private address is not caught here:
- * closing that needs the socket pinned to the address the check saw, which is a
- * custom dispatcher rather than a predicate. Recorded as a residual — the
- * reachable set through this proxy is already narrowed to three git endpoints.
- */
+/** Fast refusal for literal/private host forms; DNS answers are checked and socket-pinned separately. */
 const isBlockedHost = (hostname: string): boolean => {
   const host = hostname.toLowerCase().replaceAll(/^\[|\]$/gu, '');
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.internal') || host.endsWith('.local')) {
@@ -117,6 +180,95 @@ const maximumRedirectHops = 2;
 const credentialQueryKeys = new Set(['access_token', 'token', 'authorization', 'password', 'api_key', 'apikey']);
 
 /**
+ * How long an upstream git host may take to answer before the socket is
+ * destroyed. Without it a slow or hostile remote pinned an API connection for
+ * as long as the browser stayed on the page (review C31). Generous, because a
+ * large `git-upload-pack` negotiation against a busy host is legitimately slow;
+ * it bounds the pathological case, not the normal one.
+ */
+const upstreamTimeoutMilliseconds = 60 * 1000;
+
+/**
+ * The most a signed-in caller may stream through the proxy into a third-party
+ * git host in one request. Fastify's `bodyLimit` does not reach the git content
+ * types (they are parsed as a raw stream), so this is the whole of the bound.
+ */
+const proxyRequestLimitBytes = 512 * 1024 * 1024;
+
+/**
+ * The request body, with a ceiling, reusing the shape the LFS relay already
+ * uses for its exact-size check below.
+ *
+ * @param body - The incoming request stream.
+ * @param limitBytes - The most it may carry.
+ * @returns A stream that fails once the ceiling is passed.
+ */
+const boundedBody = (body: Readable, limitBytes: number): Readable =>
+  Readable.from(
+    (async function* (): AsyncGenerator<Uint8Array<ArrayBuffer>> {
+      let received = 0;
+      for await (const chunk of body) {
+        const bytes = Uint8Array.from(chunk as Uint8Array<ArrayBuffer>);
+        received += bytes.byteLength;
+        if (received > limitBytes) {
+          throw new PayloadTooLargeException({ code: 'GIT_PROXY_REQUEST_TOO_LARGE' });
+        }
+        yield bytes;
+      }
+    })(),
+  );
+
+const pinnedFetch = async (target: URL, address: LookupAddress, init: RequestInit): Promise<Response> =>
+  new Promise<Response>((resolve, reject) => {
+    const request = (target.protocol === 'https:' ? httpsRequest : httpRequest)(
+      target,
+      {
+        method: init.method,
+        headers: Object.fromEntries(new Headers(init.headers).entries()),
+        lookup: (_hostname, _options, callback) => {
+          callback(null, address.address, address.family);
+        },
+      },
+      (response) => {
+        const headers = new Headers();
+        for (const [name, value] of Object.entries(response.headers)) {
+          if (Array.isArray(value)) {
+            for (const item of value) {
+              headers.append(name, item);
+            }
+          } else if (value !== undefined) {
+            headers.set(name, value);
+          }
+        }
+        resolve(
+          new Response(Readable.toWeb(response) as unknown as ReadableStream, {
+            status: response.statusCode ?? 502,
+            statusText: response.statusMessage,
+            headers,
+          }),
+        );
+      },
+    );
+    request.once('error', reject);
+    request.setTimeout(upstreamTimeoutMilliseconds, () => {
+      request.destroy(new Error('The upstream git host did not answer in time.'));
+    });
+    const abort = (): void => {
+      request.destroy(new DOMException('The upstream request was aborted.', 'AbortError'));
+    };
+    if (init.signal?.aborted === true) {
+      abort();
+    } else {
+      init.signal?.addEventListener('abort', abort, { once: true });
+    }
+    if (init.body instanceof ReadableStream) {
+      Readable.fromWeb(init.body as unknown as WebReadableStream).pipe(request);
+    } else {
+      request.end(init.body as string | Uint8Array<ArrayBuffer> | undefined);
+    }
+  });
+
+/**
  * CORS proxy for browser clients talking to a third-party git remote
  * (architecture "Remotes"): a few dozen lines of forwarding, not a Tau
  * transport. Same-origin Tau Cloud pushes never come here.
@@ -124,26 +276,87 @@ const credentialQueryKeys = new Set(['access_token', 'token', 'authorization', '
 @Controller({ path: 'git', version: '1' })
 @UseAuth()
 export class GitProxyController {
+  /**
+   * Ruling P50: an operator env relaxes the scheme and private-address
+   * refusals so charter AC18's local `git http-backend` can be driven through
+   * the product. Read once, here, and announced every boot — the environment
+   * schema refuses the value outright in production, so this can only ever be a
+   * developer's or an end-to-end run's machine.
+   */
+  readonly #allowPrivate: boolean;
+  readonly #apiUrl: string;
+
+  public constructor(
+    configService: ConfigService<Environment, true>,
+    private readonly redis: RedisService,
+    @Optional() @Inject('GIT_PROXY_FETCH') private readonly injectedFetch?: typeof globalThis.fetch,
+  ) {
+    this.#allowPrivate = configService.get('TAU_GIT_REMOTE_ALLOW_PRIVATE', { infer: true }) === '1';
+    this.#apiUrl = configService.get('TAU_API_URL', { infer: true }).replace(/\/+$/u, '');
+    if (this.#allowPrivate) {
+      new Logger(GitProxyController.name).warn(
+        'TAU_GIT_REMOTE_ALLOW_PRIVATE=1: the git proxy will reach http:// and private addresses. Development only.',
+      );
+    }
+  }
+
   @Get('proxy')
   public async proxyGet(
+    @User('id') userId: string,
     @Query() query: GitProxyQueryDto,
     @Req() request: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<StreamableFile> {
-    return this.forward(query.url, request, reply);
+    return this.forward(query.url, request, reply, userId);
   }
 
   @Post('proxy')
   public async proxyPost(
+    @User('id') userId: string,
     @Query() query: GitProxyQueryDto,
     @Req() request: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<StreamableFile> {
-    return this.forward(query.url, request, reply);
+    return this.forward(query.url, request, reply, userId);
   }
 
-  private async forward(rawUrl: string, request: FastifyRequest, reply: FastifyReply): Promise<StreamableFile> {
-    const target = this.resolveTarget(rawUrl);
+  @Get('lfs/:handle')
+  public async relayGet(
+    @User('id') userId: string,
+    @Param('handle') handle: string,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<StreamableFile> {
+    return this.relay(handle, 'GET', userId, request, reply);
+  }
+
+  @Post('lfs/:handle')
+  public async relayPost(
+    @User('id') userId: string,
+    @Param('handle') handle: string,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<StreamableFile> {
+    return this.relay(handle, 'POST', userId, request, reply);
+  }
+
+  @Put('lfs/:handle')
+  public async relayPut(
+    @User('id') userId: string,
+    @Param('handle') handle: string,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<StreamableFile> {
+    return this.relay(handle, 'PUT', userId, request, reply);
+  }
+
+  private async forward(
+    rawUrl: string,
+    request: FastifyRequest,
+    reply: FastifyReply,
+    userId: string,
+  ): Promise<StreamableFile> {
+    let target = this.resolveTarget(rawUrl);
     const proxyAuthorization = request.headers[proxyAuthorizationHeader];
     const headers = new Headers({
       'user-agent': 'git/tau-proxy',
@@ -162,12 +375,12 @@ export class GitProxyController {
       abort.abort();
     });
 
-    let response = await fetch(target, {
+    let response = await this.fetchTarget(target, {
       method: request.method,
       headers,
       ...(request.method === 'POST'
         ? {
-            body: Readable.toWeb(request.raw) as ReadableStream,
+            body: Readable.toWeb(boundedBody(request.raw, proxyRequestLimitBytes)) as ReadableStream,
             duplex: 'half',
           }
         : {}),
@@ -179,6 +392,18 @@ export class GitProxyController {
       const location = response.headers.get('location');
       if (location === null) {
         break;
+      }
+      if (typeof proxyAuthorization === 'string') {
+        /* A GitHub App installation token is scoped to one *repository*, and a
+           renamed or transferred repository redirects to a different path on
+           the same origin — so dropping the credential only when the origin
+           changed replayed a repository-scoped token at a repository it was
+           never issued for (review C33, policy Rule 11). A credential follows
+           nothing: the client re-issues against the final URL. */
+        throw new BadGatewayException({
+          code: 'GIT_PROXY_REDIRECTED_CREDENTIAL',
+          message: 'The remote redirected a request that carried a credential; re-issue against the final URL',
+        });
       }
       if (hop >= maximumRedirectHops) {
         throw new BadGatewayException({
@@ -195,14 +420,72 @@ export class GitProxyController {
         });
       }
       // Every hop is re-checked: scheme, credentials, host range and git path.
+      // A redirect that carried a credential was refused above, so there is
+      // none left to drop here.
       const next = this.resolveTarget(new URL(location, target).toString());
       // oxlint-disable-next-line no-await-in-loop -- a redirect chain is sequential by definition
-      response = await fetch(next, {
+      response = await this.fetchTarget(next, {
         method: 'GET',
         headers,
         redirect: 'manual',
         signal: abort.signal,
       });
+      target = next;
+    }
+
+    if (target.pathname.endsWith(lfsBatchSuffix) && response.ok) {
+      const parsed = lfsBatchSchema.parse(await response.json());
+      const repositoryUrl = new URL(target);
+      repositoryUrl.pathname = repositoryUrl.pathname.slice(0, -lfsBatchSuffix.length);
+      repositoryUrl.search = '';
+      repositoryUrl.hash = '';
+      for (const object of parsed.objects) {
+        for (const [name, method] of [
+          ['upload', 'PUT'],
+          ['download', 'GET'],
+          ['verify', 'POST'],
+        ] as const) {
+          const action = object.actions?.[name];
+          if (action === undefined) {
+            continue;
+          }
+          const actionUrl = new URL(action.href);
+          if (actionUrl.protocol !== 'https:' || actionUrl.username !== '' || actionUrl.password !== '') {
+            throw new BadGatewayException({ code: 'GIT_LFS_ACTION_REFUSED' });
+          }
+          // oxlint-disable-next-line no-await-in-loop -- each action URL is an independent SSRF boundary.
+          await this.publicAddress(actionUrl);
+          const handle = randomUUID();
+          const headers = Object.fromEntries(
+            Object.entries(action.header ?? {}).filter(([header]) => !refusedActionHeaders.has(header.toLowerCase())),
+          );
+          const record: LfsRelayRecord = {
+            userId,
+            repositoryUrl: repositoryUrl.toString(),
+            oid: object.oid,
+            size: object.size,
+            url: actionUrl.toString(),
+            method,
+            headers,
+            expiresAt: Date.now() + lfsHandleTtlSeconds * 1000,
+          };
+          // oxlint-disable-next-line no-await-in-loop -- each independently expiring action needs its own opaque handle.
+          await this.redis.client.set(
+            `git:lfs:relay:${handle}`,
+            JSON.stringify(record),
+            'EX',
+            lfsHandleTtlSeconds,
+            'NX',
+          );
+          action.href = `${this.#apiUrl}/v1/git/lfs/${handle}`;
+          action.header = {};
+        }
+      }
+      void reply
+        .status(response.status)
+        .header('content-type', 'application/vnd.git-lfs+json')
+        .header('cache-control', 'no-store');
+      return new StreamableFile(Buffer.from(JSON.stringify(parsed)));
     }
 
     void reply.status(response.status);
@@ -218,6 +501,96 @@ export class GitProxyController {
     );
   }
 
+  private async relay(
+    handle: string,
+    method: 'GET' | 'POST' | 'PUT',
+    userId: string,
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<StreamableFile> {
+    if (!relayHandlePattern.test(handle)) {
+      throw new BadRequestException({ code: 'GIT_LFS_HANDLE_INVALID' });
+    }
+    const raw = await this.redis.client.get(`git:lfs:relay:${handle}`);
+    if (raw === null) {
+      throw new BadRequestException({ code: 'GIT_LFS_HANDLE_EXPIRED' });
+    }
+    const record = lfsRelayRecordSchema.parse(JSON.parse(raw));
+    if (record.userId !== userId || record.method !== method || record.expiresAt <= Date.now()) {
+      throw new BadRequestException({ code: 'GIT_LFS_HANDLE_REFUSED' });
+    }
+    const target = new URL(record.url);
+    const headers = new Headers(record.headers);
+    const contentType = request.headers['content-type'];
+    if (typeof contentType === 'string' && !headers.has('content-type')) {
+      headers.set('content-type', contentType);
+    }
+    const body =
+      method === 'PUT'
+        ? Readable.from(
+            (async function* (): AsyncGenerator<Uint8Array<ArrayBuffer>> {
+              let received = 0;
+              for await (const chunk of request.raw) {
+                const bytes = Uint8Array.from(chunk as Uint8Array<ArrayBuffer>);
+                received += bytes.byteLength;
+                if (received > record.size) {
+                  throw new BadRequestException({ code: 'GIT_LFS_OBJECT_TOO_LARGE' });
+                }
+                yield bytes;
+              }
+              if (received !== record.size) {
+                throw new BadRequestException({ code: 'GIT_LFS_OBJECT_SIZE_MISMATCH' });
+              }
+            })(),
+          )
+        : request.raw;
+    const response = await this.fetchTarget(target, {
+      method,
+      headers,
+      ...(method === 'GET' ? {} : { body: Readable.toWeb(body) as ReadableStream, duplex: 'half' }),
+      redirect: 'error',
+    } as RequestInit);
+    void reply.status(response.status);
+    for (const header of ['content-type', 'content-length', 'etag']) {
+      const value = response.headers.get(header);
+      if (value !== null) {
+        void reply.header(header, value);
+      }
+    }
+    return new StreamableFile(
+      response.body === null ? Readable.from([]) : Readable.fromWeb(response.body as unknown as WebReadableStream),
+    );
+  }
+
+  private async fetchTarget(target: URL, init: RequestInit): Promise<Response> {
+    const address = await this.publicAddress(target);
+    return this.injectedFetch === undefined ? pinnedFetch(target, address, init) : this.injectedFetch(target, init);
+  }
+
+  private async publicAddress(target: URL): Promise<LookupAddress> {
+    const hostname = target.hostname.replaceAll(/^\[|\]$/gu, '');
+    if (isIPv4(hostname) || isIPv6(hostname)) {
+      if (!this.#allowPrivate && isBlockedHost(hostname)) {
+        throw new BadRequestException({ code: 'GIT_PROXY_HOST_REFUSED', message: 'Refused host address' });
+      }
+      return { address: hostname, family: isIPv6(hostname) ? 6 : 4 };
+    }
+    let addresses: LookupAddress[];
+    try {
+      addresses = await lookup(hostname, { all: true, verbatim: true });
+    } catch {
+      throw new BadGatewayException({ code: 'GIT_PROXY_DNS_FAILED' });
+    }
+    if (addresses.length === 0 || (!this.#allowPrivate && addresses.some(({ address }) => isBlockedHost(address)))) {
+      throw new BadRequestException({ code: 'GIT_PROXY_HOST_REFUSED', message: 'Refused host address' });
+    }
+    const [address] = addresses;
+    if (address === undefined) {
+      throw new BadGatewayException({ code: 'GIT_PROXY_DNS_FAILED' });
+    }
+    return address;
+  }
+
   private resolveTarget(rawUrl: string): URL {
     let target: URL;
     try {
@@ -229,7 +602,7 @@ export class GitProxyController {
       });
     }
 
-    if (target.protocol !== 'https:') {
+    if (target.protocol !== 'https:' && !(this.#allowPrivate && target.protocol === 'http:')) {
       throw new BadRequestException({
         code: 'GIT_PROXY_URL_INVALID',
         message: 'Only https remotes are proxied',
@@ -249,7 +622,7 @@ export class GitProxyController {
         });
       }
     }
-    if (isBlockedHost(target.hostname)) {
+    if (!this.#allowPrivate && isBlockedHost(target.hostname)) {
       throw new BadRequestException({
         code: 'GIT_PROXY_HOST_REFUSED',
         message: 'Refused host',

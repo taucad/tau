@@ -1,5 +1,5 @@
 /** @public */
-export type ModelInputModality = 'text' | 'image';
+export type ModelInputModality = 'text' | 'image' | 'pdf';
 
 /** @public */
 export type ModelOutputModality = 'text';

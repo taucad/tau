@@ -12,7 +12,7 @@
  */
 
 import type { ReactNode } from 'react';
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, lazy, Suspense, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useMonaco } from '@monaco-editor/react';
 import { toast } from 'sonner';
 import { MonacoMarkerService } from '#lib/monaco-marker-service.js';
@@ -46,7 +46,27 @@ const defaultContextValue: MonacoServicesContextType = { modelService: undefined
 
 const MonacoServicesContext = createContext<MonacoServicesContextType>(defaultContextValue);
 
+const ConfiguredMonacoServices = lazy(async () => {
+  const { configureMonaco } = await import('#lib/monaco.lib.client.js');
+  await configureMonaco();
+  return { default: MonacoServices };
+});
+
 export function MonacoModelServiceProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  return (
+    <Suspense
+      fallback={
+        <div role='status' aria-busy='true'>
+          Loading editor…
+        </div>
+      }
+    >
+      <ConfiguredMonacoServices>{children}</ConfiguredMonacoServices>
+    </Suspense>
+  );
+}
+
+function MonacoServices({ children }: { readonly children: ReactNode }): React.JSX.Element {
   'use no memo';
 
   const monaco = useMonaco();

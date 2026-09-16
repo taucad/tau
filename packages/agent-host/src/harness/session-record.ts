@@ -386,10 +386,16 @@ export function providerMessageToPi(
   }
   if (message.role === 'assistant') {
     const metadata = message.metadata ?? {};
+    const api =
+      metadata.provider === 'anthropic' && metadata.api === 'openai-completions' && model.provider === 'anthropic'
+        ? model.api
+        : typeof metadata.api === 'string'
+          ? (metadata.api as Api)
+          : model.api;
     const hydrated: AssistantMessage = {
       role: 'assistant',
       content: message.content as unknown as AssistantMessage['content'],
-      api: typeof metadata.api === 'string' ? (metadata.api as Api) : model.api,
+      api,
       provider: typeof metadata.provider === 'string' ? metadata.provider : model.provider,
       model: typeof metadata.model === 'string' ? metadata.model : model.id,
       ...(typeof metadata.responseModel === 'string' ? { responseModel: metadata.responseModel } : {}),

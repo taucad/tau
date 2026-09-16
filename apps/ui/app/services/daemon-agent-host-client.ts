@@ -1,4 +1,5 @@
 import type { AgentChannelAdmissionConfig, AgentChannelClient, AgentChannelCommand } from '@taucad/agent-host';
+import { Topic } from '@taucad/events';
 import type { AgentHostAdmissionConfig, AgentHostWorkerStartRequest } from '#workers/agent-host.contract.js';
 import { AgentHostWorkerError } from '#services/agent-host-client.js';
 import type {
@@ -32,10 +33,14 @@ const daemonAdmissionConfig = (config: AgentHostAdmissionConfig): AgentChannelAd
    * mutable. Same values, opposite variance — copied in, asserted once. */
   ...(config.contextPayload === undefined
     ? {}
-    : { contextPayload: config.contextPayload as AgentChannelAdmissionConfig['contextPayload'] }),
+    : {
+        contextPayload: config.contextPayload as AgentChannelAdmissionConfig['contextPayload'],
+      }),
   ...(config.contextMessages === undefined
     ? {}
-    : { contextMessages: [...config.contextMessages] as AgentChannelAdmissionConfig['contextMessages'] }),
+    : {
+        contextMessages: [...config.contextMessages] as AgentChannelAdmissionConfig['contextMessages'],
+      }),
 });
 
 /**
@@ -66,11 +71,16 @@ const externalAdmissionConfig = (
   /* Same values, opposite variance — see {@link daemonAdmissionConfig}. */
   ...(context?.contextPayload === undefined
     ? {}
-    : { contextPayload: context.contextPayload as AgentChannelAdmissionConfig['contextPayload'] }),
+    : {
+        contextPayload: context.contextPayload as AgentChannelAdmissionConfig['contextPayload'],
+      }),
   ...(context?.snapshot === undefined ? {} : { snapshot: context.snapshot }),
 });
 
 const daemonCommand = (request: Exclude<AgentHostTransportRequest, { type: 'close' }>): AgentChannelCommand => {
+  if (request.type === 'record-settlement') {
+    throw new Error('Revision settlements are recorded by the browser host that owns their log.');
+  }
   if (request.type !== 'start') {
     return request;
   }
@@ -92,7 +102,11 @@ const daemonCommand = (request: Exclude<AgentHostTransportRequest, { type: 'clos
   };
   return request.trigger === 'submit'
     ? { ...base, trigger: 'submit' }
-    : { ...base, trigger: request.trigger, retainedMessageIds: request.retainedMessageIds };
+    : {
+        ...base,
+        trigger: request.trigger,
+        retainedMessageIds: request.retainedMessageIds,
+      };
 };
 
 /** How a dead wire is replaced. See {@link createDaemonAgentHostTransport}. */
@@ -113,7 +127,11 @@ export type DaemonAgentHostTransportOptions = {
 };
 
 /** One dialled channel, and the promise that settles when it dies. */
-type ChannelRecord = { readonly client: AgentChannelClient; readonly gone: Promise<void>; dead: boolean };
+type ChannelRecord = {
+  readonly client: AgentChannelClient;
+  readonly gone: Promise<void>;
+  dead: boolean;
+};
 
 const sleep = async (milliseconds: number): Promise<void> =>
   new Promise((resolve) => {
@@ -154,7 +172,7 @@ export const createDaemonAgentHostTransport = (
   const alreadyOpen = typeof source === 'function' ? undefined : source;
   const attemptLimit = options.redialAttempts ?? 3;
   const backoff = options.redialBackoff ?? 250;
-  const closeHandlers = new Set<(reason: AgentHostTransportCloseReason) => void>();
+  const closeEvents = new Topic<AgentHostTransportCloseReason>({ name: 'DaemonAgentHostTransport.close' });
   let death: AgentHostTransportCloseReason | undefined;
   let disposed = false;
   let redials = 0;
@@ -166,10 +184,8 @@ export const createDaemonAgentHostTransport = (
       return;
     }
     death = reason;
-    for (const handler of closeHandlers) {
-      handler(reason);
-    }
-    closeHandlers.clear();
+    closeEvents.emit(reason);
+    closeEvents.dispose();
   };
 
   const adopt = (client: AgentChannelClient): ChannelRecord => {
@@ -291,7 +307,11 @@ export const createDaemonAgentHostTransport = (
       const command = daemonCommand(request);
       const record = await connect();
       try {
-        return await record.client.execute(command, signal);
+        const response = await record.client.execute(command, signal);
+        if (response.type === 'revision') {
+          throw new AgentHostWorkerError('INVALID_HOST_RESPONSE', 'The agent host returned a revision response.');
+        }
+        return response;
       } catch (error) {
         const died = record.dead || (error as { readonly code?: unknown }).code === 'CHANNEL_CLOSED';
         if (!died || !dial || (signal?.aborted ?? false) || !replayable(request)) {
@@ -301,7 +321,11 @@ export const createDaemonAgentHostTransport = (
           throw error;
         }
         const healed = await connect(record);
-        return healed.client.execute(command, signal);
+        const response = await healed.client.execute(command, signal);
+        if (response.type === 'revision') {
+          throw new AgentHostWorkerError('INVALID_HOST_RESPONSE', 'The agent host returned a revision response.');
+        }
+        return response;
       }
     },
     listen: async function* listen<Name extends keyof AgentHostTransportStreams>(
@@ -340,13 +364,13 @@ export const createDaemonAgentHostTransport = (
         handler(death);
         return (): void => undefined;
       }
-      closeHandlers.add(handler);
-      return () => closeHandlers.delete(handler);
+      return closeEvents.subscribe(handler);
     },
     close: () => {
       disposed = true;
       current?.client.close();
       current = undefined;
+      closeEvents.dispose();
     },
   };
 };

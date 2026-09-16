@@ -4,6 +4,7 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { apiKey } from '@better-auth/api-key';
 import { bearer, magicLink, oneTimeToken } from 'better-auth/plugins';
 import postgres from 'postgres';
+import { tokenLifetimeSeconds } from '#email/email-copy.js';
 import { drizzle } from 'drizzle-orm/postgres-js';
 
 const accountOptions: NonNullable<BetterAuthOptions['account']> = {
@@ -28,6 +29,7 @@ export const staticAuthConfig = {
   plugins: [
     apiKey(),
     magicLink({
+      expiresIn: tokenLifetimeSeconds.magicLink,
       sendMagicLink() {
         // No-op for mock configuration
       },
@@ -44,10 +46,12 @@ export const staticAuthConfig = {
     enabled: true,
     autoSignIn: true,
     requireEmailVerification: true,
-    resetPasswordTokenExpiresIn: 60 * 60, // 1 hour
+    // Shared with the email copy so the sentence and the deadline cannot drift.
+    resetPasswordTokenExpiresIn: tokenLifetimeSeconds.resetPassword,
     revokeSessionsOnPasswordReset: true,
   },
   emailVerification: {
+    expiresIn: tokenLifetimeSeconds.verifyEmail,
     sendOnSignUp: true,
     sendOnSignIn: true,
     autoSignInAfterVerification: true,
@@ -67,6 +71,9 @@ export const staticAuthConfig = {
     window: 10,
     max: 100,
     storage: 'memory',
+    customRules: {
+      '/get-session': { window: 10, max: 20 },
+    },
   },
   advanced: {
     cookiePrefix: 'tau',

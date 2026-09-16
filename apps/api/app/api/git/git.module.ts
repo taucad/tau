@@ -3,7 +3,6 @@ import { Module } from '@nestjs/common';
 import type { MiddlewareConsumer, NestModule, OnModuleInit } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import type { FastifyInstance } from 'fastify';
-import { BillingModule } from '#api/billing/billing.module.js';
 import { DatabaseModule } from '#database/database.module.js';
 import { GitBackupService } from '#api/git/git-backup.service.js';
 import { GitBasicAuthMiddleware, registerGitContentTypeParsers } from '#api/git/git-transport.js';
@@ -17,7 +16,7 @@ import { GitRepositoryService } from '#api/git/git.service.js';
  * (LFS objects, bundle snapshots) needs no explicit import.
  */
 @Module({
-  imports: [BillingModule, DatabaseModule],
+  imports: [DatabaseModule],
   controllers: [GitController, GitProxyController],
   providers: [GitRepositoryService, GitLfsService, GitBackupService],
   exports: [GitRepositoryService],

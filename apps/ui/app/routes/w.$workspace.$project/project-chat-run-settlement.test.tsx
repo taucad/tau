@@ -12,6 +12,7 @@ import type { BrowserAgentHostRun } from '#chat-clients/_internal/browser-agent-
 const harness = {
   workspace: undefined as unknown,
   browserRun: undefined as BrowserAgentHostRun | undefined,
+  status: 'ready' as 'ready' | 'submitted' | 'streaming' | 'error',
   durableRunId: undefined as string | undefined,
   durableRunState: 'terminal' as 'active' | 'terminal' | 'reattaching' | undefined,
   finalize: vi.fn(),
@@ -31,7 +32,11 @@ const workspace = {
   admitted: true,
   runId: 'run_1',
   turnId: 'turn_1',
-  execution: { workspaceId: 'workspace_1', baseRevisionId: 'rev_1', hostId: 'host_1' },
+  execution: {
+    workspaceId: 'workspace_1',
+    baseRevisionId: 'rev_1',
+    hostId: 'host_1',
+  },
 };
 
 // `useSyncExternalStore` compares snapshots by identity: a getter that mints a
@@ -50,7 +55,7 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({
     list: () => chatIds,
     subscribeMembership: () => () => undefined,
     subscribeStatus: () => () => undefined,
-    getStatus: () => 'ready',
+    getStatus: () => harness.status,
     getDurableRunState: () => harness.durableRunState,
     getDurableRunId: () => harness.durableRunId,
     get: () => session,
@@ -83,9 +88,15 @@ const { ProjectChatRunSettlement } = await import('#routes/w.$workspace.$project
 describe('ProjectChatRunSettlement', () => {
   beforeEach(() => {
     harness.workspace = workspace;
+    harness.status = 'ready';
     harness.durableRunId = 'run_1';
     harness.durableRunState = 'terminal';
-    harness.browserRun = { runId: 'run_1', state: 'completed', eventCount: 3, turnId: 'turn_1' };
+    harness.browserRun = {
+      runId: 'run_1',
+      state: 'completed',
+      eventCount: 3,
+      turnId: 'turn_1',
+    };
     harness.reclaimAll.mockResolvedValue([]);
     harness.finalizedTurns = [];
     harness.finalize.mockResolvedValue(undefined);
@@ -103,13 +114,21 @@ describe('ProjectChatRunSettlement', () => {
     await waitFor(() => {
       expect(harness.finalize).toHaveBeenCalledWith('chat_1');
     });
-    expect(harness.releaseDurableRun).toHaveBeenCalledWith({ chatId: 'chat_1', runId: 'run_1' });
+    expect(harness.releaseDurableRun).toHaveBeenCalledWith({
+      chatId: 'chat_1',
+      runId: 'run_1',
+    });
     expect(harness.clearBrowserAgentHostRun).toHaveBeenCalledWith('chat_1');
     expect(harness.discard).not.toHaveBeenCalled();
   });
 
   it('discards a failed run and never publishes it', async () => {
-    harness.browserRun = { runId: 'run_1', state: 'failed', eventCount: 2, turnId: 'turn_1' };
+    harness.browserRun = {
+      runId: 'run_1',
+      state: 'failed',
+      eventCount: 2,
+      turnId: 'turn_1',
+    };
 
     render(<ProjectChatRunSettlement />);
 
@@ -117,7 +136,10 @@ describe('ProjectChatRunSettlement', () => {
       expect(harness.discard).toHaveBeenCalledWith('chat_1');
     });
     expect(harness.finalize).not.toHaveBeenCalled();
-    expect(harness.releaseDurableRun).toHaveBeenCalledWith({ chatId: 'chat_1', runId: 'run_1' });
+    expect(harness.releaseDurableRun).toHaveBeenCalledWith({
+      chatId: 'chat_1',
+      runId: 'run_1',
+    });
   });
 
   it('retires a claim whose run no host log owns rather than wedging the chat', async () => {
@@ -129,7 +151,10 @@ describe('ProjectChatRunSettlement', () => {
       expect(harness.retireClaim).toHaveBeenCalledWith('chat_1');
     });
     expect(harness.finalize).not.toHaveBeenCalled();
-    expect(harness.releaseDurableRun).toHaveBeenCalledWith({ chatId: 'chat_1', runId: 'run_1' });
+    expect(harness.releaseDurableRun).toHaveBeenCalledWith({
+      chatId: 'chat_1',
+      runId: 'run_1',
+    });
   });
 
   /**
@@ -146,7 +171,10 @@ describe('ProjectChatRunSettlement', () => {
       expect(harness.discard).toHaveBeenCalledWith('chat_1');
     });
     expect(harness.finalize).not.toHaveBeenCalled();
-    expect(harness.releaseDurableRun).toHaveBeenCalledWith({ chatId: 'chat_1', runId: 'run_1' });
+    expect(harness.releaseDurableRun).toHaveBeenCalledWith({
+      chatId: 'chat_1',
+      runId: 'run_1',
+    });
     expect(harness.clearBrowserAgentHostRun).toHaveBeenCalledWith('chat_1');
   });
 
@@ -156,10 +184,37 @@ describe('ProjectChatRunSettlement', () => {
     render(<ProjectChatRunSettlement />);
 
     await waitFor(() => {
-      expect(harness.retainDurableRun).toHaveBeenCalledWith({ chatId: 'chat_1', runId: 'run_1', state: 'active' });
+      expect(harness.retainDurableRun).toHaveBeenCalledWith({
+        chatId: 'chat_1',
+        runId: 'run_1',
+        state: 'active',
+      });
     });
     expect(harness.finalize).not.toHaveBeenCalled();
     expect(harness.discard).not.toHaveBeenCalled();
+  });
+
+  it('does not reattach a new local lease before its send starts', async () => {
+    harness.durableRunId = undefined;
+    harness.durableRunState = undefined;
+    harness.browserRun = undefined;
+    const view = render(<ProjectChatRunSettlement />);
+
+    await waitFor(() => {
+      expect(harness.reclaimAll).toHaveBeenCalled();
+    });
+    expect(harness.retainDurableRun).not.toHaveBeenCalled();
+
+    harness.status = 'submitted';
+    view.rerender(<ProjectChatRunSettlement />);
+
+    await waitFor(() => {
+      expect(harness.retainDurableRun).toHaveBeenCalledWith({
+        chatId: 'chat_1',
+        runId: 'run_1',
+        state: 'active',
+      });
+    });
   });
 
   /**
@@ -193,7 +248,9 @@ describe('ProjectChatRunSettlement', () => {
   it('stops after five failures, publishes nothing, and resumes when the effect re-runs', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     harness.finalize.mockRejectedValue(
-      Object.assign(new Error('Live project verification did not match.'), { code: 'WORKSPACE_VERIFY_FAILED' }),
+      Object.assign(new Error('Live project verification did not match.'), {
+        code: 'WORKSPACE_VERIFY_FAILED',
+      }),
     );
 
     const view = render(<ProjectChatRunSettlement />);
@@ -212,7 +269,10 @@ describe('ProjectChatRunSettlement', () => {
     view.rerender(<ProjectChatRunSettlement />);
 
     await waitFor(() => {
-      expect(harness.releaseDurableRun).toHaveBeenCalledWith({ chatId: 'chat_1', runId: 'run_1' });
+      expect(harness.releaseDurableRun).toHaveBeenCalledWith({
+        chatId: 'chat_1',
+        runId: 'run_1',
+      });
     });
     expect(consoleError).toHaveBeenCalled();
     consoleError.mockRestore();

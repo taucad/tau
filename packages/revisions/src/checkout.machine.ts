@@ -378,7 +378,7 @@ export const checkoutMachine = setup({
   on: {
     /* One event per content-change event, whatever its path count (A38, F9). */
     changed: { actions: 'recordWrite' },
-    headChanged: { actions: 'adoptHead' },
+    headChanged: { target: '.clean', actions: 'adoptHead' },
     /* Reached only from `minting`, `stale` and `rereading`; the resting states
      * below take `cut` straight into a mint. */
     cut: { actions: 'queueRequest' },

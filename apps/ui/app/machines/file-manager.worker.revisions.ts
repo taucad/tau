@@ -21,6 +21,7 @@ import {
   createProjectRevisionsActor,
   describeTurnRelease,
   describeTurnSettlement,
+  syncQuiesceMilliseconds,
 } from '@taucad/revisions/revision-effects';
 import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
@@ -32,7 +33,7 @@ import type {
 } from '@taucad/revisions/publish-machine';
 import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
 import { classify } from '@taucad/filesystem/path-registry';
-import { readRevisionDiff, readRevisionLog, tauRemoteUrl } from '@taucad/revisions';
+import { readRevisionDiff, readRevisionLog, registerProjectFailureMessage, tauRemoteUrl } from '@taucad/revisions';
 import type {
   GitRemoteCredential,
   RevisionDiffEntry,
@@ -100,6 +101,13 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'switch'; branch: string }>
   | Readonly<{ command: 'followChat'; chatId: string }>
   | Readonly<{ command: 'pinTo'; checkoutId: string }>
+  | Readonly<{
+      command: 'adoptHostFinalized';
+      checkoutId: string;
+      revisionId: string;
+      treeId: string;
+      branch?: string;
+    }>
   /*
    * The *Branches* region's verbs (S26, A2/D10).
    *
@@ -122,9 +130,18 @@ export type WorkerRevisionCommand =
    * The page supplies the Tau Cloud URL because only the page knows which API
    * origin it is signed in to — the worker has no `window.ENV`.
    */
-  | Readonly<{ command: 'connectRemote'; kind: 'none' | 'tau' | 'git'; url?: string }>
+  | Readonly<{
+      command: 'connectRemote';
+      kind: 'none' | 'tau' | 'git';
+      url?: string;
+      provider?: 'github';
+      repositoryId?: string;
+      fetchOnly?: boolean;
+    }>
   | Readonly<{ command: 'disconnectRemote' }>
   | Readonly<{ command: 'cancelRemote' }>
+  | Readonly<{ command: 'syncNow' }>
+  | Readonly<{ command: 'recordsChanged' }>
   /*
    * The Publish dialog's three verbs (S32, W8).
    *
@@ -218,15 +235,20 @@ export type WorkerTurnPlacement = Readonly<{
 }>;
 
 /**
- * One host revision fact, in the schema every host publishes (S9, A4).
+ * One settled signal from the worker revision root.
  *
- * The browser's root emits the same three events the Node host writes into a
- * chat's durable log, from the same machines — so `agent-host-event-projection`
- * reads one shape whatever placed the turn.
+ * Turn outcomes use the same host-attested schema the Node host writes into a
+ * chat's durable log. `chats.projected` is browser composition only: it names
+ * the protected chat records a remote fetch finished writing, so page caches
+ * can reread their filesystem authority without guessing from sync timing.
  *
  * @public
  */
-export type WorkerRevisionEvent = TurnConflictedEvent | TurnFailedEvent | TurnFinalizedEvent;
+export type WorkerRevisionEvent =
+  | TurnConflictedEvent
+  | TurnFailedEvent
+  | TurnFinalizedEvent
+  | Readonly<{ type: 'chats.projected'; projectId: string; chatIds: readonly string[] }>;
 
 /** One file's text on both sides of a revision. @public */
 export type RevisionFileComparison = Readonly<{ original: string; modified: string }>;
@@ -242,6 +264,7 @@ export type RevisionFileComparison = Readonly<{ original: string; modified: stri
  */
 export type RevisionToast =
   | Readonly<{ type: 'restored'; revisionNumber: number; unrecoverable: readonly string[] }>
+  | Readonly<{ type: 'nothingToSave' }>
   | Readonly<{ type: 'branch'; operation: BranchOperation; branch: string }>
   /** A *Switch* the D10 guard would not make, in the words it gave (review R3). */
   | Readonly<{ type: 'refused'; branch: string; reason: string }>
@@ -268,7 +291,16 @@ export type RevisionToast =
       checkoutId: string | undefined;
       paths: readonly string[];
     }>
-  | Readonly<{ type: 'error'; message: string }>;
+  /**
+   * A verb that could not be carried out, in the words the tree gave.
+   *
+   * `save` joined `restore` and `branch` because a cut nobody asked for by hand
+   * — *Save*, the idle window, the tab going hidden — failed with a reason only
+   * the Revisions pane's count hinted at, and a count is not a reason (I12,
+   * W18 DEF-7). A cut a *turn* asked for is not on this channel: its chat
+   * already says so, through the admission it refuses.
+   */
+  | Readonly<{ type: 'error'; subject: 'restore' | 'branch' | 'save'; message: string }>;
 
 /**
  * Where this document materializes one project's linked checkouts (S4, D4, W2 review R4).
@@ -323,6 +355,19 @@ export type WorkerProjectRevisions = Readonly<{
   }) => Promise<WorkerTurnPlacement>;
   /** Every other verb: fire-and-forget into the tree. */
   send: (command: WorkerRevisionCommand) => void;
+  /**
+   * Record what is on disk and wait for the answer (C16, contract §6).
+   *
+   * The correlated form of `send({ command: 'saveRevision' })`. It resolves
+   * once the cut has settled — minted, refused by the I5 gate, or failed — and
+   * the scheduler has quiesced, so the `hidden` unload registrant can hold the
+   * document open until the close revision is in a push rather than letting
+   * `pagehide` offer the *previous* push's pack.
+   *
+   * Resolves rather than rejects at the bound: after it the durable queue is
+   * the guarantee and the next open retries (D28).
+   */
+  saveRevision: (trigger?: 'save' | 'hidden' | 'close') => Promise<void>;
   /** One content-change event on a checkout, already filtered to versioned paths. */
   changed: (checkoutId: string, paths: readonly string[]) => void;
   /** Name one revision, or re-point an existing name (S31). */
@@ -339,7 +384,7 @@ export type WorkerProjectRevisions = Readonly<{
     path: string,
     options?: Readonly<{ from?: string; against?: 'checkout' }>,
   ) => Promise<RevisionFileComparison>;
-  /** Every host revision fact this tree published, in order (S9). */
+  /** Every settled revision signal this tree published, in order. */
   subscribeEvents: (listener: (event: WorkerRevisionEvent) => void) => () => void;
   /** The restore child's toasts, which only a page can show. */
   subscribeToasts: (listener: (toast: RevisionToast) => void) => () => void;
@@ -445,6 +490,51 @@ const publishToTauCloud = async (
 };
 
 /**
+ * Registers this project on Tau Cloud, from the page's own session (P51).
+ *
+ * Connecting is the verb that makes the project exist on the remote: until the
+ * `project` row is written, both git advertisements answer `404`. `PUT` because
+ * a retried *Connect* must be one request, not two rows (the API's insert is
+ * `onConflictDoNothing`). The page's cookie is the credential, so nothing is
+ * carried through the module.
+ *
+ * @param apiBaseUrl - The API origin the page named, if any.
+ * @param projectId - The project being connected.
+ * @param name - The project name from its versioned manifest, when readable.
+ * @throws Error When this document is not signed in, or the API refused.
+ */
+const registerOnTauCloud = async (
+  apiBaseUrl: string | undefined,
+  projectId: string,
+  name: string | undefined,
+): Promise<void> => {
+  if (apiBaseUrl === undefined) {
+    throw new Error('Sign in to back this project up to Tau Cloud.');
+  }
+  const response = await fetch(`${apiBaseUrl.replace(/\/$/u, '')}/v1/projects/${encodeURIComponent(projectId)}`, {
+    method: 'PUT',
+    credentials: 'include',
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- HTTP header names retain TitleCase on the wire.
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(name === undefined ? {} : { name }),
+  });
+  if (!response.ok) {
+    /* One owner for this copy (C6, contract §5). The hand-written ladder here
+     * mapped 403 to "belongs to another account" — which the API answers 404
+     * for — while 403 is the project ceiling, and 429/400 fell through to
+     * "Try again." */
+    const answered = (await response.json().catch(() => ({}))) as Readonly<{ code?: unknown; message?: unknown }>;
+    throw new Error(
+      registerProjectFailureMessage(
+        response.status,
+        typeof answered.code === 'string' ? answered.code : undefined,
+        typeof answered.message === 'string' ? answered.message : undefined,
+      ),
+    );
+  }
+};
+
+/**
  * What a refused publish says, in the operator's words (A18).
  *
  * @param status - The HTTP status the API answered.
@@ -502,6 +592,16 @@ const sameBranches = (
  * @param right - The cards the machine would publish now.
  * @returns True when nothing a reader can see has changed.
  */
+/**
+ * Whether two string lists say the same thing (P28: settled values only).
+ *
+ * @param left - The published list.
+ * @param right - The candidate list.
+ * @returns Whether a reader would see the same list.
+ */
+const sameStrings = (left: readonly string[], right: readonly string[]): boolean =>
+  left.length === right.length && left.every((value, index) => value === right[index]);
+
 const sameConflicts = (
   left: RevisionStatusProjection['conflicts'],
   right: RevisionStatusProjection['conflicts'],
@@ -518,6 +618,68 @@ const sameConflicts = (
     ].join('\u0000');
   return left.map((card) => key(card)).join('\u0001') === right.map((card) => key(card)).join('\u0001');
 };
+
+/**
+ * Whether two projections say the same thing to a reader (P28, P52).
+ *
+ * Every settled field a surface renders, and nothing that ticks. A field left
+ * out here is a surface that never repaints: `remote.*` was missing, so
+ * *Connect Tau Cloud* moved `phase` none → connecting → connected and the Sync
+ * region kept drawing the disconnected state (W18 DEF-6).
+ *
+ * @param left - The published projection.
+ * @param right - The candidate projection.
+ * @returns Whether the page would draw the same thing.
+ * @public
+ */
+export const sameRevisionStatus = (left: RevisionStatusProjection, right: RevisionStatusProjection): boolean =>
+  left.checkoutId === right.checkoutId &&
+  left.checkoutRoot === right.checkoutRoot &&
+  left.branch === right.branch &&
+  left.projectDirty === right.projectDirty &&
+  left.dirty === right.dirty &&
+  left.minting === right.minting &&
+  left.headRevisionId === right.headRevisionId &&
+  left.follow === right.follow &&
+  left.attention === right.attention &&
+  left.branchVerb.busy === right.branchVerb.busy &&
+  left.branchVerb.asking === right.branchVerb.asking &&
+  left.branchVerb.branch === right.branchVerb.branch &&
+  /* The Sync row and the header chip are settled values (A38, P28), so this is
+   * the whole of what a reader can see change about sync. */
+  left.sync.state === right.sync.state &&
+  left.sync.pendingCount === right.sync.pendingCount &&
+  left.sync.online === right.sync.online &&
+  left.sync.conflictRef === right.sync.conflictRef &&
+  /* P52/DEF-6: the Sync region renders the *connection*, not only the push
+   * queue. Without these, `Connect Tau Cloud` moved `remote.phase` from
+   * `none` to `connecting` to `connected` and the page never repainted
+   * unless some unrelated field happened to move at the same time. */
+  left.remote.phase === right.remote.phase &&
+  left.remote.kind === right.remote.kind &&
+  left.remote.url === right.remote.url &&
+  left.remote.storage?.used === right.remote.storage?.used &&
+  left.remote.storage?.quota === right.remote.storage?.quota &&
+  left.remote.error === right.remote.error &&
+  sameStrings(left.remote.overQuota, right.remote.overQuota) &&
+  /* The same gap, in the two other facets the projection carries and a
+   * surface reads: the restore confirmation (S19) and the Publish dialog
+   * (S32). One comparator, every settled facet. */
+  left.restore.asking === right.restore.asking &&
+  left.restore.busy === right.restore.busy &&
+  left.restore.removedPathCount === right.restore.removedPathCount &&
+  left.restore.dirty === right.restore.dirty &&
+  left.restore.revisionNumber === right.restore.revisionNumber &&
+  left.publish.phase === right.publish.phase &&
+  left.publish.publicationId === right.publish.publicationId &&
+  left.publish.shareUrl === right.publish.shareUrl &&
+  left.publish.error === right.publish.error &&
+  sameStrings(
+    left.publish.tags.map((tag) => tag.name),
+    right.publish.tags.map((tag) => tag.name),
+  ) &&
+  sameBranches(left.branches, right.branches) &&
+  sameConflicts(left.conflicts, right.conflicts);
 
 /**
  * Start one project's revision tree in this worker.
@@ -538,6 +700,26 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   const admissions = new Map<string, PromiseWithResolvers<WorkerTurnPlacement>>();
   /** Where each placed run landed, filled at `placed` and answered at `leased`. */
   const placements = new Map<string, WorkerTurnPlacement>();
+  /**
+   * Refuse one waiting admission, with the reason it was refused for.
+   *
+   * One sentence for every way a turn can end without its lease, so the caller
+   * never has to tell a refusal apart from the bound: `prepare` throwing,
+   * `turnReleased` (W19-b) and the bound itself all answer in this shape.
+   *
+   * @param runId - The run whose admission is waiting.
+   * @param reason - What the host can tell the person, already a sentence.
+   */
+  const refuseAdmission = (runId: string, reason: string): void => {
+    const pending = admissions.get(runId);
+    admissions.delete(runId);
+    placements.delete(runId);
+    pending?.reject(
+      Object.assign(new Error(`This project could not open a revision for the turn: ${reason}`), {
+        code: 'REVISION_PREPARE_FAILED',
+      }),
+    );
+  };
   /** Monotonic per checkout, one increment per content-change event (A38, F9). */
   const generations = new Map<string, number>();
   const listeners = new Topic<RevisionStatusProjection>({ name: 'WorkerProjectRevisions' });
@@ -586,19 +768,29 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       const apiBaseUrl = options.apiBaseUrl?.();
       return apiBaseUrl === undefined ? undefined : tauRemoteUrl(apiBaseUrl, id);
     },
+    /* P51: connecting registers the project before anything asks the remote
+     * for an advertisement it would otherwise answer `404`. */
+    registerRemoteProject: async (id) => {
+      let name: string | undefined;
+      try {
+        const filesystem = await options.filesystem(`/projects/${id}`);
+        const manifest = JSON.parse(await filesystem.readFile('tau.json', 'utf8')) as {
+          readonly name?: unknown;
+        };
+        name = typeof manifest.name === 'string' && manifest.name.trim() !== '' ? manifest.name.trim() : undefined;
+      } catch {
+        /* Registration still makes an empty or incomplete local project
+         * recoverable; the API's fallback name is honest until tau.json exists. */
+      }
+      await registerOnTauCloud(options.apiBaseUrl?.(), id, name);
+    },
     publishPublication: async (input) => publishToTauCloud(options.apiBaseUrl?.(), input),
     onPlacement: (placement) => {
-      const pending = admissions.get(placement.runId);
       if (placement.status === 'refused') {
-        admissions.delete(placement.runId);
-        placements.delete(placement.runId);
-        pending?.reject(
-          Object.assign(new Error(`This project could not open a revision for the turn: ${placement.reason}`), {
-            code: 'REVISION_PREPARE_FAILED',
-          }),
-        );
+        refuseAdmission(placement.runId, placement.reason);
         return;
       }
+      const pending = admissions.get(placement.runId);
       if (placement.status === 'leased') {
         /* The admission ends here, not at `placed`: a dirty checkout is minted
          * as the turn's base *between* the two, and a run admitted before that
@@ -615,36 +807,19 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         baseRevisionId: placement.baseRevisionId ?? '',
       });
     },
+    onChatsProjected: (chatIds) => {
+      events.emit({ type: 'chats.projected', projectId, chatIds });
+    },
   });
 
   let published: RevisionStatusProjection = selectRevisionStatus(actor.getSnapshot());
-  const sameStatus = (left: RevisionStatusProjection, right: RevisionStatusProjection): boolean =>
-    left.checkoutId === right.checkoutId &&
-    left.checkoutRoot === right.checkoutRoot &&
-    left.branch === right.branch &&
-    left.dirty === right.dirty &&
-    left.minting === right.minting &&
-    left.headRevisionId === right.headRevisionId &&
-    left.follow === right.follow &&
-    left.attention === right.attention &&
-    left.branchVerb.busy === right.branchVerb.busy &&
-    left.branchVerb.asking === right.branchVerb.asking &&
-    left.branchVerb.branch === right.branchVerb.branch &&
-    /* The Sync row and the header chip are settled values (A38, P28), so this is
-     * the whole of what a reader can see change about sync. */
-    left.sync.state === right.sync.state &&
-    left.sync.pendingCount === right.sync.pendingCount &&
-    left.sync.online === right.sync.online &&
-    left.sync.conflictRef === right.sync.conflictRef &&
-    sameBranches(left.branches, right.branches) &&
-    sameConflicts(left.conflicts, right.conflicts);
 
   actor.subscribe((snapshot) => {
     /* Settled changes only: the machine passes through `minting`/`dirty` more
      * often than the projection's own fields move, and a page that re-rendered
      * on every internal transition would paint frames nobody asked for. */
     const next = selectRevisionStatus(snapshot);
-    if (sameStatus(published, next)) {
+    if (sameRevisionStatus(published, next)) {
       return;
     }
     published = next;
@@ -676,9 +851,22 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
   /* The outcome no settlement carries, emitted by the root itself (W6). */
   actor.on('turnReleased', (event) => {
     const failure = describeTurnRelease(event);
-    if (failure !== undefined) {
-      events.emit(failure);
+    if (failure === undefined) {
+      return;
     }
+    events.emit(failure);
+    /*
+     * The reason, now, rather than the bound's sentence half a minute later.
+     *
+     * Only `prepare` refused an admission (`revision-effects.ts`), so a turn
+     * that ended any other way before its lease — a base cut the checkout could
+     * not settle, a lease it could not write, a `release` — left the caller
+     * waiting out `admissionMilliseconds` and then hearing "it was never
+     * leased", which names nothing anybody can act on (I12, W19-b). A
+     * `finalized` or `conflicted` turn held its lease, so its admission was
+     * already resolved at `leased` and there is nothing here to settle.
+     */
+    refuseAdmission(event.runId, failure.reason);
   });
   actor.start();
   published = selectRevisionStatus(actor.getSnapshot());
@@ -690,7 +878,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     toasts.emit({ type: 'restored', revisionNumber: toast.revisionNumber, unrecoverable: toast.unrecoverable });
   });
   restoreChild?.on('toast.error', (toast) => {
-    toasts.emit({ type: 'error', message: toast.message });
+    toasts.emit({ type: 'error', subject: 'restore', message: toast.message });
   });
   /* The branch verbs settle out of sight of the region that started them — a
    * *Discard* the registry refused has no row left to say so on (A25's "no
@@ -699,6 +887,26 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    * that quietly does nothing is exactly what "no outcome is silent" forbids
    * (A25, I12; review R3). The resolved arm needs no notice — the workbench
    * moving is the notice. */
+  /*
+   * A save that failed says why (I12, W18 DEF-7).
+   *
+   * The Revisions pane counted it — `attention` — and named nothing, so a cut
+   * that died on, say, a missing `Buffer` read as "one change could not be
+   * saved" forever. A cut carrying a `turnId` is already reported to the chat
+   * that asked for it, through the admission the turn refuses; this channel is
+   * for the ambient ones nobody is watching a spinner for.
+   */
+  actor.on('cutFailed', (failure) => {
+    if (failure.turnId !== undefined) {
+      return;
+    }
+    toasts.emit({ type: 'error', subject: 'save', message: failure.reason });
+  });
+  actor.on('nothingToSave', (event) => {
+    if (event.trigger === 'save') {
+      toasts.emit({ type: 'nothingToSave' });
+    }
+  });
   actor.on('switchRefused', (refusal) => {
     toasts.emit({ type: 'refused', branch: refusal.branch, reason: refusal.reason });
   });
@@ -737,20 +945,85 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     toasts.emit({ type: 'branch', operation: toast.operation, branch: toast.branch });
   });
   branchChild?.on('toast.error', (toast) => {
-    toasts.emit({ type: 'error', message: toast.message });
+    toasts.emit({ type: 'error', subject: 'branch', message: toast.message });
   });
+
+  /**
+   * Cut the live checkout and wait for the tree's own answer (C16).
+   *
+   * One implementation for the close path and for an explicit save: the three
+   * settled outcomes are the machine's own emissions — minted, refused by the
+   * I5 gate, or failed — and the deadline is the same `syncQuiesceMilliseconds`
+   * everything else on the close path is bounded by.
+   *
+   * @param trigger - What asked for the cut (S30).
+   * @returns When the cut has settled.
+   */
+  const awaitCut = async (trigger: 'save' | 'hidden' | 'close'): Promise<void> => {
+    const checkoutId = selectRevisionStatus(actor.getSnapshot()).checkoutId;
+    if (checkoutId === undefined) {
+      throw new Error('The project checkout was not ready before close.');
+    }
+    const cut = Promise.withResolvers<void>();
+    const matches = (event: Readonly<{ checkoutId: string; trigger: string }>): boolean =>
+      event.checkoutId === checkoutId && event.trigger === trigger;
+    const subscriptions = [
+      actor.on('revisionMinted', (event) => {
+        if (matches(event)) {
+          cut.resolve();
+        }
+      }),
+      actor.on('nothingToSave', (event) => {
+        if (matches(event)) {
+          cut.resolve();
+        }
+      }),
+      actor.on('cutFailed', (event) => {
+        if (matches(event)) {
+          cut.reject(new Error(event.reason));
+        }
+      }),
+    ];
+    const bound = globalThis.setTimeout(() => {
+      cut.reject(new Error(`The ${trigger} revision was not recorded before the deadline.`));
+    }, syncQuiesceMilliseconds);
+    try {
+      actor.send({ type: 'cut', trigger, checkoutId, leaseIds: [] });
+      await cut.promise;
+    } finally {
+      globalThis.clearTimeout(bound);
+      for (const subscription of subscriptions) {
+        subscription.unsubscribe();
+      }
+    }
+  };
+
+  /**
+   * The correlated `saveRevision` (C16, contract §6).
+   *
+   * Resolves rather than rejects: the failure a person can act on has already
+   * gone out on the toast channel (`cutFailed` above), and after the bound the
+   * durable queue is the guarantee (D28). The caller is an unload registrant
+   * whose only question is "may `pagehide` run now".
+   *
+   * @param trigger - `save`, `hidden` or `close`. Defaults to `save`.
+   * @returns When the cut has settled and the scheduler has quiesced.
+   */
+  const saveRevision = async (trigger: 'save' | 'hidden' | 'close' = 'save'): Promise<void> => {
+    try {
+      await awaitCut(trigger);
+      await awaitSyncSettled(actor);
+    } catch {
+      /* Reported already; the queue carries whatever did not reach the remote. */
+    }
+  };
 
   return {
     admitTurn: async (input) => {
       const pending = Promise.withResolvers<WorkerTurnPlacement>();
       admissions.set(input.runId, pending);
       const bound = globalThis.setTimeout(() => {
-        admissions.delete(input.runId);
-        pending.reject(
-          Object.assign(new Error('This project could not open a revision for the turn: it was never leased.'), {
-            code: 'REVISION_PREPARE_FAILED',
-          }),
-        );
+        refuseAdmission(input.runId, 'it was never leased.');
       }, admissionMilliseconds);
       /* No wait for the registry: the root holds an admission that arrives
        * before it and replays it, so there is nothing here to compensate
@@ -775,6 +1048,16 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           actor.send({ type: 'admitTurn', ...input });
           return;
         }
+        case 'adoptHostFinalized': {
+          actor.send({
+            type: 'checkoutChanged',
+            checkoutId: command.checkoutId,
+            revisionId: command.revisionId,
+            treeId: command.treeId,
+            branch: command.branch,
+          });
+          return;
+        }
         /* The root invokes `restore` as a child and forwards none of its five
          * verbs, so the page reaches it where it lives. */
         case 'restore': {
@@ -786,7 +1069,14 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         case 'connectRemote': {
           actor.send({
             type: 'remote',
-            event: { type: 'connect', kind: command.kind, ...(command.url === undefined ? {} : { url: command.url }) },
+            event: {
+              type: 'connect',
+              kind: command.kind,
+              ...(command.url === undefined ? {} : { url: command.url }),
+              ...(command.provider === undefined ? {} : { provider: command.provider }),
+              ...(command.repositoryId === undefined ? {} : { repositoryId: command.repositoryId }),
+              ...(command.fetchOnly === true ? { fetchOnly: true } : {}),
+            },
           });
           return;
         }
@@ -796,6 +1086,14 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         }
         case 'cancelRemote': {
           actor.send({ type: 'remote', event: { type: 'cancel' } });
+          return;
+        }
+        case 'syncNow': {
+          actor.send({ type: 'syncNow' });
+          return;
+        }
+        case 'recordsChanged': {
+          actor.send({ type: 'sync', event: { type: 'recordsChanged' } });
           return;
         }
         /* Routed by the root to the conflicted revision's own child (S33, W10). */
@@ -942,10 +1240,9 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           break;
         }
         case 'saveRevision': {
-          const { checkoutId } = published;
-          if (checkoutId !== undefined) {
-            actor.send({ type: 'cut', trigger: command.trigger ?? 'save', checkoutId, leaseIds: [] });
-          }
+          /* One implementation, awaited or not: the uncorrelated form is the
+           * same cut with nobody listening for its answer (I15). */
+          void saveRevision(command.trigger);
           break;
         }
         /* Questions, not events: they are answered on a correlated frame and
@@ -1041,6 +1338,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         ),
       };
     },
+    saveRevision,
     release: async () => {
       /*
        * The scheduler first, inside its bound (W13 review 2 R2/P33).
@@ -1051,10 +1349,13 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
        * is pushed, or recorded as unsent" true; after the bound the durable
        * queue is the guarantee and the next open retries it (D28).
        */
+      await awaitCut('close');
       await awaitSyncSettled(actor);
-      for (const [runId, pending] of admissions) {
-        pending.reject(new Error('This project stopped before the turn was placed.'));
-        admissions.delete(runId);
+      /* The fourth way a turn ends without its lease, in the same frame and
+       * with the same code as the other three — a client cannot act on a
+       * refusal it has to tell apart by its wording (a2 review R2). */
+      for (const runId of admissions.keys()) {
+        refuseAdmission(runId, 'it stopped before the turn was placed.');
       }
       listeners.dispose();
       events.dispose();
@@ -1070,8 +1371,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
 /**
  * One request frame on a revision port: a command, optionally correlated.
  *
- * `admitTurn` is the only command with an answer, so it is the only one that
- * carries an `id`; everything else rides the tree's own projection.
+ * A command that has an answer carries an `id` and is answered by one `result`
+ * frame (see `answerOf`); everything else rides the tree's own projection.
  *
  * @public
  */
@@ -1113,7 +1414,15 @@ export type WorkerRevisionResult =
    * `awaitSyncSettled`, and only then does this frame go out. An uncorrelated
    * `close` — what `pagehide` sends — still answers nothing.
    */
-  | Readonly<{ kind: 'closed' }>;
+  | Readonly<{ kind: 'closed' }>
+  /**
+   * The cut a `saveRevision` asked for has settled (C16).
+   *
+   * Carries nothing: the outcome a reader acts on is the projection (a new
+   * head, or none) and the toast channel (a failure). What the frame *is* is
+   * permission for `pagehide` to run.
+   */
+  | Readonly<{ kind: 'saved' }>;
 
 /** One response frame on a revision port. @public */
 export type WorkerRevisionResponse =
@@ -1251,6 +1560,12 @@ const answerOf = (
         })
         .then((comparison) => ({ kind: 'comparison', comparison }) as const);
     }
+    /* A question now (C16): the `hidden` unload registrant must be able to wait
+     * for the close cut before `pagehide` offers a pack. An uncorrelated frame
+     * takes the same path and its answer is simply dropped. */
+    case 'saveRevision': {
+      return tree.saveRevision(request.trigger).then(() => ({ kind: 'saved' }) as const);
+    }
     default: {
       return undefined;
     }
@@ -1368,11 +1683,11 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
     if (entry === undefined) {
       return;
     }
+    const tree = await entry.revisions;
+    await tree.release();
     projects.delete(projectId);
     entry.stopObserving();
     entry.unsubscribe();
-    const tree = await entry.revisions;
-    await tree.release();
     options.released?.(projectId);
   };
 
@@ -1393,9 +1708,21 @@ export const createWorkerRevisionRegistry = (options: WorkerRevisionRegistryOpti
         void (async (): Promise<void> => {
           const tree = await entry.revisions;
           if (data.command === 'close') {
-            entry.ports.delete(port);
-            if (entry.ports.size === 0) {
-              await closeProject(projectId);
+            try {
+              if (entry.ports.size === 1 && entry.ports.has(port)) {
+                await closeProject(projectId);
+              } else {
+                entry.ports.delete(port);
+              }
+            } catch (error) {
+              if (data.id !== undefined) {
+                port.postMessage({
+                  type: 'error',
+                  id: data.id,
+                  message: error instanceof Error ? error.message : String(error),
+                } satisfies WorkerRevisionResponse);
+              }
+              return;
             }
             /* The port outlives the release when the caller correlated its
              * close: `project-session.closing` waits for this frame, and a

@@ -284,7 +284,7 @@ const routes = [
       outputParameter: 'max_tokens',
     },
   ),
-  route('xai', 'grok-4.6', 'Grok 4.6', 'openai-completions', 500_000, 64_000, rates('4', '1', undefined, '12')),
+  route('xai', 'grok-4.6', 'Grok 4.6', 'openai-responses', 500_000, 64_000, rates('4', '1', undefined, '12')),
 ] as const;
 
 const tieredValuations = new Map<string, { minimum: bigint; baseRates: readonly Rate[] }>([

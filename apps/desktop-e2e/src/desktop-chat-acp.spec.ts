@@ -1,23 +1,30 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import {
+  getKernelResultOutputSchema,
+  rpcSchemasRegistry,
+  screenshotOutputSchema,
+  testModelOutputSchema,
+} from '@taucad/chat';
 import { afterEach, expect, test } from 'vitest';
 import type { Locator, Page } from 'playwright';
-import { launchDesktopApp } from '#support/desktop-app.js';
+import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
-import { gatewayFixtureModelName, installGatewayFixture } from '#support/gateway-fixture.js';
+import { durableMessages, latestCompletedRun, toolResult } from '#support/acp-evidence.js';
+import { gatewayFixtureFinalText, gatewayFixtureModelName, installGatewayFixture } from '#support/gateway-fixture.js';
 import type { GatewayFixture } from '#support/gateway-fixture.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
   activeChatId,
   connectPickedFolder,
-  declineCookieBanner,
   expectCount,
   expectSignedIn,
   expectVisible,
   openExecutionPicker,
   parkPointer,
+  selectAgentModel,
   selectChatModel,
   selectKernel,
   sendPrompt,
@@ -47,6 +54,15 @@ import {
 const seedPrompt = 'Create a cube with a centered cylindrical cutout and verify it.';
 /** One word, no tools, cheap on every model — and unambiguous on screen. */
 const externalPrompt = 'Reply with the single word pong.';
+const cadInspectionPrompt =
+  'Create a simple 20 mm cube in main.scad. Do not export anything. Check your work and briefly report the result.';
+const packaged = process.env['TAU_E2E_ACP_PACKAGED'] === 'true';
+const turbojetSourcePath = process.env['TAU_E2E_ACP_TURBOJET_SOURCE'];
+const nativeTurbojet = process.env['TAU_E2E_TURBOJET_NATIVE'] === 'true';
+
+if (turbojetSourcePath !== undefined && !existsSync(turbojetSourcePath)) {
+  throw new Error(`Requested Turbojet fixture does not exist: ${turbojetSourcePath}`);
+}
 
 /**
  * Whether this machine can answer a Codex turn at all.
@@ -82,34 +98,23 @@ afterEach(async () => {
   }
 });
 
-test.skipIf(!codexAvailable)('answers a desktop turn through the Codex row', async () => {
+test.skipIf(!codexAvailable)('uses native Tau skills and tools through the Codex row', async () => {
   const account = tauTestAccount('acp');
   seededEmail = account.email;
   const token = await seedTauTestUser(account);
-  session = await launchDesktopApp({ token });
+  session = await launchDesktopApp({ token, packaged });
+  if (packaged) {
+    await authenticatePackagedDesktop(session, token);
+  }
   const { page } = session;
   fixture = await installGatewayFixture(page);
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-    await declineCookieBanner(page);
     await expectSignedIn(page);
 
     await selectKernel(page, 'OpenSCAD');
     await connectPickedFolder(session);
-    await selectChatModel(page, gatewayFixtureModelName);
-
-    /* The seeding turn is what creates the project and its chat; the turn under
-     * test is the second one, sent from inside the project route. */
-    const slug = await submitPrompt(page, seedPrompt);
-    const scriptedRequestsPerTurn = 2;
-    await expect
-      .poll(() => fixture!.gatewayRequests.length, { timeout: 120_000 })
-      .toBeGreaterThanOrEqual(scriptedRequestsPerTurn);
-    const projectRoot = join(session.pickedDirectory, slug);
-    await waitForProjectOnDisk(session.pickedDirectory, slug, { extension: '.scad' });
-    const chatId = activeChatId(page);
-
     /* 1. Both adapters main discovered are offered as rows on this computer.
      * The renderer reads them from the preload bootstrap, so this is the
      * renderer half of the one discovery main performed. */
@@ -127,30 +132,341 @@ test.skipIf(!codexAvailable)('answers a desktop turn through the Codex row', asy
       .poll(() => (existsSync(session!.logPath) ? readFileSync(session!.logPath, 'utf8') : ''), { timeout: 60_000 })
       .toMatch(/agent-host-config-received.*"externalAgents":\[[^\]]*"codex"/u);
 
-    /* 3. A turn placed on the Codex row is answered by the real adapter. */
+    /* 3. The first project turn is placed on the Codex row and answered by the
+     * real adapter. Keeping this ACP-first makes the ACP contract independent
+     * of a separate Tau-provider seed. */
     await page
       .getByRole('option', { name: /^Codex/u })
       .first()
       .click();
+    await selectAgentModel(page, 'GPT-5.6-Sol');
     const gatewayCallsBefore = fixture.gatewayRequests.length;
-    await sendPrompt(page, externalPrompt);
+    await submitPrompt(page, cadInspectionPrompt);
+    await expect.poll(() => new URL(page.url()).searchParams.get('chat'), { timeout: 120_000 }).toBeTruthy();
+    const chatId = activeChatId(page);
+    const eventsPathNow = (): string => {
+      const { pathname } = new URL(page.url());
+      const projectRoot = join(session!.pickedDirectory, pathname.slice(pathname.lastIndexOf('/') + 1));
+      return join(projectRoot, '.tau/chats', chatId, 'events.jsonl');
+    };
 
-    await expectVisible(page.getByText(/^\s*pong[\s.!]*$/iu).first(), 300_000);
+    await expect.poll(() => readLog(eventsPathNow()), { timeout: 300_000 }).toMatch(/"state":"completed"/u);
 
-    /* 4. The turn was external, not a Tau turn wearing the row's label: the
+    /* 4. Codex loaded the native skill and used Tau's ordinary MCP tools. The
+     * prompt names neither skill, tool nor verification action, so these are
+     * adoption assertions, not a coached transport probe. */
+    const events = readLog(eventsPathNow());
+    const runId = latestCompletedRun(events);
+    expect(events).toMatch(/cad-openscad\/SKILL\.md/u);
+    const messages = durableMessages(events);
+    for (const toolName of ['get_kernel_result', 'screenshot']) {
+      expect(
+        messages.findLast((message) => message.role === 'tool-input' && message.toolName === toolName)?.content,
+      ).toMatchObject({ targetFile: 'main.scad' });
+    }
+    expect(
+      getKernelResultOutputSchema.parse(
+        toolResult(events, { runId, toolName: 'get_kernel_result', targetFile: 'main.scad' }),
+      ),
+    ).toMatchObject({
+      status: 'ready',
+      kernelIssues: [],
+    });
+    const modelTest = testModelOutputSchema.parse(
+      toolResult(events, { runId, toolName: 'test_model', targetFile: 'main.geospec.ts' }),
+    );
+    expect(modelTest.total).toBeGreaterThan(0);
+    expect(modelTest.passed).toBe(modelTest.total);
+    const capture = screenshotOutputSchema.parse(
+      toolResult(events, { runId, toolName: 'screenshot', targetFile: 'main.scad' }),
+    );
+    expect(capture.images.every((image) => image.dataUrl.startsWith('data:image/'))).toBe(true);
+    await expect
+      .poll(() => finalizedRevisions(eventsPathNow()).at(-1)?.changedPaths.includes('main.scad'), { timeout: 60_000 })
+      .toBe(true);
+    const cadActivityGroups = await page
+      .getByRole('button', {
+        name: /^(?:Rendered models(?:, captured images)?(?:, ran tests)?|Captured images(?:, ran tests)?|Ran tests)$/u,
+      })
+      .all();
+    expect(cadActivityGroups.length).toBeGreaterThan(0);
+    for (const group of cadActivityGroups) {
+      // oxlint-disable-next-line no-await-in-loop -- each disclosure state must settle before the next React update.
+      await group.click();
+    }
+    await expectVisible(
+      page.getByText(`Tested ${String(modelTest.total)} requirement${modelTest.total === 1 ? '' : 's'}`, {
+        exact: true,
+      }),
+      60_000,
+    );
+    await expectVisible(page.getByRole('button', { name: /Captured 1 screenshot of main\.scad/u }), 60_000);
+    await expectCount(page.getByText(/Received unknown part tool-/u), 0);
+
+    /* 5. The turn was external, not a Tau turn wearing the row's label: the
      * gateway saw nothing, and the durable log records the ACP marker. */
     expect(fixture.gatewayRequests.length).toBe(gatewayCallsBefore);
-    const events = readFileSync(join(projectRoot, '.tau/chats', chatId, 'events.jsonl'), 'utf8');
     expect(events).toMatch(/"kind":"external-agent"/u);
     expect(events).toMatch(/"agentId":"codex"/u);
-    expect(events).toMatch(/"state":"completed"/u);
 
-    console.info(`[desktop-e2e] acp chat=${chatId} rows=${rows.length} project=${projectRoot}`);
+    // A colorful capture alone can be stale. Hold the geometry specification
+    // fixed while distinguishing two targets and then editing only one target.
+    const projectRoot = dirname(dirname(dirname(dirname(eventsPathNow()))));
+    const otherSource = 'cube([8, 8, 40], center=true);\n';
+    writeFileSync(join(projectRoot, 'other.scad'), otherSource);
+    let previousCapture: string | undefined;
+    let previousRun = runId;
+    for (const dimensions of [
+      [20, 20, 20],
+      [40, 10, 10],
+    ] as const) {
+      const priorRun = previousRun;
+      const controlledSource = `cube([${dimensions.join(', ')}], center=true);\n`;
+      const volume = dimensions[0] * dimensions[1] * dimensions[2];
+      const spec = `import { it, expectGeo } from 'geospec';
+import { loadModel } from 'geospec/model';
+it('conformance main volume and envelope', async () => {
+  const model = await loadModel({ file: 'main.scad', format: 'glb' });
+  expectGeo(model).toHaveVolume({ value: ${String(volume)}, tolerance: 0.01 });
+  expectGeo(model).toHaveBoundingBox({ size: { x: ${String(dimensions[0])}, y: ${String(dimensions[1])}, z: ${String(dimensions[2])} }, tolerance: 0.01 });
+});
+it('conformance other volume and envelope', async () => {
+  const model = await loadModel({ file: 'other.scad', format: 'glb' });
+  expectGeo(model).toHaveVolume({ value: 2560, tolerance: 0.01 });
+  expectGeo(model).toHaveBoundingBox({ size: { x: 8, y: 8, z: 40 }, tolerance: 0.01 });
+});\n`;
+      writeFileSync(join(projectRoot, 'main.scad'), controlledSource);
+      writeFileSync(join(projectRoot, 'conformance.geospec.ts'), spec);
+      const completionLine = `ACP verification ${dimensions.join('x')} complete.`;
+      // oxlint-disable-next-line no-await-in-loop -- each turn measures the source version just written.
+      await sendPrompt(
+        page,
+        `Do not edit any file. Use Tau get_kernel_result and one isometric screenshot for EACH of main.scad and other.scad, then run test_model with files ["conformance.geospec.ts"]. Report the observed results. End with this plain paragraph exactly once: ${completionLine}`,
+      );
+      // oxlint-disable-next-line no-await-in-loop -- await this exact subsequent run, not an older completed run.
+      await expect
+        .poll(
+          () => {
+            try {
+              return latestCompletedRun(readLog(eventsPathNow()));
+            } catch {
+              return priorRun;
+            }
+          },
+          { timeout: 300_000 },
+        )
+        .not.toBe(priorRun);
+      const current = readLog(eventsPathNow());
+      const currentRun = latestCompletedRun(current);
+      // oxlint-disable-next-line no-await-in-loop -- check this run's actual rendered text, not only its correct durable log.
+      await expectCount(page.getByRole('article').last().getByText(completionLine, { exact: true }), 1);
+      const captures = ['main.scad', 'other.scad'].map((targetFile) => {
+        expect(
+          getKernelResultOutputSchema.parse(
+            toolResult(current, { runId: currentRun, toolName: 'get_kernel_result', targetFile }),
+          ),
+        ).toMatchObject({ status: 'ready', kernelIssues: [] });
+        const tests = testModelOutputSchema.parse(
+          toolResult(current, { runId: currentRun, toolName: 'test_model', targetFile: 'conformance.geospec.ts' }),
+        );
+        expect(tests).toMatchObject({ passed: 2, total: 2, failures: [] });
+        return screenshotOutputSchema.parse(
+          toolResult(current, { runId: currentRun, toolName: 'screenshot', targetFile }),
+        ).images[0]!.dataUrl;
+      });
+      expect(captures[0]).not.toBe(captures[1]);
+      if (previousCapture !== undefined) {
+        expect(captures[0]).not.toBe(previousCapture);
+      }
+      expect(readFileSync(join(projectRoot, 'main.scad'), 'utf8')).toBe(controlledSource);
+      expect(readFileSync(join(projectRoot, 'other.scad'), 'utf8')).toBe(otherSource);
+      expect(readFileSync(join(projectRoot, 'conformance.geospec.ts'), 'utf8')).toBe(spec);
+      // oxlint-disable-next-line no-await-in-loop -- finalization is asynchronous relative to the terminal log row.
+      await expect
+        .poll(() => finalizedRevisions(eventsPathNow()).at(-1)?.runIds, { timeout: 60_000 })
+        .toContain(currentRun);
+      // A read-only turn mints no revision: admission has already saved the
+      // controlled edit as its base. Verify that immutable head instead.
+      const revision = execFileSync('git', ['-C', projectRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+      expect(execFileSync('git', ['-C', projectRoot, 'show', `${revision}:main.scad`], { encoding: 'utf8' })).toBe(
+        controlledSource,
+      );
+      previousCapture = captures[0];
+      previousRun = currentRun;
+    }
+    await expectCount(page.getByText(/Received (?:unknown part|reasoning-)/u), 0);
+    await session.capture('acp-current-targets');
+
+    console.info(`[desktop-e2e] acp chat=${chatId} rows=${rows.length}`);
   } catch (error) {
     await session.capture('acp-failure');
     throw error;
   }
 });
+
+test.skipIf(!codexAvailable || turbojetSourcePath === undefined)(
+  'repairs the copied Turbojet Bézier failure through native Tau tools',
+  async () => {
+    const account = tauTestAccount('acp-turbojet');
+    seededEmail = account.email;
+    const token = await seedTauTestUser(account);
+    session = await launchDesktopApp({ token, packaged });
+    if (packaged) {
+      await authenticatePackagedDesktop(session, token);
+    }
+    const { page } = session;
+    fixture = await installGatewayFixture(page);
+
+    try {
+      await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
+      await expectSignedIn(page);
+      await selectKernel(page, 'Build123d');
+      await connectPickedFolder(session);
+      if (nativeTurbojet) {
+        await selectChatModel(page, 'GPT-5.6 Luna');
+      } else {
+        const rows = await openExecutionPicker(page);
+        expect(rows.join('\n')).toMatch(/Codex\s*Runs with your local Codex login/u);
+        await page
+          .getByRole('option', { name: /^Codex/u })
+          .first()
+          .click();
+        await selectAgentModel(page, 'GPT-5.6-Sol');
+      }
+
+      const slug = await submitPrompt(page, externalPrompt);
+      const sourcePath = await waitForProjectOnDisk(session.pickedDirectory, slug, { extension: '.py' });
+      await expect.poll(() => new URL(page.url()).searchParams.get('chat'), { timeout: 120_000 }).toBeTruthy();
+      const chatId = activeChatId(page);
+      const eventsPath = join(dirname(sourcePath), '.tau/chats', chatId, 'events.jsonl');
+      await expect.poll(() => readLog(eventsPath), { timeout: 300_000 }).toMatch(/"state":"completed"/u);
+
+      if (turbojetSourcePath === undefined) {
+        throw new Error('TAU_E2E_ACP_TURBOJET_SOURCE was removed after test selection.');
+      }
+      const source = readFileSync(turbojetSourcePath, 'utf8');
+      const brokenSource = source
+        .split('\n')
+        .map((line) =>
+          line.includes('Edge.make_bezier(')
+            ? `${line.replace('Edge.make_bezier(', 'Edge.make_bezier([').slice(0, -1)}])`
+            : line,
+        )
+        .join('\n');
+      expect(brokenSource.match(/Edge\.make_bezier\(\[/gu)).toHaveLength(2);
+      writeFileSync(sourcePath, brokenSource, 'utf8');
+      await expectVisible(page.getByText(/At least two control points must be provided/u), 120_000);
+
+      const completedBefore = (readLog(eventsPath).match(/"state":"completed"/gu) ?? []).length;
+      await sendPrompt(
+        page,
+        'Repair the current Build123d turbojet model failure without changing its design. Make only the necessary argument-list correction in main.py; preserve every other source statement. Put any GeoSpec checks in main.geospec.ts. Check the repaired geometry and capture the result.',
+      );
+      await expect
+        .poll(() => (readLog(eventsPath).match(/"state":"completed"/gu) ?? []).length, { timeout: 600_000 })
+        .toBe(completedBefore + 1);
+
+      const events = readLog(eventsPath);
+      const runId = latestCompletedRun(events);
+      expect(events).toMatch(/cad-build123d/u);
+      expect(readFileSync(sourcePath, 'utf8')).not.toMatch(/Edge\.make_bezier\(\[/u);
+      // The requested surgical repair must recover the controlled assembly, not replace
+      // it with an unrelated shape that also compiles and produces colourful pixels.
+      // Both removing the list wrapper and unpacking that exact list restore
+      // the same variadic control points. No other assembly edits are allowed.
+      const expectedRepairs = [source, brokenSource.replaceAll('Edge.make_bezier([', 'Edge.make_bezier(*[')];
+      expect(expectedRepairs.map((repair) => repair.replaceAll(/\s/gu, ''))).toContain(
+        readFileSync(sourcePath, 'utf8').replaceAll(/\s/gu, ''),
+      );
+      expect(
+        getKernelResultOutputSchema.parse(
+          toolResult(events, { runId, toolName: 'get_kernel_result', targetFile: 'main.py' }),
+        ),
+      ).toMatchObject({
+        status: 'ready',
+        kernelIssues: [],
+      });
+      const modelTest = testModelOutputSchema.parse(
+        toolResult(events, { runId, toolName: 'test_model', targetFile: 'main.geospec.ts' }),
+      );
+      expect(modelTest.total).toBeGreaterThan(0);
+      expect(modelTest.passed).toBe(modelTest.total);
+      const captureResult = toolResult(events, { runId, toolName: 'screenshot', targetFile: 'main.py' });
+      // Native tools retain the RPC envelope; MCP exposes the tool output itself.
+      const capture = nativeTurbojet
+        ? rpcSchemasRegistry.capture_images.resultSchema.parse(captureResult)
+        : screenshotOutputSchema.parse(captureResult);
+      if (!('images' in capture)) {
+        throw new Error('The native Turbojet capture failed.');
+      }
+      const image = capture.images[0];
+      if (image === undefined) {
+        throw new Error('The repaired Turbojet capture returned no image.');
+      }
+      const pixels = await page.evaluate(async (dataUrl) => {
+        const response = await fetch(dataUrl);
+        const blob = await response.blob();
+        const bitmap = await createImageBitmap(blob);
+        const { height, width } = bitmap;
+        const canvas = new OffscreenCanvas(64, 64);
+        const context = canvas.getContext('2d');
+        if (context === null) {
+          throw new Error('2D canvas context unavailable while validating the ACP capture.');
+        }
+        context.drawImage(bitmap, 0, 0, 64, 64);
+        bitmap.close();
+        const rgba = context.getImageData(0, 0, 64, 64).data;
+        const colors = new Set<string>();
+        let minimum = 255;
+        let maximum = 0;
+        let opaque = 0;
+        for (let index = 0; index < rgba.length; index += 4) {
+          if (rgba[index + 3]! === 0) {
+            continue;
+          }
+          opaque += 1;
+          const red = rgba[index]!;
+          const green = rgba[index + 1]!;
+          const blue = rgba[index + 2]!;
+          const luminance = (red + green + blue) / 3;
+          minimum = Math.min(minimum, luminance);
+          maximum = Math.max(maximum, luminance);
+          colors.add(
+            `${String(Math.floor(red / 16))}:${String(Math.floor(green / 16))}:${String(Math.floor(blue / 16))}`,
+          );
+        }
+        return { colors: colors.size, height, luminanceRange: maximum - minimum, opaque, width };
+      }, image.dataUrl);
+      expect(pixels.width).toBeGreaterThan(100);
+      expect(pixels.height).toBeGreaterThan(100);
+      expect(pixels.opaque).toBeGreaterThan(1000);
+      expect(pixels.colors).toBeGreaterThan(8);
+      expect(pixels.luminanceRange).toBeGreaterThan(24);
+      // Completion precedes revision settlement; wait for this run, not the seed's revision.
+      await expect.poll(() => finalizedRevisions(eventsPath).at(-1)?.runIds, { timeout: 60_000 }).toContain(runId);
+      expect(finalizedRevisions(eventsPath).at(-1)?.changedPaths).toContain('main.py');
+
+      const activity = page.getByRole('button', { name: /Captured images/u }).last();
+      await expectVisible(activity, 60_000);
+      await activity.click();
+      await expectVisible(
+        page.getByRole('button', {
+          name: `Captured ${String(capture.images.length)} screenshot${capture.images.length === 1 ? '' : 's'} of main.py`,
+        }),
+        60_000,
+      );
+      await expectCount(page.getByText(/Received unknown part tool-/u), 0);
+      await session.capture(nativeTurbojet ? 'native-turbojet-repaired' : 'acp-turbojet-repaired');
+      console.info(
+        `[desktop-e2e] turbojet native=${String(nativeTurbojet)} chat=${chatId} pixels=${JSON.stringify(pixels)}`,
+      );
+    } catch (error) {
+      await session.capture('acp-turbojet-failure');
+      throw error;
+    }
+  },
+  900_000,
+);
 
 /**
  * The operator's actual flow, and the one turn the spec above cannot reach:
@@ -170,7 +486,10 @@ test.skipIf(!codexAvailable)(
     const account = tauTestAccount('acp-seeded');
     seededEmail = account.email;
     const token = await seedTauTestUser(account);
-    session = await launchDesktopApp({ token });
+    session = await launchDesktopApp({ token, packaged });
+    if (packaged) {
+      await authenticatePackagedDesktop(session, token);
+    }
     const { page } = session;
     /* Only the project-name turn reaches the gateway on this leg; the CAD turn
      * is external and never does. The fixture is still what funds that name. */
@@ -178,14 +497,13 @@ test.skipIf(!codexAvailable)(
 
     try {
       await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-      await declineCookieBanner(page);
       await expectSignedIn(page);
 
       await selectKernel(page, 'OpenSCAD');
       await connectPickedFolder(session);
 
       /* Picked *before* the first submit: the home hero is session-backed, so the
-       * choice lands in `chat_homepage_main` and the new project's chat row is
+       * choice lands in the Home composer record and the new project's chat row is
        * created carrying it. */
       const rows = await openExecutionPicker(page);
       expect(rows.join('\n')).toMatch(/Codex\s*Runs with your local Codex login/u);
@@ -193,6 +511,7 @@ test.skipIf(!codexAvailable)(
         .getByRole('option', { name: /^Codex/u })
         .first()
         .click();
+      await selectAgentModel(page, 'GPT-5.6-Sol');
 
       await submitPrompt(page, externalPrompt);
 
@@ -230,7 +549,7 @@ test.skipIf(!codexAvailable)(
 
 /** The candidate turn's instruction: one deterministic, cheap edit to the seeded model. */
 const candidatePrompt =
-  'Add the exact line `// candidate` as the very first line of main.scad. Change nothing else in the file and edit no other file.';
+  "Add the exact line `// candidate` as the very first line of main.scad. Change nothing else in the file and edit no other file. Then use Tau's get_kernel_result, test_model, and screenshot tools against this checkout and briefly report their results.";
 
 /** The one line the candidate turn is asked to prepend. */
 const candidateMarker = '// candidate';
@@ -279,7 +598,7 @@ const finalizedRevisions = (logPath: string): readonly FinalizedTurn[] =>
   });
 
 /** The Branches porcelain's own section, and one branch's row inside it. */
-const branchesSection = (page: Page): Locator => page.getByRole('region', { name: 'Revision branches' });
+const branchesSection = (page: Page): Locator => page.getByRole('list', { name: 'Branches' });
 /* Matched on the row's *name*, not on its text: every row also carries a diff
  * line naming the branch it is compared against ("1 file differs from main"),
  * so `hasText` alone matched both rows. */
@@ -288,38 +607,36 @@ const branchRow = (page: Page, branchName: string): Locator =>
     .locator('li')
     .filter({ has: page.getByText(branchName, { exact: true }) });
 
+const expectCurrentBranch = async (page: Page, branchName: string): Promise<void> => {
+  await expect
+    .poll(async () => branchRow(page, branchName).getAttribute('aria-current'), { timeout: 60_000 })
+    .toBe('true');
+};
+
 /**
  * G-REV-EXT live in candidate mode (J-E), and the populated look G-REV-PORCELAIN
  * owes — one project, one Tau turn in the live folder, one Codex turn in a
  * checkout of its own, and the four branch verbs over what they published.
  *
  * The two turns are on **two chats** on purpose: a direct turn records onto the
- * trunk the live tree tracks (`main`) and a candidate onto its own lane
- * (`agent/<chatId>`, `packages/revisions/src/turn-revision.ts`), so two chats is
- * the smallest shape in which switch, merge and discard exist at all — and the
- * shape in which the cross-chat merge base is load-bearing.
+ * trunk the live tree tracks (`main`) and a candidate onto the named linked
+ * checkout (`isolated-run`), so two chats is the smallest shape in which
+ * switch, merge and discard exist at all.
  *
- * The third turn — a second Tau turn back on the first chat, on the gateway
- * fixture, so it spends nothing — moves the trunk head to a tree that differs
- * from the candidate's, which is what keeps the Switch and the Merge below from
- * being true before they are clicked.
- *
- * Isolation is asserted where the charter actually claims it — *mid-turn*. A
- * candidate turn merges back into the live tree when it settles (that is what
- * "fork an isolated copy; merge back when done" means in
- * `TurnRevisionRecorder.finalize`), so the assertion is that the live
- * `main.scad` is byte-identical to the seeded bytes at every sample taken while
- * the run had not yet recorded a terminal marker. The file is read *before* the
- * log on each sample, so the only way to fail is the defect itself: bytes in the
- * project folder ahead of the turn's own settlement.
+ * Isolation is sampled rather than inferred: the live `main.scad` stays
+ * byte-identical to the seed while the candidate runs and after it settles;
+ * only an explicit Switch or Merge moves those bytes into the project folder.
  */
 test.skipIf(!codexAvailable)(
-  'isolates a Codex candidate turn on its own branch and drives switch, merge, restore and discard',
+  'switches Tau to a Codex candidate and back while driving branch revision verbs',
   async () => {
     const account = tauTestAccount('acp-rev');
     seededEmail = account.email;
     const token = await seedTauTestUser(account);
-    session = await launchDesktopApp({ token });
+    session = await launchDesktopApp({ token, packaged });
+    if (packaged) {
+      await authenticatePackagedDesktop(session, token);
+    }
     const { page } = session;
     /* The shell opens at 1440×900 (`apps/desktop/src/main/main.ts`), and at that
      * width the project route's composer is narrow enough that its right-hand
@@ -335,7 +652,6 @@ test.skipIf(!codexAvailable)(
 
     try {
       await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
-      await declineCookieBanner(page);
       await expectSignedIn(page);
 
       await selectKernel(page, 'OpenSCAD');
@@ -361,14 +677,19 @@ test.skipIf(!codexAvailable)(
 
       await expect.poll(() => finalizedRevisions(logOf(directChatId)).length, { timeout: 300_000 }).toBeGreaterThan(0);
       const directRevision = finalizedRevisions(logOf(directChatId))[0]!;
+      /* The durable settlement is written before the worker's projection has
+       * necessarily published the new head. A branch created in that window is
+       * correctly refused as unborn because no base revision is visible yet.
+       * Synchronize on the user-visible head instead of racing that projection. */
+      await expectVisible(page.getByRole('button', { name: /^Open Revisions\. You are on main, Rev \d+\.$/u }), 60_000);
       const seededSource = liveSource();
       expect(seededSource).toContain('difference()');
       /* A direct turn records onto the trunk the live tree tracks, and creates
        * it on a project's first turn (operator decisions 2026-09-09, Q11). */
       expect(directRevision.branch).toBe('main');
 
-      /* 3. A second chat is the candidate's own lane, and therefore its own
-       * branch. Created before anything is spent: a failure here costs no quota. */
+      /* 3. A second chat gets a named branch and linked checkout. Created before
+       * anything is spent: a failure here costs no quota. */
       await parkPointer(page);
       await page
         .getByRole('button', { name: /^New chat in /u })
@@ -376,7 +697,7 @@ test.skipIf(!codexAvailable)(
         .click();
       await expect.poll(() => new URL(page.url()).searchParams.get('chat'), { timeout: 60_000 }).not.toBe(directChatId);
       const candidateChatId = activeChatId(page);
-      const candidateBranch = `agent/${candidateChatId}`;
+      const candidateBranch = 'isolated-run';
 
       /* The chat pane opens at its minimum width, and at that width the
        * composer's right-hand action group ("Add context", attach, send) sits
@@ -405,6 +726,7 @@ test.skipIf(!codexAvailable)(
         .getByRole('option', { name: /^Codex/u })
         .first()
         .click();
+      await selectAgentModel(page, 'GPT-5.6-Sol');
       await parkPointer(page);
       /* The composer picker replaced the deleted revision-mode selector (W7): a
          branch is made by name, and the chip then names it. */
@@ -446,6 +768,10 @@ test.skipIf(!codexAvailable)(
         .map((event) => event.replacement?.metadata?.tauInternal)
         .find((marker) => marker !== undefined);
       expect(envelope).toMatchObject({ kind: 'external-agent', agentId: 'codex', mode: 'candidate' });
+      for (const toolName of ['get_kernel_result', 'test_model', 'screenshot']) {
+        expect(candidateEvents).toMatch(new RegExp(`"role":"tool-output"[^\\n]*"toolName":"${toolName}"`, 'u'));
+      }
+      expect(candidateEvents).not.toMatch(/Main refused the desktop runtime-port request/u);
       expect(fixture.gatewayRequests.length, 'an external turn must not reach the Tau gateway').toBe(
         gatewayCallsBefore,
       );
@@ -455,18 +781,24 @@ test.skipIf(!codexAvailable)(
       const candidateRevision = finalizedRevisions(logOf(candidateChatId)).at(-1)!;
       expect(candidateRevision.branch).toBe(candidateBranch);
       expect(candidateRevision.changedPaths).toContain('main.scad');
-      const candidateSource = liveSource();
+      const candidateRevisionId = candidateRevision.revisionId;
+      if (candidateRevisionId === undefined) {
+        throw new Error('Candidate turn finalized without a revision ID.');
+      }
+      const candidateRevisionNumber = Number.parseInt(
+        execFileSync('git', ['-C', projectRoot(), 'rev-list', '--first-parent', '--count', candidateRevisionId], {
+          encoding: 'utf8',
+        }).trim(),
+        10,
+      );
+      const checkoutMetadata = readdirSync(join(projectRoot(), '.git/worktrees'))[0]!;
+      const candidateRoot = dirname(
+        readFileSync(join(projectRoot(), '.git/worktrees', checkoutMetadata, 'gitdir'), 'utf8').trim(),
+      );
+      const candidateSource = readFileSync(join(candidateRoot, 'main.scad'), 'utf8');
       expect(candidateSource, 'the candidate turn wrote nothing to distinguish it from the seed').not.toBe(
         seededSource,
       );
-
-      /* A second direct turn on the first chat, so the graph head — and with it
-       * the pane's active branch — is the lane the candidate merges back into. */
-      await page.goBack();
-      await expect.poll(() => new URL(page.url()).searchParams.get('chat'), { timeout: 60_000 }).toBe(directChatId);
-      await sendPrompt(page, 'Rebuild main.scad from scratch.');
-      await expect.poll(() => finalizedRevisions(logOf(directChatId)).length, { timeout: 300_000 }).toBeGreaterThan(1);
-      const directSecondRevision = finalizedRevisions(logOf(directChatId)).at(-1)!;
 
       /* 5. The porcelain. */
       await parkPointer(page);
@@ -484,60 +816,94 @@ test.skipIf(!codexAvailable)(
       expect(listed).toContain(directRevision.branch ?? 'main');
       await session.capture('rev-branches-list');
 
-      /* 6. Switch to the candidate: the live folder takes the candidate's bytes,
-       * and the head reference goes with it — so the candidate is what the pane
-       * now calls Current, and the trunk is the row offering the verbs (Q11). */
-      await branchRow(page, candidateBranch).getByRole('button', { name: 'Switch', exact: true }).click();
-      await expect.poll(liveSource, { timeout: 120_000 }).toBe(candidateSource);
-      expect(liveSource()).toContain(candidateMarker);
-      await expectVisible(branchRow(page, candidateBranch).getByText('Current', { exact: true }), 60_000);
+      /* 6. Re-root between the live and linked checkouts without copying either
+       * tree over the other. */
+      // Selecting a chat checkout does not move the independently browsed workbench.
+      await expectCurrentBranch(page, 'main');
+      await expectVisible(
+        page.getByRole('button', { name: `Restore to Revision ${String(candidateRevisionNumber)}`, exact: true }),
+        60_000,
+      );
+      expect(liveSource()).toBe(seededSource);
+
+      await branchRow(page, candidateBranch)
+        .getByRole('button', { name: `Switch to ${candidateBranch}`, exact: true })
+        .click();
+      await expectCurrentBranch(page, candidateBranch);
+      expect(liveSource()).toBe(seededSource);
+      expect(candidateSource).toContain(candidateMarker);
       await session.capture('rev-branches-after-switch');
 
       /* Back onto the trunk, the same verb in the other direction. */
-      await branchRow(page, 'main').getByRole('button', { name: 'Switch', exact: true }).click();
+      await branchRow(page, 'main').getByRole('button', { name: 'Switch to main', exact: true }).click();
       await expect.poll(liveSource, { timeout: 120_000 }).toBe(seededSource);
-      await expectVisible(branchRow(page, 'main').getByText('Current', { exact: true }), 60_000);
+      await expectCurrentBranch(page, 'main');
 
-      /* Merge the candidate into the trunk. Both chats' lanes descend from the
-       * trunk head, so this is an ordinary three-way merge rather than the
-       * add/add conflict two independently rooted lanes could only produce
-       * (lane 9-je-live finding 3; operator decisions Q11). */
+      /* Merge the candidate into the trunk from their shared base. */
+      const revisionStatusButton = page.getByRole('button', { name: /^Open Revisions\./u }).first();
+      const beforeMerge = await revisionStatusButton.getAttribute('aria-label');
       await branchRow(page, candidateBranch)
-        .getByRole('button', { name: /^Merge into /u })
+        .getByRole('button', { name: `Actions for ${candidateBranch}`, exact: true })
         .click();
-      /* Read as the row's own outcome line, not as its first `role="status"`:
-       * the busy Spinner carries that role too, and a merge that lands in the
-       * live tree is no longer instant, so `.first()` resolved to the spinner's
-       * empty text while the merge was still running. */
-      const mergeLine = async (): Promise<string> => {
-        // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- `innerText` keeps the line breaks this outcome is read by.
-        const text = await branchRow(page, candidateBranch).innerText();
-        return (/^(?:Merged into .*|Merge conflict .*|.* already holds this branch)$/mu.exec(text)?.[0] ?? '').trim();
-      };
-      await expect.poll(mergeLine, { timeout: 120_000 }).toMatch(/^Merged into main: main\.scad$/u);
-      const mergeResult = await mergeLine();
+      await page.getByRole('menuitem', { name: `Merge ${candidateBranch} into main`, exact: true }).click();
+      await expectVisible(page.getByText(`Merged ${candidateBranch}`, { exact: true }), 120_000);
+      await expect
+        .poll(async () => revisionStatusButton.getAttribute('aria-label'), { timeout: 120_000 })
+        .not.toBe(beforeMerge);
+      const mergeResult = `Merged ${candidateBranch} into main`;
       /* And the live tree follows the head reference: the merge lands in the
        * project folder without a second checkout. */
       await expect.poll(liveSource, { timeout: 120_000 }).toContain(candidateMarker);
       await session.capture('rev-branches-after-merge');
 
-      /* Restore to the first revision: the live folder is the seed again. */
-      await page.getByRole('button', { name: 'Restore to Revision 1', exact: true }).first().click();
-      await expect.poll(liveSource, { timeout: 120_000 }).toBe(seededSource);
-      await session.capture('rev-branches-after-restore');
-
-      /* Discard the candidate's ref. The revisions it reached stay in the store;
-       * only the name goes. */
-      await branchRow(page, candidateBranch).getByRole('button', { name: 'Discard', exact: true }).click();
+      /* Discard the candidate's checkout and ref. The revisions it reached
+       * stay in the store; only the independent branch and worktree go. */
+      await branchRow(page, candidateBranch)
+        .getByRole('button', { name: `Actions for ${candidateBranch}`, exact: true })
+        .click();
+      await page.getByRole('menuitem', { name: `Discard branch changes from ${candidateBranch}`, exact: true }).click();
       await expectCount(branchRow(page, candidateBranch), 0, 60_000);
       await session.capture('rev-branches-after-discard');
+
+      // Discard does not silently transfer a chat's write authority to main.
+      await page.getByRole('button', { name: 'Branch unavailable. Choose a branch.' }).click();
+      await page.getByRole('option', { name: 'main', exact: true }).click();
+      await expectVisible(page.getByRole('button', { name: 'Work in main. Choose a branch.' }), 30_000);
+
+      /* Switch the same chat back to Tau after the ACP turn. The provider
+       * fixture proves the next turn used Tau's gateway, while the durable
+       * settlement proves the chat and revision loop continued normally. */
+      const completedBeforeNativeReturn = (candidateEvents.match(/"state":"completed"/gu) ?? []).length;
+      const finalizedBeforeNativeReturn = finalizedRevisions(logOf(candidateChatId)).length;
+      const gatewayCallsBeforeNativeReturn = fixture.gatewayRequests.length;
+      await openExecutionPicker(page);
+      await page.getByRole('option', { name: 'Select agent: Tau' }).click();
+      await selectChatModel(page, gatewayFixtureModelName);
+      await expectVisible(page.getByRole('button', { name: 'Select agent: Tau' }), 30_000);
+      await sendPrompt(page, 'Continue this chat with Tau.');
+      await expect
+        .poll(() => (readLog(logOf(candidateChatId)).match(/"state":"completed"/gu) ?? []).length, {
+          timeout: 180_000,
+        })
+        .toBe(completedBeforeNativeReturn + 1);
+      expect(fixture.gatewayRequests.length).toBeGreaterThan(gatewayCallsBeforeNativeReturn);
+      await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }).last(), 60_000);
+      await expect
+        .poll(() => finalizedRevisions(logOf(candidateChatId)).length, { timeout: 120_000 })
+        .toBe(finalizedBeforeNativeReturn + 1);
+      expect(finalizedRevisions(logOf(candidateChatId)).at(-1)?.branch).toBe('main');
+
+      /* Restore to the direct turn's revision: the live folder is the seed again. */
+      await page.getByRole('button', { name: 'Restore to Revision 2', exact: true }).first().click();
+      await expect.poll(liveSource, { timeout: 120_000 }).toBe(seededSource);
+      await session.capture('rev-branches-after-restore');
 
       console.info(
         `[desktop-e2e] j-e ${JSON.stringify({
           project: projectRoot(),
           directChatId,
           candidateChatId,
-          revisionsInOrder: [directRevision, candidateRevision, directSecondRevision].map((revision) => ({
+          revisionsInOrder: [directRevision, candidateRevision].map((revision) => ({
             turnId: revision.turnId,
             revisionId: revision.revisionId,
             treeId: revision.treeId,

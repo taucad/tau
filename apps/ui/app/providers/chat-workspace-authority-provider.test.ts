@@ -31,20 +31,22 @@ import {
   useChatWorkspaceAuthority,
   usePreparedChatWorkspace,
 } from '#providers/chat-workspace-authority-provider.js';
-import type { WorkerRevisionCommand } from '#machines/file-manager.worker.revisions.js';
+import type { WorkerRevisionCommand, WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
 
 const hookState = vi.hoisted(() => ({
   projectId: 'project_test',
   fileManager: undefined as unknown,
+  invalidateProjectedChats: vi.fn(),
+  refreshFromStorage: vi.fn(async () => undefined),
 }));
 const revisionRoot = vi.hoisted(() => ({
   commands: [] as WorkerRevisionCommand[],
-  admitted: [] as Array<{ turnId: string; chatId: string; runId: string }>,
+  admitted: [] as Array<{ turnId: string; chatId: string; runId: string; checkoutId?: string }>,
   refuse: undefined as string | undefined,
   /** Set by a test to keep an admission in flight while the page sends. */
   hold: undefined as PromiseWithResolvers<void> | undefined,
   /** Listeners the provider registered for the root's host-attested facts (W5). */
-  eventListeners: new Set<(event: { type: string }) => void>(),
+  eventListeners: new Set<(event: WorkerRevisionEvent) => void>(),
 }));
 
 vi.mock('#hooks/use-file-manager.js', () => ({
@@ -53,16 +55,24 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectId: hookState.projectId }),
 }));
+let chats = [{ id: 'chat_1', checkoutId: 'checkout-durable' }];
+vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats }) }));
+vi.mock('#hooks/use-project-manager.js', () => ({
+  useProjectManager: () => ({ invalidateProjectedChats: hookState.invalidateProjectedChats }),
+}));
+vi.mock('#hooks/chat-session-store-provider.js', () => ({
+  useChatSessionStore: () => ({ refreshFromStorage: hookState.refreshFromStorage }),
+}));
 vi.mock('#hooks/use-revision-status.js', () => ({
   useRevisionClient: () => ({
     status: () => undefined,
     subscribe: () => () => undefined,
-    subscribeEvents: (listener: (event: { type: string }) => void) => {
+    subscribeEvents: (listener: (event: WorkerRevisionEvent) => void) => {
       revisionRoot.eventListeners.add(listener);
       return () => revisionRoot.eventListeners.delete(listener);
     },
     subscribeToasts: () => () => undefined,
-    admitTurn: async (input: { turnId: string; chatId: string; runId: string }) => {
+    admitTurn: async (input: { turnId: string; chatId: string; runId: string; checkoutId?: string }) => {
       revisionRoot.admitted.push(input);
       await revisionRoot.hold?.promise;
       if (revisionRoot.refuse !== undefined) {
@@ -177,9 +187,12 @@ const bindFileManager = (project: RootedFileSystem): void => {
 };
 
 beforeEach(() => {
+  hookState.invalidateProjectedChats.mockClear();
+  hookState.refreshFromStorage.mockClear();
   revisionRoot.commands.length = 0;
   revisionRoot.admitted.length = 0;
   revisionRoot.refuse = undefined;
+  chats = [{ id: 'chat_1', checkoutId: 'checkout-durable' }];
   browserWorkspaceAuthorityTestApi.reset();
 });
 
@@ -199,8 +212,14 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
     const prepared = await act(async () => result.current.prepare('chat_1', { turnId: 'turn_1' }));
 
     expect(revisionRoot.admitted).toEqual([
-      { turnId: 'turn_1', chatId: 'chat_1', runId: expect.stringMatching(/^run_/u) as unknown as string },
+      {
+        turnId: 'turn_1',
+        chatId: 'chat_1',
+        runId: expect.stringMatching(/^run_/u) as unknown as string,
+        checkoutId: 'checkout-durable',
+      },
     ]);
+    expect(prepared.runId).toBe(revisionRoot.admitted[0]?.runId);
     expect(prepared.execution).toEqual({
       hostId: expect.any(String) as unknown as string,
       workspaceId: 'live',
@@ -363,28 +382,93 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
    * arrives as a `turn.finalized` record in the chat's durable log. The provider
    * owns only the first wire, and this is it.
    */
-  it('should feed a host-attested settlement from the revision root into the finalized-turn store', async () => {
+  it('should feed every host-attested settlement from the revision root into the shared store', async () => {
     const { project } = fixture();
     bindFileManager(project);
     renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
 
-    const settlement = {
-      type: 'turn.finalized',
-      turnId: 'turn_wire',
-      runId: 'run_wire',
-      chatId: 'chat_wire',
-      projectId: 'project_test',
-      revisionId: 'rev-wire',
-      changedPaths: ['main.scad'],
-      trigger: 'turn',
-      runIds: ['run_wire'],
-    };
-    for (const listener of revisionRoot.eventListeners) {
-      listener(settlement);
+    const settlements: readonly WorkerRevisionEvent[] = [
+      {
+        type: 'turn.finalized',
+        turnId: 'turn_wire',
+        runId: 'run_wire',
+        chatId: 'chat_wire',
+        projectId: 'project_test',
+        checkoutId: 'live',
+        revisionId: 'rev-wire',
+        changedPaths: ['main.scad'],
+        trigger: 'turn',
+        runIds: ['run_wire'],
+      },
+      {
+        type: 'turn.failed',
+        turnId: 'turn_failed',
+        runId: 'run_failed',
+        chatId: 'chat_failed',
+        checkoutId: 'live',
+        reason: 'revision cut failed',
+      },
+      {
+        type: 'turn.conflicted',
+        turnId: 'turn_conflicted',
+        runId: 'run_conflicted',
+        chatId: 'chat_conflicted',
+        checkoutId: 'live',
+      },
+    ];
+    const transport = await import('#chat-clients/_internal/browser-agent-host-transport.js');
+    const observed: WorkerRevisionEvent[] = [];
+    const unsubscribe = transport.subscribeHostTurnSettlements((event) => observed.push(event));
+    for (const settlement of settlements) {
+      for (const listener of revisionRoot.eventListeners) {
+        listener(settlement);
+      }
     }
+    for (const listener of revisionRoot.eventListeners) {
+      listener({ type: 'chats.projected', projectId: 'project_test', chatIds: ['chat_remote'] });
+    }
+    await waitFor(() => {
+      expect(observed).toEqual(settlements);
+    });
+    unsubscribe();
+    expect(hookState.invalidateProjectedChats).toHaveBeenCalledWith('project_test', ['chat_remote']);
+    expect(hookState.refreshFromStorage).toHaveBeenCalledWith('chat_remote');
+    expect(transport.getHostFinalizedTurns().map((entry) => entry.turnId)).toContain('turn_wire');
+  });
 
-    const { getHostFinalizedTurns } = await import('#chat-clients/_internal/browser-agent-host-transport.js');
-    expect(getHostFinalizedTurns().map((entry) => entry.turnId)).toContain('turn_wire');
+  it('should adopt a finalized daemon turn into the browser revision projection', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    const transport = await import('#chat-clients/_internal/browser-agent-host-transport.js');
+
+    act(() => {
+      transport.recordHostTurnSettlement({
+        type: 'turn.finalized',
+        turnId: 'turn_daemon',
+        runId: 'run_daemon',
+        chatId: 'chat_daemon',
+        projectId: 'project_test',
+        checkoutId: 'live',
+        revisionId: 'rev-daemon',
+        treeId: 'tree-daemon',
+        branch: 'main',
+        changedPaths: ['main.scad'],
+        trigger: 'turn',
+        runIds: ['run_daemon'],
+      });
+    });
+    /* A seeded turn can settle while the project is still being renamed. The
+     * final project provider mounts afterward and must replay that retained
+     * settlement rather than waiting for another turn. */
+    renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    expect(revisionRoot.commands).toContainEqual({
+      command: 'adoptHostFinalized',
+      checkoutId: 'live',
+      revisionId: 'rev-daemon',
+      treeId: 'tree-daemon',
+      branch: 'main',
+    });
   });
 
   it('should answer nothing for a chat it never prepared', async () => {

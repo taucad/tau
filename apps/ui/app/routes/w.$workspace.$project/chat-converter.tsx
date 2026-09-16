@@ -1098,7 +1098,7 @@ export const ConverterPanelBody = function ({
   const kernelClient = useSelector(selectedActor, (state) => state?.context.kernelClient);
 
   const availableFormats = useMemo(
-    () => deriveAvailableFormats(kernelClient, activeKernelId),
+    () => (capabilities === undefined ? [] : deriveAvailableFormats(kernelClient, activeKernelId)),
     // Capabilities is included so format list refreshes whenever the manifest mutates
     [kernelClient, activeKernelId, capabilities],
   );
@@ -1149,7 +1149,7 @@ export const ConverterPanelBody = function ({
   );
 
   useEffect(() => {
-    if (!kernelClient || !activeKernelId) {
+    if (!kernelClient || !activeKernelId || capabilities === undefined) {
       return;
     }
 
@@ -1383,7 +1383,7 @@ export const ConverterPanelBody = function ({
                       />
                       <Label
                         htmlFor='download-to-disk'
-                        className='flex-1 cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
+                        className='flex-1 cursor-action rounded-sm text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
                       >
                         Download to disk
                       </Label>
@@ -1398,7 +1398,7 @@ export const ConverterPanelBody = function ({
                         />
                         <Label
                           htmlFor='save-to-project'
-                          className='flex-1 cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
+                          className='flex-1 cursor-action rounded-sm text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
                         >
                           Save to project
                         </Label>
@@ -1410,7 +1410,7 @@ export const ConverterPanelBody = function ({
                         <Checkbox id='zip-multiple' checked={zipMultiple} onCheckedChange={handleZipToggle} />
                         <Label
                           htmlFor='zip-multiple'
-                          className='flex-1 cursor-pointer text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
+                          className='flex-1 cursor-action rounded-sm text-sm leading-none font-normal peer-disabled:cursor-not-allowed peer-disabled:opacity-70'
                         >
                           Zip multiple exports
                         </Label>

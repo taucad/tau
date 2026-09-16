@@ -22,7 +22,7 @@ import { msgpackCodec } from '@taucad/rpc/codec/msgpack';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { serveAgentChannel } from '#launchers/node/agent-channel.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
-import { agentChannelProtocolSchemas } from '#launchers/node/agent-wire.js';
+import { agentChannelLiveEventSchema, agentChannelProtocolSchemas } from '#launchers/node/agent-wire.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AgentChannelEndpoint } from '#channel/endpoint.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
@@ -30,10 +30,17 @@ import type { AgentChannelCommand, AgentChannelProtocol, AgentChannelResponse } 
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { NodeAgentLauncher } from '#launchers/node/node-agent-launcher.js';
 
-const emptyBatch = { cursor: 0, nextCursor: 0, endCursor: 0, events: [] } as const;
+const emptyBatch = {
+  cursor: 0,
+  nextCursor: 0,
+  endCursor: 0,
+  events: [],
+} as const;
 
 /** Records what the transport delivered, so both legs can be compared. */
-const recordingLauncher = (): NodeAgentLauncher & { readonly seen: AgentChannelCommand[] } => {
+const recordingLauncher = (): NodeAgentLauncher & {
+  readonly seen: AgentChannelCommand[];
+} => {
   const seen: AgentChannelCommand[] = [];
   return {
     seen,
@@ -72,9 +79,60 @@ const client = (port: Parameters<typeof createChannelClient>[0]['port']): Channe
   });
 
 describe('serveAgentChannel', () => {
+  it('should preserve live text offsets and reject invalid checkpoint coordinates', () => {
+    const frame = {
+      chatId: 'chat-1',
+      event: {
+        type: 'text-delta',
+        chatId: 'chat-1',
+        runId: 'run-1',
+        messageId: 'message-1',
+        contentIndex: 0,
+        delta: 'tail',
+        offset: 5,
+      },
+    } as const;
+    expect(agentChannelLiveEventSchema.parse(frame)).toEqual(frame);
+    for (const offset of [-1, 0.5, '5']) {
+      expect(agentChannelLiveEventSchema.safeParse({ ...frame, event: { ...frame.event, offset } }).success).toBe(
+        false,
+      );
+    }
+  });
+
+  it('validates the complete live tool-input lifecycle for every channel transport', () => {
+    const base = {
+      chatId: 'chat-1',
+      runId: 'run-1',
+      messageId: 'assistant-1',
+      contentIndex: 0,
+      toolCallId: 'call-1',
+      toolName: 'read_file',
+    } as const;
+
+    expect(
+      [
+        { type: 'tool-input-start', ...base },
+        { type: 'tool-input-delta', ...base, delta: '{"target' },
+        { type: 'tool-input-end', ...base, input: { targetFile: 'main.ts' } },
+        {
+          type: 'tool-output-update',
+          ...base,
+          output: { progress: 0.5 },
+          isError: false,
+        },
+      ].map((event) => agentChannelLiveEventSchema.safeParse({ chatId: 'chat-1', event }).success),
+    ).toEqual([true, true, true, true]);
+  });
+
   it('answers the same command over a WebSocket and over a plain MessagePort', async () => {
     const launcher = recordingLauncher();
-    const command: AgentChannelCommand = { type: 'tail', chatId: 'chat-1', cursor: 0, limit: 4 };
+    const command: AgentChannelCommand = {
+      type: 'tail',
+      chatId: 'chat-1',
+      cursor: 0,
+      limit: 4,
+    };
 
     // Leg 1: a socket, exactly as `tau serve` accepts one on `/agent`.
     const httpServer: HttpServer = createServer();
@@ -125,13 +183,22 @@ describe('serveAgentChannel', () => {
     const overPort = await portChannel.call('request', command);
 
     expect(overSocket).toEqual(overPort);
-    expect(overSocket).toEqual({ type: 'tail', chatId: 'chat-1', batch: emptyBatch });
+    expect(overSocket).toEqual({
+      type: 'tail',
+      chatId: 'chat-1',
+      batch: emptyBatch,
+    });
     expect(launcher.seen).toEqual([command, command]);
   });
 
   it('serves an emitter-shaped port that has no addEventListener at all', async () => {
     const launcher = recordingLauncher();
-    const command: AgentChannelCommand = { type: 'tail', chatId: 'chat-emitter', cursor: 0, limit: 4 };
+    const command: AgentChannelCommand = {
+      type: 'tail',
+      chatId: 'chat-emitter',
+      cursor: 0,
+      limit: 4,
+    };
     const channel = new MessageChannel();
     /* Electron's `MessagePortMain` speaks `on/off/start/close` and nothing
      * else. Hiding `addEventListener` here is what makes this leg a real
@@ -167,6 +234,92 @@ describe('serveAgentChannel', () => {
       chatId: 'chat-emitter',
       batch: emptyBatch,
     });
+  });
+
+  it('serves the host revision root over the same authenticated connection', async () => {
+    const launcher = recordingLauncher();
+    const channel = new MessageChannel();
+    const seen: unknown[] = [];
+    serveAgentChannel(channel.port1 as unknown as MessagePortLike, launcher, {
+      revisions: {
+        async request(request) {
+          seen.push(request);
+          return {
+            result: [{ id: 'revision-1', revisionNumber: 1 }],
+            status: {
+              projectId: 'project-1',
+              branch: 'main',
+              headRevisionId: 'revision-1',
+            },
+          };
+        },
+        async *events() {
+          yield {
+            kind: 'status',
+            value: {
+              projectId: 'project-1',
+              branch: 'main',
+              headRevisionId: 'revision-1',
+            },
+          };
+        },
+      },
+    });
+    const portChannel = client(wrapMessagePort<unknown>(channel.port2 as unknown as MessagePortLike));
+    disposers.push(() => {
+      portChannel.close();
+      channel.port1.close();
+      channel.port2.close();
+    });
+
+    await expect(
+      portChannel.call('request', {
+        type: 'revision',
+        request: { command: 'log', limit: 8 },
+      }),
+    ).resolves.toEqual({
+      type: 'revision',
+      result: [{ id: 'revision-1', revisionNumber: 1 }],
+      status: {
+        projectId: 'project-1',
+        branch: 'main',
+        headRevisionId: 'revision-1',
+      },
+    });
+    const abort = new AbortController();
+    const iterator = portChannel.listen('revisionEvents', undefined, abort.signal)[Symbol.asyncIterator]();
+    await expect(iterator.next()).resolves.toEqual({
+      done: false,
+      value: {
+        kind: 'status',
+        value: {
+          projectId: 'project-1',
+          branch: 'main',
+          headRevisionId: 'revision-1',
+        },
+      },
+    });
+    abort.abort();
+    expect(seen).toEqual([{ command: 'log', limit: 8 }]);
+    expect(launcher.seen).toEqual([]);
+  });
+
+  it('refuses revision requests when this host exposes no revision root', async () => {
+    const channel = new MessageChannel();
+    serveAgentChannel(channel.port1 as unknown as MessagePortLike, recordingLauncher());
+    const portChannel = client(wrapMessagePort<unknown>(channel.port2 as unknown as MessagePortLike));
+    disposers.push(() => {
+      portChannel.close();
+      channel.port1.close();
+      channel.port2.close();
+    });
+
+    await expect(
+      portChannel.call('request', {
+        type: 'revision',
+        request: { command: 'status' },
+      }),
+    ).rejects.toMatchObject({ code: 'REVISIONS_UNAVAILABLE' });
   });
 
   it('refuses an endpoint that is neither a port nor a socket', () => {

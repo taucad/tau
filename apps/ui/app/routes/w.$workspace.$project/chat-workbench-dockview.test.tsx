@@ -160,6 +160,9 @@ vi.mock('#flags/use-feature.js', () => ({
 
 vi.mock('@monaco-editor/react', () => ({
   useMonaco: () => undefined,
+  /* `configureMonaco` hands the loader the editor module; under jsdom nothing
+   * is loaded, so the mock only has to accept the call (W14 sweep). */
+  loader: { config: vi.fn() },
 }));
 
 const defaultViewer = ({

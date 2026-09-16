@@ -1,4 +1,4 @@
-import type { FileContentMetadata, FileEntry, FileStatEntry, FileStat } from '@taucad/types';
+import type { FileContentMetadata, FileEntry, FileProvenance, FileStatEntry, FileStat } from '@taucad/types';
 import type { FileTreeNode } from '@taucad/filesystem';
 import { getFileContentMetadata } from '@taucad/filesystem';
 import { Topic } from '@taucad/events';
@@ -37,6 +37,19 @@ const globalReconcileTickInterval = 5;
 
 type FileTreeFileNode = Extract<FileTreeNode, { contentKind: FileContentMetadata['contentKind'] }>;
 type CachedFileEntry = Extract<FileEntry, { type: 'file' }>;
+
+/**
+ * Provenance is data, so a row is stale when *any* of it moved — `versioned`
+ * dims the row, `overrides` names the overlay unit a project file replaced, and
+ * `identity` is the serving source. Comparing only `source` and `agentAccess`
+ * left those three frozen on screen while size and mtime stood still.
+ */
+const sameProvenance = (current?: FileProvenance, next?: FileProvenance): boolean =>
+  current?.source === next?.source &&
+  current?.versioned === next?.versioned &&
+  current?.agentAccess === next?.agentAccess &&
+  current?.identity === next?.identity &&
+  current?.overrides === next?.overrides;
 
 /**
  * Content-free aggregate for the existing external-filesystem polling loop.
@@ -1241,7 +1254,8 @@ export class FileTreeService {
         if (
           existing.size !== nextDirectory.size ||
           existing.mtimeMs !== nextDirectory.mtimeMs ||
-          existing.isDirectoryResolved !== nextDirectory.isDirectoryResolved
+          existing.isDirectoryResolved !== nextDirectory.isDirectoryResolved ||
+          !sameProvenance(existing.provenance, nextDirectory.provenance)
         ) {
           newTree.set(entryPath, nextDirectory);
         }
@@ -1292,8 +1306,7 @@ export class FileTreeService {
       current.size !== next.size ||
       current.mtimeMs !== next.mtimeMs ||
       current.contentKind !== next.contentKind ||
-      current.provenance?.source !== next.provenance?.source ||
-      current.provenance?.agentAccess !== next.provenance?.agentAccess ||
+      !sameProvenance(current.provenance, next.provenance) ||
       (current.contentKind === 'text' && next.contentKind === 'text' && current.lineCount !== next.lineCount)
     );
   }

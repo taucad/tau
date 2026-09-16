@@ -6,8 +6,7 @@ import type { ProjectCreationLocationState } from '#hooks/use-project-creation-l
 
 const mockNavigate = vi.fn(async () => undefined);
 const mockCreateProject = vi.fn();
-const mockClearDraft = vi.fn();
-const mockFlush = vi.fn();
+const mockConsumeDraft = vi.fn(async () => undefined);
 const mockPresentLocationError = vi.fn(() => false);
 const mockRefresh = vi.fn(async () => undefined);
 let capturedTextarea: ChatTextareaProperties | undefined;
@@ -63,10 +62,9 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: () => ({
     model: { modelId: 'gpt-test' },
     execution: { execution: composerExecution },
-    draftActorRef: { send: mockFlush },
+    consumeDraft: mockConsumeDraft,
   }),
 }));
-vi.mock('#hooks/use-chat.js', () => ({ useDraftActions: () => ({ clearDraft: mockClearDraft }) }));
 vi.mock('#components/ui/sonner.js', () => ({ toast: { error: vi.fn() } }));
 
 const { NewProjectChatComposer } = await import('#components/chat/new-project-chat-composer.js');
@@ -122,7 +120,7 @@ describe('NewProjectChatComposer', () => {
     },
   );
 
-  it('passes exact product selection and chat context, then clears only after navigation succeeds', async () => {
+  it('passes exact product selection and chat context, then consumes before navigation', async () => {
     render(<NewProjectChatComposer />);
     expect(capturedTextarea?.creationLocationControls?.toolbar).toBeDefined();
     expect(capturedTextarea?.creationLocationControls?.field).toBeDefined();
@@ -145,9 +143,9 @@ describe('NewProjectChatComposer', () => {
       },
       location: { kind: 'workspace', workspaceId: 'wsp_workshop' },
     });
+    expect(mockConsumeDraft).toHaveBeenCalledOnce();
     expect(mockNavigate).toHaveBeenCalledWith('/w/workshop/bracket');
-    expect(mockClearDraft).toHaveBeenCalledOnce();
-    expect(mockFlush).toHaveBeenCalledWith({ type: 'flushNow' });
+    expect(mockConsumeDraft.mock.invocationCallOrder[0]).toBeLessThan(mockNavigate.mock.invocationCallOrder[0]!);
   });
 
   it('retains the draft and refreshes selected-folder status after a typed failure', async () => {
@@ -163,8 +161,7 @@ describe('NewProjectChatComposer', () => {
     expect(mockPresentLocationError).toHaveBeenCalledWith(error);
     expect(mockRefresh).toHaveBeenCalledOnce();
     expect(mockNavigate).not.toHaveBeenCalled();
-    expect(mockClearDraft).not.toHaveBeenCalled();
-    expect(mockFlush).not.toHaveBeenCalled();
+    expect(mockConsumeDraft).not.toHaveBeenCalled();
   });
 
   it('does not mount location controls and keeps Home ready without capability', () => {

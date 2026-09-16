@@ -4,142 +4,142 @@
 
 StepData_StepWriter: declare class StepData_StepWriter
 
-constructor
+  constructor
 
-LabelMode(): number;
+  LabelMode(): number;
 
-TypeMode(): number;
+  TypeMode(): number;
 
-FloatWriter(): Interface_FloatWriter;
+  FloatWriter(): Interface_FloatWriter;
 
-SetScope(numscope: number, numin: number): void;
+  SetScope(numscope: number, numin: number): void;
 
-IsInScope(num: number): boolean;
+  IsInScope(num: number): boolean;
 
-SendModel(protocol: StepData_Protocol, headeronly?: boolean): void;
+  SendModel(protocol: StepData_Protocol, headeronly?: boolean): void;
 
-SendHeader(): void;
+  SendHeader(): void;
 
-SendData(): void;
+  SendData(): void;
 
-SendEntity(nument: number, lib: StepData_WriterLib): void;
+  SendEntity(nument: number, lib: StepData_WriterLib): void;
 
-EndSec(): void;
+  EndSec(): void;
 
-EndFile(): void;
+  EndFile(): void;
 
-NewLine(evenempty: boolean): void;
+  NewLine(evenempty: boolean): void;
 
-JoinLast(newline: boolean): void;
+  JoinLast(newline: boolean): void;
 
-Indent(onent: boolean): void;
+  Indent(onent: boolean): void;
 
-SendIdent(ident: number): void;
+  SendIdent(ident: number): void;
 
-SendScope(): void;
+  SendScope(): void;
 
-SendEndscope(): void;
+  SendEndscope(): void;
 
-Comment(mode: boolean): void;
+  Comment(mode: boolean): void;
 
-SendComment(text: TCollection_HAsciiString): void;
-SendComment(text: string): void;
-SendComment(text: TCollection_HAsciiString): void;
-SendComment(text: string): void;
+  SendComment(text: TCollection_HAsciiString): void;
+  SendComment(text: string): void;
+  SendComment(text: TCollection_HAsciiString): void;
+  SendComment(text: string): void;
 
-StartEntity(atype: TCollection_AsciiString): void;
+  StartEntity(atype: TCollection_AsciiString): void;
 
-StartComplex(): void;
+  StartComplex(): void;
 
-EndComplex(): void;
+  EndComplex(): void;
 
-SendField(fild: StepData_Field, descr: StepData_PDescr): void;
+  SendField(fild: StepData_Field, descr: StepData_PDescr): void;
 
-SendSelect(sm: StepData_SelectMember, descr: StepData_PDescr): void;
+  SendSelect(sm: StepData_SelectMember, descr: StepData_PDescr): void;
 
-SendList(list: StepData_FieldList, descr: StepData_ESDescr): void;
+  SendList(list: StepData_FieldList, descr: StepData_ESDescr): void;
 
-OpenSub(): void;
+  OpenSub(): void;
 
-OpenTypedSub(subtype: string): void;
+  OpenTypedSub(subtype: string): void;
 
-CloseSub(): void;
+  CloseSub(): void;
 
-AddParam(): void;
+  AddParam(): void;
 
-Send(val: number): void;
-Send(val: number): void;
-Send(val: TCollection_AsciiString): void;
-Send(val: Standard_Transient): void;
-Send(val: number): void;
-Send(val: number): void;
-Send(val: TCollection_AsciiString): void;
-Send(val: Standard_Transient): void;
-Send(val: number): void;
-Send(val: number): void;
-Send(val: TCollection_AsciiString): void;
-Send(val: Standard_Transient): void;
-Send(val: number): void;
-Send(val: number): void;
-Send(val: TCollection_AsciiString): void;
-Send(val: Standard_Transient): void;
+  Send(val: number): void;
+  Send(val: number): void;
+  Send(val: TCollection_AsciiString): void;
+  Send(val: Standard_Transient): void;
+  Send(val: number): void;
+  Send(val: number): void;
+  Send(val: TCollection_AsciiString): void;
+  Send(val: Standard_Transient): void;
+  Send(val: number): void;
+  Send(val: number): void;
+  Send(val: TCollection_AsciiString): void;
+  Send(val: Standard_Transient): void;
+  Send(val: number): void;
+  Send(val: number): void;
+  Send(val: TCollection_AsciiString): void;
+  Send(val: Standard_Transient): void;
 
-SendBoolean(val: boolean): void;
+  SendBoolean(val: boolean): void;
 
-SendLogical(val: StepData_Logical): void;
+  SendLogical(val: StepData_Logical): void;
 
-SendString(val: TCollection_AsciiString): void;
-SendString(val: string): void;
-SendString(val: TCollection_AsciiString): void;
-SendString(val: string): void;
+  SendString(val: TCollection_AsciiString): void;
+  SendString(val: string): void;
+  SendString(val: TCollection_AsciiString): void;
+  SendString(val: string): void;
 
-SendEnum(val: TCollection_AsciiString): void;
-SendEnum(val: string): void;
-SendEnum(val: TCollection_AsciiString): void;
-SendEnum(val: string): void;
+  SendEnum(val: TCollection_AsciiString): void;
+  SendEnum(val: string): void;
+  SendEnum(val: TCollection_AsciiString): void;
+  SendEnum(val: string): void;
 
-SendArrReal(anArr: NCollection_HArray1_double): void;
+  SendArrReal(anArr: NCollection_HArray1_double): void;
 
-SendUndef(): void;
+  SendUndef(): void;
 
-SendDerived(): void;
+  SendDerived(): void;
 
-EndEntity(): void;
+  EndEntity(): void;
 
-NbLines(): number;
+  NbLines(): number;
 
-Line(num: number): TCollection_HAsciiString;
+  Line(num: number): TCollection_HAsciiString;
 
-static CleanTextForSend(theText: TCollection_AsciiString): TCollection_AsciiString;
+  static CleanTextForSend(theText: TCollection_AsciiString): TCollection_AsciiString;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 StepData_WriterLib: declare class StepData_WriterLib
 
-constructor
+  constructor
 
-static SetGlobal(amodule: StepData_ReadWriteModule, aprotocol: StepData_Protocol): void;
+  static SetGlobal(amodule: StepData_ReadWriteModule, aprotocol: StepData_Protocol): void;
 
-AddProtocol(aprotocol: Standard_Transient): void;
+  AddProtocol(aprotocol: Standard_Transient): void;
 
-Clear(): void;
+  Clear(): void;
 
-SetComplete(): void;
+  SetComplete(): void;
 
-Select(obj: Standard*Transient, CN?: number): { returnValue: boolean; module*: StepData_ReadWriteModule; CN: number; [Symbol.dispose](): void };
+  Select(obj: Standard_Transient, CN?: number): { returnValue: boolean; module_: StepData_ReadWriteModule; CN: number; [Symbol.dispose](): void };
 
-Start(): void;
+  Start(): void;
 
-More(): boolean;
+  More(): boolean;
 
-Next(): void;
+  Next(): void;
 
-Module(): StepData_ReadWriteModule;
+  Module(): StepData_ReadWriteModule;
 
-Protocol(): StepData_Protocol;
+  Protocol(): StepData_Protocol;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

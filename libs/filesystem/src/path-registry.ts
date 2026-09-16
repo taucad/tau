@@ -190,14 +190,11 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
    * and nothing ever read it from disk — the two remaining spellings were a
    * synthetic @-mention path and a prompt line, both now pointing at the chat's
    * real log. One records family, one row. */
-  /* The agent's own `export_geometry` writes its artifacts through the agent's
-   * provider, so these three stay writable until the host owns that write.
-   * A9 ("records are read-only to agents") lands on them with that move. */
   {
     prefix: '.tau/artifacts',
     class: 'records',
     versioned: false,
-    agentAccess: 'read-write',
+    agentAccess: 'read-only',
     watch: 'ui',
     anchored: true,
     directory: true,
@@ -206,7 +203,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     prefix: '.tau/tool-results',
     class: 'records',
     versioned: false,
-    agentAccess: 'read-write',
+    agentAccess: 'read-only',
     watch: 'ui',
     anchored: true,
     directory: true,
@@ -215,7 +212,7 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
     prefix: '.tau/offloaded-tool-results',
     class: 'records',
     versioned: false,
-    agentAccess: 'read-write',
+    agentAccess: 'read-only',
     watch: 'ui',
     anchored: true,
     directory: true,

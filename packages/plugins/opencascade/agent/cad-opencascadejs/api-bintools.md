@@ -4,221 +4,221 @@
 
 BinTools: declare class BinTools
 
-constructor
+  constructor
 
-static Write(theShape: TopoDS_Shape, theFile: string, theRange: Message_ProgressRange): boolean;
-static Write(theShape: TopoDS_Shape, theFile: string, theWithTriangles: boolean, theWithNormals: boolean, theVersion: BinTools_FormatVersion, theRange: Message_ProgressRange): boolean;
-static Write(theShape: TopoDS_Shape, theFile: string, theRange: Message_ProgressRange): boolean;
-static Write(theShape: TopoDS_Shape, theFile: string, theWithTriangles: boolean, theWithNormals: boolean, theVersion: BinTools_FormatVersion, theRange: Message_ProgressRange): boolean;
+  static Write(theShape: TopoDS_Shape, theFile: string, theRange: Message_ProgressRange): boolean;
+  static Write(theShape: TopoDS_Shape, theFile: string, theWithTriangles: boolean, theWithNormals: boolean, theVersion: BinTools_FormatVersion, theRange: Message_ProgressRange): boolean;
+  static Write(theShape: TopoDS_Shape, theFile: string, theRange: Message_ProgressRange): boolean;
+  static Write(theShape: TopoDS_Shape, theFile: string, theWithTriangles: boolean, theWithNormals: boolean, theVersion: BinTools_FormatVersion, theRange: Message_ProgressRange): boolean;
 
-static Read(theShape: TopoDS_Shape, theFile: string, theRange: Message_ProgressRange): boolean;
+  static Read(theShape: TopoDS_Shape, theFile: string, theRange: Message_ProgressRange): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BinTools_Curve2dSet: declare class BinTools_Curve2dSet
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-Add(C: Geom2d_Curve): number;
+  Add(C: Geom2d_Curve): number;
 
-Curve2d(I: number): Geom2d_Curve;
+  Curve2d(I: number): Geom2d_Curve;
 
-Index(C: Geom2d_Curve): number;
+  Index(C: Geom2d_Curve): number;
 
-static WriteCurve2d(C: Geom2d_Curve, OS: BinTools_OStream): void;
+  static WriteCurve2d(C: Geom2d_Curve, OS: BinTools_OStream): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BinTools_CurveSet: declare class BinTools_CurveSet
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-Add(C: Geom_Curve): number;
+  Add(C: Geom_Curve): number;
 
-Curve(I: number): Geom_Curve;
+  Curve(I: number): Geom_Curve;
 
-Index(C: Geom_Curve): number;
+  Index(C: Geom_Curve): number;
 
-static WriteCurve(C: Geom_Curve, OS: BinTools_OStream): void;
+  static WriteCurve(C: Geom_Curve, OS: BinTools_OStream): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BinTools_FormatVersion: typeof BinTools_FormatVersion[keyof typeof BinTools_FormatVersion]
 
 BinTools_IStream: declare class BinTools_IStream
 
-ReadType(): BinTools_ObjectType;
+  ReadType(): BinTools_ObjectType;
 
-LastType(): BinTools_ObjectType;
+  LastType(): BinTools_ObjectType;
 
-ShapeType(): TopAbs_ShapeEnum;
+  ShapeType(): TopAbs_ShapeEnum;
 
-ShapeOrientation(): TopAbs_Orientation;
+  ShapeOrientation(): TopAbs_Orientation;
 
-Position(): number;
+  Position(): number;
 
-GoTo(thePosition: number): void;
+  GoTo(thePosition: number): void;
 
-IsReference(): boolean;
+  IsReference(): boolean;
 
-ReadReference(): number;
+  ReadReference(): number;
 
-UpdatePosition(): void;
+  UpdatePosition(): void;
 
-ReadReal(): number;
+  ReadReal(): number;
 
-ReadInteger(): number;
+  ReadInteger(): number;
 
-ReadPnt(): gp_Pnt;
+  ReadPnt(): gp_Pnt;
 
-ReadByte(): number;
+  ReadByte(): number;
 
-ReadBool(): boolean;
+  ReadBool(): boolean;
 
-ReadShortReal(): number;
+  ReadShortReal(): number;
 
-ReadBools(theBool1?: boolean, theBool2?: boolean, theBool3?: boolean): { theBool1: boolean; theBool2: boolean; theBool3: boolean };
-ReadBools(theBool1?: boolean, theBool2?: boolean, theBool3?: boolean, theBool4?: boolean, theBool5?: boolean, theBool6?: boolean, theBool7?: boolean): { theBool1: boolean; theBool2: boolean; theBool3: boolean; theBool4: boolean; theBool5: boolean; theBool6: boolean; theBool7: boolean };
-ReadBools(theBool1?: boolean, theBool2?: boolean, theBool3?: boolean): { theBool1: boolean; theBool2: boolean; theBool3: boolean };
-ReadBools(theBool1?: boolean, theBool2?: boolean, theBool3?: boolean, theBool4?: boolean, theBool5?: boolean, theBool6?: boolean, theBool7?: boolean): { theBool1: boolean; theBool2: boolean; theBool3: boolean; theBool4: boolean; theBool5: boolean; theBool6: boolean; theBool7: boolean };
+  ReadBools(theBool1?: boolean, theBool2?: boolean, theBool3?: boolean): { theBool1: boolean; theBool2: boolean; theBool3: boolean };
+  ReadBools(theBool1?: boolean, theBool2?: boolean, theBool3?: boolean, theBool4?: boolean, theBool5?: boolean, theBool6?: boolean, theBool7?: boolean): { theBool1: boolean; theBool2: boolean; theBool3: boolean; theBool4: boolean; theBool5: boolean; theBool6: boolean; theBool7: boolean };
+  ReadBools(theBool1?: boolean, theBool2?: boolean, theBool3?: boolean): { theBool1: boolean; theBool2: boolean; theBool3: boolean };
+  ReadBools(theBool1?: boolean, theBool2?: boolean, theBool3?: boolean, theBool4?: boolean, theBool5?: boolean, theBool6?: boolean, theBool7?: boolean): { theBool1: boolean; theBool2: boolean; theBool3: boolean; theBool4: boolean; theBool5: boolean; theBool6: boolean; theBool7: boolean };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BinTools_LocationSet: declare class BinTools_LocationSet
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-Add(L: TopLoc_Location): number;
+  Add(L: TopLoc_Location): number;
 
-Location(I: number): TopLoc_Location;
+  Location(I: number): TopLoc_Location;
 
-Index(L: TopLoc_Location): number;
+  Index(L: TopLoc_Location): number;
 
-NbLocations(): number;
+  NbLocations(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BinTools_OStream: declare class BinTools_OStream
 
-Position(): number;
+  Position(): number;
 
-WriteReference(thePosition: number): void;
+  WriteReference(thePosition: number): void;
 
-WriteShape(theType: TopAbs_ShapeEnum, theOrientation: TopAbs_Orientation): void;
+  WriteShape(theType: TopAbs_ShapeEnum, theOrientation: TopAbs_Orientation): void;
 
-PutBools(theValue1: boolean, theValue2: boolean, theValue3: boolean): void;
-PutBools(theValue1: boolean, theValue2: boolean, theValue3: boolean, theValue4: boolean, theValue5: boolean, theValue6: boolean, theValue7: boolean): void;
-PutBools(theValue1: boolean, theValue2: boolean, theValue3: boolean): void;
-PutBools(theValue1: boolean, theValue2: boolean, theValue3: boolean, theValue4: boolean, theValue5: boolean, theValue6: boolean, theValue7: boolean): void;
+  PutBools(theValue1: boolean, theValue2: boolean, theValue3: boolean): void;
+  PutBools(theValue1: boolean, theValue2: boolean, theValue3: boolean, theValue4: boolean, theValue5: boolean, theValue6: boolean, theValue7: boolean): void;
+  PutBools(theValue1: boolean, theValue2: boolean, theValue3: boolean): void;
+  PutBools(theValue1: boolean, theValue2: boolean, theValue3: boolean, theValue4: boolean, theValue5: boolean, theValue6: boolean, theValue7: boolean): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BinTools_ObjectType: typeof BinTools_ObjectType[keyof typeof BinTools_ObjectType]
 
 BinTools_ShapeReader: declare class BinTools_ShapeReader extends BinTools_ShapeSetBase
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-ReadLocation(theStream: BinTools_IStream): TopLoc_Location;
+  ReadLocation(theStream: BinTools_IStream): TopLoc_Location;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BinTools_ShapeSet: declare class BinTools_ShapeSet extends BinTools_ShapeSetBase
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-Add(S: TopoDS_Shape): number;
+  Add(S: TopoDS_Shape): number;
 
-Shape(I: number): TopoDS_Shape;
+  Shape(I: number): TopoDS_Shape;
 
-Index(S: TopoDS_Shape): number;
+  Index(S: TopoDS_Shape): number;
 
-Locations(): BinTools_LocationSet;
+  Locations(): BinTools_LocationSet;
 
-ChangeLocations(): BinTools_LocationSet;
+  ChangeLocations(): BinTools_LocationSet;
 
-NbShapes(): number;
+  NbShapes(): number;
 
-AddShape(S: TopoDS_Shape): void;
+  AddShape(S: TopoDS_Shape): void;
 
-AddShapes(S1: TopoDS_Shape, S2: TopoDS_Shape): void;
+  AddShapes(S1: TopoDS_Shape, S2: TopoDS_Shape): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BinTools_ShapeSetBase: declare class BinTools_ShapeSetBase
 
-constructor
+  constructor
 
-IsWithTriangles(): boolean;
+  IsWithTriangles(): boolean;
 
-IsWithNormals(): boolean;
+  IsWithNormals(): boolean;
 
-SetWithTriangles(theWithTriangles: boolean): void;
+  SetWithTriangles(theWithTriangles: boolean): void;
 
-SetWithNormals(theWithNormals: boolean): void;
+  SetWithNormals(theWithNormals: boolean): void;
 
-SetFormatNb(theFormatNb: number): void;
+  SetFormatNb(theFormatNb: number): void;
 
-FormatNb(): number;
+  FormatNb(): number;
 
-Clear(): void;
+  Clear(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BinTools_ShapeWriter: declare class BinTools_ShapeWriter extends BinTools_ShapeSetBase
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-WriteLocation(theStream: BinTools_OStream, theLocation: TopLoc_Location): void;
+  WriteLocation(theStream: BinTools_OStream, theLocation: TopLoc_Location): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BinTools_SurfaceSet: declare class BinTools_SurfaceSet
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-Add(S: Geom_Surface): number;
+  Add(S: Geom_Surface): number;
 
-Surface(I: number): Geom_Surface;
+  Surface(I: number): Geom_Surface;
 
-Index(S: Geom_Surface): number;
+  Index(S: Geom_Surface): number;
 
-static WriteSurface(S: Geom_Surface, OS: BinTools_OStream): void;
+  static WriteSurface(S: Geom_Surface, OS: BinTools_OStream): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

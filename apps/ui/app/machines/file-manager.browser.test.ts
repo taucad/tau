@@ -218,6 +218,23 @@ afterEach(async () => {
   }
 });
 
+it('mounts an ephemeral preview before opening its rooted bridge', async () => {
+  const rootDirectory = `/previews/${crypto.randomUUID()}`;
+  const actor = createActor(fileManagerMachine, {
+    input: { initialBackend: 'memory', rootDirectory, shouldInitializeOnStart: true },
+  });
+  actor.start();
+
+  try {
+    const ready = await waitFor(actor, (snapshot) => snapshot.matches('ready') || snapshot.matches('error'));
+    expect(ready.context.error).toBeUndefined();
+    await ready.context.viewClient?.writeFile(`${rootDirectory}/main.ts`, 'preview');
+    await expect(ready.context.viewClient?.readFile(`${rootDirectory}/main.ts`, 'utf8')).resolves.toBe('preview');
+  } finally {
+    actor.stop();
+  }
+});
+
 it('registers a project persisted after worker boot before opening its rooted bridge', async () => {
   const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
   const projectId = `proj_${crypto.randomUUID().replaceAll('-', '').slice(0, 21)}`;

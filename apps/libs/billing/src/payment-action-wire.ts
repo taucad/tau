@@ -36,9 +36,9 @@ export const wirePaymentActionSchema = z
         offerId: financialIdentitySchema,
         currency: z.literal('usd'),
         principalMinor: unsignedIntegerStringSchema,
-        taxMinor: unsignedIntegerStringSchema,
-        grossMinor: unsignedIntegerStringSchema,
-        maximumGrossMinor: unsignedIntegerStringSchema,
+        taxMinor: unsignedIntegerStringSchema.nullable(),
+        grossMinor: unsignedIntegerStringSchema.nullable(),
+        maximumGrossMinor: unsignedIntegerStringSchema.nullable(),
         creditAtoms: unsignedIntegerStringSchema,
         paymentMethod: cardSchema.nullable(),
       })
@@ -84,6 +84,20 @@ export const wirePaymentActionSchema = z
     }
     if (
       action.frozen !== null &&
+      [action.frozen.taxMinor, action.frozen.grossMinor, action.frozen.maximumGrossMinor].some(
+        (value) => value === null,
+      ) &&
+      [action.frozen.taxMinor, action.frozen.grossMinor, action.frozen.maximumGrossMinor].some(
+        (value) => value !== null,
+      )
+    ) {
+      context.addIssue({ code: 'custom', message: 'Frozen tax totals must be all quoted or all resolved in Checkout' });
+    }
+    if (
+      action.frozen !== null &&
+      action.frozen.taxMinor !== null &&
+      action.frozen.grossMinor !== null &&
+      action.frozen.maximumGrossMinor !== null &&
       [
         action.frozen.principalMinor,
         action.frozen.taxMinor,

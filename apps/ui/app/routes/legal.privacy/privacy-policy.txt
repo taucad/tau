@@ -1,6 +1,6 @@
 # Privacy Policy - TauCAD Limited
 
-*Effective date: December 29, 2025*
+*Effective date: September 14, 2026*
 
 ## 1. Introduction
 
@@ -35,7 +35,7 @@ Financial information such as payment method details is collected and stored by 
 
 ### 3.3 Usage Data
 
-We collect information about how the Service is accessed and used, including IP address, browser type, pages visited, time and date of visit, time spent on pages, and unique device identifiers.
+On the web, we collect product analytics such as browser type, pages visited, interaction and feature-use events, and session replay only after analytics consent. The desktop app does not run PostHog analytics. Operational security and service logs may still process network information when you use online features.
 
 ### 3.4 Location Data
 
@@ -43,14 +43,15 @@ We collect general location information based on your IP address (city or region
 
 ### 3.5 Tracking Technologies and Cookies
 
-We use cookies and similar technologies (such as localStorage) to maintain your preferences and improve your experience:
+We use cookies and browser storage for distinct purposes:
 
-- **Essential Cookies**: Strictly necessary for basic functionality. Cannot be disabled.
-- **Analytics Cookies** (Optional): With your consent, we use analytics cookies to understand how you use the Service.
+- **Necessary web cookies**: Authentication, optional server-rendered theme, and your analytics consent decision.
+- **Functional local storage**: Interface preferences and local project data. Ordinary preferences are not request cookies.
+- **Analytics storage** (Optional, web only): After consent, PostHog uses first-party cookies and local storage for approved product analytics and session replay.
 
-You can manage your cookie preferences through our cookie consent banner or by visiting [Cookie Settings](/legal/cookies#preferences). For detailed information, see our [Cookie Policy](/legal/cookies).
+You can manage analytics through the web consent form or the **Cookies** control in the web footer. Withdrawing consent stops capture and replay, resets the analytics identity, and clears PostHog persistence through its supported lifecycle. For the complete inventory, see our [Storage and Cookie Policy](/legal/cookies).
 
-**Global Privacy Control (GPC)**: We honor the Global Privacy Control signal. When we detect a GPC signal, we treat this as an opt-out of analytics tracking.
+**Global Privacy Control (GPC)**: An active GPC signal is a hard decline of web analytics and cannot be overridden by a stored acceptance while the signal remains active.
 
 ### 3.6 Prompts, Designs, and CAD Files
 
@@ -99,7 +100,7 @@ Under data protection laws, we rely on the following legal bases:
 | Data Category | Retention Period |
 |---------------|------------------|
 | **Account Data** | While account is active, plus 90 days after deletion request |
-| **Usage & Analytics Data** | 12 months from collection |
+| **Usage & Analytics Data** | According to the current service-side retention configuration; contact privacy@tau.new for the current schedule |
 | **AI Prompts & Designs** | 12 months for service improvement; deleted upon opt-out |
 | **Support Communications** | 3 years from communication |
 | **Financial Records** | 7 years (as required by law) |
@@ -151,7 +152,7 @@ We may use your prompts and generated designs to improve our AI features. This i
 
 ### 9.3 Analytics and Observability
 
-- **PostHog (Cloud)**: Product analytics with consent (USA). [Privacy Policy](https://posthog.com/privacy)
+- **PostHog (Cloud)**: Web product analytics and session replay after consent (USA). It is not used by the desktop app. [Privacy Policy](https://posthog.com/privacy)
 - **LangSmith**: AI feature monitoring. [Privacy Policy](https://www.langchain.com/privacy)
 
 ### 9.4 Payment Processing

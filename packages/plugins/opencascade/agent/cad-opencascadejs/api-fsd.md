@@ -4,98 +4,98 @@
 
 FSD_Base64: declare class FSD_Base64
 
-constructor
+  constructor
 
-static Encode(theEncodedStr: string, theStrLen: number, theData: number, theDataLen: number): number;
-static Encode(theData: number, theDataLen: number): TCollection_AsciiString;
-static Encode(theEncodedStr: string, theStrLen: number, theData: number, theDataLen: number): number;
-static Encode(theData: number, theDataLen: number): TCollection_AsciiString;
+  static Encode(theEncodedStr: string, theStrLen: number, theData: number, theDataLen: number): number;
+  static Encode(theData: number, theDataLen: number): TCollection_AsciiString;
+  static Encode(theEncodedStr: string, theStrLen: number, theData: number, theDataLen: number): number;
+  static Encode(theData: number, theDataLen: number): TCollection_AsciiString;
 
-static Decode(theDecodedData: number, theDataLen: number, theEncodedStr: string, theStrLen: number): number;
-static Decode(theStr: string, theLen: number): NCollection_Buffer;
-static Decode(theDecodedData: number, theDataLen: number, theEncodedStr: string, theStrLen: number): number;
-static Decode(theStr: string, theLen: number): NCollection_Buffer;
+  static Decode(theDecodedData: number, theDataLen: number, theEncodedStr: string, theStrLen: number): number;
+  static Decode(theStr: string, theLen: number): NCollection_Buffer;
+  static Decode(theDecodedData: number, theDataLen: number, theEncodedStr: string, theStrLen: number): number;
+  static Decode(theStr: string, theLen: number): NCollection_Buffer;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 FSD_CmpFile: declare class FSD_CmpFile extends Standard_Transient
 
-constructor
+  constructor
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-Open(aName: TCollection_AsciiString, aMode: Storage_OpenMode): Storage_Error;
+  Open(aName: TCollection_AsciiString, aMode: Storage_OpenMode): Storage_Error;
 
-static IsGoodFileType(aName: TCollection_AsciiString): Storage_Error;
+  static IsGoodFileType(aName: TCollection_AsciiString): Storage_Error;
 
-BeginWriteInfoSection(): Storage_Error;
+  BeginWriteInfoSection(): Storage_Error;
 
-BeginReadInfoSection(): Storage_Error;
+  BeginReadInfoSection(): Storage_Error;
 
-WritePersistentObjectHeader(aRef: number, aType: number): void;
+  WritePersistentObjectHeader(aRef: number, aType: number): void;
 
-BeginWritePersistentObjectData(): void;
+  BeginWritePersistentObjectData(): void;
 
-BeginWriteObjectData(): void;
+  BeginWriteObjectData(): void;
 
-EndWriteObjectData(): void;
+  EndWriteObjectData(): void;
 
-EndWritePersistentObjectData(): void;
+  EndWritePersistentObjectData(): void;
 
-ReadPersistentObjectHeader(aRef: number, aType: number): { aRef: number; aType: number };
+  ReadPersistentObjectHeader(aRef: number, aType: number): { aRef: number; aType: number };
 
-BeginReadPersistentObjectData(): void;
+  BeginReadPersistentObjectData(): void;
 
-BeginReadObjectData(): void;
+  BeginReadObjectData(): void;
 
-EndReadObjectData(): void;
+  EndReadObjectData(): void;
 
-EndReadPersistentObjectData(): void;
+  EndReadPersistentObjectData(): void;
 
-Destroy(): void;
+  Destroy(): void;
 
-static MagicNumber(): string;
+  static MagicNumber(): string;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 FSD_FileHeader: declare class FSD_FileHeader
 
-constructor
+  constructor
 
-testindian: number
+  testindian: number
 
-binfo: number
+  binfo: number
 
-einfo: number
+  einfo: number
 
-bcomment: number
+  bcomment: number
 
-ecomment: number
+  ecomment: number
 
-btype: number
+  btype: number
 
-etype: number
+  etype: number
 
-broot: number
+  broot: number
 
-eroot: number
+  eroot: number
 
-bref: number
+  bref: number
 
-eref: number
+  eref: number
 
-bdata: number
+  bdata: number
 
-edata: number
+  edata: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

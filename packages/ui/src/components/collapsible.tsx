@@ -43,7 +43,7 @@ function CollapsibleTrigger({
   return (
     <CollapsiblePrimitive.CollapsibleTrigger
       data-slot='collapsible-trigger'
-      className={cn('outline-none focus-visible:ring-2 focus-visible:ring-ring', className)}
+      className={cn('outline-none focus-visible:focus-outline', className)}
       {...properties}
     />
   );

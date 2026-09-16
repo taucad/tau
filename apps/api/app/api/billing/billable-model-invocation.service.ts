@@ -732,6 +732,12 @@ export class BillableModelInvocationService {
     if (!paused) {
       return;
     }
+    const { pool } = classifyFundedLlmCapacity(intent.activity);
+    this.metrics?.billingFundedOperationDenials.add(1, {
+      'deployment.environment': intent.environment,
+      'tau.billing.capacity_pool': pool,
+      'tau.billing.denial.reason': 'supplier_route_paused',
+    });
     this.logger.warn(`Funded admission denied: supplier_route_paused for ${qualification.sku} by case ${paused.id}`);
     throw new LlmGatewayError(
       HttpStatus.SERVICE_UNAVAILABLE,

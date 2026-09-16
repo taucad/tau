@@ -2,7 +2,7 @@
 import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import type { DynamicModule, NestModule, OnModuleInit } from '@nestjs/common';
-import { Global, HttpException, Inject, Logger, Module } from '@nestjs/common';
+import { Global, HttpException, Inject, Logger, Module, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DiscoveryModule, DiscoveryService, HttpAdapterHost, MetadataScanner } from '@nestjs/core';
 import { betterAuth } from 'better-auth';
@@ -34,13 +34,9 @@ const hooks = [
   exports: [AuthService],
 })
 export class AuthModule implements NestModule, OnModuleInit {
-  public static forRootAsync(): DynamicModule {
-    return {
-      global: true,
-      module: AuthModule,
-      imports: [DatabaseModule, EmailModule, BillingModule],
-      providers: [
-        {
+  public static forRootAsync(options: { readonly tauCloudEnabled: boolean }): DynamicModule {
+    const authProvider = options.tauCloudEnabled
+      ? {
           provide: authInstanceKey,
           // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest resolves four distinct auth composition tokens.
           async useFactory(
@@ -49,18 +45,26 @@ export class AuthModule implements NestModule, OnModuleInit {
             emailService: EmailService,
             closure: BillingAccountClosureService,
           ): Promise<AuthInstance> {
-            const config = getBetterAuthConfig({
-              databaseService,
-              configService,
-              emailService,
-              closure,
-            });
-            return betterAuth(config);
+            return betterAuth(getBetterAuthConfig({ databaseService, configService, emailService, closure }));
           },
           inject: [DatabaseService, ConfigService, EmailService, BillingAccountClosureService],
-        },
-        BetterAuthService,
-      ],
+        }
+      : {
+          provide: authInstanceKey,
+          async useFactory(
+            databaseService: DatabaseService,
+            configService: ConfigService<Environment, true>,
+            emailService: EmailService,
+          ): Promise<AuthInstance> {
+            return betterAuth(getBetterAuthConfig({ databaseService, configService, emailService }));
+          },
+          inject: [DatabaseService, ConfigService, EmailService],
+        };
+    return {
+      global: true,
+      module: AuthModule,
+      imports: [DatabaseModule, EmailModule, ...(options.tauCloudEnabled ? [BillingModule] : [])],
+      providers: [authProvider, BetterAuthService],
       exports: [authInstanceKey, BetterAuthService],
     };
   }
@@ -72,7 +76,8 @@ export class AuthModule implements NestModule, OnModuleInit {
     @Inject(DiscoveryService) private readonly discoveryService: DiscoveryService,
     @Inject(MetadataScanner) private readonly metadataScanner: MetadataScanner,
     @Inject(HttpAdapterHost) private readonly adapter: HttpAdapterHost<FastifyAdapter>,
-    @Inject(BillingPaymentsService) private readonly payments: BillingPaymentsService,
+    // oxlint-disable-next-line eslint/new-cap -- Nest's Optional decorator is a function by contract.
+    @Optional() @Inject(BillingPaymentsService) private readonly payments?: BillingPaymentsService,
   ) {}
 
   public onModuleInit(): void {
@@ -117,32 +122,34 @@ export class AuthModule implements NestModule, OnModuleInit {
     }
 
     // This scoped parser preserves signed bytes ahead of the authentication wildcard.
-    const stripeWebhookPath = `${basePath}/stripe/webhook`;
-    void instance.register(async (scoped) => {
-      scoped.removeContentTypeParser('application/json');
-      scoped.addContentTypeParser(
-        'application/json',
-        { parseAs: 'buffer', bodyLimit: 1024 * 1024 },
-        (_request, body, done) => {
-          done(null, body);
-        },
-      );
-      scoped.post(stripeWebhookPath, { bodyLimit: 1024 * 1024 }, async (request: Request, reply: Reply) => {
-        if (!Buffer.isBuffer(request.body) || typeof request.headers['stripe-signature'] !== 'string') {
-          await reply.status(400).send({ code: 'invalid_stripe_delivery' });
-          return;
-        }
-        try {
-          await this.payments.receiveWebhook(new Uint8Array(request.body), request.headers['stripe-signature']);
-          await reply.status(200).send({ received: true });
-        } catch (error) {
-          const status = error instanceof HttpException ? error.getStatus() : 503;
-          await reply
-            .status(status)
-            .send({ code: status >= 500 ? 'stripe_inbox_unavailable' : 'invalid_stripe_delivery' });
-        }
+    if (this.payments) {
+      const stripeWebhookPath = `${basePath}/stripe/webhook`;
+      void instance.register(async (scoped) => {
+        scoped.removeContentTypeParser('application/json');
+        scoped.addContentTypeParser(
+          'application/json',
+          { parseAs: 'buffer', bodyLimit: 1024 * 1024 },
+          (_request, body, done) => {
+            done(null, body);
+          },
+        );
+        scoped.post(stripeWebhookPath, { bodyLimit: 1024 * 1024 }, async (request: Request, reply: Reply) => {
+          if (!Buffer.isBuffer(request.body) || typeof request.headers['stripe-signature'] !== 'string') {
+            await reply.status(400).send({ code: 'invalid_stripe_delivery' });
+            return;
+          }
+          try {
+            await this.payments?.receiveWebhook(new Uint8Array(request.body), request.headers['stripe-signature']);
+            await reply.status(200).send({ received: true });
+          } catch (error) {
+            const status = error instanceof HttpException ? error.getStatus() : 503;
+            await reply
+              .status(status)
+              .send({ code: status >= 500 ? 'stripe_inbox_unavailable' : 'invalid_stripe_delivery' });
+          }
+        });
       });
-    });
+    }
 
     // Configure the auth routes
     instance.all(`${basePath}/*`, async (request: Request, reply: Reply) => {

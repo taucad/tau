@@ -4,7 +4,7 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { FileEntry } from '@taucad/types';
 import type { ListedDirectoryEntry } from '@taucad/fs-client/directory-listing';
-import { builtInSystemSkills } from '#lib/system-skills-catalog.js';
+import { systemSkillsCatalog } from '#lib/system-skills-catalog.js';
 
 const mockReadFile = vi.fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>();
 const mockListDirectory = vi.fn<(path: string) => Promise<ListedDirectoryEntry[]>>();
@@ -281,10 +281,10 @@ describe('useContextPayload', () => {
     expect(mockListDirectory).not.toHaveBeenCalledWith('.tau/skills');
   });
 
-  it('should discover built-in system skills as virtual resources without filesystem reads', async () => {
-    const createSkill = builtInSystemSkills.find((skill) => skill.slug === 'create-skill');
+  it('should discover system skills as virtual resources without filesystem reads', async () => {
+    const createSkill = systemSkillsCatalog.find((skill) => skill.slug === 'create-skill');
     if (!createSkill) {
-      throw new Error('Expected built-in create-skill to be registered');
+      throw new Error('Expected system create-skill to be registered');
     }
 
     const { result } = renderHook(() => useContextPayload());

@@ -4,139 +4,139 @@
 
 GeomLProp: declare class GeomLProp
 
-constructor
+  constructor
 
-static Continuity(C1: Geom_Curve, C2: Geom_Curve, u1: number, u2: number, r1: boolean, r2: boolean, tl: number, ta: number): GeomAbs_Shape;
-static Continuity(C1: Geom_Curve, C2: Geom_Curve, u1: number, u2: number, r1: boolean, r2: boolean): GeomAbs_Shape;
-static Continuity(C1: Geom_Curve, C2: Geom_Curve, u1: number, u2: number, r1: boolean, r2: boolean, tl: number, ta: number): GeomAbs_Shape;
-static Continuity(C1: Geom_Curve, C2: Geom_Curve, u1: number, u2: number, r1: boolean, r2: boolean): GeomAbs_Shape;
+  static Continuity(C1: Geom_Curve, C2: Geom_Curve, u1: number, u2: number, r1: boolean, r2: boolean, tl: number, ta: number): GeomAbs_Shape;
+  static Continuity(C1: Geom_Curve, C2: Geom_Curve, u1: number, u2: number, r1: boolean, r2: boolean): GeomAbs_Shape;
+  static Continuity(C1: Geom_Curve, C2: Geom_Curve, u1: number, u2: number, r1: boolean, r2: boolean, tl: number, ta: number): GeomAbs_Shape;
+  static Continuity(C1: Geom_Curve, C2: Geom_Curve, u1: number, u2: number, r1: boolean, r2: boolean): GeomAbs_Shape;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomLProp_CLProps: declare class GeomLProp_CLProps
 
-constructor
+  constructor
 
-SetParameter(U: number): void;
+  SetParameter(U: number): void;
 
-SetCurve(C: Geom_Curve): void;
+  SetCurve(C: Geom_Curve): void;
 
-Value(): gp_Pnt;
+  Value(): gp_Pnt;
 
-D1(): gp_Vec;
+  D1(): gp_Vec;
 
-D2(): gp_Vec;
+  D2(): gp_Vec;
 
-D3(): gp_Vec;
+  D3(): gp_Vec;
 
-IsTangentDefined(): boolean;
+  IsTangentDefined(): boolean;
 
-Tangent(D: gp_Dir): void;
+  Tangent(D: gp_Dir): void;
 
-Curvature(): number;
+  Curvature(): number;
 
-Normal(N: gp_Dir): void;
+  Normal(N: gp_Dir): void;
 
-CentreOfCurvature(P: gp_Pnt): void;
+  CentreOfCurvature(P: gp_Pnt): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomLProp_CLProps2d: declare class GeomLProp_CLProps2d
 
-constructor
+  constructor
 
-SetParameter(U: number): void;
+  SetParameter(U: number): void;
 
-SetCurve(C: Geom2d_Curve): void;
+  SetCurve(C: Geom2d_Curve): void;
 
-Value(): gp_Pnt2d;
+  Value(): gp_Pnt2d;
 
-D1(): gp_Vec2d;
+  D1(): gp_Vec2d;
 
-D2(): gp_Vec2d;
+  D2(): gp_Vec2d;
 
-D3(): gp_Vec2d;
+  D3(): gp_Vec2d;
 
-IsTangentDefined(): boolean;
+  IsTangentDefined(): boolean;
 
-Tangent(D: gp_Dir2d): void;
+  Tangent(D: gp_Dir2d): void;
 
-Curvature(): number;
+  Curvature(): number;
 
-Normal(N: gp_Dir2d): void;
+  Normal(N: gp_Dir2d): void;
 
-CentreOfCurvature(P: gp_Pnt2d): void;
+  CentreOfCurvature(P: gp_Pnt2d): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomLProp_CurAndInf2d: declare class GeomLProp_CurAndInf2d extends LProp_CurAndInf
 
-constructor
+  constructor
 
-Perform(C: Geom2d_Curve): void;
+  Perform(C: Geom2d_Curve): void;
 
-PerformCurExt(C: Geom2d_Curve): void;
+  PerformCurExt(C: Geom2d_Curve): void;
 
-PerformInf(C: Geom2d_Curve): void;
+  PerformInf(C: Geom2d_Curve): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GeomLProp_SLProps: declare class GeomLProp_SLProps
 
-constructor
+  constructor
 
-SetSurface(S: Geom_Surface): void;
+  SetSurface(S: Geom_Surface): void;
 
-SetParameters(U: number, V: number): void;
+  SetParameters(U: number, V: number): void;
 
-Value(): gp_Pnt;
+  Value(): gp_Pnt;
 
-D1U(): gp_Vec;
+  D1U(): gp_Vec;
 
-D1V(): gp_Vec;
+  D1V(): gp_Vec;
 
-D2U(): gp_Vec;
+  D2U(): gp_Vec;
 
-D2V(): gp_Vec;
+  D2V(): gp_Vec;
 
-DUV(): gp_Vec;
+  DUV(): gp_Vec;
 
-IsTangentUDefined(): boolean;
+  IsTangentUDefined(): boolean;
 
-TangentU(D: gp_Dir): void;
+  TangentU(D: gp_Dir): void;
 
-IsTangentVDefined(): boolean;
+  IsTangentVDefined(): boolean;
 
-TangentV(D: gp_Dir): void;
+  TangentV(D: gp_Dir): void;
 
-IsNormalDefined(): boolean;
+  IsNormalDefined(): boolean;
 
-Normal(): gp_Dir;
+  Normal(): gp_Dir;
 
-IsCurvatureDefined(): boolean;
+  IsCurvatureDefined(): boolean;
 
-IsUmbilic(): boolean;
+  IsUmbilic(): boolean;
 
-MaxCurvature(): number;
+  MaxCurvature(): number;
 
-MinCurvature(): number;
+  MinCurvature(): number;
 
-CurvatureDirections(MaxD: gp_Dir, MinD: gp_Dir): void;
+  CurvatureDirections(MaxD: gp_Dir, MinD: gp_Dir): void;
 
-MeanCurvature(): number;
+  MeanCurvature(): number;
 
-GaussianCurvature(): number;
+  GaussianCurvature(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

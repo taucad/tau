@@ -3,15 +3,18 @@ import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completio
 import { openAIResponsesApi } from '@earendil-works/pi-ai/api/openai-responses.lazy';
 import type {
   Api,
+  AnthropicOptions,
   AssistantMessage,
   AssistantMessageEvent,
   Context,
   Model,
   ModelCostRates,
-  ProviderStreams,
+  OpenAICompletionsOptions,
+  OpenAIResponsesOptions,
 } from '@earendil-works/pi-ai';
 import { util as zodUtility } from 'zod';
 import { MessageIdentities, providerMessageToPi } from '#harness/session-record.js';
+import { createVertexResponseShim, echoThoughtSignatures } from '#transport/vertex-completions-shim.js';
 import type { JsonObject, ModelProviderKind, ModelSystemPromptBlock } from '#log/event-types.js';
 import type { ModelInvocationBinding, ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
 
@@ -120,7 +123,7 @@ export const isGatewayProviderKind = (providerKind: string | undefined): boolean
  * @public
  */
 export const isOpenAiResponsesProviderKind = (providerKind: ModelProviderKind | undefined): boolean =>
-  providerKind === 'openai';
+  providerKind === 'openai' || providerKind === 'xai';
 
 /** Input matching Tau API's static/workspace/dynamic cache layout. @public */
 export type CachedSystemPromptOptions = {
@@ -179,6 +182,18 @@ export type GatewayModelTransportOptions = {
       }
     | undefined;
   readonly fetch?: typeof globalThis.fetch | undefined;
+  /** Optional funded-operation protocol supplied only by a managed Cloud composition. */
+  readonly fundedOperations?: GatewayFundedOperationProtocol | undefined;
+};
+
+/** Managed Cloud operation binding kept outside the provider transport's self-host graph. @public */
+export type GatewayFundedOperationProtocol = {
+  /** Whether the selected provider uses Tau-funded operation accounting. */
+  usesBillingAttempt(providerKind: ModelProviderKind | undefined): boolean;
+  /** Recover an ambiguous attempt without dispatching it again. */
+  lookupAttempt(attemptId: string, signal: AbortSignal): Promise<ModelInvocationBinding | undefined>;
+  /** Require and validate the operation identity on an accepted gateway response. */
+  bindResponse(response: Response): ModelInvocationBinding;
 };
 
 type WireRecord = Record<string, unknown>;
@@ -263,7 +278,7 @@ const flattenedGatewayError = (payload: WireRecord, status: number): GatewayMode
   });
 };
 
-const responseError = async (response: Response): Promise<GatewayModelTransportError> => {
+export const gatewayResponseError = async (response: Response): Promise<GatewayModelTransportError> => {
   let payload: unknown;
   try {
     payload = await response.json();
@@ -370,6 +385,7 @@ const authenticatedFetch =
     readonly state: GatewayFetchState;
     readonly providerKind: ModelProviderKind;
     readonly attemptId: string;
+    readonly fundedOperations?: GatewayFundedOperationProtocol | undefined;
     readonly onInvocationBound?: ModelStreamRequest['onInvocationBound'];
     readonly systemPromptBlocks?: readonly ModelSystemPromptBlock[] | undefined;
   }): typeof globalThis.fetch =>
@@ -414,22 +430,14 @@ const authenticatedFetch =
         headers,
       });
       if (!response.ok) {
-        const failure = await responseError(response);
+        const failure = await gatewayResponseError(response);
         options.state.failure = failure;
         throw failure;
       }
-      const operationId = response.headers.get('x-tau-operation-id');
-      if (!operationId || operationId.length > 128 || !/^[\u0021-\u007E]+$/u.test(operationId)) {
-        const failure = new GatewayModelTransportError({
-          code: 'MALFORMED_RESPONSE',
-          message: 'Tau model gateway did not return a valid operation identity.',
-          status: response.status,
-        });
-        options.state.failure = failure;
-        throw failure;
+      if (options.fundedOperations) {
+        options.state.binding = options.fundedOperations.bindResponse(response);
+        await options.onInvocationBound?.(options.state.binding);
       }
-      options.state.binding = { operationId, status: 'pending' };
-      await options.onInvocationBound?.(options.state.binding);
       const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase();
       if (contentType !== 'text/event-stream' || !response.body) {
         const failure = new GatewayModelTransportError({
@@ -493,6 +501,9 @@ const piModelFor = (options: {
         ...common,
         api: 'anthropic-messages',
         baseUrl: baseUrlFor(options.transport.baseUrl, anthropicGatewayPath),
+        ...(options.request.reasoning?.budgetTokens === undefined && options.request.reasoning !== undefined
+          ? { compat: { forceAdaptiveThinking: true } }
+          : {}),
       }
     : {
         ...common,
@@ -500,6 +511,7 @@ const piModelFor = (options: {
         // `/chat/completions` or `/responses` to it.
         api: isOpenAiResponsesProviderKind(options.request.providerKind) ? 'openai-responses' : 'openai-completions',
         baseUrl: baseUrlFor(options.transport.baseUrl, openAiGatewayPath),
+        ...(options.request.providerKind === 'vertexai' ? { compat: { supportsDeveloperRole: false } } : {}),
       };
 };
 
@@ -517,13 +529,6 @@ const piContextFor = (request: ModelStreamRequest, model: PiGatewayModel): Conte
   return { systemPrompt: request.systemPrompt, messages, tools };
 };
 
-const piApiFor = (providerKind: ModelProviderKind | undefined): ProviderStreams =>
-  providerKind === 'anthropic'
-    ? anthropicMessagesApi()
-    : isOpenAiResponsesProviderKind(providerKind)
-      ? openAIResponsesApi()
-      : openAICompletionsApi();
-
 const metadataFor = (message: AssistantMessage): JsonObject | undefined => {
   const metadata: JsonObject = {
     ...(message.responseId ? { responseId: message.responseId } : {}),
@@ -538,8 +543,21 @@ const signatureEvents = (message: AssistantMessage, emitted: Map<number, string>
       return [];
     }
     emitted.set(index, block.thinkingSignature);
-    return [{ type: 'thinking-delta', text: '', signature: block.thinkingSignature }];
+    return [{ type: 'thinking-signature', contentIndex: index, signature: block.thinkingSignature }];
   });
+
+const streamedToolCall = (
+  event: Extract<AssistantMessageEvent, { readonly type: 'toolcall_start' | 'toolcall_delta' }>,
+) => {
+  const block = event.partial.content[event.contentIndex];
+  if (block?.type !== 'toolCall') {
+    throw new GatewayModelTransportError({
+      code: 'MALFORMED_RESPONSE',
+      message: `pi-ai emitted ${event.type} without a tool call at content index ${event.contentIndex}.`,
+    });
+  }
+  return block;
+};
 
 const abortError = (signal: AbortSignal): Error =>
   signal.reason instanceof Error ? signal.reason : new DOMException('The operation was aborted.', 'AbortError');
@@ -556,29 +574,67 @@ const streamPiEvents = async function* (options: {
   readonly events: AsyncIterable<AssistantMessageEvent>;
   readonly state: GatewayFetchState;
   readonly signal: AbortSignal;
+  /** Gemini thought signatures captured off the wire by the Vertex shim. */
+  readonly thoughtSignatures: ReadonlyMap<string, string>;
 }): AsyncGenerator<ModelStreamEvent> {
   const emittedSignatures = new Map<number, string>();
   let terminal = false;
   for await (const event of options.events) {
+    if (event.type === 'text_start') {
+      yield { type: 'text-start', contentIndex: event.contentIndex };
+      continue;
+    }
     if (event.type === 'text_delta') {
-      yield { type: 'text-delta', text: event.delta };
+      yield { type: 'text-delta', contentIndex: event.contentIndex, text: event.delta };
+      continue;
+    }
+    if (event.type === 'text_end') {
+      yield { type: 'text-end', contentIndex: event.contentIndex, content: event.content };
+      continue;
+    }
+    if (event.type === 'thinking_start') {
+      yield { type: 'thinking-start', contentIndex: event.contentIndex };
       continue;
     }
     if (event.type === 'thinking_delta') {
-      yield { type: 'thinking-delta', text: event.delta };
+      yield { type: 'thinking-delta', contentIndex: event.contentIndex, text: event.delta };
       continue;
     }
     if (event.type === 'thinking_end') {
+      yield { type: 'thinking-end', contentIndex: event.contentIndex, content: event.content };
       yield* signatureEvents(event.partial, emittedSignatures);
       continue;
     }
+    if (event.type === 'toolcall_start') {
+      const toolCall = streamedToolCall(event);
+      yield {
+        type: 'tool-input-start',
+        contentIndex: event.contentIndex,
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+      };
+      continue;
+    }
+    if (event.type === 'toolcall_delta') {
+      const toolCall = streamedToolCall(event);
+      yield {
+        type: 'tool-input-delta',
+        contentIndex: event.contentIndex,
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+        delta: event.delta,
+      };
+      continue;
+    }
     if (event.type === 'toolcall_end') {
+      const thoughtSignature = options.thoughtSignatures.get(event.toolCall.id);
       yield {
         type: 'tool-input',
+        contentIndex: event.contentIndex,
         toolCallId: event.toolCall.id,
         toolName: event.toolCall.name,
         input: event.toolCall.arguments,
-        ...(event.toolCall.thoughtSignature === undefined ? {} : { thoughtSignature: event.toolCall.thoughtSignature }),
+        ...(thoughtSignature === undefined ? {} : { thoughtSignature }),
       };
       continue;
     }
@@ -624,54 +680,12 @@ const streamPiEvents = async function* (options: {
  * @public
  */
 export const createGatewayModelTransport = (options: GatewayModelTransportOptions): ModelTransport => ({
-  usesBillingAttempt: isGatewayProviderKind,
-  async lookupAttempt(attemptId, signal) {
-    if (!attemptId || attemptId.length > 128 || !/^[\u0021-\u007E]+$/u.test(attemptId)) {
-      throw new GatewayModelTransportError({
-        code: 'INVALID_REQUEST',
-        message: 'Invalid Tau invocation attempt identity.',
-      });
-    }
-    const headers = new Headers();
-    const token = await options.auth?.();
-    if (token !== undefined) {
-      headers.set('authorization', `Bearer ${token}`);
-    }
-    const response = await (options.fetch ?? globalThis.fetch.bind(globalThis))(
-      new URL(
-        `v1/billing/attempts/gateway/${encodeURIComponent(attemptId)}`,
-        options.baseUrl.endsWith('/') ? options.baseUrl : `${options.baseUrl}/`,
-      ),
-      { credentials: 'include', headers, signal },
-    );
-    if (!response.ok) {
-      throw await responseError(response);
-    }
-    const payload: unknown = await response.json();
-    if (!zodUtility.isObject(payload)) {
-      throw new GatewayModelTransportError({
-        code: 'MALFORMED_RESPONSE',
-        message: 'Tau attempt lookup returned invalid JSON.',
-      });
-    }
-    if (payload['state'] === 'not_found') {
-      return undefined;
-    }
-    const operationId = readString(payload, 'operationId');
-    const state = readString(payload, 'state');
-    if (
-      !operationId ||
-      operationId.length > 128 ||
-      !/^[\u0021-\u007E]+$/u.test(operationId) ||
-      !['pending', 'terminal', 'unavailable'].includes(state ?? '')
-    ) {
-      throw new GatewayModelTransportError({
-        code: 'MALFORMED_RESPONSE',
-        message: 'Tau attempt lookup returned an invalid operation envelope.',
-      });
-    }
-    return { operationId, status: state as ModelInvocationBinding['status'] };
-  },
+  ...(options.fundedOperations
+    ? {
+        usesBillingAttempt: options.fundedOperations.usesBillingAttempt,
+        lookupAttempt: options.fundedOperations.lookupAttempt,
+      }
+    : {}),
   async *stream(request) {
     if (!request.attemptId || request.attemptId.length > 128 || !/^[\u0021-\u007E]+$/u.test(request.attemptId)) {
       throw new GatewayModelTransportError({
@@ -685,27 +699,101 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
         message: `The browser gateway transport does not speak the ${request.providerKind ?? 'unknown'} provider wire.`,
       });
     }
+    if (
+      request.providerKind === 'vertexai' &&
+      request.reasoning?.effort !== undefined &&
+      !['low', 'medium', 'high'].includes(request.reasoning.effort)
+    ) {
+      throw new GatewayModelTransportError({
+        code: 'INVALID_REQUEST',
+        message: `Vertex does not support ${request.reasoning.effort} reasoning effort.`,
+      });
+    }
     const model = piModelFor({ request, transport: options });
     const state: GatewayFetchState = {};
-    const events = piApiFor(request.providerKind).stream(model as Model<Api>, piContextFor(request, model), {
+    const context = piContextFor(request, model);
+    const thoughtSignatures = new Map<string, string>();
+    const gatewayFetch = authenticatedFetch({
+      ...(options.auth === undefined ? {} : { auth: options.auth }),
+      // Bound: a bare globalThis.fetch reference invoked as options.fetch(...)
+      // carries the wrong `this` and throws Illegal invocation in a WorkerGlobalScope.
+      fetch: options.fetch ?? globalThis.fetch.bind(globalThis),
+      signal: request.signal,
+      state,
+      providerKind: request.providerKind!,
+      attemptId: request.attemptId,
+      fundedOperations: options.fundedOperations,
+      ...(options.fundedOperations && request.onInvocationBound
+        ? { onInvocationBound: request.onInvocationBound }
+        : {}),
+      systemPromptBlocks: request.systemPromptBlocks,
+    });
+    const commonOptions = {
       headers: piCookieAuthValidationHeaders,
       cacheRetention: 'short',
-      fetch: authenticatedFetch({
-        ...(options.auth === undefined ? {} : { auth: options.auth }),
-        // Bound: a bare globalThis.fetch reference invoked as options.fetch(...)
-        // carries the wrong `this` and throws Illegal invocation in a WorkerGlobalScope.
-        fetch: options.fetch ?? globalThis.fetch.bind(globalThis),
-        signal: request.signal,
-        state,
-        providerKind: request.providerKind!,
-        attemptId: request.attemptId,
-        onInvocationBound: request.onInvocationBound,
-        systemPromptBlocks: request.systemPromptBlocks,
-      }),
+      // Gemini's thought markers and tool-call thought signatures are rewritten
+      // into the OpenAI-compatible shape before pi's codec reads a byte. Every
+      // other provider keeps the gateway response untouched.
+      fetch:
+        request.providerKind === 'vertexai'
+          ? ((async (input, init) => {
+              const response = await gatewayFetch(input, init);
+              // `authenticatedFetch` has already refused a body-less response.
+              return new Response(response.body!.pipeThrough(createVertexResponseShim(thoughtSignatures)), {
+                status: response.status,
+                statusText: response.statusText,
+                headers: response.headers,
+              });
+            }) satisfies typeof globalThis.fetch)
+          : gatewayFetch,
       maxRetries: 0,
       ...(request.maxTokens === undefined ? {} : { maxTokens: request.maxTokens }),
       signal: request.signal,
-    });
-    yield* streamPiEvents({ events, state, signal: request.signal });
+    } as const;
+    const { reasoning } = request;
+    const events =
+      request.providerKind === 'anthropic'
+        ? anthropicMessagesApi().stream(model as Model<'anthropic-messages'>, context, {
+            ...commonOptions,
+            ...(reasoning === undefined
+              ? {}
+              : {
+                  thinkingEnabled: true,
+                  ...(reasoning.budgetTokens === undefined ? {} : { thinkingBudgetTokens: reasoning.budgetTokens }),
+                  ...(reasoning.display === undefined ? {} : { thinkingDisplay: reasoning.display }),
+                  ...(reasoning.effort === undefined
+                    ? {}
+                    : { effort: reasoning.effort === 'minimal' ? 'low' : reasoning.effort }),
+                }),
+          } satisfies AnthropicOptions)
+        : isOpenAiResponsesProviderKind(request.providerKind)
+          ? openAIResponsesApi().stream(model as Model<'openai-responses'>, context, {
+              ...commonOptions,
+              ...(reasoning?.effort === undefined ? {} : { reasoningEffort: reasoning.effort }),
+              ...(reasoning?.summary === undefined ? {} : { reasoningSummary: reasoning.summary }),
+            } satisfies OpenAIResponsesOptions)
+          : openAICompletionsApi().stream(model as Model<'openai-completions'>, context, {
+              ...commonOptions,
+              ...(request.providerKind === 'vertexai' ? { onPayload: echoThoughtSignatures(context) } : {}),
+              ...(request.providerKind === 'vertexai' && reasoning?.effort !== undefined
+                ? {
+                    /* eslint-disable @typescript-eslint/naming-convention -- Upstream Gemini wire keys use snake_case. */
+                    samplingParams: {
+                      extra_body: {
+                        google: {
+                          thinking_config: {
+                            include_thoughts: true,
+                            thinking_level: reasoning.effort.toUpperCase(),
+                          },
+                          thought_tag_marker: 'think',
+                          stream_function_call_arguments: true,
+                        },
+                      },
+                    },
+                    /* eslint-enable @typescript-eslint/naming-convention -- End upstream Gemini payload. */
+                  }
+                : {}),
+            } satisfies OpenAICompletionsOptions);
+    yield* streamPiEvents({ events, state, signal: request.signal, thoughtSignatures });
   },
 });

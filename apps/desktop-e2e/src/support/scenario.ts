@@ -12,10 +12,8 @@ import type { DesktopSession } from '#support/desktop-app.js';
  * Both tiers drive the same path — connect a folder, pick a kernel, pick a
  * model, submit a prompt — and differ only in which model runs and how tight
  * the assertions are afterwards. It is written against the desktop shell's own
- * affordances rather than `ui-e2e`'s cookie seeding, because `app://` is not a
- * cookieable scheme: `document.cookie` is refused
- * (`EXCLUDE_NONCOOKIEABLE_SCHEME`), so every `useCookie` preference — kernel,
- * chat model, cookie consent — has to be set by clicking.
+ * affordances rather than `ui-e2e`'s cookie seeding. Desktop product
+ * preferences are localStorage-backed and its renderer is cookie-free.
  */
 
 const composerSelector = '[aria-label="Ask Tau to build anything..."]';
@@ -46,15 +44,20 @@ const filesPaneOf = (page: Page): Locator => page.getByRole('region', { name: /^
 export const fileTreeItemOf = (page: Page, path: string): Locator =>
   filesPaneOf(page).locator(`[data-testid="file-tree-item"][data-file-tree-path="${path}"]`);
 
-/** Dismiss the cookie banner if it is up. Declining is the privacy-preserving option. */
-export const declineCookieBanner = async (page: Page): Promise<void> => {
-  const decline = page.getByRole('button', { name: /^Decline$/iu });
-  try {
-    await decline.first().waitFor({ state: 'visible', timeout: 3000 });
-    await decline.first().click();
-  } catch {
-    // Consent was already recorded or Global Privacy Control dismissed it.
-  }
+/** Proves a fresh Electron profile contains no website privacy or footer surface. */
+export const expectDesktopSurfaceBoundary = async (session: DesktopSession): Promise<void> => {
+  const { page } = session;
+  await expectCount(page.getByRole('button', { name: /^Decline$/iu }), 0);
+  await expectCount(page.locator('footer'), 0);
+  await expectCount(page.getByRole('link', { name: /^(?:Cookies|Legal)$/iu }), 0);
+  expect(await page.evaluate(() => document.cookie)).toBe('');
+  expect(await page.context().cookies()).toEqual([]);
+  expectNoDesktopAnalytics(session);
+};
+
+/** Desktop never sends analytics; the recorder has run since launch. Call again at scenario end. */
+export const expectNoDesktopAnalytics = (session: DesktopSession): void => {
+  expect(session.analyticsRequests).toEqual([]);
 };
 
 /** Assert the shell resolved the seeded credential into a real session. */
@@ -107,6 +110,16 @@ export const selectChatModel = async (page: Page, modelName: string): Promise<vo
   await page.getByRole('option', { name: modelName, exact: true }).first().click();
 };
 
+/** Select a model from the active external agent's own model namespace. */
+export const selectAgentModel = async (page: Page, modelName: string): Promise<void> => {
+  await parkPointer(page);
+  await page
+    .getByRole('button', { name: /^Select model \(/u })
+    .first()
+    .click();
+  await page.getByRole('option', { name: modelName, exact: true }).first().click();
+};
+
 /**
  * Park the pointer in a dead corner.
  *
@@ -117,12 +130,16 @@ export const selectChatModel = async (page: Page, modelName: string): Promise<vo
 export const parkPointer = async (page: Page): Promise<void> => {
   await page.mouse.move(4, 4);
   await page.keyboard.press('Escape');
-  await expectCount(page.locator('[data-radix-popper-content-wrapper]'), 0, 15_000);
+  await expectCount(
+    page.locator('[data-radix-popper-content-wrapper]:not(:has([data-slot="tooltip-content"]))'),
+    0,
+    15_000,
+  );
 };
 
 /** Choose the CAD kernel from the home page's kernel row. */
 export const selectKernel = async (page: Page, kernelName: string): Promise<void> => {
-  await page.getByRole('button', { name: kernelName, exact: true }).click();
+  await page.getByRole('button', { name: kernelName, exact: true }).first().click();
   await parkPointer(page);
 };
 

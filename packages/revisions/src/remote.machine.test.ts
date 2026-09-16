@@ -34,11 +34,15 @@
  * | 25 | `authorizing → reconnectRequired` | the third `onError` edge into it, so all three are covered |
  * | 26 | `reconnectRequired --connect--> choosing` | the edge *Reconnect GitHub* actually takes |
  * | 27 | `reconnectRequired --disconnect--> disconnecting → none` | leaving a remote whose credential died |
+ * | 28 | `reading --connect--> choosing → … → connected` | an opening gesture is not lost behind config rehydration |
+ *
+ * | 29 | `authorizing|validating|initialSync → abandoning → failed` | **C10**: a failed attempt removes the remote it wrote, so the next open is not `connected` |
+ * | 30 | `reconnectRequired --authorized--> validating → failed` | **C10**: and an attempt that wrote nothing removes nothing |
  *
  * With rows 25–27 every transition in the machine has a row (W12 review R6).
  */
 
-import { createActor, fromPromise } from 'xstate';
+import { createActor, fromPromise, setup } from 'xstate';
 import type { Actor, PromiseActorLogic } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
@@ -130,6 +134,34 @@ const settle = async (): Promise<void> => {
 };
 
 describe('remoteMachine', () => {
+  it('tells its parent when the remote comes and goes, so a sibling scheduler starts on the fact (W18 review DEF-6b, P53)', async () => {
+    const received: Array<{ type: string }> = [];
+    const parent = createActor(
+      setup({}).createMachine({ on: { '*': { actions: ({ event }) => received.push(event) } } }),
+    ).start();
+    const actor = createActor(
+      remoteMachine.provide({ actors: start().actor.logic.implementations.actors as RemoteActors }),
+      {
+        input: { projectId: 'p1', parentRef: parent },
+      },
+    );
+    actor.start();
+    await settle();
+
+    actor.send({ type: 'connect', kind: 'tau' });
+    await settle();
+    expect(actor.getSnapshot().matches('connected')).toBe(true);
+    expect(received).toStrictEqual([
+      { type: 'remoteConnected', kind: 'tau', url: tauRemote.url, name: tauRemote.name },
+    ]);
+
+    actor.send({ type: 'disconnect' });
+    await settle();
+    expect(received.at(-1)).toStrictEqual({ type: 'remoteDisconnected' });
+    actor.stop();
+    parent.stop();
+  });
+
   it('1: starts disconnected when the project has no remote', async () => {
     const { actor } = start();
 
@@ -141,8 +173,12 @@ describe('remoteMachine', () => {
       url: undefined,
       phase: 'none',
       storage: undefined,
+      quota: undefined,
       overQuota: [],
       error: undefined,
+      fetchOnly: false,
+      provider: undefined,
+      repositoryId: undefined,
     });
     actor.stop();
   });
@@ -171,6 +207,17 @@ describe('remoteMachine', () => {
     actor.stop();
   });
 
+  it('28: accepts a connect gesture while the initial remotes read is still pending', async () => {
+    const { actor } = start({ readRemote: pending() });
+
+    actor.send({ type: 'connect', kind: 'tau' });
+    expect(actor.getSnapshot().matches('choosing')).toBe(true);
+    await settle();
+
+    expect(actor.getSnapshot().matches('connected')).toBe(true);
+    actor.stop();
+  });
+
   it('4: treats “no remote” on a project with none as nothing to do', async () => {
     const { actor } = start();
     await settle();
@@ -195,8 +242,12 @@ describe('remoteMachine', () => {
       url: tauRemote.url,
       phase: 'connected',
       storage: { used: 2_100_000_000, quota: 10_000_000_000 },
+      quota: undefined,
       overQuota: [],
       error: undefined,
+      fetchOnly: false,
+      provider: undefined,
+      repositoryId: undefined,
     });
     expect(emitted).toStrictEqual([
       { type: 'remoteConnected', kind: 'tau', url: tauRemote.url },
@@ -280,6 +331,72 @@ describe('remoteMachine', () => {
 
     expect(actor.getSnapshot().matches('failed')).toBe(true);
     expect(emitted).toStrictEqual([{ type: 'toast.error', message: 'the push was refused' }]);
+    actor.stop();
+  });
+
+  it('29 (C10): a failed attempt removes the remote it wrote, so the next open is not “connected”', async () => {
+    const removals: unknown[] = [];
+    const removing: RemoteActors['removeRemote'] = fromPromise(async ({ input }): Promise<void> => {
+      removals.push(input);
+    });
+
+    const stages: ReadonlyArray<Readonly<{ stage: string; overrides: Overrides }>> = [
+      { stage: 'authorize', overrides: { authorize: failing('consent was refused') } },
+      { stage: 'validate', overrides: { validate: failing('the remote did not answer') } },
+      { stage: 'initialSync', overrides: { initialSync: failing('the push was refused') } },
+    ];
+    for (const { stage, overrides } of stages) {
+      removals.length = 0;
+      const { actor } = start({ ...overrides, removeRemote: removing });
+      // oxlint-disable-next-line no-await-in-loop -- one connect attempt per stage.
+      await settle();
+      actor.send({ type: 'connect', kind: 'tau' });
+      // oxlint-disable-next-line no-await-in-loop -- one connect attempt per stage.
+      await settle();
+
+      const facet = selectRemoteFacet(actor.getSnapshot());
+      expect({ stage, removals: [...removals] }).toStrictEqual({ stage, removals: [{ name: 'tau' }] });
+      /* `sync.machine` finds the remote through git's own config, not through
+       * this machine's phase, so leaving the remote behind was the whole
+       * defect: the next open read it as connected and started pushing. */
+      expect({ stage, kind: facet.kind, phase: facet.phase }).toStrictEqual({
+        stage,
+        kind: 'none',
+        phase: 'failed',
+      });
+      expect(facet.error).not.toBeUndefined();
+      actor.stop();
+    }
+  });
+
+  it('30 (C10): a reconnect that fails validation keeps the remote it did not write', async () => {
+    const removals: unknown[] = [];
+    let validations = 0;
+    const { actor } = start({
+      /* Reach `reconnectRequired` the way a rotated credential does. */
+      authorize: reauthorizing('Your connection needs to be renewed.'),
+      validate: fromPromise(async (): Promise<RemoteValidateActorOutput> => {
+        validations += 1;
+        throw new Error('the remote did not answer');
+      }),
+      removeRemote: fromPromise(async ({ input }): Promise<void> => {
+        removals.push(input);
+      }),
+    });
+    await settle();
+    actor.send({ type: 'connect', kind: 'tau' });
+    await settle();
+    expect(actor.getSnapshot().matches('reconnectRequired')).toBe(true);
+
+    /* Granting the credential again re-validates the *established* remote, so a
+     * failure there is not this attempt's write to undo. */
+    actor.send({ type: 'authorized' });
+    await settle();
+
+    expect(validations).toBe(1);
+    expect(actor.getSnapshot().matches('failed')).toBe(true);
+    expect(removals).toStrictEqual([]);
+    expect(actor.getSnapshot().context.remote).toStrictEqual(tauRemote);
     actor.stop();
   });
 
@@ -401,6 +518,7 @@ describe('remoteMachine', () => {
         async (): Promise<RemoteInitialSyncActorOutput> => ({
           overQuota: ['models/bracket.step'],
           message: 'This project is over its storage plan.',
+          storage: { remainingBytes: 0, shortfallBytes: 5_242_880 },
         }),
       ),
     });
@@ -413,6 +531,11 @@ describe('remoteMachine', () => {
      * did not fit are named rather than thrown away with an error (P19). */
     expect(actor.getSnapshot().matches('connected')).toBe(true);
     expect(selectRemoteFacet(actor.getSnapshot()).overQuota).toStrictEqual(['models/bracket.step']);
+    /* C13: the numbers the server sent, not only the names. */
+    expect(selectRemoteFacet(actor.getSnapshot()).quota).toStrictEqual({
+      remainingBytes: 0,
+      shortfallBytes: 5_242_880,
+    });
     expect(emitted).toStrictEqual([
       { type: 'remoteConnected', kind: 'tau', url: tauRemote.url },
       { type: 'toast.error', message: 'This project is over its storage plan.' },

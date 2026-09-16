@@ -1,12 +1,12 @@
-import { forwardRef, memo, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, forwardRef, memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { ScrollerProps, VirtuosoHandle } from 'react-virtuoso';
 import { useLocation } from 'react-router';
 import { XIcon } from 'lucide-react';
-import { messageRole } from '@taucad/chat/constants';
 import { ChatMessage } from '#routes/w.$workspace.$project/chat-message.js';
 import { ChatRevisionMarker } from '#routes/w.$workspace.$project/chat-revision-marker.js';
 import { buildTurnGroups } from '#routes/w.$workspace.$project/chat-turn-groups.js';
+import type { TurnGroup as TurnGroupData } from '#routes/w.$workspace.$project/chat-turn-groups.js';
 import { ScrollDownButton } from '#routes/w.$workspace.$project/scroll-down-button.js';
 import { ChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import type { ChatTextareaProperties, ChatTextareaHandle } from '#components/chat/chat-textarea-types.js';
@@ -83,11 +83,12 @@ const TurnGroup = memo(function ({
   return (
     <div className={cn('py-1 gap-1 flex flex-col', isLast && 'min-h-(--chat-live-turn-min-h)')}>
       {messageIds.map((id, index) => (
-        <ChatMessage
-          key={id}
-          messageId={id}
-          footer={index === messageIds.length - 1 ? <ChatRevisionMarker userMessageId={messageIds[0]!} /> : undefined}
-        />
+        <Fragment key={id}>
+          <ChatMessage messageId={id} />
+          {/* The request's revision summary sits directly after the user
+              message, so appending assistant messages never moves it. */}
+          {index === 0 ? <ChatRevisionMarker userMessageId={id} isLatestTurn={isLast} /> : null}
+        </Fragment>
       ))}
       {isLast ? <ChatError className='mx-4' /> : null}
     </div>
@@ -109,6 +110,18 @@ const ChatScroller = forwardRef<HTMLDivElement, ScrollerProps & { className?: st
     <div {...props} ref={ref} style={{ ...props.style, ...chatScrollerCssVariables }} className={cn(props.className)} />
   );
 });
+
+const ChatHistoryHeader = (): undefined => undefined;
+const ChatHistoryEmptyPlaceholder = (): React.JSX.Element => (
+  <div className='flex h-full px-3 py-6'>
+    <ChatHistoryEmpty />
+  </div>
+);
+const virtuosoComponents = {
+  Scroller: ChatScroller,
+  Header: ChatHistoryHeader,
+  EmptyPlaceholder: ChatHistoryEmptyPlaceholder,
+};
 
 export const ChatHistory = memo(function (props: {
   readonly className?: string;
@@ -146,12 +159,20 @@ export const ChatHistory = memo(function (props: {
     if (!persistenceActorRef) {
       return;
     }
+    let frame: number | undefined;
     const subscription = persistenceActorRef.on('restoreCancelledDraft', () => {
-      requestAnimationFrame(() => {
+      if (frame !== undefined) {
+        cancelAnimationFrame(frame);
+      }
+      frame = requestAnimationFrame(() => {
+        frame = undefined;
         chatTextareaRef.current?.focus();
       });
     });
     return () => {
+      if (frame !== undefined) {
+        cancelAnimationFrame(frame);
+      }
       subscription.unsubscribe();
     };
   }, [persistenceActorRef]);
@@ -178,13 +199,13 @@ export const ChatHistory = memo(function (props: {
   const groups = useChatSelector((state) => buildTurnGroups(state.messages));
 
   const renderItem = useCallback(
-    (index: number) => {
-      const group = groups[index]!;
+    (index: number, group: TurnGroupData) => {
       const isLast = index === groups.length - 1;
-      return <TurnGroup key={`turn-${group.messageIds[0]}`} messageIds={group.messageIds} isLast={isLast} />;
+      return <TurnGroup messageIds={group.messageIds} isLast={isLast} />;
     },
-    [groups],
+    [groups.length],
   );
+  const computeItemKey = useCallback((_index: number, group: TurnGroupData) => group.messageIds[0]!, []);
 
   const [atBottom, setAtBottom] = useState(true);
 
@@ -195,25 +216,21 @@ export const ChatHistory = memo(function (props: {
   // Only auto-follow output when the user is already pinned to the bottom —
   // otherwise leave the scroll position alone so the user can read earlier
   // messages without Virtuoso fighting them as assistant tokens stream in.
-  const followOutput = useCallback((atBottom: boolean): 'smooth' | false => (atBottom ? 'smooth' : false), []);
+  const followOutput = useCallback((atBottom: boolean): 'auto' | false => (atBottom ? 'auto' : false), []);
 
   // When the user submits a new message, pin it to the top of the viewport
   // so the assistant reply streams into the spacer canvas below it. rAF
   // defers the scroll until after Virtuoso lays out the new last item, so
   // `scrollToIndex` measures the spacer height correctly.
-  const lastMessageRole = useChatSelector((state) => state.messages.at(-1)?.role);
-  const previousLengthRef = useRef(messageIds.length);
+  const lastTurnId = groups.at(-1)?.messageIds[0];
+  const previousLastTurnIdRef = useRef(lastTurnId);
 
   useEffect(() => {
-    const grew = messageIds.length > previousLengthRef.current;
-    previousLengthRef.current = messageIds.length;
-    if (!grew) {
+    if (lastTurnId === previousLastTurnIdRef.current) {
       return;
     }
-    if (lastMessageRole !== messageRole.user) {
-      return;
-    }
-    requestAnimationFrame(() => {
+    previousLastTurnIdRef.current = lastTurnId;
+    const frame = requestAnimationFrame(() => {
       const scroller = virtuosoRef.current;
       if (!scroller) {
         return;
@@ -224,7 +241,10 @@ export const ChatHistory = memo(function (props: {
         behavior: instantScrollBehavior,
       });
     });
-  }, [messageIds.length, lastMessageRole]);
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [lastTurnId]);
 
   // Handler to scroll to the bottom of the chat
   const scrollToBottom = useCallback(() => {
@@ -240,7 +260,8 @@ export const ChatHistory = memo(function (props: {
   return (
     <FloatingPanel isOpen={isExpanded} side='right' className={className} onOpenChange={setIsExpanded}>
       <FloatingPanelContent
-        className={cn(!isExpanded && 'hidden')}
+        // `ph-no-capture`: session replay never records chat transcripts.
+        className={cn('ph-no-capture', !isExpanded && 'hidden')}
         errorFallback={(errorProps) => (
           <FloatingPanelErrorContent
             {...errorProps}
@@ -274,24 +295,27 @@ export const ChatHistory = memo(function (props: {
         <AtReferenceProvider treeService={treeService} chats={chats}>
           <Virtuoso
             ref={virtuosoRef}
-            totalCount={groups.length}
+            data={groups}
             itemContent={renderItem}
+            computeItemKey={computeItemKey}
             followOutput={followOutput}
             className='mt-1 min-h-0 min-w-0 flex-1'
             atBottomStateChange={handleAtBottomStateChange}
-            components={{
-              Scroller: ChatScroller,
-              Header: () => null,
-              EmptyPlaceholder: () => (
-                <div className='flex h-full px-3 py-6'>
-                  <ChatHistoryEmpty />
-                </div>
-              ),
-            }}
+            components={virtuosoComponents}
           />
         </AtReferenceProvider>
         <ScrollDownButton hasContent={messageIds.length > 0} isVisible={!atBottom} onScrollToBottom={scrollToBottom} />
 
+        {/*
+          A refusal on an empty chat has to land somewhere (I12, W19-b).
+
+          `ChatError` rides the last `TurnGroup`, and a submit that fails before
+          the user message is appended — the durable workspace refusing the
+          turn — leaves no group for it to ride. The person then saw nothing at
+          all: their text still in the composer, no row, no banner. One banner
+          at a time: while there are turns, the group above owns it.
+        */}
+        {groups.length === 0 ? <ChatError className='mx-4 mb-1 shrink-0' /> : null}
         {/* Chat input area */}
         <div className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
           <ChatTextarea ref={chatTextareaRef} mode='main' enableAutoFocus={false} onSubmit={onSubmit} />

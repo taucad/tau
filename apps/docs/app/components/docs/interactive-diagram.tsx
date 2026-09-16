@@ -56,7 +56,7 @@ function DiagramNodeContent({ data }: NodeProps<DiagramNode>): React.JSX.Element
         <Handle type='target' position={Position.Right} id='right-target' className='opacity-0!' />
         <Handle type='source' position={Position.Left} id='left-source' className='opacity-0!' />
 
-        <div className='cursor-pointer rounded-xl border border-border/50 bg-background/90 px-4 py-2.5 shadow-sm backdrop-blur-sm group-hover:border-primary/40 group-hover:shadow-md'>
+        <div className='rounded-xl border border-border/50 bg-background/90 px-4 py-2.5 shadow-sm backdrop-blur-sm group-hover:border-primary/40 group-hover:shadow-md'>
           <div className='text-sm font-medium text-foreground'>{data.label}</div>
         </div>
       </div>

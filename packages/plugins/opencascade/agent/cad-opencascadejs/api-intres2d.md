@@ -4,101 +4,101 @@
 
 IntRes2d_Domain: declare class IntRes2d_Domain
 
-constructor
+  constructor
 
-SetValues(Pnt1: gp_Pnt2d, Par1: number, Tol1: number, Pnt2: gp_Pnt2d, Par2: number, Tol2: number): void;
-SetValues(): void;
-SetValues(Pnt: gp_Pnt2d, Par: number, Tol: number, First: boolean): void;
-SetValues(Pnt1: gp_Pnt2d, Par1: number, Tol1: number, Pnt2: gp_Pnt2d, Par2: number, Tol2: number): void;
-SetValues(): void;
-SetValues(Pnt: gp_Pnt2d, Par: number, Tol: number, First: boolean): void;
-SetValues(Pnt1: gp_Pnt2d, Par1: number, Tol1: number, Pnt2: gp_Pnt2d, Par2: number, Tol2: number): void;
-SetValues(): void;
-SetValues(Pnt: gp_Pnt2d, Par: number, Tol: number, First: boolean): void;
+  SetValues(Pnt1: gp_Pnt2d, Par1: number, Tol1: number, Pnt2: gp_Pnt2d, Par2: number, Tol2: number): void;
+  SetValues(): void;
+  SetValues(Pnt: gp_Pnt2d, Par: number, Tol: number, First: boolean): void;
+  SetValues(Pnt1: gp_Pnt2d, Par1: number, Tol1: number, Pnt2: gp_Pnt2d, Par2: number, Tol2: number): void;
+  SetValues(): void;
+  SetValues(Pnt: gp_Pnt2d, Par: number, Tol: number, First: boolean): void;
+  SetValues(Pnt1: gp_Pnt2d, Par1: number, Tol1: number, Pnt2: gp_Pnt2d, Par2: number, Tol2: number): void;
+  SetValues(): void;
+  SetValues(Pnt: gp_Pnt2d, Par: number, Tol: number, First: boolean): void;
 
-SetEquivalentParameters(zero: number, period: number): void;
+  SetEquivalentParameters(zero: number, period: number): void;
 
-HasFirstPoint(): boolean;
+  HasFirstPoint(): boolean;
 
-FirstParameter(): number;
+  FirstParameter(): number;
 
-FirstPoint(): gp_Pnt2d;
+  FirstPoint(): gp_Pnt2d;
 
-FirstTolerance(): number;
+  FirstTolerance(): number;
 
-HasLastPoint(): boolean;
+  HasLastPoint(): boolean;
 
-LastParameter(): number;
+  LastParameter(): number;
 
-LastPoint(): gp_Pnt2d;
+  LastPoint(): gp_Pnt2d;
 
-LastTolerance(): number;
+  LastTolerance(): number;
 
-IsClosed(): boolean;
+  IsClosed(): boolean;
 
-EquivalentParameters(zero?: number, zeroplusperiod?: number): { zero: number; zeroplusperiod: number };
+  EquivalentParameters(zero?: number, zeroplusperiod?: number): { zero: number; zeroplusperiod: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IntRes2d_Intersection: declare class IntRes2d_Intersection
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-IsEmpty(): boolean;
+  IsEmpty(): boolean;
 
-NbPoints(): number;
+  NbPoints(): number;
 
-Point(N: number): IntRes2d_IntersectionPoint;
+  Point(N: number): IntRes2d_IntersectionPoint;
 
-NbSegments(): number;
+  NbSegments(): number;
 
-Segment(N: number): IntRes2d_IntersectionSegment;
+  Segment(N: number): IntRes2d_IntersectionSegment;
 
-SetReversedParameters(Reverseflag: boolean): void;
+  SetReversedParameters(Reverseflag: boolean): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IntRes2d_IntersectionPoint: declare class IntRes2d_IntersectionPoint
 
-constructor
+  constructor
 
-SetValues(P: gp_Pnt2d, Uc1: number, Uc2: number, Trans1: IntRes2d_Transition, Trans2: IntRes2d_Transition, ReversedFlag: boolean): void;
+  SetValues(P: gp_Pnt2d, Uc1: number, Uc2: number, Trans1: IntRes2d_Transition, Trans2: IntRes2d_Transition, ReversedFlag: boolean): void;
 
-Value(): gp_Pnt2d;
+  Value(): gp_Pnt2d;
 
-ParamOnFirst(): number;
+  ParamOnFirst(): number;
 
-ParamOnSecond(): number;
+  ParamOnSecond(): number;
 
-TransitionOfFirst(): IntRes2d_Transition;
+  TransitionOfFirst(): IntRes2d_Transition;
 
-TransitionOfSecond(): IntRes2d_Transition;
+  TransitionOfSecond(): IntRes2d_Transition;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IntRes2d_IntersectionSegment: declare class IntRes2d_IntersectionSegment
 
-constructor
+  constructor
 
-IsOpposite(): boolean;
+  IsOpposite(): boolean;
 
-HasFirstPoint(): boolean;
+  HasFirstPoint(): boolean;
 
-FirstPoint(): IntRes2d_IntersectionPoint;
+  FirstPoint(): IntRes2d_IntersectionPoint;
 
-HasLastPoint(): boolean;
+  HasLastPoint(): boolean;
 
-LastPoint(): IntRes2d_IntersectionPoint;
+  LastPoint(): IntRes2d_IntersectionPoint;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IntRes2d_Position: typeof IntRes2d_Position[keyof typeof IntRes2d_Position]
 
@@ -106,33 +106,33 @@ IntRes2d_Situation: typeof IntRes2d_Situation[keyof typeof IntRes2d_Situation]
 
 IntRes2d_Transition: declare class IntRes2d_Transition
 
-constructor
+  constructor
 
-SetValue(Tangent: boolean, Pos: IntRes2d_Position, Type: IntRes2d_TypeTrans): void;
-SetValue(Tangent: boolean, Pos: IntRes2d_Position, Situ: IntRes2d_Situation, Oppos: boolean): void;
-SetValue(Pos: IntRes2d_Position): void;
-SetValue(Tangent: boolean, Pos: IntRes2d_Position, Type: IntRes2d_TypeTrans): void;
-SetValue(Tangent: boolean, Pos: IntRes2d_Position, Situ: IntRes2d_Situation, Oppos: boolean): void;
-SetValue(Pos: IntRes2d_Position): void;
-SetValue(Tangent: boolean, Pos: IntRes2d_Position, Type: IntRes2d_TypeTrans): void;
-SetValue(Tangent: boolean, Pos: IntRes2d_Position, Situ: IntRes2d_Situation, Oppos: boolean): void;
-SetValue(Pos: IntRes2d_Position): void;
+  SetValue(Tangent: boolean, Pos: IntRes2d_Position, Type: IntRes2d_TypeTrans): void;
+  SetValue(Tangent: boolean, Pos: IntRes2d_Position, Situ: IntRes2d_Situation, Oppos: boolean): void;
+  SetValue(Pos: IntRes2d_Position): void;
+  SetValue(Tangent: boolean, Pos: IntRes2d_Position, Type: IntRes2d_TypeTrans): void;
+  SetValue(Tangent: boolean, Pos: IntRes2d_Position, Situ: IntRes2d_Situation, Oppos: boolean): void;
+  SetValue(Pos: IntRes2d_Position): void;
+  SetValue(Tangent: boolean, Pos: IntRes2d_Position, Type: IntRes2d_TypeTrans): void;
+  SetValue(Tangent: boolean, Pos: IntRes2d_Position, Situ: IntRes2d_Situation, Oppos: boolean): void;
+  SetValue(Pos: IntRes2d_Position): void;
 
-SetPosition(Pos: IntRes2d_Position): void;
+  SetPosition(Pos: IntRes2d_Position): void;
 
-PositionOnCurve(): IntRes2d_Position;
+  PositionOnCurve(): IntRes2d_Position;
 
-TransitionType(): IntRes2d_TypeTrans;
+  TransitionType(): IntRes2d_TypeTrans;
 
-IsTangent(): boolean;
+  IsTangent(): boolean;
 
-Situation(): IntRes2d_Situation;
+  Situation(): IntRes2d_Situation;
 
-IsOpposite(): boolean;
+  IsOpposite(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IntRes2d_TypeTrans: typeof IntRes2d_TypeTrans[keyof typeof IntRes2d_TypeTrans]
 

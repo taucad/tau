@@ -166,7 +166,7 @@ export const dockviewStyleOverrides = cn(
   '[&_.dv-tab.dv-active-tab_.dv-default-tab_.dv-default-tab-action:not(:hover)]:!bg-accent',
   '[&_.dv-tab.dv-active-tab_.dockview-tab-title]:[--scroll-fade-size:42px]',
   '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action:hover]:text-foreground',
-  '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action:hover]:!bg-input',
+  '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action:hover]:!bg-nested-action-hover',
 
   // ═══════════════════════════════════════════════════════════════════════════
   // TAB STATES
@@ -176,9 +176,7 @@ export const dockviewStyleOverrides = cn(
   '[&_.dv-tab]:transition-colors',
   '[&_.dv-tab:not(.dv-active-tab):hover]:!bg-accent',
   '[&_.dv-tab:not(.dv-active-tab):hover]:!text-muted-foreground',
-  '[&_.dv-tab:focus-visible]:outline-none',
-  '[&_.dv-tab:focus-visible]:ring-2',
-  '[&_.dv-tab:focus-visible]:ring-ring',
+  '[&_.dv-tab:focus-visible]:focus-outline',
   '[&_.dv-tab.dv-active-tab_.dv-default-tab-action]:opacity-100',
   '[&_.dv-tab:focus-within_.dv-default-tab-action]:visible',
   '[&_.dv-tab:focus-within_.dv-default-tab-action]:opacity-100',
@@ -216,7 +214,7 @@ export const dockviewStyleOverrides = cn(
   '[&_.dv-right-actions-container_button:has(>svg:only-child)]:!w-7',
   '[&_.dv-pre-actions-container_button:has(>svg:only-child)]:!w-7',
   '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button]:!bg-transparent',
-  '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button:hover]:!bg-muted-foreground/15',
+  '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button:hover]:!bg-nested-action-hover',
 
   // ── Group-hover action button visibility ──
   // Hidden by default, shown on group hover to reduce visual noise.

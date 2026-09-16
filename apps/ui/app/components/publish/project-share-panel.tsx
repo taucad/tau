@@ -22,9 +22,7 @@ import { PublicationAccessPanel } from '#components/publish/publication-access-p
 import type { PublicationAccessGrant } from '#components/publish/publication-access-panel.js';
 import { ENV } from '#environment.config.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
-import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
-import { ProBadge } from '#components/tier-badge.js';
+import { CommercialUpgradeLabel, useCommercialFeatures } from '#cloud/commercial-features.js';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import {
   connectGithubGist,
@@ -74,6 +72,7 @@ type ProjectShareEnvelope = {
   };
   currentPublication?: {
     id: string;
+    tag: string;
     title: string;
     description?: string;
     visibility: PublishVisibility;
@@ -151,6 +150,7 @@ const parseProjectShareEnvelope = (value: unknown): ProjectShareEnvelope | undef
     const { urls, access } = publicationRecord;
     if (
       typeof publicationRecord['id'] !== 'string' ||
+      typeof publicationRecord['tag'] !== 'string' ||
       typeof publicationRecord['title'] !== 'string' ||
       (publicationRecord['description'] !== undefined &&
         publicationRecord['description'] !== null &&
@@ -170,6 +170,7 @@ const parseProjectShareEnvelope = (value: unknown): ProjectShareEnvelope | undef
     }
     currentPublication = {
       id: publicationRecord['id'],
+      tag: publicationRecord['tag'],
       title: publicationRecord['title'],
       ...(typeof publicationRecord['description'] === 'string'
         ? { description: publicationRecord['description'] }
@@ -597,7 +598,7 @@ function PortableShareBody({
         </div>
       ) : null}
       {warnings.length > 0 ? (
-        <div className='border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300 rounded-md border px-3 py-2 text-sm'>
+        <div className='rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm'>
           Shared with {warnings.length} unresolved {warnings.length === 1 ? 'dependency' : 'dependencies'}.
         </div>
       ) : null}
@@ -679,8 +680,7 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
   const [loadingEnvelope, setLoadingEnvelope] = useState(false);
   const [envelopeError, setEnvelopeError] = useState<string | undefined>();
   const [visibility, setVisibility] = useState<PublishVisibility>('private');
-  const entitlements = useEntitlements();
-  const { canCreatePrivateShares } = entitlements;
+  const { canCreatePrivateShares, requestUpgrade } = useCommercialFeatures();
   // Free tier publishes public-only (T4/T5/AD11); derived so an async
   // entitlements load never strands a locked selection in form state.
   const effectiveVisibility: PublishVisibility = canCreatePrivateShares ? visibility : 'public';
@@ -701,6 +701,7 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
   const [description, setDescription] = useState(projectDescription);
   const [sharedEmails, setSharedEmails] = useState<string[]>([]);
   const [visibilityMutating, setVisibilityMutating] = useState(false);
+  const [publishingAnother, setPublishingAnother] = useState(false);
   const lastHandledShareUrlRef = useRef<string | undefined>(undefined);
   const { ticked: copied, trigger: triggerCopiedTick } = useTickAnimation();
 
@@ -761,6 +762,7 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
 
       if (!cancelled) {
         await loadEnvelope();
+        setPublishingAnother(false);
         commands.resetPublish();
       }
     };
@@ -838,7 +840,7 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
     // Switching TO private is Pro-gated (T4/T5); the server 403s anyway — route
     // the user to the upgrade surface instead of a failing request.
     if (nextVisibility === 'private' && !canCreatePrivateShares) {
-      openSettingsDialog('billing');
+      requestUpgrade();
       return;
     }
 
@@ -871,7 +873,7 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
     }
 
     sendPublish({
-      tag: versionName.trim(),
+      tag: publication.tag,
       projectName,
       entryPath,
       visibility: publication.visibility,
@@ -945,7 +947,7 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
 
   const publication = envelope?.currentPublication;
 
-  if (publication) {
+  if (publication && !publishingAnother) {
     return (
       <SharePanelFrame
         method={shareMethod}
@@ -958,6 +960,7 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
           <div className='flex flex-col gap-4'>
             <div>
               <h3 className='truncate text-sm font-medium'>{publication.title}</h3>
+              <p className='mt-1 text-xs text-muted-foreground'>Version {publication.tag}</p>
               {publication.description ? (
                 <p className='mt-1 line-clamp-2 text-sm text-muted-foreground'>{publication.description}</p>
               ) : null}
@@ -976,7 +979,17 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
 
           {publishError === undefined ? null : <PublishErrorCallout message={publishError} signIn={signIn} />}
 
-          <div className='flex justify-end'>
+          <div className='flex flex-wrap justify-end gap-2'>
+            <Button
+              type='button'
+              variant='outline'
+              disabled={busy || visibilityMutating}
+              onClick={() => {
+                setPublishingAnother(true);
+              }}
+            >
+              Publish another version
+            </Button>
             <Button type='button' disabled={busy || visibilityMutating} onClick={handleRepublish}>
               {busy ? (
                 <Loader2 className='size-4 animate-spin' aria-hidden />
@@ -985,7 +998,11 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
               ) : (
                 <RefreshCw className='size-3.5' aria-hidden />
               )}
-              <span>{snapshotState === 'published-stale' ? 'Republish and copy link' : 'Republish'}</span>
+              <span>
+                {snapshotState === 'published-stale'
+                  ? 'Republish this version and copy link'
+                  : 'Republish this version'}
+              </span>
             </Button>
           </div>
         </div>
@@ -1069,11 +1086,10 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
                     type='button'
                     className='inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline'
                     onClick={() => {
-                      openSettingsDialog('billing');
+                      requestUpgrade();
                     }}
                   >
-                    <ProBadge />
-                    Upgrade
+                    <CommercialUpgradeLabel />
                   </button>
                 )}
               </div>

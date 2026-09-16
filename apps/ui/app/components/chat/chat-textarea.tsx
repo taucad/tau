@@ -23,6 +23,8 @@ import { ChatApprovalBanner } from '#components/chat/chat-approval-banner.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages, captureFilesToDataUrls } from '#services/headless-capture.js';
+import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
+import { latestAcpSessionData } from '#services/agent-host-event-projection.js';
 
 /**
  * Main chat textarea component that conditionally renders either the
@@ -93,7 +95,14 @@ export const ChatTextarea = memo(function ({
   const { treeService } = useFileManager();
   const imageService = useHeadlessImageService();
   const { chats } = useChats(projectContext?.projectId ?? '');
-  const { session } = useChatComposer();
+  const {
+    session,
+    execution: { execution },
+  } = useChatComposer();
+  const acpAgentId = execution.kind === 'acp' ? execution.agentId : undefined;
+  const acpSessionData = useChatSessionSnapshot(session?.activeChatId ?? '', (active) =>
+    acpAgentId === undefined ? undefined : latestAcpSessionData(active?.chat.messages ?? [], acpAgentId),
+  );
   const { setDraftText: setMainDraftText, setEditDraftText } = useDraftActions();
 
   const setDraftText = useCallback(
@@ -440,6 +449,8 @@ export const ChatTextarea = memo(function ({
         chats={chats}
         actionItems={screenshotActionItems}
         setDraftText={setDraftText}
+        acpAgentId={acpAgentId}
+        acpSessionData={acpSessionData}
         // Refs
         fileInputReference={logic.fileInputReference}
         containerReference={logic.containerReference}

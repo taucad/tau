@@ -11,11 +11,15 @@ import {
   getBrowserAgentHostRun,
   getHostFinalizedTurns,
   isBrowserAgentHostRunResumable,
+  persistBrowserTurnSettlement,
+  recordHostTurnSettlement,
   registerAgentHost,
   registerAgentHostRunReset,
   requestBrowserAgentHostResume,
   resolveBrowserAgentHostInterrupt,
+  subscribeHostTurnSettlements,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import type { HostTurnSettlement } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { agentHostTailBatchLimit } from '#workers/agent-host.contract.js';
 import { parseErrorForPersistence } from '#utils/error.utils.js';
 import hexagonalNutLog from '#services/__fixtures__/daemon-reattach-hexnut.jsonl?raw';
@@ -46,11 +50,50 @@ const clientFor = (chatId: string, runId: string, overrides: Partial<AgentHostCl
         type: 'run.lifecycle',
         state: 'completed',
       });
+      listener?.(chatId, {
+        version: 1,
+        leaderEpoch: 'leader-start',
+        sequence: 2,
+        recordedAt: '2026-09-01T00:00:02.000Z',
+        runId,
+        type: 'turn.finalized',
+        turnId: `message-${chatId}`,
+        chatId,
+        projectId: `project-${chatId}`,
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: [runId],
+      });
       return snapshot(chatId, runId);
     }),
     steer: vi.fn(async () => snapshot(chatId, runId)),
     cancel: vi.fn(async () => snapshot(chatId, runId, 'cancelled')),
-    resume: vi.fn(async () => snapshot(chatId, runId)),
+    resume: vi.fn(async () => {
+      listener?.(chatId, {
+        version: 1,
+        leaderEpoch: 'leader-resume',
+        sequence: 1,
+        recordedAt: '2026-09-01T00:00:01.000Z',
+        runId,
+        type: 'run.lifecycle',
+        state: 'completed',
+      });
+      listener?.(chatId, {
+        version: 1,
+        leaderEpoch: 'leader-resume',
+        sequence: 2,
+        recordedAt: '2026-09-01T00:00:02.000Z',
+        runId,
+        type: 'turn.finalized',
+        turnId: `message-${chatId}`,
+        chatId,
+        projectId: `project-${chatId}`,
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: [runId],
+      });
+      return snapshot(chatId, runId);
+    }),
     resolveInterrupt: vi.fn(async () => snapshot(chatId, runId)),
     attach: vi.fn(async () => ({ cursor: 0, nextCursor: 0, endCursor: 0, events: [] })),
     tail: vi.fn(async () => ({ cursor: 0, nextCursor: 0, endCursor: 0, events: [] })),
@@ -273,6 +316,163 @@ describe('BrowserPlacementChatTransport', () => {
     unregister();
   });
 
+  it('uses authoritative durable tool rows for an external-agent turn', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-external-tools';
+    const runId = 'run-external-tools';
+    const toolCallId = 'call-external-tools';
+    let durableListener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    let liveListener: Parameters<NonNullable<AgentHostClient['subscribeLive']>>[0] | undefined;
+    const start = vi.fn(async () => {
+      liveListener?.(chatId, {
+        type: 'tool-input-start',
+        chatId,
+        runId,
+        messageId: 'assistant-external-tools',
+        contentIndex: 0,
+        toolCallId,
+        toolName: 'Read main.scad',
+      });
+      liveListener?.(chatId, {
+        type: 'tool-input-end',
+        chatId,
+        runId,
+        messageId: 'assistant-external-tools',
+        contentIndex: 0,
+        toolCallId,
+        toolName: 'Read main.scad',
+        input: { path: 'main.scad' },
+      });
+      const event = (sequence: number, message: Record<string, unknown>): AgentLogEvent =>
+        parseLogEvent({
+          version: 1,
+          leaderEpoch: 'leader-external-tools',
+          sequence,
+          recordedAt: '2026-09-01T00:00:01.000Z',
+          runId,
+          type: 'message.appended',
+          message,
+        });
+      durableListener?.(
+        chatId,
+        event(1, {
+          id: 'input-external-tools',
+          role: 'tool-input',
+          toolCallId,
+          toolName: 'Read main.scad',
+          call: { toolCallId, kind: 'read', title: 'Read main.scad', status: 'completed' },
+          content: { path: 'main.scad' },
+          metadata: { tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex' } },
+        }),
+      );
+      liveListener?.(chatId, {
+        type: 'tool-output-update',
+        chatId,
+        runId,
+        messageId: 'assistant-external-tools',
+        contentIndex: 0,
+        toolCallId,
+        toolName: 'Read main.scad',
+        output: 'reading line 1',
+        isError: false,
+      });
+      durableListener?.(
+        chatId,
+        event(2, {
+          id: 'output-external-tools',
+          role: 'tool-output',
+          toolCallId,
+          toolName: 'Read main.scad',
+          call: { toolCallId, kind: 'read', title: 'Read main.scad', status: 'completed' },
+          content: 'cube(20);',
+          isError: false,
+          metadata: { tauInternal: { kind: 'external-tool', origin: 'external', agentId: 'codex' } },
+        }),
+      );
+      durableListener?.(
+        chatId,
+        parseLogEvent({
+          version: 1,
+          leaderEpoch: 'leader-external-tools',
+          sequence: 3,
+          recordedAt: '2026-09-01T00:00:03.000Z',
+          runId,
+          type: 'run.lifecycle',
+          state: 'completed',
+        }),
+      );
+      durableListener?.(
+        chatId,
+        parseLogEvent({
+          version: 1,
+          leaderEpoch: 'leader-external-tools',
+          sequence: 4,
+          recordedAt: '2026-09-01T00:00:04.000Z',
+          runId,
+          type: 'turn.finalized',
+          turnId: 'user-external-tools',
+          chatId,
+          projectId: 'project-external-tools',
+          changedPaths: [],
+          trigger: 'turn',
+          runIds: [runId],
+        }),
+      );
+      return snapshot(chatId, runId);
+    });
+    const client = clientFor(chatId, runId, {
+      start,
+      subscribe: vi.fn((listener: Parameters<AgentHostClient['subscribe']>[0]) => {
+        durableListener = listener;
+        return () => {
+          durableListener = undefined;
+        };
+      }),
+      subscribeLive: vi.fn((listener: Parameters<NonNullable<AgentHostClient['subscribeLive']>>[0]) => {
+        liveListener = listener;
+        return () => {
+          liveListener = undefined;
+        };
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => {
+        throw new Error('An external-agent turn reads its workspace from the daemon.');
+      },
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+    const transport = new BrowserPlacementChatTransport();
+    const stream = await transport.sendMessages({
+      chatId,
+      trigger: 'submit-message',
+      messageId: 'user-external-tools',
+      messages: [{ id: 'user-external-tools', role: 'user', parts: [{ type: 'text', text: 'Read it.' }] }],
+      abortSignal: undefined,
+      body: {
+        agent: { execution: { kind: 'acp', hostId: 'origin', agentId: 'codex' } },
+        admission: { version: 1, idempotencyKey: runId },
+        browserHost: { trigger: 'submit', agent: { kind: 'acp', id: 'codex' } },
+      },
+    });
+    const reader = stream.getReader();
+    const collect = async (): Promise<UIMessageChunk[]> => {
+      const next = await reader.read();
+      if (next.done) {
+        return [];
+      }
+      return [next.value, ...(await collect())];
+    };
+    const chunks = await collect();
+
+    expect(chunks.filter((chunk) => 'toolCallId' in chunk && chunk.toolCallId === toolCallId)).toEqual([
+      expect.objectContaining({ type: 'tool-input-available', dynamic: true }),
+      expect.objectContaining({ type: 'tool-output-available', output: 'reading line 1' }),
+      expect.objectContaining({ type: 'tool-output-available', dynamic: true }),
+    ]);
+    unregister();
+  });
+
   /* The store is module-scoped and lives as long as the tab: a session that
      sees thousands of host-recorded turns must not retain every one of them,
      and the snapshot the graph reads is rebuilt on each arrival (5-review N6). */
@@ -352,6 +552,174 @@ describe('BrowserPlacementChatTransport', () => {
     expect(kept.at(0)?.revisionId).toBe(`rev-${String(recorded - 256)}`);
     expect(kept.at(-1)?.revisionId).toBe(`rev-${String(recorded - 1)}`);
     unregister();
+  });
+
+  it('publishes finalized, failed and conflicted outcomes replayed from a host log', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-host-settlement-union';
+    const runId = 'run-host-settlement-union';
+    const events = [
+      parseLogEvent({
+        version: 1,
+        leaderEpoch: 'leader-settlement-union',
+        sequence: 1,
+        recordedAt: '2026-09-01T00:00:01.000Z',
+        runId: 'run-finalized',
+        type: 'turn.finalized',
+        turnId: 'turn-finalized',
+        chatId,
+        projectId: 'project-settlement-union',
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: ['run-finalized'],
+      }),
+      parseLogEvent({
+        version: 1,
+        leaderEpoch: 'leader-settlement-union',
+        sequence: 2,
+        recordedAt: '2026-09-01T00:00:02.000Z',
+        runId: 'run-failed',
+        type: 'turn.failed',
+        turnId: 'turn-failed',
+        chatId,
+        reason: 'revision cut failed',
+      }),
+      parseLogEvent({
+        version: 1,
+        leaderEpoch: 'leader-settlement-union',
+        sequence: 3,
+        recordedAt: '2026-09-01T00:00:03.000Z',
+        runId,
+        type: 'run.lifecycle',
+        state: 'completed',
+      }),
+      parseLogEvent({
+        version: 1,
+        leaderEpoch: 'leader-settlement-union',
+        sequence: 4,
+        recordedAt: '2026-09-01T00:00:04.000Z',
+        runId,
+        type: 'turn.conflicted',
+        turnId: 'turn-conflicted',
+        chatId,
+      }),
+    ];
+    const observed: Array<{ type: string; runState: string | undefined }> = [];
+    const unsubscribe = subscribeHostTurnSettlements((event) => {
+      observed.push({ type: event.type, runState: getBrowserAgentHostRun(chatId)?.state });
+    });
+    const client = clientFor(chatId, runId, {
+      attach: vi.fn(async () => ({
+        cursor: 0,
+        nextCursor: events.length,
+        endCursor: events.length,
+        events,
+        snapshot: snapshot(chatId, runId),
+      })),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => {
+        throw new Error('A host-placed turn reads its workspace from the daemon.');
+      },
+      markRunId: async () => undefined,
+      createClient: async () => client,
+    });
+
+    try {
+      const stream = await new BrowserPlacementChatTransport().reconnectToStream({ chatId });
+      expect(stream).not.toBeNull();
+      if (stream === null) {
+        return;
+      }
+      await drain(stream.getReader());
+      expect(observed.map((event) => event.type)).toEqual(['turn.finalized', 'turn.failed', 'turn.conflicted']);
+      expect(observed.at(-1)).toEqual({ type: 'turn.conflicted', runState: 'completed' });
+    } finally {
+      unsubscribe();
+      unregister();
+    }
+  });
+
+  it('keeps the host lease alive when browser-root settlement follows completed lifecycle', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-late-turn-settlement';
+    const runId = 'run-late-turn-settlement';
+    let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    const recordSettlement = vi.fn(async () => undefined);
+    const client = clientFor(chatId, runId, {
+      recordSettlement,
+      start: vi.fn(async () => {
+        listener?.(chatId, {
+          version: 1,
+          leaderEpoch: 'leader-late-settlement',
+          sequence: 1,
+          recordedAt: '2026-09-14T00:00:01.000Z',
+          runId,
+          type: 'run.lifecycle',
+          state: 'completed',
+        });
+        return snapshot(chatId, runId);
+      }),
+      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+        listener = next;
+        return () => {
+          listener = undefined;
+        };
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-late-turn-settlement',
+        backend: 'opfs',
+        providerBasePath: 'project-late-turn-settlement',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+    const observed: HostTurnSettlement[] = [];
+    const unsubscribe = subscribeHostTurnSettlements((event) => {
+      if (event.chatId === chatId) {
+        observed.push(event);
+      }
+    });
+
+    try {
+      const stream = await new BrowserPlacementChatTransport().sendMessages({
+        chatId,
+        trigger: 'submit-message',
+        messageId: undefined,
+        messages: [{ id: 'turn-late-settlement', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }],
+        abortSignal: undefined,
+        body: browserBody({ runId, trigger: 'submit' }),
+      });
+      await drain(stream.getReader());
+
+      expect(client.close).not.toHaveBeenCalled();
+      const finalized = {
+        type: 'turn.finalized',
+        turnId: 'turn-late-settlement',
+        runId,
+        chatId,
+        projectId: 'project-late-turn-settlement',
+        checkoutId: undefined,
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: [runId],
+      } as const;
+      expect(await persistBrowserTurnSettlement(finalized)).toBe(true);
+      expect(recordSettlement).toHaveBeenCalledWith(finalized);
+      recordHostTurnSettlement(finalized);
+
+      await vi.waitFor(() => {
+        expect(observed).toEqual([
+          expect.objectContaining({ type: 'turn.finalized', chatId, runId, turnId: 'turn-late-settlement' }),
+        ]);
+        expect(client.close).toHaveBeenCalledOnce();
+      });
+    } finally {
+      unsubscribe();
+      unregister();
+    }
   });
 
   /* G-REV-MODE: the host that runs the turn is the host that records it, so
@@ -590,7 +958,6 @@ describe('BrowserPlacementChatTransport', () => {
     } as const;
     const client = clientFor(chatId, runId, {
       attach: vi.fn(async () => ({ cursor: 0, nextCursor: 4, endCursor: 4, events, snapshot: refusedSnapshot })),
-      resume: vi.fn(async () => snapshot(chatId, runId)),
     });
     const unregister = registerAgentHost(chatId, {
       projectStorage: async () => ({
@@ -892,6 +1259,96 @@ describe('BrowserPlacementChatTransport', () => {
     expect(client.resume).not.toHaveBeenCalled();
     unregister();
   });
+
+  it.each(['completed', 'running'] as const)(
+    'replays a %s attach snapshot before concurrent frames',
+    async (snapshotState) => {
+      installBrowserGlobals();
+      const chatId = 'chat-attach-race';
+      const runId = 'run-attach-race';
+      let liveListener: Parameters<NonNullable<AgentHostClient['subscribeLive']>>[0] | undefined;
+      let durableListener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+      const base = { version: 1, leaderEpoch: 'leader', recordedAt: '2026-09-01T00:00:00.000Z', runId } as const;
+      const events: AgentLogEvent[] = [
+        { ...base, sequence: 0, type: 'run.lifecycle', state: 'admitted' },
+        ...['Earlier', 'Later'].map(
+          (text, index): AgentLogEvent => ({
+            ...base,
+            sequence: index + 1,
+            type: 'message.appended',
+            message: {
+              id: text,
+              role: 'assistant',
+              content: text,
+              metadata: { tauInternal: { kind: 'external-tool', origin: 'external', streamState: 'final' } },
+            },
+          }),
+        ),
+        { ...base, sequence: 3, type: 'run.lifecycle', state: 'completed' },
+      ];
+      const client = clientFor(chatId, runId, {
+        subscribe: (listener) => {
+          durableListener = listener;
+          return () => {
+            durableListener = undefined;
+          };
+        },
+        subscribeLive: (listener) => {
+          liveListener = listener;
+          return () => {
+            liveListener = undefined;
+          };
+        },
+        attach: async () => {
+          liveListener?.(chatId, {
+            type: 'text-delta',
+            chatId,
+            runId,
+            messageId: 'Later',
+            contentIndex: 0,
+            delta: 'Later',
+            offset: 0,
+          });
+          if (snapshotState === 'running') {
+            durableListener?.(chatId, events[3]!);
+          }
+          const attachedEvents = snapshotState === 'running' ? events.slice(0, 3) : events;
+          return {
+            cursor: 0,
+            nextCursor: attachedEvents.length,
+            endCursor: attachedEvents.length,
+            events: attachedEvents,
+            snapshot: { ...snapshot(chatId, runId), state: snapshotState },
+          };
+        },
+      });
+      const unregister = registerAgentHost(chatId, {
+        projectStorage: async () => ({ projectId: 'project-race', backend: 'opfs', providerBasePath: 'project-race' }),
+        createClient: async () => client,
+        markRunId: async () => undefined,
+      });
+      try {
+        const transport = new BrowserPlacementChatTransport();
+        transport.bindRun(chatId, runId);
+        const stream = await transport.reconnectToStream({ chatId });
+        const chunks: UIMessageChunk[] = [];
+        await stream!.pipeTo(
+          new WritableStream({
+            write(chunk) {
+              chunks.push(chunk);
+            },
+          }),
+        );
+        expect(chunks.filter((chunk) => chunk.type === 'text-delta').map((chunk) => chunk.delta)).toEqual([
+          'Earlier',
+          'Later',
+        ]);
+        expect(getBrowserAgentHostRun(chatId)?.state).toBe('completed');
+      } finally {
+        unregister();
+      }
+    },
+  );
 
   it('projects a real live partial before start settles and closes it without durable replay', async () => {
     installBrowserGlobals();
@@ -1404,6 +1861,15 @@ describe('BrowserPlacementChatTransport', () => {
     );
     expect(assistantTexts(corrupted)).toHaveLength(58);
     expect(await reattach(corrupted)).toEqual(rebuilt);
+
+    const lossy = structuredClone(rebuilt);
+    const assistant = lossy.find((message) => message.role === 'assistant');
+    const text = assistant?.parts.find((part) => part.type === 'text');
+    if (text?.type === 'text') {
+      text.text = `${text.text.slice(0, 8)}${text.text.slice(-8)}`;
+    }
+    expect(lossy).not.toEqual(rebuilt);
+    expect(await reattach(lossy)).toEqual(rebuilt);
     unregister();
   });
 });

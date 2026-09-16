@@ -2,6 +2,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "allowImportingTsExtensions": true,
+    "noEmit": true,
     "outDir": "./out-tsc/spec",
     "types": ["node"],
     "paths": {

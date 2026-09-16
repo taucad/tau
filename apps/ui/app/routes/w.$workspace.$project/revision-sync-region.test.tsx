@@ -5,15 +5,44 @@
  * for a given `RemoteFacet` — no worker, no actor, no network.
  */
 
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router';
 import { RevisionSyncRegion } from '#routes/w.$workspace.$project/revision-sync-region.js';
 import type { RemoteFacet, SyncFacet } from '@taucad/revisions';
+import type { RevisionSyncRegionProps } from '#routes/w.$workspace.$project/revision-sync-region.js';
 
-const authorizeGithubRemote = vi.hoisted(() => vi.fn(async () => undefined));
+const githubToken = vi.hoisted(() =>
+  vi.fn(async () => ({
+    accessToken: 'secret',
+    expiresAt: '2026-09-14T00:00:00Z',
+    generation: 3,
+  })),
+);
 
-vi.mock('#lib/share-providers.js', () => ({ authorizeGithubRemote }));
+vi.mock('#lib/github-connections.js', () => ({
+  githubConnections: { token: githubToken },
+}));
+vi.mock('#components/github/github-repository-picker.js', () => ({
+  GithubRepositoryPicker: ({ onSelect }: { onSelect: (selection: unknown) => void }) => (
+    <button
+      type='button'
+      onClick={() => {
+        onSelect({
+          connection: { id: '00000000-0000-4000-8000-000000000001' },
+          repository: {
+            id: 99,
+            cloneUrl: 'https://github.com/o/r.git',
+            access: 'write',
+          },
+        });
+      }}
+    >
+      Pick GitHub repository
+    </button>
+  ),
+}));
 
 const facet = (overrides: Partial<RemoteFacet> = {}): RemoteFacet => ({
   kind: 'none',
@@ -22,6 +51,10 @@ const facet = (overrides: Partial<RemoteFacet> = {}): RemoteFacet => ({
   storage: undefined,
   overQuota: [],
   error: undefined,
+  fetchOnly: false,
+  provider: undefined,
+  repositoryId: undefined,
+  quota: undefined,
   ...overrides,
 });
 
@@ -34,30 +67,74 @@ const syncFacet = (overrides: Partial<SyncFacet> = {}): SyncFacet => ({
   online: true,
   conflictRef: undefined,
   error: undefined,
+  reason: undefined,
   ...overrides,
 });
 
 const renderRegion = (
   remote: RemoteFacet,
   sync: SyncFacet = syncFacet(),
+  overrides: Partial<RevisionSyncRegionProps> = {},
 ): Readonly<{
-  connect: ReturnType<typeof vi.fn>;
+  connect: ReturnType<typeof vi.fn<RevisionSyncRegionProps['onConnect']>>;
   disconnect: ReturnType<typeof vi.fn>;
   cancel: ReturnType<typeof vi.fn>;
+  syncNow: ReturnType<typeof vi.fn>;
+  setSyncChats: ReturnType<typeof vi.fn>;
+  setSyncLargeExports: ReturnType<typeof vi.fn>;
+  upgrade: ReturnType<typeof vi.fn>;
+  /** Re-render the same mount with a moved facet, which is where C9 lived. */
+  show: (next: RemoteFacet, nextSync?: SyncFacet) => void;
 }> => {
-  const connect = vi.fn();
+  const connect = vi.fn<RevisionSyncRegionProps['onConnect']>();
   const disconnect = vi.fn();
   const cancel = vi.fn();
-  render(
-    <RevisionSyncRegion remote={remote} sync={sync} onConnect={connect} onDisconnect={disconnect} onCancel={cancel} />,
+  const syncNow = vi.fn();
+  const setSyncChats = vi.fn();
+  const setSyncLargeExports = vi.fn();
+  const upgrade = vi.fn();
+  const element = (nextRemote: RemoteFacet, nextSync: SyncFacet): React.JSX.Element => (
+    <MemoryRouter>
+      <RevisionSyncRegion
+        remote={nextRemote}
+        sync={nextSync}
+        onConnect={connect}
+        onDisconnect={disconnect}
+        onCancel={cancel}
+        onSync={syncNow}
+        syncChats
+        onSyncChatsChange={setSyncChats}
+        syncLargeExports={false}
+        onSyncLargeExportsChange={setSyncLargeExports}
+        onUpgrade={upgrade}
+        signInHref='/auth/sign-in'
+        {...overrides}
+      />
+    </MemoryRouter>
   );
-  return { connect, disconnect, cancel };
+  const { rerender } = render(element(remote, sync));
+  return {
+    connect,
+    disconnect,
+    cancel,
+    syncNow,
+    setSyncChats,
+    setSyncLargeExports,
+    upgrade,
+    show: (next, nextSync = sync) => {
+      rerender(element(next, nextSync));
+    },
+  };
 };
 
 describe('RevisionSyncRegion', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    authorizeGithubRemote.mockResolvedValue(undefined);
+    githubToken.mockResolvedValue({
+      accessToken: 'secret',
+      expiresAt: '2026-09-14T00:00:00Z',
+      generation: 3,
+    });
   });
 
   it('offers the three remote kinds and says what connecting asks for', () => {
@@ -66,15 +143,21 @@ describe('RevisionSyncRegion', () => {
     expect(screen.getByRole('radio', { name: 'No remote' })).toBeChecked();
     expect(screen.getByRole('radio', { name: 'Tau Cloud' })).not.toBeChecked();
     expect(screen.getByRole('radio', { name: 'Git remote' })).not.toBeChecked();
-    expect(screen.getByText(/signs this project’s files, history and chats in/u)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Connect backup' })).toBeInTheDocument();
   });
 
   it('asks to connect when Tau Cloud is picked', async () => {
     const user = userEvent.setup();
-    const { connect } = renderRegion(facet());
+    const { connect, setSyncChats } = renderRegion(facet());
 
     await user.click(screen.getByRole('radio', { name: 'Tau Cloud' }));
 
+    expect(connect).not.toHaveBeenCalled();
+    expect(screen.getByText('Files and history are backed up to your Tau account.')).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Sync chats' })).toBeInTheDocument();
+    await user.click(screen.getByRole('switch', { name: 'Sync chats' }));
+    expect(setSyncChats).toHaveBeenCalledWith(false);
+    await user.click(screen.getByRole('button', { name: 'Connect backup' }));
     expect(connect).toHaveBeenCalledWith('tau');
   });
 
@@ -103,24 +186,110 @@ describe('RevisionSyncRegion', () => {
       'aria-valuenow',
       '21',
     );
-    expect(screen.getByText('https://api.tau.new/v1/git/p1.git')).toBeInTheDocument();
+    expect(screen.getByText('Tau Cloud')).toBeInTheDocument();
+    expect(screen.queryByText('https://api.tau.new/v1/git/p1.git')).not.toBeInTheDocument();
+  });
+
+  it('states when a linked GitHub repository is fetch-only', () => {
+    renderRegion(
+      facet({
+        kind: 'git',
+        phase: 'connected',
+        url: 'https://github.com/o/read-only.git',
+        fetchOnly: true,
+        provider: 'github',
+      }),
+    );
+    expect(screen.getByText('Read-only link · Tau will not push')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sync now' })).not.toBeInTheDocument();
+  });
+
+  it('syncs a writable project through the existing scheduler and opens its GitHub page', async () => {
+    const user = userEvent.setup();
+    const { syncNow } = renderRegion(
+      facet({
+        kind: 'git',
+        phase: 'connected',
+        url: 'https://github.com/o/design.git',
+        provider: 'github',
+      }),
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Sync now' }));
+    expect(syncNow).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('o/design')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open GitHub' })).toHaveAttribute('href', 'https://github.com/o/design');
+  });
+
+  it('can change the linked repository or GitHub account without disconnecting first', async () => {
+    const user = userEvent.setup();
+    renderRegion(
+      facet({
+        kind: 'git',
+        phase: 'connected',
+        url: 'https://github.com/o/design.git',
+        provider: 'github',
+      }),
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Change backup' }));
+    expect(screen.getByRole('button', { name: 'Pick GitHub repository' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Keep current repository' }));
+    expect(screen.queryByRole('button', { name: 'Pick GitHub repository' })).not.toBeInTheDocument();
+  });
+
+  it('asks before replacing the connected backup', async () => {
+    const user = userEvent.setup();
+    const { connect } = renderRegion(
+      facet({
+        kind: 'tau',
+        phase: 'connected',
+        url: 'https://api.tau.new/v1/git/p1.git',
+      }),
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Change backup' }));
+    await user.click(screen.getByRole('radio', { name: 'Git remote' }));
+    await user.click(screen.getByRole('button', { name: 'Pick GitHub repository' }));
+
+    expect(connect).not.toHaveBeenCalled();
+    expect(screen.getByText('Replace Tau Cloud with o/r? Every revision stays on this device.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Replace backup' }));
+    await waitFor(() => {
+      expect(connect).toHaveBeenCalledWith(
+        'git',
+        'https://github.com/o/r.git',
+        expect.objectContaining({ provider: 'github', repositoryId: '99' }),
+      );
+    });
   });
 
   it('asks before disconnecting, and says what disconnecting costs', async () => {
     const user = userEvent.setup();
-    const { disconnect } = renderRegion(facet({ kind: 'tau', phase: 'connected', url: 'https://example.test/p1.git' }));
+    const { disconnect } = renderRegion(
+      facet({
+        kind: 'tau',
+        phase: 'connected',
+        url: 'https://example.test/p1.git',
+      }),
+    );
 
-    await user.click(screen.getByRole('button', { name: 'Disconnect' }));
+    await user.click(screen.getByRole('button', { name: 'Change backup' }));
+    await user.click(screen.getByRole('radio', { name: 'No remote' }));
+    await user.click(screen.getByRole('button', { name: 'Apply backup change' }));
 
     // The first press asks; nothing has happened yet.
     expect(disconnect).not.toHaveBeenCalled();
-    expect(screen.getByText('Disconnect this remote? Every revision stays on this device.')).toBeInTheDocument();
+    expect(screen.getByText('Disconnect Tau Cloud? Every revision stays on this device.')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Keep it' }));
     expect(disconnect).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole('button', { name: 'Disconnect' }));
-    await user.click(screen.getByRole('button', { name: 'Disconnect' }));
+    await user.click(screen.getByRole('button', { name: 'Change backup' }));
+    await user.click(screen.getByRole('radio', { name: 'No remote' }));
+    await user.click(screen.getByRole('button', { name: 'Apply backup change' }));
+    await user.click(screen.getByRole('button', { name: 'Disconnect Tau Cloud' }));
     expect(disconnect).toHaveBeenCalledTimes(1);
   });
 
@@ -142,7 +311,13 @@ describe('RevisionSyncRegion', () => {
   });
 
   it('reports a failed connection as an alert, not as silence', () => {
-    renderRegion(facet({ kind: 'tau', phase: 'failed', error: 'The remote did not answer.' }));
+    renderRegion(
+      facet({
+        kind: 'tau',
+        phase: 'failed',
+        error: 'The remote did not answer.',
+      }),
+    );
 
     expect(screen.getByRole('alert')).toHaveTextContent('The remote did not answer.');
   });
@@ -161,32 +336,17 @@ describe('RevisionSyncRegion', () => {
     await user.click(screen.getByRole('radio', { name: 'Git remote' }));
 
     expect(connect).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Pick GitHub repository' })).toBeInTheDocument();
+    await user.click(screen.getByText('Advanced HTTPS remote'));
     expect(screen.getByRole('textbox', { name: 'Repository address' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Connect' })).toBeDisabled();
-  });
-
-  it('names the authority it will ask for, and asks for more only once the repository is private', async () => {
-    const user = userEvent.setup();
-    renderRegion(facet());
-    await user.click(screen.getByRole('radio', { name: 'Git remote' }));
-
-    await user.type(screen.getByRole('textbox', { name: 'Repository address' }), 'https://github.com/o/r.git');
-
-    expect(
-      screen.getByText('GitHub will ask you to let Tau read and write your public repositories.'),
-    ).toBeInTheDocument();
-
-    await user.click(screen.getByRole('checkbox', { name: 'This repository is private' }));
-
-    expect(
-      screen.getByText('GitHub will ask you to let Tau read and write your repositories, including private ones.'),
-    ).toBeInTheDocument();
   });
 
   it('refuses an address the proxy would refuse, while the person is still typing', async () => {
     const user = userEvent.setup();
     renderRegion(facet());
     await user.click(screen.getByRole('radio', { name: 'Git remote' }));
+    await user.click(screen.getByText('Advanced HTTPS remote'));
 
     await user.type(screen.getByRole('textbox', { name: 'Repository address' }), 'http://github.com/o/r.git');
 
@@ -194,49 +354,36 @@ describe('RevisionSyncRegion', () => {
     expect(screen.getByRole('button', { name: 'Connect' })).toBeDisabled();
   });
 
-  it('says plainly that large files do not cross a third-party wire (S35, P17)', async () => {
+  it('explains that GitHub selections use Git LFS', async () => {
     const user = userEvent.setup();
     renderRegion(facet());
 
     await user.click(screen.getByRole('radio', { name: 'Git remote' }));
+    await user.click(screen.getByText('Advanced HTTPS remote'));
 
     expect(
-      screen.getByText('Files over 1 MB stay on this device: Tau transfers large files to Tau Cloud only.'),
+      screen.getByText(
+        'GitHub repositories selected above use their Git LFS storage. Other hosts may reject large files.',
+      ),
     ).toBeInTheDocument();
   });
 
-  it('takes consent before it connects, and connects with what the person said', async () => {
+  it('connects a repository selected through the shared GitHub picker', async () => {
     const user = userEvent.setup();
-    const consent = { closed: false, close: vi.fn(), location: { href: '' } };
-    vi.spyOn(globalThis, 'open').mockReturnValue(consent as unknown as Window);
     const { connect } = renderRegion(facet());
     await user.click(screen.getByRole('radio', { name: 'Git remote' }));
-    await user.type(screen.getByRole('textbox', { name: 'Repository address' }), 'https://github.com/o/r.git');
-    await user.click(screen.getByRole('checkbox', { name: 'This repository is private' }));
+    await user.click(screen.getByRole('button', { name: 'Pick GitHub repository' }));
 
-    await user.click(screen.getByRole('button', { name: 'Connect' }));
-
-    expect(authorizeGithubRemote).toHaveBeenCalledWith({
-      visibility: 'private',
-      consent,
-      reconnect: false,
+    const options = connect.mock.calls[0]?.[2];
+    expect(options?.authorization).toMatch(/^Basic /u);
+    expect(options).toEqual({
+      authorization: options?.authorization,
+      provider: 'github',
+      repositoryId: '99',
+      connectionId: '00000000-0000-4000-8000-000000000001',
+      generation: 3,
+      fetchOnly: false,
     });
-    expect(connect).toHaveBeenCalledWith('git', 'https://github.com/o/r.git', { visibility: 'private' });
-  });
-
-  it('never connects when consent was refused, and says so', async () => {
-    const user = userEvent.setup();
-    const consent = { closed: false, close: vi.fn(), location: { href: '' } };
-    vi.spyOn(globalThis, 'open').mockReturnValue(consent as unknown as Window);
-    authorizeGithubRemote.mockRejectedValueOnce(new Error('GitHub permission was not granted.'));
-    const { connect } = renderRegion(facet());
-    await user.click(screen.getByRole('radio', { name: 'Git remote' }));
-    await user.type(screen.getByRole('textbox', { name: 'Repository address' }), 'https://github.com/o/r.git');
-
-    await user.click(screen.getByRole('button', { name: 'Connect' }));
-
-    expect(connect).not.toHaveBeenCalled();
-    expect(screen.getByRole('alert')).toHaveTextContent('GitHub permission was not granted.');
   });
 
   /*
@@ -244,11 +391,9 @@ describe('RevisionSyncRegion', () => {
    * push, so the row asks again for the grant rather than reporting an error
    * nobody can act on.
    */
-  it('asks GitHub again, and only GitHub, when the credential has to be renewed', async () => {
+  it('keeps the shared GitHub picker available when the credential has to be renewed', async () => {
     const user = userEvent.setup();
-    const consent = { closed: false, close: vi.fn(), location: { href: '' } };
-    vi.spyOn(globalThis, 'open').mockReturnValue(consent as unknown as Window);
-    const { connect } = renderRegion(
+    renderRegion(
       facet({
         kind: 'git',
         phase: 'reconnectRequired',
@@ -259,13 +404,7 @@ describe('RevisionSyncRegion', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('Your GitHub connection needs to be renewed.');
     await user.click(screen.getByRole('button', { name: 'Reconnect GitHub' }));
-
-    expect(authorizeGithubRemote).toHaveBeenCalledWith({
-      visibility: 'public',
-      consent,
-      reconnect: true,
-    });
-    expect(connect).toHaveBeenCalledWith('git', 'https://github.com/o/r.git', { visibility: 'public' });
+    expect(screen.getByRole('button', { name: 'Pick GitHub repository' })).toBeInTheDocument();
   });
 
   /*
@@ -289,12 +428,20 @@ describe('RevisionSyncRegion', () => {
 
   it('moves focus onto the disconnect confirmation, not to the document', async () => {
     const user = userEvent.setup();
-    renderRegion(facet({ kind: 'tau', phase: 'connected', url: 'https://example.test/p1.git' }));
+    renderRegion(
+      facet({
+        kind: 'tau',
+        phase: 'connected',
+        url: 'https://example.test/p1.git',
+      }),
+    );
 
-    await user.click(screen.getByRole('button', { name: 'Disconnect' }));
+    await user.click(screen.getByRole('button', { name: 'Change backup' }));
+    await user.click(screen.getByRole('radio', { name: 'No remote' }));
+    await user.click(screen.getByRole('button', { name: 'Apply backup change' }));
 
     // The button the click came from unmounted; focus must not fall to <body>.
-    expect(screen.getByRole('button', { name: 'Disconnect' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Disconnect Tau Cloud' })).toHaveFocus();
   });
 
   /*
@@ -306,15 +453,20 @@ describe('RevisionSyncRegion', () => {
   const rows: ReadonlyArray<readonly [SyncFacet['state'], number, string]> = [
     ['checking', 0, 'Checking…'],
     ['backedUp', 0, 'Backed up'],
-    ['pending', 2, 'Backing up… 2'],
-    ['queued', 1, 'Not backed up · 1'],
-    ['failed', 3, 'Not backed up · 3'],
+    ['pending', 1, 'Backing up… 1 revision'],
+    ['pending', 2, 'Backing up… 2 revisions'],
+    ['queued', 1, 'Not backed up · 1 revision'],
+    ['failed', 3, 'Not backed up · 3 revisions'],
     ['conflicted', 0, 'Needs resolution'],
   ];
 
-  it.each(rows)('says %s as “%s”', (state, pendingCount, copy) => {
+  it.each(rows)('should say %s as “%s”', (state, pendingCount, copy) => {
     renderRegion(
-      facet({ kind: 'tau', phase: 'connected', url: 'https://api.tau.new/v1/git/p1.git' }),
+      facet({
+        kind: 'tau',
+        phase: 'connected',
+        url: 'https://api.tau.new/v1/git/p1.git',
+      }),
       syncFacet({ state, pendingCount }),
     );
 
@@ -329,11 +481,87 @@ describe('RevisionSyncRegion', () => {
 
   it('says the device is offline beside a queue it cannot send', () => {
     renderRegion(
-      facet({ kind: 'tau', phase: 'connected', url: 'https://api.tau.new/v1/git/p1.git' }),
+      facet({
+        kind: 'tau',
+        phase: 'connected',
+        url: 'https://api.tau.new/v1/git/p1.git',
+      }),
       syncFacet({ state: 'queued', pendingCount: 1, online: false }),
     );
 
-    expect(screen.getByRole('status')).toHaveTextContent('Not backed up · 1');
+    expect(screen.getByRole('status')).toHaveTextContent('Not backed up · 1 revision');
     expect(screen.getByRole('status')).toHaveTextContent('Offline');
+  });
+});
+
+/*
+ * The three closeout pins for this region: a connection that leaves `connected`
+ * keeps its verbs (C9), a refusal reaches a person with its reason and exactly
+ * one action (C4/N3), and a plan that cannot sync is never offered a connect
+ * (C5/N4).
+ */
+describe('RevisionSyncRegion refusals and plan gates', () => {
+  const connected = facet({ kind: 'tau', phase: 'connected', url: 'https://api.tau.new/v1/git/p1.git' });
+
+  it('keeps a commit affordance when a live connection leaves connected (C9)', () => {
+    const region = renderRegion(connected);
+    expect(screen.getByRole('button', { name: 'Change backup' })).toBeInTheDocument();
+
+    region.show(facet({ kind: 'tau', phase: 'failed', error: 'Sign in to back this project up to Tau Cloud.' }));
+
+    /* Before the fix this rendered three radios and *zero* buttons, so the
+     * region was an inert dead end and focus fell to `<body>`. */
+    expect(screen.getByRole('button', { name: 'Apply backup change' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['unauthorized' as const, 'link', 'Sign in'],
+    ['notEntitled' as const, 'button', 'Pro Upgrade'],
+    ['quota' as const, 'button', 'Pro Upgrade'],
+    ['rejected' as const, 'button', 'Sync now'],
+    ['unknown' as const, 'button', 'Retry'],
+  ])('renders the %s reason with its one action (C4, N3)', (reason, role, action) => {
+    renderRegion(
+      connected,
+      syncFacet({ state: 'failed', pendingCount: 2, error: 'The plan does not allow it.', reason }),
+    );
+
+    const row = screen.getByRole('status', { name: 'Backup status' });
+    expect(row).toHaveTextContent('The plan does not allow it.');
+    expect(within(row).getByRole(role, { name: action })).toBeInTheDocument();
+  });
+
+  it('never parses the sentence: no reason means no invented action (C4)', () => {
+    renderRegion(connected, syncFacet({ state: 'failed', pendingCount: 1, error: 'Something went wrong.' }));
+
+    const row = screen.getByRole('status', { name: 'Backup status' });
+    expect(row).toHaveTextContent('Something went wrong.');
+    expect(within(row).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('offers Available on Pro instead of a connect a free plan cannot have (C5, N4)', async () => {
+    const user = userEvent.setup();
+    const region = renderRegion(facet(), syncFacet(), { canSyncFiles: false, canConnectGitHub: false });
+
+    expect(screen.getByRole('radio', { name: 'Tau Cloud' })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: 'Git remote' })).toBeDisabled();
+    const upgrades = screen.getAllByRole('button', { name: /Available on Pro/u });
+    expect(upgrades).toHaveLength(2);
+
+    await user.click(upgrades[0]!);
+    expect(region.upgrade).toHaveBeenCalled();
+    /* The whole point of the gate: nothing is registered on the server. */
+    expect(region.connect).not.toHaveBeenCalled();
+  });
+
+  it('offers Sync exports beside Sync chats on a connected project (C14, EQ7)', async () => {
+    const user = userEvent.setup();
+    const region = renderRegion(connected);
+
+    const exports = screen.getByRole('switch', { name: 'Sync exports' });
+    expect(exports).toBeInTheDocument();
+    await user.click(exports);
+    expect(region.setSyncLargeExports).toHaveBeenCalledWith(true);
   });
 });

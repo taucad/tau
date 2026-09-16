@@ -23,7 +23,9 @@ const editorRef = {
   getSnapshot: () => ({ context: { focusedChatId } }),
   subscribe: () => ({ unsubscribe: () => undefined }),
 };
-vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'p', editorRef }) }));
+vi.mock('#hooks/use-project.js', () => ({
+  useProject: () => ({ projectId: 'p', editorRef }),
+}));
 
 const openPanel = vi.fn();
 vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
@@ -40,6 +42,8 @@ vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
   getHostFinalizedTurns: () => settlements,
   subscribeHostFinalizedTurns: () => () => undefined,
 }));
+let chats = [{ id: 'chat-1', checkoutId: 'live' }];
+vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats }) }));
 
 const row = (over: Partial<RevisionRow> & Pick<RevisionRow, 'revisionId'>): RevisionRow => ({
   revisionNumber: undefined,
@@ -64,24 +68,36 @@ beforeEach(() => {
   revisionStatusHarness.reset();
   openPanel.mockClear();
   focusedChatId = 'chat-1';
+  chats = [{ id: 'chat-1', checkoutId: 'live' }];
 });
 
 describe('RevisionStatusAction', () => {
   it('names the branch and the revision at all times', async () => {
     revisionStatusHarness.rows = [row({ revisionId: 'rev-12', revisionNumber: 12 })];
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main', headRevisionId: 'rev-12' };
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      headRevisionId: 'rev-12',
+    };
 
     render(<RevisionStatusAction />, { wrapper });
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Open Revisions. You are on main, Rev 12.' })).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', {
+          name: 'Open Revisions. You are on main, Rev 12.',
+        }),
+      ).toBeInTheDocument();
     });
     expect(screen.getByText('Rev 12')).toBeInTheDocument();
   });
 
   it('opens Revisions when it is clicked', async () => {
     const user = userEvent.setup();
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main' };
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+    };
 
     render(<RevisionStatusAction />, { wrapper });
     await user.click(screen.getByRole('button', { name: 'Open Revisions. You are on main.' }));
@@ -89,13 +105,36 @@ describe('RevisionStatusAction', () => {
     expect(openPanel).toHaveBeenCalledWith('revisions');
   });
 
+  it('announces when the checkout is modified', () => {
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: 'main',
+      dirty: true,
+    };
+
+    render(<RevisionStatusAction />, { wrapper });
+
+    expect(
+      screen.getByRole('button', {
+        name: 'Open Revisions. You are on main, Modified.',
+      }),
+    ).toBeInTheDocument();
+  });
+
   it('offers Follow chat only while the chat works on another branch', async () => {
     const user = userEvent.setup();
+    chats = [{ id: 'chat-1', checkoutId: 'co-2' }];
     revisionStatusHarness.status = {
       ...revisionStatusHarness.status,
       branch: 'main',
       branches: [
-        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: [] },
+        {
+          name: 'main',
+          head: undefined,
+          checkoutId: 'live',
+          checkoutRoot: '/projects/p',
+          leaseChatIds: [],
+        },
         {
           name: 'bracket-fillet',
           head: undefined,
@@ -107,10 +146,12 @@ describe('RevisionStatusAction', () => {
     };
 
     render(<RevisionStatusAction />, { wrapper });
-    const follow = screen.getByRole('button', { name: 'Follow chat, which is working on bracket-fillet' });
+    const follow = screen.getByRole('button', {
+      name: 'Follow chat, which is working on bracket-fillet',
+    });
     await user.click(follow);
 
-    expect(revisionStatusHarness.commands.followChat).toHaveBeenCalledWith('chat-1');
+    expect(revisionStatusHarness.commands.pinTo).toHaveBeenCalledWith('co-2');
   });
 
   it('says nothing about following while the chat is where the workbench is', () => {
@@ -118,7 +159,13 @@ describe('RevisionStatusAction', () => {
       ...revisionStatusHarness.status,
       branch: 'main',
       branches: [
-        { name: 'main', head: undefined, checkoutId: 'live', checkoutRoot: '/projects/p', leaseChatIds: ['chat-1'] },
+        {
+          name: 'main',
+          head: undefined,
+          checkoutId: 'live',
+          checkoutRoot: '/projects/p',
+          leaseChatIds: ['chat-1'],
+        },
       ],
     };
 
@@ -128,11 +175,18 @@ describe('RevisionStatusAction', () => {
   });
 
   it('says where you are even before the first revision, rather than vanishing (review R10)', () => {
-    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: undefined };
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      branch: undefined,
+    };
 
     render(<RevisionStatusAction />, { wrapper });
 
-    expect(screen.getByRole('button', { name: 'Open Revisions. You are on Setting up.' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', {
+        name: 'Open Revisions. You are on Setting up.',
+      }),
+    ).toBeInTheDocument();
   });
 
   it('renders nothing before the project root has answered at all', () => {

@@ -14,11 +14,11 @@ Iterable
 // All the operations on a read-only sequence
 Sequence
 
-// S.index(value, [start, [stop]]) -> integer -- return first index of
-index(value, start = 0, stop = None)
+  // S.index(value, [start, [stop]]) -> integer -- return first index of
+  index(value, start = 0, stop = None)
 
-// S.count(value) -> integer -- return number of occurrences of value
-count(value)
+  // S.count(value) -> integer -- return number of occurrences of value
+  count(value)
 
 // A decorator indicating abstract methods
 abstractmethod(funcobj)

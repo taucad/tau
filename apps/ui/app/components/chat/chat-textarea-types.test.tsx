@@ -140,6 +140,44 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
     expect(submittedPayload).toEqual({ content: 'hello world', imageUrls: [] });
   });
 
+  it('should admit only one submit before React commits the submitting state', async () => {
+    let resolveSubmit: (() => void) | undefined;
+    const onSubmit = vi.fn(
+      async () =>
+        new Promise<void>((resolve) => {
+          resolveSubmit = resolve;
+        }),
+    );
+    const { result } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit }));
+
+    let first: Promise<void> | undefined;
+    let second: Promise<void> | undefined;
+    act(() => {
+      first = result.current.handleSubmit();
+      second = result.current.handleSubmit();
+    });
+
+    expect(onSubmit).toHaveBeenCalledOnce();
+    await act(async () => {
+      resolveSubmit?.();
+      await Promise.all([first, second]);
+    });
+  });
+
+  it('should release the synchronous submit guard after rejection', async () => {
+    const onSubmit = vi.fn().mockRejectedValueOnce(new Error('failed')).mockResolvedValueOnce(undefined);
+    const { result } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit }));
+
+    await act(async () => {
+      await expect(result.current.handleSubmit()).rejects.toThrow('failed');
+    });
+    await act(async () => {
+      await result.current.handleSubmit();
+    });
+
+    expect(onSubmit).toHaveBeenCalledTimes(2);
+  });
+
   it('should never thread model or metadata to onSubmit even when the chat-scoped model changes between submits', async () => {
     const onSubmit = vi.fn<(payload: { content: string; imageUrls: string[] }) => Promise<void>>(async () => undefined);
     const { result, rerender } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit }));

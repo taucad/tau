@@ -82,6 +82,25 @@ describe('createRevisionHttpClient', () => {
     ).rejects.toThrow(/at most 65536 bytes/u);
   });
 
+  it('refuses oversized declared and streamed Git responses', async () => {
+    const declared = createRevisionHttpClient({
+      maximumResponseBytes: 2,
+      fetch: vi.fn(async () => new Response('long', { headers: { 'content-length': '4' } })),
+    });
+    await expect(declared.request({ url: 'https://api.tau.new/declared' })).rejects.toThrow(/at most 2 bytes/u);
+
+    const streamed = createRevisionHttpClient({
+      maximumResponseBytes: (url) => (url.endsWith('/pack') ? 2 : 8),
+      fetch: vi.fn(async () => new Response('long')),
+    });
+    const response = await streamed.request({ url: 'https://api.tau.new/pack' });
+    await expect(async () => {
+      for await (const _chunk of response.body) {
+        // Consume the body: the streaming bound is enforced during iteration.
+      }
+    }).rejects.toThrow(/at most 2 bytes/u);
+  });
+
   it('bounds one request on its own signal, and on both when the client has one too (P36)', async () => {
     /* The open pull's 10 s is one operation's bound, not the client's: a
      * client-wide signal would abort every other request the same client is

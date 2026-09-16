@@ -2,7 +2,6 @@ import { useRef, useState } from 'react';
 import { Check, Sparkles } from 'lucide-react';
 import { Link } from 'react-router';
 import type { BillingTier, PlanCatalogEntry } from '@taucad/billing';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party plan surface owns the direct billing client contract
 import { tauPlanCatalog } from '@taucad/billing';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
 import {
@@ -164,7 +163,7 @@ export function PlanCards({
               className={cn(
                 'flex flex-1 flex-col gap-1.5 text-sm',
                 isFeatureListScrollable &&
-                  'max-h-80 scroll-shadows-y overscroll-contain pr-2 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+                  'max-h-80 scroll-shadows-y overscroll-contain pr-2 focus-visible:focus-outline',
               )}
               tabIndex={isFeatureListScrollable ? 0 : undefined}
             >

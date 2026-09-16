@@ -6,195 +6,195 @@ FairCurve_AnalysisCode: typeof FairCurve_AnalysisCode[keyof typeof FairCurve_Ana
 
 FairCurve_Batten: declare class FairCurve_Batten
 
-constructor
+  constructor
 
-SetFreeSliding(FreeSliding: boolean): void;
+  SetFreeSliding(FreeSliding: boolean): void;
 
-SetConstraintOrder1(ConstraintOrder: number): void;
+  SetConstraintOrder1(ConstraintOrder: number): void;
 
-SetConstraintOrder2(ConstraintOrder: number): void;
+  SetConstraintOrder2(ConstraintOrder: number): void;
 
-SetP1(P1: gp_Pnt2d): void;
+  SetP1(P1: gp_Pnt2d): void;
 
-SetP2(P2: gp_Pnt2d): void;
+  SetP2(P2: gp_Pnt2d): void;
 
-SetAngle1(Angle1: number): void;
+  SetAngle1(Angle1: number): void;
 
-SetAngle2(Angle2: number): void;
+  SetAngle2(Angle2: number): void;
 
-SetHeight(Height: number): void;
+  SetHeight(Height: number): void;
 
-SetSlope(Slope: number): void;
+  SetSlope(Slope: number): void;
 
-SetSlidingFactor(SlidingFactor: number): void;
+  SetSlidingFactor(SlidingFactor: number): void;
 
-Compute(Code: FairCurve_AnalysisCode, NbIterations: number, Tolerance: number): { returnValue: boolean; Code: FairCurve_AnalysisCode };
+  Compute(Code: FairCurve_AnalysisCode, NbIterations: number, Tolerance: number): { returnValue: boolean; Code: FairCurve_AnalysisCode };
 
-SlidingOfReference(): number;
+  SlidingOfReference(): number;
 
-GetFreeSliding(): boolean;
+  GetFreeSliding(): boolean;
 
-GetConstraintOrder1(): number;
+  GetConstraintOrder1(): number;
 
-GetConstraintOrder2(): number;
+  GetConstraintOrder2(): number;
 
-GetP1(): gp_Pnt2d;
+  GetP1(): gp_Pnt2d;
 
-GetP2(): gp_Pnt2d;
+  GetP2(): gp_Pnt2d;
 
-GetAngle1(): number;
+  GetAngle1(): number;
 
-GetAngle2(): number;
+  GetAngle2(): number;
 
-GetHeight(): number;
+  GetHeight(): number;
 
-GetSlope(): number;
+  GetSlope(): number;
 
-GetSlidingFactor(): number;
+  GetSlidingFactor(): number;
 
-Curve(): Geom2d_BSplineCurve;
+  Curve(): Geom2d_BSplineCurve;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 FairCurve_BattenLaw: declare class FairCurve_BattenLaw extends math_Function
 
-constructor
+  constructor
 
-SetSliding(Sliding: number): void;
+  SetSliding(Sliding: number): void;
 
-SetHeigth(Heigth: number): void;
+  SetHeigth(Heigth: number): void;
 
-SetSlope(Slope: number): void;
+  SetSlope(Slope: number): void;
 
-Value(X: number, F: number): { returnValue: boolean; F: number };
+  Value(X: number, F: number): { returnValue: boolean; F: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 FairCurve_DistributionOfEnergy: declare class FairCurve_DistributionOfEnergy extends math_FunctionSet
 
-NbVariables(): number;
+  NbVariables(): number;
 
-NbEquations(): number;
+  NbEquations(): number;
 
-SetDerivativeOrder(DerivativeOrder: number): void;
+  SetDerivativeOrder(DerivativeOrder: number): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 FairCurve_DistributionOfJerk: declare class FairCurve_DistributionOfJerk extends FairCurve_DistributionOfEnergy
 
-constructor
+  constructor
 
-Value(X: math_VectorBase_double, F: math_VectorBase_double): boolean;
+  Value(X: math_VectorBase_double, F: math_VectorBase_double): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 FairCurve_DistributionOfSagging: declare class FairCurve_DistributionOfSagging extends FairCurve_DistributionOfEnergy
 
-constructor
+  constructor
 
-Value(X: math_VectorBase_double, F: math_VectorBase_double): boolean;
+  Value(X: math_VectorBase_double, F: math_VectorBase_double): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 FairCurve_DistributionOfTension: declare class FairCurve_DistributionOfTension extends FairCurve_DistributionOfEnergy
 
-constructor
+  constructor
 
-SetLengthSliding(LengthSliding: number): void;
+  SetLengthSliding(LengthSliding: number): void;
 
-Value(X: math_VectorBase_double, F: math_VectorBase_double): boolean;
+  Value(X: math_VectorBase_double, F: math_VectorBase_double): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 FairCurve_Energy: declare class FairCurve_Energy extends math_MultipleVarFunctionWithHessian
 
-NbVariables(): number;
+  NbVariables(): number;
 
-Value(X: math_VectorBase_double, F: number): { returnValue: boolean; F: number };
+  Value(X: math_VectorBase_double, F: number): { returnValue: boolean; F: number };
 
-Gradient(X: math_VectorBase_double, G: math_VectorBase_double): boolean;
+  Gradient(X: math_VectorBase_double, G: math_VectorBase_double): boolean;
 
-Values(X: math_VectorBase_double, F: number, G: math_VectorBase_double): { returnValue: boolean; F: number };
-Values(X: math_VectorBase_double, F: number, G: math_VectorBase_double, H: math_Matrix): { returnValue: boolean; F: number };
-Values(X: math_VectorBase_double, F: number, G: math_VectorBase_double): { returnValue: boolean; F: number };
-Values(X: math_VectorBase_double, F: number, G: math_VectorBase_double, H: math_Matrix): { returnValue: boolean; F: number };
+  Values(X: math_VectorBase_double, F: number, G: math_VectorBase_double): { returnValue: boolean; F: number };
+  Values(X: math_VectorBase_double, F: number, G: math_VectorBase_double, H: math_Matrix): { returnValue: boolean; F: number };
+  Values(X: math_VectorBase_double, F: number, G: math_VectorBase_double): { returnValue: boolean; F: number };
+  Values(X: math_VectorBase_double, F: number, G: math_VectorBase_double, H: math_Matrix): { returnValue: boolean; F: number };
 
-Variable(X: math_VectorBase_double): boolean;
+  Variable(X: math_VectorBase_double): boolean;
 
-Poles(): NCollection_HArray1_gp_Pnt2d;
+  Poles(): NCollection_HArray1_gp_Pnt2d;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 FairCurve_EnergyOfBatten: declare class FairCurve_EnergyOfBatten extends FairCurve_Energy
 
-constructor
+  constructor
 
-LengthSliding(): number;
+  LengthSliding(): number;
 
-Status(): FairCurve_AnalysisCode;
+  Status(): FairCurve_AnalysisCode;
 
-Variable(X: math_VectorBase_double): boolean;
+  Variable(X: math_VectorBase_double): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 FairCurve_EnergyOfMVC: declare class FairCurve_EnergyOfMVC extends FairCurve_Energy
 
-constructor
+  constructor
 
-LengthSliding(): number;
+  LengthSliding(): number;
 
-Status(): FairCurve_AnalysisCode;
+  Status(): FairCurve_AnalysisCode;
 
-Variable(X: math_VectorBase_double): boolean;
+  Variable(X: math_VectorBase_double): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 FairCurve_MinimalVariation: declare class FairCurve_MinimalVariation extends FairCurve_Batten
 
-constructor
+  constructor
 
-SetCurvature1(Curvature: number): void;
+  SetCurvature1(Curvature: number): void;
 
-SetCurvature2(Curvature: number): void;
+  SetCurvature2(Curvature: number): void;
 
-SetPhysicalRatio(Ratio: number): void;
+  SetPhysicalRatio(Ratio: number): void;
 
-Compute(Code: FairCurve_AnalysisCode, NbIterations: number, Tolerance: number): { returnValue: boolean; Code: FairCurve_AnalysisCode };
+  Compute(Code: FairCurve_AnalysisCode, NbIterations: number, Tolerance: number): { returnValue: boolean; Code: FairCurve_AnalysisCode };
 
-GetCurvature1(): number;
+  GetCurvature1(): number;
 
-GetCurvature2(): number;
+  GetCurvature2(): number;
 
-GetPhysicalRatio(): number;
+  GetPhysicalRatio(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 FairCurve_Newton: declare class FairCurve_Newton
 
-constructor
+  constructor
 
-IsConverged(): boolean;
+  IsConverged(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

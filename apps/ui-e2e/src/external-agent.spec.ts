@@ -20,15 +20,15 @@
  * interrupt durably and pauses, the page renders the banner from that log,
  * survives a reload, and the approval resumes the agent's own tool.
  *
- * Still not asserted: **the live leg**, gated on `TAU_ACP_LIVE_TESTS`, which
- * nothing sets yet.
+ * A separate live leg is opt-in through `TAU_ACP_LIVE_TESTS`.
  *
  * Chromium only, like AV-4: the fixture spawns a real daemon per session and
  * one browser is enough to prove the wire.
  */
 
-import { describe, expect, test } from 'vitest';
+import { describe, expect, inject, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
+import { getKernelResultOutputSchema, screenshotOutputSchema } from '@taucad/chat';
 import * as target from '#support/external-target.js';
 
 const composer = '[aria-label="Ask Tau to build anything..."]';
@@ -47,6 +47,7 @@ type LogEvent = {
   readonly message?: {
     readonly role: string;
     readonly toolName?: string;
+    readonly content?: unknown;
     readonly metadata?: { readonly tauInternal?: Record<string, unknown> };
   };
 };
@@ -66,6 +67,7 @@ const ensureChatOpen = async (): Promise<void> => {
 const createProject = async (origin: string): Promise<void> => {
   await target.navigate(`${origin}/projects/new`);
   await target.expectVisible(selectors.getByRole('button', { name: 'Create in Home' }), 90_000);
+  await target.click(selectors.getByRole('button', { name: /^decline$/iu }), { timeout: 5000 }).catch(() => undefined);
   await target.fill(selectors.getByLabelText('Project Name *'), 'External Agent Project');
   await target.click(selectors.getByRole('button', { name: /Create Project/u }));
   await target.expectUrl(/\/w\/home\/[^/]+$/u, 60_000);
@@ -97,6 +99,88 @@ const durableEvents = async (): Promise<readonly LogEvent[]> => {
 };
 
 describe('external agent (AV-5)', () => {
+  test.skipIf(!inject('acpLiveEnabled'))(
+    'runs live Codex with native Tau tools through browser and daemon',
+    async () => {
+      const { origin } = await target.startTauServeFixture({ externalAgents: 'codex' });
+      await target.setViewport({ width: 1440, height: 900 });
+      await createProject(origin);
+      await selectCodex();
+      await target.type(
+        composer,
+        'Create a 20 mm cube in main.ts using Replicad. Verify it with Tau kernel results and a Tau screenshot. Do not export. Remember the nonce copper-seahorse-41.',
+      );
+      await target.click(selectors.getByCss(submitButton).last());
+      try {
+        await expect
+          .poll(
+            async () => {
+              const events = await durableEvents();
+              return events.filter((event) => event.type === 'run.lifecycle' && event.state === 'completed').length;
+            },
+            { timeout: 300_000 },
+          )
+          .toBe(1);
+      } catch (error) {
+        console.error(
+          '[AV-5 live] durable events:',
+          (await durableEvents()).slice(-20).map((event) => ({
+            type: event.type,
+            state: event.state,
+            phase: event.phase,
+            role: event.message?.role,
+            tool: event.message?.toolName,
+          })),
+        );
+        console.error('[AV-5 live] browser events:', JSON.stringify(await target.events()));
+        throw error;
+      }
+      const events = await durableEvents();
+      for (const name of ['get_kernel_result', 'screenshot']) {
+        expect(
+          events.some(
+            (event) =>
+              event.type === 'message.appended' &&
+              event.message?.role === 'tool-output' &&
+              event.message.toolName === name,
+          ),
+          name,
+        ).toBe(true);
+      }
+      const kernel = events.findLast(
+        (event) => event.message?.role === 'tool-output' && event.message.toolName === 'get_kernel_result',
+      );
+      expect(getKernelResultOutputSchema.parse(kernel?.message?.content)).toMatchObject({
+        status: 'ready',
+        kernelIssues: [],
+      });
+      const screenshot = events.findLast(
+        (event) => event.message?.role === 'tool-output' && event.message.toolName === 'screenshot',
+      );
+      expect(screenshotOutputSchema.parse(screenshot?.message?.content).images.length).toBeGreaterThan(0);
+      const activity = selectors.getByRole('button', { name: /Explored .*?(?:render|screenshot|test)/u }).last();
+      await target.expectVisible(activity, 60_000);
+      await target.click(activity);
+      await target.expectVisible(selectors.getByRole('button', { name: /Captured 1 screenshot of main\.ts/u }), 60_000);
+      await target.screenshot('body', 'acp-browser-native-tools');
+      await target.type(composer, 'Reply only with the nonce from my previous message.');
+      await target.click(selectors.getByCss(submitButton).last());
+      await expect
+        .poll(
+          async () => {
+            const events = await durableEvents();
+            return events.filter((event) => event.type === 'run.lifecycle' && event.state === 'completed').length;
+          },
+          { timeout: 120_000 },
+        )
+        .toBe(2);
+      await target.expectVisible(selectors.getByText('copper-seahorse-41', { exact: true }).last(), 30_000);
+      await target.reload();
+      await target.expectVisible(selectors.getByText('copper-seahorse-41', { exact: true }).last(), 60_000);
+    },
+    600_000,
+  );
+
   test('runs a daemon-advertised ACP agent in a branch, with the API absent', async () => {
     const { origin, workspace } = await target.startTauServeFixture({ externalAgents: true });
     await target.setViewport({ width: 1440, height: 900 });
@@ -216,11 +300,19 @@ describe('external agent (AV-5)', () => {
        * page happened to be listening for. */
       await expect.poll(pausedOnApproval, { timeout: 180_000 }).toBe(true);
       await target.expectVisible(banner, 60_000);
-      await target.expectVisible(banner.getByText('write hello.txt', { exact: true }), 30_000);
+      await target.expectVisible(banner.getByText(/Allow write hello\.txt/u), 30_000);
       /* The options the host recorded, and the copy bounded by SP-4 Result 3 —
        * approving is not a promise that Tau gates each action. */
-      await target.expectVisible(banner.getByText(/Options it offered: Allow · Always allow · Reject/u), 10_000);
-      await target.expectVisible(banner.getByText(/keep working in this chat's tree/u), 10_000);
+      await target.expectVisible(banner.getByRole('button', { name: 'Allow', exact: true }), 10_000);
+      await target.expectVisible(banner.getByRole('button', { name: 'Always allow', exact: true }), 10_000);
+      await target.expectVisible(banner.getByRole('button', { name: 'Reject', exact: true }), 10_000);
+      await target.expectVisible(
+        banner.getByText(
+          "Approving lets Codex keep working in this chat's tree; Tau does not gate each action it takes there.",
+          { exact: true },
+        ),
+        10_000,
+      );
 
       /* Reattach: this tab's memory of the run is gone, so a banner that comes
        * back can only have come from the log the daemon still holds. */
@@ -228,7 +320,7 @@ describe('external agent (AV-5)', () => {
       await ensureChatOpen();
       await target.expectVisible(banner, 120_000);
 
-      await target.click(banner.getByRole('button', { name: 'Approve' }));
+      await target.click(banner.getByRole('button', { name: 'Allow', exact: true }));
 
       const completed = async (): Promise<boolean> => {
         const events = await durableEvents();
@@ -263,7 +355,7 @@ describe('external agent (AV-5)', () => {
      * moved through `paused` and back to `running` around it. */
     expect(
       events.flatMap(({ type, phase, reason }) => (type === 'interrupt.recorded' ? [`${phase}:${reason}`] : [])),
-    ).toEqual(['requested:write hello.txt', 'resolved:approved']);
+    ).toEqual(['requested:Allow write hello.txt with {"path":"hello.txt"}?', 'resolved:approved']);
     expect(events.filter(({ type }) => type === 'run.lifecycle').map(({ state }) => state)).toEqual([
       'admitted',
       'running',

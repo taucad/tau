@@ -354,9 +354,17 @@ export const checkoutsMachine = setup({
                 actions: assign({ removingId: ({ event }) => event.id }),
               },
               {
+                /* Policy Rule 1: *lease* and *checkout* are engineering terms
+                 * and this sentence reaches a toast and the CLI. What the
+                 * person can act on is which branch is busy. */
                 actions: {
                   type: 'announceFailure',
-                  params: { operation: 'remove', reason: 'A lease still holds that checkout.' },
+                  params: ({ context, event }) => ({
+                    operation: 'remove' as const,
+                    reason: `An agent is working in ${
+                      context.checkouts.find((checkout) => checkout.id === event.id)?.branch ?? 'this branch'
+                    }.`,
+                  }),
                 },
               },
             ],

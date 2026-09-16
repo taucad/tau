@@ -14,10 +14,17 @@ import type { Environment } from '#config/environment.config.js';
 import { staticAuthConfig } from '#config/auth.js';
 import type { EmailService } from '#email/email.service.js';
 import {
+  buildFrontendForgotPasswordUrl,
   buildFrontendMagicLinkVerifyUrl,
   buildFrontendResetPasswordUrl,
   buildFrontendVerificationUrl,
 } from '#email/email-link-builder.js';
+import { deviceFromRequest, tokenLifetimeSeconds } from '#email/email-copy.js';
+
+// The recipient's timezone is not knowable from the reset request, so the row states UTC explicitly
+// rather than implying a local time the reader would have to second-guess.
+const formatChangedAt = (at: Date): string =>
+  `${new Intl.DateTimeFormat('en-NZ', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }).format(at)} UTC`;
 
 /**
  * Mapping between BetterAuth models and ID prefixes.
@@ -52,7 +59,7 @@ type BetterAuthConfigOptions = {
   databaseService: DatabaseService;
   configService: ConfigService<Environment, true>;
   emailService: EmailService;
-  closure: Pick<BillingAccountClosureService, 'prepareForAuthDeletion'>;
+  closure?: Pick<BillingAccountClosureService, 'prepareForAuthDeletion'> | undefined;
 };
 
 /**
@@ -79,7 +86,9 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
       },
     }),
     magicLink({
-      async sendMagicLink({ email, url, token }) {
+      expiresIn: tokenLifetimeSeconds.magicLink,
+      // `context` is optional on this callback, so the device row is best-effort and omits itself.
+      async sendMagicLink({ email, url, token }, context) {
         await emailService.sendMagicLink({
           email,
           url: buildFrontendMagicLinkVerifyUrl({
@@ -87,6 +96,7 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
             generatedUrl: url,
             token,
           }),
+          device: deviceFromRequest(context?.request),
         });
       },
     }),
@@ -113,9 +123,13 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
     user: {
       deleteUser: {
         enabled: true,
-        beforeDelete: async (user, request) => {
-          await options.closure.prepareForAuthDeletion({ authUserId: user.id, request });
-        },
+        ...(options.closure
+          ? {
+              beforeDelete: async (user, request) => {
+                await options.closure?.prepareForAuthDeletion({ authUserId: user.id, request });
+              },
+            }
+          : {}),
       },
     },
 
@@ -142,17 +156,28 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
       ...staticAuthConfig.emailAndPassword,
       requireEmailVerification: true,
       revokeSessionsOnPasswordReset: true,
-      async sendResetPassword({ user, token }) {
+      async sendResetPassword({ user, token }, request) {
         await emailService.sendResetPassword({
           email: user.email,
           url: buildFrontendResetPasswordUrl({
             frontendURL: configService.get('TAU_FRONTEND_URL', { infer: true }),
             token,
           }),
+          device: deviceFromRequest(request),
         });
       },
-      async onPasswordReset(data) {
-        logger.log(`Password reset requested for ${data.user.email}`);
+      // Fires immediately before `revokeSessionsOnPasswordReset` drops the other sessions, so the
+      // email and the revocation describe the same moment.
+      async onPasswordReset({ user }, request) {
+        logger.log(`Password reset completed for ${user.email}`);
+        await emailService.sendPasswordChanged({
+          email: user.email,
+          changedAt: formatChangedAt(new Date()),
+          url: buildFrontendForgotPasswordUrl({
+            frontendURL: configService.get('TAU_FRONTEND_URL', { infer: true }),
+          }),
+          device: deviceFromRequest(request),
+        });
       },
     },
     emailVerification: {

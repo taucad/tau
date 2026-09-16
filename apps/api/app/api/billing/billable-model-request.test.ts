@@ -5,7 +5,11 @@ import { createGatewayModelTransport } from '../../../../../packages/agent-host/
 // oxlint-disable-next-line no-restricted-imports -- fixture messages use the codec owner's exact public wire types.
 import type { ModelProviderKind, ProviderMessage } from '../../../../../packages/agent-host/src/log/event-types.js';
 import { CodeOwnedBillableModelQualificationResolver } from '#api/billing/billable-model-qualification.js';
-import { billableModelInputBound, safeParseBillableModelRequest } from '#api/billing/billable-model-request.js';
+import {
+  billableModelInputBound,
+  billableModelRequestSchema,
+  safeParseBillableModelRequest,
+} from '#api/billing/billable-model-request.js';
 import type { BillableModelRequest } from '#api/billing/billable-model-request.js';
 import type {
   BillableModelProviderAdapter,
@@ -323,6 +327,45 @@ describe('billable model request contract', () => {
     ).toBe(true);
   });
 
+  it('admits only the catalog-owned Anthropic and Gemini reasoning controls', () => {
+    const anthropic = {
+      model: 'claude-sonnet-5',
+      messages: [{ role: 'user', content: 'fixture' }],
+      max_tokens: 64,
+      stream: true,
+      thinking: { type: 'adaptive', display: 'summarized' },
+      output_config: { effort: 'high' },
+    };
+    const gemini = {
+      model: 'gemini-3.7-flash',
+      messages: [{ role: 'user', content: 'fixture' }],
+      max_completion_tokens: 64,
+      stream: true,
+      extra_body: {
+        google: {
+          thinking_config: { include_thoughts: true, thinking_level: 'MEDIUM' },
+          thought_tag_marker: 'think',
+          stream_function_call_arguments: true,
+        },
+      },
+    };
+
+    expect(safeParseBillableModelRequest(anthropic, 'anthropic').success).toBe(true);
+    expect(
+      safeParseBillableModelRequest(
+        { ...anthropic, thinking: { type: 'enabled', budget_tokens: 1024, display: 'summarized' } },
+        'anthropic',
+      ).success,
+    ).toBe(true);
+    expect(safeParseBillableModelRequest(gemini, 'openai-completions').success).toBe(true);
+    expect(
+      safeParseBillableModelRequest(
+        { ...gemini, extra_body: { ...gemini.extra_body, arbitrary_passthrough: true } },
+        'openai-completions',
+      ).success,
+    ).toBe(false);
+  });
+
   it('rejects Anthropic cache metadata inside Completions content', () => {
     expect(
       safeParseBillableModelRequest(
@@ -514,6 +557,133 @@ describe('billable model request contract', () => {
       }),
     ).toThrow();
     expect(adapterExecutions).toBe(0);
+  });
+});
+
+/* D24: the three native PDF document blocks, one per provider wire. */
+const pdfBase64 = 'JVBERi0xLjcKJeLjz9MK';
+const pdfDataUrl = `data:application/pdf;base64,${pdfBase64}`;
+const documentBlock = {
+  type: 'document',
+  source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 },
+} as const;
+const inputFileBlock = { type: 'input_file', filename: 'bracket-spec.pdf', file_data: pdfDataUrl } as const;
+const fileBlock = { type: 'file', file: { filename: 'bracket-spec.pdf', file_data: pdfDataUrl } } as const;
+const anthropicBody = (block: unknown) => ({
+  model: 'claude-sonnet-5',
+  stream: true,
+  max_tokens: 16,
+  messages: [{ role: 'user', content: [{ type: 'text', text: 'read it' }, block] }],
+});
+const responsesBody = (block: unknown) => ({
+  model: 'gpt-5.6-luna',
+  stream: true,
+  max_output_tokens: 16,
+  input: [{ role: 'user', content: [{ type: 'input_text', text: 'read it' }, block] }],
+});
+const completionsBody = (block: unknown) => ({
+  model: 'google/gemini-3.5-flash',
+  stream: true,
+  max_completion_tokens: 16,
+  messages: [{ role: 'user', content: [{ type: 'text', text: 'read it' }, block] }],
+});
+
+describe('document block admission', () => {
+  it('admits each provider document block on its own wire', () => {
+    expect(safeParseBillableModelRequest(anthropicBody(documentBlock), 'anthropic').success).toBe(true);
+    expect(
+      safeParseBillableModelRequest(anthropicBody({ ...documentBlock, title: 'bracket-spec.pdf' }), 'anthropic')
+        .success,
+    ).toBe(true);
+    expect(safeParseBillableModelRequest(responsesBody(inputFileBlock), 'openai-responses').success).toBe(true);
+    expect(safeParseBillableModelRequest(completionsBody(fileBlock), 'openai-completions').success).toBe(true);
+  });
+
+  it('refuses a document block on a foreign provider wire', () => {
+    expect(safeParseBillableModelRequest(anthropicBody(inputFileBlock), 'anthropic').success).toBe(false);
+    expect(safeParseBillableModelRequest(responsesBody(documentBlock), 'openai-responses').success).toBe(false);
+    expect(safeParseBillableModelRequest(completionsBody(documentBlock), 'openai-completions').success).toBe(false);
+  });
+
+  it('refuses an extra key on any document block', () => {
+    expect(safeParseBillableModelRequest(anthropicBody({ ...documentBlock, context: 'x' }), 'anthropic').success).toBe(
+      false,
+    );
+    expect(
+      safeParseBillableModelRequest(
+        anthropicBody({ ...documentBlock, source: { ...documentBlock.source, url: 'x' } }),
+        'anthropic',
+      ).success,
+    ).toBe(false);
+    expect(
+      safeParseBillableModelRequest(responsesBody({ ...inputFileBlock, file_id: 'f' }), 'openai-responses').success,
+    ).toBe(false);
+    expect(
+      safeParseBillableModelRequest(
+        completionsBody({ ...fileBlock, file: { ...fileBlock.file, file_id: 'f' } }),
+        'openai-completions',
+      ).success,
+    ).toBe(false);
+  });
+
+  it('refuses document bytes that are not a PDF', () => {
+    expect(
+      safeParseBillableModelRequest(
+        anthropicBody({ ...documentBlock, source: { ...documentBlock.source, media_type: 'image/png' } }),
+        'anthropic',
+      ).success,
+    ).toBe(false);
+    expect(
+      safeParseBillableModelRequest(
+        anthropicBody({ ...documentBlock, source: { ...documentBlock.source, data: 'not base64!' } }),
+        'anthropic',
+      ).success,
+    ).toBe(false);
+    expect(
+      safeParseBillableModelRequest(
+        responsesBody({ ...inputFileBlock, file_data: 'https://example.test/bracket-spec.pdf' }),
+        'openai-responses',
+      ).success,
+    ).toBe(false);
+    expect(
+      safeParseBillableModelRequest(
+        responsesBody({ ...inputFileBlock, file_data: `data:image/png;base64,${validPng}` }),
+        'openai-responses',
+      ).success,
+    ).toBe(false);
+    expect(
+      safeParseBillableModelRequest(
+        completionsBody({
+          ...fileBlock,
+          file: { ...fileBlock.file, file_data: 'data:application/pdf;base64,not base64!' },
+        }),
+        'openai-completions',
+      ).success,
+    ).toBe(false);
+  });
+
+  it('bounds document bytes at the base64 length of 20 MiB', () => {
+    /* The aggregate 4 MB request gate in `safeParseBillableModelRequest` trips long before
+     * this bound, so the per-document ceiling is asserted against the schema itself. */
+    const oversize = 'A'.repeat(4 * Math.ceil((20 * 1024 * 1024) / 3) + 1);
+    expect(
+      billableModelRequestSchema.safeParse(
+        anthropicBody({ ...documentBlock, source: { ...documentBlock.source, data: oversize } }),
+      ).success,
+    ).toBe(false);
+    expect(
+      billableModelRequestSchema.safeParse(
+        responsesBody({ ...inputFileBlock, file_data: `data:application/pdf;base64,${oversize}` }),
+      ).success,
+    ).toBe(false);
+  });
+
+  it('falls closed on the funded input bound for a document request', () => {
+    /* A PDF's tokens are not bounded by its base64 length, so `document`, `input_file` and
+     * `file` stay out of the bounded-element registry and pin the whole provider context. */
+    const parsed = safeParseBillableModelRequest(responsesBody(inputFileBlock), 'openai-responses');
+    expect(parsed.success).toBe(true);
+    expect(billableModelInputBound((parsed as Extract<typeof parsed, { success: true }>).data)).toBeUndefined();
   });
 });
 

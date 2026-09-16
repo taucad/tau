@@ -288,6 +288,7 @@ describe('getClientEnvironment', () => {
       'TAU_BILLING_ENVIRONMENT',
       'TAU_DEBUG',
       'TAU_FRONTEND_URL',
+      'TAU_GIT_REMOTE_ALLOW_PRIVATE',
       'TAU_WEBSOCKET_URL',
     ]);
   });
@@ -314,6 +315,7 @@ describe('window.ENV host contract', () => {
       TAU_WEBSOCKET_URL: 'wss://socket.host.test',
       TAU_FRONTEND_URL: 'https://host.test',
       TAU_DEBUG: true,
+      TAU_GIT_REMOTE_ALLOW_PRIVATE: false,
       TAU_BILLING_ENVIRONMENT: 'staging',
       NODE_ENV: 'production',
       POSTHOG_API_HOST: 'https://events.host.test',
@@ -327,10 +329,16 @@ describe('window.ENV host contract', () => {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- browser injection contract is named window.ENV.
       value: { ENV: injectedEnvironment },
     });
-    const processEnvironmentRead = vi.fn(() => originalEnvironment);
+    const processEnvironmentRead = vi.fn();
     Object.defineProperty(process, 'env', {
       configurable: true,
-      get: processEnvironmentRead,
+      get: () => {
+        // Node 26's ESM loader reads process.env twice while resolving a dynamic import.
+        if (!new Error('trace process.env access').stack?.includes('node:internal/modules/esm/loader')) {
+          processEnvironmentRead();
+        }
+        return originalEnvironment;
+      },
     });
     vi.resetModules();
 

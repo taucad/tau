@@ -13,6 +13,19 @@ it('should expose the durable chat run identity and bearer session token to cros
   expect(corsBaseConfiguration.allowedHeaders).toContain('x-tau-attempt-id');
 });
 
+/**
+ * W18 DEF-5. `isomorphic-git` asks for protocol v2 with a `git-protocol` header
+ * on every smart-HTTP request, and posts its packs as `application/x-git-*`,
+ * which is not one of CORS's three safelisted `content-type` values. A missing
+ * name here is invisible: the preflight answers `204` and the browser then
+ * drops the request without an error the page can see.
+ */
+it('should allow every header a browser git client sends', () => {
+  expect(corsBaseConfiguration.allowedHeaders).toEqual(
+    expect.arrayContaining(['git-protocol', 'content-type', 'authorization', 'x-tau-proxy-authorization']),
+  );
+});
+
 describe('separateOriginsAndPatterns', () => {
   it('should separate exact origins from glob patterns', () => {
     const origins = [

@@ -4,208 +4,208 @@
 
 BRepAlgo: declare class BRepAlgo
 
-constructor
+  constructor
 
-static ConcatenateWire(Wire: TopoDS_Wire, Option: GeomAbs_Shape, AngularTolerance?: number): TopoDS_Wire;
+  static ConcatenateWire(Wire: TopoDS_Wire, Option: GeomAbs_Shape, AngularTolerance?: number): TopoDS_Wire;
 
-static ConcatenateWireC0(Wire: TopoDS_Wire): TopoDS_Edge;
+  static ConcatenateWireC0(Wire: TopoDS_Wire): TopoDS_Edge;
 
-static ConvertWire(theWire: TopoDS_Wire, theAngleTolerance: number, theFace: TopoDS_Face): TopoDS_Wire;
+  static ConvertWire(theWire: TopoDS_Wire, theAngleTolerance: number, theFace: TopoDS_Face): TopoDS_Wire;
 
-static ConvertFace(theFace: TopoDS_Face, theAngleTolerance: number): TopoDS_Face;
+  static ConvertFace(theFace: TopoDS_Face, theAngleTolerance: number): TopoDS_Face;
 
-static IsValid(S: TopoDS_Shape): boolean;
-static IsValid(theArgs: NCollection_List_TopoDS_Shape, theResult: TopoDS_Shape, closedSolid: boolean, GeomCtrl: boolean): boolean;
-static IsValid(S: TopoDS_Shape): boolean;
-static IsValid(theArgs: NCollection_List_TopoDS_Shape, theResult: TopoDS_Shape, closedSolid: boolean, GeomCtrl: boolean): boolean;
+  static IsValid(S: TopoDS_Shape): boolean;
+  static IsValid(theArgs: NCollection_List_TopoDS_Shape, theResult: TopoDS_Shape, closedSolid: boolean, GeomCtrl: boolean): boolean;
+  static IsValid(S: TopoDS_Shape): boolean;
+  static IsValid(theArgs: NCollection_List_TopoDS_Shape, theResult: TopoDS_Shape, closedSolid: boolean, GeomCtrl: boolean): boolean;
 
-static IsTopologicallyValid(S: TopoDS_Shape): boolean;
+  static IsTopologicallyValid(S: TopoDS_Shape): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepAlgo_AsDes: declare class BRepAlgo_AsDes extends Standard_Transient
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-Add(S: TopoDS_Shape, SS: TopoDS_Shape): void;
-Add(S: TopoDS_Shape, SS: NCollection_List_TopoDS_Shape): void;
-Add(S: TopoDS_Shape, SS: TopoDS_Shape): void;
-Add(S: TopoDS_Shape, SS: NCollection_List_TopoDS_Shape): void;
+  Add(S: TopoDS_Shape, SS: TopoDS_Shape): void;
+  Add(S: TopoDS_Shape, SS: NCollection_List_TopoDS_Shape): void;
+  Add(S: TopoDS_Shape, SS: TopoDS_Shape): void;
+  Add(S: TopoDS_Shape, SS: NCollection_List_TopoDS_Shape): void;
 
-HasAscendant(S: TopoDS_Shape): boolean;
+  HasAscendant(S: TopoDS_Shape): boolean;
 
-HasDescendant(S: TopoDS_Shape): boolean;
+  HasDescendant(S: TopoDS_Shape): boolean;
 
-Ascendant(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  Ascendant(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-Descendant(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  Descendant(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-ChangeDescendant(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  ChangeDescendant(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-Replace(theOldS: TopoDS_Shape, theNewS: TopoDS_Shape): void;
+  Replace(theOldS: TopoDS_Shape, theNewS: TopoDS_Shape): void;
 
-Remove(theS: TopoDS_Shape): void;
+  Remove(theS: TopoDS_Shape): void;
 
-HasCommonDescendant(S1: TopoDS_Shape, S2: TopoDS_Shape, LC: NCollection_List_TopoDS_Shape): boolean;
+  HasCommonDescendant(S1: TopoDS_Shape, S2: TopoDS_Shape, LC: NCollection_List_TopoDS_Shape): boolean;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepAlgo_FaceRestrictor: declare class BRepAlgo_FaceRestrictor
 
-constructor
+  constructor
 
-Init(F: TopoDS_Face, Proj?: boolean, ControlOrientation?: boolean): void;
+  Init(F: TopoDS_Face, Proj?: boolean, ControlOrientation?: boolean): void;
 
-Add(W: TopoDS_Wire): void;
+  Add(W: TopoDS_Wire): void;
 
-Clear(): void;
+  Clear(): void;
 
-Perform(): void;
+  Perform(): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-More(): boolean;
+  More(): boolean;
 
-Next(): void;
+  Next(): void;
 
-Current(): TopoDS_Face;
+  Current(): TopoDS_Face;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepAlgo_Image: declare class BRepAlgo_Image
 
-constructor
+  constructor
 
-SetRoot(S: TopoDS_Shape): void;
+  SetRoot(S: TopoDS_Shape): void;
 
-Bind(OldS: TopoDS_Shape, NewS: TopoDS_Shape): void;
-Bind(OldS: TopoDS_Shape, NewS: NCollection_List_TopoDS_Shape): void;
-Bind(OldS: TopoDS_Shape, NewS: TopoDS_Shape): void;
-Bind(OldS: TopoDS_Shape, NewS: NCollection_List_TopoDS_Shape): void;
+  Bind(OldS: TopoDS_Shape, NewS: TopoDS_Shape): void;
+  Bind(OldS: TopoDS_Shape, NewS: NCollection_List_TopoDS_Shape): void;
+  Bind(OldS: TopoDS_Shape, NewS: TopoDS_Shape): void;
+  Bind(OldS: TopoDS_Shape, NewS: NCollection_List_TopoDS_Shape): void;
 
-Add(OldS: TopoDS_Shape, NewS: TopoDS_Shape): void;
-Add(OldS: TopoDS_Shape, NewS: NCollection_List_TopoDS_Shape): void;
-Add(OldS: TopoDS_Shape, NewS: TopoDS_Shape): void;
-Add(OldS: TopoDS_Shape, NewS: NCollection_List_TopoDS_Shape): void;
+  Add(OldS: TopoDS_Shape, NewS: TopoDS_Shape): void;
+  Add(OldS: TopoDS_Shape, NewS: NCollection_List_TopoDS_Shape): void;
+  Add(OldS: TopoDS_Shape, NewS: TopoDS_Shape): void;
+  Add(OldS: TopoDS_Shape, NewS: NCollection_List_TopoDS_Shape): void;
 
-Clear(): void;
+  Clear(): void;
 
-Remove(S: TopoDS_Shape): void;
+  Remove(S: TopoDS_Shape): void;
 
-RemoveRoot(Root: TopoDS_Shape): void;
+  RemoveRoot(Root: TopoDS_Shape): void;
 
-ReplaceRoot(OldRoot: TopoDS_Shape, NewRoot: TopoDS_Shape): void;
+  ReplaceRoot(OldRoot: TopoDS_Shape, NewRoot: TopoDS_Shape): void;
 
-Roots(): NCollection_List_TopoDS_Shape;
+  Roots(): NCollection_List_TopoDS_Shape;
 
-IsImage(S: TopoDS_Shape): boolean;
+  IsImage(S: TopoDS_Shape): boolean;
 
-ImageFrom(S: TopoDS_Shape): TopoDS_Shape;
+  ImageFrom(S: TopoDS_Shape): TopoDS_Shape;
 
-Root(S: TopoDS_Shape): TopoDS_Shape;
+  Root(S: TopoDS_Shape): TopoDS_Shape;
 
-HasImage(S: TopoDS_Shape): boolean;
+  HasImage(S: TopoDS_Shape): boolean;
 
-Image(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  Image(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-LastImage(S: TopoDS_Shape, L: NCollection_List_TopoDS_Shape): void;
+  LastImage(S: TopoDS_Shape, L: NCollection_List_TopoDS_Shape): void;
 
-Compact(): void;
+  Compact(): void;
 
-Filter(S: TopoDS_Shape, ShapeType: TopAbs_ShapeEnum): void;
+  Filter(S: TopoDS_Shape, ShapeType: TopAbs_ShapeEnum): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepAlgo_Loop: declare class BRepAlgo_Loop
 
-constructor
+  constructor
 
-Init(F: TopoDS_Face): void;
+  Init(F: TopoDS_Face): void;
 
-AddEdge(E: TopoDS_Edge, LV: NCollection_List_TopoDS_Shape): void;
+  AddEdge(E: TopoDS_Edge, LV: NCollection_List_TopoDS_Shape): void;
 
-AddConstEdge(E: TopoDS_Edge): void;
+  AddConstEdge(E: TopoDS_Edge): void;
 
-AddConstEdges(LE: NCollection_List_TopoDS_Shape): void;
+  AddConstEdges(LE: NCollection_List_TopoDS_Shape): void;
 
-SetImageVV(theImageVV: BRepAlgo_Image): void;
+  SetImageVV(theImageVV: BRepAlgo_Image): void;
 
-Perform(): void;
+  Perform(): void;
 
-UpdateVEmap(theVEmap: NCollection_IndexedDataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher): void;
+  UpdateVEmap(theVEmap: NCollection_IndexedDataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher): void;
 
-CutEdge(E: TopoDS_Edge, VonE: NCollection_List_TopoDS_Shape, NE: NCollection_List_TopoDS_Shape): void;
+  CutEdge(E: TopoDS_Edge, VonE: NCollection_List_TopoDS_Shape, NE: NCollection_List_TopoDS_Shape): void;
 
-NewWires(): NCollection_List_TopoDS_Shape;
+  NewWires(): NCollection_List_TopoDS_Shape;
 
-WiresToFaces(): void;
+  WiresToFaces(): void;
 
-NewFaces(): NCollection_List_TopoDS_Shape;
+  NewFaces(): NCollection_List_TopoDS_Shape;
 
-NewEdges(E: TopoDS_Edge): NCollection_List_TopoDS_Shape;
+  NewEdges(E: TopoDS_Edge): NCollection_List_TopoDS_Shape;
 
-GetVerticesForSubstitute(VerVerMap: NCollection_DataMap_TopoDS_Shape_TopoDS_Shape_TopTools_ShapeMapHasher): void;
+  GetVerticesForSubstitute(VerVerMap: NCollection_DataMap_TopoDS_Shape_TopoDS_Shape_TopTools_ShapeMapHasher): void;
 
-VerticesForSubstitute(VerVerMap: NCollection_DataMap_TopoDS_Shape_TopoDS_Shape_TopTools_ShapeMapHasher): void;
+  VerticesForSubstitute(VerVerMap: NCollection_DataMap_TopoDS_Shape_TopoDS_Shape_TopTools_ShapeMapHasher): void;
 
-SetTolConf(theTolConf: number): void;
+  SetTolConf(theTolConf: number): void;
 
-GetTolConf(): number;
+  GetTolConf(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepAlgo_NormalProjection: declare class BRepAlgo_NormalProjection
 
-constructor
+  constructor
 
-Init(S: TopoDS_Shape): void;
+  Init(S: TopoDS_Shape): void;
 
-Add(ToProj: TopoDS_Shape): void;
+  Add(ToProj: TopoDS_Shape): void;
 
-SetParams(Tol3D: number, Tol2D: number, InternalContinuity: GeomAbs_Shape, MaxDegree: number, MaxSeg: number): void;
+  SetParams(Tol3D: number, Tol2D: number, InternalContinuity: GeomAbs_Shape, MaxDegree: number, MaxSeg: number): void;
 
-SetDefaultParams(): void;
+  SetDefaultParams(): void;
 
-SetMaxDistance(MaxDist: number): void;
+  SetMaxDistance(MaxDist: number): void;
 
-Compute3d(With3d?: boolean): void;
+  Compute3d(With3d?: boolean): void;
 
-SetLimit(FaceBoundaries?: boolean): void;
+  SetLimit(FaceBoundaries?: boolean): void;
 
-Build(): void;
+  Build(): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-Projection(): TopoDS_Shape;
+  Projection(): TopoDS_Shape;
 
-Ancestor(E: TopoDS_Edge): TopoDS_Shape;
+  Ancestor(E: TopoDS_Edge): TopoDS_Shape;
 
-Couple(E: TopoDS_Edge): TopoDS_Shape;
+  Couple(E: TopoDS_Edge): TopoDS_Shape;
 
-Generated(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  Generated(S: TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-IsElementary(C: Adaptor3d_Curve): boolean;
+  IsElementary(C: Adaptor3d_Curve): boolean;
 
-BuildWire(Liste: NCollection_List_TopoDS_Shape): boolean;
+  BuildWire(Liste: NCollection_List_TopoDS_Shape): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

@@ -52,7 +52,6 @@ catalog:
   '@better-auth/stripe': ^1.6.19
   '@eslint-community/eslint-plugin-eslint-comments': ^4.7.2
   '@fastify/cookie': ^11.0.2
-  '@fastify/multipart': ^10.0.0
   '@fastify/otel': ^0.17.1
   '@gltf-transform/core': ^4.4.0
   '@gltf-transform/extensions': ^4.4.0
@@ -106,6 +105,7 @@ catalog:
   '@opentelemetry/sdk-metrics': ^2.8.0
   '@opentelemetry/sdk-node': ^0.213.0
   '@oxc-node/core': ^0.0.35
+  buffer: 6.0.3
   playwright: ^1.61.0
   '@pyroscope/nodejs': ^0.4.13
   '@react-router/dev': 7.14.2
@@ -284,6 +284,11 @@ catalog:
   '@lhncbc/ucum-lhc': 7.1.9
   '@json-structure/sdk': 0.7.0
   portless: 0.15.6
+  streamdown: ^2.6.0
+  '@streamdown/code': ^1.1.1
+  '@streamdown/math': ^1.0.2
+  '@streamdown/cjk': ^1.0.3
+  '@streamdown/mermaid': ^1.0.2
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0
@@ -375,7 +380,7 @@ patchedDependencies:
   '@kittycad/lib@2.0.48': patches/@kittycad__lib@2.0.48.patch
   vite-plugin-mkcert@2.0.0: patches/vite-plugin-mkcert@2.0.0.patch
   zod@4.4.3: patches/zod@4.4.3.patch
-  '@earendil-works/pi-ai@0.84.4': patches/@earendil-works__pi-ai@0.84.4.patch
+  '@agentclientprotocol/codex-acp@1.7.0': patches/@agentclientprotocol__codex-acp@1.7.0.patch
 overrides:
   '@langchain/google-common': npm:@taulabs/langchain-google-common@2.2.0-beta.0
   '@types/express': 'catalog:'

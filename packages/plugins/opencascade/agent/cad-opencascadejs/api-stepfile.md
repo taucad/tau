@@ -4,58 +4,58 @@
 
 StepFile_ReadData: declare class StepFile_ReadData
 
-constructor
+  constructor
 
-CreateNewText(theNewText: string, theLenText: number): void;
+  CreateNewText(theNewText: string, theLenText: number): void;
 
-RecordNewEntity(): void;
+  RecordNewEntity(): void;
 
-RecordIdent(): void;
+  RecordIdent(): void;
 
-RecordType(): void;
+  RecordType(): void;
 
-RecordListStart(): void;
+  RecordListStart(): void;
 
-CreateNewArg(): void;
+  CreateNewArg(): void;
 
-CreateErrorArg(): void;
+  CreateErrorArg(): void;
 
-AddNewScope(): void;
+  AddNewScope(): void;
 
-FinalOfScope(): void;
+  FinalOfScope(): void;
 
-ClearRecorder(theMode: number): void;
+  ClearRecorder(theMode: number): void;
 
-GetArgDescription(theType: Interface_ParamType, theValue: string): boolean;
+  GetArgDescription(theType: Interface_ParamType, theValue: string): boolean;
 
-GetFileNbR(theNbHead: number, theNbRec: number, theNbPage: number): void;
+  GetFileNbR(theNbHead: number, theNbRec: number, theNbPage: number): void;
 
-GetRecordDescription(theIdent: string, theType: string, theNbArg: number): boolean;
+  GetRecordDescription(theIdent: string, theType: string, theNbArg: number): boolean;
 
-RecordTypeText(): void;
+  RecordTypeText(): void;
 
-NextRecord(): void;
+  NextRecord(): void;
 
-PrintCurrentRecord(): void;
+  PrintCurrentRecord(): void;
 
-PrepareNewArg(): void;
+  PrepareNewArg(): void;
 
-FinalOfHead(): void;
+  FinalOfHead(): void;
 
-SetTypeArg(theArgType: Interface_ParamType): void;
+  SetTypeArg(theArgType: Interface_ParamType): void;
 
-SetModePrint(theMode: number): void;
+  SetModePrint(theMode: number): void;
 
-GetModePrint(): number;
+  GetModePrint(): number;
 
-GetNbRecord(): number;
+  GetNbRecord(): number;
 
-AddError(theErrorMessage: string): void;
+  AddError(theErrorMessage: string): void;
 
-ErrorHandle(theCheck: Interface_Check): boolean;
+  ErrorHandle(theCheck: Interface_Check): boolean;
 
-GetLastError(): string;
+  GetLastError(): string;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

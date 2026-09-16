@@ -26,6 +26,7 @@ import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import type { NodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import { headSniffByteLength, seemsBinary, countLineBytes } from '#content-metadata.js';
 import type { FileReadStreamOptions, FileStat, ProviderCapabilities, WatchRequest } from '#types.js';
+import type { RevisionFileMode } from '#revision-tree.js';
 import type { NodeFsWatchEvent } from '#backend/node/protocol.js';
 import { streamChunkSize, validateFileReadStreamOptions } from '#backend/stream-utils.js';
 
@@ -170,6 +171,28 @@ export class NodeFsProvider extends AbstractFileSystemProvider {
       mtimeMs: stats.mtimeMs,
       ...(await this._contentMetadata(target, stats.size)),
     };
+  }
+
+  public async getFileMode(path_: string): Promise<RevisionFileMode> {
+    this._assertRootedPath(path_);
+    const stats = await fs.stat(await this._resolve(path_));
+    if (!stats.isFile()) {
+      throw this._einval(path_);
+    }
+    const permissions = stats.mode % 0o1000;
+    const executable =
+      Math.floor(permissions / 0o100) % 2 === 1 || Math.floor(permissions / 0o10) % 2 === 1 || permissions % 2 === 1;
+    return executable ? '100755' : '100644';
+  }
+
+  public async setFileMode(path_: string, mode: RevisionFileMode): Promise<void> {
+    this._assertRootedPath(path_);
+    const target = await this._resolve(path_);
+    const stats = await fs.stat(target);
+    if (!stats.isFile()) {
+      throw this._einval(path_);
+    }
+    await fs.chmod(target, mode === '100755' ? 0o755 : 0o644);
   }
 
   public async unlink(path_: string): Promise<void> {

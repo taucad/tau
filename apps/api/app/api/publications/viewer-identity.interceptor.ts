@@ -1,6 +1,6 @@
 import type { CallHandler, ExecutionContext, NestInterceptor } from '@nestjs/common';
 import { Injectable } from '@nestjs/common';
-import type { FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyRequest } from 'fastify';
 import type { Observable } from 'rxjs';
 // oxlint-disable-next-line eslint-plugin-import/no-unassigned-import -- Side-effect import to register Fastify type augmentation
 import '#api/publications/viewer-identity.fastify-augmentation.js';
@@ -19,11 +19,8 @@ export class ViewerIdentityInterceptor implements NestInterceptor {
   public intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const http = context.switchToHttp();
     const request = http.getRequest<FastifyRequest>();
-    const reply = http.getResponse<FastifyReply>();
-
     request.viewerIdentity = this.viewerIdentityService.resolveForRequest({
       request,
-      reply,
       sessionUserId: readSessionUserId(request),
     });
 

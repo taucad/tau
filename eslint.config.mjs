@@ -434,6 +434,23 @@ const config = [
             'See docs/architecture/workspace-filesystem-and-revisions.md (A38).',
         },
         {
+          // The three modules S43 deleted, by name: the Jujutsu adapter, the
+          // wasm revision algebra and the multipart publication upload. A
+          // module path is a string, so this is the string half of the pin
+          // below — an import, a dynamic import, a mock path or a test fixture
+          // that names one of them fails here. (Comments are not AST nodes, so
+          // the two prose mentions of the algebra spike in `object-hash.ts` and
+          // `git-objects.ts` are untouched, and so is this rule's own source:
+          // this config is `.mjs` and the block only lints `.ts`/`.tsx`.)
+          selector:
+            'Literal[value=/(jj-adapter|revision-algebra|publish-multipart)/], TemplateElement[value.raw=/(jj-adapter|revision-algebra|publish-multipart)/]',
+          message:
+            'That module is retired. The disk host is `createNativeGitRevisionPort`, the browser ' +
+            'store is `createIsomorphicGitRevisionPort`, and a publication is a named version of ' +
+            'the synced graph — there is no jj adapter, no wasm algebra and no multipart upload. ' +
+            'See docs/research/workspace-filesystem-revisions-charter.md (D11, D30, EQ14).',
+        },
+        {
           selector: 'TSAsExpression > TSNeverKeyword',
           message:
             '`as never` erases all type information and masks underlying type errors. ' +
@@ -460,7 +477,12 @@ const config = [
             'createJjRevisionPort',
             // The dead native-git persistence wrapper.
             'createNativeGitRevisionPersistence',
-            // Bundles as a wire; git smart HTTP is the only transport.
+            // Bundles as a wire; git smart HTTP is the only transport. The
+            // selector is anchored, so `createBundler`/`createBundlerSourceHost`
+            // in the bundler toolkits are untouched (review R3).
+            'importBundle',
+            'createBundle',
+            'fetchBundle',
             'RevisionBundleInput',
             'ImportRevisionBundleInput',
             'CreateNativeGitBundleInput',
@@ -476,6 +498,9 @@ const config = [
             'EncodedTreeGraph',
             'FlatTreeEntry',
             'GitMode',
+            // Publications are named versions of the synced graph (D11): no blob
+            // store of uploaded files stands beside it.
+            'BlobStore',
             // The compiled wasm revision algebra and its out-of-tree artifact.
             'loadRevisionAlgebra',
             'RevisionAlgebra',
@@ -937,18 +962,6 @@ const config = [
           ],
         },
       ],
-    },
-  },
-  {
-    /* The one end-to-end spec that still reads publications out of a
-     * pre-north-star serve tree. W18 rewrites it with the publication path;
-     * until then the pin would red a file its owner cannot see. Everything
-     * else — product code, unit tests, e2e support — is pinned, template
-     * literals included. (`external-agent.spec.ts` was the second file here
-     * until W5 dropped its two retired-layout assertions.) */
-    files: ['apps/ui-e2e/src/browser-agent-host.spec.ts'],
-    rules: {
-      'no-restricted-syntax': 'off',
     },
   },
 ];

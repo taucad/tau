@@ -1,9 +1,11 @@
 import { useEffect } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { projectToManifest } from '@taucad/types';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
+import { SessionsProvider } from '#hooks/use-sessions.js';
+import { sessionsActor } from '#services/sessions-store.js';
 import type { RevisionClient } from '#hooks/use-revision-status.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 import type { ActorRefFrom } from 'xstate';
@@ -20,6 +22,8 @@ const restoreProject = vi.fn<(projectId: string) => Promise<void>>();
 const projectManager = {
   getProjectRouteAccess,
   restoreProject,
+  /* W2: bumping this is how a trash or restore reaches an already-resolved route. */
+  libraryRevision: 0,
 };
 const mounts: string[] = [];
 const unmounts: string[] = [];
@@ -31,6 +35,9 @@ const projectProviderChatInputs: Array<{
 }> = [];
 const editorSend = vi.fn();
 const projectSend = vi.fn();
+const connectRemote = vi.fn(async () => undefined);
+/* `quiesce` is W13's close cut: `closing.flushing` calls it on this client. */
+const revisionClient = { subscribeEvents: () => () => undefined, quiesce: async () => undefined };
 let editorIsIdle = true;
 type EditorSnapshot = Readonly<{
   status: 'active';
@@ -69,7 +76,11 @@ const failEditorFlush = (error: Error): void => {
 };
 const projectRef = {
   send: projectSend,
-  getSnapshot: () => ({ context: { project: undefined } }),
+  /* `matches` is not decoration: the session's `closing.flushingProducers`
+   * awaits `waitFor(projectRef, (state) => state.matches(...))`, so a snapshot
+   * without it threw, the session settled in `failed` instead of `closed`, and
+   * the registry never dropped its ref. */
+  getSnapshot: () => ({ context: { project: undefined }, matches: () => true }),
   subscribe: () => ({ unsubscribe: () => undefined }),
 };
 const parameterService = {
@@ -82,6 +93,7 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 }));
 
 vi.mock('#hooks/use-file-manager.js', () => ({
+  useSharedFileManagerWorker: () => undefined,
   SharedWorkerGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   HomeFileManagerProvider: ({
     children,
@@ -130,23 +142,34 @@ vi.mock('#hooks/use-project.js', () => ({
 vi.mock('#hooks/use-flush-on-close.js', () => ({
   useFlushOnClose: () => undefined,
 }));
+vi.mock('#hooks/use-flush-on-close.js', () => ({ useFlushOnClose: () => undefined }));
+/* The registry's agent-host region is a real browser probe. Unmocked it rejects
+ * in jsdom, so `closing.releasingAgentHost` threw, every session settled in
+ * `failed` instead of `closed`, and the registry never dropped its ref — one
+ * case's project stayed live for the next one. */
+vi.mock('#services/project-agent-host-registration.js', () => ({
+  registerProjectAgentHost: async () => ({ release: async () => undefined }),
+}));
 /* The session binding is headless and has its own suites; this route suite is
  * about which subtrees are mounted, so its two app-level handles are stubs. */
 vi.mock('#hooks/use-revision-status.js', () => ({
   useRevisionClient: () => undefined,
+  useRevisionClientLifecycle: () => revisionClient,
+  useRevisionClientStatus: () => undefined,
   useRevisionStatus: () => undefined,
-  useRevisionCommands: () => ({}),
+  useRevisionCommands: () => ({ connectRemote }),
 }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
   useChatSessionStore: () => ({
     get: () => undefined,
     setProjectSession: () => undefined,
+    setFocusedProject: () => undefined,
   }),
 }));
 /* The `Mod+S` registration needs the application root's `KeyboardProvider`,
  * which this route-level suite does not mount; the shortcut has its own test. */
 vi.mock('#routes/w.$workspace.$project/revision-save-shortcut.js', () => ({
-  RevisionSaveShortcut: () => null,
+  RevisionSaveShortcut: () => <span data-testid='focused-project' />,
 }));
 vi.mock('#hooks/use-monaco-model-service.js', () => ({
   MonacoModelServiceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
@@ -157,6 +180,9 @@ vi.mock('#hooks/use-webgl-context-tracker.js', () => ({
 vi.mock('#routes/w.$workspace.$project/revision-provider.js', () => ({
   RevisionProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
+vi.mock('#routes/w.$workspace.$project/revision-restore.js', () => ({ RevisionRestore: () => null }));
+vi.mock('#routes/w.$workspace.$project/workbench-checkout-root.js', () => ({ WorkbenchCheckoutRoot: () => null }));
+vi.mock('#routes/w.$workspace.$project/revision-outcomes.js', () => ({ RevisionOutcomes: () => null }));
 vi.mock('#routes/w.$workspace.$project/project-chat-run-settlement.js', () => ({
   ProjectChatRunSettlement: () => null,
 }));
@@ -177,23 +203,38 @@ vi.mock('#routes/w.$workspace.$project/chat-interface.js', () => ({
 }));
 /* W10's conflict chat reads `useChats`, which needs the root `QueryClient`
  * this route-level suite does not mount; it has its own tests. */
-vi.mock('#routes/w.$workspace.$project/revision-conflict-chat.js', () => ({
-  RevisionConflictChat: () => null,
+vi.mock('#routes/w.$workspace.$project/revision-conflict-chat.js', () => ({ RevisionConflictChat: () => null }));
+/* Same reason, and the reason this suite was already red on `geospec` before
+ * the notice work: the authority provider reads `useChats` too, so every
+ * focused-session test threw "No QueryClient set" at module render. */
+vi.mock('#hooks/use-focused-chat-read-state.js', () => ({ useFocusedChatReadState: () => undefined }));
+vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
+  ChatWorkspaceAuthorityProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
-vi.mock('#routes/w.$workspace.$project/project-not-found.js', () => ({
-  ProjectNotFound: () => <div>Project Not Found</div>,
-}));
-vi.mock('#routes/w.$workspace.$project/project-load-error.js', () => ({
-  ProjectLoadError: ({ error, onReload }: { readonly error: Error; readonly onReload: () => void }) => (
-    <div>
-      Project access failed
-      <span data-testid='project-route-error'>{error.message}</span>
-      <button type='button' onClick={onReload}>
-        Retry project
-      </button>
-    </div>
-  ),
-}));
+/*
+ * The notice presentation is W3's own suite. Here it stands in for every
+ * non-editor state so these tests stay about what the *gate* derives and
+ * whether the app shell survived it.
+ */
+vi.mock('#routes/w.$workspace.$project/project-route-notices.js', async () => {
+  const { createContext, useContext } = await import('react');
+  const ProjectRouteRetryContext = createContext<() => void>(() => undefined);
+  return {
+    ProjectRouteRetryContext,
+    ProjectRouteNotice: ({ state }: { readonly state: { kind: string; error?: Error } }) => {
+      const retry = useContext(ProjectRouteRetryContext);
+      return (
+        <div>
+          <p>Notice: {state.kind}</p>
+          {state.error ? <p>{state.error.message}</p> : undefined}
+          <button type='button' onClick={retry}>
+            Retry project
+          </button>
+        </div>
+      );
+    },
+  };
+});
 
 const routeModule = await import('./project-route.js');
 
@@ -235,21 +276,34 @@ const deferred = <T,>(): {
 const renderRouteProvider = ({
   requestedChatId,
   createdChatId,
+  shouldOpenFromTauCloud,
 }: {
   readonly requestedChatId?: string;
   readonly createdChatId?: string;
+  readonly shouldOpenFromTauCloud?: boolean;
 } = {}): {
   Provider: React.JSXElementConstructor<React.PropsWithChildren>;
   view: ReturnType<typeof render>;
 } => {
+  /* The route renders one subtree per LIVE project (R1), so the registry that
+   * decides the live set has to be here — exactly as `root.tsx` mounts it. */
+  /*
+   * `children` stands in for the app shell, which renders the route component
+   * through its `<Outlet/>`. The notice lives there (W2/W3), so a gate-only
+   * tree would never show one — include it exactly where the shell does.
+   */
   const Provider = ({ children }: React.PropsWithChildren): React.JSX.Element => (
-    <routeModule.ProjectRouteProviders
-      projectId={currentProjectId}
-      requestedChatId={requestedChatId}
-      createdChatId={createdChatId}
-    >
-      {children}
-    </routeModule.ProjectRouteProviders>
+    <SessionsProvider>
+      <routeModule.ProjectRouteProviders
+        projectId={currentProjectId}
+        requestedChatId={requestedChatId}
+        createdChatId={createdChatId}
+        shouldOpenFromTauCloud={shouldOpenFromTauCloud}
+      >
+        {children}
+        <routeModule.ProjectChatRoute />
+      </routeModule.ProjectRouteProviders>
+    </SessionsProvider>
   );
   return {
     Provider,
@@ -265,6 +319,7 @@ beforeEach(() => {
   currentProjectId = projectA;
   getProjectRouteAccess.mockReset();
   restoreProject.mockReset();
+  projectManager.libraryRevision = 0;
   mounts.length = 0;
   unmounts.length = 0;
   fileManagerInputs.length = 0;
@@ -272,8 +327,54 @@ beforeEach(() => {
   projectProviderChatInputs.length = 0;
   editorSend.mockReset();
   projectSend.mockReset();
+  connectRemote.mockClear();
   editorObservers.clear();
   editorIsIdle = true;
+});
+
+/**
+ * Which project the person is looking at.
+ *
+ * Every live project renders a subtree now (I22, R1), so "the session" is no
+ * longer "the only one mounted": the focused one is the subtree that holds the
+ * route's children.
+ */
+const focusedSessionId = (): string | undefined =>
+  screen.queryByTestId('focused-project')?.closest<HTMLElement>('[data-project-id]')?.dataset['projectId'];
+
+/** Every mounted project subtree, in render order. */
+const sessionIds = (): readonly string[] =>
+  screen.queryAllByTestId('project-session').map((element) => element.dataset['projectId'] ?? '');
+
+afterEach(async () => {
+  /* A case that left the editor mid-flush would hold `flushProducers` open
+   * until its timeout; the drain is about liveness, not about that case. */
+  editorIsIdle = true;
+  /*
+   * The registry is one app singleton (S44); a project left live by one case is
+   * live for the next one. Closing is a round trip: `close` moves the session
+   * to `closing`, `confirmClose` lets it past `asking`, and only when its flush
+   * and release settle does the registry drop the ref. A close that *throws*
+   * lands in `failed` instead and is never dropped, which is why the doubles
+   * above have to answer `matches` and `quiesce`.
+   */
+  await act(async () => {
+    const live = Object.keys(sessionsActor.getSnapshot().context.refs);
+    for (const projectId of live) {
+      sessionsActor.send({ type: 'close', projectId, reason: 'user' });
+    }
+    await new Promise<void>((resolve) => {
+      globalThis.setTimeout(resolve, 0);
+    });
+    for (const ref of Object.values(sessionsActor.getSnapshot().context.refs)) {
+      ref.send({ type: 'confirmClose' });
+    }
+    await new Promise<void>((resolve) => {
+      globalThis.setTimeout(resolve, 0);
+    });
+  });
+  /* The drain is the guard, so prove it drained rather than hoping. */
+  expect(Object.keys(sessionsActor.getSnapshot().context.refs)).toEqual([]);
 });
 
 describe('project route session identity', () => {
@@ -363,6 +464,15 @@ describe('project route session identity', () => {
     expect(revision.quiesce).not.toHaveBeenCalled();
   });
 
+  it('connects a Tau Cloud library open through the project-scoped client', async () => {
+    getProjectRouteAccess.mockResolvedValue(ready(projectA));
+    renderRouteProvider({ shouldOpenFromTauCloud: true });
+
+    await waitFor(() => {
+      expect(connectRemote).toHaveBeenCalledWith('tau');
+    });
+  });
+
   it('forwards a trusted created chat to the active project session', async () => {
     getProjectRouteAccess.mockResolvedValue(ready(projectA));
     renderRouteProvider({
@@ -370,7 +480,7 @@ describe('project route session identity', () => {
       createdChatId: 'chat-created',
     });
 
-    await screen.findByTestId('project-session');
+    await screen.findAllByTestId('project-session');
     expect(projectProviderChatInputs.at(-1)).toEqual({
       requestedChatId: 'chat-created',
       createdChatId: 'chat-created',
@@ -380,29 +490,35 @@ describe('project route session identity', () => {
   it('should render only the route status while initial access is unresolved', async () => {
     const pendingA = deferred<ProjectRouteAccess>();
     getProjectRouteAccess.mockReturnValue(pendingA.promise);
-    const { view } = renderRouteProvider();
+    renderRouteProvider();
 
-    expect(screen.getByRole('status', { name: 'Opening project' })).toBeInTheDocument();
+    /* W2: the initial wait is the `resolving` notice now, and its loader with
+     * the `Opening project` label is asserted in the notice's own suite. The
+     * overlay below still owns the *navigation* wait, which is a different
+     * state: a project is already on screen behind it. */
+    expect(screen.getByText('Notice: resolving')).toBeInTheDocument();
     expect(screen.queryByTestId('project-session')).not.toBeInTheDocument();
 
     await act(async () => {
       pendingA.resolve(ready(projectA));
       await pendingA.promise;
     });
-    await screen.findByTestId('project-session');
-    expect(view.getByTestId('project-session')).toHaveAttribute('data-project-id', projectA);
+    await screen.findAllByTestId('project-session');
+    expect(focusedSessionId()).toBe(projectA);
   });
 
   it('should leave the initial loader for a retryable access error', async () => {
     getProjectRouteAccess.mockRejectedValueOnce(new Error('discovery failed')).mockResolvedValueOnce(ready(projectA));
     renderRouteProvider();
 
-    expect(await screen.findByText('Project access failed')).toBeInTheDocument();
-    expect(screen.getByTestId('project-route-error')).toHaveTextContent('could not check this project');
+    expect(await screen.findByText('Notice: access-error')).toBeInTheDocument();
+    expect(screen.getByText(/could not check this project/)).toBeInTheDocument();
     expect(screen.queryByRole('status', { name: 'Opening project' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry project' }));
-    expect(await screen.findByTestId('project-session')).toHaveAttribute('data-project-id', projectA);
+    await screen.findAllByTestId('project-session');
+    expect(focusedSessionId()).toBe(projectA);
+    expect(getProjectRouteAccess).toHaveBeenCalledTimes(2);
   });
 
   it('should retain project A inertly until project B access commits', async () => {
@@ -415,7 +531,7 @@ describe('project route session identity', () => {
       pendingA.resolve(ready(projectA));
       await pendingA.promise;
     });
-    expect(screen.getByTestId('project-session')).toHaveAttribute('data-project-id', projectA);
+    expect(focusedSessionId()).toBe(projectA);
 
     currentProjectId = projectB;
     view.rerender(
@@ -424,9 +540,9 @@ describe('project route session identity', () => {
       </Provider>,
     );
 
-    const retainedSession = screen.getByTestId('project-session');
+    const retainedSession = screen.getAllByTestId('project-session')[0]!;
     const pendingOutcome = retainedSession.closest('[aria-busy="true"]');
-    expect(retainedSession).toHaveAttribute('data-project-id', projectA);
+    expect(focusedSessionId()).toBe(projectA);
     expect(pendingOutcome).toHaveAttribute('inert');
     expect(screen.getByRole('status', { name: 'Opening project' })).toBeInTheDocument();
     expect(unmounts).not.toContain(projectA);
@@ -438,15 +554,18 @@ describe('project route session identity', () => {
       pendingB.resolve(ready(projectB));
       await pendingB.promise;
     });
-    expect(screen.getByTestId('project-session')).toHaveAttribute('data-project-id', projectB);
-    expect(unmounts.filter((id) => id === projectA)).toHaveLength(1);
+    expect(focusedSessionId()).toBe(projectB);
+    /* I22: arriving at B opens B and closes nothing. A keeps its file manager,
+     * kernel and watchers, which is what makes going back instant. */
+    expect(unmounts.filter((id) => id === projectA)).toHaveLength(0);
     expect(mounts.filter((id) => id === projectB)).toHaveLength(1);
+    expect(sessionIds()).toEqual([projectA, projectB]);
   });
 
   it('should flush and await pending EditorState before replacing the current project session', async () => {
     getProjectRouteAccess.mockImplementation(async (id) => ready(id));
     const { Provider, view } = renderRouteProvider();
-    await screen.findByTestId('project-session');
+    await screen.findAllByTestId('project-session');
     setEditorIdle(false);
 
     currentProjectId = projectB;
@@ -455,21 +574,21 @@ describe('project route session identity', () => {
     await waitFor(() => {
       expect(editorSend).toHaveBeenCalledWith({ type: 'flushNow' });
     });
-    expect(screen.getByTestId('project-session')).toHaveAttribute('data-project-id', projectA);
+    expect(focusedSessionId()).toBe(projectA);
     expect(unmounts).not.toContain(projectA);
 
     act(() => {
       setEditorIdle(true);
     });
     await waitFor(() => {
-      expect(screen.getByTestId('project-session')).toHaveAttribute('data-project-id', projectB);
+      expect(focusedSessionId()).toBe(projectB);
     });
   });
 
   it('should share one pending flush across rapid navigation and commit only the latest project', async () => {
     getProjectRouteAccess.mockImplementation(async (id) => ready(id));
     const { Provider, view } = renderRouteProvider();
-    await screen.findByTestId('project-session');
+    await screen.findAllByTestId('project-session');
     setEditorIdle(false);
 
     currentProjectId = projectB;
@@ -488,7 +607,7 @@ describe('project route session identity', () => {
       setEditorIdle(true);
     });
     await waitFor(() => {
-      expect(screen.getByTestId('project-session')).toHaveAttribute('data-project-id', projectC);
+      expect(focusedSessionId()).toBe(projectC);
     });
     expect(mounts).not.toContain(projectB);
   });
@@ -496,7 +615,7 @@ describe('project route session identity', () => {
   it('should keep the current session mounted when its editor flush fails', async () => {
     getProjectRouteAccess.mockImplementation(async (id) => ready(id));
     const { Provider, view } = renderRouteProvider();
-    await screen.findByTestId('project-session');
+    await screen.findAllByTestId('project-session');
     setEditorIdle(false);
 
     currentProjectId = projectB;
@@ -508,9 +627,9 @@ describe('project route session identity', () => {
       failEditorFlush(new Error('storage failed'));
     });
 
-    expect(await screen.findByText('Project access failed')).toBeInTheDocument();
-    expect(screen.getByTestId('project-route-error')).toHaveTextContent('could not save the current project view');
-    expect(screen.getByTestId('project-session')).toHaveAttribute('data-project-id', projectA);
+    expect(await screen.findByText('Notice: flush-error')).toBeInTheDocument();
+    expect(screen.getByText(/could not save the current project view/)).toBeInTheDocument();
+    expect(focusedSessionId()).toBe(projectA);
     expect(unmounts).not.toContain(projectA);
   });
 
@@ -524,7 +643,7 @@ describe('project route session identity', () => {
       return id === projectB ? pendingB.promise : pendingC.promise;
     });
     const { Provider, view } = renderRouteProvider();
-    await screen.findByTestId('project-session');
+    await screen.findAllByTestId('project-session');
 
     await act(async () => {
       currentProjectId = projectB;
@@ -535,31 +654,31 @@ describe('project route session identity', () => {
       view.rerender(<Provider>content</Provider>);
     });
 
-    expect(screen.getByTestId('project-session')).toHaveAttribute('data-project-id', projectA);
+    expect(focusedSessionId()).toBe(projectA);
 
     await act(async () => {
       pendingC.resolve(ready(projectC));
       await pendingC.promise;
     });
-    expect(screen.getByTestId('project-session')).toHaveAttribute('data-project-id', projectC);
+    expect(focusedSessionId()).toBe(projectC);
     await act(async () => {
       pendingB.resolve(ready(projectB));
       await pendingB.promise;
     });
 
-    expect(screen.getByTestId('project-session')).toHaveAttribute('data-project-id', projectC);
+    expect(focusedSessionId()).toBe(projectC);
     expect(mounts).not.toContain(projectB);
   });
 
   it.each([
-    ['missing', 'Project Not Found'],
-    ['conflict', 'This project ID exists in more than one directory.'],
-    ['unavailable', 'The project storage location is currently unavailable.'],
+    ['missing', 'Notice: missing'],
+    ['conflict', 'Notice: conflict'],
+    ['unavailable', 'Notice: unavailable'],
   ] as const)('should render %s access without mounting project B resources', async (status, message) => {
     const pendingB = deferred<ProjectRouteAccess>();
     getProjectRouteAccess.mockImplementation(async (id) => (id === projectA ? ready(projectA) : pendingB.promise));
     const { Provider, view } = renderRouteProvider();
-    await screen.findByTestId('project-session');
+    await screen.findAllByTestId('project-session');
 
     currentProjectId = projectB;
     view.rerender(<Provider>content</Provider>);
@@ -569,7 +688,10 @@ describe('project route session identity', () => {
       await pendingB.promise;
     });
     expect(screen.getByText(message, { exact: false })).toBeInTheDocument();
-    expect(screen.queryByTestId('project-session')).not.toBeInTheDocument();
+    /* W2: the app shell is no longer swapped out for the notice. */
+    expect(screen.getByText('content')).toBeInTheDocument();
+    /* A stays live behind the message (I22); B never got resources. */
+    expect(sessionIds()).not.toContain(projectB);
     expect(fileManagerInputs.some((input) => input.projectId === projectB)).toBe(false);
     expect(projectProviderInputs).not.toContain(projectB);
   });
@@ -586,7 +708,7 @@ describe('project route session identity', () => {
           status: 'recovering',
         },
       } satisfies ProjectRouteAccess,
-      'Tau is finishing this project.',
+      'Notice: recovering',
     ],
     [
       {
@@ -600,7 +722,7 @@ describe('project route session identity', () => {
           reason: 'filesystem-error',
         },
       } satisfies ProjectRouteAccess,
-      'Tau could not finish writing the project files.',
+      'Notice: recovery-failed',
     ],
   ])('should render pending-operation access without mounting project resources', async (access, message) => {
     getProjectRouteAccess.mockResolvedValue(access);
@@ -618,7 +740,7 @@ describe('project route session identity', () => {
       throw new Error('discovery failed');
     });
     const { Provider, view } = renderRouteProvider();
-    await screen.findByTestId('project-session');
+    await screen.findAllByTestId('project-session');
 
     currentProjectId = projectB;
     view.rerender(
@@ -627,26 +749,83 @@ describe('project route session identity', () => {
       </Provider>,
     );
 
-    expect(await screen.findByText('Project access failed')).toBeInTheDocument();
-    expect(screen.getByTestId('project-session')).toHaveAttribute('data-project-id', projectA);
+    expect(await screen.findByText('Notice: access-error')).toBeInTheDocument();
+    expect(focusedSessionId()).toBe(projectA);
     expect(screen.getByTestId('project-session').closest('[inert]')).not.toBeNull();
     expect(unmounts).not.toContain(projectA);
   });
 
-  it('should restore the project ID carried by the trashed result', async () => {
-    getProjectRouteAccess.mockImplementation(async (id) => (id === projectA ? ready(projectA) : trashed(projectB)));
-    restoreProject.mockResolvedValue();
+  it('should re-resolve access when the library revision changes (W2)', async () => {
+    /*
+     * Finding 2: deleting the open project closes its session and writes
+     * `deletedAt`. The close was live; the trash was not, so the route kept
+     * showing "Closed" — and its Reopen would have re-mounted a trashed
+     * project. The revision counter is what makes the second fact arrive.
+     */
+    getProjectRouteAccess.mockResolvedValue(ready(projectA));
     const { Provider, view } = renderRouteProvider();
-    await screen.findByTestId('project-session');
+    await screen.findAllByTestId('project-session');
 
-    currentProjectId = projectB;
-    view.rerender(<Provider>content</Provider>);
-    fireEvent.click(await screen.findByRole('button', { name: 'Restore Project' }));
+    getProjectRouteAccess.mockResolvedValue(trashed(projectA));
+    await act(async () => {
+      projectManager.libraryRevision += 1;
+      view.rerender(<Provider>content</Provider>);
+      await new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, 0);
+      });
+    });
+
+    expect(await screen.findByText('Notice: trashed')).toBeInTheDocument();
+  });
+
+  it('should return to the editor when a restore bumps the library revision (W2)', async () => {
+    getProjectRouteAccess.mockResolvedValue(trashed(projectA));
+    const { Provider, view } = renderRouteProvider();
+    expect(await screen.findByText('Notice: trashed')).toBeInTheDocument();
+
+    getProjectRouteAccess.mockResolvedValue(ready(projectA));
+    await act(async () => {
+      projectManager.libraryRevision += 1;
+      view.rerender(<Provider>content</Provider>);
+      await new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, 0);
+      });
+    });
 
     await waitFor(() => {
-      expect(restoreProject).toHaveBeenCalledWith(projectB);
-      expect(screen.getByTestId('project-session')).toHaveAttribute('data-project-id', projectB);
+      expect(screen.queryByText('Notice: trashed')).not.toBeInTheDocument();
     });
+    expect(focusedSessionId()).toBe(projectA);
+  });
+
+  it('should keep the app shell mounted in every non-editor state (W2)', async () => {
+    /*
+     * The blueprint's whole first finding: `children` is the app shell, and the
+     * gate used to substitute its terminal markup for it, so closing a project
+     * stranded the person on a page with no sidebar and no way out.
+     */
+    getProjectRouteAccess.mockResolvedValue(trashed(projectA));
+    renderRouteProvider();
+
+    expect(await screen.findByText('Notice: trashed')).toBeInTheDocument();
+    expect(screen.getByText('content')).toBeInTheDocument();
+  });
+
+  it('should show the closed notice with the shell when the session closes (W2)', async () => {
+    getProjectRouteAccess.mockResolvedValue(ready(projectA));
+    renderRouteProvider();
+    await screen.findAllByTestId('project-session');
+
+    await act(async () => {
+      sessionsActor.send({ type: 'close', projectId: projectA, reason: 'user' });
+      sessionsActor.getSnapshot().context.refs[projectA]?.send({ type: 'confirmClose' });
+      await new Promise<void>((resolve) => {
+        globalThis.setTimeout(resolve, 0);
+      });
+    });
+
+    expect(await screen.findByText('Notice: closed')).toBeInTheDocument();
+    expect(screen.getByText('content')).toBeInTheDocument();
   });
 
   it('should ignore pending access after the route gate unmounts', async () => {

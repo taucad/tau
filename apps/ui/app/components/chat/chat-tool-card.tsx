@@ -202,7 +202,7 @@ function ChatToolCardHeader({ children, className }: ChatToolCardHeaderProps): R
   return (
     <CollapsibleTrigger
       className={cn(
-        'group/trigger group/chat-tool-trigger flex h-7 w-full cursor-pointer flex-row items-center gap-1.5 pr-1 pl-2 text-xs text-muted-foreground transition-colors hover:bg-foreground/5',
+        'group/trigger group/chat-tool-trigger flex h-7 w-full flex-row items-center gap-1.5 pr-1 pl-2 text-xs text-muted-foreground transition-colors hover:bg-foreground/5',
         className,
       )}
     >

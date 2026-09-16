@@ -4,241 +4,241 @@
 
 TransferBRep_BinderOfShape: declare class TransferBRep_BinderOfShape extends Transfer_Binder
 
-constructor
+  constructor
 
-ResultType(): Standard_Type;
+  ResultType(): Standard_Type;
 
-ResultTypeName(): string;
+  ResultTypeName(): string;
 
-SetResult(res: TopoDS_Shape): void;
+  SetResult(res: TopoDS_Shape): void;
 
-Result(): TopoDS_Shape;
+  Result(): TopoDS_Shape;
 
-CResult(): TopoDS_Shape;
+  CResult(): TopoDS_Shape;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TransferBRep_Reader: declare class TransferBRep_Reader
 
-constructor
+  constructor
 
-SetProtocol(protocol: Interface_Protocol): void;
+  SetProtocol(protocol: Interface_Protocol): void;
 
-Protocol(): Interface_Protocol;
+  Protocol(): Interface_Protocol;
 
-SetActor(actor: Transfer_ActorOfTransientProcess): void;
+  SetActor(actor: Transfer_ActorOfTransientProcess): void;
 
-Actor(): Transfer_ActorOfTransientProcess;
+  Actor(): Transfer_ActorOfTransientProcess;
 
-SetFileStatus(status: number): void;
+  SetFileStatus(status: number): void;
 
-FileStatus(): number;
+  FileStatus(): number;
 
-FileNotFound(): boolean;
+  FileNotFound(): boolean;
 
-SyntaxError(): boolean;
+  SyntaxError(): boolean;
 
-SetModel(model: Interface_InterfaceModel): void;
+  SetModel(model: Interface_InterfaceModel): void;
 
-Model(): Interface_InterfaceModel;
+  Model(): Interface_InterfaceModel;
 
-Clear(): void;
+  Clear(): void;
 
-CheckStatusModel(withprint: boolean): boolean;
+  CheckStatusModel(withprint: boolean): boolean;
 
-ModeNewTransfer(): boolean;
+  ModeNewTransfer(): boolean;
 
-BeginTransfer(): boolean;
+  BeginTransfer(): boolean;
 
-EndTransfer(): void;
+  EndTransfer(): void;
 
-PrepareTransfer(): void;
+  PrepareTransfer(): void;
 
-TransferRoots(theProgress?: Message_ProgressRange): void;
+  TransferRoots(theProgress?: Message_ProgressRange): void;
 
-Transfer(num: number, theProgress?: Message_ProgressRange): boolean;
+  Transfer(num: number, theProgress?: Message_ProgressRange): boolean;
 
-TransferList(list: NCollection_HSequence_handle_Standard_Transient, theProgress?: Message_ProgressRange): void;
+  TransferList(list: NCollection_HSequence_handle_Standard_Transient, theProgress?: Message_ProgressRange): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbShapes(): number;
+  NbShapes(): number;
 
-Shapes(): NCollection_HSequence_TopoDS_Shape;
+  Shapes(): NCollection_HSequence_TopoDS_Shape;
 
-Shape(num?: number): TopoDS_Shape;
+  Shape(num?: number): TopoDS_Shape;
 
-ShapeResult(ent: Standard_Transient): TopoDS_Shape;
+  ShapeResult(ent: Standard_Transient): TopoDS_Shape;
 
-OneShape(): TopoDS_Shape;
+  OneShape(): TopoDS_Shape;
 
-NbTransients(): number;
+  NbTransients(): number;
 
-Transients(): NCollection_HSequence_handle_Standard_Transient;
+  Transients(): NCollection_HSequence_handle_Standard_Transient;
 
-Transient(num?: number): Standard_Transient;
+  Transient(num?: number): Standard_Transient;
 
-CheckStatusResult(withprints: boolean): boolean;
+  CheckStatusResult(withprints: boolean): boolean;
 
-TransientProcess(): Transfer_TransientProcess;
+  TransientProcess(): Transfer_TransientProcess;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TransferBRep_ShapeBinder: declare class TransferBRep_ShapeBinder extends TransferBRep_BinderOfShape
 
-constructor
+  constructor
 
-ShapeType(): TopAbs_ShapeEnum;
+  ShapeType(): TopAbs_ShapeEnum;
 
-Vertex(): TopoDS_Vertex;
+  Vertex(): TopoDS_Vertex;
 
-Edge(): TopoDS_Edge;
+  Edge(): TopoDS_Edge;
 
-Wire(): TopoDS_Wire;
+  Wire(): TopoDS_Wire;
 
-Face(): TopoDS_Face;
+  Face(): TopoDS_Face;
 
-Shell(): TopoDS_Shell;
+  Shell(): TopoDS_Shell;
 
-Solid(): TopoDS_Solid;
+  Solid(): TopoDS_Solid;
 
-CompSolid(): TopoDS_CompSolid;
+  CompSolid(): TopoDS_CompSolid;
 
-Compound(): TopoDS_Compound;
+  Compound(): TopoDS_Compound;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TransferBRep_ShapeInfo: declare class TransferBRep_ShapeInfo
 
-constructor
+  constructor
 
-static Type(ent: TopoDS_Shape): Standard_Type;
+  static Type(ent: TopoDS_Shape): Standard_Type;
 
-static TypeName(ent: TopoDS_Shape): string;
+  static TypeName(ent: TopoDS_Shape): string;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TransferBRep_ShapeListBinder: declare class TransferBRep_ShapeListBinder extends Transfer_Binder
 
-constructor
+  constructor
 
-IsMultiple(): boolean;
+  IsMultiple(): boolean;
 
-ResultType(): Standard_Type;
+  ResultType(): Standard_Type;
 
-ResultTypeName(): string;
+  ResultTypeName(): string;
 
-AddResult(res: TopoDS_Shape): void;
-AddResult(next: Transfer_Binder): void;
-AddResult(res: TopoDS_Shape): void;
-AddResult(next: Transfer_Binder): void;
+  AddResult(res: TopoDS_Shape): void;
+  AddResult(next: Transfer_Binder): void;
+  AddResult(res: TopoDS_Shape): void;
+  AddResult(next: Transfer_Binder): void;
 
-Result(): NCollection_HSequence_TopoDS_Shape;
+  Result(): NCollection_HSequence_TopoDS_Shape;
 
-SetResult(num: number, res: TopoDS_Shape): void;
+  SetResult(num: number, res: TopoDS_Shape): void;
 
-NbShapes(): number;
+  NbShapes(): number;
 
-Shape(num: number): TopoDS_Shape;
+  Shape(num: number): TopoDS_Shape;
 
-ShapeType(num: number): TopAbs_ShapeEnum;
+  ShapeType(num: number): TopAbs_ShapeEnum;
 
-Vertex(num: number): TopoDS_Vertex;
+  Vertex(num: number): TopoDS_Vertex;
 
-Edge(num: number): TopoDS_Edge;
+  Edge(num: number): TopoDS_Edge;
 
-Wire(num: number): TopoDS_Wire;
+  Wire(num: number): TopoDS_Wire;
 
-Face(num: number): TopoDS_Face;
+  Face(num: number): TopoDS_Face;
 
-Shell(num: number): TopoDS_Shell;
+  Shell(num: number): TopoDS_Shell;
 
-Solid(num: number): TopoDS_Solid;
+  Solid(num: number): TopoDS_Solid;
 
-CompSolid(num: number): TopoDS_CompSolid;
+  CompSolid(num: number): TopoDS_CompSolid;
 
-Compound(num: number): TopoDS_Compound;
+  Compound(num: number): TopoDS_Compound;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TransferBRep_ShapeMapper: declare class TransferBRep_ShapeMapper extends Transfer_Finder
 
-constructor
+  constructor
 
-Value(): TopoDS_Shape;
+  Value(): TopoDS_Shape;
 
-Equates(other: Transfer_Finder): boolean;
+  Equates(other: Transfer_Finder): boolean;
 
-ValueType(): Standard_Type;
+  ValueType(): Standard_Type;
 
-ValueTypeName(): string;
+  ValueTypeName(): string;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TransferBRep_TransferResultInfo: declare class TransferBRep_TransferResultInfo extends Standard_Transient
 
-constructor
+  constructor
 
-Clear(): void;
+  Clear(): void;
 
-Result(): number;
+  Result(): number;
 
-ResultWarning(): number;
+  ResultWarning(): number;
 
-ResultFail(): number;
+  ResultFail(): number;
 
-ResultWarningFail(): number;
+  ResultWarningFail(): number;
 
-NoResult(): number;
+  NoResult(): number;
 
-NoResultWarning(): number;
+  NoResultWarning(): number;
 
-NoResultFail(): number;
+  NoResultFail(): number;
 
-NoResultWarningFail(): number;
+  NoResultWarningFail(): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

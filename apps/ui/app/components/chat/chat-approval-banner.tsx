@@ -208,6 +208,12 @@ export function ChatApprovalBanner(): React.JSX.Element | undefined {
       </div>
       <p className='min-w-0 break-words text-foreground/90'>{approval.prompt}</p>
       <p className='text-xs text-muted-foreground'>{continuationNote(activeExecution, name)}</p>
+      {approval.options.some((option) => option.kind === 'allow_always') ? (
+        <p className='text-xs text-muted-foreground'>
+          Standing-grant persistence is controlled by the connected agent or MCP server; Tau only forwards this exact
+          choice.
+        </p>
+      ) : undefined}
       <div className='flex flex-row flex-wrap gap-2'>
         {approval.options.length > 0 ? (
           /* The agent's own options, in its own order and its own words (EQ5).

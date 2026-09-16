@@ -118,4 +118,32 @@ describe('useFocusedChatReadState', () => {
 
     expect(setChatUnreadState).toHaveBeenCalledWith('chat-focused', false);
   });
+
+  /* W20 pin (b): the sidebar's `unread` is the chat machine's `read` region and
+   * this is the only thing that clears it. An unfocused or hidden document is
+   * not somebody reading the chat, so neither the machine nor the record moves
+   * — and there is no second read record anywhere. */
+  it('never marks a background chat viewed, and never one in a hidden document', () => {
+    chatsRef.current = [chat('chat-background', true), chat('chat-focused', true)];
+    visibilityState = 'hidden';
+    const hidden = renderHook(() => {
+      useFocusedChatReadState();
+    });
+    expect(markViewed).not.toHaveBeenCalled();
+    expect(setChatUnreadState).not.toHaveBeenCalled();
+    hidden.unmount();
+
+    visibilityState = 'visible';
+    vi.mocked(document.hasFocus).mockReturnValue(false);
+    renderHook(() => {
+      useFocusedChatReadState();
+    });
+    expect(markViewed).not.toHaveBeenCalled();
+
+    vi.mocked(document.hasFocus).mockReturnValue(true);
+    act(() => {
+      globalThis.dispatchEvent(new Event('focus'));
+    });
+    expect(markViewed).toHaveBeenCalledExactlyOnceWith('chat-focused');
+  });
 });

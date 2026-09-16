@@ -193,6 +193,7 @@ const startRecoveryWorker = async (
   const workerVariables: Record<string, string> = {};
   workerVariables['BILLING_DATABASE_URL'] = databaseUrl;
   workerVariables['BILLING_ENVIRONMENT'] = loadEnvironment;
+  workerVariables['TAU_CLOUD_ENABLED'] = 'true';
   // Prometheus exporter binds a disposable loopback port; no OTLP endpoint is set, so nothing is exported.
   workerVariables['OTEL_METRICS_PORT'] = String(await freePort());
   const workerEnvironment = allowlistedChildEnvironment(workerVariables);

@@ -4,19 +4,19 @@
 
 Dictionary
 
-Comparer: IEqualityComparer<TKey>
+  Comparer: IEqualityComparer<TKey>
 
-Count: int
+  Count: int
 
-Capacity: int
+  Capacity: int
 
-Keys: Dictionary<TKey, TValue>.KeyCollection
+  Keys: Dictionary<TKey, TValue>.KeyCollection
 
-Values: Dictionary<TKey, TValue>.ValueCollection
+  Values: Dictionary<TKey, TValue>.ValueCollection
 
-this[]: TValue
+  this[]: TValue
 
-AlternateLookup
+  AlternateLookup
 
     Dictionary: Dictionary<TKey, TValue>
 
@@ -32,7 +32,7 @@ AlternateLookup
 
     public bool TryAdd(TAlternateKey key, TValue value)
 
-Enumerator
+  Enumerator
 
     Current: KeyValuePair<TKey, TValue>
 
@@ -40,7 +40,7 @@ Enumerator
 
     public void Dispose()
 
-KeyCollection
+  KeyCollection
 
     Count: int
 
@@ -60,7 +60,7 @@ KeyCollection
 
     public bool Contains(TKey item)
 
-ValueCollection
+  ValueCollection
 
     Count: int
 
@@ -78,56 +78,56 @@ ValueCollection
 
     public void CopyTo(TValue[] array, int index)
 
-public Dictionary()
-public Dictionary(int capacity)
-public Dictionary(IEqualityComparer<TKey>? comparer)
-public Dictionary(int capacity, IEqualityComparer<TKey>? comparer)
-public Dictionary(IDictionary<TKey, TValue> dictionary)
-public Dictionary(IDictionary<TKey, TValue> dictionary, IEqualityComparer<TKey>? comparer)
-public Dictionary(IEnumerable<KeyValuePair<TKey, TValue>> collection)
-public Dictionary(IEnumerable<KeyValuePair<TKey, TValue>> collection, IEqualityComparer<TKey>? comparer)
-protected Dictionary(SerializationInfo info, StreamingContext context)
+  public Dictionary()
+  public Dictionary(int capacity)
+  public Dictionary(IEqualityComparer<TKey>? comparer)
+  public Dictionary(int capacity, IEqualityComparer<TKey>? comparer)
+  public Dictionary(IDictionary<TKey, TValue> dictionary)
+  public Dictionary(IDictionary<TKey, TValue> dictionary, IEqualityComparer<TKey>? comparer)
+  public Dictionary(IEnumerable<KeyValuePair<TKey, TValue>> collection)
+  public Dictionary(IEnumerable<KeyValuePair<TKey, TValue>> collection, IEqualityComparer<TKey>? comparer)
+  protected Dictionary(SerializationInfo info, StreamingContext context)
 
-public void Add(TKey key, TValue value)
+  public void Add(TKey key, TValue value)
 
-public void Clear()
+  public void Clear()
 
-public bool ContainsKey(TKey key)
+  public bool ContainsKey(TKey key)
 
-public bool ContainsValue(TValue value)
+  public bool ContainsValue(TValue value)
 
-public Dictionary<TKey, TValue>.Enumerator GetEnumerator()
+  public Dictionary<TKey, TValue>.Enumerator GetEnumerator()
 
-// DEPRECATED: This API supports obsolete formatter-based serialization. It should not be called or extended by application code.
-public virtual void GetObjectData(SerializationInfo info, StreamingContext context)
+  // DEPRECATED: This API supports obsolete formatter-based serialization. It should not be called or extended by application code.
+  public virtual void GetObjectData(SerializationInfo info, StreamingContext context)
 
-public Dictionary<TKey, TValue>.AlternateLookup<TAlternateKey> GetAlternateLookup<TAlternateKey>()
+  public Dictionary<TKey, TValue>.AlternateLookup<TAlternateKey> GetAlternateLookup<TAlternateKey>()
 
-public bool TryGetAlternateLookup<TAlternateKey>(out Dictionary<TKey, TValue>.AlternateLookup<TAlternateKey> lookup)
+  public bool TryGetAlternateLookup<TAlternateKey>(out Dictionary<TKey, TValue>.AlternateLookup<TAlternateKey> lookup)
 
-public virtual void OnDeserialization(object? sender)
+  public virtual void OnDeserialization(object? sender)
 
-public bool Remove(TKey key)
-public bool Remove(TKey key, out TValue value)
+  public bool Remove(TKey key)
+  public bool Remove(TKey key, out TValue value)
 
-public bool TryGetValue(TKey key, out TValue value)
+  public bool TryGetValue(TKey key, out TValue value)
 
-public bool TryAdd(TKey key, TValue value)
+  public bool TryAdd(TKey key, TValue value)
 
-public int EnsureCapacity(int capacity)
+  public int EnsureCapacity(int capacity)
 
-public void TrimExcess()
-public void TrimExcess(int capacity)
+  public void TrimExcess()
+  public void TrimExcess(int capacity)
 
 HashSet
 
-Count: int
+  Count: int
 
-Capacity: int
+  Capacity: int
 
-Comparer: IEqualityComparer<T>
+  Comparer: IEqualityComparer<T>
 
-AlternateLookup
+  AlternateLookup
 
     Set: HashSet<T>
 
@@ -139,7 +139,7 @@ AlternateLookup
 
     public bool TryGetValue(TAlternate equalValue, out T actualValue)
 
-Enumerator
+  Enumerator
 
     Current: T
 
@@ -147,77 +147,77 @@ Enumerator
 
     public void Dispose()
 
-public HashSet()
-public HashSet(IEqualityComparer<T>? comparer)
-public HashSet(int capacity)
-public HashSet(IEnumerable<T> collection)
-public HashSet(IEnumerable<T> collection, IEqualityComparer<T>? comparer)
-public HashSet(int capacity, IEqualityComparer<T>? comparer)
-protected HashSet(SerializationInfo info, StreamingContext context)
+  public HashSet()
+  public HashSet(IEqualityComparer<T>? comparer)
+  public HashSet(int capacity)
+  public HashSet(IEnumerable<T> collection)
+  public HashSet(IEnumerable<T> collection, IEqualityComparer<T>? comparer)
+  public HashSet(int capacity, IEqualityComparer<T>? comparer)
+  protected HashSet(SerializationInfo info, StreamingContext context)
 
-public void Clear()
+  public void Clear()
 
-public bool Contains(T item)
+  public bool Contains(T item)
 
-public bool Remove(T item)
+  public bool Remove(T item)
 
-public HashSet<T>.AlternateLookup<TAlternate> GetAlternateLookup<TAlternate>()
+  public HashSet<T>.AlternateLookup<TAlternate> GetAlternateLookup<TAlternate>()
 
-public bool TryGetAlternateLookup<TAlternate>(out HashSet<T>.AlternateLookup<TAlternate> lookup)
+  public bool TryGetAlternateLookup<TAlternate>(out HashSet<T>.AlternateLookup<TAlternate> lookup)
 
-public HashSet<T>.Enumerator GetEnumerator()
+  public HashSet<T>.Enumerator GetEnumerator()
 
-// DEPRECATED: This API supports obsolete formatter-based serialization. It should not be called or extended by application code.
-public virtual void GetObjectData(SerializationInfo info, StreamingContext context)
+  // DEPRECATED: This API supports obsolete formatter-based serialization. It should not be called or extended by application code.
+  public virtual void GetObjectData(SerializationInfo info, StreamingContext context)
 
-public virtual void OnDeserialization(object? sender)
+  public virtual void OnDeserialization(object? sender)
 
-public bool Add(T item)
+  public bool Add(T item)
 
-public bool TryGetValue(T equalValue, out T actualValue)
+  public bool TryGetValue(T equalValue, out T actualValue)
 
-public void UnionWith(IEnumerable<T> other)
+  public void UnionWith(IEnumerable<T> other)
 
-public void IntersectWith(IEnumerable<T> other)
+  public void IntersectWith(IEnumerable<T> other)
 
-public void ExceptWith(IEnumerable<T> other)
+  public void ExceptWith(IEnumerable<T> other)
 
-public void SymmetricExceptWith(IEnumerable<T> other)
+  public void SymmetricExceptWith(IEnumerable<T> other)
 
-public bool IsSubsetOf(IEnumerable<T> other)
+  public bool IsSubsetOf(IEnumerable<T> other)
 
-public bool IsProperSubsetOf(IEnumerable<T> other)
+  public bool IsProperSubsetOf(IEnumerable<T> other)
 
-public bool IsSupersetOf(IEnumerable<T> other)
+  public bool IsSupersetOf(IEnumerable<T> other)
 
-public bool IsProperSupersetOf(IEnumerable<T> other)
+  public bool IsProperSupersetOf(IEnumerable<T> other)
 
-public bool Overlaps(IEnumerable<T> other)
+  public bool Overlaps(IEnumerable<T> other)
 
-public bool SetEquals(IEnumerable<T> other)
+  public bool SetEquals(IEnumerable<T> other)
 
-public void CopyTo(T[] array)
-public void CopyTo(T[] array, int arrayIndex)
-public void CopyTo(T[] array, int arrayIndex, int count)
+  public void CopyTo(T[] array)
+  public void CopyTo(T[] array, int arrayIndex)
+  public void CopyTo(T[] array, int arrayIndex, int count)
 
-public int RemoveWhere(Predicate<T> match)
+  public int RemoveWhere(Predicate<T> match)
 
-public int EnsureCapacity(int capacity)
+  public int EnsureCapacity(int capacity)
 
-public void TrimExcess()
-public void TrimExcess(int capacity)
+  public void TrimExcess()
+  public void TrimExcess(int capacity)
 
-public static IEqualityComparer<HashSet<T>> CreateSetComparer()
+  public static IEqualityComparer<HashSet<T>> CreateSetComparer()
 
 List
 
-Capacity: int
+  Capacity: int
 
-Count: int
+  Count: int
 
-this[]: T
+  this[]: T
 
-Enumerator
+  Enumerator
 
     Current: T
 
@@ -225,86 +225,86 @@ Enumerator
 
     public bool MoveNext()
 
-public List()
-public List(int capacity)
-public List(IEnumerable<T> collection)
+  public List()
+  public List(int capacity)
+  public List(IEnumerable<T> collection)
 
-public void Add(T item)
+  public void Add(T item)
 
-public void AddRange(IEnumerable<T> collection)
+  public void AddRange(IEnumerable<T> collection)
 
-public ReadOnlyCollection<T> AsReadOnly()
+  public ReadOnlyCollection<T> AsReadOnly()
 
-public int BinarySearch(int index, int count, T item, IComparer<T>? comparer)
-public int BinarySearch(T item)
-public int BinarySearch(T item, IComparer<T>? comparer)
+  public int BinarySearch(int index, int count, T item, IComparer<T>? comparer)
+  public int BinarySearch(T item)
+  public int BinarySearch(T item, IComparer<T>? comparer)
 
-public void Clear()
+  public void Clear()
 
-public bool Contains(T item)
+  public bool Contains(T item)
 
-public List<TOutput> ConvertAll<TOutput>(Converter<T, TOutput> converter)
+  public List<TOutput> ConvertAll<TOutput>(Converter<T, TOutput> converter)
 
-public void CopyTo(T[] array)
-public void CopyTo(int index, T[] array, int arrayIndex, int count)
-public void CopyTo(T[] array, int arrayIndex)
+  public void CopyTo(T[] array)
+  public void CopyTo(int index, T[] array, int arrayIndex, int count)
+  public void CopyTo(T[] array, int arrayIndex)
 
-public int EnsureCapacity(int capacity)
+  public int EnsureCapacity(int capacity)
 
-public bool Exists(Predicate<T> match)
+  public bool Exists(Predicate<T> match)
 
-public T? Find(Predicate<T> match)
+  public T? Find(Predicate<T> match)
 
-public List<T> FindAll(Predicate<T> match)
+  public List<T> FindAll(Predicate<T> match)
 
-public int FindIndex(Predicate<T> match)
-public int FindIndex(int startIndex, Predicate<T> match)
-public int FindIndex(int startIndex, int count, Predicate<T> match)
+  public int FindIndex(Predicate<T> match)
+  public int FindIndex(int startIndex, Predicate<T> match)
+  public int FindIndex(int startIndex, int count, Predicate<T> match)
 
-public T? FindLast(Predicate<T> match)
+  public T? FindLast(Predicate<T> match)
 
-public int FindLastIndex(Predicate<T> match)
-public int FindLastIndex(int startIndex, Predicate<T> match)
-public int FindLastIndex(int startIndex, int count, Predicate<T> match)
+  public int FindLastIndex(Predicate<T> match)
+  public int FindLastIndex(int startIndex, Predicate<T> match)
+  public int FindLastIndex(int startIndex, int count, Predicate<T> match)
 
-public void ForEach(Action<T> action)
+  public void ForEach(Action<T> action)
 
-public List<T>.Enumerator GetEnumerator()
+  public List<T>.Enumerator GetEnumerator()
 
-public List<T> GetRange(int index, int count)
+  public List<T> GetRange(int index, int count)
 
-public List<T> Slice(int start, int length)
+  public List<T> Slice(int start, int length)
 
-public int IndexOf(T item)
-public int IndexOf(T item, int index)
-public int IndexOf(T item, int index, int count)
+  public int IndexOf(T item)
+  public int IndexOf(T item, int index)
+  public int IndexOf(T item, int index, int count)
 
-public void Insert(int index, T item)
+  public void Insert(int index, T item)
 
-public void InsertRange(int index, IEnumerable<T> collection)
+  public void InsertRange(int index, IEnumerable<T> collection)
 
-public int LastIndexOf(T item)
-public int LastIndexOf(T item, int index)
-public int LastIndexOf(T item, int index, int count)
+  public int LastIndexOf(T item)
+  public int LastIndexOf(T item, int index)
+  public int LastIndexOf(T item, int index, int count)
 
-public bool Remove(T item)
+  public bool Remove(T item)
 
-public int RemoveAll(Predicate<T> match)
+  public int RemoveAll(Predicate<T> match)
 
-public void RemoveAt(int index)
+  public void RemoveAt(int index)
 
-public void RemoveRange(int index, int count)
+  public void RemoveRange(int index, int count)
 
-public void Reverse()
-public void Reverse(int index, int count)
+  public void Reverse()
+  public void Reverse(int index, int count)
 
-public void Sort()
-public void Sort(IComparer<T>? comparer)
-public void Sort(int index, int count, IComparer<T>? comparer)
-public void Sort(Comparison<T> comparison)
+  public void Sort()
+  public void Sort(IComparer<T>? comparer)
+  public void Sort(int index, int count, IComparer<T>? comparer)
+  public void Sort(Comparison<T> comparison)
 
-public T[] ToArray()
+  public T[] ToArray()
 
-public void TrimExcess()
+  public void TrimExcess()
 
-public bool TrueForAll(Predicate<T> match)
+  public bool TrueForAll(Predicate<T> match)

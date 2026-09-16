@@ -1,15 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { useLocation, useMatch, useNavigate } from 'react-router';
 import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
-import { toast } from 'sonner';
 import { ChatInterface } from '#routes/w.$workspace.$project/chat-interface.js';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
 import type { Handle } from '#types/matches.types.js';
 import { ProjectChatRunSettlement } from '#routes/w.$workspace.$project/project-chat-run-settlement.js';
 import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { ProjectShareRouteIntent } from '#routes/w.$workspace.$project/project-share-action.js';
-import { useKeybinding } from '#hooks/use-keyboard.js';
 import { ProjectCommandPaletteItems } from '#routes/w.$workspace.$project/project-command-items.js';
 import { HomeFileManagerProvider, SharedWorkerGate, useFileManager } from '#hooks/use-file-manager.js';
 import { MonacoModelServiceProvider } from '#hooks/use-monaco-model-service.js';
@@ -29,18 +28,35 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useFocusedChatReadState } from '#hooks/use-focused-chat-read-state.js';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 import { Loader } from '#components/ui/loader.js';
-import { Button } from '@taucad/ui/components/button';
-import { ProjectNotFound } from '#routes/w.$workspace.$project/project-not-found.js';
-import { ProjectLoadError } from '#routes/w.$workspace.$project/project-load-error.js';
+import {
+  deriveProjectRouteState,
+  ProjectRouteStateContext,
+  useProjectRouteState,
+} from '#routes/w.$workspace.$project/project-route-state.js';
+import type { ProjectRouteSlugs } from '#routes/w.$workspace.$project/project-route-state.js';
+import { ProjectRouteNotice, ProjectRouteRetryContext } from '#routes/w.$workspace.$project/project-route-notices.js';
 import { isKernelAvailable, nativeKernelRequirementForEntryPath } from '#constants/available-kernel-configurations.js';
 import { useLiveProjectIds, useProjectSession, useSessions } from '#hooks/use-sessions.js';
 import { forgetProjectRegions, registerProjectSessionServices, reportRegionReady } from '#services/sessions-store.js';
-import { useRevisionClient } from '#hooks/use-revision-status.js';
+import type { ChatSyncState } from '#machines/chat-session.machine.js';
+import {
+  useRevisionClientLifecycle,
+  useRevisionClientStatus,
+  useRevisionCommands,
+} from '#hooks/use-revision-status.js';
 import type { RevisionClient } from '#hooks/use-revision-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import { useCanonicalProjectUrlCorrection, useProjectIdBySlugs } from '#hooks/use-project-slug-route.js';
+import { projectChatIdFromSearch, projectUrl } from '#utils/project-url.utils.js';
+import { useSearchParameter } from '#hooks/use-search-parameter.js';
+import { searchParameterName } from '#constants/search-parameter.constants.js';
+import { stringParameter } from '#utils/search-parameter.codecs.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
+
+/* Module scope: the setter is memoised on the codec's identity. */
+const cloudOpenParameter = stringParameter();
 
 type ResolvedProjectRouteAccess = {
   readonly projectId: string;
@@ -55,9 +71,20 @@ type ProjectSessionFlushRegistration = {
 };
 
 type ProjectRouteError = Readonly<{
+  /**
+   * What failed, not merely where.
+   *
+   * A rejected access check and a rejected view flush can both belong to the
+   * project being navigated to, so the project id cannot tell them apart —
+   * and they are two different notices (W1).
+   */
+  kind: 'access' | 'flush';
   projectId: string;
+  loadAttempt: number;
   error: Error;
 }>;
+
+const ProjectSessionsHostContext = createContext(false);
 
 const editorFlushTimeoutMilliseconds = 10_000;
 
@@ -100,6 +127,18 @@ export async function flushProjectSessionPersistence({
  * what flushes a project that is actually going away (S44). */
 const noFlushRegistration = (): void => undefined;
 
+const flushRegisteredSession = async (session: ProjectSessionFlushRegistration): Promise<void> => {
+  const pendingFlush = session.inFlight ?? session.flush();
+  session.inFlight = pendingFlush;
+  try {
+    await pendingFlush;
+  } finally {
+    if (session.inFlight === pendingFlush) {
+      session.inFlight = undefined;
+    }
+  }
+};
+
 /**
  * The session's half of a project subtree (S44).
  *
@@ -111,22 +150,29 @@ const noFlushRegistration = (): void => undefined;
 function ProjectSessionBinding({
   projectId,
   isFocused,
+  shouldOpenFromTauCloud,
 }: {
   readonly projectId: string;
   readonly isFocused: boolean;
+  readonly shouldOpenFromTauCloud?: boolean;
 }): React.JSX.Element {
   const { fileManagerRef } = useFileManager();
   const { parameterService, projectRef, editorRef } = useProject();
-  const client = useRevisionClient();
+  const client = useRevisionClientLifecycle();
+  const { connectRemote } = useRevisionCommands();
   const chatSessions = useChatSessionStore();
   const session = useProjectSession(projectId);
   const viewsReady = useSelector(fileManagerRef, (state) => state.matches('ready'));
   const runtimeReady = useSelector(projectRef, (state) => state.context.project !== undefined);
-  const sync = useSelector(
-    useSessions(),
-    () => client?.status()?.sync,
-    (left, right) => left?.state === right?.state && left?.pendingCount === right?.pendingCount,
-  );
+  const status = useRevisionClientStatus(client);
+  /* W7 tier 3: the `cloudOpen` marker is read and cleared by the host, through
+   * the router, so React sees the change. This half only acts on it. */
+  useEffect(() => {
+    if (client === undefined || shouldOpenFromTauCloud !== true) {
+      return;
+    }
+    void connectRemote('tau');
+  }, [client, connectRemote, shouldOpenFromTauCloud]);
 
   useEffect(() => {
     if (viewsReady) {
@@ -137,14 +183,6 @@ function ProjectSessionBinding({
   useEffect(() => {
     if (runtimeReady) {
       reportRegionReady(projectId, 'runtime');
-      /*
-       * Ponytail: the browser agent host still registers per request.
-       * The session owns the attachment's *lifetime* today — it dies with the
-       * project — but `agent-host-client.ts`'s 10 s `initializationTimeout` is
-       * still the route's race. Upgrade path: a session-owned registration
-       * child, reported here instead of assumed.
-       */
-      reportRegionReady(projectId, 'agentHost');
     }
   }, [projectId, runtimeReady]);
 
@@ -152,17 +190,31 @@ function ProjectSessionBinding({
    * knows: the project's own revision projection. The *session* owns these
    * facts and tells the registry; the route never reports over its head. */
   useEffect(() => {
-    const status = client?.status();
     if (status === undefined || session === undefined) {
       return;
     }
+    const { sync } = status;
+    /* R11: the sync facet is the sync facet. `pending`/`queued`/`failed` are
+     * all "this device has something the remote has not acknowledged" — a
+     * clean tree with a queued push is NOT synced, which is what deriving this
+     * from dirtiness used to claim. */
+    const syncState: ChatSyncState =
+      sync.state === 'conflicted'
+        ? 'conflicted'
+        : sync.state === 'pending' || sync.state === 'queued' || sync.state === 'failed'
+          ? 'pending'
+          : 'synced';
     session.send({
       type: 'revisionState',
-      dirty: status.dirty,
-      pushed: status.sync.state === 'noRemote' || status.sync.state === 'backedUp',
-      sync: status.sync.state === 'conflicted' ? 'conflicted' : status.dirty ? 'pending' : 'synced',
+      dirty: status.projectDirty,
+      pushed: sync.state === 'noRemote' || sync.state === 'backedUp',
+      sync: syncState,
+      /* R11: the branch the checkout is on gives `revision.line` its producer,
+       * so the `⎇ <branch>` chip has data instead of a permanent `onMain`. */
+      pendingCount: sync.pendingCount,
+      ...(status.branch === undefined ? {} : { branch: status.branch }),
     });
-  }, [client, session, sync]);
+  }, [session, status]);
 
   useEffect(() => {
     parameterService.setBackupOwner(async () => {
@@ -209,22 +261,17 @@ function ProjectSessionBinding({
 
   useEffect(() => {
     return registerProjectSessionServices(projectId, {
-      /*
-       * P34: a thin wait on `sync.machine`'s facet leaving `checking`. The three
-       * exits are the machine's; this only stops waiting when it has answered.
-       */
-      awaitPull: async () => {
-        if (client?.status()?.sync.state !== 'checking') {
-          return;
-        }
-        await new Promise<void>((resolve) => {
-          const unsubscribe = client.subscribe(() => {
-            if (client.status()?.sync.state !== 'checking') {
-              unsubscribe();
-              resolve();
-            }
-          });
-        });
+      flushProducers: async () => {
+        projectRef.send({ type: 'flushNow' });
+        editorRef.send({ type: 'flushNow' });
+        await Promise.all([
+          waitFor(projectRef, (state) => state.matches({ ready: { storing: 'idle' } }), {
+            timeout: editorFlushTimeoutMilliseconds,
+          }),
+          waitFor(editorRef, (state) => state.matches({ ready: { storing: 'idle' } }), {
+            timeout: editorFlushTimeoutMilliseconds,
+          }),
+        ]);
       },
       /* W13's seam, called: the worker's `release()` takes the close cut and
        * awaits `awaitSyncSettled` before it answers this. */
@@ -237,7 +284,20 @@ function ProjectSessionBinding({
           closeFlushMilliseconds: boundMilliseconds,
         }),
       cancelRuns: async (chatIds) => {
-        await Promise.allSettled(chatIds.map(async (chatId) => chatSessions.get(chatId)?.chat.stop()));
+        await Promise.all(
+          chatIds.map(async (chatId) => {
+            const chat = chatSessions.get(chatId);
+            if (chat === undefined) {
+              throw new Error(`Chat ${chatId} is no longer attached to this project.`);
+            }
+            chatSessions.stopRun(chatId);
+            await waitFor(
+              chat.persistenceActorRef,
+              (state) => state.matches({ requestLifecycle: 'idle' }) && state.matches({ messagePersistence: 'idle' }),
+              { timeout: editorFlushTimeoutMilliseconds },
+            );
+          }),
+        );
       },
       /* The leases go with the root: `release()` retires every one this
        * session's turns took, inside the flush above. Kept as its own step
@@ -246,18 +306,43 @@ function ProjectSessionBinding({
     });
   }, [chatSessions, client, editorRef, parameterService, projectId, projectRef]);
 
-  /* The chat machines belong to the session of the project the person is in
-   * (I23). A retained project keeps its own agents running; it does not own
-   * the chat store, which follows the route. */
+  /* Every live project registers its session, not only the focused one (R2):
+   * a run that settles after the person navigates away must reach the project
+   * that ran it, and W20's sidebar reads a chat machine per live project. */
   useEffect(() => {
-    if (!isFocused || session === undefined) {
+    if (session === undefined) {
       return;
     }
-    chatSessions.setProjectSession(session);
+    chatSessions.setProjectSession(projectId, session);
     return () => {
-      chatSessions.setProjectSession(undefined);
+      chatSessions.setProjectSession(projectId, undefined);
     };
-  }, [chatSessions, isFocused, session]);
+  }, [chatSessions, projectId, session]);
+
+  useEffect(() => {
+    if (session === undefined) {
+      return;
+    }
+    const reportVisibility = (): void => {
+      session.send({ type: 'visibilityChanged', visible: isFocused && document.visibilityState === 'visible' });
+    };
+    reportVisibility();
+    document.addEventListener('visibilitychange', reportVisibility);
+    return () => {
+      document.removeEventListener('visibilitychange', reportVisibility);
+    };
+  }, [isFocused, session]);
+
+  /* A chat is acquired from inside its own project's route. */
+  useEffect(() => {
+    if (!isFocused) {
+      return;
+    }
+    chatSessions.setFocusedProject(projectId);
+    return () => {
+      chatSessions.setFocusedProject(undefined);
+    };
+  }, [chatSessions, isFocused, projectId]);
 
   useEffect(
     () => () => {
@@ -279,6 +364,7 @@ function ProjectSession({
   createdChatId,
   onFocusedChatResolved,
   onFlushRegistration,
+  shouldOpenFromTauCloud,
 }: {
   readonly children?: React.ReactNode;
   readonly projectId: string;
@@ -288,11 +374,13 @@ function ProjectSession({
   readonly createdChatId?: string;
   readonly onFocusedChatResolved?: (chatId: string) => void;
   readonly onFlushRegistration: (registration: ProjectSessionFlushRegistration | undefined) => void;
+  readonly shouldOpenFromTauCloud?: boolean;
 }): React.ReactNode {
   const kernelSelection = useProjectKernelOptions({
     projectId,
     nativeKernelId,
   });
+  const focused = isFocused === true;
   return (
     <HomeFileManagerProvider projectId={projectId} rootDirectory={`/projects/${projectId}`}>
       <WebglContextTrackerProvider>
@@ -305,27 +393,81 @@ function ProjectSession({
           kernelOptionsFactory={kernelSelection.kernelOptionsFactory}
         >
           <ProjectPersistenceGuard projectId={projectId} onFlushRegistration={onFlushRegistration} />
-          <ProjectSessionBinding projectId={projectId} isFocused={isFocused === true} />
-          <RevisionSaveShortcut />
-          <MonacoModelServiceProvider>
-            <ChatWorkspaceAuthorityProvider>
-              <ProjectWorkspaceProvider>
-                <ProjectShareRouteIntent />
-                <RevisionRestore />
-                {/* AC14: *Ask chat to resolve* seeds one chat, bound to the
-                    conflict its turn is being started for. */}
-                <RevisionConflictChat />
-                {/* S27: the workbench follows the selected checkout's route. */}
-                <WorkbenchCheckoutRoot />
-                {/* A4: the two outcomes that record no revision are not silent. */}
-                <RevisionOutcomes />
-                {children}
-              </ProjectWorkspaceProvider>
-            </ChatWorkspaceAuthorityProvider>
-          </MonacoModelServiceProvider>
+          <ProjectSessionBinding
+            projectId={projectId}
+            isFocused={focused}
+            shouldOpenFromTauCloud={shouldOpenFromTauCloud}
+          />
+          {focused ? (
+            <>
+              <RevisionSaveShortcut isFocused={focused} />
+              <MonacoModelServiceProvider>
+                <ChatWorkspaceAuthorityProvider>
+                  <ProjectWorkspaceProvider>
+                    <ProjectShareRouteIntent />
+                    <RevisionRestore />
+                    {/* AC14: *Ask chat to resolve* seeds one chat, bound to the
+                        conflict its turn is being started for. */}
+                    <RevisionConflictChat />
+                    {/* S27: the workbench follows the selected checkout's route. */}
+                    <WorkbenchCheckoutRoot />
+                    {/* A4: the two outcomes that record no revision are not silent. */}
+                    <RevisionOutcomes />
+                    {children}
+                  </ProjectWorkspaceProvider>
+                </ChatWorkspaceAuthorityProvider>
+              </MonacoModelServiceProvider>
+            </>
+          ) : null}
         </ProjectProvider>
       </WebglContextTrackerProvider>
     </HomeFileManagerProvider>
+  );
+}
+
+type FocusedProjectSession = Readonly<{
+  projectId: string;
+  requestedChatId: string | undefined;
+  createdChatId: string | undefined;
+  children: React.ReactNode;
+  shouldOpenFromTauCloud?: boolean;
+}>;
+
+/** The app-level keyed host for every live project's resource subtree. */
+function LiveProjectSessions({
+  focused,
+  liveProjectIds,
+  onFocusedChatResolved,
+  onFlushRegistration,
+  retainedKernels,
+}: {
+  readonly focused?: FocusedProjectSession;
+  readonly liveProjectIds: readonly string[];
+  readonly onFocusedChatResolved?: (chatId: string) => void;
+  readonly onFlushRegistration: (registration: ProjectSessionFlushRegistration | undefined) => void;
+  readonly retainedKernels: Readonly<Record<string, string | undefined>>;
+}): React.JSX.Element {
+  return (
+    <>
+      {liveProjectIds.map((projectId) => {
+        const isFocused = focused?.projectId === projectId;
+        return (
+          <ProjectSession
+            key={projectId}
+            projectId={projectId}
+            isFocused={isFocused}
+            nativeKernelId={retainedKernels[projectId]}
+            requestedChatId={isFocused ? focused.requestedChatId : undefined}
+            createdChatId={isFocused ? focused.createdChatId : undefined}
+            onFocusedChatResolved={isFocused ? onFocusedChatResolved : undefined}
+            onFlushRegistration={isFocused ? onFlushRegistration : noFlushRegistration}
+            shouldOpenFromTauCloud={isFocused ? focused.shouldOpenFromTauCloud : undefined}
+          >
+            {isFocused ? focused.children : undefined}
+          </ProjectSession>
+        );
+      })}
+    </>
   );
 }
 
@@ -335,19 +477,33 @@ export function ProjectRouteGate({
   requestedProjectId,
   requestedChatId,
   createdChatId,
+  shouldOpenFromTauCloud,
+  slugs,
+  isResolvingSlugs = false,
 }: {
   readonly children?: React.ReactNode;
   readonly onFocusedChatResolved?: (chatId: string) => void;
-  readonly requestedProjectId: string;
+  readonly requestedProjectId?: string;
   readonly requestedChatId?: string;
   readonly createdChatId?: string;
+  readonly shouldOpenFromTauCloud?: boolean;
+  /** How the URL addressed this project, for a slug that resolves to nothing. */
+  readonly slugs?: ProjectRouteSlugs;
+  readonly isResolvingSlugs?: boolean;
 }): React.ReactNode {
   const projectManager = useProjectManager();
   const sessions = useSessions();
   const liveProjectIds = useLiveProjectIds();
-  /* What a retained project's subtree needs to keep running. Recorded when the
+  const closedReason = useSelector(sessions, (state) =>
+    requestedProjectId === undefined ? undefined : state.context.closed[requestedProjectId]?.reason,
+  );
+  /*
+   * Ponytail: bounded by the projects visited in one document, so a smell not
+   * a leak; prune it when the sidebar can open a project this route never saw.
+   * What a retained project's subtree needs to keep running. Recorded when the
    * project was the requested one; a project can only be opened through a
-   * resolved route, so nothing here is ever guessed. */
+   * resolved route, so nothing here is ever guessed.
+   */
   const [retainedKernels, setRetainedKernels] = useState<Readonly<Record<string, string | undefined>>>({});
   const latestRequestedProjectIdRef = useRef(requestedProjectId);
   const latestRequestedChatIdRef = useRef(requestedChatId);
@@ -367,13 +523,37 @@ export function ProjectRouteGate({
     const controller = new AbortController();
     const isCancelled = (): boolean => controller.signal.aborted;
     const loadAccess = async (): Promise<void> => {
+      if (requestedProjectId === undefined) {
+        try {
+          const session = activeSessionFlushRef.current;
+          if (session) {
+            await flushRegisteredSession(session);
+          }
+          if (!isCancelled()) {
+            setRouteError(undefined);
+            setResolved(undefined);
+          }
+        } catch {
+          if (!isCancelled()) {
+            setRouteError({
+              kind: 'flush',
+              projectId: '',
+              loadAttempt,
+              error: new Error('Tau could not save the current project view. Try again before leaving.'),
+            });
+          }
+        }
+        return;
+      }
       let access: ProjectRouteAccess;
       try {
         access = await projectManager.getProjectRouteAccess(requestedProjectId);
       } catch {
         if (!isCancelled()) {
           setRouteError({
+            kind: 'access',
             projectId: requestedProjectId,
+            loadAttempt,
             error: new Error('Tau could not check this project. Try again.'),
           });
         }
@@ -385,15 +565,7 @@ export function ProjectRouteGate({
       try {
         const session = activeSessionFlushRef.current;
         if (session && session.projectId !== requestedProjectId) {
-          const pendingFlush = session.inFlight ?? session.flush();
-          session.inFlight = pendingFlush;
-          try {
-            await pendingFlush;
-          } finally {
-            if (activeSessionFlushRef.current === session && session.inFlight === pendingFlush) {
-              session.inFlight = undefined;
-            }
-          }
+          await flushRegisteredSession(session);
         }
         if (isCancelled()) {
           return;
@@ -420,7 +592,9 @@ export function ProjectRouteGate({
       } catch {
         if (!isCancelled()) {
           setRouteError({
+            kind: 'flush',
             projectId: requestedProjectId,
+            loadAttempt,
             error: new Error('Tau could not save the current project view. Try again before leaving.'),
           });
         }
@@ -431,7 +605,12 @@ export function ProjectRouteGate({
     return () => {
       controller.abort();
     };
-  }, [requestedProjectId, projectManager, loadAttempt]);
+    /*
+     * `libraryRevision` (W2): trashing or restoring the project on screen must
+     * re-resolve access. Without it the route kept a one-shot answer and showed
+     * the closed notice for a project that is in the Trash (Finding 2).
+     */
+  }, [requestedProjectId, projectManager, loadAttempt, projectManager.libraryRevision]);
 
   /*
    * Liveness is orthogonal to navigation (A35, I22).
@@ -443,191 +622,217 @@ export function ProjectRouteGate({
    * port, so a running agent settles and returning is instant.
    */
   useEffect(() => {
-    if (resolved?.access.status !== 'ready' || resolved.projectId !== requestedProjectId) {
+    if (
+      requestedProjectId === undefined ||
+      resolved?.access.status !== 'ready' ||
+      resolved.projectId !== requestedProjectId
+    ) {
       return;
     }
     sessions.send({ type: 'open', projectId: requestedProjectId });
     sessions.send({ type: 'touch', projectId: requestedProjectId });
   }, [requestedProjectId, resolved, sessions]);
 
-  const handleRetryLoad = (): void => {
+  /* The other half of "navigation and focus only" (R16): coming back to the
+   * window is attention, so the idle window measures time since the person was
+   * last here rather than time since the last navigation. */
+  useEffect(() => {
+    if (
+      requestedProjectId === undefined ||
+      resolved?.access.status !== 'ready' ||
+      resolved.projectId !== requestedProjectId
+    ) {
+      return;
+    }
+    const touch = (): void => {
+      sessions.send({ type: 'touch', projectId: requestedProjectId });
+    };
+    globalThis.addEventListener('focus', touch);
+    return () => {
+      globalThis.removeEventListener('focus', touch);
+    };
+  }, [requestedProjectId, resolved, sessions]);
+
+  /* Memoised because it is a context value: a new identity on every render
+   * would re-render every notice below the outlet. */
+  const handleRetryLoad = useCallback((): void => {
     setRouteError(undefined);
     setLoadAttempt((attempt) => attempt + 1);
-  };
+  }, []);
 
-  const handleRestore = async (): Promise<void> => {
-    if (resolved?.access.status !== 'trashed') {
-      return;
-    }
-    const { access, projectId } = resolved;
-    await projectManager.restoreProject(projectId);
-    if (latestRequestedProjectIdRef.current !== projectId) {
-      return;
-    }
-    setResolved((current) =>
-      current?.projectId === projectId && current.access.status === 'trashed'
-        ? {
-            projectId,
-            access: { status: 'ready', project: access.project },
-            requestedChatId: latestRequestedChatIdRef.current,
-          }
-        : current,
-    );
-  };
+  const pending = resolved !== undefined && resolved.projectId !== requestedProjectId;
+  const nativeRequirement =
+    resolved?.access.status === 'ready'
+      ? nativeKernelRequirementForEntryPath(resolved.access.project.assets.main.entryPath)
+      : undefined;
 
-  if (!resolved && routeError?.projectId === requestedProjectId) {
-    return (
-      <div className='relative h-full'>
-        <ProjectLoadError error={routeError.error} onReload={handleRetryLoad} />
-      </div>
-    );
-  }
+  /*
+   * W1/W2: one derived state, published once.
+   *
+   * This used to be a switch that chose markup, and because `children` is the
+   * whole app shell, every terminal branch unmounted the sidebar with it. The
+   * shell now renders for every state; the route component below the outlet
+   * picks between the editor and a notice.
+   */
+  const state = deriveProjectRouteState({
+    requestedProjectId,
+    slugs,
+    isResolvingSlugs,
+    resolvedProjectId: resolved?.projectId,
+    access: resolved?.access,
+    error: routeError?.loadAttempt === loadAttempt ? routeError.error : undefined,
+    errorKind: routeError?.loadAttempt === loadAttempt ? routeError.kind : undefined,
+    errorProjectId: routeError?.loadAttempt === loadAttempt ? routeError.projectId : undefined,
+    liveProjectIds,
+    closedReason,
+    nativeKernelRequirement: nativeRequirement && {
+      kernelName: nativeRequirement.configuration.name,
+      runtimeKernelId: nativeRequirement.configuration.id,
+    },
+    isKernelAvailable,
+  });
 
-  if (!resolved) {
-    return (
-      <div className='flex h-full items-center justify-center' role='status' aria-label='Opening project'>
-        <Loader />
-      </div>
-    );
-  }
-
-  const { access, projectId } = resolved;
-  const pending = projectId !== requestedProjectId;
-  let content: React.ReactNode;
-
-  switch (access.status) {
-    case 'ready': {
-      const nativeRequirement = nativeKernelRequirementForEntryPath(access.project.assets.main.entryPath);
-      if (nativeRequirement && !isKernelAvailable(nativeRequirement.configuration.id)) {
-        content = (
-          <div className='flex h-full items-center justify-center p-6 text-center'>
-            <div className='max-w-md space-y-2'>
-              <h1 className='text-xl font-semibold'>{nativeRequirement.configuration.name} requires Tau Desktop</h1>
-              <p className='text-sm text-muted-foreground'>
-                This project runs native code, which is not included in the web runtime.
-              </p>
-            </div>
-          </div>
-        );
-        break;
-      }
-      content = (
-        <ProjectSession
-          key={projectId}
-          projectId={projectId}
-          isFocused
-          nativeKernelId={nativeRequirement?.runtimeKernelId}
-          requestedChatId={pending ? resolved.requestedChatId : requestedChatId}
-          createdChatId={pending ? undefined : createdChatId}
-          onFocusedChatResolved={pending ? undefined : onFocusedChatResolved}
-          onFlushRegistration={registerSessionFlush}
-        >
-          {children}
-        </ProjectSession>
-      );
-      break;
-    }
-    case 'missing': {
-      content = <ProjectNotFound />;
-      break;
-    }
-    case 'trashed': {
-      content = (
-        <div className='flex h-full items-center justify-center p-6'>
-          <div className='max-w-md space-y-4 text-center'>
-            <h1 className='text-xl font-semibold'>Project is in Trash</h1>
-            <p className='text-sm text-muted-foreground'>
-              Its files remain in place. Restore it for this Tau browser profile to reopen the editor.
-            </p>
-            <Button onClick={handleRestore}>Restore Project</Button>
-          </div>
-        </div>
-      );
-      break;
-    }
-    case 'conflict':
-    case 'unavailable': {
-      content = (
-        <div className='flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground'>
-          {access.status === 'conflict'
-            ? 'This project ID exists in more than one directory. Resolve the conflict from the project library.'
-            : 'The project storage location is currently unavailable.'}
-        </div>
-      );
-      break;
-    }
-    case 'recovering': {
-      content = (
-        <div className='flex h-full items-center justify-center p-6 text-center'>
-          <div className='space-y-3'>
-            <Loader className='mx-auto' />
-            <p className='text-sm text-muted-foreground'>Tau is finishing this project.</p>
-          </div>
-        </div>
-      );
-      break;
-    }
-    case 'recovery-failed': {
-      const message =
-        access.recovery.reason === 'workspace-unavailable'
-          ? 'Reconnect the project workspace and reload so Tau can finish recovery.'
-          : access.recovery.reason === 'identity-conflict'
-            ? 'The project directory belongs to different or unidentifiable content.'
-            : access.recovery.reason === 'local-state-error'
-              ? 'The project files committed, but local project state could not be restored.'
-              : 'Tau could not finish writing the project files.';
-      content = (
-        <div className='flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground'>
-          {message}
-        </div>
-      );
-      break;
-    }
-  }
+  /*
+   * I22/P72 unchanged: the focused project's subtree still hosts the shell when
+   * the editor is live, so navigating between projects does not remount it.
+   * Every other state renders the same shell as a sibling of the keyed list.
+   */
+  const isEditor = state?.kind === 'editor';
+  /*
+   * The destination waits behind the overlay below while the view the person
+   * is leaving still owes a flush — but only while there is nothing to say. A
+   * failed access check or a failed flush is exactly what they navigated into,
+   * so its notice renders rather than spinning forever.
+   */
+  const isHoldingDestination = pending && (state === undefined || state.kind === 'resolving');
+  const focused =
+    resolved?.access.status === 'ready'
+      ? {
+          projectId: resolved.projectId,
+          requestedChatId: pending ? resolved.requestedChatId : requestedChatId,
+          createdChatId: pending ? undefined : createdChatId,
+          children: pending || !isEditor ? undefined : children,
+          ...(shouldOpenFromTauCloud === true ? { shouldOpenFromTauCloud: true } : {}),
+        }
+      : undefined;
 
   return (
-    <>
-      <div className='contents' inert={pending || undefined} aria-busy={pending}>
-        {content}
-      </div>
-      {/*
-        The other live projects (V21, I22).
-        Each keeps its own resources — file manager, kernel, revision port,
-        watchers — and renders no chrome, because the person is looking at one
-        project at a time. The registry decides who is in this list; the route
-        never removes anybody from it.
-      */}
-      {liveProjectIds
-        .filter((liveProjectId) => liveProjectId !== projectId && Object.hasOwn(retainedKernels, liveProjectId))
-        .map((liveProjectId) => (
-          <ProjectSession
-            key={liveProjectId}
-            projectId={liveProjectId}
-            nativeKernelId={retainedKernels[liveProjectId]}
-            onFlushRegistration={noFlushRegistration}
-          />
-        ))}
-      {pending && routeError?.projectId !== requestedProjectId ? (
-        <div
-          className='pointer-events-none fixed inset-0 z-50 flex items-center justify-center'
-          role='status'
-          aria-label='Opening project'
-        >
-          <Loader className='size-8' />
-        </div>
-      ) : null}
-      {routeError?.projectId === requestedProjectId ? (
-        <ProjectLoadError error={routeError.error} onReload={handleRetryLoad} />
-      ) : null}
-    </>
+    <SharedWorkerGate>
+      <ProjectRouteStateContext.Provider value={state}>
+        <ProjectRouteRetryContext.Provider value={handleRetryLoad}>
+          <div className='contents' inert={pending || undefined} aria-busy={pending}>
+            {/* P72: this keyed resource list stays at one React tree position for
+                project, loading, error and non-project routes alike. */}
+            <LiveProjectSessions
+              focused={focused}
+              liveProjectIds={liveProjectIds}
+              onFocusedChatResolved={pending ? undefined : onFocusedChatResolved}
+              onFlushRegistration={registerSessionFlush}
+              retainedKernels={retainedKernels}
+            />
+            {isEditor || isHoldingDestination ? undefined : children}
+          </div>
+          {pending ? (
+            <div
+              className='pointer-events-none fixed inset-0 z-50 flex items-center justify-center'
+              role='status'
+              aria-label='Opening project'
+            >
+              <Loader className='size-8' />
+            </div>
+          ) : null}
+        </ProjectRouteRetryContext.Provider>
+      </ProjectRouteStateContext.Provider>
+    </SharedWorkerGate>
+  );
+}
+
+/** Mount every live project below the app registry and place route chrome in the focused one. */
+export function ProjectSessionsHost({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
+  const match = useMatch({ path: '/w/:workspace/:project', end: true });
+  const location = useLocation();
+  const navigate = useNavigate();
+  const workspace = match?.params.workspace ?? '';
+  const project = match?.params.project ?? '';
+  const resolution = useProjectIdBySlugs(workspace, project);
+  const routePath = match === null ? undefined : location.pathname;
+  const resolvedProjectId = resolution.status === 'resolved' ? resolution.value : undefined;
+  const [retainedRoute, setRetainedRoute] = useState<Readonly<{ path: string; projectId: string }> | undefined>();
+  useEffect(() => {
+    if (routePath === undefined) {
+      // oxlint-disable-next-line react/set-state-in-effect -- Leaving the route invalidates its external-rename cache before a later visit.
+      setRetainedRoute(undefined);
+    } else if (resolvedProjectId !== undefined) {
+      // oxlint-disable-next-line react/set-state-in-effect -- Discovery is the external source; cache its durable id for a same-path rename correction.
+      setRetainedRoute((current) =>
+        current?.path === routePath && current.projectId === resolvedProjectId
+          ? current
+          : { path: routePath, projectId: resolvedProjectId },
+      );
+    }
+  }, [resolvedProjectId, routePath]);
+  const projectId = resolvedProjectId ?? (retainedRoute?.path === routePath ? retainedRoute?.projectId : undefined);
+  const canonicalSlugs = useCanonicalProjectUrlCorrection(projectId);
+  const requestedChatId = projectId === undefined ? undefined : projectChatIdFromSearch(location.search);
+  const createdChatId = location.state?.focusChatComposer === true ? requestedChatId : undefined;
+  /*
+   * W7 tier 3: `cloudOpen` is a consume-once marker. It used to be stripped
+   * with `history.replaceState` from deep inside the session subtree, which
+   * React never saw, so the URL and the render disagreed. Read it through the
+   * router and clear it here; the intent is latched because the connection it
+   * triggers needs a revision client that does not exist yet at this render.
+   */
+  const [cloudOpen, setCloudOpen] = useSearchParameter(searchParameterName.cloudOpen, cloudOpenParameter);
+  const [hasTauCloudIntent, setHasTauCloudIntent] = useState(false);
+  useEffect(() => {
+    if (cloudOpen !== 'tau') {
+      return;
+    }
+    // oxlint-disable-next-line react/set-state-in-effect -- The URL is the external source; the marker is consumed once and cleared.
+    setHasTauCloudIntent(true);
+    setCloudOpen(cloudOpenParameter.fallback);
+  }, [cloudOpen, setCloudOpen]);
+  const shouldOpenFromTauCloud = location.state?.openFromTauCloud === true || hasTauCloudIntent;
+  const currentUrl = `${location.pathname}${location.search}`;
+  const handleFocusedChatResolved = useCallback(
+    (chatId: string) => {
+      const parameters = new URLSearchParams(currentUrl.split('?')[1] ?? '');
+      parameters.set('chat', chatId);
+      const path = projectUrl(canonicalSlugs ?? { workspaceSlug: workspace, projectSlug: project });
+      const target = `${path}?${parameters.toString()}`;
+      if (currentUrl !== target) {
+        void navigate(target, {
+          replace: true,
+          ...(shouldOpenFromTauCloud ? { state: { openFromTauCloud: true } } : {}),
+        });
+      }
+    },
+    [canonicalSlugs, currentUrl, navigate, project, shouldOpenFromTauCloud, workspace],
+  );
+  /*
+   * W2: the shell is no longer swapped out here either. An unresolvable slug is
+   * a route *state* the gate publishes, not a replacement for `children`.
+   */
+  return (
+    <ProjectSessionsHostContext.Provider value>
+      <ProjectRouteGate
+        requestedProjectId={projectId}
+        requestedChatId={requestedChatId}
+        createdChatId={createdChatId}
+        shouldOpenFromTauCloud={shouldOpenFromTauCloud}
+        onFocusedChatResolved={handleFocusedChatResolved}
+        slugs={match === null ? undefined : { workspaceSlug: workspace, projectSlug: project }}
+        isResolvingSlugs={resolution.status === 'resolving'}
+      >
+        {children}
+      </ProjectRouteGate>
+    </ProjectSessionsHostContext.Provider>
   );
 }
 
 /**
- * Everything a project route needs once its `proj_` id is known. Both route
- * shapes render this: `/w/{workspace}/{project}` after slug resolution, and
- * the legacy `/projects/:id` resolver only ever redirects into it (D4/D6 — the
- * id stays the currency of everything downstream).
+ * The live-project host once its focused `proj_` id is known. The app shell
+ * owns this; project routes contribute only their focused content.
  */
 export function ProjectRouteProviders({
   children,
@@ -635,28 +840,33 @@ export function ProjectRouteProviders({
   projectId,
   requestedChatId,
   createdChatId,
+  shouldOpenFromTauCloud,
 }: {
   readonly children?: React.ReactNode;
   readonly onFocusedChatResolved?: (chatId: string) => void;
-  readonly projectId: string;
+  readonly projectId?: string;
   readonly requestedChatId?: string;
   readonly createdChatId?: string;
-}): React.JSX.Element {
+  readonly shouldOpenFromTauCloud?: boolean;
+}): React.ReactNode {
+  const appHosted = useContext(ProjectSessionsHostContext);
+  if (appHosted) {
+    return children;
+  }
   return (
-    <SharedWorkerGate>
-      <ProjectRouteGate
-        requestedProjectId={projectId}
-        requestedChatId={requestedChatId}
-        createdChatId={createdChatId}
-        onFocusedChatResolved={onFocusedChatResolved}
-      >
-        {children}
-      </ProjectRouteGate>
-    </SharedWorkerGate>
+    <ProjectRouteGate
+      requestedProjectId={projectId}
+      requestedChatId={requestedChatId}
+      createdChatId={createdChatId}
+      shouldOpenFromTauCloud={shouldOpenFromTauCloud}
+      onFocusedChatResolved={onFocusedChatResolved}
+    >
+      {children}
+    </ProjectRouteGate>
   );
 }
 
-/** Chrome shared by every project route; each route module adds `providers`. */
+/** Chrome shared by every project route. */
 export const projectRouteHandle: Omit<Handle, 'providers'> = {
   commandPalette(match) {
     return <ProjectCommandPaletteItems match={match} />;
@@ -669,16 +879,6 @@ export const projectRouteHandle: Omit<Handle, 'providers'> = {
 // `ChatSessionStore` (settlement is per-session, not per-route — see
 // `apps/ui/app/routes/w.$workspace.$project/project-chat-run-settlement.tsx`).
 function Chat(): React.JSX.Element {
-  useKeybinding(
-    {
-      key: 's',
-      modKey: true,
-    },
-    () => {
-      toast.success('Your project is saved automatically');
-    },
-  );
-
   return <ChatInterface />;
 }
 
@@ -730,12 +930,21 @@ function ProjectPersistenceGuard({
 }): React.JSX.Element {
   const { projectRef, editorRef } = useProject();
 
-  useFlushOnClose(() => {
-    projectRef.send({ type: 'flushNow' });
-  });
-  useFlushOnClose(() => {
-    editorRef.send({ type: 'flushNow' });
-  });
+  useFlushOnClose(
+    async () => {
+      projectRef.send({ type: 'flushNow' });
+      editorRef.send({ type: 'flushNow' });
+      await Promise.all([
+        waitFor(projectRef, (state) => state.matches({ ready: { storing: 'idle' } }), {
+          timeout: editorFlushTimeoutMilliseconds,
+        }),
+        waitFor(editorRef, (state) => state.matches({ ready: { storing: 'idle' } }), {
+          timeout: editorFlushTimeoutMilliseconds,
+        }),
+      ]);
+    },
+    { stage: 'producer' },
+  );
 
   useEffect(() => {
     const registration: ProjectSessionFlushRegistration = {
@@ -758,5 +967,11 @@ function ProjectPersistenceGuard({
 }
 
 export function ProjectChatRoute(): React.JSX.Element {
-  return <ChatWithProvider />;
+  const state = useProjectRouteState();
+  /*
+   * W2/W3: the editor is the only state with the project's providers above it,
+   * so `ChatWithProvider`'s `useProject()` stays inside that branch. Every other
+   * state renders its notice in the same shell, with the sidebar intact.
+   */
+  return state === undefined || state.kind === 'editor' ? <ChatWithProvider /> : <ProjectRouteNotice state={state} />;
 }

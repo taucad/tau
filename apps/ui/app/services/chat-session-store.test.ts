@@ -2,10 +2,15 @@
 /* eslint-disable @typescript-eslint/naming-convention -- mock for AI SDK's Chat / DefaultChatTransport classes uses the SDK's own PascalCase names and `~`-prefixed subscriber method names verbatim so the mock surface matches the real one. */
 /* eslint-disable @typescript-eslint/explicit-member-accessibility -- mock class constructors omit the `public` keyword to mirror the AI SDK's published shape. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import { createActor } from 'xstate';
 import type { Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
 import { chatTurnRequestSchema } from '@taucad/chat/schemas';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import { clearLedger, recordRpcOutcome } from '#services/rpc-ledger.js';
+import { chatSessionMachine } from '#machines/chat-session.machine.js';
+import type { ChatSessionActorRef } from '#machines/chat-session.machine.js';
+import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 
 // ---------------------------------------------------------------------------
 // Hoisted test harness
@@ -139,7 +144,8 @@ vi.mock('#machines/inspector.js', () => ({
 
 const { ChatSessionStore } = await import('#services/chat-session-store.js');
 const { bindDurableChatRun, sharedChatTransport } = await import('#chat-clients/_internal/shared-chat-transport.js');
-const { registerAgentHost } = await import('#chat-clients/_internal/browser-agent-host-transport.js');
+const { recordHostFinalizedTurn, recordHostTurnSettlement, registerAgentHost } =
+  await import('#chat-clients/_internal/browser-agent-host-transport.js');
 type StoreType = InstanceType<typeof ChatSessionStore>;
 type ChatSessionDeps = Parameters<StoreType['setDependencies']>[0];
 
@@ -227,6 +233,741 @@ const testRunBody = Object.freeze({
   admission: Object.freeze({ version: 1, idempotencyKey: 'req_test_chat_session_store' }),
 });
 
+describe('ChatSessionStore — run accounting per project (R2)', () => {
+  /**
+   * A project session, reduced to what the store sends it.
+   *
+   * The real machine is driven in `project-session.machine.test.ts`; what this
+   * pin is about is *which* session hears a run start and settle.
+   */
+  const fakeSession = (projectId: string) => {
+    const heard: Array<{ type: string; chatId?: string }> = [];
+    return {
+      projectId,
+      heard,
+      ref: {
+        send: (event: { type: string; chatId?: string }) => {
+          heard.push(event);
+        },
+        getSnapshot: () => ({ context: { chatRefs: {} } }),
+      } as unknown as Parameters<StoreType['setProjectSession']>[1],
+    };
+  };
+
+  it('sends a settling run to the chat’s own project, not the focused one', async () => {
+    const store = createStore();
+    const projectA = fakeSession('proj_a');
+    const projectB = fakeSession('proj_b');
+
+    store.setProjectSession('proj_a', projectA.ref);
+    store.setFocusedProject('proj_a');
+    store.acquire('chat-a');
+    const fake = harness.created.find((entry) => entry.id === 'chat-a')!;
+    fake.status = 'streaming';
+    fake.emitStatusChange();
+
+    /* The person navigates to B while A's run is still going. */
+    store.setProjectSession('proj_b', projectB.ref);
+    store.setFocusedProject('proj_b');
+    fake.status = 'ready';
+    fake.emitStatusChange();
+
+    expect(projectA.heard.filter((event) => event.type === 'runSettled')).toEqual([
+      { type: 'runSettled', chatId: 'chat-a' },
+    ]);
+    expect(projectB.heard.filter((event) => event.type === 'runSettled')).toEqual([]);
+    store.release('chat-a');
+    store.setProjectSession('proj_a', undefined);
+    store.setProjectSession('proj_b', undefined);
+  });
+
+  it('binds a retained project chat to its known owner while another project is focused', () => {
+    const store = createStore();
+    const projectA = fakeSession('proj_a');
+    const projectB = fakeSession('proj_b');
+    store.setProjectSession('proj_a', projectA.ref);
+    store.setProjectSession('proj_b', projectB.ref);
+    store.setFocusedProject('proj_b');
+
+    store.acquire('chat-a', 'proj_a');
+
+    expect(projectA.heard).toContainEqual({ type: 'openChat', chatId: 'chat-a' });
+    expect(projectB.heard).not.toContainEqual({ type: 'openChat', chatId: 'chat-a' });
+    store.release('chat-a');
+    store.setProjectSession('proj_a', undefined);
+    store.setProjectSession('proj_b', undefined);
+  });
+
+  it('rebinds a chat acquired during a focus switch to its durable project before the run starts', async () => {
+    const store = new ChatSessionStore();
+    const deps = createStubDeps();
+    let resolveLoadedChat!: (chat: ChatEntity) => void;
+    const loadedChat = new Promise<ChatEntity>((resolve) => {
+      resolveLoadedChat = resolve;
+    });
+    deps.getChat.mockImplementation(async () => loadedChat);
+    store.setDependencies(deps);
+
+    const boundSession = (projectId: string) => {
+      const heard: Array<{ type: string; chatId?: string }> = [];
+      const chatRef = { send: vi.fn() } as unknown as ChatSessionActorRef;
+      const chatReferences = new Map<string, ChatSessionActorRef>();
+      const ref = {
+        send: (event: { type: string; chatId?: string }) => {
+          heard.push(event);
+          if (event.type === 'openChat' && event.chatId !== undefined) {
+            chatReferences.set(event.chatId, chatRef);
+          } else if (event.type === 'chatClosed' && event.chatId !== undefined) {
+            chatReferences.delete(event.chatId);
+          }
+        },
+        getSnapshot: () => ({ context: { chatRefs: Object.fromEntries(chatReferences) } }),
+      } as unknown as ProjectSessionActorRef;
+      return { projectId, heard, chatRef, ref };
+    };
+    const projectA = boundSession('proj_a');
+    const projectB = boundSession('proj_b');
+    store.setProjectSession('proj_a', projectA.ref);
+    store.setProjectSession('proj_b', projectB.ref);
+    store.setFocusedProject('proj_b');
+
+    /* React renders A's new chat before ProjectSessionBinding's focus effect
+     * runs, so acquisition still sees B. The durable chat row is the first
+     * authoritative ownership fact available to the store. */
+    const session = store.acquire('chat_a');
+    expect(session.stateActorRef).toBe(projectB.chatRef);
+    expect(session.persistenceActorRef.getSnapshot().value).toMatchObject({ chatLoading: 'loading' });
+    await vi.waitFor(() => {
+      expect(deps.getChat).toHaveBeenCalledWith('chat_a');
+    });
+    store.setFocusedProject('proj_a');
+    resolveLoadedChat({
+      id: 'chat_a',
+      resourceId: 'proj_a',
+      name: 'A chat',
+      messages: [],
+      createdAt: 0,
+      updatedAt: 0,
+    });
+
+    await vi.waitFor(() => {
+      expect(session.stateActorRef).toBe(projectA.chatRef);
+    });
+    const fake = harness.created.find((entry) => entry.id === 'chat_a')!;
+    fake.status = 'streaming';
+    fake.emitStatusChange();
+
+    expect(projectB.heard).toContainEqual({ type: 'chatClosed', chatId: 'chat_a' });
+    expect(projectA.heard).toContainEqual({ type: 'openChat', chatId: 'chat_a' });
+    expect(projectA.heard).toContainEqual({ type: 'runStarted', chatId: 'chat_a' });
+    expect(projectB.heard).not.toContainEqual({ type: 'runStarted', chatId: 'chat_a' });
+    store.release('chat_a');
+    store.setProjectSession('proj_a', undefined);
+    store.setProjectSession('proj_b', undefined);
+  });
+
+  it('should ignore a delayed hydration after the session is released', async () => {
+    const store = new ChatSessionStore();
+    const deps = createStubDeps();
+    let resolveLoadedChat!: (chat: ChatEntity) => void;
+    const loadedChat = new Promise<ChatEntity>((resolve) => {
+      resolveLoadedChat = resolve;
+    });
+    deps.getChat.mockImplementation(async () => loadedChat);
+    store.setDependencies(deps);
+    const projectA = fakeSession('proj_a');
+    const projectB = fakeSession('proj_b');
+    store.setProjectSession('proj_a', projectA.ref);
+    store.setProjectSession('proj_b', projectB.ref);
+    store.setFocusedProject('proj_b');
+
+    try {
+      store.acquire('chat_delayed_release');
+      await vi.waitFor(() => {
+        expect(deps.getChat).toHaveBeenCalledWith('chat_delayed_release');
+      });
+      store.release('chat_delayed_release');
+      resolveLoadedChat({
+        id: 'chat_delayed_release',
+        resourceId: 'proj_a',
+        name: 'Released chat',
+        messages: [],
+        createdAt: 0,
+        updatedAt: 0,
+      });
+      await loadedChat;
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(store.get('chat_delayed_release')).toBeUndefined();
+      expect(projectA.heard).toEqual([]);
+      expect(projectB.heard).toEqual([
+        { type: 'openChat', chatId: 'chat_delayed_release' },
+        { type: 'chatClosed', chatId: 'chat_delayed_release' },
+      ]);
+    } finally {
+      store.setProjectSession('proj_a', undefined);
+      store.setProjectSession('proj_b', undefined);
+    }
+  });
+
+  it('should not let a released hydration close a reacquired replacement', async () => {
+    const store = new ChatSessionStore();
+    const deps = createStubDeps();
+    let resolveFirstLoad!: (chat: ChatEntity) => void;
+    const firstLoad = new Promise<ChatEntity>((resolve) => {
+      resolveFirstLoad = resolve;
+    });
+    let resolveReplacementLoad!: (chat: ChatEntity) => void;
+    const replacementLoad = new Promise<ChatEntity>((resolve) => {
+      resolveReplacementLoad = resolve;
+    });
+    deps.getChat.mockImplementationOnce(async () => firstLoad).mockImplementationOnce(async () => replacementLoad);
+    store.setDependencies(deps);
+    const projectA = fakeSession('proj_a');
+    const projectB = fakeSession('proj_b');
+    store.setProjectSession('proj_a', projectA.ref);
+    store.setProjectSession('proj_b', projectB.ref);
+    store.setFocusedProject('proj_b');
+
+    try {
+      const released = store.acquire('chat_reacquired');
+      await vi.waitFor(() => {
+        expect(deps.getChat).toHaveBeenCalledTimes(1);
+      });
+      store.release('chat_reacquired');
+      const replacement = store.acquire('chat_reacquired');
+      await vi.waitFor(() => {
+        expect(deps.getChat).toHaveBeenCalledTimes(2);
+      });
+      expect(replacement).not.toBe(released);
+
+      resolveFirstLoad({
+        id: 'chat_reacquired',
+        resourceId: 'proj_a',
+        name: 'Reacquired chat',
+        messages: [],
+        createdAt: 0,
+        updatedAt: 0,
+      });
+      await firstLoad;
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(store.get('chat_reacquired')).toBe(replacement);
+      expect(projectA.heard).toEqual([]);
+      expect(projectB.heard).toEqual([
+        { type: 'openChat', chatId: 'chat_reacquired' },
+        { type: 'chatClosed', chatId: 'chat_reacquired' },
+        { type: 'openChat', chatId: 'chat_reacquired' },
+      ]);
+    } finally {
+      store.release('chat_reacquired');
+      resolveReplacementLoad({
+        id: 'chat_reacquired',
+        resourceId: 'proj_b',
+        name: 'Replacement chat',
+        messages: [],
+        createdAt: 0,
+        updatedAt: 0,
+      });
+      store.setProjectSession('proj_a', undefined);
+      store.setProjectSession('proj_b', undefined);
+    }
+  });
+
+  it('should bind admission before an early settlement arrives during hydration', async () => {
+    const store = new ChatSessionStore();
+    const deps = createStubDeps();
+    let resolveLoadedChat!: (chat: ChatEntity) => void;
+    const loadedChat = new Promise<ChatEntity>((resolve) => {
+      resolveLoadedChat = resolve;
+    });
+    deps.getChat.mockImplementation(async () => loadedChat);
+    store.setDependencies(deps);
+
+    const realSession = (projectId: string) => {
+      const heard: Array<{ type: string; chatId?: string }> = [];
+      const chatReferences = new Map<string, ChatSessionActorRef>();
+      const ref = mock<ProjectSessionActorRef>();
+      const snapshot = mock<ReturnType<ProjectSessionActorRef['getSnapshot']>>();
+      Object.defineProperty(snapshot, 'context', {
+        get: () => ({ chatRefs: Object.fromEntries(chatReferences) }),
+      });
+      vi.mocked(ref.send).mockImplementation((event) => {
+        heard.push(event);
+        if (event.type === 'openChat' && !chatReferences.has(event.chatId)) {
+          chatReferences.set(
+            event.chatId,
+            createActor(chatSessionMachine, { input: { chatId: event.chatId, projectId } }).start(),
+          );
+        } else if (event.type === 'chatClosed') {
+          chatReferences.get(event.chatId)?.stop();
+          chatReferences.delete(event.chatId);
+        }
+      });
+      vi.mocked(ref.getSnapshot).mockReturnValue(snapshot);
+      return { heard, chatReferences, ref };
+    };
+    const projectA = realSession('proj_a');
+    const projectB = realSession('proj_b');
+    store.setProjectSession('proj_a', projectA.ref);
+    store.setProjectSession('proj_b', projectB.ref);
+    store.setFocusedProject('proj_b');
+
+    try {
+      const session = store.acquire('chat_early_settlement');
+      await vi.waitFor(() => {
+        expect(deps.getChat).toHaveBeenCalledWith('chat_early_settlement');
+      });
+      const runId = 'req_early_settlement';
+      store.startRun('chat_early_settlement', {
+        ...testRunBody,
+        projectId: 'proj_a',
+        admission: { version: 1, idempotencyKey: runId },
+      });
+      const fake = harness.created.find((entry) => entry.id === 'chat_early_settlement')!;
+      fake.status = 'streaming';
+      fake.emitStatusChange();
+      recordHostFinalizedTurn({
+        type: 'turn.finalized',
+        turnId: 'turn_early_settlement',
+        runId,
+        chatId: 'chat_early_settlement',
+        projectId: 'proj_a',
+        checkoutId: 'live',
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: [runId],
+      });
+
+      resolveLoadedChat({
+        id: 'chat_early_settlement',
+        resourceId: 'proj_a',
+        name: 'Early settlement chat',
+        messages: [],
+        createdAt: 0,
+        updatedAt: 0,
+      });
+      await vi.waitFor(() => {
+        expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+      });
+      fake.status = 'ready';
+      fake.emitStatusChange();
+
+      const chatA = projectA.chatReferences.get('chat_early_settlement');
+      expect(chatA?.getSnapshot().matches({ run: 'done' })).toBe(true);
+      expect(projectA.heard.filter((event) => event.type === 'runStarted')).toEqual([
+        { type: 'runStarted', chatId: 'chat_early_settlement' },
+      ]);
+      expect(projectA.heard.filter((event) => event.type === 'runSettled')).toEqual([
+        { type: 'runSettled', chatId: 'chat_early_settlement' },
+      ]);
+      expect(projectB.heard.filter((event) => event.type === 'runStarted' || event.type === 'runSettled')).toEqual([]);
+    } finally {
+      store.endRun('chat_early_settlement');
+      store.release('chat_early_settlement');
+      store.setProjectSession('proj_a', undefined);
+      store.setProjectSession('proj_b', undefined);
+      for (const actor of [...projectA.chatReferences.values(), ...projectB.chatReferences.values()]) {
+        actor.stop();
+      }
+    }
+  });
+});
+
+describe('ChatSessionStore — host-attested settlement (P71)', () => {
+  const sessionProjectRef = (chatId: string, actor: ChatSessionActorRef) => {
+    const ref = mock<ProjectSessionActorRef>();
+    const chatReferences: Record<string, ChatSessionActorRef> = {};
+    const snapshot = mock<ReturnType<ProjectSessionActorRef['getSnapshot']>>({
+      context: { chatRefs: chatReferences },
+    });
+    chatReferences[chatId] = actor;
+    vi.mocked(ref.getSnapshot).mockReturnValue(snapshot);
+    return ref;
+  };
+
+  it('buffers an early matching settlement until the run enters finishing', () => {
+    const store = createStore();
+    const chatId = 'chat-ordered-settlement';
+    const runId = testRunBody.admission.idempotencyKey;
+    const actor = createActor(chatSessionMachine, {
+      input: { chatId, projectId: 'project-settlement' },
+    }).start();
+
+    try {
+      store.setFocusedProject('project-settlement');
+      store.setProjectSession('project-settlement', sessionProjectRef(chatId, actor));
+      store.acquire(chatId);
+      store.startRun(chatId, testRunBody);
+      const fake = harness.created.find((entry) => entry.id === chatId);
+      expect(fake).toBeDefined();
+      if (fake === undefined) {
+        return;
+      }
+      fake.status = 'streaming';
+      fake.emitStatusChange();
+
+      recordHostFinalizedTurn({
+        type: 'turn.finalized',
+        turnId: 'turn-ordered-settlement',
+        runId,
+        chatId,
+        projectId: 'project-settlement',
+        checkoutId: 'live',
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: [runId],
+      });
+      expect(actor.getSnapshot().matches({ run: 'running' })).toBe(true);
+
+      fake.status = 'ready';
+      fake.emitStatusChange();
+      expect(actor.getSnapshot().matches({ run: 'done' })).toBe(true);
+    } finally {
+      store.release(chatId);
+      store.setProjectSession('project-settlement', undefined);
+      actor.stop();
+    }
+  });
+
+  it('does not settle a newer run with an older settlement from the same chat', () => {
+    const store = createStore();
+    const chatId = 'chat-correlated-settlement';
+    const currentRunId = 'req_current_chat_session_store';
+    const actor = createActor(chatSessionMachine, {
+      input: { chatId, projectId: 'project-settlement' },
+    }).start();
+
+    try {
+      store.setFocusedProject('project-settlement');
+      store.setProjectSession('project-settlement', sessionProjectRef(chatId, actor));
+      store.acquire(chatId);
+      store.startRun(chatId, {
+        ...testRunBody,
+        admission: { version: 1, idempotencyKey: currentRunId },
+      });
+      const fake = harness.created.find((entry) => entry.id === chatId);
+      expect(fake).toBeDefined();
+      if (fake === undefined) {
+        return;
+      }
+      fake.status = 'streaming';
+      fake.emitStatusChange();
+      fake.status = 'ready';
+      fake.emitStatusChange();
+      expect(actor.getSnapshot().matches({ run: 'finishing' })).toBe(true);
+
+      recordHostFinalizedTurn({
+        type: 'turn.finalized',
+        turnId: 'turn-old',
+        runId: 'run-old',
+        chatId,
+        projectId: 'project-settlement',
+        checkoutId: 'live',
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: ['run-old'],
+      });
+      expect(actor.getSnapshot().matches({ run: 'finishing' })).toBe(true);
+
+      recordHostFinalizedTurn({
+        type: 'turn.finalized',
+        turnId: 'turn-current',
+        runId: currentRunId,
+        chatId,
+        projectId: 'project-settlement',
+        checkoutId: 'live',
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: [currentRunId],
+      });
+      expect(actor.getSnapshot().matches({ run: 'done' })).toBe(true);
+    } finally {
+      store.release(chatId);
+      store.setProjectSession('project-settlement', undefined);
+      actor.stop();
+    }
+  });
+
+  it("keeps a completed run finishing until that chat's own settlement is observed", () => {
+    const store = createStore();
+    const chatA = createActor(chatSessionMachine, {
+      input: { chatId: 'chat-a', projectId: 'project-settlement' },
+    }).start();
+    const chatB = createActor(chatSessionMachine, {
+      input: { chatId: 'chat-b', projectId: 'project-settlement' },
+    }).start();
+    const projectRef = {
+      send: () => undefined,
+      getSnapshot: () => ({ context: { chatRefs: { 'chat-a': chatA, 'chat-b': chatB } } }),
+    } as unknown as Parameters<StoreType['setProjectSession']>[1];
+
+    try {
+      store.setFocusedProject('project-settlement');
+      store.setProjectSession('project-settlement', projectRef);
+      store.acquire('chat-a');
+      store.acquire('chat-b');
+      chatA.send({ type: 'runLifecycle', phase: 'running', runId: 'run-a' });
+      chatA.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-a' });
+
+      expect(chatA.getSnapshot().matches({ run: 'finishing' })).toBe(true);
+      recordHostFinalizedTurn({
+        type: 'turn.finalized',
+        turnId: 'turn-b',
+        runId: 'run-b',
+        chatId: 'chat-b',
+        projectId: 'project-settlement',
+        checkoutId: 'live',
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: ['run-b'],
+      });
+      expect(chatA.getSnapshot().matches({ run: 'finishing' })).toBe(true);
+
+      recordHostFinalizedTurn({
+        type: 'turn.finalized',
+        turnId: 'turn-a',
+        runId: 'run-a',
+        chatId: 'chat-a',
+        projectId: 'project-settlement',
+        checkoutId: 'live',
+        changedPaths: [],
+        trigger: 'turn',
+        runIds: ['run-a'],
+      });
+      expect(chatA.getSnapshot().matches({ run: 'done' })).toBe(true);
+    } finally {
+      store.release('chat-a');
+      store.release('chat-b');
+      store.setProjectSession('project-settlement', undefined);
+      chatA.stop();
+      chatB.stop();
+    }
+  });
+
+  it('routes failed and conflicted outcomes only to their matching chats', () => {
+    const store = createStore();
+    const failed: Array<Record<string, unknown>> = [];
+    const conflicted: Array<Record<string, unknown>> = [];
+    const projectRef = {
+      send: () => undefined,
+      getSnapshot: () => ({
+        context: {
+          chatRefs: {
+            'chat-failed': { send: (event: Record<string, unknown>) => failed.push(event) },
+            'chat-conflicted': { send: (event: Record<string, unknown>) => conflicted.push(event) },
+          },
+        },
+      }),
+    } as unknown as Parameters<StoreType['setProjectSession']>[1];
+
+    store.setFocusedProject('project-settlement');
+    store.setProjectSession('project-settlement', projectRef);
+    store.acquire('chat-failed');
+    store.acquire('chat-conflicted');
+    try {
+      recordHostTurnSettlement({
+        type: 'turn.failed',
+        turnId: 'turn-failed',
+        runId: 'run-failed',
+        chatId: 'chat-failed',
+        checkoutId: 'live',
+        reason: 'revision cut failed',
+      });
+      recordHostTurnSettlement({
+        type: 'turn.conflicted',
+        turnId: 'turn-conflicted',
+        runId: 'run-conflicted',
+        chatId: 'chat-conflicted',
+        checkoutId: 'live',
+      });
+
+      expect(failed).toContainEqual({
+        type: 'turnFailedObserved',
+        runId: 'run-failed',
+        turnId: 'turn-failed',
+        reason: 'revision cut failed',
+      });
+      expect(failed).not.toContainEqual({
+        type: 'turnConflictedObserved',
+        runId: 'run-conflicted',
+        turnId: 'turn-conflicted',
+      });
+      expect(conflicted).toContainEqual({
+        type: 'turnConflictedObserved',
+        runId: 'run-conflicted',
+        turnId: 'turn-conflicted',
+      });
+      expect(conflicted).not.toContainEqual({
+        type: 'turnFailedObserved',
+        runId: 'run-failed',
+        turnId: 'turn-failed',
+        reason: 'revision cut failed',
+      });
+    } finally {
+      store.release('chat-failed');
+      store.release('chat-conflicted');
+      store.setProjectSession('project-settlement', undefined);
+    }
+  });
+
+  it('rehydrates a terminal chat card from its durable settlement', () => {
+    const store = createStore();
+    const chatId = 'chat-persisted-settlement';
+    const chat = createActor(chatSessionMachine, {
+      input: { chatId, projectId: 'project-persisted-settlement' },
+    }).start();
+    const projectRef = {
+      send: () => undefined,
+      getSnapshot: () => ({ context: { chatRefs: { [chatId]: chat } } }),
+    } as unknown as Parameters<StoreType['setProjectSession']>[1];
+    recordHostFinalizedTurn({
+      type: 'turn.finalized',
+      turnId: 'turn-persisted-settlement',
+      runId: 'run-persisted-settlement',
+      chatId,
+      projectId: 'project-persisted-settlement',
+      checkoutId: 'live',
+      branch: 'main',
+      changedPaths: [],
+      trigger: 'turn',
+      runIds: ['run-persisted-settlement'],
+    });
+
+    store.setFocusedProject('project-persisted-settlement');
+    store.acquire(chatId);
+    store.setProjectSession('project-persisted-settlement', projectRef);
+
+    expect(chat.getSnapshot().matches({ run: 'done' })).toBe(true);
+    expect(chat.getSnapshot().matches({ read: 'unread' })).toBe(true);
+
+    store.release(chatId);
+    store.setProjectSession('project-persisted-settlement', undefined);
+    chat.stop();
+  });
+
+  it('replays a settlement discovered while the durable chat is loading', async () => {
+    const store = new ChatSessionStore();
+    const deps = createStubDeps();
+    const chatId = 'chat-loading-settlement';
+    const projectId = 'project-loading-settlement';
+    const chat = createActor(chatSessionMachine, { input: { chatId, projectId } }).start();
+    const loading = Promise.withResolvers<Awaited<ReturnType<ChatSessionDeps['getChat']>>>();
+    const projectRef = {
+      send: () => undefined,
+      getSnapshot: () => ({ context: { chatRefs: { [chatId]: chat } } }),
+    } as unknown as Parameters<StoreType['setProjectSession']>[1];
+    deps.getChat.mockImplementation(async () => loading.promise);
+    store.setDependencies(deps);
+    store.setProjectSession(projectId, projectRef);
+    store.acquire(chatId, projectId);
+    recordHostFinalizedTurn({
+      type: 'turn.finalized',
+      turnId: 'turn-loading-settlement',
+      runId: 'run-loading-settlement',
+      chatId,
+      projectId,
+      checkoutId: 'live',
+      branch: 'main',
+      changedPaths: [],
+      trigger: 'turn',
+      runIds: ['run-loading-settlement'],
+    });
+    loading.resolve({
+      id: chatId,
+      name: 'Loaded chat',
+      resourceId: projectId,
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    await vi.waitFor(() => {
+      expect(chat.getSnapshot().matches({ run: 'done' })).toBe(true);
+      expect(chat.getSnapshot().matches({ read: 'unread' })).toBe(true);
+    });
+
+    store.release(chatId);
+    store.setProjectSession(projectId, undefined);
+    chat.stop();
+  });
+});
+
+describe('ChatSessionStore — persisted failure replay (P59)', () => {
+  /* A reload finds the failed turn in IndexedDB, not on a live run: nothing
+   * ever sent the chat's machine a lifecycle for it, so the row read `Idle`
+   * for work that ended badly. Binding is the moment to say so. */
+  it('replays a persisted failure into the chat machine as it binds, and settles no run', () => {
+    const store = createStore();
+    const heard: Array<Record<string, unknown>> = [];
+    const projectHeard: Array<{ type: string }> = [];
+    const projectRef = {
+      send: (event: { type: string }) => {
+        projectHeard.push(event);
+      },
+      getSnapshot: () => ({
+        context: {
+          chatRefs: {
+            'chat-reloaded': {
+              send: (event: Record<string, unknown>) => {
+                heard.push(event);
+              },
+            },
+          },
+        },
+      }),
+    } as unknown as Parameters<StoreType['setProjectSession']>[1];
+
+    store.setFocusedProject('proj_reload');
+    store.acquire('chat-reloaded');
+    const fake = harness.created.find((entry) => entry.id === 'chat-reloaded')!;
+    fake.status = 'error';
+    fake.error = new Error('the model refused');
+
+    store.setProjectSession('proj_reload', projectRef);
+
+    expect(heard).toContainEqual({ type: 'runLifecycle', phase: 'failed', reason: 'the model refused' });
+    /* A historical failure is not a run this session admitted (P59). */
+    expect(projectHeard.filter((event) => event.type === 'runSettled')).toEqual([]);
+    store.release('chat-reloaded');
+    store.setProjectSession('proj_reload', undefined);
+  });
+
+  it('leaves a live run alone, replaying nothing over it', () => {
+    const store = createStore();
+    const heard: Array<Record<string, unknown>> = [];
+    const projectRef = {
+      send: () => undefined,
+      getSnapshot: () => ({
+        context: {
+          chatRefs: {
+            'chat-streaming': {
+              send: (event: Record<string, unknown>) => {
+                heard.push(event);
+              },
+            },
+          },
+        },
+      }),
+    } as unknown as Parameters<StoreType['setProjectSession']>[1];
+
+    store.setFocusedProject('proj_live');
+    store.acquire('chat-streaming');
+    const fake = harness.created.find((entry) => entry.id === 'chat-streaming')!;
+    fake.status = 'streaming';
+    fake.emitStatusChange();
+    fake.error = new Error('an error from the turn before');
+
+    store.setProjectSession('proj_live', projectRef);
+
+    expect(heard.filter((event) => event['phase'] === 'failed')).toEqual([]);
+    store.release('chat-streaming');
+    store.setProjectSession('proj_live', undefined);
+  });
+});
+
 describe('ChatSessionStore', () => {
   beforeEach(() => {
     harness.created = [];
@@ -245,6 +986,31 @@ describe('ChatSessionStore', () => {
     await store.touchChatRecency('chat_activity', 123);
 
     expect(deps.touchChatRecency).toHaveBeenCalledWith('chat_activity', 123);
+  });
+
+  it('updates the active dynamic tool name when counts stay unchanged', () => {
+    const store = createStore();
+    const session = store.acquire('chat_tool_name');
+    const fake = harness.created.find((entry) => entry.id === 'chat_tool_name')!;
+    const actor = createActor(chatSessionMachine, {
+      input: { chatId: 'chat_tool_name', projectId: 'project_1' },
+    }).start();
+    session.stateActorRef = actor;
+    const activeToolMessage = (toolName: string): MyUIMessage => ({
+      id: 'assistant_1',
+      role: 'assistant',
+      parts: [{ type: 'dynamic-tool', toolName, toolCallId: 'tool_1', state: 'input-streaming', input: {} }],
+    });
+
+    fake.messages = [activeToolMessage('search')];
+    fake.emitMessagesChange();
+    expect(actor.getSnapshot().context.toolName).toBe('search');
+
+    fake.messages = [activeToolMessage('edit_file')];
+    fake.emitMessagesChange();
+    expect(actor.getSnapshot().context.toolName).toBe('edit_file');
+
+    actor.stop();
   });
 
   describe('unread lifecycle', () => {

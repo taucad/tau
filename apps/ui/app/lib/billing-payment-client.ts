@@ -1,8 +1,8 @@
 import { randomUuid } from '@taucad/utils/id';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- this client is the UI-owned boundary for first-party billing wire actions
 import { wirePaymentActionSchema } from '@taucad/billing';
 import type { WirePaymentAction } from '@taucad/billing';
 import type { FinancialSessionRequest } from '#providers/financial-session-provider.js';
+import { recordBillingRevisionMinimum } from '#db/billing-snapshot-store.js';
 
 export type PaymentActionBinding = {
   readonly apiBaseUrl: string;
@@ -84,7 +84,16 @@ const actionRequest = async (
   }
   const body: unknown = await response.json();
   assertCurrentSession(binding);
-  return assertBoundAction(wirePaymentActionSchema.parse(body), binding);
+  const action = assertBoundAction(wirePaymentActionSchema.parse(body), binding);
+  if (action.receipt !== null) {
+    await recordBillingRevisionMinimum({
+      environment: action.environment,
+      ownerId: action.ownerId,
+      subjectId: action.subjectId,
+      revision: action.receipt.revision,
+    });
+  }
+  return action;
 };
 
 /** Creates a fresh browser correlation ID; server ownership remains authoritative. */

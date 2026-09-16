@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import { Check, ChevronDown, ChevronUp, GitCompare, Pencil, RotateCcw, Undo2 } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, GitCompare, Pencil, RotateCcw, Tag, Undo2, X } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
+import { Input } from '@taucad/ui/components/input';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
+import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { Spinner } from '#components/ui/spinner.js';
 import { DiffViewer } from '#components/code/diff-viewer.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
@@ -32,6 +34,9 @@ export type RevisionMarkerProps = {
   readonly compareAgainst?: 'parent' | 'checkout';
   readonly onRestore: () => void;
   readonly onDiscard: () => void;
+  readonly onTag?: (name: string) => Promise<void>;
+  readonly onDeleteTag?: (name: string) => Promise<void>;
+  readonly appearance?: 'card' | 'rail';
   readonly className?: string;
 };
 
@@ -54,7 +59,7 @@ const changeLabels: Readonly<Record<RevisionDiffEntry['kind'], string>> = {
  * parent. The comparison is only asked for once a reader opens it — a card with
  * twenty files must not cost twenty tree reads to render.
  */
-function FileRow({
+export function FileRow({
   file,
   revisionId,
   compareAgainst,
@@ -62,7 +67,7 @@ function FileRow({
   readonly file: RevisionDiffEntry;
   readonly revisionId: string;
   readonly compareAgainst: 'parent' | 'checkout';
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   const [isComparing, setIsComparing] = useState(false);
 
   return (
@@ -80,12 +85,12 @@ function FileRow({
             compareAgainst === 'checkout' ? `Compare ${file.path} with the current file` : `Compare ${file.path}`
           }
           aria-expanded={isComparing}
-          className='shrink-0 opacity-0 group-hover/file:opacity-100 focus-visible:opacity-100'
+          className='shrink-0'
           onClick={() => {
             setIsComparing((open) => !open);
           }}
         >
-          <GitCompare className='size-3' />
+          <GitCompare aria-hidden className='size-3' />
         </Button>
       </div>
       {isComparing ? <FileComparison revisionId={revisionId} path={file.path} compareAgainst={compareAgainst} /> : null}
@@ -101,20 +106,129 @@ function FileComparison({
   readonly revisionId: string;
   readonly path: string;
   readonly compareAgainst: 'parent' | 'checkout';
-}): React.JSX.Element {
-  const { original, modified, isLoading } = useRevisionFileComparison(
+}): React.JSX.Element | null {
+  const { original, modified, isLoading, isLoaded, error, retry } = useRevisionFileComparison(
     revisionId,
     path,
     compareAgainst === 'checkout' ? 'checkout' : undefined,
   );
   if (isLoading) {
     return (
-      <div className='px-3 py-2 text-xs text-muted-foreground'>
+      <div
+        role='status'
+        aria-label={`Comparison for ${path}`}
+        aria-busy='true'
+        className='flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground'
+      >
         <Spinner className='size-3' /> Loading comparison…
       </div>
     );
   }
+  if (error !== undefined) {
+    return (
+      <div
+        role='alert'
+        aria-label={`Comparison for ${path}`}
+        className='flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 text-xs'
+      >
+        <span>{`Could not compare ${path}. ${error}`}</span>
+        <Button size='xs' variant='outline' onClick={retry}>
+          Retry
+        </Button>
+      </div>
+    );
+  }
+  if (!isLoaded) {
+    return null;
+  }
   return <DiffViewer originalContent={original} modifiedContent={modified} language={path} className='border-t' />;
+}
+
+/**
+ * *Name version* — an anchored, cancellable form for tagging one revision.
+ *
+ * Shared by the chat summary and the Revisions pane so both surfaces use one
+ * verb and one form.
+ */
+export function RevisionNameAction({
+  revisionName,
+  onTag,
+}: {
+  /** The accessible revision name, e.g. `Revision 2`. */
+  readonly revisionName: string;
+  readonly onTag: (name: string) => Promise<void>;
+}): React.JSX.Element {
+  const [isOpen, setIsOpen] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState<string>();
+
+  return (
+    <Popover
+      open={isOpen}
+      onOpenChange={(open) => {
+        setIsOpen(open);
+        setDraft('');
+        setError(undefined);
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button size='xs' variant='outline'>
+          <Tag aria-hidden className='size-3' />
+          Name version
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align='start' className='w-72 max-w-[calc(100vw-2rem)] p-3'>
+        <form
+          className='flex flex-col gap-3'
+          onSubmit={async (event) => {
+            event.preventDefault();
+            const tag = draft.trim();
+            if (tag === '') {
+              return;
+            }
+            try {
+              await onTag(tag);
+              setIsOpen(false);
+              setDraft('');
+            } catch (error) {
+              setError(error instanceof Error ? error.message : 'Could not name this revision.');
+            }
+          }}
+        >
+          <Input
+            autoFocus
+            aria-label={`Name ${revisionName}`}
+            value={draft}
+            placeholder='e.g. Ready for prototype'
+            aria-invalid={error === undefined ? undefined : true}
+            onChange={(event) => {
+              setDraft(event.target.value);
+            }}
+          />
+          {error === undefined ? null : (
+            <span role='alert' className='text-xs'>
+              {error}
+            </span>
+          )}
+          <div className='flex justify-end gap-2'>
+            <Button
+              size='xs'
+              type='button'
+              variant='outline'
+              onClick={() => {
+                setIsOpen(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button size='xs' type='submit' disabled={draft.trim() === ''}>
+              Save name
+            </Button>
+          </div>
+        </form>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 /**
@@ -144,6 +258,9 @@ export function RevisionMarker({
   compareAgainst = 'parent',
   onRestore,
   onDiscard,
+  onTag,
+  onDeleteTag,
+  appearance = 'card',
   className,
 }: RevisionMarkerProps): React.JSX.Element {
   const [showAllFiles, setShowAllFiles] = useState(false);
@@ -156,7 +273,10 @@ export function RevisionMarker({
     }
   }
   const date = new Date(revision.createdAt);
-  const timestamp = date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  const timestamp = date.toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
   const time = date.toLocaleTimeString(undefined, { timeStyle: 'short' });
   const name = revision.n === undefined ? 'Revision' : `Revision ${String(revision.n)}`;
   const shortName = revision.n === undefined ? 'Revision' : `Rev ${String(revision.n)}`;
@@ -166,8 +286,11 @@ export function RevisionMarker({
   return (
     <div
       className={cn(
-        '@container flex flex-col overflow-hidden rounded-lg border bg-background dark:bg-background/20 text-sm',
-        isActive ? 'ring-primary/50 ring-2 ring-offset-2 ring-offset-background' : 'border-border',
+        '@container flex flex-col overflow-hidden text-sm',
+        appearance === 'card'
+          ? 'rounded-lg border bg-background dark:bg-background/20'
+          : 'rounded-none border-0 bg-transparent',
+        appearance === 'card' ? 'border-border' : undefined,
         className,
       )}
     >
@@ -176,10 +299,10 @@ export function RevisionMarker({
           <span className='font-medium @[30rem]:hidden'>{shortName}</span>
           <span className='hidden font-medium @[30rem]:inline'>{name}</span>
           {isActive ? (
-            <Badge variant='outline' className='gap-1 border-primary/30 bg-primary/10 text-primary'>
-              <Check />
+            <span className='flex items-center gap-1 text-xs'>
+              <Check aria-hidden className='size-3' />
               Current
-            </Badge>
+            </span>
           ) : (
             <Button
               size='xs'
@@ -197,8 +320,8 @@ export function RevisionMarker({
             </Button>
           )}
           {isModified ? (
-            <Badge variant='outline' className='gap-1 border-warning/30 bg-warning/10 text-warning'>
-              <Pencil />
+            <Badge variant='outline' className='gap-1 border-warning/30 bg-warning/10'>
+              <Pencil className='text-warning' />
               Modified
             </Badge>
           ) : null}
@@ -207,6 +330,30 @@ export function RevisionMarker({
           <span className='@[22rem]:hidden'>{time}</span>
           <span className='hidden @[22rem]:inline'>{timestamp}</span>
         </span>
+      </div>
+
+      <div className='flex flex-wrap items-center gap-1.5 border-b px-3 py-1.5'>
+        {(revision.tags ?? []).map((tag) => (
+          <Badge key={tag} variant='secondary' className='gap-1 font-normal'>
+            <Tag aria-hidden />
+            {tag}
+            {onDeleteTag === undefined ? null : (
+              <button
+                type='button'
+                aria-label={`Remove version name ${tag}`}
+                onClick={() => {
+                  void onDeleteTag(tag);
+                }}
+              >
+                <X aria-hidden className='size-3' />
+              </button>
+            )}
+          </Badge>
+        ))}
+        {onTag === undefined ? null : <RevisionNameAction revisionName={name} onTag={onTag} />}
+        {revision.trigger === 'idle' || revision.trigger === 'hidden' || revision.trigger === 'close' ? (
+          <span className='ml-auto text-xs text-muted-foreground'>Autosave</span>
+        ) : null}
       </div>
 
       <div className='flex flex-col'>
@@ -237,9 +384,9 @@ export function RevisionMarker({
       </div>
 
       {isActive && isModified ? (
-        <div className='flex items-center justify-between gap-2 border-t p-3'>
-          <span className='flex items-center gap-1.5 text-xs text-warning'>
-            <Pencil className='size-3' />
+        <div className='flex flex-wrap items-center justify-between gap-2 border-t p-3'>
+          <span className='flex items-center gap-1.5 text-xs'>
+            <Pencil className='size-3 text-warning' />
             Unsaved editor changes
           </span>
           <Button

@@ -125,6 +125,13 @@ const systemPromptBlockSchema = z.strictObject({
   text: z.string(),
   cacheControl: z.strictObject({ type: z.literal('ephemeral'), scope: z.literal('global').optional() }).optional(),
 });
+/** Provider reasoning controls persisted with an admitted model row. @public */
+export const modelReasoningConfigSchema = z.strictObject({
+  effort: z.enum(['minimal', 'low', 'medium', 'high', 'xhigh', 'max']).optional(),
+  summary: z.enum(['auto', 'concise', 'detailed']).optional(),
+  display: z.enum(['summarized', 'omitted']).optional(),
+  budgetTokens: z.number().int().positive().optional(),
+});
 const turnContextSchema = z.strictObject({
   version: z.literal(1),
   systemPrompt: z.string(),
@@ -143,6 +150,7 @@ const turnContextSchema = z.strictObject({
           cacheWrite: z.number().nonnegative(),
         })
         .optional(),
+      reasoning: modelReasoningConfigSchema.optional(),
     })
     .optional(),
   toolChoice: z.union([z.enum(['none', 'auto', 'any', 'custom']), z.array(nonEmptyString)]).optional(),

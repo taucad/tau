@@ -9,7 +9,10 @@ export function ChatMessagePartUnknown({ part }: { readonly part: UIMessagePart<
   return (
     <Collapsible className='group/collapsible flex w-full flex-col justify-center rounded-md border border-destructive/20 bg-destructive/10 text-sm'>
       <CollapsibleTrigger asChild>
-        <div className='group/chat-tool-trigger flex w-full min-w-0 cursor-pointer items-center justify-between gap-1 p-2 pl-3 text-muted-foreground'>
+        <button
+          type='button'
+          className='group/chat-tool-trigger flex w-full min-w-0 items-center justify-between gap-1 p-2 pl-3 text-left text-muted-foreground'
+        >
           <div className='flex w-full min-w-0 items-center gap-1.5'>
             <TriangleAlert className='size-3 shrink-0 text-destructive' />
             <ChatToolLabel verb='Received unknown part'>
@@ -17,7 +20,7 @@ export function ChatMessagePartUnknown({ part }: { readonly part: UIMessagePart<
             </ChatToolLabel>
           </div>
           <ChevronRight className='size-3 shrink-0 text-foreground/60 transition duration-200 group-hover/chat-tool-trigger:text-foreground group-data-[state=open]/collapsible:rotate-90' />
-        </div>
+        </button>
       </CollapsibleTrigger>
       <CollapsibleContent>
         <CodeBlockContent>

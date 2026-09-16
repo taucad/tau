@@ -14,6 +14,7 @@ export type TargetClickOptions = {
   readonly button?: 'left' | 'middle' | 'right';
   readonly force?: boolean;
   readonly position?: { readonly x: number; readonly y: number };
+  readonly touch?: boolean;
   readonly timeout?: number;
 };
 export type TargetMouseOptions = { readonly steps?: number };
@@ -44,6 +45,7 @@ export type TargetState = {
   readonly value?: string;
   readonly visible: boolean;
 };
+export type TargetWorker = Readonly<{ identity: string; url: string }>;
 export type TargetDiagnostics = {
   readonly consoleMessages: ReadonlyArray<{
     readonly text: string;
@@ -111,6 +113,7 @@ export type TargetWebGpuQualificationReport = Readonly<{
 declare module 'vitest' {
   export interface ProvidedContext {
     webGpuProfile: TargetWebGpuProfile;
+    acpLiveEnabled: boolean;
   }
 }
 
@@ -143,6 +146,7 @@ export type UiBrowserCommands = {
   uiEmulateColorScheme(colorScheme: 'dark' | 'light' | 'no-preference', surface?: TargetSurface): Promise<void>;
   uiEmulateContrast(contrast: 'more' | 'no-preference', surface?: TargetSurface): Promise<void>;
   uiEmulateForcedColors(forcedColors: 'active' | 'none', surface?: TargetSurface): Promise<void>;
+  uiEmulateReducedMotion(reducedMotion: 'no-preference' | 'reduce', surface?: TargetSurface): Promise<void>;
   uiEvaluateTarget(source: string, argument?: unknown, surface?: TargetSurface): Promise<unknown>;
   uiEvaluateTargetLocator(
     selector: string,
@@ -190,6 +194,7 @@ export type UiBrowserCommands = {
   uiReleaseTauServeGateway(): Promise<void>;
   uiReadTauServeFile(relativePath: string): Promise<string | undefined>;
   uiListTauServeChats(): Promise<readonly string[]>;
+  uiTargetWorkers(urlSubstring?: string, surface?: TargetSurface): Promise<readonly TargetWorker[]>;
   uiTypeTarget(selector: string, value: string, surface?: TargetSurface): Promise<void>;
   uiWaitForTarget(source: string, argument?: unknown, timeout?: number, surface?: TargetSurface): Promise<void>;
 };
@@ -217,6 +222,10 @@ export const emulateContrast = (contrast: 'more' | 'no-preference', surface?: Ta
   server.commands.uiEmulateContrast(contrast, surface);
 export const emulateForcedColors = (forcedColors: 'active' | 'none', surface?: TargetSurface): Promise<void> =>
   server.commands.uiEmulateForcedColors(forcedColors, surface);
+export const emulateReducedMotion = (
+  reducedMotion: 'no-preference' | 'reduce',
+  surface?: TargetSurface,
+): Promise<void> => server.commands.uiEmulateReducedMotion(reducedMotion, surface);
 export const click = (selector: TargetSelector, options?: TargetClickOptions, surface?: TargetSurface): Promise<void> =>
   server.commands.uiClickTarget(selectorFor(selector), options ?? {}, surface);
 export const fill = (selector: TargetSelector, value: string, surface?: TargetSurface): Promise<void> =>
@@ -318,6 +327,9 @@ export const sampleCameraDuringClick = <Camera>(selector: TargetSelector, frameC
   server.commands.uiSampleCameraDuringClick(selectorFor(selector), frameCount) as Promise<Camera[]>;
 export const openSecondary = (path: string): Promise<void> => server.commands.uiOpenSecondaryTarget(path);
 export const closeSecondary = (): Promise<void> => server.commands.uiCloseSecondaryTarget();
+/** The dedicated workers the page is running, by stable instance identity and script URL (V21). */
+export const workers = (urlSubstring?: string, surface?: TargetSurface): Promise<readonly TargetWorker[]> =>
+  server.commands.uiTargetWorkers(urlSubstring, surface);
 export const cookies = (): Promise<TargetCookie[]> => server.commands.uiCookies();
 export const addCookies = (values: readonly TargetCookie[]): Promise<void> => server.commands.uiAddCookies(values);
 export const authenticateTauTestUser = (account: TargetTauTestAccount): Promise<void> =>
@@ -407,7 +419,7 @@ export const startHostFixture = (): Promise<string> => server.commands.uiStartHo
 
 /** AV-4 (rung 1): a real `tau serve` daemon serving the real serve-mode SPA. */
 export const startTauServeFixture = (
-  options: { readonly externalAgents?: boolean } = {},
+  options: { readonly externalAgents?: boolean | 'codex' } = {},
 ): Promise<TargetTauServeFixture> => server.commands.uiStartTauServeFixture(options);
 export const stopTauServeFixture = (): Promise<void> => server.commands.uiStopTauServeFixture();
 export const releaseTauServeGateway = (): Promise<void> => server.commands.uiReleaseTauServeGateway();

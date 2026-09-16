@@ -1,13 +1,13 @@
 import type { IChangeEvent } from '@rjsf/core';
 import { Info } from 'lucide-react';
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useDeferredValue, useMemo, useState } from 'react';
 import Form from '@rjsf/core';
 import type { RJSFSchema } from '@rjsf/utils';
 import { SearchInput } from '#components/search-input.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { templates, uiSchema, widgets } from '#components/geometry/parameters/rjsf-theme.js';
 import { rjsfFields } from '#components/geometry/parameters/rjsf-field-path.js';
-import type { RJSFContext, Units } from '#components/geometry/parameters/rjsf-context.js';
+import type { ParameterEdit, RJSFContext, Units } from '#components/geometry/parameters/rjsf-context.js';
 import {
   mergeFormDefaults,
   normalizeRjsfFormData,
@@ -19,6 +19,8 @@ import {
 import { extractModifiedProperties } from '#utils/object.utils.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { rjsfValidator } from '#lib/rjsf-validator.js';
+import type { ParameterManifest } from '@taucad/parameters';
+import type { CurrentFileParameterEntry } from '@taucad/types';
 
 type ParametersProperties = {
   readonly parameters: Record<string, unknown>;
@@ -34,6 +36,9 @@ type ParametersProperties = {
   readonly units: Units;
   readonly isInitialExpanded?: boolean;
   readonly isAllExpanded?: boolean;
+  readonly parameterManifest: ParameterManifest;
+  readonly parameterBindings?: CurrentFileParameterEntry['groups'][string]['bindings'];
+  readonly parameterEdit: ParameterEdit;
 };
 
 /* oxlint-disable react/set-state-in-effect -- The `use no memo` boundary preserves the existing controlled search reset and focus timing. */
@@ -51,6 +56,9 @@ export function Parameters({
   units,
   isInitialExpanded = true,
   isAllExpanded,
+  parameterManifest,
+  parameterBindings,
+  parameterEdit,
 }: ParametersProperties): React.JSX.Element {
   'use no memo';
 
@@ -95,7 +103,10 @@ export function Parameters({
 
   const resetSingleParameter = useCallback<RJSFContext['resetSingleParameter']>(
     (input) => {
-      const updatedParameters = resetRjsfField({ ...input, formData: currentFormDataRef.current });
+      const updatedParameters = resetRjsfField({
+        ...input,
+        formData: currentFormDataRef.current,
+      });
       if (updatedParameters !== undefined) {
         currentFormDataRef.current = updatedParameters;
         setParameters(updatedParameters);
@@ -115,7 +126,6 @@ export function Parameters({
   const formContext = useMemo<RJSFContext>(
     () => ({
       idPrefix: rjsfIdPrefix,
-      parameterSemantics: 'legacy-cad',
       rootPresentation: 'catalog',
       allExpanded,
       searchTerm: activeFilterTerm,
@@ -129,14 +139,30 @@ export function Parameters({
         return text.toLowerCase().includes(activeFilterTerm.toLowerCase());
       },
       units,
+      parameterManifest,
+      parameterBindings,
+      parameterEdit,
     }),
-    [allExpanded, activeFilterTerm, resetSingleParameter, defaultParameters, units],
+    [
+      allExpanded,
+      activeFilterTerm,
+      resetSingleParameter,
+      defaultParameters,
+      units,
+      parameterManifest,
+      parameterBindings,
+      parameterEdit,
+    ],
   );
 
   const mergedData = useMemo(
     () => mergeFormDefaults(jsonSchema ?? {}, defaultParameters, parameters),
     [jsonSchema, defaultParameters, parameters],
   );
+  /* Authoritative number rows read their own value from their input actor, so the form's own
+   * re-render is never what acknowledges an edit; deferring it keeps the whole RJSF tree off the
+   * urgent path while non-number widgets still see the committed data. */
+  const deferredData = useDeferredValue(mergedData);
   const hasParameters = jsonSchema && Object.keys(jsonSchema.properties ?? {}).length > 0;
 
   // Initialize the ref with the current edited parameters when component mounts or data changes
@@ -190,7 +216,7 @@ export function Parameters({
             idSeparator={rjsfIdSeparator}
             widgets={widgets}
             fields={rjsfFields}
-            formData={mergedData}
+            formData={deferredData}
             formContext={formContext}
             experimental_defaultFormStateBehavior={rjsfDefaultFormStateBehavior}
             className='flex flex-1 scroll-shadows-y flex-col overflow-x-hidden px-0 py-0 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'

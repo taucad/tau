@@ -22,6 +22,16 @@ const EmailWidget = widgets['EmailWidget']!;
 
 const validator = customizeValidator<Record<string, unknown>, RJSFSchema, RJSFContext>();
 
+const testParameterContext = {
+  units: { length: { displaySymbol: 'mm' } },
+  parameterManifest: {
+    bindings: {},
+    bindingDeclarations: {},
+    provenance: {},
+  } as unknown as RJSFContext['parameterManifest'],
+  parameterEdit: { kind: 'transient' },
+} satisfies Pick<RJSFContext, 'units' | 'parameterManifest' | 'parameterEdit'>;
+
 const numberSchema: RJSFSchema = { type: 'number' };
 const stringSchema: RJSFSchema = { type: 'string' };
 
@@ -86,14 +96,13 @@ const renderSchemaForm = ({
 }) => {
   const formContext: RJSFContext = {
     idPrefix: rjsfIdPrefix,
-    parameterSemantics: 'legacy-cad',
+    ...testParameterContext,
     rootPresentation: 'catalog',
     searchTerm,
     allExpanded,
     resetSingleParameter: vi.fn(),
     shouldShowField: () => true,
     defaultParameters,
-    units: { length: { sourceSymbol: 'mm', displaySymbol: 'mm' } },
   };
 
   render(
@@ -328,13 +337,12 @@ describe('fixed-length arrays', () => {
     const onChange = vi.fn();
     const formContext: RJSFContext = {
       idPrefix: rjsfIdPrefix,
-      parameterSemantics: 'legacy-cad',
+      ...testParameterContext,
       rootPresentation: 'catalog',
       searchTerm: '',
       allExpanded: true,
       resetSingleParameter: vi.fn(),
       shouldShowField: () => true,
-      units: { length: { sourceSymbol: 'mm', displaySymbol: 'mm' } },
     };
 
     render(
@@ -369,19 +377,19 @@ describe('fixed-length arrays', () => {
     expect(screen.queryByRole('button', { name: /remove/i })).toBeNull();
 
     fireEvent.change(screen.getAllByRole('textbox')[1]!, { target: { value: '0.75' } });
+    fireEvent.keyDown(screen.getAllByRole('textbox')[1]!, { key: 'Enter' });
     expect(onChange.mock.lastCall?.[0].formData).toEqual({ point: [0, 0.75, 0.5] });
   });
 
   it('should preserve Add and Remove controls for homogeneous arrays', () => {
     const formContext: RJSFContext = {
       idPrefix: rjsfIdPrefix,
-      parameterSemantics: 'legacy-cad',
+      ...testParameterContext,
       rootPresentation: 'catalog',
       searchTerm: '',
       allExpanded: true,
       resetSingleParameter: vi.fn(),
       shouldShowField: () => true,
-      units: { length: { sourceSymbol: 'mm', displaySymbol: 'mm' } },
     };
 
     render(
@@ -652,14 +660,13 @@ describe('root presentation', () => {
   }) => {
     const formContext: RJSFContext = {
       idPrefix,
-      parameterSemantics: 'configuration',
+      ...testParameterContext,
       rootPresentation,
       searchTerm: '',
       allExpanded: true,
       resetSingleParameter,
       shouldShowField: () => true,
       defaultParameters,
-      units: { length: { sourceSymbol: 'mm', displaySymbol: 'mm' } },
     };
 
     return render(

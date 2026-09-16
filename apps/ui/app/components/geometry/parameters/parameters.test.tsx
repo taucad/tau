@@ -1,12 +1,13 @@
 /* oxlint-disable max-lines -- test file */
 import type { Mock } from 'vitest';
 import { vi, describe, it, expect, beforeEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { RJSFSchema } from '@rjsf/utils';
-import { Parameters } from '#components/geometry/parameters/parameters.js';
+import { Parameters as ParametersImplementation } from '#components/geometry/parameters/parameters.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { Units } from '#components/geometry/parameters/rjsf-context.js';
+import type { ParameterManifest } from '@taucad/parameters';
 
 // Test wrapper component that provides necessary providers
 function TestWrapper({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
@@ -16,10 +17,31 @@ function TestWrapper({ children }: { readonly children: React.ReactNode }): Reac
 // Default units (mm)
 const defaultUnits: Units = {
   length: {
-    sourceSymbol: 'mm',
     displaySymbol: 'mm',
   },
 };
+
+const emptyManifest = {
+  bindings: {},
+  bindingDeclarations: {},
+  provenance: {},
+} as unknown as ParameterManifest;
+
+type TestParametersProperties = Omit<
+  React.ComponentProps<typeof ParametersImplementation>,
+  'parameterManifest' | 'parameterEdit'
+> &
+  Partial<Pick<React.ComponentProps<typeof ParametersImplementation>, 'parameterManifest' | 'parameterEdit'>>;
+
+function Parameters({
+  parameterManifest = emptyManifest,
+  parameterEdit = { kind: 'transient' },
+  ...properties
+}: TestParametersProperties): React.JSX.Element {
+  return (
+    <ParametersImplementation {...properties} parameterManifest={parameterManifest} parameterEdit={parameterEdit} />
+  );
+}
 
 // Create mock data for consistent testing
 const mockDefaultParameters = {
@@ -2045,7 +2067,7 @@ describe('Parameters - Reactive Configuration Changes', () => {
     // Component should render with updated default value
     const updatedInput = screen.getByLabelText('Input for Size');
     expect(updatedInput).toBeTruthy();
-    expect(updatedInput).toHaveValue('1000');
+    expect(updatedInput).toHaveValue('1,000');
   });
 
   it('should allow clearing min/max/step constraints when schema changes from constrained to unconstrained', async () => {
@@ -2121,7 +2143,7 @@ describe('Parameters - Reactive Configuration Changes', () => {
     const updatedInput = screen.getByLabelText('Input for Width');
     await user.clear(updatedInput);
     await user.type(updatedInput, '5'); // Value below old minimum of 10
-    await user.tab(); // Trigger blur to commit the value
+    await user.keyboard('{Enter}');
 
     // Wait for onChange to fire
     await new Promise((resolve) => {
@@ -2204,7 +2226,7 @@ describe('Parameters - Reactive Configuration Changes', () => {
     const noMinInput = screen.getByLabelText('Input for Height');
     await user.clear(noMinInput);
     await user.type(noMinInput, '5'); // Below old minimum
-    await user.tab();
+    await user.keyboard('{Enter}');
 
     await new Promise((resolve) => {
       setTimeout(resolve, 100);
@@ -2318,6 +2340,7 @@ describe('Parameters - Reset Single Parameter Bug', () => {
     const portInput = screen.getByLabelText('Input for Port');
     await user.clear(portInput);
     await user.type(portInput, '9000');
+    await user.keyboard('{Enter}');
 
     // Wait for onChange to fire
     await new Promise((resolve) => {
@@ -2373,7 +2396,7 @@ describe('Parameters - Reset Single Parameter Bug', () => {
 
     // Second param (port) should still have the updated value
     const portInputAfterReset = screen.getByLabelText('Input for Port');
-    expect(portInputAfterReset).toHaveValue('9000');
+    expect(portInputAfterReset).toHaveValue('9,000');
 
     // Verify parameters object: config1 should be removed/reset, config2 should remain
     expect(currentParameters).not.toHaveProperty('config1');
@@ -3118,14 +3141,14 @@ describe('Parameters - Edge Cases', () => {
   });
 });
 
-describe('Parameters - Unit Conversion Only for Length', () => {
+describe('Parameters - unknown numeric semantics', () => {
   let mockOnParametersChange: Mock<(parameters: Record<string, unknown>) => void>;
 
   beforeEach(() => {
     mockOnParametersChange = vi.fn<(parameters: Record<string, unknown>) => void>();
   });
 
-  it('should apply unit conversion for length descriptor when units change from mm to cm', () => {
+  it('should not infer length from a parameter name when display units change', () => {
     const defaultParameters = {
       width: 100, // 100mm
     };
@@ -3143,7 +3166,6 @@ describe('Parameters - Unit Conversion Only for Length', () => {
     // Start with mm units
     const mmUnits: Units = {
       length: {
-        sourceSymbol: 'mm',
         displaySymbol: 'mm',
       },
     };
@@ -3167,7 +3189,6 @@ describe('Parameters - Unit Conversion Only for Length', () => {
     // Change to cm units (10mm = 1cm, so 100mm = 10cm)
     const cmUnits: Units = {
       length: {
-        sourceSymbol: 'mm',
         displaySymbol: 'cm',
       },
     };
@@ -3184,9 +3205,9 @@ describe('Parameters - Unit Conversion Only for Length', () => {
       </TestWrapper>,
     );
 
-    // Value should now be 10 (100mm / 10 = 10cm)
+    // No admitted binding means the value remains unknown and unchanged.
     const widthInputAfterConversion = screen.getByLabelText('Input for Width');
-    expect(widthInputAfterConversion).toHaveValue('10');
+    expect(widthInputAfterConversion).toHaveValue('100');
   });
 
   it('should NOT apply unit conversion for angle descriptor when units change', () => {
@@ -3207,7 +3228,6 @@ describe('Parameters - Unit Conversion Only for Length', () => {
     // Start with mm units
     const mmUnits: Units = {
       length: {
-        sourceSymbol: 'mm',
         displaySymbol: 'mm',
       },
     };
@@ -3231,7 +3251,6 @@ describe('Parameters - Unit Conversion Only for Length', () => {
     // Change to cm units
     const cmUnits: Units = {
       length: {
-        sourceSymbol: 'mm',
         displaySymbol: 'cm',
       },
     };
@@ -3271,7 +3290,6 @@ describe('Parameters - Unit Conversion Only for Length', () => {
     // Start with mm units
     const mmUnits: Units = {
       length: {
-        sourceSymbol: 'mm',
         displaySymbol: 'mm',
       },
     };
@@ -3295,7 +3313,6 @@ describe('Parameters - Unit Conversion Only for Length', () => {
     // Change to cm units
     const cmUnits: Units = {
       length: {
-        sourceSymbol: 'mm',
         displaySymbol: 'cm',
       },
     };
@@ -3335,7 +3352,6 @@ describe('Parameters - Unit Conversion Only for Length', () => {
     // Start with mm units
     const mmUnits: Units = {
       length: {
-        sourceSymbol: 'mm',
         displaySymbol: 'mm',
       },
     };
@@ -3359,7 +3375,6 @@ describe('Parameters - Unit Conversion Only for Length', () => {
     // Change to cm units
     const cmUnits: Units = {
       length: {
-        sourceSymbol: 'mm',
         displaySymbol: 'cm',
       },
     };
@@ -3379,6 +3394,213 @@ describe('Parameters - Unit Conversion Only for Length', () => {
     // Value should STILL be 2.5 (not converted)
     const factorInputAfterConversion = screen.getByLabelText('Input for Factor');
     expect(factorInputAfterConversion).toHaveValue('2.5');
+  });
+});
+
+describe('Parameters - admitted unit projection', () => {
+  const manifest = (
+    origin: 'declared' | 'inferred',
+    representation: 'binary64' | 'safe-integer' | 'decimal' = 'binary64',
+  ) =>
+    ({
+      bindings: {
+        '/width': {
+          parameter: { value: 'width', stability: 'stable' },
+          schema: {
+            resource: 'urn:taucad:test:parameters',
+            pointer: '/properties/width',
+          },
+          representation,
+          optional: false,
+          nullable: false,
+          unit: 'mm',
+          sourceUnitCapability: 'change-source-unit:preserve-size:v1',
+          quantityKind: 'http://qudt.org/vocab/quantitykind/Length',
+          space: 'linear',
+          constraints: {},
+        },
+      },
+      bindingDeclarations: {
+        '/width': {
+          unit: 'mm',
+          provenance: {
+            unit: {
+              origin,
+              producer: 'test',
+              sourceRevision: 'source',
+              ...(origin === 'inferred'
+                ? {
+                    profile: 'tau-educated-defaults-v1',
+                    rule: 'name-token-length-v1',
+                    evidence: 'width',
+                  }
+                : {}),
+            },
+          },
+        },
+      },
+      provenance: {},
+      source: {
+        id: 'build123d',
+        version: 'test',
+        revision: 'source',
+        capability: 'json-structure',
+      },
+    }) as unknown as ParameterManifest;
+
+  const schema: RJSFSchema = {
+    type: 'object',
+    properties: { width: { type: 'number', default: 100 } },
+  };
+
+  it('ignores compatibility-only safe-integer bounds when scrubbing', () => {
+    const onParametersChange = vi.fn<(parameters: Record<string, unknown>) => void>();
+    const { container } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={{ width: 100 }}
+          jsonSchema={{
+            type: 'object',
+            properties: {
+              width: {
+                type: 'integer',
+                default: 100,
+                minimum: Number.MIN_SAFE_INTEGER,
+                maximum: Number.MAX_SAFE_INTEGER,
+              },
+            },
+          }}
+          units={defaultUnits}
+          parameterManifest={manifest('inferred', 'safe-integer')}
+          onParametersChange={onParametersChange}
+        />
+      </TestWrapper>,
+    );
+    const slider = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
+    Object.defineProperty(slider, 'offsetWidth', { configurable: true, value: 100 });
+    const pointer = (type: 'pointerdown' | 'pointermove' | 'pointerup', clientX: number): void => {
+      const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX });
+      Object.defineProperty(event, 'pointerId', { value: 1 });
+      fireEvent(slider, event);
+    };
+
+    pointer('pointerdown', 0);
+    pointer('pointermove', 10);
+    pointer('pointerup', 10);
+
+    expect(onParametersChange).toHaveBeenLastCalledWith({ width: 120 });
+  });
+
+  it('uses the manifest path, preserves native values, and labels an inferred unit accessibly', async () => {
+    const user = userEvent.setup();
+    const onParametersChange = vi.fn<(parameters: Record<string, unknown>) => void>();
+
+    render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={{ width: 100 }}
+          jsonSchema={schema}
+          units={{ length: { displaySymbol: 'cm' } }}
+          parameterManifest={manifest('inferred')}
+          onParametersChange={onParametersChange}
+        />
+      </TestWrapper>,
+    );
+
+    const input = screen.getByLabelText('Input for Width');
+    const label = screen.getByLabelText('Parameter: Width');
+    const hint = screen.getByRole('button', { name: 'Inferred unit for Width' });
+    expect(input).toHaveValue('10');
+    expect(screen.getByText('cm')).toBeInTheDocument();
+    expect(label.nextElementSibling).toBe(hint);
+    expect(input).not.toHaveAttribute('aria-describedby');
+    await user.hover(hint);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent('Inferred unit');
+
+    await user.clear(input);
+    await user.type(input, '12');
+    expect(onParametersChange).not.toHaveBeenCalled();
+    await user.keyboard('{Enter}');
+    expect(onParametersChange).toHaveBeenLastCalledWith({ width: 120 });
+  });
+
+  it('does not label a declaration as guessed and disables preserved decimal data', () => {
+    const { rerender } = render(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={{ width: 100 }}
+          jsonSchema={schema}
+          units={defaultUnits}
+          parameterManifest={manifest('declared')}
+          onParametersChange={vi.fn()}
+        />
+      </TestWrapper>,
+    );
+
+    expect(screen.queryByText('Inferred unit')).toBeNull();
+    rerender(
+      <TestWrapper>
+        <Parameters
+          parameters={{}}
+          defaultParameters={{ width: 100 }}
+          jsonSchema={schema}
+          units={defaultUnits}
+          parameterManifest={manifest('declared', 'decimal')}
+          onParametersChange={vi.fn()}
+        />
+      </TestWrapper>,
+    );
+    expect(screen.getByLabelText('Input for Width')).toBeDisabled();
+    expect(screen.getByText(/Decimal values are preserved/)).toBeInTheDocument();
+  });
+
+  it('uses a checked project source-unit binding for values and adornments', () => {
+    const admitted = manifest('declared');
+    const binding = admitted.bindings['/width']!;
+    render(
+      <TestWrapper>
+        <Parameters
+          parameters={{ width: 10 }}
+          defaultParameters={{ width: 100 }}
+          jsonSchema={schema}
+          units={{ length: { displaySymbol: 'cm' } }}
+          parameterManifest={admitted}
+          parameterBindings={{
+            '/width': {
+              parameter: binding.parameter,
+              schema: binding.schema,
+              representation: binding.representation,
+              unit: 'cm',
+              quantityKind: binding.quantityKind,
+              space: binding.space,
+              constraints: { default: 10, minimum: 0.1, maximum: 20 },
+              sourceUnit: {
+                producer: 'build123d',
+                producerUnit: 'mm',
+                sourceRevision: 'source',
+                capability: 'change-source-unit:preserve-size:v1',
+              },
+              provenance: {
+                unit: {
+                  origin: 'project',
+                  producer: 'build123d',
+                  sourceRevision: 'source',
+                  evidence: 'source-unit:/width',
+                },
+              },
+            },
+          }}
+          onParametersChange={vi.fn()}
+        />
+      </TestWrapper>,
+    );
+
+    expect(screen.getByLabelText('Input for Width')).toHaveValue('10');
+    expect(screen.getByText('cm')).toBeInTheDocument();
+    expect(screen.queryByText('Inferred unit')).toBeNull();
   });
 });
 
@@ -3581,6 +3803,7 @@ describe('Parameters - onChange Only Modified Values', () => {
     const countInput = screen.getByLabelText('Input for Count');
     await user.clear(countInput);
     await user.type(countInput, '10');
+    await user.keyboard('{Enter}');
 
     // Wait for onChange to fire
     await new Promise((resolve) => {

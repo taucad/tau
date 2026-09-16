@@ -583,7 +583,6 @@ export default function ConverterRoute(): React.JSX.Element {
             return {
               type: 'projectRetrieved',
               project: converterProject,
-              parameterEntries: new Map(),
             };
           }),
         },

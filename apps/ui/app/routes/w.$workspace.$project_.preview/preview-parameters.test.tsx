@@ -12,6 +12,7 @@ vi.mock('#hooks/use-cad-preview.js', () => ({
       getSnapshot: () => ({ context: { parameters: { length: 0.5 }, units: { length: 'mm' } } }),
     },
     defaultParameters: { length: 0.5 },
+    parameterManifest: { bindings: {}, bindingDeclarations: {}, provenance: {} },
     graphicsRef: {
       getSnapshot: () => ({ context: { displayUnits: { length: { symbol: 'm' } } } }),
     },
@@ -21,12 +22,8 @@ vi.mock('#hooks/use-cad-preview.js', () => ({
 }));
 
 vi.mock('#components/geometry/parameters/parameters.js', () => ({
-  Parameters: ({ units }: { units: { length: { sourceSymbol: string; displaySymbol: string } } }) => (
-    <div
-      data-testid='preview-parameters'
-      data-source-symbol={units.length.sourceSymbol}
-      data-display-symbol={units.length.displaySymbol}
-    />
+  Parameters: ({ units }: { units: { length: { displaySymbol: string } } }) => (
+    <div data-testid='preview-parameters' data-display-symbol={units.length.displaySymbol} />
   ),
 }));
 
@@ -37,11 +34,10 @@ vi.mock('@taucad/ui/components/tooltip', () => ({
 }));
 
 describe('PreviewParameters', () => {
-  it('keeps the CAD source unit separate from the viewer display unit', async () => {
+  it('passes the viewer display unit alongside the manifest', async () => {
     const { PreviewParameters } = await import('./preview-parameters.js');
     render(<PreviewParameters />);
 
-    expect(screen.getByTestId('preview-parameters')).toHaveAttribute('data-source-symbol', 'mm');
     expect(screen.getByTestId('preview-parameters')).toHaveAttribute('data-display-symbol', 'm');
   });
 });

@@ -5,6 +5,7 @@ export default defineConfig({
   plugins: [nxViteTsPaths()],
   test: {
     environment: 'node',
+    pool: 'threads',
     typecheck: {
       enabled: true,
       include: ['**/*.test-d.ts'],

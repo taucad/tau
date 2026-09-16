@@ -69,6 +69,7 @@
     "@taucad/cache-core": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/occt-core": "workspace:*",
+    "@taucad/parameters": "workspace:*",
     "culori": "catalog:",
     "replicad": "catalog:",
     "replicad-opencascadejs": "catalog:",

@@ -9,126 +9,70 @@ const draft = (text: string): MyUIMessage => ({
   id: 'draft',
   role: 'user',
   metadata: { createdAt: 1, status: 'pending' },
-  parts: [
-    { type: 'text', text },
-    { type: 'file', url: 'data:image/png;base64,AA==', mediaType: 'image/png' },
-  ],
+  parts: [{ type: 'text', text }],
 });
 
-const tau: CadAgentExecution = { kind: 'tau', model: 'openai/gpt-5.5', hostId: 'desktop' };
-const acp: CadAgentExecution = { kind: 'acp', hostId: 'origin', agentId: 'codex', model: 'gpt-5' };
+const tau: CadAgentExecution = {
+  kind: 'tau',
+  model: 'openai/gpt-5.5',
+  hostId: 'desktop',
+};
 
-const memoryClient = (initial?: string) => {
-  let bytes = initial;
+/** Only the two members the Home seam reaches; the record family's own suite covers the rest. */
+const memoryClient = () => {
+  const files = new Map<string, Uint8Array<ArrayBuffer>>();
   return {
-    readFile: vi.fn(async (path: string, encoding: 'utf8') => {
-      expect(path).toBe('/.tau/composers/new-project.json');
-      expect(encoding).toBe('utf8');
+    files,
+    text: (path: string): string => new TextDecoder().decode(files.get(path) ?? new Uint8Array()),
+    readFile: vi.fn(async (path: string): Promise<Uint8Array<ArrayBuffer>> => {
+      const bytes = files.get(path);
       if (bytes === undefined) {
-        throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+        throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
       }
       return bytes;
     }),
-    writeFile: vi.fn(async (path: string, next: string) => {
-      expect(path).toBe('/.tau/composers/new-project.json');
-      bytes = next;
+    writeFile: vi.fn(async (path: string, data: Uint8Array<ArrayBuffer>): Promise<void> => {
+      files.set(path, data);
     }),
-    bytes: () => bytes,
+    exists: async (path: string): Promise<boolean> => files.has(path),
+    readdir: async (): Promise<string[]> => [],
+    unlink: async (): Promise<void> => undefined,
+    rmdir: async (): Promise<void> => undefined,
   };
 };
 
 describe('new-project composer file store', () => {
-  it('pins the sole pre-project record outside projects and chats', () => {
+  it('should pin the sole pre-project record outside projects and chats', () => {
     expect(newProjectComposerFilePath).toBe('/.tau/composers/new-project.json');
-    expect(newProjectComposerFilePath).not.toMatch(
-      /\/projects\/|\.tau\/chats|homepage_main_chat_resource|chat_homepage_main/,
-    );
+    expect(newProjectComposerFilePath).not.toMatch(/\/projects\/|\.tau\/chats/);
   });
 
-  it('treats a missing file as an absent record', async () => {
-    const client = memoryClient();
-    await expect(createNewProjectComposerFileStore(client).read()).resolves.toEqual({ status: 'absent' });
-    expect(client.readFile).toHaveBeenCalledWith(newProjectComposerFilePath, 'utf8');
-  });
-
-  it.each([
-    ['malformed JSON', '{'],
-    ['wrong version', '{"version":2}'],
-    ['non-user message', JSON.stringify({ version: 1, draft: { id: 'draft', role: 'assistant', parts: [] } })],
-    ['invalid execution', JSON.stringify({ version: 1, execution: { kind: 'tau', model: '' } })],
-    ['unknown credentials', JSON.stringify({ version: 1, token: 'secret' })],
-  ])('returns invalid for %s', async (_name, bytes) => {
-    const result = await createNewProjectComposerFileStore(memoryClient(bytes)).read();
-    expect(result.status).toBe('invalid');
-  });
-
-  it('round-trips draft images and Tau/ACP executions with stable bytes', async () => {
+  it('should map the Home seam onto the shared composer record', async () => {
     const client = memoryClient();
     const store = createNewProjectComposerFileStore(client);
+
+    await expect(store.read()).resolves.toEqual({ status: 'absent' });
     await store.patchDraft(draft('split clamp'));
     await store.patchExecution(tau);
+
     await expect(store.read()).resolves.toEqual({
       status: 'valid',
       record: { version: 1, draft: draft('split clamp'), execution: tau },
     });
-    expect(client.bytes()).toMatch(/^{\n/);
-    expect(client.bytes()).toMatch(/\n}\n$/);
-
-    await store.patchExecution(acp);
-    await expect(store.read()).resolves.toEqual({
-      status: 'valid',
-      record: { version: 1, draft: draft('split clamp'), execution: acp },
-    });
+    expect([...client.files.keys()]).toEqual([newProjectComposerFilePath]);
   });
 
-  it('preserves both fields across 100 concurrent draft/execution interleavings', async () => {
-    await Promise.all(
-      Array.from({ length: 100 }, async (_, index) => {
-        const client = memoryClient();
-        const first = createNewProjectComposerFileStore(client);
-        const second = createNewProjectComposerFileStore(client);
-        await Promise.all([
-          first.patchDraft(draft(`draft ${index}`)),
-          second.patchExecution(index % 2 === 0 ? tau : acp),
-        ]);
-        await expect(first.read()).resolves.toEqual({
-          status: 'valid',
-          record: { version: 1, draft: draft(`draft ${index}`), execution: index % 2 === 0 ? tau : acp },
-        });
-      }),
-    );
-  });
-
-  it('closes out a cleared draft while preserving the execution', async () => {
+  it('should close out a cleared draft while preserving the execution', async () => {
     const client = memoryClient();
     const store = createNewProjectComposerFileStore(client);
+
     await store.patchExecution(tau);
     await store.patchDraft(draft('split clamp'));
     await store.patchDraft({ ...draft(''), parts: [] });
-    expect(JSON.parse(client.bytes() ?? '')).toEqual({ version: 1, execution: tau });
-    await expect(store.read()).resolves.toEqual({ status: 'valid', record: { version: 1, execution: tau } });
-    expect(client.writeFile.mock.calls.flat().join(' ')).not.toMatch(/\/projects\/|\.tau\/chats/);
-  });
 
-  it('reads a previously persisted cleared draft as no draft', async () => {
-    const bytes = JSON.stringify({ version: 1, draft: { ...draft(''), parts: [] }, execution: acp });
-    await expect(createNewProjectComposerFileStore(memoryClient(bytes)).read()).resolves.toEqual({
-      status: 'valid',
-      record: { version: 1, execution: acp },
+    expect(JSON.parse(client.text(newProjectComposerFilePath))).toEqual({
+      version: 1,
+      execution: tau,
     });
-  });
-
-  it('propagates read I/O failures and does not overwrite them', async () => {
-    const error = Object.assign(new Error('permission denied'), { code: 'EACCES' });
-    const client = {
-      readFile: vi.fn(async () => {
-        throw error;
-      }),
-      writeFile: vi.fn(async () => undefined),
-    };
-    const store = createNewProjectComposerFileStore(client);
-    await expect(store.read()).rejects.toBe(error);
-    await expect(store.patchDraft(draft('do not write'))).rejects.toBe(error);
-    expect(client.writeFile).not.toHaveBeenCalled();
   });
 });

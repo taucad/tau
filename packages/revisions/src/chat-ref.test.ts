@@ -11,7 +11,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createMemoryProvider } from '@taucad/filesystem/backend';
@@ -100,6 +100,31 @@ const readChatFile = async (checkout: FileSystemProvider, path: string, id = cha
     return undefined;
   }
 };
+
+const readChatBytes = async (
+  checkout: FileSystemProvider,
+  path: string,
+  id = chatId,
+): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+  try {
+    return await checkout.readFile(`${chatRecordsPath(id)}/${path}`);
+  } catch {
+    return undefined;
+  }
+};
+
+/* Attachments as the closed tree spells them (D12): bytes named by their
+ * lowercase SHA-256 hex and one of the five stored media types. The hashes here
+ * are shaped, not computed — `chat-ref` validates the spelling, and the store
+ * that mints the name is the UI's own. */
+const imageHash = 'a1'.repeat(32);
+const documentHash = 'b2'.repeat(32);
+const imagePath = `attachments/${imageHash}.jpg`;
+const documentPath = `attachments/${documentHash}.pdf`;
+/* Binary on purpose: a JPEG's SOI/APP0 and a PDF header, so a leg that decoded
+ * or re-encoded a blob on the way through would not round-trip. */
+const imageBytes = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+const documentBytes = Uint8Array.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37, 0x0a, 0x00]);
 
 describe('chat ref naming', () => {
   it('reads a chat id from a local ref and from its remote-tracking spelling', () => {
@@ -403,6 +428,78 @@ describe.each([
     expect(await readChatFile(target, chatSegmentPath('device-a'), 'malformed')).toBeUndefined();
   });
 
+  /* One entry family was widened, not the tree: an attachment is admitted only
+   * when it is content-addressed under `attachments/`, and everything else is
+   * still refused before a byte is written (Finding 11). */
+  it.runIf(enabled)('admits content-addressed attachments and refuses every other sibling', async () => {
+    const id = `attachments_${_engine}`;
+    const carried = await harness.port.writeRevision({
+      parents: [],
+      tree: new ImmutableRevisionTree([
+        ['chat.json', '{"name":"with attachments"}'],
+        ['events/device-a.jsonl', 'A0\n'],
+        [imagePath, imageBytes],
+        [documentPath, documentBytes],
+      ]),
+      provenance: { source: 'user', actorId, createdAt: now },
+      summary: { generated: 'Chat with attachments' },
+    });
+    const target = await createMemoryProvider();
+    await projectChats({
+      port: harness.port,
+      filesystem: target,
+      deviceId: 'device-b',
+      refs: [{ name: chatRefName(id), head: revisionId(carried.commitId) }],
+    });
+    expect(await readChatBytes(target, imagePath, id)).toEqual(imageBytes);
+    expect(await readChatBytes(target, documentPath, id)).toEqual(documentBytes);
+
+    /**
+     * Offer one tree carrying `path` beside the record, and require a refusal.
+     *
+     * @param path - The sibling the closed tree must not admit.
+     */
+    const refusesSibling = async (path: string): Promise<void> => {
+      const written = await harness.port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([
+          ['chat.json', '{"name":"remote"}'],
+          [path, imageBytes],
+        ]),
+        provenance: { source: 'user', actorId, createdAt: now },
+        summary: { generated: `Chat carrying ${path}` },
+      });
+      await expect(
+        projectChats({
+          port: harness.port,
+          filesystem: await createMemoryProvider(),
+          deviceId: 'device-b',
+          refs: [{ name: chatRefName(`${id}_refused`), head: revisionId(written.commitId) }],
+        }),
+        `expected ${path} to be refused`,
+      ).rejects.toMatchObject({ code: 'UNSUPPORTED_OPERATION' });
+    };
+
+    for (const path of [
+      /* 63 hex digits: a name no content-addressed write produces. */
+      `attachments/${imageHash.slice(1)}.jpg`,
+      /* Outside the five stored media types (D12). */
+      `attachments/${imageHash}.exe`,
+      /* Upper-case hex: the store writes lower-case, so two spellings of one
+       * blob would be two entries for one object. */
+      `attachments/${imageHash.toUpperCase()}.jpg`,
+      /* No sub-directories: the family is one flat level. */
+      `attachments/nested/${imageHash}.jpg`,
+      'attachments/notes.txt',
+      'notes.txt',
+    ]) {
+      /* One at a time: each is a `git fast-import` against one repository on
+       * the native leg, and six at once contend on its object store. */
+      // oxlint-disable-next-line no-await-in-loop -- see above.
+      await refusesSibling(path);
+    }
+  });
+
   it.runIf(enabled)(
     'keeps newer projected segments and local metadata when recording from a stale parent',
     async () => {
@@ -663,5 +760,77 @@ describe.runIf(gitOnPath)('two devices, two stores, one remote', () => {
     });
     expect(await readChatFile(deviceA.checkout, chatSegmentPath('device-b'), sharedChatId)).toBe('B0\n');
     expect(await readChatFile(deviceA.checkout, 'events.jsonl', sharedChatId)).toBe('A0\n');
+  }, 180_000);
+
+  /* An image and a PDF beside the log: one entry each in the ref's tree, exact
+   * bytes, and never re-entered once the device already holds them. */
+  it('carries an image and a PDF to the other device as plain blobs, never pointers', async () => {
+    const base = await fetchChat(deviceA);
+    await deviceA.checkout.writeFile(`${chatRecordsPath(sharedChatId)}/${imagePath}`, imageBytes);
+    await deviceA.checkout.writeFile(`${chatRecordsPath(sharedChatId)}/${documentPath}`, documentBytes);
+
+    const withAttachments = await replayChatSegment({
+      port: deviceA.port,
+      filesystem: deviceA.checkout,
+      deviceId: 'device-a',
+      chatId: sharedChatId,
+      syncChats: true,
+      actorId,
+      now,
+      onto: base,
+    });
+    expect(withAttachments.status).toBe('updated');
+    const carried = await deviceA.port.readTree(withAttachments.head!);
+    expect(carried?.entries().map((entry) => entry.path)).toEqual([
+      imagePath,
+      documentPath,
+      'chat.json',
+      chatSegmentPath('device-a'),
+      chatSegmentPath('device-b'),
+    ]);
+    expect(carried?.get(imagePath)).toEqual(imageBytes);
+    expect(carried?.get(documentPath)).toEqual(documentBytes);
+
+    /*
+     * Raw, not through the port: `readTree` smudges, so it would answer with the
+     * real bytes even if the stored blob were a pointer. A chat ref is recorded
+     * with `largeObjects: false`, so nothing on this path is ever pointerised
+     * and the store has no LFS object directory at all.
+     */
+    await expect(stat(join(root, 'device-a-store', '.git', 'lfs'))).rejects.toMatchObject({ code: 'ENOENT' });
+
+    /* Written once: the same bytes recorded again are the tree the ref already
+     * holds, so content addressing costs one object per blob however many turns
+     * reference it. */
+    const again = await replayChatSegment({
+      port: deviceA.port,
+      filesystem: deviceA.checkout,
+      deviceId: 'device-a',
+      chatId: sharedChatId,
+      syncChats: true,
+      actorId,
+      now,
+      onto: withAttachments.head,
+    });
+    expect(again.status).toBe('upToDate');
+    expect(again.head).toBe(withAttachments.head);
+
+    /*
+     * A plain remote carries them. Nothing in the tree is a pointer, so the P20
+     * gate has nothing to refuse: attachments reach the other device as ordinary
+     * git blobs, which is what "one object each, written once" has to mean for a
+     * closed tree that can never carry a `.gitattributes` to smudge against.
+     */
+    const pushed = await deviceA.port.push({
+      remote: 'origin',
+      refs: [{ name: chatRefName(sharedChatId), expected: base }],
+    });
+    expect(pushed.refs[0]?.status).toBe('updated');
+
+    const fetchedB = await fetchChat(deviceB);
+    const onB = await deviceB.port.readTree(fetchedB);
+    expect(onB?.get(imagePath)).toEqual(imageBytes);
+    expect(onB?.get(documentPath)).toEqual(documentBytes);
+    await expect(stat(join(root, 'device-b-store', '.git', 'lfs'))).rejects.toMatchObject({ code: 'ENOENT' });
   }, 180_000);
 });

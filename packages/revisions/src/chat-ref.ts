@@ -6,6 +6,9 @@
  * A chat is files. `.tau/chats/<chatId>/` holds `chat.json` (the record) and
  * this device's `events.jsonl` (the session log the agent host appends to);
  * every *other* device's log arrives beside it as `events/<deviceId>.jsonl`.
+ * An attached image or document rides beside them as
+ * `attachments/<sha256>.<ext>`, content addressed, so the same bytes are the
+ * same entry on every device (D12).
  * The ref's tree is that directory with one rename: this device's own
  * `events.jsonl` is written out as `events/<deviceId>.jsonl`, so the paths of
  * two devices' logs are disjoint and a merge never has to read a line (A39,
@@ -58,6 +61,28 @@ export const chatLogFileName = 'events.jsonl';
 
 /** One device's log as the ref's tree spells it. @public */
 export const chatSegmentPath = (deviceId: string): string => `events/${deviceId}.jsonl`;
+
+/**
+ * One attachment blob as the closed tree spells it: `attachments/<64 hex>.<ext>`
+ * over the five media types the composer stores (blueprint D12).
+ *
+ * Restated here rather than imported: `apps/ui/app/utils/attachment.utils.ts`
+ * owns the canonical media-type table and mints the names, and nothing under
+ * `packages/**` may depend on `apps/**`. Lower-case hex only, because the store
+ * writes lower-case and two spellings of one hash would be two entries for one
+ * blob — the opposite of what content addressing buys.
+ */
+const chatAttachmentPattern = /^attachments\/[\da-f]{64}\.(?:jpg|png|webp|gif|pdf)$/u;
+
+/**
+ * Every path the chat ref's tree admits: the record, one log per device, and
+ * content-addressed attachment blobs.
+ *
+ * @param path - A tree entry's path, relative to the chat directory.
+ * @returns Whether the closed tree carries an entry of that name.
+ */
+const isChatTreePath = (path: string): boolean =>
+  path === chatRecordFileName || /^events\/[^/]+\.jsonl$/u.test(path) || chatAttachmentPattern.test(path);
 
 /**
  * The chat a ref names, whether it is local or remote-tracking.
@@ -204,15 +229,24 @@ const readdirOrEmpty = async (filesystem: FileSystemProvider, path: string): Pro
  *
  * `events.jsonl` becomes `events/<deviceId>.jsonl`; every segment already on
  * disk keeps its name, because it is another device's and this host never
- * rewrites it.
+ * rewrites it. Attachment blobs keep their names too: they are content
+ * addressed, so the same bytes are the same entry on every device and one
+ * object in the store however many devices hold them.
  *
  * @param input - The chat and the device whose spelling to use.
  * @returns Path/bytes pairs, or an empty list when the chat has no records yet.
  */
 const localChatEntries = async (input: ChatRefContext & Readonly<{ chatId: string }>): Promise<ChatTreeEntries> => {
   const directory = chatRecordsPath(input.chatId);
-  const segmentNames = await readdirOrEmpty(input.filesystem, `${directory}/events`);
+  const [segmentNames, attachmentNames] = await Promise.all([
+    readdirOrEmpty(input.filesystem, `${directory}/events`),
+    readdirOrEmpty(input.filesystem, `${directory}/attachments`),
+  ]);
   const foreign = segmentNames.filter((name) => name.endsWith('.jsonl') && name !== `${input.deviceId}.jsonl`);
+  /* Filtered by the same rule the incoming tree is validated against, so a
+   * stray file in the directory is left where it is instead of being recorded
+   * into a tree every reader would then refuse. */
+  const attachments = attachmentNames.filter((name) => chatAttachmentPattern.test(`attachments/${name}`));
   const read = await Promise.all([
     readFileOrUndefined(input.filesystem, `${directory}/${chatRecordFileName}`).then(
       (bytes) => [chatRecordFileName, bytes] as const,
@@ -223,6 +257,11 @@ const localChatEntries = async (input: ChatRefContext & Readonly<{ chatId: strin
     ...foreign.map(async (name) =>
       readFileOrUndefined(input.filesystem, `${directory}/events/${name}`).then(
         (bytes) => [`events/${name}`, bytes] as const,
+      ),
+    ),
+    ...attachments.map(async (name) =>
+      readFileOrUndefined(input.filesystem, `${directory}/attachments/${name}`).then(
+        (bytes) => [`attachments/${name}`, bytes] as const,
       ),
     ),
   ]);
@@ -310,7 +349,7 @@ const sameTree = (left: ImmutableRevisionTree, right: ImmutableRevisionTree | un
 /** Validate the complete, deliberately small schema of an incoming chat-ref tree. */
 const assertChatTree = (tree: ImmutableRevisionTree): void => {
   for (const entry of tree.entries()) {
-    if (entry.mode !== '100644' || (entry.path !== chatRecordFileName && !/^events\/[^/]+\.jsonl$/u.test(entry.path))) {
+    if (entry.mode !== '100644' || !isChatTreePath(entry.path)) {
       throw new RevisionPortError('UNSUPPORTED_OPERATION', `Chat ref contains an unsupported record: ${entry.path}`);
     }
     if (entry.path === chatRecordFileName) {
@@ -484,6 +523,11 @@ export const replayChatSegment = async (input: ReplayChatSegmentInput): Promise<
   const receipt = await input.port.writeRevision({
     parents: input.onto === undefined ? [] : [input.onto],
     tree,
+    /* A chat tree is closed, so it can never carry the `.gitattributes` a
+     * pointer needs behind it, and its attachments are capped where plain git
+     * carries them on any remote. Recorded verbatim, the blobs are ordinary
+     * objects every device and every remote kind can serve. */
+    largeObjects: false,
     provenance: chatProvenance(input, now),
     summary: { generated: `Chat ${input.chatId}` },
   });

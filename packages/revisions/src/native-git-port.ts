@@ -603,15 +603,18 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * The commit `fast-import` writes is a throwaway: this port needs the *tree*
    * it produced, and writes Tau's own commit over it.
    *
-   * @param tree - The exact tree to store.
+   * @param tree - The tree to store.
+   * @param largeObjects - Whether the clean step runs; `false` stores it verbatim.
    * @returns The root tree's object id.
    */
-  const writeTreeObject = async (tree: ImmutableRevisionTree): Promise<string> => {
+  const writeTreeObject = async (tree: ImmutableRevisionTree, largeObjects: boolean): Promise<string> => {
     /* `fast-import` stores `inline` data verbatim, so git's own clean filter
      * never runs on this path and the pointer decision is Tau's. It is made by
      * the host-neutral cut (`lfs.ts`) that the cut's `treeId` is computed from,
      * so the id this engine records is the id the host predicted. */
-    const recorded = cleanLargeObjects(tree);
+    const recorded = largeObjects
+      ? cleanLargeObjects(tree)
+      : { tree, objects: new Map<string, Uint8Array<ArrayBuffer>>() };
     await Promise.all([...recorded.objects].map(async ([oid, content]) => storeLfsObject(oid, content)));
     const stagingRef = `${stagingRefPrefix}-${randomUUID()}`;
     const chunks: Array<Uint8Array<ArrayBuffer>> = [
@@ -1066,7 +1069,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     },
 
     writeRevision: async (input: WriteRevisionInput): Promise<RevisionReceipt> => {
-      const treeId = await writeTreeObject(input.tree);
+      const treeId = await writeTreeObject(input.tree, input.largeObjects !== false);
       const trailer: RevisionTrailer = {
         parents: [...input.parents],
         provenance: input.provenance,

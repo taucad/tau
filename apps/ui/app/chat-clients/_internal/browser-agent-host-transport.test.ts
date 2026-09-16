@@ -1873,3 +1873,136 @@ describe('BrowserPlacementChatTransport', () => {
     unregister();
   });
 });
+
+/* W9: a durable turn references its attachments by content-addressed path. The
+   bytes are already on disk when the part is built, so the log row names them
+   instead of re-inlining base64 on every retry, edit and reattach (D14). */
+describe('BrowserPlacementChatTransport attachments', () => {
+  const attachmentHash = 'c'.repeat(64);
+
+  /** Admit one submit turn and hand back the message the host was started with. */
+  const admittedMessage = async (
+    chatId: string,
+    parts: MyUIMessage['parts'],
+  ): Promise<Record<string, unknown> | undefined> => {
+    installBrowserGlobals();
+    const runId = `run-${chatId}`;
+    const transport = new BrowserPlacementChatTransport();
+    const commands: Array<Record<string, unknown>> = [];
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({ projectId: `project-${chatId}`, backend: 'opfs', providerBasePath: chatId }),
+      markRunId: async () => undefined,
+      createClient: async () =>
+        clientFor(chatId, runId, {
+          start: vi.fn(async (input: Parameters<AgentHostClient['start']>[0]) => {
+            commands.push({ ...input });
+            return snapshot(input.chatId, input.runId, 'completed');
+          }),
+        }),
+    });
+    try {
+      const stream = await transport.sendMessages({
+        chatId,
+        trigger: 'submit-message',
+        messageId: undefined,
+        messages: [{ id: `user-${chatId}`, role: 'user', parts }],
+        abortSignal: undefined,
+        body: browserBody({ runId, trigger: 'submit' }),
+      });
+      await drain(stream.getReader());
+    } finally {
+      unregister();
+    }
+    const message = commands[0]?.['message'];
+    return isRecord(message) ? message : undefined;
+  };
+
+  it('should record an attachment image part as a file-ref block', async () => {
+    const message = await admittedMessage('chat-attachment-image', [
+      { type: 'text', text: 'Match this.' },
+      {
+        type: 'file',
+        mediaType: 'image/png',
+        url: `attachments/${attachmentHash}.png`,
+        providerMetadata: { common: { byteLength: 1234 } },
+      },
+    ]);
+
+    expect(message?.['content']).toEqual([
+      { type: 'text', text: 'Match this.' },
+      { type: 'file-ref', path: `attachments/${attachmentHash}.png`, mimeType: 'image/png', byteLength: 1234 },
+    ]);
+  });
+
+  it('should record an attachment document part as a file-ref block carrying its filename', async () => {
+    const message = await admittedMessage('chat-attachment-pdf', [
+      {
+        type: 'file',
+        mediaType: 'application/pdf',
+        filename: 'bracket-spec.pdf',
+        url: `attachments/${attachmentHash}.pdf`,
+        providerMetadata: { common: { byteLength: 20_480 } },
+      },
+    ]);
+
+    expect(message?.['content']).toEqual([
+      {
+        type: 'file-ref',
+        path: `attachments/${attachmentHash}.pdf`,
+        mimeType: 'application/pdf',
+        byteLength: 20_480,
+        filename: 'bracket-spec.pdf',
+      },
+    ]);
+  });
+
+  it('should still record a legacy data URL part as an inline image block', async () => {
+    const message = await admittedMessage('chat-attachment-legacy', [
+      { type: 'file', mediaType: 'image/png', url: 'data:image/png;base64,AAAA' },
+    ]);
+
+    expect(message?.['content']).toEqual([{ type: 'image', mimeType: 'image/png', data: 'AAAA' }]);
+  });
+
+  it('should refuse a file part whose URL is neither an attachment nor a data URL', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-attachment-unknown-url';
+    const runId = `run-${chatId}`;
+    const transport = new BrowserPlacementChatTransport();
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({ projectId: `project-${chatId}`, backend: 'opfs', providerBasePath: chatId }),
+      markRunId: async () => undefined,
+      createClient: async () => clientFor(chatId, runId),
+    });
+    const stream = await transport.sendMessages({
+      chatId,
+      trigger: 'submit-message',
+      messageId: undefined,
+      messages: [
+        {
+          id: 'user-unknown-url',
+          role: 'user',
+          parts: [{ type: 'file', mediaType: 'image/png', url: 'https://example.invalid/cat.png' }],
+        },
+      ],
+      abortSignal: undefined,
+      body: browserBody({ runId, trigger: 'submit' }),
+    });
+
+    await expect(drain(stream.getReader())).rejects.toThrow('https://example.invalid/cat.png');
+    unregister();
+  });
+
+  /* P29: a draft hydrated from a record carries a file part with no size — the
+     reload-then-send path. The reference is still recorded; only the optional
+     field is absent. */
+  it('should record an attachment part that names no byte length, without the field', async () => {
+    const message = await admittedMessage('chat-attachment-no-size', [
+      { type: 'file', mediaType: 'image/png', url: `attachments/${attachmentHash}.png` },
+    ]);
+
+    expect(message?.['content']).toEqual([
+      { type: 'file-ref', path: `attachments/${attachmentHash}.png`, mimeType: 'image/png' },
+    ]);
+  });
+});

@@ -17,9 +17,11 @@ export type SliderInputProperties = Omit<
 > & {
   readonly value: number;
   readonly displayValue?: string;
+  readonly editingValue?: string;
   readonly min: number;
   readonly max: number;
   readonly step: number;
+  readonly stepBase?: number;
   readonly leadingContent?: React.ReactNode;
   readonly trailingAdornment?: React.ReactNode;
   readonly dataSlot?: string;
@@ -29,10 +31,15 @@ export type SliderInputProperties = Omit<
   // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors native input prop
   readonly disabled?: boolean;
   readonly 'aria-label': string;
+  readonly 'aria-describedby'?: string;
   readonly onScrubChange?: (value: number) => void;
   readonly onScrubCommit?: (value: number) => void;
+  readonly onScrubCancel?: () => void;
   readonly onInputChange?: (text: string) => void;
   readonly onInputCommit?: (value: number) => void;
+  readonly onInputEnter?: () => void;
+  readonly onInputEscape?: () => void;
+  readonly onStep?: (direction: -1 | 1, modifiers: { shift: boolean }) => void;
   readonly onFocusChange?: (isFocused: boolean) => void;
 };
 
@@ -51,9 +58,17 @@ const releasePointer = (element: Element, pointerId: number): void => {
   }
 };
 
-const getDecimalCount = (value: number): number => (String(value).split('.')[1] ?? '').length;
+const getDecimalCount = (value: number): number => {
+  const [coefficient, exponentText] = String(value).toLowerCase().split('e');
+  const fractionDigits = coefficient?.split('.')[1]?.length ?? 0;
+  const exponent = exponentText === undefined ? 0 : Number(exponentText);
+  return Math.max(0, fractionDigits - exponent);
+};
 
 const roundValue = (value: number, decimalCount: number): number => {
+  if (decimalCount > 15) {
+    return Number(value.toPrecision(15));
+  }
   const rounder = 10 ** decimalCount;
   return Math.round(value * rounder) / rounder;
 };
@@ -70,9 +85,11 @@ export const snapToStep = (value: number, step: number, min = 0): number => {
 export const SliderInput = ({
   value,
   displayValue = String(value),
+  editingValue,
   min,
   max,
   step,
+  stepBase = min,
   leadingContent,
   trailingAdornment,
   dataSlot = 'slider-input',
@@ -82,10 +99,15 @@ export const SliderInput = ({
   disabled,
   className,
   'aria-label': ariaLabel,
+  'aria-describedby': ariaDescribedBy,
   onScrubChange,
   onScrubCommit,
+  onScrubCancel,
   onInputChange,
   onInputCommit,
+  onInputEnter,
+  onInputEscape,
+  onStep,
   onFocusChange,
   onPointerDown,
   onPointerMove,
@@ -103,7 +125,8 @@ export const SliderInput = ({
   const [isEditing, setIsEditing] = React.useState(false);
   const [hasUserEdit, setHasUserEdit] = React.useState(false);
   const [isScrubbing, setIsScrubbing] = React.useState(false);
-  const inputValue = isEditing && hasUserEdit ? text : displayValue;
+  const visibleValue = editingValue ?? displayValue;
+  const inputValue = isEditing ? (editingValue ?? (hasUserEdit ? text : displayValue)) : visibleValue;
 
   const range = max - min;
   const fillPercent = range > 0 ? clamp(((value - min) / range) * 100, 0, 100) : 0;
@@ -146,11 +169,11 @@ export const SliderInput = ({
       }
 
       const rawValue = activePointer.startValue + deltaX * (range / event.currentTarget.offsetWidth);
-      const nextValue = clamp(snapToStep(rawValue, step, min), min, max);
+      const nextValue = clamp(snapToStep(rawValue, step, stepBase), min, max);
       lastScrubValueRef.current = nextValue;
       onScrubChange?.(nextValue);
     },
-    [max, min, onPointerMove, onScrubChange, range, step],
+    [max, min, onPointerMove, onScrubChange, range, step, stepBase],
   );
 
   const finishPointerInteraction = React.useCallback(
@@ -165,7 +188,11 @@ export const SliderInput = ({
 
       if (activePointer.hasMoved) {
         setIsScrubbing(false);
-        onScrubCommit?.(lastScrubValueRef.current);
+        if (isCancelled) {
+          onScrubCancel?.();
+        } else {
+          onScrubCommit?.(lastScrubValueRef.current);
+        }
         return;
       }
 
@@ -174,7 +201,7 @@ export const SliderInput = ({
         inputRef.current?.select();
       }
     },
-    [onScrubCommit],
+    [onScrubCancel, onScrubCommit],
   );
 
   const handlePointerUp = React.useCallback(
@@ -214,14 +241,14 @@ export const SliderInput = ({
       setHasUserEdit(false);
       return;
     }
-    if (hasUserEdit) {
+    if (hasUserEdit && onInputEnter === undefined) {
       const parsedValue = Number(text);
       if (Number.isFinite(parsedValue) && Math.abs(parsedValue - value) >= 1e-10) {
         onInputCommit?.(parsedValue);
       }
     }
     setHasUserEdit(false);
-  }, [displayValue, hasUserEdit, onFocusChange, onInputCommit, text, value]);
+  }, [displayValue, hasUserEdit, onFocusChange, onInputCommit, onInputEnter, text, value]);
 
   const handleInputChange = React.useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -241,6 +268,7 @@ export const SliderInput = ({
       if (event.key === 'Enter') {
         event.preventDefault();
         event.stopPropagation();
+        onInputEnter?.();
         event.currentTarget.blur();
         return;
       }
@@ -250,7 +278,11 @@ export const SliderInput = ({
         revertingRef.current = true;
         setText(preEditDisplayValueRef.current);
         setHasUserEdit(false);
-        onInputCommit?.(preEditValueRef.current);
+        if (onInputEscape) {
+          onInputEscape();
+        } else {
+          onInputCommit?.(preEditValueRef.current);
+        }
         event.currentTarget.blur();
         return;
       }
@@ -260,13 +292,17 @@ export const SliderInput = ({
 
       event.preventDefault();
       event.stopPropagation();
+      if (onStep) {
+        onStep(event.key === 'ArrowUp' ? 1 : -1, { shift: event.shiftKey });
+        return;
+      }
       const delta = event.key === 'ArrowUp' ? step : -step;
-      const nextValue = clamp(snapToStep(value + delta, step, min), min, max);
+      const nextValue = clamp(snapToStep(value + delta, step, stepBase), min, max);
       setText(String(nextValue));
       setHasUserEdit(false);
       onInputCommit?.(nextValue);
     },
-    [disabled, isReadOnly, max, min, onInputCommit, step, value],
+    [disabled, isReadOnly, max, min, onInputCommit, onInputEnter, onInputEscape, onStep, step, stepBase, value],
   );
 
   return (
@@ -314,7 +350,7 @@ export const SliderInput = ({
             data-slot='slider-input-display'
             className='pointer-events-none col-start-1 row-start-1 text-right tabular-nums transition-colors select-none'
           >
-            {displayValue}
+            {visibleValue}
           </span>
         )}
         <input
@@ -325,6 +361,7 @@ export const SliderInput = ({
           type='text'
           inputMode='decimal'
           aria-label={ariaLabel}
+          aria-describedby={ariaDescribedBy}
           value={inputValue}
           disabled={disabled}
           readOnly={isReadOnly}

@@ -90,7 +90,7 @@ export default defineConfig({
           browser: 'chromium',
           name: 'chromium-touch',
           include: ['src/revision-ux-visual-matrix.spec.ts'],
-          provider: playwright({
+          provider: playwrightProvider({
             actionTimeout: 10_000,
             contextOptions: { hasTouch: true, isMobile: true },
             launchOptions: {

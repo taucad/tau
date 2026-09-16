@@ -72,11 +72,27 @@ export const seedTauCloudOwner = async (label: string): Promise<TauCloudOwner> =
   assertTestEmail(account.email);
   const headers = { 'content-type': 'application/json', origin: gitE2EFrontendUrl };
 
-  const signUp = await fetch(`${gitE2EApiUrl}/v1/auth/sign-up/email`, {
+  /* Better Auth allows three sign-ups per ten seconds per origin, and this file
+     seeds three accounts before its first case. Waiting out a `429` here rather
+     than spacing the call sites keeps the limit the fixture's problem: the next
+     case that needs one more owner does not have to know about it. */
+  let signUp = await fetch(`${gitE2EApiUrl}/v1/auth/sign-up/email`, {
     method: 'POST',
     headers,
     body: JSON.stringify(account),
   });
+  for (let attempt = 0; signUp.status === 429 && attempt < 6; attempt += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- waiting out a rate limit is sequential by definition.
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 5000);
+    });
+    // oxlint-disable-next-line no-await-in-loop -- ditto: one retry at a time.
+    signUp = await fetch(`${gitE2EApiUrl}/v1/auth/sign-up/email`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(account),
+    });
+  }
   if (!signUp.ok) {
     throw new Error(`Git E2E sign-up failed with HTTP ${String(signUp.status)}: ${await signUp.text()}`);
   }
@@ -169,6 +185,35 @@ export const registerProject = async (owner: TauCloudOwner, projectId: string): 
   await psql(
     `INSERT INTO project (id, owner_id, name, origin) ` +
       `VALUES ('${projectId}', '${owner.userId}', 'Git server E2E', 'local-mirror') ON CONFLICT (id) DO NOTHING;`,
+  );
+};
+
+/**
+ * Whether the Tau Hosted Remote holds a row for this project id.
+ *
+ * @param projectId - The id to look for.
+ * @returns True when a `project` row exists.
+ */
+export const projectExists = async (projectId: string): Promise<boolean> =>
+  (await psql(`SELECT count(*) FROM project WHERE id = '${projectId}';`)) !== '0';
+
+/**
+ * Forget every storage figure this owner's projects have accumulated.
+ *
+ * `GitRepositoryService.readOwnerUsage` sums `project_git` **account-wide** and
+ * deliberately so — one plan allowance is shared by all owned projects. One
+ * owner therefore serves the whole file, and a quota case that spends nearly
+ * the whole plan on its own project leaves the account over the limit for every
+ * later case: the coarse `authorize` guard then shadows the fine per-file one
+ * and three unrelated rows fail (review C57). Called per case, so each one owns
+ * the headroom it seeds.
+ *
+ * @param owner - The owner whose projects are forgotten.
+ * @returns Nothing.
+ */
+export const resetOwnerStorage = async (owner: TauCloudOwner): Promise<void> => {
+  await psql(
+    `DELETE FROM project_git WHERE project_id IN (SELECT id FROM project WHERE owner_id = '${owner.userId}');`,
   );
 };
 

@@ -303,6 +303,103 @@ const sampleFade = async (text: string) =>
 // real open-stream path; WebKit remains covered by the shared renderer/CSS.
 const streamingFadeTest = server.browser === 'webkit' ? test.skip : test;
 
+const activityUxScript: readonly GatewayScriptTurn[] = [
+  {
+    reasoningBlocks: [
+      '**Confirming test completion and readiness**',
+      'The source is intact, so I will verify the current model before reporting the result.',
+    ],
+    gateChunks: true,
+    toolCalls: [{ name: 'read_file', args: { targetFile: 'public/models/honeycomb.js' } }],
+    usage: { inputTokens: 12, outputTokens: 18 },
+  },
+  {
+    text: 'The model is ready.',
+    usage: { inputTokens: 18, outputTokens: 6 },
+  },
+];
+
+streamingFadeTest('presents sequential reasoning and semantic activity through completion and reload', async () => {
+  await prepareBrowserHost('indexeddb', activityUxScript);
+  await target.type(composer, 'Inspect the current model.');
+  await target.click(selectors.getByCss('button:has(svg.lucide-arrow-up)').last());
+
+  const firstReasoning = selectors.getByText('Confirming test completion and readiness', { exact: true });
+  await target.expectVisible(firstReasoning, 120_000);
+  expect(
+    await target.evaluateLocator(firstReasoning, (element) => {
+      const style = getComputedStyle(element);
+      return { fontStyle: style.fontStyle, fontWeight: style.fontWeight };
+    }),
+  ).toEqual({ fontStyle: 'italic', fontWeight: '400' });
+  await target.expectCount(selectors.getByRole('group', { name: 'Collapse thought' }), 1);
+
+  await target.releaseAgentHostGatewayFixture();
+  await target.expectVisible(
+    selectors.getByText('The source is intact, so I will verify the current model before reporting the result.', {
+      exact: true,
+    }),
+    30_000,
+  );
+  await target.expectCount(selectors.getByRole('group', { name: 'Collapse thought' }), 1);
+
+  await target.click(selectors.getByRole('group', { name: 'Collapse thought' }));
+  const thoughtTrigger = selectors.getByRole('button', { name: /^Thought (?:briefly|for \d+ seconds?)$/u });
+  await target.expectVisible(thoughtTrigger, 30_000);
+  expect(await target.evaluate(() => document.activeElement?.textContent.startsWith('Thought') ?? false)).toBe(true);
+
+  await target.releaseAgentHostGatewayFixture();
+  await target.expectVisible(selectors.getByText('The model is ready.', { exact: true }), 120_000);
+  await target.expectVisible(selectors.getByRole('button', { name: 'Read files' }), 60_000);
+  await target.expectCount(selectors.getByRole('group', { name: 'Collapse thought' }), 0);
+
+  await target.click(thoughtTrigger);
+  const reasoningBody = selectors.getByRole('group', { name: 'Collapse thought' });
+  const reasoningTrigger = selectors.getByRole('button', { name: 'Collapse thought' });
+  await target.expectVisible(reasoningBody, 30_000);
+  await target.press(reasoningTrigger, 'Enter');
+  await target.expectVisible(thoughtTrigger, 30_000);
+  await target.press(thoughtTrigger, 'Space');
+  await target.expectVisible(reasoningBody, 30_000);
+
+  await target.setViewport({ width: 430, height: 820 });
+  const activityTrigger = selectors.getByRole('button', { name: 'Read files' });
+  const alignment = await target.evaluateLocator(activityTrigger, (element) => {
+    const icon = element.querySelector('svg');
+    const label = element.querySelector('span');
+    if (!icon || !label) {
+      return undefined;
+    }
+    const iconBounds = icon.getBoundingClientRect();
+    const labelBounds = label.getBoundingClientRect();
+    return {
+      centerDelta: Math.abs(iconBounds.y + iconBounds.height / 2 - (labelBounds.y + labelBounds.height / 2)),
+      usesExactToken: icon.classList.contains('size-3'),
+    };
+  });
+  expect(alignment?.usesExactToken).toBe(true);
+  expect(alignment?.centerDelta).toBeLessThanOrEqual(1);
+
+  await target.click(activityTrigger);
+  await target.expectVisible(selectors.getByText(/Read public\/models\/honeycomb\.js/u), 30_000);
+  if (!(await target.isVisible(reasoningBody))) {
+    await target.click(thoughtTrigger);
+    await target.expectVisible(reasoningBody, 30_000);
+  }
+  await target.screenshot(selectors.getByCss('body'), 'agent-activity-exact-light-narrow.png');
+  await target.emulateColorScheme('dark');
+  await target.screenshot(selectors.getByCss('body'), 'agent-activity-exact-dark-narrow.png');
+
+  await target.reload();
+  await ensureChatOpen();
+  await target.expectVisible(selectors.getByText('The model is ready.', { exact: true }), 60_000);
+  await target.expectVisible(
+    selectors.getByRole('button', { name: /^Thought (?:briefly|for \d+ seconds?)$/u }),
+    60_000,
+  );
+  await target.expectVisible(selectors.getByRole('button', { name: 'Read files' }), 60_000);
+});
+
 streamingFadeTest('fades live reasoning and prose chunks without retaining wrappers', async () => {
   await prepareBrowserHost('indexeddb', streamingFadeScript);
   await target.type(composer, 'Show the streaming fade.');

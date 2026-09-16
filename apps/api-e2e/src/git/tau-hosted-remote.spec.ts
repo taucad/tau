@@ -1,15 +1,17 @@
 /* oxlint-disable no-await-in-loop -- Every loop here drives one `git` child or one database statement after another on purpose. */
 import { randomFillSync } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { join, resolve } from 'node:path';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { gitE2EApiUrl, gitE2EFrontendUrl } from '#git/config.js';
 import {
   basicAuthorization,
   deleteTauCloudOwner,
   gitE2EProjectId,
+  projectExists,
   registerProject,
+  resetOwnerStorage,
   runGit,
   seedProPlan,
   seedTauCloudOwner,
@@ -138,10 +140,16 @@ const spendStorage = async (projectId: string, bytes: number): Promise<void> => 
 
 const proLimitBytes = 10 * 1024 ** 3;
 
+/** The volume the tier's API writes bare repositories to (`global-setup.ts`). */
+const hostedRemoteRoot = resolve(import.meta.dirname, '../../../../out/test-results/api-e2e-git/git-root');
+
 let owner: TauCloudOwner;
 /* One shared second account. Better Auth allows three sign-ups per ten
    seconds, so every case that needs "somebody else" reads this one. */
 let stranger: TauCloudOwner;
+/* One shared free-tier account, for the same reason: Better Auth's sign-up
+   limit is three per ten seconds, and two cases need an owner with no plan. */
+let free: TauCloudOwner;
 
 beforeAll(async () => {
   owner = await seedTauCloudOwner('remote');
@@ -149,7 +157,18 @@ beforeAll(async () => {
   await seedProPlan(owner);
   stranger = await seedTauCloudOwner('stranger');
   owners.push(stranger);
+  /* Registering a project is now a paid-plan write (N5), and this account
+     connects one in `should list a caller’s own projects`. */
+  await seedProPlan(stranger);
+  free = await seedTauCloudOwner('free');
+  owners.push(free);
 }, 300_000);
+
+/* One plan allowance is shared by every project this owner has, so a case that
+   spends nearly all of it would decide the next case's headroom (review C57). */
+beforeEach(async () => {
+  await resetOwnerStorage(owner);
+});
 
 afterAll(async () => {
   for (const seeded of owners) {
@@ -241,9 +260,10 @@ describe('Tau Hosted Remote, real process', () => {
         headers: { authorization: `Bearer ${owner.token}` },
       });
       expect(response.status).toBe(404);
-      expect(await response.json()).toEqual(
-        expect.objectContaining({ code: 'GIT_REPOSITORY_NOT_FOUND', statusCode: 404 }),
-      );
+      /* Stock git reads a refusal only as `text/plain` (N6); the browser
+         envelope is asserted on the entitlement row below. */
+      expect(response.headers.get('content-type')).toMatch(/text\/plain/u);
+      expect(await response.text()).toContain('Repository not found');
     });
 
     /* W18 DEF-2 / W18-b review R8: how a second device *names* a project it has
@@ -285,8 +305,6 @@ describe('Tau Hosted Remote, real process', () => {
 
   describe('plan entitlements, decided by real Postgres', () => {
     it('should refuse a push from a free-tier owner and still serve the read advertisement', async () => {
-      const free = await seedTauCloudOwner('free');
-      owners.push(free);
       const projectId = gitE2EProjectId();
       await registerProject(free, projectId);
 
@@ -295,11 +313,49 @@ describe('Tau Hosted Remote, real process', () => {
       });
       expect(read.status).toBe(200);
 
+      /* N6: a client with no `Origin` is not a browser, and git prints a 4xx
+         body only when it is `text/plain` — so this is the shape a `git push`
+         from a free account actually shows its user (review C7). */
       const write = await fetch(`${remoteUrlFor(projectId)}/info/refs?service=git-receive-pack`, {
         headers: { authorization: `Bearer ${free.token}` },
       });
       expect(write.status).toBe(403);
-      expect(await write.json()).toEqual(expect.objectContaining({ code: 'GIT_SYNC_NOT_ENTITLED' }));
+      expect(write.headers.get('content-type')).toMatch(/text\/plain/u);
+      expect(await write.text()).toContain('paid plan');
+
+      // The browser client keeps the typed JSON envelope `REMOTE_NOT_ENTITLED` reads.
+      const inBrowser = await fetch(`${remoteUrlFor(projectId)}/info/refs?service=git-receive-pack`, {
+        headers: { authorization: `Bearer ${free.token}`, origin: gitE2EFrontendUrl },
+      });
+      expect(inBrowser.status).toBe(403);
+      expect(await inBrowser.json()).toEqual(expect.objectContaining({ code: 'GIT_SYNC_NOT_ENTITLED' }));
+    }, 300_000);
+
+    /**
+     * N5 (review C11): *Connect Tau Cloud* refuses before it writes anything.
+     *
+     * Registration spent the daily budget, inserted the row and ran
+     * `git init --bare` plus a hook install on the shared volume before
+     * anything looked at the plan — and then every push was refused with this
+     * same sentence. The operator's own free-tier account carries four such
+     * orphans. This is the tier that can see all three facts at once: the
+     * status, the row real Postgres holds, and the directory on the real
+     * `TAU_GIT_ROOT`.
+     */
+    it('should refuse a free-tier connect and leave no row and no repository behind', async () => {
+      const projectId = gitE2EProjectId();
+
+      const refused = await connectProject(free.token, projectId, 'Free tier');
+      expect(refused.status, await refused.clone().text()).toBe(403);
+      expect(await refused.json()).toEqual(
+        expect.objectContaining({
+          code: 'GIT_SYNC_NOT_ENTITLED',
+          error: 'Syncing files to Tau Cloud is a paid plan feature.',
+        }),
+      );
+
+      expect(await projectExists(projectId)).toBe(false);
+      await expect(stat(join(hostedRemoteRoot, `${projectId}.git`))).rejects.toMatchObject({ code: 'ENOENT' });
     }, 300_000);
 
     it('should answer another owner’s project with 404 rather than 403', async () => {

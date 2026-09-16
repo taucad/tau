@@ -405,8 +405,13 @@ const writeScriptedTurn = async (options: {
       usage: { input_tokens: turn.usage.inputTokens, output_tokens: 0 },
     },
   });
-  const reasoningChunks = turn.reasoningChunks ?? (turn.reasoning === undefined ? [] : [turn.reasoning]);
-  if (reasoningChunks.length > 0) {
+  const reasoningBlocks = turn.reasoningBlocks?.map((reasoningBlock) => [reasoningBlock]) ?? [
+    turn.reasoningChunks ?? (turn.reasoning === undefined ? [] : [turn.reasoning]),
+  ];
+  for (const [reasoningBlockIndex, reasoningChunks] of reasoningBlocks.entries()) {
+    if (reasoningChunks.length === 0) {
+      continue;
+    }
     writeEvent('content_block_start', {
       type: 'content_block_start',
       index,
@@ -427,7 +432,7 @@ const writeScriptedTurn = async (options: {
       index,
       delta: {
         type: 'signature_delta',
-        signature: `browser-host-e2e-signature-${String(currentRequest)}`,
+        signature: `browser-host-e2e-signature-${String(currentRequest)}-${String(reasoningBlockIndex)}`,
       },
     });
     writeEvent('content_block_stop', { type: 'content_block_stop', index });

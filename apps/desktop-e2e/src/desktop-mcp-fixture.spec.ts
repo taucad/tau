@@ -36,7 +36,7 @@ import {
  * round trip without pretending Tau owns the downstream standing-grant store.
  */
 
-const externalPrompt = 'noask skill-names mcp';
+const externalPrompt = 'updates noask skill-names mcp';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 const fakeAcpAgent = join(workspaceRoot, 'packages/host/src/acp/fixtures/fake-agent.ts');
@@ -123,6 +123,21 @@ test('serves the utility MCP endpoint to an agent it spawned', async () => {
 
     /* 3. The normalized ACP call uses the same native CAD card as a Tau turn,
      * instead of the generic external-tool disclosure. */
+    const thought = page.getByRole('button', { name: 'Thought briefly' }).last();
+    await expectVisible(thought, 60_000);
+    await thought.click();
+    const thoughtBody = page.getByRole('button', { name: 'Collapse thought' }).last();
+    await expectVisible(thoughtBody, 60_000);
+    const thoughtSummary = page.getByText('Confirming test completion and readiness', { exact: true });
+    await expectVisible(thoughtSummary, 60_000);
+    expect(await thoughtSummary.evaluate((element) => getComputedStyle(element).fontStyle)).toBe('italic');
+    expect(await thoughtSummary.evaluate((element) => getComputedStyle(element).fontWeight)).toBe('400');
+    await thoughtBody.click();
+    await expect.poll(async () => thought.evaluate((element) => element === document.activeElement)).toBe(true);
+
+    const testActivity = page.getByRole('button', { name: /(?:^|, )ran tests$/iu }).last();
+    await expectVisible(testActivity, 60_000);
+    await testActivity.click();
     await expectVisible(page.getByText('Tested 1 requirement', { exact: true }), 60_000);
     await expect.poll(() => readFileSync(eventsPath, 'utf8'), { timeout: 60_000 }).toContain('"state":"completed"');
 

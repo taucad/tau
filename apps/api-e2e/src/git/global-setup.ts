@@ -92,6 +92,24 @@ export const setup = async (): Promise<() => Promise<void>> => {
   environment['TAU_API_URL'] = gitE2EApiUrl;
   environment['TAU_FRONTEND_URL'] = gitE2EFrontendUrl;
   environment['TAU_TEST_MODE'] = 'true';
+  /* Without this the API selects `SelfHostCommercialEntitlementsService`, which
+   * hands every caller `canSyncFiles: true` and Pro's allowance — so this
+   * tier's whole plan dimension was inert and `should refuse a push from a
+   * free-tier owner` passed with `200` for the wrong reason (review C56). The
+   * schema requires the rest of this block whenever the flag is set; the values
+   * are the same fixtures `apps/desktop-e2e/global-setup.ts` uses, and nothing
+   * here reaches Stripe. */
+  environment['TAU_CLOUD_ENABLED'] = 'true';
+  environment['BILLING_ENVIRONMENT'] = 'development';
+  environment['BILLING_USAGE_CURSOR_SECRET'] = 'api-e2e-git-usage-cursor-secret-min-32-chars';
+  environment['BILLING_REQUEST_DIGEST_SECRET'] = 'api-e2e-git-request-digest-secret-min-32-chars';
+  environment['STRIPE_SECRET_KEY'] = 'rk_test_api_e2e_git_create';
+  environment['STRIPE_READ_SECRET_KEY'] = 'rk_test_api_e2e_git';
+  environment['STRIPE_ACCOUNT_ID'] = 'acct_api_e2e_git';
+  environment['STRIPE_LIVEMODE'] = 'false';
+  environment['STRIPE_WEBHOOK_SECRET'] = 'whsec_api_e2e_git';
+  environment['STRIPE_PRICE_ID_PRO_MONTHLY'] = 'price_api_e2e_git';
+  environment['STRIPE_PRODUCT_ID_CREDIT_PACK'] = 'prod_api_e2e_git';
   /* `TAU_GIT_ROOT` defaults to `.tau-git` and `git.service.ts` resolves it
    * against the process cwd, which is `apps/api` here — so without this every
    * run of this tier writes bare repositories into the source tree (825 MB of

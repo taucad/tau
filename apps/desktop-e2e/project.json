@@ -26,7 +26,7 @@
     "test:e2e": {
       "executor": "nx:run-commands",
       "metadata": {
-        "description": "Deterministic desktop chat tier (D19). Named test:e2e so `nx affected -t test:e2e` selects it, and built unpackaged so the Electron shell can run under xvfb on the CI e2e runner. `api:billing-policy:publish:development` runs on every invocation: it replays by job key, so re-running against an already-published identical policy is a no-op, and a genuine publish failure stays red."
+        "description": "Deterministic desktop chat tier (D19). Named test:e2e so `nx affected -t test:e2e` selects it, and built unpackaged so the Electron shell can run under xvfb on the CI e2e runner. Infrastructure bring-up is `scripts/ensure-services.sh`, shared with every other tier here: it publishes the bootstrap billing policy only on a database that has none, because that publish pins `--expected-head-revision 0` and dies on any database whose head has moved (C65/P70)."
       },
       "dependsOn": [
         {
@@ -42,9 +42,7 @@
         "cwd": "{workspaceRoot}/apps/desktop-e2e",
         "parallel": false,
         "commands": [
-          "docker-compose -f ../../infra/docker-compose.yml up -d postgres redis minio minio-bootstrap",
-          "pnpm --dir ../.. exec nx run api:db-migrate",
-          "pnpm --dir ../.. exec nx run api:billing-policy:publish:development",
+          "./scripts/ensure-services.sh",
           "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-in-project.spec.ts src/desktop-chat-replay.spec.ts src/desktop-chat-launcher-2.spec.ts src/desktop-mcp-fixture.spec.ts"
         ],
         "env": {
@@ -71,9 +69,7 @@
         "cwd": "{workspaceRoot}/apps/desktop-e2e",
         "parallel": false,
         "commands": [
-          "docker-compose -f ../../infra/docker-compose.yml up -d postgres redis minio minio-bootstrap",
-          "pnpm --dir ../.. exec nx run api:db-migrate",
-          "pnpm --dir ../.. exec nx run api:billing-policy:publish:development",
+          "./scripts/ensure-services.sh",
           "TAU_E2E_DESKTOP_EXECUTABLE=\"$PWD/../desktop/package-out/Tau-darwin-arm64/Tau.app/Contents/MacOS/Tau\" ../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-build123d.spec.ts src/desktop-assimp.spec.ts"
         ],
         "env": {
@@ -97,9 +93,7 @@
         "cwd": "{workspaceRoot}/apps/desktop-e2e",
         "parallel": false,
         "commands": [
-          "docker-compose -f ../../infra/docker-compose.yml up -d postgres redis minio minio-bootstrap",
-          "pnpm --dir ../.. exec nx run api:db-migrate",
-          "pnpm --dir ../.. exec nx run api:billing-policy:publish:development",
+          "./scripts/ensure-services.sh",
           "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-live.spec.ts"
         ],
         "env": {
@@ -128,9 +122,7 @@
         "cwd": "{workspaceRoot}/apps/desktop-e2e",
         "parallel": false,
         "commands": [
-          "docker-compose -f ../../infra/docker-compose.yml up -d postgres redis minio minio-bootstrap",
-          "pnpm --dir ../.. exec nx run api:db-migrate",
-          "pnpm --dir ../.. exec nx run api:billing-policy:publish:development",
+          "./scripts/ensure-services.sh",
           "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-acp.spec.ts"
         ],
         "env": {
@@ -170,9 +162,7 @@
         "cwd": "{workspaceRoot}/apps/desktop-e2e",
         "parallel": false,
         "commands": [
-          "docker-compose -f ../../infra/docker-compose.yml up -d postgres redis minio minio-bootstrap",
-          "pnpm --dir ../.. exec nx run api:db-migrate",
-          "pnpm --dir ../.. exec nx run api:billing-policy:publish:development",
+          "./scripts/ensure-services.sh",
           "../../node_modules/.bin/vitest run --config vitest.config.ts src/two-client.spec.ts"
         ],
         "env": {

@@ -24,6 +24,8 @@ export type GatewayScriptTurn = {
   readonly reasoning?: string;
   /** Reasoning deltas emitted in order; each can be held by `gateChunks`. */
   readonly reasoningChunks?: readonly string[];
+  /** Separate adjacent reasoning blocks, used to verify one shared UI disclosure. */
+  readonly reasoningBlocks?: readonly string[];
   /** Emitted as a `text` block. */
   readonly text?: string;
   /** Prose deltas emitted in order; each can be held by `gateChunks`. */

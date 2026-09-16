@@ -211,9 +211,18 @@ vi.mock('#hooks/use-kernel.js', () => ({
 }));
 
 vi.mock('#hooks/use-file-manager.js', () => {
+  /*
+   * Mirrors the real client's two shapes: the composer record store reads and
+   * writes bytes, while everything else here still speaks `utf8`. The spies stay
+   * string-level so their assertions keep naming the record's text.
+   */
   const client = {
-    readFile: async (path: string, encoding: 'utf8') => harness.homeReadFile(path, encoding),
-    writeFile: async (path: string, bytes: string) => harness.homeWriteFile(path, bytes),
+    readFile: async (path: string, encoding?: 'utf8') => {
+      const text = await harness.homeReadFile(path, 'utf8');
+      return encoding === 'utf8' ? text : new TextEncoder().encode(text);
+    },
+    writeFile: async (path: string, data: string | Uint8Array) =>
+      harness.homeWriteFile(path, typeof data === 'string' ? data : new TextDecoder().decode(data)),
   };
   return { useFileManager: () => ({ client }) };
 });

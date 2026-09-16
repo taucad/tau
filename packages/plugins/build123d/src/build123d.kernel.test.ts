@@ -36,8 +36,10 @@ const parameterDeclaration = {
   defaults: { width: 25.4 },
   bindings: {
     '/width': {
+      unit: 'mm',
       quantityKind: 'http://qudt.org/vocab/quantitykind/Length',
       space: 'linear',
+      sourceUnitCapability: 'change-source-unit:preserve-size:v1',
     },
   },
 };
@@ -91,6 +93,7 @@ describe('Build123d kernel lifecycle errors', () => {
   let definition: AnyKernelDefinition;
 
   beforeEach(async () => {
+    runtime.filesystem.readFile = vi.fn().mockRejectedValue(Object.assign(new Error('missing'), { code: 'ENOENT' }));
     definition = await resolveRuntimePluginDefinition('kernel', build123dKernel(kernelOptions));
   });
 

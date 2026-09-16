@@ -74,6 +74,8 @@ export type DesktopSession = {
   readonly logPath: string;
   /** The absolute path `window.tau.dialog.selectDirectory()` resolves to. */
   readonly pickedDirectory: string;
+  /** Every PostHog-shaped request any renderer made since launch (D13: zero on desktop). */
+  readonly analyticsRequests: readonly string[];
   /** Write trace, screenshot, process output and `desktop.log` under `out/`. */
   readonly capture: (label: string) => Promise<string>;
   readonly close: () => Promise<void>;
@@ -143,6 +145,9 @@ export const captureNextDesktopDownload = async (
  *   like, all read at launch.
  * @returns The live session.
  */
+/** PostHog through Tau's web proxy or directly. */
+export const analyticsRequestPattern = /\/api\/ph(?:\/|$)|posthog\.com/iu;
+
 export const launchDesktopApp = async (options: {
   readonly token: string;
   readonly env?: Readonly<Record<string, string>> | undefined;
@@ -210,6 +215,14 @@ export const launchDesktopApp = async (options: {
     },
   });
   const child = application.process();
+  /* Installed before the first window loads, and kept for the whole session, so
+   * startup and late traffic are both observed. */
+  const analyticsRequests: string[] = [];
+  application.context().on('request', (request) => {
+    if (analyticsRequestPattern.test(request.url())) {
+      analyticsRequests.push(request.url());
+    }
+  });
 
   child.stdout?.on('data', (chunk: unknown) => output.push(String(chunk)));
   child.stderr?.on('data', (chunk: unknown) => output.push(String(chunk)));
@@ -349,6 +362,7 @@ export const launchDesktopApp = async (options: {
   };
 
   return {
+    analyticsRequests,
     application,
     capture,
     close,

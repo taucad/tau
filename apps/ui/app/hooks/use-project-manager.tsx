@@ -18,12 +18,11 @@ import type {
   StorageRootConfig,
 } from '@taucad/filesystem';
 import { resolveStorageRootKey } from '@taucad/filesystem/storage-root-key';
-import type { CadAgentExecution, Chat, MyUIMessage } from '@taucad/chat';
+import type { CadAgentExecution, Chat } from '@taucad/chat';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { getErrno } from '@taucad/utils/error';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type { Remote } from 'comlink';
-import { messageRole, messageStatus } from '@taucad/chat/constants';
 import { projectManagerMachine } from '#hooks/project-manager.machine.js';
 import type { ObjectStoreWorker, InitialEditorState } from '#hooks/object-store.worker.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -63,7 +62,8 @@ import { directoryPicker } from '#constants/browser.constants.js';
 import type { DirectoryPick } from '#constants/browser.constants.js';
 import { nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import { createInitialProject } from '#constants/project.constants.js';
-import { attachmentKind, attachmentReferenceOf, attachmentUrl } from '#utils/attachment.utils.js';
+import { attachmentKind, attachmentReferenceOf } from '#utils/attachment.utils.js';
+import { buildUserMessage } from '#utils/chat.utils.js';
 import type { AttachmentReference } from '#utils/attachment.utils.js';
 import { createAttachmentStore, createChatAttachmentStore } from '#db/attachment-store.js';
 import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
@@ -94,33 +94,6 @@ import type {
 
 /** A stored draft attachment, as the startup message references it. */
 export type InitialMessageAttachment = Omit<AttachmentReference, 'byteLength'>;
-
-/**
- * The startup user message: attachment references first so they render first,
- * then the trimmed text.
- */
-// Ponytail: local until W7's `buildUserMessage` lands in chat.utils (P39).
-const startupMessage = ({
-  content,
-  attachments = [],
-}: NonNullable<CreateProjectChatOptions['initialMessage']>): MyUIMessage => {
-  const parts = attachments.map((attachment): MyUIMessage['parts'][number] => ({
-    type: 'file',
-    url: attachmentUrl(attachment),
-    mediaType: attachment.mediaType,
-    ...(attachment.filename === undefined ? {} : { filename: attachment.filename }),
-  }));
-  const text = content.trim();
-  if (text.length > 0) {
-    parts.push({ type: 'text', text });
-  }
-  return {
-    id: generatePrefixedId(idPrefix.message),
-    role: messageRole.user,
-    parts,
-    metadata: { status: messageStatus.pending, createdAt: Date.now() },
-  };
-};
 
 /** The operation field naming where a created chat's attachments are copied from, when not Home. */
 const attachmentSourceOf = (options: CreateProjectChatOptions): { attachmentSource?: string } => {
@@ -1066,7 +1039,12 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       // The initial homepage prompt remains a normal pending user message
       // for display purposes. The permission to run it automatically after
       // route hydration is separate one-shot command state on the chat row.
-      const initialUserMessage = options.initialMessage ? startupMessage(options.initialMessage) : undefined;
+      const initialUserMessage = options.initialMessage
+        ? buildUserMessage({
+            text: options.initialMessage.content,
+            attachments: options.initialMessage.attachments,
+          })
+        : undefined;
       const chatMessages = initialUserMessage ? [initialUserMessage] : [];
       const startupRequest: Chat['startupRequest'] | undefined = initialUserMessage
         ? {

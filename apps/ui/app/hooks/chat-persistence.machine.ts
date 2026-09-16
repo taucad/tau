@@ -13,6 +13,7 @@ import type { CadAgentExecution, Chat, MyUIMessage } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
 import type { KernelId } from '@taucad/types/constants';
 import { getRetryDelay } from '#utils/backoff.utils.js';
+import type { AttachmentReference } from '#utils/attachment.utils.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 
 // Input types
@@ -77,7 +78,8 @@ export type ChatRequest =
       kind: 'edit';
       messageId: string;
       content: string;
-      imageUrls?: string[];
+      /** The edit's attachments, already promoted into the chat's directory. */
+      attachments?: readonly AttachmentReference[];
       body?: ChatRequestBody;
     }
   | { kind: 'retry'; messageId: string; body?: ChatRequestBody }

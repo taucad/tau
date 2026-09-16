@@ -5,16 +5,17 @@ import type { CadAgentConfigInput, CadAgentExecution, ModelProvider, MyUIMessage
 import { getCadSystemPrompt } from '@taucad/chat/prompts';
 import { getProviderFacingToolInputSchemas } from '@taucad/chat/schemas';
 import type { ChatExecutionTarget } from '@taucad/chat/schemas';
+import { toast } from 'sonner';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
-import { messageRole, messageStatus } from '@taucad/chat/constants';
 import { awaitAgentHostAvailability, useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
 import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
 import { useCreditPreflight } from '#hooks/use-credit-preflight.js';
 import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import { extractMimeTypeFromDataUrl } from '#utils/chat.utils.js';
+import { attachmentSendBlockReason, buildUserMessage } from '#utils/chat.utils.js';
+import type { AttachmentReference } from '#utils/attachment.utils.js';
 import { parseErrorForPersistence } from '#utils/error.utils.js';
 import { useProject } from '#hooks/use-project.js';
 import {
@@ -54,8 +55,8 @@ import { buildBrowserAgentHostSnapshotContext } from '#chat-clients/_internal/br
 
 /**
  * Input payload for {@link CadChatClient.submit}. Mirrors the surface the
- * `ChatTextarea`'s `onSubmit` hands the client — a string `text` plus an
- * optional list of image-url attachments. All other request configuration
+ * `ChatTextarea`'s `onSubmit` hands the client — a string `text` plus the
+ * draft's stored attachments. All other request configuration
  * (model, kernel, mode, toolChoice, testingEnabled, snapshot, contextPayload)
  * is composed *inside* the client from `useCadAgentConfig`.
  *
@@ -63,7 +64,8 @@ import { buildBrowserAgentHostSnapshotContext } from '#chat-clients/_internal/br
  */
 export type CadChatSubmitInput = {
   readonly text: string;
-  readonly imageUrls?: readonly string[];
+  /** The draft's attachments, stored beside its record; the client promotes them before sending (D18). */
+  readonly attachments?: readonly AttachmentReference[];
 };
 
 /**
@@ -132,26 +134,8 @@ const admissionWaitTimeout = 15_000;
 /** Upper bound on waiting for `GET /v1/models` to answer before a turn composes. Milliseconds. */
 const modelCatalogWaitTimeout = 20_000;
 
-const buildUserMessage = (input: CadChatSubmitInput): MyUIMessage => {
-  const trimmed = input.text.trim();
-  const imageUrls = input.imageUrls ?? [];
-  const fileParts: MyUIMessage['parts'] = imageUrls.map((url) => ({
-    type: 'file',
-    url,
-    mediaType: extractMimeTypeFromDataUrl(url),
-  }));
-  const textParts: MyUIMessage['parts'] = trimmed.length > 0 ? [{ type: 'text', text: trimmed }] : [];
-  const parts: MyUIMessage['parts'] = [...fileParts, ...textParts];
-  return {
-    id: generatePrefixedId(idPrefix.message),
-    role: messageRole.user,
-    parts,
-    metadata: {
-      status: messageStatus.pending,
-      createdAt: Date.now(),
-    },
-  };
-};
+/** Stable, so a retried send replaces its toast instead of stacking another. */
+const promotionToastId = 'chat-attachment-promotion';
 
 type BrowserHostTrigger =
   | { readonly trigger: 'submit' }
@@ -872,6 +856,47 @@ export const useCadChatClient = (): CadChatClient => {
     workspaceAuthority,
   ]);
 
+  /**
+   * Refuse a draft the turn's model cannot read (D20), and copy the rest into
+   * the chat's directory before anything is admitted (D18). Admission first
+   * would leave a claim admitted for a turn that never sends. A failed copy
+   * leaves the draft as it is and sends nothing.
+   */
+  const withAttachments = useCallback(
+    (attachments: readonly AttachmentReference[], send: () => void): void => {
+      if (agent.execution.kind === 'tau' && attachments.length > 0) {
+        const resolved = resolveModelRef.current(agent.execution.model);
+        const blocked = attachmentSendBlockReason(attachments, {
+          name: resolved.name,
+          support: resolved.model?.support,
+        });
+        if (blocked !== undefined) {
+          surfaceDispatchFailure(new Error(blocked));
+          return;
+        }
+      }
+      if (attachments.length === 0) {
+        send();
+        return;
+      }
+      const promoteThenSend = async (): Promise<void> => {
+        try {
+          await store.promoteDraftAttachments(activeChatId, attachments);
+        } catch (error) {
+          console.error('[useCadChatClient] attachment promotion failed', error);
+          toast.error("Your attachments couldn't be saved to this chat, so the message wasn't sent.", {
+            id: promotionToastId,
+          });
+          return;
+        }
+        send();
+      };
+      // async-iife: bootstrap — a submit verb is synchronous; the failure is reported by the toast above
+      void promoteThenSend();
+    },
+    [activeChatId, agent.execution, store, surfaceDispatchFailure],
+  );
+
   const submit = useCallback(
     (input: CadChatSubmitInput) => {
       if (refuseWhileBusy()) {
@@ -879,24 +904,26 @@ export const useCadChatClient = (): CadChatClient => {
       }
 
       const userMessage = buildUserMessage(input);
-      withWorkspace(userMessage.id, (execution, runId) => {
-        actions.sendMessage(userMessage, {
-          body: createRunBody({
-            agent,
-            projectId,
-            execution,
-            runId,
-            browserHost: hostAdmission({
+      withAttachments(input.attachments ?? [], () => {
+        withWorkspace(userMessage.id, (execution, runId) => {
+          actions.sendMessage(userMessage, {
+            body: createRunBody({
               agent,
-              chatId: activeChatId,
-              resolveModel: resolveModelRef.current,
-              trigger: { trigger: 'submit' },
+              projectId,
+              execution,
+              runId,
+              browserHost: hostAdmission({
+                agent,
+                chatId: activeChatId,
+                resolveModel: resolveModelRef.current,
+                trigger: { trigger: 'submit' },
+              }),
             }),
-          }),
+          });
         });
       });
     },
-    [actions, activeChatId, agent, projectId, refuseWhileBusy, withWorkspace],
+    [actions, activeChatId, agent, projectId, refuseWhileBusy, withAttachments, withWorkspace],
   );
 
   const edit = useCallback(
@@ -905,28 +932,30 @@ export const useCadChatClient = (): CadChatClient => {
         return;
       }
 
-      withWorkspace(messageId, (execution, runId) => {
-        actions.editMessage(messageId, input.text, {
-          imageUrls: input.imageUrls ? [...input.imageUrls] : undefined,
-          body: createRunBody({
-            agent,
-            projectId,
-            execution,
-            runId,
-            browserHost: hostAdmission({
+      withAttachments(input.attachments ?? [], () => {
+        withWorkspace(messageId, (execution, runId) => {
+          actions.editMessage(messageId, input.text, {
+            ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
+            body: createRunBody({
               agent,
-              chatId: activeChatId,
-              resolveModel: resolveModelRef.current,
-              trigger: {
-                trigger: 'edit',
-                retainedMessageIds: retainedMessageIdsBeforeTurn(messages, messageId),
-              },
+              projectId,
+              execution,
+              runId,
+              browserHost: hostAdmission({
+                agent,
+                chatId: activeChatId,
+                resolveModel: resolveModelRef.current,
+                trigger: {
+                  trigger: 'edit',
+                  retainedMessageIds: retainedMessageIdsBeforeTurn(messages, messageId),
+                },
+              }),
             }),
-          }),
+          });
         });
       });
     },
-    [actions, activeChatId, agent, messages, projectId, refuseWhileBusy, withWorkspace],
+    [actions, activeChatId, agent, messages, projectId, refuseWhileBusy, withAttachments, withWorkspace],
   );
 
   const retry = useCallback(

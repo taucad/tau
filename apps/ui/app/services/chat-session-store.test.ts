@@ -4,11 +4,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor } from 'xstate';
-import type { Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
+import type { Chat as ChatEntity, ModelSupport, MyUIMessage } from '@taucad/chat';
+import type * as AiSdk from 'ai';
 import { chatTurnRequestSchema } from '@taucad/chat/schemas';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import { clearLedger, recordRpcOutcome } from '#services/rpc-ledger.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
+import { sha256Bytes } from '@taucad/utils/hash';
+import { uint8ArrayToBase64 } from 'uint8array-extras';
 import type { ChatSessionActorRef } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 
@@ -128,7 +131,9 @@ vi.mock('@ai-sdk/react', () => ({
   },
 }));
 
-vi.mock('ai', () => ({
+vi.mock('ai', async (importOriginal) => ({
+  // The composer record store validates drafts with the real `safeValidateUIMessages`.
+  ...(await importOriginal<typeof AiSdk>()),
   // oxlint-disable-next-line typescript-eslint/no-extraneous-class -- mock requires a `new`able value
   DefaultChatTransport: class {},
   lastAssistantMessageIsCompleteWithApprovalResponses: vi.fn(() => false),
@@ -143,6 +148,7 @@ vi.mock('#machines/inspector.js', () => ({
 }));
 
 const { ChatSessionStore } = await import('#services/chat-session-store.js');
+const { attachmentSendBlockReason, buildUserMessage } = await import('#utils/chat.utils.js');
 const { bindDurableChatRun, sharedChatTransport } = await import('#chat-clients/_internal/shared-chat-transport.js');
 const { recordHostFinalizedTurn, recordHostTurnSettlement, registerAgentHost } =
   await import('#chat-clients/_internal/browser-agent-host-transport.js');
@@ -156,20 +162,105 @@ type ChatSessionDeps = Parameters<StoreType['setDependencies']>[0];
  * that doesn't structurally match the typed closure fields.
  */
 type StubDeps = {
-  [K in keyof ChatSessionDeps]: ReturnType<typeof vi.fn<ChatSessionDeps[K]>>;
-};
+  [K in Exclude<keyof ChatSessionDeps, 'client'>]: ReturnType<typeof vi.fn<ChatSessionDeps[K]>>;
+} & { client: MemoryClient };
 
-function createStubDeps(): StubDeps {
+const notFound = (path: string): Error => Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
+
+/**
+ * The worker filesystem client, in memory. One instance stands for one
+ * device's disk, so two stores over it are a reload.
+ */
+function createMemoryClient() {
+  const files = new Map<string, Uint8Array<ArrayBuffer>>();
+  const under = (path: string): string[] =>
+    [...files.keys()].filter((entry) => entry.startsWith(`${path}/`)).map((entry) => entry.slice(path.length + 1));
+  return {
+    files,
+    /** Paths whose reads reject with an I/O error rather than a not-found. */
+    failingReads: new Set<string>(),
+    json(path: string): unknown {
+      const bytes = files.get(path);
+      return bytes === undefined ? undefined : JSON.parse(new TextDecoder().decode(bytes));
+    },
+    namesUnder(path: string): string[] {
+      return under(path).sort();
+    },
+    async readFile(path: string): Promise<Uint8Array<ArrayBuffer>> {
+      if (this.failingReads.has(path)) {
+        throw Object.assign(new Error(`EIO: ${path}`), { code: 'EIO' });
+      }
+      const bytes = files.get(path);
+      if (bytes === undefined) {
+        throw notFound(path);
+      }
+      return bytes;
+    },
+    async writeFile(path: string, data: Uint8Array<ArrayBuffer>): Promise<void> {
+      files.set(path, data);
+    },
+    async exists(path: string): Promise<boolean> {
+      return files.has(path) || under(path).length > 0;
+    },
+    async readdir(path: string): Promise<string[]> {
+      const names = under(path);
+      if (names.length === 0) {
+        throw notFound(path);
+      }
+      return names;
+    },
+    async unlink(path: string): Promise<void> {
+      if (!files.delete(path)) {
+        throw notFound(path);
+      }
+    },
+    async rmdir(path: string): Promise<void> {
+      for (const name of under(path)) {
+        files.delete(`${path}/${name}`);
+      }
+    },
+  };
+}
+type MemoryClient = ReturnType<typeof createMemoryClient>;
+
+function createStubDeps(client: MemoryClient = createMemoryClient()): StubDeps {
   return {
     getChat: vi.fn<ChatSessionDeps['getChat']>().mockResolvedValue(undefined),
     patchChat: vi.fn<ChatSessionDeps['patchChat']>().mockResolvedValue(undefined),
     touchChatRecency: vi.fn<ChatSessionDeps['touchChatRecency']>().mockResolvedValue(undefined),
-    setChatUnreadState: vi.fn<ChatSessionDeps['setChatUnreadState']>().mockResolvedValue(undefined),
     consumeChatStartupRequest: vi.fn<ChatSessionDeps['consumeChatStartupRequest']>().mockResolvedValue(undefined),
     commitCancelledDraftRestore: vi.fn<ChatSessionDeps['commitCancelledDraftRestore']>().mockResolvedValue(undefined),
-    setMessageEdit: vi.fn<ChatSessionDeps['setMessageEdit']>().mockResolvedValue(undefined),
-    clearMessageEdit: vi.fn<ChatSessionDeps['clearMessageEdit']>().mockResolvedValue(undefined),
+    client,
   };
+}
+
+const pngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]);
+const pdfBytes = new TextEncoder().encode('%PDF-1.7\nbracket: hole 7.3 mm, plate 4.5 mm\n');
+const pngHash = await sha256Bytes(pngBytes);
+const pdfHash = await sha256Bytes(pdfBytes);
+const pngUrl = `attachments/${pngHash}.png`;
+const pdfUrl = `attachments/${pdfHash}.pdf`;
+const dataUrlOf = (mediaType: string, bytes: Uint8Array<ArrayBuffer>): string =>
+  `data:${mediaType};base64,${uint8ArrayToBase64(bytes)}`;
+const composerPath = (projectId: string, chatId: string): string => `/.tau/composers/chats/${projectId}/${chatId}.json`;
+const draftAttachmentsDirectory = (projectId: string, chatId: string): string =>
+  `/.tau/composers/chats/${projectId}/${chatId}/attachments`;
+const chatAttachmentsDirectory = (projectId: string, chatId: string): string =>
+  `/projects/${projectId}/.tau/chats/${chatId}/attachments`;
+
+/** A chat row owned by `projectId`, as `getChat` returns it. */
+function chatRow(chatId: string, projectId: string, overrides: Partial<ChatEntity> = {}): ChatEntity {
+  return { id: chatId, resourceId: projectId, name: '', messages: [], createdAt: 0, updatedAt: 0, ...overrides };
+}
+
+/** Let promise chains and zero-delay timers run out. */
+async function settle(): Promise<void> {
+  for (let round = 0; round < 5; round += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- each round drains what the previous one scheduled
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+  }
 }
 
 function createStore(): StoreType {
@@ -1013,11 +1104,24 @@ describe('ChatSessionStore', () => {
     actor.stop();
   });
 
+  /* Rewritten for W7: the store's unread decision is written to the project's
+   * unread record (D9) instead of `setChatUnreadState`, which is gone. Each row
+   * keeps its original trigger and asserts the record on disk. */
   describe('unread lifecycle', () => {
-    it('marks unattended terminal success and error, but not abort or disconnect', () => {
+    const projectId = 'proj_unread';
+    const unreadPath = `/.tau/composers/chats/${projectId}/unread.json`;
+    const storeInProject = (): { store: StoreType; deps: StubDeps } => {
       const store = new ChatSessionStore();
       const deps = createStubDeps();
+      deps.getChat.mockImplementation(async (chatId) => chatRow(chatId, projectId));
       store.setDependencies(deps);
+      return { store, deps };
+    };
+    const unreadWrites = (deps: StubDeps): number =>
+      vi.mocked(deps.client.writeFile).mock.calls.filter(([path]) => path === unreadPath).length;
+
+    it('marks unattended terminal success and error, but not abort or disconnect', async () => {
+      const { store, deps } = storeInProject();
 
       for (const [chatId, options] of [
         ['chat_success', {}],
@@ -1029,16 +1133,19 @@ describe('ChatSessionStore', () => {
         harness.created.at(-1)!.finish(options);
       }
 
-      expect(deps.setChatUnreadState.mock.calls).toEqual([
-        ['chat_success', true],
-        ['chat_error', true],
-      ]);
+      await vi.waitFor(() => {
+        expect(deps.client.json(unreadPath)).toEqual({
+          version: 1,
+          unread: { chat_success: true, chat_error: true },
+        });
+      });
+      await settle();
+      expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_success: true, chat_error: true } });
     });
 
-    it('marks a new unattended approval once while it remains pending', () => {
-      const store = new ChatSessionStore();
-      const deps = createStubDeps();
-      store.setDependencies(deps);
+    it('marks a new unattended approval once while it remains pending', async () => {
+      const { store, deps } = storeInProject();
+      vi.spyOn(deps.client, 'writeFile');
       store.retainDurableRun({ chatId: 'chat_approval', runId: 'run_approval' });
       const chat = harness.created[0]!;
       const approval = {
@@ -1053,14 +1160,15 @@ describe('ChatSessionStore', () => {
       chat.emitMessagesChange();
       chat.emitMessagesChange();
 
-      expect(deps.setChatUnreadState).toHaveBeenCalledOnce();
-      expect(deps.setChatUnreadState).toHaveBeenCalledWith('chat_approval', true);
+      await vi.waitFor(() => {
+        expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_approval: true } });
+      });
+      await settle();
+      expect(unreadWrites(deps)).toBe(1);
     });
 
-    it('does not mark terminal or approval events viewed in an active document', () => {
-      const store = new ChatSessionStore();
-      const deps = createStubDeps();
-      store.setDependencies(deps);
+    it('does not mark terminal or approval events viewed in an active document', async () => {
+      const { store, deps } = storeInProject();
       store.acquire('chat_active');
       const chat = harness.created[0]!;
       chat.messages = [
@@ -1082,19 +1190,25 @@ describe('ChatSessionStore', () => {
       chat.emitMessagesChange();
       chat.finish();
 
-      expect(deps.setChatUnreadState).not.toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(deps.getChat).toHaveBeenCalledWith('chat_active');
+      });
+      await settle();
+      expect(deps.client.json(unreadPath)).toBeUndefined();
+      expect(store.isUnread('chat_active')).toBe(false);
     });
 
-    it('marks a terminal event when its mounted view is hidden', () => {
+    it('marks a terminal event when its mounted view is hidden', async () => {
       vi.stubGlobal('document', { visibilityState: 'hidden', hasFocus: () => false });
-      const store = new ChatSessionStore();
-      const deps = createStubDeps();
-      store.setDependencies(deps);
+      const { store, deps } = storeInProject();
       store.acquire('chat_hidden');
 
       harness.created[0]!.finish();
 
-      expect(deps.setChatUnreadState).toHaveBeenCalledWith('chat_hidden', true);
+      await vi.waitFor(() => {
+        expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_hidden: true } });
+      });
+      expect(store.isUnread('chat_hidden')).toBe(true);
     });
   });
 
@@ -2147,8 +2261,11 @@ describe('ChatSessionStore', () => {
       vi.useFakeTimers();
       try {
         const chatId = 'chat_restore_empty_cancel';
+        const projectId = 'proj_restore';
         const store = new ChatSessionStore();
         const deps = createStubDeps();
+        deps.getChat.mockResolvedValue(chatRow(chatId, projectId));
+        deps.client.files.set(`${chatAttachmentsDirectory(projectId, chatId)}/${pngHash}.png`, pngBytes);
         store.setDependencies(deps);
 
         const session = store.acquire(chatId);
@@ -2173,7 +2290,7 @@ describe('ChatSessionStore', () => {
           role: 'user',
           parts: [
             { type: 'text', text: 'help me iterate on this' },
-            { type: 'file', url: 'data:image/png;base64,AAA', mediaType: 'image/png' },
+            { type: 'file', url: pngUrl, mediaType: 'image/png' },
           ],
           metadata: { createdAt: 2, status: 'pending' },
         };
@@ -2204,11 +2321,21 @@ describe('ChatSessionStore', () => {
 
         const draftSnapshot = session.draftActorRef.getSnapshot();
         expect(draftSnapshot.context.draftText).toBe('help me iterate on this');
-        expect(draftSnapshot.context.draftImages).toEqual(['data:image/png;base64,AAA']);
+        // Rewritten for W7: the draft holds the attachment by reference, not a data URL.
+        expect(draftSnapshot.context.draftAttachments).toEqual([{ hash: pngHash, mediaType: 'image/png' }]);
 
-        await Promise.resolve();
-
-        expect(deps.commitCancelledDraftRestore).toHaveBeenCalledTimes(1);
+        // The bytes are copied back beside the record before the record references them (D18).
+        await vi.waitFor(() => {
+          expect(deps.commitCancelledDraftRestore).toHaveBeenCalledTimes(1);
+        });
+        expect(deps.client.files.get(`${draftAttachmentsDirectory(projectId, chatId)}/${pngHash}.png`)).toEqual(
+          pngBytes,
+        );
+        await vi.waitFor(() => {
+          expect(deps.client.json(composerPath(projectId, chatId))).toMatchObject({
+            draft: { parts: cancelledUser.parts },
+          });
+        });
         const [restoreChatId, restoreInput] = deps.commitCancelledDraftRestore.mock.calls[0]!;
         expect(restoreChatId).toBe(chatId);
         expect(restoreInput.messages).toEqual([priorUser, priorAssistant]);
@@ -2273,7 +2400,7 @@ describe('ChatSessionStore', () => {
         // Draft must remain untouched.
         const draftSnapshot = session.draftActorRef.getSnapshot();
         expect(draftSnapshot.context.draftText).toBe('');
-        expect(draftSnapshot.context.draftImages).toEqual([]);
+        expect(draftSnapshot.context.draftAttachments).toEqual([]);
 
         await vi.advanceTimersByTimeAsync(100);
         await vi.runOnlyPendingTimersAsync();
@@ -2320,11 +2447,11 @@ describe('ChatSessionStore', () => {
         storedChat = { ...storedChat, startupRequest: undefined };
         return storedChat;
       });
+      // Rewritten for W7: the row no longer carries the draft; the chat's composer record does.
       deps.commitCancelledDraftRestore.mockImplementation(async (_chatId, input) => {
         storedChat = {
           ...storedChat,
           messages: input.messages,
-          draft: input.draft,
           startupRequest:
             input.clearStartupRequestId && storedChat.startupRequest?.id === input.clearStartupRequestId
               ? undefined
@@ -2355,20 +2482,23 @@ describe('ChatSessionStore', () => {
       });
 
       store.release(chatId);
-      await Promise.resolve();
-
-      expect(storedChat.messages).toEqual([]);
-      expect(storedChat.draft?.parts).toEqual(cancelledUser.parts);
-
+      // The draft reaches the record before the transcript is truncated, so the truncation is awaited here.
+      await vi.waitFor(() => {
+        expect(storedChat.messages).toEqual([]);
+      });
       const secondSession = store.acquire(chatId);
-      await Promise.resolve();
-      await Promise.resolve();
+
+      await vi.waitFor(() => {
+        expect(secondSession.draftActorRef.getSnapshot().context.draftText).toBe('make a planetary gear');
+      });
+      expect(deps.client.json(composerPath('resource_release_reacquire', chatId))).toMatchObject({
+        draft: { parts: cancelledUser.parts },
+      });
 
       const secondFake = harness.created.at(-1)!;
       expect(secondFake.id).toBe(chatId);
       expect(secondFake.regenerate).not.toHaveBeenCalled();
       expect(secondFake.messages).toEqual([]);
-      expect(secondSession.draftActorRef.getSnapshot().context.draftText).toBe('make a planetary gear');
 
       store.release(chatId);
     });
@@ -2531,8 +2661,10 @@ describe('ChatSessionStore', () => {
 
       const session = store.acquire('chat_orphan_pending');
 
-      await Promise.resolve();
-      await Promise.resolve();
+      // The restored draft reaches its record before the transcript is truncated (W7), which takes more than two ticks.
+      await vi.waitFor(() => {
+        expect(deps.commitCancelledDraftRestore).toHaveBeenCalledOnce();
+      });
 
       const fake = harness.created.find((entry) => entry.id === 'chat_orphan_pending')!;
       expect(fake.regenerate).not.toHaveBeenCalled();
@@ -2585,8 +2717,10 @@ describe('ChatSessionStore', () => {
 
       const session = store.acquire('chat_orphan_placeholder');
 
-      await Promise.resolve();
-      await Promise.resolve();
+      // The restored draft reaches its record before the transcript is truncated (W7), which takes more than two ticks.
+      await vi.waitFor(() => {
+        expect(deps.commitCancelledDraftRestore).toHaveBeenCalledOnce();
+      });
 
       const fake = harness.created.find((entry) => entry.id === 'chat_orphan_placeholder')!;
       expect(fake.regenerate).not.toHaveBeenCalled();
@@ -3196,5 +3330,230 @@ describe('ChatSessionStore', () => {
       fake.emitStatusChange();
       expect(countStreamResumed()).toBe(1);
     });
+  });
+});
+
+// ===========================================================================
+// Composer records (W7): per-device drafts, unread and attachments through the
+// session store, on an in-memory filesystem that outlives each store.
+// ===========================================================================
+describe('ChatSessionStore — composer records (W7)', () => {
+  const projectId = 'proj_composer';
+  const chatId = 'chat_composer';
+  const unreadPath = `/.tau/composers/chats/${projectId}/unread.json`;
+  type SelectedModel = { readonly name: string; readonly support: ModelSupport };
+  const pdfModel: SelectedModel = {
+    name: 'Claude Test',
+    support: { modalities: { input: ['text', 'image', 'pdf'], output: ['text'] } },
+  };
+  const imageOnlyModel: SelectedModel = {
+    name: 'GPT Image',
+    support: { modalities: { input: ['text', 'image'], output: ['text'] } },
+  };
+
+  beforeEach(() => {
+    harness.created = [];
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  const openStore = (client: MemoryClient, row: ChatEntity = chatRow(chatId, projectId)) => {
+    const store = new ChatSessionStore();
+    const deps = createStubDeps(client);
+    deps.getChat.mockImplementation(async (id) => (id === row.id ? row : undefined));
+    store.setDependencies(deps);
+    return { store, deps };
+  };
+
+  const attachBoth = async (session: ReturnType<StoreType['acquire']>): Promise<void> => {
+    session.draftActorRef.send({
+      type: 'addDraftAttachment',
+      dataUrl: dataUrlOf('image/png', pngBytes),
+      preserveOriginal: true,
+      model: pdfModel,
+    });
+    session.draftActorRef.send({
+      type: 'addDraftAttachment',
+      dataUrl: dataUrlOf('application/pdf', pdfBytes),
+      filename: 'bracket-spec.pdf',
+      model: pdfModel,
+    });
+    await vi.waitFor(() => {
+      expect(session.draftActorRef.getSnapshot().context.draftAttachments).toHaveLength(2);
+    });
+  };
+
+  it('restores the draft, both attachments, tool choice and mode through a fresh store', async () => {
+    const client = createMemoryClient();
+    const first = openStore(client);
+    const session = first.store.acquire(chatId);
+    await attachBoth(session);
+    session.draftActorRef.send({ type: 'setDraftText', text: 'model the bracket per the spec' });
+    session.draftActorRef.send({ type: 'setDraftToolChoice', toolChoice: 'none' });
+    session.draftActorRef.send({ type: 'setDraftMode', mode: 'plan' });
+    // Released inside the draft's debounce: the release itself must hand the text to the record.
+    first.store.release(chatId);
+
+    await vi.waitFor(() => {
+      expect(client.json(composerPath(projectId, chatId))).toMatchObject({
+        draft: { parts: [{ type: 'text', text: 'model the bracket per the spec' }, {}, {}] },
+        toolChoice: 'none',
+        mode: 'plan',
+      });
+    });
+    expect(client.namesUnder(draftAttachmentsDirectory(projectId, chatId))).toEqual(
+      [`${pngHash}.png`, `${pdfHash}.pdf`].sort(),
+    );
+
+    const second = openStore(client);
+    const restored = second.store.acquire(chatId);
+    await vi.waitFor(() => {
+      expect(restored.draftActorRef.getSnapshot().context).toMatchObject({
+        draftText: 'model the bracket per the spec',
+        draftAttachments: [
+          { hash: pngHash, mediaType: 'image/png' },
+          { hash: pdfHash, mediaType: 'application/pdf', filename: 'bracket-spec.pdf' },
+        ],
+        draftToolChoice: 'none',
+        draftMode: 'plan',
+      });
+    });
+    second.store.release(chatId);
+  });
+
+  it('keeps unread across a fresh store and clears it when the chat is viewed', async () => {
+    vi.stubGlobal('document', { visibilityState: 'hidden', hasFocus: () => false });
+    const client = createMemoryClient();
+    const first = openStore(client);
+    first.store.acquire(chatId);
+    harness.created.at(-1)!.finish();
+    await vi.waitFor(() => {
+      expect(client.json(unreadPath)).toEqual({ version: 1, unread: { [chatId]: true } });
+    });
+    first.store.release(chatId);
+
+    const second = openStore(client);
+    second.store.acquire(chatId);
+    await vi.waitFor(() => {
+      expect(second.store.isUnread(chatId)).toBe(true);
+    });
+
+    second.store.markViewed(chatId);
+
+    await vi.waitFor(() => {
+      expect(client.json(unreadPath)).toEqual({ version: 1 });
+    });
+    expect(second.store.isUnread(chatId)).toBe(false);
+    second.store.release(chatId);
+  });
+
+  it('promotes both blobs into the chat directory on send and clears the draft-stage copies', async () => {
+    const client = createMemoryClient();
+    const { store } = openStore(client);
+    const session = store.acquire(chatId);
+    const fake = harness.created.at(-1)!;
+    await attachBoth(session);
+    const { draftAttachments } = session.draftActorRef.getSnapshot().context;
+
+    await store.promoteDraftAttachments(chatId, draftAttachments);
+
+    expect(client.files.get(`${chatAttachmentsDirectory(projectId, chatId)}/${pngHash}.png`)).toEqual(pngBytes);
+    expect(client.files.get(`${chatAttachmentsDirectory(projectId, chatId)}/${pdfHash}.pdf`)).toEqual(pdfBytes);
+
+    // What `useChatActions().sendMessage` does once the message is built.
+    const message = buildUserMessage({ text: 'read the spec', attachments: draftAttachments });
+    session.draftActorRef.send({ type: 'clearDraft' });
+    await store.releaseDraftAttachments(chatId);
+    session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'send', message, body: testRunBody } });
+
+    await vi.waitFor(() => {
+      expect(fake.sendMessage).toHaveBeenCalledOnce();
+    });
+    expect(fake.sendMessage.mock.calls[0]![0]).toMatchObject({
+      role: 'user',
+      parts: [
+        {
+          type: 'file',
+          mediaType: 'image/png',
+          url: pngUrl,
+          providerMetadata: { common: { byteLength: pngBytes.byteLength } },
+        },
+        {
+          type: 'file',
+          mediaType: 'application/pdf',
+          filename: 'bracket-spec.pdf',
+          url: pdfUrl,
+          providerMetadata: { common: { byteLength: pdfBytes.byteLength } },
+        },
+        { type: 'text', text: 'read the spec' },
+      ],
+    });
+    expect(client.namesUnder(draftAttachmentsDirectory(projectId, chatId))).toEqual([]);
+    await vi.waitFor(() => {
+      expect(client.json(composerPath(projectId, chatId))).not.toHaveProperty('draft');
+    });
+    store.release(chatId);
+  });
+
+  it('leaves the draft intact and copies nothing it cannot finish when promotion fails', async () => {
+    const client = createMemoryClient();
+    const { store } = openStore(client);
+    const session = store.acquire(chatId);
+    await attachBoth(session);
+    const before = session.draftActorRef.getSnapshot().context.draftAttachments;
+    client.files.delete(`${draftAttachmentsDirectory(projectId, chatId)}/${pdfHash}.pdf`);
+
+    await expect(store.promoteDraftAttachments(chatId, before)).rejects.toThrow(/missing/u);
+
+    expect(session.draftActorRef.getSnapshot().context.draftAttachments).toEqual(before);
+    expect(client.files.has(`${chatAttachmentsDirectory(projectId, chatId)}/${pdfHash}.pdf`)).toBe(false);
+    expect(harness.created.at(-1)!.sendMessage).not.toHaveBeenCalled();
+    store.release(chatId);
+  });
+
+  it('still opens the chat when its record cannot be read', async () => {
+    const client = createMemoryClient();
+    client.failingReads.add(composerPath(projectId, chatId));
+    const transcript: MyUIMessage[] = [{ id: 'msg_1', role: 'user', parts: [{ type: 'text', text: 'earlier' }] }];
+    const { store } = openStore(client, chatRow(chatId, projectId, { messages: transcript }));
+    const session = store.acquire(chatId);
+    const unreadable = vi.fn();
+    session.composerRecordRef.on('recordUnreadable', unreadable);
+
+    await vi.waitFor(() => {
+      expect(harness.created.at(-1)!.messages).toEqual(transcript);
+    });
+    await vi.waitFor(() => {
+      expect(session.composerRecordRef.getSnapshot().matches({ lifecycle: 'usable' })).toBe(true);
+    });
+    expect(unreadable).toHaveBeenCalledOnce();
+    expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+
+    // A read failure is not an absence, but the composer stays usable and writes still go out.
+    client.failingReads.clear();
+    session.draftActorRef.send({ type: 'setDraftMode', mode: 'plan' });
+    await vi.waitFor(() => {
+      expect(client.json(composerPath(projectId, chatId))).toEqual({ version: 1, mode: 'plan' });
+    });
+    store.release(chatId);
+  });
+
+  it('disables send with the reason when the selected model cannot read a PDF in the draft', async () => {
+    const client = createMemoryClient();
+    const { store } = openStore(client);
+    const session = store.acquire(chatId);
+    await attachBoth(session);
+    const gate = (model: SelectedModel): string | undefined =>
+      attachmentSendBlockReason(session.draftActorRef.getSnapshot().context.draftAttachments, model);
+
+    expect(gate(pdfModel)).toBeUndefined();
+    expect(gate(imageOnlyModel)).toBe("GPT Image can't read PDFs. Remove the PDF or pick another model.");
+
+    session.draftActorRef.send({ type: 'removeDraftAttachment', index: 1 });
+    expect(gate(imageOnlyModel)).toBeUndefined();
+    store.release(chatId);
   });
 });

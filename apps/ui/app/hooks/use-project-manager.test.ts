@@ -509,9 +509,6 @@ vi.mock('xstate', async (importOriginal) => {
 vi.mock('#hooks/use-cookie.js', () => ({
   useCookie: (_name: string, defaultValue: string) => [defaultValue, vi.fn()],
 }));
-vi.mock('#utils/chat.utils.js', () => ({
-  createMessage: (options: Record<string, unknown>) => ({ id: 'msg-1', ...options }),
-}));
 
 const { ProjectManagerProvider, useProjectManager } = await import('#hooks/use-project-manager.js');
 

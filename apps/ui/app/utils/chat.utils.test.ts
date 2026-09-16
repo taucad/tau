@@ -2,6 +2,7 @@ import process from 'node:process';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MyUIMessage } from '@taucad/chat';
 import {
+  buildUserMessage,
   createMessage,
   finalizeInterruptedToolParts,
   serializeMessage,
@@ -808,6 +809,58 @@ describe('createMessage', () => {
       metadata: {},
     });
     expect((message.parts[0] as { type: 'text'; text: string }).text).toBe('trimmed');
+  });
+});
+
+describe('buildUserMessage', () => {
+  const imageHash = 'a'.repeat(64);
+  const documentHash = 'b'.repeat(64);
+
+  it('should put each attachment reference ahead of the trimmed text', () => {
+    const message = buildUserMessage({
+      text: '  model the bracket  ',
+      attachments: [
+        { hash: imageHash, mediaType: 'image/jpeg' },
+        { hash: documentHash, mediaType: 'application/pdf', filename: 'bracket-spec.pdf' },
+      ],
+    });
+
+    expect(message).toMatchObject({ id: expect.stringMatching(/^msg_/u) as unknown, role: 'user' });
+    expect(message.metadata).toMatchObject({ status: 'pending', createdAt: expect.any(Number) as unknown });
+    expect(message.parts).toEqual([
+      { type: 'file', mediaType: 'image/jpeg', url: `attachments/${imageHash}.jpg` },
+      {
+        type: 'file',
+        mediaType: 'application/pdf',
+        filename: 'bracket-spec.pdf',
+        url: `attachments/${documentHash}.pdf`,
+      },
+      { type: 'text', text: 'model the bracket' },
+    ]);
+  });
+
+  it('should carry the byte length only when the reference knows it (P29)', () => {
+    const message = buildUserMessage({
+      text: '',
+      attachments: [{ hash: imageHash, mediaType: 'image/png', byteLength: 42 }],
+    });
+
+    expect(message.parts).toEqual([
+      {
+        type: 'file',
+        mediaType: 'image/png',
+        url: `attachments/${imageHash}.png`,
+        providerMetadata: { common: { byteLength: 42 } },
+      },
+    ]);
+  });
+
+  it('should omit an empty text part and give every message its own id', () => {
+    const first = buildUserMessage({ text: '   ' });
+    const second = buildUserMessage({ text: 'x' });
+
+    expect(first.parts).toEqual([]);
+    expect(first.id).not.toBe(second.id);
   });
 });
 

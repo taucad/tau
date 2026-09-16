@@ -4,17 +4,20 @@ import type {
   MyMetadata,
   MyMessagePart,
   MyUIMessage,
+  ModelSupport,
   ToolInvocation,
   MyTools,
   UsageData,
 } from '@taucad/chat';
-import { getToolPartName, isAnyToolPart, isToolPart } from '@taucad/chat';
+import { getToolPartName, isAnyToolPart, isToolPart, modelSupportsInput } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { metaConfig } from '#constants/meta.constants.js';
 import { formatExportDate } from '#utils/date.utils.js';
 import { getRpcOutcome } from '#services/rpc-ledger.js';
+import { attachmentKind, attachmentUrl } from '#utils/attachment.utils.js';
+import type { AttachmentName, AttachmentReference } from '#utils/attachment.utils.js';
 import type { RequestTerminationCause } from '#hooks/chat-persistence.machine.js';
 
 /**
@@ -634,6 +637,68 @@ export function stampMessageCreatedAt(messages: MyUIMessage[]): MyUIMessage[] {
       ? { ...message, metadata: { ...message.metadata, createdAt: now } }
       : message,
   );
+}
+
+/**
+ * The one user-message builder for every chat verb that sends what the person
+ * composed (submit, edit).
+ *
+ * One file part per attachment comes first, referenced by `attachmentUrl`
+ * relative to the chat's own directory (providers read attachments best ahead
+ * of the text about them), then the text, trimmed and omitted when empty. A part carries `providerMetadata.common.byteLength` only when the
+ * reference knows its size (P29); nothing is invented for one that does not.
+ *
+ * @param input - The composed text and the chat's attachment references.
+ * @returns A pending user message with a fresh id.
+ */
+export function buildUserMessage(input: {
+  readonly text: string;
+  readonly attachments?: readonly AttachmentReference[];
+}): MyUIMessage {
+  const text = input.text.trim();
+  return {
+    id: generatePrefixedId(idPrefix.message),
+    role: 'user',
+    parts: [
+      ...(input.attachments ?? []).map(
+        (attachment) =>
+          ({
+            type: 'file',
+            mediaType: attachment.mediaType,
+            ...(attachment.filename === undefined ? {} : { filename: attachment.filename }),
+            url: attachmentUrl(attachment),
+            ...(attachment.byteLength === undefined
+              ? {}
+              : { providerMetadata: { common: { byteLength: attachment.byteLength } } }),
+          }) as const,
+      ),
+      ...(text.length > 0 ? [{ type: 'text', text } as const] : []),
+    ],
+    metadata: { createdAt: Date.now(), status: 'pending' },
+  };
+}
+
+/**
+ * Why a message holding these attachments cannot be sent to the selected
+ * model, or `undefined` when it can (D20). The composer disables Send with
+ * this reason; the chat client refuses with it.
+ *
+ * @param attachments - The draft's (or the open edit's) attachments.
+ * @param model - The selected model: its name for the reason, and what it reads.
+ * @returns The reason, naming the model.
+ */
+export function attachmentSendBlockReason(
+  attachments: readonly AttachmentName[],
+  model: { readonly name: string; readonly support?: ModelSupport },
+): string | undefined {
+  const kinds = new Set(attachments.map((attachment) => attachmentKind(attachment.mediaType)));
+  if (kinds.has('document') && !modelSupportsInput(model.support, 'pdf')) {
+    return `${model.name} can't read PDFs. Remove the PDF or pick another model.`;
+  }
+  if (kinds.has('image') && !modelSupportsInput(model.support, 'image')) {
+    return `${model.name} can't read images. Remove the image or pick another model.`;
+  }
+  return undefined;
 }
 
 // Helper function to create a new message

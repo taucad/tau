@@ -21,6 +21,9 @@
           "env": "TAU_FRONTEND_URL"
         },
         {
+          "env": "PORTLESS_URL"
+        },
+        {
           "env": "NETLIFY"
         },
         {
@@ -97,6 +100,20 @@
         "command": "react-router dev --config vite.config.ts",
         "env": {
           "REACT_ROUTER_ROOT": "."
+        }
+      }
+    },
+    "dev:portless": {
+      "executor": "nx:run-commands",
+      "continuous": true,
+      "dependsOn": ["copy-assets", "^copy-assets"],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "portless run --name tau-ui react-router dev",
+        "env": {
+          "TAU_API_URL": "http://127.0.0.1:4000",
+          "TAU_WEBSOCKET_URL": "ws://127.0.0.1:4001",
+          "TAU_DEBUG": "true"
         }
       }
     },

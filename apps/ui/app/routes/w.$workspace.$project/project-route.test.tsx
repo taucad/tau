@@ -1,8 +1,14 @@
 import { useEffect } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { projectToManifest } from '@taucad/types';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
+import type { RevisionClient } from '#hooks/use-revision-status.js';
+import type { ParameterSetService } from '#services/parameter-set-service.js';
+import type { ActorRefFrom } from 'xstate';
+import type { projectMachine } from '#machines/project.machine.js';
+import type { editorMachine } from '#machines/editor.machine.js';
 
 const projectA = 'proj_aaaaaaaaaaaaaaaaaaaaa';
 const projectB = 'proj_bbbbbbbbbbbbbbbbbbbbb';
@@ -66,6 +72,10 @@ const projectRef = {
   getSnapshot: () => ({ context: { project: undefined } }),
   subscribe: () => ({ unsubscribe: () => undefined }),
 };
+const parameterService = {
+  setBackupOwner: vi.fn(),
+  close: vi.fn(async () => undefined),
+};
 
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => projectManager,
@@ -106,14 +116,20 @@ vi.mock('#hooks/use-project.js', () => ({
     projectId,
     requestedChatId,
     createdChatId,
-  }: React.PropsWithChildren<{ projectId: string; requestedChatId?: string; createdChatId?: string }>) => {
+  }: React.PropsWithChildren<{
+    projectId: string;
+    requestedChatId?: string;
+    createdChatId?: string;
+  }>) => {
     projectProviderInputs.push(projectId);
     projectProviderChatInputs.push({ requestedChatId, createdChatId });
     return <div>{children}</div>;
   },
-  useProject: () => ({ projectRef, editorRef }),
+  useProject: () => ({ projectRef, editorRef, parameterService }),
 }));
-vi.mock('#hooks/use-flush-on-close.js', () => ({ useFlushOnClose: () => undefined }));
+vi.mock('#hooks/use-flush-on-close.js', () => ({
+  useFlushOnClose: () => undefined,
+}));
 /* The session binding is headless and has its own suites; this route suite is
  * about which subtrees are mounted, so its two app-level handles are stubs. */
 vi.mock('#hooks/use-revision-status.js', () => ({
@@ -122,7 +138,10 @@ vi.mock('#hooks/use-revision-status.js', () => ({
   useRevisionCommands: () => ({}),
 }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
-  useChatSessionStore: () => ({ get: () => undefined, setProjectSession: () => undefined }),
+  useChatSessionStore: () => ({
+    get: () => undefined,
+    setProjectSession: () => undefined,
+  }),
 }));
 /* The `Mod+S` registration needs the application root's `KeyboardProvider`,
  * which this route-level suite does not mount; the shortcut has its own test. */
@@ -141,18 +160,26 @@ vi.mock('#routes/w.$workspace.$project/revision-provider.js', () => ({
 vi.mock('#routes/w.$workspace.$project/project-chat-run-settlement.js', () => ({
   ProjectChatRunSettlement: () => null,
 }));
-vi.mock('#routes/w.$workspace.$project/project-command-items.js', () => ({ ProjectCommandPaletteItems: () => null }));
-vi.mock('#routes/w.$workspace.$project/project-export-action.js', () => ({ ProjectExportAction: () => null }));
+vi.mock('#routes/w.$workspace.$project/project-command-items.js', () => ({
+  ProjectCommandPaletteItems: () => null,
+}));
+vi.mock('#routes/w.$workspace.$project/project-export-action.js', () => ({
+  ProjectExportAction: () => null,
+}));
 vi.mock('#routes/w.$workspace.$project/project-share-action.js', () => ({
   ProjectShareRouteIntent: () => null,
 }));
 vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
   ProjectWorkspaceProvider: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
-vi.mock('#routes/w.$workspace.$project/chat-interface.js', () => ({ ChatInterface: () => null }));
+vi.mock('#routes/w.$workspace.$project/chat-interface.js', () => ({
+  ChatInterface: () => null,
+}));
 /* W10's conflict chat reads `useChats`, which needs the root `QueryClient`
  * this route-level suite does not mount; it has its own tests. */
-vi.mock('#routes/w.$workspace.$project/revision-conflict-chat.js', () => ({ RevisionConflictChat: () => null }));
+vi.mock('#routes/w.$workspace.$project/revision-conflict-chat.js', () => ({
+  RevisionConflictChat: () => null,
+}));
 vi.mock('#routes/w.$workspace.$project/project-not-found.js', () => ({
   ProjectNotFound: () => <div>Project Not Found</div>,
 }));
@@ -189,7 +216,10 @@ const trashed = (id: string): ProjectRouteAccess => ({
   project: project(id),
 });
 
-const deferred = <T,>(): { promise: Promise<T>; resolve: (value: T) => void } => {
+const deferred = <T,>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} => {
   let resolveDeferred!: (value: T) => void;
   const promise = new Promise<T>((resolve) => {
     resolveDeferred = resolve;
@@ -205,7 +235,10 @@ const deferred = <T,>(): { promise: Promise<T>; resolve: (value: T) => void } =>
 const renderRouteProvider = ({
   requestedChatId,
   createdChatId,
-}: { readonly requestedChatId?: string; readonly createdChatId?: string } = {}): {
+}: {
+  readonly requestedChatId?: string;
+  readonly createdChatId?: string;
+} = {}): {
   Provider: React.JSXElementConstructor<React.PropsWithChildren>;
   view: ReturnType<typeof render>;
 } => {
@@ -244,9 +277,98 @@ beforeEach(() => {
 });
 
 describe('project route session identity', () => {
+  it('should settle parameters and UI stores before the revision close cut', async () => {
+    const order: string[] = [];
+    const parameters = mock<ParameterSetService>();
+    const project = mock<ActorRefFrom<typeof projectMachine>>();
+    const editor = mock<ActorRefFrom<typeof editorMachine>>();
+    const revision = mock<RevisionClient>();
+    const projectSnapshot = mock<ReturnType<ActorRefFrom<typeof projectMachine>['getSnapshot']>>();
+    const editorSnapshotValue = mock<ReturnType<ActorRefFrom<typeof editorMachine>['getSnapshot']>>();
+    projectSnapshot.matches.mockReturnValue(true);
+    editorSnapshotValue.matches.mockReturnValue(true);
+    project.getSnapshot.mockReturnValue(projectSnapshot);
+    editor.getSnapshot.mockReturnValue(editorSnapshotValue);
+    parameters.close.mockImplementation(async () => {
+      order.push('parameters');
+    });
+    project.send.mockImplementation(() => {
+      order.push('project');
+    });
+    editor.send.mockImplementation(() => {
+      order.push('editor');
+    });
+    revision.quiesce.mockImplementation(async () => {
+      order.push('revision');
+    });
+
+    await routeModule.flushProjectSessionPersistence({
+      parameterService: parameters,
+      projectRef: project,
+      editorRef: editor,
+      revisionClient: revision,
+      closeFlushMilliseconds: 100,
+    });
+
+    expect(order).toEqual(['parameters', 'project', 'editor', 'revision']);
+  });
+
+  it('should refuse the revision close cut when parameter settlement fails', async () => {
+    const parameters = mock<ParameterSetService>();
+    const project = mock<ActorRefFrom<typeof projectMachine>>();
+    const editor = mock<ActorRefFrom<typeof editorMachine>>();
+    const revision = mock<RevisionClient>();
+    parameters.close.mockRejectedValue(new Error('checked parameter flush failed'));
+
+    await expect(
+      routeModule.flushProjectSessionPersistence({
+        parameterService: parameters,
+        projectRef: project,
+        editorRef: editor,
+        revisionClient: revision,
+        closeFlushMilliseconds: 100,
+      }),
+    ).rejects.toThrow('checked parameter flush failed');
+    expect(project.send).not.toHaveBeenCalled();
+    expect(editor.send).not.toHaveBeenCalled();
+    expect(revision.quiesce).not.toHaveBeenCalled();
+  });
+
+  it('should refuse the revision close cut when project storage reports idle with an error', async () => {
+    const parameters = mock<ParameterSetService>();
+    const project = mock<ActorRefFrom<typeof projectMachine>>();
+    const editor = mock<ActorRefFrom<typeof editorMachine>>();
+    const revision = mock<RevisionClient>();
+    const projectFailure = new Error('project save failed');
+    const projectSnapshot = {
+      matches: () => true,
+      context: { error: projectFailure },
+    } as unknown as ReturnType<ActorRefFrom<typeof projectMachine>['getSnapshot']>;
+    const editorSnapshotValue = {
+      matches: () => true,
+      context: { error: undefined },
+    } as unknown as ReturnType<ActorRefFrom<typeof editorMachine>['getSnapshot']>;
+    project.getSnapshot.mockReturnValue(projectSnapshot);
+    editor.getSnapshot.mockReturnValue(editorSnapshotValue);
+
+    await expect(
+      routeModule.flushProjectSessionPersistence({
+        parameterService: parameters,
+        projectRef: project,
+        editorRef: editor,
+        revisionClient: revision,
+        closeFlushMilliseconds: 100,
+      }),
+    ).rejects.toThrow('project save failed');
+    expect(revision.quiesce).not.toHaveBeenCalled();
+  });
+
   it('forwards a trusted created chat to the active project session', async () => {
     getProjectRouteAccess.mockResolvedValue(ready(projectA));
-    renderRouteProvider({ requestedChatId: 'chat-created', createdChatId: 'chat-created' });
+    renderRouteProvider({
+      requestedChatId: 'chat-created',
+      createdChatId: 'chat-created',
+    });
 
     await screen.findByTestId('project-session');
     expect(projectProviderChatInputs.at(-1)).toEqual({

@@ -21,7 +21,7 @@ export const FileTreePanelBody = memo(function ({
   shouldHandleReveal,
   readOnly = false,
 }: {
-  readonly actionsContainer?: Element | DocumentFragment | null;
+  readonly actionsContainer?: Element | DocumentFragment;
   readonly className?: string;
   readonly isOpen?: boolean;
   readonly onOpenChange?: (open: boolean) => void;
@@ -36,7 +36,7 @@ export const FileTreePanelBody = memo(function ({
   return (
     <FloatingPanel isOpen={isOpen} side='right' className={className} onOpenChange={onOpenChange}>
       <ChatEditorFileTree
-        actionsContainer={actionsContainer}
+        actionsContainer={actionsContainer ?? undefined}
         closeButton={closeButton}
         showTitle={showTitle}
         borderless={borderless}

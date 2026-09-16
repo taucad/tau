@@ -54,7 +54,9 @@ function createErrorAwareWaitPredicate(
 
 function assertNotErrorState(snapshot: FileManagerSnapshot): void {
   if (snapshot.matches('error')) {
-    throw new FileManagerNotReadyError('machine-error', { cause: snapshot.context.error });
+    throw new FileManagerNotReadyError('machine-error', {
+      cause: snapshot.context.error,
+    });
   }
 }
 
@@ -64,7 +66,10 @@ export async function waitForFileManagerServices(
     /** Milliseconds. */
     readyTimeout?: number;
   },
-): Promise<{ contentService: FileContentService; treeService: FileTreeService }> {
+): Promise<{
+  contentService: FileContentService;
+  treeService: FileTreeService;
+}> {
   const snapshot = fileManagerRef.getSnapshot();
   const { contentService: content, treeService: tree } = snapshot.context;
   if (content && tree) {
@@ -155,6 +160,7 @@ export type FileSystemClientFacade = Pick<
   ComposedViewClient,
   | 'readFile'
   | 'writeFile'
+  | 'writeFileChecked'
   | 'writeFiles'
   | 'mkdir'
   | 'readdir'
@@ -215,7 +221,10 @@ type FileManagerContextType = {
   treeService: FileTreeService | undefined;
   workerChangeChannel: WorkerChangeChannel | undefined;
   /** Resolves once both content and tree facades are bound (or rejects if the machine enters `error`). */
-  whenServicesReady: () => Promise<{ contentService: FileContentService; treeService: FileTreeService }>;
+  whenServicesReady: () => Promise<{
+    contentService: FileContentService;
+    treeService: FileTreeService;
+  }>;
   /**
    * Write a single file through the per-FM `FileContentService` cache.
    *
@@ -546,7 +555,10 @@ export function FileManagerProvider({
       });
       await proxy.configureProjectRoots(await getProjectRootConfigs());
 
-      workspaceTelemetry.workspaceSwap({ previousWorkspaceId, nextWorkspaceId: workspaceId });
+      workspaceTelemetry.workspaceSwap({
+        previousWorkspaceId,
+        nextWorkspaceId: workspaceId,
+      });
       fileManagerRef.send({ type: 'reloadWorkspace' });
     },
     [fileManagerRef, projectId, workspaceTelemetry],
@@ -554,7 +566,9 @@ export function FileManagerProvider({
 
   useEffect(() => {
     if (unavailableReason === 'permission' && activeWorkspaceId) {
-      workspaceTelemetry.workspacePermissionRevoked({ workspaceId: activeWorkspaceId });
+      workspaceTelemetry.workspacePermissionRevoked({
+        workspaceId: activeWorkspaceId,
+      });
     }
     if (unavailableReason) {
       workspaceTelemetry.workspaceOpenFailed({
@@ -820,6 +834,7 @@ export function FileManagerProvider({
     return {
       readFile: gated('readFile'),
       writeFile: gated('writeFile'),
+      writeFileChecked: gated('writeFileChecked'),
       writeFiles: gated('writeFiles'),
       mkdir: gated('mkdir'),
       readdir: gated('readdir'),

@@ -52,10 +52,34 @@ export function mountFileOperationParticipants(init: {
   readonly contentService: FileContentService;
   readonly editorRef: ActorRefFrom<typeof editorMachine>;
   readonly projectRef: ActorRefFrom<typeof projectMachine>;
+  readonly parameterFiles?: Readonly<{
+    movePath(oldPath: string, newPath: string, directory: boolean): Promise<void>;
+    deletePath(path: string, directory: boolean): Promise<void>;
+    prepareFileOperation: Parameters<FileContentService['addFileOperationParticipant']>[0];
+  }>;
+  readonly onError?: (error: unknown) => void;
 }): () => void {
-  const { contentService, editorRef, projectRef } = init;
+  const { contentService, editorRef, projectRef, parameterFiles, onError } = init;
+  const disposePreparedParticipant =
+    parameterFiles === undefined
+      ? undefined
+      : contentService.addFileOperationParticipant(parameterFiles.prepareFileOperation);
+  const run = (operation: Promise<void> | undefined): void => {
+    if (operation === undefined) {
+      return;
+    }
+    const report = async (): Promise<void> => {
+      try {
+        await operation;
+      } catch (error) {
+        onError?.(error);
+      }
+    };
+    // async-iife: bootstrap -- content notifications cannot await optional participant cleanup.
+    void report();
+  };
 
-  return contentService.onDidContentChange((event: ContentChangeEvent) => {
+  const disposeContentParticipant = contentService.onDidContentChange((event: ContentChangeEvent) => {
     switch (event.type) {
       case 'written': {
         sendProjectFileActivity(projectRef, 'written', [event.path]);
@@ -82,10 +106,19 @@ export function mountFileOperationParticipants(init: {
         // Editor: re-write path in place on every affected tab. The
         // existing `renameFile` action handles both single-file and
         // prefix (directory) renames in one pass.
-        editorRef.send({ type: 'renameFile', oldPath: event.oldPath, newPath: event.newPath });
+        editorRef.send({
+          type: 'renameFile',
+          oldPath: event.oldPath,
+          newPath: event.newPath,
+        });
         // Project: rewrite path-keyed maps and `mainEntryPath` so
         // open viewers / CAD actors / parameters survive the move.
-        projectRef.send({ type: 'fileMoved', oldPath: event.oldPath, newPath: event.newPath });
+        projectRef.send({
+          type: 'fileMoved',
+          oldPath: event.oldPath,
+          newPath: event.newPath,
+        });
+        run(parameterFiles?.movePath(event.oldPath, event.newPath, event.type === 'directoryRenamed'));
         sendProjectFileActivity(projectRef, event.type, [event.oldPath, event.newPath]);
         return;
       }
@@ -93,8 +126,12 @@ export function mountFileOperationParticipants(init: {
         // Editor: close the matching tab if any. Path is exact, no
         // prefix scan needed for single-file deletes.
         editorRef.send({ type: 'closeFile', path: event.path });
-        editorRef.send({ type: 'pruneComponentDisplayForDeletedPath', path: event.path });
+        editorRef.send({
+          type: 'pruneComponentDisplayForDeletedPath',
+          path: event.path,
+        });
         projectRef.send({ type: 'fileDeleted', path: event.path });
+        run(parameterFiles?.deletePath(event.path, false));
         sendProjectFileActivity(projectRef, 'deleted', [event.path]);
         return;
       }
@@ -110,10 +147,14 @@ export function mountFileOperationParticipants(init: {
             editorRef.send({ type: 'closeFile', path: file.path });
           }
         }
-        editorRef.send({ type: 'pruneComponentDisplayForDeletedPath', path: event.path });
+        editorRef.send({
+          type: 'pruneComponentDisplayForDeletedPath',
+          path: event.path,
+        });
         projectRef.send({ type: 'directoryDeleted', path: event.path });
+        run(parameterFiles?.deletePath(event.path, true));
         sendProjectFileActivity(projectRef, 'directoryDeleted', [event.path]);
-        return;
+        break;
       }
       // 'read' does not represent a project mutation.
       default: {
@@ -121,4 +162,8 @@ export function mountFileOperationParticipants(init: {
       }
     }
   });
+  return () => {
+    disposeContentParticipant();
+    disposePreparedParticipant?.();
+  };
 }

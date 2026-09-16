@@ -52,8 +52,10 @@ vi.mock('#hooks/use-file-tree.js', () => ({
   useFileTreeEntry: () => undefined,
 }));
 vi.mock('#hooks/use-keyboard.js', () => ({ useKeybinding: () => ({ formattedKeyCombination: 'Enter' }) }));
+vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: () => undefined }));
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
+    fileManagerRef: actorStub,
     contentService: undefined,
     treeService: undefined,
     runtimeFileSystem: undefined,

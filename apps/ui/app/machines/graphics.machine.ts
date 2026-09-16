@@ -3,8 +3,8 @@ import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { GeometryComponentManifest, GridSizes, Geometry } from '@taucad/types';
 import type { ProgressiveSceneUpdate, ResolvedSceneSnapshot } from '@taucad/runtime';
 import { idPrefix } from '@taucad/types/constants';
-import type { LengthSymbol, UnitSystem } from '@taucad/units';
-import { standardInternationalBaseUnits } from '@taucad/units/constants';
+import { getLengthUnit, metersPerLengthUnit } from '#constants/length-units.js';
+import type { LengthSymbol, UnitSystem } from '#constants/length-units.js';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type {
   GraphicsBackendPreference,
@@ -426,41 +426,9 @@ type LengthUnitData = {
   system: UnitSystem;
 };
 
-const lengthUnitCache = new Map<LengthSymbol, LengthUnitData>();
-const lengthDefinition = standardInternationalBaseUnits.length;
-
 function getLengthUnitData(symbol: LengthSymbol): LengthUnitData {
-  const cached = lengthUnitCache.get(symbol);
-  if (cached) {
-    return cached;
-  }
-
-  // Check base unit
-  if (symbol === lengthDefinition.symbol) {
-    const data: LengthUnitData = {
-      unit: lengthDefinition.unit,
-      symbol: lengthDefinition.symbol as LengthSymbol,
-      factor: 1,
-      system: 'si',
-    };
-    lengthUnitCache.set(symbol, data);
-    return data;
-  }
-
-  // Search variants
-  const variant = lengthDefinition.variants.find((v) => v.symbol === symbol);
-  if (!variant) {
-    throw new Error(`Unknown length symbol: ${symbol}`);
-  }
-
-  const data: LengthUnitData = {
-    unit: variant.unit,
-    symbol: variant.symbol as LengthSymbol,
-    factor: variant.factor,
-    system: variant.system,
-  };
-  lengthUnitCache.set(symbol, data);
-  return data;
+  const unit = getLengthUnit(symbol);
+  return { unit: unit.label, symbol, factor: metersPerLengthUnit(symbol), system: unit.system };
 }
 
 /**

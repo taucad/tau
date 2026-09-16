@@ -73,14 +73,23 @@ export function KernelDemo({
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
-  const { geometry, status, defaultParameters, jsonSchema, exportGeometry, capabilities, setParameters } = useRuntime({
+  const {
+    geometry,
+    status,
+    defaultParameters,
+    jsonSchema,
+    parameterManifest,
+    exportGeometry,
+    capabilities,
+    setParameters,
+  } = useRuntime({
     clientOptions,
     // `files` is a wide `Record<string, string>`, so the runtime needs an
     // explicit entry point (it can't infer a single literal key).
     source: { files, entry: mainFile },
   });
 
-  const hasParameters = Boolean(jsonSchema);
+  const hasParameters = Boolean(jsonSchema && parameterManifest);
 
   type DemoExportFormatOption = ExportFormatOption;
 
@@ -211,6 +220,8 @@ export function KernelDemo({
                 parameters={currentParams}
                 defaultParameters={defaultParameters}
                 jsonSchema={jsonSchema}
+                parameterManifest={parameterManifest!}
+                parameterEdit={{ kind: 'transient' }}
                 units={units}
                 emptyDescription='Loading parameters...'
                 onParametersChange={handleParametersChange}

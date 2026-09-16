@@ -734,6 +734,36 @@ describe('editorMachine', () => {
         vi.useRealTimers();
       }
     });
+
+    it('should acknowledge a failed save and retry it on flushNow', async () => {
+      vi.useFakeTimers();
+      try {
+        let writeCallCount = 0;
+        const actor = await startAndLoad({
+          loadResult: undefined,
+          saveResult: async () => {
+            writeCallCount += 1;
+            if (writeCallCount === 1) {
+              throw new Error('editor save failed');
+            }
+          },
+        });
+
+        actor.send({ type: 'openFile', path: 'src/a.ts', source: 'user' });
+        await vi.advanceTimersByTimeAsync(500);
+        await waitFor(actor, (state) => state.matches({ ready: { storing: 'idle' } }));
+        expect(actor.getSnapshot().context.error?.message).toBe('editor save failed');
+
+        actor.send({ type: 'flushNow' });
+        await vi.advanceTimersByTimeAsync(0);
+        await waitFor(actor, (state) => state.matches({ ready: { storing: 'idle' } }));
+        expect(writeCallCount).toBe(2);
+        expect(actor.getSnapshot().context.error).toBeUndefined();
+        actor.stop();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   // =========================================================================

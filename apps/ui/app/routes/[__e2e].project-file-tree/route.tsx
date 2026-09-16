@@ -21,7 +21,7 @@ const encode = (text: string): Uint8Array<ArrayBuffer> => encoder.encode(text);
 const honeycombModel = `import { makeBaseBox } from 'replicad';
 
 export const defaultParams = {
-  dimensions: { width: 20, height: 14, depth: 4 },
+  dimensions: { width: 20, height: 14, depth: 4, rotationAngle: 45 },
   pattern: { cellSize: 3, wallThickness: 1 },
 };
 
@@ -31,15 +31,23 @@ export default function main(params = defaultParams) {
 }
 `;
 
+const stressParameters = Object.fromEntries(
+  Array.from({ length: 96 }, (_, index) => [`stressValue${String(index + 1)}`, index + 1]),
+);
+
 const boxCornerModel = `import { makeBaseBox } from 'replicad';
 
 export const defaultParams = {
   dimensions: { width: 16, height: 12, depth: 6 },
   corner: { cornerRadius: 2, rounded: true },
+  stress: ${JSON.stringify(stressParameters)},
 };
 
 export default function main(params = defaultParams) {
   const { width, height, depth } = params.dimensions;
+  if (params.stress.stressValue96 > 1000) {
+    throw new Error('parameter stress preview failure');
+  }
   return makeBaseBox(width, height, depth);
 }
 `;
@@ -60,13 +68,17 @@ const seedFiles = Object.fromEntries([
   ['src/readme.md', { content: encode('# File tree e2e fixture\n') }],
 ]) as Record<string, { content: Uint8Array<ArrayBuffer> }>;
 
-const createSeedProject = (): Omit<ProjectManifest, '$schema' | 'id'> => ({
+/** `?main=box-corner` seeds the 101-field stress model as the main asset for large-form probes. */
+const mainEntryPathFor = (fixture: string | undefined): string =>
+  fixture === 'box-corner' ? 'public/models/box-corner.js' : 'public/models/honeycomb.js';
+
+const createSeedProject = (mainFixture: string | undefined): Omit<ProjectManifest, '$schema' | 'id'> => ({
   name: 'sgenoud/models file-tree e2e',
   description: 'Deterministic local seed for the project file tree e2e surface.',
   tags: ['e2e', 'replicad'],
   assets: {
     main: {
-      entryPath: 'public/models/honeycomb.js',
+      entryPath: mainEntryPathFor(mainFixture),
     },
   },
 });
@@ -96,6 +108,7 @@ const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
    * picker cannot offer browser-host from the homepage, where no project exists).
    */
   const seededPrompt = searchParameters.get('prompt') ?? undefined;
+  const mainFixture = searchParameters.get('main') ?? undefined;
   const [error, setError] = React.useState<string | undefined>(undefined);
   const seedStarted = React.useRef(false);
 
@@ -126,7 +139,7 @@ const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
       try {
         const project = await createProject({
           location: await resolveLocation(),
-          project: createSeedProject(),
+          project: createSeedProject(mainFixture),
           activeKernel: 'replicad',
           files: seedFiles,
           ...(seededPrompt === undefined
@@ -154,7 +167,7 @@ const ProjectFileTreeDebugRoute = (): React.JSX.Element => {
     };
 
     void seed();
-  }, [connectWorkspace, createProject, navigate, workspaceFixture]);
+  }, [connectWorkspace, createProject, mainFixture, navigate, workspaceFixture]);
 
   if (error) {
     return (

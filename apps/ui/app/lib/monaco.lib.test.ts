@@ -84,6 +84,16 @@ describe('configureMonaco', () => {
     mockMeasure.mockClear();
   });
 
+  it('should leave Monaco unconfigured when FontFaceSet is unavailable', async () => {
+    const { loader } = await import('@monaco-editor/react');
+    const { configureMonaco } = await import('#lib/monaco.lib.client.js');
+    Reflect.deleteProperty(document, 'fonts');
+
+    await configureMonaco();
+
+    expect(loader.config).not.toHaveBeenCalled();
+  });
+
   it('should configure workers and all four GitHub themes', async () => {
     const { configureMonaco } = await import('#lib/monaco.lib.client.js');
 

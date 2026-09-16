@@ -1,7 +1,6 @@
 import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { GitFork } from 'lucide-react';
-import { parameterEntryPath } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
 import {
   Dialog,
@@ -15,8 +14,6 @@ import { WorkspaceSelector } from '#components/filesystem/workspace-selector.js'
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { toast } from '#components/ui/sonner.js';
-import { encodeTextFile } from '#utils/filesystem.utils.js';
-import { createParameterEntry, serializeParameterEntry } from '#utils/parameter-config.utils.js';
 import { projectUrl } from '#utils/project-url.utils.js';
 import { useProjectCreationLocation } from '#hooks/use-project-creation-location.js';
 
@@ -33,7 +30,7 @@ type ForkActionProps = {
   readonly parameters: Record<string, unknown>;
 };
 
-export function ForkAction({ publication, files, parameters }: ForkActionProps): React.JSX.Element {
+export function ForkAction({ publication, files }: ForkActionProps): React.JSX.Element {
   const navigate = useNavigate();
   const projectManager = useProjectManager();
   const presentLocationError = useProjectCreationLocationError();
@@ -56,12 +53,7 @@ export function ForkAction({ publication, files, parameters }: ForkActionProps):
           tags: [],
           assets: { main: { entryPath: publication.entryPath } },
         },
-        files: {
-          ...Object.fromEntries([...files.entries()].map(([path, file]) => [path, { content: file.content }])),
-          [parameterEntryPath(publication.entryPath)]: {
-            content: encodeTextFile(serializeParameterEntry(createParameterEntry(parameters))),
-          },
-        },
+        files: Object.fromEntries([...files.entries()].map(([path, file]) => [path, { content: file.content }])),
         location: location.value,
       });
 
@@ -84,7 +76,6 @@ export function ForkAction({ publication, files, parameters }: ForkActionProps):
     busy,
     files,
     location,
-    parameters,
     navigate,
     projectManager,
     presentLocationError,

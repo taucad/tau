@@ -10,7 +10,11 @@ type ProjectEvent =
   | { type: 'fileMoved'; oldPath: string; newPath: string }
   | { type: 'fileDeleted'; path: string }
   | { type: 'directoryDeleted'; path: string }
-  | { type: 'projectFileActivity'; operation: string; paths: readonly string[] };
+  | {
+      type: 'projectFileActivity';
+      operation: string;
+      paths: readonly string[];
+    };
 
 function makeReferences(initialOpenFiles: Array<{ path: string }> = []) {
   const editorSent: EditorEvent[] = [];
@@ -48,6 +52,7 @@ function makeContentService(): {
       listener = handler;
       return dispose;
     },
+    addFileOperationParticipant: vi.fn(() => vi.fn()),
   } as unknown as FileContentService;
   return {
     service,
@@ -64,31 +69,51 @@ describe('mountFileOperationParticipants', () => {
   it('should dispatch renameFile + fileMoved on file rename', () => {
     const { editorRef, projectRef, editorSent, projectSent } = makeReferences();
     const { service, emit } = makeContentService();
-    mountFileOperationParticipants({ contentService: service, editorRef, projectRef });
+    mountFileOperationParticipants({
+      contentService: service,
+      editorRef,
+      projectRef,
+    });
     emit({ type: 'renamed', oldPath: 'src/old.ts', newPath: 'src/new.ts' });
     expect(editorSent).toEqual([{ type: 'renameFile', oldPath: 'src/old.ts', newPath: 'src/new.ts' }]);
     expect(projectSent).toEqual([
       { type: 'fileMoved', oldPath: 'src/old.ts', newPath: 'src/new.ts' },
-      { type: 'projectFileActivity', operation: 'renamed', paths: ['src/old.ts', 'src/new.ts'] },
+      {
+        type: 'projectFileActivity',
+        operation: 'renamed',
+        paths: ['src/old.ts', 'src/new.ts'],
+      },
     ]);
   });
 
   it('should dispatch renameFile + fileMoved on directory rename (prefix carries through)', () => {
     const { editorRef, projectRef, editorSent, projectSent } = makeReferences();
     const { service, emit } = makeContentService();
-    mountFileOperationParticipants({ contentService: service, editorRef, projectRef });
+    mountFileOperationParticipants({
+      contentService: service,
+      editorRef,
+      projectRef,
+    });
     emit({ type: 'directoryRenamed', oldPath: 'src/foo', newPath: 'src/bar' });
     expect(editorSent).toEqual([{ type: 'renameFile', oldPath: 'src/foo', newPath: 'src/bar' }]);
     expect(projectSent).toEqual([
       { type: 'fileMoved', oldPath: 'src/foo', newPath: 'src/bar' },
-      { type: 'projectFileActivity', operation: 'directoryRenamed', paths: ['src/foo', 'src/bar'] },
+      {
+        type: 'projectFileActivity',
+        operation: 'directoryRenamed',
+        paths: ['src/foo', 'src/bar'],
+      },
     ]);
   });
 
   it('should dispatch closeFile + fileDeleted on file delete', () => {
     const { editorRef, projectRef, editorSent, projectSent } = makeReferences([{ path: 'src/x.ts' }]);
     const { service, emit } = makeContentService();
-    mountFileOperationParticipants({ contentService: service, editorRef, projectRef });
+    mountFileOperationParticipants({
+      contentService: service,
+      editorRef,
+      projectRef,
+    });
     emit({ type: 'deleted', path: 'src/x.ts', source: 'user' });
     expect(editorSent).toEqual([
       { type: 'closeFile', path: 'src/x.ts' },
@@ -96,7 +121,11 @@ describe('mountFileOperationParticipants', () => {
     ]);
     expect(projectSent).toEqual([
       { type: 'fileDeleted', path: 'src/x.ts' },
-      { type: 'projectFileActivity', operation: 'deleted', paths: ['src/x.ts'] },
+      {
+        type: 'projectFileActivity',
+        operation: 'deleted',
+        paths: ['src/x.ts'],
+      },
     ]);
   });
 
@@ -107,7 +136,11 @@ describe('mountFileOperationParticipants', () => {
       { path: 'src/foo/nested/b.ts' },
     ]);
     const { service, emit } = makeContentService();
-    mountFileOperationParticipants({ contentService: service, editorRef, projectRef });
+    mountFileOperationParticipants({
+      contentService: service,
+      editorRef,
+      projectRef,
+    });
     emit({ type: 'directoryDeleted', path: 'src/foo' });
     expect(editorSent.map((event) => event)).toEqual([
       { type: 'closeFile', path: 'src/foo/a.ts' },
@@ -116,33 +149,78 @@ describe('mountFileOperationParticipants', () => {
     ]);
     expect(projectSent).toEqual([
       { type: 'directoryDeleted', path: 'src/foo' },
-      { type: 'projectFileActivity', operation: 'directoryDeleted', paths: ['src/foo'] },
+      {
+        type: 'projectFileActivity',
+        operation: 'directoryDeleted',
+        paths: ['src/foo'],
+      },
     ]);
   });
 
   it('should route filesystem content activity into the project machine', () => {
     const { editorRef, projectRef, editorSent, projectSent } = makeReferences();
     const { service, emit } = makeContentService();
-    mountFileOperationParticipants({ contentService: service, editorRef, projectRef });
-    emit({ type: 'written', path: 'src/x.ts', data: new Uint8Array(), source: 'user' });
+    mountFileOperationParticipants({
+      contentService: service,
+      editorRef,
+      projectRef,
+    });
+    emit({
+      type: 'written',
+      path: 'src/x.ts',
+      data: new Uint8Array(),
+      source: 'user',
+    });
     emit({ type: 'batchWritten', paths: ['src/x.ts'], source: 'user' });
     emit({ type: 'directoryCreated', path: 'src/newdir' });
-    emit({ type: 'fileCopied', sourcePath: 'src/x.ts', targetPath: 'src/x-copy.ts' });
-    emit({ type: 'directoryCopied', sourcePath: 'src', targetPath: 'src-copy' });
+    emit({
+      type: 'fileCopied',
+      sourcePath: 'src/x.ts',
+      targetPath: 'src/x-copy.ts',
+    });
+    emit({
+      type: 'directoryCopied',
+      sourcePath: 'src',
+      targetPath: 'src-copy',
+    });
     expect(editorSent).toEqual([]);
     expect(projectSent).toEqual([
-      { type: 'projectFileActivity', operation: 'written', paths: ['src/x.ts'] },
-      { type: 'projectFileActivity', operation: 'batchWritten', paths: ['src/x.ts'] },
-      { type: 'projectFileActivity', operation: 'directoryCreated', paths: ['src/newdir'] },
-      { type: 'projectFileActivity', operation: 'fileCopied', paths: ['src/x-copy.ts'] },
-      { type: 'projectFileActivity', operation: 'directoryCopied', paths: ['src-copy'] },
+      {
+        type: 'projectFileActivity',
+        operation: 'written',
+        paths: ['src/x.ts'],
+      },
+      {
+        type: 'projectFileActivity',
+        operation: 'batchWritten',
+        paths: ['src/x.ts'],
+      },
+      {
+        type: 'projectFileActivity',
+        operation: 'directoryCreated',
+        paths: ['src/newdir'],
+      },
+      {
+        type: 'projectFileActivity',
+        operation: 'fileCopied',
+        paths: ['src/x-copy.ts'],
+      },
+      {
+        type: 'projectFileActivity',
+        operation: 'directoryCopied',
+        paths: ['src-copy'],
+      },
     ]);
   });
 
   it('should ignore read events', () => {
     const { editorRef, projectRef, editorSent, projectSent } = makeReferences();
     const { service, emit } = makeContentService();
-    mountFileOperationParticipants({ contentService: service, editorRef, projectRef });
+    mountFileOperationParticipants({
+      contentService: service,
+      editorRef,
+      projectRef,
+    });
     emit({ type: 'read', path: 'src/x.ts', data: new Uint8Array() });
     expect(editorSent).toEqual([]);
     expect(projectSent).toEqual([]);
@@ -151,8 +229,41 @@ describe('mountFileOperationParticipants', () => {
   it('should return a disposer that unsubscribes from the content service', () => {
     const { editorRef, projectRef } = makeReferences();
     const { service, dispose } = makeContentService();
-    const disposer = mountFileOperationParticipants({ contentService: service, editorRef, projectRef });
+    const disposer = mountFileOperationParticipants({
+      contentService: service,
+      editorRef,
+      projectRef,
+    });
     disposer();
     expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it('moves and deletes parameter sidecars with their source paths', async () => {
+    const { editorRef, projectRef } = makeReferences();
+    const { service, emit } = makeContentService();
+    const movePath = vi.fn(async () => undefined);
+    const deletePath = vi.fn(async () => undefined);
+    const prepareFileOperation = vi.fn(async () => ({
+      commit: async () => undefined,
+      rollback: async () => undefined,
+    }));
+    mountFileOperationParticipants({
+      contentService: service,
+      editorRef,
+      projectRef,
+      parameterFiles: { movePath, deletePath, prepareFileOperation },
+    });
+
+    emit({ type: 'renamed', oldPath: 'old.ts', newPath: 'new.ts' });
+    emit({ type: 'directoryRenamed', oldPath: 'old', newPath: 'new' });
+    emit({ type: 'deleted', path: 'gone.ts', source: 'user' });
+    emit({ type: 'directoryDeleted', path: 'gone' });
+
+    await vi.waitFor(() => {
+      expect(movePath).toHaveBeenNthCalledWith(1, 'old.ts', 'new.ts', false);
+      expect(movePath).toHaveBeenNthCalledWith(2, 'old', 'new', true);
+      expect(deletePath).toHaveBeenNthCalledWith(1, 'gone.ts', false);
+      expect(deletePath).toHaveBeenNthCalledWith(2, 'gone', true);
+    });
   });
 });

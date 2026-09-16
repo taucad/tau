@@ -1354,6 +1354,8 @@ describe('skill activity summary contract', () => {
       [toolName.testModel]: 'research',
       [toolName.exportGeometry]: 'write',
       [toolName.revisions]: 'research',
+      [toolName.getParameters]: 'research',
+      [toolName.applyParameterOperation]: 'research',
     } as const;
     expect([...toolNames].sort()).toEqual(Object.keys(categories).sort());
     for (const name of toolNames) {

@@ -67,7 +67,7 @@ const buildOptions = (options: CaptureExportOptionsInput) => {
         mode: 'single',
         camera: {
           framing: 'bounds',
-          direction: [0.612_372_435_7, -0.612_372_435_7, 0.5],
+          direction: [0.6123724357, -0.6123724357, 0.5],
           up: [0, 0, 1],
           margin: 0.1,
           projection: { kind: 'perspective', verticalFieldOfView: 45 },

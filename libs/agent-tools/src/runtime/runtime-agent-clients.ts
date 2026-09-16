@@ -5,9 +5,19 @@ import type {
   RpcHandlerError,
   RpcImageClient,
   RpcInvocationContext,
+  RpcParameterClient,
   RpcRuntimeClient,
 } from '@taucad/chat/rpc';
+import {
+  applyParameterOperationOutputSchema,
+  getParametersOutputSchema,
+  parameterManifestWireSchema,
+} from '@taucad/chat/schemas';
 import type { ExportFile, HashedGeometryResult, KernelIssue } from '@taucad/runtime/types';
+import { admitParameterManifest } from '@taucad/parameters';
+import { waitFor } from 'xstate';
+import type { ActorRefFrom } from 'xstate';
+import type { parameterSetMachine } from '@taucad/parameters/set-machine';
 import { assertRootedPath } from '@taucad/utils/path';
 
 import { buildCaptureExportOptions, canonicalCaptureViews } from '#capture/capture-views.js';
@@ -27,9 +37,16 @@ export type RuntimeAgentClient = Readonly<{
   }): Promise<HashedGeometryResult>;
   export(
     format: string,
-    options: { readonly source: { readonly path: string }; readonly signal?: AbortSignal },
+    options: {
+      readonly source: { readonly path: string };
+      readonly signal?: AbortSignal;
+    },
   ): Promise<
-    | { readonly success: true; readonly data: readonly ExportFile[]; readonly issues: readonly KernelIssue[] }
+    | {
+        readonly success: true;
+        readonly data: readonly ExportFile[];
+        readonly issues: readonly KernelIssue[];
+      }
     | { readonly success: false; readonly issues: readonly KernelIssue[] }
   >;
 }>;
@@ -78,6 +95,161 @@ export type CreateRuntimeAgentClientsInput = Readonly<{
   mapRuntimeError: RuntimeAgentErrorMapper;
 }>;
 
+/** Inputs for adapting one host-owned parameter actor per source target. @public */
+export type CreateRuntimeParameterAgentClientInput = Readonly<{
+  mapRuntimeError: RuntimeAgentErrorMapper;
+  parameterActorFor(
+    targetFile: string,
+  ): ActorRefFrom<typeof parameterSetMachine> | Promise<ActorRefFrom<typeof parameterSetMachine>>;
+}>;
+
+/**
+ * Adapt native parameter actors to the chat RPC contract without creating another workflow owner.
+ * @param input - Target resolver and host error projection.
+ * @returns The semantic parameter RPC client.
+ * @public
+ */
+export const createRuntimeParameterAgentClient = (
+  input: CreateRuntimeParameterAgentClientInput,
+): RpcParameterClient => ({
+  async getParameters(request, context) {
+    try {
+      context?.signal?.throwIfAborted();
+      const targetFile = assertRootedPath(request.targetFile);
+      const actor = await input.parameterActorFor(targetFile);
+      actor.send({
+        type: 'resolve',
+        resolution: request.resolutionMode === undefined ? undefined : { mode: request.resolutionMode },
+      });
+      const result = await waitFor(
+        actor,
+        (snapshot) =>
+          snapshot.matches({ open: 'ready' }) ||
+          snapshot.matches({ open: 'disconnected' }) ||
+          snapshot.matches({ open: 'uncertain' }) ||
+          snapshot.status === 'done',
+        { signal: context?.signal },
+      );
+      const { current } = result.context;
+      if (!result.matches({ open: 'ready' }) || current === undefined) {
+        return {
+          success: true,
+          ...getParametersOutputSchema.parse({
+            status: 'unresolved',
+            diagnostics: [
+              {
+                ...(result.context.diagnostic ?? {
+                  code: 'SEMANTICS_UNRESOLVED',
+                  message: 'Parameter authority is unavailable.',
+                }),
+                severity: 'error',
+                resource: targetFile,
+                schemaPointer: '',
+              },
+            ],
+          }),
+        };
+      }
+      if ((current.manifest.identity.resolution.mode ?? 'default') !== (request.resolutionMode ?? 'default')) {
+        throw new Error('Parameter resolution was superseded by a different admission mode.');
+      }
+      const manifest = await admitParameterManifest(current.manifest);
+      context?.signal?.throwIfAborted();
+      return {
+        success: true,
+        ...getParametersOutputSchema.parse({
+          status: 'resolved',
+          manifest: parameterManifestWireSchema.parse(structuredClone(manifest)),
+          current: structuredClone({ entry: current.entry, identity: current.identity, access: current.access }),
+        }),
+      };
+    } catch (error) {
+      return input.mapRuntimeError(error, request.targetFile);
+    }
+  },
+  async applyParameterOperation(request, context) {
+    try {
+      context?.signal?.throwIfAborted();
+      const targetFile = assertRootedPath(request.targetFile);
+      const actor = await input.parameterActorFor(targetFile);
+      if (actor.getSnapshot().status !== 'active') {
+        throw new Error('Parameter actor is closed.');
+      }
+      const command =
+        'action' in request
+          ? undefined
+          : {
+              requestId: request.requestId,
+              draftGeneration: 0,
+              fingerprint: JSON.stringify({
+                targetFile,
+                expected: request.expected,
+                pressure: request.pressure,
+                operation: request.operation,
+              }),
+              expected: request.expected,
+              pressure: request.pressure,
+              operation: request.operation,
+            };
+      const outcome = await new Promise<unknown>((resolve, reject) => {
+        const cleanup = () => {
+          settled.unsubscribe();
+          confirmation.unsubscribe();
+          lifecycle.unsubscribe();
+          context?.signal?.removeEventListener('abort', onAbort);
+        };
+        const finish = (value: unknown) => {
+          cleanup();
+          resolve(value);
+        };
+        const settled = actor.on('settled', (event) => {
+          if (
+            event.outcome.requestId === request.requestId &&
+            (command === undefined || event.request?.fingerprint === command.fingerprint)
+          ) {
+            finish(event.outcome);
+          }
+        });
+        const confirmation = actor.on('confirmation-required', (event) => {
+          if (event.requestId === request.requestId) {
+            finish({ ...event.confirmation, requestId: event.requestId });
+          }
+        });
+        const lifecycle = actor.subscribe({
+          complete: () => {
+            cleanup();
+            reject(new Error('Parameter actor closed before settlement.'));
+          },
+          error: (error) => {
+            cleanup();
+            reject(error instanceof Error ? error : new Error(String(error)));
+          },
+        });
+        const onAbort = () => {
+          actor.send({ type: 'cancel', requestId: request.requestId });
+        };
+        context?.signal?.addEventListener('abort', onAbort, { once: true });
+        if (command !== undefined) {
+          actor.send({ type: 'submit', request: command });
+        } else if ('action' in request && request.action === 'confirm') {
+          actor.send({ type: 'confirm', requestId: request.requestId, fingerprint: request.planFingerprint });
+        } else {
+          actor.send({ type: 'cancel', requestId: request.requestId });
+        }
+        if (context?.signal?.aborted) {
+          onAbort();
+        }
+      });
+      return {
+        success: true,
+        outcome: applyParameterOperationOutputSchema.shape.outcome.parse(structuredClone(outcome)),
+      };
+    } catch (error) {
+      return input.mapRuntimeError(error, request.targetFile);
+    }
+  },
+});
+
 const issueMessage = (issues: ReadonlyArray<{ readonly message: string }>, fallback: string): string =>
   issues.map((issue) => issue.message).join('; ') || fallback;
 
@@ -125,7 +297,11 @@ const assertGlb = (bytes: Uint8Array<ArrayBuffer>): void => {
  */
 export const createRuntimeAgentClients = (
   input: CreateRuntimeAgentClientsInput,
-): Readonly<{ kernelClient: RpcRuntimeClient; graphics: RpcGraphicsClient; images: RpcImageClient }> => {
+): Readonly<{
+  kernelClient: RpcRuntimeClient;
+  graphics: RpcGraphicsClient;
+  images: RpcImageClient;
+}> => {
   const evaluate = async (targetFile: string, context?: RpcInvocationContext): Promise<HashedGeometryResult> => {
     context?.signal?.throwIfAborted();
     return input.runtime.evaluate({
@@ -157,7 +333,10 @@ export const createRuntimeAgentClients = (
       try {
         context?.signal?.throwIfAborted();
         const rooted = assertRootedPath(targetFile);
-        const result = await input.runtime.export(format, { source: { path: rooted }, signal: context?.signal });
+        const result = await input.runtime.export(format, {
+          source: { path: rooted },
+          signal: context?.signal,
+        });
         context?.signal?.throwIfAborted();
         return result.success
           ? { success: true, files: [...result.data] }
@@ -230,7 +409,10 @@ export const createRuntimeAgentClients = (
             { count: 1, mimeType: 'image/png' },
           );
           context?.signal?.throwIfAborted();
-          return { success: true, images: [{ view: 'drawing', dataUrl: captureFilesToDataUrls(files)[0]! }] };
+          return {
+            success: true,
+            images: [{ view: 'drawing', dataUrl: captureFilesToDataUrls(files)[0]! }],
+          };
         }
 
         assertGlb(geometry.content);
@@ -264,7 +446,10 @@ export const createRuntimeAgentClients = (
           success: true,
           images:
             captureInput.mode === 'multi_angle'
-              ? canonicalCaptureViews.map((view, index) => ({ view: view.id, dataUrl: dataUrls[index]! }))
+              ? canonicalCaptureViews.map((view, index) => ({
+                  view: view.id,
+                  dataUrl: dataUrls[index]!,
+                }))
               : [{ view: 'isometric', dataUrl: dataUrls[0]! }],
         };
       } catch (error) {

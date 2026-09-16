@@ -1,7 +1,7 @@
 import { esbuild } from '@taucad/esbuild';
 import { middleware } from '@taucad/middleware';
 import { replicad } from '@taucad/replicad';
-import { defineKernel } from '@taucad/runtime/kernel';
+import { createKernelParameterDeclaration, defineKernel } from '@taucad/runtime/kernel';
 import { defineRuntime } from '@taucad/runtime/worker';
 
 /** Packaged-Electron hard-recovery fixture: deliberately never yields back to the utility event loop. */
@@ -20,7 +20,14 @@ const blocking = defineKernel({
   async getParameters() {
     return {
       success: true,
-      data: { defaultParameters: {}, jsonSchema: { type: 'object', properties: {} } },
+      data: createKernelParameterDeclaration(
+        {},
+        { type: 'object', properties: {} },
+        {
+          id: 'urn:taucad:test:blocking-electron',
+          name: 'BlockingElectronParameters',
+        },
+      ),
       issues: [],
     };
   },

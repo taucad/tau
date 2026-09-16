@@ -24,6 +24,8 @@ describe('CookieConsent', () => {
   it('should show immediately only when the web consent decision is unknown', () => {
     const view = render(<CookieConsent />);
     expect(screen.getByRole('heading', { name: 'Cookies' })).toBeInTheDocument();
+    // Accept bypasses Manage, so the first layer itself names replay.
+    expect(screen.getByText(/including session recording/i)).toBeInTheDocument();
 
     consent.status = 'accepted';
     view.rerender(<CookieConsent />);

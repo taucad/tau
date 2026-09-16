@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- PostHog and environment APIs use snake/constant case. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CaptureResult, PostHog, PostHogConfig } from 'posthog-js';
+import type { CaptureResult } from 'posthog-js';
 import { posthogConfig } from '#lib/posthog.lib.js';
 
 const state = vi.hoisted(() => ({ consent: 'accepted' as 'accepted' | 'declined' }));
@@ -19,19 +19,17 @@ describe('posthogConfig', () => {
     state.consent = 'accepted';
   });
 
-  it('should preserve accepted web analytics BAU behind privacy-closed initialization', () => {
-    const { before_send: beforeSend, loaded, ...staticOptions } = posthogConfig.options;
+  it('should keep accepted web analytics BAU with SPA pageviews and no opt-out workarounds', () => {
+    const { before_send: beforeSend, ...staticOptions } = posthogConfig.options;
     expect(staticOptions).toEqual({
       __preview_deferred_init_extensions: true,
       api_host: '/api/ph',
       autocapture: true,
       capture_dead_clicks: true,
       capture_pageleave: true,
-      capture_pageview: true,
+      capture_pageview: 'history_change',
       defaults: '2025-11-30',
       disable_session_recording: true,
-      opt_out_capturing_by_default: true,
-      opt_out_persistence_by_default: true,
       persistence: 'localStorage+cookie',
       ui_host: 'https://initial-posthog.tau.test',
     });
@@ -45,14 +43,10 @@ describe('posthogConfig', () => {
       'capture_pageview',
       'defaults',
       'disable_session_recording',
-      'loaded',
-      'opt_out_capturing_by_default',
-      'opt_out_persistence_by_default',
       'persistence',
       'ui_host',
     ]);
     expect(typeof beforeSend).toBe('function');
-    expect(typeof loaded).toBe('function');
     expect(posthogConfig.options.cookieless_mode).toBeUndefined();
   });
 
@@ -66,20 +60,6 @@ describe('posthogConfig', () => {
     expect(beforeSend(event)).toBe(event);
     state.consent = 'declined';
     expect(beforeSend(event)).toBeNull();
-  });
-
-  it('should opt in through the loaded lifecycle without duplicating the SDK initial pageview', () => {
-    const calls: string[] = [];
-    const optIn = vi.fn(() => {
-      calls.push('opt-in');
-    });
-    const setConfig = vi.fn((config: Partial<PostHogConfig>) => {
-      calls.push(`pageview:${String(config.capture_pageview)}`);
-    });
-    posthogConfig.options.loaded?.({ opt_in_capturing: optIn, set_config: setConfig } as unknown as PostHog);
-
-    expect(calls).toStrictEqual(['pageview:false', 'opt-in', 'pageview:true']);
-    expect(optIn).toHaveBeenCalledWith({ captureEventName: false });
   });
 
   it('should read PostHog environment values lazily', () => {

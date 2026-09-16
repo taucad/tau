@@ -128,7 +128,9 @@ export function CookieConsent(): React.JSX.Element | undefined {
             <h3 className='font-semibold'>Cookies</h3>
             <CookieIcon className='size-4 shrink-0 text-muted-foreground' />
           </div>
-          <p className='text-sm text-muted-foreground'>Allow optional PostHog analytics to help improve Tau?</p>
+          <p className='text-sm text-muted-foreground'>
+            Allow optional PostHog analytics, including session recording, to help improve Tau?
+          </p>
           <div className='flex items-center justify-between'>
             <Button
               variant='link'

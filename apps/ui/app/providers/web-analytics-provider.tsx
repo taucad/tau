@@ -1,108 +1,110 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { useSession } from '@better-auth-ui/react';
-import { PostHogProvider, usePostHog } from 'posthog-js/react';
+import { posthog } from 'posthog-js';
 import { authClient } from '#lib/auth-client.js';
-import { posthogConfig } from '#lib/posthog.lib.js';
+import { clearPostHogStorage, posthogConfig } from '#lib/posthog.lib.js';
 import { useCookieConsent } from '#hooks/use-cookie-consent.js';
 import { AnalyticsContextProvider } from '#hooks/use-analytics.js';
 import type { Analytics } from '#hooks/use-analytics.js';
 
-const AnalyticsBridge = ({ children }: { readonly children: ReactNode }): React.JSX.Element => {
-  const posthog = usePostHog();
-  const analytics = useMemo<Analytics>(
-    () => ({
-      capture: (event, properties) => {
-        posthog.capture(event, properties);
-      },
-      captureException: (error, properties) => {
-        posthog.captureException(error, properties);
-      },
-    }),
-    [posthog],
-  );
-  return <AnalyticsContextProvider analytics={analytics}>{children}</AnalyticsContextProvider>;
-};
+const isCapturing = (): boolean => posthog.__loaded && !posthog.has_opted_out_capturing();
 
-const AnalyticsIdentifier = ({ children }: { readonly children: ReactNode }): React.ReactNode => {
-  const analytics = usePostHog();
-  const { data: sessionData } = useSession(authClient);
-  const user = sessionData?.user;
-  const previousUserIdRef = useRef<string | undefined>(undefined);
-
-  useEffect(() => {
-    const currentUserId = user?.id;
-    const previousUserId = previousUserIdRef.current;
-    if (currentUserId && currentUserId !== previousUserId && !analytics._isIdentified()) {
-      analytics.identify(currentUserId, { avatar: user.image, email: user.email, name: user.name });
-      previousUserIdRef.current = currentUserId;
-    }
-    if (!currentUserId && previousUserId) {
-      analytics.reset();
-      previousUserIdRef.current = undefined;
-    }
-  }, [analytics, user?.email, user?.id, user?.image, user?.name]);
-
-  return children;
-};
-
-/** Starts recording outside the critical rendering path after consent. */
-export function DeferredSessionRecording(): React.ReactNode {
-  const posthog = usePostHog();
-
-  useEffect(() => {
-    const start = (): void => {
-      posthog.startSessionRecording();
-    };
-    if ('requestIdleCallback' in globalThis) {
-      const id = requestIdleCallback(start);
-      return () => {
-        cancelIdleCallback(id);
-      };
-    }
-    const id = setTimeout(start, 0);
+/**
+ * Starts replay outside the critical rendering path.
+ *
+ * @param start - Called once the page is idle.
+ * @returns Cancels a start that has not run yet.
+ */
+const whenIdle = (start: () => void): (() => void) => {
+  if ('requestIdleCallback' in globalThis) {
+    const id = requestIdleCallback(start);
     return () => {
-      clearTimeout(id);
+      cancelIdleCallback(id);
     };
-  }, [posthog]);
+  }
+  const id = setTimeout(start, 0);
+  return () => {
+    clearTimeout(id);
+  };
+};
+
+/**
+ * Applies consent to the PostHog singleton. It renders nothing, so a consent
+ * change never moves the product between React trees.
+ */
+function PostHogLifecycle({ isActive }: { readonly isActive: boolean }): undefined {
+  const { data: sessionData, isPending } = useSession(authClient);
+  const user = sessionData?.user;
+
+  useEffect(() => {
+    const { apiKey } = posthogConfig;
+    if (!isActive) {
+      if (posthog.__loaded) {
+        posthog.stopSessionRecording();
+        posthog.reset();
+        posthog.opt_out_capturing();
+      }
+      if (apiKey) {
+        clearPostHogStorage(apiKey);
+      }
+      return undefined;
+    }
+
+    if (!posthog.__loaded) {
+      posthog.init(apiKey, posthogConfig.options);
+    }
+    // Re-acceptance, or a persisted opt-out marker from an earlier withdrawal. The SDK's
+    // initial-pageview guard keeps this from emitting a second `$pageview`.
+    if (posthog.has_opted_out_capturing()) {
+      posthog.opt_in_capturing({ captureEventName: false });
+    }
+    return whenIdle(() => {
+      posthog.startSessionRecording();
+    });
+  }, [isActive]);
+
+  useEffect(() => {
+    if (!isActive || isPending || !posthog.__loaded) {
+      return;
+    }
+    if (user) {
+      // Covers cold authenticated loads, login and account switches without merging accounts.
+      if (posthog.get_distinct_id() !== user.id) {
+        posthog.identify(user.id, { avatar: user.image, email: user.email, name: user.name });
+      }
+    } else if (posthog._isIdentified()) {
+      posthog.reset();
+    }
+  }, [isActive, isPending, user]);
 
   return undefined;
 }
 
-const ConsentLifecycle = ({ children }: { readonly children: ReactNode }): React.ReactNode => {
-  const posthog = usePostHog();
-
-  useEffect(() => {
-    return () => {
-      posthog.stopSessionRecording();
-      posthog.reset();
-      posthog.opt_out_capturing();
-    };
-  }, [posthog]);
-
-  return children;
-};
-
-const ConsentedAnalytics = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
-  <ConsentLifecycle>
-    <AnalyticsBridge>
-      <DeferredSessionRecording />
-      <AnalyticsIdentifier>{children}</AnalyticsIdentifier>
-    </AnalyticsBridge>
-  </ConsentLifecycle>
-);
-
-/** Initializes PostHog only after web consent and keeps withdrawal reversible. */
-export function WebAnalyticsProvider({ children }: { readonly children: ReactNode }): React.ReactNode {
+/** Web analytics boundary: stable ancestry, PostHog only after accepted consent. */
+export function WebAnalyticsProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const [consentStatus] = useCookieConsent();
-  const { apiKey } = posthogConfig;
-  if (consentStatus !== 'accepted' || !apiKey) {
-    return children;
-  }
+  const isActive = consentStatus === 'accepted' && posthogConfig.apiKey !== '';
+  const analytics = useMemo<Analytics>(
+    () => ({
+      capture(event, properties) {
+        if (isCapturing()) {
+          posthog.capture(event, properties);
+        }
+      },
+      captureException(error, properties) {
+        if (isCapturing()) {
+          posthog.captureException(error, properties);
+        }
+      },
+    }),
+    [],
+  );
 
   return (
-    <PostHogProvider apiKey={apiKey} options={posthogConfig.options}>
-      <ConsentedAnalytics>{children}</ConsentedAnalytics>
-    </PostHogProvider>
+    <AnalyticsContextProvider analytics={analytics}>
+      <PostHogLifecycle isActive={isActive} />
+      {children}
+    </AnalyticsContextProvider>
   );
 }

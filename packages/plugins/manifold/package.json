@@ -60,6 +60,7 @@
   "dependencies": {
     "@gltf-transform/core": "catalog:",
     "@taucad/geometry-core": "workspace:*",
+    "@taucad/parameters": "workspace:*",
     "manifold-3d": "catalog:"
   },
   "peerDependencies": {

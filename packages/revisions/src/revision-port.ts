@@ -515,6 +515,24 @@ export type RevisionPort = Readonly<{
   removeCheckout?(id: string): Promise<void>;
 }>;
 
+/**
+ * What a remote said about room when it refused a push for storage (D16, C13).
+ *
+ * The numbers the Tau API's LFS batch refusal actually carries. They were
+ * parsed into `LfsQuotaRefusal` and then dropped one hop later, so the Sync
+ * region's storage meter had nothing to render but the file list. Declared here
+ * because it is a *contract* shape: `remote.machine` and `sync.machine` may
+ * import types from this module and from nowhere else (I20).
+ *
+ * @public
+ */
+export type RemoteStorageRefusal = Readonly<{
+  /** How much room is left under the plan, when the remote said. */
+  remainingBytes?: number;
+  /** How much more this push needed than would fit, when the remote said. */
+  shortfallBytes?: number;
+}>;
+
 /** Stable failure categories every adapter shares. @public */
 export type RevisionPortErrorCode =
   /** The requested branch already has a checkout, or the id names no checkout. */
@@ -533,8 +551,47 @@ export type RevisionPortErrorCode =
   | 'LFS_REMOTE_UNSUPPORTED'
   /** A large object this revision references is not in this store, and cannot be fetched. */
   | 'MISSING_LARGE_OBJECT'
+  /*
+   * The remote's own answers (N1).
+   *
+   * Every one of these means the remote *was* reached and said no, which is why
+   * none of them may ever be spelled "could not be reached": that sentence is
+   * `ENGINE_FAILED`'s alone, and `ENGINE_FAILED` is reserved for a transport
+   * failure carrying no HTTP status at all. One classifier produces the whole
+   * set — `remoteTransportError` in `#remotes.js` — and both legs call it.
+   */
+  /** Any HTTP 403 that is not an entitlement refusal. */
+  | 'REMOTE_FORBIDDEN'
+  /** HTTP 403 whose body `code` is `GIT_SYNC_NOT_ENTITLED`: the plan does not include syncing. */
+  | 'REMOTE_NOT_ENTITLED'
+  /** HTTP 404: the remote has no repository at this address for this account. */
+  | 'REMOTE_NOT_FOUND'
+  /** HTTP 413 with no LFS file list; a batch refusal keeps raising `LfsQuotaError`. */
+  | 'REMOTE_QUOTA_EXCEEDED'
+  /**
+   * The remote's credential has to be granted again.
+   *
+   * Spelled identically to `RemoteReauthorizationCode` in `#remotes.js`, which
+   * is the same literal on a plain `Error` for the hosts that raise it before a
+   * request is made. `remote.machine` routes both to `reconnectRequired`.
+   */
+  | 'REMOTE_REAUTHORIZATION_REQUIRED'
   /** A reviewed remote ref changed before it could be adopted locally. */
   | 'REMOTE_REF_CONFLICT'
+  /**
+   * The remote refused the refs themselves, in its own words and with no status.
+   *
+   * Tau Cloud's `pre-receive` hook refuses a deletion or a rewind on *every* ref
+   * family, `refs/tau/*` included (contract §4), and it answers over git's
+   * `remote:` sideband rather than with an HTTP status — so without this the one
+   * refusal a fetch-and-replay actually clears read as `ENGINE_FAILED`, the code
+   * reserved for a remote that was never reached.
+   */
+  | 'REMOTE_REJECTED'
+  /** HTTP 401: this device's credential is not one the remote accepts. */
+  | 'REMOTE_UNAUTHORIZED'
+  /** HTTP 429 or 5xx: the remote is there and cannot answer yet. Retryable. */
+  | 'REMOTE_UNAVAILABLE'
   | 'UNKNOWN_REVISION'
   | 'UNSUPPORTED_OPERATION';
 

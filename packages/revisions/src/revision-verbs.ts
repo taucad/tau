@@ -225,18 +225,24 @@ export const readRevisionDiff = async (
  * ```
  */
 export const readRevisionPlace = async (port: RevisionPort): Promise<RevisionPlace> => {
-  const { branch, head, entries } = await readGraph(port, undefined);
+  const [live, references] = await Promise.all([port.readHead(), port.listRefs()]);
+  const { branch, head } = { branch: live?.branch, head: live?.head };
+  /* One walk for every head at once, not one per branch (B5). `log` takes the
+   * whole set and answers their union, and `Rev N` is read out of that union by
+   * following first parents — the same ids, in the same order, that a walk per
+   * branch produced at N times the cost. A project with eight branches was
+   * eight full histories every time the place line was refreshed. */
+  const heads = [...new Set([...(head === undefined ? [] : [head]), ...references.map((reference) => reference.head)])];
+  const entries = new Map<string, RevisionLogEntry>();
+  for (const entry of heads.length === 0 ? [] : await port.log({ heads })) {
+    entries.set(entry.id, entry);
+  }
   const revisionNumber = head === undefined ? undefined : firstParentChain(head, entries).length;
-  const references = await port.listRefs();
-  const branches = await Promise.all(
-    references.map(async (reference) => {
-      const walked = reference.head === head ? undefined : await port.log({ heads: [reference.head] });
-      const reachable = walked === undefined ? entries : new Map(walked.map((entry) => [entry.id, entry]));
-      return Object.freeze({
-        name: reference.name,
-        revisionNumber: firstParentChain(reference.head, reachable).length,
-        revisionId: reference.head,
-      });
+  const branches = references.map((reference) =>
+    Object.freeze({
+      name: reference.name,
+      revisionNumber: firstParentChain(reference.head, entries).length,
+      revisionId: reference.head,
     }),
   );
   return Object.freeze({

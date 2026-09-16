@@ -27,6 +27,7 @@ import { assign, emit, enqueueActions, fromPromise, raise, setup } from 'xstate'
 import type { AnyActorRef, SnapshotFrom } from 'xstate';
 
 import type { RemoteKind, RemoteReauthorizationCode } from '#remotes.js';
+import type { RemoteStorageRefusal } from '#revision-port.js';
 
 /** Which remote a project is connected to, and what it costs. @public */
 export type RemoteFacet = Readonly<{
@@ -38,6 +39,15 @@ export type RemoteFacet = Readonly<{
   storage: Readonly<{ used: number; quota: number }> | undefined;
   /** Files a refused push named as over the plan (D16, AC16). */
   overQuota: readonly string[];
+  /**
+   * The numbers that came with that refusal, when the remote sent them (C13).
+   *
+   * Distinct from {@link RemoteFacet.storage}, which is a `{ used, quota }`
+   * pair no host has ever filled in: these are what the Tau API's LFS batch
+   * refusal actually carries, and they were parsed and then dropped one hop
+   * before the Sync region could render them.
+   */
+  quota: RemoteStorageRefusal | undefined;
   /** The last failure, already safe to render. */
   error: string | undefined;
   /** True when this project may fetch but must never push to the remote. */
@@ -73,8 +83,22 @@ export type RemoteMachineContext = Readonly<{
   kind: RemoteKind | 'none';
   remote: RemoteRecord | undefined;
   storage: Readonly<{ used: number; quota: number }> | undefined;
+  quota: RemoteStorageRefusal | undefined;
   overQuota: readonly string[];
   error: string | undefined;
+  /**
+   * This attempt wrote the remote into git's config and has not finished (C10).
+   *
+   * The config write happens in `choosing`, before `authorize`, `validate` or
+   * the first sync has asked the remote anything — which is what makes the
+   * connect sequence recoverable. What it also made possible was a *failed*
+   * attempt leaving that remote behind: the next open read it back as
+   * **connected** and `sync.machine`, which finds the remote through git's
+   * config and not through this machine's phase, started pushing to a remote
+   * nobody had validated. This bit is what lets the failure edges undo exactly
+   * their own write, and nothing else's.
+   */
+  attemptWroteRemote: boolean;
 }>;
 
 /** Events accepted by remoteMachine. @public */
@@ -111,7 +135,14 @@ export type RemoteMachineEvent =
    * renders the over-quota file list, and the refusal happens during a push
    * (`sync.machine`, W13), not during a connection.
    */
-  | Readonly<{ type: 'quotaRefused'; paths: readonly string[]; used?: number; quota?: number }>;
+  | Readonly<{
+      type: 'quotaRefused';
+      paths: readonly string[];
+      used?: number;
+      quota?: number;
+      /** What the remote said about room, when it said anything (C13). */
+      storage?: RemoteStorageRefusal;
+    }>;
 
 /** Facts remoteMachine emits for a host that holds only the root. @public */
 export type RemoteMachineEmitted =
@@ -164,6 +195,8 @@ export type RemoteInitialSyncActorOutput = Readonly<{
   overQuota?: readonly string[];
   /** The server's own words, for the toast. */
   message?: string;
+  /** What it said about room, when it said anything (C13). */
+  storage?: RemoteStorageRefusal;
 }>;
 
 const defaultBranch = 'main';
@@ -227,9 +260,19 @@ export const remoteMachine = setup({
   },
   guards: {
     choseNone: (_, params: Readonly<{ kind: RemoteKind | 'none' }>) => params.kind === 'none',
+    attemptWroteRemote: ({ context }) => context.attemptWroteRemote,
   },
   actions: {
     failWith: assign({ error: (_, params: Readonly<{ error: string }>) => params.error }),
+    /** Everything this abandoned attempt wrote, forgotten; the reason stays. */
+    forgetAttempt: assign({
+      remote: undefined,
+      kind: 'none',
+      storage: undefined,
+      quota: undefined,
+      overQuota: [],
+      attemptWroteRemote: false,
+    }),
   },
 }).createMachine({
   id: 'remote',
@@ -240,8 +283,10 @@ export const remoteMachine = setup({
     kind: 'none',
     remote: undefined,
     storage: undefined,
+    quota: undefined,
     overQuota: [],
     error: undefined,
+    attemptWroteRemote: false,
   }),
   initial: 'reading',
   states: {
@@ -304,7 +349,10 @@ export const remoteMachine = setup({
           ...(event.type === 'connect' && event.repositoryId !== undefined ? { repositoryId: event.repositoryId } : {}),
           ...(event.type === 'connect' && event.fetchOnly === true ? { fetchOnly: true } : {}),
         }),
-        onDone: { target: 'authorizing', actions: assign({ remote: ({ event }) => event.output.remote }) },
+        onDone: {
+          target: 'authorizing',
+          actions: assign({ remote: ({ event }) => event.output.remote, attemptWroteRemote: true }),
+        },
         onError: {
           target: 'failed',
           actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
@@ -339,6 +387,11 @@ export const remoteMachine = setup({
             target: 'reconnectRequired',
             actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
           },
+          {
+            guard: 'attemptWroteRemote',
+            target: 'abandoning',
+            actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
+          },
           { target: 'failed', actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) } },
         ],
       },
@@ -355,6 +408,11 @@ export const remoteMachine = setup({
           {
             guard: ({ event }) => isReauthorizationRequired(event.error),
             target: 'reconnectRequired',
+            actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
+          },
+          {
+            guard: 'attemptWroteRemote',
+            target: 'abandoning',
             actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
           },
           { target: 'failed', actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) } },
@@ -406,7 +464,13 @@ export const remoteMachine = setup({
                   message: event.output.message ?? 'Some files are over this project’s storage plan.',
                 }),
               ),
-              raise(({ event }): RemoteMachineEvent => ({ type: 'quotaRefused', paths: event.output.overQuota ?? [] })),
+              raise(
+                ({ event }): RemoteMachineEvent => ({
+                  type: 'quotaRefused',
+                  paths: event.output.overQuota ?? [],
+                  ...(event.output.storage === undefined ? {} : { storage: event.output.storage }),
+                }),
+              ),
             ],
           },
           {
@@ -452,6 +516,14 @@ export const remoteMachine = setup({
             actions: { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
           },
           {
+            guard: 'attemptWroteRemote',
+            target: 'abandoning',
+            actions: [
+              { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
+              emit(({ event }): RemoteMachineEmitted => ({ type: 'toast.error', message: reason(event.error) })),
+            ],
+          },
+          {
             target: 'failed',
             actions: [
               { type: 'failWith', params: ({ event }) => ({ error: reason(event.error) }) },
@@ -463,7 +535,30 @@ export const remoteMachine = setup({
       on: { cancel: { target: 'disconnecting' } },
     },
 
+    /**
+     * Undo the config write a failed attempt made, and keep its reason (C10).
+     *
+     * Not `disconnecting`: that is the verb for a remote that *was* connected,
+     * it announces `remoteDisconnected` to every sibling and it lands in
+     * `none`. Nothing here was ever connected and nobody was told it was, so
+     * the only thing to undo is the one config line `choosing` wrote — and the
+     * person is left in `failed`, where the reason is rendered and *Retry* is
+     * the same `connect` it always was. This is what the module header has
+     * always promised: never a half-connected project.
+     */
+    abandoning: {
+      invoke: {
+        src: 'removeRemote',
+        input: ({ context }) => ({ name: context.remote?.name ?? '' }),
+        /* A remote this host could not even remove is still not one it will
+         * push to, so both edges land in the same place. */
+        onDone: { target: 'failed', actions: 'forgetAttempt' },
+        onError: { target: 'failed', actions: 'forgetAttempt' },
+      },
+    },
+
     connected: {
+      entry: assign({ attemptWroteRemote: false }),
       on: {
         disconnect: { target: 'disconnecting' },
         connect: [
@@ -475,6 +570,7 @@ export const remoteMachine = setup({
         quotaRefused: {
           actions: assign({
             overQuota: ({ event }) => event.paths,
+            quota: ({ context, event }) => event.storage ?? context.quota,
             storage: ({ context, event }) =>
               event.used === undefined || event.quota === undefined
                 ? context.storage
@@ -492,7 +588,14 @@ export const remoteMachine = setup({
         onDone: {
           target: 'none',
           actions: [
-            assign({ remote: undefined, kind: 'none', storage: undefined, overQuota: [], error: undefined }),
+            assign({
+              remote: undefined,
+              kind: 'none',
+              storage: undefined,
+              quota: undefined,
+              overQuota: [],
+              error: undefined,
+            }),
             emit((): RemoteMachineEmitted => ({ type: 'remoteDisconnected' })),
             enqueueActions(({ context, enqueue }) => {
               if (context.parentRef !== undefined) {
@@ -519,7 +622,9 @@ export const remoteMachine = setup({
      */
     reconnectRequired: {
       on: {
-        authorized: { target: 'validating', actions: assign({ error: undefined }) },
+        /* The remote here is an established one, not this attempt's write, so a
+         * later validate failure must not remove it (C10). */
+        authorized: { target: 'validating', actions: assign({ error: undefined, attemptWroteRemote: false }) },
         connect: [
           { guard: { type: 'choseNone', params: ({ event }) => ({ kind: event.kind }) }, target: 'disconnecting' },
           { target: 'choosing', actions: assign({ kind: ({ event }) => event.kind, error: undefined }) },
@@ -557,6 +662,11 @@ const phaseOf = (value: string): RemoteFacet['phase'] => {
     case 'disconnecting': {
       return 'disconnecting';
     }
+    /* Undoing a failed attempt's own config write is still the failure the
+     * person is looking at, not a phase of its own (C10). */
+    case 'abandoning': {
+      return 'failed';
+    }
     case 'none':
     case 'reading': {
       return 'none';
@@ -580,6 +690,7 @@ export const selectRemoteFacet = (snapshot: SnapshotFrom<typeof remoteMachine>):
   phase: phaseOf(String(snapshot.value)),
   storage: snapshot.context.storage,
   overQuota: snapshot.context.overQuota,
+  quota: snapshot.context.quota,
   error: snapshot.context.error,
   fetchOnly: snapshot.context.remote?.fetchOnly === true,
   provider: snapshot.context.remote?.provider,

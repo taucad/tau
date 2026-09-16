@@ -20,12 +20,22 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(async (root) => rm(root, { recursive: true, force: true })));
 });
 
-/** A stub binary that answers one version question. */
-const stubBinary = async (name: string, body: string): Promise<string> => {
+/** A `git` that answers `--version` and `lfs version`, as a real one does. */
+const gitWithLfs = async (): Promise<string> => {
   const root = await mkdtemp(join(tmpdir(), 'tau-git-toolchain-'));
   roots.push(root);
-  const executable = join(root, name);
-  await writeFile(executable, body, { mode: 0o755 });
+  const executable = join(root, 'git');
+  await writeFile(
+    executable,
+    [
+      '#!/bin/sh',
+      'if [ "$1" = "--version" ]; then echo "git version 2.55.0"; exit 0; fi',
+      'if [ "$1" = "lfs" ] && [ "$2" = "version" ]; then echo "git-lfs/3.8.0 (GitHub; darwin arm64)"; exit 0; fi',
+      'exit 1',
+      '',
+    ].join('\n'),
+    { mode: 0o755 },
+  );
   return executable;
 };
 
@@ -48,19 +58,16 @@ describe('git toolchain', () => {
   /* Stubs, not the developer's own machine: this suite has to be green in a
    * minimal container, where `git-lfs` is exactly what is missing (a1 R13). */
   it('reports both versions when both binaries answer', async () => {
-    const toolchain = await resolveGitToolchain({
-      gitExecutable: await stubBinary('git', '#!/bin/sh\necho "git version 2.55.0"\n'),
-      gitLfsExecutable: await stubBinary('git-lfs', '#!/bin/sh\necho "git-lfs/3.8.0 (GitHub; darwin arm64)"\n'),
-    });
+    const toolchain = await resolveGitToolchain({ gitExecutable: await gitWithLfs() });
     expect(toolchain.gitVersion).toMatch(/^\d+\.\d+/u);
     expect(toolchain.gitLfsVersion).toContain('git-lfs');
   });
 
-  it('takes a bundled git-lfs as its own binary, not as a git subcommand (OQ-B8)', async () => {
-    const failure = await resolveGitToolchain({
-      gitExecutable: await gitWithoutLfs(),
-      gitLfsExecutable: '/nonexistent/tau-git-lfs',
-    }).then(
+  it('probes git-lfs the way every real call reaches it, as git’s own subcommand (OQ3)', async () => {
+    /* A `git-lfs` beside the named `git` is found; one that is only on `PATH`
+     * beside a *different* `git` is not — which is the whole reason the second
+     * option was deleted: it probed a binary nothing ever ran. */
+    const failure = await resolveGitToolchain({ gitExecutable: await gitWithoutLfs() }).then(
       () => undefined,
       (error: unknown) => error,
     );

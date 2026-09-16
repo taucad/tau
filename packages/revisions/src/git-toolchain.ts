@@ -8,10 +8,13 @@
  * `git worktree add` a project with large objects in it, and finding that out
  * at the first push is worse than being told at the start.
  *
- * Resolution is deliberately dumb: the caller names the executable or the
- * process finds it on `PATH`. The desktop app passes the path of the binary it
- * ships in its own resources; `tau serve` and the CLI take what is installed and
- * say, in one message, what is missing.
+ * Resolution is deliberately dumb: the caller names *one* executable —
+ * `gitExecutable` — or the process finds `git` on `PATH`. There is no separate
+ * `git-lfs` path and there deliberately never was one that worked: every real
+ * LFS call in the port runs `git lfs …` and resolves the binary from git's own
+ * exec path, so a second option could only ever have been probed and then
+ * ignored (OQ3). A host that ships its own git ships `git-lfs` beside it, in
+ * that git's `libexec`, and points `gitExecutable` at it.
  */
 
 import { runCommand } from '#git-command.js';
@@ -80,7 +83,7 @@ const version = async (executable: string, args: readonly string[]): Promise<str
 /**
  * Resolve the Git toolchain this host will record revisions with.
  *
- * @param options - The binaries to use; the ones on `PATH` when absent.
+ * @param options - The `git` to use; the one on `PATH` when absent.
  * @returns Both versions, once both binaries have answered.
  * @throws GitToolchainError `ENGINE_UNAVAILABLE`, naming exactly what is missing.
  * @public
@@ -94,17 +97,14 @@ const version = async (executable: string, args: readonly string[]): Promise<str
  * ```
  */
 export const resolveGitToolchain = async (
-  options: Readonly<{ gitExecutable?: string | undefined; gitLfsExecutable?: string | undefined }> = {},
+  options: Readonly<{ gitExecutable?: string | undefined }> = {},
 ): Promise<GitToolchain> => {
   const git = options.gitExecutable ?? 'git';
-  /* A bundled `git-lfs` is a binary of its own (OQ-B8); the one on `PATH` is
-   * reached the way a person reaches it, as git's own subcommand. */
-  const [reported, lfs] = await Promise.all([
-    version(git, ['--version']),
-    options.gitLfsExecutable === undefined
-      ? version(git, ['lfs', 'version'])
-      : version(options.gitLfsExecutable, ['version']),
-  ]);
+  /* `git lfs version`, exactly as the port's own calls reach it: as git's
+   * subcommand, resolved from git's exec path. Probing a different binary from
+   * the one the work runs on is how the probe came to pass on a machine the
+   * push then failed on (OQ3). */
+  const [reported, lfs] = await Promise.all([version(git, ['--version']), version(git, ['lfs', 'version'])]);
   const missing: readonly MissingGitTool[] = [
     ...(reported === undefined ? (['git'] as const) : []),
     ...(lfs === undefined ? (['git-lfs'] as const) : []),

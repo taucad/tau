@@ -68,7 +68,9 @@ import {
   lfsRemoteUnsupportedMessage,
   remoteCarriesLargeObjects,
   remoteOf,
+  remoteRefusalSaid,
   remoteTrackingRef,
+  remoteTransportError,
 } from '#remotes.js';
 import type { Remote } from '#remotes.js';
 import type { RevisionHttpClient } from '#http-client.js';
@@ -729,7 +731,13 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
    */
   const advertisedReferences = async (remote: string, http: RevisionHttpClient): Promise<readonly RemoteRef[]> => {
     const url = await remoteUrl(remote);
-    const advertised = await listServerRefs({ http, url });
+    /* Seam 1 of 3 (N1). The advertisement is the *first* thing every remote
+     * verb does, so it is where a 401, a `403 GIT_SYNC_NOT_ENTITLED` and a 404
+     * arrive — and until this catch existed the library's own
+     * `HTTP Error: 403 Forbidden` escaped verbatim into a `role='alert'`. */
+    const advertised = await listServerRefs({ http, url }).catch((error: unknown) => {
+      throw remoteTransportError(error, { remote });
+    });
     return Object.freeze(
       advertised
         .filter((reference) => !reference.ref.endsWith('^{}'))
@@ -1152,9 +1160,17 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           return { local, tracked, localHead: await tryResolve(local), remoteHead: await tryResolve(tracked) };
         }),
       );
+      /* Seam 2 of 3 (N1): every negotiation this fetch makes answers in the
+       * refusal vocabulary, so a pull that the remote refused never reads as a
+       * pull the remote did not answer. */
+      const refused = (error: unknown): never => {
+        throw remoteTransportError(error, { remote: input.remote });
+      };
       const heads = wanted.filter((ref) => ref.startsWith('refs/heads/'));
       if (heads.length > 0) {
-        await fetchFromRemote({ fs, http, gitdir, url, remote: input.remote, singleBranch: false, tags: false });
+        await fetchFromRemote({ fs, http, gitdir, url, remote: input.remote, singleBranch: false, tags: false }).catch(
+          refused,
+        );
       }
       for (const ref of wanted.filter((candidate) => !heads.includes(candidate))) {
         // eslint-disable-next-line no-await-in-loop -- one negotiation per non-branch ref, see above.
@@ -1167,7 +1183,7 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           singleBranch: true,
           remoteRef: ref,
           tags: false,
-        });
+        }).catch(refused);
       }
       await Promise.all(
         previousTags.map(async ({ local, tracked, localHead, remoteHead }) => {
@@ -1278,6 +1294,9 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           results.push(Object.freeze({ name: ref.name, status: 'rejected', head: undefined, reason: 'leaseLost' }));
           continue;
         }
+        /* The server's sideband, which is where a `pre-receive` refusal says
+         * *why*: the per-ref report only carries git's `hook declined` (N4). */
+        const said: string[] = [];
         try {
           // eslint-disable-next-line no-await-in-loop -- one ref at a time is the contract (F4).
           await pushToRemote({
@@ -1288,6 +1307,12 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
             remote: input.remote,
             ref: ref.name,
             remoteRef: remoteName,
+            onMessage: (message: string) => {
+              const line = message.trim();
+              if (line !== '') {
+                said.push(line);
+              }
+            },
             /* A held lease is what allows the non-fast-forward; without one the
              * remote's own rule decides, exactly as on the native leg. */
             ...(leased ? { force: true } : {}),
@@ -1301,15 +1326,29 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
           );
         } catch (error) {
           const reason = pushReason(error);
-          /* No per-ref report means the push never reached the remote — an
-           * offline window, DNS, a 401. That is not "the remote refused this
-           * ref", and reporting it as one would tell W13's scheduler to retry
-           * one record ref while history is just as un-pushed. The native leg
-           * throws `ENGINE_FAILED` here; so does this one. */
+          /*
+           * Seam 3 of 3 (N1). No per-ref report means the *remote* never got as
+           * far as reporting on refs, so this is not "the remote refused this
+           * ref" and reporting it as one would tell W13's scheduler to retry
+           * one record ref while history is just as un-pushed.
+           *
+           * What it is instead is the classifier's question: an HTTP status
+           * means the remote answered and said no — 401, `403
+           * GIT_SYNC_NOT_ENTITLED`, 404, 413 — and only a failure carrying no
+           * status at all is the offline window this used to report for all ten
+           * classes at once.
+           */
           if (reason === undefined) {
-            throw new RevisionPortError('ENGINE_FAILED', 'The remote could not be reached.', { cause: error });
+            throw remoteTransportError(error, { remote: input.remote });
           }
-          results.push(Object.freeze({ name: ref.name, status: 'rejected', head: undefined, reason }));
+          results.push(
+            Object.freeze({
+              name: ref.name,
+              status: 'rejected',
+              head: undefined,
+              reason: remoteRefusalSaid(reason, said),
+            }),
+          );
         }
       }
       return Object.freeze({
@@ -1474,7 +1513,12 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     removeCheckout: async (id: string): Promise<void> => {
       const { root } = requireCheckouts();
       if (id === liveCheckoutId) {
-        throw new RevisionPortError('CHECKOUT_CONFLICT', 'The live checkout is the project; it cannot be removed.');
+        /* Policy Rule 1: *live checkout* is an engineering term and this
+         * sentence is rendered verbatim by the pane and printed by the CLI. */
+        throw new RevisionPortError(
+          'CHECKOUT_CONFLICT',
+          'The project itself cannot be removed. Switch to another branch first.',
+        );
       }
       const record = await readCheckoutRecord(id);
       if (record === undefined) {

@@ -30,7 +30,7 @@ import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions'
 import { createActor } from 'xstate';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 
-import { chatRecordsPath, chatSegmentPath } from '#chat-ref.js';
+import { chatRecordsPath, chatRefName, chatSegmentPath } from '#chat-ref.js';
 import { createRevisionHttpClient } from '#http-client.js';
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
@@ -270,7 +270,17 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
       expect(await remote.git(['rev-parse', mainRef])).toBe(head);
       const queue = await queueOf(one);
       expect(queue.entries.map((entry) => entry.ref)).toEqual([chatRef]);
-      expect(selectSyncFacet(scheduler.getSnapshot())).toMatchObject({ state: 'queued', pendingCount: 1 });
+      expect(selectSyncFacet(scheduler.getSnapshot())).toMatchObject({
+        state: 'queued',
+        pendingCount: 1,
+        reason: 'rejected',
+      });
+      /* N4 and Rule 1: what the Sync row shows is the *server's* sentence. Both
+       * legs learn it from the sideband; git's own placeholder for it names a
+       * hook, which is a word no surface may ever render (contract §4). */
+      const shown = selectSyncFacet(scheduler.getSnapshot()).error ?? '';
+      expect(shown).toContain('not allowed here');
+      expect(shown).not.toMatch(/hook|pre-receive/iu);
 
       scheduler.stop();
     } finally {
@@ -522,9 +532,32 @@ describe.runIf(gitOnPath).each(legs)('W13 second-device flow over git http-backe
           }),
       });
 
-      await expect(
-        run(two.actors.sync.fetch, { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 }),
-      ).rejects.toThrow('Second chat projection failed.');
+      /*
+       * R10: one record's failure is a *result*, not a rejected pull.
+       *
+       * A fetch that threw took the whole pull's history integration down with
+       * it — the branch this device is on stayed behind because a chat could
+       * not be written — so each projection got its own `try`/`catch` and
+       * reports per ref. This row asserts that contract rather than the
+       * rejection it used to (C21): the sibling that did land is on disk and
+       * notified, the one that did not is named in `records`, and the retry
+       * keeps both. The scheduler turns that entry into the durable projection
+       * queue and renders its reason through `SyncFacet.error`.
+       */
+      const partial = await run<{ records: ReadonlyArray<{ name: string; status: string; reason?: string }> }>(
+        two.actors.sync.fetch,
+        { remote: 'tau', branch: 'main', deadlineMilliseconds: 25_000 },
+      );
+      expect(partial.records).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: chatRefName(firstChatId), status: 'updated' }),
+          expect.objectContaining({
+            name: chatRefName(secondChatId),
+            status: 'rejected',
+            reason: 'Second chat projection failed.',
+          }),
+        ]),
+      );
       await vi.waitFor(() => {
         expect(projectedChats).toEqual([[firstChatId]]);
       });

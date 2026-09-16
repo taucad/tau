@@ -1285,6 +1285,7 @@ const selectRemoteFacetOf = (snapshot: SnapshotFrom<typeof projectRevisionsMachi
         url: undefined,
         phase: 'none',
         storage: undefined,
+        quota: undefined,
         overQuota: [],
         error: undefined,
         fetchOnly: false,
@@ -1306,7 +1307,7 @@ const selectRemoteFacetOf = (snapshot: SnapshotFrom<typeof projectRevisionsMachi
 const selectSyncFacetOf = (snapshot: SnapshotFrom<typeof projectRevisionsMachine>): SyncFacet => {
   const sync = snapshot.children.sync?.getSnapshot();
   return sync === undefined
-    ? { state: 'noRemote', pendingCount: 0, online: true, conflictRef: undefined, error: undefined }
+    ? { state: 'noRemote', pendingCount: 0, online: true, conflictRef: undefined, error: undefined, reason: undefined }
     : selectSyncFacet(sync);
 };
 

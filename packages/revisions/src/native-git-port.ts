@@ -73,13 +73,16 @@ import type {
   WriteRevisionInput,
 } from '#revision-port.js';
 import { cleanLargeObjects, lfsObjectPath, readLfsPointer } from '#lfs.js';
+import { LfsQuotaError } from '#lfs-client.js';
 import {
   isHostLocalRef,
   isTauApiUrl,
   lfsRemoteUnsupportedMessage,
   remoteCarriesLargeObjects,
   remoteOf,
+  remoteRefusalSaid,
   remoteTrackingRef,
+  remoteTransportError,
 } from '#remotes.js';
 import type { Remote } from '#remotes.js';
 import {
@@ -154,6 +157,15 @@ export type NativeGitRevisionPortOptions = Readonly<{
  */
 const refusalReason = (summary: string): string => (/stale info/iu.test(summary) ? 'leaseLost' : summary);
 
+/**
+ * How far past its own bound a bounded log walk is prefetched.
+ *
+ * ponytail: a constant, not a measurement. The walk's real window is the width
+ * of the committer-time tie at its frontier, which nothing can know before
+ * reading it; under-reading costs one `cat-file` per missed revision and never
+ * changes the answer.
+ */
+const commitWalkSlack = 32;
 const branchRefPrefix = 'refs/heads';
 const tagRefPrefix = 'refs/tags';
 const symbolicRefPrefix = 'ref: ';
@@ -274,7 +286,35 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     input?: ReadonlyArray<Uint8Array<ArrayBuffer>>;
     env?: Record<string, string | undefined>;
     signal?: AbortSignal;
+    /**
+     * The remote this command talks to, when one does.
+     *
+     * Only the refusal classifier reads it, and only to decide whose credential
+     * a 401 or 403 refused (N1).
+     */
+    remote?: string;
   }>;
+
+  /**
+   * What git itself said about a remote refusal, or `undefined` when its stderr
+   * names no HTTP status at all — which is every local failure (C2).
+   *
+   * `runCommand` has always captured stderr and both throw sites discarded it,
+   * so a stale session, a wrong owner, a missing project and a full store were
+   * all reported as *Native Git could not reach the remote.* — false in every
+   * one of those cases, and the sentence the Sync row showed verbatim.
+   *
+   * @param stderr - Everything the command wrote to its error stream.
+   * @param remote - The remote it was talking to.
+   * @returns The typed refusal, or `undefined` when this was not one.
+   */
+  const remoteRefusalOf = (stderr: string, remote?: string): RevisionPortError | undefined => {
+    const classified = remoteTransportError(new Error(stderr.trim()), {
+      ...(remote === undefined ? {} : { remote }),
+      stderr,
+    });
+    return classified.code === 'ENGINE_FAILED' ? undefined : classified;
+  };
 
   const run = async (args: readonly string[], options: GitRunOptions = {}): Promise<GitCommandResult> => {
     try {
@@ -296,7 +336,16 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
   const output = async (args: readonly string[], options: GitRunOptions = {}): Promise<Uint8Array<ArrayBuffer>> => {
     const result = await run(args, options);
     if (result.exitCode !== 0) {
-      throw new RevisionPortError('ENGINE_FAILED', `Native Git failed ${args[0] ?? 'a command'}.`);
+      const stderr = textDecoder.decode(result.stderr);
+      /* Keep git's own words: a refusal that names a status is classified, and
+       * anything else keeps its subcommand sentence with the stderr as its
+       * cause rather than being thrown away entirely. */
+      throw (
+        remoteRefusalOf(stderr, options.remote) ??
+        new RevisionPortError('ENGINE_FAILED', `Native Git failed ${args[0] ?? 'a command'}.`, {
+          ...(stderr.trim() === '' ? {} : { cause: new Error(stderr.trim()) }),
+        })
+      );
     }
     return result.stdout;
   };
@@ -317,12 +366,18 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * transport applies to the cookie (W11b review Q2).
    *
    * @param remote - The remote a command is about to talk to.
+   * @param known - Git's remotes list, when the caller has already read it.
+   *   `listRemotes` costs `1 + 3R` processes on this leg and a push asked for it
+   *   two or three times over (C73); the answer cannot change inside one push.
    * @returns The configuration arguments, or none.
    */
-  const remoteEnvironment = async (remote: string): Promise<Record<string, string | undefined>> => {
+  const remoteEnvironment = async (
+    remote: string,
+    known?: readonly Remote[],
+  ): Promise<Record<string, string | undefined>> => {
     const env = gitEnvironment();
     const held = options.tauCredential?.();
-    const remotes = await port.listRemotes();
+    const remotes = known ?? (await port.listRemotes());
     const url = remotes.find((entry) => entry.name === remote)?.url;
     const remoteHeld = options.remoteCredential?.();
     const normalized = (value: string): string | undefined => {
@@ -452,6 +507,43 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       }
     }
     return [...paths];
+  };
+
+  /**
+   * Why `git lfs push` failed, in the vocabulary `remote.machine` already owns.
+   *
+   * An over-quota batch refusal is an `LfsQuotaError` carrying the **file
+   * list** (policy Rule 13, D16/AC16) — the same class the browser leg raises
+   * from its own LFS client, so `revision-effects`' three `instanceof
+   * LfsQuotaError` branches work on this leg too. Anything else is an ordinary
+   * remote refusal.
+   *
+   * The paths come from {@link largeObjectPaths}, not from
+   * `withQuotaPaths(refusal, oids)`: git-lfs prints the server's *sentence* and
+   * not its object list, so there are no oids here to map. The port already
+   * knows exactly which paths this push offered, which is the answer the person
+   * needs.
+   *
+   * @param stderr - What `git lfs push` wrote to its error stream.
+   * @param remote - The remote it was pushing to.
+   * @param paths - Project-relative paths of the large objects in this push.
+   * @returns The error to throw.
+   */
+  const lfsTransferRefusal = (stderr: string, remote: string, paths: readonly string[]): Error => {
+    if (/\b413\b|GIT_LFS_QUOTA_EXCEEDED|entity too large|storage (?:quota|plan)/iu.test(stderr)) {
+      const said = /batch response:\s*(?<said>.+)/u.exec(stderr)?.groups?.['said']?.trim();
+      return new LfsQuotaError({
+        message: said === undefined || said === '' ? 'This project is over its storage plan.' : said,
+        oids: Object.freeze([]),
+        paths: Object.freeze([...paths].toSorted()),
+      });
+    }
+    return (
+      remoteRefusalOf(stderr, remote) ??
+      new RevisionPortError('ENGINE_FAILED', 'The remote could not be reached.', {
+        ...(stderr.trim() === '' ? {} : { cause: new Error(stderr.trim()) }),
+      })
+    );
   };
 
   const storeLfsObject = async (oid: string, content: Uint8Array<ArrayBuffer>): Promise<void> => {
@@ -598,6 +690,104 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     return paths;
   };
 
+  /**
+   * Every named blob, in one `cat-file --batch` (B6).
+   *
+   * `--batch` reads object names on stdin and answers
+   * `<oid> SP <type> SP <size> LF <content> LF` for each, in the order it was
+   * asked — so the whole tree costs one process instead of one per file. A
+   * 4,000-file project was 4,001 spawns, which is where opening History or a
+   * second checkout spent its time, and no amount of concurrency fixes a cost
+   * that *is* the process count.
+   *
+   * ponytail: one batch, no chunking. The answer is bounded by `runCommand`'s
+   * own captured-output limit (256 MiB), which a tree that large would already
+   * have exhausted through `ImmutableRevisionTree` anyway.
+   *
+   * @param oids - Object ids to read; duplicates are read once.
+   * @returns The bytes by object id.
+   */
+  const readObjects = async (
+    ids: readonly string[],
+    want: 'blob' | 'commit',
+  ): Promise<ReadonlyMap<string, Uint8Array<ArrayBuffer>>> => {
+    const wanted = [...new Set(ids)];
+    const objects = new Map<string, Uint8Array<ArrayBuffer>>();
+    if (wanted.length === 0) {
+      return objects;
+    }
+    const stdout = await output(['cat-file', '--batch'], { input: [textEncoder.encode(`${wanted.join('\n')}\n`)] });
+    let offset = 0;
+    for (const id of wanted) {
+      const newline = stdout.indexOf(0x0a, offset);
+      const [reported, kind, size] =
+        newline === -1 ? [] : textDecoder.decode(stdout.subarray(offset, newline)).split(' ');
+      if (reported !== id || kind !== want || size === undefined || !/^\d+$/u.test(size)) {
+        /* `missing`, the wrong type, or a short answer: the batch named
+         * something this store cannot hand back, which is the same failure one
+         * `cat-file <type>` raised per object. */
+        throw new RevisionPortError('ENGINE_FAILED', 'This store cannot read an object a revision names.');
+      }
+      const start = newline + 1;
+      const end = start + Number(size);
+      /* Copied, not a view: a view would hold the whole batch alive for the
+       * life of every object in it. */
+      objects.set(id, stdout.slice(start, end));
+      offset = end + 1;
+    }
+    return objects;
+  };
+
+  /**
+   * The commits a walk from these heads is about to read, in two processes (B5).
+   *
+   * `rev-list` answers the reachable *set* and `--batch` reads it; the promised
+   * order is still {@link walkRevisionLog}'s, computed from the same parents and
+   * committer times it would have read one process at a time. Best effort by
+   * design: anything this does not hold — a head that is not a commit, a walk
+   * that reaches past the bound — falls back to a single `cat-file`, so the
+   * result is identical either way.
+   *
+   * @param heads - Where the walk starts.
+   * @param limit - The walk's own bound, when it has one.
+   * @returns The decoded commits by id, empty when the prefetch could not run.
+   */
+  const prefetchCommits = async (
+    heads: readonly string[],
+    limit: number | undefined,
+  ): Promise<ReadonlyMap<string, DecodedCommit>> => {
+    const commits = new Map<string, DecodedCommit>();
+    if (heads.length === 0) {
+      return commits;
+    }
+    try {
+      /* Slack over the bound: a bounded walk expands every revision whose time
+       * is not older than the one it is about to emit, so it reads a little
+       * more than it emits. Reading a few extra objects in the same process is
+       * free; reading too few just costs one `cat-file` each. */
+      const listed = await run([
+        'rev-list',
+        ...(limit === undefined ? [] : [`--max-count=${String(limit + commitWalkSlack)}`]),
+        ...heads,
+        '--',
+      ]);
+      if (listed.exitCode !== 0) {
+        return commits;
+      }
+      const ids = textDecoder
+        .decode(listed.stdout)
+        .split('\n')
+        .filter((line) => line !== '');
+      for (const [id, body] of await readObjects(ids, 'commit')) {
+        commits.set(id, decodeCommit(body));
+      }
+    } catch {
+      /* A store that cannot answer the batch answers one object at a time. */
+      return new Map();
+    }
+    return commits;
+  };
+
   const checkoutIdOf = async (branch: string): Promise<string> =>
     digestHex(await format(), textEncoder.encode(`tau-checkout\0${branch}`)).slice(0, 16);
 
@@ -673,7 +863,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
 
   const listRemoteReferences = async (remote: string): Promise<readonly RemoteRef[]> => {
     guardTransportValue(remote, 'remote');
-    const listing = await text(['ls-remote', '--refs', '--', remote], await remoteEnvironment(remote));
+    const listing = textDecoder
+      .decode(await output(['ls-remote', '--refs', '--', remote], { env: await remoteEnvironment(remote), remote }))
+      .trim();
     return Object.freeze(
       listing
         .split('\n')
@@ -692,11 +884,13 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    *
    * @param stdout - The command's `--porcelain` output.
    * @param offered - The local refs, in the order they were offered.
+   * @param said - The server's own sideband sentence, when it sent one.
    * @returns One result per offered ref.
    */
   const parsePushPorcelain = async (
     stdout: string,
     offered: readonly string[],
+    said?: string,
   ): Promise<readonly RevisionPushRefResult[]> => {
     const rows = new Map<string, Readonly<{ flag: string; summary: string }>>();
     for (const line of stdout.split('\n')) {
@@ -716,7 +910,10 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
               name,
               status: 'rejected',
               head: undefined,
-              reason: row === undefined ? 'The remote did not report this ref.' : refusalReason(row.summary),
+              reason:
+                row === undefined
+                  ? 'The remote did not report this ref.'
+                  : remoteRefusalSaid(refusalReason(row.summary), said === undefined ? [] : [said]),
             });
           }
           const local = await resolve(name);
@@ -831,21 +1028,21 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       });
     },
 
-    /* One `cat-file` per blob — ponytail: `cat-file --batch` is the upgrade when
-     * a tree is big enough for the process count to show up in a profile. */
+    /* Three processes whatever the tree holds: the commit, its paths, and one
+     * `cat-file --batch` for every blob in it (B6). */
     readTree: async (id: RevisionId): Promise<ImmutableRevisionTree | undefined> => {
       const commit = await readCommitObject(id);
       if (commit === undefined) {
         return undefined;
       }
       const paths = await listTree(commit.tree);
+      const blobs = await readObjects(
+        [...paths.values()].map((entry) => entry.oid),
+        'blob',
+      );
       const entries = await Promise.all(
         [...paths].map(
-          async ([path, { oid, mode }]): Promise<RevisionTreeInput> => [
-            path,
-            await smudged(await output(['cat-file', 'blob', oid])),
-            mode,
-          ],
+          async ([path, { oid, mode }]): Promise<RevisionTreeInput> => [path, await smudged(blobs.get(oid)!), mode],
         ),
       );
       return new ImmutableRevisionTree(entries);
@@ -1036,15 +1233,17 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     log: async (input?: RevisionLogInput): Promise<readonly RevisionLogEntry[]> => {
       const references = input?.heads === undefined ? await port.listRefs() : undefined;
       const heads = [...(input?.heads ?? (references ?? []).map((reference) => reference.head))];
-      /* One `cat-file` per revision the order actually needs — ponytail:
-       * `cat-file --batch` is the upgrade when an unbounded log over a long
-       * history shows up in a profile. `rev-list` is gone: it answered a set,
-       * and the walk needs the set the promised order reaches, not git's. */
+      /* The set in one `cat-file --batch`, the *order* still the walk's own
+       * (B5). `rev-list` answers which objects to read and nothing else: it
+       * never decides what is emitted or in what order, so a long history costs
+       * two processes rather than one per revision while the promised order
+       * stays a property of the graph (review 4 R12). */
+      const prefetched = await prefetchCommits(heads, input?.limit);
       return Object.freeze(
         await walkRevisionLog(
           heads,
           async (id) => {
-            const commit = await readCommitObject(id);
+            const commit = prefetched.get(id) ?? (await readCommitObject(id));
             return commit === undefined
               ? undefined
               : {
@@ -1121,6 +1320,9 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
             return { local: ref, tracked, localHead: await rawRef(ref), remoteHead: await rawRef(tracked) };
           }),
       );
+      /* Once per fetch (C73): `listRemotes` is `1 + 3R` processes on this leg. */
+      const configuredRemotes = await port.listRemotes();
+      const configuredRemote = configuredRemotes.find((remote) => remote.name === input.remote);
       await output(
         [
           'fetch',
@@ -1129,16 +1331,19 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
           input.remote,
           ...wanted.map((ref) => `+${ref}:${remoteTrackingRef(input.remote, ref)}`),
         ],
-        { env: await remoteEnvironment(input.remote), signal: input.signal },
+        {
+          env: await remoteEnvironment(input.remote, configuredRemotes),
+          signal: input.signal,
+          remote: input.remote,
+        },
       );
-      const configuredRemotes = await port.listRemotes();
-      const configuredRemote = configuredRemotes.find((remote) => remote.name === input.remote);
       const fetchedReferences = wanted.map((ref) => remoteTrackingRef(input.remote, ref));
       const fetchedLargeObjects = await largeObjectPaths(fetchedReferences.map((name) => ({ name })));
       if (fetchedLargeObjects.length > 0 && remoteCarriesLargeObjects(configuredRemote ?? input.remote)) {
         await output(['lfs', 'fetch', '--', input.remote, ...fetchedReferences], {
-          env: await remoteEnvironment(input.remote),
+          env: await remoteEnvironment(input.remote, configuredRemotes),
           signal: input.signal,
+          remote: input.remote,
         });
       }
       await Promise.all(
@@ -1203,9 +1408,21 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       if (!remoteCarriesLargeObjects(configuredRemote ?? input.remote) && large.length > 0) {
         throw new RevisionPortError('LFS_REMOTE_UNSUPPORTED', lfsRemoteUnsupportedMessage(large));
       } else if (large.length > 0) {
-        await output(['lfs', 'push', '--', input.remote, ...input.refs.map((ref) => ref.name)], {
-          env: await remoteEnvironment(input.remote),
+        const transfer = await run(['lfs', 'push', '--', input.remote, ...input.refs.map((ref) => ref.name)], {
+          env: await remoteEnvironment(input.remote, configuredRemotes),
+          remote: input.remote,
         });
+        if (transfer.exitCode !== 0) {
+          /*
+           * C66: the over-quota **file list** policy Rule 13 requires, on the
+           * leg that could not produce it. `git lfs push` turned the API's 413
+           * batch refusal into `ENGINE_FAILED "Native Git failed lfs."`, so
+           * `remote.machine` never entered `quotaRefused` on desktop or the CLI
+           * and the Sync region had nothing to list — although the paths were
+           * computed one statement earlier, by `largeObjectPaths` above.
+           */
+          throw lfsTransferRefusal(textDecoder.decode(transfer.stderr), input.remote, large);
+        }
       }
       /* The lease, per ref (A32, S24, D14). `--force-with-lease=<dst>:<expect>`
        * allows the non-fast-forward a rewritten history needs *only* while the
@@ -1226,18 +1443,29 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
           input.remote,
           ...input.refs.map((ref) => `${ref.name}:${ref.remoteName ?? ref.name}`),
         ],
-        { env: await remoteEnvironment(input.remote) },
+        { env: await remoteEnvironment(input.remote, configuredRemotes), remote: input.remote },
       );
       const stdout = textDecoder.decode(result.stdout);
+      const stderr = textDecoder.decode(result.stderr);
+      const refused = remoteRefusalOf(stderr, input.remote);
       /* A push that never reached the remote reports no table at all; one the
-       * remote refused in part reports every row and exits non-zero. */
+       * remote refused in part reports every row and exits non-zero. Which of
+       * those it was is git's stderr to say, and it says it (C2). */
       if (result.exitCode !== 0 && !stdout.includes('\t')) {
-        throw new RevisionPortError('ENGINE_FAILED', 'Native Git could not reach the remote.');
+        throw (
+          refused ??
+          new RevisionPortError('ENGINE_FAILED', 'The remote could not be reached.', {
+            ...(stderr.trim() === '' ? {} : { cause: new Error(stderr.trim()) }),
+          })
+        );
       }
       return Object.freeze({
         refs: await parsePushPorcelain(
           stdout,
           input.refs.map((ref) => ref.name),
+          /* The server's sideband sentence, which is where a `pre-receive`
+           * refusal says *why* — the per-ref table only says a hook declined. */
+          refused?.code === 'REMOTE_REJECTED' ? refused.message : undefined,
         ),
       });
     },
@@ -1363,7 +1591,12 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     removeCheckout: async (id: string): Promise<void> => {
       requireCheckouts();
       if (id === liveCheckoutId) {
-        throw new RevisionPortError('CHECKOUT_CONFLICT', 'The live checkout is the project; it cannot be removed.');
+        /* Policy Rule 1: *live checkout* is an engineering term and this
+         * sentence is rendered verbatim by the pane and printed by the CLI. */
+        throw new RevisionPortError(
+          'CHECKOUT_CONFLICT',
+          'The project itself cannot be removed. Switch to another branch first.',
+        );
       }
       const worktrees = await listWorktrees();
       const existing = worktrees.find((checkout) => checkout.id === id);

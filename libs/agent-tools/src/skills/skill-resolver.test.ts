@@ -132,6 +132,32 @@ describe('createSkillResolver', () => {
     });
   });
 
+  it('records the system bundle shadowed by a valid workspace skill', async () => {
+    const resolver = resolverOver(
+      { '.agents/skills/demo/SKILL.md': skillMarkdown('demo', 'Workspace demo') },
+      { '.agents/skills': [{ name: 'demo', isFolder: true }] },
+      {
+        systemSkills: [
+          {
+            slug: 'demo',
+            name: 'Demo',
+            version: '1.0.0',
+            whenToUse: 'Use for demos.',
+            skillMarkdown: skillMarkdown('demo', 'System demo'),
+          },
+        ],
+      },
+    );
+
+    expect(await resolver.listSkills()).toEqual([
+      expect.objectContaining({
+        description: 'Workspace demo',
+        source: 'user',
+        shadowedSources: [expect.objectContaining({ source: 'system', resourceUri: 'system:skills/demo/SKILL.md' })],
+      }),
+    ]);
+  });
+
   it('hides every system bundle when an upper ancestor is not a directory', async () => {
     const resolver = createSkillResolver({
       readFile: vi.fn(),

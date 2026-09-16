@@ -51,6 +51,8 @@ export const tauToolKinds = new Map<string, string>([
   ['edit_file', 'edit'],
   ['delete_file', 'delete'],
   ['get_kernel_result', 'execute'],
+  ['get_parameters', 'read'],
+  ['apply_parameter_operation', 'edit'],
   ['test_model', 'execute'],
   ['export_geometry', 'execute'],
   ['screenshot', 'other'],

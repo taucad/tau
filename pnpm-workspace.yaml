@@ -377,7 +377,6 @@ patchedDependencies:
   '@kittycad/lib@2.0.48': patches/@kittycad__lib@2.0.48.patch
   vite-plugin-mkcert@2.0.0: patches/vite-plugin-mkcert@2.0.0.patch
   zod@4.4.3: patches/zod@4.4.3.patch
-  '@earendil-works/pi-ai@0.84.4': patches/@earendil-works__pi-ai@0.84.4.patch
   '@agentclientprotocol/codex-acp@1.7.0': patches/@agentclientprotocol__codex-acp@1.7.0.patch
 overrides:
   '@langchain/google-common': npm:@taulabs/langchain-google-common@2.2.0-beta.0

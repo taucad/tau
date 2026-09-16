@@ -3,83 +3,162 @@ import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
 import type { MyUIMessage } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';
-import { draftMachine } from '#hooks/draft.machine.js';
+import { sha256Bytes } from '@taucad/utils/hash';
+import { attachmentKinds, draftMachine } from '#hooks/draft.machine.js';
+import type { DraftAttachmentModel, DraftEmittedEvents } from '#hooks/draft.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
+import type { Attachment } from '#utils/attachment.utils.js';
 
 type PersistDraftInput = { draft: MyUIMessage };
+type PersistEditInput = { messageId: string; draft: MyUIMessage };
+type PersistSelectionInput = { toolChoice?: string | string[]; mode?: ChatMode };
+type StoreInput = { bytes: Uint8Array<ArrayBuffer>; mediaType: string; filename?: string };
 
-function createTestActor(options?: { initialDraft?: MyUIMessage; resize?: (image: string) => Promise<string> }) {
+// Three bytes each, so a stored attachment's hash and length are checkable.
+const pngA = 'data:image/png;base64,AAEC';
+const pngB = 'data:image/png;base64,AwQF';
+const pngC = 'data:image/png;base64,BgcI';
+const jpegResized = 'data:image/jpeg;base64,CQoL';
+const pdf = 'data:application/pdf;base64,JVBERg==';
+
+const imageAndPdfModel: DraftAttachmentModel = {
+  name: 'Claude Sonnet',
+  support: { modalities: { input: ['text', 'image', 'pdf'], output: ['text'] } },
+};
+const imageOnlyModel: DraftAttachmentModel = {
+  name: 'Gemini Flash',
+  support: { modalities: { input: ['text', 'image'], output: ['text'] } },
+};
+const textOnlyModel: DraftAttachmentModel = {
+  name: 'Text Model',
+  support: { modalities: { input: ['text'], output: ['text'] } },
+};
+
+const hashA = 'a'.repeat(64);
+const hashB = 'b'.repeat(64);
+
+const bytesOf = (dataUrl: string): Uint8Array<ArrayBuffer> =>
+  Uint8Array.from(atob(dataUrl.slice(dataUrl.indexOf(',') + 1)), (character) => character.charCodeAt(0));
+
+/** The attachment the fake store returns for these bytes: the real hash, so URLs are checkable. */
+const storedAs = async (dataUrl: string, filename?: string): Promise<Attachment> => {
+  const bytes = bytesOf(dataUrl);
+  return {
+    hash: await sha256Bytes(bytes),
+    mediaType: dataUrl.slice(5, dataUrl.indexOf(';')),
+    byteLength: bytes.byteLength,
+    ...(filename === undefined ? {} : { filename }),
+  };
+};
+
+const userMessage = (parts: MyUIMessage['parts']): MyUIMessage => ({
+  id: 'draft',
+  role: 'user',
+  parts,
+  metadata: { createdAt: 1, status: 'pending' },
+});
+
+const originalMessage = (text: string): MyUIMessage =>
+  mock<MyUIMessage>({
+    id: 'msg-1',
+    role: 'user',
+    parts: [{ type: 'text', text }],
+    metadata: { createdAt: Date.now(), status: 'pending' },
+  });
+
+const pendingForever = async (): Promise<never> =>
+  new Promise<never>(() => {
+    // Never settles, so the entry stays in flight while the test acts.
+  });
+
+type HarnessOptions = {
+  initialDraft?: MyUIMessage;
+  resize?: (image: string) => Promise<string>;
+  store?: (input: StoreInput) => Promise<Attachment>;
+  /** Hold every draft persist open until the test resolves it. */
+  deferDraftPersist?: boolean;
+};
+
+/**
+ * One draft actor with every actor replaced by a recording fake.
+ *
+ * The persistence fakes resolve at once, as `draftPersistenceFor` does: each
+ * write is a hand-off to the record machine.
+ */
+function createHarness(options: HarnessOptions = {}) {
+  const drafts: PersistDraftInput[] = [];
+  const edits: PersistEditInput[] = [];
+  const selections: PersistSelectionInput[] = [];
+  const stored: StoreInput[] = [];
+  const resized: string[] = [];
+  const draftResolvers: Array<() => void> = [];
+
   const machine = draftMachine.provide({
     actors: {
-      // oxlint-disable-next-line no-empty-function -- mock stub
-      persistDraftActor: fromSafeAsync(async () => {}),
-      // oxlint-disable-next-line no-empty-function -- mock stub
-      persistEditDraftActor: fromSafeAsync(async () => {}),
+      persistDraftActor: fromSafeAsync(async ({ input }: { input: PersistDraftInput }) => {
+        drafts.push(input);
+        if (options.deferDraftPersist) {
+          await new Promise<void>((resolve) => {
+            draftResolvers.push(resolve);
+          });
+        }
+      }),
+      persistEditDraftActor: fromSafeAsync(async ({ input }: { input: PersistEditInput }) => {
+        edits.push(input);
+      }),
+      persistSelectionActor: fromSafeAsync(async ({ input }: { input: PersistSelectionInput }) => {
+        selections.push(input);
+      }),
       // oxlint-disable-next-line no-empty-function -- mock stub
       clearMessageEditActor: fromSafeAsync(async () => {}),
       resizeImageActor: fromSafeAsync<
         { type: 'imageResized'; resized: string },
         { image: string; preserveOriginal: boolean }
       >(async ({ input }) => {
-        const resizer = options?.resize ?? (async (image) => image);
-        const resized = await resizer(input.image);
-        return { type: 'imageResized', resized };
+        resized.push(input.image);
+        const resizer = options.resize ?? (async (image) => image);
+        return { type: 'imageResized', resized: await resizer(input.image) };
       }),
+      storeAttachmentActor: fromSafeAsync<{ type: 'attachmentStored'; attachment: Attachment }, StoreInput>(
+        async ({ input }) => {
+          stored.push(input);
+          const put =
+            options.store ??
+            (async ({ bytes, mediaType, filename }: StoreInput) => ({
+              hash: await sha256Bytes(bytes),
+              mediaType,
+              byteLength: bytes.byteLength,
+              ...(filename === undefined ? {} : { filename }),
+            }));
+          return { type: 'attachmentStored', attachment: await put(input) };
+        },
+      ),
     },
   });
 
-  return createActor(machine, {
-    input: { initialDraft: options?.initialDraft },
-  });
+  const actor = createActor(machine, { input: { initialDraft: options.initialDraft } });
+  return { actor, drafts, edits, selections, stored, resized, draftResolvers };
 }
 
-function createTestActorWithPersistCapture(options: { onPersist: (input: PersistDraftInput) => void }) {
-  const machine = draftMachine.provide({
-    actors: {
-      persistDraftActor: fromSafeAsync(async ({ input }: { input: PersistDraftInput }) => {
-        options.onPersist(input);
-      }),
-      // oxlint-disable-next-line no-empty-function -- mock stub
-      persistEditDraftActor: fromSafeAsync(async () => {}),
-      // oxlint-disable-next-line no-empty-function -- mock stub
-      clearMessageEditActor: fromSafeAsync(async () => {}),
-      resizeImageActor: fromSafeAsync<
-        { type: 'imageResized'; resized: string },
-        { image: string; preserveOriginal: boolean }
-      >(async ({ input }) => ({ type: 'imageResized', resized: input.image })),
-    },
-  });
+const settled = async (actor: ReturnType<typeof createHarness>['actor']) =>
+  waitFor(
+    actor,
+    (snapshot) => snapshot.context.attachmentQueue.length === 0 && snapshot.matches({ attachmentProcessing: 'idle' }),
+  );
 
-  return createActor(machine, { input: {} });
-}
-
-function createTestActorWithDeferredPersist(options: {
-  onPersist: (input: PersistDraftInput, resolve: () => void) => void;
-}) {
-  const machine = draftMachine.provide({
-    actors: {
-      persistDraftActor: fromSafeAsync(async ({ input }: { input: PersistDraftInput }) => {
-        await new Promise<void>((resolve) => {
-          options.onPersist(input, resolve);
-        });
-      }),
-      // oxlint-disable-next-line no-empty-function -- mock stub
-      persistEditDraftActor: fromSafeAsync(async () => {}),
-      // oxlint-disable-next-line no-empty-function -- mock stub
-      clearMessageEditActor: fromSafeAsync(async () => {}),
-      resizeImageActor: fromSafeAsync<
-        { type: 'imageResized'; resized: string },
-        { image: string; preserveOriginal: boolean }
-      >(async ({ input }) => ({ type: 'imageResized', resized: input.image })),
-    },
-  });
-
-  return createActor(machine, { input: {} });
-}
+const allSavingIdle = (actor: ReturnType<typeof createHarness>['actor']): boolean => {
+  const snapshot = actor.getSnapshot();
+  return (
+    snapshot.matches({ inputSaving: 'idle' }) &&
+    snapshot.matches({ editSaving: 'idle' }) &&
+    snapshot.matches({ selectionSaving: 'idle' })
+  );
+};
 
 describe('draftMachine', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   // ===========================================================================
@@ -87,37 +166,44 @@ describe('draftMachine', () => {
   // ===========================================================================
   describe('context initialization', () => {
     it('should initialize with correct defaults', () => {
-      const actor = createTestActor();
+      const { actor } = createHarness();
       actor.start();
       const { context } = actor.getSnapshot();
       expect(context.draftText).toBe('');
-      expect(context.draftImages).toEqual([]);
+      expect(context.draftAttachments).toEqual([]);
       expect(context.draftToolChoice).toBe('auto');
       expect(context.draftMode).toBe('agent');
       expect(context.messageEdits).toEqual({});
       expect(context.activeEditMessageId).toBeUndefined();
       expect(context.editDraftText).toBe('');
-      expect(context.editDraftImages).toEqual([]);
+      expect(context.editDraftAttachments).toEqual([]);
       actor.stop();
     });
 
     it('hydrates a draft without a synthetic persistence id', () => {
-      const actor = createTestActor({
-        initialDraft: {
-          id: 'draft',
-          role: 'user',
-          parts: [
-            { type: 'text', text: 'restored prompt' },
-            { type: 'file', url: 'data:image/png;base64,AAA', mediaType: 'image/png' },
-          ],
-        },
+      const { actor } = createHarness({
+        initialDraft: userMessage([
+          { type: 'text', text: 'restored prompt' },
+          { type: 'file', url: `attachments/${hashA}.png`, mediaType: 'image/png' },
+        ]),
       });
       actor.start();
       expect(actor.getSnapshot().context).toMatchObject({
         draftText: 'restored prompt',
-        draftImages: ['data:image/png;base64,AAA'],
+        draftAttachments: [{ hash: hashA, mediaType: 'image/png' }],
       });
       expect(actor.getSnapshot().context).not.toHaveProperty('chatId');
+      actor.stop();
+    });
+
+    it('should store a legacy data: URL from the initial draft as an attachment', async () => {
+      const { actor, stored } = createHarness({
+        initialDraft: userMessage([{ type: 'file', url: pngA, mediaType: 'image/png' }]),
+      });
+      actor.start();
+      await waitFor(actor, (snapshot) => snapshot.context.draftAttachments.length === 1);
+      expect(stored).toHaveLength(1);
+      expect(actor.getSnapshot().context.draftAttachments).toEqual([await storedAs(pngA)]);
       actor.stop();
     });
   });
@@ -127,7 +213,7 @@ describe('draftMachine', () => {
   // ===========================================================================
   describe('draft text events', () => {
     it('should set draft text', () => {
-      const actor = createTestActor();
+      const { actor } = createHarness();
       actor.start();
       actor.send({ type: 'setDraftText', text: 'hello world' });
       expect(actor.getSnapshot().context.draftText).toBe('hello world');
@@ -135,75 +221,67 @@ describe('draftMachine', () => {
     });
 
     it('should load a draft from a message transiently without invoking persistence', async () => {
-      const persistInputs: PersistDraftInput[] = [];
-      const actor = createTestActorWithPersistCapture({
-        onPersist(input) {
-          persistInputs.push(input);
-        },
-      });
+      const { actor, drafts } = createHarness();
       actor.start();
 
       actor.send({
         type: 'loadDraftFromMessageTransient',
-        draft: {
-          id: 'draft',
-          role: 'user',
-          parts: [
-            { type: 'text', text: 'restored prompt' },
-            { type: 'file', url: 'data:image/png;base64,AAA', mediaType: 'image/png' },
-          ],
-          metadata: { createdAt: 1, status: 'pending' },
-        },
+        draft: userMessage([
+          { type: 'text', text: 'restored prompt' },
+          { type: 'file', url: `attachments/${hashA}.pdf`, mediaType: 'application/pdf', filename: 'spec.pdf' },
+        ]),
       });
 
       await Promise.resolve();
 
       expect(actor.getSnapshot().context.draftText).toBe('restored prompt');
-      expect(actor.getSnapshot().context.draftImages).toEqual(['data:image/png;base64,AAA']);
-      expect(persistInputs).toEqual([]);
+      expect(actor.getSnapshot().context.draftAttachments).toEqual([
+        { hash: hashA, mediaType: 'application/pdf', filename: 'spec.pdf' },
+      ]);
+      expect(drafts).toEqual([]);
       actor.stop();
     });
 
     it('should add draft image (after resize chokepoint settles)', async () => {
-      const actor = createTestActor();
+      const { actor } = createHarness();
       actor.start();
-      actor.send({ type: 'addDraftImage', image: 'data:image/png;base64,abc' });
-      await waitFor(actor, (s) => s.context.draftImages.length === 1);
-      expect(actor.getSnapshot().context.draftImages).toEqual(['data:image/png;base64,abc']);
-      actor.send({ type: 'addDraftImage', image: 'data:image/png;base64,def' });
-      await waitFor(actor, (s) => s.context.draftImages.length === 2);
-      expect(actor.getSnapshot().context.draftImages).toHaveLength(2);
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
+      await waitFor(actor, (s) => s.context.draftAttachments.length === 1);
+      expect(actor.getSnapshot().context.draftAttachments).toEqual([await storedAs(pngA)]);
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngB, model: imageOnlyModel });
+      await waitFor(actor, (s) => s.context.draftAttachments.length === 2);
+      expect(actor.getSnapshot().context.draftAttachments).toHaveLength(2);
       actor.stop();
     });
 
     it('should remove draft image by index (after resize chokepoint settles)', async () => {
-      const actor = createTestActor();
+      const { actor } = createHarness();
       actor.start();
-      actor.send({ type: 'addDraftImage', image: 'img-a' });
-      actor.send({ type: 'addDraftImage', image: 'img-b' });
-      actor.send({ type: 'addDraftImage', image: 'img-c' });
-      await waitFor(actor, (s) => s.context.draftImages.length === 3);
-      actor.send({ type: 'removeDraftImage', index: 1 });
-      expect(actor.getSnapshot().context.draftImages).toEqual(['img-a', 'img-c']);
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngB, model: imageOnlyModel });
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngC, model: imageOnlyModel });
+      await waitFor(actor, (s) => s.context.draftAttachments.length === 3);
+      actor.send({ type: 'removeDraftAttachment', index: 1 });
+      expect(actor.getSnapshot().context.draftAttachments).toEqual([await storedAs(pngA), await storedAs(pngC)]);
       actor.stop();
     });
 
     it('should clear draft (text, images, tool choice)', () => {
-      const actor = createTestActor();
+      const { actor } = createHarness();
       actor.start();
       actor.send({ type: 'setDraftText', text: 'some text' });
-      actor.send({ type: 'addDraftImage', image: 'img-a' });
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
       actor.send({ type: 'setDraftToolChoice', toolChoice: 'required' });
       actor.send({ type: 'clearDraft' });
       const { context } = actor.getSnapshot();
       expect(context.draftText).toBe('');
-      expect(context.draftImages).toEqual([]);
+      expect(context.draftAttachments).toEqual([]);
       expect(context.draftToolChoice).toBe('auto');
       actor.stop();
     });
 
     it('should set draft mode', () => {
-      const actor = createTestActor();
+      const { actor } = createHarness();
       actor.start();
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- intentionally invalid value for error-path testing
       actor.send({ type: 'setDraftMode', mode: 'edit' as unknown as ChatMode });
@@ -212,10 +290,62 @@ describe('draftMachine', () => {
     });
 
     it('should set draft tool choice', () => {
-      const actor = createTestActor();
+      const { actor } = createHarness();
       actor.start();
       actor.send({ type: 'setDraftToolChoice', toolChoice: 'required' });
       expect(actor.getSnapshot().context.draftToolChoice).toBe('required');
+      actor.stop();
+    });
+
+    it('should persist the draft with attachment references, never data: URLs', async () => {
+      vi.useFakeTimers();
+      const { actor, drafts } = createHarness();
+      actor.start();
+      actor.send({ type: 'setDraftText', text: 'model the bracket' });
+      actor.send({ type: 'addDraftAttachment', dataUrl: pdf, filename: 'spec.pdf', model: imageAndPdfModel });
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().context.draftAttachments).toHaveLength(1);
+      });
+      await vi.advanceTimersByTimeAsync(200);
+      const { hash } = await storedAs(pdf);
+      expect(drafts.at(-1)?.draft.parts).toEqual([
+        { type: 'text', text: 'model the bracket' },
+        { type: 'file', mediaType: 'application/pdf', filename: 'spec.pdf', url: `attachments/${hash}.pdf` },
+      ]);
+      actor.stop();
+    });
+  });
+
+  // ===========================================================================
+  // Tool choice and mode reach the record
+  // ===========================================================================
+  describe('selection persistence', () => {
+    it('should patch the tool choice through when it is set', async () => {
+      const { actor, selections } = createHarness();
+      actor.start();
+      actor.send({ type: 'setDraftToolChoice', toolChoice: ['web_search'] });
+      await waitFor(actor, () => selections.length === 1);
+      expect(selections).toEqual([{ toolChoice: ['web_search'] }]);
+      actor.stop();
+    });
+
+    it('should patch the mode through when it is set', async () => {
+      const { actor, selections } = createHarness();
+      actor.start();
+      actor.send({ type: 'setDraftMode', mode: 'plan' });
+      await waitFor(actor, () => selections.length === 1);
+      expect(selections).toEqual([{ mode: 'plan' }]);
+      actor.stop();
+    });
+
+    it('should patch the tool choice reset when the draft is cleared', async () => {
+      const { actor, selections } = createHarness();
+      actor.start();
+      actor.send({ type: 'setDraftMode', mode: 'plan' });
+      actor.send({ type: 'setDraftToolChoice', toolChoice: 'required' });
+      actor.send({ type: 'clearDraft' });
+      await waitFor(actor, () => allSavingIdle(actor));
+      expect(selections.at(-1)).toEqual({ toolChoice: 'auto', mode: 'plan' });
       actor.stop();
     });
   });
@@ -225,7 +355,7 @@ describe('draftMachine', () => {
   // ===========================================================================
   describe('inputSaving', () => {
     it('should enter pending on setDraftText', () => {
-      const actor = createTestActor();
+      const { actor } = createHarness();
       actor.start();
       actor.send({ type: 'setDraftText', text: 'typing...' });
       expect(actor.getSnapshot().matches({ inputSaving: 'pending' })).toBe(true);
@@ -233,7 +363,7 @@ describe('draftMachine', () => {
     });
 
     it('should keep unchanged draft text idle', () => {
-      const actor = createTestActor();
+      const { actor } = createHarness();
       actor.start();
 
       actor.send({ type: 'setDraftText', text: '' });
@@ -244,19 +374,15 @@ describe('draftMachine', () => {
 
     it('should persist after debounce without a target identifier', async () => {
       vi.useFakeTimers();
-      try {
-        const actor = createTestActor();
-        actor.start();
-        actor.send({ type: 'setDraftText', text: 'save me' });
-        expect(actor.getSnapshot().matches({ inputSaving: 'pending' })).toBe(true);
+      const { actor } = createHarness();
+      actor.start();
+      actor.send({ type: 'setDraftText', text: 'save me' });
+      expect(actor.getSnapshot().matches({ inputSaving: 'pending' })).toBe(true);
 
-        await vi.advanceTimersByTimeAsync(200);
-        await waitFor(actor, (s) => s.matches({ inputSaving: 'idle' }));
-        expect(actor.getSnapshot().matches({ inputSaving: 'idle' })).toBe(true);
-        actor.stop();
-      } finally {
-        vi.useRealTimers();
-      }
+      await vi.advanceTimersByTimeAsync(200);
+      await waitFor(actor, (s) => s.matches({ inputSaving: 'idle' }));
+      expect(actor.getSnapshot().matches({ inputSaving: 'idle' })).toBe(true);
+      actor.stop();
     });
   });
 
@@ -265,108 +391,73 @@ describe('draftMachine', () => {
   // ===========================================================================
   describe('clearDraft persistence', () => {
     it('should persist empty draft when clearDraft fires during idle state', async () => {
-      const persistInputs: PersistDraftInput[] = [];
-      const actor = createTestActorWithPersistCapture({
-        onPersist(input) {
-          persistInputs.push(input);
-        },
-      });
+      vi.useFakeTimers();
+      const { actor, drafts } = createHarness();
       actor.start();
 
       actor.send({ type: 'setDraftText', text: 'will be cleared' });
-      // ClearDraft resets context immediately; we want inputSaving in idle first
-      // so advance past the debounce to let the initial save complete
-      vi.useFakeTimers();
-      try {
-        await vi.advanceTimersByTimeAsync(200);
-        await waitFor(actor, (s) => s.matches({ inputSaving: 'idle' }));
+      await vi.advanceTimersByTimeAsync(200);
+      await waitFor(actor, (s) => s.matches({ inputSaving: 'idle' }));
 
-        persistInputs.length = 0;
-        actor.send({ type: 'clearDraft' });
+      drafts.length = 0;
+      actor.send({ type: 'clearDraft' });
 
-        expect(actor.getSnapshot().matches({ inputSaving: 'persisting' })).toBe(true);
+      expect(actor.getSnapshot().matches({ inputSaving: 'persisting' })).toBe(true);
 
-        await waitFor(actor, (s) => s.matches({ inputSaving: 'idle' }));
-        expect(persistInputs).toHaveLength(1);
-        expect(persistInputs[0]!.draft.parts).toEqual([]);
-      } finally {
-        actor.stop();
-        vi.useRealTimers();
-      }
+      await waitFor(actor, (s) => s.matches({ inputSaving: 'idle' }));
+      expect(drafts).toHaveLength(1);
+      expect(drafts[0]!.draft.parts).toEqual([]);
+      actor.stop();
     });
 
     it('should persist empty draft when clearDraft fires during pending state', async () => {
-      const persistInputs: PersistDraftInput[] = [];
-      const actor = createTestActorWithPersistCapture({
-        onPersist(input) {
-          persistInputs.push(input);
-        },
-      });
-      actor.start();
       vi.useFakeTimers();
-      try {
-        actor.send({ type: 'setDraftText', text: 'typed before send' });
-        expect(actor.getSnapshot().matches({ inputSaving: 'pending' })).toBe(true);
+      const { actor, drafts } = createHarness();
+      actor.start();
+      actor.send({ type: 'setDraftText', text: 'typed before send' });
+      expect(actor.getSnapshot().matches({ inputSaving: 'pending' })).toBe(true);
 
-        // Fire clearDraft while still in pending (before 200ms debounce)
-        actor.send({ type: 'clearDraft' });
+      // Fire clearDraft while still in pending (before 200ms debounce)
+      actor.send({ type: 'clearDraft' });
 
-        // Should bypass debounce and go straight to persisting
-        expect(actor.getSnapshot().matches({ inputSaving: 'persisting' })).toBe(true);
-        expect(actor.getSnapshot().context.draftText).toBe('');
+      // Should bypass debounce and go straight to persisting
+      expect(actor.getSnapshot().matches({ inputSaving: 'persisting' })).toBe(true);
+      expect(actor.getSnapshot().context.draftText).toBe('');
 
-        await waitFor(actor, (s) => s.matches({ inputSaving: 'idle' }));
-        expect(persistInputs).toHaveLength(1);
-        expect(persistInputs[0]!.draft.parts).toEqual([]);
-      } finally {
-        actor.stop();
-        vi.useRealTimers();
-      }
+      await waitFor(actor, (s) => s.matches({ inputSaving: 'idle' }));
+      expect(drafts).toHaveLength(1);
+      expect(drafts[0]!.draft.parts).toEqual([]);
+      actor.stop();
     });
 
     it('should re-persist empty draft when clearDraft fires during persisting state', async () => {
-      const persistInputs: PersistDraftInput[] = [];
-      let resolveCurrentPersist: (() => void) | undefined;
-
-      const actor = createTestActorWithDeferredPersist({
-        onPersist(input, resolve) {
-          persistInputs.push(input);
-          resolveCurrentPersist = resolve;
-        },
-      });
-      actor.start();
       vi.useFakeTimers();
-      try {
-        actor.send({ type: 'setDraftText', text: 'stale content' });
-        expect(actor.getSnapshot().matches({ inputSaving: 'pending' })).toBe(true);
+      const { actor, drafts, draftResolvers } = createHarness({ deferDraftPersist: true });
+      actor.start();
+      actor.send({ type: 'setDraftText', text: 'stale content' });
+      expect(actor.getSnapshot().matches({ inputSaving: 'pending' })).toBe(true);
 
-        // Let debounce fire so inputSaving enters persisting with stale text
-        await vi.advanceTimersByTimeAsync(200);
-        expect(actor.getSnapshot().matches({ inputSaving: 'persisting' })).toBe(true);
-        expect(persistInputs).toHaveLength(1);
+      // Let debounce fire so inputSaving enters persisting with stale text
+      await vi.advanceTimersByTimeAsync(200);
+      expect(actor.getSnapshot().matches({ inputSaving: 'persisting' })).toBe(true);
+      expect(drafts).toHaveLength(1);
+      expect(drafts[0]!.draft.parts.find((p) => p.type === 'text')?.text).toBe('stale content');
 
-        const staleParts = persistInputs[0]!.draft.parts;
-        const staleTextPart = staleParts.find((p) => p.type === 'text');
-        expect(staleTextPart?.text).toBe('stale content');
+      // Fire clearDraft while the stale persist is in-flight
+      actor.send({ type: 'clearDraft' });
 
-        // Fire clearDraft while the stale persist is in-flight
-        actor.send({ type: 'clearDraft' });
+      // Should re-enter persisting, cancelling the stale invoke
+      expect(actor.getSnapshot().matches({ inputSaving: 'persisting' })).toBe(true);
+      expect(actor.getSnapshot().context.draftText).toBe('');
 
-        // Should re-enter persisting, cancelling the stale invoke
-        expect(actor.getSnapshot().matches({ inputSaving: 'persisting' })).toBe(true);
-        expect(actor.getSnapshot().context.draftText).toBe('');
+      // The re-enter started a NEW persist invoke with the empty draft
+      expect(drafts).toHaveLength(2);
+      expect(drafts[1]!.draft.parts).toEqual([]);
 
-        // The re-enter started a NEW persist invoke with the empty draft
-        expect(persistInputs).toHaveLength(2);
-        expect(persistInputs[1]!.draft.parts).toEqual([]);
-
-        // Resolve the new persist so the machine settles
-        resolveCurrentPersist?.();
-        await waitFor(actor, (s) => s.matches({ inputSaving: 'idle' }));
-      } finally {
-        actor.stop();
-        vi.useRealTimers();
-      }
+      // Resolve the new persist so the machine settles
+      draftResolvers.at(-1)?.();
+      await waitFor(actor, (s) => s.matches({ inputSaving: 'idle' }));
+      actor.stop();
     });
   });
 
@@ -375,17 +466,12 @@ describe('draftMachine', () => {
   // ===========================================================================
   describe('edit mode', () => {
     it('should start editing a message', () => {
-      const actor = createTestActor();
+      const { actor } = createHarness();
       actor.start();
       actor.send({
         type: 'startEditingMessage',
         messageId: 'msg-1',
-        originalMessage: mock<MyUIMessage>({
-          id: 'msg-1',
-          role: 'user',
-          parts: [{ type: 'text', text: 'original text' }],
-          metadata: { createdAt: Date.now(), status: 'pending' },
-        }),
+        originalMessage: originalMessage('original text'),
       });
       expect(actor.getSnapshot().context.activeEditMessageId).toBe('msg-1');
       expect(actor.getSnapshot().context.editDraftText).toBe('original text');
@@ -393,36 +479,18 @@ describe('draftMachine', () => {
     });
 
     it('should set edit draft text', () => {
-      const actor = createTestActor();
+      const { actor } = createHarness();
       actor.start();
-      actor.send({
-        type: 'startEditingMessage',
-        messageId: 'msg-1',
-        originalMessage: mock<MyUIMessage>({
-          id: 'msg-1',
-          role: 'user',
-          parts: [{ type: 'text', text: 'original' }],
-          metadata: { createdAt: Date.now(), status: 'pending' },
-        }),
-      });
+      actor.send({ type: 'startEditingMessage', messageId: 'msg-1', originalMessage: originalMessage('original') });
       actor.send({ type: 'setEditDraftText', text: 'edited text' });
       expect(actor.getSnapshot().context.editDraftText).toBe('edited text');
       actor.stop();
     });
 
     it('should exit edit mode and save to messageEdits', () => {
-      const actor = createTestActor();
+      const { actor } = createHarness();
       actor.start();
-      actor.send({
-        type: 'startEditingMessage',
-        messageId: 'msg-1',
-        originalMessage: mock<MyUIMessage>({
-          id: 'msg-1',
-          role: 'user',
-          parts: [{ type: 'text', text: 'original' }],
-          metadata: { createdAt: Date.now(), status: 'pending' },
-        }),
-      });
+      actor.send({ type: 'startEditingMessage', messageId: 'msg-1', originalMessage: originalMessage('original') });
       actor.send({ type: 'setEditDraftText', text: 'edited' });
       actor.send({ type: 'exitEditMode' });
 
@@ -437,65 +505,67 @@ describe('draftMachine', () => {
     });
 
     it('saves a pending edit under its own message id when the box closes', async () => {
-      const persisted: Array<{ messageId: string; draft: MyUIMessage }> = [];
-      const machine = draftMachine.provide({
-        actors: {
-          // oxlint-disable-next-line no-empty-function -- mock stub
-          persistDraftActor: fromSafeAsync(async () => {}),
-          persistEditDraftActor: fromSafeAsync(
-            async ({ input }: { input: { messageId: string; draft: MyUIMessage } }) => {
-              persisted.push(input);
-            },
-          ),
-          // oxlint-disable-next-line no-empty-function -- mock stub
-          clearMessageEditActor: fromSafeAsync(async () => {}),
-          resizeImageActor: fromSafeAsync<
-            { type: 'imageResized'; resized: string },
-            { image: string; preserveOriginal: boolean }
-          >(async ({ input }) => ({ type: 'imageResized', resized: input.image })),
-        },
-      });
-      const actor = createActor(machine, { input: {} });
+      const { actor, edits } = createHarness();
       actor.start();
-      actor.send({
-        type: 'startEditingMessage',
-        messageId: 'msg-1',
-        originalMessage: mock<MyUIMessage>({
-          id: 'msg-1',
-          role: 'user',
-          parts: [{ type: 'text', text: 'original' }],
-          metadata: { createdAt: Date.now(), status: 'pending' },
-        }),
-      });
+      actor.send({ type: 'startEditingMessage', messageId: 'msg-1', originalMessage: originalMessage('original') });
       // Exit inside the 200 ms debounce: the save is still pending here.
       actor.send({ type: 'setEditDraftText', text: 'edited' });
       actor.send({ type: 'exitEditMode' });
 
-      await waitFor(actor, () => persisted.length > 0);
-      expect(persisted).toHaveLength(1);
-      expect(persisted[0]?.messageId).toBe('msg-1');
-      expect(persisted[0]?.draft.parts.find((part) => part.type === 'text')?.text).toBe('edited');
+      await waitFor(actor, () => edits.length > 0);
+      expect(edits).toHaveLength(1);
+      expect(edits[0]?.messageId).toBe('msg-1');
+      expect(edits[0]?.draft.parts.find((part) => part.type === 'text')?.text).toBe('edited');
       actor.stop();
     });
 
     it('should clear message edit', () => {
-      const actor = createTestActor();
+      const { actor } = createHarness();
       actor.start();
-      actor.send({
-        type: 'startEditingMessage',
-        messageId: 'msg-1',
-        originalMessage: mock<MyUIMessage>({
-          id: 'msg-1',
-          role: 'user',
-          parts: [{ type: 'text', text: 'original' }],
-          metadata: { createdAt: Date.now(), status: 'pending' },
-        }),
-      });
+      actor.send({ type: 'startEditingMessage', messageId: 'msg-1', originalMessage: originalMessage('original') });
       actor.send({ type: 'exitEditMode' });
       expect(actor.getSnapshot().context.messageEdits['msg-1']).toBeDefined();
 
       actor.send({ type: 'clearMessageEdit', messageId: 'msg-1' });
       expect(actor.getSnapshot().context.messageEdits['msg-1']).toBeUndefined();
+      actor.stop();
+    });
+
+    it('should load an edited message attachment as a reference', () => {
+      const { actor } = createHarness();
+      actor.start();
+      actor.send({
+        type: 'startEditingMessage',
+        messageId: 'msg-1',
+        originalMessage: userMessage([
+          { type: 'text', text: 'see image' },
+          { type: 'file', url: `attachments/${hashB}.jpg`, mediaType: 'image/jpeg' },
+        ]),
+      });
+      expect(actor.getSnapshot().context.editDraftAttachments).toEqual([{ hash: hashB, mediaType: 'image/jpeg' }]);
+      actor.stop();
+    });
+
+    it('should discard an edit attachment that lands after its edit box closed', async () => {
+      let release: (() => void) | undefined;
+      const { actor, stored } = createHarness({
+        store: async ({ bytes, mediaType }) => {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          return { hash: await sha256Bytes(bytes), mediaType, byteLength: bytes.byteLength };
+        },
+      });
+      actor.start();
+      actor.send({ type: 'startEditingMessage', messageId: 'msg-1', originalMessage: originalMessage('first') });
+      actor.send({ type: 'addEditDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
+      await waitFor(actor, () => stored.length === 1);
+      actor.send({ type: 'exitEditMode' });
+      actor.send({ type: 'startEditingMessage', messageId: 'msg-2', originalMessage: originalMessage('second') });
+      release?.();
+      await settled(actor);
+      expect(actor.getSnapshot().context.activeEditMessageId).toBe('msg-2');
+      expect(actor.getSnapshot().context.editDraftAttachments).toEqual([]);
       actor.stop();
     });
   });
@@ -505,7 +575,7 @@ describe('draftMachine', () => {
   // ===========================================================================
   describe('editSaving', () => {
     it('should enter pending on setEditDraftText', () => {
-      const actor = createTestActor();
+      const { actor } = createHarness();
       actor.start();
       actor.send({ type: 'setEditDraftText', text: 'editing...' });
       expect(actor.getSnapshot().matches({ editSaving: 'pending' })).toBe(true);
@@ -514,141 +584,367 @@ describe('draftMachine', () => {
   });
 
   // ===========================================================================
-  // Image resize chokepoint
-  //
-  // The machine owns image processing. `addDraftImage` / `addEditDraftImage`
-  // events enqueue raw data URLs; the `imageProcessing` parallel sub-region
-  // invokes `resizeImageActor` FIFO to either resize user uploads or retain
-  // generated captures byte-for-byte. Failures surface via the typed
-  // `imageResizeFailed` emit.
+  // initializeFromChat
   // ===========================================================================
-  describe('image resize chokepoint', () => {
-    it('should append the resized URL to draftImages once the resize actor settles', async () => {
-      const actor = createTestActor({ resize: async () => 'data:image/jpeg;base64,RESIZED' });
+  describe('initializeFromChat', () => {
+    it('should reset the open edit and leave every composer field alone', () => {
+      const { actor } = createHarness();
       actor.start();
-      actor.send({ type: 'addDraftImage', image: 'RAW' });
-      await waitFor(actor, (snap) => snap.context.draftImages.length === 1);
-      const snapshot = actor.getSnapshot();
-      expect(snapshot.context.draftImages).toEqual(['data:image/jpeg;base64,RESIZED']);
-      expect(snapshot.context.imageQueue).toEqual([]);
+      actor.send({ type: 'setDraftText', text: 'typed' });
+      actor.send({ type: 'setDraftMode', mode: 'plan' });
+      actor.send({ type: 'startEditingMessage', messageId: 'msg-1', originalMessage: originalMessage('original') });
+      actor.send({ type: 'initializeFromChat' });
+      const { context } = actor.getSnapshot();
+      expect(context).toMatchObject({
+        draftText: 'typed',
+        draftMode: 'plan',
+        editDraftText: '',
+        editDraftAttachments: [],
+      });
+      expect(context.activeEditMessageId).toBeUndefined();
+      actor.stop();
+    });
+  });
+
+  // ===========================================================================
+  // Hydration (D7)
+  // ===========================================================================
+  describe('hydrateDraft', () => {
+    const recordDraft = userMessage([
+      { type: 'text', text: 'stored prompt' },
+      { type: 'file', url: `attachments/${hashA}.pdf`, mediaType: 'application/pdf', filename: 'spec.pdf' },
+    ]);
+    const storedEdit = userMessage([{ type: 'text', text: 'stored edit' }]);
+
+    it('should populate every field on a pristine composer without persisting', async () => {
+      const { actor, drafts, edits, selections, stored } = createHarness();
+      actor.start();
+      actor.send({
+        type: 'hydrateDraft',
+        draft: recordDraft,
+        messageEdits: { 'msg-1': storedEdit },
+        toolChoice: 'required',
+        mode: 'plan',
+      });
+
+      const { context } = actor.getSnapshot();
+      expect(context).toMatchObject({
+        draftText: 'stored prompt',
+        draftAttachments: [{ hash: hashA, mediaType: 'application/pdf', filename: 'spec.pdf' }],
+        messageEdits: { 'msg-1': storedEdit },
+        draftToolChoice: 'required',
+        draftMode: 'plan',
+      });
+      expect(allSavingIdle(actor)).toBe(true);
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 250);
+      });
+      expect({ drafts, edits, selections, stored }).toEqual({ drafts: [], edits: [], selections: [], stored: [] });
       actor.stop();
     });
 
-    it('should append to editDraftImages when addEditDraftImage triggers the queue', async () => {
-      const actor = createTestActor({ resize: async () => 'data:image/jpeg;base64,EDIT_RESIZED' });
+    it('should keep typed text and write it back when the composer was edited first', async () => {
+      const { actor, drafts } = createHarness();
       actor.start();
-      actor.send({ type: 'addEditDraftImage', image: 'RAW_EDIT' });
-      await waitFor(actor, (snap) => snap.context.editDraftImages.length === 1);
+      actor.send({ type: 'setDraftText', text: 'typed before the read' });
+      actor.send({ type: 'hydrateDraft', draft: recordDraft, toolChoice: 'required', mode: 'plan' });
+
+      const { context } = actor.getSnapshot();
+      expect(context.draftText).toBe('typed before the read');
+      expect(context.draftAttachments).toEqual([]);
+      // Untouched fields still converge on the record.
+      expect(context).toMatchObject({ draftToolChoice: 'required', draftMode: 'plan' });
+      // The write-back skips the debounce.
+      expect(actor.getSnapshot().matches({ inputSaving: 'persisting' })).toBe(true);
+      await waitFor(actor, () => drafts.length === 1);
+      expect(drafts[0]!.draft.parts).toEqual([{ type: 'text', text: 'typed before the read' }]);
+      actor.stop();
+    });
+
+    it('should keep a locally chosen mode and write back only what was touched', async () => {
+      const { actor, drafts, selections } = createHarness();
+      actor.start();
+      actor.send({ type: 'setDraftMode', mode: 'ask' });
+      await waitFor(actor, () => selections.length === 1);
+      actor.send({ type: 'hydrateDraft', draft: recordDraft, toolChoice: 'required', mode: 'plan' });
+
+      const { context } = actor.getSnapshot();
+      expect(context.draftMode).toBe('ask');
+      expect(context.draftToolChoice).toBe('required');
+      // The draft was never touched, so the stored one applies.
+      expect(context.draftText).toBe('stored prompt');
+      await waitFor(actor, () => selections.length === 2);
+      expect(selections[1]).toEqual({ mode: 'ask' });
+      expect(drafts).toEqual([]);
+      actor.stop();
+    });
+
+    it('should apply stored edits only for messages the user has not edited', () => {
+      const { actor } = createHarness();
+      actor.start();
+      actor.send({ type: 'startEditingMessage', messageId: 'msg-1', originalMessage: originalMessage('local edit') });
+      actor.send({ type: 'exitEditMode' });
+      actor.send({ type: 'startEditingMessage', messageId: 'msg-3', originalMessage: originalMessage('open edit') });
+      actor.send({ type: 'clearMessageEdit', messageId: 'msg-4' });
+      actor.send({
+        type: 'hydrateDraft',
+        messageEdits: {
+          'msg-1': storedEdit,
+          'msg-2': storedEdit,
+          'msg-3': storedEdit,
+          'msg-4': storedEdit,
+        },
+      });
+
+      const { context } = actor.getSnapshot();
+      expect(Object.keys(context.messageEdits).toSorted()).toEqual(['msg-1', 'msg-2']);
+      expect(context.messageEdits['msg-1']!.parts).toEqual([{ type: 'text', text: 'local edit' }]);
+      expect(context.messageEdits['msg-2']).toEqual(storedEdit);
+      expect(context.editDraftText).toBe('open edit');
+      actor.stop();
+    });
+
+    it('should convert a legacy data: URL in the record into a stored attachment and write it back', async () => {
+      const { actor, drafts } = createHarness();
+      actor.start();
+      actor.send({
+        type: 'hydrateDraft',
+        draft: userMessage([
+          { type: 'text', text: 'legacy' },
+          { type: 'file', url: pngA, mediaType: 'image/png' },
+        ]),
+      });
+      const attachment = await storedAs(pngA);
+      await waitFor(actor, () => drafts.length === 1, { timeout: 1000 });
+      expect(actor.getSnapshot().context.draftAttachments).toEqual([attachment]);
+      expect(drafts[0]!.draft.parts).toEqual([
+        { type: 'text', text: 'legacy' },
+        { type: 'file', mediaType: 'image/png', url: `attachments/${attachment.hash}.png` },
+      ]);
+      actor.stop();
+    });
+  });
+
+  // ===========================================================================
+  // Attachment ingest
+  //
+  // `addDraftAttachment` / `addEditDraftAttachment` enqueue a data URL. Images
+  // pass through `resizeImageActor` FIFO (captures may be preserved byte for
+  // byte); documents skip it. Every entry then enters `storing`, where
+  // `storeAttachmentActor` writes the bytes before the draft references them.
+  // Failures surface via typed emits and add nothing.
+  // ===========================================================================
+  describe('attachment ingest', () => {
+    it('should append the stored resized image to draftAttachments once the actors settle', async () => {
+      const { actor, stored } = createHarness({ resize: async () => jpegResized });
+      actor.start();
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
+      await waitFor(actor, (snap) => snap.context.draftAttachments.length === 1);
       const snapshot = actor.getSnapshot();
-      expect(snapshot.context.editDraftImages).toEqual(['data:image/jpeg;base64,EDIT_RESIZED']);
-      expect(snapshot.context.draftImages).toEqual([]);
-      expect(snapshot.context.imageQueue).toEqual([]);
+      expect(snapshot.context.draftAttachments).toEqual([await storedAs(jpegResized)]);
+      expect(stored[0]?.mediaType).toBe('image/jpeg');
+      expect(snapshot.context.attachmentQueue).toEqual([]);
+      actor.stop();
+    });
+
+    it('should append to editDraftAttachments when addEditDraftAttachment triggers the queue', async () => {
+      const { actor } = createHarness({ resize: async () => jpegResized });
+      actor.start();
+      actor.send({ type: 'startEditingMessage', messageId: 'msg-1', originalMessage: originalMessage('original') });
+      actor.send({ type: 'addEditDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
+      await waitFor(actor, (snap) => snap.context.editDraftAttachments.length === 1);
+      const snapshot = actor.getSnapshot();
+      expect(snapshot.context.editDraftAttachments).toEqual([await storedAs(jpegResized)]);
+      expect(snapshot.context.draftAttachments).toEqual([]);
+      expect(snapshot.context.attachmentQueue).toEqual([]);
       actor.stop();
     });
 
     it('should preserve FIFO insertion order when multiple images are sent in a burst', async () => {
       const delayByInput = new Map<string, number>([
-        ['A', 50],
-        ['B', 5],
-        ['C', 10],
+        [pngA, 50],
+        [pngB, 5],
+        [pngC, 10],
       ]);
-      const actor = createTestActor({
+      const { actor } = createHarness({
         resize: async (image) => {
-          const head = image[0] ?? '';
           await new Promise<void>((resolve) => {
-            setTimeout(resolve, delayByInput.get(head) ?? 0);
+            setTimeout(resolve, delayByInput.get(image) ?? 0);
           });
-          return `${image}_R`;
+          return image;
         },
       });
       actor.start();
-      actor.send({ type: 'addDraftImage', image: 'A' });
-      actor.send({ type: 'addDraftImage', image: 'B' });
-      actor.send({ type: 'addDraftImage', image: 'C' });
-      await waitFor(actor, (snap) => snap.context.draftImages.length === 3);
-      expect(actor.getSnapshot().context.draftImages).toEqual(['A_R', 'B_R', 'C_R']);
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngB, model: imageOnlyModel });
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngC, model: imageOnlyModel });
+      await waitFor(actor, (snap) => snap.context.draftAttachments.length === 3);
+      expect(actor.getSnapshot().context.draftAttachments).toEqual([
+        await storedAs(pngA),
+        await storedAs(pngB),
+        await storedAs(pngC),
+      ]);
       actor.stop();
     });
 
-    it('should preserve FIFO order across N enqueues with mixed targets and adversarial delays', async () => {
+    it('should preserve FIFO order across N enqueues with mixed targets, kinds and adversarial delays', async () => {
       const delayByInput = new Map<string, number>([
-        ['A', 50],
-        ['B', 40],
-        ['C', 30],
-        ['D', 20],
-        ['E', 10],
+        [pngA, 50],
+        [pngB, 40],
+        [pngC, 30],
       ]);
-      const callOrder: string[] = [];
-      const actor = createTestActor({
+      const { actor, stored } = createHarness({
         resize: async (image) => {
-          callOrder.push(image);
-          const head = image[0] ?? '';
           await new Promise<void>((resolve) => {
-            setTimeout(resolve, delayByInput.get(head) ?? 0);
+            setTimeout(resolve, delayByInput.get(image) ?? 0);
           });
-          return `${image}_R`;
+          return image;
         },
       });
       actor.start();
-      actor.send({ type: 'addDraftImage', image: 'A' });
-      actor.send({ type: 'addDraftImage', image: 'B' });
-      actor.send({ type: 'addEditDraftImage', image: 'C' });
-      actor.send({ type: 'addDraftImage', image: 'D' });
-      actor.send({ type: 'addEditDraftImage', image: 'E' });
-      await waitFor(
-        actor,
-        (snap) => snap.context.draftImages.length === 3 && snap.context.editDraftImages.length === 2,
-      );
+      actor.send({ type: 'startEditingMessage', messageId: 'msg-1', originalMessage: originalMessage('original') });
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngA, model: imageAndPdfModel });
+      actor.send({ type: 'addDraftAttachment', dataUrl: pdf, filename: 'spec.pdf', model: imageAndPdfModel });
+      actor.send({ type: 'addEditDraftAttachment', dataUrl: pngB, model: imageAndPdfModel });
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngC, model: imageAndPdfModel });
+      actor.send({ type: 'addEditDraftAttachment', dataUrl: pngA, model: imageAndPdfModel });
+      await settled(actor);
       const snapshot = actor.getSnapshot();
-      expect(snapshot.context.draftImages).toEqual(['A_R', 'B_R', 'D_R']);
-      expect(snapshot.context.editDraftImages).toEqual(['C_R', 'E_R']);
-      expect(callOrder).toEqual(['A', 'B', 'C', 'D', 'E']);
+      expect(snapshot.context.draftAttachments).toEqual([
+        await storedAs(pngA),
+        await storedAs(pdf, 'spec.pdf'),
+        await storedAs(pngC),
+      ]);
+      expect(snapshot.context.editDraftAttachments).toEqual([await storedAs(pngB), await storedAs(pngA)]);
+      expect(stored.map((entry) => entry.mediaType)).toEqual([
+        'image/png',
+        'application/pdf',
+        'image/png',
+        'image/png',
+        'image/png',
+      ]);
+      actor.stop();
+    });
+
+    it('should store a PDF without resizing it', async () => {
+      const { actor, resized, stored } = createHarness();
+      actor.start();
+      actor.send({ type: 'addDraftAttachment', dataUrl: pdf, filename: 'spec.pdf', model: imageAndPdfModel });
+      await waitFor(actor, (snap) => snap.context.draftAttachments.length === 1);
+      expect(resized).toEqual([]);
+      expect(stored).toEqual([{ bytes: bytesOf(pdf), mediaType: 'application/pdf', filename: 'spec.pdf' }]);
+      expect(actor.getSnapshot().context.draftAttachments).toEqual([await storedAs(pdf, 'spec.pdf')]);
       actor.stop();
     });
 
     it('should emit imageResizeFailed when the resize actor rejects', async () => {
-      const actor = createTestActor({
+      const { actor } = createHarness({
         resize: async () => {
           throw new Error('Failed to load image');
         },
       });
-      const emitSpy = vi.fn<(event: { type: 'imageResizeFailed'; error: Error }) => void>();
+      const emitSpy = vi.fn<(event: Extract<DraftEmittedEvents, { type: 'imageResizeFailed' }>) => void>();
       actor.on('imageResizeFailed', emitSpy);
       actor.start();
-      actor.send({ type: 'addDraftImage', image: 'BAD' });
-      await waitFor(actor, (snap) => snap.context.imageQueue.length === 0);
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
+      await settled(actor);
       expect(emitSpy).toHaveBeenCalledOnce();
       const event = emitSpy.mock.calls[0]![0];
       expect(event.error).toBeInstanceOf(Error);
       expect(event.error.message).toBe('Failed to load image');
       expect(event.error.name).toBe('Error');
-      expect(actor.getSnapshot().context.draftImages).toEqual([]);
+      expect(actor.getSnapshot().context.draftAttachments).toEqual([]);
+      actor.stop();
+    });
+
+    it('should emit attachmentStoreFailed and add nothing when storing rejects', async () => {
+      const { actor, drafts } = createHarness({
+        store: async () => {
+          throw new Error('Attachment exceeds the 20 MB limit for documents.');
+        },
+      });
+      const emitSpy = vi.fn<(event: Extract<DraftEmittedEvents, { type: 'attachmentStoreFailed' }>) => void>();
+      actor.on('attachmentStoreFailed', emitSpy);
+      actor.start();
+      actor.send({ type: 'addDraftAttachment', dataUrl: pdf, model: imageAndPdfModel });
+      await settled(actor);
+      expect(emitSpy).toHaveBeenCalledOnce();
+      expect(emitSpy.mock.calls[0]![0].error.message).toBe('Attachment exceeds the 20 MB limit for documents.');
+      expect(actor.getSnapshot().context.draftAttachments).toEqual([]);
+      expect(actor.getSnapshot().matches({ inputSaving: 'idle' })).toBe(true);
+      expect(drafts).toEqual([]);
+      actor.stop();
+    });
+
+    it('should emit attachmentStoreFailed without storing when the source is not a base64 data URL', async () => {
+      const { actor, stored, resized } = createHarness();
+      const emitSpy = vi.fn<(event: Extract<DraftEmittedEvents, { type: 'attachmentStoreFailed' }>) => void>();
+      actor.on('attachmentStoreFailed', emitSpy);
+      actor.start();
+      actor.send({ type: 'addDraftAttachment', dataUrl: 'not a data url', model: imageAndPdfModel });
+      expect(emitSpy).toHaveBeenCalledOnce();
+      expect(emitSpy.mock.calls[0]![0].error.message).toBe('The attachment is not a base64 data URL.');
+      expect(actor.getSnapshot().context.attachmentQueue).toEqual([]);
+      await settled(actor);
+      expect({ stored, resized }).toEqual({ stored: [], resized: [] });
+      actor.stop();
+    });
+
+    it('should refuse a PDF before storing when the selected model cannot read PDFs', async () => {
+      const { actor, stored, resized } = createHarness();
+      const emitSpy = vi.fn<(event: Extract<DraftEmittedEvents, { type: 'attachmentRefused' }>) => void>();
+      actor.on('attachmentRefused', emitSpy);
+      actor.start();
+      actor.send({ type: 'addDraftAttachment', dataUrl: pdf, filename: 'spec.pdf', model: imageOnlyModel });
+      expect(emitSpy).toHaveBeenCalledOnce();
+      expect(emitSpy.mock.calls[0]![0]).toEqual({
+        type: 'attachmentRefused',
+        kind: 'document',
+        mediaType: 'application/pdf',
+        modelName: 'Gemini Flash',
+      });
+      expect(actor.getSnapshot().context.attachmentQueue).toEqual([]);
+      await settled(actor);
+      expect({ stored, resized }).toEqual({ stored: [], resized: [] });
+      expect(actor.getSnapshot().context.draftAttachments).toEqual([]);
+      actor.stop();
+    });
+
+    it('should refuse an image before resizing when the selected model cannot read images', () => {
+      const { actor, resized } = createHarness();
+      const emitSpy = vi.fn<(event: Extract<DraftEmittedEvents, { type: 'attachmentRefused' }>) => void>();
+      actor.on('attachmentRefused', emitSpy);
+      actor.start();
+      actor.send({ type: 'addEditDraftAttachment', dataUrl: pngA, model: textOnlyModel });
+      expect(emitSpy.mock.calls[0]![0]).toMatchObject({ kind: 'image', modelName: 'Text Model' });
+      expect(actor.getSnapshot().context.attachmentQueue).toEqual([]);
+      expect(resized).toEqual([]);
       actor.stop();
     });
 
     it('should drain the queue past a single failure (subsequent images still process)', async () => {
       const emitSpy = vi.fn();
-      const actor = createTestActor({
+      const { actor } = createHarness({
         resize: async (image) => {
-          if (image === 'BAD') {
+          if (image === pngA) {
             throw new Error('boom');
           }
-          return `${image}_R`;
+          return image;
         },
       });
       actor.on('imageResizeFailed', emitSpy);
       actor.start();
-      actor.send({ type: 'addDraftImage', image: 'BAD' });
-      actor.send({ type: 'addDraftImage', image: 'GOOD' });
-      await waitFor(actor, (snap) => snap.context.draftImages.length === 1);
-      expect(actor.getSnapshot().context.draftImages).toEqual(['GOOD_R']);
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngB, model: imageOnlyModel });
+      await waitFor(actor, (snap) => snap.context.draftAttachments.length === 1);
+      expect(actor.getSnapshot().context.draftAttachments).toEqual([await storedAs(pngB)]);
       expect(emitSpy).toHaveBeenCalledOnce();
       actor.stop();
     });
 
     it('should not invoke the resize actor when the queue is empty', async () => {
       const resizeSpy = vi.fn(async (image: string) => image);
-      const actor = createTestActor({ resize: resizeSpy });
+      const { actor } = createHarness({ resize: resizeSpy });
       actor.start();
       await new Promise<void>((resolve) => {
         setTimeout(resolve, 0);
@@ -657,68 +953,107 @@ describe('draftMachine', () => {
       actor.stop();
     });
 
-    it('should clear pending queue entries on clearDraft', async () => {
-      const actor = createTestActor({
-        resize: async () =>
-          new Promise<string>(() => {
-            // Never resolves — keeps the in-flight resize pending so we can assert clear behavior.
-          }),
-      });
+    it('should clear pending queue entries on clearDraft', () => {
+      const { actor } = createHarness({ resize: pendingForever });
       actor.start();
-      actor.send({ type: 'addDraftImage', image: 'A' });
-      actor.send({ type: 'addDraftImage', image: 'B' });
-      expect(actor.getSnapshot().context.imageQueue.length).toBeGreaterThan(0);
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngB, model: imageOnlyModel });
+      expect(actor.getSnapshot().context.attachmentQueue.length).toBeGreaterThan(0);
       actor.send({ type: 'clearDraft' });
-      expect(actor.getSnapshot().context.imageQueue).toEqual([]);
-      expect(actor.getSnapshot().context.draftImages).toEqual([]);
+      expect(actor.getSnapshot().context.attachmentQueue).toEqual([]);
+      expect(actor.getSnapshot().context.draftAttachments).toEqual([]);
       actor.stop();
     });
 
     it('should clear pending edit queue entries on clearEditDraft', () => {
-      const actor = createTestActor({
-        resize: async () =>
-          new Promise<string>(() => {
-            // Never resolves — keeps the edit resize pending so we can assert clear behavior.
-          }),
-      });
+      const { actor } = createHarness({ resize: pendingForever });
       actor.start();
-      actor.send({ type: 'addEditDraftImage', image: 'A' });
-      actor.send({ type: 'addEditDraftImage', image: 'B' });
-      expect(actor.getSnapshot().context.imageQueue.length).toBeGreaterThan(0);
+      actor.send({ type: 'addEditDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
+      actor.send({ type: 'addEditDraftAttachment', dataUrl: pngB, model: imageOnlyModel });
+      expect(actor.getSnapshot().context.attachmentQueue.length).toBeGreaterThan(0);
       actor.send({ type: 'clearEditDraft' });
-      expect(actor.getSnapshot().context.imageQueue).toEqual([]);
-      expect(actor.getSnapshot().context.editDraftImages).toEqual([]);
+      expect(actor.getSnapshot().context.attachmentQueue).toEqual([]);
+      expect(actor.getSnapshot().context.editDraftAttachments).toEqual([]);
       actor.stop();
     });
 
-    it('should NOT append directly when addDraftImage event fires (must go through queue + resize)', async () => {
-      const actor = createTestActor({
-        resize: async () =>
-          new Promise<string>(() => {
-            // Never resolves — guarantees the queue entry stays pending so we can assert no direct append.
-          }),
+    it('should not attach an in-flight main attachment to the edit draft after clearDraft', async () => {
+      let release: (() => void) | undefined;
+      const { actor, stored } = createHarness({
+        store: async ({ bytes, mediaType }) => {
+          if (stored.length === 1) {
+            await new Promise<void>((resolve) => {
+              release = resolve;
+            });
+          }
+          return { hash: await sha256Bytes(bytes), mediaType, byteLength: bytes.byteLength };
+        },
       });
       actor.start();
-      actor.send({ type: 'addDraftImage', image: 'RAW' });
+      actor.send({ type: 'startEditingMessage', messageId: 'msg-1', originalMessage: originalMessage('original') });
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
+      actor.send({ type: 'addEditDraftAttachment', dataUrl: pngB, model: imageOnlyModel });
+      await waitFor(actor, () => stored.length === 1);
+      actor.send({ type: 'clearDraft' });
+      release?.();
+      await settled(actor);
+      const { context } = actor.getSnapshot();
+      expect(context.draftAttachments).toEqual([]);
+      expect(context.editDraftAttachments).toEqual([await storedAs(pngB)]);
+      actor.stop();
+    });
+
+    it('should NOT append directly when addDraftAttachment event fires (must go through queue + resize)', async () => {
+      const { actor } = createHarness({ resize: pendingForever });
+      actor.start();
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
       await new Promise<void>((resolve) => {
         setTimeout(resolve, 10);
       });
       const snapshot = actor.getSnapshot();
-      expect(snapshot.context.draftImages).toEqual([]);
-      expect(snapshot.context.imageQueue.length).toBe(1);
+      expect(snapshot.context.draftAttachments).toEqual([]);
+      expect(snapshot.context.attachmentQueue.length).toBe(1);
       actor.stop();
     });
 
     it('should stop the in-flight resize actor without surfacing unhandled rejection when the parent actor stops', () => {
-      const actor = createTestActor({
-        resize: async () =>
-          new Promise<string>(() => {
-            // Never resolves — confirms the parent stop tears down the in-flight resize cleanly.
-          }),
-      });
+      const { actor } = createHarness({ resize: pendingForever });
       actor.start();
-      actor.send({ type: 'addDraftImage', image: 'RAW' });
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
       expect(() => actor.stop()).not.toThrow();
+      expect(actor.getSnapshot().status).toBe('stopped');
+    });
+  });
+
+  // ===========================================================================
+  // attachmentKinds — what the send gate checks against the selected model
+  // ===========================================================================
+  describe('attachmentKinds', () => {
+    it('should report the kinds each draft holds', async () => {
+      const { actor } = createHarness();
+      actor.start();
+      expect(attachmentKinds(actor.getSnapshot().context, 'main')).toEqual([]);
+      actor.send({ type: 'addDraftAttachment', dataUrl: pdf, model: imageAndPdfModel });
+      await waitFor(actor, (snap) => snap.context.draftAttachments.length === 1);
+      expect(attachmentKinds(actor.getSnapshot().context, 'main')).toEqual(['document']);
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngA, model: imageAndPdfModel });
+      await waitFor(actor, (snap) => snap.context.draftAttachments.length === 2);
+      expect(attachmentKinds(actor.getSnapshot().context, 'main')).toEqual(['image', 'document']);
+      expect(attachmentKinds(actor.getSnapshot().context, 'edit')).toEqual([]);
+      actor.send({ type: 'removeDraftAttachment', index: 0 });
+      expect(attachmentKinds(actor.getSnapshot().context, 'main')).toEqual(['image']);
+      actor.stop();
+    });
+
+    it('should return the same array for the same kinds, so selectors do not re-render', async () => {
+      const { actor } = createHarness();
+      actor.start();
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
+      await waitFor(actor, (snap) => snap.context.draftAttachments.length === 1);
+      const first = attachmentKinds(actor.getSnapshot().context, 'main');
+      actor.send({ type: 'setDraftText', text: 'x' });
+      expect(attachmentKinds(actor.getSnapshot().context, 'main')).toBe(first);
+      actor.stop();
     });
   });
 });

@@ -4,7 +4,7 @@ import { EventLogError } from '#log/event-log-error.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { modelProviderKinds, storageDurabilityClasses } from '#log/event-types.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
-import type { AgentLogEvent, JsonValue } from '#log/event-types.js';
+import type { AgentLogEvent, FileRefContentBlock, JsonValue } from '#log/event-types.js';
 
 const nonEmptyString = z.string().min(1);
 const opaqueInvocationId = z
@@ -58,6 +58,31 @@ const metadataSchema = z
     tauInternal: z.object({ kind: z.string() }).catchall(jsonValueSchema).optional(),
   })
   .catchall(jsonValueSchema);
+/*
+ * The attachment URL shape, restated here on purpose: `apps/ui/app/utils/attachment.utils.ts`
+ * owns it for the composer, and a published package cannot depend on an app.
+ * Both spellings must stay in step — a row this rejects is a row the UI wrote
+ * and no reader can resolve.
+ */
+const attachmentPath = z.string().regex(/^attachments\/[\da-f]{64}\.(?:jpg|png|webp|gif|pdf)$/u);
+/**
+ * Schema for a content-addressed attachment reference in durable message content.
+ *
+ * Strict, unlike the loose event envelopes around it: this block is Tau's own
+ * and a writer that cannot name its bytes or media type has written a row no
+ * reader can resolve. `byteLength` is optional (P29) — it has no authoritative
+ * source on every write path and no reader requires it — but a present one is
+ * still a whole non-negative count, because a row must never lie about its size.
+ *
+ * @public
+ */
+export const fileRefBlockSchema: z.ZodType<FileRefContentBlock> = z.strictObject({
+  type: z.literal('file-ref'),
+  path: attachmentPath,
+  mimeType: nonEmptyString,
+  byteLength: z.number().int().nonnegative().optional(),
+  filename: nonEmptyString.optional(),
+});
 const messageBase = { id: nonEmptyString };
 const messageContent = { content: jsonValueSchema, metadata: metadataSchema.optional() };
 /*

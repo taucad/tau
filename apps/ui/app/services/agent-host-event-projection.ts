@@ -6,6 +6,7 @@ import { acpSessionDataSchema, billingInvocationStatusSchema } from '@taucad/cha
 import { errorCategoryTitles, httpStatusToCategory } from '@taucad/chat/utils';
 import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { isRecord } from '@taucad/utils/schema';
+import { isAttachmentUrl } from '#utils/attachment.utils.js';
 
 type ProviderMessage = Extract<AgentLogEvent, { readonly type: 'message.appended' }>['message'];
 type AssistantProviderMessage = Extract<ProviderMessage, { readonly role: 'assistant' }>;
@@ -405,6 +406,41 @@ export const latestAcpSessionData = (messages: readonly MyUIMessage[], agentId: 
   return undefined;
 };
 
+type UserFilePart = Extract<MyUIMessage['parts'][number], { type: 'file' }>;
+
+/**
+ * Project one durable attachment block onto the file part a transcript renders.
+ *
+ * Two arms (D14): a `file-ref` keeps the relative `attachments/…` path so the
+ * renderer resolves the bytes against the chat's own directory, and the legacy
+ * inline `image` block is still re-synthesized as a `data:` URL. A block whose
+ * path is not a resolvable attachment is dropped rather than rendered as a
+ * broken source — the rest of the turn still reads.
+ *
+ * @param value - One durable content block from a user message.
+ * @returns The file part, or none when the block is not a renderable attachment.
+ */
+const userFilePart = (value: Record<string, unknown>): UserFilePart | undefined => {
+  if (value['type'] === 'file-ref') {
+    const { path, mimeType, filename, byteLength } = value;
+    if (typeof path !== 'string' || !isAttachmentUrl(path) || typeof mimeType !== 'string') {
+      return undefined;
+    }
+    return {
+      type: 'file',
+      mediaType: mimeType,
+      url: path,
+      ...(typeof filename === 'string' ? { filename } : {}),
+      // `FileUIPart` has no size field; `common` is where Tau's own part facts ride.
+      ...(typeof byteLength === 'number' ? { providerMetadata: { common: { byteLength } } } : {}),
+    };
+  }
+  if (value['type'] === 'image' && typeof value['mimeType'] === 'string' && typeof value['data'] === 'string') {
+    return { type: 'file', mediaType: value['mimeType'], url: `data:${value['mimeType']};base64,${value['data']}` };
+  }
+  return undefined;
+};
+
 /** Reconstruct one canonical user row without routing it through assistant stream chunks. */
 export const projectAgentHostUserMessage = (message: UserProviderMessage, recordedAt?: string): MyUIMessage => {
   const values: readonly JsonValue[] = Array.isArray(message.content) ? message.content : [message.content];
@@ -421,12 +457,9 @@ export const projectAgentHostUserMessage = (message: UserProviderMessage, record
       parts.push({ type: 'text', text: value['text'] });
       continue;
     }
-    if (value['type'] === 'image' && typeof value['mimeType'] === 'string' && typeof value['data'] === 'string') {
-      parts.push({
-        type: 'file',
-        mediaType: value['mimeType'],
-        url: `data:${value['mimeType']};base64,${value['data']}`,
-      });
+    const file = userFilePart(value);
+    if (file) {
+      parts.push(file);
     }
   }
   /** Milliseconds. */

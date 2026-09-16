@@ -2,6 +2,7 @@ import { readUIMessageStream } from 'ai';
 import type { ChatTransport, UIMessage, UIMessageChunk } from 'ai';
 import { z } from 'zod';
 import { isRecord } from '@taucad/utils/schema';
+import { isAttachmentUrl } from '#utils/attachment.utils.js';
 import type { ProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { AgentHostWorkerError } from '#services/agent-host-client.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
@@ -446,11 +447,32 @@ const userMessage = <Message extends UIMessage>(messages: readonly Message[]): U
       content.push({ type: 'text', text: part.text });
       continue;
     }
-    if (part.type === 'file' && part.url.startsWith('data:')) {
-      const match = /^data:([^;,]+);base64,(.*)$/u.exec(part.url);
-      if (match) {
-        content.push({ type: 'image', mimeType: match[1]!, data: match[2]! });
+    if (part.type === 'file') {
+      /* A content-addressed attachment: the bytes are already durable beside
+       * the log, so the row references them rather than re-inlining base64 on
+       * every retry, edit and reattach. A `FileUIPart` has no size field, so a
+       * composer that knows it rides it on `providerMetadata.common`. */
+      if (isAttachmentUrl(part.url)) {
+        const byteLength = part.providerMetadata?.['common']?.['byteLength'];
+        content.push({
+          type: 'file-ref',
+          path: part.url,
+          mimeType: part.mediaType,
+          /* Optional (P29): a freshly composed draft has the `Attachment` and
+           * its size, a draft hydrated from a record has only the file part.
+           * Omitted beats fabricated — nothing reads it, and a row must never
+           * lie about its size. */
+          ...(typeof byteLength === 'number' && Number.isInteger(byteLength) && byteLength >= 0 ? { byteLength } : {}),
+          ...(part.filename === undefined ? {} : { filename: part.filename }),
+        });
+        continue;
       }
+      // The legacy arm (D14): a caller that still hands over inline base64.
+      const match = /^data:([^;,]+);base64,(.*)$/u.exec(part.url);
+      if (!match) {
+        throw new TypeError(`Browser agent host cannot record file part URL "${part.url}".`);
+      }
+      content.push({ type: 'image', mimeType: match[1]!, data: match[2]! });
     }
   }
   const first = content[0];

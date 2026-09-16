@@ -1,14 +1,5 @@
 import type { ToolUIPart } from 'ai';
-import type {
-  MessageRole,
-  MyMetadata,
-  MyMessagePart,
-  MyUIMessage,
-  ModelSupport,
-  ToolInvocation,
-  MyTools,
-  UsageData,
-} from '@taucad/chat';
+import type { MyMessagePart, MyUIMessage, ModelSupport, ToolInvocation, MyTools, UsageData } from '@taucad/chat';
 import { getToolPartName, isAnyToolPart, isToolPart, modelSupportsInput } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
 import { idPrefix } from '@taucad/types/constants';
@@ -19,25 +10,6 @@ import { getRpcOutcome } from '#services/rpc-ledger.js';
 import { attachmentKind, attachmentUrl } from '#utils/attachment.utils.js';
 import type { AttachmentName, AttachmentReference } from '#utils/attachment.utils.js';
 import type { RequestTerminationCause } from '#hooks/chat-persistence.machine.js';
-
-/**
- * Extract the mime type from a data URL
- *
- * @example <caption>Extract the media type from an image data URL.</caption>
- * extractMimeTypeFromDataUrl('data:image/webp;base64,UklGRu6VAQBXR')
- * // -> 'image/webp'
- *
- * @param dataUrl
- * @returns
- */
-export const extractMimeTypeFromDataUrl = (dataUrl: string): string => {
-  const mimeType = dataUrl.split(',')[0]?.split(':')[1]?.split(';')[0];
-  if (!mimeType) {
-    throw new Error('Invalid data URL');
-  }
-
-  return mimeType;
-};
 
 /**
  * The maximum number of characters to include in a snippet of web search results.
@@ -699,47 +671,4 @@ export function attachmentSendBlockReason(
     return `${model.name} can't read images. Remove the image or pick another model.`;
   }
   return undefined;
-}
-
-// Helper function to create a new message
-export function createMessage({
-  id,
-  content,
-  role,
-  metadata,
-  imageUrls = [],
-}: {
-  id?: string;
-  content: string;
-  role: MessageRole;
-  metadata: MyMetadata;
-  imageUrls?: string[];
-}): MyUIMessage {
-  const trimmedContent = content.trim();
-
-  return {
-    id: id ?? generatePrefixedId(idPrefix.message),
-    role,
-    parts: [
-      // Always add image parts first so they are rendered first in the UI
-      ...imageUrls.map(
-        (url) =>
-          ({
-            type: 'file',
-            url,
-            mediaType: extractMimeTypeFromDataUrl(url),
-          }) as const,
-      ),
-      // Only add text part if there is text content
-      ...(trimmedContent.length > 0
-        ? [
-            {
-              type: 'text',
-              text: trimmedContent,
-            } as const,
-          ]
-        : []),
-    ],
-    metadata: { ...metadata, createdAt: Date.now() },
-  };
 }

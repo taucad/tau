@@ -175,5 +175,9 @@ export function createChatAttachmentStore(
   projectId: string,
   chatId: string,
 ): AttachmentStore {
-  return createAttachmentStore(client, `/projects/${projectId}/${chatRecordsPath(chatId)}/attachments`);
+  return createAttachmentStore(client, chatAttachmentsPath(projectId, chatId));
 }
+
+/** The directory `createChatAttachmentStore` roots at, for readers that resolve references without a store. */
+export const chatAttachmentsPath = (projectId: string, chatId: string): string =>
+  `/projects/${projectId}/${chatRecordsPath(chatId)}/attachments`;

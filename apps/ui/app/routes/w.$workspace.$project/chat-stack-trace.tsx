@@ -2,7 +2,6 @@ import { useCallback, useState } from 'react';
 import { ChevronRight, Sparkles } from 'lucide-react';
 import type { KernelProvider, KernelIssue, KernelStackFrame, IssueSeverity } from '@taucad/runtime';
 import { idPrefix, languageFromKernel } from '@taucad/types/constants';
-import { messageRole, messageStatus } from '@taucad/chat/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { Button } from '@taucad/ui/components/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
@@ -17,7 +16,7 @@ import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { useModifiers } from '#hooks/use-keyboard.js';
 import { formatKeyCombination } from '#utils/keys.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { createMessage } from '#utils/chat.utils.js';
+import { buildUserMessage } from '#utils/chat.utils.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
@@ -491,13 +490,7 @@ export function ChatStackTrace({ entryPath, className, side, ...props }: ChatSta
         // Persist the pending user message with an explicit one-shot startup
         // request so hydration can fire this intentional Fix-with-AI turn
         // without treating every pending user tail as command state.
-        const message = createMessage({
-          content: errorPrompt,
-          role: messageRole.user,
-          metadata: {
-            status: messageStatus.pending,
-          },
-        });
+        const message = buildUserMessage({ text: errorPrompt });
         const newChat = await createChat({
           name: 'New chat',
           messages: [message],

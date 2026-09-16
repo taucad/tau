@@ -1,13 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { toast } from '#components/ui/sonner.js';
 import { idPrefix } from '@taucad/types/constants';
-import { messageRole, messageStatus } from '@taucad/chat/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { useChats } from '#hooks/use-chats.js';
 import { useProject } from '#hooks/use-project.js';
 import { useRevisionClient } from '#hooks/use-revision-status.js';
 import { useChatWorkspaceAuthority } from '#providers/chat-workspace-authority-provider.js';
-import { createMessage } from '#utils/chat.utils.js';
+import { buildUserMessage } from '#utils/chat.utils.js';
 
 /**
  * What the seeded chat is asked to do (AC14, A18/I12 — document words only).
@@ -61,11 +60,7 @@ export function RevisionConflictChat(): undefined {
     const seed = async (
       request: Readonly<{ revisionId: string; checkoutId: string | undefined; paths: readonly string[] }>,
     ): Promise<void> => {
-      const message = createMessage({
-        content: resolutionPrompt(request.paths),
-        role: messageRole.user,
-        metadata: { status: messageStatus.pending },
-      });
+      const message = buildUserMessage({ text: resolutionPrompt(request.paths) });
       /* The same one-shot startup request *Fix with AI* uses, so the seeded
        * turn fires once on hydration and a plain pending tail is still only
        * display state (apps/ui/AGENTS.md). */

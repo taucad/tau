@@ -132,10 +132,6 @@ vi.mock('@taucad/ui/components/button', () => ({
   ),
 }));
 
-vi.mock('#utils/chat.utils.js', () => ({
-  createMessage: (options: Record<string, unknown>) => ({ id: 'msg-fix', ...options }),
-}));
-
 vi.mock('#utils/filesystem.utils.js', () => ({
   decodeTextFile: (_bytes: Uint8Array<ArrayBuffer>) => 'cube(10);',
 }));

@@ -3,7 +3,6 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { MyUIMessage } from '@taucad/chat';
 import {
   buildUserMessage,
-  createMessage,
   finalizeInterruptedToolParts,
   serializeMessage,
   serializeTranscript,
@@ -790,29 +789,15 @@ describe('finalizeInterruptedToolParts', () => {
   });
 });
 
-describe('createMessage', () => {
-  it('creates a message with text and optional images', () => {
-    const message = createMessage({
-      content: 'Hello',
-      role: 'user',
-      metadata: {},
-    });
-    expect(message.role).toBe('user');
-    expect(message.parts).toHaveLength(1);
-    expect(message.parts[0]).toEqual({ type: 'text', text: 'Hello' });
-  });
-
-  it('trims content', () => {
-    const message = createMessage({
-      content: '  trimmed  ',
-      role: 'user',
-      metadata: {},
-    });
-    expect((message.parts[0] as { type: 'text'; text: string }).text).toBe('trimmed');
-  });
-});
-
 describe('buildUserMessage', () => {
+  // P38: the one user-message builder; the data-URL builders it replaced are gone.
+  it('should be the only user-message builder the module exports', async () => {
+    const exported = Object.keys(await import('#utils/chat.utils.js'));
+    expect(exported).toContain('buildUserMessage');
+    expect(exported).not.toContain('createMessage');
+    expect(exported).not.toContain('extractMimeTypeFromDataUrl');
+  });
+
   const imageHash = 'a'.repeat(64);
   const documentHash = 'b'.repeat(64);
 

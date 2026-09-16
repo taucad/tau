@@ -58,6 +58,7 @@ import {
   sanitizeAgentText,
 } from '#routes/w.$workspace.$project/chat-message-tool-external.js';
 import { ChatMessageFileAttachments } from '#routes/w.$workspace.$project/chat-message-file.js';
+import { useChatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import { ChatMessagePlanning } from '#routes/w.$workspace.$project/chat-message-planning.js';
 import { ChatStreamingStopButton } from '#components/chat/chat-textarea-submit-button.js';
 import { cancelChatStreamKeyCombination } from '#components/chat/chat-textarea-types.js';
@@ -584,6 +585,7 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
   const knownSkillIds = useMemo(() => new Set(skillsCatalog.map((skill) => skill.name)), [skillsCatalog]);
   const message = useChatSelector((state) => state.messagesById.get(messageId));
   const displayMessage = useChatSelector((state) => state.messageEdits[messageId] ?? state.messagesById.get(messageId));
+  const attachmentDirectories = useChatAttachmentDirectories();
   const fileParts = useChatSelector(
     (state) => state.messagesById.get(messageId)?.parts.filter((part) => part.type === 'file') ?? [],
   );
@@ -750,7 +752,7 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
               // the wire body's `agent` block is composed from the live
               // `useCadAgentConfig` snapshot — no model/metadata stamping
               // on the persisted user row.
-              cadChat.edit(messageId, { text: event.content, imageUrls: event.imageUrls });
+              cadChat.edit(messageId, { text: event.content, attachments: event.attachments });
               exitEditMode();
               setIsEditing(false);
             }}
@@ -780,7 +782,9 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
             onClick={isUser ? handleEditClick : undefined}
             onKeyDown={isUser ? handleEditKeyDown : undefined}
           >
-            {fileParts.length > 0 ? <ChatMessageFileAttachments parts={fileParts} /> : null}
+            {fileParts.length > 0 ? (
+              <ChatMessageFileAttachments parts={fileParts} directory={attachmentDirectories?.transcript} />
+            ) : null}
             {shouldRenderCollapsedUserRows ? (
               <div className='flex flex-col gap-1 pr-1'>
                 {collapsedUserRowsWithStableKeys.map(({ keyPrefix, row }) => (

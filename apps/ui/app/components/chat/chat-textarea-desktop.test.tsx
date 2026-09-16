@@ -195,6 +195,7 @@ function controls(
       focusEditor={noop}
       setDraftToolChoice={noop}
       fileInputReference={stubFileInput}
+      attachmentAccept='image/png,application/pdf'
       handleFileChange={noop}
       creationLocationControl={creationLocationControl}
       acpSessionData={acpSessionData}

@@ -198,4 +198,25 @@ describe('useProjectNameClient', () => {
       { type: 'file', url: second, mediaType: 'image/webp' },
     ]);
   });
+
+  it('should send only image data URLs to the naming profile, never a document or a stored reference', async () => {
+    mountStreamingResponse([{ type: 'start' }, { type: 'finish' }]);
+    const { result } = renderHook(() => useProjectNameClient());
+    const image = 'data:image/png;base64,iVBORw0KGgo=';
+
+    await act(async () => {
+      await result.current.generate({
+        projectId: 'proj_test',
+        text: 'Bracket',
+        imageUrls: ['data:application/pdf;base64,JVBERi0=', `attachments/${'a'.repeat(64)}.png`, image],
+      });
+    });
+
+    const [, init] = fetchMock.mock.calls[0]! as [string, RequestInit];
+    const parsed = await parseChatTurnRequest(JSON.parse(init.body as string));
+    expect(parsed.messages[0]?.parts).toEqual([
+      { type: 'file', url: image, mediaType: 'image/png' },
+      { type: 'text', text: 'Bracket' },
+    ]);
+  });
 });

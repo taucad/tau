@@ -156,7 +156,11 @@ function renderMobile(options?: {
       selectedMenuIndex={0}
       isSubmitting={false}
       inputText={options?.inputText ?? ''}
-      images={[]}
+      attachments={[]}
+      attachmentDirectory='/.tau/composers/new-project/attachments'
+      sendBlockReason={undefined}
+      attachmentAccept='image/png'
+      attachmentInputSupported
       selectedToolChoice='auto'
       setDraftToolChoice={noop}
       status='idle'
@@ -183,7 +187,7 @@ function renderMobile(options?: {
       handleTextareaBlur={noop}
       handlePointerDown={noop}
       focusInput={options?.focusInput ?? noop}
-      removeImage={noop}
+      removeAttachment={noop}
       setShowContextMenu={noop}
       setAtSymbolPosition={noop}
       setContextSearchQuery={noop}

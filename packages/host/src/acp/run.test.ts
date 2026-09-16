@@ -17,14 +17,14 @@ vi.mock('#acp/session.js', () => ({
   openAcpSession: vi.fn(
     async (): Promise<AcpSession> => ({
       acpSessionId: 'acp-1',
-      agent: {} as AcpSession['agent'],
+      agent: { protocolVersion: 1, agentCapabilities: undefined, authMethods: [], agentInfo: undefined },
       configOptions: undefined,
       modeId: undefined,
       contextLost: false,
-      closed: new Promise<void>(() => undefined),
+      closed: Promise.withResolvers<void>().promise,
       prompt: async (prompt) => {
         prompts.push(prompt);
-        return { stopReason: 'end_turn', configuration: {} } as unknown as Awaited<ReturnType<AcpSession['prompt']>>;
+        return { stopReason: 'end_turn', acpSessionId: 'acp-1', configuration: {} };
       },
       close: async () => undefined,
     }),
@@ -42,9 +42,9 @@ const adapter: AcpAdapter = {
 
 const imageHash = 'e'.repeat(64);
 const pdfHash = 'f'.repeat(64);
-const imageBytes = new Uint8Array([137, 80, 78, 71, 13, 10]);
+const imageBytes: Uint8Array<ArrayBuffer> = new Uint8Array([137, 80, 78, 71, 13, 10]);
 const pdfBytes = new TextEncoder().encode('%PDF-1.7 acp');
-const base64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64');
+const base64 = (bytes: Uint8Array<ArrayBuffer>): string => Buffer.from(bytes).toString('base64');
 
 let root: string;
 
@@ -64,7 +64,7 @@ afterEach(async () => {
 
 const turnWith = (message: UserProviderMessage): ExternalAgentTurn => ({
   agentId: 'codex',
-  agent: { kind: 'acp', agentId: 'codex' },
+  agent: { kind: 'acp', id: 'codex' },
   chatId: 'chat-1',
   runId: 'run-1',
   message,
@@ -72,14 +72,20 @@ const turnWith = (message: UserProviderMessage): ExternalAgentTurn => ({
   signal: new AbortController().signal,
   append: async () => undefined,
   remember: async () => undefined,
+  approve: async () => {
+    throw new Error('No approval is expected in this test.');
+  },
 });
 
-const run = async (message: UserProviderMessage): Promise<readonly ContentBlock[]> => {
+const run = async (message: UserProviderMessage, turns = 1): Promise<readonly ContentBlock[]> => {
   const port = createAcpExternalAgentPort({ agents: [adapter], workspaceRoot: root });
-  await port.run(turnWith(message));
+  for (let turn = 0; turn < turns; turn++) {
+    // oxlint-disable-next-line no-await-in-loop -- one chat's turns are sequential.
+    await port.run(turnWith(message));
+  }
   await port.closeChat?.('chat-1');
   const [prompt] = prompts;
-  if (!Array.isArray(prompt)) {
+  if (prompt === undefined || typeof prompt === 'string') {
     throw new TypeError('The port sent no content blocks.');
   }
   return prompt;
@@ -123,18 +129,22 @@ describe('ACP attachment materialisation (D23)', () => {
     ]);
   });
 
-  it('omits a reference whose bytes are absent and warns once', async () => {
+  it('omits a reference whose bytes are absent and warns once across turns', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    const blocks = await run({
-      id: 'user-1',
-      role: 'user',
-      content: [
-        { type: 'text', text: 'and this?' },
-        { type: 'file-ref', path: `attachments/${'0'.repeat(64)}.png`, mimeType: 'image/png' },
-      ],
-    });
+    const blocks = await run(
+      {
+        id: 'user-1',
+        role: 'user',
+        content: [
+          { type: 'text', text: 'and this?' },
+          { type: 'file-ref', path: `attachments/${'0'.repeat(64)}.png`, mimeType: 'image/png' },
+        ],
+      },
+      2,
+    );
 
+    expect(prompts).toHaveLength(2);
     expect(blocks).toEqual([{ type: 'text', text: 'and this?' }]);
     expect(warn).toHaveBeenCalledTimes(1);
   });

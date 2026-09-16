@@ -1,5 +1,6 @@
 import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import type { Api, AssistantMessage, AssistantMessageDiagnostic, Model } from '@earendil-works/pi-ai';
+import { uint8ArrayToBase64 } from 'uint8array-extras';
 import { util as zodUtility } from 'zod';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { DurableEventLog, HostRunFailure, MaterializedDocument } from '#waist/ports.js';
@@ -280,7 +281,7 @@ export type AttachmentReader = {
    * @param path - The durable `file-ref` path, `attachments/<sha256>.<ext>`.
    * @returns The bytes, or `undefined` when they have not arrived on this device.
    */
-  read(chatId: string, path: string): Promise<Uint8Array | undefined>;
+  read(chatId: string, path: string): Promise<Uint8Array<ArrayBuffer> | undefined>;
 };
 
 /**
@@ -331,15 +332,6 @@ export type MaterializedAttachments = {
   readonly absent: string[];
 };
 
-const toBase64 = (bytes: Uint8Array): string => {
-  let binary = '';
-  // Chunked: a spread of a 20 MiB argument list overflows the call stack.
-  for (let offset = 0; offset < bytes.byteLength; offset += 0x80_00) {
-    binary += String.fromCodePoint(...bytes.subarray(offset, offset + 0x80_00));
-  }
-  return btoa(binary);
-};
-
 const hashOf = (path: string): string => path.slice('attachments/'.length, path.lastIndexOf('.'));
 
 const isFileRef = (block: unknown): boolean => zodUtility.isObject(block) && block['type'] === 'file-ref';
@@ -362,7 +354,7 @@ const isFileRef = (block: unknown): boolean => zodUtility.isObject(block) && blo
  */
 export const materializeAttachments = async (
   messages: readonly ProviderMessage[],
-  read: (path: string) => Promise<Uint8Array | undefined>,
+  read: (path: string) => Promise<Uint8Array<ArrayBuffer> | undefined>,
   buildDocument: DocumentBlockBuilder = (hash) => ({ type: 'text', text: documentSentinel(hash) }),
 ): Promise<MaterializedAttachments> => {
   const documents = new Map<string, MaterializedDocument>();
@@ -382,7 +374,7 @@ export const materializeAttachments = async (
       absent.push(reference.path);
       return [];
     }
-    const data = toBase64(bytes);
+    const data = uint8ArrayToBase64(bytes);
     if (reference.mimeType.startsWith('image/')) {
       return [{ type: 'image', mimeType: reference.mimeType, data }];
     }

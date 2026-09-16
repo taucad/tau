@@ -13,15 +13,6 @@ import { chatAttachmentPath } from '#harness/session-record.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { AttachmentReader } from '#harness/session-record.js';
 
-// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
-export { materializeAttachments } from '#harness/session-record.js';
-export type {
-  AttachmentReader,
-  DocumentBlockBuilder,
-  MaterializedAttachments,
-  // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
-} from '#harness/session-record.js';
-
 /**
  * Read chat attachments from a workspace on the Node filesystem (D15).
  *
@@ -32,7 +23,8 @@ export type {
 export const createNodeAttachmentReader = (workspaceRoot: string): AttachmentReader => ({
   read: async (chatId, path) => {
     try {
-      return await readFile(join(workspaceRoot, chatAttachmentPath(chatId, path)));
+      // A copy: a Node `Buffer` may be a view over a shared pool, and a reader answers owned bytes.
+      return new Uint8Array(await readFile(join(workspaceRoot, chatAttachmentPath(chatId, path))));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         return undefined;

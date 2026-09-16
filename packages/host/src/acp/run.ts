@@ -25,10 +25,15 @@ import { dirname, join } from 'node:path';
 
 import type { ContentBlock, McpServer, Usage as AcpUsage } from '@agentclientprotocol/sdk';
 
-import { reduceEventLog } from '@taucad/agent-host';
-import type { ExternalAgentPort, ExternalAgentTurn, JsonObject, JsonValue } from '@taucad/agent-host';
-import { createNodeAttachmentReader, materializeAttachments } from '@taucad/agent-host/node';
-import type { DocumentBlockBuilder } from '@taucad/agent-host/node';
+import { materializeAttachments, reduceEventLog } from '@taucad/agent-host';
+import type {
+  DocumentBlockBuilder,
+  ExternalAgentPort,
+  ExternalAgentTurn,
+  JsonObject,
+  JsonValue,
+} from '@taucad/agent-host';
+import { createNodeAttachmentReader } from '@taucad/agent-host/node';
 import { createSkillBundleRegistry } from '@taucad/agent-tools/registry';
 import { tauMcpInstructions } from '@taucad/mcp';
 import { isRecord } from '@taucad/utils/schema';

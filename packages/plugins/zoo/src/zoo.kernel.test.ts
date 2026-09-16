@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
 import type { JSONDocument } from '@gltf-transform/core';
 
-import type { JsonStructureSchema } from '@taucad/runtime/parameter';
+import type { JsonStructureSchema } from '@taucad/parameters';
 import { zooKernel } from '#zoo.kernel.js';
 import { zooOptionsSchema } from '#zoo.schemas.js';
 import { KclUtilities } from '#kcl-utils.js';

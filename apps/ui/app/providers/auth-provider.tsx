@@ -76,19 +76,46 @@ export function desktopAuthAction(to: string): DesktopAuthAction | undefined {
 /**
  * Runs the desktop shell's auth flow for a destination.
  *
+ * A destination the shell owns stays owned when the preload bridge is missing:
+ * the caller must not fall through to the embedded web form, which cannot
+ * complete a desktop sign-in.
+ *
  * @param to - The destination better-auth-ui wants to route to.
- * @returns `true` when the shell took it, `false` to route in-app as usual.
+ * @returns `true` when the destination belongs to the shell, `false` to route in-app as usual.
  */
 function runDesktopAuthAction(to: string): boolean {
   const action = desktopAuthAction(to);
-  const bridge = globalThis.window.tauAuth;
-  if (action === undefined || !bridge) {
+  if (action === undefined) {
     return false;
   }
 
-  void bridge[action]();
+  const bridge = globalThis.window.tauAuth;
+  if (bridge) {
+    void callDesktopShell(bridge[action]);
+  }
   return true;
 }
+
+/**
+ * Runs a desktop shell auth call whose failure the handoff panel already covers
+ * with its retry, so a rejection needs no second surface.
+ *
+ * @param call - The bridge method to run.
+ */
+export async function callDesktopShell(call: () => Promise<void>): Promise<void> {
+  try {
+    await call();
+  } catch {
+    // The user retries from the handoff panel.
+  }
+}
+
+/** How the auth route should present a destination the desktop shell owns. */
+export type ShellAuthHandoff = {
+  readonly action: DesktopAuthAction;
+  /** `false` when the desktop preload has not exposed its auth bridge. */
+  readonly isBridgeAvailable: boolean;
+};
 
 /**
  * Hands a bridged auth destination to the Electron shell instead of rendering it.
@@ -105,21 +132,21 @@ function runDesktopAuthAction(to: string): boolean {
  * every one of them.
  *
  * @param to - The auth destination, for example `/auth/sign-in`.
- * @returns The bridge call the shell ran, or `undefined` to render the view.
+ * @returns The shell handoff, or `undefined` to render the in-app view.
  */
-export function useShellAuthHandoff(to: string): DesktopAuthAction | undefined {
-  // `globalThis.window` is absent during SSR; the left operand is `undefined`
-  // in every web build, so the bridge read is never reached there.
+export function useShellAuthHandoff(to: string): ShellAuthHandoff | undefined {
+  // `desktopAuthAction` is `undefined` in every web build, so the bridge read is
+  // never reached during SSR.
   const action = desktopAuthAction(to);
-  const owned = action !== undefined && globalThis.window.tauAuth !== undefined;
+  const isBridgeAvailable = action !== undefined && globalThis.window.tauAuth !== undefined;
 
   useEffect(() => {
-    if (owned) {
+    if (isBridgeAvailable) {
       runDesktopAuthAction(to);
     }
-  }, [owned, to]);
+  }, [isBridgeAvailable, to]);
 
-  return owned ? action : undefined;
+  return action === undefined ? undefined : { action, isBridgeAvailable };
 }
 
 /**

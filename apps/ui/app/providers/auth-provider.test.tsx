@@ -243,6 +243,15 @@ describe('AuthConfigLink', () => {
     expect(bridge.signOut).toHaveBeenCalled();
   });
 
+  it('never routes a shell-owned destination in-app when the desktop bridge is missing', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+
+    render(<AuthConfigLink href='/auth/sign-in'>Sign in</AuthConfigLink>);
+    await userEvent.click(screen.getByText('Sign in'));
+
+    expect(routerLink).not.toHaveBeenCalled();
+  });
+
   it('renders an ordinary router link in the web build', () => {
     render(<AuthConfigLink href='/auth/sign-in'>Sign in</AuthConfigLink>);
 

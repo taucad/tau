@@ -114,6 +114,31 @@ describe('AuthPage', () => {
       expect(signIn).toHaveBeenCalledTimes(2);
     });
 
+    it('fails closed with no embedded form when the desktop bridge is missing', () => {
+      delete globalThis.window.tauAuth;
+
+      for (const segment of ['sign-in', 'sign-up', 'sign-out']) {
+        routeMocks.segment = segment;
+        const view = render(<AuthPage />);
+
+        expect(screen.queryByText(`auth:${segment}`)).not.toBeInTheDocument();
+        expect(screen.getByText(/sign-in is unavailable/i)).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: /open my browser again/i })).not.toBeInTheDocument();
+        view.unmount();
+      }
+    });
+
+    it('keeps the handoff panel when the shell rejects the sign-in call', async () => {
+      signIn.mockRejectedValueOnce(new Error('loopback failed'));
+      routeMocks.segment = 'sign-in';
+
+      render(<AuthPage />);
+      await Promise.resolve();
+
+      expect(screen.queryByText('auth:sign-in')).not.toBeInTheDocument();
+      expect(screen.getByText(/continue in your browser/i)).toBeInTheDocument();
+    });
+
     it('still renders callback surfaces the browser lands on', () => {
       routeMocks.segment = 'verify-email';
 

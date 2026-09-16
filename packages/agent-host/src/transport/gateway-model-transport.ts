@@ -14,6 +14,7 @@ import type {
 } from '@earendil-works/pi-ai';
 import { util as zodUtility } from 'zod';
 import { MessageIdentities, providerMessageToPi } from '#harness/session-record.js';
+import { createVertexResponseShim, echoThoughtSignatures } from '#transport/vertex-completions-shim.js';
 import type { JsonObject, ModelProviderKind, ModelSystemPromptBlock } from '#log/event-types.js';
 import type { ModelInvocationBinding, ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
 
@@ -573,6 +574,8 @@ const streamPiEvents = async function* (options: {
   readonly events: AsyncIterable<AssistantMessageEvent>;
   readonly state: GatewayFetchState;
   readonly signal: AbortSignal;
+  /** Gemini thought signatures captured off the wire by the Vertex shim. */
+  readonly thoughtSignatures: ReadonlyMap<string, string>;
 }): AsyncGenerator<ModelStreamEvent> {
   const emittedSignatures = new Map<number, string>();
   let terminal = false;
@@ -624,13 +627,14 @@ const streamPiEvents = async function* (options: {
       continue;
     }
     if (event.type === 'toolcall_end') {
+      const thoughtSignature = options.thoughtSignatures.get(event.toolCall.id);
       yield {
         type: 'tool-input',
         contentIndex: event.contentIndex,
         toolCallId: event.toolCall.id,
         toolName: event.toolCall.name,
         input: event.toolCall.arguments,
-        ...(event.toolCall.thoughtSignature === undefined ? {} : { thoughtSignature: event.toolCall.thoughtSignature }),
+        ...(thoughtSignature === undefined ? {} : { thoughtSignature }),
       };
       continue;
     }
@@ -708,24 +712,40 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
     const model = piModelFor({ request, transport: options });
     const state: GatewayFetchState = {};
     const context = piContextFor(request, model);
+    const thoughtSignatures = new Map<string, string>();
+    const gatewayFetch = authenticatedFetch({
+      ...(options.auth === undefined ? {} : { auth: options.auth }),
+      // Bound: a bare globalThis.fetch reference invoked as options.fetch(...)
+      // carries the wrong `this` and throws Illegal invocation in a WorkerGlobalScope.
+      fetch: options.fetch ?? globalThis.fetch.bind(globalThis),
+      signal: request.signal,
+      state,
+      providerKind: request.providerKind!,
+      attemptId: request.attemptId,
+      fundedOperations: options.fundedOperations,
+      ...(options.fundedOperations && request.onInvocationBound
+        ? { onInvocationBound: request.onInvocationBound }
+        : {}),
+      systemPromptBlocks: request.systemPromptBlocks,
+    });
     const commonOptions = {
       headers: piCookieAuthValidationHeaders,
       cacheRetention: 'short',
-      fetch: authenticatedFetch({
-        ...(options.auth === undefined ? {} : { auth: options.auth }),
-        // Bound: a bare globalThis.fetch reference invoked as options.fetch(...)
-        // carries the wrong `this` and throws Illegal invocation in a WorkerGlobalScope.
-        fetch: options.fetch ?? globalThis.fetch.bind(globalThis),
-        signal: request.signal,
-        state,
-        providerKind: request.providerKind!,
-        attemptId: request.attemptId,
-        fundedOperations: options.fundedOperations,
-        ...(options.fundedOperations && request.onInvocationBound
-          ? { onInvocationBound: request.onInvocationBound }
-          : {}),
-        systemPromptBlocks: request.systemPromptBlocks,
-      }),
+      // Gemini's thought markers and tool-call thought signatures are rewritten
+      // into the OpenAI-compatible shape before pi's codec reads a byte. Every
+      // other provider keeps the gateway response untouched.
+      fetch:
+        request.providerKind === 'vertexai'
+          ? ((async (input, init) => {
+              const response = await gatewayFetch(input, init);
+              // `authenticatedFetch` has already refused a body-less response.
+              return new Response(response.body!.pipeThrough(createVertexResponseShim(thoughtSignatures)), {
+                status: response.status,
+                statusText: response.statusText,
+                headers: response.headers,
+              });
+            }) satisfies typeof globalThis.fetch)
+          : gatewayFetch,
       maxRetries: 0,
       ...(request.maxTokens === undefined ? {} : { maxTokens: request.maxTokens }),
       signal: request.signal,
@@ -754,6 +774,7 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
             } satisfies OpenAIResponsesOptions)
           : openAICompletionsApi().stream(model as Model<'openai-completions'>, context, {
               ...commonOptions,
+              ...(request.providerKind === 'vertexai' ? { onPayload: echoThoughtSignatures(context) } : {}),
               ...(request.providerKind === 'vertexai' && reasoning?.effort !== undefined
                 ? {
                     /* eslint-disable @typescript-eslint/naming-convention -- Upstream Gemini wire keys use snake_case. */
@@ -773,6 +794,6 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
                   }
                 : {}),
             } satisfies OpenAICompletionsOptions);
-    yield* streamPiEvents({ events, state, signal: request.signal });
+    yield* streamPiEvents({ events, state, signal: request.signal, thoughtSignatures });
   },
 });

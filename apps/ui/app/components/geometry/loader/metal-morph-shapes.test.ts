@@ -70,10 +70,44 @@ describe('extractConvexFaces', () => {
   });
 });
 
+describe('prepareSolid', () => {
+  it.each(['escher-star', 'stella-octangula'] as const)(
+    'should pair every %s spike side with its crease twin',
+    (id) => {
+      const star = prepareSolid(metalMorphShapeDefinitions[id]);
+      const spikes = star.spikes ?? [];
+      const creases = star.creases ?? [];
+
+      expect(spikes.length).toBeGreaterThan(0);
+      expect(creases).toHaveLength(spikes.length);
+      for (const [faceIndex, sides] of spikes.entries()) {
+        for (const [sideIndex, side] of sides.entries()) {
+          const twin = creases[faceIndex]![sideIndex]!;
+          expect(sides).not.toContain(twin);
+          expect(spikes.flat()).toContain(twin);
+          const edge = [side.vertices[0], side.vertices[1]].map((vertex) => vertex!.map((c) => c.toFixed(6)).join(','));
+          const twinEdge = [twin.vertices[0], twin.vertices[1]].map((vertex) =>
+            vertex!.map((c) => c.toFixed(6)).join(','),
+          );
+          expect(twinEdge.sort()).toEqual(edge.sort());
+        }
+      }
+    },
+  );
+
+  it('should carry the definition temperature without spikes for plain solids', () => {
+    const cube = prepareSolid(metalMorphShapeDefinitions.cube);
+
+    expect(cube.roundness).toBe(metalMorphShapeDefinitions.cube.roundness);
+    expect(cube.spikes).toBeUndefined();
+    expect(cube.creases).toBeUndefined();
+  });
+});
+
 describe('sampleRadial', () => {
   it('should measure a cube face at its inradius and a corner at its circumradius', () => {
     const cube = prepareSolid(metalMorphShapeDefinitions.cube);
-    const { scale } = metalMorphShapeDefinitions.cube;
+    const { scale, roundness } = metalMorphShapeDefinitions.cube;
 
     const face = sampleRadial(cube, [1, 0, 0]);
     expect(face.radius).toBeCloseTo(scale, 9);
@@ -81,18 +115,56 @@ describe('sampleRadial', () => {
     expect(face.normal[1]).toBeCloseTo(0, 9);
     expect(face.normal[2]).toBeCloseTo(0, 9);
 
+    // Three faces tie at a corner, so the fillet sits one temperature times ln 3 inside the circumradius.
     const corner = sampleRadial(cube, normalise([1, 1, 1]));
-    expect(corner.radius).toBeCloseTo(scale * Math.sqrt(3), 9);
+    expect(corner.radius).toBeCloseTo(scale * Math.sqrt(3) - roundness * Math.log(3), 9);
+    expect(corner.normal[0]).toBeCloseTo(1 / Math.sqrt(3), 9);
+    expect(corner.normal[1]).toBeCloseTo(1 / Math.sqrt(3), 9);
+    expect(corner.normal[2]).toBeCloseTo(1 / Math.sqrt(3), 9);
   });
 
-  it('should reach the spike apex of a stellated solid along its face normal', () => {
-    const star = prepareSolid(metalMorphShapeDefinitions['stella-octangula']);
+  it('should fillet an edge over a band that scales with the temperature', () => {
+    const { cube: definition } = metalMorphShapeDefinitions;
+    const sharp = prepareSolid({ ...definition, roundness: 1e-4 });
+    const soft = prepareSolid(definition);
+    const softer = prepareSolid({ ...definition, roundness: definition.roundness * 2 });
+    const edge = normalise([1, 1, 0]);
 
+    // The cold reference still loses its own temperature times ln 2 where the two faces tie.
+    expect(sampleRadial(sharp, edge).radius).toBeCloseTo(definition.scale * Math.sqrt(2), 3);
+    expect(sampleRadial(soft, edge).radius).toBeCloseTo(
+      definition.scale * Math.sqrt(2) - definition.roundness * Math.log(2),
+      9,
+    );
+    expect(sampleRadial(softer, edge).radius).toBeLessThan(sampleRadial(soft, edge).radius);
+
+    // Off the edge the fillet fades back onto the face, sooner at the cooler temperature.
+    const nearEdge = normalise([1, 0.8, 0]);
+    const sharpRadius = sampleRadial(sharp, nearEdge).radius;
+    expect(sampleRadial(soft, nearEdge).radius).toBeLessThan(sharpRadius);
+    expect(sharpRadius - sampleRadial(soft, nearEdge).radius).toBeLessThan(
+      sharpRadius - sampleRadial(softer, nearEdge).radius,
+    );
+    expect(sampleRadial(soft, nearEdge).normal[1] / sampleRadial(soft, nearEdge).normal[0]).toBeGreaterThan(0);
+    expect(sampleRadial(soft, nearEdge).normal[1] / sampleRadial(soft, nearEdge).normal[0]).toBeLessThan(1);
+  });
+
+  it('should blunt the spike tip and fill the valleys of a stellated solid', () => {
+    const definition = metalMorphShapeDefinitions['stella-octangula'];
+    const star = prepareSolid(definition);
+    const sharp = prepareSolid({ ...definition, roundness: 1e-4 });
+
+    // Three side planes tie at the apex; the neighbouring spikes' planes are too far below to add to it.
     const apex = sampleRadial(star, normalise([1, 1, 1]));
-    expect(apex.radius).toBeCloseTo(1, 6);
+    expect(sampleRadial(sharp, normalise([1, 1, 1])).radius).toBeCloseTo(1, 3);
+    expect(apex.radius).toBeCloseTo(1 - definition.roundness * Math.log(3), 4);
+    expect(apex.normal[0]).toBeCloseTo(1 / Math.sqrt(3), 6);
 
+    // The core vertex sits at the bottom of four valleys; the crease fill lifts it by less than one temperature.
     const valley = sampleRadial(star, [1, 0, 0]);
-    expect(valley.radius).toBeCloseTo(metalMorphShapeDefinitions['stella-octangula'].scale, 9);
+    expect(sampleRadial(sharp, [1, 0, 0]).radius).toBeCloseTo(definition.scale, 3);
+    expect(valley.radius).toBeGreaterThan(definition.scale);
+    expect(valley.radius).toBeLessThan(definition.scale + definition.roundness);
     expect(valley.normal[0]).toBeGreaterThan(0);
   });
 
@@ -149,11 +221,12 @@ describe('getMetalMorphGeometryData', () => {
 });
 
 describe('getMetalMorphPlaneTable', () => {
-  it('should flatten every shape into contiguous core and side planes', () => {
+  it('should flatten every shape into contiguous core and side planes with crease twins', () => {
     const table = getMetalMorphPlaneTable();
 
     expect(table.descriptors).toHaveLength(metalMorphShapeIds.length);
     expect(table.planes).toHaveLength(130);
+    expect(table.twins).toHaveLength(130);
     expect(table.descriptors).toEqual([
       [0, 12, 12, 4],
       [60, 8, 68, 3],
@@ -161,9 +234,22 @@ describe('getMetalMorphPlaneTable', () => {
       [98, 12, 110, 0],
       [110, 20, 130, 0],
     ]);
-    for (const plane of table.planes) {
+    expect(table.roundness).toEqual(metalMorphShapeIds.map((id) => metalMorphShapeDefinitions[id].roundness));
+    for (const [index, plane] of table.planes.entries()) {
       expect(Math.hypot(plane[0], plane[1], plane[2])).toBeCloseTo(1, 9);
       expect(plane[3]).toBeGreaterThan(0);
+      const twin = table.twins[index]!;
+      const isSidePlane = table.descriptors.some(
+        (descriptor) =>
+          descriptor[3] > 0 && index >= descriptor[2] && index < descriptor[2] + descriptor[1] * descriptor[3],
+      );
+      if (isSidePlane) {
+        expect(Math.hypot(twin[0], twin[1], twin[2])).toBeCloseTo(1, 9);
+        expect(twin).not.toEqual(plane);
+        expect(table.planes).toContainEqual(twin);
+      } else {
+        expect(twin).toEqual([0, 0, 0, 0]);
+      }
     }
     expect(getMetalMorphPlaneTable()).toBe(table);
   });

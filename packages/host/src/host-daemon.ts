@@ -1019,6 +1019,22 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
   };
 
   const runControlConnection = async (credential: HostCredential, child: RuntimeChildHandle): Promise<void> => {
+    /*
+     * `close()` closes whatever `controlSocket` holds *at the instant it
+     * aborts*, so a connection dialled after that instant is one nothing ever
+     * closes: `disconnected` never resolves, `run()` never returns, and
+     * `close()` waits on it forever — with the project's close cut, the last
+     * thing that records what a served project changed, never attempted (C74).
+     *
+     * The loop re-checks the signal only at its top, and both `ensureJobWorker`
+     * and `ensureRuntimeChild` await between that check and this call, so the
+     * abort lands inside that window whenever a caller closes a daemon shortly
+     * after `ready`. Everything from here to `controlSocket = socket` is
+     * synchronous, so this guard and `close()` cannot interleave.
+     */
+    if (shutdown.signal.aborted) {
+      return;
+    }
     emit({ type: 'control', state: 'connecting' });
     const socket = authorizedSocket(asWebSocketUrl(options.relayUrl, '/v1/agents/control'), credential.credential);
     controlSocket = socket;

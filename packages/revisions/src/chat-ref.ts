@@ -523,6 +523,11 @@ export const replayChatSegment = async (input: ReplayChatSegmentInput): Promise<
   const receipt = await input.port.writeRevision({
     parents: input.onto === undefined ? [] : [input.onto],
     tree,
+    /* A chat tree is closed, so it can never carry the `.gitattributes` a
+     * pointer needs behind it, and its attachments are capped where plain git
+     * carries them on any remote. Recorded verbatim, the blobs are ordinary
+     * objects every device and every remote kind can serve. */
+    largeObjects: false,
     provenance: chatProvenance(input, now),
     summary: { generated: `Chat ${input.chatId}` },
   });

@@ -871,7 +871,10 @@ export const createIsomorphicGitRevisionPort = (options: IsomorphicGitRevisionPo
     writeRevision: async (input: WriteRevisionInput): Promise<RevisionReceipt> => {
       /* The pointer decision is Tau's and host-neutral, and the cut's `treeId`
        * was computed from exactly this (`revision-effects.recordedTree`). */
-      const recorded = cleanLargeObjects(input.tree);
+      const recorded =
+        input.largeObjects === false
+          ? { tree: input.tree, objects: new Map<string, Uint8Array<ArrayBuffer>>() }
+          : cleanLargeObjects(input.tree);
       await Promise.all([...recorded.objects].map(async ([oid, content]) => storeLfsObject(oid, content)));
       const treeId = await writeTreeGraph(draftOf(recorded.tree));
       const trailer: RevisionTrailer = {

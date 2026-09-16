@@ -121,6 +121,10 @@ const unreachablePlaneRadius = 1e9;
 const grazingDenominator = 1e-6;
 /** Integer loop bounds for the TSL `Loop` helper, declared once so overload inference stays tractable. */
 type LoopRange = { start: Node<'int'>; end: Node<'int'>; type: 'int'; condition: string };
+/** Relative radius gap below which a fragment counts as sitting on a facet edge and takes the chamfer normal. */
+const bevelBand = 0.016;
+/** How far the chamfer normal leans toward the neighbouring facet, so edges catch a distinct glint. */
+const bevelLean = 0.6;
 /** Nudge that keeps blended normals away from zero when two face normals oppose. */
 const normalBlendNudge = 1e-4;
 
@@ -229,34 +233,58 @@ const createExactNormalField = (planes: UniformArrayNode<'vec4'>, descriptors: U
     const sideStart = descriptor.z.toInt().toVar();
     const sidesPerFace = descriptor.w.toInt().toVar();
     const bestRadius = float(unreachablePlaneRadius).toVar();
+    const secondRadius = float(unreachablePlaneRadius).toVar();
     const bestIndex = int(0).toVar();
     const bestNormal = vec3(0, 0, 1).toVar();
+    const secondNormal = vec3(0, 0, 1).toVar();
     const coreRange: LoopRange = { start: int(0), end: coreCount, type: 'int', condition: '<' };
     Loop(coreRange, ({ i }) => {
       const plane = vec4(planes.element(coreStart.add(i))).toVar();
       const denominator = dot(plane.xyz, direction).toVar();
       const radius = plane.w.div(max(denominator, grazingDenominator)).toVar();
-      If(denominator.greaterThan(grazingDenominator).and(radius.lessThan(bestRadius)), () => {
-        bestRadius.assign(radius);
-        bestIndex.assign(i);
-        bestNormal.assign(plane.xyz);
+      If(denominator.greaterThan(grazingDenominator), () => {
+        If(radius.lessThan(bestRadius), () => {
+          secondRadius.assign(bestRadius);
+          secondNormal.assign(bestNormal);
+          bestRadius.assign(radius);
+          bestIndex.assign(i);
+          bestNormal.assign(plane.xyz);
+        }).ElseIf(radius.lessThan(secondRadius), () => {
+          secondRadius.assign(radius);
+          secondNormal.assign(plane.xyz);
+        });
       });
     });
     If(sidesPerFace.greaterThan(int(0)), () => {
+      // Inside a spike the ridge edges are the neighbouring side planes; start both trackers afresh.
       const spikeStart = sideStart.add(bestIndex.mul(sidesPerFace)).toVar();
-      const bestSideRadius = float(unreachablePlaneRadius).toVar();
+      bestRadius.assign(unreachablePlaneRadius);
+      secondRadius.assign(unreachablePlaneRadius);
       const sideRange: LoopRange = { start: int(0), end: sidesPerFace, type: 'int', condition: '<' };
       Loop(sideRange, ({ i }) => {
         const plane = vec4(planes.element(spikeStart.add(i))).toVar();
         const denominator = dot(plane.xyz, direction).toVar();
         const radius = plane.w.div(max(denominator, grazingDenominator)).toVar();
-        If(denominator.greaterThan(grazingDenominator).and(radius.lessThan(bestSideRadius)), () => {
-          bestSideRadius.assign(radius);
-          bestNormal.assign(plane.xyz);
+        If(denominator.greaterThan(grazingDenominator), () => {
+          If(radius.lessThan(bestRadius), () => {
+            secondRadius.assign(bestRadius);
+            secondNormal.assign(bestNormal);
+            bestRadius.assign(radius);
+            bestNormal.assign(plane.xyz);
+          }).ElseIf(radius.lessThan(secondRadius), () => {
+            secondRadius.assign(radius);
+            secondNormal.assign(plane.xyz);
+          });
         });
       });
     });
-    return bestNormal;
+    // A hair-thin chamfer where the next facet is almost as close: real machined edges catch their own glint.
+    const gap = secondRadius.sub(bestRadius).div(bestRadius).toVar();
+    const bevel = float(1)
+      .sub(smoothstep(float(0), float(bevelBand), gap))
+      .toVar();
+    const chamferNormal = normalize(bestNormal.add(secondNormal));
+    return normalize(mix(bestNormal, chamferNormal, bevel.mul(bevelLean)));
     /* oxlint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return */
   });
 

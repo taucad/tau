@@ -102,7 +102,7 @@ const maximumFrameDelta = 100;
 const statisticsWindow = 500;
 const historyLimit = 16;
 const icosphereDetailByQuality: Readonly<Record<MetalMorphLoaderQuality, number>> = { balanced: 5, high: 6 };
-const bloomSettings = { strength: 0.22, radius: 0.3, threshold: 1.3, alphaGain: 0.9 } as const;
+const bloomSettings = { strength: 0.18, radius: 0.3, threshold: 1.35, alphaGain: 0.8 } as const;
 const initialOrientation = new Quaternion().setFromAxisAngle(new Vector3(0.55, 0.8, 0.25).normalize(), 0.9);
 
 const buildGeometry = (data: MetalMorphGeometryData): BufferGeometry => {

@@ -964,6 +964,58 @@ const config = [
       ],
     },
   },
+  {
+    /*
+     * I12: reserved engineering vocabulary may not reach operator-facing copy.
+     *
+     * Policy rule 1 gives each term one meaning and keeps the engineering ones
+     * out of product text — a person sees Revision, Branch, Current, Restore,
+     * Sync, never checkout, lease, ref, HEAD, worktree or backend. Two refusal
+     * sentences in this program shipped naming a *checkout* and a *lease*, and
+     * the manual "terminology scan" that was supposed to catch them is what
+     * this rule replaces.
+     *
+     * Scoped to rendered text only: JSXText, and the handful of attributes that
+     * are read aloud or shown. A prop *value* is not copy — `compareAgainst=
+     * 'checkout'` and `checkoutId` are the vocabulary of the code, and flagging
+     * them would make the rule noise that gets disabled. `repository` and
+     * `commit` are deliberately absent: neither is reserved, and both are what
+     * a person actually picks and reads on GitHub.
+     */
+    files: ['apps/ui/app/routes/w.$workspace.$project/**/*.tsx'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'JSXText[value=/\\b(checkouts?|leases?|worktrees?|backends?|refs?)\\b/i]',
+          message:
+            'Reserved engineering vocabulary in rendered copy (policy rule 1). Say it in product ' +
+            'words: a Revision, a Branch, Current, Restore, Switch, Merge, Discard, Work in, Sync. ' +
+            'See docs/policy/revisions-policy.md (rule 1) and DESIGN.md.',
+        },
+        {
+          selector: 'JSXText[value=/\\bHEAD\\b/]',
+          message:
+            'HEAD is not product vocabulary (policy rule 1). Name what the person sees — the ' +
+            'Current revision, or the branch it is on. See docs/policy/revisions-policy.md.',
+        },
+        {
+          selector:
+            'JSXAttribute[name.name=/^(aria-label|aria-description|title|placeholder|alt|label)$/] > Literal[value=/\\b(checkouts?|leases?|worktrees?|backends?|refs?)\\b/i]',
+          message:
+            'Reserved engineering vocabulary in an accessible name (policy rule 1) — a screen ' +
+            'reader reads this aloud, so it is copy. See docs/policy/revisions-policy.md.',
+        },
+        {
+          selector:
+            'JSXAttribute[name.name=/^(aria-label|aria-description|title|placeholder|alt|label)$/] > Literal[value=/\\bHEAD\\b/]',
+          message:
+            'HEAD is not product vocabulary (policy rule 1), and an accessible name is read ' +
+            'aloud. See docs/policy/revisions-policy.md.',
+        },
+      ],
+    },
+  },
 ];
 
 export default config;

@@ -3,7 +3,7 @@ import { esbuild } from '@taucad/esbuild';
 import { image } from '@taucad/image';
 import { jscad } from '@taucad/jscad';
 import { manifold } from '@taucad/manifold';
-import { gltfEdgeDetection, parameterCache, parameterFileResolver } from '@taucad/middleware';
+import { gltfEdgeDetection, parameterCache, parameterFileResolver, parameterUnits } from '@taucad/middleware';
 import { opencascade } from '@taucad/opencascade';
 import { openrscad } from '@taucad/openrscad';
 import { loadPicogkKernelOptions, picogk } from '@taucad/picogk';
@@ -16,13 +16,21 @@ import type { GeoSpecRuntimeClient } from 'geospec/model';
 
 const resourceRoot = process.env['TAU_PICOGK_RESOURCE_ROOT'];
 const nativePlugins = resourceRoot
-  ? [picogk({ kernels: { default: loadPicogkKernelOptions({ resourceRoot: resolve(resourceRoot) }) } })]
+  ? [
+      picogk({
+        kernels: {
+          default: loadPicogkKernelOptions({
+            resourceRoot: resolve(resourceRoot),
+          }),
+        },
+      }),
+    ]
   : [];
 
 /** Runtime composition used to generate and verify checked-in example thumbnails. @public */
 export const exampleRuntime = defineRuntime({
   plugins: [replicad(), opencascade(), manifold(), jscad(), openrscad(), esbuild(), image(), ...nativePlugins],
-  middleware: [parameterFileResolver(), parameterCache(), gltfEdgeDetection()],
+  middleware: [parameterFileResolver(), parameterCache(), parameterUnits(), gltfEdgeDetection()],
 });
 
 /** Kernel ids supported by the example-thumbnail runtime. @public */
@@ -59,7 +67,10 @@ export const createExampleGeoSpecRuntimeClient = async (projectPath: string): Pr
       if (!client) {
         throw new Error('Example runtime client was not initialized.');
       }
-      return client.export(format, { ...options, source: { path: isolated ? basename(path) : path } });
+      return client.export(format, {
+        ...options,
+        source: { path: isolated ? basename(path) : path },
+      });
     },
   };
 };

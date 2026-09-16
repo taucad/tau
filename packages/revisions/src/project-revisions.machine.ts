@@ -319,6 +319,8 @@ export type ProjectRevisionsMachineEvent =
       ours: string;
       theirs: string;
     }>
+  /** That file could not be opened for resolution, and why (C44). */
+  | Readonly<{ type: 'conflictMaterializationFailed'; revisionId: string; path: string; reason: string }>
   | Readonly<{
       type: 'turnRequested';
       revisionId: string;
@@ -394,6 +396,8 @@ export type ProjectRevisionsMachineEmitted =
       ours: string;
       theirs: string;
     }>
+  /** That file could not be opened for resolution, and why (C44). */
+  | Readonly<{ type: 'conflictMaterializationFailed'; revisionId: string; path: string; reason: string }>
   | Readonly<{
       type: 'turnRequested';
       revisionId: string;
@@ -1028,6 +1032,9 @@ export const projectRevisionsMachine = setup({
         },
         /* The marker text goes to the page that has an editor to show it in. */
         conflictMaterialized: { actions: emit(({ event }) => event) },
+        /* And so does its refusal: a surface that asked for a file learns that
+         * nothing is coming from a fact, not from a timeout (C44). */
+        conflictMaterializationFailed: { actions: emit(({ event }) => event) },
         /* *Ask chat to resolve*: only a page or a CLI can start a chat, and both
          * hold the root (A38), so the request is re-emitted here. */
         turnRequested: { actions: emit(({ event }) => event) },
@@ -1288,6 +1295,7 @@ const selectRemoteFacetOf = (snapshot: SnapshotFrom<typeof projectRevisionsMachi
         quota: undefined,
         overQuota: [],
         error: undefined,
+        reason: undefined,
         fetchOnly: false,
         provider: undefined,
         repositoryId: undefined,

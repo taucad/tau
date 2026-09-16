@@ -185,6 +185,7 @@ describe('the projection comparator (P52, W18 DEF-6)', () => {
       storage: undefined,
       overQuota: [],
       error: undefined,
+      reason: undefined,
       fetchOnly: false,
       provider: undefined,
       repositoryId: undefined,

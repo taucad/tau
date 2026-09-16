@@ -1,0 +1,175 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ProviderMessage } from '#log/event-types.js';
+import type { ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
+import { createMemoryEventLogFile } from '#harness/harness.fixture.js';
+import { hasFileRef, providerMessageToPi } from '#harness/session-record.js';
+import type { AttachmentReader } from '#harness/session-record.js';
+import { createAgentSession } from '#harness/session.js';
+
+vi.mock('#harness/session-record.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('#harness/session-record.js')>();
+  return { ...actual, providerMessageToPi: vi.fn(actual.providerMessageToPi) };
+});
+
+const imagePath = `attachments/${'c'.repeat(64)}.jpg`;
+const pdfHash = 'd'.repeat(64);
+const pdfPath = `attachments/${pdfHash}.pdf`;
+const imageBytes = new Uint8Array([255, 216, 255]);
+const pdfBytes = new TextEncoder().encode('%PDF-1.4 body');
+const base64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64');
+
+class RecordingTransport implements ModelTransport {
+  public readonly requests: ModelStreamRequest[] = [];
+
+  public async *stream(request: ModelStreamRequest): AsyncGenerator<ModelStreamEvent> {
+    this.requests.push(request);
+    yield { type: 'text-delta', text: 'seen' };
+    yield { type: 'completed', stopReason: 'stop' };
+  }
+}
+
+const attachmentsFrom = (files: Record<string, Uint8Array>): AttachmentReader & { read: ReturnType<typeof vi.fn> } => ({
+  read: vi.fn(async (_chatId: string, path: string) => files[path]),
+});
+
+const userWithAttachments: ProviderMessage & { role: 'user' } = {
+  id: 'user-1',
+  role: 'user',
+  content: [
+    { type: 'text', text: 'what is in these?' },
+    { type: 'file-ref', path: imagePath, mimeType: 'image/jpeg' },
+    { type: 'file-ref', path: pdfPath, mimeType: 'application/pdf', filename: 'drawing.pdf' },
+  ],
+};
+
+const openSession = async (options: {
+  readonly file: ReturnType<typeof createMemoryEventLogFile>;
+  readonly runId: string;
+  readonly transport: RecordingTransport;
+  readonly attachments?: AttachmentReader;
+}) =>
+  createAgentSession({
+    chatId: 'chat-1',
+    runId: options.runId,
+    leaderEpoch: 'epoch-1',
+    systemPrompt: 'system',
+    model: { id: 'stub', contextWindow: 200_000, providerKind: 'anthropic' },
+    modelTransport: options.transport,
+    toolRegistry: { list: () => [], invoke: vi.fn() },
+    eventLog: await options.file.open(),
+    ...(options.attachments ? { attachments: options.attachments } : {}),
+  });
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.mocked(providerMessageToPi).mockClear();
+});
+
+describe('attachment materialisation in the session (D15)', () => {
+  it('sends images and documents as bytes, carries the side table on the request, and never sends a file-ref', async () => {
+    const file = createMemoryEventLogFile();
+    const transport = new RecordingTransport();
+    const attachments = attachmentsFrom({ [imagePath]: imageBytes, [pdfPath]: pdfBytes });
+    const session = await openSession({ file, runId: 'run-1', transport, attachments });
+
+    await session.prompt(userWithAttachments);
+
+    expect(transport.requests).toHaveLength(1);
+    const [request] = transport.requests;
+    expect(request?.messages.at(-1)?.content).toEqual([
+      { type: 'text', text: 'what is in these?' },
+      { type: 'image', mimeType: 'image/jpeg', data: base64(imageBytes) },
+      { type: 'text', text: `⟃tau:document:${pdfHash}⟄` },
+    ]);
+    expect(request?.documents).toEqual(
+      new Map([[pdfHash, { data: base64(pdfBytes), mediaType: 'application/pdf', filename: 'drawing.pdf' }]]),
+    );
+    expect(attachments.read).toHaveBeenCalledWith('chat-1', imagePath);
+    // Pin: no request ever contains a file-ref.
+    expect(JSON.stringify(request?.messages)).not.toContain('file-ref');
+  });
+
+  it('keeps the durable rows as references', async () => {
+    const file = createMemoryEventLogFile();
+    const transport = new RecordingTransport();
+    const session = await openSession({
+      file,
+      runId: 'run-1',
+      transport,
+      attachments: attachmentsFrom({ [imagePath]: imageBytes, [pdfPath]: pdfBytes }),
+    });
+
+    await session.prompt(structuredClone(userWithAttachments));
+
+    const log = await file.open();
+    const serialized = JSON.stringify(await log.read());
+    expect(serialized).not.toContain(base64(pdfBytes));
+    expect(serialized).not.toContain('⟃tau:document');
+    const committed = (await log.read()).find((event) => event.type === 'turn.history-projection-committed');
+    expect(committed?.type === 'turn.history-projection-committed' && committed.message).toEqual(userWithAttachments);
+  });
+
+  it('never hands hydration a file-ref, on the first turn or when a later run rebuilds history', async () => {
+    const file = createMemoryEventLogFile();
+    const attachments = attachmentsFrom({ [imagePath]: imageBytes, [pdfPath]: pdfBytes });
+    const first = await openSession({ file, runId: 'run-1', transport: new RecordingTransport(), attachments });
+    await first.prompt(userWithAttachments);
+    await first.close();
+
+    const transport = new RecordingTransport();
+    const second = await openSession({ file, runId: 'run-2', transport, attachments });
+    await second.prompt({ id: 'user-2', role: 'user', content: 'and now?' });
+
+    const hydrated = vi.mocked(providerMessageToPi).mock.calls.map(([message]) => message);
+    expect(hydrated.some((message) => message.id === 'user-1')).toBe(true);
+    // Pin: hydrateHistory never sees a file-ref.
+    expect(hydrated.filter((message) => hasFileRef(message))).toEqual([]);
+    const replayed = transport.requests[0]?.messages.find((message) => message.id === 'user-1');
+    expect(replayed?.content).toContainEqual({ type: 'image', mimeType: 'image/jpeg', data: base64(imageBytes) });
+    expect(transport.requests[0]?.documents?.get(pdfHash)?.data).toBe(base64(pdfBytes));
+    expect(JSON.stringify(transport.requests[0]?.messages)).not.toContain('file-ref');
+  });
+
+  it('omits a reference whose bytes are absent and warns once', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const file = createMemoryEventLogFile();
+    const transport = new RecordingTransport();
+    const session = await openSession({
+      file,
+      runId: 'run-1',
+      transport,
+      attachments: attachmentsFrom({ [pdfPath]: pdfBytes }),
+    });
+
+    await session.prompt(userWithAttachments);
+
+    expect(transport.requests[0]?.messages.at(-1)?.content).toEqual([
+      { type: 'text', text: 'what is in these?' },
+      { type: 'text', text: `⟃tau:document:${pdfHash}⟄` },
+    ]);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toContain(imagePath);
+  });
+
+  it('treats every reference as absent when the host wires no reader', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const transport = new RecordingTransport();
+    const session = await openSession({ file: createMemoryEventLogFile(), runId: 'run-1', transport });
+
+    await session.prompt(userWithAttachments);
+
+    expect(transport.requests[0]?.messages.at(-1)?.content).toEqual([{ type: 'text', text: 'what is in these?' }]);
+    expect(transport.requests[0]?.documents).toBeUndefined();
+  });
+
+  it('still sends a legacy inline image block unchanged', async () => {
+    const transport = new RecordingTransport();
+    const session = await openSession({ file: createMemoryEventLogFile(), runId: 'run-1', transport });
+    const legacy = [{ type: 'image', mimeType: 'image/png', data: 'bGVnYWN5' }];
+
+    await session.prompt({ id: 'user-legacy', role: 'user', content: legacy });
+
+    expect(transport.requests[0]?.messages.at(-1)?.content).toEqual(legacy);
+    expect(transport.requests[0]?.documents).toBeUndefined();
+  });
+});

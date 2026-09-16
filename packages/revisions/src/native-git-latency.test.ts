@@ -71,7 +71,8 @@ const countedProject = async (
   return {
     port: createNativeGitRevisionPort({ repositoryPath, gitExecutable: shim }),
     spawns: async (): Promise<Spawns> => {
-      const lines = (await readFile(log, 'utf8').catch(() => '')).split('\n').filter((line) => line !== '');
+      const recorded = await readFile(log, 'utf8').catch(() => '');
+      const lines = recorded.split('\n').filter((line) => line !== '');
       const since = lines.slice(read);
       read = lines.length;
       let live = 0;
@@ -168,7 +169,15 @@ describe('cut hashing (B3)', () => {
     /* A separate tree over separate buffers takes the uncached path, and the
      * two answers are identical — which is what makes the cache safe. */
     const twin = cleanLargeObjects(treeOf(entries()));
-    expect(twin).not.toBe(first);
+    /* `Object.is` rather than `expect(twin).not.toBe(first)`: a *negated*
+     * `toBe` pretty-formats both operands to build the message it would print,
+     * and both of these hold a 1 MiB object. That cost is real, but it does not
+     * make this row red on its own — reverted and re-measured on an idle
+     * machine it passes in 2.0 s, against vitest's 5 s default. It was observed
+     * at 10.3 s only under heavy concurrent load, so what this line buys is
+     * headroom against a *load-sensitive* timeout, not a fix for a standing
+     * failure. The fact asserted is the same one. */
+    expect(Object.is(twin, first)).toBe(false);
     for (const format of ['sha1', 'sha256'] as const) {
       expect(revisionTreeId(twin.tree, format)).toBe(revisionTreeId(first.tree, format));
     }

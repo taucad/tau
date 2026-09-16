@@ -27,6 +27,8 @@ import type { ContentBlock, McpServer, Usage as AcpUsage } from '@agentclientpro
 
 import { reduceEventLog } from '@taucad/agent-host';
 import type { ExternalAgentPort, ExternalAgentTurn, JsonObject, JsonValue } from '@taucad/agent-host';
+import { createNodeAttachmentReader, materializeAttachments } from '@taucad/agent-host/node';
+import type { DocumentBlockBuilder } from '@taucad/agent-host/node';
 import { createSkillBundleRegistry } from '@taucad/agent-tools/registry';
 import { tauMcpInstructions } from '@taucad/mcp';
 import { isRecord } from '@taucad/utils/schema';
@@ -398,6 +400,23 @@ const promptBlocksOf = (turn: ExternalAgentTurn, first: boolean): readonly Conte
   return [...cadContextBlocks(turn.config, first), ...blocks];
 };
 
+/**
+ * A document as ACP carries it (D23): an embedded resource with its bytes.
+ *
+ * @param hash - The document's SHA-256, as its attachment path names it.
+ * @param document - The bytes and media type read for this prompt.
+ * @param reference - The durable reference, whose extension the uri keeps.
+ * @returns The `resource` block {@link contentBlockOf} maps.
+ */
+const acpDocumentBlock: DocumentBlockBuilder = (hash, document, reference) => ({
+  type: 'resource',
+  resource: {
+    uri: `tau://attachments/${hash}${reference.path.slice(reference.path.lastIndexOf('.'))}`,
+    mimeType: document.mediaType,
+    blob: document.data,
+  },
+});
+
 const stringField = (state: JsonObject | undefined, name: string): string | undefined => {
   const value = state?.[name];
   return typeof value === 'string' ? value : undefined;
@@ -497,6 +516,37 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
   /* Per port, not per module: a chat id is unique inside one workspace, and two
    * ports in one process serve two workspaces. */
   const live = new Map<string, LiveSession>();
+  /* The chat log — and so its attachments — lives at the workspace root in
+   * every mode; a candidate checkout never carries `.tau/chats`. */
+  const attachments = createNodeAttachmentReader(options.workspaceRoot);
+  const warnedAbsent = new Set<string>();
+
+  /**
+   * The turn with its attachment references replaced by bytes (D15, D23).
+   *
+   * @param turn - The admitted turn; its durable message is never mutated.
+   * @returns The same turn, or a copy whose message carries images and resources.
+   */
+  const materializedTurn = async (turn: ExternalAgentTurn): Promise<ExternalAgentTurn> => {
+    if (!turn.message) {
+      return turn;
+    }
+    const outcome = await materializeAttachments(
+      [turn.message],
+      async (path) => attachments.read(turn.chatId, path),
+      acpDocumentBlock,
+    );
+    for (const path of outcome.absent) {
+      if (!warnedAbsent.has(`${turn.chatId}/${path}`)) {
+        warnedAbsent.add(`${turn.chatId}/${path}`);
+        console.warn(
+          `Chat ${turn.chatId}: attachment ${path} is not available on this host; the agent will not see it.`,
+        );
+      }
+    }
+    const [message] = outcome.messages;
+    return message === turn.message || message?.role !== 'user' ? turn : { ...turn, message };
+  };
 
   const forget = async (key: string): Promise<void> => {
     const entry = live.get(key);
@@ -738,7 +788,10 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
         /* The vendor session Tau is about to prompt is not the one this chat's
          * record remembers: it is new (or a lost one was replaced), so it has
          * never seen Tau's CAD context and this prompt carries it (V12). */
-        const prompt = promptBlocksOf(turn, entry.session.acpSessionId !== stringField(turn.state, 'acpSessionId'));
+        const prompt = promptBlocksOf(
+          await materializedTurn(turn),
+          entry.session.acpSessionId !== stringField(turn.state, 'acpSessionId'),
+        );
         if (prompt === undefined) {
           throw Object.assign(
             new Error('Tau restored the ACP session, but ACP cannot prove whether the interrupted turn completed.'),

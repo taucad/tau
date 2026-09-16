@@ -359,9 +359,11 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
        * cause rather than being thrown away entirely. */
       throw (
         remoteRefusalOf(stderr, options.remote) ??
-        new RevisionPortError('ENGINE_FAILED', `Native Git failed ${args[0] ?? 'a command'}.`, {
-          ...(stderr.trim() === '' ? {} : { cause: new Error(stderr.trim()) }),
-        })
+        new RevisionPortError(
+          'ENGINE_FAILED',
+          `Native Git failed ${args[0] ?? 'a command'}.`,
+          stderr.trim() === '' ? undefined : { cause: new Error(stderr.trim()) },
+        )
       );
     }
     return result.stdout;
@@ -557,9 +559,11 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
     }
     return (
       remoteRefusalOf(stderr, remote) ??
-      new RevisionPortError('ENGINE_FAILED', 'The remote could not be reached.', {
-        ...(stderr.trim() === '' ? {} : { cause: new Error(stderr.trim()) }),
-      })
+      new RevisionPortError(
+        'ENGINE_FAILED',
+        'The remote could not be reached.',
+        stderr.trim() === '' ? undefined : { cause: new Error(stderr.trim()) },
+      )
     );
   };
 
@@ -724,7 +728,8 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
    * own captured-output limit (256 MiB), which a tree that large would already
    * have exhausted through `ImmutableRevisionTree` anyway.
    *
-   * @param oids - Object ids to read; duplicates are read once.
+   * @param ids - Object ids to read; duplicates are read once.
+   * @param want - The object kind `cat-file` is asked for.
    * @returns The bytes by object id.
    */
   const readObjects = async (
@@ -1474,9 +1479,11 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       if (result.exitCode !== 0 && !stdout.includes('\t')) {
         throw (
           refused ??
-          new RevisionPortError('ENGINE_FAILED', 'The remote could not be reached.', {
-            ...(stderr.trim() === '' ? {} : { cause: new Error(stderr.trim()) }),
-          })
+          new RevisionPortError(
+            'ENGINE_FAILED',
+            'The remote could not be reached.',
+            stderr.trim() === '' ? undefined : { cause: new Error(stderr.trim()) },
+          )
         );
       }
       return Object.freeze({

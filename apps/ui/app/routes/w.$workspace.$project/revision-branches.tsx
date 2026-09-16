@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { AlertTriangle, Check, FileText, GitBranch, GitCompare, MoreHorizontal, Pencil, Plus } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
@@ -115,22 +115,6 @@ function ConflictCard({
   const target = into ?? conflict.labels?.ours ?? 'the other branch';
   const count = conflict.paths.length;
   const [modes, setModes] = useState<Readonly<Record<string, 'compare' | 'edit'>>>({});
-  const [materializationErrors, setMaterializationErrors] = useState<Readonly<Record<string, boolean>>>({});
-  useEffect(() => {
-    const pending = Object.keys(modes).filter(
-      (path) => conflictTexts[`${conflict.revisionId}\u0000${path}`] === undefined && !materializationErrors[path],
-    );
-    if (pending.length === 0) return undefined;
-    const timeout = setTimeout(() => {
-      setMaterializationErrors((current) => ({
-        ...current,
-        ...Object.fromEntries(pending.map((path) => [path, true])),
-      }));
-    }, 10_000);
-    return () => {
-      clearTimeout(timeout);
-    };
-  }, [conflict.revisionId, conflictTexts, materializationErrors, modes]);
 
   return (
     <div className='flex flex-col gap-2 pl-5'>
@@ -183,10 +167,6 @@ function ConflictCard({
                         ...current,
                         [path]: 'compare',
                       }));
-                      setMaterializationErrors((current) => ({
-                        ...current,
-                        [path]: false,
-                      }));
                       onOpenConflict(conflict.revisionId, path);
                     }}
                   >
@@ -203,10 +183,6 @@ function ConflictCard({
                     disabled={conflict.busy}
                     onClick={() => {
                       setModes((current) => ({ ...current, [path]: 'edit' }));
-                      setMaterializationErrors((current) => ({
-                        ...current,
-                        [path]: false,
-                      }));
                       onOpenConflict(conflict.revisionId, path);
                     }}
                   >
@@ -231,7 +207,7 @@ function ConflictCard({
               {/* A27/D19's third *Compare* surface. The markers say what the two
                 sides are; this says it the way the History rows already do, and
                 it is the same component (review R9). */}
-              {modes[path] !== undefined && materialized === undefined && !materializationErrors[path] ? (
+              {modes[path] !== undefined && materialized === undefined ? (
                 <p
                   role='status'
                   aria-label={`Conflict view for ${path}`}
@@ -241,32 +217,28 @@ function ConflictCard({
                   Loading {modes[path] === 'compare' ? 'comparison' : 'editor'} for {path}…
                 </p>
               ) : null}
-              {materializationErrors[path] ? (
+              {materialized?.failure === undefined ? null : (
                 <div
                   role='alert'
                   aria-label={`Conflict view for ${path}`}
                   className='flex flex-wrap items-center gap-2 px-2 py-1 text-xs'
                 >
-                  <span>{`Could not load ${path}. Your choices are unchanged.`}</span>
+                  <span>{`${materialized.failure} Your choices are unchanged.`}</span>
                   <Button
                     size='xs'
                     variant='outline'
                     onClick={() => {
-                      setMaterializationErrors((current) => ({
-                        ...current,
-                        [path]: false,
-                      }));
                       onOpenConflict(conflict.revisionId, path);
                     }}
                   >
                     Retry
                   </Button>
                 </div>
-              ) : null}
-              {modes[path] === 'compare' && materialized !== undefined ? (
+              )}
+              {modes[path] === 'compare' && materialized?.text !== undefined ? (
                 <DiffViewer
-                  originalContent={materialized?.ours ?? ''}
-                  modifiedContent={materialized?.theirs ?? ''}
+                  originalContent={materialized.ours}
+                  modifiedContent={materialized.theirs}
                   language={path}
                   className='rounded-md border'
                 />
@@ -315,11 +287,16 @@ function ConflictCard({
  *
  * @public
  */
-export type ConflictMaterialization = Readonly<{
-  text: string;
-  ours: string;
-  theirs: string;
-}>;
+export type ConflictMaterialization =
+  | Readonly<{ text: string; ours: string; theirs: string; failure?: undefined }>
+  /**
+   * The refusal, when the worker could not open that file (C44).
+   *
+   * A settled answer like the text is: the row renders it the moment it lands,
+   * rather than inferring one from a 10 s timer that made every slow
+   * materialization look like a failure and every failure take ten seconds.
+   */
+  | Readonly<{ failure: string; text?: undefined; ours?: undefined; theirs?: undefined }>;
 
 export type RevisionBranchesProps = {
   /** Every branch the project has, from the `RevisionStatus` projection. */

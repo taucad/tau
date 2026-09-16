@@ -1,4 +1,4 @@
-import { renderImageLabelMaxLength, renderImageLabelPattern } from 'nanoraster';
+import { renderImageLabelMaxLength, renderImageLabelPattern } from 'nanoraster/options';
 
 const supportedCharacter = new RegExp(renderImageLabelPattern, 'u');
 

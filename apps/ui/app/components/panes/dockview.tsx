@@ -164,7 +164,7 @@ export const dockviewStyleOverrides = cn(
   // masks the title beneath the close action without showing a separate pill.
   '[&_.dv-tab:hover_.dv-default-tab_.dv-default-tab-action:not(:hover)]:!bg-accent',
   '[&_.dv-tab.dv-active-tab_.dv-default-tab_.dv-default-tab-action:not(:hover)]:!bg-accent',
-  '[&_.dv-tab.dv-active-tab_.dockview-tab-title]:[--scroll-fade-size:42px]',
+  '[&_.dv-tab.dv-active-tab_.dockview-tab-title]:[--fade-label-size:var(--fade-label-size-actions)]',
   '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action:hover]:text-foreground',
   '[&_.dv-tab_.dv-default-tab_.dv-default-tab-action:hover]:!bg-nested-action-hover',
 

@@ -105,7 +105,7 @@ export function RevisionRestore(): React.JSX.Element {
       /* The two conflict notices are not messages for a person: the marker text
        * belongs to whatever editor asked for it, and the chat request to whatever
        * starts turns. Both have their own subscribers (W10). */
-      if (entry.type === 'conflictText' || entry.type === 'resolveWithChat') {
+      if (entry.type === 'conflictText' || entry.type === 'conflictTextFailed' || entry.type === 'resolveWithChat') {
         return;
       }
       /* The merge that collided. The branch merged into is untouched by design

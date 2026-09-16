@@ -106,9 +106,6 @@ vi.mock('#constants/browser.constants.js', () => ({
 vi.mock('#hooks/use-cookie.js', () => ({
   useCookie: (_name: string, defaultValue: string) => [defaultValue, vi.fn()],
 }));
-vi.mock('#utils/chat.utils.js', () => ({
-  createMessage: (options: Record<string, unknown>) => ({ id: 'msg-1', ...options }),
-}));
 
 const pendingDuplicate: Extract<PendingProjectOperation, { kind: 'duplicate' }> = {
   operationId,

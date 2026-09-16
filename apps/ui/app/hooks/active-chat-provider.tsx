@@ -362,6 +362,7 @@ export function ActiveChatProvider({
   // need their own try/catch around the resize step. See
   // `useDraftImageErrorToast` JSDoc.
   useDraftImageErrorToast(session.draftActorRef);
+  useComposerRecordToasts(session.composerRecordRef);
 
   const execution = useSessionExecution(session);
   const model = useExecutionModel(execution);

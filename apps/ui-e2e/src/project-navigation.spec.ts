@@ -19,7 +19,8 @@ type PersistedChatActivity = Readonly<{
   createdAt: number;
   updatedAt: number;
   recencyAt?: number;
-  hasUnreadTurn?: boolean;
+  /** From the project's composer unread record, not the chat record (D9). */
+  unread: boolean;
   activeExecution?: unknown;
   activeKernel?: string;
   draft?: unknown;
@@ -362,13 +363,13 @@ test('chat navigation preserves ordering until an accepted user submit advances 
   const beforeNavigation = await readChatActivitySnapshot();
   await openActivityChat(chatNames.newer);
   const afterFirstFocus = await readChatActivitySnapshot();
-  expect(beforeNavigation.chats.find(({ name }) => name === chatNames.newer)?.hasUnreadTurn).toBe(true);
-  expect(afterFirstFocus.chats.find(({ name }) => name === chatNames.newer)?.hasUnreadTurn).toBe(false);
+  expect(beforeNavigation.chats.find(({ name }) => name === chatNames.newer)?.unread).toBe(true);
+  expect(afterFirstFocus.chats.find(({ name }) => name === chatNames.newer)?.unread).toBe(false);
   await openActivityChat(chatNames.older);
   await openActivityChat(chatNames.newer);
   const afterRepeatedFocus = await readChatActivitySnapshot();
-  expect(afterRepeatedFocus.chats.find(({ name }) => name === chatNames.newer)?.hasUnreadTurn).toBe(
-    afterFirstFocus.chats.find(({ name }) => name === chatNames.newer)?.hasUnreadTurn,
+  expect(afterRepeatedFocus.chats.find(({ name }) => name === chatNames.newer)?.unread).toBe(
+    afterFirstFocus.chats.find(({ name }) => name === chatNames.newer)?.unread,
   );
   await openActivityChat(chatNames.older);
   const afterNavigation = await readChatActivitySnapshot();

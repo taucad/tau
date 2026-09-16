@@ -197,7 +197,7 @@ const LandingPage = (): React.JSX.Element => {
                   <Link
                     to={task.href}
                     aria-label={task.title}
-                    className='absolute inset-0 rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset'
+                    className='absolute inset-0 rounded-xl focus-visible:focus-outline'
                   />
                 </Card>
               ))}
@@ -220,7 +220,7 @@ const LandingPage = (): React.JSX.Element => {
                 <a
                   key={item.href}
                   href={item.href}
-                  className='group grid min-h-24 gap-2 border-b border-background/40 px-2 py-5 last:border-b-0 hover:bg-background hover:text-foreground focus-visible:outline-background sm:grid-cols-3 sm:items-center sm:gap-6'
+                  className='group grid min-h-24 gap-2 border-b border-background/40 px-2 py-5 last:border-b-0 hover:bg-background hover:text-foreground focus-visible:focus-outline sm:grid-cols-3 sm:items-center sm:gap-6'
                 >
                   <code className='text-sm font-semibold'>{item.label}</code>
                   <span className='text-sm leading-6 sm:col-span-2'>{item.description}</span>

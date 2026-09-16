@@ -22,7 +22,7 @@ const composerSelector = '[aria-label="Ask Tau to build anything..."]';
 
 /**
  * Vitest's `expect` carries no Playwright matchers (`toBeVisible` and friends
- * ship with `@playwright/test`, which this suite does not use). Two helpers
+ * ship with the separate Playwright test runner, which this suite does not use). Two helpers
  * over `locator.waitFor` and `expect.poll` cover everything the specs assert.
  */
 export const expectVisible = async (locator: Locator, timeout = 30_000): Promise<void> => {

@@ -39,7 +39,11 @@ export const SharedProjectHydrator = ({
     const mounted = { current: false };
     const hydrate = async (): Promise<void> => {
       try {
-        await workspace.mount(rootDirectory, { backend: 'memory', storageRootKey, class: 'authored' });
+        await workspace.mount(rootDirectory, {
+          backend: 'memory',
+          storageRootKey,
+          class: 'authored',
+        });
         mounted.current = true;
         await writeFiles(files);
         const { treeService } = await whenServicesReady();
@@ -95,11 +99,9 @@ const SharedProjectTopbar = ({
   readonly sourceLabel?: string;
   readonly managementActions?: React.ReactNode;
 }): React.JSX.Element => {
-  const { projectRef } = useProject();
-  const parameters = useSelector(projectRef, (state) => {
-    const entry = state.context.parameterEntries.get(publication.entryPath);
-    return entry ? getActiveGroupValues(entry) : {};
-  });
+  const { parameterService } = useProject();
+  const entry = useSelector(parameterService.actor(publication.entryPath), (state) => state?.context.current?.entry);
+  const parameters = entry ? getActiveGroupValues(entry) : {};
 
   return (
     <PublicationTopbar

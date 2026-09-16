@@ -45,13 +45,18 @@ const optionalSectionsSchema: RJSFSchema = {
 
 const formContext: RJSFContext = {
   idPrefix: rjsfIdPrefix,
-  parameterSemantics: 'configuration',
   rootPresentation: 'catalog',
   searchTerm: '',
   allExpanded: true,
   resetSingleParameter: vi.fn(),
   shouldShowField: () => true,
-  units: { length: { sourceSymbol: 'mm', displaySymbol: 'mm' } },
+  units: { length: { displaySymbol: 'mm' } },
+  parameterManifest: {
+    bindings: {},
+    bindingDeclarations: {},
+    provenance: {},
+  } as unknown as RJSFContext['parameterManifest'],
+  parameterEdit: { kind: 'transient' },
 };
 
 const inputJsonSchema = (schema: unknown): RJSFSchema => {

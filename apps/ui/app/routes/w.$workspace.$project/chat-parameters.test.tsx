@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import type { ActorRefFrom } from 'xstate';
 import type { FileParameterEntry } from '@taucad/types';
 import type { cadMachine } from '#machines/cad.machine.js';
+import { ChatParameters } from '#routes/w.$workspace.$project/chat-parameters.js';
 
 vi.mock('@xstate/react', () => ({
   useSelector: (actor: { getSnapshot: () => unknown } | undefined, selector: (state: unknown) => unknown) => {
@@ -17,13 +18,18 @@ vi.mock('@xstate/react', () => ({
 const mockCadRef = {
   getSnapshot: vi.fn(() => ({
     context: {
-      defaultParameters: { width: 10, height: 20 },
       units: { length: 'mm' },
-      jsonSchema: {
-        type: 'object',
-        properties: {
-          width: { type: 'number' },
-          height: { type: 'number' },
+      parameterManifest: {
+        defaults: { width: 10, height: 20 },
+        legacyProjection: {
+          status: 'usable',
+          schema: {
+            type: 'object',
+            properties: {
+              width: { type: 'number' },
+              height: { type: 'number' },
+            },
+          },
         },
       },
     },
@@ -33,12 +39,17 @@ const mockCadRef = {
 const mockCadRef2 = {
   getSnapshot: vi.fn(() => ({
     context: {
-      defaultParameters: { radius: 5 },
       units: { length: 'm' },
-      jsonSchema: {
-        type: 'object',
-        properties: {
-          radius: { type: 'number' },
+      parameterManifest: {
+        defaults: { radius: 5 },
+        legacyProjection: {
+          status: 'usable',
+          schema: {
+            type: 'object',
+            properties: {
+              radius: { type: 'number' },
+            },
+          },
         },
       },
     },
@@ -54,6 +65,64 @@ const mockProjectSend = vi.fn();
 const mockEditorSend = vi.fn();
 const mockPaneSetExpanded = vi.fn();
 let mockParameterEntries = new Map<string, FileParameterEntry>();
+const mockResolveParameterEntry = vi.fn();
+const mockEmptyParameterEntries = new Map<string, FileParameterEntry>();
+const mockParameterSnapshots = new Map<
+  string,
+  Readonly<{
+    entry: FileParameterEntry;
+    identity: Readonly<{
+      sourceRevision: string;
+      manifestRevision: string;
+      valueRevision: string;
+      dependencyRevision: string;
+    }>;
+  }>
+>();
+const mockParameterActors = new Map<
+  string,
+  { getSnapshot: () => unknown; subscribe: () => { unsubscribe: () => void } }
+>();
+const mockParameterService = {
+  snapshot: (entryPath: string) => {
+    let entry = mockParameterEntries.get(entryPath) ?? mockEmptyParameterEntries.get(entryPath);
+    if (entry === undefined) {
+      entry = { activeGroup: 'default', groups: { default: { values: {} } } };
+      mockEmptyParameterEntries.set(entryPath, entry);
+    }
+    const current = mockParameterSnapshots.get(entryPath);
+    if (current?.entry === entry) {
+      return current;
+    }
+    const snapshot = {
+      entry,
+      identity: {
+        sourceRevision: 'source',
+        manifestRevision: 'manifest',
+        valueRevision: 'value',
+        dependencyRevision: 'dependency',
+      },
+    };
+    mockParameterSnapshots.set(entryPath, snapshot);
+    return snapshot;
+  },
+  // Readers select from the authority actor; this fake replays the stored snapshot to them.
+  // One actor per entry, like the service: consumers rely on that identity being stable.
+  actor: (entryPath: string) => {
+    let actor = mockParameterActors.get(entryPath);
+    if (actor === undefined) {
+      actor = {
+        getSnapshot: () => ({ context: { current: mockParameterService.snapshot(entryPath) } }),
+        subscribe: () => ({ unsubscribe: () => undefined }),
+      };
+      mockParameterActors.set(entryPath, actor);
+    }
+    return actor;
+  },
+  target: (entry: string) => ({ authority: 'browser-filesystem', root: '/test', entry }),
+  input: vi.fn(),
+  submit: vi.fn(),
+};
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
@@ -77,7 +146,8 @@ vi.mock('#hooks/use-project.js', () => ({
     createParameterGroup: vi.fn(),
     deleteParameterGroup: vi.fn(),
     renameParameterGroup: vi.fn(),
-    parameterEntries: mockParameterEntries,
+    parameterService: mockParameterService,
+    resolveParameterEntry: mockResolveParameterEntry,
   }),
   useMainGraphics: () => ({
     getSnapshot: vi.fn(() => ({
@@ -168,7 +238,7 @@ vi.mock('#components/geometry/parameters/parameters.js', () => ({
     enableSearch?: boolean;
     filterTerm?: string;
     onParametersChange: (params: Record<string, unknown>) => void;
-    units: { length: { sourceSymbol: string; displaySymbol: string } };
+    units: { length: { displaySymbol: string } };
   }) => (
     <div
       data-testid='parameters-component'
@@ -176,7 +246,6 @@ vi.mock('#components/geometry/parameters/parameters.js', () => ({
       data-class-name={className}
       data-enable-search={String(enableSearch)}
       data-filter-term={filterTerm}
-      data-source-symbol={units.length.sourceSymbol}
       data-display-symbol={units.length.displaySymbol}
     >
       <button
@@ -362,7 +431,6 @@ describe('ChatParameters', () => {
   it('should render single geometry unit inside PaneviewReact', async () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     expect(screen.getByTestId('paneview')).toBeInTheDocument();
@@ -373,23 +441,19 @@ describe('ChatParameters', () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
     mockGeometryUnits.set('helper.ts', mockCadRef2);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     expect(screen.getByTestId('paneview')).toBeInTheDocument();
   });
 
-  it('passes each CAD source unit separately from the shared display unit', async () => {
+  it('passes the shared display unit while each manifest retains its native unit', async () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
     mockGeometryUnits.set('helper.ts', mockCadRef2);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     const parameters = screen.getAllByTestId('parameters-component');
-    expect(parameters[0]).toHaveAttribute('data-source-symbol', 'mm');
     expect(parameters[0]).toHaveAttribute('data-display-symbol', 'mm');
-    expect(parameters[1]).toHaveAttribute('data-source-symbol', 'm');
     expect(parameters[1]).toHaveAttribute('data-display-symbol', 'mm');
   });
 
@@ -398,7 +462,6 @@ describe('ChatParameters', () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
     mockGeometryUnits.set('helper.ts', mockCadRef2);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     const filter = screen.getByRole('textbox', { name: 'Filter parameters' });
@@ -422,7 +485,6 @@ describe('ChatParameters', () => {
   });
 
   it('keeps the filter and sidebar surface visible without geometry units', async () => {
-    const { ChatParameters } = await import('./chat-parameters.js');
     const { container } = render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     expect(screen.getByRole('textbox', { name: 'Filter parameters' })).toBeVisible();
@@ -438,7 +500,6 @@ describe('ChatParameters', () => {
     mockGeometryUnits.set('helper.ts', mockCadRef2);
     mockGeometryUnits.set('main.ts', mockCadRef);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     const panes = screen.getAllByTestId(/^param-pane-/);
@@ -449,7 +510,6 @@ describe('ChatParameters', () => {
     mockGeometryUnits.set('helper.ts', mockCadRef2);
     mockGeometryUnits.set('main.ts', mockCadRef);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     const mainPane = screen.getByTestId('param-pane-main.ts');
@@ -463,7 +523,6 @@ describe('ChatParameters', () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
     mockGeometryUnits.set('helper.ts', mockCadRef2);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     for (const pane of screen.getAllByTestId(/^param-pane-/)) {
@@ -471,10 +530,9 @@ describe('ChatParameters', () => {
     }
   });
 
-  it('reads parameter values from parameterEntries active group', async () => {
+  it('reads parameter values from the authority actor active group', async () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     const paramsComponent = screen.getByTestId('parameters-component');
@@ -485,15 +543,17 @@ describe('ChatParameters', () => {
   it('calls setGeometryUnitParameters when parameters change', async () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     fireEvent.click(screen.getByTestId('change-params'));
-    expect(mockSetGeometryUnitParameters).toHaveBeenCalledWith('main.ts', { width: 42 });
+    expect(mockSetGeometryUnitParameters).toHaveBeenCalledWith(
+      'main.ts',
+      expect.objectContaining({ defaults: { width: 10, height: 20 } }),
+      { width: 42 },
+    );
   });
 
   it('shows empty message when no geometry units', async () => {
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     expect(screen.getByText('No geometry units.')).toBeInTheDocument();
@@ -503,7 +563,6 @@ describe('ChatParameters', () => {
     mockParameterEntries = new Map();
     mockGeometryUnits.set('main.ts', mockCadRef);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     const paramsComponent = screen.getByTestId('parameters-component');
@@ -553,7 +612,6 @@ describe('ParameterGroupSelector', () => {
       ],
     ]);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     expect(screen.getByTestId('paneview')).toBeInTheDocument();
@@ -574,7 +632,6 @@ describe('ParameterGroupSelector', () => {
       ],
     ]);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     // The active group ('default') text appears once per pane via the
@@ -587,7 +644,6 @@ describe('ParameterGroupSelector', () => {
   it('keeps saved-group state persistent and gates only secondary actions', async () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     const controls = screen.getByTestId('paneview-header-controls');
@@ -607,7 +663,6 @@ describe('ParameterGroupSelector', () => {
       ['main.ts', { activeGroup: 'default', groups: { default: { values: { width: 15 } } } }],
     ]);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Reset parameters' }));
@@ -640,7 +695,6 @@ describe('ParameterGroupManager — active group name', () => {
       ],
     ]);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     expect(screen.getByText('my-custom-group')).toBeInTheDocument();
@@ -661,7 +715,6 @@ describe('ParameterGroupManager — active group name', () => {
       ],
     ]);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     const { rerender } = render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     expect(screen.getByText('default')).toBeInTheDocument();
@@ -700,7 +753,6 @@ describe('ParametersPanelHeader context menu', () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
     mockGeometryUnits.set('helper.ts', mockCadRef2);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     const dropdownContents = screen.getAllByTestId('dropdown-menu-content');
@@ -717,7 +769,6 @@ describe('ParametersPanelHeader context menu', () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
     mockGeometryUnits.set('helper.ts', mockCadRef2);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     expect(screen.getAllByTestId('context-menu-content').length).toBeGreaterThan(0);
@@ -728,7 +779,6 @@ describe('ParametersPanelHeader context menu', () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
     mockGeometryUnits.set('helper.ts', mockCadRef2);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     // Use the dropdown-menu close button for the helper pane (second occurrence)
@@ -745,7 +795,6 @@ describe('ParametersPanelHeader context menu', () => {
   it('disables Close renderer when only one geometry unit remains', async () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     const closeItems = screen
@@ -760,7 +809,6 @@ describe('ParametersPanelHeader context menu', () => {
   it('does not dispatch destroyGeometryUnit when Close is disabled', async () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     const closeItem = screen
@@ -776,7 +824,6 @@ describe('ParametersPanelHeader context menu', () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
     mockGeometryUnits.set('helper.ts', mockCadRef2);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     const dropdownOpenItems = screen
@@ -794,7 +841,6 @@ describe('ParametersPanelHeader context menu', () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
     mockGeometryUnits.set('helper.ts', mockCadRef2);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     const helperOpenItem = screen.getAllByTestId('dropdown-menu-item').find(
@@ -815,7 +861,6 @@ describe('ParametersPanelHeader context menu', () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
     mockGeometryUnits.set('helper.ts', mockCadRef2);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     const contextOpenItem = screen
@@ -831,7 +876,6 @@ describe('ParametersPanelHeader context menu', () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
     mockGeometryUnits.set('helper.ts', mockCadRef2);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     const dropdownEditorItems = screen
@@ -848,7 +892,6 @@ describe('ParametersPanelHeader context menu', () => {
   it('dispatches openFile on editorRef when "Open in editor" is selected from the dropdown', async () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     const editorItem = screen
@@ -863,7 +906,6 @@ describe('ParametersPanelHeader context menu', () => {
   it('dispatches openFile on editorRef when "Open in editor" is selected from the context menu', async () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
 
-    const { ChatParameters } = await import('./chat-parameters.js');
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
 
     const editorItem = screen

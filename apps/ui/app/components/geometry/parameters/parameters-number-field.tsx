@@ -1,49 +1,46 @@
 import * as React from 'react';
-import { Hash } from 'lucide-react';
-import { Angle } from '#components/icons/angle.js';
 import { SliderInput } from '#components/ui/slider-input.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { cn } from '@taucad/ui/utils/cn';
-import type { MeasurementDescriptor } from '#constants/project-parameters.js';
 
 type ParametersNumberFieldProperties = {
   readonly value: number;
   readonly formattedValue?: string;
+  readonly editingValue?: string;
   readonly isApproximation?: boolean;
+  readonly diagnostic?: string;
   readonly unit?: string;
-  readonly descriptor: MeasurementDescriptor;
   readonly rangeMin: number;
   readonly rangeMax: number;
   readonly step: number;
   readonly id?: string;
-  readonly autoFocus?: boolean;
-  readonly readOnly?: boolean;
+  readonly shouldAutoFocus?: boolean;
+  readonly isReadOnly?: boolean;
   // oxlint-disable-next-line react-js/boolean-prop-naming -- mirrors native input prop
   readonly disabled?: boolean;
   readonly className?: string;
   readonly 'aria-label'?: string;
   readonly onSliderChange: (value: number) => void;
   readonly onSliderRelease: (value: number) => void;
+  readonly onSliderCancel?: () => void;
   readonly onValueChange: (value: number) => void;
   readonly onTextChange: (text: string) => void;
+  readonly onEnter?: () => void;
+  readonly onEscape?: () => void;
+  readonly onStep?: (direction: -1 | 1, modifiers: { shift: boolean }) => void;
   readonly onFocusChange: (isFocused: boolean) => void;
 };
 
 const UnitIndicator = ({
-  descriptor,
   unit,
   isApproximation,
 }: {
-  readonly descriptor: MeasurementDescriptor;
   readonly unit: string;
   readonly isApproximation: boolean;
 }): React.ReactNode => {
   if (!unit) {
     return null;
   }
-
-  const isAngle = descriptor === 'angle';
-  const isUnitless = descriptor === 'unitless';
 
   return (
     <Tooltip>
@@ -56,23 +53,17 @@ const UnitIndicator = ({
             !isApproximation && 'pointer-events-none',
           )}
         >
-          {isAngle && unit !== 'deg' ? (
-            <Angle className='size-3.5 stroke-[1.5px]' />
-          ) : isUnitless ? (
-            <Hash className='size-2.5' />
-          ) : (
-            <span
-              className={cn(
-                'inline-flex flex-col items-center justify-center font-mono text-[10px]',
-                unit.length <= 2 ? 'tracking-wide' : unit.length <= 3 ? 'tracking-normal' : 'tracking-tight',
-              )}
-            >
-              {isApproximation ? (
-                <span className='-mb-0.5 text-[0.6rem] leading-none text-muted-foreground/60'>&asymp;</span>
-              ) : null}
-              <span className={cn(isApproximation && 'leading-none')}>{unit}</span>
-            </span>
-          )}
+          <span
+            className={cn(
+              'inline-flex flex-col items-center justify-center font-mono text-[10px]',
+              unit.length <= 2 ? 'tracking-wide' : unit.length <= 3 ? 'tracking-normal' : 'tracking-tight',
+            )}
+          >
+            {isApproximation ? (
+              <span className='-mb-0.5 text-[0.6rem] leading-none text-muted-foreground/60'>&asymp;</span>
+            ) : null}
+            <span className={cn(isApproximation && 'leading-none')}>{unit}</span>
+          </span>
         </span>
       </TooltipTrigger>
       {isApproximation ? <TooltipContent>Rounded to 4 significant figures</TooltipContent> : null}
@@ -80,68 +71,74 @@ const UnitIndicator = ({
   );
 };
 
-const CountIndicator = (): React.JSX.Element => (
-  <span
-    aria-hidden='true'
-    className='pointer-events-none flex h-[var(--param-field-h,1.5rem)] w-6 items-center justify-center text-[11px] text-muted-foreground/60 select-none'
-  >
-    <span className='font-mono text-xs'>&times;</span>
-  </span>
-);
-
 export const ParametersNumberField = ({
   value,
   formattedValue,
+  editingValue,
   isApproximation = false,
-  unit = 'mm',
-  descriptor,
+  diagnostic,
+  unit,
   rangeMin,
   rangeMax,
   step,
   id,
-  autoFocus,
-  readOnly,
+  shouldAutoFocus,
+  isReadOnly,
   disabled,
   className,
   'aria-label': ariaLabel,
   onSliderChange,
   onSliderRelease,
+  onSliderCancel,
   onValueChange,
   onTextChange,
+  onEnter,
+  onEscape,
+  onStep,
   onFocusChange,
 }: ParametersNumberFieldProperties): React.JSX.Element => {
-  const trailingAdornment =
-    descriptor === 'count' ? (
-      <CountIndicator />
-    ) : unit ? (
-      <UnitIndicator descriptor={descriptor} unit={unit} isApproximation={isApproximation} />
-    ) : undefined;
+  const descriptionId = React.useId();
+  const trailingAdornment = unit ? <UnitIndicator unit={unit} isApproximation={isApproximation} /> : undefined;
 
   return (
-    <SliderInput
-      value={value}
-      displayValue={formattedValue}
-      min={rangeMin}
-      max={rangeMax}
-      step={step}
-      inputId={id}
-      shouldAutoFocus={autoFocus}
-      isReadOnly={readOnly}
-      trailingAdornment={trailingAdornment}
-      disabled={disabled}
-      className={cn(
-        'h-[var(--param-field-h,1.5rem)] w-full rounded-[var(--param-field-radius,var(--radius-md))] border border-transparent bg-muted text-right text-[var(--param-field-color,var(--color-muted-foreground))] text-sm',
-        'transition-colors hover:text-[var(--param-field-color-focus,var(--color-foreground))] focus-within:bg-background focus-within:text-[var(--param-field-color-focus,var(--color-foreground))]',
-        trailingAdornment ? 'pl-2' : 'px-2',
-        disabled && 'opacity-50',
-        className,
-      )}
-      aria-label={ariaLabel ?? 'Parameter value'}
-      onScrubChange={onSliderChange}
-      onScrubCommit={onSliderRelease}
-      onInputCommit={onValueChange}
-      onInputChange={onTextChange}
-      onFocusChange={onFocusChange}
-    />
+    <>
+      <SliderInput
+        value={value}
+        displayValue={formattedValue}
+        editingValue={editingValue}
+        min={rangeMin}
+        max={rangeMax}
+        step={step}
+        stepBase={0}
+        inputId={id}
+        shouldAutoFocus={shouldAutoFocus}
+        isReadOnly={isReadOnly}
+        trailingAdornment={trailingAdornment}
+        disabled={disabled}
+        className={cn(
+          'h-[var(--param-field-h,1.5rem)] w-full rounded-[var(--param-field-radius,var(--radius-md))] border border-transparent bg-muted text-right text-[var(--param-field-color,var(--color-muted-foreground))] text-sm',
+          'transition-colors hover:text-[var(--param-field-color-focus,var(--color-foreground))] focus-within:bg-background focus-within:text-[var(--param-field-color-focus,var(--color-foreground))]',
+          trailingAdornment ? 'pl-2' : 'px-2',
+          disabled && 'opacity-50',
+          className,
+        )}
+        aria-label={ariaLabel ?? 'Parameter value'}
+        aria-describedby={diagnostic ? descriptionId : undefined}
+        onScrubChange={onSliderChange}
+        onScrubCommit={onSliderRelease}
+        onScrubCancel={onSliderCancel}
+        onInputCommit={onValueChange}
+        onInputChange={onTextChange}
+        onInputEnter={onEnter}
+        onInputEscape={onEscape}
+        onStep={onStep}
+        onFocusChange={onFocusChange}
+      />
+      {diagnostic ? (
+        <span id={descriptionId} className='text-xs text-muted-foreground'>
+          {diagnostic}
+        </span>
+      ) : null}
+    </>
   );
 };

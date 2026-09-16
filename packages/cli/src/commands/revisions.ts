@@ -38,8 +38,10 @@ const projectArguments = {
  * Refuse the run when the binaries a disk host records with are missing.
  *
  * `git` is the engine and `git-lfs` is how large objects reach a remote and how
- * a stock clone resolves them; the desktop app ships both, and the CLI takes
- * what is installed and says which one is not (OQ-B8).
+ * a stock clone resolves them. The CLI takes what is installed and says which
+ * one is not (OQ-B8). The desktop app is meant to carry its own `git` with
+ * `git-lfs` inside its exec path (OQ3); until that payload is packaged and
+ * verified, every host here answers from `PATH`.
  *
  * @throws CliError Naming exactly what is missing.
  */

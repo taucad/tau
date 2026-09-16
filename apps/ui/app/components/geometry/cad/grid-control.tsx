@@ -1,7 +1,6 @@
 import React, { useCallback, useState, useMemo } from 'react';
 import type { ClassValue } from 'clsx';
 import { Info, Lock, LockIcon, LockOpen } from 'lucide-react';
-import type { LengthSymbol } from '@taucad/units';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { Button } from '@taucad/ui/components/button';
 import {
@@ -63,7 +62,7 @@ export function GridSizeIndicator({ className }: GridSizeIndicatorProps): React.
     (selectedUnit: string) => {
       graphicsRef.send({
         type: 'setGridUnit',
-        payload: { unit: selectedUnit as LengthSymbol },
+        payload: { unit: selectedUnit },
       });
     },
     [graphicsRef],

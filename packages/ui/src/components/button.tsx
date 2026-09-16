@@ -27,7 +27,10 @@ const buttonVariants = cva(
           'border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/60',
         // A variant of the outline, used when overlaying onto a canvas
         overlay: 'border bg-sidebar shadow-xs hover:bg-accent hover:text-accent-foreground',
-        secondary: 'bg-secondary border text-secondary-foreground shadow-xs hover:bg-secondary/80',
+        // ponytail: `bg-secondary/80` fades toward the page background, which is where Tau's
+        // secondary already sits, so it read as no hover at all. `accent` is the shared
+        // hovered-surface token and steps away from the background in every theme.
+        secondary: 'bg-secondary border text-secondary-foreground shadow-xs hover:bg-accent',
         neutral: 'bg-accent/70 text-foreground shadow-xs hover:bg-accent',
         ghost: 'hover:bg-accent/50 hover:text-accent-foreground dark:hover:bg-accent/80',
         link: 'underline-offset-4 hover:underline',

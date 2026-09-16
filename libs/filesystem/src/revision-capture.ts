@@ -15,7 +15,10 @@ import { ImmutableRevisionTree } from '#revision-tree.js';
 import type { RevisionFileMode, RevisionTreeInput } from '#revision-tree.js';
 
 /** Read capabilities required to capture one immutable revision tree. @public */
-export type RevisionCaptureFileSystem = Pick<FileSystemProvider, 'readFile' | 'readFileStream' | 'readdir' | 'stat'>;
+export type RevisionCaptureFileSystem = Pick<
+  FileSystemProvider,
+  'readFile' | 'readFileStream' | 'readdir' | 'stat' | 'getFileMode'
+>;
 
 const isNotFoundError = (error: unknown): boolean =>
   typeof error === 'object' &&

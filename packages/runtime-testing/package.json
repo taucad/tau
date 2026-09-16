@@ -57,6 +57,7 @@
     "@gltf-transform/functions": "catalog:",
     "@taucad/cache-core": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
+    "@taucad/parameters": "workspace:*",
     "@taucad/utils": "workspace:*",
     "deepmerge": "catalog:"
   },

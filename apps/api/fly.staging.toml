@@ -68,10 +68,18 @@ TAU_S3_FORCE_PATH_STYLE = 'false'
 # the repositories a Machine serves are the repositories on its own disk. The
 # `app` process must stay single-Machine (or gain request routing by project)
 # until a shared-storage backend exists — see the W11a report's operator items.
+#
+# Sized against the plan, not against today's usage (ruling OQ1, review C27).
+# Staging carries seeded Pro accounts rather than customers, so it starts at one
+# Pro allowance (10 GiB) and extends; prod starts at five. See `fly.prod.toml`
+# for why this is a volume setting and not a free-disk check in code.
 [[mounts]]
 source = 'tau_git_data'
 destination = '/data'
-initial_size = '3gb'
+initial_size = '10gb'
+auto_extend_size_threshold = 80
+auto_extend_size_increment = '5gb'
+auto_extend_size_limit = '50gb'
 processes = ['app']
 
 [http_service]

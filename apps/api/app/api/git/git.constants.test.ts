@@ -31,7 +31,11 @@ const runHook = async (
     const stderr: Array<Uint8Array<ArrayBuffer>> = [];
     child.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => stderr.push(chunk));
     child.stdin.end(
-      (typeof ref === 'string' ? [ref] : ref).map((name) => `${'0'.repeat(40)} ${'1'.repeat(40)} ${name}\n`).join(''),
+      (typeof ref === 'string' ? [ref] : ref)
+        /* A bare name is a ref *creation*; a caller that needs a particular
+           old/new pair (a deletion, a rewind) writes the whole hook line. */
+        .map((name) => (name.includes(' ') ? `${name}\n` : `${'0'.repeat(40)} ${'1'.repeat(40)} ${name}\n`))
+        .join(''),
     );
     child.on('close', (code) => {
       resolve({
@@ -84,6 +88,21 @@ describe('Tau Hosted Remote constants', () => {
       const refused = await runHook(ref);
       expect(refused.code, ref).toBe(1);
       expect(refused.stderr).toContain(ref === 'refs/heads/' ? 'host-local' : ref);
+    }
+  });
+
+  /**
+   * Ruling OQ4: no ref family is deletable, and the hook is the only place that
+   * can say so. `receive.denyDeletes` is set on the spawn as well, but git
+   * applies it to `refs/heads/*` alone — measured against git 2.55, a tag and a
+   * `refs/tau/chats/*` ref were both deletable with it on (review C25).
+   */
+  it('refuses a deletion of every pushable ref family', async () => {
+    for (const ref of ['refs/heads/main', 'refs/tags/v1', 'refs/tau/chats/chat_1', 'refs/tau/artifacts/a1']) {
+      // oxlint-disable-next-line no-await-in-loop -- one hook run per ref, by design
+      const refused = await runHook(`${'1'.repeat(40)} ${'0'.repeat(40)} ${ref}`);
+      expect(refused.code, `${ref} was deletable: ${refused.stderr}`).toBe(1);
+      expect(refused.stderr).toContain('never deletes a ref');
     }
   });
 

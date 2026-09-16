@@ -2,14 +2,14 @@
 /* eslint-disable @typescript-eslint/naming-convention -- decorators are not constructors; git-lfs wire fields are snake_case */
 import { spawn } from 'node:child_process';
 import { createHash, randomFillSync } from 'node:crypto';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import type { Server } from 'node:http';
 import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { Injectable, Module, VersioningType } from '@nestjs/common';
+import { Injectable, Module, UnauthorizedException, VersioningType } from '@nestjs/common';
 import type { CanActivate, ExecutionContext, MiddlewareConsumer, NestModule, OnModuleInit } from '@nestjs/common';
 import { APP_FILTER, APP_PIPE, HttpAdapterHost } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
@@ -37,6 +37,79 @@ const projectId = 'proj_w11a';
 const ownerId = 'user-owner';
 const ownerToken = 'owner-token';
 
+/**
+ * This harness's stand-in for the deployed `TAU_API_URL`.
+ *
+ * Reserved before the application is built, because `GitController` reads the
+ * value in its constructor (the point of C24 is that the LFS endpoint is a
+ * configured fact rather than a per-request one) and stock `git-lfs` then has
+ * to reach it. Assigned in `beforeAll`.
+ */
+let configuredApiUrl = '';
+
+/** A port nothing is listening on yet, so the API can be configured for it. */
+const reservePort = async (): Promise<number> =>
+  new Promise((resolve) => {
+    const probe = createServer();
+    probe.listen(0, '127.0.0.1', () => {
+      const address = probe.address();
+      const port = typeof address === 'string' || address === null ? 0 : address.port;
+      probe.close(() => {
+        resolve(port);
+      });
+    });
+  });
+
+/**
+ * A forwarding shim that hides *smart* HTTP and passes everything else through
+ * to the API unchanged.
+ *
+ * Git has no client-side switch for the dumb protocol: it asks for
+ * `info/refs?service=git-upload-pack` and walks the dumb layout only when the
+ * answer is not a smart advertisement. A 404 is not that — git dies with
+ * "repository not found" — so the shim drops the `service` parameter and lets
+ * the API answer with the plain `info/refs` file `update-server-info` wrote,
+ * which is exactly what a deployment without smart HTTP returns. Every other
+ * byte of the clone — `HEAD`, `info/refs`,
+ * `objects/info/packs`, each loose object and pack, and git-lfs's batch POST —
+ * is served by the API's own routes, which is what W18/V8 name as an
+ * acceptance path and what no suite had ever actually performed.
+ *
+ * @param target - The API origin to forward to.
+ * @returns The shim server and its origin.
+ */
+const createDumbOnlyProxy = async (target: string): Promise<{ server: Server; origin: string }> =>
+  new Promise((resolve) => {
+    const upstream = new URL(target);
+    const server = createServer((incoming, response) => {
+      const requested = incoming.url ?? '/';
+      const url = requested.includes('?service=') ? requested.slice(0, requested.indexOf('?')) : requested;
+      const forwarded = httpRequest(
+        {
+          hostname: upstream.hostname,
+          port: upstream.port,
+          path: url,
+          method: incoming.method,
+          headers: incoming.headers,
+        },
+        (answer) => {
+          response.writeHead(answer.statusCode ?? 502, answer.headers);
+          answer.pipe(response);
+        },
+      );
+      forwarded.on('error', () => {
+        response.statusCode = 502;
+        response.end();
+      });
+      incoming.pipe(forwarded);
+    });
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      const port = typeof address === 'string' || address === null ? 0 : address.port;
+      resolve({ server, origin: `http://127.0.0.1:${String(port)}` });
+    });
+  });
+
 /** Mutable fixture state the stubs read. */
 const state = {
   ownerId: ownerId as string | undefined,
@@ -44,6 +117,12 @@ const state = {
   storageBytes: 0,
   lfsBytes: 0,
 };
+
+/**
+ * What one request cost the database, so the read path's cost is a fact rather
+ * than a reading of the source (review C28).
+ */
+const queries = { project: 0, entitlements: 0, usage: 0 };
 
 const runGit = async (
   args: readonly string[],
@@ -90,7 +169,10 @@ class GitTestAuthGuard implements CanActivate {
       request.user = { id: ownerId, name: 'Owner', email: 'owner@test.com' };
       return true;
     }
-    return false;
+    /* The deployed `AuthGuard` raises rather than returning `false`, and the
+       difference is 401 versus Nest's default 403 — which is what a browser
+       client has to tell apart (review C8). */
+    throw new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'Authentication required' });
   }
 }
 
@@ -144,6 +226,8 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
   beforeAll(async () => {
     gitRoot = await mkdtemp(path.join(tmpdir(), 'tau-git-root-'));
     workspace = await mkdtemp(path.join(tmpdir(), 'tau-git-work-'));
+    const port = await reservePort();
+    configuredApiUrl = `http://127.0.0.1:${String(port)}`;
     ({ server: storeServer, origin: storeOrigin } = await createObjectStoreServer());
 
     const databaseStub = {
@@ -153,6 +237,7 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
             where: () => ({
               limit: async (): Promise<unknown[]> => {
                 if (table === project) {
+                  queries.project += 1;
                   return state.ownerId === undefined ? [] : [{ ownerId: state.ownerId }];
                 }
                 if (table === projectGit) {
@@ -231,16 +316,24 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
         {
           provide: commercialEntitlementsKey,
           useValue: {
-            getEntitlements: async () => ({
-              tier: state.tier,
-              canSyncFiles: state.tier !== 'free',
-            }),
+            getEntitlements: async () => {
+              queries.entitlements += 1;
+              return {
+                tier: state.tier,
+                canSyncFiles: state.tier !== 'free',
+              };
+            },
           },
         },
         {
           provide: ConfigService,
           useValue: {
-            get: (key: string): unknown => (key === 'TAU_GIT_ROOT' ? gitRoot : ''),
+            get: (key: string): unknown => {
+              if (key === 'TAU_GIT_ROOT') {
+                return gitRoot;
+              }
+              return key === 'TAU_API_URL' ? configuredApiUrl : '';
+            },
           },
         },
         { provide: APP_PIPE, useClass: ZodValidationPipe },
@@ -273,13 +366,13 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
     app.enableVersioning({ type: VersioningType.URI });
     await app.init();
     await app.getHttpAdapter().getInstance().ready();
-    await app.listen(0);
+    await app.listen(new URL(configuredApiUrl).port, '127.0.0.1');
 
     const repositories = app.get(GitRepositoryService);
-    vi.spyOn(repositories, 'readOwnerUsage').mockImplementation(async () => ({
-      storageBytes: state.storageBytes,
-      lfsBytes: state.lfsBytes,
-    }));
+    vi.spyOn(repositories, 'readOwnerUsage').mockImplementation(async () => {
+      queries.usage += 1;
+      return { storageBytes: state.storageBytes, lfsBytes: state.lfsBytes };
+    });
     vi.spyOn(repositories, 'readLfsObjects').mockImplementation(async (_project, oids) =>
       oids.flatMap((oid) => {
         const row = lfsRows.get(oid);
@@ -322,10 +415,8 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
       return 'finalized';
     });
 
-    const address = app.getHttpServer().address();
-    const port = typeof address === 'string' || address === null ? 0 : address.port;
-    baseUrl = `http://127.0.0.1:${port}`;
-    remoteUrl = `http://tau:${ownerToken}@127.0.0.1:${port}/v1/git/${projectId}.git`;
+    baseUrl = configuredApiUrl;
+    remoteUrl = `http://tau:${ownerToken}@${new URL(configuredApiUrl).host}/v1/git/${projectId}.git`;
   });
 
   afterAll(async () => {
@@ -719,6 +810,243 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
     expect(pulled.code, pulled.stderr).toBe(0);
     const { size } = await stat(path.join(reader, 'scan.bin'));
     expect(size).toBe(2 * 1024 * 1024);
+  });
+
+  /**
+   * V8 / W18's acceptance path, performed rather than reasoned about: a stock
+   * `git clone` over the **dumb** protocol of a repository that holds an LFS
+   * object, followed by `git lfs pull`.
+   *
+   * The repository is the one the row above pushed `scan.bin` to, so the clone
+   * walks `info/refs`, `objects/info/packs` and every loose object through
+   * `GitController.dumbHttp`, and git-lfs then smudges the pointer through the
+   * batch API. It also happens to prove C24 from the other side: the shim's own
+   * `Host` is what the API sees, and the `verify` href is still the configured
+   * one.
+   */
+  it('clones over the dumb protocol with stock git and pulls its LFS object', async () => {
+    const { server: shim, origin: shimOrigin } = await createDumbOnlyProxy(baseUrl);
+    try {
+      const smart = await fetch(`${shimOrigin}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
+        headers: { Authorization: `Bearer ${ownerToken}` },
+      });
+      expect(smart.status).toBe(200);
+      expect(
+        smart.headers.get('content-type'),
+        'the shim must hide smart HTTP for git to walk the dumb layout',
+      ).toContain('text/plain');
+
+      const into = path.join(workspace, 'dumb-clone');
+      const dumbUrl = `http://tau:${ownerToken}@${new URL(shimOrigin).host}/v1/git/${projectId}.git`;
+      const cloned = await runGit(['clone', '-q', dumbUrl, into], workspace);
+      expect(cloned.code, cloned.stderr).toBe(0);
+
+      const expected = await runGit(['rev-parse', 'refs/heads/main'], path.join(gitRoot, `${projectId}.git`));
+      const actual = await runGit(['rev-parse', 'HEAD'], into);
+      expect(actual.stdout.trim()).toBe(expected.stdout.trim());
+
+      {
+        const outcome = await runGit(['lfs', 'install', '--local'], into);
+        expect(outcome.code, outcome.stderr).toBe(0);
+      }
+      const pulled = await runGit(['lfs', 'pull'], into);
+      expect(pulled.code, pulled.stderr).toBe(0);
+      const { size } = await stat(path.join(into, 'scan.bin'));
+      expect(size).toBe(2 * 1024 * 1024);
+    } finally {
+      shim.close();
+    }
+  }, 120_000);
+
+  /**
+   * C24 (P0, charter I8): the `verify` action carries the caller's own Tau
+   * bearer, so its href decides where that credential is sent.
+   *
+   * It used to be built from `request.protocol`/`request.host`: behind Fly
+   * `trustProxy` is unset and TLS terminates at the proxy, so `protocol` was
+   * `http` and the credential crossed the public internet in cleartext — and
+   * `Host` is the client's own header, so the same line let a caller point its
+   * credential at any origin it liked. Built from the validated `TAU_API_URL`
+   * instead, exactly as `git-proxy.controller.ts` already builds the LFS relay.
+   */
+  it('builds the LFS verify href from the configured API URL, not from the request', async () => {
+    /* `fetch` refuses to set `Host` (it is a forbidden header name), and `Host`
+       is half of what C24 is about — so this one request is written with the
+       raw client, exactly as a hostile caller would. */
+    const spoofed = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const upstream = new URL(baseUrl);
+      const call = httpRequest(
+        {
+          hostname: upstream.hostname,
+          port: upstream.port,
+          path: `/v1/git/${projectId}.git/info/lfs/objects/batch`,
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${ownerToken}`,
+            'content-type': 'application/vnd.git-lfs+json',
+            host: 'evil.example',
+          },
+        },
+        (answer) => {
+          const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+          answer.on('data', (chunk: Uint8Array<ArrayBuffer>) => chunks.push(chunk));
+          answer.on('end', () => {
+            resolve({ status: answer.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') });
+          });
+        },
+      );
+      call.on('error', reject);
+      call.end(
+        JSON.stringify({
+          operation: 'upload',
+          transfers: ['basic'],
+          objects: [{ oid: 'd'.repeat(64), size: 7 }],
+        }),
+      );
+    });
+
+    expect(spoofed.status).toBe(200);
+    const body = JSON.parse(spoofed.body) as {
+      objects: Array<{ actions?: { verify?: { href: string; header?: Record<string, string> } } }>;
+    };
+    const verify = body.objects[0]?.actions?.verify;
+    expect(verify?.href).not.toContain('evil.example');
+    expect(verify?.href).toBe(`${configuredApiUrl}/v1/git/${projectId}.git/info/lfs/objects/verify`);
+    /* The credential is still attached — that is git-lfs's contract — which is
+       exactly why the href above may not be the caller's to choose. */
+    expect(verify?.header?.['Authorization']).toBe(`Bearer ${ownerToken}`);
+
+    state.lfsBytes = 0;
+    lfsRows.delete('d'.repeat(64));
+  });
+
+  /**
+   * C25 / ruling OQ4: compare-and-swap, enforced where it can be.
+   *
+   * `pre-receive` matches ref *names* only, so until `receive.denyDeletes` and
+   * `receive.denyNonFastForwards` joined the spawn a client could delete a
+   * published tag, delete a chat record ref and force-rewind `main` — all three
+   * reproduced against the real hook. `--force-with-lease` is client
+   * discipline; this is the server's, and it covers every ref family because
+   * retention is server-local (D17) and never needs a client delete.
+   */
+  it('refuses a ref deletion and a non-fast-forward push, and keeps what they aimed at', async () => {
+    const clone = path.join(workspace, 'cas');
+    {
+      const outcome = await runGit(['clone', remoteUrl, clone], workspace);
+      expect(outcome.code, outcome.stderr).toBe(0);
+    }
+    {
+      const outcome = await runGit(['tag', 'v-cas'], clone);
+      expect(outcome.code, outcome.stderr).toBe(0);
+    }
+    {
+      const outcome = await runGit(['push', 'origin', 'refs/tags/v-cas'], clone);
+      expect(outcome.code, outcome.stderr).toBe(0);
+    }
+    {
+      const outcome = await runGit(['update-ref', 'refs/tau/chats/chat_cas', 'HEAD'], clone);
+      expect(outcome.code, outcome.stderr).toBe(0);
+    }
+    {
+      const outcome = await runGit(['push', 'origin', 'refs/tau/chats/chat_cas'], clone);
+      expect(outcome.code, outcome.stderr).toBe(0);
+    }
+
+    const deletedTag = await runGit(['push', 'origin', ':refs/tags/v-cas'], clone);
+    expect(deletedTag.code, `tag deletion was accepted: ${deletedTag.stderr}`).not.toBe(0);
+
+    const deletedRecord = await runGit(['push', 'origin', ':refs/tau/chats/chat_cas'], clone);
+    expect(deletedRecord.code, `record deletion was accepted: ${deletedRecord.stderr}`).not.toBe(0);
+
+    const head = await runGit(['rev-parse', 'HEAD'], clone);
+    {
+      const outcome = await runGit(['reset', '--hard', 'HEAD~1'], clone);
+      expect(outcome.code, outcome.stderr).toBe(0);
+    }
+    const rewound = await runGit(['push', '--force', 'origin', 'HEAD:refs/heads/main'], clone);
+    expect(rewound.code, `a force push was accepted: ${rewound.stderr}`).not.toBe(0);
+
+    const advertised = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    }).then(async (response) => response.text());
+    expect(advertised).toContain('refs/tags/v-cas');
+    expect(advertised).toContain('refs/tau/chats/chat_cas');
+    expect(advertised).toContain(head.stdout.trim());
+  }, 120_000);
+
+  /**
+   * C7 / N6: git prints the body of a failed request only when it is
+   * `text/plain` (`show_http_message`, measured against git 2.55) — under
+   * `application/json` the identical bytes are discarded and a free account
+   * sees `error: 403` and nothing else. A browser is told apart by `Origin`,
+   * which stock git never sends, and keeps the JSON envelope.
+   */
+  it('answers a git-protocol refusal as text/plain for a client that is not a browser', async () => {
+    state.tier = 'free';
+    const forGit = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-receive-pack`, {
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
+    const forBrowser = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-receive-pack`, {
+      headers: { Authorization: `Bearer ${ownerToken}`, origin: 'https://tau.new' },
+    });
+    state.tier = 'pro';
+
+    expect(forGit.status).toBe(403);
+    expect(forGit.headers.get('content-type')).toMatch(/text\/plain/u);
+    expect(await forGit.text()).toContain('paid plan');
+
+    expect(forBrowser.status).toBe(403);
+    expect(forBrowser.headers.get('content-type')).toMatch(/application\/json/u);
+    expect(await forBrowser.json()).toEqual(expect.objectContaining({ code: 'GIT_SYNC_NOT_ENTITLED' }));
+  });
+
+  /**
+   * C8: the Basic challenge is written straight to the raw `ServerResponse`, so
+   * neither `@fastify/cors` nor `@fastify/helmet` runs on it — a signed-out
+   * browser `fetch` saw an opaque network failure and could not tell "sign in
+   * again" from "the API is down". Stock git never sends `Origin`, and it is
+   * the only client that needs the challenge, so a request that carries one
+   * goes to the guard and is answered through the whole chain.
+   */
+  it('answers an unauthenticated browser request through CORS instead of the raw challenge', async () => {
+    const browser = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-receive-pack`, {
+      headers: { origin: 'https://tau.new' },
+    });
+    expect(browser.status).toBe(401);
+    expect(browser.headers.get('access-control-allow-origin')).toBe('https://tau.new');
+    expect(await browser.json()).toEqual(expect.objectContaining({ code: 'UNAUTHORIZED' }));
+
+    // Stock git still gets the challenge that makes it ask its credential helper.
+    const git = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-receive-pack`);
+    expect(git.status).toBe(401);
+    expect(git.headers.get('www-authenticate')).toBe('Basic realm="Tau"');
+  });
+
+  /**
+   * C28: a read consults neither `canSyncFiles` nor the plan headroom, and it
+   * used to pay for both anyway — `getEntitlements` is three uncached queries
+   * by design and `readOwnerUsage` is a `sum()` across every project the owner
+   * has. A dumb-HTTP clone pays `authorize` once per *object*, which is what
+   * made five round-trips per read worth removing.
+   */
+  it('costs a read exactly one database query', async () => {
+    queries.project = 0;
+    queries.entitlements = 0;
+    queries.usage = 0;
+
+    const advertisement = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
+    expect(advertisement.status).toBe(200);
+    expect(queries).toEqual({ project: 1, entitlements: 0, usage: 0 });
+
+    // And a write still pays for the plan — once, not twice (`admitGitPush`).
+    const write = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-receive-pack`, {
+      headers: { Authorization: `Bearer ${ownerToken}` },
+    });
+    expect(write.status).toBe(200);
+    expect(queries).toEqual({ project: 2, entitlements: 1, usage: 1 });
   });
 
   it('refuses a proxy target with a credential in the URL, a private host, or a non-git path', async () => {

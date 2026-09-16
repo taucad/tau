@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { modelSupportsInput } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
 import type { ConfigService } from '@nestjs/config';
-import { modelList } from '#api/models/model.constants.js';
+import { isModelListEntryEnabled, modelList } from '#api/models/model.constants.js';
 import { ModelService } from '#api/models/model.service.js';
+import { gatewayModelRoutes } from '#api/providers/provider-gateway.js';
 import { ProviderService } from '#api/providers/provider.service.js';
 import type { Environment } from '#config/environment.config.ts';
 
@@ -34,6 +35,22 @@ const cappedModelIds = [
   'xai-grok-4.6',
   'moonshot-kimi-k3',
 ] as const;
+
+/** Every model Tau sends a PDF to; each is on a proven Anthropic or OpenAI codec (blueprint D20, Finding 13). */
+const pdfInputModelIds = [
+  'anthropic-claude-fable-5.1',
+  'anthropic-claude-fable-5',
+  'anthropic-claude-opus-5',
+  'anthropic-claude-opus-4.8',
+  'anthropic-claude-sonnet-5',
+  'anthropic-claude-sonnet-4.6',
+  'anthropic-claude-haiku-4.5',
+  'openai-gpt-6-astra',
+  'openai-gpt-5.6-sol',
+  'openai-gpt-5.6-terra',
+  'openai-gpt-5.6-luna',
+  'openai-gpt-5.5',
+];
 
 const getCloudCatalogEntries = () => Object.values(modelList).flatMap((modelsBySlug) => Object.values(modelsBySlug));
 
@@ -77,6 +94,32 @@ describe('modelList', () => {
       expect(model.support?.modalities?.output.length, model.id).toBeGreaterThan(0);
     }
   });
+
+  it('declares PDF input on exactly the proven Anthropic and OpenAI codec models', () => {
+    const pdfModelIds = getCloudCatalogEntries()
+      .filter((model) => modelSupportsInput(model.support, 'pdf'))
+      .map((model) => model.id);
+
+    expect(pdfModelIds).toEqual(pdfInputModelIds);
+  });
+
+  it('never declares PDF input outside a proven codec, a vision model, or on Vertex AI', () => {
+    const wireByRouteId = new Map(gatewayModelRoutes().map((route) => [route.routeId, route]));
+
+    for (const model of getCloudCatalogEntries().filter((entry) => modelSupportsInput(entry.support, 'pdf'))) {
+      // Provider PDF support rasterises pages, so it is only offered on a vision-capable model.
+      expect(modelSupportsInput(model.support, 'image'), model.id).toBe(true);
+      // Vertex AI stays ungated until the live document check in the blueprint's manual row 12 passes.
+      expect(model.provider.id, model.id).not.toBe('vertexai');
+      if (isModelListEntryEnabled(model)) {
+        expect(wireByRouteId.get(model.id)?.wire, model.id).toBeOneOf([
+          'anthropic',
+          'openai-responses',
+          'openai-completions',
+        ]);
+      }
+    }
+  });
 });
 
 describe('ModelService', () => {
@@ -117,7 +160,7 @@ describe('ModelService', () => {
       provider: { id: 'anthropic', name: 'Anthropic' },
       support: {
         toolChoice: false,
-        modalities: { input: ['text', 'image'], output: ['text'] },
+        modalities: { input: ['text', 'image', 'pdf'], output: ['text'] },
       },
       details: {
         family: 'claude',
@@ -148,7 +191,7 @@ describe('ModelService', () => {
       provider: { id: 'anthropic', name: 'Anthropic' },
       support: {
         toolChoice: false,
-        modalities: { input: ['text', 'image'], output: ['text'] },
+        modalities: { input: ['text', 'image', 'pdf'], output: ['text'] },
       },
       details: {
         family: 'claude',

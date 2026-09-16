@@ -7,6 +7,7 @@ import {
   Get,
   HttpException,
   HttpStatus,
+  Inject,
   NotFoundException,
   Param,
   Put,
@@ -15,6 +16,8 @@ import { count, desc, eq } from 'drizzle-orm';
 import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
 import { DatabaseService } from '#database/database.service.js';
 import { project } from '#database/schema.js';
+import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
+import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
 import {
   isProjectRepositoryId,
   projectRegistrationsPerOwnerPerDay,
@@ -43,6 +46,8 @@ export class ProjectsController {
     private readonly databaseService: DatabaseService,
     private readonly repositories: GitRepositoryService,
     private readonly rateLimiter: PublicationRateLimiterService,
+    @Inject(commercialEntitlementsKey)
+    private readonly entitlementsService: CommercialEntitlementsService,
   ) {}
 
   /**
@@ -88,7 +93,7 @@ export class ProjectsController {
    * @returns The registered project's id.
    * @throws BadRequestException When the id cannot name a repository.
    * @throws NotFoundException When the id is already another account's (P55).
-   * @throws ForbiddenException When the account is at its project ceiling.
+   * @throws ForbiddenException When the plan does not entitle syncing (N5), or when the account is at its project ceiling.
    * @throws HttpException When the account is over its daily registration budget.
    */
   @Put(':projectId')
@@ -119,6 +124,25 @@ export class ProjectsController {
     const existing = await this.ownerOf(projectId);
     if (existing !== undefined && existing !== userId) {
       throw this.notFound();
+    }
+
+    /* Before the row and before the repository (N5). Registration is the write
+       *Connect Tau Cloud* makes, and every subsequent push is refused with this
+       same sentence at `git.service.ts` — so without this guard a free account
+       connected successfully, got a `project` row and a bare repository with
+       hooks on the shared volume, and then could never use either. Four such
+       orphans exist on the operator's own account; each one spends a slot of
+       the 200-project ceiling that a later paid plan would want.
+
+       After the ownership check, not before it: ruling P55 says an id that is
+       somebody else's answers `404` on every surface, and a plan refusal that
+       preceded it would replace that answer for an un-entitled caller. */
+    const entitlements = await this.entitlementsService.getEntitlements(userId);
+    if (!entitlements.canSyncFiles) {
+      throw new ForbiddenException({
+        code: 'GIT_SYNC_NOT_ENTITLED',
+        message: 'Syncing files to Tau Cloud is a paid plan feature.',
+      });
     }
 
     if (existing === undefined) {

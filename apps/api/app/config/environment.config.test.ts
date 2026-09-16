@@ -282,7 +282,8 @@ describe('environmentSchema', () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.TAU_EMAIL_FROM).toBe('Tau <identity@taucad.dev>');
-      expect(result.data.TAU_EMAIL_REPLY_TO).toBe('identity@taucad.dev');
+      // Replies go to the staffed help mailbox (OQ8); fly.prod.toml overrides it with the tau.new address.
+      expect(result.data.TAU_EMAIL_REPLY_TO).toBe('help@taucad.dev');
     }
   });
 

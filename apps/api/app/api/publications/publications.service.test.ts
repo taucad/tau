@@ -185,10 +185,17 @@ function publishRequest(
  * tests exercise the storage/DB behaviour, not the entitlement gate; gate
  * tests pass `canCreatePrivateShares: false` explicitly.
  */
-function createBillingStub(args?: { canCreatePrivateShares?: boolean }): PublicationsServiceDeps[7] {
+function createBillingStub(args?: {
+  canCreatePrivateShares?: boolean;
+  canSyncFiles?: boolean;
+}): PublicationsServiceDeps[7] {
   return {
     getEntitlements: vi.fn().mockResolvedValue({
       canCreatePrivateShares: args?.canCreatePrivateShares ?? true,
+      /* Publishing a named version presupposes the push that created it, so
+         `publishFromRevision` refuses without the sync entitlement before it
+         reaches `ensureRepository` (N5's second route, review C11). */
+      canSyncFiles: args?.canSyncFiles ?? true,
     }),
   } as unknown as PublicationsServiceDeps[7];
 }

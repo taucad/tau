@@ -3,6 +3,7 @@ import { BadRequestException, HttpStatus, NotFoundException } from '@nestjs/comm
 import { eq } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import type { DatabaseService } from '#database/database.service.js';
+import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import { project } from '#database/schema.js';
 import { registeredProjectLimitPerOwner } from '#api/git/git.constants.js';
 import type { GitRepositoryService } from '#api/git/git.service.js';
@@ -48,7 +49,17 @@ describe('ProjectsController', () => {
   let inserted: Array<Record<string, unknown>>;
   let conditions: SQL[];
   let ensureRepository: ReturnType<typeof vi.fn>;
+  /** What the caller's plan entitles, which N5 checks before either write. */
+  let canSyncFiles: boolean;
   let controller: ProjectsController;
+
+  const entitlements = (): CommercialEntitlementsService => ({
+    getEntitlements: async () => ({
+      canSyncFiles,
+      canCreatePrivateShares: canSyncFiles,
+      canUseProKernels: canSyncFiles,
+    }),
+  });
 
   /** The one string a `column = $1` condition carries: the owner being asked for. */
   const ownerOf = (condition: SQL | undefined): string | undefined =>
@@ -67,6 +78,7 @@ describe('ProjectsController', () => {
     withinBudget = true;
     inserted = [];
     conditions = [];
+    canSyncFiles = true;
     ensureRepository = vi.fn(async (id: string) => `/git/${id}.git`);
     const databaseStub = {
       database: {
@@ -105,6 +117,7 @@ describe('ProjectsController', () => {
       {
         consumeDailyBudget: async () => ({ allowed: withinBudget, count: 1 }),
       } as unknown as PublicationRateLimiterService,
+      entitlements(),
     );
   });
 
@@ -112,6 +125,26 @@ describe('ProjectsController', () => {
     await expect(controller.register(projectId, body('Bracket'), ownerId)).resolves.toEqual({ id: projectId });
     expect(inserted).toEqual([{ id: projectId, ownerId, name: 'Bracket', origin: 'local-mirror' }]);
     expect(ensureRepository).toHaveBeenCalledWith(projectId);
+  });
+
+  /**
+   * N5 (review C11): the connect verb refuses before it writes anything.
+   *
+   * Registration used to spend the daily budget, insert the row and create a
+   * bare repository with hooks on the shared volume before anything looked at
+   * the plan — and every push that followed was refused at `git.service.ts`
+   * with this same sentence. A free account therefore connected successfully,
+   * could never use what it connected, and spent a slot of the 200-project
+   * ceiling doing it. The wire-level proof (403, no row, no directory) is
+   * `apps/api-e2e/src/git/tau-hosted-remote.spec.ts`.
+   */
+  it('refuses a caller whose plan does not entitle syncing, before the row and the repository', async () => {
+    canSyncFiles = false;
+    await expect(controller.register(projectId, body('Bracket'), ownerId)).rejects.toMatchObject({
+      response: { code: 'GIT_SYNC_NOT_ENTITLED', message: 'Syncing files to Tau Cloud is a paid plan feature.' },
+    });
+    expect(inserted).toEqual([]);
+    expect(ensureRepository).not.toHaveBeenCalled();
   });
 
   it('is idempotent for the owner and still reconciles the repository', async () => {
@@ -167,6 +200,7 @@ describe('ProjectsController', () => {
       racing as unknown as DatabaseService,
       { ensureRepository } as unknown as GitRepositoryService,
       { consumeDailyBudget: async () => ({ allowed: true, count: 1 }) } as unknown as PublicationRateLimiterService,
+      entitlements(),
     );
 
     await expect(contested.register(projectId, body(), ownerId)).rejects.toMatchObject({

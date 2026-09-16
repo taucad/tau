@@ -62,7 +62,14 @@ export class GitBasicAuthMiddleware implements NestMiddleware {
 
     const { authorization } = request.headers;
     if (authorization === undefined) {
-      if (request.headers.cookie !== undefined) {
+      /* This 401 is written straight to the raw `ServerResponse`, so neither
+         `@fastify/cors` nor `@fastify/helmet` runs on it — a signed-out browser
+         `fetch` saw an opaque network failure rather than a readable 401 and
+         could not tell "sign in again" from "the API is down" (review C8).
+         Stock git never sends `Origin`, and it is the only client that needs
+         the challenge at all, so a request that carries one goes to the guard,
+         which answers through the whole chain. */
+      if (request.headers.cookie !== undefined || request.headers.origin !== undefined) {
         next();
         return;
       }

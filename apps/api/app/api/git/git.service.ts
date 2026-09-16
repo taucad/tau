@@ -191,6 +191,13 @@ export class GitRepositoryService implements OnApplicationBootstrap {
    * Read (fetch, dumb HTTP) needs the project; write (push, LFS upload) also
    * needs the sync entitlement and headroom under the plan allowance. One auth
    * path: the caller is already resolved by `AuthGuard`.
+   *
+   * A read stops after the project row. The plan facts cost four sequential
+   * round-trips — `getEntitlements` is three uncached queries by design, and
+   * `readOwnerUsage` is a `sum()` across every project the owner has — and a
+   * read consults neither `canSyncFiles` nor `remainingBytes`. A dumb-HTTP
+   * clone pays `authorize` once *per object*, so this is the difference between
+   * five queries an object and one (review C28).
    */
   public async authorize(args: {
     projectId: string;
@@ -213,8 +220,20 @@ export class GitRepositoryService implements OnApplicationBootstrap {
       });
     }
 
+    if (args.mode === 'read') {
+      return {
+        projectId: args.projectId,
+        ownerId: row.ownerId,
+        repositoryPath: await this.ensureRepository(args.projectId),
+        /* A read spends nothing and is offered nothing: every caller that reads
+           these two is a write caller (`git.controller.ts`, `git-lfs.service.ts`). */
+        remainingBytes: 0,
+        storageLimitBytes: 0,
+      };
+    }
+
     const entitlements = await this.entitlementsService.getEntitlements(row.ownerId);
-    if (args.mode !== 'read' && !entitlements.canSyncFiles) {
+    if (!entitlements.canSyncFiles) {
       throw new ForbiddenException({
         code: 'GIT_SYNC_NOT_ENTITLED',
         message: 'Syncing files to Tau Cloud is a paid plan feature.',
@@ -592,23 +611,30 @@ export class GitRepositoryService implements OnApplicationBootstrap {
     }
   }
 
-  /** Refresh quota while holding the owner gate for the entire receive-pack. */
-  public async admitGitPush(access: GitAccess): Promise<{ remainingBytes: number; release: () => void }> {
+  /**
+   * Hold the owner gate for the entire receive-pack.
+   *
+   * The headroom is `authorize`'s own, taken on this request: re-running the
+   * account-wide `sum()` here asked the same question of the same rows a
+   * moment later and doubled the aggregate on every push (review C28). The
+   * gate is still what makes the figure safe — one storage write per account at
+   * a time — and `pre-receive` re-measures the quarantine against it anyway.
+   *
+   * @param access - What `authorize` resolved for this request.
+   * @returns The headroom the push may use, and the gate's release.
+   * @throws PayloadTooLargeException When the plan allowance is already spent.
+   * @throws ServiceUnavailableException When this account already holds the gate.
+   */
+  public admitGitPush(access: GitAccess): { remainingBytes: number; release: () => void } {
     const release = this.claimStorageOwner(access.ownerId);
-    try {
-      const usage = await this.readOwnerUsage(access.ownerId);
-      const remainingBytes = Math.max(0, access.storageLimitBytes - usage.storageBytes - usage.lfsBytes);
-      if (remainingBytes === 0) {
-        throw new PayloadTooLargeException({
-          code: 'GIT_QUOTA_EXCEEDED',
-          message: 'Storage quota reached.',
-        });
-      }
-      return { remainingBytes, release };
-    } catch (error) {
+    if (access.remainingBytes === 0) {
       release();
-      throw error;
+      throw new PayloadTooLargeException({
+        code: 'GIT_QUOTA_EXCEEDED',
+        message: 'Storage quota reached.',
+      });
     }
+    return { remainingBytes: access.remainingBytes, release };
   }
 
   public async readUsage(projectId: string): Promise<{ storageBytes: number; lfsBytes: number }> {
@@ -690,9 +716,12 @@ export class GitRepositoryService implements OnApplicationBootstrap {
     /** Set for a push: the project whose storage row is re-measured after it. */
     accountFor?: string;
     /**
-     * Set for a push: git's own `receive.maxInputSize`, so an oversized pack is
-     * refused while it arrives instead of filling the volume before any hook
-     * runs.
+     * The ceiling on the request body this service accepts, counted after
+     * decompression. For a push it is also git's own `receive.maxInputSize`, so
+     * an oversized pack is refused while it arrives instead of filling the
+     * volume before any hook runs; for a fetch, git has no equivalent and
+     * Fastify's `bodyLimit` does not reach a streamed parser, so the count here
+     * is the whole of the bound (review C32).
      */
     maximumInputBytes?: number;
     /** Aborted when the client goes away, which kills the child. */
@@ -723,9 +752,24 @@ export class GitRepositoryService implements OnApplicationBootstrap {
       child = spawn(
         gitExecutable,
         [
-          ...(args.maximumInputBytes === undefined
+          ...(args.accountFor === undefined
             ? []
-            : ['-c', `receive.maxInputSize=${String(args.maximumInputBytes)}`]),
+            : [
+                '-c',
+                `receive.maxInputSize=${String(args.maximumInputBytes ?? 0)}`,
+                /* Compare-and-swap, on the one side of the wire that can enforce
+                   it (charter I7/I9, ruling OQ4). `pre-receive` matches ref
+                   *names* only, so until these two a client could delete a
+                   published tag or a chat record ref and force-rewind `main` —
+                   reproduced against the real hook (review C25). `--force-with-lease`
+                   is client discipline; a stale, buggy or hostile client bypasses
+                   it and the second device's work is gone. All ref families:
+                   retention is server-local (D17) and never needs a client delete. */
+                '-c',
+                'receive.denyDeletes=true',
+                '-c',
+                'receive.denyNonFastForwards=true',
+              ]),
           args.service.replace('git-', ''),
           '--stateless-rpc',
           args.repositoryPath,
@@ -791,6 +835,7 @@ export class GitRepositoryService implements OnApplicationBootstrap {
         gzipped: args.gzipped,
         service: args.service,
         request,
+        maximumInputBytes: args.maximumInputBytes,
       }),
     );
 
@@ -874,12 +919,23 @@ export class GitRepositoryService implements OnApplicationBootstrap {
   }
 
   /**
-   * Keep revisions named only inside synchronized chat records reachable from
-   * Git's own collector, then return every LFS object reachable from all refs.
+   * Every LFS object reachable from all refs.
+   *
+   * A read, and only a read. `refreshRecordRetentionRoots` used to run from
+   * here, which put a ref-writing `for-each-ref` + `rev-list` + batched
+   * `git grep` + `update-ref` fan-out **inside** `retireLfsObject`'s
+   * `pg_advisory_xact_lock` transaction, where R14 needs a reachability
+   * recheck — so a nightly collection pass held one account's storage gate
+   * across minutes of git work and every concurrent push got `503
+   * GIT_STORAGE_BUSY` (review C30). The refresh is maintenance and now runs
+   * once per pass from `GitBackupService`, under the repository gate it
+   * already holds.
+   *
+   * @param projectId - The project to scan.
+   * @returns Every oid `git lfs ls-files --all` reports.
    */
   public async reachableLfsOids(projectId: string): Promise<ReadonlySet<string>> {
     const repositoryPath = this.repositoryPath(projectId);
-    await this.refreshRecordRetentionRoots(repositoryPath);
     const listed = Buffer.from(await this.run(['lfs', 'ls-files', '--all', '--long'], repositoryPath)).toString('utf8');
     return new Set(
       listed
@@ -950,37 +1006,20 @@ export class GitRepositoryService implements OnApplicationBootstrap {
     }
   }
 
-  private claimStorageOwner(ownerId: string): () => void {
-    if (this.#activeStorageOwners.has(ownerId)) {
-      throw new ServiceUnavailableException({
-        code: 'GIT_STORAGE_BUSY',
-        message: 'Another storage write for this account is in flight; retry shortly.',
-      });
-    }
-    this.#activeStorageOwners.add(ownerId);
-    let released = false;
-    return () => {
-      if (!released) {
-        released = true;
-        this.#activeStorageOwners.delete(ownerId);
-      }
-    };
-  }
-
-  private claimRepositoryOperation(projectId: string): () => void {
-    if (this.#activeRepositoryOperations.has(projectId)) {
-      throw new ServiceUnavailableException({
-        code: 'GIT_REPOSITORY_BUSY',
-        message: 'Another repository maintenance operation is in flight; retry shortly.',
-      });
-    }
-    this.#activeRepositoryOperations.add(projectId);
-    return () => {
-      this.#activeRepositoryOperations.delete(projectId);
-    };
-  }
-
-  private async refreshRecordRetentionRoots(repositoryPath: string): Promise<void> {
+  /**
+   * Keep revisions named only inside synchronized chat records reachable from
+   * git's own collector.
+   *
+   * A maintenance **writer**: it moves `refs/tau/retention/records/*` and
+   * spawns a `git grep` per 256 revisions to find them. Called once per
+   * collection pass from `GitBackupService`, inside the repository-maintenance
+   * window it already holds, and never from a request or from inside a database
+   * transaction (review C30).
+   *
+   * @param repositoryPath - The bare repository to reconcile.
+   * @returns Nothing.
+   */
+  public async refreshRecordRetentionRoots(repositoryPath: string): Promise<void> {
     const listed = Buffer.from(
       await this.run(
         [
@@ -1075,6 +1114,36 @@ export class GitRepositoryService implements OnApplicationBootstrap {
     }
   }
 
+  private claimStorageOwner(ownerId: string): () => void {
+    if (this.#activeStorageOwners.has(ownerId)) {
+      throw new ServiceUnavailableException({
+        code: 'GIT_STORAGE_BUSY',
+        message: 'Another storage write for this account is in flight; retry shortly.',
+      });
+    }
+    this.#activeStorageOwners.add(ownerId);
+    let released = false;
+    return () => {
+      if (!released) {
+        released = true;
+        this.#activeStorageOwners.delete(ownerId);
+      }
+    };
+  }
+
+  private claimRepositoryOperation(projectId: string): () => void {
+    if (this.#activeRepositoryOperations.has(projectId)) {
+      throw new ServiceUnavailableException({
+        code: 'GIT_REPOSITORY_BUSY',
+        message: 'Another repository maintenance operation is in flight; retry shortly.',
+      });
+    }
+    this.#activeRepositoryOperations.add(projectId);
+    return () => {
+      this.#activeRepositoryOperations.delete(projectId);
+    };
+  }
+
   private async spawnRun(args: readonly string[], cwd: string, stdin?: string): Promise<Uint8Array<ArrayBuffer>> {
     return new Promise((resolve, reject) => {
       const child = spawn(gitExecutable, [...args], {
@@ -1154,10 +1223,16 @@ export class GitRepositoryService implements OnApplicationBootstrap {
     service: GitSmartService;
     /** Counted so a flush-only request is not mistaken for a push (review R4). */
     request: { bytes: number };
+    /** The body ceiling; `0` and `undefined` are both "unbounded" (review C32). */
+    maximumInputBytes?: number;
   }): Promise<void> {
+    const ceiling = args.maximumInputBytes ?? 0;
     const source = args.gzipped ? args.body.pipe(createGunzip()) : args.body;
     source.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
       args.request.bytes += chunk.byteLength;
+      if (ceiling > 0 && args.request.bytes > ceiling) {
+        source.destroy(new Error(`The request body exceeded ${String(ceiling)} bytes.`));
+      }
     });
     try {
       await pipeline(source, args.child.stdin);

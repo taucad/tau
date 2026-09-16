@@ -183,6 +183,27 @@ export type BillingCashQualification = {
   }): Promise<CashQualificationResult | UnclaimedCashProjection>;
 };
 
+/** Detail rows for the renewal-failed notice, as display strings. Absent fields drop their row. */
+const describeRenewalFailure = (
+  invoice: Stripe.Invoice,
+): { readonly amount?: string; readonly nextAttemptAt?: string } => ({
+  ...(invoice.amount_due > 0
+    ? {
+        amount: new Intl.NumberFormat('en-US', {
+          style: 'currency',
+          currency: invoice.currency.toUpperCase(),
+        }).format(invoice.amount_due / 100),
+      }
+    : {}),
+  ...(invoice.next_payment_attempt === null || invoice.next_payment_attempt === undefined
+    ? {}
+    : {
+        nextAttemptAt: new Intl.DateTimeFormat('en-NZ', { dateStyle: 'medium', timeZone: 'UTC' }).format(
+          new Date(invoice.next_payment_attempt * 1000),
+        ),
+      }),
+});
+
 export type BillingRecoveryNoticeTransport = {
   deliver(input: {
     readonly kind: string;
@@ -3367,7 +3388,14 @@ export class BillingPaymentsService {
                   dedupeKey: `renewal-failed:${invoiceId}`,
                   subscriptionId: owned.id,
                   invoiceId,
-                  payload: { subscriptionId: owned.id, invoiceId },
+                  payload: {
+                    subscriptionId: owned.id,
+                    invoiceId,
+                    accountId,
+                    // Pre-formatted here, where the Stripe invoice is already in hand, so the
+                    // notice transport never has to call Stripe or format money and dates itself.
+                    ...describeRenewalFailure(source.invoice),
+                  },
                 })
                 .onConflictDoNothing();
             }

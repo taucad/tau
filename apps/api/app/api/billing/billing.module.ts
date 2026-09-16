@@ -11,9 +11,11 @@ import { BillingRecoveryScheduler, recoveryPassLimit } from '#api/billing/billin
 import { BillingJournalReconciliationService } from '#api/billing/billing-journal-reconciliation.service.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
+import { BillingRecoveryNoticeEmailTransport } from '#api/billing/billing-recovery-notice.transport.js';
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
 import { DatabaseModule } from '#database/database.module.js';
 import { EmailModule } from '#email/email.module.js';
+import { EmailService } from '#email/email.service.js';
 import { ModelModule } from '#api/models/model.module.js';
 import { BillingController } from '#api/billing/billing.controller.js';
 import { BillingService } from '#api/billing/billing.service.js';
@@ -184,8 +186,9 @@ const providerUpstreamFetch =
         BillingPolicyService,
         CreditLedgerService,
         BillingCashService,
+        EmailService,
       ],
-      // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest resolves the seven explicitly declared provider tokens.
+      // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Nest resolves the eight explicitly declared provider tokens.
       useFactory(
         database: DatabaseService,
         stripe: Stripe,
@@ -194,6 +197,7 @@ const providerUpstreamFetch =
         policy: BillingPolicyService,
         ledger: CreditLedgerService,
         cash: BillingCashService,
+        email: EmailService,
       ): BillingPaymentsService {
         const environment = financialEnvironmentSchema.safeParse(config.get('BILLING_ENVIRONMENT', { infer: true }));
         const accountId = config.get('STRIPE_ACCOUNT_ID', { infer: true });
@@ -223,6 +227,7 @@ const providerUpstreamFetch =
           policy,
           ledger,
           cash,
+          new BillingRecoveryNoticeEmailTransport(database, email, config.get('TAU_FRONTEND_URL', { infer: true })),
         );
       },
     },

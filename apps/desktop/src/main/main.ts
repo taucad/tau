@@ -363,8 +363,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
     registry: roots,
     defaultRoot: homeRoot,
     isTrustedRoot: (executionRoot) => {
-      const projectRoot = computeProjectRootFor(executionRoot);
-      return projectRoot !== executionRoot && roots.isTrusted(projectRoot);
+      const projectRoot = registeredProjectRootFor(executionRoot);
+      return projectRoot !== undefined && projectRoot !== executionRoot && roots.isTrusted(projectRoot);
     },
   });
   const runtimeMain = registerElectronRuntimeMain({

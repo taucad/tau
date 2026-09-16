@@ -81,9 +81,21 @@ export const shaderSites = [
     backends: ['webgpu'],
     risks: ['camera', 'depth', 'lifecycle', 'hot-path'],
   },
+  {
+    id: 'metal-morph-loader',
+    modules: [
+      '#components/geometry/loader/metal-morph-material.node.ts',
+      '#components/geometry/loader/metal-morph-controller.ts',
+    ],
+    authoring: ['tsl', 'render-pipeline'],
+    backends: ['webgl', 'webgpu'],
+    risks: ['custom-position', 'transparency', 'lifecycle', 'hot-path'],
+  },
 ] as const;
 
 const graphicsBackendEndToEnd = 'apps/ui-e2e/src/graphics-backend.spec.ts';
+const metalMorphLoaderEndToEnd = 'apps/ui-e2e/src/metal-morph-loader.spec.ts';
+const metalMorphLoaderRoot = 'apps/ui/app/components/geometry/loader';
 const generatedShaderEndToEnd = 'apps/ui-e2e/src/shader-fixture.spec.ts';
 const evidence = (unit: string, semantic: string, generatedSource = `${unit}::${semantic}`) => ({
   reference: [`${unit}::${semantic}`],
@@ -146,4 +158,27 @@ export const shaderEvidence = {
     'apps/ui/app/components/geometry/graphics/three/post-processing-webgpu.test.tsx',
     'restores the selected scene-pass depth with one direct fullscreen draw',
   ),
+  'metal-morph-loader': {
+    reference: [
+      `${metalMorphLoaderRoot}/metal-morph-shapes.test.ts::should measure a cube face at its inradius and a corner at its circumradius`,
+      `${metalMorphLoaderRoot}/metal-morph-sequence.test.ts::should move the front monotonically from source to target during a morph`,
+    ],
+    'generated-source': [
+      `${metalMorphLoaderRoot}/metal-morph-material.node.test.ts::matches stable stripped physical node material snapshot`,
+      `${metalMorphLoaderEndToEnd}::compiles the liquid metal body through Three`,
+    ],
+    pixels: [`${metalMorphLoaderEndToEnd}::renders a chrome body with highlights and dark facets through`],
+    'depth-clipping': [
+      `${metalMorphLoaderEndToEnd}::keeps the transparent canvas clear outside the body silhouette through`,
+    ],
+    'backend-differential': [`${metalMorphLoaderEndToEnd}::renders the same resting silhouette on both backends`],
+    lifecycle: [
+      `${metalMorphLoaderRoot}/metal-morph-loader.test.tsx::should forward theme and speed to the controller and dispose it on unmount`,
+      `${metalMorphLoaderRoot}/metal-morph-material.node.test.ts::should animate through uniform mutation without rebuilding the graph`,
+    ],
+    'structural-perf': [
+      `${metalMorphLoaderEndToEnd}::renders one body of 40,962 vertices with the bloom chain enabled`,
+    ],
+    'gpu-whole-frame': [`${metalMorphLoaderEndToEnd}::sustains the loop under a bounded frame interval`],
+  },
 } as const;

@@ -4,10 +4,10 @@
 
 OCJS: declare class OCJS
 
-static getStandard_FailureData(exceptionPtr: number): Standard_Failure;
+  static getStandard_FailureData(exceptionPtr: number): Standard_Failure;
 
-static exceptionsEnabled(): boolean;
+  static exceptionsEnabled(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

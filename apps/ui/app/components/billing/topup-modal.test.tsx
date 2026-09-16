@@ -1,5 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { readFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TopupModal } from '#components/billing/topup-modal.js';
@@ -51,6 +53,34 @@ vi.mock('#components/ui/sonner.js', () => ({
   toast: Object.assign(vi.fn(), { warning: vi.fn() }),
 }));
 
+const compiledModal = await (async () => {
+  const { transformSync } = await import('oxc-transform-react');
+  const source = await readFile(new URL('topup-modal.tsx', pathToFileURL(import.meta.filename)), 'utf8');
+  const compiled = transformSync('topup-modal.tsx', source, {
+    lang: 'tsx',
+    reactCompiler: { target: '19' },
+  });
+  if (compiled.fatal || compiled.errors.length > 0) {
+    throw new Error(`React Compiler refused TopupModal: ${JSON.stringify(compiled.errors)}`);
+  }
+  const specifiers = [...compiled.code.matchAll(/^import {[^}]*} from "([^"]+)";$/gm)].map((match) => match[1]!);
+  const modules = Object.fromEntries(
+    await Promise.all(specifiers.map(async (specifier) => [specifier, await import(specifier)] as const)),
+  );
+  const linked = compiled.code
+    .replaceAll(
+      /^import {([^}]*)} from "([^"]+)";$/gm,
+      (_match, names: string, specifier: string) =>
+        `const { ${names.replaceAll(' as ', ': ')} } = __modules[${JSON.stringify(specifier)}];`,
+    )
+    .replaceAll(/^export /gm, '');
+  // oxlint-disable-next-line no-new-func -- this pin executes the app's compiler output.
+  const factory = new Function('__modules', `${linked}\nreturn { TopupModal };`) as (
+    dependencies: Record<string, unknown>,
+  ) => { TopupModal: typeof TopupModal };
+  return { code: compiled.code, TopupModal: factory(modules).TopupModal };
+})();
+
 const wireAction = (state: string) => ({
   actionId: 'topup_1',
   ownerId: 'user-a',
@@ -69,10 +99,10 @@ const wireAction = (state: string) => ({
     paymentMethod: { brand: 'visa', last4: '4242' },
   },
 });
-const renderModal = () =>
+const renderModal = (Modal: typeof TopupModal = TopupModal) =>
   render(
     <MemoryRouter>
-      <TopupModal isOpen onOpenChange={vi.fn()} />
+      <Modal isOpen onOpenChange={vi.fn()} />
     </MemoryRouter>,
   );
 
@@ -142,6 +172,30 @@ describe('TopupModal', () => {
     expect(screen.queryByText(/payment is still processing/i)).toBeNull();
   });
 
+  it('preserves owner switching in the compiled component', async () => {
+    expect(compiledModal.code).toContain('from "react/compiler-runtime"');
+    const view = renderModal(compiledModal.TopupModal);
+    await waitFor(() => {
+      expect(client.getUnresolvedPaymentActions).toHaveBeenCalledWith(
+        expect.objectContaining({ ownerId: 'user-a' }),
+        'manual_topup',
+      );
+    });
+    client.getUnresolvedPaymentActions.mockClear();
+    session.current = { ...session.current, userId: 'user-b' };
+    view.rerender(
+      <MemoryRouter>
+        <compiledModal.TopupModal isOpen onOpenChange={vi.fn()} />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(client.getUnresolvedPaymentActions).toHaveBeenCalledWith(
+        expect.objectContaining({ ownerId: 'user-b' }),
+        'manual_topup',
+      );
+    });
+  });
+
   it('ignores a prepared-quote discard that settles after an owner generation change', async () => {
     client.getUnresolvedPaymentActions.mockResolvedValue([wireAction('prepared')]);
     let settle!: (value: unknown) => void;
@@ -175,6 +229,14 @@ describe('TopupModal', () => {
       expect(screen.queryByText(/payment status: canceled/i)).toBeNull();
     });
     expect(client.followPaymentRedirect).not.toHaveBeenCalled();
+  });
+
+  it('links Terms to the public website so desktop never opens a removed route', async () => {
+    renderModal();
+
+    const terms = await screen.findByRole('link', { name: 'Terms' });
+    expect(terms).toHaveAttribute('href', 'https://tau.new/legal/terms');
+    expect(terms).toHaveAttribute('target', '_blank');
   });
 
   it('prepares a frozen quote before confirmation', async () => {

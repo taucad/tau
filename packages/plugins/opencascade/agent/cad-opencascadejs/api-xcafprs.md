@@ -4,132 +4,132 @@
 
 XCAFPrs: declare class XCAFPrs
 
-constructor
+  constructor
 
-static CollectStyleSettings(L: TDF_Label, loc: TopLoc_Location, settings: NCollection_IndexedDataMap_TopoDS_Shape_XCAFPrs_Style_TopTools_ShapeMapHasher, theLayerColor: Quantity_ColorRGBA): void;
+  static CollectStyleSettings(L: TDF_Label, loc: TopLoc_Location, settings: NCollection_IndexedDataMap_TopoDS_Shape_XCAFPrs_Style_TopTools_ShapeMapHasher, theLayerColor: Quantity_ColorRGBA): void;
 
-static SetViewNameMode(viewNameMode: boolean): void;
+  static SetViewNameMode(viewNameMode: boolean): void;
 
-static GetViewNameMode(): boolean;
+  static GetViewNameMode(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 XCAFPrs_DocumentExplorer: declare class XCAFPrs_DocumentExplorer
 
-constructor
+  constructor
 
-static DefineChildId(theLabel: TDF_Label, theParentId: TCollection_AsciiString): TCollection_AsciiString;
+  static DefineChildId(theLabel: TDF_Label, theParentId: TCollection_AsciiString): TCollection_AsciiString;
 
-static FindLabelFromPathId(theDocument: TDocStd_Document, theId: TCollection_AsciiString, theParentLocation: TopLoc_Location, theLocation: TopLoc_Location): TDF_Label;
-static FindLabelFromPathId(theDocument: TDocStd_Document, theId: TCollection_AsciiString, theLocation: TopLoc_Location): TDF_Label;
-static FindLabelFromPathId(theDocument: TDocStd_Document, theId: TCollection_AsciiString, theParentLocation: TopLoc_Location, theLocation: TopLoc_Location): TDF_Label;
-static FindLabelFromPathId(theDocument: TDocStd_Document, theId: TCollection_AsciiString, theLocation: TopLoc_Location): TDF_Label;
+  static FindLabelFromPathId(theDocument: TDocStd_Document, theId: TCollection_AsciiString, theParentLocation: TopLoc_Location, theLocation: TopLoc_Location): TDF_Label;
+  static FindLabelFromPathId(theDocument: TDocStd_Document, theId: TCollection_AsciiString, theLocation: TopLoc_Location): TDF_Label;
+  static FindLabelFromPathId(theDocument: TDocStd_Document, theId: TCollection_AsciiString, theParentLocation: TopLoc_Location, theLocation: TopLoc_Location): TDF_Label;
+  static FindLabelFromPathId(theDocument: TDocStd_Document, theId: TCollection_AsciiString, theLocation: TopLoc_Location): TDF_Label;
 
-static FindShapeFromPathId(theDocument: TDocStd_Document, theId: TCollection_AsciiString): TopoDS_Shape;
+  static FindShapeFromPathId(theDocument: TDocStd_Document, theId: TCollection_AsciiString): TopoDS_Shape;
 
-Init(theDocument: TDocStd_Document, theRoot: TDF_Label, theFlags: number, theDefStyle: XCAFPrs_Style): void;
-Init(theDocument: TDocStd_Document, theRoots: NCollection_Sequence_TDF_Label, theFlags: number, theDefStyle: XCAFPrs_Style): void;
-Init(theDocument: TDocStd_Document, theRoot: TDF_Label, theFlags: number, theDefStyle: XCAFPrs_Style): void;
-Init(theDocument: TDocStd_Document, theRoots: NCollection_Sequence_TDF_Label, theFlags: number, theDefStyle: XCAFPrs_Style): void;
+  Init(theDocument: TDocStd_Document, theRoot: TDF_Label, theFlags: number, theDefStyle: XCAFPrs_Style): void;
+  Init(theDocument: TDocStd_Document, theRoots: NCollection_Sequence_TDF_Label, theFlags: number, theDefStyle: XCAFPrs_Style): void;
+  Init(theDocument: TDocStd_Document, theRoot: TDF_Label, theFlags: number, theDefStyle: XCAFPrs_Style): void;
+  Init(theDocument: TDocStd_Document, theRoots: NCollection_Sequence_TDF_Label, theFlags: number, theDefStyle: XCAFPrs_Style): void;
 
-More(): boolean;
+  More(): boolean;
 
-Current(): XCAFPrs_DocumentNode;
-Current(theDepth: number): XCAFPrs_DocumentNode;
-Current(): XCAFPrs_DocumentNode;
-Current(theDepth: number): XCAFPrs_DocumentNode;
+  Current(): XCAFPrs_DocumentNode;
+  Current(theDepth: number): XCAFPrs_DocumentNode;
+  Current(): XCAFPrs_DocumentNode;
+  Current(theDepth: number): XCAFPrs_DocumentNode;
 
-ChangeCurrent(): XCAFPrs_DocumentNode;
+  ChangeCurrent(): XCAFPrs_DocumentNode;
 
-CurrentDepth(): number;
+  CurrentDepth(): number;
 
-Next(): void;
+  Next(): void;
 
-ColorTool(): XCAFDoc_ColorTool;
+  ColorTool(): XCAFDoc_ColorTool;
 
-VisMaterialTool(): XCAFDoc_VisMaterialTool;
+  VisMaterialTool(): XCAFDoc_VisMaterialTool;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 XCAFPrs_DocumentIdIterator: declare class XCAFPrs_DocumentIdIterator
 
-constructor
+  constructor
 
-More(): boolean;
+  More(): boolean;
 
-Value(): TCollection_AsciiString;
+  Value(): TCollection_AsciiString;
 
-Next(): void;
+  Next(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 XCAFPrs_DocumentNode: declare class XCAFPrs_DocumentNode
 
-constructor
+  constructor
 
-Id: TCollection_AsciiString
+  Id: TCollection_AsciiString
 
-Label: TDF_Label
+  Label: TDF_Label
 
-RefLabel: TDF_Label
+  RefLabel: TDF_Label
 
-Style: XCAFPrs_Style
+  Style: XCAFPrs_Style
 
-Location: TopLoc_Location
+  Location: TopLoc_Location
 
-LocalTrsf: TopLoc_Location
+  LocalTrsf: TopLoc_Location
 
-IsAssembly: boolean
+  IsAssembly: boolean
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 XCAFPrs_Style: declare class XCAFPrs_Style
 
-constructor
+  constructor
 
-IsEmpty(): boolean;
+  IsEmpty(): boolean;
 
-Material(): XCAFDoc_VisMaterial;
+  Material(): XCAFDoc_VisMaterial;
 
-SetMaterial(theMaterial: XCAFDoc_VisMaterial): void;
+  SetMaterial(theMaterial: XCAFDoc_VisMaterial): void;
 
-IsSetColorSurf(): boolean;
+  IsSetColorSurf(): boolean;
 
-GetColorSurf(): Quantity_Color;
+  GetColorSurf(): Quantity_Color;
 
-SetColorSurf(theColor: Quantity_Color): void;
-SetColorSurf(theColor: Quantity_ColorRGBA): void;
-SetColorSurf(theColor: Quantity_Color): void;
-SetColorSurf(theColor: Quantity_ColorRGBA): void;
+  SetColorSurf(theColor: Quantity_Color): void;
+  SetColorSurf(theColor: Quantity_ColorRGBA): void;
+  SetColorSurf(theColor: Quantity_Color): void;
+  SetColorSurf(theColor: Quantity_ColorRGBA): void;
 
-GetColorSurfRGBA(): Quantity_ColorRGBA;
+  GetColorSurfRGBA(): Quantity_ColorRGBA;
 
-UnSetColorSurf(): void;
+  UnSetColorSurf(): void;
 
-IsSetColorCurv(): boolean;
+  IsSetColorCurv(): boolean;
 
-GetColorCurv(): Quantity_Color;
+  GetColorCurv(): Quantity_Color;
 
-SetColorCurv(col: Quantity_Color): void;
+  SetColorCurv(col: Quantity_Color): void;
 
-UnSetColorCurv(): void;
+  UnSetColorCurv(): void;
 
-SetVisibility(theVisibility: boolean): void;
+  SetVisibility(theVisibility: boolean): void;
 
-IsVisible(): boolean;
+  IsVisible(): boolean;
 
-IsEqual(theOther: XCAFPrs_Style): boolean;
+  IsEqual(theOther: XCAFPrs_Style): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 XCAFPrs_IndexedDataMapOfShapeStyle: NCollection_IndexedDataMap_TopoDS_Shape_XCAFPrs_Style_TopTools_ShapeMapHasher

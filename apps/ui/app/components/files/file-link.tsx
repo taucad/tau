@@ -133,7 +133,7 @@ export function FileLink({
         // consumer's `inline-flex`/`flex` and make layout dependent on
         // Tailwind's CSS source order.
         !asChild && 'inline',
-        'cursor-pointer decoration-current underline-offset-2 hover:text-foreground hover:underline',
+        'cursor-action decoration-current underline-offset-2 hover:text-foreground hover:underline',
         className,
       )}
       onClick={handleClick}

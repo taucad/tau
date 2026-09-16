@@ -8,7 +8,8 @@
  * multiplexer, so a wedged filesystem stream cannot stall an agent run.
  */
 
-import { resolve, sep } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import type { MessageChannelMain, MessagePortMain, UtilityProcess } from 'electron';
 
@@ -73,6 +74,13 @@ export type ServicesBroker = {
    * second connection, never a re-configuration of the first.
    */
   connect(concern: ServicesConcern, context?: Readonly<Record<string, string>>): MessagePortMain;
+  /** Retain launcher 2 for one renderer project session. */
+  retainAgentHost(input: Readonly<{ workspaceRoot: string; projectId: string; attachmentId: string }>): void;
+  /** Release one hold and await shutdown when it was the last. */
+  releaseAgentHost(
+    input: Readonly<{ workspaceRoot: string; projectId: string; attachmentId: string }>,
+    boundMilliseconds: number,
+  ): Promise<void>;
   /** Send a control frame (root admission, credential updates) to the utility. */
   post(message: unknown): void;
   /** Original project identity retained for an admitted execution root. */
@@ -109,6 +117,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
    * accumulates. */
   const controlFrames = new Map<string, unknown>();
   const runtimeContexts = new Map<string, Readonly<Record<string, string>>>();
+  const projectIds = new Map<string, string>();
   /* Turn checkouts the utility registered, kept apart from the project contexts
    * `connect()` owns: a candidate turn's kernel and GeoSpec tools must reach the
    * tree its file tools write, and that tree lives only for the turn (V19). The
@@ -116,11 +125,28 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   const checkoutContexts = new Set<string>();
   const runtimeLeases = new Map<string, ReturnType<ServicesBrokerOptions['connectRuntime']>>();
   const runtimeLeaseClosures = new Map<string, Promise<void>>();
+  const projectAttachments = new Map<string, Set<string>>();
+  const attachmentGenerations = new Map<string, number>();
+  const releaseWaiters = new Map<string, ReturnType<typeof Promise.withResolvers<void>>>();
+  let releaseRequest = 0;
   let utility: UtilityProcess | undefined;
   let acceptingConnections = true;
   let quiescence: Promise<ServicesQuiesceOutcome> | undefined;
   let settleQuiescence: ((outcome: ServicesQuiesceOutcome) => void) | undefined;
   let disposal: Promise<void> | undefined;
+
+  const isStrictDescendant = (parent: string, candidate: string): boolean => {
+    const child = relative(parent, candidate);
+    return child !== '' && child !== '..' && !child.startsWith(`..${sep}`) && !isAbsolute(child);
+  };
+  const canonicalRoot = (root: string): string => {
+    const absolute = resolve(root);
+    try {
+      return realpathSync.native(absolute);
+    } catch {
+      return absolute;
+    }
+  };
 
   const releaseRuntimeLeases = (): void => {
     for (const lease of runtimeLeases.values()) {
@@ -149,10 +175,10 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
    *
    * A candidate turn's kernel and GeoSpec tools must reach the tree its file
    * tools write, and that tree lives only for the turn (V19). The grant is
-   * still main's: a checkout is admissible only strictly inside a project the
-   * user already granted, and only a checkout registered here is releasable —
-   * a release naming the project would silently disarm every later runtime
-   * request for it.
+   * still main's: a checkout is admissible only inside Tau's configured
+   * per-project checkout directory, and only a checkout registered here is
+   * releasable — a release naming the project would silently disarm every later
+   * runtime request for it.
    *
    * @param type - The frame's type, register or release.
    * @param frame - The frame the utility sent.
@@ -162,22 +188,28 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     if (typeof workspaceRoot !== 'string' || typeof projectRoot !== 'string') {
       return;
     }
-    const canonicalWorkspaceRoot = resolve(workspaceRoot);
-    const canonicalProjectRoot = resolve(projectRoot);
+    const canonicalWorkspaceRoot = canonicalRoot(workspaceRoot);
+    const canonicalProjectRoot = canonicalRoot(projectRoot);
     if (type === 'runtime-context-release') {
       if (checkoutContexts.delete(canonicalWorkspaceRoot)) {
         runtimeContexts.delete(canonicalWorkspaceRoot);
       }
       return;
     }
+    const projectContext = runtimeContexts.get(canonicalProjectRoot);
+    const projectId = projectIds.get(canonicalProjectRoot);
+    const projectCheckouts =
+      projectId === undefined
+        ? canonicalProjectRoot
+        : resolve(join(dirname(canonicalProjectRoot), '.tau', 'checkouts', projectId));
     if (
-      !runtimeContexts.has(canonicalProjectRoot) ||
-      !canonicalWorkspaceRoot.startsWith(canonicalProjectRoot.replace(/[\\/]+$/u, '') + sep)
+      projectContext === undefined ||
+      projectId === undefined ||
+      !isStrictDescendant(projectCheckouts, canonicalWorkspaceRoot)
     ) {
       log('warn', 'services.runtime-context-refused', { workspaceRoot });
       return;
     }
-    const projectContext = runtimeContexts.get(canonicalProjectRoot)!;
     runtimeContexts.set(canonicalWorkspaceRoot, { ...projectContext, projectRoot: canonicalWorkspaceRoot });
     checkoutContexts.add(canonicalWorkspaceRoot);
   };
@@ -187,6 +219,18 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       return;
     }
     const { requestId, type, workspaceRoot } = frame as Record<string, unknown>;
+    if ((type === 'agent-host-released' || type === 'agent-host-release-failed') && typeof requestId === 'string') {
+      const pending = releaseWaiters.get(requestId);
+      if (pending !== undefined) {
+        releaseWaiters.delete(requestId);
+        if (type === 'agent-host-released') {
+          pending.resolve();
+        } else {
+          pending.reject(new Error('The desktop agent host could not release this project.'));
+        }
+      }
+      return;
+    }
     if (type === 'quiesced' || type === 'quiesce-failed') {
       if (utility !== spawned) {
         return;
@@ -227,7 +271,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     ) {
       return;
     }
-    const context = runtimeContexts.get(resolve(workspaceRoot));
+    const context = runtimeContexts.get(canonicalRoot(workspaceRoot));
     if (!acceptingConnections || !context || utility !== spawned) {
       spawned.postMessage({ type: 'runtime-port-refused', requestId });
       return;
@@ -271,6 +315,10 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         settleQuiescence?.({ status: 'host-exited' });
         releaseRuntimeLeases();
         forgetCheckoutContexts();
+        for (const pending of releaseWaiters.values()) {
+          pending.reject(new Error('The desktop services host exited while releasing a project.'));
+        }
+        releaseWaiters.clear();
       }
     });
     spawned.on('message', (message: unknown) => {
@@ -298,10 +346,23 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       if (!acceptingConnections) {
         throw new Error('The services broker is quiescing and accepts no new concerns.');
       }
+      let concernContext = context;
+      if (concern === 'agentHost' && context?.['workspaceRoot']) {
+        const projectRoot = canonicalRoot(context['workspaceRoot']);
+        if (context['projectId'] !== undefined) {
+          projectIds.set(projectRoot, context['projectId']);
+        }
+        const generation = attachmentGenerations.get(projectRoot);
+        if (generation !== undefined) {
+          concernContext = { ...context, attachmentGeneration: String(generation) };
+        }
+      }
+      /* Registered only once the utility has accepted the port: a refused
+       * concern must not leave a runtime context claiming this root. */
       const projectContext =
         concern === 'agentHost' && context?.['workspaceRoot']
           ? (() => {
-              const projectRoot = resolve(context['workspaceRoot']);
+              const projectRoot = canonicalRoot(context['workspaceRoot']);
               return {
                 key: projectRoot,
                 value: {
@@ -315,9 +376,10 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
           : undefined;
       const channel = options.createChannel();
       try {
-        ensure().postMessage({ type: 'concern', concern, ...(context === undefined ? {} : { context }) }, [
-          channel.port2,
-        ]);
+        ensure().postMessage(
+          { type: 'concern', concern, ...(concernContext === undefined ? {} : { context: concernContext }) },
+          [channel.port2],
+        );
       } catch (error) {
         channel.port1.close();
         channel.port2.close();
@@ -329,6 +391,70 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       log('info', 'services.concern-connected', { concern });
       return channel.port1;
     },
+    retainAgentHost(input) {
+      const root = canonicalRoot(input.workspaceRoot);
+      const attachments = projectAttachments.get(root) ?? new Set<string>();
+      if (!attachments.has(input.attachmentId)) {
+        attachmentGenerations.set(root, (attachmentGenerations.get(root) ?? 0) + 1);
+      }
+      attachments.add(input.attachmentId);
+      projectAttachments.set(root, attachments);
+      projectIds.set(root, input.projectId);
+    },
+    async releaseAgentHost(input, boundMilliseconds) {
+      const root = canonicalRoot(input.workspaceRoot);
+      const attachments = projectAttachments.get(root);
+      if (attachments === undefined || !attachments.has(input.attachmentId)) {
+        return;
+      }
+      if (attachments.size > 1) {
+        attachments.delete(input.attachmentId);
+        return;
+      }
+      const generation = attachmentGenerations.get(root);
+      const spawned = utility;
+      if (spawned === undefined) {
+        attachments.delete(input.attachmentId);
+        projectAttachments.delete(root);
+        attachmentGenerations.delete(root);
+        runtimeContexts.delete(root);
+        projectIds.delete(root);
+        return;
+      }
+      releaseRequest += 1;
+      const requestId = `agent-host-release-${String(releaseRequest)}`;
+      const pending = Promise.withResolvers<void>();
+      releaseWaiters.set(requestId, pending);
+      spawned.postMessage({
+        type: 'agent-host-release',
+        requestId,
+        workspaceRoot: root,
+        projectId: input.projectId,
+        ...(generation === undefined ? {} : { attachmentGeneration: generation }),
+      });
+      let releaseTimeout: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<never>((_resolve, reject) => {
+        releaseTimeout = setTimeout(() => {
+          reject(new Error('The desktop agent host release timed out.'));
+        }, boundMilliseconds);
+        releaseTimeout.unref();
+      });
+      try {
+        await Promise.race([pending.promise, deadline]);
+        attachments.delete(input.attachmentId);
+        if (attachments.size === 0) {
+          projectAttachments.delete(root);
+          attachmentGenerations.delete(root);
+          runtimeContexts.delete(root);
+          projectIds.delete(root);
+        }
+      } finally {
+        if (releaseTimeout !== undefined) {
+          clearTimeout(releaseTimeout);
+        }
+        releaseWaiters.delete(requestId);
+      }
+    },
     post(message) {
       const { type } = message as { type?: unknown };
       if (typeof type !== 'string') {
@@ -338,7 +464,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       utility?.postMessage(message);
     },
     computeProjectRoot(executionRoot) {
-      return runtimeContexts.get(resolve(executionRoot))?.['computeProjectRoot'];
+      return runtimeContexts.get(canonicalRoot(executionRoot))?.['computeProjectRoot'];
     },
     // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the repeated-close contract.
     quiesce(boundMilliseconds) {
@@ -364,6 +490,10 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       };
       const bound = setTimeout(() => settleQuiescence?.({ status: 'timeout' }), boundMilliseconds);
       bound.unref();
+      /* A dead utility cannot prove that its projects settled. */
+      spawned.on('exit', () => {
+        settleQuiescence?.({ status: 'host-exited' });
+      });
       try {
         spawned.postMessage({ type: 'quiesce' });
       } catch {
@@ -379,6 +509,12 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         const closures = [...runtimeLeaseClosures.values()];
         releaseRuntimeLeases();
         forgetCheckoutContexts();
+        projectAttachments.clear();
+        attachmentGenerations.clear();
+        for (const pending of releaseWaiters.values()) {
+          pending.reject(new Error('The desktop services broker was disposed.'));
+        }
+        releaseWaiters.clear();
         settleQuiescence?.({ status: 'host-exited' });
         utility?.kill();
         utility = undefined;

@@ -5,29 +5,29 @@
 // DEPRECATED
 TColStd_HPackedMapOfInteger: declare class TColStd_HPackedMapOfInteger extends Standard_Transient
 
-constructor
+  constructor
 
-Map(): TColStd_PackedMapOfInteger;
+  Map(): TColStd_PackedMapOfInteger;
 
-ChangeMap(): TColStd_PackedMapOfInteger;
+  ChangeMap(): TColStd_PackedMapOfInteger;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TColStd_IndexedDataMapOfStringString: declare class TColStd_IndexedDataMapOfStringString
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 TColStd_Array1OfAsciiString: NCollection_Array1_TCollection_AsciiString
 

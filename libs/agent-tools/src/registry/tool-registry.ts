@@ -14,7 +14,7 @@
 
 import { rpcClientErrorCode } from '@taucad/chat';
 import type { RpcCall, RpcName } from '@taucad/chat';
-import { rpcName, toolDescriptions, toolMode, toolName } from '@taucad/chat/constants';
+import { mutatingRpcNames, rpcName, toolDescriptions, toolMode, toolName } from '@taucad/chat/constants';
 import { createRpcDispatcher } from '@taucad/chat/rpc';
 import type {
   RpcFileSystem,
@@ -22,6 +22,7 @@ import type {
   RpcGraphicsClient,
   RpcImageClient,
   RpcRevisionsClient,
+  RpcParameterClient,
   RpcRuntimeClient,
   RpcSkillResolver,
 } from '@taucad/chat/rpc';
@@ -34,7 +35,7 @@ import type { HostToolDefinition, JsonObject, JsonValue, ToolRegistry } from '@t
 import { createMachineToolRegistry, isMachineToolName } from '#registry/machine-tool-registry.js';
 
 /** The optional dispatcher client one tool needs beyond the filesystem. */
-type ToolClientKey = 'kernelClient' | 'graphics' | 'images' | 'geospec' | 'skillResolver' | 'revisions';
+type ToolClientKey = 'kernelClient' | 'graphics' | 'images' | 'geospec' | 'skillResolver' | 'revisions' | 'parameters';
 
 /**
  * Every servable tool, its RPC, and the client that must be present for it.
@@ -48,12 +49,20 @@ const rpcForTool: Readonly<Record<string, { readonly rpc: RpcName; readonly need
   [toolName.deleteFile]: { rpc: rpcName.deleteFile },
   [toolName.grep]: { rpc: rpcName.grep },
   [toolName.globSearch]: { rpc: rpcName.globSearch },
-  [toolName.getKernelResult]: { rpc: rpcName.getKernelResult, needs: 'kernelClient' },
+  [toolName.getKernelResult]: {
+    rpc: rpcName.getKernelResult,
+    needs: 'kernelClient',
+  },
   [toolName.exportGeometry]: { rpc: rpcName.exportGeometry, needs: 'graphics' },
   [toolName.screenshot]: { rpc: rpcName.captureImages, needs: 'images' },
   [toolName.testModel]: { rpc: rpcName.runGeoSpecTests, needs: 'geospec' },
   [toolName.useSkill]: { rpc: rpcName.resolveSkill, needs: 'skillResolver' },
   [toolName.revisions]: { rpc: rpcName.readRevisions, needs: 'revisions' },
+  [toolName.getParameters]: { rpc: rpcName.getParameters, needs: 'parameters' },
+  [toolName.applyParameterOperation]: {
+    rpc: rpcName.applyParameterOperation,
+    needs: 'parameters',
+  },
 };
 
 const codedErrorSchema = z.object({ code: z.string() });
@@ -90,6 +99,8 @@ export type ChatToolRegistryOptions = {
    * Always required: the file tools are the floor of every host.
    */
   readonly fileSystemFor: (signal: AbortSignal) => RpcFileSystem;
+  /** Host-owned record writer used only to persist `export_geometry` artifacts. */
+  readonly recordFileSystemFor?: ((signal: AbortSignal) => RpcFileSystem) | undefined;
   /** Backs `get_kernel_result`. */
   readonly kernelClient?: RpcRuntimeClient | undefined;
   /** Backs `export_geometry`. */
@@ -104,6 +115,8 @@ export type ChatToolRegistryOptions = {
   readonly revisions?: RpcRevisionsClient | undefined;
   /** Explicit machine tools, offered only after transport capability and route grant negotiation. */
   readonly machines?: RuntimeTransportFacet<MachineClient> | undefined;
+  /** Backs checked semantic parameter reads and operations. */
+  readonly parameters?: RpcParameterClient | undefined;
   /** `test_model`'s independent policy gate in `@taucad/chat`. */
   readonly testingEnabled: boolean;
 };
@@ -139,7 +152,10 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
   const byName = new Map<string, (typeof schemas)[number]>(schemas.map((entry) => [entry.toolName, entry]));
   const machineRegistry = options.machines?.available ? createMachineToolRegistry(options.machines) : undefined;
   const definitions: HostToolDefinition[] = schemas.map((entry) => {
-    const inputSchema = z.toJSONSchema(entry.schema, { target: 'draft-7', io: 'input' }) as JsonObject & {
+    const inputSchema = z.toJSONSchema(entry.schema, {
+      target: 'draft-7',
+      io: 'input',
+    }) as JsonObject & {
       $schema?: unknown;
     };
     delete inputSchema.$schema;
@@ -156,35 +172,49 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
     async invoke(invocation) {
       assertNotAborted(invocation.signal);
       if (isMachineToolName(invocation.toolName)) {
-        return machineRegistry?.invoke(invocation) ?? {
-          content: { errorCode: 'TOOL_NOT_FOUND', message: `Unknown tool: ${invocation.toolName}` },
-          isError: true,
-        };
+        return (
+          machineRegistry?.invoke(invocation) ?? {
+            content: { errorCode: 'TOOL_NOT_FOUND', message: `Unknown tool: ${invocation.toolName}` },
+            isError: true,
+          }
+        );
       }
       const entry = byName.get(invocation.toolName);
       const mapped = rpcForTool[invocation.toolName];
       if (!entry || !mapped) {
         return {
-          content: { errorCode: 'TOOL_NOT_FOUND', message: `Unknown tool: ${invocation.toolName}` },
+          content: {
+            errorCode: 'TOOL_NOT_FOUND',
+            message: `Unknown tool: ${invocation.toolName}`,
+          },
           isError: true,
         };
       }
       const parsed = entry.schema.safeParse(invocation.input);
       if (!parsed.success) {
         return {
-          content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED', message: z.prettifyError(parsed.error) },
+          content: {
+            errorCode: 'TOOL_INPUT_VALIDATION_FAILED',
+            message: z.prettifyError(parsed.error),
+          },
           isError: true,
         };
       }
+      const preserveMutatingOutcome = mutatingRpcNames.has(mapped.rpc);
       try {
+        const fileSystemFor =
+          mapped.rpc === rpcName.exportGeometry && options.recordFileSystemFor !== undefined
+            ? options.recordFileSystemFor
+            : options.fileSystemFor;
         const dispatcher = createRpcDispatcher({
-          fileSystem: options.fileSystemFor(invocation.signal),
+          fileSystem: fileSystemFor(invocation.signal),
           kernelClient: options.kernelClient ?? unattachedKernelClient,
           ...(options.graphics === undefined ? {} : { graphics: options.graphics }),
           ...(options.images === undefined ? {} : { images: options.images }),
           ...(options.geospec === undefined ? {} : { geospec: options.geospec }),
           ...(options.skillResolver === undefined ? {} : { skillResolver: options.skillResolver }),
           ...(options.revisions === undefined ? {} : { revisions: options.revisions }),
+          ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
         });
         const aborted = Promise.withResolvers<never>();
         /* Tracked so a rejection that lands after the race is already won is
@@ -208,23 +238,31 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
           }
           const args =
             mapped.rpc === rpcName.exportGeometry ? { ...parsed.data, toolCallId: invocation.toolCallId } : parsed.data;
-          result = await Promise.race([
-            // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- schema validation above pins the tool↔RPC input pair.
-            dispatcher.dispatch({ rpcName: mapped.rpc, args } as RpcCall, { signal: invocation.signal }),
-            aborted.promise,
-          ]);
+          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- schema validation above pins the tool↔RPC input pair.
+          const dispatch = dispatcher.dispatch({ rpcName: mapped.rpc, args } as RpcCall, {
+            signal: invocation.signal,
+          });
+          result = preserveMutatingOutcome ? await dispatch : await Promise.race([dispatch, aborted.promise]);
         } finally {
           invocation.signal.removeEventListener('abort', onAbort);
         }
-        assertNotAborted(invocation.signal);
+        if (!preserveMutatingOutcome) {
+          assertNotAborted(invocation.signal);
+        }
         // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- RPC results are JSON by construction.
-        return { content: structuredClone(result) as JsonValue, isError: !result.success };
+        return {
+          content: structuredClone(result) as JsonValue,
+          isError: !result.success,
+        };
       } catch (error) {
-        if (invocation.signal.aborted) {
+        if (invocation.signal.aborted && !preserveMutatingOutcome) {
           throw abortError(invocation.signal);
         }
         return {
-          content: { errorCode: errorCode(error), message: error instanceof Error ? error.message : String(error) },
+          content: {
+            errorCode: errorCode(error),
+            message: error instanceof Error ? error.message : String(error),
+          },
           isError: true,
         };
       }

@@ -10,9 +10,10 @@ describe('prepareMachineWebSocket', () => {
   ] as const)('maps status %i to %s without opening a socket', async (status, reason) => {
     const fetch = vi.fn(async () => new Response(undefined, { status }));
     const createSocket = vi.fn();
-    await expect(
-      prepareMachineWebSocket({ url: 'https://host.test/machines', fetch, createSocket }),
-    ).resolves.toEqual({ available: false, reason });
+    await expect(prepareMachineWebSocket({ url: 'https://host.test/machines', fetch, createSocket })).resolves.toEqual({
+      available: false,
+      reason,
+    });
     expect(fetch).toHaveBeenCalledWith(
       new URL('https://host.test/machines'),
       expect.objectContaining({ credentials: 'include', redirect: 'error' }),
@@ -51,10 +52,7 @@ describe('prepareMachineWebSocket', () => {
     const second = prepared.connect();
     first.close();
     second.close();
-    expect(sockets).toEqual([
-      'wss://host.test/prefix/machines?scope=one',
-      'wss://host.test/prefix/machines?scope=one',
-    ]);
+    expect(sockets).toEqual(['wss://host.test/prefix/machines?scope=one', 'wss://host.test/prefix/machines?scope=one']);
     await expect(first.ready).rejects.toThrow('Channel closed before ready');
     await expect(second.ready).rejects.toThrow('Channel closed before ready');
   });

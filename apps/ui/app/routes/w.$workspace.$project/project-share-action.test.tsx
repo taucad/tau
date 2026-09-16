@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { projectToManifest } from '@taucad/types';
 import type * as XStateModule from 'xstate';
 import type { ProjectSharePanelProps } from '#components/publish/project-share-panel.js';
-import { createDefaultEntry } from '#utils/parameter-config.utils.js';
 import {
   parseProjectShareNavigationIntent,
   ProjectShareAction,
@@ -18,6 +17,7 @@ const openPanel = vi.hoisted(() => vi.fn());
 const snapshotSource = vi.hoisted(() => vi.fn());
 const projectSend = vi.hoisted(() => vi.fn());
 const fileClient = vi.hoisted(() => ({ readdir: vi.fn() }));
+const parameterService = vi.hoisted(() => ({ readSettled: vi.fn() }));
 let capturedPanelProperties: ProjectSharePanelProps | undefined;
 let projectActivity = 10;
 let sourceContent = new TextEncoder().encode('initial source');
@@ -30,10 +30,15 @@ const project = projectToManifest({
   assets: { main: { entryPath: 'main.ts', thumbnail: 'thumbnail.webp' } },
 });
 const geometryUnit = {
-  getSnapshot: () => ({ context: { kernelClient: { snapshotSource } }, value: 'ready' }),
+  getSnapshot: () => ({
+    context: { kernelClient: { snapshotSource } },
+    value: 'ready',
+  }),
 };
 const projectRef = {
-  getSnapshot: () => ({ context: { project, geometryUnits: new Map([['main.ts', geometryUnit]]) } }),
+  getSnapshot: () => ({
+    context: { project, geometryUnits: new Map([['main.ts', geometryUnit]]) },
+  }),
   send: projectSend,
 };
 
@@ -52,7 +57,7 @@ vi.mock('xstate', async (importOriginal) => {
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
-    parameterEntries: new Map([['main.ts', createDefaultEntry()]]),
+    parameterService,
     projectId: project.id,
     projectRef,
   }),
@@ -63,7 +68,9 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 }));
 
 vi.mock('#hooks/use-projects.js', () => ({
-  useProjects: () => ({ projects: [{ id: project.id, lastActivityAt: projectActivity }] }),
+  useProjects: () => ({
+    projects: [{ id: project.id, lastActivityAt: projectActivity }],
+  }),
 }));
 
 vi.mock('#components/publish/project-share-panel.js', () => ({
@@ -84,6 +91,16 @@ describe('ProjectShareAction', () => {
     projectActivity = 10;
     sourceContent = new TextEncoder().encode('initial source');
     fileClient.readdir.mockResolvedValue(['README.md', '.tau']);
+    parameterService.readSettled.mockResolvedValue(
+      new TextEncoder().encode(
+        JSON.stringify({
+          recordVersion: 2,
+          profile: 'future',
+          activeGroup: 'alternate',
+          groups: { alternate: { values: { width: '12.5' } } },
+        }),
+      ),
+    );
     snapshotSource.mockImplementation(async ({ signal }: { readonly signal?: AbortSignal }) => {
       signal?.throwIfAborted();
       return {
@@ -91,7 +108,12 @@ describe('ProjectShareAction', () => {
         data: {
           entryPath: 'main.ts',
           files: [
-            { path: 'main.ts', content: sourceContent, sha256: '1'.repeat(64), role: 'entry' },
+            {
+              path: 'main.ts',
+              content: sourceContent,
+              sha256: '1'.repeat(64),
+              role: 'entry',
+            },
             {
               path: 'tau.json',
               content: new TextEncoder().encode('stale'),
@@ -110,9 +132,24 @@ describe('ProjectShareAction', () => {
               sha256: '4'.repeat(64),
               role: 'additional',
             },
-            { path: 'thumbnail.webp', content: new Uint8Array([1]), sha256: '5'.repeat(64), role: 'additional' },
-            { path: '.tau/internal', content: new Uint8Array([2]), sha256: '6'.repeat(64), role: 'dependency' },
-            { path: 'node_modules/pkg.js', content: new Uint8Array([3]), sha256: '7'.repeat(64), role: 'dependency' },
+            {
+              path: 'thumbnail.webp',
+              content: new Uint8Array([1]),
+              sha256: '5'.repeat(64),
+              role: 'additional',
+            },
+            {
+              path: '.tau/internal',
+              content: new Uint8Array([2]),
+              sha256: '6'.repeat(64),
+              role: 'dependency',
+            },
+            {
+              path: 'node_modules/pkg.js',
+              content: new Uint8Array([3]),
+              sha256: '7'.repeat(64),
+              role: 'dependency',
+            },
           ],
           unresolvedPaths: ['missing.ts'],
         },
@@ -187,11 +224,16 @@ describe('ProjectShareWorkbenchPanel', () => {
       'tau.json',
       '.tau/parameters/main.ts.json',
     ]);
+    expect(parameterService.readSettled).toHaveBeenCalledExactlyOnceWith('main.ts');
+    expect(new TextDecoder().decode(snapshot.files.at(-1)?.content)).toContain('"profile":"future"');
     const manifestFile = snapshot.files.find(({ path }) => path === 'tau.json');
     expect(manifestFile?.role).toBe('project-metadata');
     expect(manifestFile?.sha256).toMatch(/^[\da-f]{64}$/u);
     expect(snapshot.warnings).toEqual([
-      { code: 'UNRESOLVED_DEPENDENCY', message: 'The runtime could not resolve missing.ts.' },
+      {
+        code: 'UNRESOLVED_DEPENDENCY',
+        message: 'The runtime could not resolve missing.ts.',
+      },
     ]);
   });
 

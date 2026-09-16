@@ -6,9 +6,12 @@ import type {
   HashedGeometryResult,
   GetParametersResult,
   KernelIssue,
+  RenderOutcome,
   RenderStatus,
 } from '@taucad/runtime';
 import { createRuntimeClient } from '@taucad/runtime/client';
+import { compileParameterManifest } from '@taucad/parameters';
+import type { CompileParameterManifestInput } from '@taucad/parameters';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
@@ -33,13 +36,20 @@ const testRuntime = defineRuntime({
 /* `createRuntimeClient` is mocked above so the transport never actually
  * opens — it only needs to satisfy the typed `transport` field on the
  * runtime client options. */
-const stubTransport = inProcessTransport({ runtime: testRuntime, fileSystem: fromMemoryFs() });
+const stubTransport = inProcessTransport({
+  runtime: testRuntime,
+  fileSystem: fromMemoryFs(),
+});
 
 const testClientOptions = {
   transport: stubTransport,
 };
 
-const successGeometry: Geometry = { format: 'gltf', content: new Uint8Array([1, 2, 3]), hash: 'abc123' };
+const successGeometry: Geometry = {
+  format: 'gltf',
+  content: new Uint8Array([1, 2, 3]),
+  hash: 'abc123',
+};
 
 const successResult: HashedGeometryResult = {
   success: true,
@@ -49,8 +59,43 @@ const successResult: HashedGeometryResult = {
 
 const errorResult: HashedGeometryResult = {
   success: false,
-  issues: [{ message: 'Kernel error: invalid geometry', code: 'RUNTIME', severity: 'error' }],
+  issues: [
+    {
+      message: 'Kernel error: invalid geometry',
+      code: 'RUNTIME',
+      severity: 'error',
+    },
+  ],
 };
+
+const parameterResult = async (
+  defaults: Readonly<Record<string, unknown>>,
+  schema: JSONSchema7,
+): Promise<GetParametersResult> => ({
+  success: true,
+  data: await compileParameterManifest({
+    declaration: {
+      schema: {
+        $schema: 'https://json-structure.org/meta/extended/v0/#',
+        $id: 'urn:taucad:test:react-parameters',
+        $uses: ['JSONSchemaUnits'],
+        name: 'ReactParameters',
+        ...schema,
+      },
+      defaults,
+    },
+    scope: { kind: 'source', authority: 'test', root: '', entry: 'main.ts' },
+    source: {
+      id: 'test',
+      version: '1',
+      revision: 'react-parameters',
+      capability: 'json-structure',
+    },
+    dependency: `sha256:${'1'.repeat(64)}` as CompileParameterManifestInput['dependency'],
+    middleware: `sha256:${'2'.repeat(64)}` as CompileParameterManifestInput['middleware'],
+  }),
+  issues: [],
+});
 
 type EventHandlerMap = {
   geometry?: (result: HashedGeometryResult) => void;
@@ -178,6 +223,7 @@ describe('useRuntime', () => {
       expect(result.current.error).toBeUndefined();
       expect(result.current.defaultParameters).toEqual({});
       expect(result.current.jsonSchema).toBeUndefined();
+      expect(result.current.parameterManifest).toBeUndefined();
 
       await waitFor(() => {
         expect(createRuntimeClient).toHaveBeenCalledOnce();
@@ -316,6 +362,41 @@ describe('useRuntime', () => {
       });
 
       expect(result.current.geometry).toEqual(successGeometry);
+      expect(result.current.geometryStatus).toBe('current');
+      expect(result.current.error).toBeUndefined();
+    });
+
+    it('should retain last-good geometry as stale through failure and recovery', async () => {
+      const { client, handlers } = createConfiguredMockClient(successResult);
+      const { result } = renderHook(() => useRuntime(defaultOptions()));
+
+      await waitFor(() => {
+        expect(result.current.geometryStatus).toBe('current');
+      });
+
+      act(() => {
+        handlers.geometry?.(errorResult);
+        handlers.renderStatus?.('error');
+      });
+      expect(result.current.geometry).toBe(successGeometry);
+      expect(result.current.geometryStatus).toBe('stale');
+      expect(result.current.error?.message).toBe('Kernel error: invalid geometry');
+
+      await act(async () => {
+        await result.current.exportGeometry('stl');
+      });
+      expect(client.export).toHaveBeenLastCalledWith('stl', {
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- file path key in assertion
+        source: { files: { 'main.ts': 'export default () => ({})' } },
+      });
+
+      const recoveredGeometry: Geometry = { ...successGeometry, hash: 'recovered' };
+      act(() => {
+        handlers.geometry?.({ success: true, data: recoveredGeometry, issues: [] });
+        handlers.renderStatus?.('ready');
+      });
+      expect(result.current.geometry).toBe(recoveredGeometry);
+      expect(result.current.geometryStatus).toBe('current');
       expect(result.current.error).toBeUndefined();
     });
 
@@ -426,6 +507,10 @@ describe('useRuntime', () => {
 
     it('should expose defaultParameters when parametersResolved fires with success', async () => {
       const { handlers } = createConfiguredMockClient();
+      const resolved = await parameterResult(
+        { width: 10, height: 20 },
+        { type: 'object', properties: { width: { type: 'number' } } },
+      );
 
       const { result } = renderHook(() => useRuntime(defaultOptions({ enabled: false })));
 
@@ -434,21 +519,25 @@ describe('useRuntime', () => {
       });
 
       act(() => {
-        handlers.parametersResolved?.({
-          success: true,
-          data: {
-            defaultParameters: { width: 10, height: 20 },
-            jsonSchema: { type: 'object', properties: { width: { type: 'number' } } },
-          },
-          issues: [],
-        });
+        handlers.parametersResolved?.(resolved);
       });
 
-      expect(result.current.defaultParameters).toEqual({ width: 10, height: 20 });
+      expect(result.current.defaultParameters).toEqual({
+        width: 10,
+        height: 20,
+      });
+      expect(result.current.parameterManifest).toBe(resolved.success ? resolved.data : undefined);
     });
 
     it('should expose effective parameters from defaults and initial overrides', async () => {
       const { handlers } = createConfiguredMockClient();
+      const resolved = await parameterResult(
+        { width: 10, height: 20 },
+        {
+          type: 'object',
+          properties: { width: { type: 'number' }, height: { type: 'number' } },
+        },
+      );
 
       const { result } = renderHook(() =>
         useRuntime(defaultOptions({ enabled: false, initialParameters: { width: 12 } })),
@@ -461,14 +550,7 @@ describe('useRuntime', () => {
       });
 
       act(() => {
-        handlers.parametersResolved?.({
-          success: true,
-          data: {
-            defaultParameters: { width: 10, height: 20 },
-            jsonSchema: { type: 'object', properties: { width: { type: 'number' }, height: { type: 'number' } } },
-          },
-          issues: [],
-        });
+        handlers.parametersResolved?.(resolved);
       });
 
       expect(result.current.parameters).toEqual({ width: 12, height: 20 });
@@ -476,9 +558,22 @@ describe('useRuntime', () => {
 
     it('should prune overrides when resolved defaults change shape', async () => {
       const { handlers } = createConfiguredMockClient();
+      const widthResolved = await parameterResult(
+        { width: 10 },
+        { type: 'object', properties: { width: { type: 'number' } } },
+      );
+      const heightResolved = await parameterResult(
+        { height: 20 },
+        { type: 'object', properties: { height: { type: 'number' } } },
+      );
 
       const { result } = renderHook(() =>
-        useRuntime(defaultOptions({ enabled: false, initialParameters: { width: 12, stale: true } })),
+        useRuntime(
+          defaultOptions({
+            enabled: false,
+            initialParameters: { width: 12, stale: true },
+          }),
+        ),
       );
 
       await waitFor(() => {
@@ -486,27 +581,13 @@ describe('useRuntime', () => {
       });
 
       act(() => {
-        handlers.parametersResolved?.({
-          success: true,
-          data: {
-            defaultParameters: { width: 10 },
-            jsonSchema: { type: 'object', properties: { width: { type: 'number' } } },
-          },
-          issues: [],
-        });
+        handlers.parametersResolved?.(widthResolved);
       });
 
       expect(result.current.parameters).toEqual({ width: 12 });
 
       act(() => {
-        handlers.parametersResolved?.({
-          success: true,
-          data: {
-            defaultParameters: { height: 20 },
-            jsonSchema: { type: 'object', properties: { height: { type: 'number' } } },
-          },
-          issues: [],
-        });
+        handlers.parametersResolved?.(heightResolved);
       });
 
       expect(result.current.parameters).toEqual({ height: 20 });
@@ -514,6 +595,13 @@ describe('useRuntime', () => {
 
     it('should update effective parameters from full values and reset to defaults', async () => {
       const { handlers } = createConfiguredMockClient();
+      const resolved = await parameterResult(
+        { width: 10, height: 20 },
+        {
+          type: 'object',
+          properties: { width: { type: 'number' }, height: { type: 'number' } },
+        },
+      );
 
       const { result } = renderHook(() => useRuntime(defaultOptions({ enabled: false })));
 
@@ -522,14 +610,7 @@ describe('useRuntime', () => {
       });
 
       act(() => {
-        handlers.parametersResolved?.({
-          success: true,
-          data: {
-            defaultParameters: { width: 10, height: 20 },
-            jsonSchema: { type: 'object', properties: { width: { type: 'number' }, height: { type: 'number' } } },
-          },
-          issues: [],
-        });
+        handlers.parametersResolved?.(resolved);
       });
 
       act(() => {
@@ -554,9 +635,22 @@ describe('useRuntime', () => {
     it('should notify parameter changes with effective values', async () => {
       const { handlers } = createConfiguredMockClient();
       const onParametersChange = vi.fn();
+      const resolved = await parameterResult(
+        { width: 10, height: 20 },
+        {
+          type: 'object',
+          properties: { width: { type: 'number' }, height: { type: 'number' } },
+        },
+      );
 
       const { result } = renderHook(() =>
-        useRuntime(defaultOptions({ enabled: false, initialParameters: { width: 12 }, onParametersChange })),
+        useRuntime(
+          defaultOptions({
+            enabled: false,
+            initialParameters: { width: 12 },
+            onParametersChange,
+          }),
+        ),
       );
 
       await waitFor(() => {
@@ -564,18 +658,14 @@ describe('useRuntime', () => {
       });
 
       act(() => {
-        handlers.parametersResolved?.({
-          success: true,
-          data: {
-            defaultParameters: { width: 10, height: 20 },
-            jsonSchema: { type: 'object', properties: { width: { type: 'number' }, height: { type: 'number' } } },
-          },
-          issues: [],
-        });
+        handlers.parametersResolved?.(resolved);
       });
 
       await waitFor(() => {
-        expect(onParametersChange).toHaveBeenLastCalledWith({ width: 12, height: 20 });
+        expect(onParametersChange).toHaveBeenLastCalledWith({
+          width: 12,
+          height: 20,
+        });
       });
 
       act(() => {
@@ -583,7 +673,10 @@ describe('useRuntime', () => {
       });
 
       await waitFor(() => {
-        expect(onParametersChange).toHaveBeenLastCalledWith({ width: 10, height: 24 });
+        expect(onParametersChange).toHaveBeenLastCalledWith({
+          width: 10,
+          height: 24,
+        });
       });
 
       act(() => {
@@ -591,7 +684,10 @@ describe('useRuntime', () => {
       });
 
       await waitFor(() => {
-        expect(onParametersChange).toHaveBeenLastCalledWith({ width: 10, height: 20 });
+        expect(onParametersChange).toHaveBeenLastCalledWith({
+          width: 10,
+          height: 20,
+        });
       });
     });
 
@@ -600,21 +696,30 @@ describe('useRuntime', () => {
 
       const { result } = renderHook(() => useRuntime(defaultOptions({ enabled: false })));
 
-      const schema: JSONSchema7 = { type: 'object', properties: { size: { type: 'number' } } };
+      const schema: JSONSchema7 = {
+        type: 'object',
+        properties: { size: { type: 'number' } },
+      };
+      const resolved = await parameterResult({}, schema);
 
       await waitFor(() => {
         expect(handlers.parametersResolved).toBeDefined();
       });
 
       act(() => {
-        handlers.parametersResolved?.({
-          success: true,
-          data: { defaultParameters: {}, jsonSchema: schema },
-          issues: [],
-        });
+        handlers.parametersResolved?.(resolved);
       });
 
-      expect(result.current.jsonSchema).toBe(schema);
+      if (!resolved.success) {
+        throw new Error('Expected parameter resolution');
+      }
+      if (resolved.data.legacyProjection.status !== 'usable') {
+        throw new Error('Expected a usable Draft-7 projection');
+      }
+      const expectedSchema = resolved.data.legacyProjection.schema;
+      await waitFor(() => {
+        expect(result.current.jsonSchema).toEqual(expectedSchema);
+      });
     });
 
     it('should not update parameters state when parametersResolved fires with failure', async () => {
@@ -649,21 +754,27 @@ describe('useRuntime', () => {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- file path key
       const source2 = { files: { 'main.ts': 'version 2' } };
 
-      const { rerender } = renderHook(({ source }) => useRuntime(defaultOptions({ source })), {
+      const { result, rerender } = renderHook(({ source }) => useRuntime(defaultOptions({ source })), {
         initialProps: { source: source1 },
       });
 
       await waitFor(() => {
-        expect(client.render).toHaveBeenCalledTimes(1);
+        expect(result.current.geometryStatus).toBe('current');
       });
 
+      const pending = Promise.withResolvers<RenderOutcome>();
+      vi.mocked(client.render).mockReturnValueOnce(pending.promise);
       rerender({ source: source2 });
+
+      expect(result.current.geometry).toBe(successGeometry);
+      expect(result.current.geometryStatus).toBe('stale');
 
       await waitFor(() => {
         expect(client.render).toHaveBeenCalledTimes(2);
       });
 
       expect(client.render).toHaveBeenLastCalledWith(expect.objectContaining({ source: source2 }));
+      pending.resolve({ superseded: true });
     });
 
     it('should update active render parameters without calling render again', async () => {
@@ -791,7 +902,10 @@ describe('useRuntime', () => {
       const unsubscribe = vi.fn();
       const client = createMockRuntimeClient();
       vi.mocked(client.on).mockReturnValue(unsubscribe);
-      vi.mocked(client.render).mockResolvedValue({ superseded: false, geometry: successResult });
+      vi.mocked(client.render).mockResolvedValue({
+        superseded: false,
+        geometry: successResult,
+      });
       vi.mocked(createRuntimeClient).mockReturnValue(client);
 
       const { unmount } = renderHook(() => useRuntime(defaultOptions({ enabled: false })));
@@ -811,8 +925,14 @@ describe('useRuntime', () => {
     it('should terminate the old client and create a new one when client options change', async () => {
       const client1 = createMockRuntimeClient();
       const client2 = createMockRuntimeClient();
-      vi.mocked(client1.render).mockResolvedValue({ superseded: false, geometry: successResult });
-      vi.mocked(client2.render).mockResolvedValue({ superseded: false, geometry: successResult });
+      vi.mocked(client1.render).mockResolvedValue({
+        superseded: false,
+        geometry: successResult,
+      });
+      vi.mocked(client2.render).mockResolvedValue({
+        superseded: false,
+        geometry: successResult,
+      });
 
       vi.mocked(createRuntimeClient).mockReturnValueOnce(client1).mockReturnValueOnce(client2);
 
@@ -906,7 +1026,10 @@ describe('useRuntime', () => {
 
     it('should ignore stale provider resolution after a newer provider identity wins', async () => {
       const client = createMockRuntimeClient();
-      vi.mocked(client.render).mockResolvedValue({ superseded: false, geometry: successResult });
+      vi.mocked(client.render).mockResolvedValue({
+        superseded: false,
+        geometry: successResult,
+      });
       vi.mocked(createRuntimeClient).mockReturnValue(client);
       const staleOptions = deferred<typeof testClientOptions>();
       const freshOptions = deferred<typeof testClientOptions>();
@@ -935,8 +1058,14 @@ describe('useRuntime', () => {
     it('should replay the current source on a newly resolved client when options identity changes', async () => {
       const client1 = createMockRuntimeClient();
       const client2 = createMockRuntimeClient();
-      vi.mocked(client1.render).mockResolvedValue({ superseded: false, geometry: successResult });
-      vi.mocked(client2.render).mockResolvedValue({ superseded: false, geometry: successResult });
+      vi.mocked(client1.render).mockResolvedValue({
+        superseded: false,
+        geometry: successResult,
+      });
+      vi.mocked(client2.render).mockResolvedValue({
+        superseded: false,
+        geometry: successResult,
+      });
       vi.mocked(createRuntimeClient).mockReturnValueOnce(client1).mockReturnValueOnce(client2);
 
       const provider1 = (): typeof testClientOptions => testClientOptions;
@@ -973,10 +1102,14 @@ describe('useRuntime', () => {
       });
 
       await act(async () => {
-        await result.current.exportGeometry('stl', { exportOptions: { binary: true } });
+        await result.current.exportGeometry('stl', {
+          exportOptions: { binary: true },
+        });
       });
 
-      expect(client.export).toHaveBeenCalledWith('stl', { exportOptions: { binary: true } });
+      expect(client.export).toHaveBeenCalledWith('stl', {
+        exportOptions: { binary: true },
+      });
     });
 
     it('should forward route-scoped content when exporting the settled preview', async () => {
@@ -988,10 +1121,14 @@ describe('useRuntime', () => {
       });
 
       await act(async () => {
-        await result.current.exportGeometry('glb', { content: { includeEdges: true } });
+        await result.current.exportGeometry('glb', {
+          content: { includeEdges: true },
+        });
       });
 
-      expect(client.export).toHaveBeenCalledWith('glb', { content: { includeEdges: true } });
+      expect(client.export).toHaveBeenCalledWith('glb', {
+        content: { includeEdges: true },
+      });
     });
 
     it('should request-scope export the hook source when preview rendering is disabled', async () => {
@@ -1003,7 +1140,9 @@ describe('useRuntime', () => {
       });
 
       await act(async () => {
-        await result.current.exportGeometry('stl', { exportOptions: { binary: true } });
+        await result.current.exportGeometry('stl', {
+          exportOptions: { binary: true },
+        });
       });
 
       expect(client.render).not.toHaveBeenCalled();
@@ -1021,7 +1160,9 @@ describe('useRuntime', () => {
           defaultOptions({
             enabled: false,
             content: { includeEdges: true, includeTopology: true },
-            renderOptions: { tessellation: { linearTolerance: 0.1, angularTolerance: 12 } },
+            renderOptions: {
+              tessellation: { linearTolerance: 0.1, angularTolerance: 12 },
+            },
           }),
         ),
       );
@@ -1031,7 +1172,9 @@ describe('useRuntime', () => {
       });
 
       await act(async () => {
-        await result.current.exportGeometry('glb', { content: { includeEdges: false } });
+        await result.current.exportGeometry('glb', {
+          content: { includeEdges: false },
+        });
       });
 
       expect(client.export).toHaveBeenCalledWith('glb', {

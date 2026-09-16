@@ -4,51 +4,51 @@
 
 IntTools_TopolTool: declare class IntTools_TopolTool extends Adaptor3d_TopolTool
 
-constructor
+  constructor
 
-Initialize(): void;
-Initialize(S: Adaptor3d_Surface): void;
-Initialize(Curve: Adaptor2d_Curve2d): void;
-Initialize(): void;
-Initialize(S: Adaptor3d_Surface): void;
-Initialize(Curve: Adaptor2d_Curve2d): void;
-Initialize(): void;
-Initialize(S: Adaptor3d_Surface): void;
-Initialize(Curve: Adaptor2d_Curve2d): void;
+  Initialize(): void;
+  Initialize(S: Adaptor3d_Surface): void;
+  Initialize(Curve: Adaptor2d_Curve2d): void;
+  Initialize(): void;
+  Initialize(S: Adaptor3d_Surface): void;
+  Initialize(Curve: Adaptor2d_Curve2d): void;
+  Initialize(): void;
+  Initialize(S: Adaptor3d_Surface): void;
+  Initialize(Curve: Adaptor2d_Curve2d): void;
 
-ComputeSamplePoints(): void;
+  ComputeSamplePoints(): void;
 
-NbSamplesU(): number;
+  NbSamplesU(): number;
 
-NbSamplesV(): number;
+  NbSamplesV(): number;
 
-NbSamples(): number;
+  NbSamples(): number;
 
-SamplePoint(Index: number, P2d: gp_Pnt2d, P3d: gp_Pnt): void;
+  SamplePoint(Index: number, P2d: gp_Pnt2d, P3d: gp_Pnt): void;
 
-SamplePnts(theDefl: number, theNUmin: number, theNVmin: number): void;
+  SamplePnts(theDefl: number, theNUmin: number, theNVmin: number): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IntTools_WLineTool: declare class IntTools_WLineTool
 
-constructor
+  constructor
 
-static NotUseSurfacesForApprox(aF1: TopoDS_Face, aF2: TopoDS_Face, WL: IntPatch_WLine, ifprm: number, ilprm: number): boolean;
+  static NotUseSurfacesForApprox(aF1: TopoDS_Face, aF2: TopoDS_Face, WL: IntPatch_WLine, ifprm: number, ilprm: number): boolean;
 
-static DecompositionOfWLine(theWLine: IntPatch_WLine, theSurface1: GeomAdaptor_Surface, theSurface2: GeomAdaptor_Surface, theFace1: TopoDS_Face, theFace2: TopoDS_Face, theLConstructor: GeomInt_LineConstructor, theAvoidLConstructor: boolean, theTol: number, theNewLines: NCollection_Sequence_handle_IntPatch_Line, argNo9: IntTools_Context): boolean;
+  static DecompositionOfWLine(theWLine: IntPatch_WLine, theSurface1: GeomAdaptor_Surface, theSurface2: GeomAdaptor_Surface, theFace1: TopoDS_Face, theFace2: TopoDS_Face, theLConstructor: GeomInt_LineConstructor, theAvoidLConstructor: boolean, theTol: number, theNewLines: NCollection_Sequence_handle_IntPatch_Line, argNo9: IntTools_Context): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 IntTools_ListOfCurveRangeSample: NCollection_List_IntTools_CurveRangeSample
 

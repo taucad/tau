@@ -4,4 +4,4 @@
 
 modifiers
 
-export default function retessellate(geometry: Geom3): Geom3
+  export default function retessellate(geometry: Geom3): Geom3

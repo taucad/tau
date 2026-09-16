@@ -1,5 +1,35 @@
 import { describe, expect, it } from 'vitest';
-import { contextCompactionDataSchema, contextUsageDataSchema, usageDataSchema } from '#schemas/message-data.schema.js';
+import {
+  acpSessionDataSchema,
+  contextCompactionDataSchema,
+  contextUsageDataSchema,
+  usageDataSchema,
+} from '#schemas/message-data.schema.js';
+
+describe('acpSessionDataSchema', () => {
+  it('accepts protocol-null optional command, configuration, and mode metadata', () => {
+    expect(
+      acpSessionDataSchema.parse({
+        type: 'acp-session',
+        id: 'state',
+        agentId: 'codex',
+        commands: [{ name: 'help', description: 'Help', input: null }],
+        configOptions: [
+          {
+            type: 'boolean',
+            id: 'search',
+            name: 'Search',
+            description: null,
+            category: null,
+            currentValue: false,
+          },
+        ],
+        modeId: 'default',
+        modes: [{ id: 'default', name: 'Default', description: null }],
+      }),
+    ).toMatchObject({ commands: [{ input: null }], configOptions: [{ description: null, category: null }] });
+  });
+});
 
 describe('contextCompactionDataSchema', () => {
   it('should accept the enriched compaction cursor fields', () => {

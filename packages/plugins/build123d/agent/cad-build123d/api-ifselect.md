@@ -5,10 +5,10 @@
 // Qualifies an execution status
 IFSelect_ReturnStatus
 
-// **init**(self
-**init**(self: OCP.OCP.IFSelect.IFSelect_ReturnStatus, value: int) -> None
+  // __init__(self
+  __init__(self: OCP.OCP.IFSelect.IFSelect_ReturnStatus, value: int) -> None
 
-// name(self
-name
+  // name(self
+  name
 
-value
+  value

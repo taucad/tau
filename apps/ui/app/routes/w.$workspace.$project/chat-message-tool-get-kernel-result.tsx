@@ -109,7 +109,7 @@ export function ChatMessageToolGetKernelResult({
           <ChatToolCardHeader>
             <ChatToolCardIcon icon={CheckCircle} />
             <ChatToolCardTitle>
-              <ChatToolLabel verb='Compiling'>
+              <ChatToolLabel verb='Rendering'>
                 {targetFile ? (
                   <ChatToolDescription>
                     <FilenameLink targetFile={targetFile} />
@@ -133,7 +133,7 @@ export function ChatMessageToolGetKernelResult({
           <ChatToolCardHeader>
             <ChatToolCardIcon icon={CheckCircle} />
             <ChatToolCardTitle>
-              <ChatToolLabel verb='Compiling'>
+              <ChatToolLabel verb='Rendering'>
                 <ChatToolDescription>
                   <FilenameLink targetFile={targetFile} />
                   ...
@@ -152,7 +152,7 @@ export function ChatMessageToolGetKernelResult({
 
       const hasIssues = kernelIssues.length > 0;
 
-      // Without diagnostics there is nothing to disclose, regardless of compile status.
+      // Without diagnostics there is nothing to disclose, regardless of render status.
       if (!hasIssues) {
         return (
           <ChatToolCard variant='minimal' status={status === 'error' ? 'error' : 'ready'} isCollapsible={false}>
@@ -163,9 +163,7 @@ export function ChatMessageToolGetKernelResult({
               />
               <ChatToolCardTitle>
                 <ChatToolLabel
-                  verb={
-                    status === 'error' ? 'Failed to compile' : status === 'pending' ? 'Compile pending' : 'Compiled'
-                  }
+                  verb={status === 'error' ? 'Failed to render' : status === 'pending' ? 'Render pending' : 'Rendered'}
                 >
                   <ChatToolDescription>
                     <FilenameLink targetFile={targetFile} />
@@ -192,7 +190,7 @@ export function ChatMessageToolGetKernelResult({
       const titleLabel = ((): React.ReactNode => {
         if (hasErrors) {
           return (
-            <ChatToolLabel verb='Failed to compile'>
+            <ChatToolLabel verb='Failed to render'>
               <ChatToolDescription>
                 <FilenameLink targetFile={targetFile} />
               </ChatToolDescription>
@@ -202,7 +200,7 @@ export function ChatMessageToolGetKernelResult({
 
         const warningSuffix = `with ${warningCount} ${warningCount === 1 ? 'warning' : 'warnings'}`;
         return (
-          <ChatToolLabel verb='Compiled'>
+          <ChatToolLabel verb='Rendered'>
             <ChatToolDescription>
               <FilenameLink targetFile={targetFile} /> {warningSuffix}
             </ChatToolDescription>
@@ -254,7 +252,7 @@ export function ChatMessageToolGetKernelResult({
     }
 
     case 'output-error': {
-      return <ChatToolError errorText={part.errorText} icon={XCircle} noun='kernel compile' />;
+      return <ChatToolError errorText={part.errorText} icon={XCircle} noun='kernel render' />;
     }
 
     case 'approval-requested':

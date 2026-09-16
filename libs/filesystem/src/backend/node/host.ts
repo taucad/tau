@@ -347,6 +347,12 @@ const runOperation = async (
     case 'stat': {
       return provider.stat(request.path);
     }
+    case 'getFileMode': {
+      return provider.getFileMode(request.path);
+    }
+    case 'setFileMode': {
+      return provider.setFileMode(request.path, request.mode);
+    }
     case 'mkdir': {
       return mutate(request.root, [request.path], async () => provider.mkdir(request.path));
     }

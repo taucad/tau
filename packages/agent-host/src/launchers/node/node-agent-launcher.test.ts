@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createNodeAgentLauncher } from '#launchers/node/node-agent-launcher.js';
 import type { NodeAgentLauncher } from '#launchers/node/node-agent-launcher.js';
+import { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gateway-model-transport.js';
 import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixture.js';
 import type { ToolRegistry } from '#waist/ports.js';
 
@@ -69,6 +70,12 @@ const makeLauncher = async (fetchImplementation: typeof globalThis.fetch): Promi
     toolRegistry: emptyTools,
     auth: () => 'daemon-bearer',
     fetch: fetchImplementation,
+    modelTransport: createTauCloudGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      model,
+      auth: () => 'daemon-bearer',
+      fetch: fetchImplementation,
+    }),
   });
   return launcher;
 };
@@ -84,6 +91,11 @@ const makeModellessLauncher = async (fetchImplementation: typeof globalThis.fetc
     toolRegistry: emptyTools,
     auth: () => 'daemon-bearer',
     fetch: fetchImplementation,
+    modelTransport: createTauCloudGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      auth: () => 'daemon-bearer',
+      fetch: fetchImplementation,
+    }),
   });
   return launcher;
 };

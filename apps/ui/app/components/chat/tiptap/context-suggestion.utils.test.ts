@@ -257,7 +257,7 @@ describe('buildContextItems', () => {
     expect(ids).toContain('src/cache-utils.ts');
   });
 
-  it('should offer a project override but never the built-in bundle it replaces', () => {
+  it('should offer a project override but never the system skill bundle it replaces', () => {
     const fileTree = new Map<string, FileEntry>([
       [
         '.agents/skills/cad-openscad/SKILL.md',

@@ -4,57 +4,57 @@
 
 Geom2dToIGES_Geom2dCurve: declare class Geom2dToIGES_Geom2dCurve extends Geom2dToIGES_Geom2dEntity
 
-constructor
+  constructor
 
-Transfer2dCurve(start: Geom2d_Curve, Udeb: number, Ufin: number): IGESData_IGESEntity;
+  Transfer2dCurve(start: Geom2d_Curve, Udeb: number, Ufin: number): IGESData_IGESEntity;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dToIGES_Geom2dEntity: declare class Geom2dToIGES_Geom2dEntity
 
-constructor
+  constructor
 
-SetModel(model: IGESData_IGESModel): void;
+  SetModel(model: IGESData_IGESModel): void;
 
-GetModel(): IGESData_IGESModel;
+  GetModel(): IGESData_IGESModel;
 
-SetUnit(unit: number): void;
+  SetUnit(unit: number): void;
 
-GetUnit(): number;
+  GetUnit(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dToIGES_Geom2dPoint: declare class Geom2dToIGES_Geom2dPoint extends Geom2dToIGES_Geom2dEntity
 
-constructor
+  constructor
 
-Transfer2dPoint(start: Geom2d_Point): IGESGeom_Point;
-Transfer2dPoint(start: Geom2d_CartesianPoint): IGESGeom_Point;
-Transfer2dPoint(start: Geom2d_Point): IGESGeom_Point;
-Transfer2dPoint(start: Geom2d_CartesianPoint): IGESGeom_Point;
+  Transfer2dPoint(start: Geom2d_Point): IGESGeom_Point;
+  Transfer2dPoint(start: Geom2d_CartesianPoint): IGESGeom_Point;
+  Transfer2dPoint(start: Geom2d_Point): IGESGeom_Point;
+  Transfer2dPoint(start: Geom2d_CartesianPoint): IGESGeom_Point;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dToIGES_Geom2dVector: declare class Geom2dToIGES_Geom2dVector extends Geom2dToIGES_Geom2dEntity
 
-constructor
+  constructor
 
-Transfer2dVector(start: Geom2d_Vector): IGESGeom_Direction;
-Transfer2dVector(start: Geom2d_VectorWithMagnitude): IGESGeom_Direction;
-Transfer2dVector(start: Geom2d_Direction): IGESGeom_Direction;
-Transfer2dVector(start: Geom2d_Vector): IGESGeom_Direction;
-Transfer2dVector(start: Geom2d_VectorWithMagnitude): IGESGeom_Direction;
-Transfer2dVector(start: Geom2d_Direction): IGESGeom_Direction;
-Transfer2dVector(start: Geom2d_Vector): IGESGeom_Direction;
-Transfer2dVector(start: Geom2d_VectorWithMagnitude): IGESGeom_Direction;
-Transfer2dVector(start: Geom2d_Direction): IGESGeom_Direction;
+  Transfer2dVector(start: Geom2d_Vector): IGESGeom_Direction;
+  Transfer2dVector(start: Geom2d_VectorWithMagnitude): IGESGeom_Direction;
+  Transfer2dVector(start: Geom2d_Direction): IGESGeom_Direction;
+  Transfer2dVector(start: Geom2d_Vector): IGESGeom_Direction;
+  Transfer2dVector(start: Geom2d_VectorWithMagnitude): IGESGeom_Direction;
+  Transfer2dVector(start: Geom2d_Direction): IGESGeom_Direction;
+  Transfer2dVector(start: Geom2d_Vector): IGESGeom_Direction;
+  Transfer2dVector(start: Geom2d_VectorWithMagnitude): IGESGeom_Direction;
+  Transfer2dVector(start: Geom2d_Direction): IGESGeom_Direction;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

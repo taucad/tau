@@ -33,30 +33,13 @@ type ViewportGizmoCubeProps = {
    * When provided, the gizmo will be appended to this container instead of the renderer's parent.
    */
   readonly container?: HTMLElement | string;
-  /**
-   * Optional dependencies array that will be appended to the effect dependencies.
-   * When any of these values change, the gizmo will be disposed and recreated.
-   * Useful for triggering recreation when coordinate systems or other external state changes.
-   *
-   * @example <caption>Recreate the gizmo when the coordinate system changes.</caption>
-   * ```tsx
-   * <ViewportGizmoCube dependencies={[enableYupRotation]} />
-   * ```
-   */
-  readonly dependencies?: readonly unknown[];
 };
 
 const className = 'viewport-gizmo-cube';
-const emptyDependencies: readonly unknown[] = [];
 
-export function ViewportGizmoCube({
-  size = 96,
-  container,
-  dependencies = emptyDependencies,
-}: ViewportGizmoCubeProps): ReactNode {
+export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubeProps): ReactNode {
   const gl = useThree((state) => state.gl);
   const controls = useThree((state) => state.controls);
-  const scene = useThree((state) => state.scene);
   const invalidate = useThree((state) => state.invalidate);
   const interactionLock = useViewportGizmoInteractionLock();
   const graphicsActor = useGraphics();
@@ -265,12 +248,10 @@ export function ViewportGizmoCube({
         existing.dispose();
       }
     };
-    // oxlint-disable-next-line react-hooks/exhaustive-deps -- dependencies array is user-provided for custom recreation triggers
   }, [
     gl,
     controls,
     graphicsBackendThree,
-    scene,
     serialized.hex,
     theme,
     isHighContrast,
@@ -280,7 +261,6 @@ export function ViewportGizmoCube({
     interactionLock,
     graphicsActor,
     cameraRig,
-    ...dependencies,
   ]);
 
   useGizmoResizeSync(gizmoRef);

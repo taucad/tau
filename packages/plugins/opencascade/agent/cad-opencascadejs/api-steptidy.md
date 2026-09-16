@@ -4,10 +4,10 @@
 
 StepTidy_DuplicateCleaner: declare class StepTidy_DuplicateCleaner
 
-constructor
+  constructor
 
-Perform(): void;
+  Perform(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

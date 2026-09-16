@@ -17,6 +17,7 @@
  */
 
 import { Topic } from '@taucad/events';
+import { randomUuid } from '@taucad/utils/id';
 import { createActor, fromCallback } from 'xstate';
 import type { ActorRefFrom, EventObject } from 'xstate';
 import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
@@ -26,6 +27,10 @@ import { projectSessionMachine } from '#machines/project-session.machine.js';
 import type { ProjectSessionActorRef, ProjectSessionRegion } from '#machines/project-session.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { inspect } from '#machines/inspector.js';
+import {
+  registerProjectAgentHost,
+  type ProjectAgentHostRegistration,
+} from '#services/project-agent-host-registration.js';
 
 /**
  * One project session's flush and lease work, supplied by the subtree that
@@ -38,18 +43,17 @@ import { inspect } from '#machines/inspector.js';
  * client — never a second copy of it.
  */
 export type ProjectSessionServices = Readonly<{
+  flushProducers: () => Promise<void>;
   flushSync: (boundMilliseconds: number) => Promise<void>;
   cancelRuns: (chatIds: readonly string[]) => Promise<void>;
   releaseLeases: () => Promise<void>;
-  /** Resolve once `sync.machine`'s facet has left `checking` (P34). */
-  awaitPull: () => Promise<void>;
 }>;
 
 const noServices: ProjectSessionServices = {
+  flushProducers: async () => undefined,
   flushSync: async () => undefined,
   cancelRuns: async () => undefined,
   releaseLeases: async () => undefined,
-  awaitPull: async () => undefined,
 };
 
 const services = new Map<string, ProjectSessionServices>();
@@ -85,7 +89,10 @@ const regionKey = (projectId: string, region: ProjectSessionRegion): string => `
 const regionOutcomes = new Map<string, RegionOutcome>();
 /* One fan-out for every region of every project; the key rides on the event so
  * a session's relay child filters to its own (event-fanout policy). */
-const regionTopic = new Topic<{ readonly key: string; readonly outcome: RegionOutcome }>({
+const regionTopic = new Topic<{
+  readonly key: string;
+  readonly outcome: RegionOutcome;
+}>({
   name: 'sessions.regions',
 });
 
@@ -143,6 +150,23 @@ const relayRegion = (region: ProjectSessionRegion) =>
   });
 
 // ---------------------------------------------------------------------------
+// Cross-process identity
+// ---------------------------------------------------------------------------
+
+/**
+ * This document's session epoch (W3c-R4, P31).
+ *
+ * One id per client session, carried on every `revisionsConnect` so the worker
+ * can tell whose revisions actor system owns a project's leases. A second
+ * window of the same workspace gets a different epoch, which is the whole
+ * point: only the session that owns a project's revisions actor system may
+ * sweep its leases.
+ *
+ * @public
+ */
+export const sessionEpoch: string = randomUuid();
+
+// ---------------------------------------------------------------------------
 // Compute admission
 // ---------------------------------------------------------------------------
 
@@ -161,10 +185,40 @@ export const setSharedFileManagerWorker = (worker: Worker | undefined): void => 
  * "this project is live", so it is what admits and releases.
  */
 const computeRegion = fromCallback<EventObject, { projectId: string }>(({ input, sendBack }) => {
-  sharedFileManagerWorker?.postMessage({ type: 'computeStoreAdmission', projectId: input.projectId });
+  sharedFileManagerWorker?.postMessage({
+    type: 'computeStoreAdmission',
+    projectId: input.projectId,
+  });
   sendBack({ type: 'childReady', region: 'compute' });
   return () => {
-    sharedFileManagerWorker?.postMessage({ type: 'computeStoreRelease', projectId: input.projectId });
+    sharedFileManagerWorker?.postMessage({
+      type: 'computeStoreRelease',
+      projectId: input.projectId,
+    });
+  };
+});
+
+const agentHostRegistrations = new Map<string, Promise<ProjectAgentHostRegistration>>();
+
+/** The real browser probe or desktop launcher attachment owned by one session. */
+const agentHostRegion = fromCallback<EventObject, { projectId: string }>(({ input, sendBack }) => {
+  const registration = registerProjectAgentHost(input.projectId, `${sessionEpoch}:${input.projectId}`);
+  agentHostRegistrations.set(input.projectId, registration);
+  void registration.then(
+    () => sendBack({ type: 'childReady', region: 'agentHost' }),
+    (error: unknown) =>
+      sendBack({
+        type: 'childFailed',
+        region: 'agentHost',
+        reason: error instanceof Error ? error.message : String(error),
+      }),
+  );
+  return () => {
+    if (agentHostRegistrations.get(input.projectId) !== registration) {
+      return;
+    }
+    agentHostRegistrations.delete(input.projectId);
+    void registration.then(async (registered) => registered.release()).catch(() => undefined);
   };
 });
 
@@ -174,11 +228,11 @@ const computeRegion = fromCallback<EventObject, { projectId: string }>(({ input,
 
 const projectSession = projectSessionMachine.provide({
   actors: {
-    awaitPull: fromSafeAsync<void, { projectId: string }>(async ({ input }) => {
-      await servicesFor(input.projectId).awaitPull();
-    }),
     cancelRuns: fromSafeAsync<void, { projectId: string; runs: readonly string[] }>(async ({ input }) => {
       await servicesFor(input.projectId).cancelRuns(input.runs);
+    }),
+    flushProducers: fromSafeAsync<void, { projectId: string }>(async ({ input }) => {
+      await servicesFor(input.projectId).flushProducers();
     }),
     flushSync: fromSafeAsync<void, { projectId: string; boundMilliseconds: number }>(async ({ input }) => {
       await servicesFor(input.projectId).flushSync(input.boundMilliseconds);
@@ -186,10 +240,16 @@ const projectSession = projectSessionMachine.provide({
     releaseLeases: fromSafeAsync<void, { projectId: string }>(async ({ input }) => {
       await servicesFor(input.projectId).releaseLeases();
     }),
+    releaseAgentHost: fromSafeAsync<void, { projectId: string }>(async ({ input }) => {
+      const registration = agentHostRegistrations.get(input.projectId);
+      if (registration !== undefined) {
+        await (await registration).release();
+        agentHostRegistrations.delete(input.projectId);
+      }
+    }),
     fileManager: relayRegion('views'),
     project: relayRegion('runtime'),
-    editor: relayRegion('runtime'),
-    agentHost: relayRegion('agentHost'),
+    agentHost: agentHostRegion,
     compute: computeRegion,
   },
 });
@@ -203,7 +263,9 @@ const projectSession = projectSessionMachine.provide({
 export const sessionsActor: ActorRefFrom<typeof sessionsMachine> = createActor(
   sessionsMachine.provide({ actors: { projectSession } }),
   {
-    input: { budget: isDesktopTarget ? Number.POSITIVE_INFINITY : browserLiveProjectBudget },
+    input: {
+      budget: isDesktopTarget ? Number.POSITIVE_INFINITY : browserLiveProjectBudget,
+    },
     inspect,
   },
 );

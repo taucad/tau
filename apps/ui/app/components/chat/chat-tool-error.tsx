@@ -142,7 +142,7 @@ function StructuredToolErrorBody({ error, noun, className }: StructuredToolError
           ) : undefined}
           {hasValidationDetails && error.rawOutput !== undefined ? (
             <details className='text-xs'>
-              <summary className='cursor-pointer text-muted-foreground hover:text-foreground'>Raw Output</summary>
+              <summary className='text-muted-foreground hover:text-foreground'>Raw Output</summary>
               <CodeBlockContent className='mt-2'>
                 <Pre language='json' className='max-h-40 overflow-auto text-xs'>
                   {JSON.stringify(error.rawOutput, null, 2)}

@@ -4,7 +4,7 @@
 
 geometries
 
-geom2
+  geom2
 
     declare function clone(geometry: Geom2): Geom2
 
@@ -40,7 +40,7 @@ geom2
 
       color: Color
 
-geom3
+  geom3
 
     declare function clone(geometry: Geom3): Geom3
 
@@ -78,7 +78,7 @@ geom3
 
       color: Color
 
-path2
+  path2
 
     declare function appendArc(options: AppendArcOptions, geometry: Path2): Path2
 
@@ -148,7 +148,7 @@ path2
 
       color: Color
 
-poly2
+  poly2
 
     declare function arePointsInside(points: Array<Vec2>, polygon: Poly2): number
 
@@ -162,7 +162,7 @@ poly2
 
       vertices: Array<Vec2>
 
-poly3
+  poly3
 
     declare function clone(polygon: Poly3): Poly3
     declare function clone(out: Poly3, polygon: Poly3): Poly3

@@ -13,6 +13,7 @@ import { FastifyOtelInstrumentation } from '@fastify/otel';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { AppModule } from '#app.module.js';
+import { getEnvironment } from '#config/environment.config.js';
 import type { Environment } from '#config/environment.config.js';
 import { getFastifyLoggingConfig } from '#logger/fastify.logger.js';
 import { corsBaseConfiguration } from '#constants/cors.constant.js';
@@ -30,7 +31,7 @@ async function createApiApp() {
     logger: getFastifyLoggingConfig(),
   });
 
-  const app = await NestFactory.create<NestFastifyApplication>(AppModule, fastifyAdapter, {
+  const app = await NestFactory.create<NestFastifyApplication>(AppModule.forRoot(getEnvironment()), fastifyAdapter, {
     bufferLogs: true, // Buffer logs until pino logger is ready. This ensures all logs are consistently formatted.
   });
 

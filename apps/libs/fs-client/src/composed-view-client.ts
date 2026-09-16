@@ -86,6 +86,7 @@ const treeNode = (row: { name: string } & FileStat): FileTreeNode => {
  */
 const guardedMutations = new Map<string, readonly number[]>([
   ['writeFile', [0]],
+  ['writeFileChecked', []],
   ['mkdir', [0]],
   ['unlink', [0]],
   ['rmdir', [0]],
@@ -104,6 +105,12 @@ const guardedPreflights = new Map<string, readonly number[]>([
 
 /** The paths a guarded call would touch, whatever shape its arguments take. */
 const touchedPaths = (property: string, args: readonly unknown[]): readonly string[] => {
+  if (property === 'writeFileChecked') {
+    const input = args[0] as { path?: unknown; preconditions?: ReadonlyArray<{ path?: unknown }> } | undefined;
+    return [input?.path, ...(input?.preconditions?.map(({ path }) => path) ?? [])].filter(
+      (value): value is string => typeof value === 'string',
+    );
+  }
   if (property === 'canRename') {
     /* The new name lands in the source's own parent, and that parent can still
      * be an overlay's — so the preflight answers on the same two paths the
@@ -179,22 +186,19 @@ export const createComposedViewClient = (input: {
    * reaches the authority when the answer is an overlay's.
    */
   const firstReadOnly = async (paths: readonly string[]): Promise<string | undefined> => {
-    for (const absolutePath of paths) {
-      const relative = viewPath(absolutePath);
-      if (relative === undefined) {
-        continue;
-      }
-      let known = provenance.get(relative);
-      if (known === undefined) {
-        // eslint-disable-next-line no-await-in-loop -- one path at a time; the memo makes the common case zero calls
-        known = await view.provenance(relative);
-        provenance.set(relative, known);
-      }
-      if (known.source !== 'project') {
-        return relative;
-      }
-    }
-    return undefined;
+    const relatives = paths.map((absolutePath) => viewPath(absolutePath)).filter((path) => path !== undefined);
+    /* One round of probes, not one per path: a multi-select move asks about
+     * every path it touches, and the memo answers for none of them the first
+     * time (a move target has never been read). Order still decides which path
+     * the refusal names (W2 R14). */
+    await Promise.all(
+      relatives
+        .filter((relative) => !provenance.has(relative))
+        .map(async (relative) => {
+          provenance.set(relative, await view.provenance(relative));
+        }),
+    );
+    return relatives.find((relative) => provenance.get(relative)?.source !== 'project');
   };
 
   const remember = (relativePath: string, value: FileProvenance | undefined): void => {
@@ -239,7 +243,11 @@ export const createComposedViewClient = (input: {
         const child = `${relativePath}/${row.name}`;
         return row.type === 'dir'
           ? unitFiles(child)
-          : { [paths.toAbsolutePath(child)]: { content: await view.readFile(child) } };
+          : {
+              [paths.toAbsolutePath(child)]: {
+                content: await view.readFile(child),
+              },
+            };
       }),
     );
     return Object.assign({}, ...parts) as Record<string, { content: Uint8Array<ArrayBuffer> }>;
@@ -270,7 +278,10 @@ export const createComposedViewClient = (input: {
     stat: async (absolutePath: string) => {
       const relative = viewPath(absolutePath);
       if (relative === undefined) {
-        return { ...(await workspace.stat(absolutePath)), provenance: outsideCheckoutProvenance };
+        return {
+          ...(await workspace.stat(absolutePath)),
+          provenance: outsideCheckoutProvenance,
+        };
       }
       const result = await view.stat(relative);
       remember(relative, result.provenance);
@@ -288,7 +299,10 @@ export const createComposedViewClient = (input: {
       const relative = viewPath(absolutePath);
       if (relative === undefined) {
         const rows = await workspace.readDirectory(absolutePath);
-        return rows.map((node) => ({ ...node, provenance: outsideCheckoutProvenance }));
+        return rows.map((node) => ({
+          ...node,
+          provenance: outsideCheckoutProvenance,
+        }));
       }
       const rows = await view.readdirWithStats(relative);
       for (const row of rows) {

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { formatKeyCombination, setPlatform, getPlatform } from '#utils/keys.utils.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
@@ -44,7 +44,7 @@ type KeybindingOptions = {
 type KeybindingRegistration = {
   id: symbol;
   callbackRef: React.RefObject<(event: KeyboardEvent) => void>;
-  options: Required<KeybindingOptions>;
+  optionsRef: React.RefObject<Required<KeybindingOptions>>;
 };
 
 type KeyboardContextValue = {
@@ -311,28 +311,29 @@ export function KeyboardProvider({ children }: { readonly children: ReactNode })
       }
 
       // Sort by priority descending (stable)
-      const sorted = [...registrations].sort((a, b) => b.options.priority - a.options.priority);
+      const sorted = [...registrations].sort((a, b) => b.optionsRef.current.priority - a.optionsRef.current.priority);
 
       for (const reg of sorted) {
+        const options = reg.optionsRef.current;
         // Enabled check
-        const isEnabled = typeof reg.options.enabled === 'function' ? reg.options.enabled() : reg.options.enabled;
+        const isEnabled = typeof options.enabled === 'function' ? options.enabled() : options.enabled;
 
         if (!isEnabled) {
           continue;
         }
 
         // Repeat guard
-        if (event.repeat && !reg.options.repeat) {
+        if (event.repeat && !options.repeat) {
           continue;
         }
 
         // Input guard
-        if (reg.options.ignoreInputs && isEditableTarget(event.target ?? undefined)) {
+        if (options.ignoreInputs && isEditableTarget(event.target ?? undefined)) {
           continue;
         }
 
         // Scope guard
-        if (reg.options.scope === 'app' && isInsideScopedContainer(event.target ?? undefined)) {
+        if (options.scope === 'app' && isInsideScopedContainer(event.target ?? undefined)) {
           continue;
         }
 
@@ -340,16 +341,16 @@ export function KeyboardProvider({ children }: { readonly children: ReactNode })
         reg.callbackRef.current(event);
 
         // Apply DOM event modifications
-        if (reg.options.preventDefault) {
+        if (options.preventDefault) {
           event.preventDefault();
         }
 
-        if (reg.options.stopPropagation) {
+        if (options.stopPropagation) {
           event.stopPropagation();
         }
 
         // Consume check
-        if (reg.options.consume) {
+        if (options.consume) {
           break;
         }
       }
@@ -387,14 +388,14 @@ export function KeyboardProvider({ children }: { readonly children: ReactNode })
     };
 
     // Attach single set of listeners
-    globalThis.addEventListener('keydown', handleKeyDown);
+    globalThis.addEventListener('keydown', handleKeyDown, { capture: true });
     globalThis.addEventListener('keyup', handleKeyUp);
     globalThis.addEventListener('blur', handleBlur);
     document.addEventListener('visibilitychange', handleVisibilityChange);
     globalThis.addEventListener('pointerdown', handlePointerDown);
 
     return () => {
-      globalThis.removeEventListener('keydown', handleKeyDown);
+      globalThis.removeEventListener('keydown', handleKeyDown, { capture: true });
       globalThis.removeEventListener('keyup', handleKeyUp);
       globalThis.removeEventListener('blur', handleBlur);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
@@ -466,15 +467,11 @@ export function useKeybinding(
 
   // Stable callback ref -- updated every render, read in handler
   const callbackRef = useRef(callback);
-  callbackRef.current = callback;
-
-  // Merge options with defaults
-  const mergedOptions = useMemo<Required<KeybindingOptions>>(
-    () => ({ ...defaultOptions, ...options }),
-    // Serialize options to a stable string for dependency comparison
-    // oxlint-disable-next-line react-hooks/exhaustive-deps -- intentional: we serialize for stability
-    [JSON.stringify(options)],
-  );
+  const optionsRef = useRef<Required<KeybindingOptions>>({ ...defaultOptions, ...options });
+  useLayoutEffect(() => {
+    callbackRef.current = callback;
+    optionsRef.current = { ...defaultOptions, ...options };
+  }, [callback, options]);
 
   // Serialize combo for registry key and effect dependency
   const comboKey = useMemo(() => serializeCombo(keyCombination), [keyCombination]);
@@ -485,7 +482,7 @@ export function useKeybinding(
     const registration: KeybindingRegistration = {
       id,
       callbackRef,
-      options: mergedOptions,
+      optionsRef,
     };
 
     register(comboKey, registration);
@@ -493,7 +490,7 @@ export function useKeybinding(
     return () => {
       unregister(comboKey, id);
     };
-  }, [comboKey, mergedOptions, register, unregister]);
+  }, [comboKey, register, unregister]);
 
   // Format for display
   const formattedKeyCombination = useMemo(() => formatKeyCombination(keyCombination), [keyCombination]);

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { legalUrl } from '#constants/meta.constants.js';
 import { CreditCard } from 'lucide-react';
-import { Link } from 'react-router';
-// eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party billing surface owns the direct billing client contract
 import { formatCreditAtoms } from '@taucad/billing';
 import type { WirePaymentAction } from '@taucad/billing';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
@@ -25,7 +24,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 
 const presetsCents = [1000, 2500, 5000, 10_000] as const;
 const minCents = 500;
-const maxCents = 50_000;
+const maxCents = 500_000;
 const brandIconId: Record<string, IconId> = {
   visa: 'visa',
   mastercard: 'mastercard',
@@ -135,13 +134,14 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
         }
       }
     },
-    [generationValue, userId],
+    [generationValue],
   );
 
   useEffect(() => {
-    if (!isOpen || binding === undefined) {
+    if (!isOpen || !apiBaseUrl || !environment || !userId) {
       return;
     }
+    const currentBinding = { apiBaseUrl, environment, ownerId: userId };
     let active = true;
     // oxlint-disable-next-line react/set-state-in-effect -- hide the prior identity's financial state before the owned GET
     setAction(undefined);
@@ -151,7 +151,7 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
     // async-iife: bootstrap
     void (async () => {
       try {
-        const items = await getUnresolvedPaymentActions(binding, 'manual_topup');
+        const items = await getUnresolvedPaymentActions(currentBinding, 'manual_topup');
         // oxlint-disable-next-line typescript/no-unnecessary-condition -- cleanup can flip active while the GET is pending
         if (active) {
           const owned = items[0];
@@ -267,7 +267,7 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
                   autoFocus
                   type='number'
                   min={5}
-                  max={500}
+                  max={5000}
                   aria-label='Custom amount'
                   value={customDollars}
                   onChange={(event) => {
@@ -276,21 +276,43 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
                   }}
                 />
               ) : undefined}
-              <Button
-                disabled={visibleBusy || !amountIsValid || binding === undefined}
-                onClick={async () => {
-                  await run(async () =>
-                    prepareTopup(binding!, {
-                      requestId: requestIdRef.current,
-                      amountMinor: String(amountCents),
-                      method: entitlements.paymentMethod ? 'saved_card' : 'checkout',
-                      returnPath: returnPath(),
-                    }),
-                  );
-                }}
-              >
-                Review {formatUsdMinor(amountCents)} purchase
-              </Button>
+              <div className='flex flex-col gap-2'>
+                {entitlements.paymentMethod ? (
+                  <Button
+                    disabled={visibleBusy || !amountIsValid || binding === undefined}
+                    onClick={async () => {
+                      await run(async () =>
+                        prepareTopup(binding!, {
+                          requestId: requestIdRef.current,
+                          amountMinor: String(amountCents),
+                          method: 'saved_card',
+                          returnPath: returnPath(),
+                        }),
+                      );
+                    }}
+                  >
+                    Review purchase with saved card
+                  </Button>
+                ) : undefined}
+                <Button
+                  variant={entitlements.paymentMethod ? 'outline' : 'default'}
+                  disabled={visibleBusy || !amountIsValid || binding === undefined}
+                  onClick={async () => {
+                    await run(async () =>
+                      prepareTopup(binding!, {
+                        requestId: requestIdRef.current,
+                        amountMinor: String(amountCents),
+                        method: 'checkout',
+                        returnPath: returnPath(),
+                      }),
+                    );
+                  }}
+                >
+                  {entitlements.paymentMethod
+                    ? 'Use another card in Checkout'
+                    : `Review ${formatUsdMinor(amountCents)} purchase`}
+                </Button>
+              </div>
             </>
           ) : undefined}
 
@@ -305,16 +327,23 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
                   <dt>Amount</dt>
                   <dd>{formatUsdMinor(frozen.principalMinor)}</dd>
                 </div>
-                {frozen.taxMinor === '0' ? undefined : (
+                {frozen.taxMinor === null ? (
+                  <div className='flex justify-between gap-4 text-muted-foreground'>
+                    <dt>Tax and total</dt>
+                    <dd className='text-right'>Calculated in secure Checkout before payment</dd>
+                  </div>
+                ) : (
                   <div className='flex justify-between'>
                     <dt>Tax</dt>
                     <dd>{formatUsdMinor(frozen.taxMinor)}</dd>
                   </div>
                 )}
-                <div className='flex justify-between border-t pt-1.5 font-medium'>
-                  <dt>Total due</dt>
-                  <dd>{formatUsdMinor(frozen.grossMinor)}</dd>
-                </div>
+                {frozen.grossMinor === null ? undefined : (
+                  <div className='flex justify-between border-t pt-1.5 font-medium'>
+                    <dt>Total due</dt>
+                    <dd>{formatUsdMinor(frozen.grossMinor)}</dd>
+                  </div>
+                )}
               </dl>
               {frozen.paymentMethod ? (
                 <div className='flex items-center justify-between rounded-md border px-3 py-2 text-sm'>
@@ -336,7 +365,7 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
                   await run(async () => confirmPaymentAction(visibleBinding!, visibleAction.actionId));
                 }}
               >
-                Confirm quote
+                {frozen?.grossMinor === null ? 'Continue to secure Checkout' : 'Confirm quote'}
               </Button>
               <Button variant='outline' disabled={visibleBusy} onClick={discardQuote}>
                 Discard quote
@@ -410,9 +439,9 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
           ) : undefined}
           <p className='text-xs text-muted-foreground'>
             Credits are spent on AI and kernel usage and never expire. By continuing you agree to Tau’s{' '}
-            <Link to='/legal/terms' className='underline'>
+            <a href={legalUrl('terms')} target='_blank' rel='noopener noreferrer' className='underline'>
               Terms
-            </Link>
+            </a>
             .
           </p>
         </div>

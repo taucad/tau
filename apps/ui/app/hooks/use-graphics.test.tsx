@@ -1,6 +1,9 @@
 import { StrictMode, useLayoutEffect } from 'react';
-import { act, render, waitFor } from '@testing-library/react';
+import { act, render, renderHook, waitFor } from '@testing-library/react';
+import { readFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { createActor, fromPromise } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { ThreeCameraRig } from '@taucad/three/camera';
@@ -14,10 +17,43 @@ import {
   useSetRenderFrame,
 } from '#hooks/use-graphics.js';
 import type { CameraViewInitialization } from '#hooks/use-graphics.js';
-import { getGraphicsCameraState, hasGraphicsCameraRig } from '#services/graphics-camera-registry.js';
+import {
+  getGraphicsCameraState,
+  hasGraphicsCameraRig,
+  registerGraphicsCameraRig,
+  unregisterGraphicsCameraRig,
+} from '#services/graphics-camera-registry.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 
 const actors: Array<ActorRefFrom<typeof graphicsMachine>> = [];
+
+const compiledGraphics = await (async () => {
+  const { transformSync } = await import('oxc-transform-react');
+  const source = await readFile(new URL('use-graphics.tsx', pathToFileURL(import.meta.filename)), 'utf8');
+  const compiled = transformSync('use-graphics.tsx', source, {
+    lang: 'tsx',
+    reactCompiler: { target: '19' },
+  });
+  if (compiled.fatal || compiled.errors.length > 0) {
+    throw new Error(`React Compiler refused use-graphics: ${JSON.stringify(compiled.errors)}`);
+  }
+  const specifiers = [...compiled.code.matchAll(/^import {[^}]*} from "([^"]+)";$/gm)].map((match) => match[1]!);
+  const modules = Object.fromEntries(
+    await Promise.all(specifiers.map(async (specifier) => [specifier, await import(specifier)] as const)),
+  );
+  const linked = compiled.code
+    .replaceAll(
+      /^import {([^}]*)} from "([^"]+)";$/gm,
+      (_match, names: string, specifier: string) =>
+        `const { ${names.replaceAll(' as ', ': ')} } = __modules[${JSON.stringify(specifier)}];`,
+    )
+    .replaceAll(/^export /gm, '');
+  // oxlint-disable-next-line no-new-func -- this pin executes the app's compiler output.
+  const factory = new Function('__modules', `${linked}\nreturn { useGraphicsCameraRigQuery };`) as (
+    dependencies: Record<string, unknown>,
+  ) => { useGraphicsCameraRigQuery: () => (graphicsRef: ActorRefFrom<typeof graphicsMachine>) => boolean };
+  return { code: compiled.code, useGraphicsCameraRigQuery: factory(modules).useGraphicsCameraRigQuery };
+})();
 
 const createGraphicsActor = () => {
   const actor = createActor(graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }), {
@@ -106,6 +142,28 @@ describe('GraphicsProvider camera rig ownership', () => {
     });
     expect(rig!.activeCamera).toBe(orthographic);
     expect(hasGraphicsCameraRig(graphicsActor)).toBe(true);
+  });
+
+  it('should refresh the compiled camera-rig query when the registry changes', async () => {
+    expect(compiledGraphics.code).toContain('from "react/compiler-runtime"');
+    expect(compiledGraphics.code).toMatch(/useGraphicsCameraRigQuery = \(\) => {\s*const \$ = _c\(/);
+    const graphicsActor = createGraphicsActor();
+    const rig = mock<ThreeCameraRig>();
+    const { result } = renderHook(() => compiledGraphics.useGraphicsCameraRigQuery());
+    const initialQuery = result.current;
+    expect(initialQuery(graphicsActor)).toBe(false);
+
+    act(() => {
+      registerGraphicsCameraRig(graphicsActor, rig);
+    });
+    await waitFor(() => {
+      expect(result.current(graphicsActor)).toBe(true);
+    });
+    expect(result.current).not.toBe(initialQuery);
+
+    act(() => {
+      unregisterGraphicsCameraRig(graphicsActor, rig);
+    });
   });
 
   it('constructs a card camera at its requested field of view before the first frame', () => {

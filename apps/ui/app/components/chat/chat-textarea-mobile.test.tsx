@@ -15,13 +15,22 @@ const jscadKernel = kernelConfigurations.find((k) => k.id === 'jscad')!;
 // guarantees a non-nullable `KernelConfiguration`. This test mirrors
 // that contract.
 const mockKernel: { current: KernelConfiguration } = { current: manifoldKernel };
+const mockCanSelectExecution = { current: false };
 
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: (): ChatComposerContextValue =>
     ({
       execution: { execution: { kind: 'tau', model: 'test-model' }, setActiveExecution: vi.fn() },
       session: undefined,
+      canSelectExecution: mockCanSelectExecution.current,
     }) as unknown as ChatComposerContextValue,
+}));
+
+vi.mock('#components/chat/chat-execution-selector.js', () => ({
+  formatChatAgentActivity: () => 'Ready',
+  ChatExecutionSelector: ({ children }: { readonly children: (props: unknown) => React.ReactNode }) => (
+    <div data-testid='execution-selector'>{children({ label: 'Tau', activity: 'ready' })}</div>
+  ),
 }));
 
 vi.mock('#components/chat/chat-model-selector.js', () => ({
@@ -189,6 +198,7 @@ describe('ChatTextareaMobile — chat-scoped kernel resolution', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockKernel.current = manifoldKernel;
+    mockCanSelectExecution.current = false;
   });
 
   it('renders the kernel handed back by ChatKernelSelector (no hardcoded openscad fallback)', () => {
@@ -206,6 +216,12 @@ describe('ChatTextareaMobile — chat-scoped kernel resolution', () => {
   it('offers the credit balance chip inside the options drawer', () => {
     renderMobile();
     expect(screen.getByTestId('credit-balance-chip')).toBeInTheDocument();
+  });
+
+  it('shows execution selection from capability even without a chat session', () => {
+    mockCanSelectExecution.current = true;
+    renderMobile();
+    expect(screen.getByTestId('execution-selector')).toBeInTheDocument();
   });
 
   it('names the options trigger and renders location inside Settings', () => {

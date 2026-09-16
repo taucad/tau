@@ -5,6 +5,13 @@
   "projectType": "library",
   "tags": ["scope:shared", "type:package"],
   "targets": {
+    "test:live": {
+      "command": "vitest run --config vitest.live.config.ts",
+      "options": {
+        "cwd": "{projectRoot}"
+      },
+      "cache": false
+    },
     "test:browser": {
       "command": "vitest run --config vitest.browser.config.ts",
       "options": {

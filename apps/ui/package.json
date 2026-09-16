@@ -42,6 +42,7 @@
     "@taucad/middleware": "workspace:*",
     "@taucad/opencascade": "workspace:*",
     "@taucad/openrscad": "workspace:*",
+    "@taucad/parameters": "workspace:*",
     "@taucad/picogk": "workspace:*",
     "@taucad/react": "workspace:*",
     "@taucad/replicad": "workspace:*",
@@ -78,8 +79,8 @@
     "tslib": "catalog:",
     "uint8array-extras": "catalog:",
     "vscode-uri": "catalog:",
-    "zod": "catalog:",
-    "xstate": "catalog:"
+    "xstate": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@taucad/geometry-core": "workspace:*",

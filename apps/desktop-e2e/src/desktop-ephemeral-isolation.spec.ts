@@ -6,7 +6,6 @@ import { afterEach, expect, test } from 'vitest';
 
 import { captureNextDesktopDownload, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
-import { declineCookieBanner } from '#support/scenario.js';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 const cubePath = join(workspaceRoot, 'packages/plugins/gltf/src/fixtures/cube.glb');
@@ -29,7 +28,6 @@ const directorySnapshot = async (root: string): Promise<readonly string[]> => {
 const openConverter = async (page: Page): Promise<void> => {
   await page.goto('app://tau/convert', { waitUntil: 'domcontentloaded' });
   await page.getByRole('heading', { name: '3D Model Converter' }).waitFor({ state: 'visible' });
-  await declineCookieBanner(page);
   await page
     .getByText(/^[1-9]\d* formats supported$/u)
     .filter({ visible: true })
@@ -195,7 +193,6 @@ test('[completed-artifact] isolates simultaneous converter clients with identica
   const secondPage = await nextWindow;
   secondPage.setDefaultTimeout(60_000);
   await secondPage.getByRole('heading', { name: '3D Model Converter' }).waitFor({ state: 'visible' });
-  await declineCookieBanner(secondPage);
   await secondPage
     .getByText(/^[1-9]\d* formats supported$/u)
     .filter({ visible: true })

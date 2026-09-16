@@ -1,8 +1,24 @@
 import deepmerge from 'deepmerge';
 import { z } from 'zod';
-import { fileParameterEntrySchema, getActiveGroupValues, parametersDirectory } from '@taucad/runtime/types';
+import { getActiveGroupValues, parametersDirectory } from '@taucad/runtime/types';
+import type { KernelIssue } from '@taucad/runtime/types';
 import { assertRootedPath, isNotFoundError } from '@taucad/runtime/kernel';
 import { defineMiddleware } from '@taucad/runtime/middleware';
+import { readParameterRecord } from '@taucad/parameters';
+
+const encoder = new TextEncoder();
+
+const recordFailure = (code: 'INVALID_RECORD' | 'UNSUPPORTED_RECORD', message: string): Error =>
+  Object.assign(new Error(message), {
+    issues: [
+      {
+        code,
+        message,
+        type: 'runtime',
+        severity: 'error',
+      } satisfies KernelIssue,
+    ],
+  });
 
 const resolveParameterFilePath = (entryPath: string, parametersDirectoryPath: string): string => {
   const localEntryPath = assertRootedPath(entryPath);
@@ -19,9 +35,10 @@ const resolveParameterFilePath = (entryPath: string, parametersDirectoryPath: st
  * rather than concatenated.
  *
  * The parameter file is included in dependency hashing and registered for watching.
- * Missing, malformed, or incomplete files leave the request unchanged. Other
- * read failures propagate so stale handles, permission errors, and provider
- * failures cannot be mistaken for an absent optional parameter file.
+ * Missing files leave the request unchanged. Invalid or unsupported records
+ * surface a stable diagnostic, and other read failures propagate so stale
+ * handles, permission errors, and provider failures cannot be mistaken for an
+ * absent optional parameter file.
  *
  * @public
  */
@@ -55,24 +72,20 @@ export const parameterFileResolver = defineMiddleware({
       throw error;
     }
 
-    let decoded: unknown;
-    try {
-      decoded = JSON.parse(content);
-    } catch (error) {
-      if (!(error instanceof SyntaxError)) {
-        throw error;
-      }
-      return handler(input);
+    const decoded = readParameterRecord(encoder.encode(content), {
+      migrationAvailable: false,
+    });
+    if (decoded.status === 'invalid-preserved') {
+      throw recordFailure('INVALID_RECORD', `Invalid parameter record: ${decoded.error}`);
     }
-
-    const entry = fileParameterEntrySchema.safeParse(decoded);
-    if (!entry.success) {
-      return handler(input);
+    if (decoded.status === 'unsupported-preserved') {
+      throw recordFailure('UNSUPPORTED_RECORD', 'Unsupported parameter record version or profile.');
     }
+    const entry = decoded.record;
 
     return handler({
       ...input,
-      parameters: deepmerge(input.parameters, getActiveGroupValues(entry.data), {
+      parameters: deepmerge(input.parameters, getActiveGroupValues(entry), {
         arrayMerge: (_target: unknown[], source: unknown[]) => source,
       }),
     });

@@ -87,7 +87,7 @@ export function OfflineShell(): React.JSX.Element | undefined {
     return (
       <OfflineNotice
         label='Offline'
-        message='Offline — showing saved usage. Amounts are as of the last time this page reached Tau.'
+        message='Offline — current usage is unavailable. A saved account view appears below when this device has one.'
       />
     );
   }

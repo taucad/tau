@@ -121,6 +121,38 @@ describe('getBetterAuthConfig abuse gates', () => {
     expect(auth.options.account.encryptOAuthTokens).toBe(true);
   });
 
+  it('caps session reads without reducing the global auth limit', async () => {
+    const { staticAuthConfig } = await import('#config/auth.js');
+    const counts = new Map<string, number>();
+    const appliedLimits: number[] = [];
+    const auth = betterAuth({
+      ...staticAuthConfig,
+      database: memoryAdapter({ user: [], session: [], account: [], verification: [], apikey: [] }),
+      rateLimit: {
+        ...staticAuthConfig.rateLimit,
+        customStorage: {
+          get: async () => null,
+          set: async () => undefined,
+          consume: async (key, rule) => {
+            appliedLimits.push(rule.max);
+            const count = (counts.get(key) ?? 0) + 1;
+            counts.set(key, count);
+            return { allowed: count <= rule.max, retryAfter: count <= rule.max ? null : rule.window };
+          },
+        },
+      },
+    });
+
+    const sessionResponses = await Promise.all(
+      Array.from({ length: 21 }, async () => auth.handler(new Request('http://localhost:4000/v1/auth/get-session'))),
+    );
+    expect(sessionResponses.slice(0, 20).every(({ status }) => status !== 429)).toBe(true);
+    expect(sessionResponses.at(-1)?.status).toBe(429);
+
+    await auth.handler(new Request('http://localhost:4000/v1/auth/sign-out', { method: 'POST' }));
+    expect(appliedLimits.at(-1)).toBe(100);
+  });
+
   it('keeps initial GitHub sign-in limited to identity scopes', () => {
     const { config } = createConfig();
     const github = config.socialProviders?.['github'];

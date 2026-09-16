@@ -102,6 +102,24 @@ type ToolSerializer<T extends keyof MyTools> = {
 type ToolPartFor<Name extends keyof MyTools> = ToolUIPart<Pick<MyTools, Name>>;
 
 const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
+  [toolName.getParameters]: {
+    input: (input) =>
+      joinLines(
+        `targetFile: ${input.targetFile}`,
+        input.resolutionMode === undefined ? undefined : `resolutionMode: ${input.resolutionMode}`,
+      ),
+    output: (output) => JSON.stringify(output, null, 2),
+  },
+  [toolName.applyParameterOperation]: {
+    input: (input) =>
+      joinLines(
+        `targetFile: ${input.targetFile}`,
+        `requestId: ${input.requestId}`,
+        'action' in input && input.action !== undefined ? `action: ${input.action}` : undefined,
+        'operation' in input && input.operation !== undefined ? `operation: ${input.operation.kind}` : undefined,
+      ),
+    output: (output) => JSON.stringify(output, null, 2),
+  },
   [toolName.webSearch]: {
     input: (input) => `query: ${input.query}`,
     output: (output) =>
@@ -354,6 +372,10 @@ function serializePart(part: MyMessagePart): string {
     }
 
     case 'data-context-usage': {
+      return '';
+    }
+
+    case 'data-acp-session': {
       return '';
     }
 

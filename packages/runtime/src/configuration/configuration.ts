@@ -1,13 +1,12 @@
 import type { StandardJSONSchemaV1, StandardSchemaV1 } from '@standard-schema/spec';
 import { canonicalizeCacheValue, digestContent } from '@taucad/cache-core';
 import type { CacheValue, ContentDigest } from '@taucad/cache-core';
-import { admitJsonSchema, resolveLocalSchema, validateJsonSchemaValue } from '#configuration/admission.js';
-import type { JsonSchema } from '#configuration/admission.js';
-import { assertBoundedJson, cloneBoundedJson } from '#configuration/bounded-json.js';
+import { admitJsonSchema, resolveLocalSchema, validateJsonSchemaValue } from '@taucad/parameters/schema';
+import type { JsonSchema } from '@taucad/parameters/schema';
+import { assertBoundedJson, cloneBoundedJson } from '@taucad/parameters/json';
 import { configurationIconIds } from '#configuration/configuration-icons.generated.js';
-import { projectDraft7SchemaToParameterDeclaration } from '#parameter/json-schema-adapter.js';
-import { admitParameterDeclaration } from '#parameter/manifest.js';
-import type { ParameterDeclaration } from '#parameter/manifest.js';
+import { admitParameterDeclaration, projectDraft7SchemaToParameterDeclaration } from '@taucad/parameters';
+import type { ParameterDeclaration } from '@taucad/parameters';
 
 /** Widgets admitted by configuration manifest version one. @public */
 export type RestrictedUiWidgetV1 = 'color' | 'radio' | 'segmented' | 'select' | 'slider' | 'textarea' | 'toggle';

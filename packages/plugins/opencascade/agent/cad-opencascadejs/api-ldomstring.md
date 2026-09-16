@@ -4,8 +4,8 @@
 
 LDOMString: declare class LDOMString extends LDOMBasicString
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

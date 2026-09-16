@@ -55,7 +55,7 @@ import type {
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeTransportClient, RuntimeTransportTimeoutRecovery } from '#transport/runtime-transport.types.js';
-import { admitParameterManifest, ParameterAdmissionError } from '#parameter/manifest.js';
+import { admitParameterManifest, ParameterAdmissionError } from '@taucad/parameters';
 import {
   defaultTranscodeTimeout,
   renderTimeoutRecoveryGrace,
@@ -185,8 +185,7 @@ export type RuntimeWorkerClientOptions = {
   transport: RuntimeTransportClient;
 };
 
-/**
- */
+/** Initialization options for {@link RuntimeWorkerClient}. @public */
 export type RuntimeWorkerClientInitializeOptions = {
   readonly config?: unknown;
 };
@@ -599,7 +598,10 @@ export class RuntimeWorkerClient {
   ): Unsubscribe {
     return this.deferNotify('stateChanged', (args) => {
       if (this.isSelectedPreviewPublishable(args.renderId)) {
-        handler({ ...args, geometryObserved: this.selectedPreview?.geometryObserved === true });
+        handler({
+          ...args,
+          geometryObserved: this.selectedPreview?.geometryObserved === true,
+        });
       }
     });
   }
@@ -888,15 +890,16 @@ export class RuntimeWorkerClient {
     try {
       return { ...result, data: await admitParameterManifest(result.data) };
     } catch (error) {
+      const diagnostics = error instanceof ParameterAdmissionError ? error.diagnostics : undefined;
       return {
         success: false,
         issues: [
           {
             message: error instanceof Error ? error.message : 'Parameter manifest admission failed',
-            code: 'RUNTIME',
+            code: diagnostics?.[0]?.code ?? 'RUNTIME',
             type: 'runtime',
             severity: 'error',
-            details: error instanceof ParameterAdmissionError ? error.diagnostics : undefined,
+            details: diagnostics,
           },
         ],
       };
@@ -1104,7 +1107,10 @@ export class RuntimeWorkerClient {
   ): Promise<ProgressiveSceneUpdate> {
     switch (update.type) {
       case 'reset': {
-        return { ...update, snapshot: await this.resolveSceneSnapshot(update.snapshot, assetsByDigest) };
+        return {
+          ...update,
+          snapshot: await this.resolveSceneSnapshot(update.snapshot, assetsByDigest),
+        };
       }
       case 'delta': {
         const assets: ResolvedSceneAsset[] = [];

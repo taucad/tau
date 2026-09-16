@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, describe, it, expect } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
-import type { ParameterManifest } from '@taucad/runtime/parameter';
+import type { ParameterManifest } from '@taucad/parameters';
 import type { GeometryResponse } from '@taucad/runtime/types';
 
 import { manifoldKernel } from '#manifold.kernel.js';

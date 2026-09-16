@@ -3,7 +3,107 @@
  * These should be associated with the feature they describe
  */
 import * as pluralize from 'pluralize';
-import { descriptorTerms, commonGeneralTerms } from '#constants/project-parameters.js';
+
+const groupingModifiers = new Set([
+  'width',
+  'height',
+  'radius',
+  'diameter',
+  'thickness',
+  'depth',
+  'length',
+  'scale',
+  'size',
+  'offset',
+  'gap',
+  'distance',
+  'margin',
+  'clearance',
+  'rounded',
+  'taper',
+  'bevel',
+  'chamfer',
+  'fillet',
+  'curvature',
+  'smoothness',
+  'resolution',
+  'count',
+  'number',
+  'num',
+  'quantity',
+  'amount',
+  'frequency',
+  'rows',
+  'columns',
+  'cols',
+  'cells',
+  'angle',
+  'angular',
+  'rotation',
+  'radians',
+  'degrees',
+  'tilt',
+  'orientation',
+  'slope',
+  'twist',
+  'quality',
+  'detail',
+  'factor',
+  'ratio',
+  'multiplier',
+  'coefficient',
+  'level',
+  'grade',
+  'step',
+  'steps',
+  'segments',
+  'facets',
+  'subdivision',
+  'divisions',
+  'precision',
+  'sampling',
+  'opacity',
+  'transparency',
+  'position',
+  'alignment',
+  'elevation',
+  'inset',
+  'inner',
+  'outer',
+  'top',
+  'bottom',
+  'side',
+  'front',
+  'back',
+  'edge',
+  'corner',
+  'center',
+  'color',
+  'density',
+  'weight',
+  'include',
+  'exclude',
+  'enable',
+  'disable',
+  'show',
+  'hide',
+  'add',
+  'remove',
+  'with',
+  'without',
+]);
+
+const generalGroupingTerms = new Set([
+  'total',
+  'default',
+  'main',
+  'primary',
+  'secondary',
+  'common',
+  'standard',
+  'general',
+  'global',
+]);
 
 /**
  * Normalize a plural word to its singular form using the pluralize library
@@ -69,7 +169,7 @@ export const extractPrimaryTerm = (parameterName: string): string | undefined =>
  * @returns Whether the term is a descriptor term
  */
 export const isDescriptorTerm = (term: string): boolean => {
-  return descriptorTerms.includes(term.toLowerCase());
+  return groupingModifiers.has(term.toLowerCase());
 };
 
 /**
@@ -79,7 +179,7 @@ export const isDescriptorTerm = (term: string): boolean => {
  * @returns Whether the term is a common general term
  */
 export const isCommonGeneralTerm = (term: string): boolean => {
-  return commonGeneralTerms.includes(term.toLowerCase());
+  return generalGroupingTerms.has(term.toLowerCase());
 };
 
 /**

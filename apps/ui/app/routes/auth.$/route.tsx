@@ -1,4 +1,3 @@
-import { lazy } from 'react';
 import { Link, useParams } from 'react-router';
 import { Auth } from '#components/auth/auth.js';
 import { AuthEmailDraftProvider } from '#components/auth/auth-email-draft.js';
@@ -7,33 +6,40 @@ import { VerifyEmail } from '#components/auth/verify-email.js';
 import { TauWordmark } from '#components/icons/tau-wordmark.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import type { Handle } from '#types/matches.types.js';
-import { ClientOnly } from '#components/ui/utils/client-only.js';
+import { DesignStory } from '#components/geometry/splash/design-story.js';
 import { isDesktopTarget } from '#lib/build-target.js';
-import type { DesktopAuthAction } from '#providers/auth-provider.js';
-import { useShellAuthHandoff } from '#providers/auth-provider.js';
+import type { ShellAuthHandoff } from '#providers/auth-provider.js';
+import { callDesktopShell, useShellAuthHandoff } from '#providers/auth-provider.js';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
-
-const AuthSplashbackLazy = lazy(async () => {
-  const m = await import('#components/geometry/splash/auth-splashback.js');
-  return { default: m.AuthSplashback };
-});
 
 export const handle: Handle = {
   enablePageWrapper: false,
 };
 
 /**
- * What the desktop window shows once the shell has taken the flow.
+ * What the desktop window shows once the shell owns the flow.
  *
  * Signing out is immediate and needs no browser, so only the sign-in family
- * gets the handoff copy and its retry.
+ * gets the handoff copy and its retry. A missing bridge never falls back to the
+ * embedded web form.
  *
- * @param action - The bridge call the shell ran.
+ * @param handoff - The shell-owned destination and whether its bridge exists.
  * @returns The handoff panel.
  */
-function ShellHandoff({ action }: { readonly action: DesktopAuthAction }): React.JSX.Element | undefined {
-  if (action === 'signOut') {
+function ShellHandoff({ handoff }: { readonly handoff: ShellAuthHandoff }): React.JSX.Element | undefined {
+  if (!handoff.isBridgeAvailable) {
+    return (
+      <div className='w-full max-w-md text-center'>
+        <h1 className='text-lg font-medium'>Sign-in is unavailable</h1>
+        <p className='mt-2 text-sm text-muted-foreground'>
+          Tau could not reach the desktop app&apos;s sign-in service. Restart Tau and try again.
+        </p>
+      </div>
+    );
+  }
+
+  if (handoff.action === 'signOut') {
     return undefined;
   }
 
@@ -47,7 +53,10 @@ function ShellHandoff({ action }: { readonly action: DesktopAuthAction }): React
         className='mt-6'
         variant='outline'
         onClick={() => {
-          void globalThis.window.tauAuth?.signIn();
+          const bridge = globalThis.window.tauAuth;
+          if (bridge) {
+            void callDesktopShell(bridge.signIn);
+          }
         }}
       >
         Open my browser again
@@ -58,7 +67,7 @@ function ShellHandoff({ action }: { readonly action: DesktopAuthAction }): React
 
 export default function AuthPage(): React.JSX.Element {
   const { '*': segment } = useParams();
-  const shellAction = useShellAuthHandoff(`/auth/${segment ?? ''}`);
+  const shellHandoff = useShellAuthHandoff(`/auth/${segment ?? ''}`);
   return (
     <AuthEmailDraftProvider>
       <div className='grid min-h-svh lg:grid-cols-2'>
@@ -80,7 +89,7 @@ export default function AuthPage(): React.JSX.Element {
             </Tooltip>
           </div>
           <div className='flex flex-1 items-center justify-center'>
-            {shellAction === undefined ? (
+            {shellHandoff === undefined ? (
               segment === 'verify-email' ? (
                 <VerifyEmail className='w-full max-w-md' />
               ) : segment === 'magic-link/verify' ? (
@@ -89,14 +98,12 @@ export default function AuthPage(): React.JSX.Element {
                 <Auth path={segment} className='w-full max-w-md' />
               )
             ) : (
-              <ShellHandoff action={shellAction} />
+              <ShellHandoff handoff={shellHandoff} />
             )}
           </div>
         </div>
         <div className='relative hidden lg:block'>
-          <ClientOnly>
-            <AuthSplashbackLazy />
-          </ClientOnly>
+          <DesignStory />
         </div>
       </div>
     </AuthEmailDraftProvider>

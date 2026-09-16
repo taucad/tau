@@ -4,82 +4,82 @@
 
 GccEnt: declare class GccEnt
 
-constructor
+  constructor
 
-static PositionToString(thePosition: GccEnt_Position): string;
+  static PositionToString(thePosition: GccEnt_Position): string;
 
-static PositionFromString(thePositionString: string): GccEnt_Position;
-static PositionFromString(thePositionString: string, thePosition?: GccEnt_Position): { returnValue: boolean; thePosition: GccEnt_Position };
-static PositionFromString(thePositionString: string): GccEnt_Position;
-static PositionFromString(thePositionString: string, thePosition?: GccEnt_Position): { returnValue: boolean; thePosition: GccEnt_Position };
+  static PositionFromString(thePositionString: string): GccEnt_Position;
+  static PositionFromString(thePositionString: string, thePosition?: GccEnt_Position): { returnValue: boolean; thePosition: GccEnt_Position };
+  static PositionFromString(thePositionString: string): GccEnt_Position;
+  static PositionFromString(thePositionString: string, thePosition?: GccEnt_Position): { returnValue: boolean; thePosition: GccEnt_Position };
 
-static Unqualified(Obj: gp_Lin2d): GccEnt_QualifiedLin;
-static Unqualified(Obj: gp_Circ2d): GccEnt_QualifiedCirc;
-static Unqualified(Obj: gp_Lin2d): GccEnt_QualifiedLin;
-static Unqualified(Obj: gp_Circ2d): GccEnt_QualifiedCirc;
+  static Unqualified(Obj: gp_Lin2d): GccEnt_QualifiedLin;
+  static Unqualified(Obj: gp_Circ2d): GccEnt_QualifiedCirc;
+  static Unqualified(Obj: gp_Lin2d): GccEnt_QualifiedLin;
+  static Unqualified(Obj: gp_Circ2d): GccEnt_QualifiedCirc;
 
-static Enclosing(Obj: gp_Circ2d): GccEnt_QualifiedCirc;
+  static Enclosing(Obj: gp_Circ2d): GccEnt_QualifiedCirc;
 
-static Enclosed(Obj: gp_Lin2d): GccEnt_QualifiedLin;
-static Enclosed(Obj: gp_Circ2d): GccEnt_QualifiedCirc;
-static Enclosed(Obj: gp_Lin2d): GccEnt_QualifiedLin;
-static Enclosed(Obj: gp_Circ2d): GccEnt_QualifiedCirc;
+  static Enclosed(Obj: gp_Lin2d): GccEnt_QualifiedLin;
+  static Enclosed(Obj: gp_Circ2d): GccEnt_QualifiedCirc;
+  static Enclosed(Obj: gp_Lin2d): GccEnt_QualifiedLin;
+  static Enclosed(Obj: gp_Circ2d): GccEnt_QualifiedCirc;
 
-static Outside(Obj: gp_Lin2d): GccEnt_QualifiedLin;
-static Outside(Obj: gp_Circ2d): GccEnt_QualifiedCirc;
-static Outside(Obj: gp_Lin2d): GccEnt_QualifiedLin;
-static Outside(Obj: gp_Circ2d): GccEnt_QualifiedCirc;
+  static Outside(Obj: gp_Lin2d): GccEnt_QualifiedLin;
+  static Outside(Obj: gp_Circ2d): GccEnt_QualifiedCirc;
+  static Outside(Obj: gp_Lin2d): GccEnt_QualifiedLin;
+  static Outside(Obj: gp_Circ2d): GccEnt_QualifiedCirc;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GccEnt_BadQualifier: declare class GccEnt_BadQualifier extends Standard_DomainError
 
-constructor
+  constructor
 
-ExceptionType(): string;
+  ExceptionType(): string;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GccEnt_Position: typeof GccEnt_Position[keyof typeof GccEnt_Position]
 
 GccEnt_QualifiedCirc: declare class GccEnt_QualifiedCirc
 
-constructor
+  constructor
 
-Qualified(): gp_Circ2d;
+  Qualified(): gp_Circ2d;
 
-Qualifier(): GccEnt_Position;
+  Qualifier(): GccEnt_Position;
 
-IsUnqualified(): boolean;
+  IsUnqualified(): boolean;
 
-IsEnclosing(): boolean;
+  IsEnclosing(): boolean;
 
-IsEnclosed(): boolean;
+  IsEnclosed(): boolean;
 
-IsOutside(): boolean;
+  IsOutside(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 GccEnt_QualifiedLin: declare class GccEnt_QualifiedLin
 
-constructor
+  constructor
 
-Qualified(): gp_Lin2d;
+  Qualified(): gp_Lin2d;
 
-Qualifier(): GccEnt_Position;
+  Qualifier(): GccEnt_Position;
 
-IsUnqualified(): boolean;
+  IsUnqualified(): boolean;
 
-IsEnclosed(): boolean;
+  IsEnclosed(): boolean;
 
-IsOutside(): boolean;
+  IsOutside(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

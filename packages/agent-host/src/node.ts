@@ -1,13 +1,38 @@
 import { mkdir, open, readFile, stat, unlink } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { FileHandle } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { EventLogError } from '#log/event-log-error.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { createEventLogAppender } from '#log/event-log-appender.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { EventLogAppender, EventLogStorage } from '#log/event-log-appender.js';
+// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
+import { chatAttachmentPath } from '#harness/session-record.js';
+// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
+import type { AttachmentReader } from '#harness/session-record.js';
+
+/**
+ * Read chat attachments from a workspace on the Node filesystem (D15).
+ *
+ * @param workspaceRoot - Absolute root whose `.tau/chats` holds each chat.
+ * @returns A reader answering `undefined` for bytes not on this machine; any other I/O failure rejects.
+ * @public
+ */
+export const createNodeAttachmentReader = (workspaceRoot: string): AttachmentReader => ({
+  read: async (chatId, path) => {
+    try {
+      // A copy: a Node `Buffer` may be a view over a shared pool, and a reader answers owned bytes.
+      return new Uint8Array(await readFile(join(workspaceRoot, chatAttachmentPath(chatId, path))));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return undefined;
+      }
+      throw error;
+    }
+  },
+});
 
 /** Node event-log options. @public */
 export type NodeEventLogOptions = {

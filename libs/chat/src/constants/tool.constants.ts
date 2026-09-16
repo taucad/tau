@@ -13,6 +13,8 @@ export const toolName = {
   globSearch: 'glob_search',
   getKernelResult: 'get_kernel_result',
   exportGeometry: 'export_geometry',
+  getParameters: 'get_parameters',
+  applyParameterOperation: 'apply_parameter_operation',
   screenshot: 'screenshot',
   revisions: 'revisions',
 } as const satisfies Record<string, string>;

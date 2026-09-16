@@ -1,10 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getUnresolvedPaymentActions, prepareTopup } from './billing-payment-client.js';
 
+const recordBillingRevisionMinimum = vi.hoisted(() => vi.fn(async () => undefined));
+
 vi.mock('#environment.config.js', () => ({
   requireClientEnvironmentUrl: () => 'https://api.tau.new/',
 }));
 vi.mock('@taucad/utils/id', () => ({ randomUuid: () => 'request_1' }));
+vi.mock('#db/billing-snapshot-store.js', () => ({ recordBillingRevisionMinimum }));
 
 const action = {
   version: 'payment-action-v1',
@@ -31,7 +34,10 @@ const action = {
 };
 
 describe('billing payment client', () => {
-  beforeEach(() => vi.stubGlobal('fetch', vi.fn()));
+  beforeEach(() => {
+    recordBillingRevisionMinimum.mockClear();
+    vi.stubGlobal('fetch', vi.fn());
+  });
 
   it('uses the purpose-only unresolved query', async () => {
     vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify([action]), { status: 200 }));
@@ -67,6 +73,32 @@ describe('billing payment client', () => {
     expect(url).toBe('https://api.tau.new/v1/billing/payment-actions/topup');
     expect(init?.method).toBe('POST');
     expect(init?.body).toEqual(expect.stringContaining('"amountMinor":"2500"'));
+  });
+
+  it('records a fulfilled purchase as the durable usage freshness minimum', async () => {
+    const fulfilled = {
+      ...action,
+      state: 'fulfilled',
+      receipt: {
+        receiptId: 'journal-1',
+        grantedCreditAtoms: '25000000000',
+        revision: '9',
+        chargedPaymentMethod: { brand: 'visa', last4: '4242' },
+      },
+    };
+    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(fulfilled), { status: 200 }));
+
+    await prepareTopup(
+      { apiBaseUrl: 'https://api.tau.new', environment: 'development', ownerId: 'user-a' },
+      { requestId: 'request_1', amountMinor: '2500', method: 'saved_card', returnPath: '/' },
+    );
+
+    expect(recordBillingRevisionMinimum).toHaveBeenCalledWith({
+      environment: 'development',
+      ownerId: 'user-a',
+      subjectId: 'account-a',
+      revision: '9',
+    });
   });
 
   it('preserves an owned action on conflict', async () => {

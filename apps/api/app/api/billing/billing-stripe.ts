@@ -135,6 +135,12 @@ export type StripeTaxCalculationEvidence = {
   readonly complete: boolean;
 };
 
+export type StripeTaxTransactionEvidence = {
+  readonly transaction: Stripe.Tax.Transaction;
+  readonly lines: readonly Stripe.Tax.TransactionLineItem[];
+  readonly complete: boolean;
+};
+
 export type CompactStripeEvent = {
   readonly id: string;
   readonly type: StripeBillingEventType;
@@ -156,7 +162,7 @@ const checkoutContractSchema = z.discriminatedUnion('kind', [
     .object({
       kind: z.literal('top_up'),
       productId: z.string().min(1),
-      principalMinor: z.number().int().min(500).max(50_000),
+      principalMinor: z.number().int().min(500).max(500_000),
     })
     .strict(),
   z.object({ kind: z.literal('subscription'), priceId: z.string().min(1) }).strict(),
@@ -178,7 +184,8 @@ const checkoutRequestSchema = z
                 .object({
                   currency: z.literal('usd'),
                   product: z.string().min(1),
-                  unit_amount: z.number().int().min(500).max(50_000),
+                  tax_behavior: z.literal('exclusive'),
+                  unit_amount: z.number().int().min(500).max(500_000),
                 })
                 .strict(),
               quantity: z.literal(1),
@@ -188,7 +195,10 @@ const checkoutRequestSchema = z
       )
       .length(1),
     metadata: metadataSchema.optional(),
-    automatic_tax: z.object({ enabled: z.boolean() }).strict().optional(),
+    automatic_tax: z.object({ enabled: z.literal(true) }).strict(),
+    billing_address_collection: z.literal('required'),
+    customer_update: z.object({ address: z.literal('auto'), name: z.literal('auto') }).strict(),
+    tax_id_collection: z.object({ enabled: z.literal(true) }).strict(),
     payment_method_types: z.array(z.literal('card')).length(1).optional(),
     payment_intent_data: z
       .object({ metadata: metadataSchema.optional(), setup_future_usage: z.literal('on_session').optional() })
@@ -386,7 +396,11 @@ export async function dispatchStripeLegOnce(stripe: Stripe, leg: StripeCreateLeg
     }
     case 'payment_intent': {
       assertPaymentIntentRequest(leg.request, leg.onSessionSaveConsent === true, leg.automaticReload === true);
-      return { kind: leg.kind, object: await stripe.paymentIntents.create(leg.request, options) };
+      return {
+        kind: leg.kind,
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Stripe owns this request field name.
+        object: await stripe.paymentIntents.create({ ...leg.request, payment_method_types: ['card'] }, options),
+      };
     }
     case 'portal': {
       return { kind: leg.kind, object: await stripe.billingPortal.sessions.create(leg.request, options) };
@@ -610,7 +624,7 @@ export async function retrieveStripeBillingCustomer(stripe: Stripe, customerId: 
   return customer;
 }
 
-/** Creates one exact Customer-based Stripe Tax calculation for a reload quote. */
+/** Creates one exact Customer-based Stripe Tax calculation for a saved-card quote. */
 export async function createStripeReloadTaxCalculationOnce(
   stripe: Stripe,
   input: {
@@ -622,8 +636,8 @@ export async function createStripeReloadTaxCalculationOnce(
   },
 ): Promise<Stripe.Tax.Calculation> {
   assertIdempotencyKey(input.idempotencyKey);
-  if (!Number.isSafeInteger(input.principalMinor) || input.principalMinor !== 2500) {
-    throw new Error('Reload tax calculation requires the frozen USD 25 principal');
+  if (!Number.isSafeInteger(input.principalMinor) || input.principalMinor < 500 || input.principalMinor > 500_000) {
+    throw new Error('Tax calculation principal must be within the supported USD top-up bounds');
   }
   if (input.customerId.length === 0 || input.productId.length === 0 || input.reference.length === 0) {
     throw new Error('Reload tax calculation identity is incomplete');
@@ -644,6 +658,44 @@ export async function createStripeReloadTaxCalculationOnce(
     },
     { idempotencyKey: input.idempotencyKey },
   );
+}
+
+/** Commits a standalone Tax Transaction only after its owned PaymentIntent is paid. */
+export async function createStripeTaxTransactionOnce(
+  stripe: Stripe,
+  input: {
+    readonly calculationId: string;
+    readonly reference: string;
+    readonly postedAt: number;
+    readonly idempotencyKey: string;
+  },
+): Promise<Stripe.Tax.Transaction> {
+  assertIdempotencyKey(input.idempotencyKey);
+  if (input.calculationId.length === 0 || input.reference.length === 0 || !Number.isSafeInteger(input.postedAt)) {
+    throw new Error('Tax Transaction identity is incomplete');
+  }
+  return stripe.tax.transactions.createFromCalculation(
+    { calculation: input.calculationId, reference: input.reference, posted_at: input.postedAt },
+    { idempotencyKey: input.idempotencyKey },
+  );
+}
+
+/** Retrieves a Tax Transaction and every bounded line page. */
+export async function fetchStripeTaxTransactionEvidence(
+  stripe: Stripe,
+  input: { readonly transactionId: string; readonly maximumLinePages: number },
+): Promise<StripeTaxTransactionEvidence> {
+  assertPageBound(input.maximumLinePages);
+  const transaction = await stripe.tax.transactions.retrieve(input.transactionId);
+  const lines = await collectPages(
+    (startingAfter) =>
+      stripe.tax.transactions.listLineItems(input.transactionId, {
+        limit: 100,
+        ...(startingAfter === undefined ? {} : { starting_after: startingAfter }),
+      }),
+    input.maximumLinePages,
+  );
+  return { transaction, lines: lines.data, complete: lines.complete };
 }
 
 /** Retrieves all bounded line pages for a Stripe Tax calculation. */
@@ -817,8 +869,10 @@ function assertClosedCreateRequest(leg: StripeCreateLeg): void {
           ? ['configuration', 'customer', 'return_url']
           : [
               'automatic_tax',
+              'billing_address_collection',
               'cancel_url',
               'client_reference_id',
+              'customer_update',
               'customer',
               'line_items',
               'metadata',
@@ -827,6 +881,7 @@ function assertClosedCreateRequest(leg: StripeCreateLeg): void {
               'payment_method_types',
               'subscription_data',
               'success_url',
+              'tax_id_collection',
             ],
   );
   for (const key of Object.keys(leg.request)) {
@@ -883,13 +938,16 @@ function assertCheckoutLineItem(
     if (
       !Number.isSafeInteger(principalMinor) ||
       principalMinor < 500 ||
-      principalMinor > 50_000 ||
+      principalMinor > 500_000 ||
       item.price !== undefined ||
       priceData?.currency !== 'usd' ||
       priceData.product !== productId ||
+      priceData.tax_behavior !== 'exclusive' ||
       priceData.unit_amount !== principalMinor ||
       Object.keys(item).some((key) => key !== 'price_data' && key !== 'quantity') ||
-      Object.keys(priceData).some((key) => key !== 'currency' && key !== 'product' && key !== 'unit_amount')
+      Object.keys(priceData).some(
+        (key) => key !== 'currency' && key !== 'product' && key !== 'tax_behavior' && key !== 'unit_amount',
+      )
     ) {
       throw new Error('Invalid Stripe top-up Checkout line item');
     }
@@ -898,6 +956,15 @@ function assertCheckoutLineItem(
 
 function assertCheckoutNestedData(leg: Extract<StripeCreateLeg, { readonly kind: 'checkout' }>): void {
   const { request } = leg;
+  if (
+    request.automatic_tax?.enabled !== true ||
+    request.billing_address_collection !== 'required' ||
+    request.customer_update?.address !== 'auto' ||
+    request.customer_update.name !== 'auto' ||
+    request.tax_id_collection?.enabled !== true
+  ) {
+    throw new Error('Stripe Checkout tax and customer evidence are required');
+  }
   const paymentData = request.payment_intent_data;
   if (paymentData !== undefined) {
     if (

@@ -4,16 +4,16 @@
 
 LDOMParser: declare class LDOMParser
 
-constructor
+  constructor
 
-getDocument(): LDOM_Document;
+  getDocument(): LDOM_Document;
 
-parse(aFileName: string): boolean;
+  parse(aFileName: string): boolean;
 
-GetError(aData: TCollection_AsciiString): TCollection_AsciiString;
+  GetError(aData: TCollection_AsciiString): TCollection_AsciiString;
 
-GetBOM(): LDOM_OSStream_BOMType;
+  GetBOM(): LDOM_OSStream_BOMType;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

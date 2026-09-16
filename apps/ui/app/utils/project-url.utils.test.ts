@@ -38,6 +38,16 @@ describe('project URL grammar', () => {
     expect(projectChatUrl(slugs, 'chat /+?&')).toBe('/w/my%20ws/a%2Fb?chat=chat+%2F%2B%3F%26');
   });
 
+  it('merges the current search instead of discarding unrelated parameters', () => {
+    const slugs = { workspaceSlug: 'ws', projectSlug: 'p' };
+
+    expect(projectChatUrl(slugs, 'chat_42', '?workbench=share&chat=chat_1')).toBe(
+      '/w/ws/p?workbench=share&chat=chat_42',
+    );
+    expect(projectChatUrl(slugs, undefined, '?workbench=share&chat=chat_1')).toBe('/w/ws/p?workbench=share');
+    expect(projectChatUrl(slugs, undefined, '?chat=chat_1')).toBe('/w/ws/p');
+  });
+
   it('parses a non-empty chat selection from strings and URLSearchParams', () => {
     expect(projectChatIdFromSearch('?chat=chat+%2F%2B%3F%26')).toBe('chat /+?&');
     expect(projectChatIdFromSearch(new URLSearchParams({ chat: 'chat_42' }))).toBe('chat_42');

@@ -4,20 +4,20 @@
 
 MathPoly_GeneralPolyResult: declare class MathPoly_GeneralPolyResult
 
-constructor
+  constructor
 
-Status: MathUtils_Status
+  Status: MathUtils_Status
 
-Roots: number[]
+  Roots: number[]
 
-ComplexRoots: any[]
+  ComplexRoots: any[]
 
-NbRoots: number
+  NbRoots: number
 
-NbComplexRoots: number
+  NbComplexRoots: number
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

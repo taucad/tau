@@ -64,6 +64,11 @@ describe('areAllPartsConcluded', () => {
   });
 
   describe('tool parts - output states', () => {
+    it('should keep preliminary output active until the terminal replacement arrives', () => {
+      const parts: PartWithOptionalState[] = [{ state: 'output-available', preliminary: true }];
+      expect(areAllPartsConcluded(parts)).toBe(false);
+    });
+
     it('should return true when tool is output-available', () => {
       const parts: PartWithOptionalState[] = [{ state: 'output-available' }];
       expect(areAllPartsConcluded(parts)).toBe(true);

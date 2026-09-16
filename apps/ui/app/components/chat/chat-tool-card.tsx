@@ -150,7 +150,12 @@ function ChatToolCardHeader({ children, className }: ChatToolCardHeaderProps): R
       <>
         {children}
         {isCollapsible ? (
-          <ChevronRight className={cn('size-3 shrink-0 transition-transform duration-200', isOpen && 'rotate-90')} />
+          <ChevronRight
+            className={cn(
+              'size-3 shrink-0 opacity-0 transition-[opacity,transform] duration-200 group-hover/chat-tool-trigger:opacity-100 group-focus-visible/chat-tool-trigger:opacity-100',
+              isOpen && 'rotate-90',
+            )}
+          />
         ) : undefined}
       </>
     );
@@ -202,7 +207,7 @@ function ChatToolCardHeader({ children, className }: ChatToolCardHeaderProps): R
   return (
     <CollapsibleTrigger
       className={cn(
-        'group/trigger group/chat-tool-trigger flex h-7 w-full cursor-pointer flex-row items-center gap-1.5 pr-1 pl-2 text-xs text-muted-foreground transition-colors hover:bg-foreground/5',
+        'group/trigger group/chat-tool-trigger flex h-7 w-full flex-row items-center gap-1.5 pr-1 pl-2 text-xs text-muted-foreground transition-colors hover:bg-foreground/5',
         className,
       )}
     >
@@ -210,7 +215,7 @@ function ChatToolCardHeader({ children, className }: ChatToolCardHeaderProps): R
       <span className='relative flex size-3 items-center justify-center'>
         <ChevronRight
           className={cn(
-            'absolute size-3 shrink-0 opacity-0 transition-all duration-150 group-hover/trigger:opacity-100',
+            'absolute size-3 shrink-0 opacity-0 transition-all duration-150 group-hover/trigger:opacity-100 group-focus-visible/trigger:opacity-100',
             isOpen && 'rotate-90',
           )}
         />

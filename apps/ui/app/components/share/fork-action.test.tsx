@@ -2,12 +2,9 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import type * as ReactRouterModule from 'react-router';
-import { parameterEntryPath } from '@taucad/types';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { CreatedProject, CreateProjectOptions } from '#hooks/use-project-manager.js';
 import { ForkAction } from '#components/share/fork-action.js';
-import { decodeTextFile } from '#utils/filesystem.utils.js';
-import { parseParameterEntry } from '#utils/parameter-config.utils.js';
 
 const navigateMock = vi.fn();
 
@@ -53,7 +50,10 @@ describe('ForkAction', () => {
     createProject.mockClear();
     presentLocationError.mockClear();
     presentLocationError.mockReturnValue(false);
-    createProject.mockResolvedValue({ id: 'new_proj', slugs: { workspaceSlug: 'home', projectSlug: 'new-proj' } });
+    createProject.mockResolvedValue({
+      id: 'new_proj',
+      slugs: { workspaceSlug: 'home', projectSlug: 'new-proj' },
+    });
   });
 
   it('uses the creation preference and navigates to the returned canonical URL', async () => {
@@ -77,18 +77,38 @@ describe('ForkAction', () => {
     });
 
     expect(navigateMock).toHaveBeenCalledWith('/w/home/new-proj');
-    expect(createProject.mock.calls[0]?.[0]).toHaveProperty('location', { kind: 'home' });
+    expect(createProject.mock.calls[0]?.[0]).toHaveProperty('location', {
+      kind: 'home',
+    });
   });
 
-  it('writes the current in-memory parameters to the parameter file', async () => {
-    const files = new Map([['main.ts', { filename: 'main.ts', content: new Uint8Array([1, 2, 3]) }]]);
+  it('copies the complete parameter record bytes without rebuilding active values', async () => {
+    const parameterBytes = new TextEncoder().encode(
+      JSON.stringify({
+        recordVersion: 2,
+        profile: 'future',
+        activeGroup: 'alternate',
+        order: ['default', 'alternate'],
+        groups: {
+          default: { values: { width: 10 } },
+          alternate: {
+            values: { width: '12.5' },
+            bindings: { '/width': { future: true } },
+          },
+        },
+      }),
+    );
+    const files = new Map([
+      ['main.ts', { filename: 'main.ts', content: new Uint8Array([1, 2, 3]) }],
+      ['.tau/parameters/main.ts.json', { filename: '.tau/parameters/main.ts.json', content: parameterBytes }],
+    ]);
 
     render(
       <MemoryRouter>
         <ForkAction
           publication={{ id: 'pub_1', title: 'Shared', entryPath: 'main.ts' }}
           files={files}
-          parameters={{ width: 10, height: 99 }}
+          parameters={{ width: 999 }}
         />
       </MemoryRouter>,
     );
@@ -104,15 +124,11 @@ describe('ForkAction', () => {
     if (!creation) {
       throw new Error('Expected project creation options');
     }
-    const parameterFile = creation.files[parameterEntryPath('main.ts')];
+    const parameterFile = creation.files['.tau/parameters/main.ts.json'];
     if (!parameterFile) {
       throw new Error('Expected a parameter file');
     }
-    const parameterEntry = parseParameterEntry(decodeTextFile(parameterFile.content));
-    expect(parameterEntry.groups['default']?.values).toEqual({
-      width: 10,
-      height: 99,
-    });
+    expect(parameterFile.content).toEqual(parameterBytes);
   });
 
   it('retains the publication and resets Remix after a creation-location failure', async () => {

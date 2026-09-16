@@ -9,7 +9,6 @@ const mockTrigger = vi.fn();
 const mockGraphicsRef = { send: vi.fn(), id: 'graphics-actor' };
 const mockCadRef = { send: vi.fn(), id: 'cad-actor' };
 const mockImageService = { export: vi.fn() };
-const runtimeFileSystem = {};
 const mockCaptureCadImages = vi.fn<typeof captureCadImagesType>();
 
 vi.mock('#services/headless-capture.js', () => ({
@@ -22,7 +21,6 @@ vi.mock('#hooks/use-chat.js', () => ({ useChatActions: () => ({ addDraftImage: m
 vi.mock('#hooks/use-tick-animation.js', () => ({
   useTickAnimation: () => ({ ticked: false, trigger: mockTrigger }),
 }));
-vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => ({ runtimeFileSystem }) }));
 vi.mock('#providers/headless-image-provider.js', () => ({
   useHeadlessImageService: () => mockImageService,
 }));
@@ -76,7 +74,6 @@ describe('CaptureViewControl', () => {
       cadRef: mockCadRef,
       graphicsRef: mockGraphicsRef,
       imageService: mockImageService,
-      fileSystem: runtimeFileSystem,
       recipe: { purpose: 'chat', mode: 'current' },
     });
     expect(mockAddDraftImage).toHaveBeenCalledWith('data:image/webp;base64,AQID', { preserveOriginal: true });

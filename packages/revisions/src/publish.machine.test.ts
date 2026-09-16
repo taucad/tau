@@ -12,6 +12,7 @@
  * | 2 | `choosingVersion → error` | `listVersions` has a failure edge (I29) |
  * | 3 | `choosingVersion --cancel--> idle` | Cancel before anything is written writes nothing |
  * | 4 | `choosingVersion --confirm--> tagging → pushing --pushSettled--> publishing → success` | the happy path, with `published` and the link |
+ * | 4b | `pushing --syncNow--> (root)` | **P39**: the push is asked of the scheduler, never declared settled here |
  * | 5 | `tagging → error` | naming has a failure edge |
  * | 6 | `pushing → error` (rejected push) | a refused push is an error, never a silent publish |
  * | 7 | `pushing --after--> error` | **red pin (d)**: no settlement inside the bound lands in `error`, never hangs |
@@ -29,8 +30,8 @@
  * | 19 | the push offers `refs/tags/<name>` with the remote's own value as its lease | **P38**: a re-publish moves the name under a lease, never a force |
  */
 
-import { createActor, fromPromise } from 'xstate';
-import type { Actor, PromiseActorLogic } from 'xstate';
+import { createActor, fromCallback, fromPromise } from 'xstate';
+import type { Actor, AnyActorRef, AnyEventObject, PromiseActorLogic } from 'xstate';
 import { describe, expect, it } from 'vitest';
 
 import * as machineModule from '#publish.machine.js';
@@ -97,15 +98,17 @@ type Started = Readonly<{
   emitted: PublishMachineEmitted[];
   clock: ReturnType<typeof createManualClock>;
   calls: Array<Readonly<{ name: string; input: unknown }>>;
+  /** Everything the dialog sent its root — `syncNow`, and nothing else (P39). */
+  asked: AnyEventObject[];
 }>;
 
 /**
  * A machine already in `pushing`, waiting for the settlement that names it.
  *
  * The W13 seam: `sync.machine` owns the push and settles it by event. Reached
- * by snapshot because publish's own `push` actor raises `backedUp` the moment
- * it resolves, so no runtime path can deliver a non-success settlement here
- * today (review R3, P39).
+ * by snapshot rather than by running the push, so the settlement under test is
+ * the one the row sends and not the one the root double would forward — every
+ * P39 outcome is reachable here, which is the point of the rows below.
  *
  * @param overrides - Actors this row replaces.
  * @returns The started actor, parked in `pushing` with `pushId` `push-1`.
@@ -128,6 +131,8 @@ const startPushing = (overrides: Partial<PublishActors> = {}): Started =>
         publicationId: undefined,
         shareUrl: undefined,
         error: undefined,
+        /* Restored without one: the row is the settlement, not the ask. */
+        parentRef: undefined,
       },
     },
   );
@@ -153,22 +158,48 @@ const start = (
       actor: undefined,
       createdAt: 2,
     })),
-    push: record('push', () => ({ pushId: 'push-1' })),
+    push: record('push', () => ({ pushId: 'push-1', remote: 'tau' })),
     createPublication: record('createPublication', () => ({ publicationId: 'pub_1', url: 'https://tau.new/p/pub_1' })),
     ...overrides,
   };
   const clock = createManualClock();
   const provided = publishMachine.provide({ actors });
+  /*
+   * The root's forwarding edge, as small as it really is (W22 DEF-W22-2).
+   *
+   * The dialog no longer declares its own push settled: it asks the root for
+   * `syncNow` and hears `pushSettled` back, so a unit row that wants the happy
+   * path needs the other half of that pair. Rows that want one of P39's three
+   * other outcomes start from `pushing` by snapshot instead and send their own
+   * settlement, which this double never races because no `syncNow` is asked.
+   */
+  const asked: AnyEventObject[] = [];
+  /* Filled after the dialog exists, which is the only reason it is a holder:
+   * the double has to answer the actor that asks it. */
+  const dialog: { ref: AnyActorRef | undefined } = { ref: undefined };
+  const parent = createActor(
+    fromCallback<AnyEventObject>(({ receive }) => {
+      receive((event) => {
+        asked.push(event);
+        if (event.type === 'syncNow') {
+          dialog.ref?.send({ type: 'pushSettled', pushId: String(event['pushId']), outcome: 'backedUp' });
+        }
+      });
+    }),
+  );
+  parent.start();
+  const input = { projectId: 'p1', parentRef: parent };
   const actor =
     from === undefined
-      ? createActor(provided, { clock, input: { projectId: 'p1' } })
-      : createActor(provided, { clock, input: { projectId: 'p1' }, snapshot: provided.resolveState(from) });
+      ? createActor(provided, { clock, input })
+      : createActor(provided, { clock, input, snapshot: provided.resolveState(from) });
+  dialog.ref = actor;
   const emitted: PublishMachineEmitted[] = [];
   for (const type of ['published', 'toast.info', 'toast.error'] as const) {
     actor.on(type, (event) => emitted.push(event));
   }
   actor.start();
-  return { actor, emitted, clock, calls };
+  return { actor, emitted, clock, calls, asked };
 };
 
 const settle = async (): Promise<void> => {
@@ -242,6 +273,34 @@ describe('publishMachine', () => {
     actor.stop();
   });
 
+  it('4b: asks its root for the push instead of declaring its own success (P39, W22 DEF-W22-2)', async () => {
+    /* The whole defect in one row: `pushing` used to be left by a `pushSettled`
+     * the machine raised at itself the moment the *request* resolved, so a push
+     * the scheduler queued, failed or superseded still published a row pointing
+     * at a ref the remote never received. The ask is what makes P39's other
+     * three outcomes reachable at all. */
+    const { actor, asked } = start({ push: pending() });
+
+    actor.send({ type: 'publish' });
+    await settle();
+    actor.send({ type: 'confirm', draft });
+    await settle();
+
+    /* The push never resolves, so nothing is asked and nothing is settled. */
+    expect(actor.getSnapshot().matches('pushing')).toBe(true);
+    expect(asked).toStrictEqual([]);
+    actor.stop();
+
+    const settled = start();
+    settled.actor.send({ type: 'publish' });
+    await settle();
+    settled.actor.send({ type: 'confirm', draft });
+    await settle();
+
+    expect(settled.asked).toStrictEqual([{ type: 'syncNow', pushId: 'push-1', remote: 'tau' }]);
+    settled.actor.stop();
+  });
+
   it('5: fails visibly when the name cannot be written', async () => {
     const { actor } = start({ createTag: failing('name already used by a branch') });
 
@@ -301,10 +360,10 @@ describe('publishMachine', () => {
   });
 
   /*
-   * The seam W13 lands on: `sync.machine` owns the push and settles it by
-   * event. Asserted as a pure transition because publish's own `push` actor
-   * raises `backedUp` the moment it resolves, so today no runtime path can
-   * deliver a non-success settlement to this state (review R3, P39).
+   * The seam: `sync.machine` owns the push and settles it by event. Asserted as
+   * a pure transition from a restored `pushing`, so the row's own settlement is
+   * the only one in play — the root double in `start` answers an *ask*, and
+   * this state was never asked (review R3, P39).
    */
   it.each([['failed'], ['queued'], ['conflicted']] as const)(
     '18: a %s settlement that names this push lands in error, never in publishing (P39)',
@@ -355,7 +414,7 @@ describe('publishMachine', () => {
 
     const push = calls.find((call) => call.name === 'push');
     expect(push?.input).toMatchObject({ tag: 'v2' });
-    expect((push?.input as { expectedTag?: string }).expectedTag).toBeUndefined();
+    expect((push?.input as { expectedTag?: string } | undefined)?.expectedTag).toBeUndefined();
     actor.stop();
   });
 

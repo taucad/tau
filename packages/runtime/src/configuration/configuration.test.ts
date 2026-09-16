@@ -94,6 +94,12 @@ describe('configuration admission', () => {
       admitJsonSchema({ type: 'string', pattern: '(a+)+$' });
     }).toThrow('UNSUPPORTED_KEYWORD');
     expect(() => {
+      admitJsonSchema({ type: 'string', format: 'color' });
+    }).not.toThrow();
+    expect(() => {
+      admitJsonSchema({ type: 'string', format: 42 });
+    }).toThrow('INVALID_SCHEMA');
+    expect(() => {
       admitJsonSchema({ $ref: 'https://example.invalid/schema' });
     }).toThrow('UNSUPPORTED_REFERENCE');
     expect(() => {

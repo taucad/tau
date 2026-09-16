@@ -22,6 +22,7 @@ export * from '#components/input-group.js';
 export * from '#components/input.js';
 export * from '#components/label.js';
 export * from '#components/menu.variants.js';
+export * from '#components/nested-action.variants.js';
 export * from '#components/navigation-menu.js';
 export * from '#components/popover.variants.js';
 export * from '#components/popover.js';

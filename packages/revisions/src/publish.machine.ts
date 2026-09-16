@@ -18,16 +18,15 @@
  * is only true in this order.
  *
  * `pushing` waits for a **correlated** `pushSettled`, not for its own actor's
- * completion, because W13 moves the push itself into `sync.machine`: today the
- * injected `push` actor resolves with the `pushId` and the machine raises the
- * settlement itself; when `sync.machine` lands, that one `raise` becomes
- * `sendTo` the parent with `syncNow { pushId }` and nothing else here changes.
+ * completion, because `sync.machine` owns the push: the injected `push` actor
+ * resolves with the `pushId` and this machine then asks the root for
+ * `syncNow { pushId }`, whose settlement comes back through the same root.
  * The bound is the reason the state exists at all — a push that never answers
  * has to land in `error`, never hang (A38: every effect has a failure edge).
  */
 
 import { assign, emit, enqueueActions, fromPromise, setup } from 'xstate';
-import type { SnapshotFrom } from 'xstate';
+import type { AnyActorRef, SnapshotFrom } from 'xstate';
 
 import type { RevisionTag } from '#revision-port.js';
 import type { SyncPushOutcome } from '#sync.machine.js';
@@ -61,6 +60,13 @@ export type PublishMachineInput = Readonly<{
   projectId: string;
   /** The branch whose head is published. Defaults to `main`. */
   branch?: string;
+  /**
+   * The `project-revisions` root, which routes `syncNow` to the scheduler.
+   *
+   * Siblings speak through the parent (A38), so the dialog asks the root for
+   * the push and hears the answer back through it as `pushSettled` (P39).
+   */
+  parentRef?: AnyActorRef;
 }>;
 
 /** What a settled push reports, in `sync.machine`'s own words (P39). @public */
@@ -86,6 +92,8 @@ export type PublishMachineContext = Readonly<{
   publicationId: string | undefined;
   shareUrl: string | undefined;
   error: string | undefined;
+  /** The root this dialog asks for its push (P39). */
+  parentRef: AnyActorRef | undefined;
 }>;
 
 /** Events accepted by publishMachine. @public */
@@ -140,8 +148,8 @@ export type PublishPushActorInput = Readonly<{
   expectedTag: string | undefined;
 }>;
 
-/** What `push` answers: the id the settlement will name. @public */
-export type PublishPushActorOutput = Readonly<{ pushId: string }>;
+/** What `push` answers: the id the settlement will name and the remote that accepted it. @public */
+export type PublishPushActorOutput = Readonly<{ pushId: string; remote: string }>;
 
 /** What `createPublication` is asked to record. @public */
 export type PublishPublicationActorInput = Readonly<{
@@ -235,6 +243,7 @@ export const publishMachine = setup({
     publicationId: undefined,
     shareUrl: undefined,
     error: undefined,
+    parentRef: input.parentRef,
   }),
   initial: 'idle',
   states: {
@@ -370,13 +379,29 @@ export const publishMachine = setup({
              says "this ref must not exist" (P18, P38). */
           expectedTag: context.remoteTags[context.draft?.tag ?? ''],
         }),
-        /* Not a transition: the push is settled when the settlement that names
-         * it arrives. W13 replaces this `raise` with `syncNow` to the parent —
-         * the outcome travels with the settlement either way (P39). */
+        /*
+         * Not a transition: the push is settled when the settlement that names
+         * it arrives (P39).
+         *
+         * The ask goes to the scheduler, which is the only thing that pushes —
+         * through the root, because siblings speak through the parent (A38).
+         * It used to `raise` its own `pushSettled { backedUp }` here, which
+         * declared success the moment the *request* resolved: `queued`,
+         * `failed` and `superseded` were then unreachable outside a restored
+         * snapshot, so a publication could name a ref the remote never received
+         * (W22 DEF-W22-2). A dialog with no parent keeps waiting for a
+         * settlement nobody will send, and `pushSettlement` is what ends it.
+         */
         onDone: {
-          actions: enqueueActions(({ enqueue, event }) => {
+          actions: enqueueActions(({ context, enqueue, event }) => {
             enqueue.assign({ pushId: event.output.pushId });
-            enqueue.raise({ type: 'pushSettled', pushId: event.output.pushId, outcome: 'backedUp' });
+            if (context.parentRef !== undefined) {
+              enqueue.sendTo(context.parentRef, {
+                type: 'syncNow',
+                pushId: event.output.pushId,
+                remote: event.output.remote,
+              });
+            }
           }),
         },
         onError: {

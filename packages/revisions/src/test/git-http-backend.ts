@@ -239,7 +239,17 @@ export const startGitHttpBackend = async (options: GitHttpBackendOptions): Promi
                  * Tau API's batch does for a bearer caller — a client that drops
                  * `verify.header` is refused below rather than silently passing. */
                 ...(body.operation === 'upload'
-                  ? { verify: { href: `${origin}/lfs/verify`, header: { 'X-Tau-Verify': verifyToken } } }
+                  ? {
+                      verify: {
+                        href: `${origin}/lfs/verify`,
+                        header: {
+                          'X-Tau-Verify': verifyToken,
+                          ...(request.headers.authorization === undefined
+                            ? {}
+                            : { Authorization: request.headers.authorization }),
+                        },
+                      },
+                    }
                   : {}),
               },
             };

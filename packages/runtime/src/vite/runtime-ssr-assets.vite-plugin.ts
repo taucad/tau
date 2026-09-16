@@ -116,6 +116,7 @@ export const runtimeAssetsPlugin = (): Plugin => {
   let isSsrBuild = false;
   let isServe = false;
   let isServerEnvironment = false;
+  let isTest = false;
   const emittedAssets = new WeakMap<Environment, Map<string, string>>();
   const emittedReferences = new WeakMap<Environment, Set<string>>();
 
@@ -131,6 +132,7 @@ export const runtimeAssetsPlugin = (): Plugin => {
       isServe = config.command === 'serve';
       isServerEnvironment = consumer === 'server' || Boolean(config.build.ssr);
       isSsrBuild = Boolean(config.build.ssr) && consumer !== 'client';
+      isTest = config.mode === 'test';
     },
     buildStart() {
       emittedAssets.set(this.environment, new Map());
@@ -139,7 +141,7 @@ export const runtimeAssetsPlugin = (): Plugin => {
     transform: {
       filter: { code: 'import.meta' },
       handler(code, id) {
-        if (!code.includes('import.meta')) {
+        if (isTest || !code.includes('import.meta')) {
           return;
         }
 

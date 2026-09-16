@@ -61,6 +61,8 @@ export const acpAgentExecutionSchema = z
     agentId: z.string().min(1).max(64),
     /** Adapter-specific model id; absent takes the adapter's own default. */
     model: z.string().min(1).max(128).optional(),
+    /** Exact ACP session configuration ids and values selected in the composer. */
+    config: z.record(z.string().min(1), z.union([z.string(), z.boolean()])).optional(),
   })
   .strict()
   .meta({ id: 'AcpAgentExecution' });

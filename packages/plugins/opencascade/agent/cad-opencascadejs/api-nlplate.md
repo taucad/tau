@@ -4,240 +4,240 @@
 
 NLPlate_HGPPConstraint: declare class NLPlate_HGPPConstraint extends Standard_Transient
 
-SetUVFreeSliding(UVFree: boolean): void;
+  SetUVFreeSliding(UVFree: boolean): void;
 
-SetIncrementalLoadAllowed(ILA: boolean): void;
+  SetIncrementalLoadAllowed(ILA: boolean): void;
 
-SetActiveOrder(ActiveOrder: number): void;
+  SetActiveOrder(ActiveOrder: number): void;
 
-SetUV(UV: gp_XY): void;
+  SetUV(UV: gp_XY): void;
 
-SetOrientation(Orient?: number): void;
+  SetOrientation(Orient?: number): void;
 
-SetG0Criterion(TolDist: number): void;
+  SetG0Criterion(TolDist: number): void;
 
-SetG1Criterion(TolAng: number): void;
+  SetG1Criterion(TolAng: number): void;
 
-SetG2Criterion(TolCurv: number): void;
+  SetG2Criterion(TolCurv: number): void;
 
-SetG3Criterion(TolG3: number): void;
+  SetG3Criterion(TolG3: number): void;
 
-UVFreeSliding(): boolean;
+  UVFreeSliding(): boolean;
 
-IncrementalLoadAllowed(): boolean;
+  IncrementalLoadAllowed(): boolean;
 
-ActiveOrder(): number;
+  ActiveOrder(): number;
 
-UV(): gp_XY;
+  UV(): gp_XY;
 
-Orientation(): number;
+  Orientation(): number;
 
-IsG0(): boolean;
+  IsG0(): boolean;
 
-G0Target(): gp_XYZ;
+  G0Target(): gp_XYZ;
 
-G1Target(): Plate_D1;
+  G1Target(): Plate_D1;
 
-G2Target(): Plate_D2;
+  G2Target(): Plate_D2;
 
-G3Target(): Plate_D3;
+  G3Target(): Plate_D3;
 
-G0Criterion(): number;
+  G0Criterion(): number;
 
-G1Criterion(): number;
+  G1Criterion(): number;
 
-G2Criterion(): number;
+  G2Criterion(): number;
 
-G3Criterion(): number;
+  G3Criterion(): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NLPlate_HPG0Constraint: declare class NLPlate_HPG0Constraint extends NLPlate_HGPPConstraint
 
-constructor
+  constructor
 
-SetUVFreeSliding(UVFree: boolean): void;
+  SetUVFreeSliding(UVFree: boolean): void;
 
-SetIncrementalLoadAllowed(ILA: boolean): void;
+  SetIncrementalLoadAllowed(ILA: boolean): void;
 
-UVFreeSliding(): boolean;
+  UVFreeSliding(): boolean;
 
-IncrementalLoadAllowed(): boolean;
+  IncrementalLoadAllowed(): boolean;
 
-ActiveOrder(): number;
+  ActiveOrder(): number;
 
-IsG0(): boolean;
+  IsG0(): boolean;
 
-G0Target(): gp_XYZ;
+  G0Target(): gp_XYZ;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NLPlate_HPG0G1Constraint: declare class NLPlate_HPG0G1Constraint extends NLPlate_HPG0Constraint
 
-constructor
+  constructor
 
-SetOrientation(Orient?: number): void;
+  SetOrientation(Orient?: number): void;
 
-ActiveOrder(): number;
+  ActiveOrder(): number;
 
-Orientation(): number;
+  Orientation(): number;
 
-G1Target(): Plate_D1;
+  G1Target(): Plate_D1;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NLPlate_HPG0G2Constraint: declare class NLPlate_HPG0G2Constraint extends NLPlate_HPG0G1Constraint
 
-constructor
+  constructor
 
-ActiveOrder(): number;
+  ActiveOrder(): number;
 
-G2Target(): Plate_D2;
+  G2Target(): Plate_D2;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NLPlate_HPG0G3Constraint: declare class NLPlate_HPG0G3Constraint extends NLPlate_HPG0G2Constraint
 
-constructor
+  constructor
 
-ActiveOrder(): number;
+  ActiveOrder(): number;
 
-G3Target(): Plate_D3;
+  G3Target(): Plate_D3;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NLPlate_HPG1Constraint: declare class NLPlate_HPG1Constraint extends NLPlate_HGPPConstraint
 
-constructor
+  constructor
 
-SetIncrementalLoadAllowed(ILA: boolean): void;
+  SetIncrementalLoadAllowed(ILA: boolean): void;
 
-SetOrientation(Orient?: number): void;
+  SetOrientation(Orient?: number): void;
 
-IncrementalLoadAllowed(): boolean;
+  IncrementalLoadAllowed(): boolean;
 
-ActiveOrder(): number;
+  ActiveOrder(): number;
 
-IsG0(): boolean;
+  IsG0(): boolean;
 
-Orientation(): number;
+  Orientation(): number;
 
-G1Target(): Plate_D1;
+  G1Target(): Plate_D1;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NLPlate_HPG2Constraint: declare class NLPlate_HPG2Constraint extends NLPlate_HPG1Constraint
 
-constructor
+  constructor
 
-ActiveOrder(): number;
+  ActiveOrder(): number;
 
-G2Target(): Plate_D2;
+  G2Target(): Plate_D2;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NLPlate_HPG3Constraint: declare class NLPlate_HPG3Constraint extends NLPlate_HPG2Constraint
 
-constructor
+  constructor
 
-ActiveOrder(): number;
+  ActiveOrder(): number;
 
-G3Target(): Plate_D3;
+  G3Target(): Plate_D3;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 NLPlate_NLPlate: declare class NLPlate_NLPlate
 
-constructor
+  constructor
 
-Load(GConst: NLPlate_HGPPConstraint): void;
+  Load(GConst: NLPlate_HGPPConstraint): void;
 
-Solve(ord?: number, InitialConsraintOrder?: number): void;
+  Solve(ord?: number, InitialConsraintOrder?: number): void;
 
-Solve2(ord?: number, InitialConsraintOrder?: number): void;
+  Solve2(ord?: number, InitialConsraintOrder?: number): void;
 
-IncrementalSolve(ord?: number, InitialConsraintOrder?: number, NbIncrements?: number, UVSliding?: boolean): void;
+  IncrementalSolve(ord?: number, InitialConsraintOrder?: number, NbIncrements?: number, UVSliding?: boolean): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-destroy(): void;
+  destroy(): void;
 
-Init(): void;
+  Init(): void;
 
-Evaluate(point2d: gp_XY): gp_XYZ;
+  Evaluate(point2d: gp_XY): gp_XYZ;
 
-EvaluateDerivative(point2d: gp_XY, iu: number, iv: number): gp_XYZ;
+  EvaluateDerivative(point2d: gp_XY, iu: number, iv: number): gp_XYZ;
 
-Continuity(): number;
+  Continuity(): number;
 
-ConstraintsSliding(NbIterations?: number): void;
+  ConstraintsSliding(NbIterations?: number): void;
 
-MaxActiveConstraintOrder(): number;
+  MaxActiveConstraintOrder(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

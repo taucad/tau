@@ -4,16 +4,16 @@
 
 AppStdL_Application: declare class AppStdL_Application extends TDocStd_Application
 
-constructor
+  constructor
 
-ResourcesName(): string;
+  ResourcesName(): string;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

@@ -1,5 +1,5 @@
 import type { RpcCall, RpcInput, RpcResult, RpcSchemasRegistry } from '#schemas/rpc.schema.js';
-import { rpcName } from '#constants/rpc.constants.js';
+import { mutatingRpcNames, rpcName } from '#constants/rpc.constants.js';
 import type { RpcName } from '#types/rpc.types.js';
 import type { RpcDependencies, RpcInvocationContext } from '#rpc/rpc-dependencies.js';
 import { handleReadFile } from '#rpc/handlers/handle-read-file.js';
@@ -16,6 +16,7 @@ import { handleAppendFile } from '#rpc/handlers/handle-append-file.js';
 import { handleEditFile } from '#rpc/handlers/handle-edit-file.js';
 import { handleResolveSkill } from '#rpc/handlers/handle-resolve-skill.js';
 import { handleReadRevisions } from '#rpc/handlers/handle-read-revisions.js';
+import { handleApplyParameterOperation, handleGetParameters } from '#rpc/handlers/handle-parameters.js';
 
 type RpcHandlerMap = {
   [K in RpcName]: (args: RpcInput<K>, context?: RpcInvocationContext) => Promise<RpcResult<K>>;
@@ -54,6 +55,9 @@ export function createRpcDispatcher(deps: RpcDependencies): RpcDispatcher {
     [rpcName.editFile]: async (args) => handleEditFile(args, deps.fileSystem),
     [rpcName.resolveSkill]: async (args) => handleResolveSkill(args, deps.skillResolver),
     [rpcName.readRevisions]: async (args) => handleReadRevisions(args, deps.revisions),
+    [rpcName.getParameters]: async (args, context) => handleGetParameters(args, deps.parameters, context),
+    [rpcName.applyParameterOperation]: async (args, context) =>
+      handleApplyParameterOperation(args, deps.parameters, context),
   };
 
   const dispatch = async <K extends keyof RpcSchemasRegistry>(
@@ -64,7 +68,9 @@ export function createRpcDispatcher(deps: RpcDependencies): RpcDispatcher {
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- tsgo widens indexed handler; `K` pins rpcName ↔ args on RpcCall<K>
     const run = handlers[call.rpcName] as (args: RpcInput<K>, context?: RpcInvocationContext) => Promise<RpcResult<K>>;
     const result = await run(call.args, context);
-    context?.signal?.throwIfAborted();
+    if (!mutatingRpcNames.has(call.rpcName)) {
+      context?.signal?.throwIfAborted();
+    }
     return result;
   };
 

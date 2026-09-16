@@ -169,6 +169,7 @@ const collectSourceBundle = async (options: {
       return;
     }
     visited.add(visitKey);
+    /* oxlint-disable no-await-in-loop -- static imported assets are resolved in source order. */
     for (const specifier of parseImportedAssets(input.source)) {
       const absolutePath = resolveImportPath(
         specifier.startsWith('/') || specifier.startsWith('.') ? specifier : `./${specifier}`,
@@ -178,10 +179,8 @@ const collectSourceBundle = async (options: {
       try {
         const extension = specifier.slice(specifier.lastIndexOf('.')).toLowerCase();
         if (extension === '.dxf' || extension === '.svg') {
-          // oxlint-disable-next-line no-await-in-loop -- static assets are resolved in source order.
           files.set(lookupKey, await options.filesystem.readFile(absolutePath, 'utf8'));
         } else {
-          // oxlint-disable-next-line no-await-in-loop -- static assets are resolved in source order.
           binaryFiles.set(lookupKey, await options.filesystem.readFile(absolutePath));
         }
         resolved.add(absolutePath);
@@ -192,6 +191,7 @@ const collectSourceBundle = async (options: {
         unresolved.add(absolutePath);
       }
     }
+    /* oxlint-enable no-await-in-loop */
     for (const specifier of parseIncludes(input.source)) {
       const absolutePath = resolveImportPath(
         specifier.startsWith('/') || specifier.startsWith('.') ? specifier : `./${specifier}`,
@@ -278,11 +278,27 @@ const customizerProperty = (parameter: CustomizerParameter): JSONSchema7 => {
     default: parameter.value,
     ...(typeof parameter.description === 'string' ? { description: parameter.description } : {}),
   };
+  const options = parameter.control.options ?? [];
+  const onlyOption = options.length === 1 ? options[0] : undefined;
+  if (
+    parameter.control.kind === 'dropdown' &&
+    parameter.type === 'number' &&
+    onlyOption !== undefined &&
+    typeof onlyOption.value === 'number' &&
+    onlyOption.value !== parameter.value
+  ) {
+    return {
+      ...base,
+      type: 'number',
+      minimum: 0,
+      maximum: onlyOption.value,
+    };
+  }
   if (parameter.control.kind === 'dropdown') {
     return {
       ...base,
       type: parameter.type === 'number' ? 'number' : 'string',
-      oneOf: (parameter.control.options ?? []).map((option) => ({
+      oneOf: options.map((option) => ({
         const: option.value,
         title: option.label,
       })),
@@ -459,6 +475,7 @@ export type CreateOpenrscadKernelOptions = {
   version?: string;
 };
 
+/* oxlint-disable typescript/explicit-module-boundary-types -- defineKernel's exact inferred contract is the public type; spelling it would restore the deleted ReturnType annotation. */
 /**
  * Build an OpenRSCAD kernel over a chosen engine build.
  *
@@ -466,7 +483,6 @@ export type CreateOpenrscadKernelOptions = {
  * @returns a kernel factory, ready to register with a runtime
  * @public
  */
-// oxlint-disable-next-line typescript/explicit-module-boundary-types -- defineKernel's exact inferred contract is the public type; spelling it would restore the deleted ReturnType annotation
 export const createOpenrscadKernel = ({
   loadBackend = async () => import('@taulabs/openrscad-engine'),
   version = engineVersion,
@@ -715,6 +731,7 @@ export const createOpenrscadKernel = ({
       await context.backend.clearCache();
     },
   });
+/* oxlint-enable typescript/explicit-module-boundary-types */
 
 /** OpenRSCAD WebAssembly kernel plugin. @public */
 export const openrscadKernel = createOpenrscadKernel();

@@ -91,6 +91,22 @@ const staleDynamicInputAvailablePart = (callId: string) => ({
   input: { partial: true },
 });
 
+/** A conversation on the hot path: prose and settled tool parts, nothing to heal. */
+const hotParts = (count: number): unknown[] =>
+  Array.from({ length: count }, (_, index) =>
+    index % 2 === 0 ? textPart(`prose ${index}`) : validReadFileToolPart(`call_${index}`),
+  );
+
+/** Milliseconds for twenty passes over `partCount` parts, so the number is measurable. */
+const timeNormalize = (partCount: number): number => {
+  const messages = [userMessage('m0'), assistantMessage('m1', hotParts(partCount))];
+  const start = performance.now();
+  for (let pass = 0; pass < 20; pass++) {
+    normalize(messages);
+  }
+  return performance.now() - start;
+};
+
 beforeEach(() => {
   getToolInputSchemaSpy.mockClear();
 });
@@ -310,23 +326,29 @@ describe('normalizeToolLifecycleParts performance contract', () => {
   });
 
   describe('stress smoke test', () => {
-    it.skipIf(process.env['CI'])(
-      'should heal a 1000-part conversation with no healable parts in well under 5ms',
-      () => {
-        const parts: unknown[] = Array.from({ length: 1000 }, (_, i) =>
-          i % 2 === 0 ? textPart(`prose ${i}`) : validReadFileToolPart(`call_${i}`),
-        );
-        const messages = [userMessage('m0'), assistantMessage('m1', parts)];
+    it('should heal a 1000-part conversation without allocating or consulting the registry', () => {
+      const messages = [userMessage('m0'), assistantMessage('m1', hotParts(1000))];
 
-        const start = performance.now();
-        const healed = normalize(messages) as typeof messages;
-        const elapsed = performance.now() - start;
+      const healed = normalize(messages) as typeof messages;
 
-        expect(healed[0]).toBe(messages[0]);
-        expect(healed[1]).toBe(messages[1]);
-        expect(elapsed).toBeLessThan(5);
-        expect(getToolInputSchemaSpy).not.toHaveBeenCalled();
-      },
-    );
+      expect(healed[0]).toBe(messages[0]);
+      expect(healed[1]).toBe(messages[1]);
+      expect(getToolInputSchemaSpy).not.toHaveBeenCalled();
+    });
+
+    /*
+     * A *ratio*, not a wall clock (W14 sweep): the old 5 ms budget measured the
+     * machine, so it went red beside other suites and green alone. Ten times the
+     * input costs about ten times the work when the pass is linear and about a
+     * hundred when it is not, and both halves pay the same load, so the shape is
+     * what the bound reads. Still off in CI, where a shared runner can stall
+     * either half.
+     */
+    it.skipIf(process.env['CI'])('should stay linear in the number of parts', () => {
+      const small = timeNormalize(200);
+      const large = timeNormalize(2000);
+
+      expect(large / Math.max(small, 0.1)).toBeLessThan(30);
+    });
   });
 });

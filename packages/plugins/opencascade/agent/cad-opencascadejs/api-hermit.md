@@ -4,15 +4,15 @@
 
 Hermit: declare class Hermit
 
-constructor
+  constructor
 
-static Solution(BS: Geom_BSplineCurve, TolPoles: number, TolKnots: number): Geom2d_BSplineCurve;
-static Solution(BS: Geom2d_BSplineCurve, TolPoles: number, TolKnots: number): Geom2d_BSplineCurve;
-static Solution(BS: Geom_BSplineCurve, TolPoles: number, TolKnots: number): Geom2d_BSplineCurve;
-static Solution(BS: Geom2d_BSplineCurve, TolPoles: number, TolKnots: number): Geom2d_BSplineCurve;
+  static Solution(BS: Geom_BSplineCurve, TolPoles: number, TolKnots: number): Geom2d_BSplineCurve;
+  static Solution(BS: Geom2d_BSplineCurve, TolPoles: number, TolKnots: number): Geom2d_BSplineCurve;
+  static Solution(BS: Geom_BSplineCurve, TolPoles: number, TolKnots: number): Geom2d_BSplineCurve;
+  static Solution(BS: Geom2d_BSplineCurve, TolPoles: number, TolKnots: number): Geom2d_BSplineCurve;
 
-static Solutionbis(BS: Geom_BSplineCurve, Knotmin: number, Knotmax: number, TolPoles: number, TolKnots: number): { Knotmin: number; Knotmax: number };
+  static Solutionbis(BS: Geom_BSplineCurve, Knotmin: number, Knotmax: number, TolPoles: number, TolKnots: number): { Knotmin: number; Knotmax: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

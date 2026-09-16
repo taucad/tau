@@ -4,307 +4,307 @@
 
 LDOM_Attr: declare class LDOM_Attr extends LDOM_Node
 
-constructor
+  constructor
 
-getName(): LDOMString;
+  getName(): LDOMString;
 
-getValue(): LDOMString;
+  getValue(): LDOMString;
 
-setValue(aValue: LDOMString): void;
+  setValue(aValue: LDOMString): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LDOM_BasicAttribute: declare class LDOM_BasicAttribute extends LDOM_BasicNode
 
-constructor
+  constructor
 
-GetName(): string;
+  GetName(): string;
 
-GetValue(): LDOMBasicString;
+  GetValue(): LDOMBasicString;
 
-SetValue(aValue: LDOMBasicString, aDoc: LDOM_MemManager): void;
+  SetValue(aValue: LDOMBasicString, aDoc: LDOM_MemManager): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LDOM_BasicElement: declare class LDOM_BasicElement extends LDOM_BasicNode
 
-constructor
+  constructor
 
-static Create(aName: string, aLength: number, aDoc: LDOM_MemManager): LDOM_BasicElement;
+  static Create(aName: string, aLength: number, aDoc: LDOM_MemManager): LDOM_BasicElement;
 
-GetTagName(): string;
+  GetTagName(): string;
 
-GetFirstChild(): LDOM_BasicNode;
+  GetFirstChild(): LDOM_BasicNode;
 
-GetLastChild(): LDOM_BasicNode;
+  GetLastChild(): LDOM_BasicNode;
 
-GetAttribute(aName: LDOMBasicString, aLastCh: LDOM_BasicNode): LDOM_BasicAttribute;
+  GetAttribute(aName: LDOMBasicString, aLastCh: LDOM_BasicNode): LDOM_BasicAttribute;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LDOM_BasicNode: declare class LDOM_BasicNode
 
-isNull(): boolean;
+  isNull(): boolean;
 
-getNodeType(): LDOM_Node_NodeType;
+  getNodeType(): LDOM_Node_NodeType;
 
-GetSibling(): LDOM_BasicNode;
+  GetSibling(): LDOM_BasicNode;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LDOM_BasicText: declare class LDOM_BasicText extends LDOM_BasicNode
 
-constructor
+  constructor
 
-GetData(): LDOMBasicString;
+  GetData(): LDOMBasicString;
 
-SetData(aValue: LDOMBasicString, aDoc: LDOM_MemManager): void;
+  SetData(aValue: LDOMBasicString, aDoc: LDOM_MemManager): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LDOM_CDATASection: declare class LDOM_CDATASection extends LDOM_Text
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LDOM_CharReference: declare class LDOM_CharReference
 
-constructor
+  constructor
 
-static Decode(theSrc: string, theLen: number): string;
+  static Decode(theSrc: string, theLen: number): string;
 
-static Encode(theSrc: string, theLen: number, isAttribute: boolean): string;
+  static Encode(theSrc: string, theLen: number, isAttribute: boolean): string;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LDOM_CharacterData: declare class LDOM_CharacterData extends LDOM_Node
 
-constructor
+  constructor
 
-getData(): LDOMString;
+  getData(): LDOMString;
 
-setData(aValue: LDOMString): void;
+  setData(aValue: LDOMString): void;
 
-getLength(): number;
+  getLength(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LDOM_Comment: declare class LDOM_Comment extends LDOM_CharacterData
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LDOM_Document: declare class LDOM_Document
 
-constructor
+  constructor
 
-static createDocument(theQualifiedName: LDOMString): LDOM_Document;
+  static createDocument(theQualifiedName: LDOMString): LDOM_Document;
 
-createElement(theTagName: LDOMString): LDOM_Element;
+  createElement(theTagName: LDOMString): LDOM_Element;
 
-createCDATASection(theData: LDOMString): LDOM_CDATASection;
+  createCDATASection(theData: LDOMString): LDOM_CDATASection;
 
-createComment(theData: LDOMString): LDOM_Comment;
+  createComment(theData: LDOMString): LDOM_Comment;
 
-createTextNode(theData: LDOMString): LDOM_Text;
+  createTextNode(theData: LDOMString): LDOM_Text;
 
-getDocumentElement(): LDOM_Element;
+  getDocumentElement(): LDOM_Element;
 
-getElementsByTagName(theTagName: LDOMString): LDOM_NodeList;
+  getElementsByTagName(theTagName: LDOMString): LDOM_NodeList;
 
-isNull(): boolean;
+  isNull(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LDOM_DocumentType: declare class LDOM_DocumentType
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LDOM_Element: declare class LDOM_Element extends LDOM_Node
 
-constructor
+  constructor
 
-getTagName(): LDOMString;
+  getTagName(): LDOMString;
 
-getAttribute(aName: LDOMString): LDOMString;
+  getAttribute(aName: LDOMString): LDOMString;
 
-getAttributeNode(aName: LDOMString): LDOM_Attr;
+  getAttributeNode(aName: LDOMString): LDOM_Attr;
 
-getElementsByTagName(aName: LDOMString): LDOM_NodeList;
+  getElementsByTagName(aName: LDOMString): LDOM_NodeList;
 
-setAttribute(aName: LDOMString, aValue: LDOMString): void;
+  setAttribute(aName: LDOMString, aValue: LDOMString): void;
 
-setAttributeNode(aNewAttr: LDOM_Attr): void;
+  setAttributeNode(aNewAttr: LDOM_Attr): void;
 
-removeAttribute(aName: LDOMString): void;
+  removeAttribute(aName: LDOMString): void;
 
-GetChildByTagName(aTagName: LDOMString): LDOM_Element;
+  GetChildByTagName(aTagName: LDOMString): LDOM_Element;
 
-GetSiblingByTagName(): LDOM_Element;
+  GetSiblingByTagName(): LDOM_Element;
 
-ReplaceElement(anOther: LDOM_Element): void;
+  ReplaceElement(anOther: LDOM_Element): void;
 
-GetAttributesList(): LDOM_NodeList;
+  GetAttributesList(): LDOM_NodeList;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LDOM_LDOMImplementation: declare class LDOM_LDOMImplementation
 
-constructor
+  constructor
 
-static createDocument(aNamespaceURI: LDOMString, aQualifiedName: LDOMString, aDocType: LDOM_DocumentType): LDOM_Document;
+  static createDocument(aNamespaceURI: LDOMString, aQualifiedName: LDOMString, aDocType: LDOM_DocumentType): LDOM_Document;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LDOM_MemManager: declare class LDOM_MemManager extends Standard_Transient
 
-constructor
+  constructor
 
-HashedAllocate(aString: string, theLen: number, theHash: number): string;
-HashedAllocate(aString: string, theLen: number, theResult: LDOMBasicString): void;
-HashedAllocate(aString: string, theLen: number, theHash: number): string;
-HashedAllocate(aString: string, theLen: number, theResult: LDOMBasicString): void;
+  HashedAllocate(aString: string, theLen: number, theHash: number): string;
+  HashedAllocate(aString: string, theLen: number, theResult: LDOMBasicString): void;
+  HashedAllocate(aString: string, theLen: number, theHash: number): string;
+  HashedAllocate(aString: string, theLen: number, theResult: LDOMBasicString): void;
 
-static Hash(theString: string, theLen: number): number;
+  static Hash(theString: string, theLen: number): number;
 
-static CompareStrings(theString: string, theHashValue: number, theHashedStr: string): boolean;
+  static CompareStrings(theString: string, theHashValue: number, theHashedStr: string): boolean;
 
-RootElement(): LDOM_BasicElement;
+  RootElement(): LDOM_BasicElement;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LDOM_Node: declare class LDOM_Node
 
-constructor
+  constructor
 
-isNull(): boolean;
+  isNull(): boolean;
 
-getNodeType(): LDOM_Node_NodeType;
+  getNodeType(): LDOM_Node_NodeType;
 
-getNodeName(): LDOMString;
+  getNodeName(): LDOMString;
 
-getNodeValue(): LDOMString;
+  getNodeValue(): LDOMString;
 
-getFirstChild(): LDOM_Node;
+  getFirstChild(): LDOM_Node;
 
-getLastChild(): LDOM_Node;
+  getLastChild(): LDOM_Node;
 
-getNextSibling(): LDOM_Node;
+  getNextSibling(): LDOM_Node;
 
-removeChild(aChild: LDOM_Node): void;
+  removeChild(aChild: LDOM_Node): void;
 
-appendChild(aChild: LDOM_Node): void;
+  appendChild(aChild: LDOM_Node): void;
 
-hasChildNodes(): boolean;
+  hasChildNodes(): boolean;
 
-SetValueClear(): void;
+  SetValueClear(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LDOM_Node_NodeType: typeof LDOM_Node_NodeType[keyof typeof LDOM_Node_NodeType]
 
 LDOM_NodeList: declare class LDOM_NodeList
 
-constructor
+  constructor
 
-item(argNo0: number): LDOM_Node;
+  item(argNo0: number): LDOM_Node;
 
-getLength(): number;
+  getLength(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LDOM_OSStream: declare class LDOM_OSStream
 
-constructor
+  constructor
 
-str(): string;
+  str(): string;
 
-Length(): number;
+  Length(): number;
 
-Clear(): void;
+  Clear(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LDOM_OSStream_BOMType: typeof LDOM_OSStream_BOMType[keyof typeof LDOM_OSStream_BOMType]
 
 LDOM_SBuffer: declare class LDOM_SBuffer
 
-constructor
+  constructor
 
-str(): string;
+  str(): string;
 
-Length(): number;
+  Length(): number;
 
-Clear(): void;
+  Clear(): void;
 
-overflow(c?: number): number;
+  overflow(c?: number): number;
 
-underflow(): number;
+  underflow(): number;
 
-xsputn(s: string, n: number): number;
+  xsputn(s: string, n: number): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LDOM_Text: declare class LDOM_Text extends LDOM_CharacterData
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 LDOM_XmlWriter: declare class LDOM_XmlWriter
 
-constructor
+  constructor
 
-SetIndentation(theIndent: number): void;
+  SetIndentation(theIndent: number): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

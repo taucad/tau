@@ -4,38 +4,38 @@
 
 BRepIntCurveSurface_Inter: declare class BRepIntCurveSurface_Inter
 
-constructor
+  constructor
 
-Init(theCurve: GeomAdaptor_Curve): void;
-Init(theShape: TopoDS_Shape, theCurve: GeomAdaptor_Curve, theTol: number): void;
-Init(theShape: TopoDS_Shape, theLine: gp_Lin, theTol: number): void;
-Init(theCurve: GeomAdaptor_Curve): void;
-Init(theShape: TopoDS_Shape, theCurve: GeomAdaptor_Curve, theTol: number): void;
-Init(theShape: TopoDS_Shape, theLine: gp_Lin, theTol: number): void;
-Init(theCurve: GeomAdaptor_Curve): void;
-Init(theShape: TopoDS_Shape, theCurve: GeomAdaptor_Curve, theTol: number): void;
-Init(theShape: TopoDS_Shape, theLine: gp_Lin, theTol: number): void;
+  Init(theCurve: GeomAdaptor_Curve): void;
+  Init(theShape: TopoDS_Shape, theCurve: GeomAdaptor_Curve, theTol: number): void;
+  Init(theShape: TopoDS_Shape, theLine: gp_Lin, theTol: number): void;
+  Init(theCurve: GeomAdaptor_Curve): void;
+  Init(theShape: TopoDS_Shape, theCurve: GeomAdaptor_Curve, theTol: number): void;
+  Init(theShape: TopoDS_Shape, theLine: gp_Lin, theTol: number): void;
+  Init(theCurve: GeomAdaptor_Curve): void;
+  Init(theShape: TopoDS_Shape, theCurve: GeomAdaptor_Curve, theTol: number): void;
+  Init(theShape: TopoDS_Shape, theLine: gp_Lin, theTol: number): void;
 
-Load(theShape: TopoDS_Shape, theTol: number): void;
+  Load(theShape: TopoDS_Shape, theTol: number): void;
 
-More(): boolean;
+  More(): boolean;
 
-Next(): void;
+  Next(): void;
 
-Pnt(): gp_Pnt;
+  Pnt(): gp_Pnt;
 
-U(): number;
+  U(): number;
 
-V(): number;
+  V(): number;
 
-W(): number;
+  W(): number;
 
-State(): TopAbs_State;
+  State(): TopAbs_State;
 
-Transition(): IntCurveSurface_TransitionOnCurve;
+  Transition(): IntCurveSurface_TransitionOnCurve;
 
-Face(): TopoDS_Face;
+  Face(): TopoDS_Face;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

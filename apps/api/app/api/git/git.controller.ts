@@ -5,6 +5,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   NotFoundException,
   Param,
   Post,
@@ -12,12 +13,16 @@ import {
   Req,
   Res,
   StreamableFile,
+  UseFilters,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import type { Environment } from '#config/environment.config.js';
 import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
 import {
   dumbHttpContentType,
   isGitService,
+  negotiationInputLimitBytes,
   noCacheHeaders,
   projectIdFromRepository,
   quotaOverrunSlackBytes,
@@ -27,6 +32,7 @@ import type { GitService as GitSmartService } from '#api/git/git.constants.js';
 import { LfsBatchDto, LfsVerifyDto } from '#api/git/git.dto.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
 import type { LfsBatchResponse, LfsQuotaRefusal } from '#api/git/git-lfs.service.js';
+import { GitProtocolExceptionFilter } from '#api/git/git-protocol-exception.filter.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
 
 const applyHeaders = (reply: FastifyReply, headers: Readonly<Record<string, string>>): void => {
@@ -47,12 +53,28 @@ const applyHeaders = (reply: FastifyReply, headers: Readonly<Record<string, stri
 @Controller({ path: 'git', version: '1' })
 @UseAuth()
 export class GitController {
+  /**
+   * This API's own browser-facing origin, which is where a git-lfs `verify`
+   * action has to point. Never `request.protocol`/`request.host`: behind Fly
+   * TLS terminates at the proxy and the container is reached over plain HTTP,
+   * so the derived href was `http://` — and `git-lfs.service.ts` attaches the
+   * caller's own Tau bearer to that action (review C24, charter I8). The
+   * `Host` header is the client's, so the same line let a caller retarget its
+   * own credential. `git-proxy.controller.ts` already reads the validated
+   * config value exactly this way.
+   */
+  readonly #apiUrl: string;
+
   public constructor(
+    configService: ConfigService<Environment, true>,
     private readonly repositories: GitRepositoryService,
     private readonly lfs: GitLfsService,
-  ) {}
+  ) {
+    this.#apiUrl = configService.get('TAU_API_URL', { infer: true }).replace(/\/+$/u, '');
+  }
 
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- NestJS parameter decorators bind independent request facets; bundling them would obscure the route contract
+  @UseFilters(GitProtocolExceptionFilter)
   @Get(':repo/info/refs')
   public async infoRefs(
     @Param('repo') repository: string,
@@ -100,7 +122,9 @@ export class GitController {
   }
 
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- NestJS parameter decorators bind independent request facets; bundling them would obscure the route contract
+  @UseFilters(GitProtocolExceptionFilter)
   @Post(':repo/git-upload-pack')
+  @HttpCode(200)
   public async uploadPack(
     @Param('repo') repository: string,
     @User('id') userId: string,
@@ -117,7 +141,9 @@ export class GitController {
   }
 
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- NestJS parameter decorators bind independent request facets; bundling them would obscure the route contract
+  @UseFilters(GitProtocolExceptionFilter)
   @Post(':repo/git-receive-pack')
+  @HttpCode(200)
   public async receivePack(
     @Param('repo') repository: string,
     @User('id') userId: string,
@@ -158,7 +184,7 @@ export class GitController {
       operation: body.operation,
       objects: body.objects,
       authorization: request.headers.authorization,
-      endpoint: `${request.protocol}://${request.host}/v1/git/${repository}/info/lfs/objects`,
+      endpoint: `${this.#apiUrl}/v1/git/${repository}/info/lfs/objects`,
     });
     void reply.header('content-type', 'application/vnd.git-lfs+json');
     void reply.status(outcome.status);
@@ -177,7 +203,7 @@ export class GitController {
     const access = await this.repositories.authorize({
       projectId,
       userId,
-      mode: 'write',
+      mode: 'finalize',
     });
     const stored = await this.lfs.verify({
       access,
@@ -200,6 +226,7 @@ export class GitController {
    * — `post-receive` runs `update-server-info` after every push.
    */
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- NestJS parameter decorators bind independent request facets; bundling them would obscure the route contract
+  @UseFilters(GitProtocolExceptionFilter)
   @Get(':repo/*')
   public async dumbHttp(
     @Param('repo') repository: string,
@@ -254,13 +281,20 @@ export class GitController {
     });
 
     applyHeaders(args.reply, noCacheHeaders);
-    // The child outlives neither the response nor a client that walks away: a
-    // `git upload-pack` whose reader disappears would otherwise block forever
-    // on a full stdout pipe.
+    // The child outlives neither an incomplete response nor a client that walks
+    // away: an upload-pack whose reader disappears would otherwise block on a
+    // full stdout pipe. A completed response lets the child finish its hooks.
     const abort = new AbortController();
     args.reply.raw.once('close', () => {
-      abort.abort();
+      if (!args.reply.raw.writableFinished) {
+        abort.abort();
+      }
     });
+    /* `authorize` measured this owner's usage on this same request; re-reading
+       the account-wide aggregate under the gate answered the same number one
+       round-trip later (review C28). */
+    const admission = write ? this.repositories.admitGitPush(access) : undefined;
+    const remainingBytes = admission?.remainingBytes ?? access.remainingBytes;
     const output = this.repositories.serve({
       abort: abort.signal,
       repositoryPath: access.repositoryPath,
@@ -273,13 +307,18 @@ export class GitController {
             // through this admission check, and refuses one whose quarantined
             // objects do not fit in what is left of the plan (D17).
             TAU_GIT_PUSH_ADMITTED: '1',
-            TAU_GIT_QUOTA_REMAINING_BYTES: String(access.remainingBytes),
+            TAU_GIT_QUOTA_REMAINING_BYTES: String(remainingBytes),
           }
         : undefined,
+      /* A fetch's body is `want`/`have` negotiation rather than a pack, so it
+         gets the flat negotiation ceiling instead of the plan's headroom — but
+         it gets one: neither Fastify's `bodyLimit` (the git parser streams past
+         it) nor git itself bounded `upload-pack`'s stdin (review C32). */
+      maximumInputBytes: write ? remainingBytes + quotaOverrunSlackBytes : negotiationInputLimitBytes,
       ...(write
         ? {
             accountFor: projectId,
-            maximumInputBytes: access.remainingBytes + quotaOverrunSlackBytes,
+            releaseStorageAdmission: admission?.release,
           }
         : {}),
     });

@@ -39,7 +39,7 @@ function Checkbox({ className, size = 'default', ...properties }: CheckboxProps)
     <CheckboxPrimitive.Root
       data-slot='checkbox'
       className={cn(
-        'peer flex shrink-0 items-center justify-center bg-input transition-colors duration-500 outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground',
+        'peer flex shrink-0 items-center justify-center bg-input transition-colors duration-500 outline-none focus-visible:focus-outline disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive data-[state=checked]:primary-action',
         size === 'default' ? 'size-4 rounded-sm' : 'size-8 rounded-md',
         className,
       )}

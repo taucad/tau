@@ -67,7 +67,9 @@
     "@taucad/agent-host": "workspace:*",
     "@taucad/jobs": "workspace:*",
     "@taucad/mcp": "workspace:*",
-    "ws": "catalog:"
+    "@taucad/parameters": "workspace:*",
+    "ws": "catalog:",
+    "xstate": "catalog:"
   },
   "peerDependencies": {
     "@taucad/geospec-engine": "^0.1.0-beta.0",

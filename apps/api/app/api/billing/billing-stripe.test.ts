@@ -11,9 +11,11 @@ import {
   createStripeReloadTaxCalculationOnce,
   createStripeSetupCheckoutOnce,
   createStripeSubscriptionScheduleOnce,
+  createStripeTaxTransactionOnce,
   dispatchStripeLegOnce,
   expireStripeCheckoutSession,
   fetchStripeTaxCalculationEvidence,
+  fetchStripeTaxTransactionEvidence,
   fetchStripeCheckoutSource,
   fetchStripeInvoiceEvidence,
   isLoopbackBillingStripeClient,
@@ -334,8 +336,17 @@ describe('billing Stripe transport', () => {
       client_reference_id: 'purchase_1',
       success_url: 'https://tau.example/return',
       cancel_url: 'https://tau.example/return',
-      line_items: [{ quantity: 1, price_data: { currency: 'usd', product: 'prod_topup', unit_amount: 1234 } }],
+      line_items: [
+        {
+          quantity: 1,
+          price_data: { currency: 'usd', product: 'prod_topup', tax_behavior: 'exclusive', unit_amount: 1234 },
+        },
+      ],
       metadata: { tau_purchase_id: 'purchase_1' },
+      automatic_tax: { enabled: true },
+      billing_address_collection: 'required',
+      customer_update: { address: 'auto', name: 'auto' },
+      tax_id_collection: { enabled: true },
     } satisfies Stripe.Checkout.SessionCreateParams;
     await expect(
       dispatchStripeLegOnce(fixture.stripe, {
@@ -449,6 +460,35 @@ describe('billing Stripe transport', () => {
         calculationId: 'taxcalc_1',
         maximumLinePages: 2,
       }),
+    ).resolves.toMatchObject({ complete: true, lines: [{ amount: 2500, amount_tax: 250 }] });
+  });
+
+  it('commits and retrieves one paid Tax Transaction', async () => {
+    const transaction = {
+      id: 'tax_1',
+      object: 'tax.transaction',
+      type: 'transaction',
+      reference: 'tau:development:purchase:purchase_1',
+    };
+    const fixture = await createFixture({
+      '/v1/tax/transactions/create_from_calculation': transaction,
+      '/v1/tax/transactions/tax_1': transaction,
+      '/v1/tax/transactions/tax_1/line_items': {
+        object: 'list',
+        data: [{ id: 'taxli_1', amount: 2500, amount_tax: 250 }],
+        has_more: false,
+      },
+    });
+    await expect(
+      createStripeTaxTransactionOnce(fixture.stripe, {
+        calculationId: 'taxcalc_1',
+        reference: transaction.reference,
+        postedAt: 1_788_650_100,
+        idempotencyKey: 'tax_transaction_leg_1',
+      }),
+    ).resolves.toMatchObject({ id: 'tax_1', reference: transaction.reference });
+    await expect(
+      fetchStripeTaxTransactionEvidence(fixture.stripe, { transactionId: 'tax_1', maximumLinePages: 2 }),
     ).resolves.toMatchObject({ complete: true, lines: [{ amount: 2500, amount_tax: 250 }] });
   });
 

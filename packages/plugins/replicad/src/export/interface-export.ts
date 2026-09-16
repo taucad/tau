@@ -497,7 +497,7 @@ const mmPerStepUnit: Record<string, number> = {
   MI: 1_609_344,
   MIL: 0.0254,
   UM: 0.001,
-  UIN: 0.000_025_4,
+  UIN: 25.4e-6,
 };
 
 const stepUnitScale = (modelUnit: string, writeUnit: string): number => {

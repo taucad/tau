@@ -29,8 +29,8 @@ import { assertRootedPath } from '@taucad/utils/path';
 import { validateArtifactPaths } from '#types/export-artifact-validation.js';
 import type { ContentDigest, SceneDigest } from '@taucad/cache-core';
 import type { SceneNodeId } from '#types/runtime-scene.types.js';
-import { isParameterManifestShape } from '#parameter/manifest.js';
-import type { ParameterManifest } from '#parameter/manifest.js';
+import { isParameterManifestShape } from '@taucad/parameters';
+import type { ParameterManifest } from '@taucad/parameters';
 
 // ---------- Primitives ----------
 

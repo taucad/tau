@@ -180,6 +180,52 @@ describe('resolutionMachine', () => {
     actor.stop();
   });
 
+  /*
+   * C44. `openConflictInEditor` is fire-and-forget and this machine emitted a
+   * fact only on success, so the pane could learn that a materialization failed
+   * only by waiting 10 s and assuming. A failure is a fact like any other: it is
+   * emitted for the same path, and sent through the parent the same way, so the
+   * surface reacts to a signal instead of to a timer.
+   */
+  it('17 (C44): a materialization that fails says so for the path it failed on', async () => {
+    const { actor, promises, parent, emitted } = await loaded();
+
+    actor.send({ type: 'openInEditor', path: 'enclosure.ts' });
+    promises.settle('materialize', { error: new Error('That file is no longer in this revision.') });
+    await flush();
+
+    expect(emitted.find((event) => event.type === 'conflictMaterializationFailed')).toEqual({
+      type: 'conflictMaterializationFailed',
+      path: 'enclosure.ts',
+      reason: 'That file is no longer in this revision.',
+    });
+    expect(parent.events.find((event) => event.type === 'conflictMaterializationFailed')).toEqual({
+      type: 'conflictMaterializationFailed',
+      revisionId: 'rev-conflict',
+      path: 'enclosure.ts',
+      reason: 'That file is no longer in this revision.',
+    });
+
+    actor.stop();
+  });
+
+  it('17b (C44): a file with no text form is a failure of the same shape', async () => {
+    const { actor, promises, parent } = await loaded();
+
+    actor.send({ type: 'openInEditor', path: 'params/wall.json' });
+    promises.settle('materialize', { output: { path: 'params/wall.json', text: undefined } });
+    await flush();
+
+    expect(parent.events.find((event) => event.type === 'conflictMaterializationFailed')).toEqual({
+      type: 'conflictMaterializationFailed',
+      revisionId: 'rev-conflict',
+      path: 'params/wall.json',
+      reason: 'That file cannot be opened as text. Keep one side instead.',
+    });
+
+    actor.stop();
+  });
+
   it('sends the editor’s resolved file to the effect and keeps it out of context', async () => {
     const { actor, promises } = await loaded();
 

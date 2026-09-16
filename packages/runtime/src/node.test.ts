@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { createNodeClient } from '#node.js';
 import { defineKernel } from '#types/runtime-kernel.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
+// oxlint-disable-next-line no-restricted-imports -- Runtime-private fixture stays outside the package build graph.
+import { createParameterDeclaration } from '../test/support/kernel-worker.fixture.js';
 
 const syntheticKernel = defineKernel({
   id: 'synthetic',
@@ -19,7 +21,7 @@ const syntheticKernel = defineKernel({
     return { resolved: [entryPath], unresolved: [] };
   },
   async getParameters() {
-    return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+    return createParameterDeclaration();
   },
   async createGeometry() {
     return { geometry: { format: 'svg', content: '<svg xmlns="http://www.w3.org/2000/svg"/>' }, nativeHandle: {} };

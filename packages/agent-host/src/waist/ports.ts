@@ -3,6 +3,7 @@ import type { ModelCostRates, StopReason, Usage } from '@earendil-works/pi-ai';
 import type {
   JsonObject,
   JsonValue,
+  ModelReasoningConfig,
   ModelProviderKind,
   ModelSystemPromptBlock,
   ProviderMessage,
@@ -25,18 +26,37 @@ export type HostToolDefinition = {
 
 /** One normalized streaming event from the model transport. @public */
 export type ModelStreamEvent =
-  | { readonly type: 'text-delta'; readonly text: string }
+  | { readonly type: 'text-start'; readonly contentIndex: number }
+  | { readonly type: 'text-delta'; readonly contentIndex?: number | undefined; readonly text: string }
+  | { readonly type: 'text-end'; readonly contentIndex: number; readonly content: string }
+  | { readonly type: 'thinking-start'; readonly contentIndex: number }
   | {
       readonly type: 'thinking-delta';
+      readonly contentIndex?: number | undefined;
       readonly text: string;
-      readonly signature?: string | undefined;
     }
+  | { readonly type: 'thinking-end'; readonly contentIndex: number; readonly content: string }
+  | { readonly type: 'thinking-signature'; readonly contentIndex: number; readonly signature: string }
   | {
       readonly type: 'message-metadata';
       readonly metadata: NonNullable<ProviderMessage['metadata']>;
     }
   | {
+      readonly type: 'tool-input-start';
+      readonly contentIndex?: number | undefined;
+      readonly toolCallId: string;
+      readonly toolName: string;
+    }
+  | {
+      readonly type: 'tool-input-delta';
+      readonly contentIndex: number;
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly delta: string;
+    }
+  | {
       readonly type: 'tool-input';
+      readonly contentIndex?: number | undefined;
       readonly toolCallId: string;
       readonly toolName: string;
       readonly input: JsonValue;
@@ -46,14 +66,66 @@ export type ModelStreamEvent =
   | { readonly type: 'completed'; readonly stopReason: StopReason };
 
 /** Non-durable model output projected only while its run is live. @public */
-export type AgentLiveEvent = {
-  readonly type: 'text-delta' | 'thinking-delta';
+type AgentLiveEventBase = {
   readonly chatId: string;
   readonly runId: string;
   readonly messageId: string;
   readonly contentIndex: number;
-  readonly delta: string;
 };
+
+/** Non-durable model output projected only while its run is live. @public */
+export type AgentLiveEvent =
+  | (AgentLiveEventBase & { readonly type: 'text-start' })
+  | (AgentLiveEventBase & {
+      readonly type: 'text-delta';
+      readonly delta: string;
+      /** UTF-16 offset in this block, for reconciliation with durable checkpoints. */
+      readonly offset?: number | undefined;
+    })
+  | (AgentLiveEventBase & { readonly type: 'text-end'; readonly content: string })
+  | (AgentLiveEventBase & { readonly type: 'thinking-start'; readonly timestamp?: number | undefined })
+  | (AgentLiveEventBase & {
+      readonly type: 'thinking-delta';
+      readonly delta: string;
+      /** UTF-16 offset in this block, for reconciliation with durable checkpoints. */
+      readonly offset?: number | undefined;
+    })
+  | (AgentLiveEventBase & {
+      readonly type: 'thinking-end';
+      readonly content: string;
+      readonly timestamp?: number | undefined;
+    })
+  | (AgentLiveEventBase & {
+      readonly type: 'tool-input-start';
+      readonly toolCallId: string;
+      readonly toolName: string;
+    })
+  | (AgentLiveEventBase & {
+      readonly type: 'tool-input-delta';
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly delta: string;
+    })
+  | (AgentLiveEventBase & {
+      readonly type: 'tool-input-end';
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly input: JsonValue;
+    })
+  | (AgentLiveEventBase & {
+      readonly type: 'tool-output-update';
+      readonly toolCallId: string;
+      readonly toolName: string;
+      readonly output: JsonValue;
+      readonly isError: boolean;
+    });
+
+/** One live event before its chat/run identity is attached. @public */
+export type AgentLiveEventPayload = AgentLiveEvent extends infer Event
+  ? Event extends AgentLiveEvent
+    ? Omit<Event, 'chatId' | 'runId'>
+    : never
+  : never;
 
 /** Complete input for one model stream. @public */
 export type ModelStreamRequest = {
@@ -69,6 +141,8 @@ export type ModelStreamRequest = {
   readonly modelCost?: ModelCostRates | undefined;
   /** Catalog-resolved provider identity; transports must reject unsupported wires. */
   readonly providerKind?: ModelProviderKind | undefined;
+  /** Effective catalog reasoning controls frozen at admission. */
+  readonly reasoning?: ModelReasoningConfig | undefined;
   /** Requested output-token ceiling; the gateway clamps it to the catalog and remaining context. */
   readonly maxTokens?: number | undefined;
   /** Catalog context window of the selected model, in tokens. */
@@ -79,10 +153,32 @@ export type ModelStreamRequest = {
   readonly systemPromptBlocks?: readonly ModelSystemPromptBlock[] | undefined;
   /** Provider-normalized history rebuilt from W1. */
   readonly messages: readonly ProviderMessage[];
+  /**
+   * Documents whose bytes this request carries, keyed by the lowercase hex
+   * SHA-256 each `⟃tau:document:<sha256>⟄` sentinel text block in `messages`
+   * names (D15). A transport replaces every sentinel with its provider's native
+   * document block and must refuse a sentinel it cannot resolve (D21). Absent
+   * when no message references a document.
+   */
+  readonly documents?: ReadonlyMap<string, MaterializedDocument> | undefined;
   /** Canonical tools available for this request. */
   readonly tools: readonly HostToolDefinition[];
   /** Cancels provider work and transport reads. */
   readonly signal: AbortSignal;
+};
+
+/**
+ * One document's bytes, read for a single model request and never persisted (D15).
+ *
+ * @public
+ */
+export type MaterializedDocument = {
+  /** The document's bytes, base64-encoded without a `data:` prefix. */
+  readonly data: string;
+  /** The media type the durable `file-ref` recorded, e.g. `application/pdf`. */
+  readonly mediaType: string;
+  /** The user-facing name the durable `file-ref` recorded, when it recorded one. */
+  readonly filename?: string | undefined;
 };
 
 /** W3: bearer/local model boundary with normalized streaming and usage. @public */
@@ -111,6 +207,8 @@ export type HostToolInvocation = {
   readonly input: JsonValue;
   /** Cancels the active tool operation. */
   readonly signal: AbortSignal;
+  /** Forward a genuine partial result produced by the executing registry. */
+  readonly onUpdate?: ((result: HostToolResult) => void) | undefined;
   /**
    * The run this call serves, when one owns it.
    *

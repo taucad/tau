@@ -1370,13 +1370,7 @@ export const FileEditor = memo(function ({
   );
 
   if (result.kind === 'binary' || result.kind === 'text') {
-    return (
-      <RoutedFileViewer
-        viewer={resolvedViewer as ResolvedFileViewer}
-        request={viewerRequest as Omit<FileViewerRenderRequest, 'renderPane'>}
-        renderPane={renderPane}
-      />
-    );
+    return <RoutedFileViewer viewer={resolvedViewer!} request={viewerRequest!} renderPane={renderPane} />;
   }
 
   return renderPane({ body });
@@ -1433,7 +1427,7 @@ function FilePaneFilesSidecar({
         aria-valuemax={maximumFilesWidth}
         aria-valuenow={Math.round(width)}
         tabIndex={0}
-        className='absolute top-0 -left-1 z-10 h-full w-2 cursor-col-resize outline-none focus-visible:ring-2 focus-visible:ring-ring'
+        className='absolute top-0 -left-1 z-10 h-full w-2 cursor-col-resize outline-none focus-visible:focus-outline'
         onPointerDown={(event) => {
           drag.current = { x: event.clientX, width, currentWidth: width };
           event.currentTarget.setPointerCapture(event.pointerId);
@@ -1789,7 +1783,9 @@ export const WorkbenchDockview = memo(function ({
         return;
       }
       const marker =
-        headRevisionNumber === undefined ? 'Baseline' : `R${String(headRevisionNumber)}${isDirty ? '*' : ''}`;
+        headRevisionNumber === undefined
+          ? 'No revisions yet'
+          : `Rev ${String(headRevisionNumber)}${isDirty ? ' · Modified' : ''}`;
       revisionsPanel.api.setTitle(canReturnToLatest ? `Revisions · ${marker}` : 'Revisions');
     };
 

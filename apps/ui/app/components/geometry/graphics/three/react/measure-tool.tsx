@@ -147,7 +147,11 @@ export function MeasureTool(): React.JSX.Element {
   const mouseRef = useRef(new THREE.Vector2());
   const measureInputActor = useMemo(() => createActor(measureInputMachine), []);
   const raycastClipState = useMemo<RaycastClipState | undefined>(() => {
-    return createSectionViewRaycastClipState(sectionView);
+    return createSectionViewRaycastClipState({
+      enableMesh: sectionView.enableMesh,
+      isActive: sectionView.isActive,
+      plane: sectionView.plane,
+    });
   }, [sectionView.enableMesh, sectionView.isActive, sectionView.plane]);
   const pointerMoveCoalescerRef = useRef<RafCoalescer<MeasurePointerCoordinates> | undefined>(undefined);
   const wasCameraInteractingRef = useRef(cameraInteracting);

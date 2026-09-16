@@ -4,68 +4,68 @@
 
 ShapeFix_WireVertex: declare class ShapeFix_WireVertex
 
-constructor
+  constructor
 
-Init(sawv: ShapeAnalysis_WireVertex): void;
-Init(wire: TopoDS_Wire, preci: number): void;
-Init(sbwd: ShapeExtend_WireData, preci: number): void;
-Init(sawv: ShapeAnalysis_WireVertex): void;
-Init(wire: TopoDS_Wire, preci: number): void;
-Init(sbwd: ShapeExtend_WireData, preci: number): void;
-Init(sawv: ShapeAnalysis_WireVertex): void;
-Init(wire: TopoDS_Wire, preci: number): void;
-Init(sbwd: ShapeExtend_WireData, preci: number): void;
+  Init(sawv: ShapeAnalysis_WireVertex): void;
+  Init(wire: TopoDS_Wire, preci: number): void;
+  Init(sbwd: ShapeExtend_WireData, preci: number): void;
+  Init(sawv: ShapeAnalysis_WireVertex): void;
+  Init(wire: TopoDS_Wire, preci: number): void;
+  Init(sbwd: ShapeExtend_WireData, preci: number): void;
+  Init(sawv: ShapeAnalysis_WireVertex): void;
+  Init(wire: TopoDS_Wire, preci: number): void;
+  Init(sbwd: ShapeExtend_WireData, preci: number): void;
 
-Analyzer(): ShapeAnalysis_WireVertex;
+  Analyzer(): ShapeAnalysis_WireVertex;
 
-WireData(): ShapeExtend_WireData;
+  WireData(): ShapeExtend_WireData;
 
-Wire(): TopoDS_Wire;
+  Wire(): TopoDS_Wire;
 
-FixSame(): number;
+  FixSame(): number;
 
-Fix(): number;
+  Fix(): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 ShapeFix_Wireframe: declare class ShapeFix_Wireframe extends ShapeFix_Root
 
-constructor
+  constructor
 
-ClearStatuses(): void;
+  ClearStatuses(): void;
 
-Load(shape: TopoDS_Shape): void;
+  Load(shape: TopoDS_Shape): void;
 
-FixWireGaps(): boolean;
+  FixWireGaps(): boolean;
 
-FixSmallEdges(): boolean;
+  FixSmallEdges(): boolean;
 
-CheckSmallEdges(theSmallEdges: NCollection_Map_TopoDS_Shape_TopTools_ShapeMapHasher, theEdgeToFaces: NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher, theFaceWithSmall: NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher, theMultyEdges: NCollection_Map_TopoDS_Shape_TopTools_ShapeMapHasher): boolean;
+  CheckSmallEdges(theSmallEdges: NCollection_Map_TopoDS_Shape_TopTools_ShapeMapHasher, theEdgeToFaces: NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher, theFaceWithSmall: NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher, theMultyEdges: NCollection_Map_TopoDS_Shape_TopTools_ShapeMapHasher): boolean;
 
-MergeSmallEdges(theSmallEdges: NCollection_Map_TopoDS_Shape_TopTools_ShapeMapHasher, theEdgeToFaces: NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher, theFaceWithSmall: NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher, theMultyEdges: NCollection_Map_TopoDS_Shape_TopTools_ShapeMapHasher, theModeDrop: boolean, theLimitAngle: number): boolean;
+  MergeSmallEdges(theSmallEdges: NCollection_Map_TopoDS_Shape_TopTools_ShapeMapHasher, theEdgeToFaces: NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher, theFaceWithSmall: NCollection_DataMap_TopoDS_Shape_NCollection_List_TopoDS_Shape_TopTools_ShapeMapHasher, theMultyEdges: NCollection_Map_TopoDS_Shape_TopTools_ShapeMapHasher, theModeDrop: boolean, theLimitAngle: number): boolean;
 
-StatusWireGaps(status: ShapeExtend_Status): boolean;
+  StatusWireGaps(status: ShapeExtend_Status): boolean;
 
-StatusSmallEdges(status: ShapeExtend_Status): boolean;
+  StatusSmallEdges(status: ShapeExtend_Status): boolean;
 
-Shape(): TopoDS_Shape;
+  Shape(): TopoDS_Shape;
 
-ModeDropSmallEdges(): boolean;
+  ModeDropSmallEdges(): boolean;
 
-SetLimitAngle(theLimitAngle: number): void;
+  SetLimitAngle(theLimitAngle: number): void;
 
-LimitAngle(): number;
+  LimitAngle(): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 ShapeFix_SequenceOfWireSegment: NCollection_Sequence_ShapeFix_WireSegment

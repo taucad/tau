@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- E2E is the established project acronym (`apps/desktop-e2e/src/support/config.ts` says the same). */
 import process from 'node:process';
 
 /**

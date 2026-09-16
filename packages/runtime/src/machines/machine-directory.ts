@@ -1,17 +1,13 @@
-import type { Topic } from "@taucad/events";
-import { ResourceQueue } from "@taucad/filesystem";
-import type { CacheValue } from "@taucad/cache-core";
-import { canonicalizeCacheValue } from "@taucad/cache-core";
-import { convert, quantityKinds } from "@taucad/units/quantity";
-import type { Quantity } from "@taucad/units/quantity";
-import { z } from "zod";
+import type { Topic } from '@taucad/events';
+import { ResourceQueue } from '@taucad/filesystem';
+import type { CacheValue } from '@taucad/cache-core';
+import { canonicalizeCacheValue } from '@taucad/cache-core';
+import { convert, quantityKinds } from '@taucad/units/quantity';
+import type { Quantity } from '@taucad/units/quantity';
+import { z } from 'zod';
 
-import { cloneBoundedJson } from "#configuration/bounded-json.js";
-import type {
-  MachineDescriptor,
-  MachineSession,
-  MachineSnapshot,
-} from "#machines/machine.js";
+import { cloneBoundedJson } from '@taucad/parameters/json';
+import type { MachineDescriptor, MachineSession, MachineSnapshot } from '#machines/machine.js';
 
 const identity = z
   .string()
@@ -24,22 +20,21 @@ const envelope = z.strictObject({
   width: z.number().positive(),
   depth: z.number().positive(),
   height: z.number().positive(),
-  unit: z.literal("m"),
+  unit: z.literal('m'),
 });
 const nozzleDiameter = z.unknown().transform((value, context) => {
   const candidate = value as Quantity;
-  const converted = convert({ quantity: candidate, to: "m" });
+  const converted = convert({ quantity: candidate, to: 'm' });
   if (
-    converted.status !== "success" ||
+    converted.status !== 'success' ||
     candidate.kind !== quantityKinds.diameter ||
-    candidate.space !== "linear" ||
-    typeof converted.value.value !== "number" ||
+    candidate.space !== 'linear' ||
+    typeof converted.value.value !== 'number' ||
     converted.value.value <= 0
   ) {
     context.addIssue({
-      code: "custom",
-      message:
-        "Nozzle diameter must be a positive executable diameter quantity.",
+      code: 'custom',
+      message: 'Nozzle diameter must be a positive executable diameter quantity.',
     });
     return z.NEVER;
   }
@@ -47,16 +42,16 @@ const nozzleDiameter = z.unknown().transform((value, context) => {
 });
 const temperaturePoint = z.unknown().transform((value, context) => {
   const candidate = value as Quantity;
-  const converted = convert({ quantity: candidate, to: "Cel" });
+  const converted = convert({ quantity: candidate, to: 'Cel' });
   if (
-    converted.status !== "success" ||
+    converted.status !== 'success' ||
     candidate.kind !== quantityKinds.temperature ||
-    candidate.space !== "point" ||
-    typeof converted.value.value !== "number"
+    candidate.space !== 'point' ||
+    typeof converted.value.value !== 'number'
   ) {
     context.addIssue({
-      code: "custom",
-      message: "Temperature must be an executable affine point quantity.",
+      code: 'custom',
+      message: 'Temperature must be an executable affine point quantity.',
     });
     return z.NEVER;
   }
@@ -65,7 +60,7 @@ const temperaturePoint = z.unknown().transform((value, context) => {
 const percentage = z.number().min(0).max(100);
 const material = z.strictObject({
   slot: count.max(127),
-  state: z.enum(["empty", "loaded", "unknown"]),
+  state: z.enum(['empty', 'loaded', 'unknown']),
   materialId: identity.optional(),
   brand: identity.optional(),
   color: z
@@ -87,7 +82,7 @@ const descriptorSchema = z.strictObject({
         contract: z.strictObject({ id: identity, version: count.min(1) }),
         mediaType: identity,
         requiredMembers: z.array(z.string().min(1).max(512)).max(128),
-        payloadSelection: z.enum(["single", "plate"]),
+        payloadSelection: z.enum(['single', 'plate']),
         technology: identity,
       }),
     )
@@ -108,8 +103,8 @@ const descriptorSchema = z.strictObject({
   bedTypes: names,
 });
 const snapshotSchema = z.strictObject({
-  connection: z.enum(["connected", "disconnected", "unreachable"]),
-  readiness: z.enum(["busy", "idle", "not-ready", "unknown"]),
+  connection: z.enum(['connected', 'disconnected', 'unreachable']),
+  readiness: z.enum(['busy', 'idle', 'not-ready', 'unknown']),
   activeRunId: identity.optional(),
   observedAt: z.iso.datetime({ offset: true }),
   setup: z.strictObject({
@@ -119,16 +114,7 @@ const snapshotSchema = z.strictObject({
   }),
   run: z
     .strictObject({
-      state: z.enum([
-        "failed",
-        "finishing",
-        "idle",
-        "paused",
-        "preparing",
-        "printing",
-        "succeeded",
-        "unknown",
-      ]),
+      state: z.enum(['failed', 'finishing', 'idle', 'paused', 'preparing', 'printing', 'succeeded', 'unknown']),
       progress: z.number().min(0).max(100).optional(),
       remainingSeconds: count.optional(),
       name: identity.optional(),
@@ -137,9 +123,7 @@ const snapshotSchema = z.strictObject({
       totalLayers: count.optional(),
       stage: identity.optional(),
       printType: identity.optional(),
-      speedProfile: z
-        .enum(["silent", "standard", "sport", "ludicrous", "unknown"])
-        .optional(),
+      speedProfile: z.enum(['silent', 'standard', 'sport', 'ludicrous', 'unknown']).optional(),
       speedPercent: z.number().min(0).max(1000).optional(),
     })
     .optional(),
@@ -174,13 +158,9 @@ const snapshotSchema = z.strictObject({
         .max(32),
     })
     .optional(),
-  network: z
-    .strictObject({ wifiSignalDbm: z.number().min(-150).max(0).optional() })
-    .optional(),
-  lights: z
-    .strictObject({ chamber: z.enum(["off", "on", "unknown"]).optional() })
-    .optional(),
-  removableStorage: z.enum(["absent", "present"]).optional(),
+  network: z.strictObject({ wifiSignalDbm: z.number().min(-150).max(0).optional() }).optional(),
+  lights: z.strictObject({ chamber: z.enum(['off', 'on', 'unknown']).optional() }).optional(),
+  removableStorage: z.enum(['absent', 'present']).optional(),
   alerts: z
     .array(z.strictObject({ code: identity }))
     .max(128)
@@ -191,7 +171,7 @@ const entrySchema = z.strictObject({
   providerId: identity,
   descriptor: descriptorSchema,
   snapshot: snapshotSchema,
-  freshness: z.enum(["current", "stale"]),
+  freshness: z.enum(['current', 'stale']),
 });
 const scope = {
   hostId: identity,
@@ -199,16 +179,16 @@ const scope = {
   workspaceId: identity,
 };
 const eventScope = { ...scope, revision: count.min(1) };
-const eventSchema = z.discriminatedUnion("type", [
+const eventSchema = z.discriminatedUnion('type', [
   z.strictObject({
     ...eventScope,
-    type: z.literal("machine-directory-upserted"),
+    type: z.literal('machine-directory-upserted'),
     entry: entrySchema,
   }),
-  z.strictObject({ ...eventScope, type: z.literal("machine-directory-stale") }),
+  z.strictObject({ ...eventScope, type: z.literal('machine-directory-stale') }),
   z.strictObject({
     ...eventScope,
-    type: z.literal("machine-directory-removed"),
+    type: z.literal('machine-directory-removed'),
     machineId: identity,
   }),
 ]);
@@ -219,7 +199,7 @@ const cursorSchema = z.strictObject({
   revision: count,
 });
 const limits = {
-  code: "MACHINE_DIRECTORY",
+  code: 'MACHINE_DIRECTORY',
   maximumDepth: 12,
   maximumNodes: 16_384,
   maximumCharacters: 131_072,
@@ -228,7 +208,7 @@ const pageSize = 128;
 const maximumLag = 1024;
 const maximumEntries = 256;
 const maximumWorkspaces = 256;
-const queueKey = "machine-directory";
+const queueKey = 'machine-directory';
 
 /** Committed machine facts, never raw packets or host connection material. @internal */
 export type MachineDirectoryEvent = Readonly<{
@@ -239,11 +219,11 @@ export type MachineDirectoryEvent = Readonly<{
 }> &
   (
     | Readonly<{
-        type: "machine-directory-upserted";
+        type: 'machine-directory-upserted';
         entry: MachineDirectoryEntry;
       }>
-    | Readonly<{ type: "machine-directory-stale" }>
-    | Readonly<{ type: "machine-directory-removed"; machineId: string }>
+    | Readonly<{ type: 'machine-directory-stale' }>
+    | Readonly<{ type: 'machine-directory-removed'; machineId: string }>
   );
 /** Host-selected identity and a validated observation. Current means this session incarnation, not wall-clock freshness or physical readiness. @public */
 export type MachineDirectoryEntry = Readonly<{
@@ -251,7 +231,7 @@ export type MachineDirectoryEntry = Readonly<{
   providerId: string;
   descriptor: MachineDescriptor;
   snapshot: MachineSnapshot;
-  freshness: "current" | "stale";
+  freshness: 'current' | 'stale';
 }>;
 /** A scoped read-through position distinct from projection revision. @public */
 export type MachineDirectoryCursor = Readonly<z.infer<typeof cursorSchema>>;
@@ -262,15 +242,15 @@ export type MachineDirectorySnapshot = Readonly<{
 }>;
 /** Durable observation frames; callers deduplicate by cursor/revision. @public */
 export type MachineDirectoryFrame =
-  | Readonly<{ type: "snapshot"; snapshot: MachineDirectorySnapshot }>
+  | Readonly<{ type: 'snapshot'; snapshot: MachineDirectorySnapshot }>
   | Readonly<{
-      type: "event";
+      type: 'event';
       cursor: MachineDirectoryCursor;
       event: MachineDirectoryEvent;
     }>
   | Readonly<{
-      type: "resync-required";
-      reason: "revision-mismatch" | "lag";
+      type: 'resync-required';
+      reason: 'revision-mismatch' | 'lag';
       snapshot: MachineDirectorySnapshot;
     }>;
 /** Host-local transfer of one already-connected session. @internal */
@@ -278,10 +258,7 @@ export type AttachMachineDirectorySessionInput = Readonly<{
   workspaceId: string;
   machineId: string;
   providerId: string;
-  session: Pick<
-    MachineSession,
-    "getDescriptor" | "getSnapshot" | "observe" | "close"
-  >;
+  session: Pick<MachineSession, 'getDescriptor' | 'getSnapshot' | 'observe' | 'close'>;
 }>;
 /** Named workspace lookup. Admission remains the route owner's responsibility. @internal */
 export type MachineDirectoryReadInput = Readonly<{ workspaceId: string }>;
@@ -294,20 +271,14 @@ export type MachineDirectoryWatchInput = Readonly<{
 /** Host-owned directory over a borrowed, exclusively owned authority journal. @internal */
 export type MachineDirectory = Readonly<{
   attach(input: AttachMachineDirectorySessionInput): Promise<void>;
-  remove(
-    input: Readonly<{ workspaceId: string; machineId: string }>,
-  ): Promise<void>;
+  remove(input: Readonly<{ workspaceId: string; machineId: string }>): Promise<void>;
   snapshot(input: MachineDirectoryReadInput): Promise<MachineDirectorySnapshot>;
-  watch(
-    input: MachineDirectoryWatchInput,
-  ): AsyncIterable<MachineDirectoryFrame>;
+  watch(input: MachineDirectoryWatchInput): AsyncIterable<MachineDirectoryFrame>;
   close(): Promise<void>;
 }>;
 /** Narrow append/replay port owned by the machine authority. It is deliberately independent of jobs. @internal */
 export type MachineDirectoryJournal = Readonly<{
-  append(
-    candidate: unknown,
-  ): Promise<Readonly<{ sequence: number; event: CacheValue }>>;
+  append(candidate: unknown): Promise<Readonly<{ sequence: number; event: CacheValue }>>;
   replay(input: Readonly<{ cursor: number; limit: number }>): Promise<
     Readonly<{
       records: ReadonlyArray<Readonly<{ sequence: number; event: CacheValue }>>;
@@ -328,7 +299,7 @@ export type CreateMachineDirectoryInput = Readonly<{
 }>;
 
 const freeze = <Value>(value: Value): Value => {
-  if (value !== null && typeof value === "object") {
+  if (value !== null && typeof value === 'object') {
     for (const child of Object.values(value)) {
       freeze(child);
     }
@@ -341,9 +312,7 @@ const freeze = <Value>(value: Value): Value => {
  * @param value - Candidate normalized record.
  * @returns Detached immutable event.
  */
-export const parseMachineDirectoryEvent = (
-  value: unknown,
-): MachineDirectoryEvent =>
+export const parseMachineDirectoryEvent = (value: unknown): MachineDirectoryEvent =>
   freeze(eventSchema.parse(cloneBoundedJson(value, limits)));
 
 /** Parse one bounded public directory cursor.
@@ -351,9 +320,7 @@ export const parseMachineDirectoryEvent = (
  * @returns Detached, frozen cursor.
  * @public
  */
-export const parseMachineDirectoryCursor = (
-  value: unknown,
-): MachineDirectoryCursor =>
+export const parseMachineDirectoryCursor = (value: unknown): MachineDirectoryCursor =>
   freeze(cursorSchema.parse(cloneBoundedJson(value, limits)));
 
 /** Parse one bounded public directory entry.
@@ -361,9 +328,7 @@ export const parseMachineDirectoryCursor = (
  * @returns Detached, frozen entry.
  * @public
  */
-export const parseMachineDirectoryEntry = (
-  value: unknown,
-): MachineDirectoryEntry =>
+export const parseMachineDirectoryEntry = (value: unknown): MachineDirectoryEntry =>
   freeze(entrySchema.parse(cloneBoundedJson(value, limits)));
 
 /** Parse one bounded public directory snapshot.
@@ -371,9 +336,7 @@ export const parseMachineDirectoryEntry = (
  * @returns Detached, frozen snapshot.
  * @public
  */
-export const parseMachineDirectorySnapshot = (
-  value: unknown,
-): MachineDirectorySnapshot => {
+export const parseMachineDirectorySnapshot = (value: unknown): MachineDirectorySnapshot => {
   const candidate = cloneBoundedJson(value, limits);
   const parsed = z
     .strictObject({
@@ -389,9 +352,7 @@ export const parseMachineDirectorySnapshot = (
  * @returns Detached, frozen stream frame.
  * @public
  */
-export const parseMachineDirectoryFrame = (
-  value: unknown,
-): MachineDirectoryFrame => {
+export const parseMachineDirectoryFrame = (value: unknown): MachineDirectoryFrame => {
   const candidate = cloneBoundedJson(value, limits);
   const snapshot = z.strictObject({
     cursor: cursorSchema,
@@ -399,16 +360,16 @@ export const parseMachineDirectoryFrame = (
   });
   return freeze(
     z
-      .discriminatedUnion("type", [
-        z.strictObject({ type: z.literal("snapshot"), snapshot }),
+      .discriminatedUnion('type', [
+        z.strictObject({ type: z.literal('snapshot'), snapshot }),
         z.strictObject({
-          type: z.literal("event"),
+          type: z.literal('event'),
           cursor: cursorSchema,
           event: eventSchema,
         }),
         z.strictObject({
-          type: z.literal("resync-required"),
-          reason: z.enum(["revision-mismatch", "lag"]),
+          type: z.literal('resync-required'),
+          reason: z.enum(['revision-mismatch', 'lag']),
           snapshot,
         }),
       ])
@@ -419,11 +380,11 @@ export const parseMachineDirectoryFrame = (
 const machineEvent = (value: CacheValue): MachineDirectoryEvent | undefined => {
   if (
     value !== null &&
-    typeof value === "object" &&
+    typeof value === 'object' &&
     !Array.isArray(value) &&
-    "type" in value &&
-    typeof value["type"] === "string" &&
-    value["type"].startsWith("machine-directory-")
+    'type' in value &&
+    typeof value['type'] === 'string' &&
+    value['type'].startsWith('machine-directory-')
   ) {
     return parseMachineDirectoryEvent(value);
   }
@@ -453,9 +414,7 @@ type OwnedSession = {
  * @param input - Trusted host scope and borrowed authority services.
  * @returns Directory with client-independent device lifetime.
  */
-export const createMachineDirectory = async (
-  input: CreateMachineDirectoryInput,
-): Promise<MachineDirectory> => {
+export const createMachineDirectory = async (input: CreateMachineDirectoryInput): Promise<MachineDirectory> => {
   const hostId = identity.parse(input.hostId);
   const authorityId = identity.parse(input.authorityId);
   const generation = identity.parse(input.generation);
@@ -477,43 +436,37 @@ export const createMachineDirectory = async (
 
   const assertOpen = (): void => {
     if (failure !== undefined) {
-      throw new Error("MACHINE_DIRECTORY_UNAVAILABLE", { cause: failure });
+      throw new Error('MACHINE_DIRECTORY_UNAVAILABLE', { cause: failure });
     }
     if (closed) {
-      throw new Error("MACHINE_DIRECTORY_CLOSED");
+      throw new Error('MACHINE_DIRECTORY_CLOSED');
     }
   };
   const projection = (workspaceId: string): Projection =>
     projections.get(workspaceId) ?? { revision: 0, entries: new Map() };
   const reduce = (event: MachineDirectoryEvent): void => {
     if (event.hostId !== hostId || event.authorityId !== authorityId) {
-      throw new Error("MACHINE_DIRECTORY_WRONG_AUTHORITY");
+      throw new Error('MACHINE_DIRECTORY_WRONG_AUTHORITY');
     }
     const current = projection(event.workspaceId);
     if (event.revision !== current.revision + 1) {
-      throw new Error("MACHINE_DIRECTORY_REVISION_GAP");
+      throw new Error('MACHINE_DIRECTORY_REVISION_GAP');
     }
-    if (
-      !projections.has(event.workspaceId) &&
-      projections.size >= maximumWorkspaces
-    ) {
-      throw new Error("MACHINE_DIRECTORY_WORKSPACE_LIMIT");
+    if (!projections.has(event.workspaceId) && projections.size >= maximumWorkspaces) {
+      throw new Error('MACHINE_DIRECTORY_WORKSPACE_LIMIT');
     }
-    if (event.type === "machine-directory-upserted") {
-      if (
-        !current.entries.has(event.entry.machineId) &&
-        current.entries.size >= maximumEntries
-      ) {
-        throw new Error("MACHINE_DIRECTORY_ENTRY_LIMIT");
+    if (event.type === 'machine-directory-upserted') {
+      if (!current.entries.has(event.entry.machineId) && current.entries.size >= maximumEntries) {
+        throw new Error('MACHINE_DIRECTORY_ENTRY_LIMIT');
       }
       current.entries.set(event.entry.machineId, event.entry);
-    } else if (event.type === "machine-directory-removed") {
+    } else if (event.type === 'machine-directory-removed') {
       if (!current.entries.delete(event.machineId)) {
-        throw new Error("MACHINE_DIRECTORY_UNKNOWN_MACHINE");
+        throw new Error('MACHINE_DIRECTORY_UNKNOWN_MACHINE');
       }
     } else {
       for (const [key, entry] of current.entries) {
-        current.entries.set(key, freeze({ ...entry, freshness: "stale" }));
+        current.entries.set(key, freeze({ ...entry, freshness: 'stale' }));
       }
     }
     current.revision = event.revision;
@@ -525,13 +478,12 @@ export const createMachineDirectory = async (
       // oxlint-disable-next-line eslint/no-await-in-loop -- committed pages must fold in sequence.
       const page = await input.journal.replay({
         cursor: position,
-        limit:
-          end === undefined ? pageSize : Math.min(pageSize, end - position),
+        limit: end === undefined ? pageSize : Math.min(pageSize, end - position),
       });
       end ??= page.endCursor;
       for (const record of page.records) {
         if (record.sequence !== position) {
-          throw new Error("MACHINE_DIRECTORY_JOURNAL_GAP");
+          throw new Error('MACHINE_DIRECTORY_JOURNAL_GAP');
         }
         const event = machineEvent(record.event);
         if (event) {
@@ -539,11 +491,8 @@ export const createMachineDirectory = async (
         }
         position += 1;
       }
-      if (
-        page.nextCursor !== position ||
-        (position < end && page.records.length === 0)
-      ) {
-        throw new Error("MACHINE_DIRECTORY_JOURNAL_GAP");
+      if (page.nextCursor !== position || (position < end && page.records.length === 0)) {
+        throw new Error('MACHINE_DIRECTORY_JOURNAL_GAP');
       }
     } while (position < end);
   };
@@ -570,9 +519,7 @@ export const createMachineDirectory = async (
     const parsed = parseMachineDirectoryEvent(event);
     // Validate the complete transition before any append, without mutating the visible projection.
     const old = projections.get(parsed.workspaceId);
-    const copy = old
-      ? { revision: old.revision, entries: new Map(old.entries) }
-      : undefined;
+    const copy = old ? { revision: old.revision, entries: new Map(old.entries) } : undefined;
     try {
       reduce(parsed);
     } finally {
@@ -587,7 +534,7 @@ export const createMachineDirectory = async (
       // Another authority domain may append between our synchronized read and this append.
       await synchronize();
       if (record.sequence >= position) {
-        throw new Error("MACHINE_DIRECTORY_UNCOMMITTED_APPEND");
+        throw new Error('MACHINE_DIRECTORY_UNCOMMITTED_APPEND');
       }
       input.commits.emit();
     } catch (error) {
@@ -599,21 +546,9 @@ export const createMachineDirectory = async (
   const change = (
     workspaceId: string,
     body:
-      | Omit<
-          Extract<
-            MachineDirectoryEvent,
-            { type: "machine-directory-upserted" }
-          >,
-          keyof typeof eventScope
-        >
-      | Omit<
-          Extract<MachineDirectoryEvent, { type: "machine-directory-stale" }>,
-          keyof typeof eventScope
-        >
-      | Omit<
-          Extract<MachineDirectoryEvent, { type: "machine-directory-removed" }>,
-          keyof typeof eventScope
-        >,
+      | Omit<Extract<MachineDirectoryEvent, { type: 'machine-directory-upserted' }>, keyof typeof eventScope>
+      | Omit<Extract<MachineDirectoryEvent, { type: 'machine-directory-stale' }>, keyof typeof eventScope>
+      | Omit<Extract<MachineDirectoryEvent, { type: 'machine-directory-removed' }>, keyof typeof eventScope>,
   ): MachineDirectoryEvent => ({
     ...body,
     hostId,
@@ -621,22 +556,17 @@ export const createMachineDirectory = async (
     workspaceId,
     revision: projection(workspaceId).revision + 1,
   });
-  const sessionKey = (workspaceId: string, machineId: string): string =>
-    JSON.stringify([workspaceId, machineId]);
+  const sessionKey = (workspaceId: string, machineId: string): string => JSON.stringify([workspaceId, machineId]);
   const isCurrent = (owned: OwnedSession): boolean =>
     !closed &&
-    sessions.get(sessionKey(owned.input.workspaceId, owned.input.machineId)) ===
-      owned &&
+    sessions.get(sessionKey(owned.input.workspaceId, owned.input.machineId)) === owned &&
     !owned.abort.signal.aborted;
   const stop = async (owned: OwnedSession): Promise<void> => {
     owned.abort.abort();
     owned.stop ??= owned.input.session.close();
     return owned.stop;
   };
-  const publish = async (
-    owned: OwnedSession,
-    entry: MachineDirectoryEntry,
-  ): Promise<void> =>
+  const publish = async (owned: OwnedSession, entry: MachineDirectoryEntry): Promise<void> =>
     queue.queueFor(queueKey, async () => {
       assertOpen();
       if (!isCurrent(owned)) {
@@ -646,23 +576,18 @@ export const createMachineDirectory = async (
       if (!isCurrent(owned)) {
         return;
       }
-      const previous = projection(owned.input.workspaceId).entries.get(
-        entry.machineId,
-      );
+      const previous = projection(owned.input.workspaceId).entries.get(entry.machineId);
       if (previous && observationState(previous) === observationState(entry)) {
         return;
       }
       await commit(
         change(owned.input.workspaceId, {
-          type: "machine-directory-upserted",
+          type: 'machine-directory-upserted',
           entry,
         }),
       );
     });
-  const observe = async (
-    owned: OwnedSession,
-    entry: MachineDirectoryEntry,
-  ): Promise<void> => {
+  const observe = async (owned: OwnedSession, entry: MachineDirectoryEntry): Promise<void> => {
     try {
       for await (const event of owned.input.session.observe({
         signal: owned.abort.signal,
@@ -672,14 +597,14 @@ export const createMachineDirectory = async (
         }
         const parsed = z
           .strictObject({
-            type: z.literal("snapshot"),
+            type: z.literal('snapshot'),
             snapshot: snapshotSchema,
           })
           .parse(cloneBoundedJson(event, limits));
         await publish(owned, {
           ...entry,
           snapshot: parsed.snapshot,
-          freshness: "current",
+          freshness: 'current',
         });
       }
     } catch (error) {
@@ -689,11 +614,9 @@ export const createMachineDirectory = async (
     } finally {
       if (isCurrent(owned)) {
         try {
-          const current = projection(owned.input.workspaceId).entries.get(
-            owned.input.machineId,
-          );
+          const current = projection(owned.input.workspaceId).entries.get(owned.input.machineId);
           if (current) {
-            await publish(owned, { ...current, freshness: "stale" });
+            await publish(owned, { ...current, freshness: 'stale' });
           }
         } catch (error) {
           report(error);
@@ -711,20 +634,13 @@ export const createMachineDirectory = async (
 
   await synchronize();
   for (const [workspaceId, current] of projections) {
-    if (
-      [...current.entries.values()].some(
-        (entry) => entry.freshness === "current",
-      )
-    ) {
+    if ([...current.entries.values()].some((entry) => entry.freshness === 'current')) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- recovery transitions retain journal order.
-      await commit(change(workspaceId, { type: "machine-directory-stale" }));
+      await commit(change(workspaceId, { type: 'machine-directory-stale' }));
     }
   }
 
-  const validCursor = async (
-    after: MachineDirectoryCursor,
-    current: MachineDirectoryCursor,
-  ): Promise<boolean> => {
+  const validCursor = async (after: MachineDirectoryCursor, current: MachineDirectoryCursor): Promise<boolean> => {
     const parsed = cursorSchema.safeParse(after);
     if (
       !parsed.success ||
@@ -752,7 +668,7 @@ export const createMachineDirectory = async (
         }
       }
       if (page.nextCursor <= readThrough) {
-        throw new Error("MACHINE_DIRECTORY_JOURNAL_GAP");
+        throw new Error('MACHINE_DIRECTORY_JOURNAL_GAP');
       }
       readThrough = page.nextCursor;
     }
@@ -775,24 +691,20 @@ export const createMachineDirectory = async (
     let next = after;
     for (const record of page.records) {
       if (record.sequence !== next.position) {
-        throw new Error("MACHINE_DIRECTORY_JOURNAL_GAP");
+        throw new Error('MACHINE_DIRECTORY_JOURNAL_GAP');
       }
       const event = machineEvent(record.event);
       const selected = event?.workspaceId === after.workspaceId;
       if (selected && event.revision !== next.revision + 1) {
-        throw new Error("MACHINE_DIRECTORY_REVISION_GAP");
+        throw new Error('MACHINE_DIRECTORY_REVISION_GAP');
       }
-      next = cursor(
-        after.workspaceId,
-        record.sequence + 1,
-        selected ? event.revision : next.revision,
-      );
+      next = cursor(after.workspaceId, record.sequence + 1, selected ? event.revision : next.revision);
       if (selected) {
-        frames.push({ type: "event", cursor: next, event });
+        frames.push({ type: 'event', cursor: next, event });
       }
     }
     if (next.position <= after.position) {
-      throw new Error("MACHINE_DIRECTORY_JOURNAL_GAP");
+      throw new Error('MACHINE_DIRECTORY_JOURNAL_GAP');
     }
     return { cursor: next, frames };
   };
@@ -806,7 +718,7 @@ export const createMachineDirectory = async (
       const key = sessionKey(workspaceId, machineId);
       const previous = sessions.get(key);
       if (!previous && sessions.size >= maximumEntries) {
-        throw new Error("MACHINE_DIRECTORY_SESSION_LIMIT");
+        throw new Error('MACHINE_DIRECTORY_SESSION_LIMIT');
       }
       const owned: OwnedSession = {
         input: { ...attachment, workspaceId, machineId, providerId },
@@ -821,11 +733,11 @@ export const createMachineDirectory = async (
               assertOpen();
               await synchronize();
               const entry = projection(workspaceId).entries.get(machineId);
-              if (isCurrent(owned) && entry?.freshness === "current") {
+              if (isCurrent(owned) && entry?.freshness === 'current') {
                 await commit(
                   change(workspaceId, {
-                    type: "machine-directory-upserted",
-                    entry: { ...entry, freshness: "stale" },
+                    type: 'machine-directory-upserted',
+                    entry: { ...entry, freshness: 'stale' },
                   }),
                 );
               }
@@ -863,7 +775,7 @@ export const createMachineDirectory = async (
           providerId,
           descriptor,
           snapshot: current,
-          freshness: "current",
+          freshness: 'current',
         };
         await publish(owned, entry);
         if (isCurrent(owned)) {
@@ -898,11 +810,11 @@ export const createMachineDirectory = async (
           assertOpen();
           await synchronize();
           if (sessions.get(key) !== owned) {
-            throw new Error("MACHINE_DIRECTORY_SESSION_REPLACED");
+            throw new Error('MACHINE_DIRECTORY_SESSION_REPLACED');
           }
           await commit(
             change(workspaceId, {
-              type: "machine-directory-removed",
+              type: 'machine-directory-removed',
               machineId,
             }),
           );
@@ -943,7 +855,7 @@ export const createMachineDirectory = async (
         const onAbort = (): void => {
           wake.resolve();
         };
-        signal.addEventListener("abort", onAbort, { once: true });
+        signal.addEventListener('abort', onAbort, { once: true });
         try {
           // oxlint-disable-next-line eslint/no-await-in-loop -- each pull joins one committed snapshot boundary.
           const current = await queue.queueFor(queueKey, async () => {
@@ -957,7 +869,7 @@ export const createMachineDirectory = async (
           if (!after) {
             after = current.cursor;
             checked = true;
-            yield { type: "snapshot", snapshot: current };
+            yield { type: 'snapshot', snapshot: current };
           }
           if (!checked) {
             // oxlint-disable-next-line eslint/no-await-in-loop -- qualify the supplied cursor before emitting its tail.
@@ -969,15 +881,15 @@ export const createMachineDirectory = async (
             if (!valid) {
               after = current.cursor;
               yield {
-                type: "resync-required",
-                reason: "revision-mismatch",
+                type: 'resync-required',
+                reason: 'revision-mismatch',
                 snapshot: current,
               };
             }
           }
           if (current.cursor.position - after.position > maximumLag) {
             after = current.cursor;
-            yield { type: "resync-required", reason: "lag", snapshot: current };
+            yield { type: 'resync-required', reason: 'lag', snapshot: current };
           }
           while (after.position < current.cursor.position) {
             // oxlint-disable-next-line eslint/no-await-in-loop -- pull bounded pages in cursor order.
@@ -995,7 +907,7 @@ export const createMachineDirectory = async (
           await wake.promise;
         } finally {
           off();
-          signal.removeEventListener("abort", onAbort);
+          signal.removeEventListener('abort', onAbort);
         }
       }
     },
@@ -1018,10 +930,10 @@ export const createMachineDirectory = async (
         );
         await queue.queueFor(queueKey, async () => undefined);
         const errors: unknown[] = results.flatMap((result): unknown[] =>
-          result.status === "rejected" ? [result.reason] : [],
+          result.status === 'rejected' ? [result.reason] : [],
         );
         if (errors.length > 0) {
-          throw new AggregateError(errors, "MACHINE_DIRECTORY_CLOSE_FAILED");
+          throw new AggregateError(errors, 'MACHINE_DIRECTORY_CLOSE_FAILED');
         }
       };
       closing = stopAll();

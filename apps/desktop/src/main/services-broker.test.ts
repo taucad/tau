@@ -1,4 +1,7 @@
 /* eslint-disable @typescript-eslint/naming-convention -- environment names are SCREAMING_SNAKE */
+import { mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createServicesBroker, rendererServicesConcerns, servicesConcerns } from '#main/services-broker.js';
@@ -6,6 +9,7 @@ import type { ServicesBrokerOptions } from '#main/services-broker.js';
 
 type Spawned = {
   postMessage: ReturnType<typeof vi.fn>;
+  posted: unknown[];
   kill: ReturnType<typeof vi.fn>;
   on: (event: 'exit' | 'message', listener: (value?: unknown) => void) => void;
   exit: () => void;
@@ -15,8 +19,12 @@ type Spawned = {
 const spawnUtility = (): Spawned => {
   const exits: Array<() => void> = [];
   const messages: Array<(message: unknown) => void> = [];
+  const posted: unknown[] = [];
   return {
-    postMessage: vi.fn(),
+    postMessage: vi.fn((message: unknown) => {
+      posted.push(message);
+    }),
+    posted,
     kill: vi.fn(),
     on: (event, listener) => {
       if (event === 'exit') {
@@ -139,6 +147,37 @@ describe('createServicesBroker', () => {
     ]);
   });
 
+  it('releases only the last project attachment and leaves another project served', async () => {
+    const { broker, spawns } = brokerHarness();
+    broker.retainAgentHost({ workspaceRoot: '/home/a', projectId: 'a', attachmentId: 'window-1' });
+    broker.retainAgentHost({ workspaceRoot: '/home/a', projectId: 'a', attachmentId: 'window-2' });
+    broker.retainAgentHost({ workspaceRoot: '/home/b', projectId: 'b', attachmentId: 'window-1' });
+    broker.connect('agentHost', { workspaceRoot: '/home/a', projectId: 'a' });
+    broker.connect('agentHost', { workspaceRoot: '/home/b', projectId: 'b' });
+
+    await broker.releaseAgentHost({ workspaceRoot: '/home/a', projectId: 'a', attachmentId: 'window-1' }, 1000);
+    expect(spawns[0]?.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'agent-host-release' }));
+
+    const released = broker.releaseAgentHost(
+      { workspaceRoot: '/home/a', projectId: 'a', attachmentId: 'window-2' },
+      1000,
+    );
+    const releaseFrame = spawns[0]?.posted.find(
+      (message): message is Record<string, unknown> =>
+        typeof message === 'object' &&
+        message !== null &&
+        'type' in message &&
+        message['type'] === 'agent-host-release',
+    );
+    spawns[0]?.message({ type: 'agent-host-released', requestId: releaseFrame?.['requestId'] });
+    await released;
+
+    spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-b', workspaceRoot: '/home/b' });
+    expect(spawns[0]?.postMessage).toHaveBeenCalledWith({ type: 'runtime-port', requestId: 'runtime-b' }, [
+      { id: 'runtime' },
+    ]);
+  });
+
   it('mints runtime ports only from a main-admitted agent context', () => {
     const { broker, connectRuntime, spawns } = brokerHarness();
     broker.connect('agentHost', {
@@ -174,45 +213,66 @@ describe('createServicesBroker', () => {
     });
   });
 
+  it('should mint a runtime port when the execution root uses a symlink spelling', () => {
+    const canonical = mkdtempSync(join(tmpdir(), 'tau-services-root-'));
+    const alias = `${canonical}-alias`;
+    symlinkSync(canonical, alias, process.platform === 'win32' ? 'junction' : 'dir');
+    try {
+      const { broker, connectRuntime, spawns } = brokerHarness();
+      broker.connect('agentHost', { workspaceRoot: alias });
+      spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-1', workspaceRoot: alias });
+
+      expect(connectRuntime).toHaveBeenCalledExactlyOnceWith({
+        projectRoot: realpathSync.native(canonical),
+        computeProjectRoot: realpathSync.native(canonical),
+        computeMode: 'off',
+        definition: 'default',
+      });
+    } finally {
+      rmSync(alias, { force: true });
+      rmSync(canonical, { force: true, recursive: true });
+    }
+  });
+
   it('retains one original identity across candidates while keeping projects separate', () => {
     const { broker, connectRuntime, spawns } = brokerHarness();
-    broker.connect('agentHost', { workspaceRoot: '/home/a', computeMode: 'durable' });
-    broker.connect('agentHost', { workspaceRoot: '/home/b', computeMode: 'durable' });
+    broker.connect('agentHost', { workspaceRoot: '/home/a', projectId: 'project-a', computeMode: 'durable' });
+    broker.connect('agentHost', { workspaceRoot: '/home/b', projectId: 'project-b', computeMode: 'durable' });
     for (const [workspaceRoot, projectRoot] of [
-      ['/home/a/.tau/checkouts/one', '/home/a'],
-      ['/home/a/.tau/checkouts/two', '/home/a'],
-      ['/home/b/.tau/checkouts/one', '/home/b'],
+      ['/home/.tau/checkouts/project-a/one', '/home/a'],
+      ['/home/.tau/checkouts/project-a/two', '/home/a'],
+      ['/home/.tau/checkouts/project-b/one', '/home/b'],
     ] as const) {
       spawns[0]?.message({ type: 'runtime-context-register', workspaceRoot, projectRoot });
       spawns[0]?.message({ type: 'runtime-port-request', requestId: workspaceRoot, workspaceRoot });
     }
 
     expect(connectRuntime).toHaveBeenNthCalledWith(1, {
-      projectRoot: '/home/a/.tau/checkouts/one',
+      projectRoot: '/home/.tau/checkouts/project-a/one',
       computeProjectRoot: '/home/a',
       computeMode: 'durable',
       definition: 'default',
     });
     expect(connectRuntime).toHaveBeenNthCalledWith(2, {
-      projectRoot: '/home/a/.tau/checkouts/two',
+      projectRoot: '/home/.tau/checkouts/project-a/two',
       computeProjectRoot: '/home/a',
       computeMode: 'durable',
       definition: 'default',
     });
     expect(connectRuntime).toHaveBeenNthCalledWith(3, {
-      projectRoot: '/home/b/.tau/checkouts/one',
+      projectRoot: '/home/.tau/checkouts/project-b/one',
       computeProjectRoot: '/home/b',
       computeMode: 'durable',
       definition: 'default',
     });
-    expect(broker.computeProjectRoot('/home/a/.tau/checkouts/one/.')).toBe('/home/a');
-    expect(broker.computeProjectRoot('/home/b/.tau/checkouts/one')).toBe('/home/b');
+    expect(broker.computeProjectRoot('/home/.tau/checkouts/project-a/one/.')).toBe('/home/a');
+    expect(broker.computeProjectRoot('/home/.tau/checkouts/project-b/one')).toBe('/home/b');
   });
 
   it('mints a runtime port for a candidate turn checkout while it is registered, and not after', () => {
     const { broker, connectRuntime, spawns } = brokerHarness();
-    broker.connect('agentHost', { workspaceRoot: '/home/widget', computeMode: 'durable' });
-    const checkout = '/home/widget/.tau/checkouts/trun-1';
+    broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'project-widget', computeMode: 'durable' });
+    const checkout = '/home/.tau/checkouts/project-widget/trun-1';
     spawns[0]?.message({ type: 'runtime-context-register', workspaceRoot: checkout, projectRoot: '/home/widget' });
     spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-1', workspaceRoot: checkout });
 
@@ -271,14 +331,14 @@ describe('createServicesBroker', () => {
 
   it('forgets the checkouts of a utility that died without releasing them', () => {
     const { broker, connectRuntime, spawns } = brokerHarness();
-    broker.connect('agentHost', { workspaceRoot: '/home/widget' });
-    const checkout = '/home/widget/.tau/checkouts/trun-1';
+    broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'project-widget' });
+    const checkout = '/home/.tau/checkouts/project-widget/trun-1';
     spawns[0]?.message({ type: 'runtime-context-register', workspaceRoot: checkout, projectRoot: '/home/widget' });
     /* Only the utility that registered a checkout ever releases it, so one that
      * dies mid-turn would otherwise leave the root admissible for the life of
      * the app — over a tree the turn's release already deleted. */
     spawns[0]?.exit();
-    broker.connect('agentHost', { workspaceRoot: '/home/widget' });
+    broker.connect('agentHost', { workspaceRoot: '/home/widget', projectId: 'project-widget' });
     spawns[1]?.message({ type: 'runtime-port-request', requestId: 'runtime-1', workspaceRoot: checkout });
     /* The project the fresh fork re-registered is still served: only the dead
      * utility's checkouts are forgotten. */

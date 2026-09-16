@@ -15,12 +15,12 @@ import { popoverSurfaceVariants } from '#components/popover.variants.js';
  * ```
  */
 export const menuItemVariants = cva(
-  "relative flex cursor-pointer items-center gap-2 rounded-sm px-3 py-1 text-[13px] outline-hidden select-none data-disabled:pointer-events-none data-disabled:text-muted-foreground/50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:-translate-y-[0.5px] [&_svg:not([class*='size-'])]:size-3.5 [&_svg:not([class*='text-'])]:text-muted-foreground",
+  "relative flex items-center gap-2 rounded-sm px-3 py-1 text-[13px] outline-hidden select-none hover:bg-menu-highlight hover:text-foreground hover:[&_svg:not([class*='text-'])]:text-foreground data-disabled:pointer-events-none data-disabled:text-muted-foreground/50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:-translate-y-[0.5px] [&_svg:not([class*='size-'])]:size-3.5 [&_svg:not([class*='text-'])]:text-muted-foreground",
   {
     variants: {
       variant: {
         default: '',
-        destructive: 'focus:bg-menu-highlight-destructive',
+        destructive: 'hover:bg-menu-highlight-destructive focus:bg-menu-highlight-destructive',
       },
       inset: {
         true: 'pl-8', // For items with left indicator (checkbox/radio)

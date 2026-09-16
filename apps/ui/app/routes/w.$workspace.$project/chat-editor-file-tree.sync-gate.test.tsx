@@ -25,6 +25,7 @@ const sync = vi.hoisted(() => {
     online: true,
     conflictRef: undefined,
     error: undefined,
+    reason: undefined,
   };
   return { current: initial };
 });
@@ -81,6 +82,7 @@ const facet = (state: SyncFacet['state']): SyncFacet => ({
   online: true,
   conflictRef: undefined,
   error: undefined,
+  reason: undefined,
 });
 
 const arrived: [string, FileEntry] = [

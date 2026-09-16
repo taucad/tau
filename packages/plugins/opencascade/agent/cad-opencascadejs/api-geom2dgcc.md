@@ -4,530 +4,530 @@
 
 Geom2dGcc: declare class Geom2dGcc
 
-constructor
+  constructor
 
-static Unqualified(Obj: Geom2dAdaptor_Curve): Geom2dGcc_QualifiedCurve;
+  static Unqualified(Obj: Geom2dAdaptor_Curve): Geom2dGcc_QualifiedCurve;
 
-static Enclosing(Obj: Geom2dAdaptor_Curve): Geom2dGcc_QualifiedCurve;
+  static Enclosing(Obj: Geom2dAdaptor_Curve): Geom2dGcc_QualifiedCurve;
 
-static Enclosed(Obj: Geom2dAdaptor_Curve): Geom2dGcc_QualifiedCurve;
+  static Enclosed(Obj: Geom2dAdaptor_Curve): Geom2dGcc_QualifiedCurve;
 
-static Outside(Obj: Geom2dAdaptor_Curve): Geom2dGcc_QualifiedCurve;
+  static Outside(Obj: Geom2dAdaptor_Curve): Geom2dGcc_QualifiedCurve;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_Circ2d2TanOn: declare class Geom2dGcc_Circ2d2TanOn
 
-constructor
+  constructor
 
-Results(Circ: GccAna_Circ2d2TanOn): void;
-Results(Circ: Geom2dGcc_Circ2d2TanOnGeo): void;
-Results(Circ: GccAna_Circ2d2TanOn): void;
-Results(Circ: Geom2dGcc_Circ2d2TanOnGeo): void;
+  Results(Circ: GccAna_Circ2d2TanOn): void;
+  Results(Circ: Geom2dGcc_Circ2d2TanOnGeo): void;
+  Results(Circ: GccAna_Circ2d2TanOn): void;
+  Results(Circ: Geom2dGcc_Circ2d2TanOnGeo): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): gp_Circ2d;
+  ThisSolution(Index: number): gp_Circ2d;
 
-WhichQualifier(Index: number, Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position };
+  WhichQualifier(Index: number, Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position };
 
-Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-Tangency2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-CenterOn3(Index: number, ParArg: number, PntSol: gp_Pnt2d): { ParArg: number };
+  CenterOn3(Index: number, ParArg: number, PntSol: gp_Pnt2d): { ParArg: number };
 
-IsTheSame1(Index: number): boolean;
+  IsTheSame1(Index: number): boolean;
 
-IsTheSame2(Index: number): boolean;
+  IsTheSame2(Index: number): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_Circ2d2TanOnGeo: declare class Geom2dGcc_Circ2d2TanOnGeo
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): gp_Circ2d;
+  ThisSolution(Index: number): gp_Circ2d;
 
-WhichQualifier(Index: number, Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position };
+  WhichQualifier(Index: number, Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position };
 
-Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-Tangency2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-CenterOn3(Index: number, ParArg: number, PntSol: gp_Pnt2d): { ParArg: number };
+  CenterOn3(Index: number, ParArg: number, PntSol: gp_Pnt2d): { ParArg: number };
 
-IsTheSame1(Index: number): boolean;
+  IsTheSame1(Index: number): boolean;
 
-IsTheSame2(Index: number): boolean;
+  IsTheSame2(Index: number): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_Circ2d2TanOnIter: declare class Geom2dGcc_Circ2d2TanOnIter
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-ThisSolution(): gp_Circ2d;
+  ThisSolution(): gp_Circ2d;
 
-WhichQualifier(Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position };
+  WhichQualifier(Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position };
 
-Tangency1(ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-Tangency2(ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency2(ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-CenterOn3(ParArg: number, PntSol: gp_Pnt2d): { ParArg: number };
+  CenterOn3(ParArg: number, PntSol: gp_Pnt2d): { ParArg: number };
 
-IsTheSame1(): boolean;
+  IsTheSame1(): boolean;
 
-IsTheSame2(): boolean;
+  IsTheSame2(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_Circ2d2TanRad: declare class Geom2dGcc_Circ2d2TanRad
 
-constructor
+  constructor
 
-Results(Circ: GccAna_Circ2d2TanRad): void;
-Results(Circ: Geom2dGcc_Circ2d2TanRadGeo): void;
-Results(Circ: GccAna_Circ2d2TanRad): void;
-Results(Circ: Geom2dGcc_Circ2d2TanRadGeo): void;
+  Results(Circ: GccAna_Circ2d2TanRad): void;
+  Results(Circ: Geom2dGcc_Circ2d2TanRadGeo): void;
+  Results(Circ: GccAna_Circ2d2TanRad): void;
+  Results(Circ: Geom2dGcc_Circ2d2TanRadGeo): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): gp_Circ2d;
+  ThisSolution(Index: number): gp_Circ2d;
 
-WhichQualifier(Index: number, Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position };
+  WhichQualifier(Index: number, Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position };
 
-Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-Tangency2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-IsTheSame1(Index: number): boolean;
+  IsTheSame1(Index: number): boolean;
 
-IsTheSame2(Index: number): boolean;
+  IsTheSame2(Index: number): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_Circ2d2TanRadGeo: declare class Geom2dGcc_Circ2d2TanRadGeo
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): gp_Circ2d;
+  ThisSolution(Index: number): gp_Circ2d;
 
-WhichQualifier(Index: number, Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position };
+  WhichQualifier(Index: number, Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position };
 
-Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-Tangency2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-IsTheSame1(Index: number): boolean;
+  IsTheSame1(Index: number): boolean;
 
-IsTheSame2(Index: number): boolean;
+  IsTheSame2(Index: number): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_Circ2d3Tan: declare class Geom2dGcc_Circ2d3Tan
 
-constructor
+  constructor
 
-Results(Circ: GccAna_Circ2d3Tan, Rank1: number, Rank2: number, Rank3: number): void;
+  Results(Circ: GccAna_Circ2d3Tan, Rank1: number, Rank2: number, Rank3: number): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): gp_Circ2d;
+  ThisSolution(Index: number): gp_Circ2d;
 
-WhichQualifier(Index: number, Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position, Qualif3?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position; Qualif3: GccEnt_Position };
+  WhichQualifier(Index: number, Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position, Qualif3?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position; Qualif3: GccEnt_Position };
 
-Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-Tangency2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-Tangency3(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency3(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-IsTheSame1(Index: number): boolean;
+  IsTheSame1(Index: number): boolean;
 
-IsTheSame2(Index: number): boolean;
+  IsTheSame2(Index: number): boolean;
 
-IsTheSame3(Index: number): boolean;
+  IsTheSame3(Index: number): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_Circ2d3TanIter: declare class Geom2dGcc_Circ2d3TanIter
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-ThisSolution(): gp_Circ2d;
+  ThisSolution(): gp_Circ2d;
 
-WhichQualifier(Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position, Qualif3?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position; Qualif3: GccEnt_Position };
+  WhichQualifier(Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position, Qualif3?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position; Qualif3: GccEnt_Position };
 
-Tangency1(ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-Tangency2(ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency2(ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-Tangency3(ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency3(ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-IsTheSame1(): boolean;
+  IsTheSame1(): boolean;
 
-IsTheSame2(): boolean;
+  IsTheSame2(): boolean;
 
-IsTheSame3(): boolean;
+  IsTheSame3(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_Circ2dTanCen: declare class Geom2dGcc_Circ2dTanCen
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): gp_Circ2d;
+  ThisSolution(Index: number): gp_Circ2d;
 
-WhichQualifier(Index: number, Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
+  WhichQualifier(Index: number, Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
 
-Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-IsTheSame1(Index: number): boolean;
+  IsTheSame1(Index: number): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_Circ2dTanCenGeo: declare class Geom2dGcc_Circ2dTanCenGeo
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): gp_Circ2d;
+  ThisSolution(Index: number): gp_Circ2d;
 
-WhichQualifier(Index: number, Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
+  WhichQualifier(Index: number, Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
 
-Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_Circ2dTanOnRad: declare class Geom2dGcc_Circ2dTanOnRad
 
-constructor
+  constructor
 
-Results(Circ: GccAna_Circ2dTanOnRad): void;
-Results(Circ: Geom2dGcc_Circ2dTanOnRadGeo): void;
-Results(Circ: GccAna_Circ2dTanOnRad): void;
-Results(Circ: Geom2dGcc_Circ2dTanOnRadGeo): void;
+  Results(Circ: GccAna_Circ2dTanOnRad): void;
+  Results(Circ: Geom2dGcc_Circ2dTanOnRadGeo): void;
+  Results(Circ: GccAna_Circ2dTanOnRad): void;
+  Results(Circ: Geom2dGcc_Circ2dTanOnRadGeo): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): gp_Circ2d;
+  ThisSolution(Index: number): gp_Circ2d;
 
-WhichQualifier(Index: number, Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
+  WhichQualifier(Index: number, Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
 
-Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-CenterOn3(Index: number, ParArg: number, PntSol: gp_Pnt2d): { ParArg: number };
+  CenterOn3(Index: number, ParArg: number, PntSol: gp_Pnt2d): { ParArg: number };
 
-IsTheSame1(Index: number): boolean;
+  IsTheSame1(Index: number): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_Circ2dTanOnRadGeo: declare class Geom2dGcc_Circ2dTanOnRadGeo
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): gp_Circ2d;
+  ThisSolution(Index: number): gp_Circ2d;
 
-WhichQualifier(Index: number, Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
+  WhichQualifier(Index: number, Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
 
-Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-CenterOn3(Index: number, ParArg: number, PntSol: gp_Pnt2d): { ParArg: number };
+  CenterOn3(Index: number, ParArg: number, PntSol: gp_Pnt2d): { ParArg: number };
 
-IsTheSame1(Index: number): boolean;
+  IsTheSame1(Index: number): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_CurveTool: declare class Geom2dGcc_CurveTool
 
-constructor
+  constructor
 
-static FirstParameter(C: Geom2dAdaptor_Curve): number;
+  static FirstParameter(C: Geom2dAdaptor_Curve): number;
 
-static LastParameter(C: Geom2dAdaptor_Curve): number;
+  static LastParameter(C: Geom2dAdaptor_Curve): number;
 
-static EpsX(C: Geom2dAdaptor_Curve, Tol: number): number;
+  static EpsX(C: Geom2dAdaptor_Curve, Tol: number): number;
 
-static NbSamples(C: Geom2dAdaptor_Curve): number;
+  static NbSamples(C: Geom2dAdaptor_Curve): number;
 
-static Value(C: Geom2dAdaptor_Curve, X: number): gp_Pnt2d;
+  static Value(C: Geom2dAdaptor_Curve, X: number): gp_Pnt2d;
 
-static D1(C: Geom2dAdaptor_Curve, U: number, P: gp_Pnt2d, T: gp_Vec2d): void;
+  static D1(C: Geom2dAdaptor_Curve, U: number, P: gp_Pnt2d, T: gp_Vec2d): void;
 
-static D2(C: Geom2dAdaptor_Curve, U: number, P: gp_Pnt2d, T: gp_Vec2d, N: gp_Vec2d): void;
+  static D2(C: Geom2dAdaptor_Curve, U: number, P: gp_Pnt2d, T: gp_Vec2d, N: gp_Vec2d): void;
 
-static D3(C: Geom2dAdaptor_Curve, U: number, P: gp_Pnt2d, T: gp_Vec2d, N: gp_Vec2d, dN: gp_Vec2d): void;
+  static D3(C: Geom2dAdaptor_Curve, U: number, P: gp_Pnt2d, T: gp_Vec2d, N: gp_Vec2d, dN: gp_Vec2d): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_FunctionTanCirCu: declare class Geom2dGcc_FunctionTanCirCu extends math_FunctionWithDerivative
 
-constructor
+  constructor
 
-Value(X: number, F: number): { returnValue: boolean; F: number };
+  Value(X: number, F: number): { returnValue: boolean; F: number };
 
-Derivative(X: number, D: number): { returnValue: boolean; D: number };
+  Derivative(X: number, D: number): { returnValue: boolean; D: number };
 
-Values(X: number, F: number, D: number): { returnValue: boolean; F: number; D: number };
+  Values(X: number, F: number, D: number): { returnValue: boolean; F: number; D: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_FunctionTanCuCu: declare class Geom2dGcc_FunctionTanCuCu extends math_FunctionSetWithDerivatives
 
-constructor
+  constructor
 
-InitDerivative(X: math_VectorBase_double, Point1: gp_Pnt2d, Point2: gp_Pnt2d, Tan1: gp_Vec2d, Tan2: gp_Vec2d, D21: gp_Vec2d, D22: gp_Vec2d): void;
+  InitDerivative(X: math_VectorBase_double, Point1: gp_Pnt2d, Point2: gp_Pnt2d, Tan1: gp_Vec2d, Tan2: gp_Vec2d, D21: gp_Vec2d, D22: gp_Vec2d): void;
 
-NbVariables(): number;
+  NbVariables(): number;
 
-NbEquations(): number;
+  NbEquations(): number;
 
-Value(X: math_VectorBase_double, F: math_VectorBase_double): boolean;
+  Value(X: math_VectorBase_double, F: math_VectorBase_double): boolean;
 
-Derivatives(X: math_VectorBase_double, D: math_Matrix): boolean;
+  Derivatives(X: math_VectorBase_double, D: math_Matrix): boolean;
 
-Values(X: math_VectorBase_double, F: math_VectorBase_double, D: math_Matrix): boolean;
+  Values(X: math_VectorBase_double, F: math_VectorBase_double, D: math_Matrix): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_FunctionTanCuCuOnCu: declare class Geom2dGcc_FunctionTanCuCuOnCu extends math_FunctionSetWithDerivatives
 
-constructor
+  constructor
 
-InitDerivative(X: math_VectorBase_double, Point1: gp_Pnt2d, Point2: gp_Pnt2d, Point3: gp_Pnt2d, Tan1: gp_Vec2d, Tan2: gp_Vec2d, Tan3: gp_Vec2d, D21: gp_Vec2d, D22: gp_Vec2d, D23: gp_Vec2d): void;
+  InitDerivative(X: math_VectorBase_double, Point1: gp_Pnt2d, Point2: gp_Pnt2d, Point3: gp_Pnt2d, Tan1: gp_Vec2d, Tan2: gp_Vec2d, Tan3: gp_Vec2d, D21: gp_Vec2d, D22: gp_Vec2d, D23: gp_Vec2d): void;
 
-NbVariables(): number;
+  NbVariables(): number;
 
-NbEquations(): number;
+  NbEquations(): number;
 
-Value(X: math_VectorBase_double, F: math_VectorBase_double): boolean;
+  Value(X: math_VectorBase_double, F: math_VectorBase_double): boolean;
 
-Derivatives(X: math_VectorBase_double, D: math_Matrix): boolean;
+  Derivatives(X: math_VectorBase_double, D: math_Matrix): boolean;
 
-Values(X: math_VectorBase_double, F: math_VectorBase_double, D: math_Matrix): boolean;
+  Values(X: math_VectorBase_double, F: math_VectorBase_double, D: math_Matrix): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_FunctionTanCuPnt: declare class Geom2dGcc_FunctionTanCuPnt extends math_FunctionWithDerivative
 
-constructor
+  constructor
 
-Value(X: number, F: number): { returnValue: boolean; F: number };
+  Value(X: number, F: number): { returnValue: boolean; F: number };
 
-Derivative(X: number, D: number): { returnValue: boolean; D: number };
+  Derivative(X: number, D: number): { returnValue: boolean; D: number };
 
-Values(X: number, F: number, D: number): { returnValue: boolean; F: number; D: number };
+  Values(X: number, F: number, D: number): { returnValue: boolean; F: number; D: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_FunctionTanObl: declare class Geom2dGcc_FunctionTanObl extends math_FunctionWithDerivative
 
-constructor
+  constructor
 
-Value(X: number, F: number): { returnValue: boolean; F: number };
+  Value(X: number, F: number): { returnValue: boolean; F: number };
 
-Derivative(X: number, D: number): { returnValue: boolean; D: number };
+  Derivative(X: number, D: number): { returnValue: boolean; D: number };
 
-Values(X: number, F: number, D: number): { returnValue: boolean; F: number; D: number };
+  Values(X: number, F: number, D: number): { returnValue: boolean; F: number; D: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_IsParallel: declare class Geom2dGcc_IsParallel extends Standard_DomainError
 
-constructor
+  constructor
 
-ExceptionType(): string;
+  ExceptionType(): string;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_Lin2d2Tan: declare class Geom2dGcc_Lin2d2Tan
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): gp_Lin2d;
+  ThisSolution(Index: number): gp_Lin2d;
 
-WhichQualifier(Index: number, Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position };
+  WhichQualifier(Index: number, Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position };
 
-Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-Tangency2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_Lin2d2TanIter: declare class Geom2dGcc_Lin2d2TanIter
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-ThisSolution(): gp_Lin2d;
+  ThisSolution(): gp_Lin2d;
 
-WhichQualifier(Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position };
+  WhichQualifier(Qualif1?: GccEnt_Position, Qualif2?: GccEnt_Position): { Qualif1: GccEnt_Position; Qualif2: GccEnt_Position };
 
-Tangency1(ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-Tangency2(ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency2(ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_Lin2dTanObl: declare class Geom2dGcc_Lin2dTanObl
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-NbSolutions(): number;
+  NbSolutions(): number;
 
-ThisSolution(Index: number): gp_Lin2d;
+  ThisSolution(Index: number): gp_Lin2d;
 
-WhichQualifier(Index: number, Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
+  WhichQualifier(Index: number, Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
 
-Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-Intersection2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Intersection2(Index: number, ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_Lin2dTanOblIter: declare class Geom2dGcc_Lin2dTanOblIter
 
-constructor
+  constructor
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-ThisSolution(): gp_Lin2d;
+  ThisSolution(): gp_Lin2d;
 
-WhichQualifier(Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
+  WhichQualifier(Qualif1?: GccEnt_Position): { Qualif1: GccEnt_Position };
 
-Tangency1(ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Tangency1(ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-Intersection2(ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
+  Intersection2(ParSol: number, ParArg: number, PntSol: gp_Pnt2d): { ParSol: number; ParArg: number };
 
-IsParallel2(): boolean;
+  IsParallel2(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_QCurve: declare class Geom2dGcc_QCurve
 
-constructor
+  constructor
 
-Qualified(): Geom2dAdaptor_Curve;
+  Qualified(): Geom2dAdaptor_Curve;
 
-Qualifier(): GccEnt_Position;
+  Qualifier(): GccEnt_Position;
 
-IsUnqualified(): boolean;
+  IsUnqualified(): boolean;
 
-IsEnclosing(): boolean;
+  IsEnclosing(): boolean;
 
-IsEnclosed(): boolean;
+  IsEnclosed(): boolean;
 
-IsOutside(): boolean;
+  IsOutside(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_QualifiedCurve: declare class Geom2dGcc_QualifiedCurve
 
-constructor
+  constructor
 
-Qualified(): Geom2dAdaptor_Curve;
+  Qualified(): Geom2dAdaptor_Curve;
 
-Qualifier(): GccEnt_Position;
+  Qualifier(): GccEnt_Position;
 
-IsUnqualified(): boolean;
+  IsUnqualified(): boolean;
 
-IsEnclosing(): boolean;
+  IsEnclosing(): boolean;
 
-IsEnclosed(): boolean;
+  IsEnclosed(): boolean;
 
-IsOutside(): boolean;
+  IsOutside(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 Geom2dGcc_Type1: typeof Geom2dGcc_Type1[keyof typeof Geom2dGcc_Type1]
 

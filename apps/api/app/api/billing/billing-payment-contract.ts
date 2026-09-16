@@ -14,16 +14,16 @@ export const paymentOfferSnapshotSchema = z
     livemode: z.boolean(),
     currency: z.literal('usd'),
     principalMinor: unsignedIntegerStringSchema,
-    taxMinor: unsignedIntegerStringSchema,
-    grossMinor: unsignedIntegerStringSchema,
-    maximumGrossMinor: unsignedIntegerStringSchema,
+    taxMinor: unsignedIntegerStringSchema.nullable(),
+    grossMinor: unsignedIntegerStringSchema.nullable(),
+    maximumGrossMinor: unsignedIntegerStringSchema.nullable(),
     creditAtoms: unsignedIntegerStringSchema,
     ceilingCreditAtoms: unsignedIntegerStringSchema.nullable(),
     stripePriceId: z.string().min(1).max(255).nullable(),
     stripeProductId: z.string().min(1).max(255).nullable(),
     quantity: z.literal(1),
     term: z.enum(['one_time', 'month']),
-    taxBasis: z.enum(['synthetic_local_zero_tax', 'stripe_tax']),
+    taxBasis: z.enum(['synthetic_local_zero_tax', 'stripe_tax', 'stripe_checkout']),
     paymentMethod: z
       .object({
         id: z.string().min(1).max(255),
@@ -35,10 +35,30 @@ export const paymentOfferSnapshotSchema = z
   })
   .strict()
   .superRefine((offer, context) => {
+    if (offer.taxBasis === 'stripe_checkout') {
+      if (
+        offer.taxMinor !== null ||
+        offer.grossMinor !== null ||
+        offer.maximumGrossMinor !== null ||
+        offer.paymentMethod !== null
+      ) {
+        context.addIssue({ code: 'custom', message: 'Checkout tax remains source-qualified until payment' });
+      }
+      return;
+    }
+    if (offer.taxMinor === null || offer.grossMinor === null || offer.maximumGrossMinor === null) {
+      context.addIssue({ code: 'custom', message: 'Quoted payment totals are required' });
+      return;
+    }
     if (
-      ![offer.principalMinor, offer.taxMinor, offer.grossMinor, offer.maximumGrossMinor, offer.creditAtoms].every(
-        (value) => unsignedIntegerStringSchema.safeParse(value).success,
-      )
+      ![
+        offer.principalMinor,
+        offer.taxMinor,
+        offer.grossMinor,
+        offer.maximumGrossMinor,
+        offer.creditAtoms,
+        ...(offer.ceilingCreditAtoms === null ? [] : [offer.ceilingCreditAtoms]),
+      ].every((value) => unsignedIntegerStringSchema.safeParse(value).success)
     ) {
       return;
     }
@@ -53,6 +73,18 @@ export const paymentOfferSnapshotSchema = z
   });
 
 export type PaymentOfferSnapshot = z.infer<typeof paymentOfferSnapshotSchema>;
+
+/** Returns exact quoted totals for a direct charge; hosted Checkout totals remain source-owned. */
+export function exactPaymentOfferTotals(offer: PaymentOfferSnapshot): {
+  readonly taxMinor: string;
+  readonly grossMinor: string;
+  readonly maximumGrossMinor: string;
+} {
+  if (offer.taxMinor === null || offer.grossMinor === null || offer.maximumGrossMinor === null) {
+    throw new Error('Payment offer has no exact pre-collection total');
+  }
+  return { taxMinor: offer.taxMinor, grossMinor: offer.grossMinor, maximumGrossMinor: offer.maximumGrossMinor };
+}
 
 /** Minimal source evidence; no personal address, email or provider error payload. */
 export const paidPaymentEvidenceSchema = z
@@ -81,7 +113,19 @@ export const paidPaymentEvidenceSchema = z
       .strict()
       .nullable(),
   })
-  .strict();
+  .strict()
+  .superRefine((evidence, context) => {
+    if (
+      ![evidence.principalMinor, evidence.taxMinor, evidence.grossMinor].every(
+        (value) => unsignedIntegerStringSchema.safeParse(value).success,
+      )
+    ) {
+      return;
+    }
+    if (BigInt(evidence.principalMinor) + BigInt(evidence.taxMinor) !== BigInt(evidence.grossMinor)) {
+      context.addIssue({ code: 'custom', message: 'Paid principal plus tax must equal gross' });
+    }
+  });
 
 export type PaidPaymentEvidence = z.infer<typeof paidPaymentEvidenceSchema>;
 

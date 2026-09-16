@@ -19,8 +19,8 @@
 
 /* eslint-disable @typescript-eslint/naming-convention -- environment names and Electron privilege keys are not camelCase */
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, resolve, sep } from 'node:path';
+import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 
 import type { ElectronRuntimeForkResolver } from '@taucad/runtime/electron/main';
 
@@ -43,6 +43,25 @@ export type ProjectRootRegistryOptions = {
    * Omitted, the registry lives only for this session.
    */
   readonly storePath?: string;
+};
+
+const canonicalPath = (directory: string): string => {
+  const resolved = resolve(directory);
+  const suffix: string[] = [];
+  let ancestor = resolved;
+  while (ancestor !== dirname(ancestor)) {
+    try {
+      return join(realpathSync.native(ancestor), ...suffix.reverse());
+    } catch {
+      suffix.push(basename(ancestor));
+      ancestor = dirname(ancestor);
+    }
+  }
+  try {
+    return join(realpathSync.native(ancestor), ...suffix.reverse());
+  } catch {
+    return resolved;
+  }
 };
 
 /**
@@ -98,18 +117,24 @@ export const createProjectRootRegistry = (options: ProjectRootRegistryOptions = 
       if (!isAbsolute(directory)) {
         return false;
       }
-      const candidate = resolve(directory);
+      const candidate = canonicalPath(directory);
       /* Descendants are admitted because projects live *inside* a granted root
        * (`userData/home/<project>`, `<picked>/<project>`); the `sep` suffix
        * keeps `…/home-evil` from matching `…/home`. */
-      return [...admitted].some((root) => candidate === root || candidate.startsWith(root + sep));
+      return [...admitted].some((root) => {
+        const canonicalRoot = canonicalPath(root);
+        return candidate === canonicalRoot || candidate.startsWith(canonicalRoot + sep);
+      });
     },
     canonical(directory) {
       if (!isAbsolute(directory)) {
         return undefined;
       }
-      const candidate = resolve(directory);
-      return [...admitted].some((root) => candidate === root || candidate.startsWith(root + sep))
+      const candidate = canonicalPath(directory);
+      return [...admitted].some((root) => {
+        const canonicalRoot = canonicalPath(root);
+        return candidate === canonicalRoot || candidate.startsWith(canonicalRoot + sep);
+      })
         ? candidate
         : undefined;
     },
@@ -176,6 +201,8 @@ export type KernelForkResolverOptions = {
   readonly registry: ProjectRootRegistry;
   /** Root used when the renderer names none. */
   readonly defaultRoot: string;
+  /** Additional ephemeral root attested by another main-owned broker. */
+  readonly isTrustedRoot?: (directory: string) => boolean;
 };
 
 /**
@@ -210,10 +237,16 @@ export const createKernelForkResolver = (options: KernelForkResolverOptions): El
       };
     }
     const requested = context['projectRoot'];
-    if (requested !== undefined && !options.registry.isTrusted(requested)) {
+    if (
+      requested !== undefined &&
+      (!isAbsolute(requested) || (!options.registry.isTrusted(requested) && !options.isTrustedRoot?.(requested)))
+    ) {
       throw new Error(`Desktop shell refused an untrusted project root: ${requested}`);
     }
-    const projectRoot = requested === undefined ? resolve(options.defaultRoot) : resolve(requested);
+    const projectRoot =
+      requested === undefined
+        ? resolve(options.defaultRoot)
+        : (options.registry.canonical(requested) ?? resolve(requested));
     return {
       env: {
         TAU_PROJECT_ROOT: projectRoot,

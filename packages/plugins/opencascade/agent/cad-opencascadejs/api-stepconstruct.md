@@ -4,560 +4,560 @@
 
 STEPConstruct: declare class STEPConstruct
 
-constructor
+  constructor
 
-static FindEntity(FinderProcess: Transfer_FinderProcess, Shape: TopoDS_Shape): StepRepr_RepresentationItem;
-static FindEntity(FinderProcess: Transfer_FinderProcess, Shape: TopoDS_Shape, Loc: TopLoc_Location): StepRepr_RepresentationItem;
-static FindEntity(FinderProcess: Transfer_FinderProcess, Shape: TopoDS_Shape): StepRepr_RepresentationItem;
-static FindEntity(FinderProcess: Transfer_FinderProcess, Shape: TopoDS_Shape, Loc: TopLoc_Location): StepRepr_RepresentationItem;
+  static FindEntity(FinderProcess: Transfer_FinderProcess, Shape: TopoDS_Shape): StepRepr_RepresentationItem;
+  static FindEntity(FinderProcess: Transfer_FinderProcess, Shape: TopoDS_Shape, Loc: TopLoc_Location): StepRepr_RepresentationItem;
+  static FindEntity(FinderProcess: Transfer_FinderProcess, Shape: TopoDS_Shape): StepRepr_RepresentationItem;
+  static FindEntity(FinderProcess: Transfer_FinderProcess, Shape: TopoDS_Shape, Loc: TopLoc_Location): StepRepr_RepresentationItem;
 
-static FindShape(TransientProcess: Transfer_TransientProcess, item: StepRepr_RepresentationItem): TopoDS_Shape;
+  static FindShape(TransientProcess: Transfer_TransientProcess, item: StepRepr_RepresentationItem): TopoDS_Shape;
 
-static FindCDSR(ComponentBinder: Transfer_Binder, AssemblySDR: StepShape_ShapeDefinitionRepresentation): { returnValue: boolean; ComponentCDSR: StepShape_ContextDependentShapeRepresentation; [Symbol.dispose](): void };
+  static FindCDSR(ComponentBinder: Transfer_Binder, AssemblySDR: StepShape_ShapeDefinitionRepresentation): { returnValue: boolean; ComponentCDSR: StepShape_ContextDependentShapeRepresentation; [Symbol.dispose](): void };
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 STEPConstruct_AP203Context: declare class STEPConstruct_AP203Context
 
-constructor
+  constructor
 
-DefaultApproval(): StepBasic_Approval;
+  DefaultApproval(): StepBasic_Approval;
 
-SetDefaultApproval(app: StepBasic_Approval): void;
+  SetDefaultApproval(app: StepBasic_Approval): void;
 
-DefaultDateAndTime(): StepBasic_DateAndTime;
+  DefaultDateAndTime(): StepBasic_DateAndTime;
 
-SetDefaultDateAndTime(dt: StepBasic_DateAndTime): void;
+  SetDefaultDateAndTime(dt: StepBasic_DateAndTime): void;
 
-DefaultPersonAndOrganization(): StepBasic_PersonAndOrganization;
+  DefaultPersonAndOrganization(): StepBasic_PersonAndOrganization;
 
-SetDefaultPersonAndOrganization(po: StepBasic_PersonAndOrganization): void;
+  SetDefaultPersonAndOrganization(po: StepBasic_PersonAndOrganization): void;
 
-DefaultSecurityClassificationLevel(): StepBasic_SecurityClassificationLevel;
+  DefaultSecurityClassificationLevel(): StepBasic_SecurityClassificationLevel;
 
-SetDefaultSecurityClassificationLevel(sc: StepBasic_SecurityClassificationLevel): void;
+  SetDefaultSecurityClassificationLevel(sc: StepBasic_SecurityClassificationLevel): void;
 
-RoleCreator(): StepBasic_PersonAndOrganizationRole;
+  RoleCreator(): StepBasic_PersonAndOrganizationRole;
 
-RoleDesignOwner(): StepBasic_PersonAndOrganizationRole;
+  RoleDesignOwner(): StepBasic_PersonAndOrganizationRole;
 
-RoleDesignSupplier(): StepBasic_PersonAndOrganizationRole;
+  RoleDesignSupplier(): StepBasic_PersonAndOrganizationRole;
 
-RoleClassificationOfficer(): StepBasic_PersonAndOrganizationRole;
+  RoleClassificationOfficer(): StepBasic_PersonAndOrganizationRole;
 
-RoleCreationDate(): StepBasic_DateTimeRole;
+  RoleCreationDate(): StepBasic_DateTimeRole;
 
-RoleClassificationDate(): StepBasic_DateTimeRole;
+  RoleClassificationDate(): StepBasic_DateTimeRole;
 
-RoleApprover(): StepBasic_ApprovalRole;
+  RoleApprover(): StepBasic_ApprovalRole;
 
-Init(sdr: StepShape_ShapeDefinitionRepresentation): void;
-Init(SDRTool: STEPConstruct_Part): void;
-Init(nauo: StepRepr_NextAssemblyUsageOccurrence): void;
-Init(sdr: StepShape_ShapeDefinitionRepresentation): void;
-Init(SDRTool: STEPConstruct_Part): void;
-Init(nauo: StepRepr_NextAssemblyUsageOccurrence): void;
-Init(sdr: StepShape_ShapeDefinitionRepresentation): void;
-Init(SDRTool: STEPConstruct_Part): void;
-Init(nauo: StepRepr_NextAssemblyUsageOccurrence): void;
+  Init(sdr: StepShape_ShapeDefinitionRepresentation): void;
+  Init(SDRTool: STEPConstruct_Part): void;
+  Init(nauo: StepRepr_NextAssemblyUsageOccurrence): void;
+  Init(sdr: StepShape_ShapeDefinitionRepresentation): void;
+  Init(SDRTool: STEPConstruct_Part): void;
+  Init(nauo: StepRepr_NextAssemblyUsageOccurrence): void;
+  Init(sdr: StepShape_ShapeDefinitionRepresentation): void;
+  Init(SDRTool: STEPConstruct_Part): void;
+  Init(nauo: StepRepr_NextAssemblyUsageOccurrence): void;
 
-GetCreator(): StepAP203_CcDesignPersonAndOrganizationAssignment;
+  GetCreator(): StepAP203_CcDesignPersonAndOrganizationAssignment;
 
-GetDesignOwner(): StepAP203_CcDesignPersonAndOrganizationAssignment;
+  GetDesignOwner(): StepAP203_CcDesignPersonAndOrganizationAssignment;
 
-GetDesignSupplier(): StepAP203_CcDesignPersonAndOrganizationAssignment;
+  GetDesignSupplier(): StepAP203_CcDesignPersonAndOrganizationAssignment;
 
-GetClassificationOfficer(): StepAP203_CcDesignPersonAndOrganizationAssignment;
+  GetClassificationOfficer(): StepAP203_CcDesignPersonAndOrganizationAssignment;
 
-GetSecurity(): StepAP203_CcDesignSecurityClassification;
+  GetSecurity(): StepAP203_CcDesignSecurityClassification;
 
-GetCreationDate(): StepAP203_CcDesignDateAndTimeAssignment;
+  GetCreationDate(): StepAP203_CcDesignDateAndTimeAssignment;
 
-GetClassificationDate(): StepAP203_CcDesignDateAndTimeAssignment;
+  GetClassificationDate(): StepAP203_CcDesignDateAndTimeAssignment;
 
-GetApproval(): StepAP203_CcDesignApproval;
+  GetApproval(): StepAP203_CcDesignApproval;
 
-GetApprover(): StepBasic_ApprovalPersonOrganization;
+  GetApprover(): StepBasic_ApprovalPersonOrganization;
 
-GetApprovalDateTime(): StepBasic_ApprovalDateTime;
+  GetApprovalDateTime(): StepBasic_ApprovalDateTime;
 
-GetProductCategoryRelationship(): StepBasic_ProductCategoryRelationship;
+  GetProductCategoryRelationship(): StepBasic_ProductCategoryRelationship;
 
-Clear(): void;
+  Clear(): void;
 
-InitRoles(): void;
+  InitRoles(): void;
 
-InitAssembly(nauo: StepRepr_NextAssemblyUsageOccurrence): void;
+  InitAssembly(nauo: StepRepr_NextAssemblyUsageOccurrence): void;
 
-InitSecurityRequisites(): void;
+  InitSecurityRequisites(): void;
 
-InitApprovalRequisites(): void;
+  InitApprovalRequisites(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 STEPConstruct_Assembly: declare class STEPConstruct_Assembly
 
-constructor
+  constructor
 
-Init(aSR: StepShape_ShapeDefinitionRepresentation, SDR0: StepShape_ShapeDefinitionRepresentation, Ax0: StepGeom_Axis2Placement3d, Loc: StepGeom_Axis2Placement3d): void;
-Init(theSR: StepShape_ShapeDefinitionRepresentation, theSDR0: StepShape_ShapeDefinitionRepresentation, theTrsfOp: StepGeom_CartesianTransformationOperator3d): void;
-Init(aSR: StepShape_ShapeDefinitionRepresentation, SDR0: StepShape_ShapeDefinitionRepresentation, Ax0: StepGeom_Axis2Placement3d, Loc: StepGeom_Axis2Placement3d): void;
-Init(theSR: StepShape_ShapeDefinitionRepresentation, theSDR0: StepShape_ShapeDefinitionRepresentation, theTrsfOp: StepGeom_CartesianTransformationOperator3d): void;
+  Init(aSR: StepShape_ShapeDefinitionRepresentation, SDR0: StepShape_ShapeDefinitionRepresentation, Ax0: StepGeom_Axis2Placement3d, Loc: StepGeom_Axis2Placement3d): void;
+  Init(theSR: StepShape_ShapeDefinitionRepresentation, theSDR0: StepShape_ShapeDefinitionRepresentation, theTrsfOp: StepGeom_CartesianTransformationOperator3d): void;
+  Init(aSR: StepShape_ShapeDefinitionRepresentation, SDR0: StepShape_ShapeDefinitionRepresentation, Ax0: StepGeom_Axis2Placement3d, Loc: StepGeom_Axis2Placement3d): void;
+  Init(theSR: StepShape_ShapeDefinitionRepresentation, theSDR0: StepShape_ShapeDefinitionRepresentation, theTrsfOp: StepGeom_CartesianTransformationOperator3d): void;
 
-MakeRelationship(): void;
+  MakeRelationship(): void;
 
-ItemValue(): Standard_Transient;
+  ItemValue(): Standard_Transient;
 
-ItemLocation(): StepGeom_Axis2Placement3d;
+  ItemLocation(): StepGeom_Axis2Placement3d;
 
-GetNAUO(): StepRepr_NextAssemblyUsageOccurrence;
+  GetNAUO(): StepRepr_NextAssemblyUsageOccurrence;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 STEPConstruct_ContextTool: declare class STEPConstruct_ContextTool
 
-constructor
+  constructor
 
-SetModel(aStepModel: StepData_StepModel): void;
+  SetModel(aStepModel: StepData_StepModel): void;
 
-SetGlobalFactor(theGlobalFactor: StepData_Factors): void;
+  SetGlobalFactor(theGlobalFactor: StepData_Factors): void;
 
-GetAPD(): StepBasic_ApplicationProtocolDefinition;
+  GetAPD(): StepBasic_ApplicationProtocolDefinition;
 
-AddAPD(enforce?: boolean): void;
+  AddAPD(enforce?: boolean): void;
 
-IsAP203(): boolean;
+  IsAP203(): boolean;
 
-IsAP214(): boolean;
+  IsAP214(): boolean;
 
-IsAP242(): boolean;
+  IsAP242(): boolean;
 
-GetACstatus(): TCollection_HAsciiString;
+  GetACstatus(): TCollection_HAsciiString;
 
-GetACschemaName(): TCollection_HAsciiString;
+  GetACschemaName(): TCollection_HAsciiString;
 
-GetACyear(): number;
+  GetACyear(): number;
 
-GetACname(): TCollection_HAsciiString;
+  GetACname(): TCollection_HAsciiString;
 
-SetACstatus(status: TCollection_HAsciiString): void;
+  SetACstatus(status: TCollection_HAsciiString): void;
 
-SetACschemaName(schemaName: TCollection_HAsciiString): void;
+  SetACschemaName(schemaName: TCollection_HAsciiString): void;
 
-SetACyear(year: number): void;
+  SetACyear(year: number): void;
 
-SetACname(name: TCollection_HAsciiString): void;
+  SetACname(name: TCollection_HAsciiString): void;
 
-GetDefaultAxis(): StepGeom_Axis2Placement3d;
+  GetDefaultAxis(): StepGeom_Axis2Placement3d;
 
-AP203Context(): STEPConstruct_AP203Context;
+  AP203Context(): STEPConstruct_AP203Context;
 
-Level(): number;
+  Level(): number;
 
-NextLevel(): void;
+  NextLevel(): void;
 
-PrevLevel(): void;
+  PrevLevel(): void;
 
-SetLevel(lev: number): void;
+  SetLevel(lev: number): void;
 
-Index(): number;
+  Index(): number;
 
-NextIndex(): void;
+  NextIndex(): void;
 
-PrevIndex(): void;
+  PrevIndex(): void;
 
-SetIndex(ind: number): void;
+  SetIndex(ind: number): void;
 
-GetProductName(): TCollection_HAsciiString;
+  GetProductName(): TCollection_HAsciiString;
 
-GetRootsForPart(SDRTool: STEPConstruct_Part): NCollection_HSequence_handle_Standard_Transient;
+  GetRootsForPart(SDRTool: STEPConstruct_Part): NCollection_HSequence_handle_Standard_Transient;
 
-GetRootsForAssemblyLink(assembly: STEPConstruct_Assembly): NCollection_HSequence_handle_Standard_Transient;
+  GetRootsForAssemblyLink(assembly: STEPConstruct_Assembly): NCollection_HSequence_handle_Standard_Transient;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 STEPConstruct_ExternRefs: declare class STEPConstruct_ExternRefs extends STEPConstruct_Tool
 
-constructor
+  constructor
 
-Init(WS: XSControl_WorkSession): boolean;
+  Init(WS: XSControl_WorkSession): boolean;
 
-Clear(): void;
+  Clear(): void;
 
-LoadExternRefs(): boolean;
+  LoadExternRefs(): boolean;
 
-NbExternRefs(): number;
+  NbExternRefs(): number;
 
-FileName(num: number): string;
+  FileName(num: number): string;
 
-ProdDef(num: number): StepBasic_ProductDefinition;
+  ProdDef(num: number): StepBasic_ProductDefinition;
 
-DocFile(num: number): StepBasic_DocumentFile;
+  DocFile(num: number): StepBasic_DocumentFile;
 
-Format(num: number): TCollection_HAsciiString;
+  Format(num: number): TCollection_HAsciiString;
 
-AddExternRef(filename: string, PD: StepBasic_ProductDefinition, format: string): number;
+  AddExternRef(filename: string, PD: StepBasic_ProductDefinition, format: string): number;
 
-checkAP214Shared(): void;
+  checkAP214Shared(): void;
 
-WriteExternRefs(num: number): number;
+  WriteExternRefs(num: number): number;
 
-SetAP214APD(APD: StepBasic_ApplicationProtocolDefinition): void;
+  SetAP214APD(APD: StepBasic_ApplicationProtocolDefinition): void;
 
-GetAP214APD(): StepBasic_ApplicationProtocolDefinition;
+  GetAP214APD(): StepBasic_ApplicationProtocolDefinition;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 STEPConstruct_Part: declare class STEPConstruct_Part
 
-constructor
+  constructor
 
-MakeSDR(aShape: StepShape_ShapeRepresentation, aName: TCollection_HAsciiString, AC: StepBasic_ApplicationContext, theStepModel: StepData_StepModel): void;
+  MakeSDR(aShape: StepShape_ShapeRepresentation, aName: TCollection_HAsciiString, AC: StepBasic_ApplicationContext, theStepModel: StepData_StepModel): void;
 
-ReadSDR(aShape: StepShape_ShapeDefinitionRepresentation): void;
+  ReadSDR(aShape: StepShape_ShapeDefinitionRepresentation): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-SDRValue(): StepShape_ShapeDefinitionRepresentation;
+  SDRValue(): StepShape_ShapeDefinitionRepresentation;
 
-SRValue(): StepShape_ShapeRepresentation;
+  SRValue(): StepShape_ShapeRepresentation;
 
-PC(): StepBasic_ProductContext;
+  PC(): StepBasic_ProductContext;
 
-PCname(): TCollection_HAsciiString;
+  PCname(): TCollection_HAsciiString;
 
-PCdisciplineType(): TCollection_HAsciiString;
+  PCdisciplineType(): TCollection_HAsciiString;
 
-SetPCname(name: TCollection_HAsciiString): void;
+  SetPCname(name: TCollection_HAsciiString): void;
 
-SetPCdisciplineType(label: TCollection_HAsciiString): void;
+  SetPCdisciplineType(label: TCollection_HAsciiString): void;
 
-AC(): StepBasic_ApplicationContext;
+  AC(): StepBasic_ApplicationContext;
 
-ACapplication(): TCollection_HAsciiString;
+  ACapplication(): TCollection_HAsciiString;
 
-SetACapplication(text: TCollection_HAsciiString): void;
+  SetACapplication(text: TCollection_HAsciiString): void;
 
-PDC(): StepBasic_ProductDefinitionContext;
+  PDC(): StepBasic_ProductDefinitionContext;
 
-PDCname(): TCollection_HAsciiString;
+  PDCname(): TCollection_HAsciiString;
 
-PDCstage(): TCollection_HAsciiString;
+  PDCstage(): TCollection_HAsciiString;
 
-SetPDCname(label: TCollection_HAsciiString): void;
+  SetPDCname(label: TCollection_HAsciiString): void;
 
-SetPDCstage(label: TCollection_HAsciiString): void;
+  SetPDCstage(label: TCollection_HAsciiString): void;
 
-Product(): StepBasic_Product;
+  Product(): StepBasic_Product;
 
-Pid(): TCollection_HAsciiString;
+  Pid(): TCollection_HAsciiString;
 
-Pname(): TCollection_HAsciiString;
+  Pname(): TCollection_HAsciiString;
 
-Pdescription(): TCollection_HAsciiString;
+  Pdescription(): TCollection_HAsciiString;
 
-SetPid(id: TCollection_HAsciiString): void;
+  SetPid(id: TCollection_HAsciiString): void;
 
-SetPname(label: TCollection_HAsciiString): void;
+  SetPname(label: TCollection_HAsciiString): void;
 
-SetPdescription(text: TCollection_HAsciiString): void;
+  SetPdescription(text: TCollection_HAsciiString): void;
 
-PDF(): StepBasic_ProductDefinitionFormation;
+  PDF(): StepBasic_ProductDefinitionFormation;
 
-PDFid(): TCollection_HAsciiString;
+  PDFid(): TCollection_HAsciiString;
 
-PDFdescription(): TCollection_HAsciiString;
+  PDFdescription(): TCollection_HAsciiString;
 
-SetPDFid(id: TCollection_HAsciiString): void;
+  SetPDFid(id: TCollection_HAsciiString): void;
 
-SetPDFdescription(text: TCollection_HAsciiString): void;
+  SetPDFdescription(text: TCollection_HAsciiString): void;
 
-PD(): StepBasic_ProductDefinition;
+  PD(): StepBasic_ProductDefinition;
 
-PDdescription(): TCollection_HAsciiString;
+  PDdescription(): TCollection_HAsciiString;
 
-SetPDdescription(text: TCollection_HAsciiString): void;
+  SetPDdescription(text: TCollection_HAsciiString): void;
 
-PDS(): StepRepr_ProductDefinitionShape;
+  PDS(): StepRepr_ProductDefinitionShape;
 
-PDSname(): TCollection_HAsciiString;
+  PDSname(): TCollection_HAsciiString;
 
-PDSdescription(): TCollection_HAsciiString;
+  PDSdescription(): TCollection_HAsciiString;
 
-SetPDSname(label: TCollection_HAsciiString): void;
+  SetPDSname(label: TCollection_HAsciiString): void;
 
-SetPDSdescription(text: TCollection_HAsciiString): void;
+  SetPDSdescription(text: TCollection_HAsciiString): void;
 
-PRPC(): StepBasic_ProductRelatedProductCategory;
+  PRPC(): StepBasic_ProductRelatedProductCategory;
 
-PRPCname(): TCollection_HAsciiString;
+  PRPCname(): TCollection_HAsciiString;
 
-PRPCdescription(): TCollection_HAsciiString;
+  PRPCdescription(): TCollection_HAsciiString;
 
-SetPRPCname(label: TCollection_HAsciiString): void;
+  SetPRPCname(label: TCollection_HAsciiString): void;
 
-SetPRPCdescription(text: TCollection_HAsciiString): void;
+  SetPRPCdescription(text: TCollection_HAsciiString): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 STEPConstruct_RenderingProperties: declare class STEPConstruct_RenderingProperties
 
-constructor
+  constructor
 
-Init(theRenderingProperties: StepVisual_SurfaceStyleRenderingWithProperties): void;
-Init(theRGBAColor: Quantity_ColorRGBA): void;
-Init(theMaterial: XCAFDoc_VisMaterialCommon): void;
-Init(theMaterial: XCAFDoc_VisMaterial): void;
-Init(theColor: StepVisual_Colour, theTransparency: number): void;
-Init(theSurfaceColor: Quantity_Color, theTransparency: number): void;
-Init(theRenderingProperties: StepVisual_SurfaceStyleRenderingWithProperties): void;
-Init(theRGBAColor: Quantity_ColorRGBA): void;
-Init(theMaterial: XCAFDoc_VisMaterialCommon): void;
-Init(theMaterial: XCAFDoc_VisMaterial): void;
-Init(theColor: StepVisual_Colour, theTransparency: number): void;
-Init(theSurfaceColor: Quantity_Color, theTransparency: number): void;
-Init(theRenderingProperties: StepVisual_SurfaceStyleRenderingWithProperties): void;
-Init(theRGBAColor: Quantity_ColorRGBA): void;
-Init(theMaterial: XCAFDoc_VisMaterialCommon): void;
-Init(theMaterial: XCAFDoc_VisMaterial): void;
-Init(theColor: StepVisual_Colour, theTransparency: number): void;
-Init(theSurfaceColor: Quantity_Color, theTransparency: number): void;
-Init(theRenderingProperties: StepVisual_SurfaceStyleRenderingWithProperties): void;
-Init(theRGBAColor: Quantity_ColorRGBA): void;
-Init(theMaterial: XCAFDoc_VisMaterialCommon): void;
-Init(theMaterial: XCAFDoc_VisMaterial): void;
-Init(theColor: StepVisual_Colour, theTransparency: number): void;
-Init(theSurfaceColor: Quantity_Color, theTransparency: number): void;
-Init(theRenderingProperties: StepVisual_SurfaceStyleRenderingWithProperties): void;
-Init(theRGBAColor: Quantity_ColorRGBA): void;
-Init(theMaterial: XCAFDoc_VisMaterialCommon): void;
-Init(theMaterial: XCAFDoc_VisMaterial): void;
-Init(theColor: StepVisual_Colour, theTransparency: number): void;
-Init(theSurfaceColor: Quantity_Color, theTransparency: number): void;
-Init(theRenderingProperties: StepVisual_SurfaceStyleRenderingWithProperties): void;
-Init(theRGBAColor: Quantity_ColorRGBA): void;
-Init(theMaterial: XCAFDoc_VisMaterialCommon): void;
-Init(theMaterial: XCAFDoc_VisMaterial): void;
-Init(theColor: StepVisual_Colour, theTransparency: number): void;
-Init(theSurfaceColor: Quantity_Color, theTransparency: number): void;
+  Init(theRenderingProperties: StepVisual_SurfaceStyleRenderingWithProperties): void;
+  Init(theRGBAColor: Quantity_ColorRGBA): void;
+  Init(theMaterial: XCAFDoc_VisMaterialCommon): void;
+  Init(theMaterial: XCAFDoc_VisMaterial): void;
+  Init(theColor: StepVisual_Colour, theTransparency: number): void;
+  Init(theSurfaceColor: Quantity_Color, theTransparency: number): void;
+  Init(theRenderingProperties: StepVisual_SurfaceStyleRenderingWithProperties): void;
+  Init(theRGBAColor: Quantity_ColorRGBA): void;
+  Init(theMaterial: XCAFDoc_VisMaterialCommon): void;
+  Init(theMaterial: XCAFDoc_VisMaterial): void;
+  Init(theColor: StepVisual_Colour, theTransparency: number): void;
+  Init(theSurfaceColor: Quantity_Color, theTransparency: number): void;
+  Init(theRenderingProperties: StepVisual_SurfaceStyleRenderingWithProperties): void;
+  Init(theRGBAColor: Quantity_ColorRGBA): void;
+  Init(theMaterial: XCAFDoc_VisMaterialCommon): void;
+  Init(theMaterial: XCAFDoc_VisMaterial): void;
+  Init(theColor: StepVisual_Colour, theTransparency: number): void;
+  Init(theSurfaceColor: Quantity_Color, theTransparency: number): void;
+  Init(theRenderingProperties: StepVisual_SurfaceStyleRenderingWithProperties): void;
+  Init(theRGBAColor: Quantity_ColorRGBA): void;
+  Init(theMaterial: XCAFDoc_VisMaterialCommon): void;
+  Init(theMaterial: XCAFDoc_VisMaterial): void;
+  Init(theColor: StepVisual_Colour, theTransparency: number): void;
+  Init(theSurfaceColor: Quantity_Color, theTransparency: number): void;
+  Init(theRenderingProperties: StepVisual_SurfaceStyleRenderingWithProperties): void;
+  Init(theRGBAColor: Quantity_ColorRGBA): void;
+  Init(theMaterial: XCAFDoc_VisMaterialCommon): void;
+  Init(theMaterial: XCAFDoc_VisMaterial): void;
+  Init(theColor: StepVisual_Colour, theTransparency: number): void;
+  Init(theSurfaceColor: Quantity_Color, theTransparency: number): void;
+  Init(theRenderingProperties: StepVisual_SurfaceStyleRenderingWithProperties): void;
+  Init(theRGBAColor: Quantity_ColorRGBA): void;
+  Init(theMaterial: XCAFDoc_VisMaterialCommon): void;
+  Init(theMaterial: XCAFDoc_VisMaterial): void;
+  Init(theColor: StepVisual_Colour, theTransparency: number): void;
+  Init(theSurfaceColor: Quantity_Color, theTransparency: number): void;
 
-SetAmbientReflectance(theAmbientReflectance: number): void;
+  SetAmbientReflectance(theAmbientReflectance: number): void;
 
-SetAmbientAndDiffuseReflectance(theAmbientReflectance: number, theDiffuseReflectance: number): void;
+  SetAmbientAndDiffuseReflectance(theAmbientReflectance: number, theDiffuseReflectance: number): void;
 
-SetAmbientDiffuseAndSpecularReflectance(theAmbientReflectance: number, theDiffuseReflectance: number, theSpecularReflectance: number, theSpecularExponent: number, theSpecularColour: Quantity_Color): void;
+  SetAmbientDiffuseAndSpecularReflectance(theAmbientReflectance: number, theDiffuseReflectance: number, theSpecularReflectance: number, theSpecularExponent: number, theSpecularColour: Quantity_Color): void;
 
-CreateRenderingProperties(): StepVisual_SurfaceStyleRenderingWithProperties;
-CreateRenderingProperties(theRenderColour: StepVisual_Colour): StepVisual_SurfaceStyleRenderingWithProperties;
-CreateRenderingProperties(): StepVisual_SurfaceStyleRenderingWithProperties;
-CreateRenderingProperties(theRenderColour: StepVisual_Colour): StepVisual_SurfaceStyleRenderingWithProperties;
+  CreateRenderingProperties(): StepVisual_SurfaceStyleRenderingWithProperties;
+  CreateRenderingProperties(theRenderColour: StepVisual_Colour): StepVisual_SurfaceStyleRenderingWithProperties;
+  CreateRenderingProperties(): StepVisual_SurfaceStyleRenderingWithProperties;
+  CreateRenderingProperties(theRenderColour: StepVisual_Colour): StepVisual_SurfaceStyleRenderingWithProperties;
 
-CreateXCAFMaterial(): XCAFDoc_VisMaterialCommon;
+  CreateXCAFMaterial(): XCAFDoc_VisMaterialCommon;
 
-GetRGBAColor(): Quantity_ColorRGBA;
+  GetRGBAColor(): Quantity_ColorRGBA;
 
-SurfaceColor(): Quantity_Color;
+  SurfaceColor(): Quantity_Color;
 
-Transparency(): number;
+  Transparency(): number;
 
-RenderingMethod(): StepVisual_ShadingSurfaceMethod;
+  RenderingMethod(): StepVisual_ShadingSurfaceMethod;
 
-SetRenderingMethod(theRenderingMethod: StepVisual_ShadingSurfaceMethod): void;
+  SetRenderingMethod(theRenderingMethod: StepVisual_ShadingSurfaceMethod): void;
 
-IsDefined(): boolean;
+  IsDefined(): boolean;
 
-IsMaterialConvertible(): boolean;
+  IsMaterialConvertible(): boolean;
 
-AmbientReflectance(): number;
+  AmbientReflectance(): number;
 
-IsAmbientReflectanceDefined(): boolean;
+  IsAmbientReflectanceDefined(): boolean;
 
-DiffuseReflectance(): number;
+  DiffuseReflectance(): number;
 
-IsDiffuseReflectanceDefined(): boolean;
+  IsDiffuseReflectanceDefined(): boolean;
 
-SpecularReflectance(): number;
+  SpecularReflectance(): number;
 
-IsSpecularReflectanceDefined(): boolean;
+  IsSpecularReflectanceDefined(): boolean;
 
-SpecularExponent(): number;
+  SpecularExponent(): number;
 
-IsSpecularExponentDefined(): boolean;
+  IsSpecularExponentDefined(): boolean;
 
-SpecularColour(): Quantity_Color;
+  SpecularColour(): Quantity_Color;
 
-IsSpecularColourDefined(): boolean;
+  IsSpecularColourDefined(): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 STEPConstruct_Styles: declare class STEPConstruct_Styles extends STEPConstruct_Tool
 
-constructor
+  constructor
 
-Init(WS: XSControl_WorkSession): boolean;
+  Init(WS: XSControl_WorkSession): boolean;
 
-NbStyles(): number;
+  NbStyles(): number;
 
-Style(i: number): StepVisual_StyledItem;
+  Style(i: number): StepVisual_StyledItem;
 
-NbRootStyles(): number;
+  NbRootStyles(): number;
 
-RootStyle(i: number): StepVisual_StyledItem;
+  RootStyle(i: number): StepVisual_StyledItem;
 
-ClearStyles(): void;
+  ClearStyles(): void;
 
-AddStyle(style: StepVisual_StyledItem): void;
-AddStyle(item: StepRepr_RepresentationItem, PSA: StepVisual_PresentationStyleAssignment, Override: StepVisual_StyledItem): StepVisual_StyledItem;
-AddStyle(Shape: TopoDS_Shape, PSA: StepVisual_PresentationStyleAssignment, Override: StepVisual_StyledItem): StepVisual_StyledItem;
-AddStyle(style: StepVisual_StyledItem): void;
-AddStyle(item: StepRepr_RepresentationItem, PSA: StepVisual_PresentationStyleAssignment, Override: StepVisual_StyledItem): StepVisual_StyledItem;
-AddStyle(Shape: TopoDS_Shape, PSA: StepVisual_PresentationStyleAssignment, Override: StepVisual_StyledItem): StepVisual_StyledItem;
-AddStyle(style: StepVisual_StyledItem): void;
-AddStyle(item: StepRepr_RepresentationItem, PSA: StepVisual_PresentationStyleAssignment, Override: StepVisual_StyledItem): StepVisual_StyledItem;
-AddStyle(Shape: TopoDS_Shape, PSA: StepVisual_PresentationStyleAssignment, Override: StepVisual_StyledItem): StepVisual_StyledItem;
+  AddStyle(style: StepVisual_StyledItem): void;
+  AddStyle(item: StepRepr_RepresentationItem, PSA: StepVisual_PresentationStyleAssignment, Override: StepVisual_StyledItem): StepVisual_StyledItem;
+  AddStyle(Shape: TopoDS_Shape, PSA: StepVisual_PresentationStyleAssignment, Override: StepVisual_StyledItem): StepVisual_StyledItem;
+  AddStyle(style: StepVisual_StyledItem): void;
+  AddStyle(item: StepRepr_RepresentationItem, PSA: StepVisual_PresentationStyleAssignment, Override: StepVisual_StyledItem): StepVisual_StyledItem;
+  AddStyle(Shape: TopoDS_Shape, PSA: StepVisual_PresentationStyleAssignment, Override: StepVisual_StyledItem): StepVisual_StyledItem;
+  AddStyle(style: StepVisual_StyledItem): void;
+  AddStyle(item: StepRepr_RepresentationItem, PSA: StepVisual_PresentationStyleAssignment, Override: StepVisual_StyledItem): StepVisual_StyledItem;
+  AddStyle(Shape: TopoDS_Shape, PSA: StepVisual_PresentationStyleAssignment, Override: StepVisual_StyledItem): StepVisual_StyledItem;
 
-CreateMDGPR(Context: StepRepr_RepresentationContext): { returnValue: boolean; MDGPR: StepVisual_MechanicalDesignGeometricPresentationRepresentation; theStepModel: StepData_StepModel; [Symbol.dispose](): void };
+  CreateMDGPR(Context: StepRepr_RepresentationContext): { returnValue: boolean; MDGPR: StepVisual_MechanicalDesignGeometricPresentationRepresentation; theStepModel: StepData_StepModel; [Symbol.dispose](): void };
 
-CreateNAUOSRD(Context: StepRepr_RepresentationContext, CDSR: StepShape_ContextDependentShapeRepresentation, initPDS: StepRepr_ProductDefinitionShape): boolean;
+  CreateNAUOSRD(Context: StepRepr_RepresentationContext, CDSR: StepShape_ContextDependentShapeRepresentation, initPDS: StepRepr_ProductDefinitionShape): boolean;
 
-FindContext(Shape: TopoDS_Shape): StepRepr_RepresentationContext;
+  FindContext(Shape: TopoDS_Shape): StepRepr_RepresentationContext;
 
-LoadStyles(): boolean;
+  LoadStyles(): boolean;
 
-LoadInvisStyles(): { returnValue: boolean; InvSyles: NCollection_HSequence_handle_Standard_Transient; [Symbol.dispose](): void };
+  LoadInvisStyles(): { returnValue: boolean; InvSyles: NCollection_HSequence_handle_Standard_Transient; [Symbol.dispose](): void };
 
-MakeColorPSA(item: StepRepr_RepresentationItem, SurfCol: StepVisual_Colour, CurveCol: StepVisual_Colour, theRenderingProps: STEPConstruct_RenderingProperties, isForNAUO?: boolean): StepVisual_PresentationStyleAssignment;
+  MakeColorPSA(item: StepRepr_RepresentationItem, SurfCol: StepVisual_Colour, CurveCol: StepVisual_Colour, theRenderingProps: STEPConstruct_RenderingProperties, isForNAUO?: boolean): StepVisual_PresentationStyleAssignment;
 
-GetColorPSA(item: StepRepr_RepresentationItem, Col: StepVisual_Colour): StepVisual_PresentationStyleAssignment;
+  GetColorPSA(item: StepRepr_RepresentationItem, Col: StepVisual_Colour): StepVisual_PresentationStyleAssignment;
 
-GetColors(theStyle: StepVisual_StyledItem, theRenderingProps: STEPConstruct_RenderingProperties, theIsComponent?: boolean): { returnValue: boolean; theSurfaceColour: StepVisual_Colour; theBoundaryColour: StepVisual_Colour; theCurveColour: StepVisual_Colour; theIsComponent: boolean; [Symbol.dispose](): void };
+  GetColors(theStyle: StepVisual_StyledItem, theRenderingProps: STEPConstruct_RenderingProperties, theIsComponent?: boolean): { returnValue: boolean; theSurfaceColour: StepVisual_Colour; theBoundaryColour: StepVisual_Colour; theCurveColour: StepVisual_Colour; theIsComponent: boolean; [Symbol.dispose](): void };
 
-static EncodeColor(Col: Quantity_Color): StepVisual_Colour;
-static EncodeColor(Col: Quantity_Color, DPDCs: NCollection_DataMap_TCollection_AsciiString_handle_Standard_Transient, ColRGBs: NCollection_DataMap_gp_Pnt_handle_Standard_Transient): StepVisual_Colour;
-static EncodeColor(Col: Quantity_Color): StepVisual_Colour;
-static EncodeColor(Col: Quantity_Color, DPDCs: NCollection_DataMap_TCollection_AsciiString_handle_Standard_Transient, ColRGBs: NCollection_DataMap_gp_Pnt_handle_Standard_Transient): StepVisual_Colour;
+  static EncodeColor(Col: Quantity_Color): StepVisual_Colour;
+  static EncodeColor(Col: Quantity_Color, DPDCs: NCollection_DataMap_TCollection_AsciiString_handle_Standard_Transient, ColRGBs: NCollection_DataMap_gp_Pnt_handle_Standard_Transient): StepVisual_Colour;
+  static EncodeColor(Col: Quantity_Color): StepVisual_Colour;
+  static EncodeColor(Col: Quantity_Color, DPDCs: NCollection_DataMap_TCollection_AsciiString_handle_Standard_Transient, ColRGBs: NCollection_DataMap_gp_Pnt_handle_Standard_Transient): StepVisual_Colour;
 
-static DecodeColor(Colour: StepVisual_Colour, Col: Quantity_Color): boolean;
+  static DecodeColor(Colour: StepVisual_Colour, Col: Quantity_Color): boolean;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 STEPConstruct_Tool: declare class STEPConstruct_Tool
 
-constructor
+  constructor
 
-WS(): XSControl_WorkSession;
+  WS(): XSControl_WorkSession;
 
-Model(): Interface_InterfaceModel;
+  Model(): Interface_InterfaceModel;
 
-TransientProcess(): Transfer_TransientProcess;
+  TransientProcess(): Transfer_TransientProcess;
 
-FinderProcess(): Transfer_FinderProcess;
+  FinderProcess(): Transfer_FinderProcess;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 STEPConstruct_UnitContext: declare class STEPConstruct_UnitContext
 
-constructor
+  constructor
 
-Init(Tol3d: number, theModel: StepData_StepModel, theLocalFactors?: StepData_Factors): void;
+  Init(Tol3d: number, theModel: StepData_StepModel, theLocalFactors?: StepData_Factors): void;
 
-IsDone(): boolean;
+  IsDone(): boolean;
 
-Value(): StepGeom_GeomRepContextAndGlobUnitAssCtxAndGlobUncertaintyAssCtx;
+  Value(): StepGeom_GeomRepContextAndGlobUnitAssCtxAndGlobUncertaintyAssCtx;
 
-ComputeFactors(aContext: StepRepr_GlobalUnitAssignedContext, theLocalFactors: StepData_Factors): number;
-ComputeFactors(aUnit: StepBasic_NamedUnit, theLocalFactors: StepData_Factors): number;
-ComputeFactors(aContext: StepRepr_GlobalUnitAssignedContext, theLocalFactors: StepData_Factors): number;
-ComputeFactors(aUnit: StepBasic_NamedUnit, theLocalFactors: StepData_Factors): number;
+  ComputeFactors(aContext: StepRepr_GlobalUnitAssignedContext, theLocalFactors: StepData_Factors): number;
+  ComputeFactors(aUnit: StepBasic_NamedUnit, theLocalFactors: StepData_Factors): number;
+  ComputeFactors(aContext: StepRepr_GlobalUnitAssignedContext, theLocalFactors: StepData_Factors): number;
+  ComputeFactors(aUnit: StepBasic_NamedUnit, theLocalFactors: StepData_Factors): number;
 
-ComputeTolerance(aContext: StepRepr_GlobalUncertaintyAssignedContext): number;
+  ComputeTolerance(aContext: StepRepr_GlobalUncertaintyAssignedContext): number;
 
-LengthFactor(): number;
+  LengthFactor(): number;
 
-PlaneAngleFactor(): number;
+  PlaneAngleFactor(): number;
 
-SolidAngleFactor(): number;
+  SolidAngleFactor(): number;
 
-Uncertainty(): number;
+  Uncertainty(): number;
 
-AreaFactor(): number;
+  AreaFactor(): number;
 
-VolumeFactor(): number;
+  VolumeFactor(): number;
 
-HasUncertainty(): boolean;
+  HasUncertainty(): boolean;
 
-LengthDone(): boolean;
+  LengthDone(): boolean;
 
-PlaneAngleDone(): boolean;
+  PlaneAngleDone(): boolean;
 
-SolidAngleDone(): boolean;
+  SolidAngleDone(): boolean;
 
-AreaDone(): boolean;
+  AreaDone(): boolean;
 
-VolumeDone(): boolean;
+  VolumeDone(): boolean;
 
-StatusMessage(status: number): string;
+  StatusMessage(status: number): string;
 
-static ConvertSiPrefix(aPrefix: StepBasic_SiPrefix): number;
+  static ConvertSiPrefix(aPrefix: StepBasic_SiPrefix): number;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 STEPConstruct_ValidationProps: declare class STEPConstruct_ValidationProps extends STEPConstruct_Tool
 
-constructor
+  constructor
 
-Init(WS: XSControl_WorkSession): boolean;
+  Init(WS: XSControl_WorkSession): boolean;
 
-AddProp(Shape: TopoDS_Shape, Prop: StepRepr_RepresentationItem, Descr: string, instance: boolean): boolean;
-AddProp(target: StepRepr_CharacterizedDefinition, Context: StepRepr_RepresentationContext, Prop: StepRepr_RepresentationItem, Descr: string): boolean;
-AddProp(Shape: TopoDS_Shape, Prop: StepRepr_RepresentationItem, Descr: string, instance: boolean): boolean;
-AddProp(target: StepRepr_CharacterizedDefinition, Context: StepRepr_RepresentationContext, Prop: StepRepr_RepresentationItem, Descr: string): boolean;
+  AddProp(Shape: TopoDS_Shape, Prop: StepRepr_RepresentationItem, Descr: string, instance: boolean): boolean;
+  AddProp(target: StepRepr_CharacterizedDefinition, Context: StepRepr_RepresentationContext, Prop: StepRepr_RepresentationItem, Descr: string): boolean;
+  AddProp(Shape: TopoDS_Shape, Prop: StepRepr_RepresentationItem, Descr: string, instance: boolean): boolean;
+  AddProp(target: StepRepr_CharacterizedDefinition, Context: StepRepr_RepresentationContext, Prop: StepRepr_RepresentationItem, Descr: string): boolean;
 
-AddArea(Shape: TopoDS_Shape, Area: number): boolean;
+  AddArea(Shape: TopoDS_Shape, Area: number): boolean;
 
-AddVolume(Shape: TopoDS_Shape, Vol: number): boolean;
+  AddVolume(Shape: TopoDS_Shape, Vol: number): boolean;
 
-AddCentroid(Shape: TopoDS_Shape, Pnt: gp_Pnt, instance?: boolean): boolean;
+  AddCentroid(Shape: TopoDS_Shape, Pnt: gp_Pnt, instance?: boolean): boolean;
 
-FindTarget(S: TopoDS_Shape, target: StepRepr_CharacterizedDefinition, instance: boolean): { returnValue: boolean; Context: StepRepr_RepresentationContext; [Symbol.dispose](): void };
+  FindTarget(S: TopoDS_Shape, target: StepRepr_CharacterizedDefinition, instance: boolean): { returnValue: boolean; Context: StepRepr_RepresentationContext; [Symbol.dispose](): void };
 
-LoadProps(seq: NCollection_Sequence_handle_Standard_Transient): boolean;
+  LoadProps(seq: NCollection_Sequence_handle_Standard_Transient): boolean;
 
-GetPropNAUO(PD: StepRepr_PropertyDefinition): StepRepr_NextAssemblyUsageOccurrence;
+  GetPropNAUO(PD: StepRepr_PropertyDefinition): StepRepr_NextAssemblyUsageOccurrence;
 
-GetPropPD(PD: StepRepr_PropertyDefinition): StepBasic_ProductDefinition;
+  GetPropPD(PD: StepRepr_PropertyDefinition): StepBasic_ProductDefinition;
 
-GetPropShape(ProdDef: StepBasic_ProductDefinition): TopoDS_Shape;
-GetPropShape(PD: StepRepr_PropertyDefinition): TopoDS_Shape;
-GetPropShape(ProdDef: StepBasic_ProductDefinition): TopoDS_Shape;
-GetPropShape(PD: StepRepr_PropertyDefinition): TopoDS_Shape;
+  GetPropShape(ProdDef: StepBasic_ProductDefinition): TopoDS_Shape;
+  GetPropShape(PD: StepRepr_PropertyDefinition): TopoDS_Shape;
+  GetPropShape(ProdDef: StepBasic_ProductDefinition): TopoDS_Shape;
+  GetPropShape(PD: StepRepr_PropertyDefinition): TopoDS_Shape;
 
-GetPropReal(item: StepRepr_RepresentationItem, Val: number, isArea: boolean, theLocalFactors: StepData_Factors): { returnValue: boolean; Val: number; isArea: boolean };
+  GetPropReal(item: StepRepr_RepresentationItem, Val: number, isArea: boolean, theLocalFactors: StepData_Factors): { returnValue: boolean; Val: number; isArea: boolean };
 
-GetPropPnt(item: StepRepr_RepresentationItem, Context: StepRepr_RepresentationContext, Pnt: gp_Pnt, theLocalFactors: StepData_Factors): boolean;
+  GetPropPnt(item: StepRepr_RepresentationItem, Context: StepRepr_RepresentationContext, Pnt: gp_Pnt, theLocalFactors: StepData_Factors): boolean;
 
-SetAssemblyShape(shape: TopoDS_Shape): void;
+  SetAssemblyShape(shape: TopoDS_Shape): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

@@ -1,77 +1,46 @@
 import type { RJSFSchema, WidgetProps } from '@rjsf/utils';
 import { getSchemaType } from '@rjsf/utils';
+import { projectParameterField, resolveParameterBinding } from '@taucad/parameters';
+import { admitUnit } from '@taucad/units/unit';
 import { ParametersBoolean } from '#components/geometry/parameters/parameters-boolean.js';
 import { ParametersNumber } from '#components/geometry/parameters/parameters-number.js';
 import { ParametersString } from '#components/geometry/parameters/parameters-string.js';
 import { formatDisplayLabel } from '#utils/string.utils.js';
-import { getDescriptor } from '#constants/project-parameters.js';
+import { toUcumLengthCode } from '#constants/length-units.js';
 import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
+import { toInstancePointer, useRenderedFieldPath } from '#components/geometry/parameters/rjsf-field-path.js';
 import { Input } from '@taucad/ui/components/input';
-import { toDisplayUnitSymbol } from '#utils/length-unit.utils.js';
 
-const legacyCanonicalUnits = {
-  length: 'm',
-  mass: 'kg',
-  time: 's',
-  electricCurrent: 'A',
-  thermodynamicTemperature: 'K',
-  temperatureDifference: 'K',
-  amountOfSubstance: 'mol',
-  luminousIntensity: 'cd',
-  planeAngle: 'rad',
-  solidAngle: 'sr',
-  ratio: '1',
-  frequency: 'Hz',
-  force: 'N',
-  pressure: 'Pa',
-  energy: 'J',
-  torque: 'N.m',
-  power: 'W',
-  electricCharge: 'C',
-  electricPotential: 'V',
-  capacitance: 'F',
-  electricalResistance: 'Ohm',
-  electricalConductance: 'S',
-  magneticFlux: 'Wb',
-  magneticFluxDensity: 'T',
-  inductance: 'H',
-  luminousFlux: 'lm',
-  illuminance: 'lx',
-  activityRadionuclide: 'Bq',
-  absorbedDose: 'Gy',
-  doseEquivalent: 'Sv',
-  catalyticActivity: 'kat',
-  area: 'm2',
-  volume: 'm3',
-  speed: 'm/s',
-  acceleration: 'm/s2',
-  density: 'kg/m3',
-} as const;
+const numericConstraint = (
+  constraints: Readonly<Record<string, unknown>> | undefined,
+  key: 'default' | 'maximum' | 'minimum' | 'multipleOf',
+): number | undefined => {
+  const value = constraints?.[key];
+  return typeof value === 'number' ? value : undefined;
+};
 
-function getQuantityUnit(schema: Readonly<Record<string, unknown>>): string | undefined {
-  const declaredUnit = schema['x-tau-unit'] ?? schema['x-ogc-unit'];
-  if (typeof declaredUnit === 'string') {
-    return toDisplayUnitSymbol(declaredUnit);
+const isLengthUnit = (unit: string | undefined): boolean => {
+  if (unit === undefined) {
+    return false;
   }
-  if (!Object.hasOwn(schema, 'x-tau-quantity')) {
-    return undefined;
-  }
-
-  const quantityId = schema['x-tau-quantity'];
-  if (typeof quantityId !== 'string' || !Object.hasOwn(legacyCanonicalUnits, quantityId)) {
-    throw new Error(`Unsupported x-tau-quantity: ${String(quantityId)}`);
-  }
-
-  return Object.entries(legacyCanonicalUnits).find(([id]) => id === quantityId)?.[1];
-}
+  const admitted = admitUnit(unit);
+  return (
+    admitted.status === 'success' &&
+    Object.entries(admitted.value.dimension).every(
+      ([dimension, exponent]) => exponent === (dimension === 'length' ? 1 : 0),
+    )
+  );
+};
 
 export function ParametersWidget(
   props: WidgetProps<Record<string, unknown>, RJSFSchema, RJSFContext>,
 ): React.JSX.Element {
   // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- RJSF is untyped
-  const { id, value, onChange, onBlur, onFocus, name, schema, registry, disabled, readonly, autofocus } = props;
+  const { id, onChange, onBlur, onFocus, name, schema, registry, disabled, readonly, autofocus } = props;
+  const value: unknown = props.value;
 
   const { formContext } = registry;
+  const fieldPath = useRenderedFieldPath()?.path;
 
   const prettyLabel = name ? formatDisplayLabel(name) : '';
   const defaultValue = schema.default as string | number | boolean | undefined;
@@ -112,16 +81,28 @@ export function ParametersWidget(
     case 'integer': {
       const numericValue = value === null ? Number.NaN : typeof value === 'number' ? value : Number(value);
       const defaultNumericValue = typeof defaultValue === 'number' ? defaultValue : Number.NaN;
-      const min = schema.minimum;
-      const max = schema.maximum;
-      const step = schema.multipleOf;
-      const displayDescriptor = formContext.displayDescriptors?.[name];
-      const quantityUnit = getQuantityUnit(schema);
-      const isConfiguration = formContext.parameterSemantics === 'configuration';
-      const descriptor = quantityUnit
-        ? 'quantity'
-        : (displayDescriptor?.descriptor ?? (isConfiguration ? 'unitless' : getDescriptor(name)));
-      const unitOverride = quantityUnit ?? displayDescriptor?.unit ?? (isConfiguration ? '' : undefined);
+      const instancePointer = fieldPath ? toInstancePointer(fieldPath) : undefined;
+      if (instancePointer === undefined) {
+        throw new Error(`Numeric parameter '${name}' has no rendered instance path.`);
+      }
+      const nativeBinding = resolveParameterBinding(formContext.parameterManifest, instancePointer);
+      const requestedUnit = isLengthUnit(nativeBinding?.unit)
+        ? toUcumLengthCode(formContext.units.length.displaySymbol)
+        : undefined;
+      const fieldProjection = projectParameterField(
+        formContext.parameterManifest,
+        instancePointer,
+        {
+          unit: requestedUnit,
+          locale: globalThis.navigator.language,
+        },
+        formContext.parameterBindings?.[instancePointer],
+      );
+      const constraints = fieldProjection.schema === undefined ? schema : fieldProjection.constraints;
+      const effectiveDefault = numericConstraint(constraints, 'default') ?? defaultNumericValue;
+      const min = numericConstraint(constraints, 'minimum');
+      const max = numericConstraint(constraints, 'maximum');
+      const step = numericConstraint(constraints, 'multipleOf');
 
       if (!Number.isFinite(numericValue)) {
         return (
@@ -151,13 +132,12 @@ export function ParametersWidget(
       return (
         <ParametersNumber
           value={numericValue}
-          defaultValue={Number.isFinite(defaultNumericValue) ? defaultNumericValue : numericValue}
-          descriptor={descriptor}
-          unitOverride={unitOverride}
+          defaultValue={Number.isFinite(effectiveDefault) ? effectiveDefault : numericValue}
+          fieldProjection={fieldProjection}
+          edit={formContext.parameterEdit}
           min={min}
           max={max}
           step={step}
-          units={formContext.units}
           id={id}
           disabled={disabled}
           readOnly={readonly}
@@ -193,7 +173,9 @@ export function ParametersWidget(
           onBlur={() => {
             onBlur(id, value);
           }}
-          onChange={handleChange}
+          onChange={(nextValue) => {
+            handleChange(nextValue === '' && props.required !== true ? undefined : nextValue);
+          }}
         />
       );
     }

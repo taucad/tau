@@ -15,6 +15,127 @@ const withRequiredCookieSecret = (env: NodeJS.ProcessEnv): Record<string, unknow
 };
 
 describe('environmentSchema', () => {
+  it.each([
+    [undefined, false],
+    ['false', false],
+    ['true', true],
+  ])('parses TAU_CLOUD_ENABLED=%s strictly', (value, expected) => {
+    const environment = Object.fromEntries(
+      Object.entries(withRequiredCookieSecret(process.env)).filter(([key]) => key !== 'TAU_CLOUD_ENABLED'),
+    );
+    const result = environmentSchema.safeParse({
+      ...environment,
+      TAU_CLOUD_ENABLED: value,
+      BILLING_ENVIRONMENT: 'development',
+      BILLING_USAGE_CURSOR_SECRET: 'test-usage-cursor-secret-min-32-chars',
+      BILLING_REQUEST_DIGEST_SECRET: 'test-request-digest-secret-min-32-chars',
+      STRIPE_SECRET_KEY: 'rk_test_cloud_flag_create',
+      STRIPE_READ_SECRET_KEY: 'rk_test_cloud_flag',
+      STRIPE_ACCOUNT_ID: 'acct_cloud_flag',
+      STRIPE_LIVEMODE: 'false',
+      STRIPE_WEBHOOK_SECRET: 'whsec_cloud_flag',
+      STRIPE_PRICE_ID_PRO_MONTHLY: 'price_cloud_flag',
+      STRIPE_PRODUCT_ID_CREDIT_PACK: 'prod_cloud_flag',
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.TAU_CLOUD_ENABLED).toBe(expected);
+    }
+  });
+
+  it('rejects non-canonical TAU_CLOUD_ENABLED values', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      TAU_CLOUD_ENABLED: '1',
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.path.join('.') === 'TAU_CLOUD_ENABLED')).toBe(true);
+    }
+  });
+
+  it('requires the complete financial configuration whenever Tau Cloud is enabled', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      NODE_ENV: 'development',
+      TAU_CLOUD_ENABLED: 'true',
+      BILLING_ENVIRONMENT: undefined,
+      STRIPE_SECRET_KEY: '',
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.path.join('.'))).toEqual(
+        expect.arrayContaining(['BILLING_ENVIRONMENT', 'STRIPE_SECRET_KEY']),
+      );
+    }
+  });
+
+  it('rejects Stripe credentials whose prefixes contradict the declared mode', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      TAU_CLOUD_ENABLED: 'true',
+      BILLING_ENVIRONMENT: 'staging',
+      BILLING_USAGE_CURSOR_SECRET: 'test-usage-cursor-secret-min-32-chars',
+      BILLING_REQUEST_DIGEST_SECRET: 'test-request-digest-secret-min-32-chars',
+      STRIPE_SECRET_KEY: 'sk_live_wrong_mode',
+      STRIPE_READ_SECRET_KEY: 'rk_test_read',
+      STRIPE_ACCOUNT_ID: 'acct_test',
+      STRIPE_LIVEMODE: 'false',
+      STRIPE_WEBHOOK_SECRET: 'whsec_test',
+      STRIPE_PRICE_ID_PRO_MONTHLY: 'price_test',
+      STRIPE_PRODUCT_ID_CREDIT_PACK: 'prod_test',
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.path[0] === 'STRIPE_SECRET_KEY')).toBe(true);
+    }
+  });
+
+  it('accepts a test-mode restricted create key while retaining a separate restricted read key', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      TAU_CLOUD_ENABLED: 'true',
+      BILLING_ENVIRONMENT: 'staging',
+      BILLING_USAGE_CURSOR_SECRET: 'test-usage-cursor-secret-min-32-chars',
+      BILLING_REQUEST_DIGEST_SECRET: 'test-request-digest-secret-min-32-chars',
+      STRIPE_SECRET_KEY: 'rk_test_create_scope',
+      STRIPE_READ_SECRET_KEY: 'rk_test_read_scope',
+      STRIPE_ACCOUNT_ID: 'acct_test',
+      STRIPE_LIVEMODE: 'false',
+      STRIPE_WEBHOOK_SECRET: 'whsec_test',
+      STRIPE_PRICE_ID_PRO_MONTHLY: 'price_test',
+      STRIPE_PRODUCT_ID_CREDIT_PACK: 'prod_test',
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects a full test-mode key when Tau Cloud is enabled', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      TAU_CLOUD_ENABLED: 'true',
+      BILLING_ENVIRONMENT: 'staging',
+      BILLING_USAGE_CURSOR_SECRET: 'test-usage-cursor-secret-min-32-chars',
+      BILLING_REQUEST_DIGEST_SECRET: 'test-request-digest-secret-min-32-chars',
+      STRIPE_SECRET_KEY: 'sk_test_full_account_scope',
+      STRIPE_READ_SECRET_KEY: 'rk_test_read_scope',
+      STRIPE_ACCOUNT_ID: 'acct_test',
+      STRIPE_LIVEMODE: 'false',
+      STRIPE_WEBHOOK_SECRET: 'whsec_test',
+      STRIPE_PRICE_ID_PRO_MONTHLY: 'price_test',
+      STRIPE_PRODUCT_ID_CREDIT_PACK: 'prod_test',
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.path[0] === 'STRIPE_SECRET_KEY')).toBe(true);
+    }
+  });
+
   it('should parse merged process env including TAU_S3_* defaults in development', () => {
     const merged = environmentSchema.safeParse(withRequiredCookieSecret(process.env));
     expect(merged.success).toBe(true);
@@ -161,7 +282,8 @@ describe('environmentSchema', () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.TAU_EMAIL_FROM).toBe('Tau <identity@taucad.dev>');
-      expect(result.data.TAU_EMAIL_REPLY_TO).toBe('identity@taucad.dev');
+      // Replies go to the staffed help mailbox (OQ8); fly.prod.toml overrides it with the tau.new address.
+      expect(result.data.TAU_EMAIL_REPLY_TO).toBe('help@taucad.dev');
     }
   });
 
@@ -209,13 +331,18 @@ describe('environmentSchema', () => {
       TAU_API_URL: 'https://api.tau.new',
       DATABASE_RUNTIME_ROLE: 'tau_api_runtime',
       BILLING_ENVIRONMENT: 'prod-us',
-      STRIPE_SECRET_KEY: 'sk_live_test',
+      STRIPE_SECRET_KEY: 'rk_live_create_test',
       STRIPE_READ_SECRET_KEY: 'rk_live_read_test',
       STRIPE_ACCOUNT_ID: 'acct_test',
       STRIPE_LIVEMODE: 'true',
       STRIPE_WEBHOOK_SECRET: 'whsec_test',
       STRIPE_PRICE_ID_PRO_MONTHLY: 'price_test',
       STRIPE_PRODUCT_ID_CREDIT_PACK: 'prod_test',
+      GITHUB_REPOSITORY_APP_CLIENT_ID: 'Iv1.production',
+      GITHUB_REPOSITORY_APP_CLIENT_SECRET: 'github-app-secret',
+      GITHUB_REPOSITORY_APP_SLUG: 'tau-production',
+      GITHUB_REPOSITORY_APP_CALLBACK_URL: 'https://api.tau.new/v1/github/callback',
+      GITHUB_REPOSITORY_CONNECTION_KEY: Buffer.alloc(32, 7).toString('base64url'),
     });
 
     expect(result.success).toBe(true);
@@ -235,6 +362,41 @@ describe('environmentSchema', () => {
     if (result.success) {
       expect(result.data.TAU_S3_PRIVATE_BUCKET).toBe('tau-content-private');
     }
+  });
+
+  it('should reject a partially configured GitHub repository App in development', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      NODE_ENV: 'development',
+      GITHUB_REPOSITORY_APP_CLIENT_ID: 'Iv1.partial',
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.path.join('.') === 'GITHUB_REPOSITORY_APP_CLIENT_SECRET')).toBe(
+        true,
+      );
+    }
+  });
+
+  it('should allow production without the optional GitHub repository App', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      NODE_ENV: 'production',
+      TAU_S3_ENDPOINT: 'https://000000000000000000000000.r2.cloudflarestorage.com',
+      TAU_S3_PUBLIC_BASE_URL: 'https://cdn.tau.new',
+      TAU_S3_ACCESS_KEY_ID: 'key',
+      TAU_S3_SECRET_ACCESS_KEY: 'secret',
+      TAU_API_URL: 'https://api.tau.new',
+      DATABASE_RUNTIME_ROLE: 'tau_api_runtime',
+      GITHUB_REPOSITORY_APP_CLIENT_ID: undefined,
+      GITHUB_REPOSITORY_APP_CLIENT_SECRET: undefined,
+      GITHUB_REPOSITORY_APP_SLUG: undefined,
+      GITHUB_REPOSITORY_APP_CALLBACK_URL: undefined,
+      GITHUB_REPOSITORY_CONNECTION_KEY: undefined,
+    });
+
+    expect(result.success).toBe(true);
   });
 
   it('should reject TAU_S3_PRIVATE_BUCKET equal to TAU_S3_BUCKET in production mode', () => {
@@ -262,6 +424,7 @@ describe('environmentSchema', () => {
       const result = environmentSchema.safeParse({
         ...withRequiredCookieSecret(process.env),
         NODE_ENV: 'production',
+        TAU_CLOUD_ENABLED: 'true',
         STRIPE_READ_SECRET_KEY: 'rk_test_read',
         STRIPE_ACCOUNT_ID: 'acct_test',
         STRIPE_LIVEMODE: 'false',
@@ -273,6 +436,33 @@ describe('environmentSchema', () => {
       }
     },
   );
+
+  /* Ruling P50: the local-address relaxation is a development posture only. */
+  it('should reject TAU_GIT_REMOTE_ALLOW_PRIVATE in production mode', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      NODE_ENV: 'production',
+      TAU_S3_ENDPOINT: 'https://000000000000000000000000.r2.cloudflarestorage.com',
+      TAU_S3_PUBLIC_BASE_URL: 'https://cdn.tau.new',
+      TAU_S3_ACCESS_KEY_ID: 'key',
+      TAU_S3_SECRET_ACCESS_KEY: 'secret',
+      TAU_API_URL: 'https://api.tau.new',
+      TAU_GIT_REMOTE_ALLOW_PRIVATE: '1',
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.path.join('.') === 'TAU_GIT_REMOTE_ALLOW_PRIVATE')).toBe(true);
+    }
+  });
+
+  it('should default TAU_GIT_REMOTE_ALLOW_PRIVATE to refusing private addresses', () => {
+    const result = environmentSchema.safeParse(withRequiredCookieSecret(process.env));
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.TAU_GIT_REMOTE_ALLOW_PRIVATE).toBe('0');
+    }
+  });
 
   it('should reject localhost TAU_API_URL in production mode', () => {
     const result = environmentSchema.safeParse({

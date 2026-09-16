@@ -434,6 +434,23 @@ const config = [
             'See docs/architecture/workspace-filesystem-and-revisions.md (A38).',
         },
         {
+          // The three modules S43 deleted, by name: the Jujutsu adapter, the
+          // wasm revision algebra and the multipart publication upload. A
+          // module path is a string, so this is the string half of the pin
+          // below — an import, a dynamic import, a mock path or a test fixture
+          // that names one of them fails here. (Comments are not AST nodes, so
+          // the two prose mentions of the algebra spike in `object-hash.ts` and
+          // `git-objects.ts` are untouched, and so is this rule's own source:
+          // this config is `.mjs` and the block only lints `.ts`/`.tsx`.)
+          selector:
+            'Literal[value=/(jj-adapter|revision-algebra|publish-multipart)/], TemplateElement[value.raw=/(jj-adapter|revision-algebra|publish-multipart)/]',
+          message:
+            'That module is retired. The disk host is `createNativeGitRevisionPort`, the browser ' +
+            'store is `createIsomorphicGitRevisionPort`, and a publication is a named version of ' +
+            'the synced graph — there is no jj adapter, no wasm algebra and no multipart upload. ' +
+            'See docs/research/workspace-filesystem-revisions-charter.md (D11, D30, EQ14).',
+        },
+        {
           selector: 'TSAsExpression > TSNeverKeyword',
           message:
             '`as never` erases all type information and masks underlying type errors. ' +
@@ -460,7 +477,12 @@ const config = [
             'createJjRevisionPort',
             // The dead native-git persistence wrapper.
             'createNativeGitRevisionPersistence',
-            // Bundles as a wire; git smart HTTP is the only transport.
+            // Bundles as a wire; git smart HTTP is the only transport. The
+            // selector is anchored, so `createBundler`/`createBundlerSourceHost`
+            // in the bundler toolkits are untouched (review R3).
+            'importBundle',
+            'createBundle',
+            'fetchBundle',
             'RevisionBundleInput',
             'ImportRevisionBundleInput',
             'CreateNativeGitBundleInput',
@@ -476,6 +498,9 @@ const config = [
             'EncodedTreeGraph',
             'FlatTreeEntry',
             'GitMode',
+            // Publications are named versions of the synced graph (D11): no blob
+            // store of uploaded files stands beside it.
+            'BlobStore',
             // The compiled wasm revision algebra and its out-of-tree artifact.
             'loadRevisionAlgebra',
             'RevisionAlgebra',
@@ -940,15 +965,55 @@ const config = [
     },
   },
   {
-    /* The one end-to-end spec that still reads publications out of a
-     * pre-north-star serve tree. W18 rewrites it with the publication path;
-     * until then the pin would red a file its owner cannot see. Everything
-     * else — product code, unit tests, e2e support — is pinned, template
-     * literals included. (`external-agent.spec.ts` was the second file here
-     * until W5 dropped its two retired-layout assertions.) */
-    files: ['apps/ui-e2e/src/browser-agent-host.spec.ts'],
+    /*
+     * I12: reserved engineering vocabulary may not reach operator-facing copy.
+     *
+     * Policy rule 1 gives each term one meaning and keeps the engineering ones
+     * out of product text — a person sees Revision, Branch, Current, Restore,
+     * Sync, never checkout, lease, ref, HEAD, worktree or backend. Two refusal
+     * sentences in this program shipped naming a *checkout* and a *lease*, and
+     * the manual "terminology scan" that was supposed to catch them is what
+     * this rule replaces.
+     *
+     * Scoped to rendered text only: JSXText, and the handful of attributes that
+     * are read aloud or shown. A prop *value* is not copy — `compareAgainst=
+     * 'checkout'` and `checkoutId` are the vocabulary of the code, and flagging
+     * them would make the rule noise that gets disabled. `repository` and
+     * `commit` are deliberately absent: neither is reserved, and both are what
+     * a person actually picks and reads on GitHub.
+     */
+    files: ['apps/ui/app/routes/w.$workspace.$project/**/*.tsx'],
     rules: {
-      'no-restricted-syntax': 'off',
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'JSXText[value=/\\b(checkouts?|leases?|worktrees?|backends?|refs?)\\b/i]',
+          message:
+            'Reserved engineering vocabulary in rendered copy (policy rule 1). Say it in product ' +
+            'words: a Revision, a Branch, Current, Restore, Switch, Merge, Discard, Work in, Sync. ' +
+            'See docs/policy/revisions-policy.md (rule 1) and DESIGN.md.',
+        },
+        {
+          selector: 'JSXText[value=/\\bHEAD\\b/]',
+          message:
+            'HEAD is not product vocabulary (policy rule 1). Name what the person sees — the ' +
+            'Current revision, or the branch it is on. See docs/policy/revisions-policy.md.',
+        },
+        {
+          selector:
+            'JSXAttribute[name.name=/^(aria-label|aria-description|title|placeholder|alt|label)$/] > Literal[value=/\\b(checkouts?|leases?|worktrees?|backends?|refs?)\\b/i]',
+          message:
+            'Reserved engineering vocabulary in an accessible name (policy rule 1) — a screen ' +
+            'reader reads this aloud, so it is copy. See docs/policy/revisions-policy.md.',
+        },
+        {
+          selector:
+            'JSXAttribute[name.name=/^(aria-label|aria-description|title|placeholder|alt|label)$/] > Literal[value=/\\bHEAD\\b/]',
+          message:
+            'HEAD is not product vocabulary (policy rule 1), and an accessible name is read ' +
+            'aloud. See docs/policy/revisions-policy.md.',
+        },
+      ],
     },
   },
 ];

@@ -21,7 +21,7 @@ describe('TauMetrics', () => {
       TauMetrics.billingFundedOperationDenials.attributes.safeParse({
         'deployment.environment': 'prod-us',
         'tau.billing.capacity_pool': 'helper',
-        'tau.billing.denial.reason': 'genuine_saturation',
+        'tau.billing.denial.reason': 'supplier_route_paused',
       }).success,
     ).toBe(true);
     expect(

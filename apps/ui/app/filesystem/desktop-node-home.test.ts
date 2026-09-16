@@ -88,6 +88,22 @@ describe('desktop node Home', () => {
     expect(projects).toContainEqual({ projectId, backend: 'node', providerBasePath: 'alpha', path: homeRoot });
   });
 
+  it('keeps an explicit ambient Home path routable after reload', async () => {
+    installDesktopBridge();
+    const { handleStore } = await loadModules();
+    const projectId = 'proj_ddddddddddddddddddddd';
+    await handleStore.setProjectFileSystemConfig({
+      projectId,
+      backend: 'node',
+      path: homeRoot,
+      providerBasePath: 'alpha',
+    });
+
+    const { projects } = await handleStore.getProjectRootConfigs();
+
+    expect(projects).toContainEqual({ projectId, backend: 'node', providerBasePath: 'alpha', path: homeRoot });
+  });
+
   it('pins Home to node even when the preload bridge has not been installed yet', async () => {
     // Preload installs `window.tau` through `contextBridge`, but nothing about
     // Home's backend may depend on the bridge being there: ruling C1 says the

@@ -1,5 +1,5 @@
 /**
- * The browser's built-in skill bundles, as the overlay a composed view merges.
+ * The browser's system skill bundles, as the overlay a composed view merges.
  *
  * Two workers compose a view over the same checkout — the file-manager worker
  * for the user and the agent host worker for the agent — and both need the same
@@ -16,7 +16,7 @@ import { systemSkillBundles } from '@taucad/skills/resources';
 const registry = createSkillBundleRegistry(systemSkillBundles);
 
 /**
- * The built-in skill overlay for this build.
+ * The system skill overlay for this build.
  *
  * @returns The overlay `composeView` composes at `.agents/skills`.
  * @public

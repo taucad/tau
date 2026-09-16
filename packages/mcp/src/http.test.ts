@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createTauMcpHttpHandler, tauMcpToolNames } from '#tau-mcp.js';
+import { createTauMcpHttpHandler, tauMcpInstructions, tauMcpToolNames } from '#tau-mcp.js';
 import type { TauMcpDispatch, TauMcpRpcCall } from '#tau-mcp.js';
 
 const rpcName = { getKernelResult: 'get_kernel_result' } as const;
@@ -83,7 +83,85 @@ const connect = async (url: URL): Promise<Client> => {
 };
 
 describe('Tau MCP Streamable HTTP transport', () => {
-  it('lists and calls only the canonical read-only tools over HTTP', async () => {
+  it('keeps overlapping calls bound to the dispatcher admitted with each request', async () => {
+    const handler = createTauMcpHttpHandler();
+    const labels: string[] = [];
+    const firstStarted = Promise.withResolvers<void>();
+    const releaseFirst = Promise.withResolvers<void>();
+    const server = createServer((request, response) => {
+      const pending = (async (): Promise<void> => {
+        const body = request.method === 'POST' ? await readBody(request) : undefined;
+        const label = String(request.headers['x-dispatch'] ?? 'init');
+        await handler.handle({
+          request,
+          response,
+          body,
+          authorityKey: 'shared-authority',
+          dispatch: async () => {
+            labels.push(label);
+            if (label === 'first') {
+              firstStarted.resolve();
+              await releaseFirst.promise;
+            }
+            return { success: true, status: 'ready' };
+          },
+        });
+      })();
+      pendingRequests.add(pending);
+    });
+    server.on('close', () => {
+      void handler.close();
+    });
+    servers.add(server);
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const address = server.address() as AddressInfo;
+    const url = new URL(`http://127.0.0.1:${String(address.port)}/v1/mcp`);
+    const initialized = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 0,
+        method: 'initialize',
+        params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } },
+      }),
+    });
+    const sessionId = initialized.headers.get('mcp-session-id');
+    await initialized.text();
+    expect(sessionId).toBeTypeOf('string');
+    const call = async (id: number, label: string): Promise<Response> =>
+      fetch(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+          'mcp-session-id': sessionId ?? '',
+          'x-dispatch': label,
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id,
+          method: 'tools/call',
+          params: { name: 'get_kernel_result', arguments: { targetFile: 'main.ts' } },
+        }),
+      });
+
+    const first = call(1, 'first');
+    await firstStarted.promise;
+    const second = call(2, 'second');
+    await vi.waitFor(() => {
+      expect(labels).toEqual(['first', 'second']);
+    });
+    releaseFirst.resolve();
+    const responses = await Promise.all([first, second]);
+    await Promise.all(responses.map(async (response) => response.text()));
+
+    expect(labels).toEqual(['first', 'second']);
+  });
+
+  it('initializes with CAD-loop guidance and effect-correct tool annotations', async () => {
     const calls: TauMcpRpcCall[] = [];
     const dispatch: TauMcpDispatch = async (call) => {
       calls.push(call);
@@ -91,9 +169,16 @@ describe('Tau MCP Streamable HTTP transport', () => {
     };
     const client = await connect(await serve(dispatch));
 
+    expect(client.getInstructions()).toBe(tauMcpInstructions);
+    expect(client.getInstructions()).toContain('Before editing geometry, create or update executable GeoSpec tests');
     const listed = await client.listTools();
     expect(listed.tools.map(({ name }) => name)).toEqual(tauMcpToolNames);
-    expect(listed.tools.every(({ annotations }) => annotations?.readOnlyHint === true)).toBe(true);
+    expect(listed.tools.map(({ name, annotations }) => [name, annotations?.readOnlyHint])).toEqual([
+      ['get_kernel_result', true],
+      ['test_model', true],
+      ['screenshot', true],
+      ['export_geometry', false],
+    ]);
     await expect(
       client.callTool({ name: toolName.getKernelResult, arguments: { targetFile: 'main.ts' } }),
     ).resolves.toMatchObject({ structuredContent: { status: 'ready' } });

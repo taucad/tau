@@ -93,9 +93,7 @@ export class HostsController {
 
   @Get('worker-affinity')
   @PublicAuth()
-  public async getWorkerAffinity(
-    @Headers('authorization') authorization?: string,
-  ): Promise<never> {
+  public async getWorkerAffinity(@Headers('authorization') authorization?: string): Promise<never> {
     const device = await this.hostsService.authenticateDevice(authorization);
     if (!device) {
       throw new UnauthorizedException({ code: 'AGENT_CREDENTIAL_REJECTED' });

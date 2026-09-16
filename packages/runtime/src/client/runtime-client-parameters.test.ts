@@ -1,9 +1,10 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import type { Channel } from '@taucad/rpc';
+import { contentDigest } from '@taucad/cache-core';
 import { createRuntimeClient } from '#client/runtime-client-core.js';
-import { compileParameterManifest } from '#parameter/manifest.js';
-import type { ParameterManifest } from '#parameter/manifest.js';
+import { compileParameterManifest } from '@taucad/parameters';
+import type { ParameterManifest } from '@taucad/parameters';
 import { protocolVersion } from '#types/protocol-header.types.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
 import type { RuntimeTransportClient, TransportPlugin } from '#transport/runtime-transport.types.js';
@@ -27,8 +28,8 @@ const manifest = async (mode: 'default' | 'declared-only') =>
       revision: 'source',
       capability: 'json-structure',
     },
-    dependency: `sha256:${'1'.repeat(64)}`,
-    middleware: `sha256:${'2'.repeat(64)}`,
+    dependency: contentDigest({ value: `sha256:${'1'.repeat(64)}` }),
+    middleware: contentDigest({ value: `sha256:${'2'.repeat(64)}` }),
     resolution: { mode },
   });
 

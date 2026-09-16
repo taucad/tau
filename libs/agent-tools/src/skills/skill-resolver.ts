@@ -114,9 +114,12 @@ export function createSkillResolver(deps: SkillResolverDependencies): SkillResol
       discoverFilesystemSkills(deps, canonicalSkillsDirectory, 'user'),
       discoverTauStoreManifestSkills(deps, storeSkills),
     ]);
+    const validFilesystemNames = new Set(filesystem.skills.map(({ name }) => name));
     const visibleSystemSkills = filesystem.blocked
       ? []
-      : systemSkills.filter((skill) => !filesystem.occupiedNames.has(skill.slug));
+      : systemSkills.filter(
+          (skill) => !filesystem.occupiedNames.has(skill.slug) || validFilesystemNames.has(skill.slug),
+        );
 
     return mergeSkillMetadata([...filesystem.skills, ...store, ...discoverSystemSkills(visibleSystemSkills)]);
   }

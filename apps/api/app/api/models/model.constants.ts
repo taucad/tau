@@ -6,6 +6,8 @@ type CloudCatalogProviderId = Exclude<ProviderId, 'ollama'>;
 
 const textOnlyModalities = { input: ['text'], output: ['text'] } satisfies ModelModalities;
 const imageInputModalities = { input: ['text', 'image'], output: ['text'] } satisfies ModelModalities;
+/** Vision models on an Anthropic or OpenAI codec; providers rasterise PDF pages, so `pdf` never appears without `image`. */
+const pdfInputModalities = { input: ['text', 'image', 'pdf'], output: ['text'] } satisfies ModelModalities;
 
 /** Catalog row; omit {@link ModelListEntry.enabled} or set `true` to expose via GET `/v1/models`. */
 export type ModelListEntry = Model & { readonly enabled?: boolean };
@@ -36,7 +38,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'claude-fable-5-1',
       support: {
         toolChoice: false,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'claude',
@@ -82,7 +84,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'claude-fable-5',
       support: {
         toolChoice: false,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'claude',
@@ -127,7 +129,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'claude-opus-5',
       support: {
         toolChoice: false,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'claude',
@@ -172,7 +174,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'claude-opus-4-8',
       support: {
         toolChoice: false,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'claude',
@@ -216,7 +218,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'claude-sonnet-5',
       support: {
         toolChoice: false,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'claude',
@@ -260,7 +262,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'claude-sonnet-4-6',
       support: {
         toolChoice: false,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'claude',
@@ -303,7 +305,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       model: 'claude-haiku-4-5-20251001',
       support: {
         toolChoice: false,
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'claude',
@@ -348,7 +350,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-6-astra',
       support: {
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'gpt',
@@ -387,7 +389,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-5.6-sol',
       support: {
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'gpt',
@@ -425,7 +427,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-5.6-terra',
       support: {
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'gpt',
@@ -463,7 +465,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-5.6-luna',
       support: {
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'gpt',
@@ -502,7 +504,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
       },
       model: 'gpt-5.5',
       support: {
-        modalities: imageInputModalities,
+        modalities: pdfInputModalities,
       },
       details: {
         family: 'gpt',

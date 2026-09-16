@@ -1,11 +1,10 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import type { Chat } from '@taucad/chat';
-import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
-import { Link, useLocation, useNavigate, useNavigation } from 'react-router';
+import { MoreHorizontal, Pencil, Square, Trash2 } from 'lucide-react';
+import { useLocation, useNavigate, useNavigation } from 'react-router';
 import type { ProjectListItem } from '#types/project.types.js';
 import { useChats } from '#hooks/use-chats.js';
 import { SidebarMenuButton, SidebarMenuSub, SidebarMenuSubItem } from '#components/ui/sidebar.js';
-import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
@@ -15,12 +14,30 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
-import { Loader } from '#components/ui/loader.js';
 import { pickNextFocusedChatId } from '#routes/w.$workspace.$project/chat-navigation.utils.js';
 import { projectChatIdFromSearch, projectChatUrl, projectUrl } from '#utils/project-url.utils.js';
-import { compareChatsByRecency } from '#utils/chat-recency.utils.js';
+import { compareChatsByRecency, getChatRecencyAt } from '#utils/chat-recency.utils.js';
+import { StatusMark } from '#components/nav/status-mark.js';
+import {
+  SidebarFailureRow,
+  SidebarRowActions,
+  SidebarRowLink,
+  SidebarRowSkeleton,
+  sidebarRowButtonClass,
+  sidebarRowClass,
+  sidebarRowEditorClass,
+} from '#components/nav/sidebar-row.js';
+import { selectChatFacts, useChatSidebarStatus, useSidebarCommands } from '#hooks/use-sidebar-status.js';
+import type { SidebarFacts } from '#hooks/use-sidebar-status.js';
+import { useChatSession } from '#hooks/use-chat-session.js';
 
 const chatsPerPage = 5;
+
+/** Chats group by day (A29): the older ones are still there, just further down. */
+const startOfToday = (): number => {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+};
 
 export const sortProjectChats = (chats: readonly Chat[]): Chat[] => [...chats].sort(compareChatsByRecency);
 
@@ -31,7 +48,7 @@ export function ProjectChatList({
   readonly project: ProjectListItem;
   readonly isProjectActive: boolean;
 }): React.JSX.Element {
-  const { chats, isLoading, error, retry, updateChatName, deleteChat } = useChats(project.id);
+  const { chats, isLoading, error, updateChatName, deleteChat } = useChats(project.id);
   const location = useLocation();
   const navigate = useNavigate();
   const navigation = useNavigation();
@@ -39,6 +56,15 @@ export function ProjectChatList({
   const [editingChatId, setEditingChatId] = useState<string | undefined>();
   const sortedChats = useMemo(() => sortProjectChats(chats), [chats]);
   const visibleChats = sortedChats.slice(0, visibleCount);
+  /* A29: the label appears only when both groups do — a list that is all from
+   * today has nothing to disclose. */
+  const groupLabels = useMemo(() => {
+    const today = startOfToday();
+    const groups = visibleChats.map((entry) => (getChatRecencyAt(entry) >= today ? 'Today' : 'Earlier'));
+    return groups.map((group, index) =>
+      groups.includes('Today') && groups.includes('Earlier') && group !== groups[index - 1] ? group : undefined,
+    );
+  }, [visibleChats]);
   const activeChatId = isProjectActive ? projectChatIdFromSearch(location.search) : undefined;
   const listId = `project-chats-${project.id}`;
   const pendingUrl = navigation.location ? `${navigation.location.pathname}${navigation.location.search}` : undefined;
@@ -56,54 +82,59 @@ export function ProjectChatList({
   };
 
   return (
-    <SidebarMenuSub id={listId} className='mx-0 mt-0.5 translate-x-0 gap-0.5 border-0 px-0 py-0'>
+    /* D8: chats step in one slot and hang off the sidebar primitive's own rail,
+     * which starts under the project's chevron, so a chat row and a collapsed
+     * project row never share a column. */
+    <SidebarMenuSub
+      id={listId}
+      className='mt-0.5 mr-0 ml-3.5 translate-x-0 gap-0 border-l border-sidebar-border py-0 pr-0 pl-1.5'
+    >
       {isLoading && chats.length === 0
         ? Array.from({ length: 3 }, (_, index) => (
             <SidebarMenuSubItem key={index} aria-hidden>
-              <div className='flex h-7 items-center gap-2 px-2'>
-                <Skeleton className='size-3 rounded-sm' />
-                <Skeleton className='h-3 flex-1' />
-              </div>
+              <SidebarRowSkeleton />
             </SidebarMenuSubItem>
           ))
         : null}
       {error && chats.length === 0 ? (
         <SidebarMenuSubItem>
-          <button
-            type='button'
-            className='h-7 w-full rounded-md px-2 text-left text-xs text-muted-foreground hover:bg-sidebar-accent'
-            onClick={() => void retry()}
-          >
-            Could not load chats. Retry
-          </button>
+          <SidebarFailureRow what='chats' />
         </SidebarMenuSubItem>
       ) : null}
       {!isLoading && !error && chats.length === 0 ? (
         <SidebarMenuSubItem>
-          <div className='flex h-7 items-center px-2 text-xs text-muted-foreground'>No chats yet</div>
+          <div className='flex h-7 items-center pl-7.5 text-xs text-muted-foreground'>No chats yet</div>
         </SidebarMenuSubItem>
       ) : null}
-      {visibleChats.map((chat) => (
-        <ProjectChatItem
-          key={chat.id}
-          chat={chat}
-          project={project}
-          isActive={chat.id === activeChatId}
-          isPending={project.slugs !== undefined && pendingUrl === projectChatUrl(project.slugs, chat.id)}
-          isEditing={editingChatId === chat.id}
-          onRename={() => {
-            setEditingChatId(chat.id);
-          }}
-          onRenameSave={async (name) => {
-            await updateChatName(chat.id, name);
-          }}
-          onEditingChange={(editing) => {
-            if (!editing) {
-              setEditingChatId(undefined);
-            }
-          }}
-          onDelete={async () => handleDelete(chat.id)}
-        />
+      {visibleChats.map((chat, index) => (
+        <Fragment key={chat.id}>
+          {groupLabels[index] === undefined ? null : (
+            <SidebarMenuSubItem>
+              <div className='flex h-6 items-center pr-1.5 pl-[30px] text-xs text-muted-foreground/70'>
+                {groupLabels[index]}
+              </div>
+            </SidebarMenuSubItem>
+          )}
+          <ProjectChatItem
+            chat={chat}
+            project={project}
+            isActive={chat.id === activeChatId}
+            isPending={project.slugs !== undefined && pendingUrl === projectChatUrl(project.slugs, chat.id)}
+            isEditing={editingChatId === chat.id}
+            onRename={() => {
+              setEditingChatId(chat.id);
+            }}
+            onRenameSave={async (name) => {
+              await updateChatName(chat.id, name);
+            }}
+            onEditingChange={(editing) => {
+              if (!editing) {
+                setEditingChatId(undefined);
+              }
+            }}
+            onDelete={async () => handleDelete(chat.id)}
+          />
+        </Fragment>
       ))}
       {visibleCount < sortedChats.length ? (
         <SidebarMenuSubItem>
@@ -143,62 +174,86 @@ function ProjectChatItem({
   readonly onEditingChange: (isEditing: boolean) => void;
   readonly onDelete: () => Promise<void>;
 }): React.JSX.Element {
+  const { closeChat } = useSidebarCommands();
+  useChatSession(chat.id, project.id);
+  const status = useChatSidebarStatus(project.id, chat.id);
+  const facts: SidebarFacts = status === undefined ? { mark: 'none', sentence: undefined } : selectChatFacts(status);
+  /* D7: *Stop* only while there is something to stop. */
+  const canStop = facts.mark === 'running' || facts.mark === 'attention';
   return (
     <SidebarMenuSubItem>
-      <div
-        data-slot='chat-trigger'
-        data-active={isActive}
-        className='group/chat-trigger flex h-7 w-full min-w-0 items-center rounded-md text-sm text-sidebar-foreground transition-colors focus-within:bg-sidebar-accent hover:bg-sidebar-accent data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground'
-      >
+      <div data-slot='chat-trigger' data-active={isActive} className={sidebarRowClass(isEditing)}>
+        {/* D8: the status column leads every chat row and is never hidden —
+            hover reveals the actions at the far end, and renaming keeps it. */}
+        <StatusMark data-slot='chat-status' facts={facts} />
         {isEditing ? (
           <InlineTextEditor
             value={chat.name}
             variant='ghost'
             shouldStartEditing
-            className='h-7 min-w-0 flex-1 pr-1.5 pl-[30px] [&_[data-slot=button]]:hidden [&_[data-slot=input]]:h-7'
+            className={sidebarRowEditorClass}
             onSave={onRenameSave}
             onEditingChange={onEditingChange}
           />
-        ) : project.slugs ? (
-          <Link
-            to={projectChatUrl(project.slugs, chat.id)}
-            aria-current={isActive ? 'page' : undefined}
-            aria-busy={isPending}
-            className='flex h-full min-w-0 flex-1 items-center gap-1.5 overflow-hidden rounded-md pr-1.5 pl-[30px] ring-sidebar-ring outline-hidden focus-visible:ring-2'
-          >
-            {isPending ? <Loader className='size-3.5 shrink-0' /> : null}
-            <span className='truncate'>{chat.name}</span>
-          </Link>
         ) : (
-          <div className='flex h-7 min-w-0 flex-1 items-center pr-1.5 pl-[30px] text-sm text-muted-foreground'>
-            <span className='truncate'>{chat.name}</span>
-          </div>
-        )}
-        {isEditing ? null : (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type='button'
-                variant='ghost'
-                size='icon'
-                className='mr-1 size-6 shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground data-[state=open]:opacity-100 md:opacity-0 md:group-focus-within/chat-trigger:opacity-100 md:group-hover/chat-trigger:opacity-100 dark:hover:bg-transparent'
-                aria-label={`More actions for ${chat.name}`}
-              >
-                <MoreHorizontal aria-hidden className='size-3.5' />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent side='right' align='start' className='w-40'>
-              <DropdownMenuItem onSelect={onRename}>
-                <Pencil aria-hidden />
-                Rename
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem variant='destructive' onSelect={() => void onDelete()}>
-                <Trash2 aria-hidden />
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <>
+            {project.slugs ? (
+              <SidebarRowLink
+                to={projectChatUrl(project.slugs, chat.id)}
+                name={chat.name}
+                sentence={facts.sentence}
+                descriptionId={`chat-status-${chat.id}`}
+                isActive={isActive}
+                isPending={isPending}
+              />
+            ) : (
+              <span className='fade-label flex-1 text-muted-foreground'>{chat.name}</span>
+            )}
+            <SidebarRowActions>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='icon'
+                    className={sidebarRowButtonClass}
+                    aria-label={`More actions for ${chat.name}`}
+                  >
+                    <MoreHorizontal aria-hidden className='size-3.5' />
+                  </Button>
+                </DropdownMenuTrigger>
+                {/* D7: no Retry and no Open log. The chat's own banner owns Try
+                    again, and the name already opens the chat. */}
+                <DropdownMenuContent side='right' align='start' className='w-40'>
+                  <DropdownMenuItem onSelect={onRename}>
+                    <Pencil aria-hidden />
+                    Rename
+                  </DropdownMenuItem>
+                  {canStop ? (
+                    <DropdownMenuItem
+                      aria-label={`Stop ${chat.name}`}
+                      onSelect={() => {
+                        closeChat(project.id, chat.id);
+                      }}
+                    >
+                      <Square aria-hidden />
+                      Stop
+                    </DropdownMenuItem>
+                  ) : null}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    variant='destructive'
+                    onSelect={() => {
+                      void onDelete();
+                    }}
+                  >
+                    <Trash2 aria-hidden />
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </SidebarRowActions>
+          </>
         )}
       </div>
     </SidebarMenuSubItem>

@@ -4,16 +4,16 @@
 
 HLRAppli_ReflectLines: declare class HLRAppli_ReflectLines
 
-constructor
+  constructor
 
-SetAxes(Nx: number, Ny: number, Nz: number, XAt: number, YAt: number, ZAt: number, XUp: number, YUp: number, ZUp: number): void;
+  SetAxes(Nx: number, Ny: number, Nz: number, XAt: number, YAt: number, ZAt: number, XUp: number, YUp: number, ZUp: number): void;
 
-Perform(): void;
+  Perform(): void;
 
-GetResult(): TopoDS_Shape;
+  GetResult(): TopoDS_Shape;
 
-GetCompoundOf3dEdges(type\_: HLRBRep_TypeOfResultingEdge, visible: boolean, In3d: boolean): TopoDS_Shape;
+  GetCompoundOf3dEdges(type_: HLRBRep_TypeOfResultingEdge, visible: boolean, In3d: boolean): TopoDS_Shape;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

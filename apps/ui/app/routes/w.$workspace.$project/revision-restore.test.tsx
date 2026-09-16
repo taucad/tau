@@ -15,12 +15,13 @@ import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.j
 
 const toastSuccess = vi.hoisted(() => vi.fn<(title: string, options?: { description?: string }) => void>());
 const toastError = vi.hoisted(() => vi.fn<(title: string, options?: { description?: string }) => void>());
+const toastInfo = vi.hoisted(() => vi.fn());
 
 vi.mock('#hooks/use-revision-status.js', async () => {
   const harness = await import('#hooks/use-revision-status.test-harness.js');
   return harness.revisionStatusMock();
 });
-vi.mock('#components/ui/sonner.js', () => ({ toast: { success: toastSuccess, error: toastError } }));
+vi.mock('#components/ui/sonner.js', () => ({ toast: { success: toastSuccess, error: toastError, info: toastInfo } }));
 vi.mock('#hooks/use-analytics.js', () => ({ useAnalytics: () => ({ capture: vi.fn() }) }));
 
 const plan = (over: Partial<(typeof revisionStatusHarness)['status']['restore']>): void => {
@@ -42,7 +43,7 @@ describe('RevisionRestore', () => {
 
     render(<RevisionRestore />);
 
-    expect(screen.getByText(/This deletes 2 file\(s\) created since\./)).toBeInTheDocument();
+    expect(screen.getByText(/This deletes 2 files created since\./)).toBeInTheDocument();
   });
 
   it('asks about unsaved editor changes without inventing a deletion', () => {
@@ -90,7 +91,7 @@ describe('RevisionRestore', () => {
 
     expect(screen.getByText('Work in bracket-fillet?')).toBeInTheDocument();
     expect(screen.getByText('A chat is working in the files you have open. Move anyway?')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }));
     expect(revisionStatusHarness.commands.confirmBranch).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(revisionStatusHarness.commands.cancelBranch).toHaveBeenCalledTimes(1);
@@ -111,6 +112,20 @@ describe('RevisionRestore', () => {
 
     const [title, options] = toastSuccess.mock.calls[0] ?? [];
     expect(title).toBe('Restored to Revision 3');
-    expect(options?.description).toContain('1 file(s) could not be recovered');
+    expect(options?.description).toContain('1 file could not be recovered');
+  });
+
+  it('says why a save failed, not just that one did (W18 DEF-7)', () => {
+    render(<RevisionRestore />);
+
+    for (const listener of revisionStatusHarness.toasts) {
+      /* The Revisions pane counted this and named nothing: "one change could
+       * not be saved" is a count, not a reason a person can act on (I12). */
+      listener({ type: 'error', subject: 'save', message: 'Buffer is not defined' });
+    }
+
+    const [title, options] = toastError.mock.calls[0] ?? [];
+    expect(title).toBe('That change could not be saved');
+    expect(options?.description).toBe('Buffer is not defined');
   });
 });

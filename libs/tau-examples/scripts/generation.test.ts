@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { projectManifestSchema } from '@taucad/types';
 import { describe, expect, it } from 'vitest';
 import sharp from 'sharp';
-import { createExampleRuntimeClient, exampleKernelIds } from '#scripts/runtime.js';
+import { createExampleRuntimeClient, exampleKernelIds, exampleRuntime } from '#scripts/runtime.js';
 
 type ManifestEntry = {
   readonly kind: 'model' | 'test-fixture' | 'spec-fixture' | 'reference';
@@ -23,6 +23,15 @@ const builtinSource = readFileSync(join(sourceDirectory, 'builtin.ts'), 'utf8');
 const testFixtureSource = readFileSync(join(sourceDirectory, 'test-fixtures.ts'), 'utf8');
 
 describe('generated example artifacts', () => {
+  it('enables one unit-inference middleware after parameter declarations resolve', () => {
+    expect(exampleRuntime.middleware.map(({ id }) => id)).toEqual([
+      'parameterFileResolver',
+      'parameterCache',
+      'parameterUnits',
+      'gltfEdgeDetection',
+    ]);
+  });
+
   it('strictly validates unique manifest-backed builtins and excludes runtime caches', () => {
     const ids = new Set<string>();
     const locators = new Set<string>();

@@ -20,6 +20,7 @@
  */
 
 import { ImmutableRevisionTree } from '@taucad/filesystem/revisions';
+import type { RevisionTreeInput } from '@taucad/filesystem/revisions';
 
 import { digestHex } from '#object-hash.js';
 import {
@@ -136,6 +137,15 @@ export const lfsObjectPath = (oid: string): string => `lfs/objects/${oid.slice(0
 export const cleanLargeObjects = (
   tree: ImmutableRevisionTree,
 ): Readonly<{ tree: ImmutableRevisionTree; objects: ReadonlyMap<string, Uint8Array<ArrayBuffer>> }> => {
+  /* One cut is cleaned twice: once by the I5 gate, to know the tree id it is
+   * about to compare, and once by the port writing that exact tree. Both SHA-256
+   * every large object in it, which on a project with one 5 MiB part file was
+   * the whole cost of a save (L4). Keyed on the tree, which is immutable, so the
+   * second answer is the first one rather than a recomputation of it. */
+  const cached = cleanedTrees.get(tree);
+  if (cached !== undefined) {
+    return cached;
+  }
   const entries = tree.entries();
   const attributesEntry = entries.find((entry) => entry.path === generatedGitattributesPath);
   const existing = attributesEntry === undefined ? undefined : decoder.decode(attributesEntry.content);
@@ -149,22 +159,30 @@ export const cleanLargeObjects = (
     .map((entry) => entry.path);
   const attributes = untracked.length === 0 ? existing : generatedGitattributesContent(existing, untracked);
   const objects = new Map<string, Uint8Array<ArrayBuffer>>();
-  const cleaned = entries.map((entry): readonly [string, Uint8Array<ArrayBuffer>] => {
+  const cleaned = entries.map((entry): RevisionTreeInput => {
     if (entry.path === generatedGitattributesPath && attributes !== existing) {
-      return [entry.path, textEncoder.encode(attributes)];
+      return [entry.path, textEncoder.encode(attributes), entry.mode];
     }
     if (!isTrackedLargeObjectPath(entry.path, attributes) || readLfsPointer(entry.content) !== undefined) {
-      return [entry.path, entry.content];
+      return [entry.path, entry.content, entry.mode];
     }
     const { pointer, bytes } = lfsPointerFor(entry.content);
     objects.set(pointer.oid, entry.content);
-    return [entry.path, bytes];
+    return [entry.path, bytes, entry.mode];
   });
   if (attributes !== existing && attributesEntry === undefined) {
     cleaned.push([generatedGitattributesPath, textEncoder.encode(attributes)]);
   }
-  return Object.freeze({
+  const recorded = Object.freeze({
     tree: objects.size === 0 && attributes === existing ? tree : new ImmutableRevisionTree(cleaned),
     objects,
   });
+  cleanedTrees.set(tree, recorded);
+  return recorded;
 };
+
+/** Cleaned cuts, held only while their caller still holds the tree. */
+const cleanedTrees = new WeakMap<
+  ImmutableRevisionTree,
+  Readonly<{ tree: ImmutableRevisionTree; objects: ReadonlyMap<string, Uint8Array<ArrayBuffer>> }>
+>();

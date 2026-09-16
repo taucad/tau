@@ -4,416 +4,416 @@
 
 BRepGraph_LayerDeferred: declare class BRepGraph_LayerDeferred extends BRepGraph_Layer
 
-constructor
+  constructor
 
-static GetID(): Standard_GUID;
+  static GetID(): Standard_GUID;
 
-ID(): Standard_GUID;
+  ID(): Standard_GUID;
 
-FindDeferred(theItem: BRepGraph_ItemId): BRepGraph_LayerDeferred_Entry;
-FindDeferred(theNode: BRepGraph_NodeId): BRepGraph_LayerDeferred_Entry;
-FindDeferred(theRef: BRepGraph_RefId): BRepGraph_LayerDeferred_Entry;
-FindDeferred(theItem: BRepGraph_ItemId): BRepGraph_LayerDeferred_Entry;
-FindDeferred(theNode: BRepGraph_NodeId): BRepGraph_LayerDeferred_Entry;
-FindDeferred(theRef: BRepGraph_RefId): BRepGraph_LayerDeferred_Entry;
-FindDeferred(theItem: BRepGraph_ItemId): BRepGraph_LayerDeferred_Entry;
-FindDeferred(theNode: BRepGraph_NodeId): BRepGraph_LayerDeferred_Entry;
-FindDeferred(theRef: BRepGraph_RefId): BRepGraph_LayerDeferred_Entry;
+  FindDeferred(theItem: BRepGraph_ItemId): BRepGraph_LayerDeferred_Entry;
+  FindDeferred(theNode: BRepGraph_NodeId): BRepGraph_LayerDeferred_Entry;
+  FindDeferred(theRef: BRepGraph_RefId): BRepGraph_LayerDeferred_Entry;
+  FindDeferred(theItem: BRepGraph_ItemId): BRepGraph_LayerDeferred_Entry;
+  FindDeferred(theNode: BRepGraph_NodeId): BRepGraph_LayerDeferred_Entry;
+  FindDeferred(theRef: BRepGraph_RefId): BRepGraph_LayerDeferred_Entry;
+  FindDeferred(theItem: BRepGraph_ItemId): BRepGraph_LayerDeferred_Entry;
+  FindDeferred(theNode: BRepGraph_NodeId): BRepGraph_LayerDeferred_Entry;
+  FindDeferred(theRef: BRepGraph_RefId): BRepGraph_LayerDeferred_Entry;
 
-HasDeferred(theItem: BRepGraph_ItemId): boolean;
-HasDeferred(theNode: BRepGraph_NodeId): boolean;
-HasDeferred(theRef: BRepGraph_RefId): boolean;
-HasDeferred(theItem: BRepGraph_ItemId): boolean;
-HasDeferred(theNode: BRepGraph_NodeId): boolean;
-HasDeferred(theRef: BRepGraph_RefId): boolean;
-HasDeferred(theItem: BRepGraph_ItemId): boolean;
-HasDeferred(theNode: BRepGraph_NodeId): boolean;
-HasDeferred(theRef: BRepGraph_RefId): boolean;
+  HasDeferred(theItem: BRepGraph_ItemId): boolean;
+  HasDeferred(theNode: BRepGraph_NodeId): boolean;
+  HasDeferred(theRef: BRepGraph_RefId): boolean;
+  HasDeferred(theItem: BRepGraph_ItemId): boolean;
+  HasDeferred(theNode: BRepGraph_NodeId): boolean;
+  HasDeferred(theRef: BRepGraph_RefId): boolean;
+  HasDeferred(theItem: BRepGraph_ItemId): boolean;
+  HasDeferred(theNode: BRepGraph_NodeId): boolean;
+  HasDeferred(theRef: BRepGraph_RefId): boolean;
 
-RegisterDeferred(theItem: BRepGraph_ItemId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentationKind: BRepGraph_LayerDeferred_RepresentationKind, theRepresentationName: TCollection_AsciiString, theSourceIndex: number): void;
-RegisterDeferred(theNode: BRepGraph_NodeId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentationKind: BRepGraph_LayerDeferred_RepresentationKind, theRepresentationName: TCollection_AsciiString, theSourceIndex: number): void;
-RegisterDeferred(theRef: BRepGraph_RefId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentationKind: BRepGraph_LayerDeferred_RepresentationKind, theRepresentationName: TCollection_AsciiString, theSourceIndex: number): void;
-RegisterDeferred(theItem: BRepGraph_ItemId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentationKind: BRepGraph_LayerDeferred_RepresentationKind, theRepresentationName: TCollection_AsciiString, theSourceIndex: number): void;
-RegisterDeferred(theNode: BRepGraph_NodeId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentationKind: BRepGraph_LayerDeferred_RepresentationKind, theRepresentationName: TCollection_AsciiString, theSourceIndex: number): void;
-RegisterDeferred(theRef: BRepGraph_RefId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentationKind: BRepGraph_LayerDeferred_RepresentationKind, theRepresentationName: TCollection_AsciiString, theSourceIndex: number): void;
-RegisterDeferred(theItem: BRepGraph_ItemId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentationKind: BRepGraph_LayerDeferred_RepresentationKind, theRepresentationName: TCollection_AsciiString, theSourceIndex: number): void;
-RegisterDeferred(theNode: BRepGraph_NodeId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentationKind: BRepGraph_LayerDeferred_RepresentationKind, theRepresentationName: TCollection_AsciiString, theSourceIndex: number): void;
-RegisterDeferred(theRef: BRepGraph_RefId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentationKind: BRepGraph_LayerDeferred_RepresentationKind, theRepresentationName: TCollection_AsciiString, theSourceIndex: number): void;
+  RegisterDeferred(theItem: BRepGraph_ItemId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentationKind: BRepGraph_LayerDeferred_RepresentationKind, theRepresentationName: TCollection_AsciiString, theSourceIndex: number): void;
+  RegisterDeferred(theNode: BRepGraph_NodeId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentationKind: BRepGraph_LayerDeferred_RepresentationKind, theRepresentationName: TCollection_AsciiString, theSourceIndex: number): void;
+  RegisterDeferred(theRef: BRepGraph_RefId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentationKind: BRepGraph_LayerDeferred_RepresentationKind, theRepresentationName: TCollection_AsciiString, theSourceIndex: number): void;
+  RegisterDeferred(theItem: BRepGraph_ItemId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentationKind: BRepGraph_LayerDeferred_RepresentationKind, theRepresentationName: TCollection_AsciiString, theSourceIndex: number): void;
+  RegisterDeferred(theNode: BRepGraph_NodeId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentationKind: BRepGraph_LayerDeferred_RepresentationKind, theRepresentationName: TCollection_AsciiString, theSourceIndex: number): void;
+  RegisterDeferred(theRef: BRepGraph_RefId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentationKind: BRepGraph_LayerDeferred_RepresentationKind, theRepresentationName: TCollection_AsciiString, theSourceIndex: number): void;
+  RegisterDeferred(theItem: BRepGraph_ItemId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentationKind: BRepGraph_LayerDeferred_RepresentationKind, theRepresentationName: TCollection_AsciiString, theSourceIndex: number): void;
+  RegisterDeferred(theNode: BRepGraph_NodeId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentationKind: BRepGraph_LayerDeferred_RepresentationKind, theRepresentationName: TCollection_AsciiString, theSourceIndex: number): void;
+  RegisterDeferred(theRef: BRepGraph_RefId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentationKind: BRepGraph_LayerDeferred_RepresentationKind, theRepresentationName: TCollection_AsciiString, theSourceIndex: number): void;
 
-RegisterDeferredRepresentations(theItem: BRepGraph_ItemId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentations: BRepGraph_LayerDeferred_Representation, theNbRepresentations: number): void;
+  RegisterDeferredRepresentations(theItem: BRepGraph_ItemId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentations: BRepGraph_LayerDeferred_Representation, theNbRepresentations: number): void;
 
-RegisterDeferredRepresentationsDirect(theItem: BRepGraph_ItemId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentations: BRepGraph_LayerDeferred_Representation, theNbRepresentations: number): void;
+  RegisterDeferredRepresentationsDirect(theItem: BRepGraph_ItemId, theProvider: TCollection_AsciiString, theSourceKey: TCollection_AsciiString, theRepresentations: BRepGraph_LayerDeferred_Representation, theNbRepresentations: number): void;
 
-UnregisterDeferred(theItem: BRepGraph_ItemId): void;
-UnregisterDeferred(theNode: BRepGraph_NodeId): void;
-UnregisterDeferred(theRef: BRepGraph_RefId): void;
-UnregisterDeferred(theItem: BRepGraph_ItemId): void;
-UnregisterDeferred(theNode: BRepGraph_NodeId): void;
-UnregisterDeferred(theRef: BRepGraph_RefId): void;
-UnregisterDeferred(theItem: BRepGraph_ItemId): void;
-UnregisterDeferred(theNode: BRepGraph_NodeId): void;
-UnregisterDeferred(theRef: BRepGraph_RefId): void;
+  UnregisterDeferred(theItem: BRepGraph_ItemId): void;
+  UnregisterDeferred(theNode: BRepGraph_NodeId): void;
+  UnregisterDeferred(theRef: BRepGraph_RefId): void;
+  UnregisterDeferred(theItem: BRepGraph_ItemId): void;
+  UnregisterDeferred(theNode: BRepGraph_NodeId): void;
+  UnregisterDeferred(theRef: BRepGraph_RefId): void;
+  UnregisterDeferred(theItem: BRepGraph_ItemId): void;
+  UnregisterDeferred(theNode: BRepGraph_NodeId): void;
+  UnregisterDeferred(theRef: BRepGraph_RefId): void;
 
-HasDeferredItems(): boolean;
+  HasDeferredItems(): boolean;
 
-FindFirstDeferred(theKind: BRepGraph_LayerDeferred_RepresentationKind, theItem?: BRepGraph_ItemId): BRepGraph_LayerDeferred_Entry;
+  FindFirstDeferred(theKind: BRepGraph_LayerDeferred_RepresentationKind, theItem?: BRepGraph_ItemId): BRepGraph_LayerDeferred_Entry;
 
-ReserveDeferredItems(theNbItems: number): void;
+  ReserveDeferredItems(theNbItems: number): void;
 
-BeginBulkRegistration(): void;
+  BeginBulkRegistration(): void;
 
-EndBulkRegistration(): void;
+  EndBulkRegistration(): void;
 
-Name(): TCollection_AsciiString;
+  Name(): TCollection_AsciiString;
 
-OnNodeRemoved(theNode: BRepGraph_NodeId): void;
+  OnNodeRemoved(theNode: BRepGraph_NodeId): void;
 
-OnNodeReplaced(theOldNode: BRepGraph_NodeId, theNewNode: BRepGraph_NodeId): void;
+  OnNodeReplaced(theOldNode: BRepGraph_NodeId, theNewNode: BRepGraph_NodeId): void;
 
-CopyTo(theCopy: BRepGraph_CopyRemap): void;
+  CopyTo(theCopy: BRepGraph_CopyRemap): void;
 
-OnRefRemoved(theRef: BRepGraph_RefId): void;
+  OnRefRemoved(theRef: BRepGraph_RefId): void;
 
-InvalidateAll(): void;
+  InvalidateAll(): void;
 
-Clear(): void;
+  Clear(): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_LayerDeferred_RepresentationKind: typeof BRepGraph_LayerDeferred_RepresentationKind[keyof typeof BRepGraph_LayerDeferred_RepresentationKind]
 
 BRepGraph_LayerDeferred_Entry: declare class BRepGraph_LayerDeferred_Entry
 
-constructor
+  constructor
 
-Provider: TCollection_AsciiString
+  Provider: TCollection_AsciiString
 
-SourceKey: TCollection_AsciiString
+  SourceKey: TCollection_AsciiString
 
-Representations: BRepGraph_LayerDeferred_Entry_RepresentationStorage
+  Representations: BRepGraph_LayerDeferred_Entry_RepresentationStorage
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_LayerDeferred_Entry_RepresentationStorage: declare class BRepGraph_LayerDeferred_Entry_RepresentationStorage
 
-constructor
+  constructor
 
-Size(): number;
+  Size(): number;
 
-IsEmpty(): boolean;
+  IsEmpty(): boolean;
 
-ContainsKind(theKind: BRepGraph_LayerDeferred_RepresentationKind): boolean;
+  ContainsKind(theKind: BRepGraph_LayerDeferred_RepresentationKind): boolean;
 
-Value(theIndex: number): BRepGraph_LayerDeferred_Representation;
+  Value(theIndex: number): BRepGraph_LayerDeferred_Representation;
 
-ChangeValue(theIndex: number): BRepGraph_LayerDeferred_Representation;
+  ChangeValue(theIndex: number): BRepGraph_LayerDeferred_Representation;
 
-First(): BRepGraph_LayerDeferred_Representation;
+  First(): BRepGraph_LayerDeferred_Representation;
 
-Append(theRepresentation: BRepGraph_LayerDeferred_Representation): void;
+  Append(theRepresentation: BRepGraph_LayerDeferred_Representation): void;
 
-Clear(): void;
+  Clear(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_LayerDeferred_Representation: declare class BRepGraph_LayerDeferred_Representation
 
-constructor
+  constructor
 
-Kind: BRepGraph_LayerDeferred_RepresentationKind
+  Kind: BRepGraph_LayerDeferred_RepresentationKind
 
-Role: number
+  Role: number
 
-Name: TCollection_AsciiString
+  Name: TCollection_AsciiString
 
-SourceIndex: number
+  SourceIndex: number
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_LayerHistory: declare class BRepGraph_LayerHistory extends BRepGraph_Layer
 
-constructor
+  constructor
 
-static GetID(): Standard_GUID;
+  static GetID(): Standard_GUID;
 
-ID(): Standard_GUID;
+  ID(): Standard_GUID;
 
-Name(): TCollection_AsciiString;
+  Name(): TCollection_AsciiString;
 
-Record(theOpLabel: TCollection_AsciiString, theOriginal: BRepGraph_NodeId, theReplacements: NCollection_Array1_BRepGraph_NodeId, theKind: BRepGraph_LayerHistory_Kind): void;
-Record(theRecordIdx: number): BRepGraph_LayerHistory_Event;
-Record(theOpLabel: TCollection_AsciiString, theOriginal: BRepGraph_NodeId, theReplacements: NCollection_Array1_BRepGraph_NodeId, theKind: BRepGraph_LayerHistory_Kind): void;
-Record(theRecordIdx: number): BRepGraph_LayerHistory_Event;
+  Record(theOpLabel: TCollection_AsciiString, theOriginal: BRepGraph_NodeId, theReplacements: NCollection_Array1_BRepGraph_NodeId, theKind: BRepGraph_LayerHistory_Kind): void;
+  Record(theRecordIdx: number): BRepGraph_LayerHistory_Event;
+  Record(theOpLabel: TCollection_AsciiString, theOriginal: BRepGraph_NodeId, theReplacements: NCollection_Array1_BRepGraph_NodeId, theKind: BRepGraph_LayerHistory_Kind): void;
+  Record(theRecordIdx: number): BRepGraph_LayerHistory_Event;
 
-RecordBatch(theOpLabel: TCollection_AsciiString, theOriginals: NCollection_Array1_BRepGraph_NodeId, theReplacements: NCollection_Array1_BRepGraph_NodeId, theExtraInfo?: TCollection_AsciiString, theKind?: BRepGraph_LayerHistory_Kind): void;
+  RecordBatch(theOpLabel: TCollection_AsciiString, theOriginals: NCollection_Array1_BRepGraph_NodeId, theReplacements: NCollection_Array1_BRepGraph_NodeId, theExtraInfo?: TCollection_AsciiString, theKind?: BRepGraph_LayerHistory_Kind): void;
 
-RecordDeleted(theOpLabel: TCollection_AsciiString, theDeleted: NCollection_Array1_BRepGraph_NodeId): void;
+  RecordDeleted(theOpLabel: TCollection_AsciiString, theDeleted: NCollection_Array1_BRepGraph_NodeId): void;
 
-RecordReplaced(theOpLabel: TCollection_AsciiString, theOriginal: BRepGraph_NodeId, theReplacement: BRepGraph_NodeId): void;
+  RecordReplaced(theOpLabel: TCollection_AsciiString, theOriginal: BRepGraph_NodeId, theReplacement: BRepGraph_NodeId): void;
 
-RecordReplacedBatch(theOpLabel: TCollection_AsciiString, theOriginals: NCollection_Array1_BRepGraph_NodeId, theReplacements: NCollection_Array1_BRepGraph_NodeId, theExtraInfo?: TCollection_AsciiString): void;
+  RecordReplacedBatch(theOpLabel: TCollection_AsciiString, theOriginals: NCollection_Array1_BRepGraph_NodeId, theReplacements: NCollection_Array1_BRepGraph_NodeId, theExtraInfo?: TCollection_AsciiString): void;
 
-RecordUid(theOpLabel: TCollection_AsciiString, theOriginal: BRepGraph_UID, theReplacements: NCollection_Array1_BRepGraph_UID, theKind?: BRepGraph_LayerHistory_Kind): void;
+  RecordUid(theOpLabel: TCollection_AsciiString, theOriginal: BRepGraph_UID, theReplacements: NCollection_Array1_BRepGraph_UID, theKind?: BRepGraph_LayerHistory_Kind): void;
 
-RecordDeletedUid(theOpLabel: TCollection_AsciiString, theDeleted: NCollection_Array1_BRepGraph_UID): void;
+  RecordDeletedUid(theOpLabel: TCollection_AsciiString, theDeleted: NCollection_Array1_BRepGraph_UID): void;
 
-RecordItemUid(theOpLabel: TCollection_AsciiString, theOriginal: BRepGraph_ItemUID, theReplacements: NCollection_Array1_BRepGraph_ItemUID, theKind?: BRepGraph_LayerHistory_Kind): void;
+  RecordItemUid(theOpLabel: TCollection_AsciiString, theOriginal: BRepGraph_ItemUID, theReplacements: NCollection_Array1_BRepGraph_ItemUID, theKind?: BRepGraph_LayerHistory_Kind): void;
 
-RecordDeletedItemUid(theOpLabel: TCollection_AsciiString, theDeleted: NCollection_Array1_BRepGraph_ItemUID): void;
+  RecordDeletedItemUid(theOpLabel: TCollection_AsciiString, theDeleted: NCollection_Array1_BRepGraph_ItemUID): void;
 
-Absorb(theInputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theOutputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theSource: BRepTools_History, theOpLabel: TCollection_AsciiString): void;
-Absorb(theInputGraph: BRepGraph, theOutputGraph: BRepGraph, theInputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theOutputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theSource: BRepTools_History, theOpLabel: TCollection_AsciiString): void;
-Absorb(theInputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theOutputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theSource: BRepTools_History, theOpLabel: TCollection_AsciiString): void;
-Absorb(theInputGraph: BRepGraph, theOutputGraph: BRepGraph, theInputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theOutputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theSource: BRepTools_History, theOpLabel: TCollection_AsciiString): void;
+  Absorb(theInputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theOutputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theSource: BRepTools_History, theOpLabel: TCollection_AsciiString): void;
+  Absorb(theInputGraph: BRepGraph, theOutputGraph: BRepGraph, theInputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theOutputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theSource: BRepTools_History, theOpLabel: TCollection_AsciiString): void;
+  Absorb(theInputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theOutputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theSource: BRepTools_History, theOpLabel: TCollection_AsciiString): void;
+  Absorb(theInputGraph: BRepGraph, theOutputGraph: BRepGraph, theInputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theOutputs: NCollection_DataMap_TopoDS_Shape_BRepGraph_NodeId_TopTools_ShapeMapHasher, theSource: BRepTools_History, theOpLabel: TCollection_AsciiString): void;
 
-FindOriginal(theModified: BRepGraph_NodeId): BRepGraph_NodeId;
+  FindOriginal(theModified: BRepGraph_NodeId): BRepGraph_NodeId;
 
-FindDerived(theOriginal: BRepGraph_NodeId): BRepGraph_NodeId[];
+  FindDerived(theOriginal: BRepGraph_NodeId): BRepGraph_NodeId[];
 
-FindModified(theOriginal: BRepGraph_NodeId): BRepGraph_NodeId[];
-FindModified(theUID: BRepGraph_UID): BRepGraph_UID[];
-FindModified(theUID: BRepGraph_ItemUID): BRepGraph_ItemUID[];
-FindModified(theGraph: BRepGraph, theUID: BRepGraph_UID): BRepGraph_UID[];
-FindModified(theOriginal: BRepGraph_NodeId): BRepGraph_NodeId[];
-FindModified(theUID: BRepGraph_UID): BRepGraph_UID[];
-FindModified(theUID: BRepGraph_ItemUID): BRepGraph_ItemUID[];
-FindModified(theGraph: BRepGraph, theUID: BRepGraph_UID): BRepGraph_UID[];
-FindModified(theOriginal: BRepGraph_NodeId): BRepGraph_NodeId[];
-FindModified(theUID: BRepGraph_UID): BRepGraph_UID[];
-FindModified(theUID: BRepGraph_ItemUID): BRepGraph_ItemUID[];
-FindModified(theGraph: BRepGraph, theUID: BRepGraph_UID): BRepGraph_UID[];
-FindModified(theOriginal: BRepGraph_NodeId): BRepGraph_NodeId[];
-FindModified(theUID: BRepGraph_UID): BRepGraph_UID[];
-FindModified(theUID: BRepGraph_ItemUID): BRepGraph_ItemUID[];
-FindModified(theGraph: BRepGraph, theUID: BRepGraph_UID): BRepGraph_UID[];
+  FindModified(theOriginal: BRepGraph_NodeId): BRepGraph_NodeId[];
+  FindModified(theUID: BRepGraph_UID): BRepGraph_UID[];
+  FindModified(theUID: BRepGraph_ItemUID): BRepGraph_ItemUID[];
+  FindModified(theGraph: BRepGraph, theUID: BRepGraph_UID): BRepGraph_UID[];
+  FindModified(theOriginal: BRepGraph_NodeId): BRepGraph_NodeId[];
+  FindModified(theUID: BRepGraph_UID): BRepGraph_UID[];
+  FindModified(theUID: BRepGraph_ItemUID): BRepGraph_ItemUID[];
+  FindModified(theGraph: BRepGraph, theUID: BRepGraph_UID): BRepGraph_UID[];
+  FindModified(theOriginal: BRepGraph_NodeId): BRepGraph_NodeId[];
+  FindModified(theUID: BRepGraph_UID): BRepGraph_UID[];
+  FindModified(theUID: BRepGraph_ItemUID): BRepGraph_ItemUID[];
+  FindModified(theGraph: BRepGraph, theUID: BRepGraph_UID): BRepGraph_UID[];
+  FindModified(theOriginal: BRepGraph_NodeId): BRepGraph_NodeId[];
+  FindModified(theUID: BRepGraph_UID): BRepGraph_UID[];
+  FindModified(theUID: BRepGraph_ItemUID): BRepGraph_ItemUID[];
+  FindModified(theGraph: BRepGraph, theUID: BRepGraph_UID): BRepGraph_UID[];
 
-FindGenerated(theOriginal: BRepGraph_NodeId): BRepGraph_NodeId[];
-FindGenerated(theUID: BRepGraph_UID): BRepGraph_UID[];
-FindGenerated(theUID: BRepGraph_ItemUID): BRepGraph_ItemUID[];
-FindGenerated(theGraph: BRepGraph, theUID: BRepGraph_UID): BRepGraph_UID[];
-FindGenerated(theOriginal: BRepGraph_NodeId): BRepGraph_NodeId[];
-FindGenerated(theUID: BRepGraph_UID): BRepGraph_UID[];
-FindGenerated(theUID: BRepGraph_ItemUID): BRepGraph_ItemUID[];
-FindGenerated(theGraph: BRepGraph, theUID: BRepGraph_UID): BRepGraph_UID[];
-FindGenerated(theOriginal: BRepGraph_NodeId): BRepGraph_NodeId[];
-FindGenerated(theUID: BRepGraph_UID): BRepGraph_UID[];
-FindGenerated(theUID: BRepGraph_ItemUID): BRepGraph_ItemUID[];
-FindGenerated(theGraph: BRepGraph, theUID: BRepGraph_UID): BRepGraph_UID[];
-FindGenerated(theOriginal: BRepGraph_NodeId): BRepGraph_NodeId[];
-FindGenerated(theUID: BRepGraph_UID): BRepGraph_UID[];
-FindGenerated(theUID: BRepGraph_ItemUID): BRepGraph_ItemUID[];
-FindGenerated(theGraph: BRepGraph, theUID: BRepGraph_UID): BRepGraph_UID[];
+  FindGenerated(theOriginal: BRepGraph_NodeId): BRepGraph_NodeId[];
+  FindGenerated(theUID: BRepGraph_UID): BRepGraph_UID[];
+  FindGenerated(theUID: BRepGraph_ItemUID): BRepGraph_ItemUID[];
+  FindGenerated(theGraph: BRepGraph, theUID: BRepGraph_UID): BRepGraph_UID[];
+  FindGenerated(theOriginal: BRepGraph_NodeId): BRepGraph_NodeId[];
+  FindGenerated(theUID: BRepGraph_UID): BRepGraph_UID[];
+  FindGenerated(theUID: BRepGraph_ItemUID): BRepGraph_ItemUID[];
+  FindGenerated(theGraph: BRepGraph, theUID: BRepGraph_UID): BRepGraph_UID[];
+  FindGenerated(theOriginal: BRepGraph_NodeId): BRepGraph_NodeId[];
+  FindGenerated(theUID: BRepGraph_UID): BRepGraph_UID[];
+  FindGenerated(theUID: BRepGraph_ItemUID): BRepGraph_ItemUID[];
+  FindGenerated(theGraph: BRepGraph, theUID: BRepGraph_UID): BRepGraph_UID[];
+  FindGenerated(theOriginal: BRepGraph_NodeId): BRepGraph_NodeId[];
+  FindGenerated(theUID: BRepGraph_UID): BRepGraph_UID[];
+  FindGenerated(theUID: BRepGraph_ItemUID): BRepGraph_ItemUID[];
+  FindGenerated(theGraph: BRepGraph, theUID: BRepGraph_UID): BRepGraph_UID[];
 
-IsDeleted(theOriginal: BRepGraph_NodeId): boolean;
-IsDeleted(theUID: BRepGraph_UID): boolean;
-IsDeleted(theUID: BRepGraph_ItemUID): boolean;
-IsDeleted(theGraph: BRepGraph, theUID: BRepGraph_UID): boolean;
-IsDeleted(theOriginal: BRepGraph_NodeId): boolean;
-IsDeleted(theUID: BRepGraph_UID): boolean;
-IsDeleted(theUID: BRepGraph_ItemUID): boolean;
-IsDeleted(theGraph: BRepGraph, theUID: BRepGraph_UID): boolean;
-IsDeleted(theOriginal: BRepGraph_NodeId): boolean;
-IsDeleted(theUID: BRepGraph_UID): boolean;
-IsDeleted(theUID: BRepGraph_ItemUID): boolean;
-IsDeleted(theGraph: BRepGraph, theUID: BRepGraph_UID): boolean;
-IsDeleted(theOriginal: BRepGraph_NodeId): boolean;
-IsDeleted(theUID: BRepGraph_UID): boolean;
-IsDeleted(theUID: BRepGraph_ItemUID): boolean;
-IsDeleted(theGraph: BRepGraph, theUID: BRepGraph_UID): boolean;
+  IsDeleted(theOriginal: BRepGraph_NodeId): boolean;
+  IsDeleted(theUID: BRepGraph_UID): boolean;
+  IsDeleted(theUID: BRepGraph_ItemUID): boolean;
+  IsDeleted(theGraph: BRepGraph, theUID: BRepGraph_UID): boolean;
+  IsDeleted(theOriginal: BRepGraph_NodeId): boolean;
+  IsDeleted(theUID: BRepGraph_UID): boolean;
+  IsDeleted(theUID: BRepGraph_ItemUID): boolean;
+  IsDeleted(theGraph: BRepGraph, theUID: BRepGraph_UID): boolean;
+  IsDeleted(theOriginal: BRepGraph_NodeId): boolean;
+  IsDeleted(theUID: BRepGraph_UID): boolean;
+  IsDeleted(theUID: BRepGraph_ItemUID): boolean;
+  IsDeleted(theGraph: BRepGraph, theUID: BRepGraph_UID): boolean;
+  IsDeleted(theOriginal: BRepGraph_NodeId): boolean;
+  IsDeleted(theUID: BRepGraph_UID): boolean;
+  IsDeleted(theUID: BRepGraph_ItemUID): boolean;
+  IsDeleted(theGraph: BRepGraph, theUID: BRepGraph_UID): boolean;
 
-DeletedNodes(): any;
+  DeletedNodes(): any;
 
-FindOriginals(theDerived: BRepGraph_NodeId): BRepGraph_NodeId[];
+  FindOriginals(theDerived: BRepGraph_NodeId): BRepGraph_NodeId[];
 
-DeletedUids(): any;
-DeletedUids(theGraph: BRepGraph): BRepGraph_UID[];
-DeletedUids(): any;
-DeletedUids(theGraph: BRepGraph): BRepGraph_UID[];
+  DeletedUids(): any;
+  DeletedUids(theGraph: BRepGraph): BRepGraph_UID[];
+  DeletedUids(): any;
+  DeletedUids(theGraph: BRepGraph): BRepGraph_UID[];
 
-HasKnownInput(theUID: BRepGraph_UID): boolean;
-HasKnownInput(theUID: BRepGraph_ItemUID): boolean;
-HasKnownInput(theUID: BRepGraph_UID): boolean;
-HasKnownInput(theUID: BRepGraph_ItemUID): boolean;
+  HasKnownInput(theUID: BRepGraph_UID): boolean;
+  HasKnownInput(theUID: BRepGraph_ItemUID): boolean;
+  HasKnownInput(theUID: BRepGraph_UID): boolean;
+  HasKnownInput(theUID: BRepGraph_ItemUID): boolean;
 
-DeletedItemUids(): any;
+  DeletedItemUids(): any;
 
-NbRecords(): number;
+  NbRecords(): number;
 
-SetEnabled(theVal: boolean): void;
+  SetEnabled(theVal: boolean): void;
 
-IsEnabled(): boolean;
+  IsEnabled(): boolean;
 
-Clear(): void;
+  Clear(): void;
 
-OnNodeRemoved(theNode: BRepGraph_NodeId): void;
+  OnNodeRemoved(theNode: BRepGraph_NodeId): void;
 
-CopyTo(theCopy: BRepGraph_CopyRemap): void;
+  CopyTo(theCopy: BRepGraph_CopyRemap): void;
 
-InvalidateAll(): void;
+  InvalidateAll(): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_LayerHistory_Kind: typeof BRepGraph_LayerHistory_Kind[keyof typeof BRepGraph_LayerHistory_Kind]
 
 BRepGraph_LayerIterator: declare class BRepGraph_LayerIterator
 
-constructor
+  constructor
 
-More(): boolean;
+  More(): boolean;
 
-Next(): void;
+  Next(): void;
 
-Value(): BRepGraph_Layer;
+  Value(): BRepGraph_Layer;
 
-Slot(): number;
+  Slot(): number;
 
-NbLayers(): number;
+  NbLayers(): number;
 
-end(): NCollection_ForwardRangeSentinel;
+  end(): NCollection_ForwardRangeSentinel;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_LayerLock: declare class BRepGraph_LayerLock extends BRepGraph_Layer
 
-constructor
+  constructor
 
-static GetID(): Standard_GUID;
+  static GetID(): Standard_GUID;
 
-ID(): Standard_GUID;
+  ID(): Standard_GUID;
 
-FindOwnerId(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): boolean;
-FindOwnerId(theNode: BRepGraph_NodeId, theOwnerId: Standard_GUID): boolean;
-FindOwnerId(theRef: BRepGraph_RefId, theOwnerId: Standard_GUID): boolean;
-FindOwnerId(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): boolean;
-FindOwnerId(theNode: BRepGraph_NodeId, theOwnerId: Standard_GUID): boolean;
-FindOwnerId(theRef: BRepGraph_RefId, theOwnerId: Standard_GUID): boolean;
-FindOwnerId(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): boolean;
-FindOwnerId(theNode: BRepGraph_NodeId, theOwnerId: Standard_GUID): boolean;
-FindOwnerId(theRef: BRepGraph_RefId, theOwnerId: Standard_GUID): boolean;
+  FindOwnerId(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): boolean;
+  FindOwnerId(theNode: BRepGraph_NodeId, theOwnerId: Standard_GUID): boolean;
+  FindOwnerId(theRef: BRepGraph_RefId, theOwnerId: Standard_GUID): boolean;
+  FindOwnerId(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): boolean;
+  FindOwnerId(theNode: BRepGraph_NodeId, theOwnerId: Standard_GUID): boolean;
+  FindOwnerId(theRef: BRepGraph_RefId, theOwnerId: Standard_GUID): boolean;
+  FindOwnerId(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): boolean;
+  FindOwnerId(theNode: BRepGraph_NodeId, theOwnerId: Standard_GUID): boolean;
+  FindOwnerId(theRef: BRepGraph_RefId, theOwnerId: Standard_GUID): boolean;
 
-HasOwner(theItem: BRepGraph_ItemId): boolean;
-HasOwner(theNode: BRepGraph_NodeId): boolean;
-HasOwner(theRef: BRepGraph_RefId): boolean;
-HasOwner(theItem: BRepGraph_ItemId): boolean;
-HasOwner(theNode: BRepGraph_NodeId): boolean;
-HasOwner(theRef: BRepGraph_RefId): boolean;
-HasOwner(theItem: BRepGraph_ItemId): boolean;
-HasOwner(theNode: BRepGraph_NodeId): boolean;
-HasOwner(theRef: BRepGraph_RefId): boolean;
+  HasOwner(theItem: BRepGraph_ItemId): boolean;
+  HasOwner(theNode: BRepGraph_NodeId): boolean;
+  HasOwner(theRef: BRepGraph_RefId): boolean;
+  HasOwner(theItem: BRepGraph_ItemId): boolean;
+  HasOwner(theNode: BRepGraph_NodeId): boolean;
+  HasOwner(theRef: BRepGraph_RefId): boolean;
+  HasOwner(theItem: BRepGraph_ItemId): boolean;
+  HasOwner(theNode: BRepGraph_NodeId): boolean;
+  HasOwner(theRef: BRepGraph_RefId): boolean;
 
-SetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): void;
-SetOwner(theNode: BRepGraph_NodeId, theOwnerId: Standard_GUID): void;
-SetOwner(theRef: BRepGraph_RefId, theOwnerId: Standard_GUID): void;
-SetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID, theToUpdateRevision: boolean): boolean;
-SetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): void;
-SetOwner(theNode: BRepGraph_NodeId, theOwnerId: Standard_GUID): void;
-SetOwner(theRef: BRepGraph_RefId, theOwnerId: Standard_GUID): void;
-SetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID, theToUpdateRevision: boolean): boolean;
-SetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): void;
-SetOwner(theNode: BRepGraph_NodeId, theOwnerId: Standard_GUID): void;
-SetOwner(theRef: BRepGraph_RefId, theOwnerId: Standard_GUID): void;
-SetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID, theToUpdateRevision: boolean): boolean;
-SetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): void;
-SetOwner(theNode: BRepGraph_NodeId, theOwnerId: Standard_GUID): void;
-SetOwner(theRef: BRepGraph_RefId, theOwnerId: Standard_GUID): void;
-SetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID, theToUpdateRevision: boolean): boolean;
+  SetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): void;
+  SetOwner(theNode: BRepGraph_NodeId, theOwnerId: Standard_GUID): void;
+  SetOwner(theRef: BRepGraph_RefId, theOwnerId: Standard_GUID): void;
+  SetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID, theToUpdateRevision: boolean): boolean;
+  SetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): void;
+  SetOwner(theNode: BRepGraph_NodeId, theOwnerId: Standard_GUID): void;
+  SetOwner(theRef: BRepGraph_RefId, theOwnerId: Standard_GUID): void;
+  SetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID, theToUpdateRevision: boolean): boolean;
+  SetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): void;
+  SetOwner(theNode: BRepGraph_NodeId, theOwnerId: Standard_GUID): void;
+  SetOwner(theRef: BRepGraph_RefId, theOwnerId: Standard_GUID): void;
+  SetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID, theToUpdateRevision: boolean): boolean;
+  SetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): void;
+  SetOwner(theNode: BRepGraph_NodeId, theOwnerId: Standard_GUID): void;
+  SetOwner(theRef: BRepGraph_RefId, theOwnerId: Standard_GUID): void;
+  SetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID, theToUpdateRevision: boolean): boolean;
 
-UnsetOwner(theItem: BRepGraph_ItemId): void;
-UnsetOwner(theNode: BRepGraph_NodeId): void;
-UnsetOwner(theRef: BRepGraph_RefId): void;
-UnsetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): void;
-UnsetOwner(theItem: BRepGraph_ItemId): void;
-UnsetOwner(theNode: BRepGraph_NodeId): void;
-UnsetOwner(theRef: BRepGraph_RefId): void;
-UnsetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): void;
-UnsetOwner(theItem: BRepGraph_ItemId): void;
-UnsetOwner(theNode: BRepGraph_NodeId): void;
-UnsetOwner(theRef: BRepGraph_RefId): void;
-UnsetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): void;
-UnsetOwner(theItem: BRepGraph_ItemId): void;
-UnsetOwner(theNode: BRepGraph_NodeId): void;
-UnsetOwner(theRef: BRepGraph_RefId): void;
-UnsetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): void;
+  UnsetOwner(theItem: BRepGraph_ItemId): void;
+  UnsetOwner(theNode: BRepGraph_NodeId): void;
+  UnsetOwner(theRef: BRepGraph_RefId): void;
+  UnsetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): void;
+  UnsetOwner(theItem: BRepGraph_ItemId): void;
+  UnsetOwner(theNode: BRepGraph_NodeId): void;
+  UnsetOwner(theRef: BRepGraph_RefId): void;
+  UnsetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): void;
+  UnsetOwner(theItem: BRepGraph_ItemId): void;
+  UnsetOwner(theNode: BRepGraph_NodeId): void;
+  UnsetOwner(theRef: BRepGraph_RefId): void;
+  UnsetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): void;
+  UnsetOwner(theItem: BRepGraph_ItemId): void;
+  UnsetOwner(theNode: BRepGraph_NodeId): void;
+  UnsetOwner(theRef: BRepGraph_RefId): void;
+  UnsetOwner(theItem: BRepGraph_ItemId, theOwnerId: Standard_GUID): void;
 
-HasOwners(): boolean;
+  HasOwners(): boolean;
 
-ReserveOwners(theNbOwners: number): void;
+  ReserveOwners(theNbOwners: number): void;
 
-TouchOwners(): void;
+  TouchOwners(): void;
 
-Name(): TCollection_AsciiString;
+  Name(): TCollection_AsciiString;
 
-OnNodeRemoved(theNode: BRepGraph_NodeId): void;
+  OnNodeRemoved(theNode: BRepGraph_NodeId): void;
 
-OnNodeReplaced(theOldNode: BRepGraph_NodeId, theNewNode: BRepGraph_NodeId): void;
+  OnNodeReplaced(theOldNode: BRepGraph_NodeId, theNewNode: BRepGraph_NodeId): void;
 
-CopyTo(theCopy: BRepGraph_CopyRemap): void;
+  CopyTo(theCopy: BRepGraph_CopyRemap): void;
 
-OnRefRemoved(theRef: BRepGraph_RefId): void;
+  OnRefRemoved(theRef: BRepGraph_RefId): void;
 
-InvalidateAll(): void;
+  InvalidateAll(): void;
 
-Clear(): void;
+  Clear(): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_LayerLock_ScopedOwnerEdit: declare class BRepGraph_LayerLock_ScopedOwnerEdit
 
-constructor
+  constructor
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_LayerParametric: declare class BRepGraph_LayerParametric extends BRepGraph_Layer
 
-static GenerationMask(theFlag: BRepGraph_LayerParametric_GenerationFlag): number;
+  static GenerationMask(theFlag: BRepGraph_LayerParametric_GenerationFlag): number;
 
-static HasGenerationFlag(theFlags: number, theFlag: BRepGraph_LayerParametric_GenerationFlag): boolean;
+  static HasGenerationFlag(theFlags: number, theFlag: BRepGraph_LayerParametric_GenerationFlag): boolean;
 
-static MeshQualityValue(theQuality: BRepGraph_LayerParametric_MeshQuality, theVeryCoarse: number, theCoarse: number, theMedium: number, theFine: number, theVeryFine: number): number;
+  static MeshQualityValue(theQuality: BRepGraph_LayerParametric_MeshQuality, theVeryCoarse: number, theCoarse: number, theMedium: number, theFine: number, theVeryFine: number): number;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_LayerParametric_GenerationFlag: typeof BRepGraph_LayerParametric_GenerationFlag[keyof typeof BRepGraph_LayerParametric_GenerationFlag]
 
@@ -421,271 +421,271 @@ BRepGraph_LayerParametric_MeshQuality: typeof BRepGraph_LayerParametric_MeshQual
 
 BRepGraph_LayerRegistry: declare class BRepGraph_LayerRegistry
 
-constructor
+  constructor
 
-RegisterLayer(theLayer: BRepGraph_Layer): number;
+  RegisterLayer(theLayer: BRepGraph_Layer): number;
 
-UnregisterLayer(theGUID: Standard_GUID): void;
+  UnregisterLayer(theGUID: Standard_GUID): void;
 
-FindLayer(theGUID: Standard_GUID): BRepGraph_Layer;
+  FindLayer(theGUID: Standard_GUID): BRepGraph_Layer;
 
-FindSlot(theGUID: Standard_GUID, theSlot?: number): { returnValue: boolean; theSlot: number };
+  FindSlot(theGUID: Standard_GUID, theSlot?: number): { returnValue: boolean; theSlot: number };
 
-Layer(theSlot: number): BRepGraph_Layer;
+  Layer(theSlot: number): BRepGraph_Layer;
 
-NbLayers(): number;
+  NbLayers(): number;
 
-HasModificationSubscribers(): boolean;
+  HasModificationSubscribers(): boolean;
 
-SubscribedKindsMask(): number;
+  SubscribedKindsMask(): number;
 
-DispatchOnNodeRemoved(theNode: BRepGraph_NodeId): void;
+  DispatchOnNodeRemoved(theNode: BRepGraph_NodeId): void;
 
-DispatchOnItemRemoved(theItem: BRepGraph_ItemId): void;
+  DispatchOnItemRemoved(theItem: BRepGraph_ItemId): void;
 
-DispatchOnNodeReplaced(theOldNode: BRepGraph_NodeId, theNewNode: BRepGraph_NodeId): void;
+  DispatchOnNodeReplaced(theOldNode: BRepGraph_NodeId, theNewNode: BRepGraph_NodeId): void;
 
-DispatchNodeModified(theNode: BRepGraph_NodeId): void;
+  DispatchNodeModified(theNode: BRepGraph_NodeId): void;
 
-DispatchItemModified(theItem: BRepGraph_ItemId): void;
+  DispatchItemModified(theItem: BRepGraph_ItemId): void;
 
-DispatchNodesModified(theModifiedNodes: NCollection_Array1_BRepGraph_NodeId, theModifiedKindsMask: number): void;
+  DispatchNodesModified(theModifiedNodes: NCollection_Array1_BRepGraph_NodeId, theModifiedKindsMask: number): void;
 
-CopyLayersTo(theTargetGraph: BRepGraph, theItemRemap: any, theMode: BRepGraph_CopyRemap_Mode): void;
-CopyLayersTo(theTargetGraph: BRepGraph, theMappingKind: BRepGraph_CopyRemap_MappingKind, theMode: BRepGraph_CopyRemap_Mode): void;
-CopyLayersTo(theTargetGraph: BRepGraph, theItemRemap: any, theMode: BRepGraph_CopyRemap_Mode): void;
-CopyLayersTo(theTargetGraph: BRepGraph, theMappingKind: BRepGraph_CopyRemap_MappingKind, theMode: BRepGraph_CopyRemap_Mode): void;
+  CopyLayersTo(theTargetGraph: BRepGraph, theItemRemap: any, theMode: BRepGraph_CopyRemap_Mode): void;
+  CopyLayersTo(theTargetGraph: BRepGraph, theMappingKind: BRepGraph_CopyRemap_MappingKind, theMode: BRepGraph_CopyRemap_Mode): void;
+  CopyLayersTo(theTargetGraph: BRepGraph, theItemRemap: any, theMode: BRepGraph_CopyRemap_Mode): void;
+  CopyLayersTo(theTargetGraph: BRepGraph, theMappingKind: BRepGraph_CopyRemap_MappingKind, theMode: BRepGraph_CopyRemap_Mode): void;
 
-HasRefModificationSubscribers(): boolean;
+  HasRefModificationSubscribers(): boolean;
 
-SubscribedRefKindsMask(): number;
+  SubscribedRefKindsMask(): number;
 
-DispatchOnRefRemoved(theRef: BRepGraph_RefId): void;
+  DispatchOnRefRemoved(theRef: BRepGraph_RefId): void;
 
-DispatchRefModified(theRef: BRepGraph_RefId): void;
+  DispatchRefModified(theRef: BRepGraph_RefId): void;
 
-DispatchRefsModified(theModifiedRefs: NCollection_Array1_BRepGraph_RefId, theModifiedRefKindsMask: number): void;
+  DispatchRefsModified(theModifiedRefs: NCollection_Array1_BRepGraph_RefId, theModifiedRefKindsMask: number): void;
 
-ClearAll(): void;
+  ClearAll(): void;
 
-InvalidateAll(): void;
+  InvalidateAll(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_LayerTopoSupplement: declare class BRepGraph_LayerTopoSupplement extends BRepGraph_Layer
 
-constructor
+  constructor
 
-static GetID(): Standard_GUID;
+  static GetID(): Standard_GUID;
 
-ID(): Standard_GUID;
+  ID(): Standard_GUID;
 
-Name(): TCollection_AsciiString;
+  Name(): TCollection_AsciiString;
 
-FindByUid(theUid: number): BRepGraph_LayerTopoSupplement_Entry;
+  FindByUid(theUid: number): BRepGraph_LayerTopoSupplement_Entry;
 
-AttachedTo(theOwner: BRepGraph_NodeId): number[];
+  AttachedTo(theOwner: BRepGraph_NodeId): number[];
 
-AddAttachment(theOwner: BRepGraph_NodeId, theKind: BRepGraph_LayerTopoSupplement_AttachmentKind, theShape: TopoDS_Shape): number;
+  AddAttachment(theOwner: BRepGraph_NodeId, theKind: BRepGraph_LayerTopoSupplement_AttachmentKind, theShape: TopoDS_Shape): number;
 
-AddAttachmentWithUid(theOwner: BRepGraph_NodeId, theUid: number, theKind: BRepGraph_LayerTopoSupplement_AttachmentKind, theShape: TopoDS_Shape): boolean;
+  AddAttachmentWithUid(theOwner: BRepGraph_NodeId, theUid: number, theKind: BRepGraph_LayerTopoSupplement_AttachmentKind, theShape: TopoDS_Shape): boolean;
 
-RemoveAttachment(theUid: number): boolean;
+  RemoveAttachment(theUid: number): boolean;
 
-Validate(): void;
+  Validate(): void;
 
-OnNodeRemoved(theNode: BRepGraph_NodeId): void;
+  OnNodeRemoved(theNode: BRepGraph_NodeId): void;
 
-OnNodeReplaced(theOldNode: BRepGraph_NodeId, theNewNode: BRepGraph_NodeId): void;
+  OnNodeReplaced(theOldNode: BRepGraph_NodeId, theNewNode: BRepGraph_NodeId): void;
 
-CopyTo(theCopy: BRepGraph_CopyRemap): void;
+  CopyTo(theCopy: BRepGraph_CopyRemap): void;
 
-InvalidateAll(): void;
+  InvalidateAll(): void;
 
-Clear(): void;
+  Clear(): void;
 
-static get_type_name(): string;
+  static get_type_name(): string;
 
-static get_type_descriptor(): Standard_Type;
+  static get_type_descriptor(): Standard_Type;
 
-DynamicType(): Standard_Type;
+  DynamicType(): Standard_Type;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_LayerTopoSupplement_AttachmentKind: typeof BRepGraph_LayerTopoSupplement_AttachmentKind[keyof typeof BRepGraph_LayerTopoSupplement_AttachmentKind]
 
 BRepGraph_MeshView: declare class BRepGraph_MeshView
 
-Cache(): BRepGraph_MeshView_CacheView;
+  Cache(): BRepGraph_MeshView_CacheView;
 
-Persistent(): BRepGraph_MeshView_PersistentView;
+  Persistent(): BRepGraph_MeshView_PersistentView;
 
-Effective(): BRepGraph_MeshView_EffectiveView;
+  Effective(): BRepGraph_MeshView_EffectiveView;
 
-Editor(): BRepGraph_MeshView_EditorView;
+  Editor(): BRepGraph_MeshView_EditorView;
 
-Poly(): BRepGraph_MeshView_PolyOps;
+  Poly(): BRepGraph_MeshView_PolyOps;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_MeshView_CacheView: declare class BRepGraph_MeshView_CacheView
 
-Faces(): BRepGraph_MeshView_CacheView_FaceOps;
+  Faces(): BRepGraph_MeshView_CacheView_FaceOps;
 
-Edges(): BRepGraph_MeshView_CacheView_EdgeOps;
+  Edges(): BRepGraph_MeshView_CacheView_EdgeOps;
 
-CoEdges(): BRepGraph_MeshView_CacheView_CoEdgeOps;
+  CoEdges(): BRepGraph_MeshView_CacheView_CoEdgeOps;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_MeshView_CacheView_CoEdgeOps: declare class BRepGraph_MeshView_CacheView_CoEdgeOps
 
-Has(theCoEdge: BRepGraph_CoEdgeId): boolean;
+  Has(theCoEdge: BRepGraph_CoEdgeId): boolean;
 
-FindPolygon2D(theCoEdge: BRepGraph_CoEdgeId): BRepGraph_CacheMesh_CoEdgeMeshEntry;
+  FindPolygon2D(theCoEdge: BRepGraph_CoEdgeId): BRepGraph_CacheMesh_CoEdgeMeshEntry;
 
-FindPolygonOnTri(theCoEdge: BRepGraph_CoEdgeId): BRepGraph_CacheMesh_CoEdgeMeshEntry;
+  FindPolygonOnTri(theCoEdge: BRepGraph_CoEdgeId): BRepGraph_CacheMesh_CoEdgeMeshEntry;
 
-FindRaw(theCoEdge: BRepGraph_CoEdgeId): BRepGraph_CacheMesh_CoEdgeMeshEntry;
+  FindRaw(theCoEdge: BRepGraph_CoEdgeId): BRepGraph_CacheMesh_CoEdgeMeshEntry;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_MeshView_CacheView_EdgeOps: declare class BRepGraph_MeshView_CacheView_EdgeOps
 
-Has(theEdge: BRepGraph_EdgeId): boolean;
+  Has(theEdge: BRepGraph_EdgeId): boolean;
 
-Polygon3D(theEdge: BRepGraph_EdgeId): Poly_Polygon3D;
+  Polygon3D(theEdge: BRepGraph_EdgeId): Poly_Polygon3D;
 
-Entry(theEdge: BRepGraph_EdgeId): BRepGraph_CacheMesh_EdgeMeshEntry;
+  Entry(theEdge: BRepGraph_EdgeId): BRepGraph_CacheMesh_EdgeMeshEntry;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_MeshView_CacheView_FaceOps: declare class BRepGraph_MeshView_CacheView_FaceOps
 
-Has(theFace: BRepGraph_FaceId): boolean;
+  Has(theFace: BRepGraph_FaceId): boolean;
 
-Triangulation(theFace: BRepGraph_FaceId): Poly_Triangulation;
+  Triangulation(theFace: BRepGraph_FaceId): Poly_Triangulation;
 
-Entry(theFace: BRepGraph_FaceId): BRepGraph_CacheMesh_FaceMeshEntry;
+  Entry(theFace: BRepGraph_FaceId): BRepGraph_CacheMesh_FaceMeshEntry;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_MeshView_EditorView: declare class BRepGraph_MeshView_EditorView
 
-Faces(): BRepGraph_MeshView_EditorView_FaceOps;
+  Faces(): BRepGraph_MeshView_EditorView_FaceOps;
 
-Edges(): BRepGraph_MeshView_EditorView_EdgeOps;
+  Edges(): BRepGraph_MeshView_EditorView_EdgeOps;
 
-CoEdges(): BRepGraph_MeshView_EditorView_CoEdgeOps;
+  CoEdges(): BRepGraph_MeshView_EditorView_CoEdgeOps;
 
-PromoteToPersistent(): void;
+  PromoteToPersistent(): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_MeshView_EditorView_CoEdgeOps: declare class BRepGraph_MeshView_EditorView_CoEdgeOps
 
-AppendCachedPolygonOnTri(theCoEdge: BRepGraph_CoEdgeId, thePolygonOnTri: Poly_PolygonOnTriangulation): void;
+  AppendCachedPolygonOnTri(theCoEdge: BRepGraph_CoEdgeId, thePolygonOnTri: Poly_PolygonOnTriangulation): void;
 
-SetCachedPolygon2D(theCoEdge: BRepGraph_CoEdgeId, thePolygon2D: Poly_Polygon2D): void;
+  SetCachedPolygon2D(theCoEdge: BRepGraph_CoEdgeId, thePolygon2D: Poly_Polygon2D): void;
 
-Clear(theCoEdge: BRepGraph_CoEdgeId): void;
+  Clear(theCoEdge: BRepGraph_CoEdgeId): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_MeshView_EditorView_EdgeOps: declare class BRepGraph_MeshView_EditorView_EdgeOps
 
-SetCachedPolygon3D(theEdge: BRepGraph_EdgeId, thePolygon3D: Poly_Polygon3D): void;
+  SetCachedPolygon3D(theEdge: BRepGraph_EdgeId, thePolygon3D: Poly_Polygon3D): void;
 
-Clear(theEdge: BRepGraph_EdgeId): void;
+  Clear(theEdge: BRepGraph_EdgeId): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_MeshView_EditorView_FaceOps: declare class BRepGraph_MeshView_EditorView_FaceOps
 
-SetCachedTriangulation(theFace: BRepGraph_FaceId, theTriangulation: Poly_Triangulation): void;
+  SetCachedTriangulation(theFace: BRepGraph_FaceId, theTriangulation: Poly_Triangulation): void;
 
-Clear(theFace: BRepGraph_FaceId): void;
+  Clear(theFace: BRepGraph_FaceId): void;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_MeshView_EffectiveView: declare class BRepGraph_MeshView_EffectiveView
 
-Faces(): BRepGraph_MeshView_EffectiveView_FaceOps;
+  Faces(): BRepGraph_MeshView_EffectiveView_FaceOps;
 
-Edges(): BRepGraph_MeshView_EffectiveView_EdgeOps;
+  Edges(): BRepGraph_MeshView_EffectiveView_EdgeOps;
 
-CoEdges(): BRepGraph_MeshView_EffectiveView_CoEdgeOps;
+  CoEdges(): BRepGraph_MeshView_EffectiveView_CoEdgeOps;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_MeshView_EffectiveView_CoEdgeOps: declare class BRepGraph_MeshView_EffectiveView_CoEdgeOps
 
-Has(theCoEdge: BRepGraph_CoEdgeId): boolean;
+  Has(theCoEdge: BRepGraph_CoEdgeId): boolean;
 
-HasPolygonOnSurface(theCoEdge: BRepGraph_CoEdgeId): boolean;
+  HasPolygonOnSurface(theCoEdge: BRepGraph_CoEdgeId): boolean;
 
-PolygonOnSurface(theCoEdge: BRepGraph_CoEdgeId): Poly_Polygon2D;
+  PolygonOnSurface(theCoEdge: BRepGraph_CoEdgeId): Poly_Polygon2D;
 
-HasPolygonOnTriangulation(theCoEdge: BRepGraph_CoEdgeId): boolean;
+  HasPolygonOnTriangulation(theCoEdge: BRepGraph_CoEdgeId): boolean;
 
-PolygonOnTriangulation(theCoEdge: BRepGraph_CoEdgeId): Poly_PolygonOnTriangulation;
+  PolygonOnTriangulation(theCoEdge: BRepGraph_CoEdgeId): Poly_PolygonOnTriangulation;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_MeshView_EffectiveView_EdgeOps: declare class BRepGraph_MeshView_EffectiveView_EdgeOps
 
-Has(theEdge: BRepGraph_EdgeId): boolean;
+  Has(theEdge: BRepGraph_EdgeId): boolean;
 
-Polygon3D(theEdge: BRepGraph_EdgeId): Poly_Polygon3D;
+  Polygon3D(theEdge: BRepGraph_EdgeId): Poly_Polygon3D;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_MeshView_EffectiveView_FaceOps: declare class BRepGraph_MeshView_EffectiveView_FaceOps
 
-Has(theFace: BRepGraph_FaceId): boolean;
+  Has(theFace: BRepGraph_FaceId): boolean;
 
-Triangulation(theFace: BRepGraph_FaceId): Poly_Triangulation;
+  Triangulation(theFace: BRepGraph_FaceId): Poly_Triangulation;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;
 
 BRepGraph_MeshView_PersistentView: declare class BRepGraph_MeshView_PersistentView
 
-Faces(): BRepGraph_MeshView_PersistentView_FaceOps;
+  Faces(): BRepGraph_MeshView_PersistentView_FaceOps;
 
-Edges(): BRepGraph_MeshView_PersistentView_EdgeOps;
+  Edges(): BRepGraph_MeshView_PersistentView_EdgeOps;
 
-CoEdges(): BRepGraph_MeshView_PersistentView_CoEdgeOps;
+  CoEdges(): BRepGraph_MeshView_PersistentView_CoEdgeOps;
 
-delete(): void;
+  delete(): void;
 
-[Symbol.dispose](): void;
+  [Symbol.dispose](): void;

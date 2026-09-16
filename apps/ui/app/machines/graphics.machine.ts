@@ -3,6 +3,8 @@ import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { GeometryComponentManifest, GridSizes, Geometry } from '@taucad/types';
 import type { ProgressiveSceneUpdate, ResolvedSceneSnapshot } from '@taucad/runtime';
 import { idPrefix } from '@taucad/types/constants';
+import { getLengthUnit, metersPerLengthUnit } from '#constants/length-units.js';
+import type { LengthSymbol, UnitSystem } from '#constants/length-units.js';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type {
   GraphicsBackendPreference,
@@ -22,8 +24,6 @@ import {
   selectProgressiveSceneSequence,
 } from '#machines/progressive-scene-projection.js';
 import type { ProgressiveSceneProjection } from '#machines/progressive-scene-projection.js';
-import { getDisplayLengthUnit } from '#utils/length-unit.utils.js';
-import type { LengthSymbol, UnitSystem } from '#utils/length-unit.utils.js';
 
 export type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
 
@@ -427,13 +427,8 @@ type LengthUnitData = {
 };
 
 function getLengthUnitData(symbol: LengthSymbol): LengthUnitData {
-  const unit = getDisplayLengthUnit(symbol);
-  return {
-    unit: unit.label.toLowerCase(),
-    symbol: unit.symbol,
-    factor: unit.metersPerUnit,
-    system: unit.system,
-  };
+  const unit = getLengthUnit(symbol);
+  return { unit: unit.label, symbol, factor: metersPerLengthUnit(symbol), system: unit.system };
 }
 
 /**

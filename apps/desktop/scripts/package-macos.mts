@@ -11,7 +11,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, openSync, readSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readSync } from 'node:fs';
 import { cp, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { homedir, tmpdir } from 'node:os';
@@ -26,7 +26,7 @@ import { packager } from '@electron/packager';
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { parseMacosPackageMode } from './macos-package-mode.mjs';
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
-import { copyRuntimeClosure } from './runtime-closure.mjs';
+import { copyGeoSpecNative, copyRuntimeClosure } from './runtime-closure.mjs';
 
 type PackageMetadata = {
   readonly name: string;
@@ -61,6 +61,11 @@ const openrscadPluginModules = resolve(workspaceRoot, 'packages/plugins/openrsca
 const assimpPluginModules = resolve(workspaceRoot, 'packages/plugins/assimp/node_modules');
 const pythonResourceRoot = resolve(desktopRoot, 'resources/python');
 const picoGkResourceRoot = resolve(desktopRoot, 'resources/picogk');
+/* The `git` this app records revisions with, prepared beside python and picogk
+ * (OQ3). One payload, not two: `git-lfs` lives inside this git's own exec path,
+ * so `git lfs` resolves through the binary main points the services host at. */
+const gitResourceRoot = resolve(desktopRoot, 'resources/git/darwin-arm64');
+const shipsGit = existsSync(gitResourceRoot);
 const { release, unsigned } = parseMacosPackageMode(process.argv.slice(2));
 const extensions = ['TauQuickLookPreview.appex', 'TauQuickLookThumbnail.appex'] as const;
 const adhocAppEntitlements = [
@@ -81,6 +86,16 @@ const machObjectMagics = new Set([
 
 if (process.platform !== 'darwin') {
   throw new Error('The macOS package can only be assembled on macOS.');
+}
+/* A shipped app records revisions with the binaries it carries: a machine
+ * launched from Finder has `/usr/bin:/bin:/usr/sbin:/sbin` and no `git-lfs`, so
+ * a release without this payload is an app that cannot back a project up. A
+ * development package still assembles, and says what it left out. */
+if (release && !shipsGit) {
+  throw new Error(`A release package must ship the git payload at ${gitResourceRoot} (OQ3).`);
+}
+if (!shipsGit) {
+  console.log(`No git payload at ${gitResourceRoot}; this package records with the machine's own git and git-lfs.`);
 }
 if ([resolve('/'), homedir(), tmpdir(), desktopRoot, workspaceRoot].includes(outputRoot)) {
   throw new Error(`Refusing unsafe package output root: ${outputRoot}`);
@@ -242,6 +257,10 @@ await Promise.all([
   copyRuntimePackage('libassimp-darwin-arm64', libassimpDarwinArm64),
   copyRuntimePackage('nanoraster', nanoraster),
   copyRuntimePackage('nanoraster-darwin-arm64', nanorasterDarwinArm64),
+  copyGeoSpecNative(
+    await realpath(resolve(desktopRoot, 'node_modules/@taucad/geospec-engine')),
+    resolve(stageRoot, 'node_modules'),
+  ),
   writeFile(
     resolve(stageRoot, 'package.json'),
     `${JSON.stringify(
@@ -319,6 +338,14 @@ await Promise.all([
     recursive: true,
     verbatimSymlinks: true,
   }),
+  ...(shipsGit
+    ? [
+        cp(gitResourceRoot, resolve(resources, 'git/darwin-arm64'), {
+          recursive: true,
+          verbatimSymlinks: true,
+        }),
+      ]
+    : []),
   mkdir(plugins, { recursive: true }),
 ]);
 await Promise.all(
@@ -343,7 +370,9 @@ if (!unsigned) {
     strictVerify: true,
     batchCodesignCalls: true,
     ignore: (path) =>
-      (path.includes('/Contents/Resources/python/') || path.includes('/Contents/Resources/picogk/')) &&
+      (path.includes('/Contents/Resources/python/') ||
+        path.includes('/Contents/Resources/picogk/') ||
+        path.includes('/Contents/Resources/git/')) &&
       !isMachObject(path),
     optionsForFile: (path) => ({
       ...(!release && (path === appPath || /\/Tau Helper(?: \([^)]+\))?\.app(?:\/|$)/u.test(path))

@@ -167,6 +167,77 @@ export const contextUsageDataSchema = z.object({
 /** @public */
 export type ContextUsageData = z.infer<typeof contextUsageDataSchema>;
 
+/** One ACP plan entry shown in the same plan surface as a native Tau turn. @public */
+export const acpPlanEntrySchema = z.object({
+  content: z.string(),
+  priority: z.string(),
+  status: z.string(),
+});
+
+/** Current ACP plan content. The agent replaces this value wholesale. @public */
+export const acpPlanSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('items'), planId: z.string().optional(), entries: z.array(acpPlanEntrySchema) }),
+  z.object({ type: z.literal('file'), planId: z.string(), uri: z.string() }),
+  z.object({ type: z.literal('markdown'), planId: z.string(), content: z.string() }),
+]);
+
+/** One native command advertised by the active ACP agent. @public */
+export const acpCommandSchema = z.object({
+  name: z.string().min(1),
+  description: z.string(),
+  input: z.object({ hint: z.string() }).nullish(),
+});
+
+const acpConfigValueSchema = z.object({
+  value: z.string(),
+  name: z.string(),
+  description: z.string().nullish(),
+});
+
+const acpConfigValueGroupSchema = z.object({
+  group: z.string(),
+  name: z.string(),
+  options: z.array(acpConfigValueSchema),
+});
+
+/** One current configuration option offered by the active ACP agent. @public */
+export const acpConfigOptionSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('select'),
+    id: z.string(),
+    name: z.string(),
+    description: z.string().nullish(),
+    category: z.string().nullish(),
+    currentValue: z.string(),
+    options: z.union([z.array(acpConfigValueSchema), z.array(acpConfigValueGroupSchema)]),
+  }),
+  z.object({
+    type: z.literal('boolean'),
+    id: z.string(),
+    name: z.string(),
+    description: z.string().nullish(),
+    category: z.string().nullish(),
+    currentValue: z.boolean(),
+  }),
+]);
+
+/** Durable latest-value presentation state for one ACP session. @public */
+export const acpSessionDataSchema = z.object({
+  type: z.literal('acp-session'),
+  id: z.string(),
+  agentId: z.string(),
+  sessionId: z.string().optional(),
+  title: z.string().optional(),
+  plan: acpPlanSchema.optional(),
+  commands: z.array(acpCommandSchema),
+  configOptions: z.array(acpConfigOptionSchema),
+  modeId: z.string().optional(),
+  modes: z.array(z.object({ id: z.string(), name: z.string(), description: z.string().nullish() })).optional(),
+});
+
+/** @public */
+export type AcpSessionData = z.infer<typeof acpSessionDataSchema>;
+
 /**
  * Schema for custom data parts in UI messages.
  * @public
@@ -175,4 +246,5 @@ export const dataPartSchema = z.object({
   usage: usageDataSchema,
   'context-compaction': contextCompactionDataSchema,
   'context-usage': contextUsageDataSchema,
+  'acp-session': acpSessionDataSchema,
 });

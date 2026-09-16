@@ -52,9 +52,9 @@ describe('tool disclosure content parity', () => {
   });
 
   it.each([
-    ['ready', 'Compiled'],
-    ['error', 'Failed to compile'],
-    ['pending', 'Compile pending'],
+    ['ready', 'Rendered'],
+    ['error', 'Failed to render'],
+    ['pending', 'Render pending'],
   ] as const)('shows truthful %s kernel status without empty diagnostics', (status, verb) => {
     render(
       <ChatMessageToolGetKernelResult

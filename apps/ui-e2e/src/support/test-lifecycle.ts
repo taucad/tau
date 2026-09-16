@@ -1,14 +1,14 @@
 import { aroundEach } from 'vitest';
-import { server } from 'vitest/browser';
+import { commands } from '#support/external-target.js';
 
 aroundEach(async (runTest, { annotate }) => {
-  await server.commands.uiOpenTarget();
+  await commands.uiOpenTarget();
   let failure: unknown;
   try {
     await runTest();
   } catch (error) {
     failure = error;
-    const diagnostics = await server.commands.uiCaptureTargetDiagnostics();
+    const diagnostics = await commands.uiCaptureTargetDiagnostics();
     if (diagnostics.screenshot) {
       await annotate('UI E2E target screenshot', {
         body: diagnostics.screenshot,
@@ -28,7 +28,7 @@ aroundEach(async (runTest, { annotate }) => {
   }
 
   try {
-    await server.commands.uiCloseTarget();
+    await commands.uiCloseTarget();
   } catch (cleanupError) {
     if (failure) {
       throw new AggregateError([failure, cleanupError], 'UI E2E test and cleanup both failed.');

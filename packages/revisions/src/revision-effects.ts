@@ -1049,7 +1049,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     left === undefined ? right === undefined : right?.mode === left.mode && equalBytes(left.content, right.content);
 
   const entryOf = async (
-    live: RootedFileSystem,
+    live: RevisionFileSystem,
     path: string,
   ): Promise<Readonly<{ content: Uint8Array<ArrayBuffer>; mode: RevisionFileMode }> | undefined> => {
     try {

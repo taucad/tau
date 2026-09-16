@@ -1,10 +1,11 @@
 ---
 title: 'Revisions Policy'
-description: 'Rules for revision identity, checkouts, RevisionPort parity, actor composition, sync, records, remotes, conflicts, publication, and project liveness.'
+description: 'Rules for revision identity, checkouts, RevisionPort parity, actor composition, sync, records, remotes, refusal classification, latency budgets, conflicts, publication, and project liveness.'
 status: active
 created: '2026-09-14'
-updated: '2026-09-15'
+updated: '2026-09-16'
 related:
+  - docs/research/revisions-sync-closeout-blueprint.md
   - docs/architecture/workspace-filesystem-and-revisions.md
   - docs/architecture/github-repository-integration.md
   - docs/research/github-repository-import-and-linked-revisions-blueprint.md
@@ -186,7 +187,7 @@ On desktop, hold `before-quit` while all live project sessions flush and the reg
 | Ref set    | Members                                                                                                                   | Push contract                                                                                              |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | History    | Project-owned `refs/heads/*`, `refs/tags/*`                                                                               | Atomic on native Git; ref-by-ref in browser with the active live branch last and the set retried as a unit |
-| Records    | `refs/tau/{chats,evidence,artifacts}/*`                                                                                   | Per ref; rejection never blocks history                                                                    |
+| Records    | `refs/tau/{chats,evidence,artifacts}/*`                                                                                   | Per ref, append-only; rejection never blocks history                                                       |
 | Host-local | `refs/remotes/*`, `refs/heads/sync/*`, `refs/tau/{owners,workspaces,revisions,transactions,retention}/*`, `refs/tau/head` | Never push; server rejects                                                                                 |
 
 Make `RevisionPort.push()` return per-ref results. Carry the expected old value on every pushed ref: native uses `--force-with-lease=<ref>:<expected>` and browser checks the advertisement before returning `rejected: leaseLost`. Never use plain force. Upload every referenced LFS object before moving its ref.
@@ -285,6 +286,49 @@ Delete replaced code in the same wave. Do not keep migrations, compatibility shi
 
 Keep only revision modules reachable from a package barrel and only barrel exports with consumers. Preserve the port contract and conformance suite, bounded Git command runner, metadata and digest helpers, graph authority, three-way merge, and native Git worktree/ref-transaction code where they remain reachable.
 
+### 19. Classify every remote refusal
+
+A server answer is never a network error. Classify every remote refusal once, in `packages/revisions/src/remotes.ts`, and let both the `isomorphic-git` and native legs raise the same typed `RevisionPortError`:
+
+| `code`                            | Raised for                                      |
+| --------------------------------- | ----------------------------------------------- |
+| `REMOTE_UNAUTHORIZED`             | 401                                             |
+| `REMOTE_NOT_ENTITLED`             | 403 `GIT_SYNC_NOT_ENTITLED`                     |
+| `REMOTE_NOT_FOUND`                | 404                                             |
+| `REMOTE_QUOTA_EXCEEDED`           | 413, carrying the affected file list            |
+| `REMOTE_REJECTED`                 | A per-ref refusal, carrying the server's reason |
+| `REMOTE_REAUTHORIZATION_REQUIRED` | An expired or revoked third-party connection    |
+
+Carry the server's own sentence as the error `message` whenever the answer has one, and render that sentence rather than replacing it with generic copy. Reserve `ENGINE_FAILED 'could not be reached'` for a failure that produced no HTTP status at all.
+
+Treat `REMOTE_UNAUTHORIZED`, `REMOTE_NOT_ENTITLED`, `REMOTE_NOT_FOUND`, and `REMOTE_REAUTHORIZATION_REQUIRED` as terminal in `sync.machine`: enter `failed` or `reconnectRequired`, resume only on **Sync now**, a remote change, or a session change, and never re-enter a fetch-push cycle without passing through the queue's backoff.
+
+Render the reason on every surface showing **Not backed up**, `failed`, `reconnectRequired`, or a connect error, with exactly one action matching the class — _Sign in_, _Upgrade_, _Reconnect GitHub_, _Sync now_, _Open Revisions_, or _Retry_.
+
+Consult `canSyncFiles` and `canConnectGitHub` before offering Tau Cloud or a Git remote. Show an unentitled account the existing upgrade affordance and never issue a connect on its behalf. Register nothing on the server before the plan admits it: a failed connect must leave no remote in Git config, no durable-queue mutation, and no server row.
+
+Answer git-facing refusals as `text/plain` when the request carries no `Origin`, so stock Git prints the sentence; keep the JSON envelope for browsers and carry CORS headers on every 401.
+
+Enforce the lease invariant server-side as well as in the client. Refuse every ref deletion and every non-fast-forward update in the Hosted Remote's `pre-receive` hook, for every ref family. Git's `receive.denyDeletes` and `receive.denyNonFastForwards` are a backstop for `refs/heads/*` only and never a substitute: Git applies neither outside that namespace, so record refs stay rewindable under both flags alone.
+
+### 20. Hold revision work to a latency budget
+
+Revision interactions are interactive UI, not batch work. Every operation below has a budget; a change that regresses one is a defect whether or not it is correct.
+
+| Operation                                            | Budget                                                      |
+| ---------------------------------------------------- | ----------------------------------------------------------- |
+| Save → **Saved** visible                             | 100 ms browser, 150 ms native                               |
+| Tree-hash gate after a one-file edit                 | Hash one blob plus that path's tree objects, never the tree |
+| History pane open                                    | 50 ms browser, 100 ms native                                |
+| `readRevisionLog({ limit: 50 })` native              | At most 5 `git` spawns                                      |
+| `readTree` native                                    | At most 3 `git` spawns; at most 16 concurrent children      |
+| Restore                                              | 300 ms browser, 500 ms native                               |
+| Turn marker flips to **Saved** after settlement      | One frame, with no graph re-walk                            |
+| `useRevisions()` across renders with no store change | The same view reference                                     |
+| Mint → push request issued, connected and online     | 2.1 s, the debounce plus 100 ms                             |
+
+Spend work once: memoize object ids across a cut, batch native object reads through one `cat-file --batch`, and key a derived log on its head rather than recomputing it per mint. Return a referentially stable view from every revision hook so a marker flip costs one render, not a re-walk.
+
 ## Summary Checklist
 
 - [ ] Every surface reads one composed view of the selected checkout.
@@ -295,6 +339,10 @@ Keep only revision modules reachable from a package barrel and only barrel expor
 - [ ] Open, hidden, pagehide, close, and quit follow their bounded paths.
 - [ ] Records, not XState snapshots or transcripts, rehydrate machines and UI.
 - [ ] Sidebar states are accessible selectors, not persisted flags.
+- [ ] Every remote refusal is typed, carries the server's sentence, and offers one matching action.
+- [ ] Entitlement is checked before a connect is offered, and nothing is registered before the plan admits it.
+- [ ] Deletions and non-fast-forward updates are refused server-side for every ref family.
+- [ ] Each budgeted revision operation is measured against its budget, not assumed.
 
 ## References
 

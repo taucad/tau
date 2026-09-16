@@ -22,6 +22,8 @@ export const rpcName = {
   captureImages: 'capture_images',
   runGeoSpecTests: 'run_geospec_tests',
   exportGeometry: 'export_geometry',
+  getParameters: 'get_parameters',
+  applyParameterOperation: 'apply_parameter_operation',
   appendFile: 'append_file',
   editFile: 'edit_file',
   resolveSkill: 'resolve_skill',
@@ -56,6 +58,7 @@ export const mutatingRpcNames = new Set<(typeof rpcName)[keyof typeof rpcName]>(
   rpcName.deleteFile,
   rpcName.appendFile,
   rpcName.editFile,
+  rpcName.applyParameterOperation,
 ]);
 
 /**
@@ -74,6 +77,7 @@ export const readOnlyRpcNames = new Set<(typeof rpcName)[keyof typeof rpcName]>(
   rpcName.captureImages,
   rpcName.runGeoSpecTests,
   rpcName.exportGeometry,
+  rpcName.getParameters,
   rpcName.resolveSkill,
   rpcName.readRevisions,
 ]);

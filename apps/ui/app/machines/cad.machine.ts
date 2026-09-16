@@ -15,11 +15,11 @@ import type {
   TelemetryEntry,
   WorkerState,
 } from '@taucad/runtime';
+import type { ParameterManifest } from '@taucad/parameters';
 import { isRenderTimeoutError } from '@taucad/runtime/client';
 import { isKernelIssueCode } from '@taucad/runtime/types';
 import { safeDispose } from '@taucad/utils/dispose';
-import type { JSONSchema7 } from '@taucad/json-schema';
-import type { LengthSymbol } from '@taucad/units';
+import type { LengthSymbol } from '#constants/length-units.js';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { getComputeReuseMode } from '#lib/compute-reuse-preference.js';
@@ -59,7 +59,6 @@ export type CadContext = {
   screenshot: string | undefined;
   parameters: Record<string, unknown>;
   units: { length: LengthSymbol };
-  defaultParameters: Record<string, unknown>;
   /** Outcome of the latest selected runtime geometry event. */
   latestGeometryOutcome: LatestGeometryOutcome;
   /** Last successful artifact retained for display across later render failures. */
@@ -72,7 +71,7 @@ export type CadContext = {
   fileManagerRef?: ActorRefFrom<typeof fileManagerMachine>;
   kernelOptionsFactory: LazyKernelOptionsFactory;
   fileSystemRoot: string;
-  jsonSchema?: JSONSchema7;
+  parameterManifest?: ParameterManifest;
   renderPhase: RenderPhase | undefined;
   telemetryEntries: TelemetryEntry[];
   renderTimeout: number;
@@ -179,11 +178,7 @@ type CadEvent =
   | { type: 'setCodeIssues'; errors: CadContext['codeIssues'] }
   | { type: 'geometryComputed'; geometry: Geometry; issues: KernelIssue[] }
   | { type: 'geometryFailed'; issues: KernelIssue[] }
-  | {
-      type: 'parametersParsed';
-      defaultParameters: Record<string, unknown>;
-      jsonSchema: JSONSchema7;
-    }
+  | { type: 'parametersParsed'; manifest: ParameterManifest }
   | { type: 'kernelIssue'; errors: KernelIssue[] }
   | { type: 'kernelProgress'; phase: RenderPhase }
   | { type: 'kernelTelemetry'; entries: TelemetryEntry[] }
@@ -646,8 +641,7 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
       if (parametersResult.success) {
         machineRef.send({
           type: 'parametersParsed',
-          defaultParameters: parametersResult.data.defaultParameters,
-          jsonSchema: parametersResult.data.jsonSchema,
+          manifest: parametersResult.data,
         });
       }
     }),
@@ -869,14 +863,10 @@ export const cadMachine = setup({
         return event.errors;
       },
     }),
-    setDefaultParameters: assign({
-      defaultParameters({ event }) {
+    setParameterManifest: assign({
+      parameterManifest({ event }) {
         assertEvent(event, 'parametersParsed');
-        return event.defaultParameters;
-      },
-      jsonSchema({ event }) {
-        assertEvent(event, 'parametersParsed');
-        return event.jsonSchema;
+        return event.manifest;
       },
     }),
     initializeModel: enqueueActions(({ enqueue, event }) => {
@@ -886,7 +876,7 @@ export const cadMachine = setup({
         parameters: event.parameters ?? {},
         codeIssues: [],
         latestGeometryOutcome: undefined,
-        jsonSchema: undefined,
+        parameterManifest: undefined,
       });
     }),
     storeKernelConnection: enqueueActions(({ enqueue, context, event }) => {
@@ -1091,7 +1081,6 @@ export const cadMachine = setup({
     screenshot: undefined,
     units: { length: 'mm' },
     parameters: {},
-    defaultParameters: {},
     latestGeometryOutcome: undefined,
     geometry: undefined,
     kernelIssues: new Map(),
@@ -1102,7 +1091,7 @@ export const cadMachine = setup({
     fileManagerRef: input.fileManagerRef,
     kernelOptionsFactory: input.kernelOptionsFactory,
     fileSystemRoot: input.fileSystemRoot,
-    jsonSchema: undefined,
+    parameterManifest: undefined,
     renderPhase: undefined,
     telemetryEntries: [],
     renderTimeout: defaultRenderTimeout,
@@ -1252,7 +1241,7 @@ export const cadMachine = setup({
         geometryFailed: {
           actions: ['setGeometryFailure', 'setSettledRenderId', 'notifyExportAvailability'],
         },
-        parametersParsed: { actions: 'setDefaultParameters' },
+        parametersParsed: { actions: 'setParameterManifest' },
         kernelIssue: { actions: 'setKernelIssue' },
         kernelLog: { actions: 'sendKernelLogs' },
         kernelProgress: { actions: 'trackProgress' },
@@ -1298,7 +1287,7 @@ export const cadMachine = setup({
         geometryFailed: {
           actions: ['setGeometryFailure', 'setSettledRenderId', 'notifyExportAvailability'],
         },
-        parametersParsed: { actions: 'setDefaultParameters' },
+        parametersParsed: { actions: 'setParameterManifest' },
         kernelIssue: { actions: 'setKernelIssue' },
         kernelLog: { actions: 'sendKernelLogs' },
         kernelProgress: { actions: 'trackProgress' },
@@ -1414,7 +1403,7 @@ export const cadMachine = setup({
         geometryFailed: {
           actions: ['setGeometryFailure', 'setSettledRenderId', 'notifyExportAvailability'],
         },
-        parametersParsed: { actions: 'setDefaultParameters' },
+        parametersParsed: { actions: 'setParameterManifest' },
         kernelIssue: { actions: 'setKernelIssue' },
         kernelLog: { actions: 'sendKernelLogs' },
         kernelProgress: { actions: 'trackProgress' },
@@ -1458,7 +1447,7 @@ export const cadMachine = setup({
         geometryFailed: {
           actions: ['setGeometryFailure', 'setSettledRenderId', 'notifyExportAvailability'],
         },
-        parametersParsed: { actions: 'setDefaultParameters' },
+        parametersParsed: { actions: 'setParameterManifest' },
         kernelIssue: { actions: 'setKernelIssue' },
         kernelLog: { actions: 'sendKernelLogs' },
         kernelProgress: { actions: 'trackProgress' },

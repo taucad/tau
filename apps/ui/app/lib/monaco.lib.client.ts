@@ -88,9 +88,11 @@ const initializeMonaco = async (): Promise<void> => {
   // first reading uses Geist Mono advances. `.catch` keeps offline users
   // working with fallback metrics (no worse than today).
   // Sizes mirror code-editor.client.tsx (14 desktop, 16 mobile).
-  await Promise.all([document.fonts.load("14px 'Geist Mono'"), document.fonts.load("16px 'Geist Mono'")]).catch(
-    () => undefined,
-  );
+  // `document.fonts` is absent under jsdom, where there is nothing to prime.
+  const fontSet = Reflect.get(document, 'fonts') as FontFaceSet | undefined;
+  await Promise.all(
+    fontSet === undefined ? [] : [fontSet.load("14px 'Geist Mono'"), fontSet.load("16px 'Geist Mono'")],
+  ).catch(() => undefined);
 
   globalThis.self.MonacoEnvironment = {
     getWorker(_, label) {
@@ -142,7 +144,7 @@ const initializeMonaco = async (): Promise<void> => {
   // Mono above, additional weights/styles or HMR re-injection can change
   // the cached advances; `monaco.editor.remeasureFonts()` clears
   // FontMeasurementsImpl._cache and triggers per-editor re-render.
-  document.fonts.addEventListener('loadingdone', () => {
+  fontSet?.addEventListener('loadingdone', () => {
     monaco.editor.remeasureFonts();
   });
 

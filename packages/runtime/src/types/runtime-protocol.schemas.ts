@@ -18,7 +18,7 @@
 import { z } from 'zod';
 import { runtimeCapabilityKinds } from '#plugins/plugin-types.js';
 import { runtimeContentSchema } from '#types/runtime-content.types.js';
-import { exportFidelityValues, fileExtensions } from '@taucad/types/constants';
+import { cadLengthUnits, exportFidelityValues, fileExtensions } from '@taucad/types/constants';
 import type { FileExtension, MimeType } from '@taucad/types';
 import type { MessagePortLike, WireProtocolSchemas } from '@taucad/rpc';
 import { isMessagePortLike } from '#transport/_internal/wire-transferables.js';
@@ -29,8 +29,8 @@ import { assertRootedPath } from '@taucad/utils/path';
 import { validateArtifactPaths } from '#types/export-artifact-validation.js';
 import type { ContentDigest, SceneDigest } from '@taucad/cache-core';
 import type { SceneNodeId } from '#types/runtime-scene.types.js';
-import { standardInternationalBaseUnits } from '@taucad/units/constants';
-import type { LengthSymbol } from '@taucad/units';
+import { isParameterManifestShape } from '@taucad/parameters';
+import type { ParameterManifest } from '@taucad/parameters';
 
 // ---------- Primitives ----------
 
@@ -40,12 +40,7 @@ const fileExtensionSchema = z.enum(
   // literal union (no runtime change).
   fileExtensions as unknown as readonly [FileExtension, ...FileExtension[]],
 );
-const lengthSymbolSchema = z.enum(
-  standardInternationalBaseUnits.length.variants.map(({ symbol }) => symbol) as unknown as readonly [
-    LengthSymbol,
-    ...LengthSymbol[],
-  ],
-);
+const lengthSymbolSchema = z.enum(cadLengthUnits);
 
 const rootedPathSchema = z.string().superRefine((value, context) => {
   try {
@@ -147,10 +142,7 @@ export const getParametersResultSchema = z.union([
   z
     .object({
       success: z.literal(true),
-      data: z.object({
-        defaultParameters: z.record(z.string(), z.unknown()),
-        jsonSchema: z.unknown(),
-      }),
+      data: z.custom<ParameterManifest>(isParameterManifestShape, 'Expected a parameter manifest wire shape'),
       issues: z.array(kernelIssueSchema),
       serializedNativeHandle: z.unknown().optional(),
     })
@@ -627,6 +619,23 @@ export const runtimeOpenFileArgsSchema = z
   })
   .catchall(z.unknown());
 
+export const runtimeResolveParametersArgsSchema = z
+  .object({
+    stage: stageSchema.optional(),
+    file: geometryFileSchema.strict(),
+    resolution: z
+      .object({
+        mode: z.enum(['default', 'declared-only']).optional(),
+        profile: z.literal('tau-json-structure-units-03-v1').optional(),
+        inferenceLanguage: z.string().optional(),
+        projectBindingDigest: contentDigestSchema.optional(),
+        sourceUnitDigest: contentDigestSchema.optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
 export const runtimeStageAndRenderArgsSchema = z
   .object({
     ...previewCommandIdentityShape,
@@ -795,6 +804,7 @@ export const runtimeProtocolSchemas = {
     export: { args: runtimeExportArgsSchema, result: runtimeExportResultSchema },
     exportModel: { args: runtimeExportModelArgsSchema, result: runtimeExportResultSchema },
     evaluateModel: { args: runtimeEvaluateModelArgsSchema, result: hashedGeometryResultTransportSchema },
+    resolveParameters: { args: runtimeResolveParametersArgsSchema, result: getParametersResultSchema },
     snapshotSource: { args: runtimeSourceSnapshotArgsSchema, result: runtimeSourceSnapshotResultSchema },
     readSceneSnapshot: { args: runtimeReadSceneSnapshotArgsSchema, result: runtimeReadSceneSnapshotResultSchema },
     listSceneBookmarks: {

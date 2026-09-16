@@ -374,7 +374,7 @@ export const ChatEditorFileTree = memo(function ({
   // It's necessary to opt out of React Compiler auto-memoization for this component due to:
   // https://headless-tree.lukasbach.com/guides/react-compiler/
   'use no memo'; // Opt out of React Compiler memoization
-  const { projectRef, editorRef } = useProject();
+  const { projectRef, editorRef, parameterService } = useProject();
   const fileManager = useFileManager();
   const {
     client,
@@ -421,14 +421,22 @@ export const ChatEditorFileTree = memo(function ({
     // participant does it once, centrally.
     const participantDispose =
       contentService && !readOnly
-        ? mountFileOperationParticipants({ contentService, editorRef, projectRef })
+        ? mountFileOperationParticipants({
+            contentService,
+            editorRef,
+            projectRef,
+            parameterFiles: parameterService,
+            onError: (error) => {
+              toast.error(error instanceof Error ? error.message : 'Parameter sidecar operation failed.');
+            },
+          })
         : undefined;
 
     return () => {
       fileOpenedSub.unsubscribe();
       participantDispose?.();
     };
-  }, [projectRef, editorRef, contentService, readFile, readOnly]);
+  }, [projectRef, editorRef, contentService, readFile, readOnly, parameterService]);
 
   const requestOpenFile = useCallback(
     (path: string, fileReadOnly?: boolean) => {
@@ -1350,12 +1358,20 @@ export const ChatEditorFileTree = memo(function ({
             try {
               zipBlob = await getZippedDirectory(path);
             } catch (error) {
-              throw createFileTreeDownloadError({ code: 'zip-generation-failed', path, cause: error });
+              throw createFileTreeDownloadError({
+                code: 'zip-generation-failed',
+                path,
+                cause: error,
+              });
             }
             try {
               downloadBlob(zipBlob, `${name}.zip`);
             } catch (error) {
-              throw createFileTreeDownloadError({ code: 'browser-download-failed', path, cause: error });
+              throw createFileTreeDownloadError({
+                code: 'browser-download-failed',
+                path,
+                cause: error,
+              });
             }
           },
           {
@@ -1371,7 +1387,11 @@ export const ChatEditorFileTree = memo(function ({
             try {
               content = await readFile(path);
             } catch (error) {
-              throw createFileTreeDownloadError({ code: 'path-not-found', path, cause: error });
+              throw createFileTreeDownloadError({
+                code: 'path-not-found',
+                path,
+                cause: error,
+              });
             }
             const blob = new Blob([asBuffer(content.buffer)], {
               type: 'application/octet-stream',
@@ -1379,7 +1399,11 @@ export const ChatEditorFileTree = memo(function ({
             try {
               downloadBlob(blob, name);
             } catch (error) {
-              throw createFileTreeDownloadError({ code: 'browser-download-failed', path, cause: error });
+              throw createFileTreeDownloadError({
+                code: 'browser-download-failed',
+                path,
+                cause: error,
+              });
             }
           },
           {
@@ -1403,7 +1427,9 @@ export const ChatEditorFileTree = memo(function ({
 
       toast.error(result.message, result.description ? { description: result.description } : undefined);
     } catch (error) {
-      toast.error('Failed to copy path', { description: error instanceof Error ? error.message : String(error) });
+      toast.error('Failed to copy path', {
+        description: error instanceof Error ? error.message : String(error),
+      });
     }
   }, []);
 
@@ -1442,7 +1468,10 @@ export const ChatEditorFileTree = memo(function ({
   // Shared import processing logic for both drag-drop and upload button.
   const processDroppedEntries = useCallback(
     async (
-      entries: { readonly files: readonly DroppedFile[]; readonly directories: readonly DroppedDirectory[] },
+      entries: {
+        readonly files: readonly DroppedFile[];
+        readonly directories: readonly DroppedDirectory[];
+      },
       targetDirectory: string,
     ) => {
       const directoryPaths = collectDropDirectoryPaths({
@@ -1534,7 +1563,9 @@ export const ChatEditorFileTree = memo(function ({
         toast.success(summary.success.message);
       }
       if (summary.failure) {
-        toast.error(summary.failure.message, { description: summary.failure.description });
+        toast.error(summary.failure.message, {
+          description: summary.failure.description,
+        });
       }
     },
     [
@@ -1662,7 +1693,10 @@ export const ChatEditorFileTree = memo(function ({
       event.preventDefault();
       event.stopPropagation();
       if (!readOnly) {
-        void handleForeignDrop({ ...getForeignDropTargetFromEvent(event), dataTransfer });
+        void handleForeignDrop({
+          ...getForeignDropTargetFromEvent(event),
+          dataTransfer,
+        });
       }
     };
 
@@ -1791,7 +1825,10 @@ export const ChatEditorFileTree = memo(function ({
           <AlertDialogFooter className='gap-2'>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className={buttonVariants({ variant: 'destructive', className: 'pr-3' })}
+              className={buttonVariants({
+                variant: 'destructive',
+                className: 'pr-3',
+              })}
               onClick={confirmDelete}
             >
               Delete

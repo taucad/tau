@@ -54,11 +54,17 @@ describe('assimpKernel', () => {
       resolved: ['models/main.obj', 'models/texture.png'],
       unresolved: [],
     });
-    await expect(definition.getParameters({ entryPath: 'models/main.obj' }, localRuntime, context)).resolves.toEqual({
+    await expect(
+      definition.getParameters({ entryPath: 'models/main.obj' }, localRuntime, context),
+    ).resolves.toMatchObject({
       success: true,
       data: {
-        defaultParameters: {},
-        jsonSchema: { type: 'object', properties: {}, additionalProperties: false },
+        defaults: {},
+        schema: {
+          $id: 'urn:taucad:assimp:parameters',
+          name: 'AssimpParameters',
+          type: 'object',
+        },
       },
       issues: [],
     });

@@ -15,6 +15,8 @@ import type { ChangeEvent } from '@taucad/types';
 import type { ComposedViewConsumer } from '@taucad/filesystem/composed-view';
 import type {
   FileStat,
+  CheckedFileWrite,
+  CheckedFileWriteResult,
   MkdirOptions,
   ProviderCapabilities,
   WatchEvent,
@@ -195,6 +197,19 @@ const cloneFileMapForTransfer = (value: unknown): Record<string, unknown> => {
 };
 
 const cloneWriteArgsForTransfer = (method: string, args: unknown[]): unknown[] => {
+  if (method === 'writeFileChecked' && args[0] !== null && typeof args[0] === 'object') {
+    const input = args[0] as CheckedFileWrite;
+    return [
+      {
+        path: input.path,
+        data: cloneWritePayloadForTransfer(input.data),
+        preconditions: input.preconditions.map((precondition) => ({
+          path: precondition.path,
+          expected: precondition.expected === null ? null : cloneWritePayloadForTransfer(precondition.expected),
+        })),
+      },
+    ];
+  }
   if ((method === 'writeFile' || method === 'appendFile') && args.length >= 2) {
     return [args[0], cloneWritePayloadForTransfer(args[1]), ...args.slice(2)];
   }
@@ -234,6 +249,7 @@ const cloneWriteArgsForTransfer = (method: string, args: unknown[]): unknown[] =
  */
 type MutationMethodName =
   | 'writeFile'
+  | 'writeFileChecked'
   | 'appendFile'
   | 'writeFiles'
   | 'mkdir'
@@ -265,6 +281,7 @@ type MutationOverrideMap = {
 };
 
 type WriteFileParameters = Parameters<MutatingMethods['writeFile']>;
+type WriteFileCheckedParameters = Parameters<MutatingMethods['writeFileChecked']>;
 type AppendFileParameters = Parameters<MutatingMethods['appendFile']>;
 type WriteFilesParameters = Parameters<MutatingMethods['writeFiles']>;
 type DuplicateFileParameters = Parameters<MutatingMethods['duplicateFile']>;
@@ -289,6 +306,68 @@ type PreflightOverrideMap = {
   [K in PreflightMethodName]: PreflightMethods[K];
 };
 const workspaceMutationErrorMarker = '__workspaceMutationError__';
+type CheckedWriteApplicationState = 'known-not-applied' | 'potentially-applied';
+
+const checkedWriteApplicationState = (value: unknown): CheckedWriteApplicationState | undefined => {
+  const state = (value as { applicationState?: unknown } | undefined)?.applicationState;
+  return state === 'known-not-applied' || state === 'potentially-applied' ? state : undefined;
+};
+
+const preserveCheckedWriteApplicationState = (error: unknown): Error => {
+  const applicationState = checkedWriteApplicationState(error);
+  const result = error instanceof Error ? error : new Error(String(error));
+  if (applicationState === undefined) {
+    return result;
+  }
+  const candidateMetadata = (result as { metadata?: unknown }).metadata;
+  const metadata =
+    candidateMetadata !== null && typeof candidateMetadata === 'object' && !Array.isArray(candidateMetadata)
+      ? candidateMetadata
+      : {};
+  return Object.assign(result, { metadata: { ...metadata, applicationState } });
+};
+
+const restoreCheckedWriteApplicationState = (error: unknown): void => {
+  const metadata = (error as { metadata?: unknown } | undefined)?.metadata;
+  if (metadata !== null && typeof metadata === 'object' && !Array.isArray(metadata)) {
+    const applicationState = checkedWriteApplicationState(metadata);
+    if (applicationState !== undefined) {
+      Object.assign(error as Record<string, unknown>, { applicationState });
+    }
+  }
+};
+
+const withCheckedWriteApplicationState = (error: unknown, applicationState: CheckedWriteApplicationState): Error => {
+  const result = error instanceof Error ? error : new Error(String(error));
+  const candidateMetadata = (result as { metadata?: unknown }).metadata;
+  const metadata =
+    candidateMetadata !== null && typeof candidateMetadata === 'object' && !Array.isArray(candidateMetadata)
+      ? candidateMetadata
+      : {};
+  return Object.assign(result, {
+    applicationState,
+    metadata: { ...metadata, applicationState },
+  });
+};
+
+const checkedWritePreDeliveryError = (args: unknown[]): Error | undefined => {
+  const validation = fileSystemBridgeSchemas.calls.writeFileChecked.args.safeParse(args);
+  if (validation.success) {
+    return undefined;
+  }
+  return withCheckedWriteApplicationState(
+    new TypeError(`Invalid writeFileChecked arguments: ${validation.error.message}`),
+    'known-not-applied',
+  );
+};
+
+const classifyCheckedWriteFailure = (error: unknown): Error => {
+  restoreCheckedWriteApplicationState(error);
+  if (checkedWriteApplicationState(error) !== undefined) {
+    return error as Error;
+  }
+  return withCheckedWriteApplicationState(error, 'potentially-applied');
+};
 
 const serializeWorkspaceMutationError = (error: WorkspaceMutationError): WorkspaceMutationError => {
   const serialized: SerializedWorkspaceMutationError = {
@@ -356,6 +435,13 @@ export function bindMutationContextForPort<T extends StringKeyedObject>(
   const overrides: MutationOverrideMap = {
     writeFile: async (path: WriteFileParameters[0], data: WriteFileParameters[1]): Promise<void> =>
       mutatingService.writeFile(path, data, context),
+    writeFileChecked: async (input: WriteFileCheckedParameters[0]): Promise<CheckedFileWriteResult> => {
+      try {
+        return await mutatingService.writeFileChecked(input, context);
+      } catch (error) {
+        throw preserveCheckedWriteApplicationState(error);
+      }
+    },
     appendFile: async (path: AppendFileParameters[0], data: AppendFileParameters[1]): Promise<void> =>
       mutatingService.appendFile(path, data, context),
     writeFiles: async (files: WriteFilesParameters[0]): Promise<void> => mutatingService.writeFiles(files, context),
@@ -911,6 +997,30 @@ export function openFileSystemBridge(
   };
 }
 
+const runtimeFileSystemBridgeOptions = (handlers: FileSystemBridgeRuntimeService) => ({
+  hello: createFileSystemBridgeHello({
+    state: 'ready',
+    capabilities: handlers.capabilities,
+    watchable: typeof handlers.watch === 'function',
+  }),
+  protocolSchemas: fileSystemBridgeSchemas,
+});
+
+/**
+ * Serve a runtime filesystem over an already-established RPC port.
+ *
+ * @param handlers - Rooted filesystem authority exposed to the peer.
+ * @param port - Existing RPC port, including a wrapped transferred channel.
+ * @returns Server handle whose disposal closes the bridge lifecycle.
+ * @public
+ */
+export function serveFileSystemBridgePort(
+  handlers: FileSystemBridgeRuntimeService,
+  port: Port<unknown>,
+): BridgeServerHandle {
+  return createBridgeServer(handlers, port, runtimeFileSystemBridgeOptions(handlers));
+}
+
 /**
  * Create a validated filesystem bridge port for an in-isolate runtime filesystem.
  * The hello and every wire validator are installed here, so callers cannot
@@ -919,14 +1029,7 @@ export function openFileSystemBridge(
  * @public
  */
 export function createFileSystemBridgePort(handlers: FileSystemBridgeRuntimeService): FileSystemBridgeConnection {
-  const bridge = createBridgePort(handlers, {
-    hello: createFileSystemBridgeHello({
-      state: 'ready',
-      capabilities: handlers.capabilities,
-      watchable: typeof handlers.watch === 'function',
-    }),
-    protocolSchemas: fileSystemBridgeSchemas,
-  });
+  const bridge = createBridgePort(handlers, runtimeFileSystemBridgeOptions(handlers));
   return {
     port: asFileSystemBridgePort(bridge.port),
     dispose: bridge.dispose,
@@ -1025,10 +1128,31 @@ export function createFileSystemBridgeProxy(
       if (property === 'then' || property === 'toJSON' || typeof property === 'symbol') {
         return undefined;
       }
-      if (isDisposed) {
+      if (isDisposed && property !== 'writeFileChecked') {
         throw new Error(`Filesystem bridge proxy has been disposed — cannot call '${property}'`);
       }
-      return async (...args: unknown[]) => call(property, args);
+      return async (...args: unknown[]) => {
+        if (property === 'writeFileChecked') {
+          const preDeliveryError = checkedWritePreDeliveryError(args);
+          if (preDeliveryError !== undefined) {
+            throw preDeliveryError;
+          }
+          if (isDisposed) {
+            throw withCheckedWriteApplicationState(
+              new Error(`Filesystem bridge proxy has been disposed — cannot call '${property}'`),
+              'known-not-applied',
+            );
+          }
+        }
+        try {
+          return await call(property, args);
+        } catch (error) {
+          if (property === 'writeFileChecked') {
+            throw classifyCheckedWriteFailure(error);
+          }
+          throw error;
+        }
+      };
     },
   });
 }

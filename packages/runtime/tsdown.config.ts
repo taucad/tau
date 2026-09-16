@@ -16,6 +16,10 @@ export const runtimeCopyTargets = (outDirectory: string): Array<{ from: string; 
     rename: 'THIRD_PARTY_LICENSES.md',
   },
   {
+    from: 'NOTICE',
+    to: outDirectory,
+  },
+  {
     from: 'src/nextjs/package-assets-loader.mjs',
     to: `${outDirectory}/nextjs`,
   },

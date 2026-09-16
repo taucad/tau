@@ -68,6 +68,21 @@ export const withCrossTabLocks = async <T>(paths: readonly string[], operation: 
   return acquire(0);
 };
 
+/** Acquire browser authority locks, refusing when the platform cannot provide exclusion. @internal */
+export const withRequiredCrossTabLocks = async <T>(
+  paths: readonly string[],
+  operation: () => Promise<T>,
+): Promise<T> => {
+  if (typeof navigator === 'undefined' || !('locks' in navigator)) {
+    throw Object.assign(new Error('Checked filesystem writes require navigator.locks or a provider authority.'), {
+      code: 'CHECKED_WRITE_UNSUPPORTED',
+      applicationState: 'known-not-applied',
+      metadata: { applicationState: 'known-not-applied' },
+    });
+  }
+  return withCrossTabLocks(paths, operation);
+};
+
 /**
  * Coordinates filesystem writes across browser tabs.
  *
@@ -117,6 +132,11 @@ export class CrossTabCoordinator {
    */
   public async withLocks<T>(paths: readonly string[], operation: () => Promise<T>): Promise<T> {
     return withCrossTabLocks(paths, operation);
+  }
+
+  /** Execute under required cross-tab exclusion, failing closed when unavailable. */
+  public async withRequiredLocks<T>(paths: readonly string[], operation: () => Promise<T>): Promise<T> {
+    return withRequiredCrossTabLocks(paths, operation);
   }
 
   /**

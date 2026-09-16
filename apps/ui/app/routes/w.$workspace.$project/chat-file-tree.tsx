@@ -36,7 +36,7 @@ export const FileTreePanelBody = memo(function ({
   return (
     <FloatingPanel isOpen={isOpen} side='right' className={className} onOpenChange={onOpenChange}>
       <ChatEditorFileTree
-        actionsContainer={actionsContainer}
+        actionsContainer={actionsContainer ?? undefined}
         closeButton={closeButton}
         showTitle={showTitle}
         borderless={borderless}

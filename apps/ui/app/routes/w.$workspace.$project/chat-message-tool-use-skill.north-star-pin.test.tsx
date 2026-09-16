@@ -55,6 +55,7 @@ vi.mock('#hooks/use-keyboard.js', () => ({ useKeybinding: () => ({ formattedKeyC
 vi.mock('#hooks/use-revision-status.js', () => ({ useRevisionStatus: () => undefined }));
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
+    fileManagerRef: actorStub,
     contentService: undefined,
     treeService: undefined,
     runtimeFileSystem: undefined,

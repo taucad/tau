@@ -9,11 +9,10 @@ import { cn } from '@taucad/ui/utils/cn';
 import { useCadPreview } from '#hooks/use-cad-preview.js';
 
 export function PreviewParameters(): React.JSX.Element {
-  const { cadRef, graphicsRef, defaultParameters, jsonSchema, setParameters } = useCadPreview();
+  const { cadRef, graphicsRef, defaultParameters, jsonSchema, parameterManifest, setParameters } = useCadPreview();
   const parameters = useSelector(cadRef, (snapshot) => snapshot.context.parameters);
-  const sourceSymbol = useSelector(cadRef, (snapshot) => snapshot.context.units.length);
   const displaySymbol = useSelector(graphicsRef, (state) => state.context.displayUnits.length.symbol);
-  const units = { length: { sourceSymbol, displaySymbol } } as const;
+  const units = { length: { displaySymbol } } as const;
 
   const [isSearchVisible, setIsSearchVisible] = useState(false);
   const [isAllExpanded, setIsAllExpanded] = useState(true);
@@ -96,16 +95,22 @@ export function PreviewParameters(): React.JSX.Element {
         </div>
       </div>
       <div className='flex-1 overflow-hidden'>
-        <Parameters
-          parameters={parameters}
-          defaultParameters={defaultParameters}
-          jsonSchema={jsonSchema}
-          units={units}
-          enableSearch={isSearchVisible}
-          isAllExpanded={isAllExpanded}
-          emptyDescription='This model has no parameters'
-          onParametersChange={handleParametersChange}
-        />
+        {parameterManifest ? (
+          <Parameters
+            parameters={parameters}
+            defaultParameters={defaultParameters}
+            jsonSchema={jsonSchema}
+            parameterManifest={parameterManifest}
+            parameterEdit={{ kind: 'transient' }}
+            units={units}
+            enableSearch={isSearchVisible}
+            isAllExpanded={isAllExpanded}
+            emptyDescription='This model has no parameters'
+            onParametersChange={handleParametersChange}
+          />
+        ) : (
+          <div className='p-3 text-sm text-muted-foreground'>Loading parameter metadata…</div>
+        )}
       </div>
     </div>
   );

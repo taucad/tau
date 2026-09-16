@@ -15,13 +15,25 @@ const originalUnhandled = new Set(process.listeners('unhandledRejection'));
 const state = vi.hoisted(() => ({
   appListeners: new Map<string, Array<(event: { preventDefault(): void }) => void>>(),
   handlers: new Map<string, (...args: unknown[]) => unknown>(),
-  resolveFork: undefined as undefined | ((context: Record<string, string>) => { compute?: unknown }),
+  resolveFork: undefined as
+    | undefined
+    | ((context: Record<string, string>) => {
+        compute?: unknown;
+        env?: Readonly<Record<string, string>>;
+        fileSystemPort?: unknown;
+      }),
   workers: [] as NodeWorker[],
   userData: '',
   servicesDispose: vi.fn(async () => undefined),
   /* The quit hold's two halves, in the order main runs them (R9, D31). */
   shutdownOrder: [] as string[],
-  servicesQuiesce: vi.fn(async (): Promise<'quiesced' | 'failed' | 'timeout' | 'no-utility'> => 'quiesced'),
+  servicesConnect: vi.fn(() => ({ id: 'services-port' })),
+  servicesQuiesce: vi.fn(
+    async (): Promise<
+      { status: 'quiesced' } | { status: 'failed'; message: string } | { status: 'timeout' } | { status: 'no-utility' }
+    > => ({ status: 'quiesced' }),
+  ),
+  utilityEnvironmentAdditions: [] as NodeJS.ProcessEnv[],
   ipcListeners: new Map<string, Array<(...args: unknown[]) => unknown>>(),
   sentToRenderer: [] as string[],
   /* A renderer that closes its sessions at once, which is what every case but
@@ -192,10 +204,10 @@ vi.mock('#main/navigation-policy.js', () => ({
   rendererOrigins: vi.fn(() => []),
 }));
 vi.mock('#main/services-broker.js', () => ({
-  servicesConcerns: ['nodeFs', 'agentHost'],
+  rendererServicesConcerns: ['nodeFs', 'agentHost'],
   createServicesBroker: vi.fn(() => ({
     post: vi.fn(),
-    connect: vi.fn(),
+    connect: state.servicesConnect,
     quiesce: state.servicesQuiesce,
     dispose: state.servicesDispose,
     computeProjectRoot: (root: string) =>
@@ -205,7 +217,10 @@ vi.mock('#main/services-broker.js', () => ({
 vi.mock('#main/utility-environment.js', () => ({
   loginShellEnvironment: vi.fn(async () => undefined),
   packagedEsbuildEnvironment: vi.fn(() => ({})),
-  utilityEnvironment: vi.fn(() => ({})),
+  utilityEnvironment: vi.fn((_environment: unknown, additions: NodeJS.ProcessEnv = {}) => {
+    state.utilityEnvironmentAdditions.push(additions);
+    return {};
+  }),
 }));
 vi.mock('#main/quick-look.js', () => ({
   createQuickLookController: vi.fn(() => ({ dispose: vi.fn() })),
@@ -230,6 +245,8 @@ afterEach(async () => {
   state.sentToRenderer.length = 0;
   state.autoQuiesce = true;
   state.resolveFork = undefined;
+  state.servicesConnect.mockClear();
+  state.utilityEnvironmentAdditions.length = 0;
   // Each case bootstraps main afresh; the cached module would otherwise register nothing.
   vi.resetModules();
   vi.unstubAllGlobals();
@@ -283,6 +300,9 @@ describe('desktop main compute owner', () => {
     'allocates lazily, reuses original identity, invalidates on error, restarts, and awaits quit',
     async () => {
       const projectRoot = await bootstrap();
+      expect(state.utilityEnvironmentAdditions.at(-1)?.['TAU_DESKTOP_AUTHORITY_DIR']).toBe(
+        join(state.userData, 'filesystem-authority'),
+      );
       const off = state.resolveFork!({ projectRoot, computeMode: 'off' });
       expect(off.compute).toEqual({ mode: 'off' });
       expect(state.workers).toHaveLength(0);
@@ -295,6 +315,10 @@ describe('desktop main compute owner', () => {
         computeMode: 'durable',
       });
       expect((candidate.compute as { store: unknown }).store).toBe((direct.compute as { store: unknown }).store);
+      expect(candidate.env?.['TAU_PROJECT_ROOT']).toBe(join(projectRoot, '.tau/checkouts/run'));
+      expect(state.servicesConnect).toHaveBeenCalledWith('runtimeFileSystem', {
+        workspaceRoot: join(projectRoot, '.tau/checkouts/run'),
+      });
       expect(state.workers).toHaveLength(1);
 
       const inspect = state.handlers.get(computeControlChannels.inspect)!;
@@ -334,9 +358,9 @@ describe('desktop main compute owner', () => {
       await bootstrap();
       const order: string[] = [];
       state.autoQuiesce = false;
-      state.servicesQuiesce.mockImplementation(async (): Promise<'quiesced'> => {
+      state.servicesQuiesce.mockImplementation(async (): Promise<{ status: 'quiesced' }> => {
         order.push('quiesce');
-        return 'quiesced';
+        return { status: 'quiesced' };
       });
       state.servicesDispose.mockImplementation(async () => {
         order.push('dispose');
@@ -378,7 +402,7 @@ describe('desktop main compute owner', () => {
     'names what could not settle when a quit is held, and quits anyway on request',
     async () => {
       await bootstrap();
-      state.servicesQuiesce.mockResolvedValue('failed');
+      state.servicesQuiesce.mockResolvedValue({ status: 'failed', message: 'utility drain failed' });
 
       const quit = state.appListeners.get('before-quit')!.at(-1)!;
       quit({ preventDefault: vi.fn() });
@@ -391,6 +415,11 @@ describe('desktop main compute owner', () => {
       });
       expect(app.quit).not.toHaveBeenCalled();
       expect(state.servicesDispose).not.toHaveBeenCalled();
+      /* The outcome itself is logged, not just its name, so what refused to
+       * settle is recoverable from the log. */
+      expect(state.log).toHaveBeenCalledWith('error', 'main.quiesce', {
+        outcome: { status: 'failed', message: 'utility drain failed' },
+      });
 
       dialog.showMessageBox.mockResolvedValue({ response: 1 });
       quit({ preventDefault: vi.fn() });
@@ -399,7 +428,7 @@ describe('desktop main compute owner', () => {
         expect(app.quit).toHaveBeenCalledOnce();
       });
       dialog.showMessageBox.mockResolvedValue({ response: 0 });
-      state.servicesQuiesce.mockResolvedValue('quiesced');
+      state.servicesQuiesce.mockResolvedValue({ status: 'quiesced' });
     },
     bootMilliseconds,
   );

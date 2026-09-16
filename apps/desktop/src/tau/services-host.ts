@@ -26,6 +26,10 @@ if (!parentPort) {
  * `node-fs-served` are assertable from disk rather than only from inherited
  * stdout. Absent the directory the default console sink still applies. */
 const logDirectory = process.env['TAU_DESKTOP_LOG_DIR'];
+const authorityDirectory = process.env['TAU_DESKTOP_AUTHORITY_DIR'];
+if (!authorityDirectory) {
+  throw new Error('The Tau services host requires a host-owned filesystem authority directory.');
+}
 const diagnostics =
   logDirectory === undefined ? undefined : createDiagnosticsLog({ directory: logDirectory, producer: 'services' });
 const pendingRuntimePorts = new Map<
@@ -74,6 +78,7 @@ const requestRuntimePort = async (
 const gitExecutable = process.env['TAU_GIT_EXECUTABLE'];
 
 const host = createServicesHost({
+  authorityDirectory,
   requestRuntimePort,
   ...(gitExecutable === undefined || gitExecutable === '' ? {} : { gitExecutable }),
   runtimeContext: (action, workspaceRoot, projectRoot) => {
@@ -81,11 +86,8 @@ const host = createServicesHost({
   },
   /* The reply half of main's quit hold (W19): every project this utility serves
    * has taken its close cut and settled its sync. */
-  quiesced: (error) => {
-    parentPort.postMessage({
-      type: error === undefined ? 'quiesced' : 'quiesce-failed',
-      ...(error === undefined ? {} : { error }),
-    });
+  quiesced: (outcome) => {
+    parentPort.postMessage(outcome);
   },
   agentHostReleased: (requestId, error) => {
     parentPort.postMessage({

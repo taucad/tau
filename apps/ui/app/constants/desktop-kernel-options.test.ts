@@ -85,6 +85,7 @@ describe('desktopKernelOptions', () => {
       const factory = await desktop.desktopKernelOptions(projectId)();
 
       expect(requestRuntimePort).toHaveBeenCalledExactlyOnceWith(expect.any(String), {
+        computeMode: 'durable',
         definition: 'default',
         projectRoot: `${homeRoot}/widget`,
       });
@@ -117,6 +118,7 @@ describe('desktopKernelOptions', () => {
       await desktop.desktopKernelOptions(projectId)();
 
       expect(requestRuntimePort).toHaveBeenCalledExactlyOnceWith(expect.any(String), {
+        computeMode: 'durable',
         definition: 'default',
         projectRoot: '/Users/tester/Projects/Workshop/widget',
       });

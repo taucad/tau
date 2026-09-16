@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+import { createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
 import { validateTauCadTopology } from '@taucad/geometry-core';
 import type { TauCadTopologyPayload } from '@taucad/geometry-core';
 import {
@@ -15,6 +16,12 @@ import {
   getSignedVolumeFromGlb,
   validateGlbData,
 } from '@taucad/runtime-testing';
+import { readParameterRecord } from '@taucad/parameters';
+import { loadParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
+import type { ParameterAuthority } from '@taucad/parameters/authority';
+import { createActor, fromPromise, waitFor } from 'xstate';
+import type { ParameterManifest } from '@taucad/parameters';
+import { parameterSetMachine } from '@taucad/parameters/set-machine';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { describe, expect, it } from 'vitest';
 
@@ -30,6 +37,8 @@ type ResourceManifest = {
 };
 
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 const targetRoot = resolve(workspaceRoot, `apps/desktop/resources/python/${process.platform}-${process.arch}`);
 const manifest = JSON.parse(readFileSync(resolve(targetRoot, 'tau-runtime-manifest.json'), 'utf8')) as ResourceManifest;
 
@@ -50,23 +59,43 @@ const runtime = defineRuntime({
   ],
 });
 
-const source = `from dataclasses import dataclass
-from build123d import Box, Color
+const modelSource = (metadata: string): string => `from dataclasses import dataclass
+from build123d import Axis, Box, Color
 
 @dataclass(frozen=True)
 class Params:
     width: float = 40.0
     depth: float = 30.0
     height: float = 20.0
+    angle: float = 30.0
 
-__tau__ = {"parameters": {"width": {"minimum": 1.0, "maximum": 200.0}}}
+__tau__ = {"parameters": ${metadata}}
 
 def main(params: Params):
-    result = Box(params.width, params.depth, params.height)
+    result = Box(params.width, params.depth, params.height).rotate(Axis.Z, params.angle)
     result.label = "Housing"
     result.color = Color("royalblue")
     return result
 `;
+const source = modelSource(
+  '{"width": {"minimum": 1.0, "maximum": 200.0}, "angle": {"minimum": -180.0, "maximum": 180.0}}',
+);
+const declaredSource = modelSource(`{
+  "width": {
+    "minimum": 1.0,
+    "maximum": 200.0,
+    "ucumUnit": "mm",
+    "quantityKind": "http://qudt.org/vocab/quantitykind/Length",
+    "space": "linear"
+  },
+  "angle": {
+    "minimum": -180.0,
+    "maximum": 180.0,
+    "ucumUnit": "deg",
+    "quantityKind": "http://qudt.org/vocab/quantitykind/PlaneAngle",
+    "space": "linear"
+  }
+}`);
 const v8Source = readFileSync(
   resolve(workspaceRoot, 'libs/tau-examples/src/kernels/build123d/v8-engine-brep/main.py'),
   'utf8',
@@ -124,31 +153,93 @@ const readTopology = (
 };
 
 describe('Build123d native kernel', () => {
-  it('extracts parameters, renders canonical topology, and exports retained STEP', async () => {
+  it('admits declared units without changing native values or geometry', async () => {
     const previousPath = process.env['PATH'];
     // Only the system directories the sandbox wrapper resolves `which` from: no user or tool PATH.
     process.env['PATH'] = '/usr/bin:/bin';
     const client = createTestRuntimeClient({ runtime, files: { 'main.py': source } });
-    const parameters = new Promise<Record<string, unknown>>((resolve) => {
-      client.on('parametersResolved', (result) => {
-        if (result.success) {
-          resolve(result.data.defaultParameters);
-        }
+    const nextManifest = async (): Promise<ParameterManifest> =>
+      new Promise((resolve) => {
+        client.on('parametersResolved', (result) => {
+          if (result.success) {
+            resolve(result.data);
+          }
+        });
       });
-    });
     try {
-      const rendered = await client.render({ source: { path: 'main.py' }, parameters: { width: 50 } });
+      const baselineParameters = nextManifest();
+      const baseline = await client.render({
+        source: { path: 'main.py' },
+        parameters: { width: 50, angle: 15 },
+      });
+      const baselineManifest = await baselineParameters;
+      expect(baselineManifest.defaults).toEqual({ width: 40, depth: 30, height: 20, angle: 30 });
+      expect(Object.keys(baselineManifest.bindings).sort()).toEqual(['/angle', '/depth', '/height', '/width']);
+      for (const binding of Object.values(baselineManifest.bindings)) {
+        expect(binding).not.toHaveProperty('unit');
+      }
+
+      const declaredParameters = nextManifest();
+      const rendered = await client.render({
+        source: { files: { 'main.py': declaredSource }, entry: 'main.py' },
+        parameters: { width: 50, angle: 15 },
+      });
+      const declared = await declaredParameters;
       expect(rendered.superseded).toBe(false);
       if (rendered.superseded) {
         throw new Error('Native Build123d render was unexpectedly superseded.');
       }
-      expect(await parameters).toEqual({ width: 40, depth: 30, height: 20 });
+      expect(declared.defaults).toEqual({ width: 40, depth: 30, height: 20, angle: 30 });
+      expect(declared.source).toMatchObject({ id: 'build123d', capability: 'json-structure' });
+      expect(declared.bindings).toMatchObject({
+        '/width': {
+          unit: 'mm',
+          quantityKind: 'http://qudt.org/vocab/quantitykind/Length',
+          space: 'linear',
+          constraints: { default: 40, minimum: 1, maximum: 200 },
+        },
+        '/angle': {
+          unit: 'deg',
+          quantityKind: 'http://qudt.org/vocab/quantitykind/PlaneAngle',
+          space: 'linear',
+          constraints: { default: 30, minimum: -180, maximum: 180 },
+        },
+      });
+      expect(Object.values(declared.provenance)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            field: 'unit',
+            origin: 'declared',
+            producer: 'build123d',
+            sourceRevision: declared.source.revision,
+          }),
+          expect.objectContaining({
+            field: 'quantity-kind',
+            origin: 'declared',
+            producer: 'build123d',
+            sourceRevision: declared.source.revision,
+          }),
+          expect.objectContaining({
+            field: 'space',
+            origin: 'declared',
+            producer: 'build123d',
+            sourceRevision: declared.source.revision,
+          }),
+        ]),
+      );
+
+      expect(baseline.superseded).toBe(false);
+      if (baseline.superseded) {
+        throw new Error('Native Build123d baseline render was unexpectedly superseded.');
+      }
+      assertSuccess(baseline.geometry);
       assertSuccess(rendered.geometry);
       expect(rendered.geometry.data.format).toBe('gltf');
-      if (rendered.geometry.data.format !== 'gltf') {
+      if (baseline.geometry.data.format !== 'gltf' || rendered.geometry.data.format !== 'gltf') {
         throw new Error('Expected GLB geometry');
       }
       const glb = rendered.geometry.data.content;
+      expect(glb).toEqual(baseline.geometry.data.content);
       validateGlbData(glb);
       expect(await getSignedVolumeFromGlb(glb)).toBeCloseTo(30e-6, 10);
       const { json, payload } = readTopology(glb);
@@ -179,6 +270,199 @@ describe('Build123d native kernel', () => {
       expect(Buffer.from(step.data[0]!.bytes).subarray(0, 13).toString()).toBe('ISO-10303-21;');
     } finally {
       process.env['PATH'] = previousPath;
+      await client.shutdown();
+    }
+  }, 180_000);
+
+  it('preserves real geometry through an admitted source-unit record', async () => {
+    const client = createTestRuntimeClient({ runtime, files: { 'main.py': declaredSource } });
+    const nextManifest = async (): Promise<ParameterManifest> =>
+      new Promise((resolve) => {
+        client.on('parametersResolved', (result) => {
+          if (result.success) {
+            resolve(result.data);
+          }
+        });
+      });
+    try {
+      const baselineParameters = nextManifest();
+      const baseline = await client.render({
+        source: { path: 'main.py' },
+        parameters: { width: 50, angle: 15 },
+      });
+      const admitted = await baselineParameters;
+      const width = admitted.bindings['/width'];
+      expect(width?.sourceUnitCapability).toBe('change-source-unit:preserve-size:v1');
+      if (!width) {
+        throw new Error('Expected admitted width binding');
+      }
+      type ByteState = Awaited<ReturnType<ParameterAuthority['read']>>;
+      let recordBytes: ByteState = null;
+      const sourceBytes = encoder.encode(declaredSource);
+      const sameBytes = (left: ByteState | string, right: ByteState | string): boolean => {
+        if (left === null || right === null) {
+          return left === right;
+        }
+        const leftBytes = typeof left === 'string' ? encoder.encode(left) : left;
+        const rightBytes = typeof right === 'string' ? encoder.encode(right) : right;
+        return (
+          leftBytes.byteLength === rightBytes.byteLength &&
+          leftBytes.every((value, index) => value === rightBytes[index])
+        );
+      };
+      const authority: ParameterAuthority = {
+        path: () => '.tau/parameters/main.py.json',
+        read: async () => recordBytes?.slice() ?? null,
+        writeChecked: async (input) => {
+          const sourcePrecondition = input.preconditions.find(({ path }) => path === 'main.py');
+          if (sourcePrecondition !== undefined && !sameBytes(sourceBytes, sourcePrecondition.expected)) {
+            return { status: 'conflict', conflicts: [{ path: 'main.py', actual: Uint8Array.from(sourceBytes) }] };
+          }
+          if (
+            !sameBytes(
+              recordBytes,
+              input.preconditions.find(({ path }) => path === '.tau/parameters/main.py.json')?.expected ?? null,
+            )
+          ) {
+            return {
+              status: 'conflict',
+              conflicts: [
+                {
+                  path: '.tau/parameters/main.py.json',
+                  actual: recordBytes === null ? null : Uint8Array.from(recordBytes),
+                },
+              ],
+            };
+          }
+          const status = sameBytes(recordBytes, input.data) ? 'unchanged' : 'applied';
+          recordBytes = typeof input.data === 'string' ? encoder.encode(input.data) : Uint8Array.from(input.data);
+          return { status, content: Uint8Array.from(recordBytes) };
+        },
+        semanticPreconditions: async () => [{ path: 'main.py', expected: Uint8Array.from(sourceBytes) }],
+      };
+      const target = { authority: 'memory', root: '/project', entry: 'main.py' };
+      const actor = createActor(
+        parameterSetMachine.provide({
+          actors: {
+            loadParameterSet: fromPromise(async ({ signal }) =>
+              loadParameterSnapshot({ target, authority, manifest: async () => admitted, signal }),
+            ),
+            commitParameterSet: fromPromise(async ({ input: change, signal }) =>
+              commitParameterChange({ change, authority, signal }),
+            ),
+          },
+        }),
+        { input: { target } },
+      );
+      actor.start();
+      const agent = createRuntimeParameterAgentClient({
+        parameterActorFor: async () => actor,
+        mapRuntimeError: (error) => ({ success: false, errorCode: 'UNKNOWN', message: String(error) }),
+      });
+      const resolved = await agent.getParameters({ targetFile: 'main.py' }, { signal: AbortSignal.timeout(30_000) });
+      if (!resolved.success || resolved.status !== 'resolved' || resolved.current === undefined) {
+        throw new Error('Expected the agent to resolve Build123d parameters');
+      }
+      const sourceUnitOperation = {
+        kind: 'source-unit',
+        mode: 'preserve-size',
+        group: 'default',
+        parameterId: width.parameter.value,
+        resource: width.schema.resource,
+        pointer: '/width',
+        unit: 'cm',
+        producerCapability: {
+          producer: 'build123d',
+          sourceRevision: admitted.source.revision,
+          capability: 'change-source-unit:preserve-size:v1',
+        },
+        dependencies: { 'main.py': admitted.source.revision },
+      } as const;
+      const cancelledProposal = await agent.applyParameterOperation(
+        {
+          targetFile: 'main.py',
+          requestId: 'build123d-agent:cancel',
+          expected: resolved.current.identity,
+          pressure: 'final',
+          operation: sourceUnitOperation,
+        },
+        { signal: AbortSignal.timeout(30_000) },
+      );
+      if (!cancelledProposal.success || cancelledProposal.outcome.status !== 'confirmation-required') {
+        throw new Error('Expected a cancellable source-unit proposal');
+      }
+      await expect(
+        agent.applyParameterOperation(
+          {
+            action: 'cancel',
+            targetFile: 'main.py',
+            requestId: 'build123d-agent:cancel',
+          },
+          { signal: AbortSignal.timeout(30_000) },
+        ),
+      ).resolves.toMatchObject({ success: true, outcome: { status: 'cancelled-before-apply' } });
+      const proposal = await agent.applyParameterOperation(
+        {
+          targetFile: 'main.py',
+          requestId: 'build123d-agent:confirm',
+          expected: resolved.current.identity,
+          pressure: 'final',
+          operation: sourceUnitOperation,
+        },
+        { signal: AbortSignal.timeout(30_000) },
+      );
+      if (!proposal.success || proposal.outcome.status !== 'confirmation-required') {
+        throw new Error('Expected a source-unit confirmation plan');
+      }
+      await expect(
+        agent.applyParameterOperation(
+          {
+            action: 'confirm',
+            targetFile: 'main.py',
+            requestId: 'build123d-agent:confirm',
+            planFingerprint: proposal.outcome.planFingerprint,
+          },
+          { signal: AbortSignal.timeout(30_000) },
+        ),
+      ).resolves.toMatchObject({ success: true, outcome: { status: 'committed', write: 'applied' } });
+      const committedBytes = await authority.read(target, new AbortController().signal);
+      if (committedBytes === null) {
+        throw new Error('Expected a committed parameter record');
+      }
+      const sourceUnitRecord = decoder.decode(committedBytes);
+      const decoded = readParameterRecord(committedBytes);
+      if (decoded.status !== 'current') {
+        throw new Error('Expected a current parameter record');
+      }
+      expect(decoded.record.groups['default']).toMatchObject({
+        values: { width: 4 },
+        bindings: { '/width': { unit: 'cm', sourceUnit: { producer: 'build123d', producerUnit: 'mm' } } },
+      });
+      const converted = await client.render({
+        source: {
+          files: {
+            'main.py': declaredSource,
+            '.tau/parameters/main.py.json': sourceUnitRecord,
+          },
+          entry: 'main.py',
+        },
+        parameters: { width: 5, angle: 15 },
+      });
+      expect(baseline.superseded).toBe(false);
+      expect(converted.superseded).toBe(false);
+      if (baseline.superseded || converted.superseded) {
+        throw new Error('Build123d source-unit render was unexpectedly superseded');
+      }
+      assertSuccess(baseline.geometry);
+      assertSuccess(converted.geometry);
+      if (baseline.geometry.data.format !== 'gltf' || converted.geometry.data.format !== 'gltf') {
+        throw new Error('Expected GLB geometry');
+      }
+      expect(converted.geometry.data.content).toEqual(baseline.geometry.data.content);
+      expect(await getSignedVolumeFromGlb(converted.geometry.data.content)).toBeCloseTo(30e-6, 10);
+      actor.send({ type: 'close' });
+      await waitFor(actor, (snapshot) => snapshot.status === 'done');
+    } finally {
       await client.shutdown();
     }
   }, 180_000);

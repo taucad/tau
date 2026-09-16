@@ -46,6 +46,8 @@ import { defineRuntime } from '#worker/runtime-definition.js';
 import { createMemoryComputeEngine } from '#cache/memory-compute-engine.js';
 import { _registerComputeStore } from '#cache/kernel-compute-runtime.js';
 import type { ComputeStore, ResidentExportEntry } from '#types/runtime-compute.types.js';
+// oxlint-disable-next-line no-restricted-imports -- Runtime-private fixture stays outside the package build graph.
+import { createParameterDeclaration } from '../../test/support/kernel-worker.fixture.js';
 
 const testGeometry = { format: 'gltf', content: new Uint8Array([1]), hash: 'mock' } satisfies Geometry;
 const unsupportedSameIsolateTimeoutMessage =
@@ -161,7 +163,7 @@ describe('transport conformance — in-process (C2)', () => {
         return { resolved: [input.entryPath], unresolved: [] };
       },
       async getParameters() {
-        return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+        return createParameterDeclaration();
       },
       async createGeometry(input, runtime) {
         const label = await runtime.filesystem.readFile(input.entryPath, 'utf8');
@@ -252,7 +254,7 @@ describe('transport conformance — in-process (C2)', () => {
         return { resolved: [input.entryPath], unresolved: [] };
       },
       async getParameters() {
-        return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+        return createParameterDeclaration();
       },
       async exportGeometry() {
         return { success: false, issues: [] };

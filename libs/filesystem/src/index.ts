@@ -11,6 +11,7 @@ export type {
   WatchRequest,
   WatchEvent,
 } from '#types.js';
+export type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 
 export { pendingProjectCommitInputSchema, WorkspaceFileService } from '#workspace-file-service.js';
 export type {
@@ -36,6 +37,7 @@ export type { CapacityDecision, CapacityDomain, CapacityMeasurement, CapacityReq
 
 export { BoundedFileCache } from '#bounded-file-cache.js';
 export { ResourceQueue } from '#resource-queue.js';
+export type { ResourceQueueClaim } from '#resource-queue.js';
 export { ChangeEventBus } from '#change-event-bus.js';
 export { InMemoryFileTree } from '#in-memory-file-tree.js';
 export type { TreeNode } from '#in-memory-file-tree.js';

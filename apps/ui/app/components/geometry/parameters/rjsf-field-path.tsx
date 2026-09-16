@@ -40,3 +40,6 @@ const SchemaField = (props: FieldProps<Record<string, unknown>, RJSFSchema, RJSF
 export const rjsfFields: RegistryFieldsType<Record<string, unknown>, RJSFSchema, RJSFContext> = { SchemaField };
 
 export const useRenderedFieldPath = (): RenderedFieldPath | undefined => useContext(renderedFieldPathContext);
+
+export const toInstancePointer = (path: readonly string[]): string =>
+  `/${path.map((part) => part.replaceAll('~', '~0').replaceAll('/', '~1')).join('/')}`;

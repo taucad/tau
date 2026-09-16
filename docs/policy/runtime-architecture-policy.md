@@ -3,7 +3,7 @@ title: 'Runtime Architecture Policy'
 description: 'Runtime SDK ownership and CAD worker architecture. Covers generic job/configuration modules, plugin boundaries, transport, and independent lifecycles.'
 status: active
 created: '2026-02-18'
-updated: '2026-09-06'
+updated: '2026-09-13'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -136,7 +136,7 @@ Capability ids stay flat and author-declared (`replicad`, `geometry-cache`). Plu
 
 Jobs must work without a CAD session. Pure configuration use must start no host or connection. Keep their modules independent of the CAD engine and SDK facade; only composition depends on the modules. Client detachment must not implicitly cancel accepted jobs, unpair devices or shut down their host. A single package is not a single service lifetime.
 
-Expose focused authoring through `/job`, `/configuration` and `/configuration/zod`; retain environment-specific host entries and browser-safe consumer imports. The base configuration entry uses Standard Schema contracts without importing Zod or React; the Zod helper belongs only to its explicit entry. Reuse canonical private filesystem/path/units code through runtime's existing single-owner bundle/declaration assembly. Do not extract foundations or copy registry/brand definitions merely to support separate jobs/configuration packages. Independently published filesystem consumers retain their own dependency obligations.
+Expose focused authoring through `/job`, `/configuration` and `/configuration/zod`; retain environment-specific host entries and browser-safe consumer imports. The base configuration entry uses Standard Schema contracts without importing Zod or React; the Zod helper belongs only to its explicit entry. Reuse canonical private filesystem/path code through runtime's existing single-owner bundle/declaration assembly, and consume portable unit parsing, conversion, and quantity semantics from public `@taucad/units`. Do not extract another foundation or copy registry/brand definitions merely to support separate jobs/configuration packages. Independently published filesystem consumers retain their own dependency obligations.
 
 Daemon, CLI and Electron products compose runtime host entries. Runtime must not import the heavy `@taucad/host` product root. Validate installed dependency payloads and actual import graphs separately; subpaths and tree shaking do not remove npm installation dependencies. This ownership is ratified by the [manufacturing charter's M41](../research/agentic-manufacturing-program-charter.md); export availability is established by the actual package manifest and its checks, not by this target contract alone.
 

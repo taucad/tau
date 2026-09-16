@@ -18,7 +18,10 @@ const renderSlider = (properties: Partial<SliderInputProperties> = {}) =>
   render(<SliderInput {...defaultProperties} {...properties} />);
 
 const setSliderWidth = (element: HTMLElement, width = 100): void => {
-  Object.defineProperty(element, 'offsetWidth', { configurable: true, value: width });
+  Object.defineProperty(element, 'offsetWidth', {
+    configurable: true,
+    value: width,
+  });
 };
 
 const fireSliderPointerEvent = (
@@ -26,7 +29,12 @@ const fireSliderPointerEvent = (
   type: 'pointercancel' | 'pointerdown' | 'pointermove' | 'pointerup',
   { button = 0, clientX, pointerId }: { button?: number; clientX: number; pointerId: number },
 ): void => {
-  const event = new MouseEvent(type, { bubbles: true, cancelable: true, button, clientX });
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    button,
+    clientX,
+  });
   Object.defineProperty(event, 'pointerId', { value: pointerId });
   fireEvent(element, event);
 };
@@ -35,7 +43,10 @@ const scrub = (
   element: HTMLElement,
   { pointerId = 1, startX = 0, endX = 25 }: { pointerId?: number; startX?: number; endX?: number } = {},
 ): void => {
-  fireSliderPointerEvent(element, 'pointerdown', { clientX: startX, pointerId });
+  fireSliderPointerEvent(element, 'pointerdown', {
+    clientX: startX,
+    pointerId,
+  });
   fireSliderPointerEvent(element, 'pointermove', { clientX: endX, pointerId });
 };
 
@@ -49,12 +60,14 @@ describe('snapToStep', () => {
     { value: 0.21, step: 0.1, min: 0.05, expected: 0.25 },
     { value: -0.299, step: 0.01, min: 0, expected: -0.3 },
     { value: 0.0029, step: 0.001, min: 0, expected: 0.003 },
+    { value: 0.0000002, step: 0.0000001, min: 0, expected: 0.0000002 },
+    { value: -0.0000002, step: 0.0000001, min: 0, expected: -0.0000002 },
   ])('snaps $value to the step grid', ({ value, step, min, expected }) => {
     expect(snapToStep(value, step, min)).toBe(expected);
   });
 
   it('returns the value unchanged for non-positive steps', () => {
-    expect(snapToStep(0.123_456, 0)).toBe(0.123_456);
+    expect(snapToStep(0.123456, 0)).toBe(0.123456);
     expect(snapToStep(0.5, -1)).toBe(0.5);
   });
 });
@@ -110,7 +123,9 @@ describe('SliderInput', () => {
   it('focuses and selects the text after a click below the drag threshold', () => {
     const { container } = renderSlider();
     const root = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
-    const input = screen.getByRole<HTMLInputElement>('textbox', { name: 'Amount' });
+    const input = screen.getByRole<HTMLInputElement>('textbox', {
+      name: 'Amount',
+    });
     setSliderWidth(root);
 
     fireSliderPointerEvent(root, 'pointerdown', { clientX: 20, pointerId: 1 });
@@ -124,7 +139,10 @@ describe('SliderInput', () => {
 
   it('enters editing through Tab while keeping leading and trailing content visible', async () => {
     const user = userEvent.setup();
-    renderSlider({ leadingContent: <span>Opacity</span>, trailingAdornment: <span>%</span> });
+    renderSlider({
+      leadingContent: <span>Opacity</span>,
+      trailingAdornment: <span>%</span>,
+    });
     const input = screen.getByRole('textbox', { name: 'Amount' });
 
     await user.tab();
@@ -188,7 +206,9 @@ describe('SliderInput', () => {
   it('syncs idle controlled values without overwriting active user text', async () => {
     const user = userEvent.setup();
     const { rerender } = renderSlider();
-    const input = screen.getByRole<HTMLInputElement>('textbox', { name: 'Amount' });
+    const input = screen.getByRole<HTMLInputElement>('textbox', {
+      name: 'Amount',
+    });
 
     rerender(<SliderInput {...defaultProperties} value={60} />);
     expect(input).toHaveValue('60');
@@ -201,6 +221,13 @@ describe('SliderInput', () => {
 
     await user.tab();
     expect(input).toHaveValue('80');
+  });
+
+  it('shows an externally retained draft while idle', () => {
+    renderSlider({ displayValue: '50', editingValue: 'invalid draft' });
+
+    expect(screen.getByRole('textbox', { name: 'Amount' })).toHaveValue('invalid draft');
+    expect(screen.getByText('invalid draft')).toBeVisible();
   });
 
   it('does not schedule a passive follow-up commit for an idle controlled value update', () => {
@@ -246,7 +273,13 @@ describe('SliderInput', () => {
 
   it('supports a scrub beginning at clientX zero, min-anchored snapping, and range clamping', () => {
     const onScrubChange = vi.fn();
-    const { container } = renderSlider({ value: 0.05, min: 0.05, max: 1.05, step: 0.1, onScrubChange });
+    const { container } = renderSlider({
+      value: 0.05,
+      min: 0.05,
+      max: 1.05,
+      step: 0.1,
+      onScrubChange,
+    });
     const root = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
     setSliderWidth(root);
 
@@ -255,6 +288,26 @@ describe('SliderInput', () => {
 
     fireSliderPointerEvent(root, 'pointermove', { clientX: 200, pointerId: 1 });
     expect(onScrubChange).toHaveBeenLastCalledWith(1.05);
+  });
+
+  it('keeps repeated exponent-step scrubs finite, monotonic, and on-grid', () => {
+    const onScrubChange = vi.fn<(value: number) => void>();
+    const { container } = renderSlider({
+      value: 0,
+      min: -0.000001,
+      max: 0.000001,
+      step: 0.0000001,
+      stepBase: 0,
+      onScrubChange,
+    });
+    const root = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
+    setSliderWidth(root);
+
+    scrub(root, { startX: 0, endX: 10 });
+    fireSliderPointerEvent(root, 'pointermove', { clientX: 20, pointerId: 1 });
+
+    expect(onScrubChange.mock.calls.map(([value]) => value)).toEqual([0.0000002, 0.0000004]);
+    expect(onScrubChange.mock.calls.every(([value]) => Number.isFinite(value))).toBe(true);
   });
 
   it('ignores non-initiating pointers', () => {
@@ -272,19 +325,28 @@ describe('SliderInput', () => {
     expect(onScrubCommit).not.toHaveBeenCalled();
   });
 
-  it('commits the last accepted scrub value and clears interaction on pointer cancel', () => {
+  it('cancels the scrub and clears interaction on pointer cancel', () => {
     const onScrubChange = vi.fn();
     const onScrubCommit = vi.fn();
-    const { container } = renderSlider({ onScrubChange, onScrubCommit });
+    const onScrubCancel = vi.fn();
+    const { container } = renderSlider({
+      onScrubChange,
+      onScrubCommit,
+      onScrubCancel,
+    });
     const root = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
     setSliderWidth(root);
 
     scrub(root, { startX: 0, endX: 25 });
-    fireSliderPointerEvent(root, 'pointercancel', { clientX: 25, pointerId: 1 });
+    fireSliderPointerEvent(root, 'pointercancel', {
+      clientX: 25,
+      pointerId: 1,
+    });
     fireSliderPointerEvent(root, 'pointermove', { clientX: 50, pointerId: 1 });
 
     expect(onScrubChange).toHaveBeenCalledOnce();
-    expect(onScrubCommit).toHaveBeenCalledWith(75);
+    expect(onScrubCommit).not.toHaveBeenCalled();
+    expect(onScrubCancel).toHaveBeenCalledOnce();
   });
 
   it('steps and clamps Arrow keys without leaking consumed keys to a parent', () => {
@@ -313,7 +375,12 @@ describe('SliderInput', () => {
     const onScrubChange = vi.fn();
     const onInputChange = vi.fn();
     const onInputCommit = vi.fn();
-    const { container } = renderSlider({ disabled: true, onScrubChange, onInputChange, onInputCommit });
+    const { container } = renderSlider({
+      disabled: true,
+      onScrubChange,
+      onInputChange,
+      onInputCommit,
+    });
     const root = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
     const input = screen.getByRole('textbox', { name: 'Amount' });
     setSliderWidth(root);

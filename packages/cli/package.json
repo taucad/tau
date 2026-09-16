@@ -81,6 +81,7 @@
     "@taucad/middleware": "workspace:*",
     "@taucad/opencascade": "workspace:*",
     "@taucad/openrscad": "workspace:*",
+    "@taucad/parameters": "workspace:*",
     "@taucad/picogk": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/rhino": "workspace:*",

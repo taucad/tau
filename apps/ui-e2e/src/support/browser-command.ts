@@ -1,4 +1,4 @@
-/* oxlint-disable max-params, no-await-in-loop, no-eval, no-restricted-imports, tau-lint/no-bare-time-identifier, typescript/no-restricted-types -- Vitest command callbacks add their context parameter to the explicit external-target contract, and config-time modules cannot use test aliases. `no-eval` is the external-target contract itself: `evaluateTarget`, `evaluateTargetLocator` and `waitForTarget` take a function SOURCE across the browser↔node command boundary — nothing else survives that serialization — and the page reconstitutes it. The sources are spec literals, never page-derived input. */
+/* oxlint-disable max-params, no-await-in-loop, no-eval, no-restricted-imports, tau-lint/no-bare-time-identifier, typescript/consistent-type-definitions, typescript/no-restricted-types -- Vitest command callbacks add their context parameter to the explicit external-target contract, and config-time modules cannot use test aliases. `no-eval` is the external-target contract itself: `evaluateTarget`, `evaluateTargetLocator` and `waitForTarget` take a function SOURCE across the browser↔node command boundary — nothing else survives that serialization — and the page reconstitutes it. The sources are spec literals, never page-derived input. */
 import { execFile, spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -7,6 +7,7 @@ import type { Server } from 'node:http';
 import { release } from 'node:os';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
+import type { BrowserContext } from 'playwright';
 import type { BrowserCommand, BrowserCommandContext } from 'vitest/node';
 import type {
   TargetClickOptions,
@@ -29,6 +30,12 @@ import { listTauServeChats, readTauServeFile, startTauServeFixture } from './tau
 import type { TauServeFixture, TauServeFixtureOptions } from './tau-serve-fixture.ts';
 import { browserHostScript } from './agent-host-gateway-script.ts';
 import type { GatewayScriptTurn } from './agent-host-gateway-script.ts';
+
+declare module 'vitest/node' {
+  interface BrowserCommandContext {
+    readonly context: BrowserContext;
+  }
+}
 
 type ProviderContext = BrowserCommandContext['context'];
 type TargetPage = Awaited<ReturnType<ProviderContext['newPage']>>;

@@ -10,6 +10,8 @@ import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type {
   AdoptableProjectManifest,
+  CheckedFileWrite,
+  CheckedFileWriteResult,
   FileContentMetadata,
   FileStat,
   FileStatEntry,
@@ -93,6 +95,43 @@ const maxLocalizedExternalChanges = 64;
 
 /** Snapshot body published when the walked physical root is absent. */
 const missingExternalSnapshot = '<missing>';
+const maximumCheckedWritePreconditions = 32;
+const maximumCheckedWriteBytes = 8 * 1024 * 1024;
+
+const asBytes = (value: Uint8Array<ArrayBuffer> | string): Uint8Array<ArrayBuffer> =>
+  typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value);
+
+const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
+  left.byteLength === right.byteLength && left.every((value, index) => value === right[index]);
+
+const readFileOrAbsent = async (
+  provider: FileSystemProvider,
+  path: string,
+  // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the public checked-write absence sentinel.
+): Promise<Uint8Array<ArrayBuffer> | null> => {
+  try {
+    return await provider.readFile(path);
+  } catch (error) {
+    const code = (error as { code?: unknown } | undefined)?.code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      return null;
+    }
+    throw error;
+  }
+};
+
+const checkedWriteFailure = (
+  state: 'known-not-applied' | 'potentially-applied',
+  error: unknown,
+): Error & { applicationState: typeof state } => {
+  const result = error instanceof Error ? error : new Error(String(error));
+  const candidateMetadata = (result as { metadata?: unknown }).metadata;
+  const metadata =
+    candidateMetadata !== null && typeof candidateMetadata === 'object' && !Array.isArray(candidateMetadata)
+      ? candidateMetadata
+      : {};
+  return Object.assign(result, { applicationState: state, metadata: { ...metadata, applicationState: state } });
+};
 
 type NativeFileSystemChangeRecord = {
   readonly type: 'appeared' | 'disappeared' | 'modified' | 'moved' | 'unknown' | 'errored';
@@ -411,7 +450,8 @@ export type BundledTypePackageReplacement = Readonly<{
  * Filesystem provider surface issued for one captured mount.
  * @public
  */
-export type RootedFileSystem = FileSystemProvider & {
+export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked'> & {
+  writeFileChecked(input: CheckedFileWrite): Promise<CheckedFileWriteResult>;
   watch(request: WatchRequest, handler: (event: WatchEvent) => void): () => void;
 };
 
@@ -626,6 +666,21 @@ export class WorkspaceFileService {
       const { authorityPath, resolution } = resolveLocal(path);
       await this._writeFileResolved({ path: authorityPath, resolution, data, context: mutationContext });
     };
+    const writeFileChecked = async (input: CheckedFileWrite): Promise<CheckedFileWriteResult> => {
+      const target = resolveLocal(input.path);
+      const preconditions = input.preconditions.map((precondition) => {
+        const resolved = resolveLocal(precondition.path);
+        return { ...precondition, path: resolved.authorityPath, resolution: resolved.resolution };
+      });
+      return this._writeFileCheckedResolved({
+        path: target.authorityPath,
+        resolution: target.resolution,
+        data: input.data,
+        preconditions,
+        signal: input.signal,
+        context: mutationContext,
+      });
+    };
     const appendFile = async (path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> => {
       const { authorityPath, resolution } = resolveLocal(path);
       await this._appendFileResolved({ path: authorityPath, resolution, data, context: mutationContext });
@@ -741,6 +796,7 @@ export class WorkspaceFileService {
       readFile,
       readFileStream,
       writeFile,
+      writeFileChecked,
       appendFile,
       readdir,
       stat,
@@ -892,6 +948,29 @@ export class WorkspaceFileService {
     const resolution = this._resolveProvider(canonicalPath);
     const ownedData = typeof data === 'string' ? data : new Uint8Array(data);
     return this._writeFileResolved({ path: canonicalPath, resolution, data: ownedData, context });
+  }
+
+  /** Check current bytes and replace one file inside the canonical mutation fence. */
+  public async writeFileChecked(
+    input: CheckedFileWrite,
+    context?: WorkspaceMutationContext,
+  ): Promise<CheckedFileWriteResult> {
+    const path = resolveAuthorityPath(input.path);
+    this._assertGenericMutationPath(path);
+    const resolution = this._resolveProvider(path);
+    const preconditions = input.preconditions.map((precondition) => {
+      const preconditionPath = resolveAuthorityPath(precondition.path);
+      this._assertGenericMutationPath(preconditionPath);
+      return { ...precondition, path: preconditionPath, resolution: this._resolveProvider(preconditionPath) };
+    });
+    return this._writeFileCheckedResolved({
+      path,
+      resolution,
+      data: input.data,
+      preconditions,
+      signal: input.signal,
+      context,
+    });
   }
 
   /**
@@ -3707,6 +3786,176 @@ export class WorkspaceFileService {
           await this._writeFileUnlocked({ path, resolution, data, context });
         }),
     );
+  }
+
+  private async _writeFileCheckedResolved({
+    path,
+    resolution,
+    data,
+    preconditions,
+    signal,
+    context,
+  }: {
+    path: string;
+    resolution: MountResolution;
+    data: Uint8Array<ArrayBuffer> | string;
+    preconditions: ReadonlyArray<{
+      path: string;
+      // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the public checked-write absence sentinel.
+      expected: Uint8Array<ArrayBuffer> | string | null;
+      resolution: MountResolution;
+    }>;
+    signal?: AbortSignal;
+    context?: WorkspaceMutationContext;
+  }): Promise<CheckedFileWriteResult> {
+    if (preconditions.length === 0 || preconditions.length > maximumCheckedWritePreconditions) {
+      throw new TypeError(`Checked writes require 1-${String(maximumCheckedWritePreconditions)} preconditions.`);
+    }
+    const ownedData = asBytes(data);
+    const ownedPreconditions = preconditions.map((precondition) => ({
+      ...precondition,
+      expected: precondition.expected === null ? null : asBytes(precondition.expected),
+    }));
+    const expectedBytes = ownedPreconditions.reduce(
+      (total, precondition) => total + (precondition.expected?.byteLength ?? 0),
+      ownedData.byteLength,
+    );
+    if (expectedBytes > maximumCheckedWriteBytes) {
+      throw new TypeError(`Checked write request exceeds ${String(maximumCheckedWriteBytes)} bytes.`);
+    }
+    const targetAuthority = resolution.entry;
+    if (
+      targetAuthority?.storageRootKey === undefined ||
+      ownedPreconditions.some(
+        (precondition) =>
+          precondition.resolution.provider !== resolution.provider ||
+          precondition.resolution.entry?.storageRootKey !== targetAuthority.storageRootKey,
+      )
+    ) {
+      throw new TypeError('Checked write paths must share one admitted physical authority.');
+    }
+    // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the public checked-write absence sentinel.
+    const physical = new Map<string, Uint8Array<ArrayBuffer> | null>();
+    const logicalByPhysical = new Map<string, string>();
+    for (const precondition of ownedPreconditions) {
+      const previous = physical.get(precondition.resolution.path);
+      if (previous !== undefined || physical.has(precondition.resolution.path)) {
+        const same =
+          previous === null
+            ? precondition.expected === null
+            : precondition.expected !== null && bytesEqual(previous!, precondition.expected);
+        if (!same) {
+          throw new TypeError(`Checked write aliases disagree for '${precondition.path}'.`);
+        }
+      } else {
+        physical.set(precondition.resolution.path, precondition.expected);
+        logicalByPhysical.set(precondition.resolution.path, precondition.path);
+      }
+    }
+    if (!physical.has(resolution.path)) {
+      throw new TypeError('Checked writes require a destination precondition.');
+    }
+    if (signal?.aborted) {
+      throw checkedWriteFailure(
+        'known-not-applied',
+        signal.reason instanceof Error ? signal.reason : new DOMException('The operation was aborted.', 'AbortError'),
+      );
+    }
+
+    const operations = [
+      { path, resolution },
+      ...ownedPreconditions.map(({ path, resolution }) => ({ path, resolution })),
+    ];
+    const locks = this._mutationLockPaths(operations);
+    const run = async (): Promise<CheckedFileWriteResult> =>
+      this._resourceQueue.queueForMany(locks, async () => {
+        await this._refreshMutationProviders(operations.map(({ resolution }) => resolution));
+        if (signal?.aborted) {
+          throw checkedWriteFailure(
+            'known-not-applied',
+            signal.reason instanceof Error
+              ? signal.reason
+              : new DOMException('The operation was aborted.', 'AbortError'),
+          );
+        }
+        if (resolution.provider.writeFileChecked !== undefined) {
+          let result: CheckedFileWriteResult;
+          try {
+            result = await resolution.provider.writeFileChecked({
+              path: resolution.path,
+              data: ownedData,
+              preconditions: [...physical].map(([preconditionPath, expected]) => ({
+                path: preconditionPath,
+                expected,
+              })),
+            });
+          } catch (error) {
+            if ((error as { applicationState?: unknown }).applicationState !== undefined) {
+              throw error;
+            }
+            throw checkedWriteFailure('potentially-applied', error);
+          }
+          if (result.status === 'applied') {
+            this._recordCompletedWrite({ path, resolution, bytes: result.content, context });
+          }
+          return result.status === 'conflict'
+            ? {
+                status: 'conflict',
+                conflicts: result.conflicts.map((conflict) => ({
+                  ...conflict,
+                  path: logicalByPhysical.get(conflict.path) ?? conflict.path,
+                })),
+              }
+            : result;
+        }
+        const checkedPaths = [
+          ...new Map(ownedPreconditions.map((precondition) => [precondition.path, precondition])).values(),
+        ];
+        const compared = await Promise.all(
+          checkedPaths.map(async (precondition) => {
+            const actual = await readFileOrAbsent(precondition.resolution.provider, precondition.resolution.path);
+            const matches =
+              actual === null
+                ? precondition.expected === null
+                : precondition.expected !== null && bytesEqual(actual, precondition.expected);
+            return matches ? undefined : { path: precondition.path, actual };
+          }),
+        );
+        const conflicts = compared.filter((conflict) => conflict !== undefined);
+        if (conflicts.length > 0) {
+          return { status: 'conflict', conflicts };
+        }
+        const current = await readFileOrAbsent(resolution.provider, resolution.path);
+        if (current !== null && bytesEqual(current, ownedData)) {
+          return { status: 'unchanged', content: current };
+        }
+        if (signal?.aborted) {
+          throw checkedWriteFailure(
+            'known-not-applied',
+            signal.reason instanceof Error
+              ? signal.reason
+              : new DOMException('The operation was aborted.', 'AbortError'),
+          );
+        }
+        try {
+          await resolution.provider.writeFile(resolution.path, ownedData);
+          this._recordCompletedWrite({ path, resolution, bytes: ownedData, context });
+        } catch (error) {
+          throw checkedWriteFailure('potentially-applied', error);
+        }
+        return { status: 'applied', content: ownedData };
+      });
+    const result = await (resolution.provider.writeFileChecked === undefined
+      ? this._crossTabCoordinator.withRequiredLocks(locks, run)
+      : this._crossTabCoordinator.withLocks(locks, run));
+    if (result.status === 'applied') {
+      this._crossTabCoordinator.notifyMutation({
+        type: 'write',
+        path,
+        authority: this._physicalAuthority(resolution),
+      });
+    }
+    return result;
   }
 
   private async _appendFileResolved({

@@ -99,6 +99,61 @@ describe('ResourceQueue', () => {
     expect(order).toEqual(['first-start', 'first-end', 'second']);
   });
 
+  it('serializes ancestor and descendant claims while parallelizing siblings', async () => {
+    const queue = new ResourceQueue();
+    const releaseDescendant = Promise.withResolvers<void>();
+    const descendantStarted = Promise.withResolvers<void>();
+    const order: string[] = [];
+    const descendant = queue.queueForClaims(
+      [{ key: '/tree/file.txt', descendantPrefix: '/tree/file.txt/' }],
+      async () => {
+        order.push('descendant-start');
+        descendantStarted.resolve();
+        await releaseDescendant.promise;
+        order.push('descendant-end');
+      },
+    );
+    await descendantStarted.promise;
+    const ancestor = queue.queueForClaims([{ key: '/tree', descendantPrefix: '/tree/' }], async () => {
+      order.push('ancestor');
+    });
+    const sibling = queue.queueForClaims([{ key: '/other', descendantPrefix: '/other/' }], async () => {
+      order.push('sibling');
+    });
+
+    await Promise.resolve();
+    expect(order).toEqual(['descendant-start', 'sibling']);
+    releaseDescendant.resolve();
+    await Promise.all([descendant, ancestor, sibling]);
+    expect(order).toEqual(['descendant-start', 'sibling', 'descendant-end', 'ancestor']);
+  });
+
+  it('owns claim records before waiting', async () => {
+    const queue = new ResourceQueue();
+    const firstMayFinish = Promise.withResolvers<void>();
+    const firstStarted = Promise.withResolvers<void>();
+    const claim = { key: '/tree', descendantPrefix: '/tree/' };
+    const order: string[] = [];
+    const first = queue.queueForClaims([claim], async () => {
+      order.push('first-start');
+      firstStarted.resolve();
+      await firstMayFinish.promise;
+      order.push('first-end');
+    });
+    await firstStarted.promise;
+    claim.key = '/changed';
+    claim.descendantPrefix = '/changed/';
+    const second = queue.queueFor('/tree/file.txt', async () => {
+      order.push('second');
+    });
+
+    await Promise.resolve();
+    expect(order).toEqual(['first-start']);
+    firstMayFinish.resolve();
+    await Promise.all([first, second]);
+    expect(order).toEqual(['first-start', 'first-end', 'second']);
+  });
+
   it('should auto-cleanup empty queues', async () => {
     const queue = new ResourceQueue();
 

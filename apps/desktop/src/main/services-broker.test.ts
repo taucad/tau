@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createServicesBroker } from '#main/services-broker.js';
+import { createServicesBroker, rendererServicesConcerns, servicesConcerns } from '#main/services-broker.js';
 import type { ServicesBrokerOptions } from '#main/services-broker.js';
 
 type Spawned = {
@@ -49,6 +49,11 @@ const spawnUtility = (): Spawned => {
 const brokerHarness = () => {
   const spawns: Spawned[] = [];
   const runtimeExits: Array<() => void> = [];
+  const channels: Array<{
+    readonly port1: { readonly id: 'renderer'; readonly close: ReturnType<typeof vi.fn> };
+    readonly port2: { readonly id: 'utility'; readonly close: ReturnType<typeof vi.fn> };
+  }> = [];
+  type Channel = (typeof channels)[number];
   const fork = vi.fn((): Spawned => {
     const utility = spawnUtility();
     spawns.push(utility);
@@ -65,27 +70,70 @@ const brokerHarness = () => {
     utilityEntry: '/dist/main/chunks/services-host.js',
     env: { PATH: '/usr/bin' },
     fork,
-    createChannel: () => ({ port1: { id: 'renderer' }, port2: { id: 'utility' } }),
+    createChannel: (): Channel => {
+      const channel: Channel = {
+        port1: { id: 'renderer', close: vi.fn() },
+        port2: { id: 'utility', close: vi.fn() },
+      };
+      channels.push(channel);
+      return channel;
+    },
     connectRuntime,
   } as unknown as ServicesBrokerOptions;
-  return { broker: createServicesBroker(options), connectRuntime, fork, runtimeExits, spawns };
+  return { broker: createServicesBroker(options), channels, connectRuntime, fork, runtimeExits, spawns };
 };
 
 describe('createServicesBroker', () => {
+  it('keeps the rooted runtime filesystem concern main-only', () => {
+    expect(servicesConcerns).toContain('runtimeFileSystem');
+    expect(rendererServicesConcerns).toEqual(['nodeFs', 'agentHost']);
+  });
+
   it('forks nothing until the first concern is connected', () => {
     const { fork } = brokerHarness();
     expect(fork).not.toHaveBeenCalled();
   });
 
   it('is a singleton: many concerns, one utility, one dedicated port each', () => {
-    const { broker, fork, spawns } = brokerHarness();
+    const { broker, channels, fork, spawns } = brokerHarness();
     broker.connect('nodeFs');
     broker.connect('nodeFs');
     expect(fork).toHaveBeenCalledTimes(1);
     expect(spawns[0]?.postMessage).toHaveBeenCalledTimes(2);
     /* One port per concern, never a multiplexer — each connect transfers its
      * own channel leg. */
-    expect(spawns[0]?.postMessage.mock.calls[0]).toEqual([{ type: 'concern', concern: 'nodeFs' }, [{ id: 'utility' }]]);
+    expect(spawns[0]?.postMessage.mock.calls[0]).toEqual([
+      { type: 'concern', concern: 'nodeFs' },
+      [expect.objectContaining({ id: 'utility' })],
+    ]);
+    expect(channels[0]?.port1.close).not.toHaveBeenCalled();
+    expect(channels[0]?.port2.close).not.toHaveBeenCalled();
+  });
+
+  it('closes both freshly minted legs when the services fork fails', () => {
+    const { broker, channels, fork } = brokerHarness();
+    fork.mockImplementationOnce(() => {
+      throw new Error('fork failed');
+    });
+
+    expect(() => broker.connect('agentHost', { workspaceRoot: '/home/widget' })).toThrow('fork failed');
+    expect(channels[0]?.port1.close).toHaveBeenCalledOnce();
+    expect(channels[0]?.port2.close).toHaveBeenCalledOnce();
+    expect(broker.computeProjectRoot('/home/widget')).toBeUndefined();
+  });
+
+  it('closes both freshly minted legs and clears admission when concern transfer fails', () => {
+    const { broker, channels, fork } = brokerHarness();
+    const failed = spawnUtility();
+    failed.postMessage.mockImplementationOnce(() => {
+      throw new Error('transfer failed');
+    });
+    fork.mockReturnValueOnce(failed);
+
+    expect(() => broker.connect('agentHost', { workspaceRoot: '/home/widget' })).toThrow('transfer failed');
+    expect(channels[0]?.port1.close).toHaveBeenCalledOnce();
+    expect(channels[0]?.port2.close).toHaveBeenCalledOnce();
+    expect(broker.computeProjectRoot('/home/widget')).toBeUndefined();
   });
 
   it('forwards a concern context on the same frame as the port', () => {
@@ -95,7 +143,7 @@ describe('createServicesBroker', () => {
      * rather than becoming a replayed control frame. */
     expect(spawns[0]?.postMessage.mock.calls[0]).toEqual([
       { type: 'concern', concern: 'agentHost', context: { workspaceRoot: '/home/widget' } },
-      [{ id: 'utility' }],
+      [expect.objectContaining({ id: 'utility' })],
     ]);
   });
 
@@ -330,8 +378,10 @@ describe('createServicesBroker', () => {
     broker.connect('agentHost', { workspaceRoot: '/home/widget' });
     spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-1', workspaceRoot: '/home/widget' });
     let settled = false;
+    const firstDisposal = broker.dispose();
+    expect(broker.dispose()).toBe(firstDisposal);
     const disposal = (async () => {
-      await broker.dispose();
+      await firstDisposal;
       settled = true;
     })();
     await Promise.resolve();
@@ -390,12 +440,13 @@ describe('createServicesBroker — the quit hold (W19, D31)', () => {
     const utility = spawns[0]!;
 
     const quiescing = broker.quiesce(5000);
+    expect(broker.quiesce(5000)).toBe(quiescing);
     expect(utility.postMessage).toHaveBeenCalledWith({ type: 'quiesce' });
     expect(utility.kill).not.toHaveBeenCalled();
 
     utility.message({ type: 'quiesced' });
 
-    await expect(quiescing).resolves.toBe('quiesced');
+    await expect(quiescing).resolves.toEqual({ status: 'quiesced' });
     expect(utility.kill).not.toHaveBeenCalled();
   });
 
@@ -407,26 +458,62 @@ describe('createServicesBroker — the quit hold (W19, D31)', () => {
       const quiescing = broker.quiesce(1000);
       await vi.advanceTimersByTimeAsync(1100);
 
-      await expect(quiescing).resolves.toBe('timeout');
+      await expect(quiescing).resolves.toEqual({ status: 'timeout' });
       expect(spawns[0]?.kill).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('reports failure when a utility dies before acknowledging quiescence', async () => {
+  it('reports a utility that died mid-quiesce without claiming its work settled', async () => {
     const { broker, spawns } = brokerHarness();
     broker.connect('nodeFs');
     const quiescing = broker.quiesce(5000);
     spawns[0]!.exit();
 
-    await expect(quiescing).resolves.toBe('failed');
+    await expect(quiescing).resolves.toEqual({ status: 'host-exited' });
+  });
+
+  it('settles an in-flight quiesce as host-exited when forced disposal cuts it', async () => {
+    const { broker } = brokerHarness();
+    broker.connect('nodeFs');
+    const quiescing = broker.quiesce(5000);
+
+    await broker.dispose();
+
+    await expect(quiescing).resolves.toEqual({ status: 'host-exited' });
   });
 
   it('has nothing to ask when no utility was ever forked', async () => {
     const { broker, fork } = brokerHarness();
 
-    await expect(broker.quiesce(5000)).resolves.toBe('no-utility');
+    await expect(broker.quiesce(5000)).resolves.toEqual({ status: 'no-utility' });
     expect(fork).not.toHaveBeenCalled();
+  });
+
+  it('propagates a typed utility failure and refuses new concern admission', async () => {
+    const { broker, spawns } = brokerHarness();
+    broker.connect('nodeFs');
+
+    const quiescing = broker.quiesce(5000);
+    expect(() => broker.connect('nodeFs')).toThrow(/accepts no new concerns/u);
+    spawns[0]!.message({ type: 'quiesce-failed', message: 'checked write drain failed' });
+
+    await expect(quiescing).resolves.toEqual({ status: 'failed', message: 'checked write drain failed' });
+  });
+
+  it('ignores a stale utility reply after a replacement was forked', async () => {
+    const { broker, spawns } = brokerHarness();
+    broker.connect('nodeFs');
+    const stale = spawns[0]!;
+    stale.exit();
+    broker.connect('nodeFs');
+    const current = spawns[1]!;
+
+    const quiescing = broker.quiesce(5000);
+    stale.message({ type: 'quiesced' });
+    current.message({ type: 'quiesce-failed', message: 'current utility failed' });
+
+    await expect(quiescing).resolves.toEqual({ status: 'failed', message: 'current utility failed' });
   });
 });

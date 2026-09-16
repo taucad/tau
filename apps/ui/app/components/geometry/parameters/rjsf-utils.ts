@@ -88,7 +88,15 @@ export const getDiscriminatedUnionInfo = (schema: RJSFSchema): DiscriminatedUnio
 
   const firstProperties = (branches[0]?.properties ?? {}) as Record<string, unknown>;
   for (const discriminator of Object.keys(firstProperties)) {
-    if (!branches.every((branch) => branch.required?.includes(discriminator) === true)) {
+    if (
+      !branches.every((branch) => {
+        const property = branch.properties?.[discriminator];
+        return (
+          branch.required?.includes(discriminator) === true ||
+          (isRjsfSchema(property) && property.default !== undefined)
+        );
+      })
+    ) {
       continue;
     }
     const values = branches.map((branch) => {
@@ -136,6 +144,16 @@ const directDefaults = (schema: RJSFSchema): Record<string, unknown> =>
   );
 
 const mergeFormValue = (schema: RJSFSchema, defaults: unknown, values: unknown): unknown => {
+  if (Array.isArray(values)) {
+    const itemSchema = Array.isArray(schema.items) ? undefined : schema.items;
+    if (!isRjsfSchema(itemSchema)) {
+      return values;
+    }
+    const itemDefaults = Object.hasOwn(itemSchema, 'default') ? itemSchema.default : directDefaults(itemSchema);
+    return values.map((value) =>
+      value === undefined ? structuredClone(itemDefaults) : mergeFormValue(itemSchema, itemDefaults, value),
+    );
+  }
   if (!objectValue(defaults) || !objectValue(values)) {
     return values;
   }

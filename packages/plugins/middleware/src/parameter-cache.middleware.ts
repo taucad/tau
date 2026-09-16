@@ -20,16 +20,16 @@ const parameterCodec: CacheCodec<GetParametersResult> = {
   decode: ({ bytes }) => getParametersResultSchema.parse(JSON.parse(strictUtf8.decode(bytes))) as GetParametersResult,
 };
 
-const parameterAction = (dependencyHash: string): ComputeAction => ({
+const parameterAction = (semanticHash: string): ComputeAction => ({
   schemaVersion: 1,
   namespace: '@taucad/middleware/parameter-cache',
-  producer: { id: '@taucad/middleware/parameter-cache', version: '2', implementationAssets: [] },
+  producer: { id: '@taucad/middleware/parameter-cache', version: '3', implementationAssets: [] },
   operation: 'extract-parameters',
   inputs: [
     {
       kind: 'content',
-      role: 'runtime-dependency-set',
-      digest: contentDigest({ value: `sha256:${dependencyHash}`, name: 'middleware dependency hash' }),
+      role: 'parameter-semantics',
+      digest: contentDigest({ value: `sha256:${semanticHash}`, name: 'parameter semantic hash' }),
     },
   ],
   arguments: {},
@@ -41,21 +41,21 @@ const parameterAction = (dependencyHash: string): ComputeAction => ({
 export const parameterCache = defineMiddleware({
   id: 'parameterCache',
   name: 'ParameterCache',
-  version: '2.0.0',
+  version: '3.0.0',
 
-  async wrapGetParameters(input, handler, { compute, dependencyHash, logger, tracer }) {
+  async wrapGetParameters(input, handler, { compute, dependencyHash: semanticHash, logger, tracer }) {
     if (compute.status !== 'on') {
       return handler(input);
     }
     const result = await traceCacheOperation(tracer, 'cache.parameter.evaluate', async () =>
       compute.evaluate({
-        action: parameterAction(dependencyHash),
+        action: parameterAction(semanticHash),
         codec: parameterCodec,
         policy: 'best-effort',
         compute: async () => handler(input),
       }),
     );
-    logger.debug(`Parameter cache ${result.source} for ${dependencyHash}`);
+    logger.debug(`Parameter cache ${result.source} for ${semanticHash}`);
     return result.value;
   },
 });

@@ -606,6 +606,70 @@ describe('the tree id', () => {
 });
 
 describe('the checkout registry', () => {
+  it('should bracket linked-checkout preparation before either placement outcome', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revision-admission-'));
+    roots.push(root);
+    const filesystem = new NodeFsProvider(root);
+    const port = createIsomorphicGitRevisionPort({
+      filesystem,
+      checkouts: { projectId: 'project-1', root: () => filesystem },
+    });
+    await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const receipt = await port.writeRevision({
+      tree: new ImmutableRevisionTree([['main.ts', new TextEncoder().encode('one\n')]]),
+      parents: [],
+      provenance: { source: 'user', actorId: 'person-1', createdAt: 1 },
+      summary: { generated: 'base' },
+    });
+    const head = revisionId(receipt.commitId);
+    await port.updateRef({ name: 'refs/heads/main', expectedHead: undefined, head });
+    const linked = await port.addCheckout?.({ branch: 'candidate', from: head });
+    expect(linked?.kind).toBe('linked');
+
+    const events: string[] = [];
+    let refuse = false;
+    const actors = createRevisionActors({
+      port,
+      projectId: 'project-1',
+      authorityEpoch: 'epoch-1',
+      filesystem: () => filesystem,
+      useFileSystem: async (checkout, operation) => {
+        events.push(`open:${checkout.kind}`);
+        try {
+          if (refuse) {
+            throw new Error('candidate admission refused');
+          }
+          return await operation(filesystem);
+        } finally {
+          events.push(`close:${checkout.kind}`);
+        }
+      },
+      onPlacement: (placement) => {
+        events.push(placement.status);
+      },
+    });
+
+    await run(actors.turn.prepare, {
+      turnId: 'turn-1',
+      chatId: 'chat-1',
+      runId: 'run-1',
+      checkoutId: linked?.id,
+    });
+    expect(events).toEqual(['open:linked', 'close:linked', 'placed']);
+
+    events.length = 0;
+    refuse = true;
+    await expect(
+      run(actors.turn.prepare, {
+        turnId: 'turn-2',
+        chatId: 'chat-1',
+        runId: 'run-2',
+        checkoutId: linked?.id,
+      }),
+    ).rejects.toThrow('candidate admission refused');
+    expect(events).toEqual(['open:linked', 'close:linked', 'refused']);
+  });
+
   /* A25/S36, the offer half: a linked checkout whose branch the live one already
    * contains, untouched for more than a month, is *offered* for removal. The
    * offer is data — W7's pane renders it — and nothing is ever removed silently.

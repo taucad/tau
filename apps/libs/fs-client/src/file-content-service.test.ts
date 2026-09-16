@@ -380,6 +380,57 @@ describe('FileContentService', () => {
     });
   });
 
+  it('should await dependent records around a source move', async () => {
+    const order: string[] = [];
+    service.addFileOperationParticipant(async (operation) => {
+      order.push(`prepare:${operation.kind}`);
+      return {
+        commit: async () => {
+          order.push('commit');
+        },
+        rollback: async () => {
+          order.push('rollback');
+        },
+      };
+    });
+    vi.mocked(proxy.move).mockImplementation(async () => {
+      order.push('source');
+      return { type: 'file', size: 0, mtimeMs: 0, contentKind: 'binary' };
+    });
+
+    await service.move('old.ts', 'new.ts');
+
+    expect(order).toEqual(['prepare:move', 'source', 'commit']);
+  });
+
+  it('should restore the source and dependent records when move commit fails', async () => {
+    const rollback = vi.fn(async () => undefined);
+    service.addFileOperationParticipant(async () => ({
+      commit: async () => {
+        throw new Error('sidecar move failed');
+      },
+      rollback,
+    }));
+
+    await expect(service.move('old.ts', 'new.ts')).rejects.toThrow('sidecar move failed');
+
+    expect(proxy.move).toHaveBeenNthCalledWith(1, '/project/old.ts', '/project/new.ts');
+    expect(proxy.move).toHaveBeenNthCalledWith(2, '/project/new.ts', '/project/old.ts');
+    expect(rollback).toHaveBeenCalledOnce();
+  });
+
+  it('should release the editor barrier when participant preparation rejects', async () => {
+    service.addFileOperationParticipant(async () => {
+      throw new Error('prepare failed');
+    });
+
+    await expect(service.delete('main.ts', 'user')).rejects.toThrow('prepare failed');
+    await service.saveEditor('main.ts', new Uint8Array([7]));
+
+    expect(proxy.unlink).not.toHaveBeenCalled();
+    expect(proxy.writeFile).toHaveBeenCalledWith('/project/main.ts', new Uint8Array([7]));
+  });
+
   it('should update cache on rename', async () => {
     const data = new Uint8Array([1, 2, 3]);
     vi.mocked(proxy.readFile).mockResolvedValue(data);
@@ -393,6 +444,22 @@ describe('FileContentService', () => {
   });
 
   it('should apply every completed bulk move even when another edit fails', async () => {
+    const committed: string[] = [];
+    const rolledBack: string[] = [];
+    service.addFileOperationParticipant(async (operation) => {
+      if (operation.kind !== 'move') {
+        return undefined;
+      }
+      const label = `${operation.oldPath}->${operation.newPath}`;
+      return {
+        commit: async () => {
+          committed.push(label);
+        },
+        rollback: async () => {
+          rolledBack.push(label);
+        },
+      };
+    });
     const sourceBytes = new Map([
       ['/project/a.ts', new Uint8Array([1])],
       ['/project/b.ts', new Uint8Array([2])],
@@ -432,6 +499,8 @@ describe('FileContentService', () => {
     expect(service.peek('dst/b.ts')).toBeUndefined();
     expect(service.peek('c.ts')).toBeUndefined();
     expect(service.peek('dst/c.ts')).toEqual(new Uint8Array([3]));
+    expect(committed).toEqual(['a.ts->dst/a.ts', 'c.ts->dst/c.ts']);
+    expect(rolledBack).toEqual(['b.ts->dst/b.ts']);
   });
 
   it('should fire content change on delete', async () => {

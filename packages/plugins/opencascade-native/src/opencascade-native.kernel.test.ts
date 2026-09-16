@@ -115,14 +115,14 @@ describe('OpenCascadeNativeKernel', () => {
   });
 
   it('extracts default parameters from the model', async () => {
-    const { defaultParameters } = await getTestParameters({
+    const { defaults } = await getTestParameters({
       runtime,
       files: model(
         'export const defaultParams = { size: 12 };\nexport default (oc, p) => oc.createSolid.box([0,0,0],[p.size,p.size,p.size]);',
       ),
       mainFile: 'model.ts',
     });
-    expect(defaultParameters).toEqual({ size: 12 });
+    expect(defaults).toEqual({ size: 12 });
   });
 
   it('renders a parameterized model to a glTF artifact', async () => {

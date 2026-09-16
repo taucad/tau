@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
 import type { JSONDocument } from '@gltf-transform/core';
 
-import type { JSONSchema7 } from '@taucad/runtime/types';
+import type { JsonStructureSchema } from '@taucad/parameters';
 import { zooKernel } from '#zoo.kernel.js';
 import { zooOptionsSchema } from '#zoo.schemas.js';
 import { KclUtilities } from '#kcl-utils.js';
@@ -173,7 +173,7 @@ async function getParameters(
   files: Record<string, string>,
   mainFile: string,
 ): Promise<{
-  jsonSchema: JSONSchema7;
+  jsonSchema: JsonStructureSchema;
   defaultParameters: Record<string, unknown>;
 }> {
   const result = await getParameterResult(files, mainFile);
@@ -188,7 +188,7 @@ async function getParameters(
     throw new Error('Extraction failed');
   }
 
-  return result.data;
+  return { jsonSchema: result.data.schema, defaultParameters: { ...result.data.defaults } };
 }
 
 /**
@@ -257,9 +257,9 @@ describe('ZooWorker', () => {
         expect(jsonSchema).toMatchObject({
           type: 'object',
           properties: {
-            width: { type: 'number', default: 10 },
-            height: { type: 'number', default: 20 },
-            depth: { type: 'number', default: 5 },
+            width: { type: 'double', default: 10 },
+            height: { type: 'double', default: 20 },
+            depth: { type: 'double', default: 5 },
           },
         });
       });

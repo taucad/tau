@@ -12,7 +12,10 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { esbuild } from '@taucad/esbuild';
+import { jscad } from '@taucad/jscad';
 import { createNodeClient } from '@taucad/runtime/node';
+import { defineRuntime } from '@taucad/runtime/worker';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const gearSourcePath = join(repoRoot, 'apps/ui/app/components/geometry/splash/gear.jscad.js');
@@ -27,12 +30,11 @@ async function main(): Promise<void> {
   const gearSource = await readFile(gearSourcePath, 'utf8');
   await mkdir(outputDirectory, { recursive: true });
 
-  const client = await createNodeClient();
+  const client = await createNodeClient({ runtime: defineRuntime({ plugins: [esbuild(), jscad()] }) });
 
   for (const bake of bakes) {
     // oxlint-disable-next-line eslint/no-await-in-loop -- sequential: the bakes share one runtime client; concurrency risks kernel state and saves nothing for two models
     const result = await client.export('glb', {
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- allowed filename.
       source: { files: { 'main.js': gearSource } },
       parameters: bake.parameters,
     });

@@ -13,6 +13,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { RpcProtocol } from '@taucad/rpc';
+import { contentDigest } from '@taucad/cache-core';
 import {
   runtimeProtocolCallNames,
   runtimeProtocolClientNotifyNames,
@@ -25,16 +26,19 @@ import {
   runtimeAbortArgsSchema,
   runtimeEvaluateModelArgsSchema,
   runtimeProtocolSchemas,
+  runtimeResolveParametersArgsSchema,
   runtimeStateChangedArgsSchema,
 } from '#types/runtime-protocol.schemas.js';
+import { compileParameterManifest } from '@taucad/parameters';
 
 describe('RuntimeProtocol — runtime inventory guard (R20)', () => {
-  it('should expose exactly nine acknowledged calls', () => {
+  it('should expose exactly ten acknowledged calls', () => {
     expect([...runtimeProtocolCallNames]).toEqual([
       'initialize',
       'export',
       'exportModel',
       'evaluateModel',
+      'resolveParameters',
       'snapshotSource',
       'readSceneSnapshot',
       'listSceneBookmarks',
@@ -107,6 +111,56 @@ describe('RuntimeProtocol — targeted timeout wire validation', () => {
 
   it('accepts only a render identity and timeout reason (T16)', () => {
     expect(runtimeAbortArgsSchema.parse({ renderId, reason: 2 })).toEqual({ renderId, reason: 2 });
+  });
+});
+
+describe('RuntimeProtocol — parameter manifest admission', () => {
+  it('accepts a complete native manifest and rejects the retired Draft-7 result shape', async () => {
+    const digest = contentDigest({ value: `sha256:${'1'.repeat(64)}`, name: 'test digest' });
+    const manifest = await compileParameterManifest({
+      declaration: {
+        schema: {
+          $schema: 'https://json-structure.org/meta/extended/v0/#',
+          $id: 'urn:taucad:test:wire-parameters',
+          $uses: ['JSONSchemaUnits'],
+          name: 'WireParameters',
+          type: 'object',
+          properties: { length: { type: 'double', ucumUnit: 'mm' } },
+        },
+        defaults: { length: 1 },
+      },
+      scope: { kind: 'source', authority: 'filesystem', root: '', entry: 'main.ts' },
+      source: { id: 'wire-kernel', version: '1', revision: digest, capability: 'json-structure' },
+      dependency: digest,
+      middleware: digest,
+    });
+    const schema = runtimeProtocolSchemas.notifies.parametersResolved;
+    const renderId = '550e8400-e29b-41d4-a716-446655440000';
+    expect(schema.safeParse({ renderId, result: { success: true, data: manifest, issues: [] } }).success).toBe(true);
+    expect(
+      schema.safeParse({
+        renderId,
+        result: { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] },
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('RuntimeProtocol — request-owned parameter resolution', () => {
+  const valid = {
+    stage: { 'nested/main.ts': new Uint8Array([1, 2, 3]) },
+    file: { path: 'nested', filename: 'main.ts' },
+    resolution: { mode: 'declared-only', inferenceLanguage: 'en-NZ' },
+  } as const;
+
+  it('accepts the bounded resolution request and rejects preview or unknown fields', () => {
+    expect(runtimeResolveParametersArgsSchema.parse(valid)).toEqual(valid);
+    expect(runtimeResolveParametersArgsSchema.safeParse({ ...valid, renderId: crypto.randomUUID() }).success).toBe(
+      false,
+    );
+    expect(runtimeResolveParametersArgsSchema.safeParse({ ...valid, resolution: { mode: 'inferred' } }).success).toBe(
+      false,
+    );
   });
 });
 

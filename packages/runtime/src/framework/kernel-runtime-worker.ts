@@ -20,7 +20,7 @@ import type {
   CreateGeometryResult,
   MeshGeometryResult,
   ExportGeometryResult,
-  GetParametersResult,
+  GetParameterDeclarationsResult,
   KernelIssue,
 } from '#types/runtime.types.js';
 import type {
@@ -119,8 +119,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     this.runtime = options.runtime;
   }
 
-  /**
-   */
+  /** Initializes the configured runtime and its kernel registrations. */
   public override async initialize(input: {
     callbacks: Parameters<KernelWorker<RuntimeWorkerOptions>['initialize']>[0]['callbacks'];
     transferables: Parameters<KernelWorker<RuntimeWorkerOptions>['initialize']>[0]['transferables'];
@@ -219,7 +218,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   protected override async onGetParameters(
     input: GetParametersInput,
     runtime: KernelRuntime,
-  ): Promise<GetParametersResult> {
+  ): Promise<GetParameterDeclarationsResult> {
     const owner = await this.createRequestOperationOwner(input, 'request', runtime);
     return this.onGetParametersForOwner(owner, input, runtime);
   }
@@ -228,7 +227,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     owner: OperationOwner,
     input: GetParametersInput,
     runtime: KernelRuntime,
-  ): Promise<GetParametersResult> {
+  ): Promise<GetParameterDeclarationsResult> {
     const selectionError = this.selectionErrors.get(input.entryPath);
     if (selectionError) {
       return createKernelError([this.createKernelBindingIssue(selectionError)]);
@@ -236,15 +235,17 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
     const kernel = this.getKernelForOwner(owner);
     if (!kernel) {
-      runtime.logger.warn(
-        `getParameters returning empty: ${describeUnhandledExtension(input.entryPath, this.kernelPlugins)}`,
-        { data: { entryPath: input.entryPath, loadedKernels: [...this.loadedKernels.keys()] } },
-      );
-      return {
-        success: true,
-        data: { defaultParameters: {}, jsonSchema: {} },
-        issues: [],
-      };
+      runtime.logger.warn(`getParameters failed: ${describeUnhandledExtension(input.entryPath, this.kernelPlugins)}`, {
+        data: { entryPath: input.entryPath, loadedKernels: [...this.loadedKernels.keys()] },
+      });
+      return createKernelError([
+        {
+          message: describeUnhandledExtension(input.entryPath, this.kernelPlugins),
+          code: 'KERNEL_CAPABILITY_MISSING',
+          type: 'kernel',
+          severity: 'error',
+        },
+      ]);
     }
 
     return kernel.definition.getParameters(input, this.forKernel(kernel, runtime), kernel.ctx);

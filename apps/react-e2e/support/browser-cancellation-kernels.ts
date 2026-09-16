@@ -1,10 +1,17 @@
-import { defineKernel } from '@taucad/runtime/kernel';
-import type { ExportGeometryResult, GetParametersResult } from '@taucad/runtime/types';
+import { createKernelParameterDeclaration, defineKernel } from '@taucad/runtime/kernel';
+import type { ExportGeometryResult, GetParameterDeclarationsResult } from '@taucad/runtime/types';
 
 const delayedRenderDuration = 250;
-const parameterResult: GetParametersResult = {
+const parameterResult: GetParameterDeclarationsResult = {
   success: true,
-  data: { defaultParameters: {}, jsonSchema: { type: 'object', properties: {} } },
+  data: createKernelParameterDeclaration(
+    {},
+    { type: 'object', properties: {} },
+    {
+      id: 'urn:taucad:test:browser-cancellation',
+      name: 'BrowserCancellationParameters',
+    },
+  ),
   issues: [],
 };
 const unsupportedExportResult: ExportGeometryResult = { success: false, issues: [] };

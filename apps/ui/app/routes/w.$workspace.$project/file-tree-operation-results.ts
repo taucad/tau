@@ -61,9 +61,10 @@ function pluralize(word: string, count: number): string {
 
 export async function copyTextToClipboard(
   text: string,
-  clipboard: Pick<Clipboard, 'writeText'> | undefined = getNavigatorClipboard(),
+  clipboard?: Pick<Clipboard, 'writeText'>,
 ): Promise<FileTreeOperationResult> {
-  if (clipboard === undefined) {
+  const destination = arguments.length === 1 ? getNavigatorClipboard() : clipboard;
+  if (destination === undefined) {
     return {
       type: 'failed',
       message: 'Clipboard is unavailable.',
@@ -71,7 +72,7 @@ export async function copyTextToClipboard(
   }
 
   try {
-    await clipboard.writeText(text);
+    await destination.writeText(text);
     return {
       type: 'success',
       message: 'Path copied to clipboard',

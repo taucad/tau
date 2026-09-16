@@ -3,7 +3,7 @@ title: 'JSDoc Policy'
 description: 'Standards for JSDoc documentation: @public/@internal visibility, compilable examples, real-world usage, language tags, and @example <caption> requirements.'
 status: active
 created: '2026-03-11'
-updated: '2026-09-05'
+updated: '2026-09-13'
 related:
   - docs/policy/documentation-policy.md
   - docs/policy/library-api-policy.md
@@ -179,11 +179,11 @@ INCORRECT:
 
 ## Time Units in JSDoc
 
-Operational timing values are **milliseconds** by Node.js convention. Physical and simulation time are **seconds** under the quantity registry's coherent SI contract; see [Library API Policy §22](library-api-policy.md#22-temporal-values). Identifier names drop unit suffixes; document the semantic unit at the declaration site. Never reinterpret legacy values by relabelling them.
+Operational timing values are **milliseconds** by Node.js convention. Existing coherent-SI physical and simulation-time APIs use **seconds**; native unit-bearing parameter records document their declared unit. See [Library API Policy §22](library-api-policy.md#22-temporal-values). Identifier names drop unit suffixes; document the semantic unit at the declaration site. Never reinterpret legacy values by relabelling them.
 
 ### Rule
 
-When declaring an operational timing field, parameter, or constant, add a `/** Milliseconds. */` doc comment (or include the unit in a longer JSDoc block). For physical time use `Seconds.` and describe the physical quantity; a solver's simulation duration and its wall-clock timeout are distinct values:
+When declaring an operational timing field, parameter, or constant, add a `/** Milliseconds. */` doc comment (or include the unit in a longer JSDoc block). For an existing coherent-SI physical-time API use `Seconds.` and describe the physical quantity. For a native unit-bearing parameter, document its declared unit and quantity semantics; the versioned runtime profile owns supported inference and provenance. A solver's simulation duration and its wall-clock timeout are distinct values:
 
 ```typescript
 /** Milliseconds. */

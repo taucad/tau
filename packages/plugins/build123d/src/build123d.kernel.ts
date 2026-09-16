@@ -1,6 +1,14 @@
-import { asBuffer, createKernelError, createKernelSuccess, defineKernel } from '@taucad/runtime/kernel';
+import {
+  asBuffer,
+  assertRootedPath,
+  createKernelError,
+  createKernelSuccess,
+  defineKernel,
+  isNotFoundError,
+} from '@taucad/runtime/kernel';
 import type { ComputeAnnouncement, KernelIssue } from '@taucad/runtime/kernel';
-import { createExportFile } from '@taucad/runtime/types';
+import { createExportFile, parametersDirectory } from '@taucad/runtime/types';
+import { readParameterRecord, resolveProducerParameterValues } from '@taucad/parameters';
 import { actionDigest, canonicalizeComputeAction, contentDigest } from '@taucad/cache-core';
 import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
 import { sha256StringSync } from '@taucad/utils/hash';
@@ -33,7 +41,9 @@ const computeAdmissionFloor = 5;
  * key the shared store inconsistently, so it is dropped rather than announced.
  */
 const verifiedDigest = (action: ComputeAction, claimed: string): ActionDigest | undefined => {
-  const digest = actionDigest({ value: `sha256:${sha256StringSync(canonicalizeComputeAction(action))}` });
+  const digest = actionDigest({
+    value: `sha256:${sha256StringSync(canonicalizeComputeAction(action))}`,
+  });
   return digest === claimed ? digest : undefined;
 };
 
@@ -88,13 +98,19 @@ export const build123dKernel = defineKernel({
 
   async initialize(options, runtime) {
     const mirror = await createWorkspaceMirror();
-    const session = new PythonSession({ ...options, ...mirror, logger: runtime.logger });
+    const session = new PythonSession({
+      ...options,
+      ...mirror,
+      logger: runtime.logger,
+    });
+    const observedDependencies: string[] = [];
+    const warmCandidates: ActionDigest[] = [];
     return {
       mirror,
       session,
       resident: session.createResidentBinding(),
-      observedDependencies: [] as string[],
-      warmCandidates: [] as ActionDigest[],
+      observedDependencies,
+      warmCandidates,
       computeProducer: {
         id: '@taucad/build123d',
         version: computeProducerVersion,
@@ -112,7 +128,10 @@ export const build123dKernel = defineKernel({
     try {
       const analysis = await context.session.request({
         method: 'analyze',
-        params: { entryPath, observedDependencies: context.observedDependencies },
+        params: {
+          entryPath,
+          observedDependencies: context.observedDependencies,
+        },
         schema: build123dAnalysisSchema,
         signal: runtime.signal,
       });
@@ -127,14 +146,17 @@ export const build123dKernel = defineKernel({
     try {
       const analysis = await context.session.request({
         method: 'analyze',
-        params: { entryPath, observedDependencies: context.observedDependencies },
+        params: {
+          entryPath,
+          observedDependencies: context.observedDependencies,
+        },
         schema: build123dAnalysisSchema,
         signal: runtime.signal,
       });
-      return createKernelSuccess({
-        defaultParameters: analysis.defaultParameters,
-        jsonSchema: analysis.jsonSchema,
-      });
+      if (!analysis.declaration) {
+        throw new Error('Build123d analyzer omitted its parameter declaration.');
+      }
+      return createKernelSuccess(analysis.declaration);
     } catch (error) {
       return createKernelError(issuesFrom(error, entryPath));
     }
@@ -142,10 +164,49 @@ export const build123dKernel = defineKernel({
 
   async createGeometry({ entryPath, parameters }, runtime, context) {
     await context.mirror.sync(runtime.filesystem);
+    let executionParameters = parameters;
+    try {
+      const parameterPath = assertRootedPath(`${parametersDirectory}/${entryPath}.json`);
+      const bytes = await runtime.filesystem.readFile(parameterPath);
+      const decoded = readParameterRecord(bytes, { migrationAvailable: false });
+      if (decoded.status !== 'current') {
+        throw new Error(
+          decoded.status === 'invalid-preserved'
+            ? `Invalid parameter record: ${decoded.error}`
+            : 'Unsupported parameter record version or profile.',
+        );
+      }
+      const analysis = await context.session.request({
+        method: 'analyze',
+        params: {
+          entryPath,
+          observedDependencies: context.observedDependencies,
+        },
+        schema: build123dAnalysisSchema,
+        signal: runtime.signal,
+      });
+      if (!analysis.declaration) {
+        throw new Error('Build123d analyzer omitted its parameter declaration.');
+      }
+      executionParameters = resolveProducerParameterValues({
+        producer: 'build123d',
+        declaration: analysis.declaration,
+        entry: decoded.record,
+        values: parameters,
+      });
+    } catch (error) {
+      if (!isNotFoundError(error)) {
+        throw error;
+      }
+    }
     const build = async (compute: Record<string, unknown> | undefined) => {
       const result = await context.session.request({
         method: 'build',
-        params: { entryPath, parameters, ...(compute ? { compute } : {}) },
+        params: {
+          entryPath,
+          parameters: executionParameters,
+          ...(compute ? { compute } : {}),
+        },
         schema: build123dBuildSchema,
         signal: runtime.signal,
         // G-F5: an abort stops the worker at its next funnel boundary and keeps the resident prefix.
@@ -159,7 +220,12 @@ export const build123dKernel = defineKernel({
       if (runtime.compute.status !== 'on') {
         // Off arm: no scope, no announcement, no publication tail, no worker-side patching.
         const plain = await build(undefined);
-        return { nativeHandle: { sessionGeneration: context.session.generation, handleId: plain.handleId } };
+        return {
+          nativeHandle: {
+            sessionGeneration: context.session.generation,
+            handleId: plain.handleId,
+          },
+        };
       }
       const scope = runtime.compute.openScope({
         namespace: computeNamespace,
@@ -173,7 +239,10 @@ export const build123dKernel = defineKernel({
       try {
         // Warm discovery runs before every build, so a worker that outlives another
         // producer's publication still picks it up (D16 refresh clause).
-        await scope.warm({ digests: context.warmCandidates, maxEntries: build123dComputeDescriptorLimit });
+        await scope.warm({
+          digests: context.warmCandidates,
+          maxEntries: build123dComputeDescriptorLimit,
+        });
         runtime.signal.throwIfAborted();
         const result = await build({
           namespace: computeNamespace,
@@ -184,7 +253,7 @@ export const build123dKernel = defineKernel({
           const announcements: ComputeAnnouncement[] = [];
           const admitted: ActionDigest[] = [];
           for (const entry of result.compute.announcements) {
-            const action = entry.action as unknown as ComputeAction;
+            const action: ComputeAction = entry.action;
             const digest = verifiedDigest(action, entry.actionDigest);
             if (!digest) {
               continue;
@@ -206,10 +275,17 @@ export const build123dKernel = defineKernel({
           );
         }
         outcome = 'delivered';
-        return { nativeHandle: { sessionGeneration: context.session.generation, handleId: result.handleId } };
+        return {
+          nativeHandle: {
+            sessionGeneration: context.session.generation,
+            handleId: result.handleId,
+          },
+        };
       } finally {
         // Seals metadata only; the runtime permits the export tail after real delivery.
-        scope.close({ outcome: runtime.signal.aborted ? 'cancelled' : outcome });
+        scope.close({
+          outcome: runtime.signal.aborted ? 'cancelled' : outcome,
+        });
       }
     } catch (error) {
       throw new Build123dKernelError(issuesFrom(error, entryPath));
@@ -231,7 +307,12 @@ export const build123dKernel = defineKernel({
         schema: build123dArtifactSchema,
         signal: runtime.signal,
       });
-      return { geometry: { format: 'gltf', content: await context.session.readArtifact(artifact) } };
+      return {
+        geometry: {
+          format: 'gltf',
+          content: await context.session.readArtifact(artifact),
+        },
+      };
     } catch (error) {
       throw new Build123dKernelError(issuesFrom(error));
     }

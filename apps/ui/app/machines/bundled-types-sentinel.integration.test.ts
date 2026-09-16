@@ -87,7 +87,7 @@ describe('ensureBundledTypesMount against the real WorkspaceFileService', () => 
 
   it('stamps a /node_modules sub-mount that has its own provider base path', async () => {
     // The live worker mounts /node_modules on its own provider under
-    // /tau-node-modules; the stamp has to survive that indirection too.
+    // tau-node-modules; the stamp has to survive that indirection too.
     service.dispose();
     service = await createService('tau-node-modules');
 

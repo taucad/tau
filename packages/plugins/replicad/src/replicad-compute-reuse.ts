@@ -5,7 +5,10 @@ import type { ComputeReuseScope, ResidentCacheBinding, ResidentExportEntry } fro
 
 const namespace = 'replicad.operation.v1';
 const brepMediaType = 'application/vnd.opencascade.brep';
-const codec: ComputeAction['codec'] = { id: 'replicad.brep-text', version: '1' };
+const codec: ComputeAction['codec'] = {
+  id: 'replicad.brep-text',
+  version: '1',
+};
 const supportedPrimitives = new Set(['makeBox', 'makeCylinder', 'makeSphere']);
 const supportedBooleans = new Set(['fuse', 'fuseAll', 'cut', 'cutAll', 'intersect', 'intersectAll']);
 const supportedTransforms = new Set(['translate', 'translateX', 'translateY', 'translateZ', 'rotate']);
@@ -23,6 +26,9 @@ type ReplicadLibraryLike = {
 
 type ShapeIdentity = { readonly actionDigest: ActionDigest };
 
+/**
+ *
+ */
 export type ReplicadComputeReuseOptions = {
   readonly library: ReplicadLibraryLike;
   readonly producer: ComputeAction['producer'];
@@ -30,8 +36,11 @@ export type ReplicadComputeReuseOptions = {
   readonly enabled: boolean;
 };
 
-export type ReplicadComputeReuseAdapter = {
-  readonly library: ReplicadLibraryLike;
+/**
+ *
+ */
+export type ReplicadComputeReuseAdapter<Library extends ReplicadLibraryLike = ReplicadLibraryLike> = {
+  readonly library: Library;
   /** The kernel-owned native cache this adapter binds one scope to. */
   readonly resident: ResidentCacheBinding;
   readonly run: <T>(scope: ComputeReuseScope, operation: () => Promise<T>) => Promise<T>;
@@ -139,7 +148,9 @@ const isShapeLike = (value: unknown): value is ShapeLike =>
   typeof (value as Partial<ShapeLike>).delete === 'function';
 
 /** Create the version-pinned, fail-closed semantic adapter around Replicad's public library. */
-export const createReplicadComputeReuse = (options: ReplicadComputeReuseOptions): ReplicadComputeReuseAdapter => {
+export const createReplicadComputeReuse = <Library extends ReplicadLibraryLike>(
+  options: ReplicadComputeReuseOptions & { readonly library: Library },
+): ReplicadComputeReuseAdapter<Library> => {
   let activeScope: ComputeReuseScope | undefined;
   /** Kernel-owned residency: serialized BRep by action identity. W4 replaces it with native shapes. */
   const residentBytes = new Map<ActionDigest, Uint8Array<ArrayBuffer>>();
@@ -177,7 +188,9 @@ export const createReplicadComputeReuse = (options: ReplicadComputeReuseOptions)
   const restore = (bytes: Uint8Array<ArrayBuffer>): ShapeLike => options.library.deserializeShape(text.decode(bytes));
 
   const identify = (descriptor: ComputeAction): ActionDigest =>
-    actionDigest({ value: `sha256:${sha256StringSync(canonicalizeComputeAction(descriptor))}` });
+    actionDigest({
+      value: `sha256:${sha256StringSync(canonicalizeComputeAction(descriptor))}`,
+    });
 
   const publish = (shape: ShapeLike, descriptor: ComputeAction, computeDuration: number): ShapeIdentity | undefined => {
     const scope = activeScope;
@@ -190,7 +203,15 @@ export const createReplicadComputeReuse = (options: ReplicadComputeReuseOptions)
       residentBytes.set(digest, bytes);
       residentActions.set(digest, descriptor);
       const result = scope.announce({
-        entries: [{ kind: 'action', action: descriptor, digest, computeDuration, estimatedBytes: bytes.byteLength }],
+        entries: [
+          {
+            kind: 'action',
+            action: descriptor,
+            digest,
+            computeDuration,
+            estimatedBytes: bytes.byteLength,
+          },
+        ],
       });
       return result.admitted.length === 1 ? { actionDigest: digest } : { actionDigest: digest };
     } catch {
@@ -215,11 +236,21 @@ export const createReplicadComputeReuse = (options: ReplicadComputeReuseOptions)
         const original = value as (...values: unknown[]) => unknown;
         if (supportedBooleans.has(property)) {
           return (...values: readonly unknown[]) =>
-            invokeBoolean({ receiver: target, operation: property, original, values });
+            invokeBoolean({
+              receiver: target,
+              operation: property,
+              original,
+              values,
+            });
         }
         if (supportedTransforms.has(property)) {
           return (...values: readonly unknown[]) =>
-            invokeTransform({ receiver: target, operation: property, original, values });
+            invokeTransform({
+              receiver: target,
+              operation: property,
+              original,
+              values,
+            });
         }
         return original.bind(target);
       },
@@ -266,7 +297,10 @@ export const createReplicadComputeReuse = (options: ReplicadComputeReuseOptions)
     if (!activeScope || normalized === undefined) {
       return original(...values);
     }
-    return execute({ descriptor: action({ operation, arguments: normalized }), compute: () => original(...values) });
+    return execute({
+      descriptor: action({ operation, arguments: normalized }),
+      compute: () => original(...values),
+    });
   };
 
   type ShapeInvocation = {
@@ -302,7 +336,14 @@ export const createReplicadComputeReuse = (options: ReplicadComputeReuseOptions)
     return execute({
       descriptor: action({
         operation,
-        inputs: [{ kind: 'action', role: 'receiver', digest: receiverIdentity.actionDigest }, ...operandInputs],
+        inputs: [
+          {
+            kind: 'action',
+            role: 'receiver',
+            digest: receiverIdentity.actionDigest,
+          },
+          ...operandInputs,
+        ],
         arguments: normalized.options,
       }),
       compute: () => original.apply(receiver, actualValues),
@@ -318,7 +359,13 @@ export const createReplicadComputeReuse = (options: ReplicadComputeReuseOptions)
     return execute({
       descriptor: action({
         operation,
-        inputs: [{ kind: 'action', role: 'receiver', digest: receiverIdentity.actionDigest }],
+        inputs: [
+          {
+            kind: 'action',
+            role: 'receiver',
+            digest: receiverIdentity.actionDigest,
+          },
+        ],
         arguments: normalized,
       }),
       compute: () => original.apply(receiver, [...values]),
@@ -363,7 +410,12 @@ export const createReplicadComputeReuse = (options: ReplicadComputeReuseOptions)
           omitted.push(digest);
           continue;
         }
-        const exported: ResidentExportEntry = { action, bytes, mediaType: brepMediaType, determinism: 'byte-exact' };
+        const exported: ResidentExportEntry = {
+          action,
+          bytes,
+          mediaType: brepMediaType,
+          determinism: 'byte-exact',
+        };
         entries.push(exported);
       }
       return { entries, omitted };
@@ -399,7 +451,10 @@ export const createReplicadComputeReuse = (options: ReplicadComputeReuseOptions)
       }
       if (value !== null && typeof value === 'object' && !isShapeLike(value) && 'shape' in value) {
         const record = value as Record<string, unknown>;
-        return { ...record, shape: rawShape(record['shape']) ?? record['shape'] };
+        return {
+          ...record,
+          shape: rawShape(record['shape']) ?? record['shape'],
+        };
       }
       return rawShape(value) ?? value;
     },

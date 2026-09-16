@@ -14,7 +14,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { MessageChannelMain, MessagePortMain, UtilityProcess } from 'electron';
 
 /** Concerns the services utility serves, one dedicated port each. */
-export const servicesConcerns = ['nodeFs', 'agentHost'] as const;
+export const servicesConcerns = ['nodeFs', 'agentHost', 'runtimeFileSystem'] as const;
 
 /**
  * A concern the renderer may ask for a port to.
@@ -26,6 +26,17 @@ export const servicesConcerns = ['nodeFs', 'agentHost'] as const;
  * registry before minting anything.
  */
 export type ServicesConcern = (typeof servicesConcerns)[number];
+
+/** Concerns a renderer may request directly. */
+export const rendererServicesConcerns: readonly ServicesConcern[] = ['nodeFs', 'agentHost'];
+
+/** Observable result of the bounded services-host drain. */
+export type ServicesQuiesceOutcome =
+  | Readonly<{ status: 'quiesced' }>
+  | Readonly<{ status: 'timeout' }>
+  | Readonly<{ status: 'no-utility' }>
+  | Readonly<{ status: 'host-exited' }>
+  | Readonly<{ status: 'failed'; message: string }>;
 
 /** Options for {@link createServicesBroker}. */
 export type ServicesBrokerOptions = {
@@ -80,13 +91,13 @@ export type ServicesBroker = {
    * Quit used to reach `dispose()` directly, which kills the utility: the
    * launcher closes that record the close revision and await W13's
    * `awaitSyncSettled` never finished. This is the one round trip that lets
-   * them. Main owns the bound and treats timeout or failure as a negative
-   * acknowledgement unless the person explicitly chose Quit anyway.
+   * them. Main owns the bound and preserves timeout, failure, and host-exit as
+   * non-success outcomes before forced disposal.
    *
    * @param boundMilliseconds - How long to wait before cutting.
    * @returns What ended the wait.
    */
-  quiesce(boundMilliseconds: number): Promise<'quiesced' | 'failed' | 'timeout' | 'no-utility'>;
+  quiesce(boundMilliseconds: number): Promise<ServicesQuiesceOutcome>;
   /** Terminate the utility. */
   dispose(): Promise<void>;
 };
@@ -119,6 +130,10 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   const releaseWaiters = new Map<string, ReturnType<typeof Promise.withResolvers<void>>>();
   let releaseRequest = 0;
   let utility: UtilityProcess | undefined;
+  let acceptingConnections = true;
+  let quiescence: Promise<ServicesQuiesceOutcome> | undefined;
+  let settleQuiescence: ((outcome: ServicesQuiesceOutcome) => void) | undefined;
+  let disposal: Promise<void> | undefined;
 
   const isStrictDescendant = (parent: string, candidate: string): boolean => {
     const child = relative(parent, candidate);
@@ -199,9 +214,6 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     checkoutContexts.add(canonicalWorkspaceRoot);
   };
 
-  /** Resolvers waiting for the utility's `quiesced` reply. */
-  const quiesceWaiters = new Set<(outcome: 'quiesced' | 'failed') => void>();
-
   const handleUtilityMessage = (spawned: UtilityProcess, frame: unknown): void => {
     if (!frame || typeof frame !== 'object') {
       return;
@@ -220,10 +232,20 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       return;
     }
     if (type === 'quiesced' || type === 'quiesce-failed') {
-      for (const resolveWaiter of quiesceWaiters) {
-        resolveWaiter(type === 'quiesced' ? 'quiesced' : 'failed');
+      if (utility !== spawned) {
+        return;
       }
-      quiesceWaiters.clear();
+      settleQuiescence?.(
+        type === 'quiesced'
+          ? { status: 'quiesced' }
+          : {
+              status: 'failed',
+              message:
+                typeof (frame as Record<string, unknown>)['message'] === 'string'
+                  ? ((frame as Record<string, unknown>)['message'] as string)
+                  : 'The services host failed to quiesce.',
+            },
+      );
       return;
     }
     if (type === 'runtime-context-register' || type === 'runtime-context-release') {
@@ -250,7 +272,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       return;
     }
     const context = runtimeContexts.get(canonicalRoot(workspaceRoot));
-    if (!context || utility !== spawned) {
+    if (!acceptingConnections || !context || utility !== spawned) {
       spawned.postMessage({ type: 'runtime-port-refused', requestId });
       return;
     }
@@ -290,6 +312,7 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     spawned.on('exit', () => {
       if (utility === spawned) {
         utility = undefined;
+        settleQuiescence?.({ status: 'host-exited' });
         releaseRuntimeLeases();
         forgetCheckoutContexts();
         for (const pending of releaseWaiters.values()) {
@@ -320,28 +343,51 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
 
   return {
     connect(concern, context) {
+      if (!acceptingConnections) {
+        throw new Error('The services broker is quiescing and accepts no new concerns.');
+      }
       let concernContext = context;
       if (concern === 'agentHost' && context?.['workspaceRoot']) {
         const projectRoot = canonicalRoot(context['workspaceRoot']);
         if (context['projectId'] !== undefined) {
           projectIds.set(projectRoot, context['projectId']);
         }
-        runtimeContexts.set(projectRoot, {
-          projectRoot,
-          computeProjectRoot: projectRoot,
-          computeMode: context['computeMode'] ?? 'off',
-          definition: 'default',
-        });
         const generation = attachmentGenerations.get(projectRoot);
         if (generation !== undefined) {
           concernContext = { ...context, attachmentGeneration: String(generation) };
         }
       }
+      /* Registered only once the utility has accepted the port: a refused
+       * concern must not leave a runtime context claiming this root. */
+      const projectContext =
+        concern === 'agentHost' && context?.['workspaceRoot']
+          ? (() => {
+              const projectRoot = canonicalRoot(context['workspaceRoot']);
+              return {
+                key: projectRoot,
+                value: {
+                  projectRoot,
+                  computeProjectRoot: projectRoot,
+                  computeMode: context['computeMode'] ?? 'off',
+                  definition: 'default',
+                },
+              } as const;
+            })()
+          : undefined;
       const channel = options.createChannel();
-      ensure().postMessage(
-        { type: 'concern', concern, ...(concernContext === undefined ? {} : { context: concernContext }) },
-        [channel.port2],
-      );
+      try {
+        ensure().postMessage(
+          { type: 'concern', concern, ...(concernContext === undefined ? {} : { context: concernContext }) },
+          [channel.port2],
+        );
+      } catch (error) {
+        channel.port1.close();
+        channel.port2.close();
+        throw error;
+      }
+      if (projectContext) {
+        runtimeContexts.set(projectContext.key, projectContext.value);
+      }
       log('info', 'services.concern-connected', { concern });
       return channel.port1;
     },
@@ -420,56 +466,62 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     computeProjectRoot(executionRoot) {
       return runtimeContexts.get(canonicalRoot(executionRoot))?.['computeProjectRoot'];
     },
-    async quiesce(boundMilliseconds) {
+    // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the repeated-close contract.
+    quiesce(boundMilliseconds) {
+      acceptingConnections = false;
+      if (quiescence !== undefined) {
+        return quiescence;
+      }
       const spawned = utility;
       if (!spawned) {
-        return 'no-utility';
+        quiescence = Promise.resolve({ status: 'no-utility' });
+        return quiescence;
       }
-      const settled = Promise.withResolvers<'quiesced' | 'failed'>();
-      const resolveWaiter = (outcome: 'quiesced' | 'failed'): void => {
+      const settled = Promise.withResolvers<ServicesQuiesceOutcome>();
+      let finished = false;
+      settleQuiescence = (outcome): void => {
+        if (finished) {
+          return;
+        }
+        finished = true;
+        clearTimeout(bound);
+        settleQuiescence = undefined;
         settled.resolve(outcome);
       };
-      quiesceWaiters.add(resolveWaiter);
+      const bound = setTimeout(() => settleQuiescence?.({ status: 'timeout' }), boundMilliseconds);
+      bound.unref();
       /* A dead utility cannot prove that its projects settled. */
       spawned.on('exit', () => {
-        resolveWaiter('failed');
+        settleQuiescence?.({ status: 'host-exited' });
       });
       try {
         spawned.postMessage({ type: 'quiesce' });
       } catch {
-        quiesceWaiters.delete(resolveWaiter);
-        return 'no-utility';
+        settleQuiescence({ status: 'host-exited' });
       }
-      let bound: ReturnType<typeof setTimeout> | undefined;
-      const cut = new Promise<'timeout'>((resolve) => {
-        bound = setTimeout(() => {
-          resolve('timeout');
-        }, boundMilliseconds);
-        bound.unref();
-      });
-      try {
-        return await Promise.race([settled.promise, cut]);
-      } finally {
-        if (bound !== undefined) {
-          clearTimeout(bound);
-        }
-        quiesceWaiters.delete(resolveWaiter);
-      }
+      quiescence = settled.promise;
+      return quiescence;
     },
-    async dispose() {
-      const closures = [...runtimeLeaseClosures.values()];
-      releaseRuntimeLeases();
-      forgetCheckoutContexts();
-      projectAttachments.clear();
-      attachmentGenerations.clear();
-      for (const pending of releaseWaiters.values()) {
-        pending.reject(new Error('The desktop services broker was disposed.'));
-      }
-      releaseWaiters.clear();
-      utility?.kill();
-      utility = undefined;
-      await Promise.allSettled(closures);
-      runtimeLeaseClosures.clear();
+    // oxlint-disable-next-line typescript/promise-function-async -- Promise identity is the repeated-close contract.
+    dispose() {
+      acceptingConnections = false;
+      disposal ??= (async (): Promise<void> => {
+        const closures = [...runtimeLeaseClosures.values()];
+        releaseRuntimeLeases();
+        forgetCheckoutContexts();
+        projectAttachments.clear();
+        attachmentGenerations.clear();
+        for (const pending of releaseWaiters.values()) {
+          pending.reject(new Error('The desktop services broker was disposed.'));
+        }
+        releaseWaiters.clear();
+        settleQuiescence?.({ status: 'host-exited' });
+        utility?.kill();
+        utility = undefined;
+        await Promise.allSettled(closures);
+        runtimeLeaseClosures.clear();
+      })();
+      return disposal;
     },
   };
 };

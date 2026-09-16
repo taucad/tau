@@ -8,7 +8,7 @@
  */
 
 import { existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
 import {
@@ -63,7 +63,7 @@ import {
   kernelForkEnvAllowlist,
   sanitizeServicesContext,
 } from '#main/project-roots.js';
-import { createServicesBroker, servicesConcerns } from '#main/services-broker.js';
+import { createServicesBroker, rendererServicesConcerns } from '#main/services-broker.js';
 import type { ServicesConcern } from '#main/services-broker.js';
 import { loginShellEnvironment, packagedEsbuildEnvironment, utilityEnvironment } from '#main/utility-environment.js';
 import { createQuickLookController, removeStaleQuickLookSessions } from '#main/quick-look.js';
@@ -253,6 +253,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * because `NodeFsProvider` realpath-checks its base. */
   const homeRoot = join(app.getPath('userData'), 'home');
   mkdirSync(homeRoot, { recursive: true });
+  const authorityDirectory = join(app.getPath('userData'), 'filesystem-authority');
+  mkdirSync(authorityDirectory, { recursive: true });
 
   /* Grants outlive the session: the renderer keeps a picked folder's workspace
    * record in IndexedDB and offers it again on the next launch, so a grant main
@@ -325,7 +327,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
 
   let computeWorker: Worker | undefined;
   const computeConnections = new Map<string, ReturnType<typeof connectSqliteComputeStoreWorker>>();
-  let computeProjectRootFor = (executionRoot: string): string => executionRoot;
+  let registeredProjectRootFor = (_executionRoot: string): string | undefined => undefined;
   const invalidateComputeWorker = (worker: Worker): void => {
     if (computeWorker !== worker) {
       return;
@@ -361,8 +363,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
     registry: roots,
     defaultRoot: homeRoot,
     isTrustedRoot: (executionRoot) => {
-      const projectRoot = computeProjectRootFor(executionRoot);
-      return projectRoot !== executionRoot && roots.isTrusted(projectRoot);
+      const projectRoot = registeredProjectRootFor(executionRoot);
+      return projectRoot !== undefined && projectRoot !== executionRoot && roots.isTrusted(projectRoot);
     },
   });
   const runtimeMain = registerElectronRuntimeMain({
@@ -378,7 +380,12 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }),
     forkEnvAllowlist: [...kernelForkEnvAllowlist],
     resolveFork: (context) => {
-      const resolved = baseForkResolver(context);
+      const requestedRoot = context['projectRoot'];
+      const registeredProjectRoot =
+        requestedRoot === undefined ? undefined : registeredProjectRootFor(resolve(requestedRoot));
+      const resolved = baseForkResolver(
+        registeredProjectRoot === undefined ? context : { ...context, projectRoot: registeredProjectRoot },
+      );
       const mode = context['computeMode'] ?? 'memory';
       if (mode !== 'off' && mode !== 'memory' && mode !== 'durable') {
         throw new Error('Desktop shell refused unknown compute mode.');
@@ -386,14 +393,30 @@ const bootstrapElectronApp = async (): Promise<void> => {
       if (context['purpose'] === 'ephemeral' && mode === 'durable') {
         throw new Error('Desktop shell refused durable compute for an ephemeral runtime.');
       }
-      const executionRoot = context['projectRoot'] ?? homeRoot;
-      const computeProjectRoot = roots.canonical(computeProjectRootFor(executionRoot));
+      const executionRoot =
+        registeredProjectRoot === undefined
+          ? (resolved.env?.['TAU_PROJECT_ROOT'] ?? homeRoot)
+          : resolve(requestedRoot ?? homeRoot);
+      const computeProjectRoot = roots.canonical(registeredProjectRoot ?? executionRoot);
       if (!computeProjectRoot) {
         throw new Error('Desktop shell refused unadmitted compute project root.');
       }
       const compute: ComputeBinding =
         mode === 'durable' ? { mode, store: computeConnection(computeProjectRoot).store } : { mode };
-      return { ...resolved, compute };
+      return {
+        ...resolved,
+        ...(registeredProjectRoot === undefined
+          ? {}
+          : {
+              env: { ...resolved.env, TAU_PROJECT_ROOT: executionRoot }, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+            }),
+        compute,
+        ...(context['purpose'] === 'ephemeral'
+          ? {}
+          : {
+              fileSystemPort: services.connect('runtimeFileSystem', { workspaceRoot: executionRoot }),
+            }),
+      };
     },
     serviceName: 'tau-kernel-host',
     onError(error) {
@@ -434,6 +457,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
       ...esbuildEnvironment,
       ...gitEnvironment,
       TAU_CONFIG_DIR: tauConfigDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
+      TAU_DESKTOP_AUTHORITY_DIR: authorityDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
     }),
     fork: (entry, args, forkOptions) => utilityProcess.fork(entry, args, forkOptions),
@@ -471,7 +495,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
   ipcMain.handle(agentHostSessionChannels.release, async (event, payload) => {
     await services.releaseAgentHost(agentHostSessionInput(event, payload), quitQuiesceMilliseconds);
   });
-  computeProjectRootFor = (executionRoot) => services.computeProjectRoot(executionRoot) ?? executionRoot;
+  registeredProjectRootFor = (executionRoot) => services.computeProjectRoot(executionRoot);
   const publishRoots = (): void => {
     services.post({ type: 'allowRoots', roots: roots.roots() });
   };
@@ -679,7 +703,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     /* The renderer names the concern; main validates it against the served set
      * rather than ignoring it, so a future second concern cannot be reached by
      * a stale caller and today's only one cannot be mistyped into silence. */
-    if (!servicesConcerns.includes(concern as ServicesConcern)) {
+    if (!rendererServicesConcerns.includes(concern as ServicesConcern)) {
       log.log('error', 'services.unknown-concern', { concern });
       return;
     }
@@ -874,11 +898,15 @@ const bootstrapElectronApp = async (): Promise<void> => {
         }
         forced ||= rendererOutcome === 'timeout';
         const utilityOutcome = await services.quiesce(quitQuiesceMilliseconds);
-        log.log('info', 'main.quiesce', { outcome: utilityOutcome });
+        log.log(
+          utilityOutcome.status === 'quiesced' || utilityOutcome.status === 'no-utility' ? 'info' : 'error',
+          'main.quiesce',
+          { outcome: utilityOutcome },
+        );
         if (
           !forced &&
-          utilityOutcome !== 'quiesced' &&
-          utilityOutcome !== 'no-utility' &&
+          utilityOutcome.status !== 'quiesced' &&
+          utilityOutcome.status !== 'no-utility' &&
           !(await askToQuitAnyway('Tau could not finish saving every open project.'))
         ) {
           quitting = false;

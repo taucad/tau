@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { useLocation, useMatch, useNavigate } from 'react-router';
 import { useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
+import type { ActorRefFrom } from 'xstate';
 import { ChatInterface } from '#routes/w.$workspace.$project/chat-interface.js';
 import { ProjectProvider, useProject } from '#hooks/use-project.js';
 import type { Handle } from '#types/matches.types.js';
@@ -49,6 +50,9 @@ import { projectChatIdFromSearch, projectUrl } from '#utils/project-url.utils.js
 import { useSearchParameter } from '#hooks/use-search-parameter.js';
 import { searchParameterName } from '#constants/search-parameter.constants.js';
 import { stringParameter } from '#utils/search-parameter.codecs.js';
+import type { ParameterSetService } from '#services/parameter-set-service.js';
+import type { projectMachine } from '#machines/project.machine.js';
+import type { editorMachine } from '#machines/editor.machine.js';
 
 /* Module scope: the setter is memoised on the codec's identity. */
 const cloudOpenParameter = stringParameter();
@@ -82,6 +86,43 @@ type ProjectRouteError = Readonly<{
 const ProjectSessionsHostContext = createContext(false);
 
 const editorFlushTimeoutMilliseconds = 10_000;
+
+/**
+ * Settle checked parameters and both UI stores.
+ *
+ * The producers half of a project's close: the revision owner takes its cut in
+ * `flushSync`, which the session runs after this, so every producer's bytes are
+ * on disk before the cut rather than beside it.
+ */
+export async function flushProjectSessionPersistence({
+  parameterService,
+  projectRef,
+  editorRef,
+  closeFlushMilliseconds,
+}: Readonly<{
+  parameterService: ParameterSetService;
+  projectRef: ActorRefFrom<typeof projectMachine>;
+  editorRef: ActorRefFrom<typeof editorMachine>;
+  closeFlushMilliseconds: number;
+}>): Promise<void> {
+  await parameterService.close();
+  projectRef.send({ type: 'flushNow' });
+  editorRef.send({ type: 'flushNow' });
+  const [projectSnapshot, editorSnapshot] = await Promise.all([
+    waitFor(projectRef, (state) => state.matches({ ready: { storing: 'idle' } }), {
+      timeout: closeFlushMilliseconds,
+    }),
+    waitFor(editorRef, (state) => state.matches({ ready: { storing: 'idle' } }), {
+      timeout: closeFlushMilliseconds,
+    }),
+  ]);
+  if (projectSnapshot.context.error !== undefined) {
+    throw projectSnapshot.context.error;
+  }
+  if (editorSnapshot.context.error !== undefined) {
+    throw editorSnapshot.context.error;
+  }
+}
 
 /* A retained project has no route flush to register: the route's flush gate is
  * about the project the person is leaving, and the session's own `closing` is
@@ -118,7 +159,7 @@ function ProjectSessionBinding({
   readonly shouldOpenFromTauCloud?: boolean;
 }): React.JSX.Element {
   const { fileManagerRef } = useFileManager();
-  const { projectRef, editorRef } = useProject();
+  const { parameterService, projectRef, editorRef } = useProject();
   const client = useRevisionClientLifecycle();
   const { connectRemote } = useRevisionCommands();
   const chatSessions = useChatSessionStore();
@@ -178,19 +219,57 @@ function ProjectSessionBinding({
   }, [session, status]);
 
   useEffect(() => {
+    parameterService.setBackupOwner(async () => {
+      if (client === undefined) {
+        throw new Error('Revision backup owner is unavailable.');
+      }
+      const current = client.status();
+      if (current?.dirty === false && !current.minting && current.headRevisionId !== undefined) {
+        return current.headRevisionId;
+      }
+      client.send({ command: 'saveRevision', trigger: 'save' });
+      return new Promise<string>((resolve, reject) => {
+        const signal = AbortSignal.timeout(editorFlushTimeoutMilliseconds);
+        let unsubscribe = (): void => undefined;
+        const finish = (revisionId: string | undefined): void => {
+          if (revisionId === undefined) {
+            return;
+          }
+          unsubscribe();
+          signal.removeEventListener('abort', onAbort);
+          resolve(revisionId);
+        };
+        const onAbort = (): void => {
+          unsubscribe();
+          reject(new DOMException('Timed out while creating the parameter migration backup.', 'TimeoutError'));
+        };
+        unsubscribe = client.subscribe(() => {
+          const status = client.status();
+          if (status?.dirty === false && !status.minting) {
+            finish(status.headRevisionId);
+          }
+        });
+        signal.addEventListener('abort', onAbort, { once: true });
+        const status = client.status();
+        if (status?.dirty === false && !status.minting) {
+          finish(status.headRevisionId);
+        }
+      });
+    });
+    return () => {
+      parameterService.setBackupOwner(undefined);
+    };
+  }, [client, parameterService]);
+
+  useEffect(() => {
     return registerProjectSessionServices(projectId, {
-      flushProducers: async () => {
-        projectRef.send({ type: 'flushNow' });
-        editorRef.send({ type: 'flushNow' });
-        await Promise.all([
-          waitFor(projectRef, (state) => state.matches({ ready: { storing: 'idle' } }), {
-            timeout: editorFlushTimeoutMilliseconds,
-          }),
-          waitFor(editorRef, (state) => state.matches({ ready: { storing: 'idle' } }), {
-            timeout: editorFlushTimeoutMilliseconds,
-          }),
-        ]);
-      },
+      flushProducers: async () =>
+        flushProjectSessionPersistence({
+          parameterService,
+          projectRef,
+          editorRef,
+          closeFlushMilliseconds: editorFlushTimeoutMilliseconds,
+        }),
       /* W13's seam, called: the worker's `release()` takes the close cut and
        * awaits `awaitSyncSettled` before it answers this. */
       flushSync: async () => {
@@ -217,7 +296,7 @@ function ProjectSessionBinding({
        * because a host whose leases outlive its tree has one to implement. */
       releaseLeases: async () => undefined,
     });
-  }, [chatSessions, client, editorRef, projectId, projectRef]);
+  }, [chatSessions, client, editorRef, parameterService, projectId, projectRef]);
 
   /* Every live project registers its session, not only the focused one (R2):
    * a run that settles after the person navigates away must reach the project
@@ -491,7 +570,10 @@ export function ProjectRouteGate({
           setRetainedKernels((prior) =>
             Object.hasOwn(prior, requestedProjectId)
               ? prior
-              : { ...prior, [requestedProjectId]: requirement?.runtimeKernelId },
+              : {
+                  ...prior,
+                  [requestedProjectId]: requirement?.runtimeKernelId,
+                },
           );
         }
         setResolved({

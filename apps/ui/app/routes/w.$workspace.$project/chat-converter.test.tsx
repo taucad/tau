@@ -1,11 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import type { ActorRefFrom } from 'xstate';
 import type { CapabilitiesManifest, ExportRoute } from '@taucad/runtime';
-import type { FileExtension } from '@taucad/types';
+import type { FileExtension, FileParameterEntry, JSONValue } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
+import { admitParameterManifest } from '@taucad/parameters';
+import { imageEdgeSchemas } from '@taucad/image';
+import { toJSONSchema } from 'zod';
 import type * as RjsfCore from '@rjsf/core';
 import type { cadMachine } from '#machines/cad.machine.js';
+import type { ParameterSetService } from '#services/parameter-set-service.js';
 
 vi.mock('@xstate/react', () => ({
   useSelector: (actor: { getSnapshot: () => unknown } | undefined, selector: (state: unknown) => unknown) => {
@@ -94,6 +98,54 @@ const mockHelperCadRef = {
 
 const mockGeometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
 mockGeometryUnits.set('main.ts', mockCadRef);
+const mockParameterEntries = new Map<string, FileParameterEntry>();
+const mockParameterSnapshots = new Map<string, Record<string, unknown>>();
+const parameterIdentity = {
+  sourceRevision: 'source',
+  manifestRevision: 'manifest',
+  valueRevision: 'value',
+  dependencyRevision: 'dependency',
+};
+const mockParameterService = {
+  entries: () => mockParameterEntries,
+  target: (entry: string, authority = 'browser-filesystem') => ({ authority, root: '/project', entry }),
+  snapshot: (entry: string) => mockParameterSnapshots.get(entry),
+  // Readers select from the authority actor; this fake replays the stored snapshot to them.
+  actor: (entry: string) =>
+    mockParameterSnapshots.has(entry)
+      ? {
+          getSnapshot: () => ({ context: { current: mockParameterSnapshots.get(entry) } }),
+          subscribe: () => ({ unsubscribe: () => undefined }),
+        }
+      : undefined,
+  readSettled: vi.fn(async () => undefined),
+  resolveTarget: vi.fn(async (target: { entry: string }) => {
+    const { entry } = target;
+    const record: FileParameterEntry = { activeGroup: 'default', groups: { default: { values: {} } } };
+    const snapshot = { entry: record, identity: parameterIdentity, access: { status: 'current', writeAllowed: true } };
+    mockParameterEntries.set(entry, record);
+    mockParameterSnapshots.set(entry, snapshot);
+    return snapshot;
+  }),
+  replaceTargetValues: vi.fn(
+    async (target: { entry: string }, _manifest: unknown, { values }: { values: Record<string, JSONValue> }) => {
+      const record: FileParameterEntry = { activeGroup: 'default', groups: { default: { values } } };
+      mockParameterEntries.set(target.entry, record);
+      mockParameterSnapshots.set(target.entry, {
+        entry: record,
+        identity: parameterIdentity,
+        access: { status: 'current', writeAllowed: true },
+      });
+    },
+  ),
+  input: vi.fn(),
+  submitTarget: vi.fn(async (target: { entry: string }, _manifest: unknown, request: { requestId: string }) => ({
+    status: 'committed',
+    requestId: request.requestId,
+    write: 'applied',
+    revision: { ...parameterIdentity, valueRevision: `${target.entry}:next` },
+  })),
+};
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
@@ -104,6 +156,7 @@ vi.mock('#hooks/use-project.js', () => ({
     },
     geometryUnits: mockGeometryUnits,
     mainEntryPath: 'main.ts',
+    parameterService: mockParameterService,
   }),
 }));
 
@@ -114,13 +167,16 @@ vi.mock('#hooks/use-keyboard.js', () => ({
 const mockWriteFiles = vi.fn().mockResolvedValue(undefined);
 const mockReadFile = vi.fn().mockRejectedValue(new Error('File not found'));
 let mockContentService: unknown = {};
+const mockFileManager = {
+  writeFiles: mockWriteFiles,
+  readFile: mockReadFile,
+  get contentService(): unknown {
+    return mockContentService;
+  },
+};
 
 vi.mock('#hooks/use-file-manager.js', () => ({
-  useFileManager: () => ({
-    writeFiles: mockWriteFiles,
-    readFile: mockReadFile,
-    contentService: mockContentService,
-  }),
+  useFileManager: () => mockFileManager,
 }));
 
 vi.mock('#components/ui/sonner.js', () => ({
@@ -156,15 +212,20 @@ vi.mock('@rjsf/core', async (importOriginal) => ({
   }: {
     schema: { properties?: Record<string, unknown> };
     formData: Record<string, unknown>;
-    formContext: { displayDescriptors?: Record<string, unknown>; rootPresentation?: string };
+    formContext: {
+      parameterEdit?: { kind: string; commit?: { target: { authority: string } } };
+      parameterManifest?: unknown;
+      rootPresentation?: string;
+    };
     idPrefix: string;
     onChange: (event: { formData: Record<string, unknown> }) => void;
   }) => (
     <div
       data-testid='rjsf-form'
       data-fields={Object.keys(schema.properties ?? {}).join(',')}
-      data-display-descriptors={JSON.stringify(formContext.displayDescriptors ?? {})}
       data-id-prefix={idPrefix}
+      data-parameter-authority={formContext.parameterEdit?.commit?.target.authority}
+      data-parameter-manifest={formContext.parameterManifest ? 'ready' : 'pending'}
       data-root-presentation={formContext.rootPresentation}
     >
       RJSF Form
@@ -197,7 +258,8 @@ vi.mock('#components/geometry/parameters/rjsf-theme.js', () => ({
   templates: {},
 }));
 
-const { ChatConverter, resolveActiveSchema } = await import('./chat-converter.js');
+const { ChatConverter, ExportSchemaForm, compileExportConfigurationManifest, resolveActiveSchema } =
+  await import('./chat-converter.js');
 
 function createCapabilities(overrides?: Partial<CapabilitiesManifest>): CapabilitiesManifest {
   return {
@@ -350,6 +412,38 @@ describe('ChatConverter', () => {
     });
   });
 
+  it('should resolve a discriminator supplied by a branch default', () => {
+    const schema: JSONSchema7 = {
+      anyOf: [
+        { properties: { mode: { enum: ['single'], default: 'single' }, camera: { type: 'object' } } },
+        { properties: { mode: { enum: ['batch'] }, views: { type: 'array' } }, required: ['mode'] },
+      ],
+    };
+
+    expect(resolveActiveSchema(schema, {}, { mode: 'single' }).schema).toMatchObject({
+      properties: { mode: { default: 'single' }, camera: { type: 'object' } },
+    });
+  });
+
+  it('should keep configuration paths collision-safe and stable across schema revisions', async () => {
+    const resolved: Parameters<typeof compileExportConfigurationManifest>[2] = {
+      schema: { type: 'object', properties: { tolerance: { type: 'number' } } },
+      defaults: {},
+    };
+    const [slash, underscore, revised] = await Promise.all([
+      compileExportConfigurationManifest('a/b', 'export/stl', resolved),
+      compileExportConfigurationManifest('a_b', 'export/stl', resolved),
+      compileExportConfigurationManifest('a/b', 'export/stl', {
+        ...resolved,
+        defaults: { tolerance: 0.1 },
+      }),
+    ]);
+
+    expect(slash.entryPath).not.toBe(underscore.entryPath);
+    expect(revised.entryPath).toBe(slash.entryPath);
+    expect(revised.manifest.identity.dependency).not.toBe(slash.manifest.identity.dependency);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockGeometry = { format: 'gltf', content: new Uint8Array([1]) };
@@ -360,6 +454,39 @@ describe('ChatConverter', () => {
     mockReadFile.mockRejectedValue(new Error('File not found'));
     mockGeometryUnits.clear();
     mockGeometryUnits.set('main.ts', mockCadRef);
+    mockParameterEntries.clear();
+    mockParameterSnapshots.clear();
+  });
+
+  it('binds provider configuration RJSF forms to the checked parameter owner without a CAD actor', async () => {
+    render(
+      <ExportSchemaForm
+        idPrefix='provider-test'
+        provider='replicad'
+        configuration='export/stl/options'
+        parameterOwner={{
+          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- bounded fake covers the form's target methods.
+          parameterService: mockParameterService as unknown as ParameterSetService,
+        }}
+        label='Format'
+        shouldShowLabel
+        resolved={{
+          schema: {
+            type: 'object',
+            properties: { tolerance: { type: 'number', default: 0.1 } },
+          },
+          defaults: { tolerance: 0.1 },
+        }}
+        value={{}}
+        onChange={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('rjsf-form')).toHaveAttribute('data-parameter-authority', 'provider-configuration');
+      expect(screen.getByTestId('rjsf-form')).toHaveAttribute('data-parameter-manifest', 'ready');
+    });
+    expect(mockParameterService.resolveTarget).toHaveBeenCalledOnce();
   });
 
   it('should show empty state when no geometry is rendered', () => {
@@ -468,19 +595,17 @@ describe('ChatConverter', () => {
     expect((exportButton as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it('should collapse format options by default', () => {
+  it('should show format options by default and allow collapsing them', async () => {
     render(<ChatConverter isExpanded />);
 
     const stlButton = screen.getByRole('button', { name: /stl/i });
     fireEvent.click(stlButton);
 
     const optionsTrigger = screen.getByRole('button', { name: /stl options/i });
-    expect(optionsTrigger).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByTestId('rjsf-form')).toBeNull();
-
-    fireEvent.click(optionsTrigger);
-    expect(screen.getByTestId('rjsf-form').dataset['idPrefix']).toBe('///root-stl-options');
-    expect(screen.getByTestId('rjsf-form').dataset['rootPresentation']).toBe('embedded');
+    expect(optionsTrigger).toHaveAttribute('aria-expanded', 'true');
+    const form = await screen.findByTestId('rjsf-form');
+    expect(form.dataset['idPrefix']).toBe('///root-stl-options');
+    expect(form.dataset['rootPresentation']).toBe('embedded');
 
     fireEvent.click(optionsTrigger);
     expect(screen.queryByTestId('rjsf-form')).toBeNull();
@@ -495,16 +620,14 @@ describe('ChatConverter', () => {
     expect(screen.queryByTestId('rjsf-form')).toBeNull();
   });
 
-  it('should keep selected format disclosures independently open', () => {
+  it('should keep selected format disclosures independently open', async () => {
     render(<ChatConverter isExpanded />);
 
     fireEvent.click(screen.getByRole('button', { name: /stl/i }));
     fireEvent.click(screen.getByRole('button', { name: /step/i }));
-    expect(screen.queryAllByTestId('rjsf-form')).toHaveLength(0);
-
-    fireEvent.click(screen.getByRole('button', { name: /stl options/i }));
-    fireEvent.click(screen.getByRole('button', { name: /step options/i }));
-    expect(screen.getAllByTestId('rjsf-form')).toHaveLength(2);
+    await waitFor(() => {
+      expect(screen.getAllByTestId('rjsf-form')).toHaveLength(2);
+    });
 
     fireEvent.click(screen.getByRole('button', { name: /stl options/i }));
     expect(screen.getAllByTestId('rjsf-form')).toHaveLength(1);
@@ -535,14 +658,16 @@ describe('ChatConverter', () => {
     render(<ChatConverter isExpanded />);
 
     fireEvent.click(screen.getByRole('button', { name: /webp/i }));
-    fireEvent.click(screen.getByRole('button', { name: /webp options defaults/i }));
+    const contentForm = await screen.findByTestId('rjsf-form');
     expect(screen.getByRole('region', { name: 'Content' })).toBeDefined();
     expect(screen.queryByRole('heading', { name: 'Content' })).toBeNull();
-    expect(screen.getByTestId('rjsf-form').dataset['fields']).toBe('includeEdges');
+    expect(contentForm.dataset['fields']).toBe('includeEdges');
     expect(screen.getByRole('button', { name: /webp options defaults/i })).toBeDefined();
 
     fireEvent.click(screen.getByRole('button', { name: 'Enable edges' }));
-    expect(screen.getByRole('button', { name: /webp options modified/i })).toBeDefined();
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /webp options modified/i })).toBeDefined();
+    });
     fireEvent.click(screen.getByRole('button', { name: /export webp/i }));
 
     await vi.waitFor(() => {
@@ -553,7 +678,7 @@ describe('ChatConverter', () => {
     });
   });
 
-  it('should label Content and Format only when both schemas are present', () => {
+  it('should label Content and Format only when both schemas are present', async () => {
     mockCapabilities = createCapabilities({
       routes: [
         {
@@ -576,54 +701,56 @@ describe('ChatConverter', () => {
 
     render(<ChatConverter isExpanded />);
     fireEvent.click(screen.getByRole('button', { name: /webp/i }));
-    fireEvent.click(screen.getByRole('button', { name: /webp options defaults/i }));
 
+    await waitFor(() => {
+      expect(screen.getAllByTestId('rjsf-form')).toHaveLength(2);
+    });
     expect(screen.getByRole('heading', { name: 'Content' })).toBeDefined();
     expect(screen.getByRole('heading', { name: 'Format' })).toBeDefined();
-    expect(screen.getAllByTestId('rjsf-form')).toHaveLength(2);
   });
 
-  it('should scope px/deg/unitless display descriptors to the export form', () => {
-    mockCapabilities = createCapabilities({
-      routes: [
-        {
-          targetFormat: 'webp',
-          kernelId: 'replicad',
-          sourceFormat: 'glb',
-          transcoderId: 'image',
-          fidelity: 'mesh',
-          exportOptions: {
-            schema: {
-              type: 'object',
-              properties: {
-                width: { type: 'number' },
-                height: { type: 'number' },
-                lineWidth: { type: 'number' },
-                verticalFieldOfView: { type: 'number' },
-                zoom: { type: 'number' },
-                quality: { type: 'number' },
-                margin: { type: 'number' },
-              },
-            },
-            defaults: {},
-          },
+  it('compiles export field semantics into the checked manifest', async () => {
+    const { manifest } = await compileExportConfigurationManifest('image', 'webp', {
+      schema: {
+        type: 'object',
+        properties: {
+          width: { type: 'number' },
+          height: { type: 'number' },
+          lineWidth: { type: 'number' },
+          verticalFieldOfView: { type: 'number' },
+          zoom: { type: 'number' },
+          quality: { type: 'number' },
+          margin: { type: 'number' },
         },
-      ],
+      },
+      defaults: {},
     });
-    render(<ChatConverter isExpanded />);
 
-    fireEvent.click(screen.getByRole('button', { name: /webp/i }));
-    fireEvent.click(screen.getByRole('button', { name: /webp options defaults/i }));
-
-    expect(JSON.parse(screen.getByTestId('rjsf-form').dataset['displayDescriptors'] ?? '{}')).toEqual({
-      width: { descriptor: 'count', unit: 'px' },
-      height: { descriptor: 'count', unit: 'px' },
-      lineWidth: { descriptor: 'count', unit: 'px' },
-      verticalFieldOfView: { descriptor: 'angle', unit: 'deg' },
-      zoom: { descriptor: 'unitless', unit: '' },
-      quality: { descriptor: 'count', unit: '' },
-      margin: { descriptor: 'count', unit: '' },
+    for (const pointer of ['/width', '/height', '/lineWidth']) {
+      expect(manifest.bindings[pointer]).toMatchObject({ unit: '1', symbol: 'px', space: 'linear' });
+    }
+    expect(manifest.bindings['/verticalFieldOfView']).toMatchObject({
+      unit: 'deg',
+      quantityKind: 'http://qudt.org/vocab/quantitykind/PlaneAngle',
+      space: 'linear',
     });
+    for (const pointer of ['/zoom', '/quality', '/margin']) {
+      expect(manifest.bindings[pointer]).toMatchObject({
+        unit: '1',
+        quantityKind: 'http://qudt.org/vocab/quantitykind/DimensionlessRatio',
+        space: 'linear',
+      });
+    }
+  });
+
+  it('produces a re-admissible manifest from the real image exporter schema', async () => {
+    const schema = toJSONSchema(imageEdgeSchemas.png, { target: 'draft-7', io: 'input' }) as JSONSchema7;
+    const compiled = await compileExportConfigurationManifest('replicad+image', 'export/png/options', {
+      schema,
+      defaults: imageEdgeSchemas.png.parse({}),
+    });
+
+    await expect(admitParameterManifest(compiled.manifest)).resolves.toEqual(compiled.manifest);
   });
 
   it('should expose one mode field and switch image branch fields without retaining single camera keys', async () => {
@@ -631,15 +758,15 @@ describe('ChatConverter', () => {
     render(<ChatConverter isExpanded />);
 
     fireEvent.click(screen.getByRole('button', { name: /webp/i }));
-    fireEvent.click(screen.getByRole('button', { name: /webp options defaults/i }));
-    expect(screen.getByTestId('rjsf-form').dataset['fields']).toBe(
-      'mode,width,height,quality,lineWidth,background,label,axes,scaleBar,camera',
-    );
+    const form = await screen.findByTestId('rjsf-form');
+    expect(form.dataset['fields']).toBe('mode,width,height,quality,lineWidth,background,label,axes,scaleBar,camera');
 
     fireEvent.click(screen.getByRole('button', { name: 'Switch mode' }));
-    expect(screen.getByTestId('rjsf-form').dataset['fields']).toBe(
-      'mode,width,height,quality,lineWidth,background,axes,scaleBar,views',
-    );
+    await waitFor(() => {
+      expect(screen.getByTestId('rjsf-form').dataset['fields']).toBe(
+        'mode,width,height,quality,lineWidth,background,axes,scaleBar,views',
+      );
+    });
 
     fireEvent.click(screen.getByRole('button', { name: /export webp/i }));
     await vi.waitFor(() => {
@@ -823,7 +950,7 @@ describe('ChatConverter', () => {
       expect(screen.queryByTestId('rjsf-form')).toBeNull();
     });
 
-    it('should prefer brep over mesh regardless of route type', () => {
+    it('should prefer brep over mesh regardless of route type', async () => {
       mockActiveKernelId = 'replicad';
       mockCapabilities = createCapabilities({
         routes: [
@@ -857,12 +984,11 @@ describe('ChatConverter', () => {
 
       const stepButton = screen.getByRole('button', { name: /step/i });
       fireEvent.click(stepButton);
-      fireEvent.click(screen.getByRole('button', { name: /step options defaults/i }));
 
-      expect(screen.getByTestId('rjsf-form')).toBeDefined();
+      expect(await screen.findByTestId('rjsf-form')).toBeDefined();
     });
 
-    it('should never show OpenSCAD tessellation options for replicad files', () => {
+    it('should never show OpenSCAD tessellation options for replicad files', async () => {
       mockActiveKernelId = 'replicad';
       mockCapabilities = createCapabilities({
         routes: [
@@ -906,9 +1032,8 @@ describe('ChatConverter', () => {
 
       const stlButton = screen.getByRole('button', { name: /stl/i });
       fireEvent.click(stlButton);
-      fireEvent.click(screen.getByRole('button', { name: /stl options defaults/i }));
 
-      expect(screen.getByTestId('rjsf-form')).toBeDefined();
+      expect(await screen.findByTestId('rjsf-form')).toBeDefined();
     });
   });
 
@@ -992,8 +1117,10 @@ describe('ChatConverter', () => {
       await vi.waitFor(() => {
         expect(screen.getByRole('button', { name: /export webp/i })).toBeDefined();
       });
-      fireEvent.click(screen.getByRole('button', { name: /webp options modified/i }));
 
+      await waitFor(() => {
+        expect(screen.getAllByTestId('rjsf-form')).toHaveLength(2);
+      });
       const exportForm = screen.getAllByTestId('rjsf-form').find((form) => form.dataset['fields']?.startsWith('mode,'));
       expect(exportForm?.dataset['fields']).toBe('mode,width,height,quality,lineWidth,background,axes,scaleBar,views');
       fireEvent.click(screen.getByRole('button', { name: /export webp/i }));

@@ -875,6 +875,9 @@ export const editorMachine = setup({
     clearPendingChanges: assign({ hasPendingChanges: false }),
   },
   guards: {
+    hasPersistenceError({ context }) {
+      return context.error !== undefined;
+    },
     hasPendingChanges({ context }) {
       return context.hasPendingChanges;
     },
@@ -1120,6 +1123,7 @@ export const editorMachine = setup({
           states: {
             idle: {
               on: {
+                flushNow: { guard: 'hasPersistenceError', target: 'writing' },
                 openFile: { target: 'pending' },
                 closeFile: { target: 'pending' },
                 closeAll: { target: 'pending' },
@@ -1183,11 +1187,11 @@ export const editorMachine = setup({
                   {
                     guard: 'hasPendingChanges',
                     target: 'pending',
-                    actions: 'clearPendingChanges',
+                    actions: ['clearError', 'clearPendingChanges'],
                   },
-                  { target: 'idle' },
+                  { target: 'idle', actions: 'clearError' },
                 ],
-                onError: { target: 'pending', actions: 'clearPendingChanges' },
+                onError: { target: 'idle', actions: ['setError', 'clearPendingChanges'] },
               },
               on: {
                 // Track mutations during write so we persist again after completion

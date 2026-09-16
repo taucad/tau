@@ -8,6 +8,7 @@ export {
   filesystemBridgeConnectMessageType,
   filesystemBridgeReadyMessageType,
   openFileSystemBridge,
+  serveFileSystemBridgePort,
   waitForWorkerReady,
   workerReadyMessageType,
 } from '#filesystem-bridge.js';

@@ -101,6 +101,23 @@ export type NativeGitCheckoutOptions = Readonly<{
    * and `tau serve` treats its cwd as the project (S6).
    */
   directory: string;
+  /**
+   * Hold the host's existing writer authority around one native worktree
+   * mutation. The target is derived here, beside the Git command: for an add,
+   * `parentRoot` already exists while `targetRoot` does not yet.
+   */
+  withMutationAuthority?:
+    | (<Result>(
+        target: Readonly<{
+          operation: 'add' | 'remove';
+          repositoryRoot: string;
+          parentRoot: string;
+          targetPath: string;
+          targetRoot: string;
+        }>,
+        mutation: () => Promise<Result>,
+      ) => Promise<Result>)
+    | undefined;
 }>;
 
 /**
@@ -1568,7 +1585,7 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
      * @returns The checkout that now holds that branch.
      */
     addCheckout: async (input: AddCheckoutInput): Promise<Checkout> => {
-      const { projectId, directory } = requireCheckouts();
+      const { projectId, directory, withMutationAuthority } = requireCheckouts();
       const existing = await listWorktrees();
       if (existing.some((checkout) => checkout.branch === input.branch)) {
         throw new RevisionPortError('CHECKOUT_CONFLICT', `Branch ${input.branch} already has a checkout.`);
@@ -1587,19 +1604,32 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
       }
       assertMaterializableRevisionTree(tree);
       const id = await checkoutIdOf(input.branch);
+      await mkdir(directory, { recursive: true });
       const root = join(directory, id);
-      await output([
-        'worktree',
-        'add',
-        ...(head === undefined ? ['-b', input.branch] : []),
-        root,
-        head === undefined ? base : input.branch,
-      ]);
+      const add = async (): Promise<void> => {
+        await output([
+          'worktree',
+          'add',
+          ...(head === undefined ? ['-b', input.branch] : []),
+          root,
+          head === undefined ? base : input.branch,
+        ]);
+      };
+      await (withMutationAuthority?.(
+        {
+          operation: 'add',
+          repositoryRoot: repositoryPath,
+          parentRoot: directory,
+          targetPath: id,
+          targetRoot: root,
+        },
+        add,
+      ) ?? add());
       return Object.freeze({ id, projectId, root, kind: 'linked', branch: input.branch, baseRevisionId: base });
     },
 
     removeCheckout: async (id: string): Promise<void> => {
-      requireCheckouts();
+      const { withMutationAuthority } = requireCheckouts();
       if (id === liveCheckoutId) {
         /* Policy Rule 1: *live checkout* is an engineering term and this
          * sentence is rendered verbatim by the pane and printed by the CLI. */
@@ -1619,7 +1649,21 @@ export const createNativeGitRevisionPort = (options: NativeGitRevisionPortOption
        * real gate is one layer up — `removeCheckout` in `revision-effects.ts`
        * compares the checkout's head tree against a live capture and refuses
        * work that is not in a revision yet (a1 review R7). */
-      await output(['worktree', 'remove', '--force', existing.root]);
+      const parentRoot = dirname(existing.root);
+      const targetPath = basename(existing.root);
+      const remove = async (): Promise<void> => {
+        await output(['worktree', 'remove', '--force', existing.root]);
+      };
+      await (withMutationAuthority?.(
+        {
+          operation: 'remove',
+          repositoryRoot: repositoryPath,
+          parentRoot,
+          targetPath,
+          targetRoot: existing.root,
+        },
+        remove,
+      ) ?? remove());
     },
   });
 

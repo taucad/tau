@@ -1,6 +1,5 @@
-import type { LengthSymbol } from '@taucad/units';
 import type { StandardSchemaV1 } from '#types/schema.types.js';
-import type { engineeringDisciplines } from '#constants/cad.constants.js';
+import type { cadLengthUnits, engineeringDisciplines } from '#constants/cad.constants.js';
 
 /** @public */
 export type CodeIssue = {
@@ -113,7 +112,7 @@ export type CadMainFunction = (
 
 /** @public */
 export type CadUnits = {
-  length: LengthSymbol;
+  length: (typeof cadLengthUnits)[number];
 };
 
 /** @public */

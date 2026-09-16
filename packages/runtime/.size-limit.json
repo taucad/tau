@@ -7,7 +7,7 @@
   {
     "name": "@taucad/runtime",
     "path": "dist/index.mjs",
-    "limit": "1.1 kB"
+    "limit": "1.2 kB"
   },
   {
     "name": "@taucad/runtime/worker/web",
@@ -62,6 +62,6 @@
   {
     "name": "@taucad/runtime/transport/websocket-host",
     "path": "dist/transport/websocket-host.mjs",
-    "limit": "2 kB"
+    "limit": "2.1 kB"
   }
 ]

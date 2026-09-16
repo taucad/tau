@@ -38,6 +38,7 @@ import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 import type {
   HashedGeometryResultTransport,
   RuntimeEvaluateModelArgs,
+  RuntimeResolveParametersArgs,
   RuntimeExportModelArgs,
   RuntimeSourceSnapshotArgs,
   RuntimeTranscodeArgs,
@@ -54,6 +55,7 @@ import type {
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeTransportClient, RuntimeTransportTimeoutRecovery } from '#transport/runtime-transport.types.js';
+import { admitParameterManifest, ParameterAdmissionError } from '@taucad/parameters';
 import {
   defaultTranscodeTimeout,
   renderTimeoutRecoveryGrace,
@@ -183,8 +185,7 @@ export type RuntimeWorkerClientOptions = {
   transport: RuntimeTransportClient;
 };
 
-/**
- */
+/** Initialization options for {@link RuntimeWorkerClient}. @public */
 export type RuntimeWorkerClientInitializeOptions = {
   readonly config?: unknown;
 };
@@ -498,6 +499,16 @@ export class RuntimeWorkerClient {
     return result.success ? { ...result, data: await this.transport.resolveGeometry(result.data) } : result;
   }
 
+  /** Resolve parameters for one request without selecting autonomous preview state. */
+  public async resolveParameters(
+    request: RuntimeResolveParametersArgs,
+    signal?: AbortSignal,
+  ): Promise<GetParametersResult> {
+    this.ensureNotTerminated();
+    this.ensureChannel();
+    return this.admitParametersResult(await this.channel!.call('resolveParameters', request, signal));
+  }
+
   /** Collect a request-scoped source closure without rendering geometry. */
   public async snapshotSource(
     request: RuntimeSourceSnapshotArgs,
@@ -587,7 +598,10 @@ export class RuntimeWorkerClient {
   ): Unsubscribe {
     return this.deferNotify('stateChanged', (args) => {
       if (this.isSelectedPreviewPublishable(args.renderId)) {
-        handler({ ...args, geometryObserved: this.selectedPreview?.geometryObserved === true });
+        handler({
+          ...args,
+          geometryObserved: this.selectedPreview?.geometryObserved === true,
+        });
       }
     });
   }
@@ -604,12 +618,34 @@ export class RuntimeWorkerClient {
   }
 
   /** Subscribe to autonomous parameter resolution events. */
-  public onParametersResolved(handler: (args: { result: GetParametersResult; renderId: string }) => void): Unsubscribe {
-    return this.deferNotify('parametersResolved', (args) => {
-      if (this.isSelectedPreviewPublishable(args.renderId)) {
-        handler(args);
-      }
+  public onParametersResolved(
+    handler: (args: { result: GetParametersResult; renderId: string }) => void | Promise<void>,
+  ): Unsubscribe {
+    const subscription = new AbortController();
+    const isActive = (): boolean => !subscription.signal.aborted;
+    let admissionQueue = Promise.resolve();
+    const off = this.deferNotify('parametersResolved', (args) => {
+      const precedingAdmission = admissionQueue;
+      const processNotification = async (): Promise<void> => {
+        try {
+          await precedingAdmission;
+          if (!isActive() || !this.isSelectedPreviewPublishable(args.renderId)) {
+            return;
+          }
+          const result = await this.admitParametersResult(args.result);
+          if (isActive() && this.isSelectedPreviewPublishable(args.renderId)) {
+            await handler({ ...args, result });
+          }
+        } catch {
+          // Keep admission and subscriber failures contained within this ordered subscription queue.
+        }
+      };
+      admissionQueue = processNotification();
     });
+    return () => {
+      subscription.abort();
+      off();
+    };
   }
 
   /**
@@ -847,6 +883,29 @@ export class RuntimeWorkerClient {
     return this.selectedPreview?.renderId === renderId && !this.selectedPreview.timedOut;
   }
 
+  private async admitParametersResult(result: GetParametersResult): Promise<GetParametersResult> {
+    if (!result.success) {
+      return result;
+    }
+    try {
+      return { ...result, data: await admitParameterManifest(result.data) };
+    } catch (error) {
+      const diagnostics = error instanceof ParameterAdmissionError ? error.diagnostics : undefined;
+      return {
+        success: false,
+        issues: [
+          {
+            message: error instanceof Error ? error.message : 'Parameter manifest admission failed',
+            code: diagnostics?.[0]?.code ?? 'RUNTIME',
+            type: 'runtime',
+            severity: 'error',
+            details: diagnostics,
+          },
+        ],
+      };
+    }
+  }
+
   private dispatchPreview(admission: RuntimePreviewIdentity, send: () => void): void {
     if (this.selectedPreview?.renderId !== admission.renderId) {
       return;
@@ -1048,7 +1107,10 @@ export class RuntimeWorkerClient {
   ): Promise<ProgressiveSceneUpdate> {
     switch (update.type) {
       case 'reset': {
-        return { ...update, snapshot: await this.resolveSceneSnapshot(update.snapshot, assetsByDigest) };
+        return {
+          ...update,
+          snapshot: await this.resolveSceneSnapshot(update.snapshot, assetsByDigest),
+        };
       }
       case 'delta': {
         const assets: ResolvedSceneAsset[] = [];

@@ -38,6 +38,7 @@ import {
 } from '@taucad/revisions/revision-effects';
 import type {
   CheckoutFileSystems,
+  UseCheckoutFileSystem,
   TurnConflictedEvent as SettlementConflicted,
   TurnFailedEvent as SettlementFailed,
   TurnFinalizedEvent as SettlementFinalized,
@@ -66,7 +67,12 @@ import type {
   RevisionTag,
 } from '@taucad/revisions';
 import { GitToolchainError, createNativeGitRevisionPort, resolveGitToolchain } from '@taucad/revisions/node';
-import type { MissingGitTool, NativeGitRemoteCredential, TauApiCredential } from '@taucad/revisions/node';
+import type {
+  MissingGitTool,
+  NativeGitCheckoutOptions,
+  NativeGitRemoteCredential,
+  TauApiCredential,
+} from '@taucad/revisions/node';
 import { publishPushMilliseconds } from '@taucad/revisions/publish-machine';
 import type {
   PublishDraft,
@@ -160,6 +166,10 @@ export type ProjectRevisionsOptions = {
   readonly port?: RevisionPort | undefined;
   /** Defaults to a `NodeFsProvider` at the live root, or at a linked checkout's own. */
   readonly filesystem?: CheckoutFileSystems | undefined;
+  /** Optional host-owned admission wrapper around checkout tree reads and writes. */
+  readonly useFileSystem?: UseCheckoutFileSystem | undefined;
+  /** Native linked-checkout mutations under the embedding host's writer authority. */
+  readonly checkoutMutation?: NativeGitCheckoutOptions['withMutationAuthority'];
   /** Defaults to the workspace root's directory name. */
   readonly projectId?: string | undefined;
   /** Host-private parent for linked Git worktrees; defaults to Tau's config directory. */
@@ -439,6 +449,8 @@ export const createProjectRevisionPort = (
     projectId?: string | undefined;
     checkoutsDirectory?: string | undefined;
     gitExecutable?: string | undefined;
+    /** Native linked-checkout mutations under the embedding host's writer authority. */
+    checkoutMutation?: NativeGitCheckoutOptions['withMutationAuthority'];
     /**
      * Read before every request to a remote, and only offered to Tau's own API
      * origin (P40). A terminal has no cookie, so this is how `tau publish`
@@ -455,6 +467,7 @@ export const createProjectRevisionPort = (
     checkouts: {
       projectId,
       directory: options.checkoutsDirectory ?? join(defaultConfigDirectory(), 'checkouts', projectId),
+      ...(options.checkoutMutation === undefined ? {} : { withMutationAuthority: options.checkoutMutation }),
     },
     ...(options.gitExecutable === undefined ? {} : { gitExecutable: options.gitExecutable }),
     ...(options.tauCredential === undefined ? {} : { tauCredential: options.tauCredential }),
@@ -533,6 +546,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       projectId,
       ...(options.checkoutsDirectory === undefined ? {} : { checkoutsDirectory: options.checkoutsDirectory }),
       ...toolchain,
+      ...(options.checkoutMutation === undefined ? {} : { checkoutMutation: options.checkoutMutation }),
       ...(options.tauCredential === undefined ? {} : { tauCredential: options.tauCredential }),
       ...(options.remoteCredential === undefined
         ? { remoteCredential: () => channelRemoteCredential }
@@ -689,6 +703,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
      * one in.
      */
     filesystem: filesystems,
+    ...(options.useFileSystem === undefined ? {} : { useFileSystem: options.useFileSystem }),
     onApplyingTree: (checkout, paths) => {
       if (checkout.kind !== 'live') {
         return;

@@ -24,7 +24,7 @@ Definition
 - **Row 1:** Complex table
 - **Row 2:** Complex table: Left; Right
 
-```text
+```
 const answer = 42;
 ```
 

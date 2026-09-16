@@ -6,6 +6,8 @@ import { fileExtensionSet } from '@taucad/runtime/types';
 import type { ExportResult } from '@taucad/runtime';
 import type { FileExtension, TelemetryEntry } from '@taucad/runtime/types';
 import { createNodeClient, isSafeRelativePath } from '@taucad/runtime/node';
+import { ParameterAdmissionError, resolveParameterInputValues } from '@taucad/parameters';
+import type { ParameterResolutionOptions } from '@taucad/parameters';
 import type { PicogkKernelOptions } from '@taucad/picogk';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import { loadCliRuntime } from '#runtime-options.js';
@@ -34,6 +36,33 @@ const parseJsonObject = (flag: string, input: string | undefined): Record<string
   }
 
   return value as Record<string, unknown>;
+};
+
+const parseResolutionMode = (input: string | undefined): NonNullable<ParameterResolutionOptions['mode']> => {
+  if (input === undefined || input === 'default') {
+    return 'default';
+  }
+  if (input === 'declared-only') {
+    return input;
+  }
+  throw cliError(
+    'ARG_PARAMETER_RESOLUTION_INVALID',
+    '--resolution-mode must be "default" or "declared-only"',
+    exitCodes.usage,
+  );
+};
+
+const parameterInputFailure = (error: unknown): ReturnType<typeof cliError> => {
+  const diagnostics = error instanceof ParameterAdmissionError ? error.diagnostics : undefined;
+  const code =
+    diagnostics?.[0]?.code ??
+    (typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+      ? error.code
+      : 'INVALID_SCHEMA');
+  return cliError(code, error instanceof Error ? error.message : 'Parameter input is invalid.', {
+    exit: exitCodes.refused,
+    details: diagnostics === undefined ? undefined : { diagnostics },
+  });
 };
 
 /*
@@ -86,6 +115,11 @@ export const exportCommand = defineCommand({
     params: {
       type: 'string',
       description: 'JSON-encoded parameters for the model (e.g. \'{"width":100}\')',
+      required: false,
+    },
+    resolutionMode: {
+      type: 'string',
+      description: 'Parameter semantic resolution: default or declared-only',
       required: false,
     },
     exportOptions: {
@@ -150,7 +184,8 @@ export const exportCommand = defineCommand({
       );
     }
 
-    const parameters = parseJsonObject('--params', args.params) ?? {};
+    const suppliedParameters = parseJsonObject('--params', args.params) ?? {};
+    const resolutionMode = parseResolutionMode(args.resolutionMode);
     const exportOptions = parseJsonObject('--export-options', args.exportOptions);
     const content = parseJsonObject('--content', args.content);
 
@@ -172,7 +207,9 @@ export const exportCommand = defineCommand({
     let picogk: PicogkKernelOptions | undefined;
     if (picogkResourceRoot) {
       const { loadPicogkKernelOptions } = await import('@taucad/picogk');
-      picogk = loadPicogkKernelOptions({ resourceRoot: resolve(picogkResourceRoot) });
+      picogk = loadPicogkKernelOptions({
+        resourceRoot: resolve(picogkResourceRoot),
+      });
     }
     const runtime = await loadCliRuntime({
       projectRoot,
@@ -182,7 +219,10 @@ export const exportCommand = defineCommand({
     });
     profileLedger?.checkpoint('cli.load-configured-plugins');
     profileLedger?.checkpoint('cli.create-runtime');
-    const client = await createNodeClient({ runtime, projectPath: inputDirectory });
+    const client = await createNodeClient({
+      runtime,
+      projectPath: inputDirectory,
+    });
     profileLedger?.checkpoint('runtime.create-client');
     const telemetryEntries: TelemetryEntry[] = [];
 
@@ -209,7 +249,29 @@ export const exportCommand = defineCommand({
     process.once('SIGINT', onSignal);
     process.once('SIGTERM', onSignal);
     try {
-      const exportOutcome = async (): Promise<{ readonly type: 'result'; readonly value: ExportResult }> => ({
+      const parameterResult = await client.resolveParameters({
+        source: { path: inputFilename },
+        resolution: { mode: resolutionMode },
+      });
+      if (!parameterResult.success) {
+        const issue = parameterResult.issues[0];
+        throw cliError(issue?.code ?? 'RUNTIME', issue?.message ?? 'Parameter manifest resolution failed.', {
+          exit: exitCodes.refused,
+          details: {
+            diagnostics: issue?.details ?? parameterResult.issues,
+          },
+        });
+      }
+      let parameters: Readonly<Record<string, unknown>>;
+      try {
+        parameters = resolveParameterInputValues(parameterResult.data, suppliedParameters);
+      } catch (error) {
+        throw parameterInputFailure(error);
+      }
+      const exportOutcome = async (): Promise<{
+        readonly type: 'result';
+        readonly value: ExportResult;
+      }> => ({
         type: 'result',
         value: await client.export(format, {
           source: { path: inputFilename },
@@ -218,7 +280,10 @@ export const exportCommand = defineCommand({
           ...(content === undefined ? {} : { content }),
         }),
       });
-      const signalOutcome = async (): Promise<{ readonly type: 'signal'; readonly signal: NodeJS.Signals }> => ({
+      const signalOutcome = async (): Promise<{
+        readonly type: 'signal';
+        readonly signal: NodeJS.Signals;
+      }> => ({
         type: 'signal',
         signal: await stopped.promise,
       });

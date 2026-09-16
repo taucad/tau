@@ -454,23 +454,12 @@ describe.each([
     expect(await readChatBytes(target, imagePath, id)).toEqual(imageBytes);
     expect(await readChatBytes(target, documentPath, id)).toEqual(documentBytes);
 
-    /* Sequential on purpose: each row is one `writeRevision`, which on the
-     * native leg is one `git fast-import` against one repository, and six of
-     * them at once contend on its object store. */
-    for (const path of [
-      /* 63 hex digits: a name no content-addressed write produces. */
-      `attachments/${imageHash.slice(1)}.jpg`,
-      /* Outside the five stored media types (D12). */
-      `attachments/${imageHash}.exe`,
-      /* Upper-case hex: the store writes lower-case, so two spellings of one
-       * blob would be two entries for one object. */
-      `attachments/${imageHash.toUpperCase()}.jpg`,
-      /* No sub-directories: the family is one flat level. */
-      `attachments/nested/${imageHash}.jpg`,
-      'attachments/notes.txt',
-      'notes.txt',
-    ]) {
-      // oxlint-disable-next-line no-await-in-loop -- one tree per refused name, against one repository.
+    /**
+     * Offer one tree carrying `path` beside the record, and require a refusal.
+     *
+     * @param path - The sibling the closed tree must not admit.
+     */
+    const refusesSibling = async (path: string): Promise<void> => {
       const written = await harness.port.writeRevision({
         parents: [],
         tree: new ImmutableRevisionTree([
@@ -488,8 +477,26 @@ describe.each([
           refs: [{ name: chatRefName(`${id}_refused`), head: revisionId(written.commitId) }],
         }),
         `expected ${path} to be refused`,
-        // oxlint-disable-next-line no-await-in-loop -- the refusal is asserted against the tree written one statement earlier.
       ).rejects.toMatchObject({ code: 'UNSUPPORTED_OPERATION' });
+    };
+
+    for (const path of [
+      /* 63 hex digits: a name no content-addressed write produces. */
+      `attachments/${imageHash.slice(1)}.jpg`,
+      /* Outside the five stored media types (D12). */
+      `attachments/${imageHash}.exe`,
+      /* Upper-case hex: the store writes lower-case, so two spellings of one
+       * blob would be two entries for one object. */
+      `attachments/${imageHash.toUpperCase()}.jpg`,
+      /* No sub-directories: the family is one flat level. */
+      `attachments/nested/${imageHash}.jpg`,
+      'attachments/notes.txt',
+      'notes.txt',
+    ]) {
+      /* One at a time: each is a `git fast-import` against one repository on
+       * the native leg, and six at once contend on its object store. */
+      // oxlint-disable-next-line no-await-in-loop -- see above.
+      await refusesSibling(path);
     }
   });
 

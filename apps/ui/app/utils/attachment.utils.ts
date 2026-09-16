@@ -13,6 +13,13 @@ export type AttachmentKind = 'image' | 'document';
 /** The part of an attachment its stored name is derived from. */
 export type AttachmentName = Pick<Attachment, 'hash' | 'mediaType'>;
 
+/**
+ * An attachment as a file part names it: enough to find, copy and label the
+ * bytes. `byteLength` is present only when the writer had the stored
+ * attachment in hand; a reference read back from a record never does (P29).
+ */
+export type AttachmentReference = AttachmentName & Readonly<Partial<Pick<Attachment, 'filename' | 'byteLength'>>>;
+
 /** A stored attachment. `hash` is the lowercase hex SHA-256 of the bytes. */
 export type Attachment = {
   readonly hash: string;

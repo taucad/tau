@@ -19,6 +19,7 @@ import { useActorRef } from '@xstate/react';
 import { createActor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { MyUIMessage } from '@taucad/chat';
+import type { ChatMode } from '@taucad/chat/constants';
 import type { ComposerRecordStore } from '#db/composer-record-store.js';
 import { createEmptyDraftMessage } from '#hooks/draft.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
@@ -32,6 +33,7 @@ export type ComposerRecordRef = ActorRefFrom<typeof composerRecordMachine>;
 export type DraftPersistenceActors = {
   persistDraftActor: ReturnType<typeof persistDraftActorFor>;
   persistEditDraftActor: ReturnType<typeof persistEditDraftActorFor>;
+  persistSelectionActor: ReturnType<typeof persistSelectionActorFor>;
   clearMessageEditActor: ReturnType<typeof clearMessageEditActorFor>;
   storeAttachmentActor: ReturnType<typeof storeAttachmentActorFor>;
 };
@@ -44,6 +46,12 @@ const persistDraftActorFor = (recordRef: ComposerRecordRef) =>
 const persistEditDraftActorFor = (recordRef: ComposerRecordRef) =>
   fromSafeAsync<void, { messageId: string; draft: MyUIMessage }>(async ({ input }) => {
     recordRef.send({ type: 'patch', fields: { messageEdits: { [input.messageId]: input.draft } } });
+  });
+
+// The draft machine sends only the fields the user touched, so they pass through as given — no defaults.
+const persistSelectionActorFor = (recordRef: ComposerRecordRef) =>
+  fromSafeAsync<void, { toolChoice?: string | string[]; mode?: ChatMode }>(async ({ input }) => {
+    recordRef.send({ type: 'patch', fields: input });
   });
 
 const clearMessageEditActorFor = (recordRef: ComposerRecordRef) =>
@@ -93,12 +101,13 @@ export function createComposerRecordActor(store: ComposerRecordStore): ComposerR
  *
  * @param recordRef - The record actor that owns the writes.
  * @param store - The same record's store, for attachment bytes.
- * @returns The four actors `draftMachine.provide()` expects.
+ * @returns The five actors `draftMachine.provide()` expects.
  */
 export function draftPersistenceFor(recordRef: ComposerRecordRef, store: ComposerRecordStore): DraftPersistenceActors {
   return {
     persistDraftActor: persistDraftActorFor(recordRef),
     persistEditDraftActor: persistEditDraftActorFor(recordRef),
+    persistSelectionActor: persistSelectionActorFor(recordRef),
     clearMessageEditActor: clearMessageEditActorFor(recordRef),
     storeAttachmentActor: storeAttachmentActorFor(store),
   };

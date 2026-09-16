@@ -42,6 +42,13 @@ expectTypeOf<Attachment>().toExtend<DraftAttachment>();
 // The record seam's actors provide into this machine as they are.
 declare const persistence: DraftPersistenceActors;
 draftMachine.provide({ actors: persistence });
+expectTypeOf<keyof DraftPersistenceActors>().toEqualTypeOf<
+  | 'persistDraftActor'
+  | 'persistEditDraftActor'
+  | 'persistSelectionActor'
+  | 'clearMessageEditActor'
+  | 'storeAttachmentActor'
+>();
 
 // Every add names the selected model, so no surface can skip the kind refusal (D20).
 declare const draft: ActorRefFrom<typeof draftMachine>;

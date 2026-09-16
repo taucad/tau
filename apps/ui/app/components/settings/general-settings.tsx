@@ -1,5 +1,5 @@
 import { SettingsItem, SettingsSectionCard } from '#components/settings/settings-item.js';
-import { Link } from 'react-router';
+import { legalUrl } from '#constants/meta.constants.js';
 import { AlertCircle, Check, ChevronDown, Circle, Contrast, Laptop, Moon, ShieldCheck, Sun } from 'lucide-react';
 import { Loader } from '#components/ui/loader.js';
 import { usePrivacyPreferences } from '#hooks/use-privacy-preferences.js';
@@ -214,9 +214,14 @@ export function GeneralSettings(): React.JSX.Element {
                 <p className='text-sm text-muted-foreground'>
                   Your plan never trains on your data — prompts and designs are excluded from AI training as part of
                   your subscription.{' '}
-                  <Link to='/legal/privacy#9.2.1' className='underline hover:text-foreground'>
+                  <a
+                    href={legalUrl('privacy#9.2.1')}
+                    target='_blank'
+                    rel='noopener noreferrer'
+                    className='underline hover:text-foreground'
+                  >
                     Learn more
-                  </Link>
+                  </a>
                 </p>
               </div>
             ) : (
@@ -239,16 +244,26 @@ export function GeneralSettings(): React.JSX.Element {
                     {currentModeId === 'share' ? (
                       <>
                         Your prompts and generated designs will be stored and used to improve our AI features.{' '}
-                        <Link to='/legal/privacy#9.2.1' className='underline hover:text-foreground'>
+                        <a
+                          href={legalUrl('privacy#9.2.1')}
+                          target='_blank'
+                          rel='noopener noreferrer'
+                          className='underline hover:text-foreground'
+                        >
                           Learn more
-                        </Link>
+                        </a>
                       </>
                     ) : (
                       <>
                         No training. Your data is not used to improve AI features.{' '}
-                        <Link to='/legal/privacy#9.2.1' className='underline hover:text-foreground'>
+                        <a
+                          href={legalUrl('privacy#9.2.1')}
+                          target='_blank'
+                          rel='noopener noreferrer'
+                          className='underline hover:text-foreground'
+                        >
                           Learn more
-                        </Link>
+                        </a>
                       </>
                     )}
                   </p>

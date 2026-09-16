@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { legalUrl } from '#constants/meta.constants.js';
 import { CreditCard } from 'lucide-react';
-import { Link } from 'react-router';
 import { formatCreditAtoms } from '@taucad/billing';
 import type { WirePaymentAction } from '@taucad/billing';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
@@ -439,9 +439,9 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
           ) : undefined}
           <p className='text-xs text-muted-foreground'>
             Credits are spent on AI and kernel usage and never expire. By continuing you agree to Tau’s{' '}
-            <Link to='/legal/terms' className='underline'>
+            <a href={legalUrl('terms')} target='_blank' rel='noopener noreferrer' className='underline'>
               Terms
-            </Link>
+            </a>
             .
           </p>
         </div>

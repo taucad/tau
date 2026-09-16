@@ -173,6 +173,22 @@ describe('GeneralSettings', () => {
     expect(screen.queryByText(/no-train guarantee/i)).toBeNull();
   });
 
+  it.each(['free', 'pro'] as const)(
+    'links privacy details to the public website so desktop never opens a removed route (%s)',
+    (tier) => {
+      useEntitlementsMock.mockReturnValue(entitlementsFromTier(tier));
+
+      render(<GeneralSettings />);
+
+      const links = screen.getAllByRole('link', { name: 'Learn more' });
+      expect(links.length).toBeGreaterThan(0);
+      for (const link of links) {
+        expect(link).toHaveAttribute('href', 'https://tau.new/legal/privacy#9.2.1');
+        expect(link).toHaveAttribute('target', '_blank');
+      }
+    },
+  );
+
   it('should render code inlay hints disabled by default', () => {
     render(<GeneralSettings />);
 

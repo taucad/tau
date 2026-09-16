@@ -44,7 +44,6 @@ import {
   useRevisionClientStatus,
   useRevisionCommands,
 } from '#hooks/use-revision-status.js';
-import type { RevisionClient } from '#hooks/use-revision-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useCanonicalProjectUrlCorrection, useProjectIdBySlugs } from '#hooks/use-project-slug-route.js';
 import { projectChatIdFromSearch, projectUrl } from '#utils/project-url.utils.js';
@@ -88,18 +87,22 @@ const ProjectSessionsHostContext = createContext(false);
 
 const editorFlushTimeoutMilliseconds = 10_000;
 
-/** Settle checked parameters and both UI stores before the revision owner takes its close cut. */
+/**
+ * Settle checked parameters and both UI stores.
+ *
+ * The producers half of a project's close: the revision owner takes its cut in
+ * `flushSync`, which the session runs after this, so every producer's bytes are
+ * on disk before the cut rather than beside it.
+ */
 export async function flushProjectSessionPersistence({
   parameterService,
   projectRef,
   editorRef,
-  revisionClient,
   closeFlushMilliseconds,
 }: Readonly<{
   parameterService: ParameterSetService;
   projectRef: ActorRefFrom<typeof projectMachine>;
   editorRef: ActorRefFrom<typeof editorMachine>;
-  revisionClient: RevisionClient | undefined;
   closeFlushMilliseconds: number;
 }>): Promise<void> {
   await parameterService.close();
@@ -119,7 +122,6 @@ export async function flushProjectSessionPersistence({
   if (editorSnapshot.context.error !== undefined) {
     throw editorSnapshot.context.error;
   }
-  await revisionClient?.quiesce();
 }
 
 /* A retained project has no route flush to register: the route's flush gate is
@@ -261,28 +263,18 @@ function ProjectSessionBinding({
 
   useEffect(() => {
     return registerProjectSessionServices(projectId, {
-      flushProducers: async () => {
-        projectRef.send({ type: 'flushNow' });
-        editorRef.send({ type: 'flushNow' });
-        await Promise.all([
-          waitFor(projectRef, (state) => state.matches({ ready: { storing: 'idle' } }), {
-            timeout: editorFlushTimeoutMilliseconds,
-          }),
-          waitFor(editorRef, (state) => state.matches({ ready: { storing: 'idle' } }), {
-            timeout: editorFlushTimeoutMilliseconds,
-          }),
-        ]);
-      },
-      /* W13's seam, called: the worker's `release()` takes the close cut and
-       * awaits `awaitSyncSettled` before it answers this. */
-      flushSync: async (boundMilliseconds) =>
+      flushProducers: async () =>
         flushProjectSessionPersistence({
           parameterService,
           projectRef,
           editorRef,
-          revisionClient: client,
-          closeFlushMilliseconds: boundMilliseconds,
+          closeFlushMilliseconds: editorFlushTimeoutMilliseconds,
         }),
+      /* W13's seam, called: the worker's `release()` takes the close cut and
+       * awaits `awaitSyncSettled` before it answers this. */
+      flushSync: async () => {
+        await client?.quiesce();
+      },
       cancelRuns: async (chatIds) => {
         await Promise.all(
           chatIds.map(async (chatId) => {

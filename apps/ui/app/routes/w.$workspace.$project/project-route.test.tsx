@@ -6,7 +6,6 @@ import { projectToManifest } from '@taucad/types';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import { sessionsActor } from '#services/sessions-store.js';
-import type { RevisionClient } from '#hooks/use-revision-status.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 import type { ActorRefFrom } from 'xstate';
 import type { projectMachine } from '#machines/project.machine.js';
@@ -42,10 +41,14 @@ let editorIsIdle = true;
 type EditorSnapshot = Readonly<{
   status: 'active';
   matches: () => boolean;
+  /* The producers flush reads `context.error` to tell "idle" from "idle, having
+   * failed to store"; a double without it throws inside `closing.flushing`. */
+  context: { error?: Error };
 }>;
 const editorSnapshot = (): EditorSnapshot => ({
   status: 'active',
   matches: () => editorIsIdle,
+  context: {},
 });
 const editorObservers = new Set<{
   next?: (snapshot: ReturnType<typeof editorSnapshot>) => void;
@@ -378,12 +381,11 @@ afterEach(async () => {
 });
 
 describe('project route session identity', () => {
-  it('should settle parameters and UI stores before the revision close cut', async () => {
+  it('should settle parameters and both UI stores, and leave the cut to flushSync', async () => {
     const order: string[] = [];
     const parameters = mock<ParameterSetService>();
     const project = mock<ActorRefFrom<typeof projectMachine>>();
     const editor = mock<ActorRefFrom<typeof editorMachine>>();
-    const revision = mock<RevisionClient>();
     const projectSnapshot = mock<ReturnType<ActorRefFrom<typeof projectMachine>['getSnapshot']>>();
     const editorSnapshotValue = mock<ReturnType<ActorRefFrom<typeof editorMachine>['getSnapshot']>>();
     projectSnapshot.matches.mockReturnValue(true);
@@ -399,26 +401,21 @@ describe('project route session identity', () => {
     editor.send.mockImplementation(() => {
       order.push('editor');
     });
-    revision.quiesce.mockImplementation(async () => {
-      order.push('revision');
-    });
 
     await routeModule.flushProjectSessionPersistence({
       parameterService: parameters,
       projectRef: project,
       editorRef: editor,
-      revisionClient: revision,
       closeFlushMilliseconds: 100,
     });
 
-    expect(order).toEqual(['parameters', 'project', 'editor', 'revision']);
+    expect(order).toEqual(['parameters', 'project', 'editor']);
   });
 
-  it('should refuse the revision close cut when parameter settlement fails', async () => {
+  it('should refuse the producers flush when parameter settlement fails', async () => {
     const parameters = mock<ParameterSetService>();
     const project = mock<ActorRefFrom<typeof projectMachine>>();
     const editor = mock<ActorRefFrom<typeof editorMachine>>();
-    const revision = mock<RevisionClient>();
     parameters.close.mockRejectedValue(new Error('checked parameter flush failed'));
 
     await expect(
@@ -426,20 +423,17 @@ describe('project route session identity', () => {
         parameterService: parameters,
         projectRef: project,
         editorRef: editor,
-        revisionClient: revision,
         closeFlushMilliseconds: 100,
       }),
     ).rejects.toThrow('checked parameter flush failed');
     expect(project.send).not.toHaveBeenCalled();
     expect(editor.send).not.toHaveBeenCalled();
-    expect(revision.quiesce).not.toHaveBeenCalled();
   });
 
-  it('should refuse the revision close cut when project storage reports idle with an error', async () => {
+  it('should refuse the producers flush when project storage reports idle with an error', async () => {
     const parameters = mock<ParameterSetService>();
     const project = mock<ActorRefFrom<typeof projectMachine>>();
     const editor = mock<ActorRefFrom<typeof editorMachine>>();
-    const revision = mock<RevisionClient>();
     const projectFailure = new Error('project save failed');
     const projectSnapshot = {
       matches: () => true,
@@ -457,11 +451,9 @@ describe('project route session identity', () => {
         parameterService: parameters,
         projectRef: project,
         editorRef: editor,
-        revisionClient: revision,
         closeFlushMilliseconds: 100,
       }),
     ).rejects.toThrow('project save failed');
-    expect(revision.quiesce).not.toHaveBeenCalled();
   });
 
   it('connects a Tau Cloud library open through the project-scoped client', async () => {

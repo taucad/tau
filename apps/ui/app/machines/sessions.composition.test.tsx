@@ -209,6 +209,13 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   useOptionalFileManager: () => undefined,
 }));
 
+/* Module scope: the route's backup-owner effect is keyed on this identity, so a
+ * fresh object per render would re-run it forever. */
+const parameterService = {
+  setBackupOwner: () => undefined,
+  close: async () => undefined,
+};
+
 vi.mock('#hooks/use-project.js', () => ({
   ProjectProvider: ({
     children,
@@ -221,6 +228,7 @@ vi.mock('#hooks/use-project.js', () => ({
   },
   useProject: () => ({
     projectId: 'unused',
+    parameterService,
     projectRef: {
       send: (event: { type: string }) => {
         serviceCalls.push(`project:${event.type}`);

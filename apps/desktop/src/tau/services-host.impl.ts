@@ -110,14 +110,14 @@ export type ServicesHostOptions = {
    */
   readonly runtimeContext?: (action: 'register' | 'release', checkoutRoot: string, projectRoot: string) => void;
   /**
-   * The `git` and `git-lfs` this app records with (OQ-B8).
+   * The `git` this app records with (OQ-B8, OQ3).
    *
-   * Absent, both come from `PATH` — which on a Finder launch is
+   * Absent, it comes from `PATH` — which on a Finder launch is
    * `/usr/bin:/bin:/usr/sbin:/sbin` and holds no Homebrew `git-lfs`. Main
-   * passes the binaries the bundle ships once it ships them.
+   * passes the `git` the bundle ships, whose own exec path carries `git-lfs`;
+   * `git lfs` is never a second binary this host has to name.
    */
   readonly gitExecutable?: string | undefined;
-  readonly gitLfsExecutable?: string | undefined;
   /**
    * Answer main's `quiesce` control frame once every project is settled (W19).
    *
@@ -171,15 +171,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       // oxlint-disable-next-line no-console -- forwarded to userData/logs through main's stdio
       console.log(`[services] ${event}${detail === undefined ? '' : ` ${JSON.stringify(detail)}`}`);
     });
-  const {
-    agentHostReleased,
-    gitExecutable,
-    gitLfsExecutable,
-    onRevisionsUnavailable,
-    quiesced,
-    requestRuntimePort,
-    runtimeContext,
-  } = options;
+  const { agentHostReleased, gitExecutable, onRevisionsUnavailable, quiesced, requestRuntimePort, runtimeContext } =
+    options;
   const serve = options.serve ?? serveNodeFsProvider;
 
   const trustedRoots = new Set<string>();
@@ -550,7 +543,6 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
           checkoutsDirectory: join(dirname(workspaceRoot), '.tau', 'checkouts', projectId),
           checkouts,
           ...(gitExecutable === undefined ? {} : { gitExecutable }),
-          ...(gitLfsExecutable === undefined ? {} : { gitLfsExecutable }),
           /* AC15: who this window records for. The desktop's own signed-in
            * session is W13's to pass here; until it does, the identity the
            * person already keeps on this machine is the truthful answer. */

@@ -1,8 +1,8 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -576,13 +576,21 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
       encoding: 'utf8',
       env: searchPath,
     }).trim();
+    /* The bundled layout OQ3 ships: one `git` whose own exec path carries
+     * `git-lfs`, so `git lfs` resolves through it with nothing on `PATH` and
+     * this host names a single binary. A system git has no such exec path,
+     * hence the stand-in. */
+    const bundleRoot = await mkdtemp(join(tmpdir(), 'tau-services-git-bundle-'));
+    workspaces.push(bundleRoot);
+    const bundledGit = join(bundleRoot, 'bundled-git');
+    await writeFile(bundledGit, `#!/bin/sh\nPATH="${dirname(gitLfs)}"\nexport PATH\nexec "${git}" "$@"\n`);
+    await chmod(bundledGit, 0o755);
     process.env['PATH'] = '';
     try {
       const bundled = await configuredHost(
         {},
         {
-          gitExecutable: git,
-          gitLfsExecutable: gitLfs,
+          gitExecutable: bundledGit,
           onRevisionsUnavailable: (_root, event) => {
             unavailable.push(event);
           },

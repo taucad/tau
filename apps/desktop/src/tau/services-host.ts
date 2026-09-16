@@ -69,8 +69,13 @@ const requestRuntimePort = async (
   }
   return port;
 };
+/* The `git` main resolved from the bundle, when this build ships one (OQ3);
+ * absent, the toolchain comes from `PATH` and says so once if it is not there. */
+const gitExecutable = process.env['TAU_GIT_EXECUTABLE'];
+
 const host = createServicesHost({
   requestRuntimePort,
+  ...(gitExecutable === undefined || gitExecutable === '' ? {} : { gitExecutable }),
   runtimeContext: (action, workspaceRoot, projectRoot) => {
     parentPort.postMessage({ type: `runtime-context-${action}`, workspaceRoot, projectRoot });
   },

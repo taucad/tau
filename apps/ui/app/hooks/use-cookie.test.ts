@@ -9,6 +9,9 @@ const names = [
   'tau-test-migrate',
   'tau-test-malformed',
   'tau-test-unavailable',
+  'tau-test-both',
+  'tau-test-corrupt-local',
+  'tau-test-blocked',
 ];
 
 beforeEach(() => {
@@ -85,4 +88,35 @@ it('does not crash when localStorage is unavailable', () => {
   expect(() => {
     store.remove('tau-test-unavailable');
   }).not.toThrow();
+});
+
+it('prefers local storage and removes a legacy cookie that survived alongside it', () => {
+  Cookies.set('tau-test-both', '"old"');
+  globalThis.localStorage.setItem('tau-test-both', '"new"');
+
+  expect(store.get('tau-test-both')).toBe('new');
+  expect(Cookies.get('tau-test-both')).toBeUndefined();
+});
+
+it('recovers a valid legacy cookie when local storage is corrupt', () => {
+  Cookies.set('tau-test-corrupt-local', '"from-cookie"');
+  globalThis.localStorage.setItem('tau-test-corrupt-local', '{broken');
+
+  expect(store.get('tau-test-corrupt-local')).toBe('from-cookie');
+  expect(globalThis.localStorage.getItem('tau-test-corrupt-local')).toBe('"from-cookie"');
+  expect(Cookies.get('tau-test-corrupt-local')).toBeUndefined();
+});
+
+it('keeps the only durable copy when migration cannot write to local storage', () => {
+  Cookies.set('tau-test-blocked', '"old"');
+  vi.stubGlobal('localStorage', {
+    getItem: () => null,
+    removeItem: () => undefined,
+    setItem: () => {
+      throw new Error('blocked');
+    },
+  });
+
+  expect(store.get('tau-test-blocked')).toBe('old');
+  expect(Cookies.get('tau-test-blocked')).toBe('"old"');
 });

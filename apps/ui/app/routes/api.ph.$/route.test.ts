@@ -76,4 +76,28 @@ describe('PostHog proxy boundary', () => {
     expect(response.status).toBe(204);
     expect(response.body).toBeNull();
   });
+
+  it('should strip fields nominated by Connection and every upstream cookie', async () => {
+    const headers = new Headers({
+      Connection: 'Keep-Alive, X-Connection-Only , x-other-hop',
+      'Content-Type': 'application/octet-stream',
+      'Proxy-Connection': 'keep-alive',
+      'X-Connection-Only': 'must-not-forward',
+      'X-Other-Hop': 'must-not-forward',
+      'X-Upstream': 'kept',
+    });
+    headers.append('Set-Cookie', 'first=secret; Path=/');
+    headers.append('Set-Cookie', 'second=secret; Path=/');
+    const body = new Uint8Array([0, 255, 1, 254]);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { headers }));
+
+    const response = await posthogProxy(new Request('https://tau.new/api/ph/static/array.js'));
+
+    for (const name of ['connection', 'proxy-connection', 'keep-alive', 'x-connection-only', 'x-other-hop']) {
+      expect(response.headers.get(name)).toBeNull();
+    }
+    expect(response.headers.getSetCookie()).toStrictEqual([]);
+    expect(response.headers.get('x-upstream')).toBe('kept');
+    expect(new Uint8Array(await response.arrayBuffer())).toStrictEqual(body);
+  });
 });

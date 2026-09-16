@@ -41,11 +41,10 @@ export const meta: MetaFunction = () => [
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- loaders require type inference
 export async function loader({ request }: LoaderFunctionArgs) {
   throwRedirectIfSubdomain(request, 'www');
+  const globalPrivacyControl = request.headers.get('Sec-GPC') === '1';
   return {
-    consentStatus: readConsentStatusFromHeader(
-      request.headers.get('Cookie') ?? undefined,
-      request.headers.get('Sec-GPC') === '1',
-    ),
+    consentStatus: readConsentStatusFromHeader(request.headers.get('Cookie') ?? undefined, globalPrivacyControl),
+    globalPrivacyControl,
     env: await getClientEnvironment(),
     pathname: new URL(request.url).pathname,
     theme: await readThemeCookie(request),

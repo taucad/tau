@@ -64,13 +64,20 @@ export const posthogProxy = async (request: Request): Promise<Response> => {
   });
 
   const responseHeaders = new Headers(response.headers);
+  // RFC 9110 §7.6.1: fields nominated by Connection are hop-by-hop and must not be forwarded.
+  const nominated = (response.headers.get('connection') ?? '')
+    .split(',')
+    .map((name) => name.trim())
+    .filter((name) => /^[!#$%&'*+.^_`|~\dA-Za-z-]+$/u.test(name));
   for (const name of [
+    ...nominated,
     'connection',
     'content-encoding',
     'content-length',
     'keep-alive',
     'proxy-authenticate',
     'proxy-authorization',
+    'proxy-connection',
     'set-cookie',
     'set-cookie2',
     'te',

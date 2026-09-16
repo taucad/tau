@@ -1,7 +1,12 @@
-import type { PostHog, PostHogConfig } from 'posthog-js';
+import * as Cookies from 'es-cookie';
+import type { PostHogConfig } from 'posthog-js';
 import { ENV } from '#environment.config.js';
 import { readConsentStatus } from '#lib/cookie-consent.lib.js';
 
+/**
+ * PostHog options for accepted web analytics. The SDK is initialised only after
+ * acceptance, so these are the plain BAU options with no opt-out defaults.
+ */
 export const posthogConfig: { options: Partial<PostHogConfig>; apiKey: string } = {
   options: {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
@@ -16,37 +21,20 @@ export const posthogConfig: { options: Partial<PostHogConfig>; apiKey: string } 
     capture_dead_clicks: true,
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
     capture_pageleave: true,
+    // `true` captures only the initial load; `history_change` also captures SPA navigation.
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
-    capture_pageview: true,
+    capture_pageview: 'history_change',
     persistence: 'localStorage+cookie',
-    // Provider initialization is deferred until acceptance; keep initialization fail-closed as well.
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
-    opt_out_capturing_by_default: true,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
-    opt_out_persistence_by_default: true,
-    // Close the narrow withdrawal race before React's cleanup effect runs.
+    // Drop events processed after a withdrawal in this or another tab, before React reacts.
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
     before_send: (event) => (readConsentStatus() === 'accepted' ? event : null),
-    loaded: (posthog) => {
-      // PostHogConfig exposes the narrower @posthog/types interface here even though
-      // the runtime value is the concrete SDK instance.
-      const sdk = posthog as unknown as PostHog;
-      // PostHog's opt_in_capturing captures a pageview itself when this is enabled, then
-      // PostHog's loaded lifecycle schedules another. Toggle it around opt-in
-      // so the SDK's normal loaded pageview is the single initial event.
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
-      sdk.set_config({ capture_pageview: false });
-      sdk.opt_in_capturing({ captureEventName: false });
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
-      sdk.set_config({ capture_pageview: true });
-    },
     // Defer extension initialization (session recording, autocapture, dead-click detection, etc.)
     // to off-main-thread tasks with 30ms time-sliced budgets, reducing startup blocking.
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
     __preview_deferred_init_extensions: true,
     // Prevent rrweb DOM snapshot on init — the snapshot scales super-linearly with DOM node count
     // and freezes the main thread for ~2.5s on the homepage (1,974 nodes). Session recording
-    // is started manually via DeferredSessionRecording after the page is idle.
+    // is started manually by the web analytics lifecycle after the page is idle.
     // eslint-disable-next-line @typescript-eslint/naming-convention -- posthog-js Options
     disable_session_recording: true,
   },
@@ -55,4 +43,44 @@ export const posthogConfig: { options: Partial<PostHogConfig>; apiKey: string } 
   get apiKey() {
     return ENV.POSTHOG_CLIENT_KEY ?? '';
   },
+};
+
+/**
+ * Removes PostHog identifiers left by an earlier accepted session without
+ * starting the SDK. Only keys for this project are touched; the SDK's opt-out
+ * marker (`__ph_opt_in_out_*`) holds no identifier and is kept.
+ *
+ * @param apiKey - The PostHog project key whose storage is removed.
+ */
+export const clearPostHogStorage = (apiKey: string): void => {
+  const prefix = `ph_${apiKey}`;
+  for (const readStorage of [(): Storage => globalThis.localStorage, (): Storage => globalThis.sessionStorage]) {
+    try {
+      const storage = readStorage();
+      const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index));
+      for (const key of keys) {
+        if (key?.startsWith(prefix)) {
+          storage.removeItem(key);
+        }
+      }
+    } catch {
+      // Blocked storage holds nothing to clear.
+    }
+  }
+
+  if (typeof document === 'undefined') {
+    return;
+  }
+  // PostHog may scope its cookie to a parent domain (`cross_subdomain_cookie`).
+  const labels = globalThis.location.hostname.split('.');
+  const domains = labels.slice(0, -1).map((_, index) => labels.slice(index).join('.'));
+  for (const name of Object.keys(Cookies.getAll())) {
+    if (!name.startsWith(prefix)) {
+      continue;
+    }
+    Cookies.remove(name, { path: '/' });
+    for (const domain of domains) {
+      Cookies.remove(name, { domain, path: '/' });
+    }
+  }
 };

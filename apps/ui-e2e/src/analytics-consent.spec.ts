@@ -71,3 +71,69 @@ test('treats Global Privacy Control as a hard analytics decline', async () => {
   expect(await target.evaluate(() => document.querySelector<HTMLButtonElement>('#analytics')?.disabled)).toBe(true);
   expect(await posthogState()).toEqual({ cookies: [], storage: [], requests: [] });
 });
+
+/*
+ * Consent changes must not remount the product. The old boundary switched
+ * element type above <html>, so accepting analytics discarded every editor draft.
+ * Withdrawal and re-acceptance arrive as another tab would deliver them: a
+ * cookie write followed by focus.
+ */
+test('keeps the application mounted through acceptance, withdrawal and re-acceptance', async ({ skip }) => {
+  await target.navigate('/');
+  await target.expectVisible(selectors.getByRole('heading', { name: 'Cookies', exact: true }));
+  await target.evaluate(() => {
+    (globalThis as typeof globalThis & { tauMounted?: Element[] }).tauMounted = [...document.body.children].filter(
+      (element) => element.tagName !== 'SCRIPT' && !/Cookies/u.test(element.querySelector('h3')?.textContent ?? ''),
+    );
+  });
+  const stillMounted = async (): Promise<boolean> =>
+    target.evaluate(() => {
+      const mounted = (globalThis as typeof globalThis & { tauMounted?: Element[] }).tauMounted ?? [];
+      return mounted.length > 0 && mounted.every((element) => element.isConnected);
+    });
+  const writeDecision = async (status: 'accepted' | 'declined'): Promise<void> => {
+    await target.addCookies([
+      {
+        name: consentCookieName,
+        value: encodeURIComponent(JSON.stringify({ status, version: 1 })),
+        url: await target.currentUrl(),
+      },
+    ]);
+    await target.evaluate(() => {
+      globalThis.dispatchEvent(new Event('focus'));
+    });
+  };
+  const hasAnalyticsKey = await target.evaluate(() =>
+    Boolean((globalThis as typeof globalThis & { ENV?: { POSTHOG_CLIENT_KEY?: string } }).ENV?.POSTHOG_CLIENT_KEY),
+  );
+
+  await target.click(selectors.getByRole('button', { name: 'Accept', exact: true }));
+  await expect.poll(consentStatus).toBe('accepted');
+  expect(await stillMounted()).toBe(true);
+
+  await writeDecision('declined');
+  await expect.poll(hasCookiePrompt).toBe(false);
+  expect(await stillMounted()).toBe(true);
+
+  await writeDecision('accepted');
+  expect(await stillMounted()).toBe(true);
+
+  if (!hasAnalyticsKey) {
+    skip('POSTHOG_CLIENT_KEY is not configured for this UI server; the analytics data plane cannot be observed.');
+  }
+  /*
+   * Persistence, not request count: the headless tab is never visible, and the SDK
+   * holds its initial pageview until `visibilityState` is visible. Accepted
+   * persistence still proves the SDK ran with a real key, and its removal proves
+   * withdrawal cleanup.
+   */
+  const storedIdentifiers = async (): Promise<number> => {
+    const { cookies, storage } = await posthogState();
+    return cookies.length + storage.length;
+  };
+  await expect.poll(storedIdentifiers, { timeout: 15_000 }).toBeGreaterThan(0);
+
+  await writeDecision('declined');
+  await expect.poll(storedIdentifiers, { timeout: 15_000 }).toBe(0);
+  expect(await stillMounted()).toBe(true);
+});

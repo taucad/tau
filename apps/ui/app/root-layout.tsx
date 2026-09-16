@@ -2,7 +2,7 @@ import type { ComponentType, ReactNode } from 'react';
 import { Links, Meta, Scripts, ScrollRestoration, useRouteLoaderData } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { authQueryKeys } from '@better-auth-ui/core';
-import { useEffect, useMemo } from 'react';
+import { Fragment, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
 import { PreventFlashOnWrongTheme, Theme, ThemeProvider, useTheme } from '#hooks/use-theme.js';
 import type { ThemeWithSystem } from '#hooks/use-theme.js';
@@ -95,7 +95,7 @@ export function configureSessionQueryDefaults(client: QueryClient): void {
 }
 
 export function RootLayout({
-  analyticsBoundary: AnalyticsBoundary,
+  analyticsBoundary: AnalyticsBoundary = Fragment,
   children,
   documentChrome,
 }: {
@@ -170,17 +170,7 @@ export function RootLayout({
   return (
     <QueryClientProvider client={queryClient}>
       <CloudRootBoundary>
-        {AnalyticsBoundary ? (
-          <AnalyticsBoundary>
-            <ThemeProvider specifiedTheme={ssrTheme} themeAction='/action/set-theme'>
-              <ColorProvider>
-                <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme} documentChrome={documentChrome}>
-                  {application}
-                </LayoutDocument>
-              </ColorProvider>
-            </ThemeProvider>
-          </AnalyticsBoundary>
-        ) : (
+        <AnalyticsBoundary>
           <ThemeProvider specifiedTheme={ssrTheme} themeAction='/action/set-theme'>
             <ColorProvider>
               <LayoutDocument env={data?.env ?? {}} ssrTheme={ssrTheme} documentChrome={documentChrome}>
@@ -188,7 +178,7 @@ export function RootLayout({
               </LayoutDocument>
             </ColorProvider>
           </ThemeProvider>
-        )}
+        </AnalyticsBoundary>
       </CloudRootBoundary>
     </QueryClientProvider>
   );

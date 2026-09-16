@@ -15,11 +15,13 @@ const readRaw = (name: string): string | undefined => {
   }
 };
 
-const writeRaw = (name: string, value: string): void => {
+const writeRaw = (name: string, value: string): boolean => {
   try {
     globalThis.localStorage.setItem(name, value);
+    return true;
   } catch {
     // Persistence is best-effort; a blocked store must not break the setting.
+    return false;
   }
 };
 
@@ -51,37 +53,55 @@ const preferenceStore = () => {
     listenerTopics.get(name)?.emit();
   };
 
+  const parse = (raw: string): { readonly isValid: boolean; readonly value?: unknown } => {
+    try {
+      return { isValid: true, value: JSON.parse(raw) as unknown };
+    } catch {
+      return { isValid: false };
+    }
+  };
+
   const get = <T>(name: string): T | undefined => {
     if (cache.has(name)) {
       return cache.get(name) as T;
     }
 
+    const legacyCookie = Cookies.get(name);
     const storedValue = readRaw(name);
-    const legacyCookie = storedValue === undefined ? Cookies.get(name) : undefined;
-    const rawValue = storedValue ?? legacyCookie;
-    if (rawValue === undefined) {
-      return undefined;
+    if (storedValue !== undefined) {
+      const local = parse(storedValue);
+      if (local.isValid) {
+        cache.set(name, local.value);
+        // Local storage wins; a surviving legacy cookie only rides requests.
+        if (legacyCookie !== undefined) {
+          Cookies.remove(name);
+        }
+        return local.value as T;
+      }
+      removeRaw(name);
     }
 
-    try {
-      const value = JSON.parse(rawValue) as T;
-      cache.set(name, value);
-      if (legacyCookie !== undefined) {
-        writeRaw(name, rawValue);
-        Cookies.remove(name);
-      }
-      return value;
-    } catch {
-      removeRaw(name);
+    if (legacyCookie === undefined) {
+      return undefined;
+    }
+    const legacy = parse(legacyCookie);
+    if (!legacy.isValid) {
       Cookies.remove(name);
       return undefined;
     }
+    cache.set(name, legacy.value);
+    // Delete the cookie only once its value is durable elsewhere.
+    if (writeRaw(name, legacyCookie)) {
+      Cookies.remove(name);
+    }
+    return legacy.value as T;
   };
 
   const update = <T>(name: string, value: T) => {
     cache.set(name, value);
-    writeRaw(name, JSON.stringify(value));
-    Cookies.remove(name);
+    if (writeRaw(name, JSON.stringify(value))) {
+      Cookies.remove(name);
+    }
     notify(name);
   };
 

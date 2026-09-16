@@ -61,7 +61,11 @@ const renderModel = async (input: {
     throw new Error('Expected OpenRSCAD meshGeometry');
   }
   const meshed = await input.definition.meshGeometry(
-    { nativeHandle: created.nativeHandle, options: renderOptions, content: input.content },
+    {
+      nativeHandle: created.nativeHandle,
+      options: renderOptions,
+      content: input.content,
+    },
     input.runtime,
     input.context,
   );
@@ -102,9 +106,19 @@ type GlbJson = {
     extras?: {
       openrscad?: {
         attribution?: 'ambiguous' | 'exact';
-        callSite?: { end: number; source: string; sourceId: number; start: number };
+        callSite?: {
+          end: number;
+          source: string;
+          sourceId: number;
+          start: number;
+        };
         contributors?: unknown;
-        definitionSite?: { end: number; source: string; sourceId: number; start: number };
+        definitionSite?: {
+          end: number;
+          source: string;
+          sourceId: number;
+          start: number;
+        };
         fallback?: boolean;
         moduleName?: string;
         provenance?: unknown;
@@ -179,7 +193,9 @@ const read3mfDocument = async (bytes: Uint8Array<ArrayBuffer>): Promise<Document
   if (!model) {
     throw new Error('3D/3dmodel.model not found in 3MF');
   }
-  const document_ = new JSDOM(await model.async('string'), { contentType: 'text/xml' }).window.document;
+  const document_ = new JSDOM(await model.async('string'), {
+    contentType: 'text/xml',
+  }).window.document;
   const parserError = document_.querySelector('parsererror');
   if (parserError) {
     throw new Error(`Invalid 3MF model XML: ${parserError.textContent}`);
@@ -227,11 +243,17 @@ describe('OpenRSCADKernel', () => {
 
   it('preserves tessellation authored in the model unless Tau explicitly overrides it', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
-    const runtime = createRuntime({ 'project/model.scad': '$fn = 64; sphere(10);' });
+    const runtime = createRuntime({
+      'project/model.scad': '$fn = 64; sphere(10);',
+    });
     const context = await definition.initialize({}, runtime);
     const render = async (tessellation: Record<string, number>) =>
       definition.createGeometry(
-        { entryPath: 'project/model.scad', parameters: {}, options: { tessellation } },
+        {
+          entryPath: 'project/model.scad',
+          parameters: {},
+          options: { tessellation },
+        },
         runtime,
         context,
       );
@@ -298,8 +320,17 @@ describe('OpenRSCADKernel', () => {
       { data: backendCause },
     );
 
-    const result = await renderModel({ definition, runtime, context, entryPath: 'project/model.scad' });
-    expect(result.nativeHandle.stats).toMatchObject({ triangleCount: 12, vertexCount: 8, volume: 1000 });
+    const result = await renderModel({
+      definition,
+      runtime,
+      context,
+      entryPath: 'project/model.scad',
+    });
+    expect(result.nativeHandle.stats).toMatchObject({
+      triangleCount: 12,
+      vertexCount: 8,
+      volume: 1000,
+    });
   });
 
   it('handles SCAD through the environment-neutral OpenRSCAD API', async () => {
@@ -310,16 +341,29 @@ describe('OpenRSCADKernel', () => {
     const definition = await resolveRuntimePluginDefinition('kernel', plugin);
     const runtime = createRuntime({ 'project/model.scad': 'cube(10);' });
     const context = await definition.initialize({}, runtime);
-    const result = await renderModel({ definition, runtime, context, entryPath: 'project/model.scad' });
+    const result = await renderModel({
+      definition,
+      runtime,
+      context,
+      entryPath: 'project/model.scad',
+    });
 
-    expect(result.nativeHandle.stats).toMatchObject({ triangleCount: 12, vertexCount: 8, volume: 1000 });
+    expect(result.nativeHandle.stats).toMatchObject({
+      triangleCount: 12,
+      vertexCount: 8,
+      volume: 1000,
+    });
     expect(result.geometry.format).toBe('gltf');
     if (result.geometry.format !== 'gltf') {
       throw new Error('Expected GLB render geometry');
     }
     validateGlbData(result.geometry.content);
     const report = await getInspectReport(result.geometry.content);
-    expect(getGeometryStatsFromInspect(report)).toEqual({ vertexCount: 36, faceCount: 12, meshCount: 1 });
+    expect(getGeometryStatsFromInspect(report)).toEqual({
+      vertexCount: 36,
+      faceCount: 12,
+      meshCount: 1,
+    });
     expect(getBoundingBoxFromInspect(report)?.size).toEqual([0.01, 0.01, 0.01]);
     await expect(readGltfNamingSummary(result.geometry.content)).resolves.toEqual({
       nodeNames: ['#F5A523FF Shape 1'],
@@ -339,13 +383,22 @@ translate([8, 0, 0]) color("blue", 0.5) cube(2);
 `,
     });
     const context = await definition.initialize({}, runtime);
-    const created = await renderModel({ definition, runtime, context, entryPath: 'project/model.scad' });
+    const created = await renderModel({
+      definition,
+      runtime,
+      context,
+      entryPath: 'project/model.scad',
+    });
     if (created.geometry.format !== 'gltf') {
       throw new Error('Expected GLB render geometry');
     }
 
     const readColors = async (content: Uint8Array<ArrayBuffer>) =>
-      getAllMaterialBaseColors({ success: true, data: { format: 'gltf', content, hash: 'test' }, issues: [] });
+      getAllMaterialBaseColors({
+        success: true,
+        data: { format: 'gltf', content, hash: 'test' },
+        issues: [],
+      });
     const assertColors = async (content: Uint8Array<ArrayBuffer>) => {
       const colors = await readColors(content);
       const naming = await readGltfNamingSummary(content);
@@ -357,7 +410,9 @@ translate([8, 0, 0]) color("blue", 0.5) cube(2);
       expect(colors).toHaveLength(3);
       expectLinearBaseColor(byName['#FF0000FF Material']!, '#FF0000');
       expectLinearBaseColor(byName['#808080FF Material']!, '#808080');
-      expectLinearBaseColor(byName['#0000FF80 Material']!, '#0000FF', { opacity: 0.5 });
+      expectLinearBaseColor(byName['#0000FF80 Material']!, '#0000FF', {
+        opacity: 0.5,
+      });
     };
 
     await assertColors(created.geometry.content);
@@ -422,13 +477,18 @@ translate([1, 0, 0]) color("blue") cube(2);
 `,
     });
     const context = await definition.initialize({}, runtime);
-    const created = await renderModel({ definition, runtime, context, entryPath: 'project/model.scad' });
+    const created = await renderModel({
+      definition,
+      runtime,
+      context,
+      entryPath: 'project/model.scad',
+    });
     if (created.geometry.format !== 'gltf') {
       throw new Error('Expected GLB render geometry');
     }
 
     expect(created.nativeHandle.stats.volume).toBeCloseTo(12, 6);
-    await expect(getSignedVolumeFromGlb(created.geometry.content)).resolves.toBeCloseTo(0.000_000_016, 12);
+    await expect(getSignedVolumeFromGlb(created.geometry.content)).resolves.toBeCloseTo(0.000000016, 12);
     await expect(readGltfNamingSummary(created.geometry.content)).resolves.toMatchObject({
       nodeNames: ['#0000FFFF Shape 1', '#FF0000FF Shape 1'],
       meshNames: ['#0000FFFF Shape 1', '#FF0000FF Shape 1'],
@@ -437,7 +497,11 @@ translate([1, 0, 0]) color("blue") cube(2);
     const exportInput = {
       format: 'glb',
       nativeHandle: created.nativeHandle,
-      options: { ...renderOptions, coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
+      options: {
+        ...renderOptions,
+        coordinateSystem: 'z-up',
+        unit: { length: 'millimeter' },
+      },
     } as const;
     const first = await definition.exportGeometry(exportInput, runtime, context);
     const second = await definition.exportGeometry(exportInput, runtime, context);
@@ -461,13 +525,18 @@ color("red") difference() {
 `,
     });
     const context = await definition.initialize({}, runtime);
-    const created = await renderModel({ definition, runtime, context, entryPath: 'project/model.scad' });
+    const created = await renderModel({
+      definition,
+      runtime,
+      context,
+      entryPath: 'project/model.scad',
+    });
     if (created.geometry.format !== 'gltf') {
       throw new Error('Expected GLB render geometry');
     }
 
     expect(created.nativeHandle.stats.volume).toBeCloseTo(4, 6);
-    await expect(getSignedVolumeFromGlb(created.geometry.content)).resolves.toBeCloseTo(0.000_000_004, 12);
+    await expect(getSignedVolumeFromGlb(created.geometry.content)).resolves.toBeCloseTo(0.000000004, 12);
     await expect(readGltfNamingSummary(created.geometry.content)).resolves.toMatchObject({
       nodeNames: ['#FF0000FF Shape 1'],
       meshNames: ['#FF0000FF Shape 1'],
@@ -485,7 +554,12 @@ color("green") cube(10);
 `,
     });
     const context = await definition.initialize({}, runtime);
-    const preview = await renderModel({ definition, runtime, context, entryPath: 'project/model.scad' });
+    const preview = await renderModel({
+      definition,
+      runtime,
+      context,
+      entryPath: 'project/model.scad',
+    });
     if (preview.geometry.format !== 'gltf') {
       throw new Error('Expected GLB preview geometry');
     }
@@ -505,7 +579,11 @@ color("green") cube(10);
       {
         format: 'glb',
         nativeHandle: preview.nativeHandle,
-        options: { ...renderOptions, coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
+        options: {
+          ...renderOptions,
+          coordinateSystem: 'z-up',
+          unit: { length: 'millimeter' },
+        },
       },
       runtime,
       context,
@@ -534,7 +612,12 @@ color("red") {
 `,
     });
     const context = await definition.initialize({}, runtime);
-    const created = await renderModel({ definition, runtime, context, entryPath: 'project/model.scad' });
+    const created = await renderModel({
+      definition,
+      runtime,
+      context,
+      entryPath: 'project/model.scad',
+    });
     if (created.geometry.format !== 'gltf') {
       throw new Error('Expected GLB render geometry');
     }
@@ -553,7 +636,10 @@ color("red") {
       json.nodes?.map((node) => {
         const primitive = json.meshes?.[node.mesh!]?.primitives[0];
         const position = json.accessors?.[primitive?.attributes?.POSITION ?? -1];
-        return { min: position?.min?.map(round), max: position?.max?.map(round) };
+        return {
+          min: position?.min?.map(round),
+          max: position?.max?.map(round),
+        };
       }),
     ).toEqual([
       { min: [0, 0, -0.002], max: [0.002, 0.002, 0] },
@@ -570,8 +656,18 @@ color("red") {
         };
       }),
     ).toEqual([
-      { primitiveCount: 1, mode: 4, triangleCount: 12, material: '#FF0000FF Material' },
-      { primitiveCount: 1, mode: 4, triangleCount: 12, material: '#FF0000FF Material' },
+      {
+        primitiveCount: 1,
+        mode: 4,
+        triangleCount: 12,
+        material: '#FF0000FF Material',
+      },
+      {
+        primitiveCount: 1,
+        mode: 4,
+        triangleCount: 12,
+        material: '#FF0000FF Material',
+      },
     ]);
     expect(
       json.nodes?.map((node) => ({
@@ -592,7 +688,9 @@ color("red") {
 
   it('emits optional native owner-local edges without adding Explorer nodes', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
-    const runtime = createRuntime({ 'project/model.scad': 'color("red") cube(2);' });
+    const runtime = createRuntime({
+      'project/model.scad': 'color("red") cube(2);',
+    });
     const context = await definition.initialize({}, runtime);
     const plain = await renderModel({
       definition,
@@ -623,7 +721,11 @@ color("red") {
     expect(edgedJson.accessors?.[lineAccessor!]?.count).toBe(24);
 
     const repeated = await definition.meshGeometry!(
-      { nativeHandle: edged.nativeHandle, options: renderOptions, content: { includeEdges: true } },
+      {
+        nativeHandle: edged.nativeHandle,
+        options: renderOptions,
+        content: { includeEdges: true },
+      },
       runtime,
       context,
     );
@@ -635,7 +737,11 @@ color("red") {
 
     const exportInput = {
       nativeHandle: edged.nativeHandle,
-      options: { ...renderOptions, coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
+      options: {
+        ...renderOptions,
+        coordinateSystem: 'z-up',
+        unit: { length: 'millimeter' },
+      },
     } as const;
     const plainExport = await definition.exportGeometry(
       { ...exportInput, format: 'glb', content: { includeEdges: false } },
@@ -676,12 +782,20 @@ translate([0, 0, 4]) color("blue") cube(2);
     });
     const context = await definition.initialize({}, runtime);
     const created = await definition.createGeometry(
-      { entryPath: 'project/model.scad', parameters: {}, options: renderOptions },
+      {
+        entryPath: 'project/model.scad',
+        parameters: {},
+        options: renderOptions,
+      },
       runtime,
       context,
     );
     const exported = await definition.exportGeometry(
-      { format: '3mf', nativeHandle: created.nativeHandle, options: renderOptions },
+      {
+        format: '3mf',
+        nativeHandle: created.nativeHandle,
+        options: renderOptions,
+      },
       runtime,
       context,
     );
@@ -712,7 +826,11 @@ translate([0, 0, 4]) color("blue") cube(2);
     ).toBe(true);
 
     const repeated = await definition.exportGeometry(
-      { format: '3mf', nativeHandle: created.nativeHandle, options: renderOptions },
+      {
+        format: '3mf',
+        nativeHandle: created.nativeHandle,
+        options: renderOptions,
+      },
       runtime,
       context,
     );
@@ -733,7 +851,10 @@ translate([0, 0, 4]) color("blue") cube(2);
       context: roundtripContext,
       entryPath: 'project/roundtrip.scad',
     });
-    expect(roundtrip.nativeHandle.stats).toMatchObject({ triangleCount: 24, volume: 16 });
+    expect(roundtrip.nativeHandle.stats).toMatchObject({
+      triangleCount: 24,
+      volume: 16,
+    });
     if (roundtrip.geometry.format !== 'gltf') {
       throw new Error('Expected round-tripped 3MF render geometry');
     }
@@ -757,12 +878,20 @@ roof_frame();
     });
     const context = await definition.initialize({}, runtime);
     const created = await definition.createGeometry(
-      { entryPath: 'project/model.scad', parameters: {}, options: renderOptions },
+      {
+        entryPath: 'project/model.scad',
+        parameters: {},
+        options: renderOptions,
+      },
       runtime,
       context,
     );
     const exported = await definition.exportGeometry(
-      { format: '3mf', nativeHandle: created.nativeHandle, options: renderOptions },
+      {
+        format: '3mf',
+        nativeHandle: created.nativeHandle,
+        options: renderOptions,
+      },
       runtime,
       context,
     );
@@ -788,8 +917,16 @@ roof_frame();
       >;
       expect(owners[0]?.[0]).toMatchObject({
         moduleName: 'roof_frame',
-        callSite: { source: '<main>', start: expect.any(Number), end: expect.any(Number) },
-        definitionSite: { source: '<main>', start: expect.any(Number), end: expect.any(Number) },
+        callSite: {
+          source: '<main>',
+          start: expect.any(Number),
+          end: expect.any(Number),
+        },
+        definitionSite: {
+          source: '<main>',
+          start: expect.any(Number),
+          end: expect.any(Number),
+        },
       });
     }
   });
@@ -801,7 +938,12 @@ roof_frame();
     const runtime = createRuntime({ 'project/main.scad': source });
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
     const context = await definition.initialize({}, runtime);
-    const rendered = await renderModel({ definition, runtime, context, entryPath: 'project/main.scad' });
+    const rendered = await renderModel({
+      definition,
+      runtime,
+      context,
+      entryPath: 'project/main.scad',
+    });
     if (rendered.geometry.format !== 'gltf') {
       throw new Error('Expected greenhouse GLB');
     }
@@ -825,8 +967,8 @@ roof_frame();
     const archSurface = archMesh?.primitives.find((primitive) => (primitive.mode ?? 4) === 4);
     const archPositions = json.accessors?.[archSurface?.attributes?.POSITION ?? -1];
     const round = (value: number): number => Math.round(value * 1_000_000) / 1_000_000;
-    expect(archPositions?.min?.map(round)).toEqual([-6.22e-2, 0.07, -0.092_145]);
-    expect(archPositions?.max?.map(round)).toEqual([6.22e-2, 0.131_859, 0.092_145]);
+    expect(archPositions?.min?.map(round)).toEqual([-6.22e-2, 0.07, -0.092145]);
+    expect(archPositions?.max?.map(round)).toEqual([6.22e-2, 0.131859, 0.092145]);
     expect((json.accessors?.[archSurface?.indices ?? -1]?.count ?? 0) / 3).toBe(1100);
     expect(arch?.extras?.openrscad).toMatchObject({
       attribution: 'exact',
@@ -854,15 +996,19 @@ roof_frame();
         doubleSided: material.doubleSided,
       }));
     expect(transparentMaterials).toEqual([
-      { alpha: 0.450_98, alphaMode: 'BLEND', doubleSided: true },
-      { alpha: 0.380_392, alphaMode: 'BLEND', doubleSided: true },
-      { alpha: 0.239_216, alphaMode: 'BLEND', doubleSided: true },
-      { alpha: 0.258_824, alphaMode: 'BLEND', doubleSided: true },
-      { alpha: 0.301_961, alphaMode: 'BLEND', doubleSided: true },
+      { alpha: 0.45098, alphaMode: 'BLEND', doubleSided: true },
+      { alpha: 0.380392, alphaMode: 'BLEND', doubleSided: true },
+      { alpha: 0.239216, alphaMode: 'BLEND', doubleSided: true },
+      { alpha: 0.258824, alphaMode: 'BLEND', doubleSided: true },
+      { alpha: 0.301961, alphaMode: 'BLEND', doubleSided: true },
     ]);
 
     const edged = await definition.meshGeometry!(
-      { nativeHandle: rendered.nativeHandle, options: renderOptions, content: { includeEdges: true } },
+      {
+        nativeHandle: rendered.nativeHandle,
+        options: renderOptions,
+        content: { includeEdges: true },
+      },
       runtime,
       context,
     );
@@ -890,7 +1036,11 @@ roof_frame();
     }>;
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
 
-    const measured: Array<{ fixture: string; lineSegments: number; dangling: number }> = [];
+    const measured: Array<{
+      fixture: string;
+      lineSegments: number;
+      dangling: number;
+    }> = [];
     for (const { fixture } of expected) {
       /* oxlint-disable no-await-in-loop -- One Wasm engine renders the fixtures serially; running them concurrently would interleave engine state for no gain on eight small models. */
       const source = await readFile(new URL(fixture, fixtureUrl), 'utf8');
@@ -917,7 +1067,13 @@ roof_frame();
 
     // One assertion over the whole set, so a failure names every fixture that
     // moved rather than stopping at the first.
-    expect(measured).toEqual(expected.map(({ fixture, lineSegments }) => ({ fixture, lineSegments, dangling: 0 })));
+    expect(measured).toEqual(
+      expected.map(({ fixture, lineSegments }) => ({
+        fixture,
+        lineSegments,
+        dangling: 0,
+      })),
+    );
   }, 60_000);
 
   it('gives feature edges the opaque black material the thumbnail path renders', async () => {
@@ -968,7 +1124,12 @@ roof_frame();
     const runtime = createRuntime(Object.fromEntries(loaded.map(([name, source]) => [`project/${name}`, source])));
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
     const context = await definition.initialize({}, runtime);
-    const rendered = await renderModel({ definition, runtime, context, entryPath: 'project/main.scad' });
+    const rendered = await renderModel({
+      definition,
+      runtime,
+      context,
+      entryPath: 'project/main.scad',
+    });
     if (rendered.geometry.format !== 'gltf') {
       throw new Error('Expected gearbox GLB');
     }
@@ -983,18 +1144,31 @@ roof_frame();
 
   it('preserves one deduplicated engine warning through render, mesh, GLB, and 3MF results', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
-    const runtime = createRuntime({ 'project/model.scad': 'color("not-a-color") cube(1);' });
+    const runtime = createRuntime({
+      'project/model.scad': 'color("not-a-color") cube(1);',
+    });
     const context = await definition.initialize({}, runtime);
     const created = await definition.createGeometry(
-      { entryPath: 'project/model.scad', parameters: {}, options: renderOptions },
+      {
+        entryPath: 'project/model.scad',
+        parameters: {},
+        options: renderOptions,
+      },
       runtime,
       context,
     );
     expect(created.issues).toHaveLength(1);
-    expect(created.issues?.[0]).toMatchObject({ severity: 'warning', message: expect.stringContaining('color') });
+    expect(created.issues?.[0]).toMatchObject({
+      severity: 'warning',
+      message: expect.stringContaining('color'),
+    });
 
     const meshed = await definition.meshGeometry!(
-      { nativeHandle: created.nativeHandle, options: renderOptions, content: { includeEdges: false } },
+      {
+        nativeHandle: created.nativeHandle,
+        options: renderOptions,
+        content: { includeEdges: false },
+      },
       runtime,
       context,
     );
@@ -1004,13 +1178,21 @@ roof_frame();
       {
         format: 'glb',
         nativeHandle: created.nativeHandle,
-        options: { ...renderOptions, coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
+        options: {
+          ...renderOptions,
+          coordinateSystem: 'z-up',
+          unit: { length: 'millimeter' },
+        },
       },
       runtime,
       context,
     );
     const threemf = await definition.exportGeometry(
-      { format: '3mf', nativeHandle: created.nativeHandle, options: renderOptions },
+      {
+        format: '3mf',
+        nativeHandle: created.nativeHandle,
+        options: renderOptions,
+      },
       runtime,
       context,
     );
@@ -1027,7 +1209,11 @@ roof_frame();
     });
     const context = await definition.initialize({}, runtime);
     const created = await definition.createGeometry(
-      { entryPath: 'project/model.scad', parameters: {}, options: renderOptions },
+      {
+        entryPath: 'project/model.scad',
+        parameters: {},
+        options: renderOptions,
+      },
       runtime,
       context,
     );
@@ -1035,26 +1221,43 @@ roof_frame();
       {
         format: 'glb',
         nativeHandle: created.nativeHandle,
-        options: { ...renderOptions, coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
+        options: {
+          ...renderOptions,
+          coordinateSystem: 'z-up',
+          unit: { length: 'millimeter' },
+        },
       },
       runtime,
       context,
     );
     expect(glb.success).toBe(true);
     expect(glb.issues).toEqual([
-      expect.objectContaining({ severity: 'error', message: expect.stringContaining('union') }),
+      expect.objectContaining({
+        severity: 'error',
+        message: expect.stringContaining('union'),
+      }),
     ]);
 
     const threemf = await definition.exportGeometry(
-      { format: '3mf', nativeHandle: created.nativeHandle, options: renderOptions },
+      {
+        format: '3mf',
+        nativeHandle: created.nativeHandle,
+        options: renderOptions,
+      },
       runtime,
       context,
     );
     expect(threemf.success).toBe(false);
     expect(threemf.issues).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ severity: 'error', message: expect.stringContaining('union') }),
-        expect.objectContaining({ severity: 'error', message: expect.stringContaining('not manifold') }),
+        expect.objectContaining({
+          severity: 'error',
+          message: expect.stringContaining('union'),
+        }),
+        expect.objectContaining({
+          severity: 'error',
+          message: expect.stringContaining('not manifold'),
+        }),
       ]),
     );
   });
@@ -1066,7 +1269,11 @@ roof_frame();
 
     await expect(
       definition.createGeometry(
-        { entryPath: 'project/model.scad', parameters: {}, options: renderOptions },
+        {
+          entryPath: 'project/model.scad',
+          parameters: {},
+          options: renderOptions,
+        },
         runtime,
         context,
       ),
@@ -1088,7 +1295,11 @@ roof_frame();
       unresolved: [],
     });
     const result = await definition.createGeometry(
-      { entryPath: 'project/model.scad', parameters: {}, options: renderOptions },
+      {
+        entryPath: 'project/model.scad',
+        parameters: {},
+        options: renderOptions,
+      },
       runtime,
       context,
     );
@@ -1137,17 +1348,28 @@ endsolid tetrahedron`);
       resolved: ['project/model.scad', 'project/tetrahedron.stl'],
       unresolved: [],
     });
-    const rendered = await renderModel({ definition, runtime, context, entryPath: 'project/model.scad' });
+    const rendered = await renderModel({
+      definition,
+      runtime,
+      context,
+      entryPath: 'project/model.scad',
+    });
     expect(rendered.nativeHandle.stats).toMatchObject({ triangleCount: 4 });
     expect(rendered.nativeHandle.stats.volume).toBeCloseTo(1 / 6, 6);
   });
 
   it('applies parameter overrides and exports deterministic z-up millimeter GLB', async () => {
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
-    const runtime = createRuntime({ 'project/model.scad': 'size = 1; cube(size);' });
+    const runtime = createRuntime({
+      'project/model.scad': 'size = 1; cube(size);',
+    });
     const context = await definition.initialize({}, runtime);
     const created = await definition.createGeometry(
-      { entryPath: 'project/model.scad', parameters: { size: 7 }, options: renderOptions },
+      {
+        entryPath: 'project/model.scad',
+        parameters: { size: 7 },
+        options: renderOptions,
+      },
       runtime,
       context,
     );
@@ -1191,7 +1413,13 @@ endsolid tetrahedron`);
             Body: {
               type: 'object',
               properties: {
-                size: { default: 5, type: 'double', minimum: 1, maximum: 10, multipleOf: 1 },
+                size: {
+                  default: 5,
+                  type: 'double',
+                  minimum: 1,
+                  maximum: 10,
+                  multipleOf: 1,
+                },
                 label: {
                   default: 'A',
                   type: 'string',
@@ -1206,6 +1434,36 @@ endsolid tetrahedron`);
         },
       },
       issues: [],
+    });
+  });
+
+  it('preserves OpenSCAD single-maximum sliders as numeric bounds', async () => {
+    const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
+    const runtime = createRuntime({
+      'project/model.scad': '/* [Body] */\ndepth = 34; // [100]\ncube(depth);',
+    });
+    const context = await definition.initialize({}, runtime);
+    const result = await definition.getParameters({ entryPath: 'project/model.scad' }, runtime, context);
+
+    expect(result).toMatchObject({
+      success: true,
+      data: {
+        defaults: { Body: { depth: 34 } },
+        schema: {
+          properties: {
+            Body: {
+              properties: {
+                depth: {
+                  default: 34,
+                  type: 'double',
+                  minimum: 0,
+                  maximum: 100,
+                },
+              },
+            },
+          },
+        },
+      },
     });
   });
 
@@ -1235,7 +1493,12 @@ endsolid tetrahedron`);
     const definition = await resolveRuntimePluginDefinition('kernel', openrscadKernel());
     const runtime = createRuntime({ 'project/empty.scad': '  \n' });
     const context = await definition.initialize({}, runtime);
-    const result = await renderModel({ definition, runtime, context, entryPath: 'project/empty.scad' });
+    const result = await renderModel({
+      definition,
+      runtime,
+      context,
+      entryPath: 'project/empty.scad',
+    });
     expect(result.nativeHandle.stats.triangleCount).toBe(0);
     if (result.geometry.format !== 'gltf') {
       throw new Error('Expected empty GLB render geometry');
@@ -1248,11 +1511,19 @@ endsolid tetrahedron`);
     const runtime = createRuntime({ 'project/model.scad': 'cube(1);' });
     const context = await definition.initialize({}, runtime);
     const created = await definition.createGeometry(
-      { entryPath: 'project/model.scad', parameters: {}, options: renderOptions },
+      {
+        entryPath: 'project/model.scad',
+        parameters: {},
+        options: renderOptions,
+      },
       runtime,
       context,
     );
-    const unsupportedRequest = { format: 'step', nativeHandle: created.nativeHandle, options: renderOptions };
+    const unsupportedRequest = {
+      format: 'step',
+      nativeHandle: created.nativeHandle,
+      options: renderOptions,
+    };
     const exported = await definition.exportGeometry(
       unsupportedRequest as unknown as Parameters<NonNullable<typeof definition.exportGeometry>>[0],
       runtime,
@@ -1270,10 +1541,17 @@ endsolid tetrahedron`);
     const runtime = createRuntime({ 'project/model.scad': 'cube(1);' });
     const context = await definition.initialize({}, runtime);
     const failedNativeExport = { ok: false } as unknown as ExportShape3DOutput;
-    context.backend = { ...context.backend, renderToGlb: async () => failedNativeExport };
+    context.backend = {
+      ...context.backend,
+      renderToGlb: async () => failedNativeExport,
+    };
     await expect(
       definition.createGeometry(
-        { entryPath: 'project/model.scad', parameters: {}, options: renderOptions },
+        {
+          entryPath: 'project/model.scad',
+          parameters: {},
+          options: renderOptions,
+        },
         runtime,
         context,
       ),

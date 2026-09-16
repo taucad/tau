@@ -571,11 +571,13 @@ const recordPath = '/.tau/composers/new-project.json';
 const homeAttachments = '/.tau/composers/new-project/attachments';
 const pngDataUrl = 'data:image/png;base64,iVBORw0KGgo=';
 
-const writeRecord = (record: unknown): void => {
-  harness.homeFiles.set(recordPath, new TextEncoder().encode(JSON.stringify(record)));
+const chatRecordPath = (projectId: string, chatId: string): string =>
+  `/.tau/composers/chats/${projectId}/${chatId}.json`;
+const writeRecord = (record: unknown, path = recordPath): void => {
+  harness.homeFiles.set(path, new TextEncoder().encode(JSON.stringify(record)));
 };
-const readRecord = (): Record<string, unknown> | undefined => {
-  const bytes = harness.homeFiles.get(recordPath);
+const readRecord = (path = recordPath): Record<string, unknown> | undefined => {
+  const bytes = harness.homeFiles.get(path);
   return bytes === undefined ? undefined : (JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>);
 };
 const textDraft = (text: string): MyUIMessage => ({
@@ -1151,8 +1153,9 @@ describe('ActiveChatProvider', () => {
     }
   });
 
-  // Red until W7 lands (ruling P40): exercises the session draft wiring W7 is rewriting; W6 rewrites it against the record afterwards.
-  it('should persist draft to the bound chat store when chatId is defined', async () => {
+  // Rewritten (P40): a project chat's draft lives in its composer record, not on the chat row (D2).
+  it('should persist the draft to the chat’s composer record when chatId is defined', async () => {
+    harness.getChat.mockResolvedValue(makeChat({ id: 'chat_persist', resourceId: 'proj_persist' }));
     vi.useFakeTimers({ shouldAdvanceTime: true });
 
     const { result } = renderHook(() => useActiveChatSession(), {
@@ -1162,12 +1165,16 @@ describe('ActiveChatProvider', () => {
     act(() => {
       result.current.draftActorRef.send({ type: 'setDraftText', text: 'hello world' });
     });
-
     await act(async () => {
       await vi.advanceTimersByTimeAsync(250);
     });
 
-    expect(harness.patchChat).toHaveBeenCalledWith('chat_persist', 'draft', expect.objectContaining({ id: 'draft' }));
+    await waitFor(() => {
+      expect(readRecord(chatRecordPath('proj_persist', 'chat_persist'))).toMatchObject({
+        draft: { parts: [{ type: 'text', text: 'hello world' }] },
+      });
+    });
+    expect(harness.patchChat).not.toHaveBeenCalledWith('chat_persist', 'draft', expect.anything());
   });
 
   it('should switch draft state cleanly when chatId prop changes', async () => {
@@ -1198,27 +1205,20 @@ describe('ActiveChatProvider', () => {
     });
   });
 
-  // Red until W7 lands (ruling P40): exercises the session draft wiring W7 is rewriting; W6 rewrites it against the record afterwards.
-  it('should load the existing Chat.draft from the chat store when a record exists', async () => {
-    harness.getChat.mockResolvedValue(
-      makeChat({
-        id: 'chat_with_draft',
-        draft: {
-          id: 'draft',
-          role: 'user',
-          metadata: { createdAt: 0, status: 'pending' },
-          parts: [{ type: 'text', text: 'preserved homepage draft' }],
-        },
-      }),
+  // Rewritten (P40): the draft hydrates from the chat's composer record once the chat names its project (D7).
+  it('should hydrate the draft from the chat’s composer record when one exists', async () => {
+    writeRecord(
+      { version: 1, draft: textDraft('preserved homepage draft') },
+      chatRecordPath('proj_load', 'chat_with_draft'),
     );
+    harness.getChat.mockResolvedValue(makeChat({ id: 'chat_with_draft', resourceId: 'proj_load' }));
 
     const { result } = renderHook(() => useActiveChatSession(), {
       wrapper: createSessionWrapper('chat_with_draft'),
     });
 
     await waitFor(() => {
-      const snapshot = result.current.draftActorRef.getSnapshot();
-      expect(snapshot.context.draftText).toBe('preserved homepage draft');
+      expect(result.current.draftActorRef.getSnapshot().context.draftText).toBe('preserved homepage draft');
     });
   });
 
@@ -1244,9 +1244,10 @@ describe('ActiveChatProvider', () => {
       expect(harness.toastError).toHaveBeenCalledWith('Failed to process image', expect.any(Object));
     });
 
-    // Red until W7 lands (ruling P40): exercises the session draft wiring W7 is rewriting; W6 rewrites it against the record afterwards.
+    // Rewritten (P40): the resized image is stored through the session's real store actor, into the chat's record directory.
     it('should not toast on successful resize', async () => {
       harness.resize.mockResolvedValueOnce('data:image/jpeg;base64,resized');
+      harness.getChat.mockResolvedValue(makeChat({ id: 'chat_no_toast', resourceId: 'proj_toast' }));
 
       const { result } = renderHook(() => useActiveChatSession(), {
         wrapper: createSessionWrapper('chat_no_toast'),
@@ -1266,6 +1267,10 @@ describe('ActiveChatProvider', () => {
           expect.objectContaining({ mediaType: 'image/jpeg' }),
         ]);
       });
+      const [stored] = result.current.draftActorRef.getSnapshot().context.draftAttachments;
+      expect(
+        harness.homeFiles.has(`/.tau/composers/chats/proj_toast/chat_no_toast/attachments/${stored!.hash}.jpg`),
+      ).toBe(true);
 
       expect(harness.toastError).not.toHaveBeenCalled();
     });

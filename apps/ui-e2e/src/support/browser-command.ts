@@ -1348,7 +1348,7 @@ export const uiMouseClick: BrowserCommand<
 };
 
 export const uiScreenshotTarget: BrowserCommand<
-  [selector?: string, artifactName?: string, surface?: TargetSurface],
+  [selector?: string | null, artifactName?: string, surface?: TargetSurface],
   string
 > = async (commandContext, selector, artifactName, surface) => {
   const page = pageFor(sessionFor(commandContext), surface);

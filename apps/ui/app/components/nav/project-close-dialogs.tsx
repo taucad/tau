@@ -96,7 +96,7 @@ function BudgetCandidate({
   return (
     <button
       type='button'
-      className='flex w-full items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-left text-sm hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden'
+      className='flex w-full items-center justify-between gap-2 rounded-md border border-border px-3 py-2 text-left text-sm hover:bg-accent focus-visible:focus-outline'
       onClick={() => {
         onChoose(projectId);
       }}

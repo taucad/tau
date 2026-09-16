@@ -80,7 +80,7 @@ const WebTitlebarControls = ({
     <Link
       to='/'
       aria-label='Home'
-      className='flex h-7 items-center rounded-sm px-1 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50'
+      className='flex h-7 items-center rounded-sm px-1 outline-none focus-visible:focus-outline'
     >
       <TauWordmark aria-hidden className='h-5 w-auto text-primary' />
     </Link>

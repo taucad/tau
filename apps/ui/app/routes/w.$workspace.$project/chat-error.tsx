@@ -76,7 +76,7 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
           onOpenChange={setGenericDetailsOpen}
         >
           <div className='flex w-full items-center justify-between gap-2 transition-colors hover:bg-destructive/15'>
-            <CollapsibleTrigger className='flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'>
+            <CollapsibleTrigger className='flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left outline-none focus-visible:focus-outline'>
               <ChevronRight className='size-4 shrink-0 transition-transform duration-300 ease-in-out group-data-[state=open]/collapsible:rotate-90' />
               <div className='min-w-0 flex-1'>
                 <MarkdownViewer

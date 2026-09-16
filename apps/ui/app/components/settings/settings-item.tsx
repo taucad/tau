@@ -22,10 +22,7 @@ export function SettingsItem({ settingId, children, className }: SettingsItemPro
       data-slot='settings-item'
       aria-label={definition.label}
       tabIndex={-1}
-      className={cn(
-        'relative scroll-m-4 rounded-lg focus:outline-2 focus:outline-offset-4 focus:outline-ring',
-        className,
-      )}
+      className={cn('relative scroll-m-4 rounded-lg focus-visible:focus-outline', className)}
     >
       {children}
     </section>

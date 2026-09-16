@@ -781,7 +781,7 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
             className={cn(
               'flex flex-col gap-0 min-w-0',
               isUser &&
-                'cursor-action rounded-2xl border bg-background px-3 py-1 outline-none hover:border-primary focus-visible:ring-2 focus-visible:ring-ring',
+                'cursor-action rounded-2xl border bg-background px-3 py-1 outline-none hover:border-primary focus-visible:focus-outline',
               shouldRenderCollapsedUserRows && 'max-h-58.5 overflow-hidden',
               fileParts.length > 0 && 'pt-3',
               showUserBubbleStopShortcut && 'relative',

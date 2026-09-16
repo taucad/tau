@@ -435,7 +435,7 @@ const ArtifactManifestEntry = ({
         {pathState === 'available' ? (
           <button
             type='button'
-            className='min-w-0 flex-1 truncate text-left font-mono text-primary underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
+            className='min-w-0 flex-1 truncate text-left font-mono text-primary underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:focus-outline'
             aria-label={`Open artifact ${artifact.logicalPath}`}
             onClick={() => {
               editorRef.send({ type: 'openFile', path: projectPath, source: 'user' });

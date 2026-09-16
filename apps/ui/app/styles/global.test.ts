@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { globSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { converter, parse, wcagContrast } from 'culori';
 import { describe, expect, it } from 'vitest';
@@ -435,5 +435,27 @@ describe('scroll fades', () => {
       'linear-gradient(to right, black, black calc(100% - var(--scroll-fade-size)), var(--scroll-fade-end))',
     );
     expect(style.getPropertyValue('animation')).toBe('');
+  });
+});
+
+describe('focus outline fallback', () => {
+  it('delegates focus geometry to the shared utility', () => {
+    const fallback = appStyles.slice(
+      appStyles.indexOf(':where(a, button, input, select, textarea, summary, [tabindex]):focus-visible'),
+    );
+
+    expect(fallback.slice(0, fallback.indexOf('}'))).toContain('@apply focus-outline;');
+    expect(appStyles).not.toContain('focus-visible:outline-primary');
+  });
+
+  it('routes every app focus indicator through the utility', () => {
+    const sources = globSync('app/**/*.{ts,tsx}', { exclude: (name) => /\.test\.tsx?$/.test(name) });
+    const restatedGeometry =
+      /[^\s"'`]*focus[a-z-]*]?:(?:ring-\d|ring-ring|ring-inset|ring-offset-\d|outline-\d|outline-solid|outline-ring|outline-sidebar-ring|-?outline-offset-\d)/g;
+    const offenders = sources.flatMap((name) =>
+      [...readFileSync(name, 'utf8').matchAll(restatedGeometry)].map((match) => `${name}: ${match[0]}`),
+    );
+
+    expect(offenders).toEqual([]);
   });
 });

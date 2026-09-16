@@ -496,7 +496,7 @@ function ProjectRowContent({
           aria-current={isActive ? 'page' : undefined}
           aria-busy={isPending}
           aria-describedby={descriptionId}
-          className='flex min-w-0 items-center overflow-hidden rounded-sm ring-sidebar-ring outline-hidden focus-visible:ring-2'
+          className='flex min-w-0 items-center overflow-hidden rounded-sm outline-hidden focus-visible:focus-outline'
           onClick={onOpen}
         >
           <span className='truncate'>{project.name}</span>

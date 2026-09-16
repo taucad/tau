@@ -6,7 +6,23 @@ import * as target from '#support/external-target.js';
 
 const revisionsPanel = '[data-slot="revisions-panel-body"]';
 const visibleRevisionsPanel = `${revisionsPanel}:visible`;
-const widths = [320, 360, 600, 1024] as const;
+/*
+ * Height is part of the matrix, not a constant (C60).
+ *
+ * Every viewport here used to be 900 tall, which is exactly why C36 shipped:
+ * the History list only overflowed its own section — and painted over Sync —
+ * when the pane was shorter than its content. The two 520-tall rows are the
+ * reproduction; the 320- and 512-wide rows are the reflow widths a person hits
+ * at phone size and at 200% zoom.
+ */
+const viewports = [
+  { width: 320, height: 800 },
+  { width: 320, height: 520 },
+  { width: 360, height: 900 },
+  { width: 600, height: 900 },
+  { width: 1024, height: 900 },
+  { width: 1100, height: 520 },
+] as const;
 
 const expectRevisionLayout = async (): Promise<void> => {
   const result = await target.evaluate((selector) => {
@@ -19,6 +35,8 @@ const expectRevisionLayout = async (): Promise<void> => {
         panelOverflow: 1_000_000,
         panelOffscreen: 1_000_000,
         escapedControl: 'panel missing',
+        historyOverflow: 1_000_000,
+        sectionOverlap: 1_000_000,
       };
     }
     const panelRect = panel.getBoundingClientRect();
@@ -28,17 +46,34 @@ const expectRevisionLayout = async (): Promise<void> => {
       const rect = control.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0 && (rect.left < panelRect.left - 1 || rect.right > panelRect.right + 1);
     });
+    /*
+     * The vertical half (C60). C36 was a section that shrank below its own
+     * `<ol>`: the list then painted outside its box and over whatever followed
+     * it. Two numbers say that, and both are `1_000_000` when the element the
+     * assertion is about is missing, so an absent History or Sync fails loudly
+     * rather than passing vacuously.
+     */
+    const historyList = panel.querySelector<HTMLElement>('ol[aria-label="Recent revision history"]');
+    const historySection = historyList?.closest('section');
+    const syncSection = panel.querySelector<HTMLElement>('#revision-sync-heading')?.closest('section');
+    const historyRect = historySection?.getBoundingClientRect();
     return {
       documentOverflow: document.documentElement.scrollWidth - window.innerWidth,
       panelOverflow: panel.scrollWidth - panel.clientWidth,
       panelOffscreen: Math.max(0, -panelRect.left, panelRect.right - window.innerWidth),
       escapedControl: escaped?.getAttribute('aria-label') ?? escaped?.textContent.trim(),
+      historyOverflow:
+        historyList && historyRect ? historyList.getBoundingClientRect().bottom - historyRect.bottom : 1_000_000,
+      sectionOverlap:
+        historyRect && syncSection ? historyRect.bottom - syncSection.getBoundingClientRect().top : 1_000_000,
     };
   }, revisionsPanel);
   expect(result.documentOverflow).toBeLessThanOrEqual(0);
   expect(result.panelOverflow).toBeLessThanOrEqual(1);
   expect(result.panelOffscreen).toBeLessThanOrEqual(1);
   expect(result.escapedControl).toBeUndefined();
+  expect(result.historyOverflow).toBeLessThanOrEqual(1);
+  expect(result.sectionOverlap).toBeLessThanOrEqual(1);
 };
 
 test('keeps every revision surface usable across the closeout UX matrix', async () => {
@@ -78,7 +113,7 @@ test('keeps every revision surface usable across the closeout UX matrix', async 
   const history = selectors.getByCss('[aria-label="Recent revision history"] > li');
   await target.expectCount(history, 1, 120_000);
 
-  const nameRevision = selectors.getByRole('button', { name: 'Name…' }).first();
+  const nameRevision = selectors.getByRole('button', { name: 'Name version' }).first();
   await target.focus(nameRevision);
   await target.keyboardPress('Enter');
   const nameInput = selectors.getByRole('textbox', { name: /Name Revision/u });
@@ -101,8 +136,8 @@ test('keeps every revision surface usable across the closeout UX matrix', async 
   await target.expectVisible(selectors.getByRole('switch', { name: 'Sync chats' }));
   const coarsePointer = await target.evaluate(() => matchMedia('(pointer: coarse)').matches);
 
-  for (const width of widths) {
-    await target.setViewport({ width, height: 900 });
+  for (const { width, height } of viewports) {
+    await target.setViewport({ width, height });
     if (!(await target.isVisible(selectors.getByCss(visibleRevisionsPanel)))) {
       if (width < 768) {
         const historyTab = selectors.getByCss('button[role="tab"]:has-text("History"):visible');
@@ -130,7 +165,10 @@ test('keeps every revision surface usable across the closeout UX matrix', async 
       await target.expectVisible(syncHeading);
     }
     await expectRevisionLayout();
-    await target.screenshot(selectors.getByCss(visibleRevisionsPanel), `revisions-${String(width)}-light.png`);
+    await target.screenshot(
+      selectors.getByCss(visibleRevisionsPanel),
+      `revisions-${String(width)}x${String(height)}-light.png`,
+    );
   }
 
   /* A 1024-device-pixel viewport at 200% browser zoom has 512 CSS pixels and

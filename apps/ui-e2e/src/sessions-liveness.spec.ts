@@ -272,6 +272,30 @@ const closeRunningProject = async (path: string): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: 'Stop and close' }));
 };
 
+/**
+ * Close a project that has no run in flight, straight from its sidebar row.
+ *
+ * `closeRunningProject` above waits for the stop-the-agent confirmation; an
+ * idle project has no such dialog and closes on the menu item itself.
+ */
+const closeIdleProject = async (path: string): Promise<void> => {
+  await expandSidebar();
+  const moreId = await target.evaluate((href) => {
+    const trigger = document
+      .querySelector<HTMLAnchorElement>(`a[href="${href}"]`)
+      ?.closest<HTMLElement>('[data-slot="project-trigger"]');
+    const more = [...(trigger?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((button) =>
+      button.ariaLabel?.startsWith('More actions for '),
+    );
+    return more?.id;
+  }, path);
+  expect(moreId).toBeTypeOf('string');
+  await target.click(selectors.getByCss(`#${moreId!}`));
+  const close = selectors.getByRole('menuitem', { name: /^Close /u });
+  await target.expectVisible(close, 30_000);
+  await target.click(close);
+};
+
 const expectProjectBusy = async (path: string): Promise<void> => {
   await expect.poll(async () => projectRowDescription(path), { timeout: 120_000 }).toMatch(/, live, busy/u);
 };
@@ -425,4 +449,40 @@ describe('the budget closes a project, and the row says why (S48(16), S48(18), P
     await expandSidebar();
     await expect.poll(async () => rowHasBudgetReason(victimPath), { timeout: 60_000 }).toBe(true);
   }, 1_800_000);
+});
+
+/**
+ * The blueprint's first finding, in a real browser: closing the project on
+ * screen used to leave a bare page with no sidebar and no way to navigate on.
+ */
+describe('a closed project keeps the app shell and reopens from its notice (W2, W3, W8)', () => {
+  test('closes the focused project to a notice inside the shell, and reopens from it', async () => {
+    await target.setViewport({ width: 1440, height: 900 });
+    const url = await seedProject();
+    const path = new URL(url).pathname;
+    await waitForKernelCount(1);
+    await expandSidebar();
+    /* No `waitForCurrentProjectToSettle` here on purpose: a user Close of an
+     * idle project has no confirmation to satisfy — the only close dialog is
+     * the running-agent one — so this case does not need the revisions panel. */
+
+    await closeIdleProject(path);
+    await expectProjectClosed(path);
+
+    /* The notice, and the shell it no longer replaces. */
+    await target.expectVisible(selectors.getByRole('heading', { name: 'Project closed' }), 60_000);
+    await target.expectVisible(selectors.getByRole('complementary', { name: 'Application sidebar' }), 30_000);
+    expect(await target.isVisible(selectors.getByRole('button', { name: 'Search' })), 'sidebar search survived').toBe(
+      true,
+    );
+    expect(await currentPath(), 'closing must not navigate the person away').toBe(path);
+
+    /* Its resources really went with the session. */
+    await waitForKernelCount(0);
+
+    await target.click(selectors.getByRole('button', { name: 'Reopen project' }));
+    await target.expectVisible(selectors.getByRole('button', { name: /^Open Revisions\./u }), 120_000);
+    await waitForKernelCount(1);
+    await expect.poll(async () => projectRowDescription(path), { timeout: 120_000 }).toMatch(/, live\.$/u);
+  }, 900_000);
 });

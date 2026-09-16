@@ -141,7 +141,7 @@ export const setup = async (): Promise<() => void> => {
     environment['BILLING_ENVIRONMENT'] = 'development';
     environment['BILLING_USAGE_CURSOR_SECRET'] = 'desktop-e2e-usage-cursor-secret-min-32-chars';
     environment['BILLING_REQUEST_DIGEST_SECRET'] = 'desktop-e2e-request-digest-secret-min-32-chars';
-    environment['STRIPE_SECRET_KEY'] = 'sk_test_desktop_e2e';
+    environment['STRIPE_SECRET_KEY'] = 'rk_test_desktop_e2e_create';
     environment['STRIPE_READ_SECRET_KEY'] = 'rk_test_desktop_e2e';
     environment['STRIPE_ACCOUNT_ID'] = 'acct_desktop_e2e';
     environment['STRIPE_LIVEMODE'] = 'false';

@@ -184,7 +184,11 @@ test.skipIf(!codexAvailable)('uses native Tau skills and tools through the Codex
     await expect
       .poll(() => finalizedRevisions(eventsPathNow()).at(-1)?.changedPaths.includes('main.scad'), { timeout: 60_000 })
       .toBe(true);
-    const cadActivityGroups = await page.getByRole('button', { name: /Explored .*?(?:render|screenshot|test)/u }).all();
+    const cadActivityGroups = await page
+      .getByRole('button', {
+        name: /^(?:Rendered models(?:, captured images)?(?:, ran tests)?|Captured images(?:, ran tests)?|Ran tests)$/u,
+      })
+      .all();
     expect(cadActivityGroups.length).toBeGreaterThan(0);
     for (const group of cadActivityGroups) {
       // oxlint-disable-next-line no-await-in-loop -- each disclosure state must settle before the next React update.
@@ -442,7 +446,7 @@ test.skipIf(!codexAvailable || turbojetSourcePath === undefined)(
       await expect.poll(() => finalizedRevisions(eventsPath).at(-1)?.runIds, { timeout: 60_000 }).toContain(runId);
       expect(finalizedRevisions(eventsPath).at(-1)?.changedPaths).toContain('main.py');
 
-      const activity = page.getByRole('button', { name: /Explored .*screenshot/u }).last();
+      const activity = page.getByRole('button', { name: /Captured images/u }).last();
       await expectVisible(activity, 60_000);
       await activity.click();
       await expectVisible(

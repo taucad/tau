@@ -39,6 +39,11 @@ const ensureChatOpen = async (): Promise<void> => {
   await target.expectVisible(selectors.getByCss(composer), 60_000);
 };
 
+/** The cookie banner is fixed to the bottom edge, over the page controls. */
+const dismissCookieBanner = async (): Promise<void> => {
+  await target.click(selectors.getByRole('button', { name: /^decline$/iu }), { timeout: 5000 }).catch(() => undefined);
+};
+
 /**
  * Create a project through the real UI.
  *
@@ -49,6 +54,7 @@ const ensureChatOpen = async (): Promise<void> => {
 const createProject = async (origin: string): Promise<void> => {
   await target.navigate(`${origin}/projects/new`);
   await target.expectVisible(selectors.getByRole('button', { name: 'Create in Home' }), 90_000);
+  await dismissCookieBanner();
   await target.fill(selectors.getByLabelText('Project Name *'), 'Tau Host Project');
   await target.click(selectors.getByRole('button', { name: /Create Project/u }));
   await target.expectUrl(/\/w\/home\/[^/]+$/u, 60_000);
@@ -87,11 +93,6 @@ const renderedCount = async (sentence: string): Promise<number> =>
     (needle: string) => document.body.innerText.split(needle).length - 1,
     sentence,
   );
-
-/** The cookie banner is fixed to the bottom edge, over the composer's controls. */
-const dismissCookieBanner = async (): Promise<void> => {
-  await target.click(selectors.getByRole('button', { name: /^decline$/iu }), { timeout: 5000 }).catch(() => undefined);
-};
 
 /** Send the visible composer's first prompt, waiting for the send control to arm. */
 const sendFirstPrompt = async (prompt: string): Promise<void> => {

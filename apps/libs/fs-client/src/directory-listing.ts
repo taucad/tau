@@ -54,6 +54,7 @@ export type DirectoryListingError = {
  *
  * @public
  */
+// oxlint-disable-next-line no-redeclare -- TypeScript intentionally shares the public value and union-type name.
 export const DirectoryListingErrorCode = {
   NotFound: 'NotFound',
   NotADirectory: 'NotADirectory',

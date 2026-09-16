@@ -82,6 +82,13 @@ vi.mock('#hooks/use-project-manager.js', () => ({
 }));
 
 vi.mock('#hooks/use-sessions.js', () => ({ useSessions: () => registry.actor }));
+vi.mock('#hooks/chat-session-store-provider.js', () => ({
+  useChatSessionStore: () => ({
+    removeProject: async (projectId: string) => {
+      registry.operations.push(`remove-composers:${projectId}`);
+    },
+  }),
+}));
 
 const { useProjects } = await import('#hooks/use-projects.js');
 
@@ -167,7 +174,8 @@ describe('useProjects deletion', () => {
     await act(async () => result.current.permanentlyDeleteProject('proj_live'));
 
     expect(registry.actor.getSnapshot().context.refs).not.toHaveProperty('proj_live');
-    expect(registry.operations).toEqual(['close:proj_live', 'delete:proj_live']);
+    // Live composer records stop before their directory goes, so none is written back (D11).
+    expect(registry.operations).toEqual(['close:proj_live', 'remove-composers:proj_live', 'delete:proj_live']);
     expect(projectManager.permanentlyDeleteProject).toHaveBeenCalledExactlyOnceWith('proj_live');
   });
 });

@@ -46,7 +46,12 @@ export type UnreadRecord = {
  * project it belongs to, and the acquire-time project can be a stale focus. So
  * the machine starts at once and its read and writes resolve against the real
  * path once `bound` does; a patch made before that is held by the record
- * machine, not lost. A chat with no project (`undefined`) fails every call.
+ * machine, not lost.
+ *
+ * A chat with no project (`undefined`) has nowhere to keep a composer: its
+ * record reads as absent and its record writes are dropped, so an ownerless
+ * draft lives in memory without a failure to report. Attachment bytes still
+ * fail, because a draft cannot hold an attachment it has nowhere to store.
  *
  * @param bound - Settles with the chat's binding, or `undefined` for none.
  * @returns A store that delegates to the bound one.
@@ -65,16 +70,16 @@ export const deferredRecordStore = (bound: Promise<ComposerBinding | undefined>)
   };
   return {
     async read() {
-      const store = await record();
-      return store.read();
+      const binding = await bound;
+      return binding === undefined ? { status: 'absent' } : binding.record.read();
     },
     async patch(fields) {
-      const store = await record();
-      return store.patch(fields);
+      const binding = await bound;
+      await binding?.record.patch(fields);
     },
     async remove() {
-      const store = await record();
-      return store.remove();
+      const binding = await bound;
+      await binding?.record.remove();
     },
     attachments: {
       async put(bytes, mediaType, filename) {

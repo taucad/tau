@@ -1,6 +1,9 @@
 /* oxlint-disable tau-lint/no-hardcoded-color -- Fixture colors are test-only visual sentinels for the image carousel e2e harness. */
 import * as React from 'react';
-import { ChatTextareaImageStrip } from '#components/chat/chat-textarea-image-strip.js';
+import { ChatTextareaAttachmentRail } from '#components/chat/chat-textarea-image-strip.js';
+import { createAttachmentStore } from '#db/attachment-store.js';
+import { useFileManager } from '#hooks/use-file-manager.js';
+import type { Attachment } from '#utils/attachment.utils.js';
 import { getEnvironment } from '#environment.config.js';
 
 type FixtureImage = {
@@ -16,17 +19,27 @@ const fixtureImages: readonly FixtureImage[] = [
   { label: 'Uploaded 5', color: '#7b2cbf' },
 ];
 
-const createFixtureImageUrl = ({ color, label }: FixtureImage): string => {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="960" height="720" viewBox="0 0 960 720">
-  <rect width="960" height="720" fill="${color}"/>
-  <rect x="64" y="64" width="832" height="592" rx="42" fill="rgba(255,255,255,0.16)" stroke="rgba(255,255,255,0.86)" stroke-width="18"/>
-  <text x="480" y="384" fill="white" font-family="Arial, sans-serif" font-size="96" font-weight="700" text-anchor="middle">${label}</text>
-</svg>`;
+// The rail renders stored attachments, so the fixture draws each image as a PNG and stores it like a paste would.
+const fixtureDirectory = '/.tau/composers/e2e-chat-image-carousel/attachments';
 
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+const drawFixtureImage = async ({ color, label }: FixtureImage): Promise<Uint8Array<ArrayBuffer>> => {
+  const canvas = new OffscreenCanvas(960, 720);
+  const context = canvas.getContext('2d');
+  if (!context) {
+    throw new Error('The fixture needs a 2D canvas.');
+  }
+  context.fillStyle = color;
+  context.fillRect(0, 0, 960, 720);
+  context.strokeStyle = 'rgba(255,255,255,0.86)';
+  context.lineWidth = 18;
+  context.strokeRect(64, 64, 832, 592);
+  context.fillStyle = 'white';
+  context.font = '700 96px Arial, sans-serif';
+  context.textAlign = 'center';
+  context.fillText(label, 480, 384);
+  const blob = await canvas.convertToBlob({ type: 'image/png' });
+  return new Uint8Array(await blob.arrayBuffer());
 };
-
-const initialImages = fixtureImages.map((fixtureImage) => createFixtureImageUrl(fixtureImage));
 
 export const loader = async (): Promise<Response> => {
   const environment = await getEnvironment();
@@ -40,18 +53,35 @@ export const loader = async (): Promise<Response> => {
 };
 
 const ChatImageCarouselDebugRoute = (): React.JSX.Element => {
-  const [images, setImages] = React.useState(initialImages);
+  const { client } = useFileManager();
+  const [images, setImages] = React.useState<readonly Attachment[]>();
+
+  React.useEffect(() => {
+    const store = createAttachmentStore(client, fixtureDirectory);
+    const storeFixtures = async (): Promise<void> => {
+      setImages(
+        await Promise.all(
+          fixtureImages.map(async (fixtureImage) => store.put(await drawFixtureImage(fixtureImage), 'image/png')),
+        ),
+      );
+    };
+    // async-iife: bootstrap — the fixture renders nothing until its images are stored.
+    void storeFixtures();
+  }, [client]);
 
   return (
     <main className='flex min-h-screen items-end justify-center bg-background p-10'>
       <section className='w-80 rounded-xl border bg-background p-4 shadow-sm'>
-        <ChatTextareaImageStrip
-          images={images}
-          size='desktop'
-          onRemoveImage={(index) => {
-            setImages((currentImages) => currentImages.filter((_, imageIndex) => imageIndex !== index));
-          }}
-        />
+        {images ? (
+          <ChatTextareaAttachmentRail
+            attachments={images}
+            directory={fixtureDirectory}
+            size='desktop'
+            onRemove={(index) => {
+              setImages((currentImages) => currentImages?.filter((_, imageIndex) => imageIndex !== index));
+            }}
+          />
+        ) : undefined}
       </section>
     </main>
   );

@@ -6,11 +6,13 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { CreatedProject } from '#hooks/use-project-manager.js';
 import { projectLibraryEntryToListItem } from '#types/project.types.js';
 import { useSessions } from '#hooks/use-sessions.js';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- let types be inferred
 export function useProjects(options?: { includeDeleted?: boolean }) {
   const queryClient = useQueryClient();
   const sessions = useSessions();
+  const chatSessions = useChatSessionStore();
   const includeDeleted = options?.includeDeleted ?? false;
   const {
     getProjectListing,
@@ -89,11 +91,13 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
   const handlePermanentlyDeleteProject = useCallback(
     async (projectId: string) => {
       await closeProjectSession(projectId);
+      // Live composer records must stop before their directory is removed, or they write it back (D11).
+      await chatSessions.removeProject(projectId);
       await permanentlyDeleteProject(projectId);
       void queryClient.invalidateQueries({ queryKey: ['projects'] });
       queryClient.removeQueries({ queryKey: ['project', projectId] });
     },
-    [closeProjectSession, permanentlyDeleteProject, queryClient],
+    [chatSessions, closeProjectSession, permanentlyDeleteProject, queryClient],
   );
 
   const handleDuplicateProject = useCallback(

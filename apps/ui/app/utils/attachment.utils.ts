@@ -10,6 +10,9 @@
 /** Images are sent to the model inline; documents are materialised per provider. */
 export type AttachmentKind = 'image' | 'document';
 
+/** The part of an attachment its stored name is derived from. */
+export type AttachmentName = Pick<Attachment, 'hash' | 'mediaType'>;
+
 /** A stored attachment. `hash` is the lowercase hex SHA-256 of the bytes. */
 export type Attachment = {
   readonly hash: string;
@@ -51,10 +54,13 @@ export const attachmentKind = (mediaType: string): AttachmentKind =>
 /**
  * The file name an attachment is written under.
  *
+ * Takes only the fields the name is made of: a reference read back from a file
+ * part names its hash and media type but has no byte length to offer.
+ *
  * @throws When `mediaType` is unsupported. Only store-produced attachments are
  *   passed here, and the store refuses an unsupported type before writing.
  */
-export const attachmentFileName = (attachment: Attachment): string => {
+export const attachmentFileName = (attachment: AttachmentName): string => {
   if (!isSupportedAttachmentMediaType(attachment.mediaType)) {
     throw new Error(`Unsupported attachment type: ${attachment.mediaType}`);
   }
@@ -62,7 +68,7 @@ export const attachmentFileName = (attachment: Attachment): string => {
 };
 
 /** The reference stored in a file part or log row, relative to the owning directory. */
-export const attachmentUrl = (attachment: Attachment): string => `attachments/${attachmentFileName(attachment)}`;
+export const attachmentUrl = (attachment: AttachmentName): string => `attachments/${attachmentFileName(attachment)}`;
 
 /** Cap after processing: images 4 MiB (captures included), documents 20 MiB (D17). */
 export const attachmentCapBytes = (kind: AttachmentKind): number => (kind === 'image' ? 4 : 20) * 1024 * 1024;

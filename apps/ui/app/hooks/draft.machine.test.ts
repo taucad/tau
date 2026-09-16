@@ -4,6 +4,7 @@ import { createActor, waitFor } from 'xstate';
 import type { MyUIMessage } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';
 import { sha256Bytes } from '@taucad/utils/hash';
+import { base64ToUint8Array } from 'uint8array-extras';
 import { attachmentKinds, draftMachine } from '#hooks/draft.machine.js';
 import type { DraftAttachmentModel, DraftEmittedEvents } from '#hooks/draft.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
@@ -38,7 +39,7 @@ const hashA = 'a'.repeat(64);
 const hashB = 'b'.repeat(64);
 
 const bytesOf = (dataUrl: string): Uint8Array<ArrayBuffer> =>
-  Uint8Array.from(atob(dataUrl.slice(dataUrl.indexOf(',') + 1)), (character) => character.charCodeAt(0));
+  base64ToUint8Array(dataUrl.slice(dataUrl.indexOf(',') + 1));
 
 /** The attachment the fake store returns for these bytes: the real hash, so URLs are checkable. */
 const storedAs = async (dataUrl: string, filename?: string): Promise<Attachment> => {
@@ -346,6 +347,19 @@ describe('draftMachine', () => {
       actor.send({ type: 'clearDraft' });
       await waitFor(actor, () => allSavingIdle(actor));
       expect(selections.at(-1)).toEqual({ toolChoice: 'auto', mode: 'plan' });
+      actor.stop();
+    });
+    it('should keep a pending draft save and an in-flight attachment when the mode changes', () => {
+      const { actor, resized } = createHarness({ resize: pendingForever });
+      actor.start();
+      actor.send({ type: 'setDraftText', text: 'typing' });
+      actor.send({ type: 'addDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
+      actor.send({ type: 'setDraftMode', mode: 'plan' });
+      actor.send({ type: 'setDraftToolChoice', toolChoice: 'required' });
+      const snapshot = actor.getSnapshot();
+      expect(snapshot.matches({ inputSaving: 'pending' })).toBe(true);
+      expect(snapshot.matches({ attachmentProcessing: 'resizing' })).toBe(true);
+      expect(resized).toEqual([pngA]);
       actor.stop();
     });
   });
@@ -664,17 +678,17 @@ describe('draftMachine', () => {
     it('should keep a locally chosen mode and write back only what was touched', async () => {
       const { actor, drafts, selections } = createHarness();
       actor.start();
-      actor.send({ type: 'setDraftMode', mode: 'ask' });
+      actor.send({ type: 'setDraftMode', mode: 'plan' });
       await waitFor(actor, () => selections.length === 1);
-      actor.send({ type: 'hydrateDraft', draft: recordDraft, toolChoice: 'required', mode: 'plan' });
+      actor.send({ type: 'hydrateDraft', draft: recordDraft, toolChoice: 'required', mode: 'agent' });
 
       const { context } = actor.getSnapshot();
-      expect(context.draftMode).toBe('ask');
+      expect(context.draftMode).toBe('plan');
       expect(context.draftToolChoice).toBe('required');
       // The draft was never touched, so the stored one applies.
       expect(context.draftText).toBe('stored prompt');
       await waitFor(actor, () => selections.length === 2);
-      expect(selections[1]).toEqual({ mode: 'ask' });
+      expect(selections[1]).toEqual({ mode: 'plan' });
       expect(drafts).toEqual([]);
       actor.stop();
     });

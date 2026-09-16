@@ -87,6 +87,14 @@ const fakeWindow = {
   on: vi.fn(),
 };
 
+/* The quit hold's only visible surface when it cannot settle (C69). */
+const dialog = {
+  showOpenDialog: vi.fn(),
+  showMessageBox: vi.fn(
+    async (_options: Readonly<{ buttons?: readonly string[] }>): Promise<{ response: number }> => ({ response: 0 }),
+  ),
+};
+
 vi.mock('electron', () => ({
   app,
   BrowserWindow: Object.assign(
@@ -98,7 +106,7 @@ vi.mock('electron', () => ({
       fromWebContents: vi.fn(() => fakeWindow),
     },
   ),
-  dialog: { showOpenDialog: vi.fn(), showMessageBox: vi.fn() },
+  dialog,
   ipcMain: {
     handle: vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => state.handlers.set(channel, handler)),
     on: vi.fn((channel: string, handler: (...args: unknown[]) => unknown) => {
@@ -354,6 +362,44 @@ describe('desktop main compute owner', () => {
       expect(order.indexOf('quiesce')).toBeGreaterThanOrEqual(0);
       expect(order.indexOf('quiesce')).toBeLessThan(order.indexOf('dispose'));
       expect(state.log).toHaveBeenCalledWith('info', 'main.renderer-quiesce', { outcome: 'quiesced' });
+    },
+    bootMilliseconds,
+  );
+
+  /*
+   * C69: a quit that cannot settle has to be *visible*.
+   *
+   * Aborting the quit is right — the projects keep their unrecorded work — but
+   * the renderer has already dismissed its overlay by then, so without a dialog
+   * Cmd+Q simply does nothing, with no reason and nothing to act on. *Quit
+   * anyway* re-enters the same shutdown, forced.
+   */
+  it(
+    'names what could not settle when a quit is held, and quits anyway on request',
+    async () => {
+      await bootstrap();
+      state.servicesQuiesce.mockResolvedValue('failed');
+
+      const quit = state.appListeners.get('before-quit')!.at(-1)!;
+      quit({ preventDefault: vi.fn() });
+
+      await vi.waitFor(() => {
+        expect(dialog.showMessageBox).toHaveBeenCalled();
+      });
+      expect(dialog.showMessageBox.mock.calls[0]?.[0]).toMatchObject({
+        buttons: expect.arrayContaining(['Quit anyway']) as unknown as string[],
+      });
+      expect(app.quit).not.toHaveBeenCalled();
+      expect(state.servicesDispose).not.toHaveBeenCalled();
+
+      dialog.showMessageBox.mockResolvedValue({ response: 1 });
+      quit({ preventDefault: vi.fn() });
+
+      await vi.waitFor(() => {
+        expect(app.quit).toHaveBeenCalledOnce();
+      });
+      dialog.showMessageBox.mockResolvedValue({ response: 0 });
+      state.servicesQuiesce.mockResolvedValue('quiesced');
     },
     bootMilliseconds,
   );

@@ -7,7 +7,7 @@
  * work — kernels, disk, the agent host — lives in the utilities.
  */
 
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
@@ -222,6 +222,26 @@ const bootstrapElectronApp = async (): Promise<void> => {
   const picogkResourceRoot = app.isPackaged
     ? join(process.resourcesPath, 'picogk')
     : join(import.meta.dirname, '../../resources/picogk');
+  /*
+   * The `git` this app records revisions with (OQ3, C68).
+   *
+   * One binary, not two: the bundled git's own exec path carries `git-lfs`, so
+   * `git lfs` resolves through it and nothing has to name a second executable.
+   * Absent — a development tree, or a platform whose payload is not built — the
+   * toolchain comes from `PATH`, which on a Finder launch is
+   * `/usr/bin:/bin:/usr/sbin:/sbin`; a machine that has neither is told once,
+   * by name, through `revision.unavailable`.
+   */
+  const bundledGitExecutable = join(
+    app.isPackaged ? join(process.resourcesPath, 'git') : join(import.meta.dirname, '../../resources/git'),
+    `${process.platform}-${process.arch}`,
+    'bin',
+    process.platform === 'win32' ? 'git.exe' : 'git',
+  );
+  const gitEnvironment: Readonly<Record<string, string>> = existsSync(bundledGitExecutable)
+    ? // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+      { TAU_GIT_EXECUTABLE: bundledGitExecutable }
+    : {};
   const esbuildEnvironment = packagedEsbuildEnvironment(app.isPackaged, process.resourcesPath);
   const log = createDiagnosticsLog({ directory: logDirectory, echo: isDevelopment });
   log.log('info', 'main.ready', { electron: process.versions.electron, packaged: app.isPackaged, isDevelopment });
@@ -412,6 +432,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     utilityEntry: servicesUtilityEntry,
     env: utilityEnvironment(environment, {
       ...esbuildEnvironment,
+      ...gitEnvironment,
       TAU_CONFIG_DIR: tauConfigDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
     }),
@@ -795,6 +816,27 @@ const bootstrapElectronApp = async (): Promise<void> => {
 
   let shutdownComplete = false;
   let shutdown: Promise<void> | undefined;
+  /**
+   * Tell the person a quit could not settle, and offer to quit anyway (C69, R13).
+   *
+   * Both abort paths below leave the app live on purpose — the unrecorded work
+   * is still there — but the renderer has already taken its own overlay down by
+   * then, so without this Cmd+Q is silent and there is nothing to act on.
+   *
+   * @param detail - What could not settle, in the person's own words.
+   * @returns Whether to go on with the quit regardless.
+   */
+  const askToQuitAnyway = async (detail: string): Promise<boolean> => {
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      buttons: ['Keep Tau open', 'Quit anyway'],
+      defaultId: 0,
+      cancelId: 0,
+      message: 'Tau is still saving your work.',
+      detail: `${detail} Quitting now would leave those changes out of a revision.`,
+    });
+    return response === 1;
+  };
   app.on('before-quit', (event) => {
     quitting = true;
     if (shutdownComplete) {
@@ -821,15 +863,24 @@ const bootstrapElectronApp = async (): Promise<void> => {
          */
         const rendererOutcome = await askRendererToQuiesce(quitRendererMilliseconds);
         log.log('info', 'main.renderer-quiesce', { outcome: rendererOutcome });
-        const forced = rendererOutcome === 'forced';
-        if (rendererOutcome === 'timeout') {
+        let forced = rendererOutcome === 'forced';
+        if (
+          rendererOutcome === 'timeout' &&
+          !(await askToQuitAnyway('This window did not finish closing its projects.'))
+        ) {
           quitting = false;
           shutdown = undefined;
           return;
         }
+        forced ||= rendererOutcome === 'timeout';
         const utilityOutcome = await services.quiesce(quitQuiesceMilliseconds);
         log.log('info', 'main.quiesce', { outcome: utilityOutcome });
-        if (!forced && utilityOutcome !== 'quiesced' && utilityOutcome !== 'no-utility') {
+        if (
+          !forced &&
+          utilityOutcome !== 'quiesced' &&
+          utilityOutcome !== 'no-utility' &&
+          !(await askToQuitAnyway('Tau could not finish saving every open project.'))
+        ) {
           quitting = false;
           shutdown = undefined;
           return;

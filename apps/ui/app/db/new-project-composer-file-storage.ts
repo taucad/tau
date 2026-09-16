@@ -1,118 +1,35 @@
-import { z } from 'zod';
+/**
+ * Compatibility seam for the Home pre-project composer.
+ *
+ * The record itself is now one member of the composer record family in
+ * `#db/composer-record-store.js`. This module survives only until W6 moves
+ * `HomeNewProjectComposerProvider` onto `composerRecordMachine`; it adds no
+ * behaviour of its own.
+ */
+
 import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
-import { cadAgentExecutionSchema, safeValidateUiMessages } from '@taucad/chat';
-import { KeyedMutex } from '#db/keyed-mutex.js';
+import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
+import type { ComposerRecord, ComposerRecordClient, ComposerRecordReadResult } from '#db/composer-record-store.js';
 
 /** Sole Home-workspace record for the pre-project composer. */
-export const newProjectComposerFilePath = '/.tau/composers/new-project.json';
+export const newProjectComposerFilePath = composerRecordPaths.newProject;
 
-export type NewProjectComposerRecord = {
-  readonly version: 1;
-  readonly draft?: MyUIMessage;
-  readonly execution?: CadAgentExecution;
-};
+/** Alias of `ComposerRecord`, kept until the Home provider names the record family directly. */
+export type NewProjectComposerRecord = ComposerRecord;
 
-export type NewProjectComposerReadResult =
-  | { readonly status: 'absent' }
-  | { readonly status: 'valid'; readonly record: NewProjectComposerRecord }
-  | { readonly status: 'invalid'; readonly error: Error };
+/** Alias of `ComposerRecordReadResult`, kept until the Home provider names the record family directly. */
+export type NewProjectComposerReadResult = ComposerRecordReadResult;
 
-type NewProjectComposerClient = {
-  readFile: (path: string, encoding: 'utf8') => Promise<string>;
-  writeFile: (path: string, data: string) => Promise<void>;
-};
-
-const envelopeSchema = z
-  .object({
-    version: z.literal(1),
-    draft: z.unknown().optional(),
-    execution: cadAgentExecutionSchema.optional(),
-  })
-  .strict();
-
-const mutex = new KeyedMutex<string>();
-
-const isNotFound = (error: unknown): boolean => {
-  const candidate = error as { code?: unknown; name?: unknown };
-  return candidate.code === 'ENOENT' || candidate.code === 'ENOTDIR' || candidate.name === 'NotFoundError';
-};
-
-const invalid = (error: unknown): NewProjectComposerReadResult => ({
-  status: 'invalid',
-  error: error instanceof Error ? error : new Error(String(error)),
-});
-
-/** The draft machine persists a cleared composer as a user message with no parts; that means "no draft". */
-const isClearedDraft = (draft: unknown): boolean => {
-  const candidate = draft as { role?: unknown; parts?: unknown } | undefined;
-  return candidate?.role === 'user' && Array.isArray(candidate.parts) && candidate.parts.length === 0;
-};
-
-const parseRecord = async (text: string): Promise<NewProjectComposerReadResult> => {
-  let json: unknown;
-  try {
-    json = JSON.parse(text);
-  } catch (error) {
-    return invalid(error);
-  }
-
-  const envelope = envelopeSchema.safeParse(json);
-  if (!envelope.success) {
-    return invalid(envelope.error);
-  }
-  // Records written before cleared drafts were omitted still carry `parts: []`.
-  if (envelope.data.draft === undefined || isClearedDraft(envelope.data.draft)) {
-    return {
-      status: 'valid',
-      record: {
-        version: 1,
-        ...(envelope.data.execution === undefined ? {} : { execution: envelope.data.execution }),
-      },
-    };
-  }
-
-  const messages = await safeValidateUiMessages([envelope.data.draft]);
-  if (!messages.success) {
-    return invalid(messages.error);
-  }
-  const draft = messages.data[0];
-  if (draft?.role !== 'user') {
-    return invalid(new Error('The new-project composer draft must be one user message.'));
-  }
-  return { status: 'valid', record: { ...envelope.data, draft } };
-};
-
-const serializeRecord = (record: NewProjectComposerRecord): string => `${JSON.stringify(record, undefined, 2)}\n`;
-
-/** Create the narrow filesystem store for the Home new-project composer. */
-export function createNewProjectComposerFileStore(client: NewProjectComposerClient): {
-  read: () => Promise<NewProjectComposerReadResult>;
+/** The Home record's store, expressed as `createComposerRecordStore(client, composerRecordPaths.newProject)`. */
+export function createNewProjectComposerFileStore(client: ComposerRecordClient): {
+  read: () => Promise<ComposerRecordReadResult>;
   patchDraft: (draft: MyUIMessage) => Promise<void>;
   patchExecution: (execution: CadAgentExecution) => Promise<void>;
 } {
-  const read = async (): Promise<NewProjectComposerReadResult> => {
-    try {
-      return await parseRecord(await client.readFile(newProjectComposerFilePath, 'utf8'));
-    } catch (error) {
-      if (isNotFound(error)) {
-        return { status: 'absent' };
-      }
-      throw error;
-    }
-  };
-
-  const patch = async (update: (record: NewProjectComposerRecord) => NewProjectComposerRecord): Promise<void> =>
-    mutex.run(newProjectComposerFilePath, async () => {
-      const current = await read();
-      const record: NewProjectComposerRecord = current.status === 'valid' ? current.record : { version: 1 };
-      await client.writeFile(newProjectComposerFilePath, serializeRecord(update(record)));
-    });
-
+  const store = createComposerRecordStore(client, composerRecordPaths.newProject);
   return {
-    read,
-    // An empty draft closes out the draft field so the record stays readable and keeps its execution.
-    patchDraft: async (draft) =>
-      patch(({ draft: _previous, ...record }) => (draft.parts.length === 0 ? record : { ...record, draft })),
-    patchExecution: async (execution) => patch((record) => ({ ...record, execution })),
+    read: store.read,
+    patchDraft: async (draft) => store.patch({ draft }),
+    patchExecution: async (execution) => store.patch({ execution }),
   };
 }

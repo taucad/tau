@@ -56,3 +56,12 @@ export const metaConfig = {
    */
   appDomain: 'tau.new',
 } as const;
+
+/**
+ * Absolute website URL for a legal page. Product surfaces link here rather than
+ * to the in-app route, which the desktop build does not ship.
+ *
+ * @param page - Page and optional anchor, for example `privacy#9.2.1`.
+ * @returns The public website URL.
+ */
+export const legalUrl = (page: string): string => `https://${metaConfig.appDomain}/legal/${page}`;

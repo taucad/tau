@@ -231,6 +231,14 @@ describe('TopupModal', () => {
     expect(client.followPaymentRedirect).not.toHaveBeenCalled();
   });
 
+  it('links Terms to the public website so desktop never opens a removed route', async () => {
+    renderModal();
+
+    const terms = await screen.findByRole('link', { name: 'Terms' });
+    expect(terms).toHaveAttribute('href', 'https://tau.new/legal/terms');
+    expect(terms).toHaveAttribute('target', '_blank');
+  });
+
   it('prepares a frozen quote before confirmation', async () => {
     client.prepareTopup.mockResolvedValue(wireAction('prepared'));
     renderModal();

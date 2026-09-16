@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { sha256Bytes } from '@taucad/utils/hash';
-import { createAttachmentStore } from '#db/attachment-store.js';
+import { createAttachmentStore, createChatAttachmentStore } from '#db/attachment-store.js';
 import { attachmentUrl } from '#utils/attachment.utils.js';
 
 const directory = '/.tau/composers/new-project/attachments';
 const otherDirectory = '/projects/p1/.tau/chats/c1/attachments';
 
-const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]) as Uint8Array<ArrayBuffer>;
-const pdf = new TextEncoder().encode('%PDF-1.7\n') as Uint8Array<ArrayBuffer>;
+const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+const pdf = new TextEncoder().encode('%PDF-1.7\n');
 
 const notFound = (path: string): Error => Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
 
@@ -98,7 +98,7 @@ describe('attachment store', () => {
 
     it('should reject an image over the 4 MiB cap without writing', async () => {
       const client = memoryClient();
-      const oversized = new Uint8Array(4 * 1024 * 1024 + 1) as Uint8Array<ArrayBuffer>;
+      const oversized = new Uint8Array(4 * 1024 * 1024 + 1);
 
       await expect(createAttachmentStore(client, directory).put(oversized, 'image/png')).rejects.toThrow(
         'Attachment exceeds the 4 MB limit for images',
@@ -109,7 +109,7 @@ describe('attachment store', () => {
 
     it('should reject a PDF over the 20 MiB cap without writing', async () => {
       const client = memoryClient();
-      const oversized = new Uint8Array(20 * 1024 * 1024 + 1) as Uint8Array<ArrayBuffer>;
+      const oversized = new Uint8Array(20 * 1024 * 1024 + 1);
 
       await expect(createAttachmentStore(client, directory).put(oversized, 'application/pdf')).rejects.toThrow(
         'Attachment exceeds the 20 MB limit for documents',
@@ -190,6 +190,33 @@ describe('attachment store', () => {
       source.files.clear();
 
       await expect(store.copyTo(chat, stored)).rejects.toThrow(stored.hash);
+    });
+
+    /*
+     * A draft hydrated after a reload, or a chat attachment a cancelled draft
+     * copies back, is a reference read from a file part: it names its hash,
+     * media type and file name, never its size (P29). Promotion needs no more.
+     */
+    it('should promote a reference that carries no byte length', async () => {
+      const source = memoryClient();
+      const target = memoryClient();
+      const store = createAttachmentStore(source, directory);
+      const chat = createAttachmentStore(target, otherDirectory);
+      const { hash, mediaType } = await store.put(pdf, 'application/pdf', 'spec.pdf');
+
+      await store.copyTo(chat, { hash, mediaType, filename: 'spec.pdf' });
+
+      expect(await chat.read({ hash, mediaType })).toEqual(pdf);
+    });
+  });
+
+  describe('createChatAttachmentStore', () => {
+    it('should root a chat attachment store beside that chat record', async () => {
+      const client = memoryClient();
+      const chat = createChatAttachmentStore(client, 'p1', 'c1');
+      const stored = await chat.put(png, 'image/png');
+
+      expect([...client.files.keys()]).toEqual([`${otherDirectory}/${stored.hash}.png`]);
     });
   });
 

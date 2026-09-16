@@ -128,6 +128,10 @@ const openFromSidebar = async (path: string): Promise<void> => {
   await expect.poll(currentPath, { timeout: 120_000 }).toBe(path);
 };
 
+/* The row's sentence for a live project with nothing running (sidebar v2 D12); a
+ * run that finished while its chat was not in view adds its rollup. */
+const liveAndIdle = /^Live(?: · \d+ chats? finished while you were away)?$/u;
+
 const projectRowDescription = async (path: string): Promise<string> =>
   target.evaluate((href) => {
     const link = document.querySelector<HTMLAnchorElement>(`a[href="${href}"]`);
@@ -161,26 +165,41 @@ const waitForCurrentProjectToSettle = async (path: string): Promise<void> => {
     })
     .toBe('true');
   await target.expectHidden(selectors.getByText('Checking…', { exact: true }), 120_000);
-  /* A seeded project is `live, unsaved edits` until a revision records its
-   * files (I24: a dirty checkout is never policy-closable), so save one the
-   * way a person does — `Mod+S` is the checkout's own save cut. */
-  if (/unsaved edits/u.test(await projectRowDescription(path))) {
+  /* A seeded project has unsaved edits until a revision records its files
+   * (I24: a dirty checkout is never policy-closable), so save one the way a
+   * person does — `Mod+S` is the checkout's own save cut. The Revisions pane
+   * owns that fact; the sidebar no longer repeats it (sidebar v2 D4). */
+  if (await target.isVisible(selectors.getByText(/^(Not saved yet|Modified since )/u))) {
     const saveShortcut = await target.evaluate(() => {
       const platform = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform;
       return /mac/i.test(platform ?? navigator.userAgent) ? 'Meta+s' : 'Control+s';
     });
     await target.keyboardPress(saveShortcut);
   }
-  await expect.poll(async () => projectRowDescription(path), { timeout: 120_000 }).toMatch(/, live\.$/u);
+  await target.expectVisible(selectors.getByText('Saved on this device', { exact: true }), 120_000);
+  await expect.poll(async () => projectRowDescription(path), { timeout: 120_000 }).toMatch(liveAndIdle);
 };
 
 const rowHasBudgetReason = async (path: string): Promise<boolean> =>
-  target.evaluate((href) => {
-    const link = document.querySelector<HTMLAnchorElement>(`a[href="${href}"]`);
-    return [...(link?.parentElement?.children ?? [])].some(
-      (element) => element !== link && element.textContent.trim() === 'Closed · memory budget · reopen any time',
+  (await projectRowDescription(path)) === 'Closed · memory budget · reopen any time';
+
+/* Row actions show on hover or focus (sidebar v2 D7), so reach them the way a
+ * pointer does before opening the menu. */
+const openProjectMenu = async (path: string): Promise<void> => {
+  await expandSidebar();
+  await target.hover(selectors.getByCss(`a[href="${path}"]`));
+  const moreId = await target.evaluate((href) => {
+    const trigger = document
+      .querySelector<HTMLAnchorElement>(`a[href="${href}"]`)
+      ?.closest<HTMLElement>('[data-slot="project-trigger"]');
+    const more = [...(trigger?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((button) =>
+      button.ariaLabel?.startsWith('More actions for '),
     );
+    return more?.id;
   }, path);
+  expect(moreId).toBeTypeOf('string');
+  await target.click(selectors.getByCss(`#${moreId!}`));
+};
 
 const waitForGatewayRequestCount = async (count: number): Promise<void> => {
   try {
@@ -237,18 +256,7 @@ const readLivenessSnapshot = async (): Promise<LivenessSnapshot> =>
   });
 
 const closeRunningProject = async (path: string): Promise<void> => {
-  await expandSidebar();
-  const moreId = await target.evaluate((href) => {
-    const trigger = document
-      .querySelector<HTMLAnchorElement>(`a[href="${href}"]`)
-      ?.closest<HTMLElement>('[data-slot="project-trigger"]');
-    const more = [...(trigger?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((button) =>
-      button.ariaLabel?.startsWith('More actions for '),
-    );
-    return more?.id;
-  }, path);
-  expect(moreId).toBeTypeOf('string');
-  await target.click(selectors.getByCss(`#${moreId!}`));
+  await openProjectMenu(path);
   const close = selectors.getByRole('menuitem', { name: /^Close /u });
   await target.expectVisible(close, 30_000);
   await target.click(close);
@@ -279,30 +287,19 @@ const closeRunningProject = async (path: string): Promise<void> => {
  * idle project has no such dialog and closes on the menu item itself.
  */
 const closeIdleProject = async (path: string): Promise<void> => {
-  await expandSidebar();
-  const moreId = await target.evaluate((href) => {
-    const trigger = document
-      .querySelector<HTMLAnchorElement>(`a[href="${href}"]`)
-      ?.closest<HTMLElement>('[data-slot="project-trigger"]');
-    const more = [...(trigger?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((button) =>
-      button.ariaLabel?.startsWith('More actions for '),
-    );
-    return more?.id;
-  }, path);
-  expect(moreId).toBeTypeOf('string');
-  await target.click(selectors.getByCss(`#${moreId!}`));
+  await openProjectMenu(path);
   const close = selectors.getByRole('menuitem', { name: /^Close /u });
   await target.expectVisible(close, 30_000);
   await target.click(close);
 };
 
 const expectProjectBusy = async (path: string): Promise<void> => {
-  await expect.poll(async () => projectRowDescription(path), { timeout: 120_000 }).toMatch(/, live, busy/u);
+  await expect.poll(async () => projectRowDescription(path), { timeout: 120_000 }).toMatch(/^Live, busy/u);
 };
 
 const expectProjectIdle = async (path: string): Promise<void> => {
   try {
-    await expect.poll(async () => projectRowDescription(path), { timeout: 120_000 }).toMatch(/, live\.$/u);
+    await expect.poll(async () => projectRowDescription(path), { timeout: 120_000 }).toMatch(liveAndIdle);
   } catch (error) {
     throw new Error(`Project did not become idle: ${JSON.stringify(await readLivenessSnapshot())}`, {
       cause: error,
@@ -311,7 +308,7 @@ const expectProjectIdle = async (path: string): Promise<void> => {
 };
 
 const expectProjectClosed = async (path: string): Promise<void> => {
-  await expect.poll(async () => projectRowDescription(path), { timeout: 120_000 }).toMatch(/, closed\.$/u);
+  await expect.poll(async () => projectRowDescription(path), { timeout: 120_000 }).toMatch(/^Closed/u);
 };
 
 /** Start a real browser-host run against the already-installed gateway. */
@@ -483,6 +480,6 @@ describe('a closed project keeps the app shell and reopens from its notice (W2, 
     await target.click(selectors.getByRole('button', { name: 'Reopen project' }));
     await target.expectVisible(selectors.getByRole('button', { name: /^Open Revisions\./u }), 120_000);
     await waitForKernelCount(1);
-    await expect.poll(async () => projectRowDescription(path), { timeout: 120_000 }).toMatch(/, live\.$/u);
+    await expect.poll(async () => projectRowDescription(path), { timeout: 120_000 }).toMatch(liveAndIdle);
   }, 900_000);
 });

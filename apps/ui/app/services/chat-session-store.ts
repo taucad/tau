@@ -815,28 +815,9 @@ export class ChatSessionStore {
   }
 
   /**
-   * Run this chat's last turn again, through the verb that already owns it.
-   *
-   * The same `startRequest{kind:'continue'}` the in-chat *Try again* sends
-   * (`use-chat.tsx`'s `continueChat`), so the sidebar's *Retry* on a failed row
-   * and the banner's button are one path and not two.
-   *
-   * @param chatId - The chat whose failed turn should run again.
-   * @public
-   */
-  public retryRun(chatId: string): void {
-    const session = this.#sessions.get(chatId);
-    if (session === undefined) {
-      return;
-    }
-    void this.touchChatRecency(chatId, Date.now());
-    session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'continue' } });
-  }
-
-  /**
    * Stop this chat's run, through the one dispatcher that owns it (P63).
    *
-   * *Close* in the sidebar and *Stop* in the composer are the same verb, so
+   * *Stop* in the sidebar and *Stop* in the composer are the same verb, so
    * they go to the same place: the persistence machine's `stopRequest`, which
    * aborts the request, settles the run and releases its lease. The chat's own
    * machine only records that the person stopped it.

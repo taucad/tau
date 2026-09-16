@@ -1,13 +1,11 @@
 import { Fragment, useMemo, useState } from 'react';
 import type { Chat } from '@taucad/chat';
-import { MoreHorizontal, Pencil, Trash2, X } from 'lucide-react';
-import { Link, useLocation, useNavigate, useNavigation } from 'react-router';
+import { MoreHorizontal, Pencil, Square, Trash2 } from 'lucide-react';
+import { useLocation, useNavigate, useNavigation } from 'react-router';
 import type { ProjectListItem } from '#types/project.types.js';
 import { useChats } from '#hooks/use-chats.js';
 import { SidebarMenuButton, SidebarMenuSub, SidebarMenuSubItem } from '#components/ui/sidebar.js';
-import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Button } from '@taucad/ui/components/button';
-import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,17 +14,21 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
-import { Loader } from '#components/ui/loader.js';
 import { pickNextFocusedChatId } from '#routes/w.$workspace.$project/chat-navigation.utils.js';
 import { projectChatIdFromSearch, projectChatUrl, projectUrl } from '#utils/project-url.utils.js';
 import { compareChatsByRecency, getChatRecencyAt } from '#utils/chat-recency.utils.js';
-import { BranchChip, ChatStatusGlyph } from '#components/nav/chat-status-glyph.js';
+import { StatusMark } from '#components/nav/status-mark.js';
 import {
-  chatStatusDescription,
-  chatStatusLabel,
-  useChatSidebarStatus,
-  useSidebarCommands,
-} from '#hooks/use-sidebar-status.js';
+  SidebarFailureRow,
+  SidebarRowActions,
+  SidebarRowLink,
+  SidebarRowSkeleton,
+  sidebarRowButtonClass,
+  sidebarRowClass,
+  sidebarRowEditorClass,
+} from '#components/nav/sidebar-row.js';
+import { selectChatFacts, useChatSidebarStatus, useSidebarCommands } from '#hooks/use-sidebar-status.js';
+import type { SidebarFacts } from '#hooks/use-sidebar-status.js';
 import { useChatSession } from '#hooks/use-chat-session.js';
 
 const chatsPerPage = 5;
@@ -46,7 +48,7 @@ export function ProjectChatList({
   readonly project: ProjectListItem;
   readonly isProjectActive: boolean;
 }): React.JSX.Element {
-  const { chats, isLoading, error, retry, updateChatName, deleteChat } = useChats(project.id);
+  const { chats, isLoading, error, updateChatName, deleteChat } = useChats(project.id);
   const location = useLocation();
   const navigate = useNavigate();
   const navigation = useNavigation();
@@ -80,33 +82,28 @@ export function ProjectChatList({
   };
 
   return (
-    <SidebarMenuSub id={listId} className='mx-0 mt-0.5 translate-x-0 gap-0.5 border-0 px-0 py-0'>
+    /* D8: chats step in one slot and hang off the sidebar primitive's own rail,
+     * which starts under the project's chevron, so a chat row and a collapsed
+     * project row never share a column. */
+    <SidebarMenuSub
+      id={listId}
+      className='mt-0.5 mr-0 ml-3.5 translate-x-0 gap-0 border-l border-sidebar-border py-0 pr-0 pl-1.5'
+    >
       {isLoading && chats.length === 0
         ? Array.from({ length: 3 }, (_, index) => (
             <SidebarMenuSubItem key={index} aria-hidden>
-              <div className='flex h-7 items-center gap-2 px-2'>
-                <Skeleton className='size-3 rounded-sm' />
-                <Skeleton className='h-3 flex-1' />
-              </div>
+              <SidebarRowSkeleton />
             </SidebarMenuSubItem>
           ))
         : null}
       {error && chats.length === 0 ? (
         <SidebarMenuSubItem>
-          <button
-            type='button'
-            className='h-7 w-full rounded-md px-2 text-left text-xs text-muted-foreground hover:bg-sidebar-accent'
-            onClick={() => {
-              void retry();
-            }}
-          >
-            Could not load chats. Retry
-          </button>
+          <SidebarFailureRow what='chats' />
         </SidebarMenuSubItem>
       ) : null}
       {!isLoading && !error && chats.length === 0 ? (
         <SidebarMenuSubItem>
-          <div className='flex h-7 items-center px-2 text-xs text-muted-foreground'>No chats yet</div>
+          <div className='flex h-7 items-center pl-7.5 text-xs text-muted-foreground'>No chats yet</div>
         </SidebarMenuSubItem>
       ) : null}
       {visibleChats.map((chat, index) => (
@@ -180,73 +177,69 @@ function ProjectChatItem({
   const { closeChat } = useSidebarCommands();
   useChatSession(chat.id, project.id);
   const status = useChatSidebarStatus(project.id, chat.id);
-  const isFailed = status?.state === 'failed';
+  const facts: SidebarFacts = status === undefined ? { mark: 'none', sentence: undefined } : selectChatFacts(status);
+  /* D7: *Stop* only while there is something to stop. */
+  const canStop = facts.mark === 'running' || facts.mark === 'attention';
   return (
     <SidebarMenuSubItem>
-      <div
-        data-slot='chat-trigger'
-        data-active={isActive}
-        className='group/chat-trigger flex min-h-7 w-full min-w-0 items-center rounded-md text-sm text-sidebar-foreground transition-colors focus-within:bg-sidebar-accent hover:bg-sidebar-accent data-[active=true]:bg-sidebar-accent'
-      >
+      <div data-slot='chat-trigger' data-active={isActive} className={sidebarRowClass(isEditing)}>
+        {/* D8: the status column leads every chat row and is never hidden —
+            hover reveals the actions at the far end, and renaming keeps it. */}
+        <StatusMark data-slot='chat-status' facts={facts} />
         {isEditing ? (
           <InlineTextEditor
             value={chat.name}
             variant='ghost'
             shouldStartEditing
-            className='h-7 min-w-0 flex-1 pr-1.5 pl-[30px] [&_[data-slot=button]]:hidden [&_[data-slot=input]]:h-7'
+            className={sidebarRowEditorClass}
             onSave={onRenameSave}
             onEditingChange={onEditingChange}
           />
-        ) : project.slugs ? (
-          <ChatRowContent
-            chat={chat}
-            status={status}
-            to={projectChatUrl(project.slugs, chat.id)}
-            isActive={isActive}
-            isPending={isPending}
-          />
         ) : (
-          <div className='flex h-7 min-w-0 flex-1 items-center pr-1.5 pl-[30px] text-sm text-muted-foreground'>
-            <span className='truncate'>{chat.name}</span>
-          </div>
-        )}
-        {isEditing ? null : (
-          <span className='relative flex shrink-0 items-center'>
-            {status === undefined ? null : (
-              <span className='pointer-events-none absolute right-3 hidden transition-opacity md:flex md:group-focus-within/chat-trigger:opacity-0 md:group-hover/chat-trigger:opacity-0'>
-                <ChatStatusGlyph status={status} />
-              </span>
+          <>
+            {project.slugs ? (
+              <SidebarRowLink
+                to={projectChatUrl(project.slugs, chat.id)}
+                name={chat.name}
+                sentence={facts.sentence}
+                descriptionId={`chat-status-${chat.id}`}
+                isActive={isActive}
+                isPending={isPending}
+              />
+            ) : (
+              <span className='fade-label flex-1 text-muted-foreground'>{chat.name}</span>
             )}
-            <span className='flex items-center transition-opacity md:opacity-0 md:group-focus-within/chat-trigger:opacity-100 md:group-hover/chat-trigger:opacity-100'>
-              {isFailed ? <FailedChatActions chat={chat} project={project} /> : null}
+            <SidebarRowActions>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
                     type='button'
                     variant='ghost'
                     size='icon'
-                    className={nestedActionVariants({
-                      className: 'mr-0.5 size-6 shrink-0 text-muted-foreground',
-                    })}
+                    className={sidebarRowButtonClass}
                     aria-label={`More actions for ${chat.name}`}
                   >
                     <MoreHorizontal aria-hidden className='size-3.5' />
                   </Button>
                 </DropdownMenuTrigger>
+                {/* D7: no Retry and no Open log. The chat's own banner owns Try
+                    again, and the name already opens the chat. */}
                 <DropdownMenuContent side='right' align='start' className='w-40'>
                   <DropdownMenuItem onSelect={onRename}>
                     <Pencil aria-hidden />
                     Rename
                   </DropdownMenuItem>
-                  <DropdownMenuItem
-                    aria-label={`Close ${chat.name}`}
-                    onSelect={() => {
-                      closeChat(project.id, chat.id);
-                    }}
-                  >
-                    <X aria-hidden />
-                    Close
-                  </DropdownMenuItem>
+                  {canStop ? (
+                    <DropdownMenuItem
+                      aria-label={`Stop ${chat.name}`}
+                      onSelect={() => {
+                        closeChat(project.id, chat.id);
+                      }}
+                    >
+                      <Square aria-hidden />
+                      Stop
+                    </DropdownMenuItem>
+                  ) : null}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     variant='destructive'
@@ -259,112 +252,10 @@ function ProjectChatItem({
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-            </span>
-          </span>
+            </SidebarRowActions>
+          </>
         )}
       </div>
     </SidebarMenuSubItem>
-  );
-}
-
-/**
- * A chat row's whole status surface — one subscriber, one repaint.
- *
- * Everything the row draws about the chat is read here and nowhere else, so a
- * chat whose tool name moved repaints its own row and not its siblings' (V24).
- * The glyph, the second line and the chip sit *outside* the link on purpose:
- * the link's accessible name is the chat's name, and nothing else.
- *
- * @param props - The chat, its project, and the link's own state.
- * @returns The row's content.
- */
-function ChatRowContent({
-  chat,
-  status,
-  to,
-  isActive,
-  isPending,
-}: {
-  readonly chat: Chat;
-  readonly status: ReturnType<typeof useChatSidebarStatus>;
-  readonly to: string;
-  readonly isActive: boolean;
-  readonly isPending: boolean;
-}): React.JSX.Element {
-  const label = status === undefined ? undefined : chatStatusLabel(status);
-  const descriptionId = `chat-status-${chat.id}`;
-  return (
-    <>
-      <span className='flex min-w-0 flex-1 flex-col justify-center py-0.5 pl-[30px]'>
-        <Link
-          to={to}
-          aria-current={isActive ? 'page' : undefined}
-          aria-busy={isPending}
-          aria-describedby={status === undefined ? undefined : descriptionId}
-          className='flex min-w-0 items-center gap-1.5 overflow-hidden rounded-md outline-hidden focus-visible:focus-outline'
-        >
-          {isPending ? <Loader className='size-3.5 shrink-0' /> : null}
-          <span className={`truncate ${status?.unread === true ? 'font-medium text-foreground' : ''}`}>
-            {chat.name}
-          </span>
-        </Link>
-        {label === undefined ? null : (
-          <span className='truncate text-xs leading-tight text-muted-foreground'>{label}</span>
-        )}
-      </span>
-      {status === undefined ? null : <BranchChip branch={status.branch} isDirty={status.dirty} />}
-      {status === undefined ? null : (
-        <span id={descriptionId} className='sr-only'>
-          {chatStatusDescription(chat.name, status)}
-        </span>
-      )}
-    </>
-  );
-}
-
-/**
- * *Retry* and *Open log*, the two verbs a failed row offers (R12, canvas).
- *
- * Neither is new behaviour: *Retry* is the same `startRequest{kind:'continue'}`
- * the in-chat error banner's *Try again* sends, through the store that owns the
- * run, and *Open log* is the chat's own route — the place the transcript is.
- *
- * @param props - The failed chat and its project.
- * @returns The two controls.
- */
-function FailedChatActions({
-  chat,
-  project,
-}: {
-  readonly chat: Chat;
-  readonly project: ProjectListItem;
-}): React.JSX.Element {
-  const { retryChat } = useSidebarCommands();
-  return (
-    <span className='flex shrink-0 items-center'>
-      <Button
-        type='button'
-        variant='ghost'
-        size='sm'
-        className={nestedActionVariants({ className: 'h-6 px-1.5 text-xs text-muted-foreground' })}
-        aria-label={`Retry ${chat.name}`}
-        onClick={() => {
-          retryChat(chat.id);
-        }}
-      >
-        Retry
-      </Button>
-      {project.slugs === undefined ? null : (
-        <Link
-          to={projectChatUrl(project.slugs, chat.id)}
-          aria-label={`Open log for ${chat.name}`}
-          className={nestedActionVariants({
-            className: 'rounded-sm px-1.5 text-xs text-muted-foreground outline-hidden focus-visible:focus-outline',
-          })}
-        >
-          Open log
-        </Link>
-      )}
-    </span>
   );
 }

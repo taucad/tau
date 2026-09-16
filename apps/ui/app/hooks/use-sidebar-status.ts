@@ -10,15 +10,18 @@
  *
  * Two shapes, on purpose:
  *
- * - `ChatSidebarStatus` is a chat row's whole vocabulary and comes from **one**
- *   snapshot, the chat's own machine. The branch, the dirty pip and the sync
- *   facet ride on it because `project-session` broadcasts `revisionState` to
- *   every chat it owns, so a chat row never reads a second machine.
+ * - `ChatSidebarStatus` is a chat's whole vocabulary and comes from **one**
+ *   snapshot, the chat's own machine. The branch and dirty facets ride on it
+ *   because `project-session` broadcasts `revisionState` to every chat it owns;
+ *   the chat's revision marker reads them, the sidebar does not (v2 D4).
  * - `ProjectSidebarStatus` is the one coalesced object per project (S46) that
- *   the project row, the *Live now* header and the close dialogs read. It joins
- *   the registry's liveness, its chats' statuses and the worker's
- *   `RevisionStatus` projection — built once per project, never four machine
- *   snapshots per row.
+ *   the project row and the close dialogs read. It joins the registry's
+ *   liveness, its chats' statuses and the worker's `RevisionStatus` projection
+ *   — built once per project, never four machine snapshots per row.
+ *
+ * A row draws one mark and says one sentence (sidebar v2 D1, D2):
+ * `selectChatFacts` and `selectProjectFacts` are the only places either is
+ * decided, so the glyph and its words cannot drift apart.
  *
  * The selectors are module constants so a row's render is a lookup, and the
  * hooks compare on settled values (P28) so a project with five chats repaints a
@@ -88,30 +91,52 @@ export type ProjectSidebarStatus = Readonly<{
 /** What a project row draws, aggregated from its chats and its session. @public */
 export type ProjectSidebarRow = Readonly<{
   projectId: string;
-  /** `none` is a closed project: no session, no glyph (A29). */
+  /**
+   * The session's own state. `none` is a closed project (A29); `failed` means
+   * the session failed to open and nothing else (v2 D11) — a failed chat is
+   * counted in `failed` below, never folded in here.
+   */
   glyph: 'none' | 'opening' | 'idle' | 'busy' | 'failed';
-  /** Chats needing a person; lifted from the chat rows to the project row. */
+  /** The session is closing, backing up first when it has to. */
+  closing: boolean;
+  /** Chats needing a person, plus one for a sync conflict (R2). */
   attention: number;
-  /** The second line: a policy close's reason, or the sync trouble. */
+  /** A sync conflict: counted in `attention`, named in the sentence (v2 R4). */
+  conflicted: boolean;
+  /** Failed runs nobody has seen yet (P57). */
+  failed: number;
+  /** Chats with a run in flight. */
+  running: number;
+  /** Chats that finished while the person was elsewhere. */
+  unread: number;
+  /** A policy close's reason, or the closing sentence. */
   detail: string | undefined;
-  /** The chip, only when the workbench is off `main` (A29). */
-  branch: string | undefined;
-  dirty: boolean;
-  /** The project's sync facet, for the glyph's own sentence (W13). */
-  sync: RevisionStatusProjection['sync']['state'] | undefined;
-  /** Refs this device has not had acknowledged — the `n` of `Not backed up`. */
-  pending: number;
   /** Runs in flight, for the close dialog's question. */
   runs: number;
 }>;
 
-/** The `Live now` header's counts. @public */
+/** The group label's live count and its *Close idle* set (v2 D5, D19). @public */
 export type LiveNowSummary = Readonly<{
   projects: number;
-  agents: number;
-  attention: number;
-  /** The *Close all idle* set, in the registry's own order. */
+  /** The *Close idle* set, in the registry's own order. */
   idleProjectIds: readonly string[];
+}>;
+
+/**
+ * A row's one mark (v2 D2). Opening and closing share `running`'s ring and are
+ * told apart by the sentence.
+ *
+ * @public
+ */
+export type SidebarMark = 'none' | 'running' | 'attention' | 'unread' | 'failed';
+
+/** What a row draws and says: one mark, an optional count, one sentence. @public */
+export type SidebarFacts = Readonly<{
+  mark: SidebarMark;
+  /** The needs-you count, when there is one to show. */
+  count?: number;
+  /** The tooltip and the `aria-describedby` text; `undefined` for a plain row. */
+  sentence: string | undefined;
 }>;
 
 type ChatSnapshot = SnapshotFrom<typeof chatSessionMachine>;
@@ -225,76 +250,48 @@ export const chatStatusLabel = (status: ChatSidebarStatus): string | undefined =
   }
 };
 
-const statePhrase = (status: ChatSidebarStatus): string | undefined => {
+/**
+ * A chat row's mark and sentence (v2 D2): eleven run states and the read flag
+ * fold into five marks, and the sentence says which one.
+ *
+ * @param status - That chat's status.
+ * @returns What the row draws and says.
+ * @public
+ */
+export const selectChatFacts = (status: ChatSidebarStatus): SidebarFacts => {
+  const sentence = chatStatusLabel(status);
   switch (status.state) {
-    case 'queued': {
-      return 'queued';
-    }
-    case 'working': {
-      return 'working';
-    }
-    case 'tool': {
-      return `running ${status.toolName ?? 'a tool'}`;
+    case 'queued':
+    case 'working':
+    case 'tool':
+    case 'reconnecting':
+    case 'finishing': {
+      return { mark: 'running', sentence };
     }
     case 'approval': {
-      return 'needs your approval';
+      return { mark: 'attention', count: status.pendingApprovalCount, sentence };
     }
     case 'question': {
-      return 'waiting for you';
-    }
-    case 'reconnecting': {
-      return 'reconnecting';
-    }
-    case 'finishing': {
-      return 'finishing';
-    }
-    case 'done': {
-      return 'done';
+      return { mark: 'attention', sentence };
     }
     case 'failed': {
-      return `failed: ${status.failureReason ?? 'the run failed'}`;
+      return { mark: 'failed', sentence };
     }
-    case 'stopped': {
-      return 'stopped';
+    case 'done': {
+      /* A seen `done` is a plain row: nothing is left to say. */
+      return status.unread
+        ? { mark: 'unread', sentence: 'Finished while you were away' }
+        : { mark: 'none', sentence: undefined };
     }
     default: {
-      return undefined;
+      /* `stopped` keeps its word (I1); `idle` has none. */
+      return { mark: 'none', sentence };
     }
   }
 };
 
-/**
- * The sentence a screen reader reads for a chat row.
- *
- * @param name - The chat's name, which the row shows anyway.
- * @param status - That chat's status.
- * @returns The `aria-describedby` text.
- * @public
- */
-export const chatStatusDescription = (name: string, status: ChatSidebarStatus): string =>
-  `${[
-    name,
-    ...(statePhrase(status) === undefined ? [] : [statePhrase(status)]),
-    ...(status.state === 'approval' ? [`${String(status.pendingApprovalCount)} pending`] : []),
-    ...(status.unread ? ['unread'] : []),
-    ...(status.branch === undefined ? [] : [`on branch ${status.branch}`]),
-    ...(status.dirty ? ['unsaved edits'] : []),
-  ].join(', ')}.`;
-
-/** Whether this chat is one of the project row's amber count. @public */
-export const chatNeedsYou = (status: ChatSidebarStatus): boolean =>
-  status.state === 'approval' || status.state === 'question';
-
 /** Whether this chat turns the project row red: a failed run nobody saw (P57). @public */
 export const chatFailedUnread = (status: ChatSidebarStatus): boolean => status.state === 'failed' && status.unread;
-
-/** Whether this chat's run is in flight, for the project row's spinner. @public */
-export const chatIsRunning = (status: ChatSidebarStatus): boolean =>
-  status.state === 'queued' ||
-  status.state === 'working' ||
-  status.state === 'tool' ||
-  status.state === 'reconnecting' ||
-  status.state === 'finishing';
 
 /** `1 revision` / `2 revisions` — the sidebar's one plural. @public */
 export const pluralize = (count: number, noun: string): string => `${String(count)} ${noun}${count === 1 ? '' : 's'}`;
@@ -308,32 +305,14 @@ export const pluralize = (count: number, noun: string): string => `${String(coun
 const idleCloseText = (idleWindowMilliseconds: number): string =>
   `Closed to save memory · ${String(Math.round(idleWindowMilliseconds / 60_000))} min idle`;
 
-const syncDetail = (revisions: RevisionStatusProjection | undefined, isClosing: boolean): string | undefined => {
-  /* I24, and the canvas's own heading: closing is visible, never silent. */
-  if (isClosing) {
-    const pending = revisions?.sync.pendingCount ?? 0;
-    return pending > 0 ? `Backing up ${pluralize(pending, 'revision')}, then closing…` : 'Closing…';
-  }
-  if (revisions === undefined) {
-    return undefined;
-  }
-  const { state, pendingCount } = revisions.sync;
-  if (state === 'conflicted') {
-    return 'Needs resolution';
-  }
-  if (state === 'pending') {
-    return `Backing up ${pluralize(pendingCount, 'revision')}`;
-  }
-  /* The reason, not just the count (N3, C4): `sync.error` is produced for every
-   * `queued`/`failed` state and was rendered nowhere, so a refusal a person
-   * could act on — quota, sign-in, plan — read as a number. The row's own
-   * action is opening the project, which is where the verb is. */
-  const trouble = (reason: string | undefined): string =>
-    `Not backed up · ${pluralize(pendingCount, 'revision')}${reason === undefined ? '' : ` · ${reason}`}`;
-  if (state === 'queued') {
-    return trouble(revisions.sync.error ?? 'retrying');
-  }
-  return state === 'failed' ? trouble(revisions.sync.error) : undefined;
+/*
+ * I24, and the canvas's own heading: closing is visible, never silent. Backup
+ * state otherwise belongs to the Revisions pane (v2 D4); the sidebar names it
+ * only while it holds a close up.
+ */
+const closingDetail = (revisions: RevisionStatusProjection | undefined): string => {
+  const pending = revisions?.sync.pendingCount ?? 0;
+  return pending > 0 ? `Backing up ${pluralize(pending, 'revision')}, then closing…` : 'Closing…';
 };
 
 /*
@@ -350,17 +329,9 @@ const closedDetail = (
   return reason === 'budget' ? 'Closed · memory budget · reopen any time' : undefined;
 };
 
-const projectGlyph = ({
-  session,
-  failed,
-  running,
-}: {
-  readonly session: ProjectLivenessStatus;
-  readonly failed: boolean;
-  readonly running: number;
-}): ProjectSidebarRow['glyph'] => {
+const projectGlyph = (session: ProjectLivenessStatus, running: number): ProjectSidebarRow['glyph'] => {
   if (session.live) {
-    if (session.status?.state === 'failed' || failed) {
+    if (session.status?.state === 'failed') {
       return 'failed';
     }
     if (session.status?.state === 'opening') {
@@ -383,72 +354,106 @@ export const selectProjectRow = (status: ProjectSidebarStatus, idleWindowMillise
   const { session, chats, revisions } = status;
   let attention = 0;
   let running = 0;
-  let failed = false;
+  let failed = 0;
+  let unread = 0;
   for (const chat of chats.values()) {
-    if (chatNeedsYou(chat)) {
-      attention += 1;
-    }
-    if (chatIsRunning(chat)) {
-      running += 1;
-    }
-    failed ||= chatFailedUnread(chat);
+    const { mark } = selectChatFacts(chat);
+    attention += mark === 'attention' ? 1 : 0;
+    running += mark === 'running' ? 1 : 0;
+    unread += mark === 'unread' ? 1 : 0;
+    failed += chatFailedUnread(chat) ? 1 : 0;
   }
   /* One conflict, counted once (R2). It is the project's checkout that is
    * conflicted, not each of its chats. */
-  if (revisions?.sync.state === 'conflicted') {
-    attention += 1;
-  }
-  const glyph = projectGlyph({ session, failed, running });
+  const conflicted = revisions?.sync.state === 'conflicted';
+  const closing = session.live && session.status?.state === 'closing';
   return {
     projectId: session.projectId,
-    glyph,
-    attention,
-    detail: session.live
-      ? syncDetail(revisions, session.status?.state === 'closing')
-      : closedDetail(session.closedReason, idleWindowMilliseconds),
-    branch: revisions?.branch === undefined || revisions.branch === 'main' ? undefined : revisions.branch,
-    dirty: revisions?.dirty === true,
-    sync: revisions?.sync.state,
-    pending: revisions?.sync.pendingCount ?? 0,
+    glyph: projectGlyph(session, running),
+    closing,
+    attention: attention + (conflicted ? 1 : 0),
+    conflicted,
+    failed,
+    running,
+    unread,
+    detail: closing
+      ? closingDetail(revisions)
+      : session.live
+        ? undefined
+        : closedDetail(session.closedReason, idleWindowMilliseconds),
     runs: session.status?.runs ?? 0,
   };
 };
 
-/**
- * The `Live now` header, over every live project.
- *
- * `agents` is the registry's own run count rather than a count of chat
- * machines: the session is what admits and settles a run, so it is what knows
- * how many are in flight. `idleProjectIds` is the registry's own
- * `sessionsCloseSuggestions` for the same reason — one closable policy, in
- * touch order, so *Close all idle* cannot close the project the person is
- * looking at while a policy would not (R9).
- *
- * @param rows - One row per live project.
- * @param idleProjectIds - The registry's closable set, least recently touched first.
- * @returns The header's counts and its *Close all idle* set.
- * @public
+const needsYou = (count: number): string => `${String(count)} need${count === 1 ? 's' : ''} you`;
+
+/*
+ * The rollup a collapsed project shows for its chats (v2 D3, I2), in priority
+ * order: needs-you > failed > running > finished-while-away.
  */
-export const selectLiveNow = (
-  rows: readonly ProjectSidebarRow[],
-  idleProjectIds: readonly string[],
-): LiveNowSummary => {
-  let agents = 0;
-  let attention = 0;
-  for (const row of rows) {
-    agents += row.runs;
-    attention += row.attention;
+const chatRollup = (row: ProjectSidebarRow): SidebarFacts | undefined => {
+  if (row.attention > 0) {
+    return {
+      mark: 'attention',
+      count: row.attention,
+      /* R4: "1 needs you" alone sends the person into the chats to look for a
+       * conflict that lives in the checkout, so the sentence names it. */
+      sentence: `${needsYou(row.attention)}${row.conflicted ? ' · needs resolution' : ''}`,
+    };
   }
-  return { projects: rows.length, agents, attention, idleProjectIds };
+  if (row.failed > 0) {
+    return { mark: 'failed', sentence: `${pluralize(row.failed, 'chat')} failed` };
+  }
+  if (row.running > 0) {
+    return { mark: 'running', sentence: `${pluralize(row.running, 'agent')} working` };
+  }
+  return row.unread > 0
+    ? { mark: 'unread', sentence: `${pluralize(row.unread, 'chat')} finished while you were away` }
+    : undefined;
 };
 
-/** The header's sentence: `2 projects · 3 agents · 1 needs you`. @public */
-export const liveNowText = (summary: LiveNowSummary): string =>
-  [
-    pluralize(summary.projects, 'project'),
-    ...(summary.agents > 0 ? [pluralize(summary.agents, 'agent')] : []),
-    ...(summary.attention > 0 ? [`${String(summary.attention)} need${summary.attention === 1 ? 's' : ''} you`] : []),
-  ].join(' · ');
+/**
+ * A project row's mark and sentence.
+ *
+ * The session's own facts — failed to open, opening, closing — show whether or
+ * not the project is expanded. Its chats' facts roll up only while it is
+ * collapsed; expanded, the chat rows carry them (v2 D3). Every sentence says
+ * whether the project is live (v2 D12), because its position above *Earlier*
+ * is not the only channel (I1).
+ *
+ * @param row - The project row.
+ * @param expanded - Whether its chats are showing.
+ * @returns What the row draws and says.
+ * @public
+ */
+export const selectProjectFacts = (row: ProjectSidebarRow, expanded: boolean): SidebarFacts => {
+  switch (row.glyph) {
+    case 'none': {
+      return { mark: 'none', sentence: row.detail ?? 'Closed' };
+    }
+    case 'failed': {
+      return { mark: 'failed', sentence: 'Failed to open' };
+    }
+    case 'opening': {
+      return { mark: 'running', sentence: 'Opening…' };
+    }
+    default: {
+      break;
+    }
+  }
+  if (row.closing) {
+    return { mark: 'running', sentence: row.detail };
+  }
+  const liveness = row.glyph === 'busy' ? 'Live, busy' : 'Live';
+  const rollup = expanded ? undefined : chatRollup(row);
+  if (rollup === undefined) {
+    /* An expanded conflict still names itself: no chat row can carry it. */
+    return row.conflicted
+      ? { mark: 'attention', sentence: `${liveness} · needs resolution` }
+      : { mark: 'none', sentence: liveness };
+  }
+  return { ...rollup, sentence: `${liveness} · ${rollup.sentence ?? ''}` };
+};
 
 // ---------------------------------------------------------------------------
 // Reading the actors
@@ -652,45 +657,30 @@ export const useChatSidebarStatus = (projectId: string, chatId: string): ChatSid
 };
 
 /**
- * The `Live now` header, over every live project.
+ * The group label's live count and its *Close idle* set (v2 D5, D19).
  *
- * One subscription per live project, one repaint when the totals move — the
- * header is not four machine snapshots per row either.
+ * Both are registry facts — `sessionsCloseSuggestions` is the one closable
+ * policy, in touch order (R9) — so the label wakes on the registry alone.
  *
- * @param projectIds - The live set, in the registry's order.
- * @returns The header's counts and its *Close all idle* set.
+ * @returns The live count and the *Close idle* set.
  * @public
  */
-export const useLiveNow = (projectIds: readonly string[]): LiveNowSummary => {
+export const useLiveNow = (): LiveNowSummary => {
   const sessions = useSessions();
-  const idleWindow = sessions.getSnapshot().context.idleWindowMilliseconds;
-  const joined = projectIds.join(keySeparator);
   const cache = useRef<{ key: string; value: LiveNowSummary } | undefined>(undefined);
   const getSnapshot = useCallback(() => {
-    const summary = selectLiveNow(
-      (joined === '' ? [] : joined.split(keySeparator)).map((projectId) =>
-        selectProjectRow(readProjectStatus(sessions, projectId), idleWindow),
-      ),
-      sessionsCloseSuggestions(sessions.getSnapshot().context),
-    );
-    return keep(
-      cache,
-      [summary.projects, summary.agents, summary.attention, ...summary.idleProjectIds].join(keySeparator),
-      summary,
-    );
-  }, [idleWindow, joined, sessions]);
+    const { context } = sessions.getSnapshot();
+    const summary = { projects: Object.keys(context.refs).length, idleProjectIds: sessionsCloseSuggestions(context) };
+    return keep(cache, [summary.projects, ...summary.idleProjectIds].join(keySeparator), summary);
+  }, [sessions]);
   const subscribe = useCallback(
     (listener: () => void) => {
-      const unbind = (joined === '' ? [] : joined.split(keySeparator)).map((projectId) =>
-        bindProject({ sessions, projectId, listener }),
-      );
+      const subscription = sessions.subscribe(listener);
       return () => {
-        for (const off of unbind) {
-          off();
-        }
+        subscription.unsubscribe();
       };
     },
-    [joined, sessions],
+    [sessions],
   );
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 };
@@ -699,8 +689,6 @@ export const useLiveNow = (projectIds: readonly string[]): LiveNowSummary => {
 export type SidebarCommands = Readonly<{
   /** *Close* on a chat: stop the run, keep the chat and its machine (P63). */
   closeChat: (projectId: string, chatId: string) => void;
-  /** *Retry* on a failed row: the same verb the in-chat banner sends. */
-  retryChat: (chatId: string) => void;
   /** *Close* on a project: the user's verb, with the registry's own reason. */
   closeProject: (projectId: string) => void;
   /** Make room, then open what the budget refused. */
@@ -729,9 +717,6 @@ export const useSidebarCommands = (): SidebarCommands => {
       closeChat: (projectId, chatId) => {
         chatSessions.stopRun(chatId);
         chatReferencesOf(sessions, projectId)[chatId]?.send({ type: 'close' });
-      },
-      retryChat: (chatId) => {
-        chatSessions.retryRun(chatId);
       },
       closeProject: (projectId) => {
         const session = projectSessionOf(sessions, projectId);

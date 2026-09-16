@@ -52,7 +52,7 @@ const readActivityChatOrder = async (): Promise<string[]> =>
   target.evaluate(
     (names) =>
       [...document.querySelectorAll<HTMLElement>('[data-slot="chat-trigger"]')]
-        .map((row) => row.textContent.trim())
+        .map((row) => row.querySelector('a')?.textContent.trim())
         .filter((name): name is string => name === names.older || name === names.newer),
     chatNames,
   );
@@ -65,6 +65,7 @@ const openActivityChat = async (name: string): Promise<void> => {
         (expected) =>
           [...document.querySelectorAll<HTMLElement>('[data-slot="chat-trigger"]')]
             .find((row) => row.dataset['active'] === 'true')
+            ?.querySelector('a')
             ?.textContent.trim() === expected,
         name,
       ),
@@ -399,7 +400,7 @@ test('chat navigation preserves ordering until an accepted user submit advances 
   expect(afterRevisit.projectLastActivityAt).toBe(afterSubmit.projectLastActivityAt);
 });
 
-test('project and chat rows expose full-width Codex-style hover actions', async () => {
+test('project and chat rows reveal their actions over a dissolving name', async () => {
   await target.setViewport({ width: 1024, height: 900 });
   await target.navigate('/__e2e/project-navigation');
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
@@ -517,41 +518,39 @@ test('project and chat rows expose full-width Codex-style hover actions', async 
     'rgba(0, 0, 0, 0)',
   );
 
-  const projectBeforeHover = await target.evaluateLocator(projectTrigger, (element) => {
-    const actionButtons = [...element.querySelectorAll<HTMLButtonElement>('button')].filter((button) =>
-      /^(More actions|New chat)/u.test(button.ariaLabel ?? ''),
-    );
-    return {
-      actionLabels: actionButtons.map((button) => button.ariaLabel),
-      actionOpacity: actionButtons.map((button) => getComputedStyle(button).opacity),
-      disclosureDisplay: getComputedStyle(element.querySelector('[data-slot="project-disclosure-icon"]')!).display,
-      folderDisplay: getComputedStyle(element.querySelector('[data-slot="project-folder-icon"]')!).display,
-    };
-  });
+  /* Sidebar v2 (D7, D13, D15): actions take no width at rest, appear over the
+   * dissolving tail on hover, and never move the name. */
+  const readProjectRow = async () =>
+    target.evaluateLocator(projectTrigger, (element) => {
+      const actions = element.querySelector<HTMLElement>('.fade-action');
+      const label = element.querySelector<HTMLElement>('a .fade-label');
+      if (!actions || !label) {
+        throw new Error('Project row was not ready.');
+      }
+      return {
+        actionLabels: [...actions.querySelectorAll<HTMLButtonElement>('button')].map((button) => button.ariaLabel),
+        actionsDisplay: getComputedStyle(actions).display,
+        fadeSize: getComputedStyle(label).getPropertyValue('--fade-label-size').trim(),
+        height: element.getBoundingClientRect().height,
+        labelWidth: label.getBoundingClientRect().width,
+        truncated: element.querySelector('.truncate') !== null,
+      };
+    });
+  const projectBeforeHover = await readProjectRow();
   expect(projectBeforeHover.actionLabels).toEqual([
     `More actions for ${projectNames.a}`,
     `New chat in ${projectNames.a}`,
   ]);
-  expect(projectBeforeHover.actionOpacity).toEqual(['0', '0']);
-  expect(projectBeforeHover.folderDisplay).not.toBe('none');
-  expect(projectBeforeHover.disclosureDisplay).toBe('none');
+  expect(projectBeforeHover.actionsDisplay).toBe('none');
+  expect(projectBeforeHover.fadeSize).toBe('1.5rem');
+  expect(projectBeforeHover.height).toBe(28);
+  expect(projectBeforeHover.truncated).toBe(false);
 
   await target.hover(projectTrigger);
-  const projectOnHover = await target.evaluateLocator(projectTrigger, (element) => {
-    const actionButtons = [...element.querySelectorAll<HTMLButtonElement>('button')].filter((button) =>
-      /^(More actions|New chat)/u.test(button.ariaLabel ?? ''),
-    );
-    return {
-      actionBackgrounds: actionButtons.map((button) => getComputedStyle(button).backgroundColor),
-      actionOpacity: actionButtons.map((button) => getComputedStyle(button).opacity),
-      disclosureDisplay: getComputedStyle(element.querySelector('[data-slot="project-disclosure-icon"]')!).display,
-      folderDisplay: getComputedStyle(element.querySelector('[data-slot="project-folder-icon"]')!).display,
-    };
-  });
-  expect(projectOnHover.actionOpacity).toEqual(['1', '1']);
-  expect(projectOnHover.actionBackgrounds).toEqual(['rgba(0, 0, 0, 0)', 'rgba(0, 0, 0, 0)']);
-  expect(projectOnHover.folderDisplay).toBe('none');
-  expect(projectOnHover.disclosureDisplay).not.toBe('none');
+  const projectOnHover = await readProjectRow();
+  expect(projectOnHover.actionsDisplay).toBe('flex');
+  expect(projectOnHover.fadeSize).toBe('2.625rem');
+  expect(projectOnHover.labelWidth).toBe(projectBeforeHover.labelWidth);
 
   await target.mouseMove(1000, 899);
   const rowMetrics = await target.evaluate(() => {
@@ -564,32 +563,35 @@ test('project and chat rows expose full-width Codex-style hover actions', async 
     const nextProjectBounds = projects[1].getBoundingClientRect();
     const chatBounds = chat.getBoundingClientRect();
     const chatList = chat.closest<HTMLElement>('[data-slot="sidebar-menu-sub"]');
-    const projectLabel = projects[0].querySelector('a span');
-    const chatLabel = chat.querySelector('a span');
-    if (!chatList || !projectLabel || !chatLabel) {
+    const projectLabel = projects[0].querySelector('a .fade-label');
+    const chatLabel = chat.querySelector('a .fade-label');
+    const chatStatus = chat.querySelector('[data-slot="chat-status"]');
+    if (!chatList || !projectLabel || !chatLabel || !chatStatus) {
       throw new Error('Sidebar row labels were not ready.');
     }
+    const sidebar = chat.closest<HTMLElement>('[data-sidebar="content"]');
     return {
-      chatRowGap: Number.parseFloat(getComputedStyle(chatList).rowGap),
       chatHasLeadingIcon: chat.querySelector('a svg') !== null,
+      chatHeight: chatBounds.height,
       chatLabelLeft: chatLabel.getBoundingClientRect().left,
+      chatStatusFirst: chat.firstElementChild === chatStatus,
       chatTooltipState: chat.querySelector<HTMLAnchorElement>('a')?.dataset['state'] ?? null,
-      chatLeft: chatBounds.left,
-      chatRight: chatBounds.right,
       gapToNextProject: nextProjectBounds.top - chatBounds.bottom,
-      projectToChatGap: chatBounds.top - projectBounds.bottom,
+      overflow: sidebar === null ? 0 : sidebar.scrollWidth - sidebar.clientWidth,
       projectLabelLeft: projectLabel.getBoundingClientRect().left,
-      projectLeft: projectBounds.left,
-      projectRight: projectBounds.right,
+      railWidth: Number.parseFloat(getComputedStyle(chatList).borderLeftWidth),
     };
   });
   expect(rowMetrics.chatHasLeadingIcon).toBe(false);
   expect(rowMetrics.chatTooltipState).toBeNull();
-  expect(Math.abs(rowMetrics.chatLabelLeft - rowMetrics.projectLabelLeft)).toBeLessThanOrEqual(0.5);
-  expect(Math.abs(rowMetrics.projectToChatGap - rowMetrics.chatRowGap)).toBeLessThanOrEqual(0.5);
-  expect(Math.abs(rowMetrics.chatLeft - rowMetrics.projectLeft)).toBeLessThanOrEqual(0.5);
-  expect(Math.abs(rowMetrics.chatRight - rowMetrics.projectRight)).toBeLessThanOrEqual(0.5);
-  expect(rowMetrics.gapToNextProject).toBeGreaterThanOrEqual(7.5);
+  expect(rowMetrics.chatStatusFirst).toBe(true);
+  expect(rowMetrics.chatHeight).toBe(28);
+  /* D8: a chat name sits one slot (21 px) in from its project's name, on a rail. */
+  expect(Math.abs(rowMetrics.chatLabelLeft - rowMetrics.projectLabelLeft - 21)).toBeLessThanOrEqual(0.5);
+  expect(rowMetrics.railWidth).toBe(1);
+  /* D10: an expanded project's block is separated from the next project. */
+  expect(rowMetrics.gapToNextProject).toBeGreaterThanOrEqual(4);
+  expect(rowMetrics.overflow).toBe(0);
 
   await target.hover(chatTrigger);
   const chatAction = await target.evaluateLocator(chatTrigger, (element) => {
@@ -600,12 +602,12 @@ test('project and chat rows expose full-width Codex-style hover actions', async 
     return {
       background: getComputedStyle(button).backgroundColor,
       label: button.ariaLabel,
-      opacity: getComputedStyle(button).opacity,
+      visible: button.checkVisibility(),
     };
   });
   expect(chatAction).toEqual({
     background: 'rgba(0, 0, 0, 0)',
     label: 'More actions for Initial chat',
-    opacity: '1',
+    visible: true,
   });
 });

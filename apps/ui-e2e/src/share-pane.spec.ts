@@ -110,6 +110,8 @@ test('restores a GitHub authorization return and routes sidebar Share to the sel
     );
   });
 
+  /* Row actions show on hover or focus (sidebar v2 D7). */
+  await target.hover(selectors.getByRole('link', { name: 'Project Navigation B', exact: true }));
   await target.click(selectors.getByRole('button', { name: 'More actions for Project Navigation B' }));
   await target.click(selectors.getByRole('menuitem', { name: 'Share project' }));
   await target.expectVisible(selectors.getByText('Project Navigation B', { exact: true }).first(), 60_000);

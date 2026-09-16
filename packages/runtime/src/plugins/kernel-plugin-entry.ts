@@ -32,7 +32,7 @@ export type {
   RuntimeWatchRequest,
 } from '#types/runtime-kernel.types.js';
 export type { GetDependenciesResult } from '#types/runtime-dependency.types.js';
-export type { ParameterDeclaration } from '#parameter/manifest.js';
+export type { ParameterDeclaration } from '@taucad/parameters';
 
 export type {
   CreateGeometryResult,

@@ -13,8 +13,9 @@ import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
 import { isNode, resolveFileUrl } from '#framework/environment.js';
 import { asBuffer } from '@taucad/utils/file';
 import { assertRootedPath } from '@taucad/utils/path';
-import { projectDraft7SchemaToParameterDeclaration } from '#parameter/json-schema-adapter.js';
-import type { ParameterDeclaration } from '#parameter/manifest.js';
+import { projectDraft7SchemaToParameterDeclaration } from '@taucad/parameters';
+import type { ParameterDeclaration } from '@taucad/parameters';
+import type { JSONSchema7 } from '@taucad/json-schema';
 
 /** @public */
 // eslint-disable-next-line @typescript-eslint/naming-convention -- protocol global key mirrors its host name
@@ -59,16 +60,14 @@ export function getModuleRegistry(): Map<string, Record<string, unknown>> {
   return registry;
 }
 
-/**
- */
+/** Options for one registry-backed module shim. @public */
 export type KernelModuleShimOptions = {
   moduleExpression: string;
   exports: Record<string, unknown>;
   exportPrefix?: string;
 };
 
-/**
- */
+/** Options for registering one built-in kernel module. @public */
 export type RegisterKernelModuleOptions = {
   name: string;
   exports: Record<string, unknown>;
@@ -198,7 +197,7 @@ export function extractDefaultParameters(module: unknown): Record<string, unknow
  */
 export const createKernelParameterDeclaration = (
   defaults: Readonly<Record<string, unknown>>,
-  schema: Readonly<Record<string, unknown>>,
+  schema: JSONSchema7 | Readonly<Record<string, unknown>>,
   identity: Readonly<{ id: string; name: string }>,
 ): ParameterDeclaration =>
   projectDraft7SchemaToParameterDeclaration({
@@ -223,7 +222,12 @@ export const toVmEntryPath = (rootedPath: string): string => assertRootedPath(ro
  * @public
  */
 export function convertRawIssuesToKernelIssues(
-  issues: Array<{ message: string; severity: string; location?: unknown; code?: unknown }>,
+  issues: Array<{
+    message: string;
+    severity: string;
+    location?: unknown;
+    code?: unknown;
+  }>,
   fallbackFileName: string,
 ): KernelIssue[] {
   return issues.map((issue) => ({

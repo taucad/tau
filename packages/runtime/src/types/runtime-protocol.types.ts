@@ -19,7 +19,7 @@ import type {
 } from '#types/runtime.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
-import type { ParameterResolutionOptions } from '#parameter/manifest.js';
+import type { ParameterResolutionOptions } from '@taucad/parameters';
 import type {
   ListSceneBookmarksInput,
   ProgressiveSceneUpdate,

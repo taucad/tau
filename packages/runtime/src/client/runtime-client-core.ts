@@ -70,7 +70,7 @@ import type {
 import type { ContentRequestFor, RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
-import type { ParameterResolutionOptions } from '#parameter/manifest.js';
+import type { ParameterResolutionOptions } from '@taucad/parameters';
 import { assertRootedPath } from '@taucad/utils/path';
 import type {
   ProgressiveSceneUpdate,

@@ -10,6 +10,8 @@ import { assertType, describe, it } from 'vitest';
 import type { GeometryResponse } from '@taucad/types';
 import type { KernelPlugin } from '#plugins/plugin-types.js';
 import { defineKernel } from '#types/runtime-kernel.types.js';
+// oxlint-disable-next-line no-restricted-imports -- Runtime-private fixture stays outside the package build graph.
+import { createParameterDeclaration } from '../../test/support/kernel-worker.fixture.js';
 
 const testGeometry = { format: 'gltf', content: new Uint8Array([1]) } satisfies GeometryResponse;
 
@@ -26,7 +28,7 @@ const baseKernelDefinition = {
     return { resolved: [], unresolved: [] };
   },
   async getParameters() {
-    return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+    return createParameterDeclaration();
   },
   async createGeometry() {
     return { geometry: testGeometry, nativeHandle: {} };

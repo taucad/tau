@@ -5,6 +5,7 @@ export * from '#schemas/tools/edit-file.tool.schema.js';
 export * from '#schemas/tools/test-model.tool.schema.js';
 export * from '#schemas/tools/test-model-input-normalizer.js';
 export * from '#schemas/tools/project-path-input-normalizer.js';
+export * from '#schemas/tools/parameter.tool.schema.js';
 export * from '#schemas/tools/use-skill.tool.schema.js';
 export * from '#schemas/tools/read-file.tool.schema.js';
 export * from '#schemas/tools/list-directory.tool.schema.js';

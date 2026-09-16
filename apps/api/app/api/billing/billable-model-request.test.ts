@@ -599,6 +599,27 @@ describe('document block admission', () => {
     expect(safeParseBillableModelRequest(completionsBody(fileBlock), 'openai-completions').success).toBe(true);
   });
 
+  /*
+   * The pi Anthropic codec marks the last block of the last user message as the
+   * rolling cache breakpoint, and a PDF placed after the text is that block.
+   * Refusing the marker would refuse the turn; dropping it would forfeit the
+   * cache on the most expensive turns there are.
+   */
+  it('admits the cache breakpoint on an Anthropic document block, and only a well-formed one', () => {
+    expect(
+      safeParseBillableModelRequest(
+        anthropicBody({ ...documentBlock, cache_control: { type: 'ephemeral' } }),
+        'anthropic',
+      ).success,
+    ).toBe(true);
+    expect(
+      safeParseBillableModelRequest(
+        anthropicBody({ ...documentBlock, cache_control: { type: 'ephemeral', ttl: '1h' } }),
+        'anthropic',
+      ).success,
+    ).toBe(false);
+  });
+
   it('refuses a document block on a foreign provider wire', () => {
     expect(safeParseBillableModelRequest(anthropicBody(inputFileBlock), 'anthropic').success).toBe(false);
     expect(safeParseBillableModelRequest(responsesBody(documentBlock), 'openai-responses').success).toBe(false);

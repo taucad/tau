@@ -2,13 +2,14 @@
 /* oxlint-disable max-lines -- comprehensive kernel test suite */
 /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- Vitest asymmetric matchers are typed as any in structured assertions. */
 
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { encode as msgpackEncode, decode as msgpackDecode } from '@msgpack/msgpack';
 import { NodeIO } from '@gltf-transform/core';
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
-import type { ParameterManifest } from '@taucad/runtime/parameter';
+import type { ParameterManifest } from '@taucad/parameters';
+import type { ComputeStore } from '@taucad/runtime/types';
 import { afterEach, describe, it, expect, beforeAll } from 'vitest';
 import * as jscadModelingImport from '@jscad/modeling';
 import { jscadKernel } from '#jscad.kernel.js';
@@ -31,13 +32,17 @@ import { middleware } from '@taucad/middleware';
 import { esbuildBundler } from '@taucad/esbuild';
 import { createRuntimeClient, defineRuntime } from '@taucad/runtime';
 import { fromNodeFs } from '@taucad/runtime/filesystem/node';
+import { createSqliteComputeEngine, fromSqlite } from '@taucad/runtime/node';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
 // =============================================================================
 // Test Utilities
 // =============================================================================
 
-const testRuntime = defineRuntime({ kernels: [jscadKernel()], bundlers: [esbuildBundler()] });
+const testRuntime = defineRuntime({
+  kernels: [jscadKernel()],
+  bundlers: [esbuildBundler()],
+});
 const testClients = new Set<ReturnType<typeof createTestRuntimeClient>>();
 const createClient = (files: Record<string, string>) => {
   const client = createTestRuntimeClient({ runtime: testRuntime, files });
@@ -50,7 +55,11 @@ afterEach(async () => {
   testClients.clear();
 });
 
-type JscadSerializedNativeHandleEntry = { type: 'geom2' | 'geom3' | 'path2'; data: Float32Array; name?: string };
+type JscadSerializedNativeHandleEntry = {
+  type: 'geom2' | 'geom3' | 'path2';
+  data: Float32Array;
+  name?: string;
+};
 
 /** Helper to extract parameters and assert success. */
 const getParameters = async (files: Record<string, string>, mainFile: string): Promise<ParameterManifest> =>
@@ -72,7 +81,7 @@ const createNodeIo = (): NodeIO => new NodeIO().registerExtensions([KHRMaterials
 
 // A runtime per client: middleware caches are owned per registration, so a fresh
 // runtime is what gives each client empty L1 caches.
-const createJscadNodeClient = (projectPath: string) =>
+const createJscadNodeClient = (projectPath: string, store: ComputeStore) =>
   createRuntimeClient({
     transport: inProcessTransport({
       runtime: defineRuntime({
@@ -81,6 +90,7 @@ const createJscadNodeClient = (projectPath: string) =>
         bundlers: [esbuildBundler()],
       }),
       fileSystem: fromNodeFs(projectPath),
+      compute: { mode: 'durable', store },
     }),
   });
 
@@ -89,7 +99,10 @@ let jscadDefinition: Awaited<ReturnType<typeof resolveJscadDefinition>>;
 
 const readNodeMeshNames = async (
   glb: Uint8Array<ArrayBuffer>,
-): Promise<{ nodeNames: Array<string | undefined>; meshNames: Array<string | undefined> }> => {
+): Promise<{
+  nodeNames: Array<string | undefined>;
+  meshNames: Array<string | undefined>;
+}> => {
   const document = await createNodeIo().readBinary(glb);
   return {
     nodeNames: document
@@ -113,7 +126,10 @@ const readPrimitiveModes = async (glb: Uint8Array<ArrayBuffer>): Promise<number[
 
 const readNodeMeshNamesFromResult = async (
   result: Awaited<ReturnType<typeof createGeometry>>,
-): Promise<{ nodeNames: Array<string | undefined>; meshNames: Array<string | undefined> }> => {
+): Promise<{
+  nodeNames: Array<string | undefined>;
+  meshNames: Array<string | undefined>;
+}> => {
   const glb = extractGltfFromResult(result);
   expect(glb).toBeDefined();
   return readNodeMeshNames(glb!);
@@ -790,7 +806,9 @@ module.exports = { main, getParameterDefinitions }
             }),
           }),
         );
-        const invalidIssueDetails = invalidIssue.details as { geometry: { topology: { irregularEdges: number } } };
+        const invalidIssueDetails = invalidIssue.details as {
+          geometry: { topology: { irregularEdges: number } };
+        };
         expect(invalidIssueDetails.geometry.topology.irregularEdges).toBeGreaterThan(0);
       });
 
@@ -1246,7 +1264,9 @@ module.exports = { main, getParameterDefinitions }
       });
 
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- deliberately bypasses the typed format union to test wire rejection.
-      const exportResult = await client.export('gltf' as 'glb', { source: { path: 'cube.ts' } });
+      const exportResult = await client.export('gltf' as 'glb', {
+        source: { path: 'cube.ts' },
+      });
       expect(exportResult.success).toBe(false);
       if (!exportResult.success) {
         expect(exportResult.issues[0]?.message).toContain('gltf');
@@ -1269,7 +1289,9 @@ module.exports = { main, getParameterDefinitions }
         `,
       });
 
-      const exportResult = await client.export('glb', { source: { path: 'glb_assembly.ts' } });
+      const exportResult = await client.export('glb', {
+        source: { path: 'glb_assembly.ts' },
+      });
       expect(exportResult.success).toBe(true);
       if (exportResult.success) {
         expect(exportResult.data).toHaveLength(1);
@@ -1295,7 +1317,10 @@ module.exports = { main, getParameterDefinitions }
       });
       const zUp = await client.export('glb', {
         source: { path: 'coordinate-evidence.ts' },
-        exportOptions: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
+        exportOptions: {
+          coordinateSystem: 'z-up',
+          unit: { length: 'millimeter' },
+        },
       });
       const yUp = await client.export('glb', {
         source: { path: 'coordinate-evidence.ts' },
@@ -1307,8 +1332,12 @@ module.exports = { main, getParameterDefinitions }
         return;
       }
 
-      const zUpEvidence = await readCoordinateEvidence({ bytes: zUp.data[0]!.bytes });
-      const yUpEvidence = await readCoordinateEvidence({ bytes: yUp.data[0]!.bytes });
+      const zUpEvidence = await readCoordinateEvidence({
+        bytes: zUp.data[0]!.bytes,
+      });
+      const yUpEvidence = await readCoordinateEvidence({
+        bytes: yUp.data[0]!.bytes,
+      });
       expect(yUpEvidence).toEqual(mapZupMillimetersToYupMeters(zUpEvidence));
     });
 
@@ -1328,7 +1357,9 @@ module.exports = { main, getParameterDefinitions }
         `,
       });
 
-      const exportResult = await client.export('glb', { source: { path: 'invalid-export.ts' } });
+      const exportResult = await client.export('glb', {
+        source: { path: 'invalid-export.ts' },
+      });
       expect(exportResult.success).toBe(true);
       if (!exportResult.success) {
         return;
@@ -1362,7 +1393,9 @@ module.exports = { main, getParameterDefinitions }
         `,
       });
 
-      const exportResult = await client.export('glb', { source: { path: 'no_return.ts' } });
+      const exportResult = await client.export('glb', {
+        source: { path: 'no_return.ts' },
+      });
       expect(exportResult.success).toBe(true);
       if (!exportResult.success) {
         return;
@@ -1400,7 +1433,9 @@ module.exports = { main, getParameterDefinitions }
 
       // JSCAD only supports gltf/glb
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- deliberately bypasses the typed format union to test wire rejection.
-      const exportResult = await client.export('step' as 'glb', { source: { path: 'cube.ts' } });
+      const exportResult = await client.export('step' as 'glb', {
+        source: { path: 'cube.ts' },
+      });
       expect(exportResult.success).toBe(false);
     });
   });
@@ -2052,7 +2087,11 @@ describe('serializeNativeHandle', () => {
     }
 
     expect(result.serializedNativeHandle).toBeDefined();
-    const serialized = result.serializedNativeHandle as Array<{ type: string; data: Float32Array; name?: string }>;
+    const serialized = result.serializedNativeHandle as Array<{
+      type: string;
+      data: Float32Array;
+      name?: string;
+    }>;
     expect(serialized).toHaveLength(1);
     expect(serialized[0]!.type).toBe('geom3');
     expect(serialized[0]!.name).toBe('Shape 1');
@@ -2079,7 +2118,9 @@ describe('serializeNativeHandle', () => {
     }
 
     const restored = deserializeNativeHandle(
-      { serializedNativeHandle: result.serializedNativeHandle as JscadSerializedNativeHandleEntry[] },
+      {
+        serializedNativeHandle: result.serializedNativeHandle as JscadSerializedNativeHandleEntry[],
+      },
       createMockKernelRuntime(),
       { modulesRegistered: true, modeling: testModeling },
     );
@@ -2115,7 +2156,9 @@ describe('serializeNativeHandle', () => {
     expect(ArrayBuffer.isView(decodedEntry?.data)).toBe(true);
 
     const restoredHandle = deserializeNativeHandle(
-      { serializedNativeHandle: decodedSerializedNativeHandle as JscadSerializedNativeHandleEntry[] },
+      {
+        serializedNativeHandle: decodedSerializedNativeHandle as JscadSerializedNativeHandleEntry[],
+      },
       createMockKernelRuntime(),
       { modulesRegistered: true, modeling: testModeling },
     );
@@ -2169,7 +2212,9 @@ describe('serializeNativeHandle', () => {
 
   it('should export from L2 create cache after MessagePack restoration when export cache is absent', async () => {
     const projectPath = await mkdtemp(join(tmpdir(), 'tau-jscad-create-cache-export-'));
-    const cacheDirectory = join(projectPath, '.tau', 'cache', 'geometry');
+    const cachePath = await mkdtemp(join(tmpdir(), 'tau-jscad-compute-'));
+    const compute = createSqliteComputeEngine({ directory: cachePath });
+    const store = fromSqlite({ store: compute, workspace: projectPath });
     const exportRequest = {
       source: { path: 'main.ts' },
       exportOptions: jscadGlbExportOptions,
@@ -2179,21 +2224,15 @@ describe('serializeNativeHandle', () => {
       await writeFile(join(projectPath, 'main.ts'), jscadCubeCutoutSource);
       await writeFile(join(projectPath, 'package.json'), '{"type":"module"}\n');
 
-      const coldClient = createJscadNodeClient(projectPath);
-      const coldExport = await coldClient.export('glb', exportRequest);
+      const coldClient = createJscadNodeClient(projectPath, store);
+      const coldRender = await coldClient.render({
+        source: { path: 'main.ts' },
+      });
       coldClient.terminate();
-      expect(coldExport.success).toBe(true);
-      if (!coldExport.success) {
-        return;
-      }
-      expect(extractGltfFromExportResult(coldExport)?.byteLength).toBeGreaterThan(0);
+      expect(coldRender.superseded).toBe(false);
+      expect(coldRender.superseded ? undefined : coldRender.geometry.success).toBe(true);
 
-      const cacheEntries = await readdir(cacheDirectory);
-      const exportCacheEntries = cacheEntries.filter((entry) => entry.startsWith('export-'));
-      expect(exportCacheEntries.length).toBeGreaterThan(0);
-      await Promise.all(exportCacheEntries.map(async (entry) => rm(join(cacheDirectory, entry), { force: true })));
-
-      const restoredClient = createJscadNodeClient(projectPath);
+      const restoredClient = createJscadNodeClient(projectPath, store);
       const restoredExport = await restoredClient.export('glb', exportRequest);
       restoredClient.terminate();
 
@@ -2204,12 +2243,19 @@ describe('serializeNativeHandle', () => {
       expect(restoredExport.data.map(({ name }) => name)).toEqual(['model.glb']);
       expect(extractGltfFromExportResult(restoredExport)?.byteLength).toBeGreaterThan(0);
     } finally {
-      await rm(projectPath, { recursive: true, force: true });
+      await compute.dispose();
+      await Promise.all([
+        rm(projectPath, { recursive: true, force: true }),
+        rm(cachePath, { recursive: true, force: true }),
+      ]);
     }
   });
 
   it('should render a named assembly after a cold export restores the source-scoped L2 create cache', async () => {
     const projectPath = await mkdtemp(join(tmpdir(), 'tau-jscad-export-then-render-'));
+    const cachePath = await mkdtemp(join(tmpdir(), 'tau-jscad-compute-'));
+    const compute = createSqliteComputeEngine({ directory: cachePath });
+    const store = fromSqlite({ store: compute, workspace: projectPath });
     const source = `
       import { primitives, transforms } from '@jscad/modeling';
 
@@ -2229,7 +2275,7 @@ describe('serializeNativeHandle', () => {
       await writeFile(join(projectPath, 'main.ts'), source);
       await writeFile(join(projectPath, 'package.json'), '{"type":"module"}\n');
 
-      coldClient = createJscadNodeClient(projectPath);
+      coldClient = createJscadNodeClient(projectPath, store);
       const coldExport = await coldClient.export('glb', {
         source: { path: 'main.ts' },
         exportOptions: jscadGlbExportOptions,
@@ -2249,7 +2295,7 @@ describe('serializeNativeHandle', () => {
       coldClient.terminate();
       coldClient = undefined;
 
-      restoredClient = createJscadNodeClient(projectPath);
+      restoredClient = createJscadNodeClient(projectPath, store);
       const display = await restoredClient.render({
         source: { path: 'main.ts' },
         content: { includeEdges: true },
@@ -2278,7 +2324,11 @@ describe('serializeNativeHandle', () => {
     } finally {
       coldClient?.terminate();
       restoredClient?.terminate();
-      await rm(projectPath, { recursive: true, force: true });
+      await compute.dispose();
+      await Promise.all([
+        rm(projectPath, { recursive: true, force: true }),
+        rm(cachePath, { recursive: true, force: true }),
+      ]);
     }
   });
 
@@ -2304,7 +2354,11 @@ describe('serializeNativeHandle', () => {
     }
 
     expect(result.serializedNativeHandle).toBeDefined();
-    const serialized = result.serializedNativeHandle as Array<{ type: string; data: Float32Array; name?: string }>;
+    const serialized = result.serializedNativeHandle as Array<{
+      type: string;
+      data: Float32Array;
+      name?: string;
+    }>;
     expect(serialized).toHaveLength(2);
     expect(serialized[0]!.type).toBe('geom3');
     expect(serialized[0]!.name).toBe('Box');
@@ -2342,7 +2396,9 @@ describe('serializeNativeHandle', () => {
     }
 
     const restoredHandle = deserializeNativeHandle(
-      { serializedNativeHandle: result.serializedNativeHandle as JscadSerializedNativeHandleEntry[] },
+      {
+        serializedNativeHandle: result.serializedNativeHandle as JscadSerializedNativeHandleEntry[],
+      },
       createMockKernelRuntime(),
       { modulesRegistered: true, modeling: testModeling },
     );

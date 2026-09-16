@@ -4,6 +4,10 @@ import { EventLogError } from '#log/event-log-error.js';
 import { createEventLogAppender } from '#log/event-log-appender.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { EventLogAppender, EventLogStorage } from '#log/event-log-appender.js';
+// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
+import { chatAttachmentPath } from '#harness/session-record.js';
+// eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
+import type { AttachmentReader } from '#harness/session-record.js';
 
 type SyncAccessHandle = {
   getSize(): number;
@@ -175,3 +179,20 @@ export const createProviderEventLog = async (options: ProviderEventLogOptions): 
     throw error;
   }
 };
+
+/**
+ * Read chat attachments through Tau's abstract filesystem provider or bridge proxy (D15).
+ *
+ * @param fileSystem - The project-root filesystem that also holds `.tau/chats`.
+ * @returns A reader answering `undefined` for bytes not on this device.
+ * @public
+ */
+export const createProviderAttachmentReader = (
+  fileSystem: Pick<ProviderEventLogOptions['fileSystem'], 'exists' | 'readFile'>,
+): AttachmentReader => ({
+  read: async (chatId, path) => {
+    // Bridge paths are root-relative, like the event log's.
+    const filePath = chatAttachmentPath(chatId, path);
+    return (await fileSystem.exists(filePath)) ? fileSystem.readFile(filePath) : undefined;
+  },
+});

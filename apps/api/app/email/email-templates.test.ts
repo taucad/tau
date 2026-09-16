@@ -153,6 +153,8 @@ describe('rendered fixtures', () => {
   it.each(templates)('matches the committed $kind render', async (template) => {
     const { html } = await renderEmailTemplate(template, layout);
 
-    await expect(html).toMatchFileSnapshot(`./__fixtures__/${template.kind}.html`);
+    // `.snap`, not `.html`: vitest runs prettier over file snapshots whose extension prettier knows, so an
+    // `.html` snapshot is rewritten on write and can never match the raw render again.
+    await expect(html).toMatchFileSnapshot(`./__email-snapshots__/${template.kind}.html.snap`);
   });
 });

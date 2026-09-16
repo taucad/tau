@@ -24,7 +24,7 @@ vi.mock('#hooks/use-revision-status.js', async () => {
   return harness.revisionStatusMock();
 });
 
-const settlements: TurnFinalizedEvent[] = [];
+let settlements: TurnFinalizedEvent[] = [];
 vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
   getHostFinalizedTurns: () => settlements,
   subscribeHostFinalizedTurns: () => () => undefined,
@@ -51,7 +51,7 @@ const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Elem
 
 beforeEach(() => {
   revisionStatusHarness.reset();
-  settlements.length = 0;
+  settlements = [];
 });
 
 describe('useRevisions', () => {
@@ -376,6 +376,48 @@ describe('useRevisionChanges', () => {
     rerender();
 
     expect(result.current).toBe(first);
+  });
+
+  /*
+   * B8: a marker flips to *Saved* on the settlement, without re-walking the graph.
+   *
+   * The host attests the turn it just recorded, and that card is enough for the
+   * marker. Asking the graph again would cost a `log` per settled turn — which
+   * is what the budget forbids — so the pin counts the walks rather than the
+   * render: the revision-log query key carries the head, and a settlement on the
+   * branch already loaded moves neither.
+   */
+  it('flips a turn to its revision on the settlement alone, with no graph re-walk (B8)', async () => {
+    revisionStatusHarness.rows = [row({ revisionId: 'rev-1', revisionNumber: 1 })];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main', headRevisionId: 'rev-1' };
+
+    const { result, rerender } = renderHook(() => useRevisions(), { wrapper });
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(1);
+    });
+    const walksBefore = revisionStatusHarness.logRequests.length;
+
+    settlements = [
+      {
+        type: 'turn.finalized',
+        turnId: 'u7',
+        runId: 'run-7',
+        chatId: 'chat-1',
+        projectId: 'p',
+        checkoutId: 'live',
+        revisionId: 'rev-1',
+        branch: 'main',
+        changedPaths: ['main.scad'],
+        trigger: 'turn',
+        runIds: ['run-7'],
+      },
+    ];
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.byTurnId.get('u7')?.revisionId).toBe('rev-1');
+    });
+    expect(revisionStatusHarness.logRequests).toHaveLength(walksBefore);
   });
 
   /* C37/C45: no surface renders the generator's placeholder or a raw actor id. */

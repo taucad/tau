@@ -124,6 +124,7 @@ export type {
   InterruptApprovalPort,
   InterruptRequest,
   InterruptResolution,
+  MaterializedDocument,
   ModelStreamEvent,
   ModelInvocationBinding,
   ModelStreamRequest,
@@ -143,6 +144,7 @@ export type {
   ToolEventSummary,
 } from '#harness/safeguards.js';
 export type { AgentSession, AgentSessionModel, CreateAgentSessionOptions } from '#harness/session.js';
+export type { AttachmentReader } from '#harness/session-record.js';
 export type {
   CreateTauAgentHostOptions,
   ExternalAgentLogEvent,

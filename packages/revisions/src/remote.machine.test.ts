@@ -49,6 +49,9 @@ import { describe, expect, it } from 'vitest';
 import * as machineModule from '#remote.machine.js';
 import { remoteMachine, selectRemoteFacet } from '#remote.machine.js';
 import { reauthorizationRequired } from '#remotes.js';
+import { RevisionPortError } from '#revision-port.js';
+import type { RevisionPortErrorCode } from '#revision-port.js';
+import type { SyncFailureReason } from '#sync.machine.js';
 import type {
   RemoteActors,
   RemoteInitialSyncActorOutput,
@@ -176,6 +179,7 @@ describe('remoteMachine', () => {
       quota: undefined,
       overQuota: [],
       error: undefined,
+      reason: undefined,
       fetchOnly: false,
       provider: undefined,
       repositoryId: undefined,
@@ -245,6 +249,7 @@ describe('remoteMachine', () => {
       quota: undefined,
       overQuota: [],
       error: undefined,
+      reason: undefined,
       fetchOnly: false,
       provider: undefined,
       repositoryId: undefined,
@@ -706,6 +711,59 @@ describe('remoteMachine', () => {
     expect(actor.getSnapshot().matches('none')).toBe(true);
     expect(removals).toStrictEqual([{ name: 'tau' }]);
     expect(emitted.map((event) => event.type)).toStrictEqual(['remoteDisconnected']);
+    actor.stop();
+  });
+
+  /*
+   * Rule 19 asks every surface showing a remote failure for exactly one action
+   * matching its class. The *sync* path had `SyncFailureReason` and the connect
+   * path had nothing, so a refused connect could only ever offer the
+   * unclassified *Retry* — including the `403 GIT_SYNC_NOT_ENTITLED` that this
+   * whole closeout began with, whose action is *Upgrade*. The classifier is the
+   * one `sync.machine` already owns; this facet just carries its answer.
+   */
+  it('31 (rule 19): a refused connect carries the class of its refusal, not just its sentence', async () => {
+    const refusals: ReadonlyArray<Readonly<{ code: string; reason: SyncFailureReason }>> = [
+      { code: 'REMOTE_NOT_ENTITLED', reason: 'notEntitled' },
+      { code: 'REMOTE_UNAUTHORIZED', reason: 'unauthorized' },
+      { code: 'REMOTE_QUOTA_EXCEEDED', reason: 'quota' },
+      { code: 'ENGINE_FAILED', reason: 'offline' },
+    ];
+    for (const refusal of refusals) {
+      const { actor } = start({
+        validate: fromPromise(async (): Promise<RemoteValidateActorOutput> => {
+          await Promise.resolve();
+          throw new RevisionPortError(
+            // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the table names real codes.
+            refusal.code as RevisionPortErrorCode,
+            'Syncing files to Tau Cloud is a paid plan feature.',
+          );
+        }),
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one connect attempt per refusal.
+      await settle();
+      actor.send({ type: 'connect', kind: 'tau' });
+      // oxlint-disable-next-line no-await-in-loop -- one connect attempt per refusal.
+      await settle();
+
+      const facet = selectRemoteFacet(actor.getSnapshot());
+      expect({ code: refusal.code, phase: facet.phase, reason: facet.reason }).toStrictEqual({
+        code: refusal.code,
+        phase: 'failed',
+        reason: refusal.reason,
+      });
+      /* The sentence is still the server's own, untouched (N4). */
+      expect(facet.error).toBe('Syncing files to Tau Cloud is a paid plan feature.');
+      actor.stop();
+    }
+  });
+
+  it('31b: a facet with no failure carries no class', async () => {
+    const { actor } = start({ readRemote: reads(tauRemote) });
+    await settle();
+
+    const facet = selectRemoteFacet(actor.getSnapshot());
+    expect({ error: facet.error, reason: facet.reason }).toStrictEqual({ error: undefined, reason: undefined });
     actor.stop();
   });
 });

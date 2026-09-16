@@ -26,7 +26,8 @@ import type { FakeCallbackActors, FakePromiseActors, ManualClock } from '#test/f
  *  6  a write during the mint lands in `dirty`, not `clean` (F4)
  *  7  a lost CAS goes `stale` → `rereading` → `dirty` and emits `casLost` (D24)
  *  8  `cut` actor failure → `failed` + `cutFailed`
- *  9  `writeRevision` failure → `failed` + `cutFailed`
+ *  9  `writeRevision` failure → `failed` + `cutFailed`, carrying the `close`
+ *     trigger and the store's sentence a host's close flush rejects with (C74)
  * 10  `casHead` failure → `failed` + `cutFailed`
  * 11  `readHead` failure while re-reading → `failed` + `cutFailed`
  * 12  `failed` is non-terminal: `cut` retries, `changed` returns to `dirty`
@@ -268,19 +269,36 @@ describe('checkoutMachine', () => {
     actor.stop();
   });
 
-  it('fails with cutFailed when writeRevision rejects', async () => {
+  /*
+   * Under the `close` trigger, because that refusal is the one a host has to
+   * carry out of the process (C74).
+   *
+   * A host's close flush listens for `cutFailed` filtered on
+   * `trigger === 'close'` and rejects with `event.reason`, so the store's own
+   * sentence and that trigger are the whole propagation: drop either and the
+   * close cut stops rejecting — it waits out the flush bound and reports a
+   * deadline instead of the refusal, which is the data-loss class C70 pins at
+   * the daemon. Asserting only the event *type* here left that unguarded.
+   */
+  it('fails with cutFailed when writeRevision rejects, carrying the trigger and the store’s sentence', async () => {
     const harness = start();
-    const { actor, promises, emitted } = harness;
+    const { actor, promises, emitted, parent } = harness;
 
-    actor.send({ type: 'cut', trigger: 'save', leaseIds: [] });
+    actor.send({ type: 'cut', trigger: 'close', leaseIds: [] });
     harness.callbacks.sendBack('fence', { type: 'fenceGranted' });
     promises.settle('cut', { output: { treeId: nextTreeId, cutId: 'cut-1' } });
     await flush();
-    promises.settle('writeRevision', { error: new Error('disk full') });
+    promises.settle('writeRevision', { error: new Error('the store is out of space') });
     await flush();
 
     expect(actor.getSnapshot().matches('failed')).toBe(true);
-    expect(types(emitted)).toContain('cutFailed');
+    const refusal = emitted.find((event) => event.type === 'cutFailed');
+    expect(refusal).toMatchObject({
+      checkoutId: 'checkout-1',
+      trigger: 'close',
+      reason: expect.stringContaining('out of space') as unknown as string,
+    });
+    expect(parent.events.find((event) => event.type === 'cutFailed')).toEqual(refusal);
 
     actor.stop();
   });

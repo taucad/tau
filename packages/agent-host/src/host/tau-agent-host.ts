@@ -450,6 +450,8 @@ export type CreateTauAgentHostOptions = {
   readonly safeguardThresholds?: CreateAgentSessionOptions['safeguardThresholds'];
   readonly onSafeguardOutcome?: CreateAgentSessionOptions['onSafeguardOutcome'];
   readonly allowImageBlocks?: CreateAgentSessionOptions['allowImageBlocks'];
+  /** Reads the chat attachment bytes each run materialises (D15). */
+  readonly attachments?: CreateAgentSessionOptions['attachments'];
   readonly onCompaction?: CreateAgentSessionOptions['onCompaction'];
   readonly onLiveEvent?: ((event: AgentLiveEvent) => void | Promise<void>) | undefined;
   /**
@@ -846,6 +848,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       safeguardThresholds: options.safeguardThresholds,
       onSafeguardOutcome: options.onSafeguardOutcome,
       allowImageBlocks: options.allowImageBlocks,
+      attachments: options.attachments,
       createId,
       now,
       onCompaction: options.onCompaction,

@@ -109,20 +109,18 @@ export function DockviewTab(properties: DockviewTabProps): React.JSX.Element {
       <TooltipTrigger asChild>
         <div
           ref={rootRef}
-          className='dv-default-tab group/default-tab relative size-full min-w-0 overflow-hidden py-1 pr-1 pl-2'
+          className='dv-default-tab group/default-tab fade-row size-full min-w-0 overflow-hidden py-1 pr-1 pl-2'
         >
           <span className='dv-default-tab-content mr-0! flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden'>
             <DockviewTabIcon title={title} leadingIcon={leadingIcon} icon={icon} />
-            <span className='dockview-tab-title min-w-0 flex-1 overflow-hidden scroll-shadow-right whitespace-nowrap [--scroll-fade-size:24px] group-hover/default-tab:[--scroll-fade-size:42px]'>
-              {title}
-            </span>
+            <span className='dockview-tab-title fade-label flex-1'>{title}</span>
           </span>
           <button
             type='button'
             aria-label={`Close ${fullTitle}`}
             className={nestedActionVariants({
               className:
-                "dv-default-tab-action absolute right-1 z-10 size-4.5! rounded-[calc(var(--dv-tab-border-radius)-0.25rem)]! bg-transparent p-0! opacity-0 group-hover/default-tab:opacity-100 before:pointer-events-none before:absolute before:inset-y-0 before:right-full before:w-6 before:bg-linear-to-r before:from-transparent before:to-accent before:content-[''] hover:bg-nested-action-hover!",
+                'dv-default-tab-action fade-action absolute right-1 z-10 size-4.5! rounded-[calc(var(--dv-tab-border-radius)-0.25rem)]! bg-transparent p-0! opacity-0 group-hover/default-tab:opacity-100 hover:bg-nested-action-hover!',
             })}
             onClick={handleClose}
             onPointerDown={(event) => {

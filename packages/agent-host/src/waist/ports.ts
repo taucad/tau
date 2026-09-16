@@ -153,10 +153,32 @@ export type ModelStreamRequest = {
   readonly systemPromptBlocks?: readonly ModelSystemPromptBlock[] | undefined;
   /** Provider-normalized history rebuilt from W1. */
   readonly messages: readonly ProviderMessage[];
+  /**
+   * Documents whose bytes this request carries, keyed by the lowercase hex
+   * SHA-256 each `⟃tau:document:<sha256>⟄` sentinel text block in `messages`
+   * names (D15). A transport replaces every sentinel with its provider's native
+   * document block and must refuse a sentinel it cannot resolve (D21). Absent
+   * when no message references a document.
+   */
+  readonly documents?: ReadonlyMap<string, MaterializedDocument> | undefined;
   /** Canonical tools available for this request. */
   readonly tools: readonly HostToolDefinition[];
   /** Cancels provider work and transport reads. */
   readonly signal: AbortSignal;
+};
+
+/**
+ * One document's bytes, read for a single model request and never persisted (D15).
+ *
+ * @public
+ */
+export type MaterializedDocument = {
+  /** The document's bytes, base64-encoded without a `data:` prefix. */
+  readonly data: string;
+  /** The media type the durable `file-ref` recorded, e.g. `application/pdf`. */
+  readonly mediaType: string;
+  /** The user-facing name the durable `file-ref` recorded, when it recorded one. */
+  readonly filename?: string | undefined;
 };
 
 /** W3: bearer/local model boundary with normalized streaming and usage. @public */

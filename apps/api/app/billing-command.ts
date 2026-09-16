@@ -22,6 +22,29 @@ import { installBillingProtections } from '#database/billing-protections.js';
 import { runMigrationJob } from '#database/database-migration.js';
 import * as schema from '#database/schema.js';
 import { MetricsService } from '#telemetry/metrics.js';
+import { BillingRecoveryNoticeEmailTransport } from '#api/billing/billing-recovery-notice.transport.js';
+import { EmailService } from '#email/email.service.js';
+import type { DatabaseService } from '#database/database.service.js';
+
+/**
+ * Recovery notices become email only when this worker knows where the app lives and how to send.
+ * Without both the notices stay pending, which is the correct outcome: a link to nowhere is worse
+ * than a delayed one, and `deliverRecoveryNotices` keeps retrying every pass.
+ */
+const createRecoveryNoticeTransport = (
+  database: Pick<DatabaseService, 'database'>,
+): BillingRecoveryNoticeEmailTransport | undefined => {
+  const frontendURL = process.env.TAU_FRONTEND_URL;
+  if (!frontendURL) {
+    return undefined;
+  }
+  // EmailService reads its configuration through the Nest ConfigService shape; this worker has no
+  // Nest container, so it gets the same keys straight from the environment.
+  const config = {
+    get: (key: string): string => process.env[key] ?? (key === 'TAU_EMAIL_REPLY_TO' ? 'help@taucad.dev' : ''),
+  };
+  return new BillingRecoveryNoticeEmailTransport(database, new EmailService(config as never), frontendURL);
+};
 
 /** Protected billing entry in the API image; no HTTP server, dotenv or provider initialization. */
 async function main(): Promise<void> {
@@ -438,6 +461,7 @@ async function main(): Promise<void> {
           policy,
           ledger,
           cash,
+          createRecoveryNoticeTransport(database),
         );
         const { sdk } = await import('#telemetry/otel.js');
         const sourceConfig = {
@@ -546,6 +570,12 @@ async function main(): Promise<void> {
             // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
             await runJob('billing.renewal_recovery', async () =>
               payments.recoverRenewalOffers({ environment: billingEnvironment, limit }),
+            );
+            // Drains the dunning outbox `recordRenewalFailure` fills; a send failure leaves the row
+            // pending with its own backoff rather than failing the pass.
+            // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
+            await runJob('billing.recovery_notices', async () =>
+              payments.deliverRecoveryNotices({ environment: billingEnvironment, limit }),
             );
             if (Date.now() - lastScanAt >= scanIntervalMilliseconds) {
               lastScanAt = Date.now();

@@ -114,7 +114,9 @@ const environmentSchemaBase = z.object({
   // Email delivery
   RESEND_API_KEY: z.string().default(''),
   TAU_EMAIL_FROM: z.string().default('Tau <identity@taucad.dev>'),
-  TAU_EMAIL_REPLY_TO: z.email().default('identity@taucad.dev'),
+  // Operator ruling 2026-09-16 (OQ8): replies go to a staffed help mailbox, because the
+  // payment-failed email invites one. fly.prod.toml overrides this with the tau.new address.
+  TAU_EMAIL_REPLY_TO: z.email().default('help@taucad.dev'),
 
   // Local Model Providers
   OLLAMA_ENABLED: strictEnvironmentBoolean(false).describe('Enable Ollama local model provider'),

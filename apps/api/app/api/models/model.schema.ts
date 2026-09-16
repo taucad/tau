@@ -7,7 +7,7 @@ export const modelSupportSchema = z.object({
   modalities: z
     .object({
       input: z
-        .array(z.enum(['text', 'image']))
+        .array(z.enum(['text', 'image', 'pdf']))
         .min(1)
         .describe('Input modalities the model can receive'),
       output: z

@@ -19,6 +19,7 @@ const fakeChild = (): EventEmitter & {
   stdout: PassThrough;
   stderr: PassThrough;
   stdin: PassThrough;
+  kill: ReturnType<typeof vi.fn>;
 } =>
   // oxlint-disable-next-line unicorn/prefer-event-target -- a fake `ChildProcess`, which is a Node EventEmitter
   Object.assign(new EventEmitter(), {
@@ -44,7 +45,17 @@ describe('GitRepositoryService.serve', () => {
     spawnMock.mockImplementation(() => fakeChild());
   });
 
-  it('bounds the incoming pack with git receive.maxInputSize', () => {
+  /**
+   * The pack ceiling and compare-and-swap, which are one `-c` list (C25/OQ4).
+   *
+   * `receive.denyDeletes` and `receive.denyNonFastForwards` are the only place
+   * the I7/I9 invariant can be enforced: `pre-receive` matches ref *names*, so
+   * without them a client could delete a published tag or a chat record ref and
+   * force-rewind `main`. The behaviour over real git is pinned in
+   * `git.http.integration.test.ts`; this row pins the argv so the flags cannot
+   * be dropped by an edit to the spawn.
+   */
+  it('bounds the incoming pack and refuses deletes and rewinds on a push', () => {
     const service = createService();
     const abort = new AbortController();
 
@@ -53,6 +64,7 @@ describe('GitRepositoryService.serve', () => {
       service: 'git-receive-pack',
       body: Readable.from([]),
       gzipped: false,
+      accountFor: 'proj_1',
       maximumInputBytes: 12_345,
       abort: abort.signal,
     });
@@ -63,6 +75,10 @@ describe('GitRepositoryService.serve', () => {
     expect(argv).toEqual([
       '-c',
       'receive.maxInputSize=12345',
+      '-c',
+      'receive.denyDeletes=true',
+      '-c',
+      'receive.denyNonFastForwards=true',
       'receive-pack',
       '--stateless-rpc',
       '/tmp/tau-git-root/proj_1.git',
@@ -81,10 +97,31 @@ describe('GitRepositoryService.serve', () => {
       service: 'git-upload-pack',
       body: Readable.from([]),
       gzipped: false,
+      maximumInputBytes: 64 * 1024 * 1024,
     });
 
     const [, argv] = spawnMock.mock.calls[0] as [string, string[]];
     expect(argv).toEqual(['upload-pack', '--stateless-rpc', '/tmp/tau-git-root/proj_1.git']);
+  });
+
+  /* C32: git has no `receive.maxInputSize` for `upload-pack` and Fastify's
+     `bodyLimit` does not reach a streamed content-type parser, so the count in
+     `pipeRequestBody` is the whole of the fetch RPC's bound. */
+  it('kills a fetch whose request body passes the negotiation ceiling', async () => {
+    const service = createService();
+    const child = fakeChild();
+    spawnMock.mockImplementationOnce(() => child);
+
+    service.serve({
+      repositoryPath: '/tmp/tau-git-root/proj_1.git',
+      service: 'git-upload-pack',
+      body: Readable.from([new Uint8Array(64), new Uint8Array(64)]),
+      gzipped: false,
+      maximumInputBytes: 100,
+    });
+
+    await service.settled();
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
   });
 
   it('refuses to spawn past the concurrency ceiling instead of queueing without bound', () => {
@@ -201,6 +238,99 @@ describe('GitRepositoryService.ensureRepository', () => {
 
     expect(() => service.repositoryPath('../../tmp/evil')).toThrow();
     expect(service.repositoryPath('proj_1')).toBe(path.join(root, 'proj_1.git'));
+  });
+});
+
+/**
+ * The nightly collector's destructive step holds a Postgres advisory lock, a
+ * row lock, the owner gate and the repository gate at once, and R14 requires a
+ * reachability recheck inside it. What did not belong there was the *writer*:
+ * `reachableLfsOids` used to refresh the record retention roots first, which is
+ * a `for-each-ref` + `rev-list` + one `git grep` per 256 revisions + a
+ * `cat-file` batch + an `update-ref`, all inside that transaction — so a
+ * collection pass answered every concurrent push from the same account with
+ * `503 GIT_STORAGE_BUSY` (review C30). The refresh moved to
+ * `GitBackupService`'s maintenance window; the recheck stayed.
+ */
+describe('GitRepositoryService.retireLfsObject', () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(path.join(tmpdir(), 'tau-git-retire-'));
+    spawnMock.mockReset();
+    spawnMock.mockImplementation(() => {
+      const child = fakeChild();
+      queueMicrotask(() => child.emit('close', 0));
+      return child;
+    });
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('runs no ref-writing git child inside the owner-serialized transaction', async () => {
+    const held = [
+      {
+        size: 64,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        finalizedAt: new Date('2026-01-01T00:00:00.000Z'),
+        unreachableAt: new Date('2026-01-02T00:00:00.000Z'),
+      },
+    ];
+    const transaction = {
+      execute: async (): Promise<void> => undefined,
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: () => ({ for: async (): Promise<typeof held> => held }),
+          }),
+        }),
+      }),
+      update: () => ({ set: () => ({ where: async (): Promise<void> => undefined }) }),
+      delete: () => ({ where: async (): Promise<void> => undefined }),
+    };
+    const deleted: string[] = [];
+    const service = new GitRepositoryService(
+      {
+        get: (key: string): unknown => (key === 'TAU_GIT_ROOT' ? root : ''),
+      } as unknown as ConfigService<Environment, true>,
+      {
+        database: {
+          select: () => ({
+            from: () => ({ where: () => ({ limit: async () => [{ ownerId: 'owner_1' }] }) }),
+          }),
+          transaction: async (work: (tx: typeof transaction) => Promise<boolean>): Promise<boolean> =>
+            work(transaction),
+        },
+      } as unknown as DatabaseService,
+      {} as unknown as BillingService,
+      {
+        deleteBlob: async (args: { key: string }): Promise<void> => {
+          deleted.push(args.key);
+        },
+      } as unknown as ObjectStorageService,
+    );
+
+    const retired = await service.retireLfsObject(
+      {
+        projectId: 'proj_1',
+        oid: 'a'.repeat(64),
+        size: 64,
+        finalized: true,
+        createdAt: held[0]?.createdAt ?? new Date(),
+        finalizedAt: held[0]?.finalizedAt,
+        unreachableAt: held[0]?.unreachableAt,
+      },
+      new Date('2026-03-01T00:00:00.000Z'),
+    );
+
+    expect(retired).toBe(true);
+    expect(deleted).toHaveLength(1);
+    const subcommands = spawnMock.mock.calls.map((call) => (call as [string, string[]])[1][0]);
+    expect(subcommands).toStrictEqual(['lfs']);
+    expect(subcommands).not.toContain('grep');
+    expect(subcommands).not.toContain('update-ref');
   });
 });
 

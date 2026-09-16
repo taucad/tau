@@ -87,6 +87,21 @@ export class GitBackupService implements OnModuleInit, OnModuleDestroy {
       const workspace = await mkdtemp(path.join(tmpdir(), 'tau-git-bundle-'));
       const bundlePath = path.join(workspace, `${projectId}.bundle`);
       try {
+        /* The one place both maintenance writers belong: this window already
+           holds the repository gate, so neither runs against a concurrent push
+           and neither runs inside a database transaction (review C30).
+           Retention first, collection second — `git gc` prunes what no ref
+           reaches, and `refs/tau/retention/records/*` is what keeps a revision
+           named only inside a synchronized chat record (ruling OQ2). Until this
+           call there was no collector anywhere, so those roots protected
+           nothing and objects orphaned by a force-push billed the owner forever
+           (review C29). */
+        await this.repositories.refreshRecordRetentionRoots(repositoryPath);
+        await this.repositories.run(['gc', '--quiet'], repositoryPath).catch((error: unknown) => {
+          /* Collection is housekeeping: a repository that will not collect must
+             still be backed up. */
+          this.#logger.warn({ err: error, projectId }, 'Repository collection failed');
+        });
         // An empty repository has nothing to bundle; git says so and exits non-zero.
         const reachable = await this.repositories.reachableLfsOids(projectId);
         await this.repositories.run(['bundle', 'create', bundlePath, '--all'], repositoryPath);

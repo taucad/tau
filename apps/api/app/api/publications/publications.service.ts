@@ -202,6 +202,19 @@ export class PublicationsService {
       await this.assertPrivateVisibilityAllowed({ ownerId, projectId: request.projectId });
     }
 
+    /* The other route that reaches `ensureRepository`, checked in the same pass
+       as N5. Publishing a named version presupposes the push that created it,
+       and a push needs this entitlement — so this refuses nobody who could
+       otherwise have succeeded, and it stops an un-entitled caller creating a
+       bare repository on the volume for a tag that can never exist (review C11). */
+    const publishEntitlements = await this.entitlementsService.getEntitlements(ownerId);
+    if (!publishEntitlements.canSyncFiles) {
+      throw new ForbiddenException({
+        code: 'GIT_SYNC_NOT_ENTITLED',
+        message: 'Syncing files to Tau Cloud is a paid plan feature.',
+      });
+    }
+
     const frontendUrl = this.configService.get('TAU_FRONTEND_URL', { infer: true }).replace(/\/$/u, '');
     const ownerSnapshot = await this.loadOwnerSnapshot(ownerId);
     const db = this.databaseService.database;

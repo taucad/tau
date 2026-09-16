@@ -90,6 +90,18 @@ export const gitLfsObjectKey = (projectId: string, oid: string): string =>
 export const quotaOverrunSlackBytes = 64 * 1024 * 1024;
 
 /**
+ * The ceiling on a `git-upload-pack` request body.
+ *
+ * A fetch's body is `want`/`have` negotiation, never a pack, so this is orders
+ * of magnitude above the largest real one — it exists because git has no
+ * `receive.maxInputSize` equivalent for `upload-pack` and Fastify's `bodyLimit`
+ * does not reach a streamed content-type parser, so the fetch RPC had no bound
+ * at all (review C32). The same figure as the push path's slack, for the same
+ * reason: it is the size at which a request stopped being a plausible one.
+ */
+export const negotiationInputLimitBytes = quotaOverrunSlackBytes;
+
+/**
  * Project ids are `proj_<nanoid>`; anything else never reaches the filesystem.
  * Bare repositories are `<TAU_GIT_ROOT>/<projectId>.git` and nothing else, so
  * a traversal attempt cannot name a directory.
@@ -141,9 +153,10 @@ export const pktLine = (payload: string): string => `${(payload.length + 4).toSt
 export const serviceAdvertisementPrefix = (service: GitService): string => `${pktLine(`# service=${service}\n`)}0000`;
 
 /**
- * `pre-receive`: the ref allow-list (A39), a fail-closed admission flag, and
- * the quota backstop measured on the quarantine directory receive-pack has
- * already written. A non-zero exit rejects the whole push and git discards the
+ * `pre-receive`: the ref allow-list (A39), a fail-closed admission flag,
+ * compare-and-swap for every ref family (I7/I9, ruling OQ4), and the quota
+ * backstop measured on the quarantine directory receive-pack has already
+ * written. A non-zero exit rejects the whole push and git discards the
  * quarantine, so a refusal is never a partial write (D17).
  */
 export const preReceiveHookScript = `#!/bin/sh
@@ -162,11 +175,36 @@ while read -r _old _new ref; do
     refs/heads/sync|refs/heads/sync/?*|refs/remotes|refs/remotes/?*|refs/tau/owners|refs/tau/owners/?*|refs/tau/workspaces|refs/tau/workspaces/?*|refs/tau/revisions|refs/tau/revisions/?*|refs/tau/transactions|refs/tau/transactions/?*|refs/tau/head|refs/tau/head/?*|refs/tau/retention|refs/tau/retention/?*)
       echo "Tau: refused $ref — host-local refs never leave a host." >&2
       status=1
+      continue
       ;;
     ${pushableRefPrefixes.map((prefix) => `${prefix}?*`).join('|')}) ;;
     *)
       echo "Tau: refused $ref — host-local refs never leave a host." >&2
       status=1
+      continue
+      ;;
+  esac
+  # Compare-and-swap, for every ref family (charter I7/I9, ruling OQ4).
+  # \`receive.denyDeletes\` and \`receive.denyNonFastForwards\` are set on the
+  # spawn too, but git applies both only to \`refs/heads/*\` — measured: a tag
+  # and a \`refs/tau/chats/*\` ref could still be deleted and force-rewound with
+  # them on. So the rule lives here, where every family is already read, and the
+  # refusal is a sentence the client can read rather than git's own
+  # "deletion prohibited".
+  case "$_new" in
+    *[!0]*) ;;
+    *)
+      echo "Tau: refused $ref — Tau Cloud never deletes a ref; retention is decided on the server." >&2
+      status=1
+      continue
+      ;;
+  esac
+  case "$_old" in
+    *[!0]*)
+      if ! git merge-base --is-ancestor "$_old^{commit}" "$_new^{commit}" 2>/dev/null; then
+        echo "Tau: refused $ref — it does not fast-forward $_old; fetch and merge first." >&2
+        status=1
+      fi
       ;;
   esac
 done
@@ -206,6 +244,10 @@ export const postReceiveHookScript = `#!/bin/sh
 # Tau Hosted Remote post-receive hook — written by apps/api GitService.
 set -eu
 while read -r _old _new ref; do
+  # An all-zero new value is a deletion, and a deleted name cannot be resolved:
+  # spooling it left a publication retrying forever (review C26). Unreachable
+  # since receive-pack runs with receive.denyDeletes, and free to keep.
+  case "$_new" in *[!0]*) ;; *) continue ;; esac
   case "$ref" in
     refs/tags/?*) printf '%s\\n' "$ref" >> "\${GIT_DIR:-.}/${publishedTagSpoolFile}" ;;
   esac

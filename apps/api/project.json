@@ -138,6 +138,17 @@
         "command": "node --import @oxc-node/core/register apps/api/scripts/generate-development-billing-policy.mts"
       }
     },
+    "generate-email-palette": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "metadata": {
+        "description": "Reproject packages/ui/src/styles/tokens.css into app/email/templates/email-palette.generated.ts. Pass --check to fail on drift."
+      },
+      "options": {
+        "cwd": "{workspaceRoot}",
+        "command": "node --import @oxc-node/core/register apps/api/scripts/generate-email-palette.mts"
+      }
+    },
     "billing-policy:publish:development": {
       "executor": "nx:run-commands",
       "cache": false,

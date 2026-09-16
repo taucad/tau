@@ -213,7 +213,10 @@ describe('GitBackupService', () => {
       clone,
     );
 
-    await repositories.reachableLfsOids('proj_backup');
+    /* The retention writer moved out of `reachableLfsOids` and into the backup
+       service's maintenance window (review C30), so this row calls the writer
+       it is actually about. */
+    await repositories.refreshRecordRetentionRoots(repositories.repositoryPath('proj_backup'));
     const retained = Buffer.from(
       await repositories.run(
         ['rev-parse', `refs/tau/retention/records/${main}`],
@@ -230,6 +233,7 @@ describe('GitBackupService', () => {
     const fakeRepositories = {
       withRepositoryMaintenance: async <T>(_projectId: string, work: () => Promise<T>) => work(),
       repositoryPath: () => workspace,
+      refreshRecordRetentionRoots: async () => undefined,
       reachableLfsOids: async () => new Set<string>(),
       listLfsObjects: async () => [],
       run: async (args: readonly string[]) => {
@@ -258,6 +262,7 @@ describe('GitBackupService', () => {
     const fakeRepositories = {
       withRepositoryMaintenance: async <T>(_projectId: string, work: () => Promise<T>) => work(),
       repositoryPath: () => workspace,
+      refreshRecordRetentionRoots: async () => undefined,
       reachableLfsOids: async () => new Set<string>(),
       listLfsObjects: async () => [],
       run: async (args: readonly string[]) => {
@@ -310,6 +315,7 @@ describe('GitBackupService', () => {
     const fakeRepositories = {
       withRepositoryMaintenance: async <T>(_projectId: string, work: () => Promise<T>) => work(),
       repositoryPath: () => workspace,
+      refreshRecordRetentionRoots: async () => undefined,
       reachableLfsOids: async () => new Set([oid]),
       listLfsObjects: async () => [
         {
@@ -476,6 +482,7 @@ describe('GitBackupService', () => {
     ] as const;
     const retired: string[] = [];
     const fakeRepositories = {
+      refreshRecordRetentionRoots: async () => undefined,
       reachableLfsOids: async () => new Set(['3'.repeat(64)]),
       listLfsObjects: async () => records,
       markLfsObjectReachability: async () => undefined,

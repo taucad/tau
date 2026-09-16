@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   assertEmailTemplateUrlAllowed,
+  buildFrontendForgotPasswordUrl,
   buildFrontendMagicLinkVerifyUrl,
   buildFrontendResetPasswordUrl,
   buildFrontendVerificationUrl,
@@ -108,6 +109,42 @@ describe('email link builder', () => {
           ownerName: 'Ada',
           publicationTitle: 'Bracket',
           url: 'https://tau.new/s/tau~pub_123',
+        },
+      });
+    }).not.toThrow();
+  });
+
+  it('accepts the billing deep link and rejects a plausible near-miss', () => {
+    const template = (billingUrl: string) =>
+      ({ kind: 'payment-failed', email: 'user@example.com', billingUrl }) as const;
+
+    expect(() => {
+      assertEmailTemplateUrlAllowed({
+        frontendURL: 'https://tau.new',
+        template: template('https://tau.new/?settings=billing'),
+      });
+    }).not.toThrow();
+    // Billing is a settings panel on the root route, not a page; a path link would 404 the recipient.
+    expect(() => {
+      assertEmailTemplateUrlAllowed({
+        frontendURL: 'https://tau.new',
+        template: template('https://tau.new/settings/billing'),
+      });
+    }).toThrow(/path/u);
+  });
+
+  it('accepts the forgot-password link the password-changed email sends', () => {
+    expect(buildFrontendForgotPasswordUrl({ frontendURL: 'https://tau.new' })).toBe(
+      'https://tau.new/auth/forgot-password',
+    );
+    expect(() => {
+      assertEmailTemplateUrlAllowed({
+        frontendURL: 'https://tau.new',
+        template: {
+          kind: 'password-changed',
+          email: 'user@example.com',
+          changedAt: '16 Sep 2026, 10:57 UTC',
+          url: buildFrontendForgotPasswordUrl({ frontendURL: 'https://tau.new' }),
         },
       });
     }).not.toThrow();

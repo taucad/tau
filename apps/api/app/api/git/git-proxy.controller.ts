@@ -17,6 +17,7 @@ import {
   Post,
   Put,
   Param,
+  PayloadTooLargeException,
   Query,
   Req,
   Res,
@@ -178,6 +179,45 @@ const maximumRedirectHops = 2;
 
 const credentialQueryKeys = new Set(['access_token', 'token', 'authorization', 'password', 'api_key', 'apikey']);
 
+/**
+ * How long an upstream git host may take to answer before the socket is
+ * destroyed. Without it a slow or hostile remote pinned an API connection for
+ * as long as the browser stayed on the page (review C31). Generous, because a
+ * large `git-upload-pack` negotiation against a busy host is legitimately slow;
+ * it bounds the pathological case, not the normal one.
+ */
+const upstreamTimeoutMilliseconds = 60 * 1000;
+
+/**
+ * The most a signed-in caller may stream through the proxy into a third-party
+ * git host in one request. Fastify's `bodyLimit` does not reach the git content
+ * types (they are parsed as a raw stream), so this is the whole of the bound.
+ */
+const proxyRequestLimitBytes = 512 * 1024 * 1024;
+
+/**
+ * The request body, with a ceiling, reusing the shape the LFS relay already
+ * uses for its exact-size check below.
+ *
+ * @param body - The incoming request stream.
+ * @param limitBytes - The most it may carry.
+ * @returns A stream that fails once the ceiling is passed.
+ */
+const boundedBody = (body: Readable, limitBytes: number): Readable =>
+  Readable.from(
+    (async function* (): AsyncGenerator<Uint8Array<ArrayBuffer>> {
+      let received = 0;
+      for await (const chunk of body) {
+        const bytes = Uint8Array.from(chunk as Uint8Array<ArrayBuffer>);
+        received += bytes.byteLength;
+        if (received > limitBytes) {
+          throw new PayloadTooLargeException({ code: 'GIT_PROXY_REQUEST_TOO_LARGE' });
+        }
+        yield bytes;
+      }
+    })(),
+  );
+
 const pinnedFetch = async (target: URL, address: LookupAddress, init: RequestInit): Promise<Response> =>
   new Promise<Response>((resolve, reject) => {
     const request = (target.protocol === 'https:' ? httpsRequest : httpRequest)(
@@ -210,6 +250,9 @@ const pinnedFetch = async (target: URL, address: LookupAddress, init: RequestIni
       },
     );
     request.once('error', reject);
+    request.setTimeout(upstreamTimeoutMilliseconds, () => {
+      request.destroy(new Error('The upstream git host did not answer in time.'));
+    });
     const abort = (): void => {
       request.destroy(new DOMException('The upstream request was aborted.', 'AbortError'));
     };
@@ -337,7 +380,7 @@ export class GitProxyController {
       headers,
       ...(request.method === 'POST'
         ? {
-            body: Readable.toWeb(request.raw) as ReadableStream,
+            body: Readable.toWeb(boundedBody(request.raw, proxyRequestLimitBytes)) as ReadableStream,
             duplex: 'half',
           }
         : {}),
@@ -349,6 +392,18 @@ export class GitProxyController {
       const location = response.headers.get('location');
       if (location === null) {
         break;
+      }
+      if (typeof proxyAuthorization === 'string') {
+        /* A GitHub App installation token is scoped to one *repository*, and a
+           renamed or transferred repository redirects to a different path on
+           the same origin — so dropping the credential only when the origin
+           changed replayed a repository-scoped token at a repository it was
+           never issued for (review C33, policy Rule 11). A credential follows
+           nothing: the client re-issues against the final URL. */
+        throw new BadGatewayException({
+          code: 'GIT_PROXY_REDIRECTED_CREDENTIAL',
+          message: 'The remote redirected a request that carried a credential; re-issue against the final URL',
+        });
       }
       if (hop >= maximumRedirectHops) {
         throw new BadGatewayException({
@@ -365,10 +420,9 @@ export class GitProxyController {
         });
       }
       // Every hop is re-checked: scheme, credentials, host range and git path.
+      // A redirect that carried a credential was refused above, so there is
+      // none left to drop here.
       const next = this.resolveTarget(new URL(location, target).toString());
-      if (next.origin !== target.origin) {
-        headers.delete('authorization');
-      }
       // oxlint-disable-next-line no-await-in-loop -- a redirect chain is sequential by definition
       response = await this.fetchTarget(next, {
         method: 'GET',

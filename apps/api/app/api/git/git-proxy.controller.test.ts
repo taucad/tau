@@ -106,6 +106,48 @@ describe('GitProxyController', () => {
     vi.unstubAllGlobals();
   });
 
+  /**
+   * C33 (policy Rule 11): a GitHub App installation token is scoped to one
+   * *repository*, and a renamed or transferred repository redirects to a
+   * different path on the **same** origin — so dropping the credential only on
+   * a cross-origin hop replayed it at a repository it was never issued for.
+   * A request that carried a proxy credential now follows nothing.
+   */
+  it('refuses a same-origin redirect on a request that carried a proxy credential', async () => {
+    const calls: Array<{ url: string; authorization: string | undefined }> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: RequestInit) => {
+        calls.push({
+          url: String(url),
+          authorization: new Headers(init.headers).get('authorization') ?? undefined,
+        });
+        return new Response(undefined, {
+          status: 301,
+          headers: { location: 'https://github.com/someone-else/renamed.git/info/refs' },
+        });
+      }),
+    );
+
+    const controller = proxyController();
+    await expect(
+      controller.proxyGet(
+        'user-1',
+        { url: 'https://github.com/tau/example.git/info/refs' },
+        request({ 'x-tau-proxy-authorization': 'Bearer ghs_installation_token' }),
+        reply(),
+      ),
+    ).rejects.toMatchObject({ response: { code: 'GIT_PROXY_REDIRECTED_CREDENTIAL' } });
+
+    /* The second repository never saw the token, because the hop was never
+       taken: one upstream request, and it was the one the caller named. */
+    expect(calls).toEqual([
+      { url: 'https://github.com/tau/example.git/info/refs', authorization: 'Bearer ghs_installation_token' },
+    ]);
+
+    vi.unstubAllGlobals();
+  });
+
   it('follows a redirect that stays on an allowed git endpoint, up to the hop cap', async () => {
     const calls: string[] = [];
     vi.stubGlobal(

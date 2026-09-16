@@ -84,6 +84,7 @@ describe('createCliRuntime', () => {
           '@taucad/jobs-solvers',
           '@taucad/parameters',
           '@taucad/runtime',
+          '@taucad/skills',
         ].includes(name),
     );
     const actual = taucadImports(source).filter((name) => name !== '@taucad/runtime');

@@ -33,7 +33,7 @@ import type {
 } from '@taucad/revisions/publish-machine';
 import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
 import { classify } from '@taucad/filesystem/path-registry';
-import { readRevisionDiff, readRevisionLog, tauRemoteUrl } from '@taucad/revisions';
+import { readRevisionDiff, readRevisionLog, registerProjectFailureMessage, tauRemoteUrl } from '@taucad/revisions';
 import type {
   GitRemoteCredential,
   RevisionDiffEntry,
@@ -355,6 +355,19 @@ export type WorkerProjectRevisions = Readonly<{
   }) => Promise<WorkerTurnPlacement>;
   /** Every other verb: fire-and-forget into the tree. */
   send: (command: WorkerRevisionCommand) => void;
+  /**
+   * Record what is on disk and wait for the answer (C16, contract §6).
+   *
+   * The correlated form of `send({ command: 'saveRevision' })`. It resolves
+   * once the cut has settled — minted, refused by the I5 gate, or failed — and
+   * the scheduler has quiesced, so the `hidden` unload registrant can hold the
+   * document open until the close revision is in a push rather than letting
+   * `pagehide` offer the *previous* push's pack.
+   *
+   * Resolves rather than rejects at the bound: after it the durable queue is
+   * the guarantee and the next open retries (D28).
+   */
+  saveRevision: (trigger?: 'save' | 'hidden' | 'close') => Promise<void>;
   /** One content-change event on a checkout, already filtered to versioned paths. */
   changed: (checkoutId: string, paths: readonly string[]) => void;
   /** Name one revision, or re-point an existing name (S31). */
@@ -506,12 +519,17 @@ const registerOnTauCloud = async (
     body: JSON.stringify(name === undefined ? {} : { name }),
   });
   if (!response.ok) {
+    /* One owner for this copy (C6, contract §5). The hand-written ladder here
+     * mapped 403 to "belongs to another account" — which the API answers 404
+     * for — while 403 is the project ceiling, and 429/400 fell through to
+     * "Try again." */
+    const answered = (await response.json().catch(() => ({}))) as Readonly<{ code?: unknown; message?: unknown }>;
     throw new Error(
-      response.status === 401
-        ? 'Sign in to back this project up to Tau Cloud.'
-        : response.status === 403
-          ? 'That project id already belongs to another account.'
-          : 'Tau Cloud could not register this project. Try again.',
+      registerProjectFailureMessage(
+        response.status,
+        typeof answered.code === 'string' ? answered.code : undefined,
+        typeof answered.message === 'string' ? answered.message : undefined,
+      ),
     );
   }
 };
@@ -930,6 +948,76 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     toasts.emit({ type: 'error', subject: 'branch', message: toast.message });
   });
 
+  /**
+   * Cut the live checkout and wait for the tree's own answer (C16).
+   *
+   * One implementation for the close path and for an explicit save: the three
+   * settled outcomes are the machine's own emissions — minted, refused by the
+   * I5 gate, or failed — and the deadline is the same `syncQuiesceMilliseconds`
+   * everything else on the close path is bounded by.
+   *
+   * @param trigger - What asked for the cut (S30).
+   * @returns When the cut has settled.
+   */
+  const awaitCut = async (trigger: 'save' | 'hidden' | 'close'): Promise<void> => {
+    const checkoutId = selectRevisionStatus(actor.getSnapshot()).checkoutId;
+    if (checkoutId === undefined) {
+      throw new Error('The project checkout was not ready before close.');
+    }
+    const cut = Promise.withResolvers<void>();
+    const matches = (event: Readonly<{ checkoutId: string; trigger: string }>): boolean =>
+      event.checkoutId === checkoutId && event.trigger === trigger;
+    const subscriptions = [
+      actor.on('revisionMinted', (event) => {
+        if (matches(event)) {
+          cut.resolve();
+        }
+      }),
+      actor.on('nothingToSave', (event) => {
+        if (matches(event)) {
+          cut.resolve();
+        }
+      }),
+      actor.on('cutFailed', (event) => {
+        if (matches(event)) {
+          cut.reject(new Error(event.reason));
+        }
+      }),
+    ];
+    const bound = globalThis.setTimeout(() => {
+      cut.reject(new Error(`The ${trigger} revision was not recorded before the deadline.`));
+    }, syncQuiesceMilliseconds);
+    try {
+      actor.send({ type: 'cut', trigger, checkoutId, leaseIds: [] });
+      await cut.promise;
+    } finally {
+      globalThis.clearTimeout(bound);
+      for (const subscription of subscriptions) {
+        subscription.unsubscribe();
+      }
+    }
+  };
+
+  /**
+   * The correlated `saveRevision` (C16, contract §6).
+   *
+   * Resolves rather than rejects: the failure a person can act on has already
+   * gone out on the toast channel (`cutFailed` above), and after the bound the
+   * durable queue is the guarantee (D28). The caller is an unload registrant
+   * whose only question is "may `pagehide` run now".
+   *
+   * @param trigger - `save`, `hidden` or `close`. Defaults to `save`.
+   * @returns When the cut has settled and the scheduler has quiesced.
+   */
+  const saveRevision = async (trigger: 'save' | 'hidden' | 'close' = 'save'): Promise<void> => {
+    try {
+      await awaitCut(trigger);
+      await awaitSyncSettled(actor);
+    } catch {
+      /* Reported already; the queue carries whatever did not reach the remote. */
+    }
+  };
+
   return {
     admitTurn: async (input) => {
       const pending = Promise.withResolvers<WorkerTurnPlacement>();
@@ -1152,10 +1240,9 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           break;
         }
         case 'saveRevision': {
-          const { checkoutId } = published;
-          if (checkoutId !== undefined) {
-            actor.send({ type: 'cut', trigger: command.trigger ?? 'save', checkoutId, leaseIds: [] });
-          }
+          /* One implementation, awaited or not: the uncorrelated form is the
+           * same cut with nobody listening for its answer (I15). */
+          void saveRevision(command.trigger);
           break;
         }
         /* Questions, not events: they are answered on a correlated frame and
@@ -1251,6 +1338,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         ),
       };
     },
+    saveRevision,
     release: async () => {
       /*
        * The scheduler first, inside its bound (W13 review 2 R2/P33).
@@ -1261,40 +1349,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
        * is pushed, or recorded as unsent" true; after the bound the durable
        * queue is the guarantee and the next open retries it (D28).
        */
-      const checkoutId = selectRevisionStatus(actor.getSnapshot()).checkoutId;
-      if (checkoutId === undefined) {
-        throw new Error('The project checkout was not ready before close.');
-      }
-      const closeCut = Promise.withResolvers<void>();
-      const subscriptions = [
-        actor.on('revisionMinted', (event) => {
-          if (event.checkoutId === checkoutId && event.trigger === 'close') {
-            closeCut.resolve();
-          }
-        }),
-        actor.on('nothingToSave', (event) => {
-          if (event.checkoutId === checkoutId && event.trigger === 'close') {
-            closeCut.resolve();
-          }
-        }),
-        actor.on('cutFailed', (event) => {
-          if (event.checkoutId === checkoutId && event.trigger === 'close') {
-            closeCut.reject(new Error(event.reason));
-          }
-        }),
-      ];
-      const bound = setTimeout(() => {
-        closeCut.reject(new Error('The close revision was not recorded before the deadline.'));
-      }, syncQuiesceMilliseconds);
-      try {
-        actor.send({ type: 'cut', trigger: 'close', checkoutId, leaseIds: [] });
-        await closeCut.promise;
-      } finally {
-        clearTimeout(bound);
-        for (const subscription of subscriptions) {
-          subscription.unsubscribe();
-        }
-      }
+      await awaitCut('close');
       await awaitSyncSettled(actor);
       /* The fourth way a turn ends without its lease, in the same frame and
        * with the same code as the other three — a client cannot act on a
@@ -1316,8 +1371,8 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
 /**
  * One request frame on a revision port: a command, optionally correlated.
  *
- * `admitTurn` is the only command with an answer, so it is the only one that
- * carries an `id`; everything else rides the tree's own projection.
+ * A command that has an answer carries an `id` and is answered by one `result`
+ * frame (see `answerOf`); everything else rides the tree's own projection.
  *
  * @public
  */
@@ -1359,7 +1414,15 @@ export type WorkerRevisionResult =
    * `awaitSyncSettled`, and only then does this frame go out. An uncorrelated
    * `close` — what `pagehide` sends — still answers nothing.
    */
-  | Readonly<{ kind: 'closed' }>;
+  | Readonly<{ kind: 'closed' }>
+  /**
+   * The cut a `saveRevision` asked for has settled (C16).
+   *
+   * Carries nothing: the outcome a reader acts on is the projection (a new
+   * head, or none) and the toast channel (a failure). What the frame *is* is
+   * permission for `pagehide` to run.
+   */
+  | Readonly<{ kind: 'saved' }>;
 
 /** One response frame on a revision port. @public */
 export type WorkerRevisionResponse =
@@ -1496,6 +1559,12 @@ const answerOf = (
           ...(request.against === undefined ? {} : { against: request.against }),
         })
         .then((comparison) => ({ kind: 'comparison', comparison }) as const);
+    }
+    /* A question now (C16): the `hidden` unload registrant must be able to wait
+     * for the close cut before `pagehide` offers a pack. An uncorrelated frame
+     * takes the same path and its answer is simply dropped. */
+    case 'saveRevision': {
+      return tree.saveRevision(request.trigger).then(() => ({ kind: 'saved' }) as const);
     }
     default: {
       return undefined;

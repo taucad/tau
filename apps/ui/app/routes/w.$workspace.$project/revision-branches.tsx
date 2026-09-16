@@ -232,12 +232,21 @@ function ConflictCard({
                 sides are; this says it the way the History rows already do, and
                 it is the same component (review R9). */}
               {modes[path] !== undefined && materialized === undefined && !materializationErrors[path] ? (
-                <p role='status' aria-busy='true' className='px-2 py-1 text-xs text-muted-foreground'>
+                <p
+                  role='status'
+                  aria-label={`Conflict view for ${path}`}
+                  aria-busy='true'
+                  className='px-2 py-1 text-xs text-muted-foreground'
+                >
                   Loading {modes[path] === 'compare' ? 'comparison' : 'editor'} for {path}…
                 </p>
               ) : null}
               {materializationErrors[path] ? (
-                <div role='alert' className='flex flex-wrap items-center gap-2 px-2 py-1 text-xs'>
+                <div
+                  role='alert'
+                  aria-label={`Conflict view for ${path}`}
+                  className='flex flex-wrap items-center gap-2 px-2 py-1 text-xs'
+                >
                   <span>{`Could not load ${path}. Your choices are unchanged.`}</span>
                   <Button
                     size='xs'
@@ -317,6 +326,14 @@ export type RevisionBranchesProps = {
   readonly branches: readonly RevisionBranchFacet[];
   /** The branch the workbench is on; its row is marked and has no verbs. */
   readonly currentBranch: string | undefined;
+  /**
+   * The live checkout's id, from the same projection (C40).
+   *
+   * A branch on any other checkout is *Linked*, whatever the host puts its
+   * files behind — which is what the old `/checkouts/` prefix test was trying
+   * to say and could only say in a browser.
+   */
+  readonly liveCheckoutId: string | undefined;
   /** Chat names by id, for the chips that say who is working where. */
   readonly chatNames: Readonly<Record<string, string>>;
   /** Durable chat placement by chat id. */
@@ -385,6 +402,7 @@ export type RevisionBranchesProps = {
 export function RevisionBranches({
   branches,
   currentBranch,
+  liveCheckoutId,
   chatNames,
   chatCheckoutIds,
   branchFacts,
@@ -458,7 +476,11 @@ export function RevisionBranches({
                 {fact?.revisionNumber === undefined ? null : (
                   <span className='shrink-0 text-xs text-muted-foreground'>Rev {fact.revisionNumber}</span>
                 )}
-                {branch.checkoutRoot?.startsWith('/checkouts/') === true ? (
+                {/* Checkout identity, not a path prefix (I2, C40): policy Rule 3
+                    puts linked checkouts at `/checkouts/<id>` in a browser
+                    authority and inside the host data directory on disk, so the
+                    prefix test never fired on desktop or `tau serve`. */}
+                {branch.checkoutId !== undefined && branch.checkoutId !== liveCheckoutId ? (
                   <Badge variant='outline' className='shrink-0 font-normal'>
                     Linked
                   </Badge>

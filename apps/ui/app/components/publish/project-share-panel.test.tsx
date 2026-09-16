@@ -77,7 +77,15 @@ vi.mock('@taucad/billing/hooks/use-entitlements', async (importOriginal) => {
 const openSettingsDialogMock = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-settings-dialog.js', async (importOriginal) => {
   const actual = await importOriginal<typeof useSettingsDialogModule>();
-  return { ...actual, openSettingsDialog: openSettingsDialogMock };
+  return {
+    ...actual,
+    useSettingsDialog: () => ({
+      isOpen: false,
+      section: 'general',
+      open: openSettingsDialogMock,
+      close: vi.fn(),
+    }),
+  };
 });
 
 const tag = (name: string): RevisionTag => ({

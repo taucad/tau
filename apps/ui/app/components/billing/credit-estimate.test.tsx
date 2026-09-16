@@ -4,16 +4,18 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { entitlementsFromTier } from '@taucad/billing';
 import type { WireBalanceExplanation, WireModelEstimates } from '@taucad/billing';
-import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
 
 const useCreditsMock = vi.hoisted(() => vi.fn());
 const useModelEstimatesMock = vi.hoisted(() => vi.fn());
 const useEntitlementsMock = vi.hoisted(() => vi.fn());
+const openSettingsDialog = vi.hoisted(() => vi.fn());
 
 vi.mock('@taucad/billing/hooks/use-credits', () => ({ useCredits: useCreditsMock }));
 vi.mock('@taucad/billing/hooks/use-model-estimates', () => ({ useModelEstimates: useModelEstimatesMock }));
 vi.mock('@taucad/billing/hooks/use-entitlements', () => ({ useEntitlements: useEntitlementsMock }));
-vi.mock('#hooks/use-settings-dialog.js', () => ({ openSettingsDialog: vi.fn() }));
+vi.mock('#hooks/use-settings-dialog.js', () => ({
+  useSettingsDialog: () => ({ isOpen: false, section: 'general', open: openSettingsDialog, close: vi.fn() }),
+}));
 vi.mock('#components/billing/topup-modal.js', () => ({
   TopupModal: (props: { readonly isOpen: boolean }) => <div data-testid='topup-modal' data-open={props.isOpen} />,
 }));

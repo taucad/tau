@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useSession } from '@better-auth-ui/react';
 import { toast } from 'sonner';
@@ -7,6 +7,8 @@ import { formatCreditAtoms } from '@taucad/billing';
 import { AuthConfigProvider } from '#providers/auth-provider.js';
 import { authClient } from '#lib/auth-client.js';
 import { ENV } from '#environment.config.js';
+import { useSearchParameter } from '#hooks/use-search-parameter.js';
+import { stringParameter } from '#utils/search-parameter.codecs.js';
 import { followPaymentRedirect, getPaymentAction, recoverPaymentAction } from '#lib/billing-payment-client.js';
 import {
   FinancialSessionProvider,
@@ -52,21 +54,36 @@ const BillingSessionBridge = ({ children }: { readonly children: ReactNode }): R
 const returnSettleAttempts = 10;
 const returnSettleIntervalMilliseconds = 2000;
 const settlingStates = new Set(['redirect_required', 'processing', 'funds_received']);
+const paymentActionParameter = stringParameter();
+const paymentActionIdPattern = /^[A-Za-z0-9._:-]{1,128}$/u;
 
 export const useCloudPaymentActionReturn = (): void => {
   const { apiBaseUrl, environment, userId } = useBillingSession();
   const financialSession = useFinancialSession();
+  const [returnedActionId, clearReturnedAction] = useSearchParameter('payment_action', paymentActionParameter);
+  /* Latched at mount, because clearing the parameter re-renders: the bounded
+   * re-check below outlives the URL it arrived on, and reading the live value
+   * would tear it down the moment it removes itself. Checkout returns on a
+   * fresh load, so the mount value is the returned action. */
+  const [actionId] = useState(returnedActionId);
+  const inspected = useRef(false);
+  /* Held in a ref rather than a dependency: React Router hands out a new
+   * `setSearchParams` identity on every URL change, so depending on the writer
+   * would tear this effect down the instant it deletes its own parameter. */
+  const clearReturnedActionRef = useRef(clearReturnedAction);
+  useEffect(() => {
+    clearReturnedActionRef.current = clearReturnedAction;
+  }, [clearReturnedAction]);
   useEffect(() => {
     if (apiBaseUrl === undefined || environment === undefined || userId === undefined) {
       return;
     }
-    const binding = { apiBaseUrl, environment, ownerId: userId, financialSession: financialSession.capture() };
-    let active = true;
-    const url = new URL(globalThis.location.href);
-    const actionId = url.searchParams.get('payment_action');
-    if (actionId === null || !/^[A-Za-z0-9._:-]{1,128}$/u.test(actionId)) {
+    if (inspected.current || !paymentActionIdPattern.test(actionId)) {
       return;
     }
+    inspected.current = true;
+    const binding = { apiBaseUrl, environment, ownerId: userId, financialSession: financialSession.capture() };
+    let active = true;
     type PaymentAction = Awaited<ReturnType<typeof getPaymentAction>>;
     const announce = (action: PaymentAction): string | number | undefined => {
       switch (action.state) {
@@ -131,8 +148,7 @@ export const useCloudPaymentActionReturn = (): void => {
         if (!active) {
           return;
         }
-        url.searchParams.delete('payment_action');
-        globalThis.history.replaceState(globalThis.history.state, '', url);
+        clearReturnedActionRef.current('');
         let toastId = announce(action);
         for (let attempt = 0; attempt < returnSettleAttempts && settlingStates.has(action.state); attempt++) {
           // oxlint-disable-next-line no-await-in-loop -- sequential bounded polling of one action
@@ -168,5 +184,5 @@ export const useCloudPaymentActionReturn = (): void => {
     return () => {
       active = false;
     };
-  }, [apiBaseUrl, environment, financialSession, userId]);
+  }, [actionId, apiBaseUrl, environment, financialSession, userId]);
 };

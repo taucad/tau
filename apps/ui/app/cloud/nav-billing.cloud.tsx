@@ -1,7 +1,7 @@
 import { ChartColumn, CreditCard, Sparkles } from 'lucide-react';
 import { DropdownMenuItem } from '@taucad/ui/components/dropdown-menu';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
-import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
+import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { ProBadge } from '#components/tier-badge.js';
 import type { NavRoute } from '#constants/route.constants.js';
 
@@ -15,10 +15,11 @@ export const billingNavRoutes: NavRoute[] = [
 
 export function NavBillingItem(): React.JSX.Element {
   const { tier } = useEntitlements();
+  const { open: openSettings } = useSettingsDialog();
   return tier === 'free' ? (
     <DropdownMenuItem
       onSelect={() => {
-        openSettingsDialog('billing');
+        openSettings('billing');
       }}
     >
       <Sparkles />
@@ -28,7 +29,7 @@ export function NavBillingItem(): React.JSX.Element {
   ) : (
     <DropdownMenuItem
       onSelect={() => {
-        openSettingsDialog('billing');
+        openSettings('billing');
       }}
     >
       <CreditCard />

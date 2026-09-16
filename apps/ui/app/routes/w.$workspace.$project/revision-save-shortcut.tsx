@@ -49,7 +49,10 @@ export function useSaveRevisionRequest(): () => Promise<void> {
           timeout: saveFlushTimeoutMilliseconds,
         }),
       ]);
-      saveRevision('save');
+      /* Not awaited: the gesture is finished once the cut is asked for, and the
+       * correlated answer exists for the unload registrant, not for a person
+       * waiting at the keyboard (C16). */
+      void saveRevision('save');
     } catch (error) {
       toast.error('Revision not saved', {
         description: error instanceof Error ? error.message : 'The editor could not finish saving its files.',

@@ -311,7 +311,8 @@ export function CodeEditor({ className, options: optionsFromProps, ...rest }: Co
         className={classNames}
         theme={monacoTheme}
         wrapperProps={{
-          className: 'editor-container',
+          // `ph-no-capture`: session replay never records source code.
+          className: 'editor-container ph-no-capture',
           style: { height: '100%' },
         }}
         options={options}

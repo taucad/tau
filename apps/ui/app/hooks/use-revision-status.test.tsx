@@ -610,11 +610,40 @@ describe('the page client of the worker revision root', () => {
 
     setVisibility('hidden');
     await settle();
-    expect(messages).toEqual([{ command: 'saveRevision', trigger: 'close' }]);
+    /* Correlated (C16, contract §6): the close cut is a *question*, so the
+     * registrant can hold the document open until the worker answers it. It
+     * used to be posted and abandoned in the same microtask, which left
+     * `pagehide` offering the previous push's pack — or nothing. */
+    expect(messages).toEqual([{ command: 'saveRevision', trigger: 'close', id: expect.any(Number) }]);
 
     messages.length = 0;
     globalThis.dispatchEvent(new Event('pagehide'));
     expect(messages).toEqual([{ command: 'flushKeepalive' }]);
+  });
+
+  it('should not resolve the close flush until the worker answers the cut (C16)', async () => {
+    const { worker, ports, messages } = controlledWorker();
+    const client = getRevisionClient({ projectId, worker });
+    client.open();
+    messages.length = 0;
+
+    let settled = false;
+    const flush = client.saveRevision('close').then(() => {
+      settled = true;
+    });
+
+    await settle();
+    expect(settled).toBe(false);
+    const frame = messages.at(-1) as { command: string; trigger?: string; id: number };
+    expect(frame).toMatchObject({ command: 'saveRevision', trigger: 'close' });
+
+    ports[0]?.postMessage({
+      type: 'result',
+      id: frame.id,
+      result: { kind: 'saved' },
+    } satisfies WorkerRevisionResponse);
+    await flush;
+    expect(settled).toBe(true);
   });
 
   it('should push what `hidden` minted, and record it when the remote cannot be reached (W13 P32/P33)', async () => {

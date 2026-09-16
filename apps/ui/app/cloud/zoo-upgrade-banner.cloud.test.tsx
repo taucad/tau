@@ -3,7 +3,9 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 const openSettingsDialog = vi.hoisted(() => vi.fn());
-vi.mock('#hooks/use-settings-dialog.js', () => ({ openSettingsDialog }));
+vi.mock('#hooks/use-settings-dialog.js', () => ({
+  useSettingsDialog: () => ({ isOpen: false, section: 'general', open: openSettingsDialog, close: vi.fn() }),
+}));
 
 const { ZooUpgradeBanner } = await import('#cloud/zoo-upgrade-banner.cloud.js');
 

@@ -185,8 +185,18 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       ...(isRemoteConnected
         ? [
             {
-              id: 'disconnect-remote',
+              id: 'change-backup',
               label: 'Change backup',
+              group: 'Sync',
+              icon: <Cloud />,
+              action: handleOpenSync,
+            },
+            /* R29 names two verbs, not one wearing the other's id: *Change* and
+               *Disconnect* are different intents and both open the pane, which
+               is where the confirmation lives (C47). */
+            {
+              id: 'disconnect-remote',
+              label: 'Disconnect backup',
               group: 'Sync',
               icon: <CloudOff />,
               action: handleOpenSync,

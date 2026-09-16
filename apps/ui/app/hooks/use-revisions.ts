@@ -18,6 +18,7 @@ import { useMemo, useSyncExternalStore } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import type { RevisionDiffEntry, RevisionRow } from '@taucad/revisions';
 import { useProject } from '#hooks/use-project.js';
+import { getRevisionSessionUser } from '#lib/revision-actor.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
 import {
   getHostFinalizedTurns,
@@ -70,6 +71,8 @@ export type RevisionsView = {
   >;
 };
 
+const emptyRows: readonly RevisionRow[] = Object.freeze([]);
+
 const emptyView: RevisionsView = {
   revisions: [],
   byTurnId: new Map(),
@@ -81,12 +84,61 @@ const emptyView: RevisionsView = {
   branchFacts: new Map(),
 };
 
+/**
+ * The title a person reads, never the generator's own string (C37).
+ *
+ * `RevisionRow.summary` is `edited ?? generated`, so a surface cannot tell a
+ * human title from `revision-effects.ts`'s placeholder — but it can
+ * *reconstruct* the placeholder from fields the row already carries and refuse
+ * to render it. That is an equality check against known values, not a parse of
+ * a sentence (I12). The generator itself is `packages/revisions`' to fix.
+ *
+ * @param row - One graph row.
+ * @returns The headline every revision surface shows.
+ */
+const titleOf = (row: RevisionRow): string => {
+  if (row.turnId !== undefined && row.summary === `Agent turn ${row.turnId}`) {
+    return 'Agent change';
+  }
+  if (row.trigger !== undefined && row.summary === `Saved changes (${row.trigger})`) {
+    return row.trigger === 'save' ? 'Saved changes' : 'Autosave';
+  }
+  return row.summary;
+};
+
+/**
+ * Who made a revision, in a person's words (C45, D18/A26).
+ *
+ * `RevisionRow.actor` is `provenance.actorId`: a model id for an agent turn,
+ * this app's own `anon:<hash>` pseudonym for an anonymous author, an account id
+ * otherwise. The pseudonym scheme is ours (`lib/revision-actor.ts`), so naming
+ * it is reading our own format. An account id belonging to somebody else cannot
+ * be named here — `RevisionRow` carries no `provenance.actor` — so it is
+ * described rather than printed raw.
+ *
+ * @param row - One graph row.
+ * @returns The attribution line.
+ */
+const actorOf = (row: RevisionRow): string => {
+  if (row.source === 'agent') {
+    return row.actor;
+  }
+  if (row.actor.startsWith('anon:')) {
+    return `Anonymous · ${row.actor.slice('anon:'.length)}`;
+  }
+  const session = getRevisionSessionUser();
+  if (session !== undefined && session.id === row.actor) {
+    return session.name ?? session.email ?? 'You';
+  }
+  return row.actor === '' ? 'Unknown' : 'Another account';
+};
+
 const cardOf = (row: RevisionRow): RevisionCard => ({
   revisionId: row.revisionId,
   n: row.revisionNumber,
   createdAt: row.createdAt,
-  summary: row.summary,
-  actor: row.actor,
+  summary: titleOf(row),
+  actor: actorOf(row),
   turnId: row.turnId,
   conflicted: row.conflicted,
   tags: row.tags,
@@ -161,6 +213,17 @@ export function useRevisions(): RevisionsView {
      * for a head that has not moved is exact rather than merely fresh. */
     staleTime: Number.POSITIVE_INFINITY,
   });
+  /*
+   * `combine` is not an optimisation here, it is the difference between this
+   * hook having a memo and not (B9, C51).
+   *
+   * Without it, `QueriesObserver.getOptimisticResult` hands back a **fresh
+   * array** on every render, so the `useMemo` below never hits and every
+   * consumer — the always-on header chip, the palette, the pane, and one per
+   * chat turn — rebuilt `revisions`, `byTurnId`, `selectedIds` and
+   * `branchFacts` per render. With it, query-core caches the combined value
+   * through `replaceEqualDeep`, so nothing moves until the graph does.
+   */
   const settledBranchRows = useQueries({
     queries: finalizedBranchHeads.map(([settledBranch, finalizedRevisionId]) => ({
       queryKey: ['revision-log', projectId, settledBranch, finalizedRevisionId],
@@ -168,6 +231,10 @@ export function useRevisions(): RevisionsView {
       queryFn: async () => client?.log({ branch: settledBranch }) ?? [],
       staleTime: Number.POSITIVE_INFINITY,
     })),
+    combine: (results) => ({
+      rows: results.flatMap((result) => result.data ?? []),
+      isPending: results.some((result) => result.isPending),
+    }),
   });
   const branchRows = useQueries({
     queries: (status?.branches ?? []).map((entry) => ({
@@ -176,6 +243,11 @@ export function useRevisions(): RevisionsView {
       queryFn: async () => client?.log({ branch: entry.name }) ?? [],
       staleTime: Number.POSITIVE_INFINITY,
     })),
+    combine: (results) => ({
+      /* Positional, because `branchFacts` pairs each log with its own branch. */
+      logs: results.map((result) => result.data ?? emptyRows),
+      pending: results.map((result) => result.isPending),
+    }),
   });
 
   return useMemo(() => {
@@ -197,7 +269,7 @@ export function useRevisions(): RevisionsView {
         byTurnId.set(card.turnId, card);
       }
     }
-    for (const row of settledBranchRows.flatMap((query) => query.data ?? [])) {
+    for (const row of settledBranchRows.rows) {
       const card = cardOf(row);
       if (card.turnId !== undefined) {
         byTurnId.set(card.turnId, card);
@@ -206,7 +278,7 @@ export function useRevisions(): RevisionsView {
     const selectedIds = new Set((rows ?? []).map((row) => row.revisionId));
     const branchFacts = new Map<string, { revisionNumber: number | undefined; ahead: number; behind: number }>();
     for (const [index, entry] of (status?.branches ?? []).entries()) {
-      const branchLog = branchRows[index]?.data ?? [];
+      const branchLog = branchRows.logs[index] ?? emptyRows;
       const branchIds = new Set(branchLog.map((row) => row.revisionId));
       branchFacts.set(entry.name, {
         revisionNumber: branchLog[0]?.revisionNumber,
@@ -224,8 +296,8 @@ export function useRevisions(): RevisionsView {
         headRevisionId !== undefined && revisions.length > 0 && revisions[0]?.revisionId !== headRevisionId,
       isLoading:
         isPending ||
-        settledBranchRows.some((query) => query.isPending) ||
-        branchRows.some((query, index) => status?.branches[index]?.head !== undefined && query.isPending),
+        settledBranchRows.isPending ||
+        branchRows.pending.some((pending, index) => status?.branches[index]?.head !== undefined && pending),
       branchFacts,
     };
   }, [branch, branchRows, client, finalized, headRevisionId, isPending, rows, settledBranchRows, status]);

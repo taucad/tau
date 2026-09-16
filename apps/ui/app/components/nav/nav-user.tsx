@@ -9,11 +9,11 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { ClientOnly } from '#components/ui/utils/client-only.js';
-import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
+import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { UserButton } from '#components/auth/user/user-button.js';
 import { useNetworkConnectivity } from '#hooks/use-network-connectivity.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { metaConfig } from '#constants/meta.constants.js';
+import { legalUrl, metaConfig } from '#constants/meta.constants.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
 import { NavBillingItem } from '#cloud/nav-billing.js';
 
@@ -27,6 +27,7 @@ import { NavBillingItem } from '#cloud/nav-billing.js';
  */
 export function NavUser(): React.JSX.Element {
   const isOnline = useNetworkConnectivity();
+  const { open: openSettings } = useSettingsDialog();
   const helpItems = [
     <DropdownMenuItem key='documentation' asChild>
       <a href='https://docs.tau.new' target='_blank' rel='noopener noreferrer'>
@@ -35,13 +36,13 @@ export function NavUser(): React.JSX.Element {
       </a>
     </DropdownMenuItem>,
     <DropdownMenuItem key='privacy' asChild>
-      <a href='https://tau.new/legal/privacy' target='_blank' rel='noopener noreferrer'>
+      <a href={legalUrl('privacy')} target='_blank' rel='noopener noreferrer'>
         <Shield />
         Privacy
       </a>
     </DropdownMenuItem>,
     <DropdownMenuItem key='terms' asChild>
-      <a href='https://tau.new/legal/terms' target='_blank' rel='noopener noreferrer'>
+      <a href={legalUrl('terms')} target='_blank' rel='noopener noreferrer'>
         <FileText />
         Terms
       </a>
@@ -92,7 +93,7 @@ export function NavUser(): React.JSX.Element {
               <DropdownMenuItem
                 key='settings'
                 onSelect={() => {
-                  openSettingsDialog('general');
+                  openSettings('general');
                 }}
               >
                 <Settings />

@@ -27,13 +27,16 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useFocusedChatReadState } from '#hooks/use-focused-chat-read-state.js';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
 import { Loader } from '#components/ui/loader.js';
-import { Button } from '@taucad/ui/components/button';
-import { ProjectNotFound } from '#routes/w.$workspace.$project/project-not-found.js';
-import { ProjectLoadError } from '#routes/w.$workspace.$project/project-load-error.js';
+import {
+  deriveProjectRouteState,
+  ProjectRouteStateContext,
+  useProjectRouteState,
+} from '#routes/w.$workspace.$project/project-route-state.js';
+import type { ProjectRouteSlugs } from '#routes/w.$workspace.$project/project-route-state.js';
+import { ProjectRouteNotice, ProjectRouteRetryContext } from '#routes/w.$workspace.$project/project-route-notices.js';
 import { isKernelAvailable, nativeKernelRequirementForEntryPath } from '#constants/available-kernel-configurations.js';
 import { useLiveProjectIds, useProjectSession, useSessions } from '#hooks/use-sessions.js';
 import { forgetProjectRegions, registerProjectSessionServices, reportRegionReady } from '#services/sessions-store.js';
-import type { ProjectSessionCloseReason } from '#machines/project-session.machine.js';
 import type { ChatSyncState } from '#machines/chat-session.machine.js';
 import {
   useRevisionClientLifecycle,
@@ -43,6 +46,12 @@ import {
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useCanonicalProjectUrlCorrection, useProjectIdBySlugs } from '#hooks/use-project-slug-route.js';
 import { projectChatIdFromSearch, projectUrl } from '#utils/project-url.utils.js';
+import { useSearchParameter } from '#hooks/use-search-parameter.js';
+import { searchParameterName } from '#constants/search-parameter.constants.js';
+import { stringParameter } from '#utils/search-parameter.codecs.js';
+
+/* Module scope: the setter is memoised on the codec's identity. */
+const cloudOpenParameter = stringParameter();
 
 type ResolvedProjectRouteAccess = {
   readonly projectId: string;
@@ -57,6 +66,14 @@ type ProjectSessionFlushRegistration = {
 };
 
 type ProjectRouteError = Readonly<{
+  /**
+   * What failed, not merely where.
+   *
+   * A rejected access check and a rejected view flush can both belong to the
+   * project being navigated to, so the project id cannot tell them apart —
+   * and they are two different notices (W1).
+   */
+  kind: 'access' | 'flush';
   projectId: string;
   loadAttempt: number;
   error: Error;
@@ -109,14 +126,13 @@ function ProjectSessionBinding({
   const viewsReady = useSelector(fileManagerRef, (state) => state.matches('ready'));
   const runtimeReady = useSelector(projectRef, (state) => state.context.project !== undefined);
   const status = useRevisionClientStatus(client);
+  /* W7 tier 3: the `cloudOpen` marker is read and cleared by the host, through
+   * the router, so React sees the change. This half only acts on it. */
   useEffect(() => {
     if (client === undefined || shouldOpenFromTauCloud !== true) {
       return;
     }
     void connectRemote('tau');
-    const url = new URL(globalThis.location.href);
-    url.searchParams.delete('cloudOpen');
-    globalThis.history.replaceState(globalThis.history.state, '', `${url.pathname}${url.search}${url.hash}`);
   }, [client, connectRemote, shouldOpenFromTauCloud]);
 
   useEffect(() => {
@@ -252,51 +268,6 @@ function ProjectSessionBinding({
   return <></>;
 }
 
-/** What a closed row says, in the canvas's words (P47, AC24). */
-const closedProjectText: Readonly<Record<ProjectSessionCloseReason, string>> = {
-  budget: 'Closed · memory budget · reopen any time',
-  idle: 'Closed after 30 minutes idle · reopen any time',
-  user: 'Closed · reopen any time',
-  quit: 'Closed · reopen any time',
-};
-
-/**
- * The project on screen after its session closed (R1).
- *
- * Its resources are gone with the session, so the route shows why and offers
- * the one verb that brings them back. Nothing here holds a worker.
- *
- * @param props - The closed project and why it closed.
- * @returns The reopen surface.
- */
-function ProjectClosed({
-  projectId,
-  reason,
-}: {
-  readonly projectId: string;
-  readonly reason: ProjectSessionCloseReason | undefined;
-}): React.JSX.Element {
-  const sessions = useSessions();
-  return (
-    <div className='flex h-full items-center justify-center p-6 text-center'>
-      <div className='max-w-md space-y-3'>
-        <p className='text-sm text-muted-foreground'>
-          {reason === undefined ? 'Closed · reopen any time' : closedProjectText[reason]}
-        </p>
-        <Button
-          type='button'
-          onClick={() => {
-            sessions.send({ type: 'open', projectId });
-            sessions.send({ type: 'touch', projectId });
-          }}
-        >
-          Reopen project
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 function ProjectSession({
   children,
   projectId,
@@ -420,6 +391,8 @@ export function ProjectRouteGate({
   requestedChatId,
   createdChatId,
   shouldOpenFromTauCloud,
+  slugs,
+  isResolvingSlugs = false,
 }: {
   readonly children?: React.ReactNode;
   readonly onFocusedChatResolved?: (chatId: string) => void;
@@ -427,6 +400,9 @@ export function ProjectRouteGate({
   readonly requestedChatId?: string;
   readonly createdChatId?: string;
   readonly shouldOpenFromTauCloud?: boolean;
+  /** How the URL addressed this project, for a slug that resolves to nothing. */
+  readonly slugs?: ProjectRouteSlugs;
+  readonly isResolvingSlugs?: boolean;
 }): React.ReactNode {
   const projectManager = useProjectManager();
   const sessions = useSessions();
@@ -473,6 +449,7 @@ export function ProjectRouteGate({
         } catch {
           if (!isCancelled()) {
             setRouteError({
+              kind: 'flush',
               projectId: '',
               loadAttempt,
               error: new Error('Tau could not save the current project view. Try again before leaving.'),
@@ -487,6 +464,7 @@ export function ProjectRouteGate({
       } catch {
         if (!isCancelled()) {
           setRouteError({
+            kind: 'access',
             projectId: requestedProjectId,
             loadAttempt,
             error: new Error('Tau could not check this project. Try again.'),
@@ -524,6 +502,7 @@ export function ProjectRouteGate({
       } catch {
         if (!isCancelled()) {
           setRouteError({
+            kind: 'flush',
             projectId: requestedProjectId,
             loadAttempt,
             error: new Error('Tau could not save the current project view. Try again before leaving.'),
@@ -536,7 +515,12 @@ export function ProjectRouteGate({
     return () => {
       controller.abort();
     };
-  }, [requestedProjectId, projectManager, loadAttempt]);
+    /*
+     * `libraryRevision` (W2): trashing or restoring the project on screen must
+     * re-resolve access. Without it the route kept a one-shot answer and showed
+     * the closed notice for a project that is in the Trash (Finding 2).
+     */
+  }, [requestedProjectId, projectManager, loadAttempt, projectManager.libraryRevision]);
 
   /*
    * Liveness is orthogonal to navigation (A35, I22).
@@ -579,183 +563,96 @@ export function ProjectRouteGate({
     };
   }, [requestedProjectId, resolved, sessions]);
 
-  const handleRetryLoad = (): void => {
+  /* Memoised because it is a context value: a new identity on every render
+   * would re-render every notice below the outlet. */
+  const handleRetryLoad = useCallback((): void => {
     setRouteError(undefined);
     setLoadAttempt((attempt) => attempt + 1);
-  };
-
-  const handleRestore = async (): Promise<void> => {
-    if (resolved?.access.status !== 'trashed') {
-      return;
-    }
-    const { access, projectId } = resolved;
-    await projectManager.restoreProject(projectId);
-    if (latestRequestedProjectIdRef.current !== projectId) {
-      return;
-    }
-    setResolved((current) =>
-      current?.projectId === projectId && current.access.status === 'trashed'
-        ? {
-            ...current,
-            access: { status: 'ready', project: access.project },
-            requestedChatId: latestRequestedChatIdRef.current,
-          }
-        : current,
-    );
-  };
+  }, []);
 
   const pending = resolved !== undefined && resolved.projectId !== requestedProjectId;
-  let content: React.ReactNode = requestedProjectId === undefined && resolved === undefined ? children : undefined;
+  const nativeRequirement =
+    resolved?.access.status === 'ready'
+      ? nativeKernelRequirementForEntryPath(resolved.access.project.assets.main.entryPath)
+      : undefined;
 
-  switch (resolved?.access.status) {
-    case 'ready': {
-      const { access, projectId } = resolved;
-      const nativeRequirement = nativeKernelRequirementForEntryPath(access.project.assets.main.entryPath);
-      if (nativeRequirement && !isKernelAvailable(nativeRequirement.configuration.id)) {
-        content = (
-          <div className='flex h-full items-center justify-center p-6 text-center'>
-            <div className='max-w-md space-y-2'>
-              <h1 className='text-xl font-semibold'>{nativeRequirement.configuration.name} requires Tau Desktop</h1>
-              <p className='text-sm text-muted-foreground'>
-                This project runs native code, which is not included in the web runtime.
-              </p>
-            </div>
-          </div>
-        );
-        break;
-      }
-      /*
-       * R1/P46: the project on screen obeys the live set exactly like the ones
-       * behind it. A policy close — the 30-minute idle window, the memory
-       * budget — must take the focused project's file manager, kernel, editor,
-       * revision port and watchers with it (I23); leaving them mounted while
-       * the worker drops its compute admission is a zombie the person cannot
-       * escape without navigating away and back.
-       *
-       * When it *is* live, its subtree is rendered by the one keyed list
-       * below, not here: a focused project rendered in its own slot changes
-       * position in the tree when the person navigates on, and React unmounts
-       * and remounts it — which is the whole cost I22 exists to avoid.
-       */
-      content = liveProjectIds.includes(projectId) ? undefined : (
-        <ProjectClosed projectId={projectId} reason={closedReason} />
-      );
-      break;
-    }
-    case 'missing': {
-      content = <ProjectNotFound />;
-      break;
-    }
-    case 'trashed': {
-      content = (
-        <div className='flex h-full items-center justify-center p-6'>
-          <div className='max-w-md space-y-4 text-center'>
-            <h1 className='text-xl font-semibold'>Project is in Trash</h1>
-            <p className='text-sm text-muted-foreground'>
-              Its files remain in place. Restore it for this Tau browser profile to reopen the editor.
-            </p>
-            <Button onClick={handleRestore}>Restore Project</Button>
-          </div>
-        </div>
-      );
-      break;
-    }
-    case 'conflict':
-    case 'unavailable': {
-      const { access } = resolved;
-      content = (
-        <div className='flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground'>
-          {access.status === 'conflict'
-            ? 'This project ID exists in more than one directory. Resolve the conflict from the project library.'
-            : 'The project storage location is currently unavailable.'}
-        </div>
-      );
-      break;
-    }
-    case 'recovering': {
-      content = (
-        <div className='flex h-full items-center justify-center p-6 text-center'>
-          <div className='space-y-3'>
-            <Loader className='mx-auto' />
-            <p className='text-sm text-muted-foreground'>Tau is finishing this project.</p>
-          </div>
-        </div>
-      );
-      break;
-    }
-    case 'recovery-failed': {
-      const { access } = resolved;
-      const message =
-        access.recovery.reason === 'workspace-unavailable'
-          ? 'Reconnect the project workspace and reload so Tau can finish recovery.'
-          : access.recovery.reason === 'identity-conflict'
-            ? 'The project directory belongs to different or unidentifiable content.'
-            : access.recovery.reason === 'local-state-error'
-              ? 'The project files committed, but local project state could not be restored.'
-              : 'Tau could not finish writing the project files.';
-      content = (
-        <div className='flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground'>
-          {message}
-        </div>
-      );
-      break;
-    }
-    case undefined: {
-      if (requestedProjectId !== undefined) {
-        content =
-          routeError?.projectId === requestedProjectId && routeError.loadAttempt === loadAttempt ? (
-            <div className='relative h-full'>
-              <ProjectLoadError error={routeError.error} onReload={handleRetryLoad} />
-            </div>
-          ) : (
-            <div className='flex h-full items-center justify-center' role='status' aria-label='Opening project'>
-              <Loader />
-            </div>
-          );
-      }
-      break;
-    }
-  }
+  /*
+   * W1/W2: one derived state, published once.
+   *
+   * This used to be a switch that chose markup, and because `children` is the
+   * whole app shell, every terminal branch unmounted the sidebar with it. The
+   * shell now renders for every state; the route component below the outlet
+   * picks between the editor and a notice.
+   */
+  const state = deriveProjectRouteState({
+    requestedProjectId,
+    slugs,
+    isResolvingSlugs,
+    resolvedProjectId: resolved?.projectId,
+    access: resolved?.access,
+    error: routeError?.loadAttempt === loadAttempt ? routeError.error : undefined,
+    errorKind: routeError?.loadAttempt === loadAttempt ? routeError.kind : undefined,
+    errorProjectId: routeError?.loadAttempt === loadAttempt ? routeError.projectId : undefined,
+    liveProjectIds,
+    closedReason,
+    nativeKernelRequirement: nativeRequirement && {
+      kernelName: nativeRequirement.configuration.name,
+      runtimeKernelId: nativeRequirement.configuration.id,
+    },
+    isKernelAvailable,
+  });
 
+  /*
+   * I22/P72 unchanged: the focused project's subtree still hosts the shell when
+   * the editor is live, so navigating between projects does not remount it.
+   * Every other state renders the same shell as a sibling of the keyed list.
+   */
+  const isEditor = state?.kind === 'editor';
+  /*
+   * The destination waits behind the overlay below while the view the person
+   * is leaving still owes a flush — but only while there is nothing to say. A
+   * failed access check or a failed flush is exactly what they navigated into,
+   * so its notice renders rather than spinning forever.
+   */
+  const isHoldingDestination = pending && (state === undefined || state.kind === 'resolving');
   const focused =
     resolved?.access.status === 'ready'
       ? {
           projectId: resolved.projectId,
           requestedChatId: pending ? resolved.requestedChatId : requestedChatId,
           createdChatId: pending ? undefined : createdChatId,
-          children: pending ? undefined : children,
+          children: pending || !isEditor ? undefined : children,
           ...(shouldOpenFromTauCloud === true ? { shouldOpenFromTauCloud: true } : {}),
         }
       : undefined;
 
   return (
     <SharedWorkerGate>
-      <>
-        <div className='contents' inert={pending || undefined} aria-busy={pending}>
-          {/* P72: this keyed resource list stays at one React tree position for
-              project, loading, error and non-project routes alike. */}
-          <LiveProjectSessions
-            focused={focused}
-            liveProjectIds={liveProjectIds}
-            onFocusedChatResolved={pending ? undefined : onFocusedChatResolved}
-            onFlushRegistration={registerSessionFlush}
-            retainedKernels={retainedKernels}
-          />
-          {content}
-        </div>
-        {pending && routeError?.projectId !== requestedProjectId ? (
-          <div
-            className='pointer-events-none fixed inset-0 z-50 flex items-center justify-center'
-            role='status'
-            aria-label='Opening project'
-          >
-            <Loader className='size-8' />
+      <ProjectRouteStateContext.Provider value={state}>
+        <ProjectRouteRetryContext.Provider value={handleRetryLoad}>
+          <div className='contents' inert={pending || undefined} aria-busy={pending}>
+            {/* P72: this keyed resource list stays at one React tree position for
+                project, loading, error and non-project routes alike. */}
+            <LiveProjectSessions
+              focused={focused}
+              liveProjectIds={liveProjectIds}
+              onFocusedChatResolved={pending ? undefined : onFocusedChatResolved}
+              onFlushRegistration={registerSessionFlush}
+              retainedKernels={retainedKernels}
+            />
+            {isEditor || isHoldingDestination ? undefined : children}
           </div>
-        ) : null}
-        {resolved !== undefined && routeError?.projectId === (requestedProjectId ?? '') ? (
-          <ProjectLoadError error={routeError.error} onReload={handleRetryLoad} />
-        ) : null}
-      </>
+          {pending ? (
+            <div
+              className='pointer-events-none fixed inset-0 z-50 flex items-center justify-center'
+              role='status'
+              aria-label='Opening project'
+            >
+              <Loader className='size-8' />
+            </div>
+          ) : null}
+        </ProjectRouteRetryContext.Provider>
+      </ProjectRouteStateContext.Provider>
     </SharedWorkerGate>
   );
 }
@@ -788,8 +685,24 @@ export function ProjectSessionsHost({ children }: { readonly children: React.Rea
   const canonicalSlugs = useCanonicalProjectUrlCorrection(projectId);
   const requestedChatId = projectId === undefined ? undefined : projectChatIdFromSearch(location.search);
   const createdChatId = location.state?.focusChatComposer === true ? requestedChatId : undefined;
-  const shouldOpenFromTauCloud =
-    location.state?.openFromTauCloud === true || new URLSearchParams(location.search).get('cloudOpen') === 'tau';
+  /*
+   * W7 tier 3: `cloudOpen` is a consume-once marker. It used to be stripped
+   * with `history.replaceState` from deep inside the session subtree, which
+   * React never saw, so the URL and the render disagreed. Read it through the
+   * router and clear it here; the intent is latched because the connection it
+   * triggers needs a revision client that does not exist yet at this render.
+   */
+  const [cloudOpen, setCloudOpen] = useSearchParameter(searchParameterName.cloudOpen, cloudOpenParameter);
+  const [hasTauCloudIntent, setHasTauCloudIntent] = useState(false);
+  useEffect(() => {
+    if (cloudOpen !== 'tau') {
+      return;
+    }
+    // oxlint-disable-next-line react/set-state-in-effect -- The URL is the external source; the marker is consumed once and cleared.
+    setHasTauCloudIntent(true);
+    setCloudOpen(cloudOpenParameter.fallback);
+  }, [cloudOpen, setCloudOpen]);
+  const shouldOpenFromTauCloud = location.state?.openFromTauCloud === true || hasTauCloudIntent;
   const currentUrl = `${location.pathname}${location.search}`;
   const handleFocusedChatResolved = useCallback(
     (chatId: string) => {
@@ -806,17 +719,10 @@ export function ProjectSessionsHost({ children }: { readonly children: React.Rea
     },
     [canonicalSlugs, currentUrl, navigate, project, shouldOpenFromTauCloud, workspace],
   );
-  const content =
-    match === null || projectId !== undefined ? (
-      children
-    ) : resolution.status === 'resolving' ? (
-      <div className='flex h-full items-center justify-center' role='status' aria-label='Opening project'>
-        <Loader />
-      </div>
-    ) : (
-      <ProjectNotFound />
-    );
-
+  /*
+   * W2: the shell is no longer swapped out here either. An unresolvable slug is
+   * a route *state* the gate publishes, not a replacement for `children`.
+   */
   return (
     <ProjectSessionsHostContext.Provider value>
       <ProjectRouteGate
@@ -825,8 +731,10 @@ export function ProjectSessionsHost({ children }: { readonly children: React.Rea
         createdChatId={createdChatId}
         shouldOpenFromTauCloud={shouldOpenFromTauCloud}
         onFocusedChatResolved={handleFocusedChatResolved}
+        slugs={match === null ? undefined : { workspaceSlug: workspace, projectSlug: project }}
+        isResolvingSlugs={resolution.status === 'resolving'}
       >
-        {content}
+        {children}
       </ProjectRouteGate>
     </ProjectSessionsHostContext.Provider>
   );
@@ -969,5 +877,11 @@ function ProjectPersistenceGuard({
 }
 
 export function ProjectChatRoute(): React.JSX.Element {
-  return <ChatWithProvider />;
+  const state = useProjectRouteState();
+  /*
+   * W2/W3: the editor is the only state with the project's providers above it,
+   * so `ChatWithProvider`'s `useProject()` stays inside that branch. Every other
+   * state renders its notice in the same shell, with the sidebar intact.
+   */
+  return state === undefined || state.kind === 'editor' ? <ChatWithProvider /> : <ProjectRouteNotice state={state} />;
 }

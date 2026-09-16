@@ -41,7 +41,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
         >
           <ViewerDockview />
 
-          {/* Renders ProjectLoadError / WorkspaceUnavailableRecovery
+          {/* Renders the shared failure notice or WorkspaceUnavailableRecovery
             depending on which gate has failed. See Audit R8 for rationale. */}
           <ProjectUnavailableOverlay />
         </div>

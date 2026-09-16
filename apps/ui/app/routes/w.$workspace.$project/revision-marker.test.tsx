@@ -111,7 +111,7 @@ describe('RevisionMarker', () => {
     const onDeleteTag = vi.fn(async () => undefined);
     renderMarker({ revision: revision({ tags: ['v1'] }), onTag, onDeleteTag });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Name…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Name version' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Name Revision 2' }), { target: { value: 'release' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
     await waitFor(() => {

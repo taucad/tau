@@ -58,9 +58,9 @@ vi.mock('#components/billing/credit-estimate.js', async (importOriginal) => ({
   useCreditAffordance: () => affordanceForMock,
 }));
 
-const openSettingsDialogMock = vi.fn();
+const openSettingsDialogMock = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-settings-dialog.js', () => ({
-  openSettingsDialog: openSettingsDialogMock,
+  useSettingsDialog: () => ({ isOpen: false, section: 'general', open: openSettingsDialogMock, close: vi.fn() }),
 }));
 
 // `details.cost` is required by the catalog schema; the hover card renders it.

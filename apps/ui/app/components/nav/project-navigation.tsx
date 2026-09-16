@@ -7,6 +7,7 @@ import { useProjects } from '#hooks/use-projects.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useAppUiPreferences } from '#hooks/use-app-ui-preferences.js';
 import { projectChatUrl, projectUrl, projectUrlOr } from '#utils/project-url.utils.js';
+import { searchParameterName } from '#constants/search-parameter.constants.js';
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -71,13 +72,17 @@ export function ProjectNavigation(): React.JSX.Element {
   }, [liveProjectIds, visibleProjects]);
   const pendingUrl = navigation.location ? `${navigation.location.pathname}${navigation.location.search}` : undefined;
 
-  const handleCreateChat = async (project: ProjectListItem): Promise<void> => {
+  /* `isActive` gates the merge: the open project's parameters belong to its own
+   * URL, so they travel with a chat switch but never onto another project. */
+  const handleCreateChat = async (project: ProjectListItem, isActive: boolean): Promise<void> => {
     if (!project.slugs) {
       return;
     }
     const chat = await createChat(project.id, { name: 'New chat', messages: [] });
     void queryClient.invalidateQueries({ queryKey: ['chats', project.id] });
-    await navigate(projectChatUrl(project.slugs, chat.id), { state: { focusChatComposer: true } });
+    await navigate(projectChatUrl(project.slugs, chat.id, isActive ? location.search : undefined), {
+      state: { focusChatComposer: true },
+    });
   };
 
   const handleDuplicate = async (project: ProjectListItem): Promise<void> => {
@@ -158,7 +163,7 @@ export function ProjectNavigation(): React.JSX.Element {
                     void setProjectDisclosure(project.id, true);
                   }
                 }}
-                onCreateChat={async () => handleCreateChat(project)}
+                onCreateChat={async () => handleCreateChat(project, isActive)}
                 onRename={() => {
                   setEditingProjectId(project.id);
                 }}
@@ -176,7 +181,7 @@ export function ProjectNavigation(): React.JSX.Element {
                     return;
                   }
                   const parameters = new URLSearchParams(isActive ? location.search : '');
-                  parameters.set('workbench', 'share');
+                  parameters.set(searchParameterName.workbench, 'share');
                   void navigate(`${projectUrl(project.slugs)}?${parameters.toString()}`);
                 }}
                 onDelete={async () => {

@@ -1,4 +1,4 @@
-import { forwardRef, memo, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, forwardRef, memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { ScrollerProps, VirtuosoHandle } from 'react-virtuoso';
 import { useLocation } from 'react-router';
@@ -83,11 +83,12 @@ const TurnGroup = memo(function ({
   return (
     <div className={cn('py-1 gap-1 flex flex-col', isLast && 'min-h-(--chat-live-turn-min-h)')}>
       {messageIds.map((id, index) => (
-        <ChatMessage
-          key={id}
-          messageId={id}
-          footer={index === messageIds.length - 1 ? <ChatRevisionMarker userMessageId={messageIds[0]!} /> : undefined}
-        />
+        <Fragment key={id}>
+          <ChatMessage messageId={id} />
+          {/* The request's revision summary sits directly after the user
+              message, so appending assistant messages never moves it. */}
+          {index === 0 ? <ChatRevisionMarker userMessageId={id} isLatestTurn={isLast} /> : null}
+        </Fragment>
       ))}
       {isLast ? <ChatError className='mx-4' /> : null}
     </div>
@@ -259,7 +260,8 @@ export const ChatHistory = memo(function (props: {
   return (
     <FloatingPanel isOpen={isExpanded} side='right' className={className} onOpenChange={setIsExpanded}>
       <FloatingPanelContent
-        className={cn(!isExpanded && 'hidden')}
+        // `ph-no-capture`: session replay never records chat transcripts.
+        className={cn('ph-no-capture', !isExpanded && 'hidden')}
         errorFallback={(errorProps) => (
           <FloatingPanelErrorContent
             {...errorProps}

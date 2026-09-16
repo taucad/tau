@@ -4,8 +4,8 @@ import userEvent from '@testing-library/user-event';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party billing surface owns the direct billing client contract
 import { entitlementsFromTier } from '@taucad/billing';
 import { ChatErrorCredits } from '#routes/w.$workspace.$project/chat-error-credits.js';
-import { openSettingsDialog } from '#hooks/use-settings-dialog.js';
 
+const openSettingsDialog = vi.hoisted(() => vi.fn());
 const continueChat = vi.fn();
 const regenerate = vi.fn();
 
@@ -14,7 +14,7 @@ vi.mock('#hooks/use-chat.js', () => ({
 }));
 
 vi.mock('#hooks/use-settings-dialog.js', () => ({
-  openSettingsDialog: vi.fn(),
+  useSettingsDialog: () => ({ isOpen: false, section: 'general', open: openSettingsDialog, close: vi.fn() }),
 }));
 
 const useEntitlementsMock = vi.hoisted(() => vi.fn());

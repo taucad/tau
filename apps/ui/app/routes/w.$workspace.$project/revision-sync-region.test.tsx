@@ -5,7 +5,7 @@
  * for a given `RemoteFacet` — no worker, no actor, no network.
  */
 
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
@@ -54,6 +54,7 @@ const facet = (overrides: Partial<RemoteFacet> = {}): RemoteFacet => ({
   fetchOnly: false,
   provider: undefined,
   repositoryId: undefined,
+  quota: undefined,
   ...overrides,
 });
 
@@ -66,39 +67,64 @@ const syncFacet = (overrides: Partial<SyncFacet> = {}): SyncFacet => ({
   online: true,
   conflictRef: undefined,
   error: undefined,
+  reason: undefined,
   ...overrides,
 });
 
 const renderRegion = (
   remote: RemoteFacet,
   sync: SyncFacet = syncFacet(),
+  overrides: Partial<RevisionSyncRegionProps> = {},
 ): Readonly<{
   connect: ReturnType<typeof vi.fn<RevisionSyncRegionProps['onConnect']>>;
   disconnect: ReturnType<typeof vi.fn>;
   cancel: ReturnType<typeof vi.fn>;
   syncNow: ReturnType<typeof vi.fn>;
   setSyncChats: ReturnType<typeof vi.fn>;
+  setSyncLargeExports: ReturnType<typeof vi.fn>;
+  upgrade: ReturnType<typeof vi.fn>;
+  /** Re-render the same mount with a moved facet, which is where C9 lived. */
+  show: (next: RemoteFacet, nextSync?: SyncFacet) => void;
 }> => {
   const connect = vi.fn<RevisionSyncRegionProps['onConnect']>();
   const disconnect = vi.fn();
   const cancel = vi.fn();
   const syncNow = vi.fn();
   const setSyncChats = vi.fn();
-  render(
+  const setSyncLargeExports = vi.fn();
+  const upgrade = vi.fn();
+  const element = (nextRemote: RemoteFacet, nextSync: SyncFacet): React.JSX.Element => (
     <MemoryRouter>
       <RevisionSyncRegion
-        remote={remote}
-        sync={sync}
+        remote={nextRemote}
+        sync={nextSync}
         onConnect={connect}
         onDisconnect={disconnect}
         onCancel={cancel}
         onSync={syncNow}
         syncChats
         onSyncChatsChange={setSyncChats}
+        syncLargeExports={false}
+        onSyncLargeExportsChange={setSyncLargeExports}
+        onUpgrade={upgrade}
+        signInHref='/auth/sign-in'
+        {...overrides}
       />
-    </MemoryRouter>,
+    </MemoryRouter>
   );
-  return { connect, disconnect, cancel, syncNow, setSyncChats };
+  const { rerender } = render(element(remote, sync));
+  return {
+    connect,
+    disconnect,
+    cancel,
+    syncNow,
+    setSyncChats,
+    setSyncLargeExports,
+    upgrade,
+    show: (next, nextSync = sync) => {
+      rerender(element(next, nextSync));
+    },
+  };
 };
 
 describe('RevisionSyncRegion', () => {
@@ -465,5 +491,77 @@ describe('RevisionSyncRegion', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent('Not backed up · 1 revision');
     expect(screen.getByRole('status')).toHaveTextContent('Offline');
+  });
+});
+
+/*
+ * The three closeout pins for this region: a connection that leaves `connected`
+ * keeps its verbs (C9), a refusal reaches a person with its reason and exactly
+ * one action (C4/N3), and a plan that cannot sync is never offered a connect
+ * (C5/N4).
+ */
+describe('RevisionSyncRegion refusals and plan gates', () => {
+  const connected = facet({ kind: 'tau', phase: 'connected', url: 'https://api.tau.new/v1/git/p1.git' });
+
+  it('keeps a commit affordance when a live connection leaves connected (C9)', () => {
+    const region = renderRegion(connected);
+    expect(screen.getByRole('button', { name: 'Change backup' })).toBeInTheDocument();
+
+    region.show(facet({ kind: 'tau', phase: 'failed', error: 'Sign in to back this project up to Tau Cloud.' }));
+
+    /* Before the fix this rendered three radios and *zero* buttons, so the
+     * region was an inert dead end and focus fell to `<body>`. */
+    expect(screen.getByRole('button', { name: 'Apply backup change' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['unauthorized' as const, 'link', 'Sign in'],
+    ['notEntitled' as const, 'button', 'Pro Upgrade'],
+    ['quota' as const, 'button', 'Pro Upgrade'],
+    ['rejected' as const, 'button', 'Sync now'],
+    ['unknown' as const, 'button', 'Retry'],
+  ])('renders the %s reason with its one action (C4, N3)', (reason, role, action) => {
+    renderRegion(
+      connected,
+      syncFacet({ state: 'failed', pendingCount: 2, error: 'The plan does not allow it.', reason }),
+    );
+
+    const row = screen.getByRole('status', { name: 'Backup status' });
+    expect(row).toHaveTextContent('The plan does not allow it.');
+    expect(within(row).getByRole(role, { name: action })).toBeInTheDocument();
+  });
+
+  it('never parses the sentence: no reason means no invented action (C4)', () => {
+    renderRegion(connected, syncFacet({ state: 'failed', pendingCount: 1, error: 'Something went wrong.' }));
+
+    const row = screen.getByRole('status', { name: 'Backup status' });
+    expect(row).toHaveTextContent('Something went wrong.');
+    expect(within(row).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('offers Available on Pro instead of a connect a free plan cannot have (C5, N4)', async () => {
+    const user = userEvent.setup();
+    const region = renderRegion(facet(), syncFacet(), { canSyncFiles: false, canConnectGitHub: false });
+
+    expect(screen.getByRole('radio', { name: 'Tau Cloud' })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: 'Git remote' })).toBeDisabled();
+    const upgrades = screen.getAllByRole('button', { name: /Available on Pro/u });
+    expect(upgrades).toHaveLength(2);
+
+    await user.click(upgrades[0]!);
+    expect(region.upgrade).toHaveBeenCalled();
+    /* The whole point of the gate: nothing is registered on the server. */
+    expect(region.connect).not.toHaveBeenCalled();
+  });
+
+  it('offers Sync exports beside Sync chats on a connected project (C14, EQ7)', async () => {
+    const user = userEvent.setup();
+    const region = renderRegion(connected);
+
+    const exports = screen.getByRole('switch', { name: 'Sync exports' });
+    expect(exports).toBeInTheDocument();
+    await user.click(exports);
+    expect(region.setSyncLargeExports).toHaveBeenCalledWith(true);
   });
 });

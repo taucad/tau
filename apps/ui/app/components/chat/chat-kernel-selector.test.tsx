@@ -54,7 +54,7 @@ vi.mock('@taucad/billing/hooks/use-entitlements', () => ({
 
 const openSettingsDialogMock = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-settings-dialog.js', () => ({
-  openSettingsDialog: openSettingsDialogMock,
+  useSettingsDialog: () => ({ isOpen: false, section: 'general', open: openSettingsDialogMock, close: vi.fn() }),
 }));
 
 const capturedComboBox: {

@@ -48,6 +48,14 @@ type LoaderBridge = Readonly<{
 
 type LoaderWindow = typeof globalThis & { __TAU_METAL_MORPH__?: LoaderBridge };
 
+/** Document-space rectangle of the stage inside a full-page screenshot. */
+type StageRegion = Readonly<{
+  height: number;
+  width: number;
+  x: number;
+  y: number;
+}>;
+
 type StageStatistics = Readonly<{
   centreContrast: number;
   centreLuminance: number;
@@ -109,76 +117,95 @@ const dismissCookieBanner = async (): Promise<void> => {
   await target.click(selectors.getByRole('button', { name: /^decline$/iu }), { timeout: 5000 }).catch(() => undefined);
 };
 
-const analyseStage = async (pngBase64: string): Promise<StageStatistics> =>
-  target.evaluate(async (encoded) => {
-    const image = new Image();
-    const loaded = new Promise<void>((resolve, reject) => {
-      image.addEventListener('load', () => {
-        resolve();
+/**
+ * Downsample the stage out of a page screenshot and describe its tonal signature. A page screenshot is used
+ * because an element screenshot waits for the animating stage to hold still, which a software adapter never
+ * manages inside the action budget.
+ */
+const analyseStage = async (pngBase64: string, region: StageRegion): Promise<StageStatistics> =>
+  target.evaluate(
+    async ({ encoded, stage: crop }) => {
+      const image = new Image();
+      const loaded = new Promise<void>((resolve, reject) => {
+        image.addEventListener('load', () => {
+          resolve();
+        });
+        image.addEventListener('error', () => {
+          reject(new Error('Metal morph stage screenshot could not be decoded.'));
+        });
       });
-      image.addEventListener('error', () => {
-        reject(new Error('Metal morph stage screenshot could not be decoded.'));
-      });
-    });
-    image.src = `data:image/png;base64,${encoded}`;
-    await loaded;
+      image.src = `data:image/png;base64,${encoded}`;
+      await loaded;
 
-    const size = 64;
-    const canvas = document.createElement('canvas');
-    canvas.width = size;
-    canvas.height = size;
-    const context = canvas.getContext('2d');
-    if (!context) {
-      throw new Error('2D canvas is unavailable for stage qualification.');
-    }
-    context.drawImage(image, 0, 0, size, size);
-    const pixels = context.getImageData(0, 0, size, size).data;
-    const histogram = new Map<number, number>();
-    const centre: number[] = [];
-    const corners: number[] = [];
-    let highlights = 0;
-    let shadows = 0;
-    const cornerReach = 6;
-    // The renderer badge sits over the top-left corner, so the page surface is sampled at the other three.
-    const isBadgeCorner = (x: number, y: number): boolean => x < cornerReach && y < cornerReach;
-    for (let index = 0; index < pixels.length; index += 4) {
-      const luminance = (pixels[index]! * 0.2126 + pixels[index + 1]! * 0.7152 + pixels[index + 2]! * 0.0722) / 255;
-      const bucket =
-        Math.floor(pixels[index]! / 8) * 1024 +
-        Math.floor(pixels[index + 1]! / 8) * 32 +
-        Math.floor(pixels[index + 2]! / 8);
-      histogram.set(bucket, (histogram.get(bucket) ?? 0) + 1);
-      const pixelIndex = index / 4;
-      const x = pixelIndex % size;
-      const y = Math.floor(pixelIndex / size);
-      const dx = x - (size - 1) / 2;
-      const dy = y - (size - 1) / 2;
-      if (dx * dx + dy * dy <= (size * 0.22) ** 2) {
-        centre.push(luminance);
-        if (luminance > 0.85) {
-          highlights += 1;
+      const size = 64;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const context = canvas.getContext('2d');
+      if (!context) {
+        throw new Error('2D canvas is unavailable for stage qualification.');
+      }
+      context.drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, size, size);
+      const pixels = context.getImageData(0, 0, size, size).data;
+      const histogram = new Map<number, number>();
+      const centre: number[] = [];
+      const corners: number[] = [];
+      let highlights = 0;
+      let shadows = 0;
+      const cornerReach = 6;
+      // The renderer badge sits over the top-left corner, so the page surface is sampled at the other three.
+      const isBadgeCorner = (x: number, y: number): boolean => x < cornerReach && y < cornerReach;
+      for (let index = 0; index < pixels.length; index += 4) {
+        const luminance = (pixels[index]! * 0.2126 + pixels[index + 1]! * 0.7152 + pixels[index + 2]! * 0.0722) / 255;
+        const bucket =
+          Math.floor(pixels[index]! / 8) * 1024 +
+          Math.floor(pixels[index + 1]! / 8) * 32 +
+          Math.floor(pixels[index + 2]! / 8);
+        histogram.set(bucket, (histogram.get(bucket) ?? 0) + 1);
+        const pixelIndex = index / 4;
+        const x = pixelIndex % size;
+        const y = Math.floor(pixelIndex / size);
+        const dx = x - (size - 1) / 2;
+        const dy = y - (size - 1) / 2;
+        if (dx * dx + dy * dy <= (size * 0.22) ** 2) {
+          centre.push(luminance);
+          if (luminance > 0.85) {
+            highlights += 1;
+          }
+          if (luminance < 0.25) {
+            shadows += 1;
+          }
         }
-        if (luminance < 0.25) {
-          shadows += 1;
+        const nearCorner = (x < cornerReach || x >= size - cornerReach) && (y < cornerReach || y >= size - cornerReach);
+        if (nearCorner && !isBadgeCorner(x, y)) {
+          corners.push(luminance);
         }
       }
-      const nearCorner = (x < cornerReach || x >= size - cornerReach) && (y < cornerReach || y >= size - cornerReach);
-      if (nearCorner && !isBadgeCorner(x, y)) {
-        corners.push(luminance);
-      }
-    }
-    const mean = centre.reduce((sum, value) => sum + value, 0) / centre.length;
-    const variance = centre.reduce((sum, value) => sum + (value - mean) ** 2, 0) / centre.length;
-    return {
-      centreContrast: Math.sqrt(variance),
-      centreLuminance: mean,
-      cornerSpread: Math.max(...corners) - Math.min(...corners),
-      distinctBuckets: histogram.size,
-      dominantShare: Math.max(...histogram.values()) / (size * size),
-      highlightShare: highlights / centre.length,
-      shadowShare: shadows / centre.length,
-    };
-  }, pngBase64);
+      const mean = centre.reduce((sum, value) => sum + value, 0) / centre.length;
+      const variance = centre.reduce((sum, value) => sum + (value - mean) ** 2, 0) / centre.length;
+      return {
+        centreContrast: Math.sqrt(variance),
+        centreLuminance: mean,
+        cornerSpread: Math.max(...corners) - Math.min(...corners),
+        distinctBuckets: histogram.size,
+        dominantShare: Math.max(...histogram.values()) / (size * size),
+        highlightShare: highlights / centre.length,
+        shadowShare: shadows / centre.length,
+      };
+    },
+    { encoded: pngBase64, stage: region },
+  );
+
+/** Screenshot the page and locate the stage within it, in document coordinates. */
+const screenshotStage = async (artifactName: string): Promise<{ png: string; region: StageRegion }> => {
+  const box = await target.boundingBox(selectors.getByRole('img', { name: stageName }));
+  if (!box) {
+    throw new Error('The metal morph stage has no bounding box.');
+  }
+  const scroll = await target.evaluate(() => ({ x: globalThis.scrollX, y: globalThis.scrollY }));
+  const png = await target.screenshot(undefined, artifactName);
+  return { png, region: { x: box.x + scroll.x, y: box.y + scroll.y, width: box.width, height: box.height } };
+};
 
 const hasSameShapePairRun = (history: readonly string[]): boolean => {
   for (let end = 4; end <= history.length; end += 1) {
@@ -267,11 +294,8 @@ test.describe('metal morph loader', () => {
         // The presented canvas composites over the page; WebGL always presents, headless WebGPU may not.
         await dismissCookieBanner();
         await target.delay(300);
-        const screenshot = await target.screenshot(
-          selectors.getByRole('img', { name: stageName }),
-          `metal-morph-stage-corners-${backend}.png`,
-        );
-        const stage = await analyseStage(screenshot);
+        const { png, region } = await screenshotStage(`metal-morph-page-corners-${backend}.png`);
+        const stage = await analyseStage(png, region);
         expect(stage.cornerSpread, 'the page surface must show through the canvas corners').toBeLessThan(0.08);
         expect(stage.distinctBuckets, 'the presented canvas must carry the chrome').toBeGreaterThan(40);
         expect(stage.centreContrast, 'the presented canvas must alternate highlights and shadows').toBeGreaterThan(

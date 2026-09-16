@@ -249,6 +249,7 @@ describe('Desktop renderer ownership', () => {
             fileName: 'renamed.js',
             moduleIds: [
               'apps/ui/app/components/cookie-consent.tsx',
+              'apps/ui/app/lib/cookie-consent.lib.ts',
               'apps/ui/app/routes/_index/route.tsx',
               'apps/ui/app/routes/_index/marketing-landing.tsx',
               'apps/ui/app/routes/legal.cookies/route.tsx',
@@ -261,7 +262,7 @@ describe('Desktop renderer ownership', () => {
     );
 
     const report = await inspectDesktopPayload(paths);
-    expect(report.violations.filter((violation) => violation.startsWith('Forbidden web surface'))).toHaveLength(6);
+    expect(report.violations.filter((violation) => violation.startsWith('Forbidden web surface'))).toHaveLength(7);
   });
 
   it('should reject web-only metadata from desktop HTML', async () => {

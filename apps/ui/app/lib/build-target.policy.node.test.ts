@@ -32,4 +32,17 @@ describe('build target source boundary', () => {
     expect(webRoot).toContain("from '#root-layout.js'");
     expect(desktopRoot).toContain("from '#root-layout.js'");
   });
+
+  /*
+   * Desktop overrides are resolved only by the explicit alias map in
+   * `vite.config.ts`. Naming a `.desktop` module directly would pull desktop code
+   * into the web graph (or bypass the map on desktop).
+   */
+  it('should never import a desktop override module by name', () => {
+    const importers = sourceFiles(appRoot)
+      .filter((path) => /from\s+['"][^'"]*\.desktop(?:\.js)?['"]/u.test(readFileSync(path, 'utf8')))
+      .map((path) => path.slice(appRoot.length + 1));
+
+    expect(importers).toStrictEqual([]);
+  });
 });

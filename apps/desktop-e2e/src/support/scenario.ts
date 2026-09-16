@@ -3,7 +3,7 @@ import { basename, dirname, join } from 'node:path';
 import process from 'node:process';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { expect } from 'vitest';
-import type { Locator, Page, Request } from 'playwright';
+import type { Locator, Page } from 'playwright';
 import type { DesktopSession } from '#support/desktop-app.js';
 
 /**
@@ -45,25 +45,19 @@ export const fileTreeItemOf = (page: Page, path: string): Locator =>
   filesPaneOf(page).locator(`[data-testid="file-tree-item"][data-file-tree-path="${path}"]`);
 
 /** Proves a fresh Electron profile contains no website privacy or footer surface. */
-export const expectDesktopSurfaceBoundary = async (page: Page): Promise<void> => {
-  const analyticsRequests: string[] = [];
-  const recordAnalyticsRequest = (request: Request): void => {
-    if (/\/api\/ph(?:\/|$)|posthog\.com/iu.test(request.url())) {
-      analyticsRequests.push(request.url());
-    }
-  };
-  page.on('request', recordAnalyticsRequest);
-  try {
-    await page.waitForTimeout(2500);
-    await expectCount(page.getByRole('button', { name: /^Decline$/iu }), 0);
-    await expectCount(page.locator('footer'), 0);
-    await expectCount(page.getByRole('link', { name: /^(?:Cookies|Legal)$/iu }), 0);
-    expect(await page.evaluate(() => document.cookie)).toBe('');
-    expect(await page.context().cookies()).toEqual([]);
-    expect(analyticsRequests).toEqual([]);
-  } finally {
-    page.off('request', recordAnalyticsRequest);
-  }
+export const expectDesktopSurfaceBoundary = async (session: DesktopSession): Promise<void> => {
+  const { page } = session;
+  await expectCount(page.getByRole('button', { name: /^Decline$/iu }), 0);
+  await expectCount(page.locator('footer'), 0);
+  await expectCount(page.getByRole('link', { name: /^(?:Cookies|Legal)$/iu }), 0);
+  expect(await page.evaluate(() => document.cookie)).toBe('');
+  expect(await page.context().cookies()).toEqual([]);
+  expectNoDesktopAnalytics(session);
+};
+
+/** Desktop never sends analytics; the recorder has run since launch. Call again at scenario end. */
+export const expectNoDesktopAnalytics = (session: DesktopSession): void => {
+  expect(session.analyticsRequests).toEqual([]);
 };
 
 /** Assert the shell resolved the seeded credential into a real session. */

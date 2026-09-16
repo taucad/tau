@@ -79,6 +79,7 @@ const anthropicDocumentSchema = z
         data: documentBase64Schema,
       })
       .strict(),
+    cache_control: cacheControlSchema.optional(),
   })
   .strict();
 const inputFileSchema = z

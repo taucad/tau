@@ -283,6 +283,7 @@ catalog:
   '@anthropic-ai/sandbox-runtime': 0.0.75
   '@lhncbc/ucum-lhc': 7.1.9
   '@json-structure/sdk': 0.7.0
+  portless: 0.15.6
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0

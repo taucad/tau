@@ -455,6 +455,86 @@ describe('composerRecordMachine', () => {
       actor.stop();
     });
 
+    it('writes nothing once the record has been removed, so a deleted draft cannot come back', async () => {
+      // Deleting a chat removes its record through the store without stopping
+      // this actor; a late flush from the composer must not recreate the file.
+      const { actor, harness } = createHarness();
+
+      actor.start();
+      await flush();
+      actor.send({ type: 'remove' });
+      await flush();
+      expect(actor.getSnapshot().matches({ lifecycle: 'removed' })).toBe(true);
+      // Both regions are final, so the actor itself is done.
+      expect(actor.getSnapshot().status).toBe('done');
+
+      actor.send({ type: 'patch', fields: { draft: userMessage('resurrected') } });
+      actor.send({ type: 'flushNow' });
+      await flush();
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(harness.writes).toEqual([]);
+      expect(harness.removes).toEqual([0]);
+    });
+
+    it('starts no write once removal has begun, even for a patch that arrives mid-drain', async () => {
+      const { actor, harness } = createHarness();
+
+      actor.start();
+      await flush();
+      actor.send({ type: 'patch', fields: { draft: userMessage('one') } });
+      await flush();
+      expect(harness.writes).toHaveLength(1);
+
+      actor.send({ type: 'remove' });
+      actor.send({ type: 'patch', fields: { mode: 'plan' } });
+      await flush();
+      harness.settle.shift()?.resolve();
+      await flush();
+
+      // The in-flight write drains; the patch that arrived behind it never starts one.
+      expect(harness.writes).toHaveLength(1);
+      expect(harness.removes).toEqual([1]);
+      expect(actor.getSnapshot().matches({ lifecycle: 'removed' })).toBe(true);
+    });
+
+    it('does not re-persist the leftovers of an unwritable patch once removal has begun', async () => {
+      const { actor, harness } = createHarness();
+
+      actor.start();
+      await flush();
+      actor.send({ type: 'patch', fields: { draft: userMessage('bad'), mode: 'plan' } });
+      await flush();
+
+      actor.send({ type: 'remove' });
+      harness.settle.shift()?.reject(new ComposerRecordInputError('A composer record holds only user messages.'));
+      await flush();
+
+      expect(harness.writes).toHaveLength(1);
+      expect(harness.removes).toEqual([1]);
+      expect(actor.getSnapshot().matches({ lifecycle: 'removed' })).toBe(true);
+    });
+
+    it('abandons a retrying patch on removal instead of retrying it into a deleted file', async () => {
+      const { actor, harness } = createHarness();
+
+      actor.start();
+      await flush();
+      actor.send({ type: 'patch', fields: { draft: userMessage('one') } });
+      await flush();
+      harness.settle.shift()?.reject(new Error('EIO'));
+      await flush();
+      expect(actor.getSnapshot().matches({ writes: 'retrying' })).toBe(true);
+
+      actor.send({ type: 'remove' });
+      await flush();
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(harness.writes).toHaveLength(1);
+      expect(harness.removes).toEqual([1]);
+      expect(actor.getSnapshot().matches({ lifecycle: 'removed' })).toBe(true);
+    });
+
     it('reaches removed even when the store cannot delete the record', async () => {
       const { actor, emitted } = createHarness({
         remove: async () => {

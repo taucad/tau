@@ -131,6 +131,26 @@ const emitWorkerChange = (channel: string, path: string): void => {
   }
 };
 
+/**
+ * The Home workspace's composer records, keyed by absolute path (blueprint
+ * D11). A Map is enough: only deletion reads them here, and what it must never
+ * do is take a path it was not asked for.
+ */
+const composerFiles = new Map<string, string>();
+const notFound = (path: string): Error => Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
+const mockRmdir = vi.fn(async (path: string, options?: { recursive?: boolean }) => {
+  const contained = [...composerFiles.keys()].filter((entry) => entry.startsWith(`${path}/`));
+  if (contained.length === 0) {
+    throw notFound(path);
+  }
+  if (options?.recursive !== true) {
+    throw Object.assign(new Error(`ENOTEMPTY: ${path}`), { code: 'ENOTEMPTY' });
+  }
+  for (const entry of contained) {
+    composerFiles.delete(entry);
+  }
+});
+
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
     workerChangeChannel: mockWorkerChangeChannel,
@@ -140,7 +160,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
       readFile: mockReadFile,
       stat: mockStat,
       exists: vi.fn(async () => false),
-      rmdir: vi.fn(async () => undefined),
+      rmdir: mockRmdir,
       getDirectoryContents: vi.fn(async () => ({})),
       listProjectManifests: mockListProjectManifests,
       permanentlyDeleteProjectDirectory: mockPermanentlyDeleteProjectDirectory,
@@ -2149,6 +2169,60 @@ describe('useProjectManager.createProject', () => {
     });
     expect(mockSetProjectDisclosure).toHaveBeenCalledWith(fakeProject.id, undefined);
     expect(phaseOrder).toEqual(['resources-cleanup', 'disclosure-cleanup', 'locator-cleanup', 'roots', 'complete']);
+  });
+
+  it('reclaims the permanently deleted project’s composer records and leaves a sibling project untouched', async () => {
+    composerFiles.clear();
+    const seed = (projectId: string, chatId: string): void => {
+      composerFiles.set(`/.tau/composers/chats/${projectId}/${chatId}.json`, 'record');
+      composerFiles.set(`/.tau/composers/chats/${projectId}/${chatId}/attachments/${'a'.repeat(64)}.png`, 'bytes');
+    };
+    seed(fakeProject.id, 'cht_deleted');
+    seed(fakeProject.id, 'cht_deleted_too');
+    seed(unrelatedProject.id, 'cht_kept');
+    mockGetProjectLibraryState.mockResolvedValueOnce({
+      projectId: fakeProject.id,
+      lastActivityAt: 10,
+      deletedAt: 11,
+    });
+    mockGetProjectFileSystemConfig.mockResolvedValue({
+      projectId: fakeProject.id,
+      backend: 'opfs',
+      providerBasePath: pendingPermanentDelete.storage.providerBasePath,
+    });
+    mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValueOnce([pendingPermanentDelete]);
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () => result.current.permanentlyDeleteProject(fakeProject.id));
+
+    expect(mockRmdir).toHaveBeenCalledWith(`/.tau/composers/chats/${fakeProject.id}`, { recursive: true });
+    expect([...composerFiles.keys()]).toEqual([
+      `/.tau/composers/chats/${unrelatedProject.id}/cht_kept.json`,
+      `/.tau/composers/chats/${unrelatedProject.id}/cht_kept/attachments/${'a'.repeat(64)}.png`,
+    ]);
+  });
+
+  it('permanently deletes a project that never held a composer record', async () => {
+    composerFiles.clear();
+    mockGetProjectLibraryState.mockResolvedValueOnce({
+      projectId: fakeProject.id,
+      lastActivityAt: 10,
+      deletedAt: 11,
+    });
+    mockGetProjectFileSystemConfig.mockResolvedValue({
+      projectId: fakeProject.id,
+      backend: 'opfs',
+      providerBasePath: pendingPermanentDelete.storage.providerBasePath,
+    });
+    mockGetPendingProjectOperations.mockResolvedValueOnce([]).mockResolvedValueOnce([pendingPermanentDelete]);
+    mockListProjectManifests.mockResolvedValue(validProjectDiscovery);
+    const { result } = renderHook(() => useProjectManager(), { wrapper: createWrapper() });
+
+    await act(async () => result.current.permanentlyDeleteProject(fakeProject.id));
+
+    // An absent composer directory is not a failed deletion: the operation completes.
+    expect(mockCompletePending).toHaveBeenCalledWith(pendingPermanentDelete.operationId);
   });
 
   it('journals the freshly discovered locator instead of stale persisted configuration', async () => {

@@ -16,6 +16,8 @@ import { consola } from 'consola';
 
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
 import { requireGitToolchain } from '#commands/revisions.js';
+// eslint-disable-next-line import-x/no-extraneous-dependencies -- package-private import-map alias, not a package dependency.
+import { exitCodes } from '#output.js';
 
 const runtimeChildModulePath = (): string =>
   fileURLToPath(
@@ -153,9 +155,14 @@ const agentOptions = (args: {
   if (!Number.isSafeInteger(contextWindow) || contextWindow < 1) {
     throw new TypeError('TAU_HOST_MODEL_CONTEXT_WINDOW must be a positive integer');
   }
+  /* The same session token `tau publish` and `tau open` take, for the same
+   * reason: a terminal has no cookie jar, and the device credential this daemon
+   * paired with authenticates the relay only (C67). */
+  const tauApiToken = process.env['TAU_API_TOKEN'];
   return {
     workspaceRoot: resolve(args.workspace ?? process.cwd()),
     tauCloudEnabled: tauCloudEnabled(),
+    ...(tauApiToken === undefined || tauApiToken === '' ? {} : { tauApiToken }),
     /* The gateway lives on the Tau API, which is also the relay origin unless
      * the operator points somewhere else (a stub, or a self-hosted API). */
     gatewayBaseUrl: args.gateway ?? args.relay,
@@ -464,6 +471,17 @@ export const serveCommand = defineCommand({
       process.off('SIGTERM', onSignal);
       try {
         await daemon.close();
+      } catch (error) {
+        /* The last thing a stopping daemon does is record what this project
+         * changed, and a store that refuses that revision keeps the project
+         * rather than losing it (C70). Say which refusal it was and that
+         * stopping again re-attempts it, instead of ending on an unmapped store
+         * exception — reported rather than thrown, because a throw from this
+         * `finally` would replace whatever brought the daemon down. */
+        consola.error(
+          `Tau Host could not record this project’s last revision: ${error instanceof Error ? error.message : String(error)} Nothing was lost — run tau serve again to retry it.`,
+        );
+        process.exitCode = exitCodes.error;
       } finally {
         computeConnection?.dispose();
         await computeWorker?.terminate();

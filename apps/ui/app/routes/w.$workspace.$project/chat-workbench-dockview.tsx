@@ -1356,13 +1356,7 @@ export const FileEditor = memo(function ({
   );
 
   if (result.kind === 'binary' || result.kind === 'text') {
-    return (
-      <RoutedFileViewer
-        viewer={resolvedViewer as ResolvedFileViewer}
-        request={viewerRequest as Omit<FileViewerRenderRequest, 'renderPane'>}
-        renderPane={renderPane}
-      />
-    );
+    return <RoutedFileViewer viewer={resolvedViewer!} request={viewerRequest!} renderPane={renderPane} />;
   }
 
   return renderPane({ body });

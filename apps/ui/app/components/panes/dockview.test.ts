@@ -502,7 +502,7 @@ describe('dockviewStyleOverrides', () => {
     expect(dockviewStyleOverrides).toContain('[&_.dv-tab:not(.dv-active-tab):hover]:!bg-accent');
     expect(dockviewStyleOverrides).toContain('[&_.dv-tab:not(.dv-active-tab):hover]:!text-muted-foreground');
     expect(dockviewStyleOverrides).toContain('[&_.dv-tab:focus-visible]:ring-2');
-    expect(dockviewStyleOverrides).toContain('[&_.dv-tab:focus-visible]:ring-ring/50');
+    expect(dockviewStyleOverrides).toContain('[&_.dv-tab:focus-visible]:ring-ring');
   });
 
   it('preserves the active title fade and smooth close-action overlay', () => {

@@ -185,7 +185,7 @@ describe('graphicsMachine model interaction', () => {
     modelRef.stop();
   });
 
-  it('should eagerly extract GLTF component manifests from updateGeometry', () => {
+  it('should accept the component manifest from the committed GLTF presentation', () => {
     const providedMachine = graphicsMachine.provide({
       actors: {
         probeWebGpu: fromPromise(async () => false),
@@ -211,10 +211,17 @@ describe('graphicsMachine model interaction', () => {
     });
 
     const sourceUnitId = deriveModelInteractionUnitId({ sourceFile: 'src/main.ts' });
+    actor.send({
+      type: 'gltfPresentationCommitted',
+      revision: 1,
+      key: 'geometry-hash',
+      unitId: sourceUnitId,
+      manifest: createManifest('src/main.ts'),
+    });
     const modelRef = actor.getSnapshot().context.modelInteractionRef;
     const unit = getModelInteractionUnitState(modelRef.getSnapshot().context, sourceUnitId);
     expect(unit.manifest?.sourceFile).toBe('src/main.ts');
-    expect(unit.manifest?.nodesById[housingComponentId]?.name).toBe('Housing');
+    expect(unit.manifest?.nodesById[housingComponentId]?.name).toBe('housing');
     actor.stop();
   });
 

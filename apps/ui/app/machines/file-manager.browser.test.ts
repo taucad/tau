@@ -37,7 +37,7 @@ const verifyPublicReuse = async (
       return { resolved: [input.entryPath], unresolved: [] };
     },
     async getParameters() {
-      return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+      return { success: true, data: { defaults: {}, schema: {} }, issues: [] };
     },
     async exportGeometry() {
       return { success: false, issues: [] };
@@ -50,7 +50,11 @@ const verifyPublicReuse = async (
         action: {
           schemaVersion: 1,
           namespace: 'file-manager.browser',
-          producer: { id: 'browser-test', version: '1', implementationAssets: [] },
+          producer: {
+            id: 'browser-test',
+            version: '1',
+            implementationAssets: [],
+          },
           operation: 'make-shape',
           inputs: [],
           arguments: { phase },
@@ -71,7 +75,11 @@ const verifyPublicReuse = async (
         },
       });
       publication = 'publication' in result ? result.publication : undefined;
-      return { geometry: { format: 'gltf', content: new Uint8Array([1]) }, nativeHandle: {}, issues: [] };
+      return {
+        geometry: { format: 'gltf', content: new Uint8Array([1]) },
+        nativeHandle: {},
+        issues: [],
+      };
     },
   })();
   const createClient = (store = existingStore) => {
@@ -86,7 +94,9 @@ const verifyPublicReuse = async (
     return { client, connection };
   };
   const producer = createClient();
-  const rendered = await producer.client.render({ source: { files: { 'main.compute': 'producer' } } });
+  const rendered = await producer.client.render({
+    source: { files: { 'main.compute': 'producer' } },
+  });
   if (existingStore) {
     expect(rendered.superseded || !rendered.geometry.success).toBe(true);
     expect(publication).toBeUndefined();
@@ -101,7 +111,9 @@ const verifyPublicReuse = async (
     return;
   }
   const consumer = createClient();
-  await consumer.client.render({ source: { files: { 'main.compute': 'consumer' } } });
+  await consumer.client.render({
+    source: { files: { 'main.compute': 'consumer' } },
+  });
   expect(solves).toBe(expectedSolves);
   await consumer.client.shutdown();
   consumer.connection?.dispose();
@@ -135,7 +147,10 @@ const rawTerminalComputeRequest = async (worker: Worker, data: Record<string, un
   );
   channel.port2.start();
   worker.postMessage({ ...data, port: channel.port1 }, [channel.port1]);
-  const terminal = async () => ({ result: await message.promise, terminal: true });
+  const terminal = async () => ({
+    result: await message.promise,
+    terminal: true,
+  });
   const requestExpiry = new Promise<{ expired: true }>((resolve) => {
     setTimeout(() => {
       resolve({ expired: true });
@@ -230,7 +245,11 @@ it('registers a project persisted after worker boot before opening its rooted br
     } finally {
       unavailable.dispose();
     }
-    await setProjectFileSystemConfig({ projectId, backend: 'indexeddb', providerBasePath: projectId });
+    await setProjectFileSystemConfig({
+      projectId,
+      backend: 'indexeddb',
+      providerBasePath: projectId,
+    });
     if (ready.context.proxy === undefined) {
       throw new Error('The file-manager proxy was not published.');
     }
@@ -258,10 +277,18 @@ it('registers a project persisted after worker boot before opening its rooted br
 it('owns durable compute by admitted project and preserves generation across authority recreation', async () => {
   const projectId = `proj_${crypto.randomUUID().replaceAll('-', '').slice(0, 21)}`;
   activeProjectId = projectId;
-  await setProjectFileSystemConfig({ projectId, backend: 'indexeddb', providerBasePath: projectId });
+  await setProjectFileSystemConfig({
+    projectId,
+    backend: 'indexeddb',
+    providerBasePath: projectId,
+  });
   const start = async () => {
     const actor = createActor(fileManagerMachine, {
-      input: { projectId, rootDirectory: `/projects/${projectId}`, shouldInitializeOnStart: true },
+      input: {
+        projectId,
+        rootDirectory: `/projects/${projectId}`,
+        shouldInitializeOnStart: true,
+      },
     });
     actor.start();
     const ready = await waitFor(actor, (snapshot) => snapshot.matches('ready'), { timeout: 30_000 });
@@ -277,21 +304,40 @@ it('owns durable compute by admitted project and preserves generation across aut
         type: 'computeStoreConnect',
         projectId: 'candidate-workspace',
       }),
-    ).resolves.toEqual({ error: 'Compute store project authority does not match the active project.' });
+    ).resolves.toEqual({
+      error: 'Compute store project authority does not match the active project.',
+    });
     await Promise.all(
       (['computeStoreConnect', 'computeStoreControl'] as const).map(async (type) => {
         await expect(
-          rawTerminalComputeRequest(first.ready.context.worker!, { type, action: 'inspect' }),
+          rawTerminalComputeRequest(first.ready.context.worker!, {
+            type,
+            action: 'inspect',
+          }),
         ).resolves.toEqual({
           result: { error: 'Compute project identity is required.' },
           terminal: true,
         });
         await expect(
-          rawTerminalComputeRequest(first.ready.context.worker!, { type, projectId: '', action: 'inspect' }),
-        ).resolves.toEqual({ result: { error: 'Compute project identity is required.' }, terminal: true });
+          rawTerminalComputeRequest(first.ready.context.worker!, {
+            type,
+            projectId: '',
+            action: 'inspect',
+          }),
+        ).resolves.toEqual({
+          result: { error: 'Compute project identity is required.' },
+          terminal: true,
+        });
         await expect(
-          rawTerminalComputeRequest(first.ready.context.worker!, { type, projectId: 42, action: 'inspect' }),
-        ).resolves.toEqual({ result: { error: 'Compute project identity is required.' }, terminal: true });
+          rawTerminalComputeRequest(first.ready.context.worker!, {
+            type,
+            projectId: 42,
+            action: 'inspect',
+          }),
+        ).resolves.toEqual({
+          result: { error: 'Compute project identity is required.' },
+          terminal: true,
+        });
       }),
     );
     await expect(
@@ -300,7 +346,9 @@ it('owns durable compute by admitted project and preserves generation across aut
         projectId: 'candidate-workspace',
         action: 'inspect',
       }),
-    ).resolves.toEqual({ error: 'Compute control project authority does not match the active project.' });
+    ).resolves.toEqual({
+      error: 'Compute control project authority does not match the active project.',
+    });
     await expect(
       rawComputeRequest(first.ready.context.worker!, {
         type: 'computeStoreControl',
@@ -315,7 +363,9 @@ it('owns durable compute by admitted project and preserves generation across aut
         action: 'collect',
         budget: Number.POSITIVE_INFINITY,
       }),
-    ).resolves.toEqual({ error: 'Compute collection budget must be a safe integer from 1 to 1000.' });
+    ).resolves.toEqual({
+      error: 'Compute collection budget must be a safe integer from 1 to 1000.',
+    });
     await expect(
       rawComputeRequest(first.ready.context.worker!, {
         type: 'computeStoreControl',
@@ -338,7 +388,10 @@ it('owns durable compute by admitted project and preserves generation across aut
 
     const projectB = `proj_${crypto.randomUUID().replaceAll('-', '').slice(0, 21)}`;
     const oldA = connectComputeStoreChannel(first.ready.context.openComputeStorePort!(projectId));
-    first.ready.context.worker!.postMessage({ type: 'computeStoreAdmission', projectId: projectB });
+    first.ready.context.worker!.postMessage({
+      type: 'computeStoreAdmission',
+      projectId: projectB,
+    });
     await verifyPublicReuse(() => rawComputePort(first.ready.context.worker!, projectId), 'revoked-a', {
       existingStore: oldA.store,
     });
@@ -349,7 +402,10 @@ it('owns durable compute by admitted project and preserves generation across aut
     const rejectedDatabase = await computeDatabaseName(rejectedProject);
     const blocker = await openHigherVersionDatabase(rejectedDatabase);
     blocker.close();
-    first.ready.context.worker!.postMessage({ type: 'computeStoreAdmission', projectId: rejectedProject });
+    first.ready.context.worker!.postMessage({
+      type: 'computeStoreAdmission',
+      projectId: rejectedProject,
+    });
     try {
       const outcomes = await Promise.all(
         (['computeStoreConnect', 'computeStoreControl'] as const).map(async (type) =>
@@ -362,7 +418,9 @@ it('owns durable compute by admitted project and preserves generation across aut
       );
       for (const outcome of outcomes) {
         expect(outcome).toEqual({
-          result: { error: 'The requested version (1) is less than the existing version (2).' },
+          result: {
+            error: 'The requested version (1) is less than the existing version (2).',
+          },
           terminal: true,
         });
       }

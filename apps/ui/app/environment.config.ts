@@ -24,6 +24,10 @@ export const resolveFrontendUrl = (rawEnvironment: RawEnvironment): string | und
     return rawEnvironment['TAU_FRONTEND_URL'];
   }
 
+  if (rawEnvironment['PORTLESS_URL']) {
+    return rawEnvironment['PORTLESS_URL'];
+  }
+
   if (rawEnvironment['NETLIFY'] !== 'true' || rawEnvironment['CONTEXT'] === 'production') {
     return undefined;
   }

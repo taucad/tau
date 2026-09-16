@@ -347,7 +347,7 @@ export function ChatMessageDataUsage({
                 : `Reported by ${agent}. Tau did not fund this turn, so it has no Tau credits.`}
           </p>
           {lastUsage?.attemptId === undefined ? undefined : (
-            <p className='px-2 pb-1 font-mono text-[11px] text-muted-foreground'>Ref {lastUsage.attemptId}</p>
+            <p className='px-2 pb-1 font-mono text-[11px] text-muted-foreground'>Reference {lastUsage.attemptId}</p>
           )}
         </div>
       </HoverCardContent>

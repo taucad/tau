@@ -112,9 +112,14 @@ const waitForReady = async (): Promise<LoaderState> => {
   return state;
 };
 
-/** The consent banner floats over the stage's bottom-right corner until it is answered. */
+/**
+ * The consent banner floats over the stage's bottom-right corner until it is answered. Forced, because a
+ * software adapter keeps the page too busy for Playwright's stability checks to pass in time.
+ */
 const dismissCookieBanner = async (): Promise<void> => {
-  await target.click(selectors.getByRole('button', { name: /^decline$/iu }), { timeout: 5000 }).catch(() => undefined);
+  await target
+    .click(selectors.getByRole('button', { name: /^decline$/iu }), { force: true, timeout: 5000 })
+    .catch(() => undefined);
 };
 
 /**
@@ -196,8 +201,17 @@ const analyseStage = async (pngBase64: string, region: StageRegion): Promise<Sta
     { encoded: pngBase64, stage: region },
   );
 
-/** Screenshot the page and locate the stage within it, in document coordinates. */
+/**
+ * Screenshot the page and locate the stage within it, in document coordinates. The stage is centred in the
+ * viewport first: the app scrolls inside its own container, so a page screenshot is viewport sized.
+ */
 const screenshotStage = async (artifactName: string): Promise<{ png: string; region: StageRegion }> => {
+  await target.evaluate(() => {
+    document
+      .querySelector('[role="img"][aria-label="Liquid metal loader showcase"]')
+      ?.scrollIntoView({ block: 'center' });
+  });
+  await target.delay(300);
   const box = await target.boundingBox(selectors.getByRole('img', { name: stageName }));
   if (!box) {
     throw new Error('The metal morph stage has no bounding box.');

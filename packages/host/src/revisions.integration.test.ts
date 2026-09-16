@@ -10,9 +10,9 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -310,20 +310,28 @@ describe.runIf(hasGit)('a disk host that cannot record', () => {
     // Nothing was recorded: the store was never even created.
     expect(existsSync(join(workspaceRoot, '.git'))).toBe(false);
 
-    /* The seam a packaged app uses (OQ-B8): named binaries, empty `PATH`. */
+    /*
+     * The seam a packaged app uses (OQ-B8, OQ3): one named `git`, empty `PATH`.
+     *
+     * The bundle ships `git-lfs` inside that git's own exec path, so `git lfs`
+     * resolves through it and no second binary is ever named — which is what
+     * the stand-in below reproduces, since a system git's exec path has none.
+     */
     const git = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
     const gitLfs = execFileSync('which', ['git-lfs'], {
       encoding: 'utf8',
     }).trim();
     const bundledRoot = await mkdtemp(join(tmpdir(), 'tau-host-toolchain-'));
     roots.push(bundledRoot);
+    const bundledGit = join(bundledRoot, 'bundled-git');
+    await writeFile(bundledGit, `#!/bin/sh\nPATH="${dirname(gitLfs)}"\nexport PATH\nexec "${git}" "$@"\n`);
+    await chmod(bundledGit, 0o755);
     const bundledEvents: HostRevisionEvent[] = [];
     process.env['PATH'] = '';
     const bundled = createProjectRevisions({
       workspaceRoot: bundledRoot,
       projectId: 'project-1',
-      gitExecutable: git,
-      gitLfsExecutable: gitLfs,
+      gitExecutable: bundledGit,
       events: (event) => bundledEvents.push(event),
     });
     try {
@@ -704,6 +712,74 @@ for (const row of ports) {
         })
         .toEqual([]);
       await revisions.release();
+    }, 30_000);
+
+    /*
+     * C71: the lease of a host that is still running is never swept.
+     *
+     * The epoch used to be one per *process*, so a second process over the same
+     * project — `tau serve` beside the app, or `tau revisions` beside either —
+     * opened with an epoch of its own and retired the live lease of a turn that
+     * was running right then, taking its run id out of the revision's
+     * provenance. The epoch is now the project's, adopted from the host that
+     * still owns it; only a dead owner's epoch is superseded.
+     */
+    it('keeps the lease of a host that is still running, and retires a dead one’s', async () => {
+      const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-revisions-epoch-'));
+      const checkoutsDirectory = await mkdtemp(join(tmpdir(), 'tau-host-checkouts-'));
+      const configDirectory = await mkdtemp(join(tmpdir(), 'tau-host-epoch-config-'));
+      roots.push(workspaceRoot, checkoutsDirectory, configDirectory);
+      process.env['TAU_CONFIG_DIR'] = configDirectory;
+      await writeFile(join(workspaceRoot, 'main.ts'), 'export const size = 1;\n');
+      const port = row.create(workspaceRoot, checkoutsDirectory);
+      await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+      const records = new NodeFsProvider(workspaceRoot);
+      const lease = async (runId: string, authorityEpoch: string): Promise<void> =>
+        records.writeFile(
+          `.tau/runs/${runId}.json`,
+          JSON.stringify({
+            runId,
+            turnId: `message-${runId}`,
+            chatId: 'chat-1',
+            checkoutId: 'live',
+            authorityEpoch,
+            startedAt: 1,
+          }),
+        );
+      await lease('run-1', 'epoch-of-the-running-host');
+      await lease('run-dead-a', 'epoch-of-a-process-that-died');
+
+      /* The host that owns this project right now, with an epoch of its own. */
+      const owner = createProjectRevisions({
+        workspaceRoot,
+        projectId: 'project-1',
+        port,
+        authorityEpoch: 'epoch-of-the-running-host',
+      });
+      let second: ReturnType<typeof createProjectRevisions> | undefined;
+      try {
+        await expect
+          .poll(async () => readdir(join(workspaceRoot, '.tau', 'runs')), { timeout: 10_000 })
+          .not.toContain('run-dead-a.json');
+        /* Written after the owner's own sweep, so what disappears next is the
+         * second host's sweep and nothing else. */
+        await lease('run-dead-b', 'epoch-of-a-process-that-died');
+
+        second = createProjectRevisions({
+          workspaceRoot,
+          projectId: 'project-1',
+          port: row.create(workspaceRoot, checkoutsDirectory),
+        });
+        await expect
+          .poll(async () => readdir(join(workspaceRoot, '.tau', 'runs')), { timeout: 10_000 })
+          .not.toContain('run-dead-b.json');
+
+        expect(await readdir(join(workspaceRoot, '.tau', 'runs'))).toStrictEqual(['run-1.json']);
+      } finally {
+        await second?.release();
+        await owner.release();
+        delete process.env['TAU_CONFIG_DIR'];
+      }
     }, 30_000);
 
     it('refuses a turn it cannot place, instead of running it unrecorded', async () => {
@@ -1184,10 +1260,14 @@ describe.runIf(hasGit)('the disk-host default', () => {
       await port.updateRef({ name: 'main', expectedHead: undefined, head });
       const side = await port.addCheckout?.({ branch: 'side', from: head });
 
-      // The project itself is never discardable.
-      expect(await revisions.discard('main')).toMatchObject({
-        status: 'refused',
-      });
+      /* The project itself is never discardable — and the refusal is the
+       * machine's own, checked against the tree, not one this host composed
+       * from a registry record before asking anybody (I20, C72). Here the
+       * project's files are not the ones its head holds, which is the first
+       * thing `removeCheckout` refuses over. */
+      const live = await revisions.discard('main');
+      expect(live.status).toBe('refused');
+      expect(live.status === 'refused' && live.reason).toContain('not in a revision yet');
 
       // Work that no revision holds stops the removal, and says why.
       await writeFile(join(side?.root ?? '', 'part.ts'), 'export const part = 2;\n');

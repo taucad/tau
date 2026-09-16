@@ -1,6 +1,7 @@
+import { execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -8,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
+import { tauRemoteUrl } from '@taucad/revisions';
 
 import { startHostDaemon } from '#host-daemon.js';
 import type { HostDaemonEvent } from '#host-daemon.js';
@@ -40,6 +42,16 @@ afterEach(async () => {
 });
 
 const agentToken = 'daemon-agent-token-with-at-least-32-characters';
+
+/** A machine with no `git` records nothing, so the native rows sit out. */
+const hasGit = ((): boolean => {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+})();
 
 type StubRelay = {
   readonly url: URL;
@@ -75,6 +87,13 @@ const startRelay = async (): Promise<StubRelay> => {
     slots.set(key, created);
     return created;
   };
+  /* Anything that is not an upgrade is refused rather than left hanging: this
+   * origin is also the Tau API, so a daemon may ask it for a Git advertisement,
+   * and a socket that never answers would hold the close cut open. */
+  httpServer.on('request', (_request, response) => {
+    response.statusCode = 404;
+    response.end();
+  });
   httpServer.on('upgrade', (request, socket, head) => {
     socketServer.handleUpgrade(request, socket, head, (accepted) => {
       const { pathname } = new URL(request.url ?? '/', 'http://relay.invalid');
@@ -408,6 +427,93 @@ describe('startHostDaemon', () => {
 
     await daemon.close();
   }, 20_000);
+
+  /*
+   * C67: a project `tau serve --ui` serves shows the Sync region, so *Connect
+   * Tau Cloud* must be able to take. The daemon is already talking to the Tau
+   * API — the relay it paired against — and that is the origin this project's
+   * Hosted Remote hangs off; without it the connect actor throws
+   * `INVALID_TRANSPORT` and the project can never be backed up.
+   */
+  it.runIf(hasGit)(
+    'configures the Tau Cloud remote a served project connects to',
+    async () => {
+      temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-connect-tau-'));
+      process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+      process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+      const relay = await startRelay();
+      let project: ReturnType<typeof realCreateProjectRevisions> | undefined;
+      revisionsSpy.mockImplementationOnce((options) => {
+        project = realCreateProjectRevisions(options);
+        return project;
+      });
+
+      const daemon = await startPairedAgentDaemon(temporaryDirectory, relay, []);
+      await daemon.ready;
+      await project!.channel.request({ command: 'connectRemote', kind: 'tau' });
+
+      /* Git's own remotes list is the record (D29), so that is what is read —
+       * and it is written before the registration this fixture's API never
+       * answers, which is why nothing here waits for a `connected` phase. */
+      const workspaceRoot = join(temporaryDirectory, 'workspace');
+      await expect
+        .poll(async () => readFile(join(workspaceRoot, '.git', 'config'), 'utf8').catch(() => ''), { timeout: 10_000 })
+        .toContain(tauRemoteUrl(relay.url.origin, 'workspace'));
+
+      await daemon.close();
+    },
+    30_000,
+  );
+
+  /*
+   * C70: R13's pattern on the leg R13 did not cover.
+   *
+   * The close cut is the last thing that records what a served project changed,
+   * and a store that refuses it rejects `launcher.close()`. A daemon that had
+   * already dropped its launcher could never re-attempt that cut, so the bytes
+   * were gone with the process; the ownership is retired only once the release
+   * itself succeeded.
+   */
+  it.runIf(hasGit)(
+    'keeps the project until its close cut succeeds, and re-attempts it',
+    async () => {
+      temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-close-cut-'));
+      process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+      process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+      const relay = await startRelay();
+      let attempts = 0;
+      revisionsSpy.mockImplementationOnce((options) => {
+        const port = revisions.createProjectRevisionPort({
+          workspaceRoot: options.workspaceRoot,
+          projectId: 'workspace',
+        });
+        return realCreateProjectRevisions({
+          ...options,
+          port: {
+            ...port,
+            writeRevision: async () => {
+              attempts += 1;
+              throw new Error('the store is out of space');
+            },
+          },
+        });
+      });
+
+      const daemon = await startPairedAgentDaemon(temporaryDirectory, relay, []);
+      await daemon.ready;
+      /* Something to record: a clean checkout has nothing to cut, and the
+       * refusal under test is the cut's. */
+      await writeFile(join(temporaryDirectory, 'workspace', 'part.ts'), 'export const part = 1;\n');
+
+      await expect(daemon.close()).rejects.toThrow('out of space');
+      const afterFirst = attempts;
+      await expect(daemon.close()).rejects.toThrow('out of space');
+
+      expect(afterFirst).toBeGreaterThan(0);
+      expect(attempts).toBeGreaterThan(afterFirst);
+    },
+    60_000,
+  );
 
   /*
    * One `POST /v1/agents/sessions` mints three routes; an *agent* placement

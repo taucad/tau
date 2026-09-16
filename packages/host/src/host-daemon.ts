@@ -130,6 +130,15 @@ export type HostDaemonAgentOptions = {
   readonly computeControl?: ComputeStoreControl;
   /** Base the model gateway hangs off, e.g. the Tau API origin. */
   readonly gatewayBaseUrl: string;
+  /**
+   * Bearer session token this daemon backs its projects up with (C67).
+   *
+   * Absent, a served project still knows *where* its Tau Cloud repository is
+   * and says so when a remote refuses it; present, *Connect Tau Cloud*
+   * registers the project (P51) and its pushes authenticate. Never persisted
+   * here and never written under a project.
+   */
+  readonly tauApiToken?: string | undefined;
   /** Default model row; one admission may override it. */
   readonly model: AgentSessionModel;
   /** Default system prompt; one admission may override it. */
@@ -548,6 +557,27 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
        * a daemon serves one machine, and `tau-host` in a clone's `git log` is
        * an opaque id nobody outside Tau can read. */
       actor: hostRevisionActor(),
+      /*
+       * Where this project's Tau Cloud repository is (C67, P51).
+       *
+       * The relay *is* the Tau API: it is the origin this daemon paired
+       * against, and `tauRemoteUrl` hangs the Hosted Remote off it. Without
+       * this the connect actor throws `INVALID_TRANSPORT` and a project served
+       * by `tau serve --ui` shows the Sync region it can never use.
+       */
+      apiBaseUrl: options.relayUrl.origin,
+      /* The session, not this daemon's device credential: the Git endpoints and
+       * `PUT /v1/projects/<id>` authenticate an account, and a paired device
+       * credential is only ever offered to the agent relay. A terminal has no
+       * cookie jar, so it is the same `TAU_API_TOKEN` `tau publish` uses. */
+      ...(agent.tauApiToken === undefined
+        ? {}
+        : {
+            tauCredential: () => ({
+              apiBaseUrl: options.relayUrl.origin,
+              authorization: `Bearer ${agent.tauApiToken}`,
+            }),
+          }),
       /* A turn that ran but could not be recorded is a warning, never a fatal:
        * the run itself is already durable in its own log, and a host that
        * stopped answering over a settlement failure would lose the next turn
@@ -691,20 +721,28 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     resolveReady();
   };
 
-  /** Stop the channel first, then the runs: a client must never outlive its host. */
+  /**
+   * Stop the channel first, then the runs: a client must never outlive its host.
+   *
+   * Each handle is retired only once its own release has *succeeded* (C70,
+   * R13's pattern). `launcher.close()` records this project's close revision and
+   * genuinely rejects when the store refuses it; a daemon that had already
+   * cleared the handle could never re-attempt that cut, and the rejection
+   * reached `tau serve` as a crash with nothing left to retry.
+   */
   const stopAgent = async (): Promise<void> => {
     const server = agentServer;
     const launcher = agentLauncher;
     const mcp = agentMcp;
     agentRunReporter?.close();
     agentRunReporter = undefined;
-    agentServer = undefined;
-    agentLauncher = undefined;
-    agentMcp = undefined;
     agentExternalAgents = [];
     await server?.close();
+    agentServer = undefined;
     await launcher?.close();
+    agentLauncher = undefined;
     await mcp?.close();
+    agentMcp = undefined;
     if (server) {
       emit({ type: 'agent', state: 'stopped' });
     }
@@ -1132,6 +1170,29 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     return { cause: 'requested' };
   };
 
+  /** The outcome this daemon closes with, once the run itself has settled. */
+  let closeResult: HostDaemonCloseResult | undefined;
+
+  /**
+   * Release everything this daemon owns, and stay retryable (C70).
+   *
+   * Every step here is idempotent and each keeps its own handle until it
+   * succeeds, so a second call re-attempts exactly what the first could not
+   * finish — which for the agent launcher is the project's close revision.
+   *
+   * @returns Nothing, once the last capability has stopped.
+   */
+  const releaseCapabilities = async (): Promise<void> => {
+    await stopAgent();
+    await stopJobWorker();
+    await jobWorkerObserver;
+    await runtimeChild?.close();
+    await childObserver;
+    if (closeResult !== undefined) {
+      closed.resolve(closeResult);
+    }
+  };
+
   const execute = async (): Promise<HostDaemonCloseResult> => {
     let result: HostDaemonCloseResult;
     try {
@@ -1157,22 +1218,38 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     }
     closeSessions('RELAY_CLOSED');
     await Promise.all([...sessions.values()].map(async (session) => session.closed));
-    await stopAgent();
-    await stopJobWorker();
-    await jobWorkerObserver;
-    await runtimeChild?.close();
-    await childObserver;
-    closed.resolve(result);
+    closeResult = result;
+    await releaseCapabilities();
     return result;
   };
   const runPromise = execute();
+  /* The release can reject (a close cut the store refused) and `close()` is the
+   * caller that sees it; this only keeps an unobserved rejection from ending the
+   * process before it asks.
+   *
+   * async-iife: bootstrap -- the settlement belongs to `close()`, never here. */
+  void (async (): Promise<void> => {
+    try {
+      await runPromise;
+    } catch {
+      /* Answered by `close()`. */
+    }
+  })();
 
   return {
     ready: ready.promise,
     closed: closed.promise,
     async close(): Promise<void> {
       if (isClosing) {
-        await runPromise;
+        /* The run is over either way; what may not be is the release. A close
+         * cut the store refused keeps its project, so this asks again rather
+         * than answering with the first rejection forever (C70). */
+        try {
+          await runPromise;
+        } catch {
+          /* The first attempt's reason; this call re-attempts and reports its own. */
+        }
+        await releaseCapabilities();
         return;
       }
       isClosing = true;

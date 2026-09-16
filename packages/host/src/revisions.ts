@@ -16,12 +16,12 @@
  * stream alone would race the first tool write.
  */
 
-import { randomUUID } from 'node:crypto';
-import { watch as watchDirectory } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdirSync, readFileSync, watch as watchDirectory, writeFileSync } from 'node:fs';
 import type { FSWatcher } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { hostname, userInfo } from 'node:os';
-import { basename, join, sep } from 'node:path';
+import { basename, dirname, join, sep } from 'node:path';
 import { z } from 'zod';
 import { chatRecordSchema } from '@taucad/chat';
 
@@ -49,6 +49,7 @@ import {
   readRevisionDiff,
   readRevisionLog,
   readRevisionPlace,
+  registerProjectFailureMessage,
   tauRemoteUrl,
 } from '@taucad/revisions';
 import { selectRevisionStatus } from '@taucad/revisions/project-revisions-machine';
@@ -164,14 +165,15 @@ export type ProjectRevisionsOptions = {
   /** Host-private parent for linked Git worktrees; defaults to Tau's config directory. */
   readonly checkoutsDirectory?: string | undefined;
   /**
-   * The `git` this host records with, and the `git-lfs` it checks for.
+   * The `git` this host records with (OQ-B8, OQ3).
    *
-   * Absent, both are taken from `PATH`. A packaged app passes the binaries it
-   * ships (OQ-B8) — which is also why the check is here and not only in the
-   * CLI: a desktop launched from Finder has `/usr/bin:/bin:/usr/sbin:/sbin`.
+   * Absent, it is taken from `PATH` — which is also why the check is here and
+   * not only in the CLI: a desktop launched from Finder has
+   * `/usr/bin:/bin:/usr/sbin:/sbin`. A packaged app passes the `git` it ships,
+   * and `git-lfs` is reached the way a person reaches it, as that git's own
+   * subcommand; there is no second binary to name.
    */
   readonly gitExecutable?: string | undefined;
-  readonly gitLfsExecutable?: string | undefined;
   /** Tau API origin, when this host has an authenticated cloud session. */
   readonly apiBaseUrl?: string | undefined;
   /** Read per remote request; never persisted under the project. */
@@ -208,11 +210,12 @@ export type ProjectRevisionsOptions = {
     | ((input: { readonly runId: string | undefined; readonly trigger: string }) => RevisionActor | undefined)
     | undefined;
   /**
-   * The authority epoch leases are written under (N3).
+   * The authority epoch leases are written under (N3, C71).
    *
-   * One per process by default: a lease from any other epoch belongs to a host
-   * that no longer owns this project, and `sweepLeases` retires it on open.
-   * W19 moves the value under `project-session`.
+   * A lease from any other epoch belongs to a host that no longer owns this
+   * project, and `sweepLeases` retires it on open. The value given here is only
+   * the *claim*: a project another running host already holds keeps that host's
+   * epoch, so opening it never retires a live turn's lease.
    */
   readonly authorityEpoch?: string | undefined;
   /**
@@ -324,16 +327,90 @@ const admissionMilliseconds = 30_000;
 const registryMilliseconds = 5000;
 
 /**
- * The authority epoch every project this process serves writes its leases under.
+ * The authority epoch this process mints for a project nothing else owns.
  *
- * One per **process**, not one per project or per call: `sweepLeases` retires
- * every lease whose epoch is not the current one, so a second
- * {@link createProjectRevisions} in this process with an epoch of its own would
- * retire the first's *live* leases the moment it opened (N3). Cross-process
- * liveness — the epoch as the `project-session` identity, and the second fact
- * that tells a crashed host from a running one — is W19's.
+ * One per **process**, not one per call: `sweepLeases` retires every lease whose
+ * epoch is not the current one, so a second {@link createProjectRevisions} with
+ * an epoch of its own would retire the first's *live* leases the moment it
+ * opened (N3).
  */
 const processAuthorityEpoch = randomUUID();
+
+/** Who holds a project on this machine, and the epoch its leases carry. */
+type ProjectAuthorityRecord = Readonly<{ epoch: string; pid: number }>;
+
+/**
+ * Where this machine records which host holds a project.
+ *
+ * Beside the linked checkouts, in this host's own data directory — never inside
+ * a served tree, because nothing a project carries may say who is running it.
+ *
+ * @param workspaceRoot - The project directory, which is the identity.
+ * @returns The record's absolute path.
+ */
+const authorityRecordPath = (workspaceRoot: string): string =>
+  join(
+    defaultConfigDirectory(),
+    'authority',
+    `${createHash('sha256').update(workspaceRoot).digest('hex').slice(0, 32)}.json`,
+  );
+
+/**
+ * Whether the process that last claimed a project is still there.
+ *
+ * `EPERM` is alive too: another user's process answers the signal check without
+ * accepting it.
+ *
+ * @param pid - The recorded owner.
+ * @returns Whether it is still running.
+ */
+const ownerIsRunning = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+};
+
+/**
+ * The epoch one project's leases are written and swept under (C71, N3).
+ *
+ * The epoch belongs to the **project**, not to the process: `sweepLeases`
+ * retires every lease from another epoch, so a second process opening a project
+ * a first is mid-turn on used to delete the live lease and take the running
+ * turn's run id out of its own provenance. A host therefore adopts the epoch of
+ * whichever host still holds this project, and mints a new one only when that
+ * owner is gone — which is exactly when the leases it left behind are stale.
+ * The browser leg made the same move per document (`file-manager.worker.ts`).
+ *
+ * ponytail: the owner is a pid, so a pid reused after a reboot reads as the same
+ * host and its predecessor's leases survive one more open. W19's
+ * `project-session` identity is the upgrade path; a heartbeat is not (Rule 8).
+ *
+ * @param workspaceRoot - The project this host is opening.
+ * @param minted - The epoch to claim it with when nothing else holds it.
+ * @returns The epoch this host must write and sweep under.
+ */
+const projectAuthorityEpoch = (workspaceRoot: string, minted: string): string => {
+  const path = authorityRecordPath(workspaceRoot);
+  try {
+    const record = JSON.parse(readFileSync(path, 'utf8')) as Partial<ProjectAuthorityRecord>;
+    if (typeof record.epoch === 'string' && typeof record.pid === 'number' && ownerIsRunning(record.pid)) {
+      return record.epoch;
+    }
+  } catch {
+    /* No record, or one this host cannot read: nothing holds this project. */
+  }
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${JSON.stringify({ epoch: minted, pid: process.pid } satisfies ProjectAuthorityRecord)}\n`);
+  } catch {
+    /* A host that cannot record its own claim still records revisions; it only
+     * loses the guarantee that a later process will not sweep its leases. */
+  }
+  return minted;
+};
 
 /**
  * The store a disk host's project is recorded in (S12, OQ-B8).
@@ -448,10 +525,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   const projectId = options.projectId ?? basename(options.workspaceRoot);
   const { apiBaseUrl } = options;
   let channelRemoteCredential: NativeGitRemoteCredential | undefined;
-  const toolchain = {
-    ...(options.gitExecutable === undefined ? {} : { gitExecutable: options.gitExecutable }),
-    ...(options.gitLfsExecutable === undefined ? {} : { gitLfsExecutable: options.gitLfsExecutable }),
-  };
+  const toolchain = options.gitExecutable === undefined ? {} : { gitExecutable: options.gitExecutable };
   const port =
     options.port ??
     createProjectRevisionPort({
@@ -589,7 +663,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
   const { actor, settled } = createProjectRevisionsActor({
     port,
     projectId,
-    authorityEpoch: options.authorityEpoch ?? processAuthorityEpoch,
+    authorityEpoch: projectAuthorityEpoch(options.workspaceRoot, options.authorityEpoch ?? processAuthorityEpoch),
     ...(options.actorId === undefined ? {} : { actorId: options.actorId }),
     ...(options.actor === undefined ? {} : { actor: options.actor }),
     /*
@@ -1553,15 +1627,12 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
  * project, so "git-lfs is not installed" never reaches a person as "this
  * project has no revision history".
  *
- * @param options - The binaries this host records with; `PATH`'s when absent.
+ * @param options - The `git` this host records with; `PATH`'s when absent.
  * @throws GitToolchainError `ENGINE_UNAVAILABLE`, naming exactly what is missing.
  * @public
  */
 export const requireRevisionToolchain = async (
-  options: Readonly<{
-    gitExecutable?: string | undefined;
-    gitLfsExecutable?: string | undefined;
-  }> = {},
+  options: Readonly<{ gitExecutable?: string | undefined }> = {},
 ): Promise<void> => {
   await resolveGitToolchain(options);
 };
@@ -1665,13 +1736,14 @@ const registerProjectOverHttp = async (
     body: JSON.stringify(project.name === undefined ? {} : { name: project.name }),
   });
   if (!response.ok) {
-    throw new Error(
-      response.status === 401
-        ? 'Tau Cloud did not accept this token. Set TAU_API_TOKEN to a current session token.'
-        : response.status === 403
-          ? 'That project id already belongs to another account.'
-          : 'Tau Cloud could not register this project. Try again.',
-    );
+    /* One owner for this ladder (C6): the copy this host used to compose had a
+     * dead rung — the API answers 404 for a project id that is not this
+     * account's, and 403 only for the project ceiling, which the old 403
+     * sentence hid behind "belongs to another account". */
+    const body = (await response.json().catch(() => undefined)) as
+      | Readonly<{ code?: string; message?: string }>
+      | undefined;
+    throw new Error(registerProjectFailureMessage(response.status, body?.code, body?.message));
   }
 };
 
@@ -1785,7 +1857,6 @@ export const openProjectRevisions = (
     port?: RevisionPort | undefined;
     authorityEpoch?: string | undefined;
     gitExecutable?: string | undefined;
-    gitLfsExecutable?: string | undefined;
     /**
      * The Tau Cloud API this project publishes to.
      *
@@ -1853,7 +1924,7 @@ export const openProjectRevisions = (
       tree = createProjectRevisionsActor({
         port,
         projectId,
-        authorityEpoch: options.authorityEpoch ?? processAuthorityEpoch,
+        authorityEpoch: projectAuthorityEpoch(options.workspaceRoot, options.authorityEpoch ?? processAuthorityEpoch),
         filesystem: (checkout) => new NodeFsProvider(checkout.kind === 'live' ? options.workspaceRoot : checkout.root),
         ...(remoteUrl === undefined ? {} : { remoteUrl }),
         ...(publishPublication === undefined ? {} : { publishPublication }),
@@ -1973,6 +2044,18 @@ export const openProjectRevisions = (
     return Object.freeze({ status: 'switched', branch, line: place.line });
   };
 
+  /*
+   * One verb, one owner (I20, C72).
+   *
+   * This used to compose four refusals of its own — a live checkout, a leased
+   * one, a branch with no files — before sending anything, though
+   * `checkouts.machine` owns the first two and `removeCheckout` re-checks the
+   * tree against the head for every caller. A host that answers first answers
+   * from a registry record rather than from the files, and drifts from the pane
+   * the moment either rule moves. Only the two host facts are left: which
+   * checkout the branch names, and whether this project's registry is running —
+   * the same shape `switchTo` and `publish` already have.
+   */
   const discard = async (branch: string): Promise<RevisionDiscardOutcome> => {
     const { actor } = await started();
     const record = actor.getSnapshot().context.checkouts.find((checkout) => checkout.branch === branch);
@@ -1981,20 +2064,6 @@ export const openProjectRevisions = (
         status: 'refused',
         branch,
         reason: `${branch} has no files of its own to discard.`,
-      });
-    }
-    if (record.kind === 'live') {
-      return Object.freeze({
-        status: 'refused',
-        branch,
-        reason: `${branch} is the project itself. Switch to another branch first.`,
-      });
-    }
-    if (record.leaseRunIds.length > 0) {
-      return Object.freeze({
-        status: 'refused',
-        branch,
-        reason: `An agent is working in ${branch}.`,
       });
     }
     const { checkouts } = actor.getSnapshot().children;
@@ -2136,10 +2205,15 @@ export const openProjectRevisions = (
             resolve(
               Object.freeze({
                 status: 'refused',
+                /* The scheduler's own reason, never a reachability story this
+                 * host invented over it (C2): 401, 403, 404 and 413 all reached
+                 * Tau Cloud and were refused, and `sync.machine` carries the
+                 * sentence that says which. The fallback names nothing it does
+                 * not know. */
                 reason:
                   status.sync.state === 'conflicted'
                     ? 'This project has work of its own that Tau Cloud does not have.'
-                    : (status.sync.error ?? 'Tau Cloud could not be reached; this project will try again.'),
+                    : (status.sync.error ?? 'Tau Cloud did not finish opening this project.'),
               }),
             );
           }

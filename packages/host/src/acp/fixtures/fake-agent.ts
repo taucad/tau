@@ -369,7 +369,11 @@ const attemptWrongSession = async (sessionId: string): Promise<void> => {
 const emitPresentationUpdates = async (sessionId: string): Promise<void> => {
   await update(sessionId, {
     sessionUpdate: 'agent_thought_chunk',
-    content: { type: 'text', text: 'thinking about the file' },
+    content: { type: 'text', text: '**Confirming test completion and readiness**' },
+  });
+  await update(sessionId, {
+    sessionUpdate: 'agent_thought_chunk',
+    content: { type: 'text', text: '\n\nThe current tool results are ready to verify.' },
   });
   const entry = { content: 'write hello.txt', priority: 'high', status: 'in_progress' };
   await update(sessionId, { sessionUpdate: 'plan', entries: [entry] });

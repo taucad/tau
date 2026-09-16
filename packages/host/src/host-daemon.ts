@@ -1077,12 +1077,20 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
     await settle(mcp?.close(), () => {
       agentMcp = undefined;
     });
-    filesystem?.channel.close();
-    await settle(filesystem?.stopServer(), () => {
-      agentFileSystem = undefined;
-    });
+    /* Only once the launcher itself is retired: a close cut the store refused is
+     * re-attempted by the next `close()`, and that attempt still has to read
+     * this project's files through the same authority (C70). */
+    if (agentLauncher === undefined) {
+      filesystem?.channel.close();
+      await settle(filesystem?.stopServer(), () => {
+        agentFileSystem = undefined;
+      });
+    }
     if (server) {
       emit({ type: 'agent', state: 'stopped' });
+    }
+    if (failures.length === 1) {
+      throw failures[0];
     }
     if (failures.length > 0) {
       throw new AggregateError(failures, 'Tau Host could not release every agent resource.');
@@ -1525,11 +1533,29 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
    * @returns Nothing, once the last capability has stopped.
    */
   const releaseCapabilities = async (): Promise<void> => {
-    await stopAgent();
-    await stopJobWorker();
-    await jobWorkerObserver;
-    await runtimeChild?.close();
-    await childObserver;
+    const failures: unknown[] = [];
+    /* Every step runs even when an earlier one refuses: a close cut the store
+     * rejected must not leave the job worker and the runtime child running. */
+    const settle = async (operation: () => Promise<unknown> | undefined): Promise<void> => {
+      try {
+        await operation();
+      } catch (error) {
+        failures.push(error);
+      }
+    };
+    await settle(async () => stopAgent());
+    await settle(async () => stopJobWorker());
+    await settle(async () => jobWorkerObserver);
+    await settle(async () => runtimeChild?.close());
+    await settle(async () => childObserver);
+    if (failures.length > 0) {
+      const aggregate = new AggregateError(failures, 'Tau Host shutdown did not release every accepted resource.');
+      ready.reject(aggregate);
+      closed.resolve({ cause: 'fatal', error: aggregate });
+      /* A single refusal keeps its own reason, so a caller can act on it; the
+       * release stays retryable either way (C70). */
+      throw failures.length === 1 ? failures[0] : aggregate;
+    }
     if (closeResult !== undefined) {
       closed.resolve(closeResult);
     }
@@ -1559,7 +1585,9 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       activeControlSocket?.terminate();
     }
     closeSessions('RELAY_CLOSED');
-    await Promise.all([...sessions.values()].map(async (session) => session.closed));
+    /* A session that could not close is its own owner's failure to report; it
+     * must not skip the capability release that follows. */
+    await Promise.allSettled([...sessions.values()].map(async (session) => session.closed));
     closeResult = result;
     await releaseCapabilities();
     return result;

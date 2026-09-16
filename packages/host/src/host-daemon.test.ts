@@ -504,9 +504,14 @@ describe('startHostDaemon', () => {
         code: 'AUTHORITY_ALREADY_OWNED',
       });
       allowRevisionClose.resolve();
-      await closing;
-      const replacement = await acquireNodeAuthorityWriter({ authorityRoot });
-      await replacement.release();
+      await expect(closing).rejects.toThrow('revision close failed after drain');
+      /* The launcher refused its own release, so it is not retired — and neither
+       * is the authority its retried close cut still has to read through (C70).
+       * Release on a settled shutdown is pinned by the checked-write case above.
+       */
+      await expect(acquireNodeAuthorityWriter({ authorityRoot })).rejects.toMatchObject({
+        code: 'AUTHORITY_ALREADY_OWNED',
+      });
       const result = await daemon.closed;
       expect(result.cause).toBe('fatal');
       if (result.cause === 'fatal') {
@@ -515,7 +520,8 @@ describe('startHostDaemon', () => {
       }
     } finally {
       allowRevisionClose.resolve();
-      await daemon.close();
+      /* The launcher keeps refusing, so every re-attempt refuses with it. */
+      await daemon.close().catch(() => undefined);
     }
   }, 30_000);
 

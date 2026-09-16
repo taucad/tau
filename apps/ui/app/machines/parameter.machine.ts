@@ -1,9 +1,8 @@
 import { assign, setup, enqueueActions } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
-import type { LengthSymbol } from '@taucad/units';
-import { convertLength } from '@taucad/units/converter';
-import { parseLengthInput } from '@taucad/units/parser';
 import { roundToSignificantFigures, formatUnitDisplay } from '#utils/number.utils.js';
+import { convertLength, parseLengthToDisplay } from '#utils/length-unit.utils.js';
+import type { LengthSymbol } from '#utils/length-unit.utils.js';
 import type { MeasurementDescriptor } from '#constants/project-parameters.js';
 import { keydownListener } from '#machines/keydown.actor.js';
 
@@ -13,7 +12,7 @@ import { keydownListener } from '#machines/keydown.actor.js';
 const defaultRangeForZero = 100;
 const rangeTestMultiplier = 2;
 const tierExpansionMultiplier = 2;
-const minStepValue = 0.000_001;
+const minStepValue = 0.000001;
 const defaultStepForZero = 0.01;
 const shiftStepMultiplier = 5; // Multiply step by 5x when Shift is held
 
@@ -570,17 +569,7 @@ export const parameterMachine = setup({
 
       // For length parameters, try to parse with units and fractions
       if (isLength) {
-        const parsed = parseLengthInput(text);
-        if (parsed) {
-          // If a unit was specified and differs from current unit, convert
-          // oxlint-disable-next-line unicorn/prefer-ternary -- ternary is not as readable as if/else
-          if (parsed.symbol && parsed.symbol !== context.currentDisplaySymbol) {
-            // Convert from parsed unit to current display unit
-            valueInDisplayUnit = convertLength(parsed.value, parsed.symbol, context.currentDisplaySymbol);
-          } else {
-            valueInDisplayUnit = parsed.value;
-          }
-        }
+        valueInDisplayUnit = parseLengthToDisplay(text, context.currentDisplaySymbol);
       } else {
         // Fallback to simple number parsing for non-length
         const parsed = Number(text);

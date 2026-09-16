@@ -1,10 +1,10 @@
 import { vi, describe, it, expect } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { LengthSymbol } from '@taucad/units';
 import { ParametersNumber } from '#components/geometry/parameters/parameters-number.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { Units } from '#components/geometry/parameters/rjsf-context.js';
+import type { LengthSymbol } from '#utils/length-unit.utils.js';
 
 function createUnits(sourceSymbol: LengthSymbol, displaySymbol: LengthSymbol): Units {
   return {
@@ -819,7 +819,7 @@ describe('ParametersNumber', () => {
       await user.type(input, '0.123456789');
 
       // Should handle high precision
-      expect(mockOnChange).toHaveBeenCalledWith(0.123_456_789);
+      expect(mockOnChange).toHaveBeenCalledWith(123_456_789e-9);
     });
   });
 });

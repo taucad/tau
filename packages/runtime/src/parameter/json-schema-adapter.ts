@@ -4,7 +4,7 @@ import type { ParameterDeclaration } from '#parameter/manifest.js';
 
 /** Input for projecting one admitted Draft-7 schema into a native parameter declaration. @public */
 export type Draft7ParameterDeclarationInput = Readonly<{
-  schema: Readonly<Record<string, unknown>>;
+  schema: unknown;
   defaults: Readonly<Record<string, unknown>>;
   schemaId: string;
   schemaName: string;
@@ -197,6 +197,9 @@ export const projectDraft7SchemaToParameterDeclaration = (
   input: Draft7ParameterDeclarationInput,
 ): ParameterDeclaration => {
   const { defaults, schema, schemaId, schemaName } = input;
+  if (!isRecord(schema)) {
+    throw new TypeError('INVALID_SCHEMA: root schema must be an object');
+  }
   admitJsonSchema(schema);
   const projection = createProjection(schema);
   return admitParameterDeclaration({

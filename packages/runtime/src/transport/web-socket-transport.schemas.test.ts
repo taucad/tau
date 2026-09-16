@@ -39,4 +39,25 @@ describe('webSocketClientOptionsSchema', () => {
     });
     expect(parsed.success).toBe(true);
   });
+
+  it('should accept only a prepared or explicitly unavailable machines facet', () => {
+    expect(
+      webSocketClientOptionsSchema.safeParse({
+        url: 'ws://127.0.0.1:8080',
+        machines: { available: true, connect: () => ({}) },
+      }).success,
+    ).toBe(true);
+    expect(
+      webSocketClientOptionsSchema.safeParse({
+        url: 'ws://127.0.0.1:8080',
+        machines: { available: false, reason: 'not-granted' },
+      }).success,
+    ).toBe(true);
+    expect(
+      webSocketClientOptionsSchema.safeParse({
+        url: 'ws://127.0.0.1:8080',
+        machines: { available: true, socket: {} },
+      }).success,
+    ).toBe(false);
+  });
 });

@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react';
-import type { LengthSymbol } from '@taucad/units';
 import type { MeasurementDescriptor } from '#constants/project-parameters.js';
+import type { LengthSymbol } from '#utils/length-unit.utils.js';
 
 export type Units = {
   length: {

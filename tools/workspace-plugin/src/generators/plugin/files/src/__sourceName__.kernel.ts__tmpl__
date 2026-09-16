@@ -15,8 +15,8 @@ export const <%= alias %>Kernel = defineKernel({
   },
   async getParameters() {
     return createKernelSuccess({
-      defaultParameters: {},
-      jsonSchema: { type: 'object', properties: {}, additionalProperties: false },
+      defaults: {},
+      schema: { type: 'object', properties: {}, additionalProperties: false },
     });
   },
   async createGeometry() {

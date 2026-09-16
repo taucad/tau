@@ -703,7 +703,9 @@ describe('hostTargetIssues', () => {
         dependencyNames: [],
         hasPayloadGuardTest: false,
       }),
-    ).toEqual(['@taucad/occt-core: package.json taucad.hostTarget is not declared (expected "browser" or "node")']);
+    ).toEqual([
+      '@taucad/occt-core: package.json taucad.hostTarget is not declared (expected "browser", "daemon", "native", "node", "python")',
+    ]);
   });
 
   it('holds a browser package to its guard test and to browser-safe dependencies', () => {
@@ -734,6 +736,17 @@ describe('hostTargetIssues', () => {
         packageName: '@taucad/cli',
         hostTarget: 'node',
         dependencyNames: ['fs-extra'],
+        hasPayloadGuardTest: false,
+      }),
+    ).toEqual([]);
+  });
+
+  it.each(['daemon', 'native', 'python'] as const)('accepts the generator-supported %s host target', (hostTarget) => {
+    expect(
+      hostTargetIssues({
+        packageName: '@taucad/example',
+        hostTarget,
+        dependencyNames: ['ws'],
         hasPayloadGuardTest: false,
       }),
     ).toEqual([]);

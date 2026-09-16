@@ -32,6 +32,7 @@ type ParametersProperties = {
   readonly emptyMessage?: string;
   readonly emptyDescription?: string;
   readonly units: Units;
+  readonly parameterSemantics?: RJSFContext['parameterSemantics'];
   readonly isInitialExpanded?: boolean;
   readonly isAllExpanded?: boolean;
 };
@@ -49,6 +50,7 @@ export function Parameters({
   emptyMessage = 'No parameters available',
   emptyDescription = 'Parameters will appear here when they become available for this model',
   units,
+  parameterSemantics = 'legacy-cad',
   isInitialExpanded = true,
   isAllExpanded,
 }: ParametersProperties): React.JSX.Element {
@@ -115,7 +117,7 @@ export function Parameters({
   const formContext = useMemo<RJSFContext>(
     () => ({
       idPrefix: rjsfIdPrefix,
-      parameterSemantics: 'legacy-cad',
+      parameterSemantics,
       rootPresentation: 'catalog',
       allExpanded,
       searchTerm: activeFilterTerm,
@@ -130,7 +132,7 @@ export function Parameters({
       },
       units,
     }),
-    [allExpanded, activeFilterTerm, resetSingleParameter, defaultParameters, units],
+    [allExpanded, activeFilterTerm, resetSingleParameter, defaultParameters, parameterSemantics, units],
   );
 
   const mergedData = useMemo(

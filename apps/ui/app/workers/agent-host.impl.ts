@@ -1384,6 +1384,7 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
     skillResolver,
     ...runtimeRpc,
     geospec: geoSpecClient,
+    machines: runtimeClient.machines,
     testingEnabled: request.testingEnabled ?? false,
   });
   const activeReference: { current?: WorkerSession } = {};

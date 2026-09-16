@@ -9,7 +9,7 @@ import { fileManagerMachine } from '#machines/file-manager.machine.js';
 import { connectComputeStoreChannel } from '@taucad/runtime/host';
 import { createRuntimeClient } from '@taucad/runtime';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { defineKernel } from '@taucad/runtime/kernel';
+import { createKernelParameterDeclaration, defineKernel } from '@taucad/runtime/kernel';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 
@@ -37,7 +37,18 @@ const verifyPublicReuse = async (
       return { resolved: [input.entryPath], unresolved: [] };
     },
     async getParameters() {
-      return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+      return {
+        success: true,
+        data: createKernelParameterDeclaration(
+          {},
+          {},
+          {
+            id: 'urn:taucad:file-manager-compute:parameters',
+            name: 'FileManagerComputeParameters',
+          },
+        ),
+        issues: [],
+      };
     },
     async exportGeometry() {
       return { success: false, issues: [] };

@@ -1,15 +1,12 @@
 import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
-import { availableParallelism } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Worker } from 'node:worker_threads';
 
-import { createSolverHatchetJobWorkerFactory, defaultConfigDirectory, startHostDaemon } from '@taucad/host';
+import { defaultConfigDirectory, startHostDaemon } from '@taucad/host';
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import type { HostDaemonAgentOptions, HostDaemonEvent } from '@taucad/host';
-import { calculixSolverVersion, createDirectorySolverInputMaterializer } from '@taucad/jobs-solvers';
-import type { OpenFoamSolverVersion } from '@taucad/jobs-solvers';
 import { defineCommand } from 'citty';
 import { consola } from 'consola';
 
@@ -182,18 +179,6 @@ const parsePositiveInteger = (name: string, value: string): number => {
   return parsed;
 };
 
-const parseAttempts = (value: string): readonly number[] => {
-  const attempts = value.split(',').map((entry) => parsePositiveInteger('--job-max-attempts', entry));
-  return [...new Set(attempts)].toSorted((left, right) => left - right);
-};
-
-const parseOpenFoamVersion = (value: string): OpenFoamSolverVersion => {
-  if (value !== '2506' && value !== '2606') {
-    throw new TypeError('--openfoam-version must be 2506 or 2606');
-  }
-  return value;
-};
-
 /** `tau serve` command. */
 export const serveCommand = defineCommand({
   meta: {
@@ -226,39 +211,6 @@ export const serveCommand = defineCommand({
       type: 'string',
       description: 'Compute reuse mode: off, memory, or durable',
       default: 'durable',
-    },
-    jobSlots: {
-      type: 'string',
-      description: 'Hatchet slots advertised by this daemon when HATCHET_CLIENT_TOKEN is configured',
-      default: String(availableParallelism()),
-    },
-    jobMaxAttempts: {
-      type: 'string',
-      description: 'Comma-separated retry counts for which static Hatchet task profiles are installed',
-      default: '1',
-    },
-    solverInputRoot: {
-      type: 'string',
-      description: 'Deployment-owned directory CAS root containing one extracted directory per SHA-256 digest',
-      required: false,
-      default: process.env['TAU_SOLVER_INPUT_ROOT'],
-    },
-    openfoamVersion: {
-      type: 'string',
-      description: 'Exact OpenFOAM release advertised by this worker',
-      default: process.env['TAU_OPENFOAM_VERSION'] ?? '2506',
-    },
-    openfoamImage: {
-      type: 'string',
-      description: 'Optional reviewed immutable OpenFOAM image override',
-      required: false,
-      default: process.env['TAU_OPENFOAM_IMAGE'],
-    },
-    calculixImage: {
-      type: 'string',
-      description: 'Optional reviewed immutable CalculiX 2.23 image',
-      required: false,
-      default: process.env['TAU_CALCULIX_IMAGE'],
     },
     trustProjects: {
       type: 'boolean',
@@ -380,37 +332,6 @@ export const serveCommand = defineCommand({
             : {}),
         }
       : undefined;
-    const hatchetToken = process.env['HATCHET_CLIENT_TOKEN'];
-    const jobWorker = (() => {
-      if (!hatchetToken) {
-        consola.warn('Durable job execution is disabled because HATCHET_CLIENT_TOKEN is not configured');
-        return undefined;
-      }
-      if (!args.solverInputRoot) {
-        throw new TypeError('--solver-input-root is required when HATCHET_CLIENT_TOKEN enables solver jobs');
-      }
-      const inputRoot = resolve(args.solverInputRoot);
-      const openFoamVersion = parseOpenFoamVersion(args.openfoamVersion);
-      return createSolverHatchetJobWorkerFactory({
-        hatchetToken,
-        hatchetNamespace: process.env['HATCHET_CLIENT_NAMESPACE'] ?? 'tau-local',
-        slots: parsePositiveInteger('--job-slots', args.jobSlots),
-        supportedMaxAttempts: parseAttempts(args.jobMaxAttempts),
-        openFoamSolverVersion: openFoamVersion,
-        ...(args.openfoamImage ? { openFoamImage: args.openfoamImage } : {}),
-        ...(args.calculixImage
-          ? {
-              calculixImage: {
-                reference: args.calculixImage,
-                solverVersion: calculixSolverVersion,
-              },
-            }
-          : {}),
-        inputMaterializer: createDirectorySolverInputMaterializer({
-          resolve: async (snapshot) => join(inputRoot, snapshot.digest.slice('sha256:'.length)),
-        }),
-      });
-    })();
     const stopped = Promise.withResolvers<NodeJS.Signals>();
     const onSignal = (signal: NodeJS.Signals): void => {
       stopped.resolve(signal);
@@ -424,7 +345,6 @@ export const serveCommand = defineCommand({
         args: childArguments({ plugin: args.plugin, config: args.config }),
       },
       maxSessions,
-      ...(jobWorker ? { jobWorker } : {}),
       ...(configuredAgent ? { agent: configuredAgent } : {}),
       onEvent: reportEvent,
     });

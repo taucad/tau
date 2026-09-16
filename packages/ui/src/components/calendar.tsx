@@ -108,7 +108,7 @@ function Calendar({
         // eslint-disable-next-line @typescript-eslint/naming-convention -- react day picker class names
         range_end: cn('bg-accent rounded-r-md', defaultClassNames.range_end),
         today: cn(
-          'bg-accent text-accent-foreground rounded-md data-[selected=true]:rounded-none',
+          'bg-accent text-accent-foreground rounded-md data-[selected=true]:rounded-none has-[[data-selected-single=true]]:bg-transparent',
           defaultClassNames.today,
         ),
         outside: cn('text-muted-foreground aria-selected:text-muted-foreground', defaultClassNames.outside),

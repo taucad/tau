@@ -47,6 +47,16 @@
   --muted-foreground: oklch(var(--l-emphasized) 0 none);
   --primary: oklch(var(--l-primary) var(--c-primary) var(--hue-primary));
   --primary-foreground: oklch(0.985 0 none);
+  --primary-action: oklch(0.4 0.008 var(--hue-primary));
+  --primary-action-foreground: oklch(0.985 0 none);
+  --primary-action-glint: linear-gradient(oklch(1 0 none / 0.08), oklch(1 0 none / 0.08));
+  --primary-action-sheen: linear-gradient(
+    165deg,
+    color-mix(in oklch, white 16%, var(--primary-action)),
+    var(--primary-action) 45%,
+    color-mix(in oklch, black 18%, var(--primary-action)) 50%,
+    var(--primary-action)
+  );
   --secondary: oklch(var(--l-surface) 0 none);
   --secondary-foreground: oklch(var(--l-deepest) 0 none);
   --neutral: oklch(var(--l-medium) 0 none);
@@ -183,6 +193,8 @@
   --l-intense: 1;
   --l-deepest: 1;
   --l-primary: 0.4;
+  --primary-action-sheen: none;
+  --primary-action-glint: none;
   --l-highlighter: 0.78;
   --background: oklch(var(--l-base) 0 none);
   --muted: oklch(var(--l-surface) 0 none);
@@ -373,6 +385,25 @@
   outline-offset: var(--focus-outline-offset-outside);
 }
 
+/* Shared by primary actions and selected button-like controls in every theme. */
+@utility primary-action {
+  color: var(--primary-action-foreground);
+  background-color: var(--primary-action);
+  background-image: var(--primary-action-sheen);
+
+  &:hover:not(:disabled):not([aria-disabled='true']) {
+    background-image: var(--primary-action-glint), var(--primary-action-sheen);
+  }
+
+  @media (prefers-contrast: more), (forced-colors: active) {
+    background-image: none;
+
+    &:hover:not(:disabled):not([aria-disabled='true']) {
+      background-image: none;
+    }
+  }
+}
+
 @layer base {
   @supports (corner-shape: superellipse(1.5)) {
     :where(*) {
@@ -406,6 +437,7 @@
   --color-neutral-foreground: var(--neutral-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-action-foreground: var(--primary-action-foreground);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-accent: var(--accent);

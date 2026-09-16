@@ -13,14 +13,14 @@ import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { menuGroupHeadingClass, menuItemLayoutClass, menuItemVariants } from '@taucad/ui/components/menu.variants';
-import type { DraftImageOptions } from '#hooks/use-chat.js';
+import type { ChatAttachmentAddOptions } from '#components/chat/chat-textarea-types.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages, captureFilesToDataUrls } from '#services/headless-capture.js';
 import { useGraphicsCameraRigQuery } from '#hooks/use-graphics.js';
 import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
 
 type ChatContextActionsProperties = {
-  readonly addImage: (image: string, options?: DraftImageOptions) => void;
+  readonly addImage: (image: string, options?: ChatAttachmentAddOptions) => void;
   readonly addText: (text: string) => void;
   readonly isImageInputSupported?: boolean;
   readonly asPopoverMenu?: boolean;

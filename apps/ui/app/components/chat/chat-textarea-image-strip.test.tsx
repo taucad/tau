@@ -1,22 +1,59 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { ChatTextareaImageStrip } from '#components/chat/chat-textarea-image-strip.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { ChatTextareaAttachmentRail } from '#components/chat/chat-textarea-image-strip.js';
+import type { DraftAttachment } from '#hooks/draft.machine.js';
 
-const images = ['data:image/png;base64,one', 'data:image/png;base64,two', 'data:image/png;base64,three'];
-const fiveImages = [...images, 'data:image/png;base64,four', 'data:image/png;base64,five'];
+const directory = '/.tau/composers/chats/p1/c1/attachments';
+const stored = (digit: string): DraftAttachment => ({ hash: digit.repeat(64), mediaType: 'image/png', byteLength: 4 });
+const images = ['1', '2', '3'].map((digit) => stored(digit));
+const fiveImages = [...images, stored('4'), stored('5')];
+const pdf: DraftAttachment = {
+  hash: 'f'.repeat(64),
+  mediaType: 'application/pdf',
+  byteLength: 3 * 1024 * 1024,
+  filename: 'bracket-spec.pdf',
+};
 
-describe('ChatTextareaImageStrip', () => {
-  it('renders desktop attachments as a large horizontal image strip without text-chip labels', () => {
-    render(<ChatTextareaImageStrip images={images} size='desktop' onRemoveImage={vi.fn()} />);
+// Every stored file reads back as bytes of its declared size, named by its path.
+const readFile = vi.fn(async (path: string) => new Uint8Array(path.endsWith('.pdf') ? 3 * 1024 * 1024 : 4));
+const fileManager = { client: { readFile } };
+vi.mock('#hooks/use-file-manager.js', () => ({
+  useOptionalFileManager: () => fileManager,
+}));
 
-    const strip = screen.getByLabelText('Attached images');
+beforeEach(() => {
+  let created = 0;
+  vi.stubGlobal(
+    'URL',
+    Object.assign(URL, {
+      createObjectURL: () => {
+        created += 1;
+        return `blob:object-${created}`;
+      },
+      revokeObjectURL: vi.fn(),
+    }),
+  );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe('ChatTextareaAttachmentRail', () => {
+  it('renders desktop attachments as a large horizontal image strip without text-chip labels', async () => {
+    render(<ChatTextareaAttachmentRail attachments={images} directory={directory} size='desktop' onRemove={vi.fn()} />);
+
+    const strip = screen.getByLabelText('Attachments');
     expect(strip.className).toContain('overflow-x-auto');
     expect(strip.className).toContain('overflow-y-hidden');
     expect(strip.className).toContain('scroll-shadows-x');
     expect(strip.firstElementChild?.className).toContain('flex-nowrap');
     expect(screen.queryByText('Image')).toBeNull();
 
+    await waitFor(() => {
+      expect(screen.getAllByRole('img')[0]?.tagName).toBe('IMG');
+    });
     const renderedImages = screen.getAllByRole('img');
     expect(renderedImages).toHaveLength(images.length);
     expect(renderedImages[0]?.parentElement?.className).toContain('size-20');
@@ -26,9 +63,11 @@ describe('ChatTextareaImageStrip', () => {
   });
 
   it('keeps a fixed desktop gap matching the composer image inset', () => {
-    render(<ChatTextareaImageStrip images={fiveImages} size='desktop' onRemoveImage={vi.fn()} />);
+    render(
+      <ChatTextareaAttachmentRail attachments={fiveImages} directory={directory} size='desktop' onRemove={vi.fn()} />,
+    );
 
-    const strip = screen.getByLabelText('Attached images');
+    const strip = screen.getByLabelText('Attachments');
     expect(strip.firstElementChild?.className).toContain('min-w-full');
     expect(strip.firstElementChild?.className).toContain('justify-start');
     expect(strip.firstElementChild?.className).toContain('gap-3');
@@ -36,8 +75,10 @@ describe('ChatTextareaImageStrip', () => {
   });
 
   it('should translate vertical wheel input and release it at the horizontal boundary', () => {
-    render(<ChatTextareaImageStrip images={fiveImages} size='desktop' onRemoveImage={vi.fn()} />);
-    const strip = screen.getByLabelText('Attached images');
+    render(
+      <ChatTextareaAttachmentRail attachments={fiveImages} directory={directory} size='desktop' onRemove={vi.fn()} />,
+    );
+    const strip = screen.getByLabelText('Attachments');
     Object.defineProperties(strip, {
       clientWidth: { configurable: true, value: 200 },
       scrollLeft: { configurable: true, value: 0, writable: true },
@@ -58,16 +99,19 @@ describe('ChatTextareaImageStrip', () => {
     expect(boundary.defaultPrevented).toBe(false);
   });
 
-  it('renders mobile attachments larger than the old compact thumbnails', () => {
-    render(<ChatTextareaImageStrip images={images} size='mobile' onRemoveImage={vi.fn()} />);
+  it('renders mobile attachments larger than the old compact thumbnails', async () => {
+    render(<ChatTextareaAttachmentRail attachments={images} directory={directory} size='mobile' onRemove={vi.fn()} />);
 
-    const renderedImages = screen.getAllByRole('img');
-    expect(renderedImages[0]?.parentElement?.className).toContain('size-14');
+    await waitFor(() => {
+      expect(screen.getAllByRole('img')[0]?.parentElement?.className).toContain('size-14');
+    });
   });
 
   it('keeps remove buttons inside thumbnails and removes the requested image', () => {
     const onRemoveImage = vi.fn();
-    render(<ChatTextareaImageStrip images={images} size='desktop' onRemoveImage={onRemoveImage} />);
+    render(
+      <ChatTextareaAttachmentRail attachments={images} directory={directory} size='desktop' onRemove={onRemoveImage} />,
+    );
 
     const secondRemoveButton = screen.getByRole('button', { name: 'Remove uploaded image 2' });
     expect(secondRemoveButton.className).toContain('top-1');
@@ -81,7 +125,7 @@ describe('ChatTextareaImageStrip', () => {
   });
 
   it('opens a carousel dialog at the clicked image', async () => {
-    render(<ChatTextareaImageStrip images={images} size='desktop' onRemoveImage={vi.fn()} />);
+    render(<ChatTextareaAttachmentRail attachments={images} directory={directory} size='desktop' onRemove={vi.fn()} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open uploaded image 2' }));
 
@@ -96,9 +140,10 @@ describe('ChatTextareaImageStrip', () => {
     expect(nextButton.className).toContain('fixed');
     expect(nextButton.className).toContain('right-4');
     expect(nextButton.className).toContain('size-10');
-    const downloadLink = screen.getByRole('link', { name: 'Download uploaded-image-2.png' });
-    expect(downloadLink).toHaveAttribute('href', images[1]);
-    expect(downloadLink).toHaveAttribute('download', 'uploaded-image-2.png');
+    // The stored image downloads from its shared object URL under its stored name.
+    const downloadLink = await screen.findByRole('link', { name: `Download ${'2'.repeat(64)}.png` });
+    expect(downloadLink.getAttribute('href')).toMatch(/^blob:object-\d+$/);
+    expect(downloadLink).toHaveAttribute('download', `${'2'.repeat(64)}.png`);
     downloadLink.addEventListener('click', (event) => {
       event.preventDefault();
     });
@@ -122,24 +167,68 @@ describe('ChatTextareaImageStrip', () => {
       screen.getAllByRole('img', { name: 'Uploaded 2' }).some((image) => image.getAttribute('loading') === 'eager'),
     ).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Close image preview' }));
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
   });
 
   it('hides carousel navigation chrome for a single image', async () => {
-    render(<ChatTextareaImageStrip images={[images[0]!]} size='desktop' onRemoveImage={vi.fn()} />);
+    render(
+      <ChatTextareaAttachmentRail attachments={[images[0]!]} directory={directory} size='desktop' onRemove={vi.fn()} />,
+    );
 
     fireEvent.click(screen.getByRole('button', { name: 'Open uploaded image 1' }));
 
     expect(screen.getByRole('region', { name: 'Image preview carousel' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Previous slide' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Next slide' })).toBeNull();
-    const downloadLink = screen.getByRole('link', { name: 'Download uploaded-image-1.png' });
-    expect(downloadLink).toHaveAttribute('href', images[0]);
-    expect(downloadLink).toHaveAttribute('download', 'uploaded-image-1.png');
+    const downloadLink = await screen.findByRole('link', { name: `Download ${'1'.repeat(64)}.png` });
+    expect(downloadLink.getAttribute('href')).toMatch(/^blob:object-\d+$/);
+    expect(downloadLink).toHaveAttribute('download', `${'1'.repeat(64)}.png`);
     const closeButton = screen.getByRole('button', { name: 'Close image preview' });
     expect(closeButton).toBeInTheDocument();
     expect(screen.queryByText('1 / 1')).toBeNull();
     fireEvent.click(closeButton);
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
+  });
+
+  it('shows a stored PDF as a document chip with its name and size, removable by name', async () => {
+    const onRemove = vi.fn();
+    render(
+      <ChatTextareaAttachmentRail
+        attachments={[images[0]!, pdf]}
+        directory={directory}
+        size='desktop'
+        onRemove={onRemove}
+      />,
+    );
+
+    expect(await screen.findByRole('link', { name: 'bracket-spec.pdf' })).toHaveAttribute(
+      'download',
+      'bracket-spec.pdf',
+    );
+    expect(screen.getByText('PDF · 3.0 MB')).toBeInTheDocument();
+    expect(readFile).toHaveBeenCalledWith(`${directory}/${pdf.hash}.pdf`);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove bracket-spec.pdf' }));
+    expect(onRemove).toHaveBeenCalledWith(1);
+  });
+
+  it('renders the send-block reason beside the attachments', () => {
+    render(
+      <ChatTextareaAttachmentRail
+        attachments={[pdf]}
+        directory={directory}
+        blockReason="Vision can't read PDFs. Remove the PDF or pick another model."
+        size='desktop'
+        onRemove={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      "Vision can't read PDFs. Remove the PDF or pick another model.",
+    );
   });
 });

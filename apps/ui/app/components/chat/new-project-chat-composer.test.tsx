@@ -119,7 +119,7 @@ describe('NewProjectChatComposer', () => {
       render(<NewProjectChatComposer />);
 
       await act(async () => {
-        await capturedTextarea?.onSubmit({ content: 'Build a bracket', imageUrls: [] });
+        await capturedTextarea?.onSubmit({ content: 'Build a bracket', attachments: [] });
       });
 
       expect(mockCreateProject).toHaveBeenCalledWith(expect.objectContaining({ activeExecution: execution }));
@@ -144,7 +144,7 @@ describe('NewProjectChatComposer', () => {
     expect(screen.getByTestId('location-field')).toHaveAttribute('data-is-inside-focus-trap', 'true');
 
     await act(async () => {
-      await capturedTextarea?.onSubmit({ content: 'Build a bracket', imageUrls: ['data:image/png;base64,a'] });
+      await capturedTextarea?.onSubmit({ content: 'Build a bracket', attachments: [] });
     });
 
     expect(mockCreateProject).toHaveBeenCalledWith({
@@ -174,7 +174,7 @@ describe('NewProjectChatComposer', () => {
     render(<NewProjectChatComposer />);
 
     await act(async () => {
-      await capturedTextarea?.onSubmit({ content: '', imageUrls: [] });
+      await capturedTextarea?.onSubmit({ content: '', attachments: [] });
     });
 
     expect(mockCreateProject).toHaveBeenCalledWith(
@@ -195,7 +195,7 @@ describe('NewProjectChatComposer', () => {
     render(<NewProjectChatComposer />);
 
     await act(async () => {
-      await capturedTextarea?.onSubmit({ content: 'Keep this draft', imageUrls: [] });
+      await capturedTextarea?.onSubmit({ content: 'Keep this draft', attachments: [] });
     });
 
     expect(mockPresentLocationError).toHaveBeenCalledWith(error);

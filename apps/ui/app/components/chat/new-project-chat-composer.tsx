@@ -29,6 +29,8 @@ export function NewProjectChatComposer({
   const presentLocationError = useProjectCreationLocationError();
   const textareaRef = useRef<ChatTextareaHandle>(null);
   const {
+    draftActorRef,
+    attachmentSource,
     execution: { execution },
     consumeDraft,
   } = useChatComposer();
@@ -66,10 +68,17 @@ export function NewProjectChatComposer({
   }, [finishLocationSelection, location]);
 
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
-    async ({ content, imageUrls }) => {
+    async ({ content }) => {
       if (location.phase !== 'ready') {
         return;
       }
+      // The stored draft is the source of truth for attachments: the new
+      // project's chat receives copies of exactly these bytes.
+      const attachments = draftActorRef.getSnapshot().context.draftAttachments.map(({ hash, mediaType, filename }) => ({
+        hash,
+        mediaType,
+        ...(filename === undefined ? {} : { filename }),
+      }));
       try {
         const created = await projectManager.createProject({
           kernel,
@@ -80,7 +89,7 @@ export function NewProjectChatComposer({
            * daemon. Both providers keep this execution's Tau model in step with
            * the model chip, so there is nothing left to override here. */
           activeExecution: execution,
-          initialMessage: { content, imageUrls },
+          initialMessage: { content, attachments, ...(attachmentSource === undefined ? {} : { attachmentSource }) },
           editorState: {
             panelState: { desktopLayout: { chatOpen: true, compactAuxiliary: 'chat' }, mobileActiveTab: 'chat' },
           },
@@ -99,7 +108,17 @@ export function NewProjectChatComposer({
         toast.error('Failed to create project');
       }
     },
-    [consumeDraft, execution, kernel, location, navigate, presentLocationError, projectManager],
+    [
+      attachmentSource,
+      consumeDraft,
+      draftActorRef,
+      execution,
+      kernel,
+      location,
+      navigate,
+      presentLocationError,
+      projectManager,
+    ],
   );
 
   return (

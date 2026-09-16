@@ -86,3 +86,20 @@ const attachmentFileNamePattern = /^[\da-f]{64}\.(?:jpg|png|webp|gif|pdf)$/;
 /** Whether a URL is an attachment reference, as opposed to a `data:` URL or anything else. */
 export const isAttachmentUrl = (url: string): boolean =>
   url.startsWith(attachmentDirectory) && attachmentFileNamePattern.test(url.slice(attachmentDirectory.length));
+
+/**
+ * The attachment a file part references, or `undefined` for a `data:` URL or
+ * any other non-reference. The part's own media type names the bytes.
+ */
+export const attachmentReferenceOf = (part: {
+  readonly url: string;
+  readonly mediaType: string;
+  readonly filename?: string;
+}): AttachmentReference | undefined =>
+  isAttachmentUrl(part.url)
+    ? {
+        hash: part.url.slice(attachmentDirectory.length, attachmentDirectory.length + 64),
+        mediaType: part.mediaType,
+        ...(part.filename === undefined ? {} : { filename: part.filename }),
+      }
+    : undefined;

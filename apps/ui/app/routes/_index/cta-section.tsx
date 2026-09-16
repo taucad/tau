@@ -22,7 +22,7 @@ export function CtaSection(): React.JSX.Element {
           {/* Chat Input — composer-only mode (no chat session). The draft is
               held in memory only. The marketing CTA never persists; it just
               routes into project creation on submit. */}
-          <ChatComposerProvider>
+          <ChatComposerProvider surface='marketing'>
             <NewProjectChatComposer enableAutoFocus={false} />
           </ChatComposerProvider>
 

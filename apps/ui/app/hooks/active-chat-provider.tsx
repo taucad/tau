@@ -6,10 +6,14 @@
  * `useChatComposer()` hook and never branch on which provider is in scope —
  * the runtime branch collapses to the two provider constructors.
  *
- * - **`<ChatComposerProvider>`** — composer-only (marketing CTA, library
- *   empty state). Cookie-only model/kernel; `status: 'ready'`; `stop` is a
- *   no-op; `contextUsage` and `session` are `undefined`. Owns a throwaway
- *   draft actor with no-op persistence.
+ * - **`<ChatComposerProvider surface>`** — composer-only (marketing CTA,
+ *   library empty state). Cookie-only model/kernel; `status: 'ready'`; `stop`
+ *   is a no-op; `contextUsage` and `session` are `undefined`. Its draft keeps
+ *   no record, but stores attachments in the surface's own directory.
+ *
+ * - **`<HomeNewProjectComposerProvider>`** — the durable Home pre-project
+ *   composer, bound to its composer record. Interactive from the first frame;
+ *   the record hydrates whatever the user has not touched.
  *
  * - **`<ActiveChatProvider chatId>`** — session-backed (project route).
  *   Chat-row-preferred model/kernel with cookie fallback and dual-write on
@@ -27,7 +31,7 @@
  */
 
 import { useActorRef, useSelector } from '@xstate/react';
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { Chat } from '@ai-sdk/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -49,9 +53,15 @@ import type { ResolvedModel } from '#hooks/use-models.js';
 import { useKernel } from '#hooks/use-kernel.js';
 import { withTauExecutionModel } from '#utils/chat-execution.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
-import { createNewProjectComposerFileStore } from '#db/new-project-composer-file-storage.js';
-import type { NewProjectComposerRecord } from '#db/new-project-composer-file-storage.js';
-import { toast } from '#components/ui/sonner.js';
+import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
+import { draftPersistenceFor, useComposerRecord } from '#hooks/composer-record.js';
+import type { ComposerRecordRef } from '#hooks/composer-record.js';
+import { createAttachmentStore } from '#db/attachment-store.js';
+import type { AttachmentStore } from '#db/attachment-store.js';
+import { attachmentUrl } from '#utils/attachment.utils.js';
+import type { Attachment } from '#utils/attachment.utils.js';
+import type { ChatMode } from '@taucad/chat/constants';
+import { useComposerRecordToasts } from '#hooks/use-composer-record-toasts.js';
 
 type ChatInstance = Chat<MyUIMessage>;
 
@@ -158,6 +168,12 @@ export type ChatComposerContextValue = {
   session: ActiveChatSessionContextValue | undefined;
   /** Whether this surface offers execution placement selection. */
   canSelectExecution: boolean;
+  /**
+   * The directory a project created from this draft copies its attachments
+   * from. `undefined` means the Home composer's, as it does on a pending
+   * project operation.
+   */
+  attachmentSource: string | undefined;
   /** Consume the current draft at its persistence owner. */
   consumeDraft: () => Promise<void>;
 };
@@ -171,16 +187,47 @@ const ActiveChatSessionContext = createContext<ActiveChatSessionContextValue | u
 
 const noopPersistDraftActor = fromSafeAsync<void, { draft: MyUIMessage }>(async () => undefined);
 const noopPersistEditDraftActor = fromSafeAsync<void, { messageId: string; draft: MyUIMessage }>(async () => undefined);
+const noopPersistSelectionActor = fromSafeAsync<void, { toolChoice?: string | string[]; mode?: ChatMode }>(
+  async () => undefined,
+);
 const noopClearMessageEditActor = fromSafeAsync<void, { messageId: string }>(async () => undefined);
 
-const composerDraftMachine = draftMachine.provide({
-  actors: {
-    persistDraftActor: noopPersistDraftActor,
-    persistEditDraftActor: noopPersistEditDraftActor,
-    clearMessageEditActor: noopClearMessageEditActor,
-    resizeImageActor,
-  },
-});
+/** A pre-project composer that keeps no record; each owns its draft-stage attachment directory. */
+export type ComposerSurface = Parameters<typeof composerRecordPaths.surfaceAttachments>[0];
+
+/**
+ * The composer-only draft keeps no record, but its attachments still need
+ * bytes on disk: a project created from it promotes them from this surface's
+ * own directory.
+ */
+function useSurfaceAttachments(surface: ComposerSurface): { directory: string; attachments: AttachmentStore } {
+  const { client } = useFileManager();
+  return useMemo(() => {
+    const directory = composerRecordPaths.surfaceAttachments(surface);
+    return { directory, attachments: createAttachmentStore(client, directory) };
+  }, [client, surface]);
+}
+
+function useComposerDraftMachine(attachments: AttachmentStore) {
+  return useMemo(() => {
+    return draftMachine.provide({
+      actors: {
+        persistDraftActor: noopPersistDraftActor,
+        persistEditDraftActor: noopPersistEditDraftActor,
+        persistSelectionActor: noopPersistSelectionActor,
+        clearMessageEditActor: noopClearMessageEditActor,
+        storeAttachmentActor: fromSafeAsync<
+          { type: 'attachmentStored'; attachment: Attachment },
+          { bytes: Uint8Array<ArrayBuffer>; mediaType: string; filename?: string }
+        >(async ({ input }) => ({
+          type: 'attachmentStored',
+          attachment: await attachments.put(input.bytes, input.mediaType, input.filename),
+        })),
+        resizeImageActor,
+      },
+    });
+  }, [attachments]);
+}
 
 // Stable no-op so the `stop` callback identity does not change across
 // composer-provider renders — consumers can safely include it in dep
@@ -196,15 +243,23 @@ const noopStop = (): void => undefined;
  * model/kernel resolvers, a throwaway draft actor, and no-session sentinel
  * values for `status`/`stop`/`contextUsage`/`session`.
  */
-export function ChatComposerProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
-  const draftActorRef = useActorRef(composerDraftMachine, { input: {}, inspect });
+export function ChatComposerProvider({
+  children,
+  surface,
+}: {
+  readonly children: React.ReactNode;
+  readonly surface: ComposerSurface;
+}): React.JSX.Element {
+  const { directory, attachments } = useSurfaceAttachments(surface);
+  const draftActorRef = useActorRef(useComposerDraftMachine(attachments), { input: {}, inspect });
 
   useDraftImageErrorToast(draftActorRef);
 
   const model = useCookieModel();
   const execution = useCookieExecution(model);
   const kernel = useCookieKernel();
-  const consumeDraft = useConsumeDraft(draftActorRef);
+  const owner = useMemo(() => ({ attachments }), [attachments]);
+  const consumeDraft = useConsumeDraft(draftActorRef, owner);
 
   const value = useMemo<ChatComposerContextValue>(
     () => ({
@@ -218,122 +273,54 @@ export function ChatComposerProvider({ children }: { readonly children: React.Re
       contextUsage: undefined,
       session: undefined,
       canSelectExecution: false,
+      attachmentSource: directory,
       consumeDraft,
     }),
-    [draftActorRef, model, execution, kernel, consumeDraft],
+    [draftActorRef, model, execution, kernel, directory, consumeDraft],
   );
 
   return <ChatComposerContext.Provider value={value}>{children}</ChatComposerContext.Provider>;
 }
 
-type HomeInitialization =
-  | { readonly status: 'loading' }
-  | { readonly status: 'ready' | 'degraded'; readonly record: NewProjectComposerRecord };
-
-/** Home-workspace provider for the durable pre-project composer. */
+/**
+ * Home-workspace provider for the durable pre-project composer.
+ *
+ * The composer is interactive from the first frame: the record is read by its
+ * own machine, and `recordLoaded` hydrates whatever the user has not touched
+ * yet (D7). There is no loading state to render.
+ */
 export function HomeNewProjectComposerProvider({
   children,
-  fallback = null,
 }: {
   readonly children: React.ReactNode;
-  readonly fallback?: React.ReactNode;
-}): React.ReactNode {
-  const { client } = useFileManager();
-  const store = useMemo(() => createNewProjectComposerFileStore(client), [client]);
-  const [initialization, setInitialization] = useState<HomeInitialization>({ status: 'loading' });
-  const reportedFailure = useRef(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async (): Promise<void> => {
-      try {
-        const result = await store.read();
-        if (cancelled) {
-          return;
-        }
-        if (result.status === 'invalid') {
-          if (!reportedFailure.current) {
-            reportedFailure.current = true;
-            console.error('Invalid Home new-project composer record:', result.error);
-            toast.error('Failed to restore the new-project draft');
-          }
-          setInitialization({ status: 'degraded', record: { version: 1 } });
-          return;
-        }
-        setInitialization({
-          status: 'ready',
-          record: result.status === 'valid' ? result.record : { version: 1 },
-        });
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-        if (!reportedFailure.current) {
-          reportedFailure.current = true;
-          console.error('Failed to read Home new-project composer record:', error);
-          toast.error('Failed to restore the new-project draft');
-        }
-        setInitialization({ status: 'degraded', record: { version: 1 } });
-      }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [store]);
-
-  if (initialization.status === 'loading') {
-    return fallback;
-  }
-  return (
-    <HomeNewProjectComposerReadyProvider store={store} record={initialization.record}>
-      {children}
-    </HomeNewProjectComposerReadyProvider>
-  );
-}
-
-type HomeComposerStore = ReturnType<typeof createNewProjectComposerFileStore>;
-
-function HomeNewProjectComposerReadyProvider({
-  children,
-  record,
-  store,
-}: {
-  readonly children: React.ReactNode;
-  readonly record: NewProjectComposerRecord;
-  readonly store: HomeComposerStore;
 }): React.JSX.Element {
-  const reportWriteFailure = useCallback((error: unknown): void => {
-    console.error('Failed to persist Home new-project composer record:', error);
-    toast.error('Failed to save the new-project draft', {
-      id: 'home-new-project-composer-save-error',
-    });
-  }, []);
+  const { client } = useFileManager();
+  const store = useMemo(() => createComposerRecordStore(client, composerRecordPaths.newProject), [client]);
+  const recordRef = useComposerRecord(store);
+  useComposerRecordToasts(recordRef);
   const homeDraftMachine = useMemo(
-    () =>
-      draftMachine.provide({
-        actors: {
-          persistDraftActor: fromSafeAsync<void, { draft: MyUIMessage }>(async ({ input }) => {
-            try {
-              await store.patchDraft(input.draft);
-            } catch (error) {
-              reportWriteFailure(error);
-            }
-          }),
-          persistEditDraftActor: noopPersistEditDraftActor,
-          clearMessageEditActor: noopClearMessageEditActor,
-          resizeImageActor,
-        },
-      }),
-    [reportWriteFailure, store],
+    () => draftMachine.provide({ actors: { ...draftPersistenceFor(recordRef, store), resizeImageActor } }),
+    [recordRef, store],
   );
-  const draftActorRef = useActorRef(homeDraftMachine, { input: { initialDraft: record.draft }, inspect });
+  const draftActorRef = useActorRef(homeDraftMachine, { input: {}, inspect });
   useDraftImageErrorToast(draftActorRef);
 
-  const execution = useHomeExecution(record.execution, store, reportWriteFailure);
+  useEffect(() => {
+    const subscription = recordRef.on('recordLoaded', ({ record }) => {
+      if (record !== 'absent') {
+        draftActorRef.send({ type: 'hydrateDraft', draft: record.draft });
+      }
+    });
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [draftActorRef, recordRef]);
+
+  const execution = useHomeExecution(recordRef);
   const model = useExecutionModel(execution);
   const kernel = useCookieKernel();
-  const consumeDraft = useConsumeDraft(draftActorRef);
+  const owner = useMemo(() => ({ recordRef, attachments: store.attachments }), [recordRef, store]);
+  const consumeDraft = useConsumeDraft(draftActorRef, owner);
   const value = useMemo<ChatComposerContextValue>(
     () => ({
       draftActorRef,
@@ -346,6 +333,7 @@ function HomeNewProjectComposerReadyProvider({
       contextUsage: undefined,
       session: undefined,
       canSelectExecution: true,
+      attachmentSource: undefined,
       consumeDraft,
     }),
     [consumeDraft, draftActorRef, execution, kernel, model],
@@ -406,6 +394,7 @@ export function ActiveChatProvider({
       contextUsage,
       session: sessionValue,
       canSelectExecution: true,
+      attachmentSource: undefined,
       consumeDraft,
     }),
     [
@@ -555,38 +544,56 @@ function useExecutionModel(activeExecution: ActiveChatExecution): ActiveChatMode
   return useMemo<ActiveChatModel>(() => ({ modelId, model, setActiveModel }), [modelId, model, setActiveModel]);
 }
 
-function useHomeExecution(
-  initial: CadAgentExecution | undefined,
-  store: HomeComposerStore,
-  reportWriteFailure: (error: unknown) => void,
-): ActiveChatExecution {
+/**
+ * Home execution: the user's choice this mount, else the record's as read,
+ * else the cookie model. A late read never replaces a choice already made.
+ */
+function useHomeExecution(recordRef: ComposerRecordRef): ActiveChatExecution {
   const { selectedModelId, setSelectedModelId } = useModels();
-  const [execution, setExecution] = useState<CadAgentExecution>(initial ?? { kind: 'tau', model: selectedModelId });
+  const stored = useSelector(recordRef, (snapshot) => snapshot.context.record?.execution);
+  const [chosen, setChosen] = useState<CadAgentExecution>();
+  const execution = useMemo<CadAgentExecution>(
+    () => chosen ?? stored ?? { kind: 'tau', model: selectedModelId },
+    [chosen, stored, selectedModelId],
+  );
   const setActiveExecution = useCallback(
     (next: CadAgentExecution) => {
-      setExecution(next);
+      setChosen(next);
       if (next.kind === 'tau') {
         setSelectedModelId(next.model);
       }
-      const persist = async (): Promise<void> => {
-        try {
-          await store.patchExecution(next);
-        } catch (error) {
-          reportWriteFailure(error);
-        }
-      };
-      void persist();
+      recordRef.send({ type: 'patch', fields: { execution: next } });
     },
-    [reportWriteFailure, setSelectedModelId, store],
+    [recordRef, setSelectedModelId],
   );
   return useMemo(() => ({ execution, setActiveExecution }), [execution, setActiveExecution]);
 }
 
-function useConsumeDraft(draftActorRef: ActorRefFrom<typeof draftMachine>): () => Promise<void> {
+function useConsumeDraft(
+  draftActorRef: ActorRefFrom<typeof draftMachine>,
+  owner?: { readonly attachments: AttachmentStore; readonly recordRef?: ComposerRecordRef },
+): () => Promise<void> {
   return useCallback(async () => {
     draftActorRef.send({ type: 'clearDraft' });
     await waitFor(draftActorRef, (snapshot) => snapshot.matches({ inputSaving: 'idle' }));
-  }, [draftActorRef]);
+    if (!owner) {
+      return;
+    }
+    // The hand-off above only queued the patch; wait for the write itself so
+    // the navigation that follows cannot strand it. A failed write keeps
+    // retrying and is reported by the record's toasts.
+    if (owner.recordRef) {
+      await waitFor(owner.recordRef, (snapshot) => !snapshot.matches({ writes: 'persisting' }));
+    }
+    // Project creation has already copied the draft's bytes into the new chat;
+    // keep only what the draft references now.
+    try {
+      await owner.attachments.retainOnly(draftActorRef.getSnapshot().context.draftAttachments.map(attachmentUrl));
+    } catch (error) {
+      // Ponytail: orphaned draft-stage bytes are reclaimed by the next consume.
+      console.warn('Failed to release draft attachments:', error);
+    }
+  }, [draftActorRef, owner]);
 }
 
 function useSessionExecution(session: ChatSession): ActiveChatExecution {

@@ -116,14 +116,18 @@ test('should apply the shared squircle curve while preserving semantic circles',
   const focusedFilter = await target.evaluateLocator(filter, (node) => {
     const style = getComputedStyle(node);
     return {
-      boxShadow: style.boxShadow,
+      outlineStyle: style.outlineStyle,
+      outlineWidth: style.outlineWidth,
+      outlineOffset: style.outlineOffset,
       cornerShape: style.getPropertyValue('corner-shape').trim(),
       focused: document.activeElement === node,
     };
   });
   expect(focusedFilter.focused).toBe(true);
   expect(focusedFilter.cornerShape).toBe(expectedShape);
-  expect(focusedFilter.boxShadow).not.toBe('none');
+  expect(focusedFilter.outlineStyle).toBe('solid');
+  expect(focusedFilter.outlineWidth).toBe('2px');
+  expect(focusedFilter.outlineOffset).toBe('-2px');
 
   await target.screenshot(selectors.getByCss('body'), 'editor-squircle-wide-light.png');
   await target.emulateColorScheme('dark');

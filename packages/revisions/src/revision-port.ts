@@ -130,7 +130,8 @@ export type InitRevisionStoreInput = Readonly<{
 export type WriteRevisionInput = Readonly<{
   parents: readonly RevisionId[];
   /**
-   * The exact tree to record.
+   * The tree to record, exactly as given unless
+   * {@link WriteRevisionInput.largeObjects} asks for the clean step.
    *
    * Required: a merge is computed by the caller, with `mergeRevisionTrees` from
    * `@taucad/filesystem/revisions`, and the terms of an unresolved one arrive
@@ -139,6 +140,18 @@ export type WriteRevisionInput = Readonly<{
    * algorithm (I-CONF, EQ14).
    */
   tree: ImmutableRevisionTree;
+  /**
+   * Whether the store's large-object clean step runs on `tree` before it is
+   * recorded.
+   *
+   * Default `true`: a project tree is recorded as its `.gitattributes` says,
+   * which is `git add` honouring a clean filter. `false` records the tree byte
+   * for byte, as `git add --no-filters` would, and is what a record ref needs: a
+   * closed tree can never carry a `.gitattributes`, so a pointer written into
+   * one is a pointer no attribute names, that no stock clone can smudge and no
+   * plain remote can serve.
+   */
+  largeObjects?: boolean;
   provenance: RevisionProvenance;
   summary: RevisionSummary;
   /**

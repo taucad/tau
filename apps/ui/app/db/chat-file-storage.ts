@@ -8,6 +8,7 @@ import { chatLogFileName, chatRecordFileName, chatRecordsPath } from '@taucad/re
 import { deriveChatTranscript } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
+import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
 import { KeyedMutex } from '#db/keyed-mutex.js';
 import type { ChatStorage, CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
@@ -72,11 +73,23 @@ const placeholderRecord = (projectId: string, chatId: string): Chat => ({
   hasUnreadTurn: false,
 });
 
-/** The slice of the worker filesystem client the chat store needs. @internal */
+/**
+ * The slice of the worker filesystem client the chat store needs. @internal
+ *
+ * A chat record is text; the composer record the delete paths remove is bytes
+ * in the same path space, so `readFile` carries both of the worker client's
+ * arms and this type satisfies `ComposerRecordClient` without a second client.
+ */
 export type ChatStoreClient = {
-  readFile: (path: string, options: 'utf8') => Promise<string>;
-  writeFile: (path: string, data: string) => Promise<void>;
+  readFile: {
+    (path: string, options: 'utf8'): Promise<string>;
+    (path: string): Promise<Uint8Array<ArrayBuffer>>;
+  };
+  writeFile: (path: string, data: string | Uint8Array<ArrayBuffer>) => Promise<void>;
   readdir: (path: string) => Promise<string[]>;
+  exists: (path: string) => Promise<boolean>;
+  unlink: (path: string) => Promise<void>;
+  rmdir: (path: string, options?: { recursive?: boolean }) => Promise<void>;
 };
 
 /** The {@link Chat} fields this client holds rather than the file. */
@@ -340,6 +353,18 @@ export function createChatFileStore(
     return created;
   };
 
+  /**
+   * Reclaim the chat's composer record when the chat goes (D11).
+   *
+   * The record holds this device's half-written message and its draft-stage
+   * attachments, and no path clears `deletedAt`, so a deleted chat's record has
+   * no reader left. `remove` takes the record and its attachment directory
+   * together and treats an absent one as done, so a chat that never had a draft
+   * deletes exactly as cleanly.
+   */
+  const removeComposerRecord = async (projectId: string, chatId: string): Promise<void> =>
+    createComposerRecordStore(options.client, composerRecordPaths.chat(projectId, chatId)).remove();
+
   return {
     invalidateLog: (chatId) => {
       staleLogs.add(chatId);
@@ -450,26 +475,35 @@ export function createChatFileStore(
         return true;
       }),
 
-    softDeleteChat: async (chatId) =>
-      patch(chatId, (chat) => {
-        if (isDeleted(chat)) {
-          return false;
-        }
-        chat.deletedAt = Date.now();
-        return true;
-      }),
-
-    /* A tombstone, not an erasure: `deletedAt` in the record is what travels to
-     * the other device, where an absent file would just look like a chat that
-     * had not arrived yet (S39, S43). */
-    deleteChat: async (chatId) => {
-      await patch(chatId, (chat) => {
+    softDeleteChat: async (chatId) => {
+      const deleted = await patch(chatId, (chat) => {
         if (isDeleted(chat)) {
           return false;
         }
         chat.deletedAt = Date.now();
         return true;
       });
+      if (deleted !== undefined) {
+        await removeComposerRecord(deleted.resourceId, chatId);
+      }
+      return deleted;
+    },
+
+    /* A tombstone, not an erasure: `deletedAt` in the record is what travels to
+     * the other device, where an absent file would just look like a chat that
+     * had not arrived yet (S39, S43). The composer record is the exception —
+     * it is this device's alone and travels nowhere, so it goes (D11). */
+    deleteChat: async (chatId) => {
+      const deleted = await patch(chatId, (chat) => {
+        if (isDeleted(chat)) {
+          return false;
+        }
+        chat.deletedAt = Date.now();
+        return true;
+      });
+      if (deleted !== undefined) {
+        await removeComposerRecord(deleted.resourceId, chatId);
+      }
     },
 
     getChat: async (chatId) => {

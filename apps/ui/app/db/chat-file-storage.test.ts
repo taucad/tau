@@ -37,6 +37,7 @@ const nextProjectId = (): string => `proj_${String(projectSequence++).padStart(2
 const createStoreWithFiles = (): {
   store: ReturnType<typeof createChatFileStore>;
   write: (path: string, content: string) => Promise<void>;
+  exists: (path: string) => Promise<boolean>;
 } => {
   let filesystem: FileSystemProvider | undefined;
   const provider = async (): Promise<FileSystemProvider> => {
@@ -45,20 +46,58 @@ const createStoreWithFiles = (): {
   };
   const rooted = (path: string): string => path.replace(/^\/+/u, '');
   const seen = new Set<string>();
+  /* Only a project path names a project; a composer record lives in the Home
+   * workspace and must never be mistaken for one. */
+  const noteProject = (path: string): void => {
+    if (path.startsWith('/projects/')) {
+      seen.add(path.slice('/projects/'.length, path.indexOf('/.tau/')));
+    }
+  };
+  /* The worker client removes a directory whole; a provider only removes an
+   * empty one, so the fixture walks it the way the file service does. */
+  const removeTree = async (path: string): Promise<void> => {
+    const provided = await provider();
+    for (const name of await provided.readdir(path)) {
+      const child = `${path}/${name}`;
+      // oxlint-disable-next-line no-await-in-loop -- sequential traversal, as the file service's own recursive remove is.
+      const entry = await provided.stat(child);
+      // oxlint-disable-next-line no-await-in-loop -- as above.
+      await (entry.type === 'dir' ? removeTree(child) : provided.unlink(child));
+    }
+    await provided.rmdir(path);
+  };
+  /* The worker client reads a chat record as text and a composer record as
+   * bytes, from the same path space. */
+  async function readFile(path: string, options: 'utf8'): Promise<string>;
+  async function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
+  async function readFile(path: string, options?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
+    const filesystem = await provider();
+    const bytes = await filesystem.readFile(rooted(path));
+    return options === 'utf8' ? decoder.decode(bytes) : bytes;
+  }
   const store = createChatFileStore({
     client: {
-      readFile: async (path) => {
-        const filesystem = await provider();
-        return decoder.decode(await filesystem.readFile(rooted(path)));
-      },
+      readFile,
       writeFile: async (path, data) => {
-        seen.add(path.slice('/projects/'.length, path.indexOf('/.tau/')));
+        noteProject(path);
         const filesystem = await provider();
         await filesystem.writeFile(rooted(path), data);
       },
       readdir: async (path) => {
         const filesystem = await provider();
         return filesystem.readdir(rooted(path));
+      },
+      exists: async (path) => {
+        const filesystem = await provider();
+        return filesystem.exists(rooted(path));
+      },
+      unlink: async (path) => {
+        const filesystem = await provider();
+        await filesystem.unlink(rooted(path));
+      },
+      rmdir: async (path, options) => {
+        const provided = await provider();
+        await (options?.recursive === true ? removeTree(rooted(path)) : provided.rmdir(rooted(path)));
       },
     },
     projectIds: async () => [...seen],
@@ -68,9 +107,13 @@ const createStoreWithFiles = (): {
     /* Seed the checkout the way a fetch's projection does: files appear, and
      * nothing the store wrote put them there. */
     write: async (path, content) => {
-      seen.add(path.slice('/projects/'.length, path.indexOf('/.tau/')));
+      noteProject(path);
       const provided = await provider();
       await provided.writeFile(rooted(path), content);
+    },
+    exists: async (path) => {
+      const provided = await provider();
+      return provided.exists(rooted(path));
     },
   };
 };
@@ -810,6 +853,77 @@ describe('chat file store', () => {
       const result = await store.softDeleteChat('chat_missing');
       expect(result).toBeUndefined();
     });
+  });
+});
+
+/**
+ * Deletion reclaims the chat's composer record (blueprint D11).
+ *
+ * The record and its draft-stage attachments are this device's alone, so a
+ * deleted chat's half-written message has nothing left to belong to: no path
+ * clears `deletedAt`, and the record would outlive every reader of it. The
+ * paths are the Home workspace's `/.tau/composers/chats/**`, never the
+ * project's, so a sibling chat and a sibling project are untouched by
+ * construction — which is what these rows pin.
+ */
+describe('chat file store — composer record deletion (D11)', () => {
+  const projectId = 'proj_composer0000000001';
+  const siblingProjectId = 'proj_composer0000000002';
+  const recordPath = (project: string, chatId: string): string => `/.tau/composers/chats/${project}/${chatId}.json`;
+  const attachmentPath = (project: string, chatId: string): string =>
+    `/.tau/composers/chats/${project}/${chatId}/attachments/${'a'.repeat(64)}.png`;
+
+  /** One chat with a draft record and one attachment beside it. */
+  const seedComposer = async (
+    files: ReturnType<typeof createStoreWithFiles>,
+    project: string,
+    chatId: string,
+  ): Promise<void> => {
+    await files.write(
+      recordPath(project, chatId),
+      `${JSON.stringify({ version: 1, draft: draftMessage(`draft for ${chatId}`) })}\n`,
+    );
+    await files.write(attachmentPath(project, chatId), 'attachment bytes');
+  };
+
+  it('removes the soft-deleted chat’s record and attachments, and nothing else', async () => {
+    const files = createStoreWithFiles();
+    const chat = await files.store.createChat(projectId, { name: 'Deleted', messages: [] });
+    const sibling = await files.store.createChat(projectId, { name: 'Kept', messages: [] });
+    const otherProjectChat = await files.store.createChat(siblingProjectId, { name: 'Elsewhere', messages: [] });
+    await seedComposer(files, projectId, chat.id);
+    await seedComposer(files, projectId, sibling.id);
+    await seedComposer(files, siblingProjectId, otherProjectChat.id);
+
+    await files.store.softDeleteChat(chat.id);
+
+    await expect(files.exists(recordPath(projectId, chat.id))).resolves.toBe(false);
+    await expect(files.exists(attachmentPath(projectId, chat.id))).resolves.toBe(false);
+    // The named acceptance row: one chat's deletion touches no sibling.
+    await expect(files.exists(recordPath(projectId, sibling.id))).resolves.toBe(true);
+    await expect(files.exists(attachmentPath(projectId, sibling.id))).resolves.toBe(true);
+    await expect(files.exists(recordPath(siblingProjectId, otherProjectChat.id))).resolves.toBe(true);
+    await expect(files.exists(attachmentPath(siblingProjectId, otherProjectChat.id))).resolves.toBe(true);
+  });
+
+  it('removes the record on the hard delete path too', async () => {
+    const files = createStoreWithFiles();
+    const chat = await files.store.createChat(projectId, { name: 'Deleted', messages: [] });
+    await seedComposer(files, projectId, chat.id);
+
+    await files.store.deleteChat(chat.id);
+
+    await expect(files.exists(recordPath(projectId, chat.id))).resolves.toBe(false);
+    await expect(files.exists(attachmentPath(projectId, chat.id))).resolves.toBe(false);
+  });
+
+  it('deletes a chat that never had a draft without failing', async () => {
+    const files = createStoreWithFiles();
+    const chat = await files.store.createChat(projectId, { name: 'No draft', messages: [] });
+
+    await expect(files.store.deleteChat(chat.id)).resolves.toBeUndefined();
+    const deleted = await files.store.getChat(chat.id);
+    expect(deleted?.deletedAt).toBeGreaterThan(0);
   });
 });
 

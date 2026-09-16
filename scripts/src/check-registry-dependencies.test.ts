@@ -101,7 +101,7 @@ describe('findUnavailableDependencies', () => {
       await readFile(join(fixtureRoot, 'workspaces/private-leaf/package.json'), 'utf8'),
     ) as { name: string; private: boolean; version: string };
     const requirements = collectArtifactImportRequirements(
-      join(fixtureRoot, 'dist'),
+      join(fixtureRoot, '../registry-gate-artifact'),
       Object.keys(manifest.dependencies),
     );
     const workspaceManifests = new Map<

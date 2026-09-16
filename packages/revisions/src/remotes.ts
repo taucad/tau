@@ -14,6 +14,9 @@
  * kind's UI; the data model already holds it.
  */
 
+import { RevisionPortError } from '#revision-port.js';
+import type { RevisionPortErrorCode } from '#revision-port.js';
+
 /** Which of the two remote kinds a project's remote is. @public */
 export type RemoteKind = 'tau' | 'git';
 
@@ -328,6 +331,308 @@ export const reauthorizationRequired = (message: string): Error =>
   Object.assign(new Error(message), {
     code: 'REMOTE_REAUTHORIZATION_REQUIRED' satisfies RemoteReauthorizationCode,
   });
+
+/**
+ * What this leg knows about a remote refusal beyond the error itself (N1).
+ *
+ * @public
+ */
+export type RemoteTransportContext = Readonly<{
+  /**
+   * The remote's name in git's config.
+   *
+   * It decides *whose* credential was refused, which is the whole difference
+   * between *Sign in* and *Reconnect*: the reserved Tau name is reached with
+   * this device's own session, and every other name is reached through the
+   * API's git proxy with a credential minted for that remote (P17, W12). So a
+   * 401 or 403 on a non-Tau remote is a credential to grant again, not a
+   * session to renew.
+   */
+  remote?: string;
+  /** git's own stderr, on the leg that has one. */
+  stderr?: string;
+}>;
+
+/** What a remote answered, however this leg learned it. */
+type RemoteRefusal = Readonly<{ status?: number; code?: string; message?: string }>;
+
+/** The `code` values this classifier will hand back untouched when it finds one. */
+const remoteErrorCodes: ReadonlySet<string> = new Set<RevisionPortErrorCode>([
+  'REMOTE_FORBIDDEN',
+  'REMOTE_NOT_ENTITLED',
+  'REMOTE_NOT_FOUND',
+  'REMOTE_QUOTA_EXCEEDED',
+  'REMOTE_REAUTHORIZATION_REQUIRED',
+  'REMOTE_REJECTED',
+  'REMOTE_UNAUTHORIZED',
+  'REMOTE_UNAVAILABLE',
+]);
+
+/** The JSON envelope every Tau refusal carries, when the body is one. */
+const refusalBody = (body: string | undefined): RemoteRefusal => {
+  if (body === undefined) {
+    return {};
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return {};
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    return {};
+  }
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a parsed body is `unknown` until read.
+  const record = parsed as Readonly<{ code?: unknown; message?: unknown }>;
+  return {
+    ...(typeof record.code === 'string' ? { code: record.code } : {}),
+    ...(typeof record.message === 'string' && record.message !== '' ? { message: record.message } : {}),
+  };
+};
+
+/**
+ * git's own sideband line for "a hook said no".
+ *
+ * `receive-pack` writes it beside whatever the hook itself printed, so it is
+ * git's restatement of the per-ref status rather than anything the server said —
+ * and it names a hook, a word no surface may render (Rule 1).
+ */
+const gitHookSideband = /^(?:error: )?(?:pre-receive )?hook declined(?: to update \S+)?$/u;
+
+/**
+ * What git's own stderr says about a refusal, for the leg that has no response
+ * object (S24).
+ *
+ * `git` prints the status in one of three spellings, and prints the server's own
+ * sentence on the `remote:` sideband — which is exactly where the Tau API's
+ * `pre-receive` messages arrive. A 401 is the odd one out: `git` answers a
+ * `WWW-Authenticate` by asking for a user name, so with prompts disabled the
+ * *absence* of a status and the presence of that refusal is the 401.
+ *
+ * @param stderr - Everything the command wrote to its error stream.
+ * @returns The status and sentence, as far as they can be read.
+ */
+const gitStderrRefusal = (stderr: string): RemoteRefusal => {
+  const status =
+    /(?:The requested URL returned error|RPC failed; HTTP|error: HTTP)[: ]\s*(?<status>\d{3})/u.exec(stderr)?.groups?.[
+      'status'
+    ] ??
+    /* git answers a `WWW-Authenticate` by asking for a user name, so with
+     * prompts disabled *that* refusal is the 401, and the status never appears. */
+    (/could not read (?:Username|Password) for|Authentication failed/u.test(stderr)
+      ? '401'
+      : /* A 404 on the advertisement is reported as git's own sentence, too. */
+        /repository .* not found|Repository not found/iu.test(stderr)
+        ? '404'
+        : undefined);
+  const said = [...stderr.matchAll(/^remote: (?<said>.+)$/gmu)]
+    .map((match) => (match.groups?.['said'] ?? '').trim())
+    .filter((line) => line !== '' && !gitHookSideband.test(line));
+  return {
+    ...(status === undefined ? {} : { status: Number(status) }),
+    ...(said.length === 0 ? {} : { message: said.join(' ') }),
+  };
+};
+
+/**
+ * The sentence a refused ref carries, preferring the server's own (N4).
+ *
+ * `hook declined` is git's *placeholder* for "the server said no and told you
+ * why on the sideband" — it is what both legs report per ref, and it is the
+ * only per-ref status that carries no information at all. Since the Tau API
+ * moved its compare-and-set rule into `pre-receive` (contract §4) that
+ * placeholder is what a refused rewind looks like on the wire, so a Sync row
+ * rendering it would show a person the word *hook* and nothing else (Rule 1).
+ *
+ * Narrow on purpose: every other per-ref status git reports is already the
+ * server's or git's own words, and a sideband line beside one of those is
+ * progress rather than a refusal.
+ *
+ * @param reported - What the per-ref status said.
+ * @param said - The remote's sideband lines, git's own restatements included.
+ * @returns The sentence to show.
+ * @internal
+ */
+export const remoteRefusalSaid = (reported: string, said: readonly string[]): string => {
+  const sentence = said
+    .map((line) => line.trim())
+    .filter((line) => line !== '' && !gitHookSideband.test(line))
+    .join(' ');
+  return sentence !== '' && /hook declined/iu.test(reported) ? sentence : reported;
+};
+
+/** One short sentence naming the class, when the server sent none of its own. */
+const refusalSentence = (code: RevisionPortErrorCode): string => {
+  switch (code) {
+    case 'REMOTE_REAUTHORIZATION_REQUIRED': {
+      return 'This remote needs permission again before it can be backed up to.';
+    }
+    case 'REMOTE_UNAUTHORIZED': {
+      return 'This remote did not accept this device; sign in again.';
+    }
+    case 'REMOTE_NOT_ENTITLED': {
+      return 'Syncing files to Tau Cloud is a paid plan feature.';
+    }
+    case 'REMOTE_FORBIDDEN': {
+      return 'This remote refused this device.';
+    }
+    case 'REMOTE_NOT_FOUND': {
+      return 'This remote has no repository at this address for your account.';
+    }
+    case 'REMOTE_QUOTA_EXCEEDED': {
+      return 'This project is over its storage plan.';
+    }
+    case 'REMOTE_REJECTED': {
+      return 'The remote refused this update; this project will catch up and try again.';
+    }
+    default: {
+      return 'This remote is busy; this project will try again.';
+    }
+  }
+};
+
+/**
+ * One remote refusal, classified — the single place either leg turns what a
+ * remote said into a code a machine and a person can both act on (N1).
+ *
+ * The rule is one sentence long: **a status means the remote answered**. So
+ * every HTTP status becomes a named code carrying the server's own message when
+ * it sent one, and only a failure with *no* status — offline, DNS, TLS, an
+ * aborted socket — stays `ENGINE_FAILED 'The remote could not be reached.'`
+ * That sentence was previously the answer to nine of the ten failure classes a
+ * push can produce, which is why a lapsed subscription read as a network
+ * outage.
+ *
+ * An error that already carries one of these codes is preserved: a host that
+ * knew before the request (a credential frame the page already marked
+ * unavailable) has said something this cannot improve on.
+ *
+ * @param error - What the transport threw.
+ * @param context - The remote's name, and git's stderr on the leg that has one.
+ * @returns The typed refusal to throw.
+ * @public
+ *
+ * @example <caption>A free-tier push, as the Sync row now reads it</caption>
+ * ```typescript
+ * import { remoteTransportError } from '@taucad/revisions';
+ *
+ * const error = Object.assign(new Error('HTTP Error: 403 Forbidden'), {
+ *   data: { statusCode: 403, response: '{"code":"GIT_SYNC_NOT_ENTITLED","message":"Syncing files to Tau Cloud is a paid plan feature."}' },
+ * });
+ * remoteTransportError(error, { remote: 'tau' }).code; // 'REMOTE_NOT_ENTITLED'
+ * ```
+ */
+export const remoteTransportError = (error: unknown, context: RemoteTransportContext = {}): RevisionPortError => {
+  if (error instanceof RevisionPortError) {
+    return error;
+  }
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- library errors are `unknown` until read.
+  const thrown = (error ?? {}) as Readonly<{
+    code?: unknown;
+    name?: unknown;
+    message?: unknown;
+    data?: Readonly<{ statusCode?: unknown; response?: unknown }>;
+  }>;
+  const held = typeof thrown.code === 'string' && remoteErrorCodes.has(thrown.code) ? thrown.code : undefined;
+  if (held !== undefined) {
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- narrowed by the set above.
+    const preserved = held as RevisionPortErrorCode;
+    return new RevisionPortError(
+      preserved,
+      typeof thrown.message === 'string' && thrown.message !== '' ? thrown.message : refusalSentence(preserved),
+      { cause: error },
+    );
+  }
+  const answered: RemoteRefusal = {
+    ...(context.stderr === undefined ? {} : gitStderrRefusal(context.stderr)),
+    ...refusalBody(typeof thrown.data?.response === 'string' ? thrown.data.response : undefined),
+    ...(typeof thrown.data?.statusCode === 'number' ? { status: thrown.data.statusCode } : {}),
+  };
+  const { status } = answered;
+  if (status === undefined) {
+    /* A sentence on the `remote:` sideband is the remote answering, even though
+     * git reports no status for it: Tau Cloud's `pre-receive` hook refuses a
+     * rewind or a deletion on every ref family that way (contract §4). Its own
+     * words, never one of Tau's (N4). */
+    if (answered.message !== undefined) {
+      return new RevisionPortError('REMOTE_REJECTED', answered.message, { cause: error });
+    }
+    /* The caller's own deadline is not the remote's answer (P36). An aborted
+     * request is this host giving up on purpose, and saying "the remote could
+     * not be reached" would hide the one bound that did its job — so the abort
+     * keeps its own words. */
+    const aborted = typeof thrown.name === 'string' && (thrown.name === 'AbortError' || thrown.name === 'TimeoutError');
+    return new RevisionPortError(
+      'ENGINE_FAILED',
+      aborted && typeof thrown.message === 'string' && thrown.message !== ''
+        ? thrown.message
+        : 'The remote could not be reached.',
+      { cause: error },
+    );
+  }
+  /* A remote that is not Tau's own is credited by a token the person granted to
+   * *it*, so refusing that token is something they can grant again (W12). */
+  const proxied = context.remote !== undefined && remoteKindOf(context.remote) === 'git';
+  const code: RevisionPortErrorCode =
+    status === 401
+      ? proxied
+        ? 'REMOTE_REAUTHORIZATION_REQUIRED'
+        : 'REMOTE_UNAUTHORIZED'
+      : status === 403
+        ? answered.code === 'GIT_SYNC_NOT_ENTITLED'
+          ? 'REMOTE_NOT_ENTITLED'
+          : proxied
+            ? 'REMOTE_REAUTHORIZATION_REQUIRED'
+            : 'REMOTE_FORBIDDEN'
+        : status === 404
+          ? 'REMOTE_NOT_FOUND'
+          : status === 413
+            ? 'REMOTE_QUOTA_EXCEEDED'
+            : 'REMOTE_UNAVAILABLE';
+  return new RevisionPortError(code, answered.message ?? refusalSentence(code), { cause: error });
+};
+
+/**
+ * What to tell a person whose project could not be registered on Tau Cloud (C6).
+ *
+ * One owner, because the two legs had written two ladders and both were wrong
+ * in the same place: they mapped `403` to *"belongs to another account"*, which
+ * the API answers `404` for, while `403` is the project ceiling — so the one
+ * refusal a person can act on was reported as *"Try again."*
+ *
+ * @param status - The HTTP status the API answered.
+ * @param code - The `code` in its JSON envelope, when it sent one.
+ * @param message - The API's own sentence, used where it names a limit this
+ *   module cannot know.
+ * @returns One sentence to render.
+ * @public
+ */
+export const registerProjectFailureMessage = (status: number, code?: string, message?: string): string => {
+  if (status === 401) {
+    return 'Sign in to back this project up to Tau Cloud.';
+  }
+  if (status === 403) {
+    /* The ceiling names itself, so the server's own sentence is the only one
+     * that can carry the number; the entitlement refusal is a fixed sentence
+     * shared with `git.service.ts`. */
+    if (code === 'PROJECT_LIMIT_REACHED' && message !== undefined && message !== '') {
+      return message;
+    }
+    if (code === 'GIT_SYNC_NOT_ENTITLED') {
+      return 'Syncing files to Tau Cloud is a paid plan feature.';
+    }
+  }
+  if (status === 404) {
+    return 'Tau Cloud has no project with this id for your account.';
+  }
+  if (status === 429) {
+    return 'Too many projects registered today. Try again tomorrow.';
+  }
+  if (status === 400) {
+    return 'This project id cannot name a Tau Cloud repository.';
+  }
+  return 'Tau Cloud could not register this project. Try again.';
+};
 
 /**
  * Whether a remote of this name can carry a project's large objects (P20).

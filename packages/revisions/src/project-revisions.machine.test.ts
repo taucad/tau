@@ -636,6 +636,7 @@ describe('projectRevisionsMachine', () => {
       fetchOnly: false,
       phase: 'connected',
       storage: { used: 1, quota: 2 },
+      quota: undefined,
       overQuota: [],
       error: undefined,
     });

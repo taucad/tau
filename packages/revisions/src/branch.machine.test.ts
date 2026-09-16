@@ -245,9 +245,9 @@ describe('branchMachine', () => {
 
     actor.send({ type: 'discard', branch: 'bracket-fillet' });
     await flush();
-    actor.send({ type: 'operationFailed', reason: 'A lease still holds that checkout.' });
+    actor.send({ type: 'operationFailed', reason: 'An agent is working in feature.' });
 
-    expect(emitted).toEqual([{ type: 'toast.error', message: 'A lease still holds that checkout.' }]);
+    expect(emitted).toEqual([{ type: 'toast.error', message: 'An agent is working in feature.' }]);
     actor.stop();
   });
 

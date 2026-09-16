@@ -107,9 +107,11 @@ export {
   isTauApiUrl,
   lfsRemoteUnsupportedMessage,
   refPatternIsHostLocal,
+  registerProjectFailureMessage,
   remoteCarriesLargeObjects,
   remoteOf,
   remoteTrackingRef,
+  remoteTransportError,
   tauRemoteName,
   tauRemoteUrl,
 } from '#remotes.js';

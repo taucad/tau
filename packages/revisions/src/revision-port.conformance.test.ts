@@ -12,6 +12,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { createServer } from 'node:http';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -952,7 +953,7 @@ describe('log reads are bounded by the limit (review 4 R28)', () => {
             '    *) verb="$argument"; break ;;',
             '  esac',
             'done',
-            `echo "$verb" >> ${log}`,
+            `echo "$verb	$*" >> ${log}`,
             'exec git "$@"',
             '',
           ].join('\n'),
@@ -964,8 +965,18 @@ describe('log reads are bounded by the limit (review 4 R28)', () => {
         expect(limited.map((entry) => entry.id)).toStrictEqual(chain.slice(-chainLimit).toReversed());
         const recorded = await readFile(log, 'utf8');
         const commands = recorded.split('\n').filter((line) => line !== '');
-        expect(commands.filter((command) => command === 'cat-file')).toHaveLength(commands.length);
+        /* Object reads only — no `log`, no `show`, nothing that would read a
+         * tree — and a handful of processes rather than one per revision (B5). */
+        expect(commands.map((command) => command.split('\t')[0])).toStrictEqual(
+          commands.map((command) => (command.startsWith('rev-list') ? 'rev-list' : 'cat-file')),
+        );
         expect(commands.length).toBeLessThanOrEqual(readCeiling);
+        /* The bound reaches the engine, which is what keeps a limited log off
+         * the whole history now that the objects arrive in one batch: the
+         * process count alone can no longer show it (review 4 R28). */
+        const bound = Number(/--max-count=(?<count>\d+)/u.exec(recorded)?.groups?.['count']);
+        expect(bound).toBeGreaterThanOrEqual(chainLimit);
+        expect(bound).toBeLessThan(chainLength);
       } finally {
         await rm(root, { force: true, recursive: true });
       }
@@ -1345,6 +1356,116 @@ describe.runIf(gitOnPath)('native remote credential transport', () => {
         `http.${fixture.url}.extraHeader\nAuthorization: ${authorization}\nlfs.url\n${fixture.url}/info/lfs`,
       );
       expect(await readFile(join(repositoryPath, '.git', 'config'), 'utf8')).not.toContain(authorization);
+    } finally {
+      await fixture.close();
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 180_000);
+});
+
+/**
+ * What the native leg says a remote said (N1, C2, C66).
+ *
+ * The parity gap L8 measured: `runCommand` captures git's stderr and both throw
+ * sites discarded it, so 401, 403, 404, 413 and 500 all reached the Sync row as
+ * one sentence — *Native Git could not reach the remote.* — which is false in
+ * every one of those cases and left the only recovery path unreachable on this
+ * leg. These rows are the browser leg's `isomorphic-git-adapter.test.ts` table,
+ * asked of the binary.
+ */
+describe.runIf(gitOnPath)('native remote refusals (N1)', () => {
+  it.each([
+    { status: 401, code: 'REMOTE_UNAUTHORIZED' },
+    { status: 403, code: 'REMOTE_FORBIDDEN' },
+    { status: 404, code: 'REMOTE_NOT_FOUND' },
+    { status: 413, code: 'REMOTE_QUOTA_EXCEEDED' },
+    { status: 500, code: 'REMOTE_UNAVAILABLE' },
+  ])(
+    'answers HTTP $status with $code on every remote verb',
+    async ({ status, code }) => {
+      const root = await mkdtemp(join(tmpdir(), 'tau-revisions-native-refusal-'));
+      const server = createServer((_request, response) => {
+        response.writeHead(status, { 'Content-Type': 'application/json' });
+        response.end('{"code":"X","message":"server sentence"}');
+      });
+      await new Promise<void>((resolve) => {
+        server.listen(0, '127.0.0.1', resolve);
+      });
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- `AddressInfo` on a listening TCP server.
+      const { port: listening } = server.address() as { port: number };
+      const origin = `http://127.0.0.1:${String(listening)}`;
+      const repositoryPath = join(root, 'project');
+      try {
+        await mkdir(repositoryPath, { recursive: true });
+        const port = createNativeGitRevisionPort({
+          repositoryPath,
+          tauCredential: () => ({ apiBaseUrl: origin, authorization: 'Bearer session-token' }),
+        });
+        await port.init({ author });
+        const receipt = await port.writeRevision({
+          parents: [],
+          tree: tree({ 'part.ts': 'export const a = 1;\n' }),
+          provenance: provenance('user'),
+          summary: summary('First'),
+        });
+        await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(receipt.commitId) });
+        await port.setRemote({ name: 'tau', url: `${origin}/v1/git/p1.git` });
+
+        await expect(port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] })).rejects.toMatchObject({ code });
+        await expect(port.fetch({ remote: 'tau', refs: ['refs/heads/main'] })).rejects.toMatchObject({ code });
+        await expect(port.listRemoteRefs('tau')).rejects.toMatchObject({ code });
+      } finally {
+        await new Promise<void>((resolve) => {
+          server.close(() => {
+            resolve();
+          });
+        });
+        await rm(root, { force: true, recursive: true });
+      }
+    },
+    180_000,
+  );
+
+  it('names the files a push over the storage plan could not carry (C66, Rule 13)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-revisions-native-quota-'));
+    const fixture = await startGitHttpBackend({
+      root,
+      quotaRefusal: {
+        message: 'Storage quota exceeded: this push needs 5242880 bytes more than the plan allows.',
+        shortfallBytes: 5_242_880,
+        remainingBytes: 0,
+      },
+    });
+    const repositoryPath = join(root, 'project');
+    const large = new Uint8Array(new ArrayBuffer(1024 * 1024 + 1));
+    for (let index = 0; index < large.length; index += 1) {
+      large[index] = (index * 31) % 256;
+    }
+    try {
+      await mkdir(repositoryPath, { recursive: true });
+      const port = createNativeGitRevisionPort({
+        repositoryPath,
+        tauCredential: () => ({ apiBaseUrl: fixture.url, authorization: 'Bearer session-token' }),
+      });
+      await port.init({ author });
+      const receipt = await port.writeRevision({
+        parents: [],
+        tree: new ImmutableRevisionTree([['models/bracket.step', large]]),
+        provenance: provenance('user'),
+        summary: summary('Large object'),
+      });
+      await port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(receipt.commitId) });
+      await port.setRemote({ name: 'tau', url: fixture.url });
+
+      /* The same class the browser leg raises, so `remote.machine` reaches
+       * `quotaRefused` on desktop and the CLI too — with the paths the port
+       * already computed, and the server's own sentence off git-lfs's
+       * `batch response:` line. */
+      await expect(port.push({ remote: 'tau', refs: [{ name: 'refs/heads/main' }] })).rejects.toMatchObject({
+        name: 'LfsQuotaError',
+        refusal: { paths: ['models/bracket.step'] },
+      });
+      expect(fixture.trail().some((entry) => entry.endsWith('/git-receive-pack'))).toBe(false);
     } finally {
       await fixture.close();
       await rm(root, { force: true, recursive: true });

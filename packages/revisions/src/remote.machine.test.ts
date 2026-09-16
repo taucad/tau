@@ -36,6 +36,9 @@
  * | 27 | `reconnectRequired --disconnect--> disconnecting → none` | leaving a remote whose credential died |
  * | 28 | `reading --connect--> choosing → … → connected` | an opening gesture is not lost behind config rehydration |
  *
+ * | 29 | `authorizing|validating|initialSync → abandoning → failed` | **C10**: a failed attempt removes the remote it wrote, so the next open is not `connected` |
+ * | 30 | `reconnectRequired --authorized--> validating → failed` | **C10**: and an attempt that wrote nothing removes nothing |
+ *
  * With rows 25–27 every transition in the machine has a row (W12 review R6).
  */
 
@@ -170,6 +173,7 @@ describe('remoteMachine', () => {
       url: undefined,
       phase: 'none',
       storage: undefined,
+      quota: undefined,
       overQuota: [],
       error: undefined,
       fetchOnly: false,
@@ -238,6 +242,7 @@ describe('remoteMachine', () => {
       url: tauRemote.url,
       phase: 'connected',
       storage: { used: 2_100_000_000, quota: 10_000_000_000 },
+      quota: undefined,
       overQuota: [],
       error: undefined,
       fetchOnly: false,
@@ -326,6 +331,72 @@ describe('remoteMachine', () => {
 
     expect(actor.getSnapshot().matches('failed')).toBe(true);
     expect(emitted).toStrictEqual([{ type: 'toast.error', message: 'the push was refused' }]);
+    actor.stop();
+  });
+
+  it('29 (C10): a failed attempt removes the remote it wrote, so the next open is not “connected”', async () => {
+    const removals: unknown[] = [];
+    const removing: RemoteActors['removeRemote'] = fromPromise(async ({ input }): Promise<void> => {
+      removals.push(input);
+    });
+
+    const stages: ReadonlyArray<Readonly<{ stage: string; overrides: Overrides }>> = [
+      { stage: 'authorize', overrides: { authorize: failing('consent was refused') } },
+      { stage: 'validate', overrides: { validate: failing('the remote did not answer') } },
+      { stage: 'initialSync', overrides: { initialSync: failing('the push was refused') } },
+    ];
+    for (const { stage, overrides } of stages) {
+      removals.length = 0;
+      const { actor } = start({ ...overrides, removeRemote: removing });
+      // oxlint-disable-next-line no-await-in-loop -- one connect attempt per stage.
+      await settle();
+      actor.send({ type: 'connect', kind: 'tau' });
+      // oxlint-disable-next-line no-await-in-loop -- one connect attempt per stage.
+      await settle();
+
+      const facet = selectRemoteFacet(actor.getSnapshot());
+      expect({ stage, removals: [...removals] }).toStrictEqual({ stage, removals: [{ name: 'tau' }] });
+      /* `sync.machine` finds the remote through git's own config, not through
+       * this machine's phase, so leaving the remote behind was the whole
+       * defect: the next open read it as connected and started pushing. */
+      expect({ stage, kind: facet.kind, phase: facet.phase }).toStrictEqual({
+        stage,
+        kind: 'none',
+        phase: 'failed',
+      });
+      expect(facet.error).not.toBeUndefined();
+      actor.stop();
+    }
+  });
+
+  it('30 (C10): a reconnect that fails validation keeps the remote it did not write', async () => {
+    const removals: unknown[] = [];
+    let validations = 0;
+    const { actor } = start({
+      /* Reach `reconnectRequired` the way a rotated credential does. */
+      authorize: reauthorizing('Your connection needs to be renewed.'),
+      validate: fromPromise(async (): Promise<RemoteValidateActorOutput> => {
+        validations += 1;
+        throw new Error('the remote did not answer');
+      }),
+      removeRemote: fromPromise(async ({ input }): Promise<void> => {
+        removals.push(input);
+      }),
+    });
+    await settle();
+    actor.send({ type: 'connect', kind: 'tau' });
+    await settle();
+    expect(actor.getSnapshot().matches('reconnectRequired')).toBe(true);
+
+    /* Granting the credential again re-validates the *established* remote, so a
+     * failure there is not this attempt's write to undo. */
+    actor.send({ type: 'authorized' });
+    await settle();
+
+    expect(validations).toBe(1);
+    expect(actor.getSnapshot().matches('failed')).toBe(true);
+    expect(removals).toStrictEqual([]);
+    expect(actor.getSnapshot().context.remote).toStrictEqual(tauRemote);
     actor.stop();
   });
 
@@ -447,6 +518,7 @@ describe('remoteMachine', () => {
         async (): Promise<RemoteInitialSyncActorOutput> => ({
           overQuota: ['models/bracket.step'],
           message: 'This project is over its storage plan.',
+          storage: { remainingBytes: 0, shortfallBytes: 5_242_880 },
         }),
       ),
     });
@@ -459,6 +531,11 @@ describe('remoteMachine', () => {
      * did not fit are named rather than thrown away with an error (P19). */
     expect(actor.getSnapshot().matches('connected')).toBe(true);
     expect(selectRemoteFacet(actor.getSnapshot()).overQuota).toStrictEqual(['models/bracket.step']);
+    /* C13: the numbers the server sent, not only the names. */
+    expect(selectRemoteFacet(actor.getSnapshot()).quota).toStrictEqual({
+      remainingBytes: 0,
+      shortfallBytes: 5_242_880,
+    });
     expect(emitted).toStrictEqual([
       { type: 'remoteConnected', kind: 'tau', url: tauRemote.url },
       { type: 'toast.error', message: 'This project is over its storage plan.' },

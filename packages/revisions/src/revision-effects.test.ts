@@ -1613,7 +1613,7 @@ describe('the durable queue’s writer', () => {
  * `authorize` is where it runs: before `validating` asks for an advertisement.
  */
 describe('connecting a remote', () => {
-  it('retires the old destination queue and tracking refs before replacement', async () => {
+  it('pauses the old destination rather than erasing its queue and tracking refs (C12)', async () => {
     const { actors, port, filesystem } = await fixture({ 'main.scad': 'cube(1);\n' });
     await port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
     const receipt = await port.writeRevision({
@@ -1638,10 +1638,14 @@ describe('connecting a remote', () => {
       repositoryId: '22',
     });
 
-    expect(await port.readRef('refs/remotes/origin/main')).toBeUndefined();
+    /* The lease a reconnect would compare against, and the work that never
+     * reached any remote, both survive the replacement: policy Rule 9 pauses
+     * the old destination's queue, and `SyncQueueEntry.remote` is what keeps
+     * the entry from being offered to the new one. */
+    expect(await port.readRef('refs/remotes/origin/main')).toBe(head);
     expect(JSON.parse(await filesystem.readFile('.tau/revisions/sync-pending', 'utf8'))).toEqual({
       version: 1,
-      entries: [],
+      entries: [{ ref: 'refs/heads/main', reason: 'offline', recordedAt: 1 }],
     });
     expect(await port.listRemotes()).toEqual([
       expect.objectContaining({ name: 'github-22', url: 'https://github.com/new/project.git', repositoryId: '22' }),

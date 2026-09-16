@@ -81,6 +81,7 @@ import type {
 } from '#checkouts.machine.js';
 import { chatIdOfRef, chatRefName, chatRefPrefix, projectChats, replayChatSegment, writeChatRef } from '#chat-ref.js';
 import { LfsQuotaError } from '#lfs-client.js';
+import type { LfsQuotaRefusal } from '#lfs-client.js';
 import { cleanLargeObjects } from '#lfs.js';
 import { bytesToHex, concatBytes, digest, hexToBytes } from '#object-hash.js';
 import type { ObjectFormat } from '#object-hash.js';
@@ -109,7 +110,6 @@ import type {
   RemoteWriteActorOutput,
 } from '#remote.machine.js';
 import { isHostLocalRef, remoteOf, remoteTrackingRef, tauRemoteName } from '#remotes.js';
-import type { Remote } from '#remotes.js';
 import { latestRevisionTarget, restoreMachine } from '#restore.machine.js';
 import { syncMachine } from '#sync.machine.js';
 import {
@@ -146,6 +146,7 @@ import { RevisionPortError } from '#revision-port.js';
 import type {
   Checkout,
   CheckoutRecord,
+  RemoteStorageRefusal,
   RevisionEngineDescriptor,
   RevisionPort,
   RevisionPushRef,
@@ -547,6 +548,24 @@ const handleLimit = 64;
  * of "base" in the package. A base further back than this reads as diverged,
  * which is the safe answer: it merges instead of fast-forwarding.
  */
+/**
+ * The two numbers a storage refusal carries, or `undefined` when it carried none.
+ *
+ * `git-lfs.service.ts` answers them and `LfsQuotaRefusal` parses them; until
+ * C13 they stopped one hop short, so the only thing that ever reached the Sync
+ * region was the file list (D16, EQ7).
+ *
+ * @param refusal - What the remote said.
+ * @returns The numbers, or `undefined`.
+ */
+const storageRefusalOf = (refusal: LfsQuotaRefusal): RemoteStorageRefusal | undefined => {
+  const storage = {
+    ...(refusal.remainingBytes === undefined ? {} : { remainingBytes: refusal.remainingBytes }),
+    ...(refusal.shortfallBytes === undefined ? {} : { shortfallBytes: refusal.shortfallBytes }),
+  };
+  return Object.keys(storage).length === 0 ? undefined : storage;
+};
+
 const divergenceWalkLimit = 1000;
 
 const textEncoder = new TextEncoder();
@@ -597,13 +616,42 @@ const compareBytes = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuff
   return left.length - right.length;
 };
 
+/**
+ * One blob's object id, hashed once per buffer (B3).
+ *
+ * The same captured tree is folded more than once on the way to a revision —
+ * the I5 gate, the claim {@link revisionTreeId} makes, and the port's own write
+ * all hash it — and pure-JS SHA-1 runs at about 39 MiB/s, so the repeats were
+ * the measurable cost of a save on a project with a large file in it (L4).
+ *
+ * Keyed on the buffer, not the path: identity is the only test that cannot be
+ * wrong, so the ids stay byte-identical by construction. A capture that read a
+ * file again produces a new buffer and is simply a miss. The table is weak, so
+ * it holds nothing a caller has let go of.
+ *
+ * @param content - The file's bytes.
+ * @param format - The store's recorded object hash.
+ * @returns Lowercase hexadecimal blob object id.
+ */
+const blobOid = (content: Uint8Array<ArrayBuffer>, format: ObjectFormat): string => {
+  const held = blobOids.get(content);
+  if (held !== undefined && held.format === format) {
+    return held.oid;
+  }
+  const oid = bytesToHex(digest(format, frameObject('blob', content)));
+  blobOids.set(content, { format, oid });
+  return oid;
+};
+
+const blobOids = new WeakMap<Uint8Array<ArrayBuffer>, Readonly<{ format: ObjectFormat; oid: string }>>();
+
 const hashNode = (node: TreeNode, format: ObjectFormat): string => {
   const entries = [
     ...[...node.files].map(([name, file]) => ({
       name,
       mode: file.mode,
       sortKey: textEncoder.encode(name),
-      oid: bytesToHex(digest(format, frameObject('blob', file.content))),
+      oid: blobOid(file.content, format),
     })),
     ...[...node.directories].map(([name, child]) => ({
       name,
@@ -1273,16 +1321,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     await write;
   };
 
-  const retireRemote = async (remote: Remote): Promise<void> => {
-    const tracking = await port.listRefs(`refs/remotes/${remote.name}`);
-    for (const ref of tracking) {
-      // oxlint-disable-next-line no-await-in-loop -- each CAS protects a distinct persisted ref.
-      await port.updateRef({ name: ref.name, expectedHead: ref.head });
-    }
-    await writePendingQueue({ version: 1, entries: [] });
-    await port.removeRemote(remote.name);
-  };
-
   /**
    * The project's *Sync chats* answer, read per push (D25, W17).
    *
@@ -1290,13 +1328,27 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * a scheduler that cached it would keep pushing chats for the rest of a
    * session after they turned it off. Absent means on.
    */
-  const chatsAreSynced = async (): Promise<boolean> => {
+  /**
+   * Both `tau.json` answers, from one read (C23).
+   *
+   * Read per push and never cached across one, because the toggles are the
+   * person's and a scheduler that remembered them would keep pushing chats for
+   * the rest of a session after they were turned off (D25, W17). Reading the
+   * same file twice to answer two booleans is the part that was not paying for
+   * itself.
+   *
+   * @returns Whether chats and generated exports are synced. Chats default on,
+   *   exports default off; an unreadable manifest is both defaults.
+   */
+  const projectSyncPreferences = async (): Promise<Readonly<{ syncChats: boolean; syncLargeExports: boolean }>> => {
     const records = await recordsFileSystem();
     try {
       const manifest: unknown = JSON.parse(await records.readFile('tau.json', 'utf8'));
-      return (manifest as { syncChats?: unknown }).syncChats !== false;
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a parsed manifest is `unknown` until read.
+      const record = manifest as Readonly<{ syncChats?: unknown; syncLargeExports?: unknown }>;
+      return { syncChats: record.syncChats !== false, syncLargeExports: record.syncLargeExports === true };
     } catch {
-      return true;
+      return { syncChats: true, syncLargeExports: false };
     }
   };
 
@@ -1312,17 +1364,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     path.startsWith('.tau/artifacts/') ||
     path.startsWith('.tau/tool-results/') ||
     path.startsWith('.tau/offloaded-tool-results/');
-
-  /** Default-off project preference, read on every push and fetch. */
-  const largeExportsAreSynced = async (): Promise<boolean> => {
-    const records = await recordsFileSystem();
-    try {
-      const manifest: unknown = JSON.parse(await records.readFile('tau.json', 'utf8'));
-      return (manifest as { syncLargeExports?: unknown }).syncLargeExports === true;
-    } catch {
-      return false;
-    }
-  };
 
   /** A brand-new device learns the preference from the fetched project manifest. */
   const fetchedProjectSyncsLargeExports = async (remote: string, branch: string): Promise<boolean> => {
@@ -1569,7 +1610,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       leases: Readonly<Record<string, string>>;
       offered: ReadonlyMap<string, string>;
     }>,
-  ): Promise<Readonly<{ outcome: SyncRefOutcome; overQuota?: readonly string[]; quotaMessage?: string }>> => {
+  ): Promise<
+    Readonly<{
+      outcome: SyncRefOutcome;
+      overQuota?: readonly string[];
+      quotaMessage?: string;
+      quotaStorage?: RemoteStorageRefusal;
+    }>
+  > => {
     try {
       const pushed = await port.push({ remote: input.remote, refs: [offerOf(input.name, input.leases)] });
       const [entry] = pushed.refs;
@@ -1594,7 +1642,13 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           reason: error instanceof LfsQuotaError ? error.refusal.message : message,
         },
         ...(error instanceof LfsQuotaError
-          ? { overQuota: error.refusal.paths, quotaMessage: error.refusal.message }
+          ? {
+              overQuota: error.refusal.paths,
+              quotaMessage: error.refusal.message,
+              ...(storageRefusalOf(error.refusal) === undefined
+                ? {}
+                : { quotaStorage: storageRefusalOf(error.refusal) }),
+            }
           : {}),
       };
     }
@@ -1614,11 +1668,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * offering the same commit again would be refused for exactly the same reason
    * forever. One retry, then the queue (S39, P27, W17 contract 1).
    *
-   * @param input - The chat, its ref, the remote and the project's own answer.
+   * @param input - The chat, its ref, the remote, the project's own answer, and
+   *   what the remote said when it refused the first offer.
    * @returns This ref's outcome, in the scheduler's shape.
    */
   const replayRejectedChat = async (
-    input: Readonly<{ chatId: string; name: string; remote: string; syncChats: boolean }>,
+    input: Readonly<{
+      chatId: string;
+      name: string;
+      remote: string;
+      syncChats: boolean;
+      refusal: string | undefined;
+    }>,
   ): Promise<SyncRefOutcome> => {
     const context = await chatContext();
     if (context === undefined) {
@@ -1630,7 +1691,17 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
      * own rule (the allow-list, entitlement), not a CAS loss. */
     const advertised = await port.listRemoteRefs(input.remote);
     if (!advertised.some((entry) => entry.name === input.name)) {
-      return { name: input.name, status: 'rejected', head: undefined, reason: 'The remote refused this ref.' };
+      /* Not a CAS loss: the remote has no such ref, so it refused for a reason
+       * of its own — the allow-list, entitlement, its `pre-receive` rule — and
+       * it said which (N4). Replacing that with a sentence of Tau's is how the
+       * Sync row came to read *The remote refused this ref.* for every one of
+       * them; the server's words go through unchanged. */
+      return {
+        name: input.name,
+        status: 'rejected',
+        head: undefined,
+        reason: input.refusal ?? 'The remote refused this ref.',
+      };
     }
     const fetched = await port.fetch({ remote: input.remote, refs: [input.name] });
     const projected = await projectChats({ ...context, refs: fetched.refs });
@@ -2639,7 +2710,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             current.provider !== input.provider ||
             current.repositoryId !== input.repositoryId)
         ) {
-          await retireRemote(current);
+          await port.removeRemote(current.name);
         }
         await port.setRemote({
           name,
@@ -2657,15 +2728,20 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         };
       }),
 
+      /*
+       * Disconnecting is a config edit and nothing else (C12).
+       *
+       * It used to also delete every `refs/remotes/<name>/*` and empty the
+       * durable queue, so a disconnect silently discarded work that had never
+       * reached any remote — `Not backed up · n` simply vanished — and threw
+       * away the leases a reconnect compares against. Policy Rule 9 wants the
+       * old destination's queue *paused*, and `SyncQueueEntry.remote` is what
+       * makes pausing safe: an entry names who it is owed to, so no other
+       * remote is ever offered it.
+       */
       removeRemote: fromAuthorityPromise<void, Readonly<{ name: string }>>(async ({ input }) => {
         await ensureStore();
-        const remotes = await port.listRemotes();
-        const remote = remotes.find((candidate) => candidate.name === input.name);
-        if (remote === undefined) {
-          await port.removeRemote(input.name);
-          return;
-        }
-        await retireRemote(remote);
+        await port.removeRemote(input.name);
       }),
 
       /* I8: no *credential* work for Tau Cloud — the credential is the session,
@@ -2731,7 +2807,18 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             }
           })();
           if ('paths' in result) {
-            return { overQuota: result.paths, message: result.message };
+            /* The numbers the server sent travel with the file list (C13): they
+             * are what a storage meter can render, and they used to be parsed
+             * here and dropped one line later. */
+            const storage = {
+              ...(result.remainingBytes === undefined ? {} : { remainingBytes: result.remainingBytes }),
+              ...(result.shortfallBytes === undefined ? {} : { shortfallBytes: result.shortfallBytes }),
+            };
+            return {
+              overQuota: result.paths,
+              message: result.message,
+              ...(Object.keys(storage).length === 0 ? {} : { storage }),
+            };
           }
           const refused = result.refs.find((entry) => entry.status === 'rejected');
           if (refused !== undefined) {
@@ -2870,17 +2957,20 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       push: fromAuthorityPromise<SyncPushActorOutput, SyncPushActorInput>(async ({ input, signal }) => {
         await ensureStore();
         signal.throwIfAborted();
-        const [syncChats, syncLargeExports] = await Promise.all([chatsAreSynced(), largeExportsAreSynced()]);
+        const { syncChats, syncLargeExports } = await projectSyncPreferences();
+        const wanted = input.refs === undefined ? undefined : new Set(input.refs);
+        const offered = (name: string): boolean => wanted === undefined || wanted.has(name);
+        /* A narrowed retry owes exactly the refs it names, so capturing and
+         * hashing the whole evidence tree for a push that is not offering the
+         * evidence ref is work nothing reads (C23). */
         const preparedRecords = [
           ...(await recordChats(syncChats)),
-          ...(await recordEvidence(syncLargeExports, input.leases[evidenceRefName])),
+          ...(offered(evidenceRefName) ? await recordEvidence(syncLargeExports, input.leases[evidenceRefName]) : []),
         ];
         signal.throwIfAborted();
         const failedPreparation = new Set(
           preparedRecords.filter((entry) => entry.status === 'rejected').map((entry) => entry.name),
         );
-        const wanted = input.refs === undefined ? undefined : new Set(input.refs);
-        const offered = (name: string): boolean => wanted === undefined || wanted.has(name);
         /* Three namespaced reads, not one bare `listRefs()`: the port answers in
          * the vocabulary it was asked in, and a bare call lists *branch names*
          * — which would offer `main` instead of `refs/heads/main` and would not
@@ -2906,6 +2996,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const results: SyncRefOutcome[] = preparedRecords.filter((entry) => entry.status === 'rejected');
         let overQuota: readonly string[] | undefined;
         let quotaMessage: string | undefined;
+        let quotaStorage: RemoteStorageRefusal | undefined;
 
         if (history.length > 0) {
           signal.throwIfAborted();
@@ -2927,6 +3018,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             if (error instanceof LfsQuotaError) {
               overQuota = error.refusal.paths;
               quotaMessage = error.refusal.message;
+              quotaStorage = storageRefusalOf(error.refusal) ?? quotaStorage;
             }
             results.push(...refusedAll(history, message, localHeads));
           }
@@ -2946,6 +3038,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           if (offered_.overQuota !== undefined) {
             overQuota = [...(overQuota ?? []), ...offered_.overQuota];
             quotaMessage = offered_.quotaMessage;
+            quotaStorage = offered_.quotaStorage ?? quotaStorage;
           }
           if (outcome.status !== 'rejected' || chatId === undefined) {
             results.push(outcome);
@@ -2957,7 +3050,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
            * paths, so nothing merges a line (S39, P27). */
           try {
             // oxlint-disable-next-line no-await-in-loop -- a rejected record is replayed before its result is recorded.
-            results.push(await replayRejectedChat({ chatId, name, remote: input.remote, syncChats }));
+            results.push(
+              await replayRejectedChat({ chatId, name, remote: input.remote, syncChats, refusal: outcome.reason }),
+            );
           } catch (error) {
             results.push({
               name,
@@ -2972,6 +3067,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           refs: results,
           ...(overQuota === undefined ? {} : { overQuota }),
           ...(quotaMessage === undefined ? {} : { quotaMessage }),
+          ...(quotaStorage === undefined ? {} : { quotaStorage }),
         };
       }),
 
@@ -2986,7 +3082,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       fetch: fromAuthorityPromise<SyncFetchActorOutput, SyncFetchActorInput>(async ({ input, signal }) => {
         await ensureStore();
         signal.throwIfAborted();
-        const [syncChats, initialSyncLargeExports] = await Promise.all([chatsAreSynced(), largeExportsAreSynced()]);
+        const { syncChats, syncLargeExports: initialSyncLargeExports } = await projectSyncPreferences();
         let syncLargeExports = initialSyncLargeExports;
         /*
          * The deadline is a signal the port carries, so it ends the request and
@@ -3103,7 +3199,20 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           // oxlint-disable-next-line no-await-in-loop -- paired cleanup for the same remote branch.
           await port.updateRef({ name: tracking, expectedHead: revisionId(prior) });
         }
-        const branches = [...localByName]
+        /*
+         * The branch this pull is *integrating* belongs in the answer too (C21).
+         *
+         * Both loops above skip it on purpose — `fastForward` owns it and moves
+         * it a step later — but `branches` is what the Branches region renders,
+         * and a fresh device whose `main` is still unborn was reporting every
+         * branch in the project except the one it is on.
+         */
+        const reported = new Map(localByName);
+        const activeAdvertised = advertisedBranches.get(activeBranch);
+        if (!reported.has(activeBranch) && activeAdvertised !== undefined) {
+          reported.set(activeBranch, activeAdvertised);
+        }
+        const branches = [...reported]
           .filter(([name]) => !isHostLocalRef(name))
           .map(([name, head]) => ({ name: name.slice('refs/heads/'.length), head }));
         const context = await chatContext();
@@ -3141,7 +3250,28 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
         const fetchedEvidence = fetched.refs.find(
           (ref) => ref.name === evidenceRefName || ref.name.endsWith('/tau/evidence/exports'),
         );
-        if (syncLargeExports && fetchedEvidence !== undefined) {
+        /*
+         * A record the remote has not moved is not restored again (C21, R11).
+         *
+         * `projectEvidence` is preserve-then-replace: it copies whatever is on
+         * disk into `.tau/artifacts/sync-conflicts/` and writes the recorded
+         * bytes over it. Run on every pull that is what it should do for a
+         * record that *changed* — and what it must never do for one that did
+         * not, which is how a device that had already restored an export, and
+         * then edited it, had its own file replaced by the same remote bytes on
+         * the very next pull. The remote-tracking ref this host held before the
+         * fetch is exactly "what I have already applied".
+         */
+        const priorEvidenceHead = trackingBefore.find((entry) => entry.name === fetchedEvidence?.name)?.head;
+        if (fetchedEvidence !== undefined && String(priorEvidenceHead) === fetchedEvidence.head) {
+          recordTasks.push(
+            Promise.resolve({
+              name: evidenceRefName,
+              status: 'upToDate' as const,
+              head: fetchedEvidence.head,
+            }),
+          );
+        } else if (syncLargeExports && fetchedEvidence !== undefined) {
           recordTasks.push(
             (async (): Promise<SyncRefOutcome> => {
               try {
@@ -3185,7 +3315,16 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
            * than overwriting. Upgrade path: `mergeBase` on `RevisionPort`.
            */
           const walk = await port.log({ heads: [remoteHead, localHead], limit: divergenceWalkLimit });
-          return integrationOf(walk, localHead, remoteHead);
+          const relation = integrationOf(walk, localHead, remoteHead);
+          /*
+           * `integrationOf` answers what this device has to *integrate*, and
+           * "the remote has everything" and "this device is ahead" both need
+           * nothing integrated — so it collapses them into `upToDate`. The
+           * scheduler needs the opposite distinction: the heads differ here
+           * (checked above), so an `upToDate` relation is precisely "the remote
+           * is missing my revisions" (C15).
+           */
+          return relation === 'upToDate' ? 'ahead' : relation;
         })();
         return { leases, integration, branches, records };
       }),
@@ -3199,11 +3338,36 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
           if (head === undefined) {
             return undefined;
           }
+          /*
+           * R04, above both branches (C20).
+           *
+           * Compare-and-swap proves the ref did not move *during* the call; it
+           * proves nothing about whether the replacement is a fast-forward. The
+           * checkout-bearing branch below got that recheck as the R04 repair and
+           * the checkout-less one — a ref-only branch, which is exactly what a
+           * second device's branches are — kept CASing straight to the remote
+           * head, so work on a branch nobody has open could be replaced without
+           * ever being composed.
+           */
+          const ancestryHolds = async (local: RevisionId | undefined): Promise<boolean> => {
+            if (local === undefined || local === head) {
+              return true;
+            }
+            const walk = await port.log({ heads: [head, local], limit: divergenceWalkLimit });
+            return integrationOf(walk, local, head) === 'fastForward';
+          };
           const places = await listPlaces();
           signal.throwIfAborted();
           const place = places.find((entry) => entry.branch === input.branch);
           if (place === undefined) {
             const expected = await port.readRef(`refs/heads/${input.branch}`);
+            signal.throwIfAborted();
+            if (!(await ancestryHolds(expected))) {
+              throw new RevisionPortError(
+                'CHECKOUT_CONFLICT',
+                `${input.branch} has work the remote does not. Fetch and compose the two lines first.`,
+              );
+            }
             signal.throwIfAborted();
             const updated = await port.updateRef({ name: `refs/heads/${input.branch}`, expectedHead: expected, head });
             if (updated.status !== 'updated') {
@@ -3222,14 +3386,11 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             signal,
             validate: async (before) => {
               expected = await port.readRef(branch);
-              if (expected !== undefined && expected !== head) {
-                const walk = await port.log({ heads: [head, expected], limit: divergenceWalkLimit });
-                if (integrationOf(walk, expected, head) !== 'fastForward') {
-                  throw new RevisionPortError(
-                    'CHECKOUT_CONFLICT',
-                    `${input.branch} changed after synchronization checked it. Fetch and compose the newer work first.`,
-                  );
-                }
+              if (!(await ancestryHolds(expected))) {
+                throw new RevisionPortError(
+                  'CHECKOUT_CONFLICT',
+                  `${input.branch} changed after synchronization checked it. Fetch and compose the newer work first.`,
+                );
               }
               signal.throwIfAborted();
               const expectedTreeId = await treeIdOf(expected);

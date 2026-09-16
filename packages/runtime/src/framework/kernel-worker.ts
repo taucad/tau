@@ -146,9 +146,9 @@ import type {
 } from '#types/runtime-scene.types.js';
 import type { RuntimeContentInput, RuntimeContentKey } from '#types/runtime-content.types.js';
 import { packageVersion } from '#utils/package-info.js';
-import { admitParameterManifest, compileParameterManifest, ParameterAdmissionError } from '#parameter/manifest.js';
-import type { ParameterDeclaration, ParameterResolutionOptions } from '#parameter/manifest.js';
-import { validateJsonSchemaValue } from '#configuration/admission.js';
+import { admitParameterManifest, compileParameterManifest, ParameterAdmissionError } from '@taucad/parameters';
+import type { ParameterDeclaration, ParameterManifest, ParameterResolutionOptions } from '@taucad/parameters';
+import { validateJsonSchemaValue } from '@taucad/parameters/schema';
 import type {
   DependencyResolutionContext,
   CommonDependencySet,
@@ -1468,6 +1468,23 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       revision: parameterDependencyHash,
       capability: 'json-structure',
     } as const;
+    const parameterSourceFiles: ParameterManifest['identity']['sourceFiles'] = Object.fromEntries(
+      dependencies.flatMap((dependency) =>
+        dependency.type === 'file'
+          ? ([
+              [
+                dependency.path,
+                dependency.contentHash === 'missing'
+                  ? 'missing'
+                  : contentDigest({
+                      value: `sha256:${dependency.contentHash}`,
+                      name: `parameter source ${dependency.path}`,
+                    }),
+              ],
+            ] as const)
+          : [],
+      ),
+    );
     const parameterIdentity = {
       dependency: contentDigest({ value: `sha256:${dependencyHash}`, name: 'parameter dependency hash' }),
       middleware: contentDigest({
@@ -1475,6 +1492,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         name: 'parameter middleware identity',
       }),
       resolution,
+      sourceFiles: parameterSourceFiles,
     } as const;
     const parameterSemanticHash = await sha256String(
       canonicalJson({
@@ -1531,6 +1549,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           dependency: parameterIdentity.dependency,
           middleware: parameterIdentity.middleware,
           resolution: parameterIdentity.resolution,
+          sourceFiles: parameterIdentity.sourceFiles,
         });
         producerDeclaration = {
           schema: manifest.schema,

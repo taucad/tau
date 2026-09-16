@@ -21,6 +21,8 @@ import { defineRuntime } from '#worker/runtime-definition.js';
 import type { RuntimeConfigInput, RuntimeConfigOutput } from '#worker/runtime-definition.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
+// oxlint-disable-next-line no-restricted-imports -- Runtime-private fixture stays outside the package build graph.
+import { createParameterDeclaration } from '../../test/support/kernel-worker.fixture.js';
 
 const testGeometry = { format: 'gltf', content: new Uint8Array([1]) } satisfies GeometryResponse;
 const typedRenderSchema = z.object({
@@ -54,7 +56,7 @@ const makeKernel = () =>
     },
     async getParameters(input) {
       expectTypeOf(input.entryPath).toEqualTypeOf<string>();
-      return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+      return createParameterDeclaration();
     },
     async createGeometry(input) {
       expectTypeOf(input.entryPath).toEqualTypeOf<string>();
@@ -95,7 +97,7 @@ describe('defineKernel', () => {
         return { resolved: [], unresolved: [] };
       },
       async getParameters() {
-        return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+        return createParameterDeclaration();
       },
       async createGeometry() {
         return { geometry: testGeometry, nativeHandle: {} };
@@ -120,7 +122,7 @@ describe('defineKernel', () => {
         return { resolved: [], unresolved: [] };
       },
       async getParameters() {
-        return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+        return createParameterDeclaration();
       },
       async createGeometry() {
         return { geometry: testGeometry, nativeHandle: { handleId: 'native' } };
@@ -168,7 +170,7 @@ describe('defineKernel', () => {
         return { resolved: [], unresolved: [] };
       },
       async getParameters() {
-        return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+        return createParameterDeclaration();
       },
       async createGeometry() {
         return { geometry: testGeometry, nativeHandle: { handleId: 'native' } };
@@ -197,7 +199,7 @@ const minimalKernelDefinition = {
     return { resolved: [], unresolved: [] };
   },
   async getParameters() {
-    return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+    return createParameterDeclaration();
   },
   async createGeometry() {
     return { geometry: testGeometry, nativeHandle: {} };
@@ -737,7 +739,7 @@ describe('route-scoped content projections', () => {
       return { resolved: [], unresolved: [] };
     },
     async getParameters() {
-      return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+      return createParameterDeclaration();
     },
     async createGeometry(input) {
       expectTypeOf(input).not.toHaveProperty('content');
@@ -790,7 +792,7 @@ describe('route-scoped content projections', () => {
       return { resolved: [], unresolved: [] };
     },
     async getParameters() {
-      return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+      return createParameterDeclaration();
     },
     async createGeometry(input) {
       expectTypeOf(input).not.toHaveProperty('content');

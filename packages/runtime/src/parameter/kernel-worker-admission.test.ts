@@ -1,7 +1,7 @@
 /* oxlint-disable no-restricted-imports, import/extensions -- focused runtime-private pipeline fixture */
 import { describe, expect, it, vi } from 'vitest';
-import { compileParameterManifest } from '@taucad/runtime/parameter';
-import type { ParameterDeclaration, ParameterProvenance } from '@taucad/runtime/parameter';
+import { compileParameterManifest } from '@taucad/parameters';
+import type { ParameterDeclaration, ParameterProvenance } from '@taucad/parameters';
 import type { OnWorkerLog } from '@taucad/types';
 import { createMemoryComputeEngine } from '#cache/memory-compute-engine.js';
 import { _registerComputeStore } from '#cache/kernel-compute-runtime.js';
@@ -167,6 +167,7 @@ describe('parameter admission in the kernel worker', () => {
             dependency: manifest.identity.dependency,
             middleware: manifest.identity.middleware,
             resolution: manifest.identity.resolution,
+            sourceFiles: manifest.identity.sourceFiles,
           }),
         };
       },
@@ -218,6 +219,7 @@ describe('parameter admission in the kernel worker', () => {
             dependency: manifest.identity.dependency,
             middleware: manifest.identity.middleware,
             resolution: manifest.identity.resolution,
+            sourceFiles: manifest.identity.sourceFiles,
           }),
         };
       },
@@ -268,6 +270,7 @@ describe('parameter admission in the kernel worker', () => {
             dependency: manifest.identity.dependency,
             middleware: manifest.identity.middleware,
             resolution: manifest.identity.resolution,
+            sourceFiles: manifest.identity.sourceFiles,
           }),
         };
       },
@@ -306,6 +309,7 @@ describe('parameter admission in the kernel worker', () => {
             dependency: manifest.identity.dependency,
             middleware: manifest.identity.middleware,
             resolution: manifest.identity.resolution,
+            sourceFiles: manifest.identity.sourceFiles,
           }),
         };
       },
@@ -351,6 +355,7 @@ describe('parameter admission in the kernel worker', () => {
             dependency: manifest.identity.dependency,
             middleware: manifest.identity.middleware,
             resolution: manifest.identity.resolution,
+            sourceFiles: manifest.identity.sourceFiles,
           }),
         };
       },
@@ -393,6 +398,7 @@ describe('parameter admission in the kernel worker', () => {
             dependency: manifest.identity.dependency,
             middleware: manifest.identity.middleware,
             resolution: manifest.identity.resolution,
+            sourceFiles: manifest.identity.sourceFiles,
           }),
         };
       },
@@ -448,6 +454,7 @@ describe('parameter admission in the kernel worker', () => {
             dependency: manifest.identity.dependency,
             middleware: manifest.identity.middleware,
             resolution: manifest.identity.resolution,
+            sourceFiles: manifest.identity.sourceFiles,
           }),
         };
       },
@@ -539,6 +546,7 @@ describe('parameter admission in the kernel worker', () => {
             dependency: manifest.identity.dependency,
             middleware: manifest.identity.middleware,
             resolution: manifest.identity.resolution,
+            sourceFiles: manifest.identity.sourceFiles,
           }),
         };
       },
@@ -590,6 +598,7 @@ describe('parameter admission in the kernel worker', () => {
             dependency: manifest.identity.dependency,
             middleware: manifest.identity.middleware,
             resolution: manifest.identity.resolution,
+            sourceFiles: manifest.identity.sourceFiles,
           }),
         };
       },
@@ -654,6 +663,7 @@ describe('parameter admission in the kernel worker', () => {
             dependency: manifest.identity.dependency,
             middleware: manifest.identity.middleware,
             resolution: manifest.identity.resolution,
+            sourceFiles: manifest.identity.sourceFiles,
           }),
         };
       },
@@ -745,6 +755,7 @@ describe('parameter admission in the kernel worker', () => {
             dependency: manifest.identity.dependency,
             middleware: manifest.identity.middleware,
             resolution: manifest.identity.resolution,
+            sourceFiles: manifest.identity.sourceFiles,
           }),
         };
       },
@@ -825,6 +836,7 @@ describe('parameter admission in the kernel worker', () => {
             dependency: manifest.identity.dependency,
             middleware: manifest.identity.middleware,
             resolution: manifest.identity.resolution,
+            sourceFiles: manifest.identity.sourceFiles,
           }),
         };
       },
@@ -901,6 +913,7 @@ describe('parameter admission in the kernel worker', () => {
               dependency: manifest.identity.dependency,
               middleware: manifest.identity.middleware,
               resolution: manifest.identity.resolution,
+              sourceFiles: manifest.identity.sourceFiles,
             }),
           };
         },
@@ -979,6 +992,7 @@ describe('parameter admission in the kernel worker', () => {
               dependency: manifest.identity.dependency,
               middleware: manifest.identity.middleware,
               resolution: manifest.identity.resolution,
+              sourceFiles: manifest.identity.sourceFiles,
             }),
           };
         },
@@ -1049,6 +1063,7 @@ describe('parameter admission in the kernel worker', () => {
             dependency: manifest.identity.dependency,
             middleware: manifest.identity.middleware,
             resolution: manifest.identity.resolution,
+            sourceFiles: manifest.identity.sourceFiles,
           }),
         };
       },
@@ -1116,6 +1131,11 @@ describe('parameter admission in the kernel worker', () => {
     const defaults = {
       cameraAngle: 38,
       rotationRadians: 0.5,
+      width: 20,
+      partHeight: 14,
+      modelDepth: 4,
+      cellSize: 3,
+      wallThickness: 1,
       triangleCount: 3,
       strainAngle: 0.01,
       hexColor: 0xff_00_ff,
@@ -1125,12 +1145,29 @@ describe('parameter admission in the kernel worker', () => {
       properties: {
         cameraAngle: { type: 'double', default: 38, minimum: 0, maximum: 90, multipleOf: 0.5 },
         rotationRadians: { type: 'double', ucumUnit: 'rad' },
+        width: { type: 'double' },
+        partHeight: { type: 'double' },
+        modelDepth: { type: 'double' },
+        cellSize: { type: 'double' },
+        wallThickness: { type: 'double' },
         triangleCount: { type: 'int32' },
         strainAngle: { type: 'double' },
         hexColor: { type: 'uint32' },
         mystery: { type: 'double' },
       },
-      required: ['cameraAngle', 'rotationRadians', 'triangleCount', 'strainAngle', 'hexColor', 'mystery'],
+      required: [
+        'cameraAngle',
+        'rotationRadians',
+        'width',
+        'partHeight',
+        'modelDepth',
+        'cellSize',
+        'wallThickness',
+        'triangleCount',
+        'strainAngle',
+        'hexColor',
+        'mystery',
+      ],
     };
     worker.declaration = createParameterDeclaration(defaults, schema);
     const file = createGeometryFile('main.ts');
@@ -1156,6 +1193,20 @@ describe('parameter admission in the kernel worker', () => {
         constraints: { default: 38, minimum: 0, maximum: 90, multipleOf: 0.5 },
       });
       expect(degrees.data.bindings['/rotationRadians']).toMatchObject({ unit: 'rad' });
+      for (const [pointer, quantityKind] of [
+        ['/width', 'http://qudt.org/vocab/quantitykind/Width'],
+        ['/partHeight', 'http://qudt.org/vocab/quantitykind/Height'],
+        ['/modelDepth', 'http://qudt.org/vocab/quantitykind/Depth'],
+        ['/cellSize', 'http://qudt.org/vocab/quantitykind/Length'],
+        ['/wallThickness', 'http://qudt.org/vocab/quantitykind/Length'],
+      ] as const) {
+        expect(degrees.data.bindings[pointer]).toMatchObject({
+          unit: 'mm',
+          quantityKind,
+          space: 'linear',
+          representation: 'binary64',
+        });
+      }
       expect(Object.values(degrees.data.provenance)).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ field: 'unit', origin: 'inferred', rule: 'angle-default-v1/unit' }),
@@ -1165,7 +1216,8 @@ describe('parameter admission in the kernel worker', () => {
         ]),
       );
       for (const pointer of ['/triangleCount', '/strainAngle', '/hexColor', '/mystery']) {
-        expect(degrees.data.bindings).not.toHaveProperty(pointer);
+        expect(degrees.data.bindings[pointer]).toBeDefined();
+        expect(degrees.data.bindings[pointer]).not.toHaveProperty('unit');
       }
 
       worker.getMiddleware()[1]!.options = { angleDefault: 'rad' };
@@ -1185,8 +1237,11 @@ describe('parameter admission in the kernel worker', () => {
 
       const declaredOnly = await worker.getParameters(file, { mode: 'declared-only', inferenceLanguage: 'en-NZ' });
       expect(worker.calls).toBe(4);
-      expect(declaredOnly.success && declaredOnly.data.bindings['/cameraAngle']).toBeUndefined();
+      expect(declaredOnly.success && declaredOnly.data.bindings['/cameraAngle']?.unit).toBeUndefined();
       expect(declaredOnly.success && declaredOnly.data.bindings['/rotationRadians']?.unit).toBe('rad');
+      for (const pointer of ['/width', '/partHeight', '/modelDepth', '/cellSize', '/wallThickness']) {
+        expect(declaredOnly.success && declaredOnly.data.bindings[pointer]?.unit).toBeUndefined();
+      }
     } finally {
       await worker.cleanup();
     }

@@ -150,9 +150,9 @@ const observePreview = (
 
 function createConfiguredWorker(overrides?: Partial<MockKernelWorkerOptions>) {
   const filesystem = createMockFileSystem();
-  filesystem.mocks.readFiles.mockResolvedValue({
-    'main.ts': new Uint8Array([1, 2, 3]),
-  });
+  filesystem.mocks.readFiles.mockImplementation(async (paths: string[]) =>
+    Object.fromEntries(paths.map((path) => [path, new Uint8Array([1, 2, 3])])),
+  );
 
   return new MockKernelWorker({
     middleware: [],

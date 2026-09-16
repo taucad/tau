@@ -1,10 +1,10 @@
 import type { StandardJSONSchemaV1, StandardSchemaV1 } from '@standard-schema/spec';
 import type { ContentDigest } from '@taucad/cache-core';
 
-import { cloneBoundedJson } from '#configuration/bounded-json.js';
+import { cloneBoundedJson } from '@taucad/parameters/json';
 import { materializeConfigurationJsonSchema } from '#configuration/configuration.js';
 import type { ConfigurationDefinition, ConfigurationManifestV1, JsonSchema } from '#configuration/index.js';
-import { admitJsonSchema } from '#configuration/admission.js';
+import { admitJsonSchema } from '@taucad/parameters/schema';
 import type { JobRevision } from '#jobs/job-contract.js';
 import {
   attachRuntimePluginDefinition,

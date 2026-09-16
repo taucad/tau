@@ -6,6 +6,8 @@ import { defineBundler } from '#types/runtime-bundler.types.js';
 import { defineKernel } from '#types/runtime-kernel.types.js';
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
+// oxlint-disable-next-line no-restricted-imports -- Runtime-private fixture stays outside the package build graph.
+import { createParameterDeclaration } from '../../test/support/kernel-worker.fixture.js';
 
 const testGeometry = { format: 'gltf', content: new Uint8Array([1]) } satisfies GeometryResponse;
 
@@ -27,7 +29,7 @@ describe('plugin factory public surface', () => {
         return { resolved: [], unresolved: [] };
       },
       async getParameters() {
-        return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+        return createParameterDeclaration();
       },
       async createGeometry() {
         return { geometry: testGeometry, nativeHandle: {} };

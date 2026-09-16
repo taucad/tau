@@ -18,6 +18,7 @@ import type { GetDependenciesInput, KernelDefinition } from '#types/runtime-kern
 import type { KernelIssue } from '#types/runtime.types.js';
 /* oxlint-disable no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph. */
 import {
+  createParameterDeclaration,
   seedTestFileSystem,
   initializeWorkerForTesting,
   createGeometryFile,
@@ -45,12 +46,11 @@ function createDeferredKernel(counters: PhaseCounters, overrides?: Partial<Kerne
     version: '1.0.0',
     exportFormats: { step: { optionsSchema: z.object({}) } },
     initialize: async () => ({}),
-    getDependencies: async (input: GetDependenciesInput) => ({ resolved: [input.entryPath], unresolved: [] }),
-    getParameters: async () => ({
-      success: true,
-      data: { defaultParameters: {}, jsonSchema: {} },
-      issues: [] as KernelIssue[],
+    getDependencies: async (input: GetDependenciesInput) => ({
+      resolved: [input.entryPath],
+      unresolved: [],
     }),
+    getParameters: async () => createParameterDeclaration(),
     createGeometry: async () => {
       counters.create++;
       return { nativeHandle: { shapes: 2 }, issues: [] as KernelIssue[] };
@@ -58,7 +58,9 @@ function createDeferredKernel(counters: PhaseCounters, overrides?: Partial<Kerne
     meshGeometry: async ({ nativeHandle }: { nativeHandle: unknown; options: Record<string, unknown> }) => {
       counters.mesh++;
       counters.lastMeshedHandle = nativeHandle;
-      return { geometry: { format: 'gltf', content: new Uint8Array(displayBytes) } };
+      return {
+        geometry: { format: 'gltf', content: new Uint8Array(displayBytes) },
+      };
     },
     exportGeometry: async () => {
       counters.export++;
@@ -68,7 +70,9 @@ function createDeferredKernel(counters: PhaseCounters, overrides?: Partial<Kerne
         issues: [] as KernelIssue[],
       };
     },
-    serializeNativeHandle: ({ nativeHandle }: { nativeHandle: unknown }) => ({ snapshot: nativeHandle }),
+    serializeNativeHandle: ({ nativeHandle }: { nativeHandle: unknown }) => ({
+      snapshot: nativeHandle,
+    }),
     deserializeNativeHandle: ({ serializedNativeHandle }: { serializedNativeHandle: { snapshot: unknown } }) =>
       serializedNativeHandle.snapshot,
     ...overrides,
@@ -102,7 +106,10 @@ describe('mesh/build/export phase separation', () => {
     const counters: PhaseCounters = { create: 0, mesh: 0, export: 0 };
     const worker = await createWorker(createDeferredKernel(counters));
 
-    const result = await worker.createGeometry({ file: modelFile(), parameters: {} });
+    const result = await worker.createGeometry({
+      file: modelFile(),
+      parameters: {},
+    });
 
     expect(result.success).toBe(true);
     if (result.success) {
@@ -146,15 +153,36 @@ describe('mesh/build/export phase separation', () => {
     });
     const worker = await createWorker(createDeferredKernel(counters), [create(), mesh(), exportOnly()]);
 
-    const result = await worker.createGeometry({ file: modelFile(), parameters: {} });
+    const result = await worker.createGeometry({
+      file: modelFile(),
+      parameters: {},
+    });
     expect(result.success).toBe(true);
 
     expect(createDependencies.filter((dependency) => dependency.type === 'middleware')).toEqual([
-      { type: 'middleware', id: 'create-phase', version: '1', index: 0, options: {} },
+      {
+        type: 'middleware',
+        id: 'create-phase',
+        version: '1',
+        index: 0,
+        options: {},
+      },
     ]);
     expect(meshDependencies.filter((dependency) => dependency.type === 'middleware')).toEqual([
-      { type: 'middleware', id: 'create-phase', version: '1', index: 0, options: {} },
-      { type: 'middleware', id: 'mesh-phase', version: '1', index: 1, options: {} },
+      {
+        type: 'middleware',
+        id: 'create-phase',
+        version: '1',
+        index: 0,
+        options: {},
+      },
+      {
+        type: 'middleware',
+        id: 'mesh-phase',
+        version: '1',
+        index: 1,
+        options: {},
+      },
     ]);
   });
 
@@ -162,7 +190,11 @@ describe('mesh/build/export phase separation', () => {
     const counters: PhaseCounters = { create: 0, mesh: 0, export: 0 };
     const worker = await createWorker(createDeferredKernel(counters));
 
-    const result = await worker.exportModel({ format: 'step', file: modelFile(), parameters: {} });
+    const result = await worker.exportModel({
+      format: 'step',
+      file: modelFile(),
+      parameters: {},
+    });
 
     expect(result.success).toBe(true);
     expect(counters.create).toBe(1);
@@ -236,7 +268,10 @@ describe('mesh/build/export phase separation', () => {
       expect('operation' in createInputs[0]!).toBe(false);
       expect(counters).toMatchObject({ create: 1, mesh: 0, export: 1 });
 
-      const displayed = await worker.createGeometry({ file: modelFile(), parameters: {} });
+      const displayed = await worker.createGeometry({
+        file: modelFile(),
+        parameters: {},
+      });
       expect(displayed.success).toBe(true);
       expect(createInputs[1]).toEqual({
         entryPath: 'model.mock',
@@ -256,7 +291,10 @@ describe('mesh/build/export phase separation', () => {
     const counters: PhaseCounters = { create: 0, mesh: 0, export: 0 };
     const worker = await createWorker(createDeferredKernel(counters, { meshGeometry: undefined }));
 
-    const result = await worker.createGeometry({ file: modelFile(), parameters: {} });
+    const result = await worker.createGeometry({
+      file: modelFile(),
+      parameters: {},
+    });
 
     expect(result.success).toBe(false);
     if (!result.success) {
@@ -283,7 +321,10 @@ describe('mesh/build/export phase separation', () => {
       }),
     );
 
-    const result = await worker.createGeometry({ file: modelFile(), parameters: {} });
+    const result = await worker.createGeometry({
+      file: modelFile(),
+      parameters: {},
+    });
 
     expect(result.success).toBe(true);
     if (result.success && result.data.format === 'gltf') {
@@ -321,7 +362,11 @@ describe('mesh/build/export phase separation', () => {
         meshGeometry: undefined,
         async createGeometry() {
           inlineCounters.create++;
-          return { geometry: { format: 'gltf', content: displayBytes }, nativeHandle: {}, issues: [] };
+          return {
+            geometry: { format: 'gltf', content: displayBytes },
+            nativeHandle: {},
+            issues: [],
+          };
         },
       }),
       [contentMiddleware(inlineCalls, 'inline-content')],

@@ -135,7 +135,10 @@ export const createMockFileSystem = (options?: MockFileSystemOptions): MockFileS
   const lstat = vi.fn(async (_path: string): Promise<FileStat> => {
     throw new Error('Not found');
   });
-  const readFiles = vi.fn(async (_paths: string[]): Promise<Record<string, Uint8Array<ArrayBuffer>>> => ({}));
+  const readFiles = vi.fn(
+    async (paths: string[]): Promise<Record<string, Uint8Array<ArrayBuffer>>> =>
+      Object.fromEntries(paths.map((path) => [path, new Uint8Array()])),
+  );
   const readdirContents = vi.fn(async (_path: string): Promise<Record<string, Uint8Array<ArrayBuffer>>> => ({}));
   const readdirStat = vi.fn(async (_path: string): Promise<FileStatEntry[]> => []);
   const ensureDirectory = vi.fn(async (_path: string): Promise<void> => undefined);

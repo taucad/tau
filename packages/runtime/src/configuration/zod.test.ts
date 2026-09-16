@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import { z } from 'zod';
 import { quantityKinds } from '@taucad/units/quantity';
 import { quantity } from '#configuration/zod.js';
-import { validateJsonSchemaValue } from '#configuration/admission.js';
+import { validateJsonSchemaValue } from '@taucad/parameters/schema';
 
 describe('quantity authoring', () => {
   it('should retain numeric bound intersections in both shipped Zod formats and schema directions', () => {

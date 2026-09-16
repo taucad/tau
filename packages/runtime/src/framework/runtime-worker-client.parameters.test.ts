@@ -3,8 +3,8 @@ import { contentDigest } from '@taucad/cache-core';
 import type { Channel } from '@taucad/rpc';
 import { describe, expect, it, vi } from 'vitest';
 import { RuntimeWorkerClient } from '#framework/runtime-worker-client.js';
-import { admitParameterManifest, compileParameterManifest } from '#parameter/manifest.js';
-import type { ParameterManifest } from '#parameter/manifest.js';
+import { admitParameterManifest, compileParameterManifest } from '@taucad/parameters';
+import type { ParameterManifest } from '@taucad/parameters';
 import { protocolVersion } from '#types/protocol-header.types.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
 import type { RuntimeTransportClient } from '#transport/runtime-transport.types.js';
@@ -114,7 +114,7 @@ describe('RuntimeWorkerClient parameter notifications', () => {
       success: false,
       issues: [
         expect.objectContaining({
-          code: 'RUNTIME',
+          code: 'METADATA_CONFLICT',
           type: 'runtime',
           severity: 'error',
           details: [expect.objectContaining({ code: 'METADATA_CONFLICT', schemaPointer: '/revision' })],

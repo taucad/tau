@@ -6,6 +6,8 @@ import { createNodeClient } from '#node.js';
 import { defineKernel } from '#types/runtime-kernel.types.js';
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
+// oxlint-disable-next-line no-restricted-imports -- Runtime-private fixture stays outside the package build graph.
+import { createParameterDeclaration } from '../test/support/kernel-worker.fixture.js';
 
 const kernel = defineKernel({
   id: 'typed-kernel',
@@ -23,7 +25,7 @@ const kernel = defineKernel({
     return { resolved: [entryPath], unresolved: [] };
   },
   async getParameters() {
-    return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+    return createParameterDeclaration();
   },
   async createGeometry() {
     return { geometry: { format: 'gltf', content: new Uint8Array() }, nativeHandle: {} };

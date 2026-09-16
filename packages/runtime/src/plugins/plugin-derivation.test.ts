@@ -5,6 +5,8 @@ import { deriveExportTargets, deriveImportExtensions } from '#plugins/plugin-der
 import { defineKernel } from '#types/runtime-kernel.types.js';
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
+// oxlint-disable-next-line no-restricted-imports -- Runtime-private fixture stays outside the package build graph.
+import { createParameterDeclaration } from '../../test/support/kernel-worker.fixture.js';
 
 const kernel = defineKernel({
   id: 'fixture',
@@ -19,7 +21,7 @@ const kernel = defineKernel({
     return { resolved: [], unresolved: [] };
   },
   async getParameters() {
-    return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+    return createParameterDeclaration();
   },
   async createGeometry() {
     return { nativeHandle: undefined };

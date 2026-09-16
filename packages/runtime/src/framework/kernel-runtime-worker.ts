@@ -119,8 +119,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     this.runtime = options.runtime;
   }
 
-  /**
-   */
+  /** Initializes the configured runtime and its kernel registrations. */
   public override async initialize(input: {
     callbacks: Parameters<KernelWorker<RuntimeWorkerOptions>['initialize']>[0]['callbacks'];
     transferables: Parameters<KernelWorker<RuntimeWorkerOptions>['initialize']>[0]['transferables'];
@@ -236,25 +235,17 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
     const kernel = this.getKernelForOwner(owner);
     if (!kernel) {
-      runtime.logger.warn(
-        `getParameters returning empty: ${describeUnhandledExtension(input.entryPath, this.kernelPlugins)}`,
-        { data: { entryPath: input.entryPath, loadedKernels: [...this.loadedKernels.keys()] } },
-      );
-      return {
-        success: true,
-        data: {
-          schema: {
-            $schema: 'https://json-structure.org/meta/extended/v0/#',
-            $id: 'urn:taucad:parameters:empty',
-            $uses: ['JSONSchemaUnits'],
-            name: 'EmptyParameters',
-            type: 'object',
-            properties: {},
-          },
-          defaults: {},
+      runtime.logger.warn(`getParameters failed: ${describeUnhandledExtension(input.entryPath, this.kernelPlugins)}`, {
+        data: { entryPath: input.entryPath, loadedKernels: [...this.loadedKernels.keys()] },
+      });
+      return createKernelError([
+        {
+          message: describeUnhandledExtension(input.entryPath, this.kernelPlugins),
+          code: 'KERNEL_CAPABILITY_MISSING',
+          type: 'kernel',
+          severity: 'error',
         },
-        issues: [],
-      };
+      ]);
     }
 
     return kernel.definition.getParameters(input, this.forKernel(kernel, runtime), kernel.ctx);

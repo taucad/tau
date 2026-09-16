@@ -29,7 +29,7 @@ import {
   runtimeResolveParametersArgsSchema,
   runtimeStateChangedArgsSchema,
 } from '#types/runtime-protocol.schemas.js';
-import { compileParameterManifest } from '@taucad/runtime/parameter';
+import { compileParameterManifest } from '@taucad/parameters';
 
 describe('RuntimeProtocol — runtime inventory guard (R20)', () => {
   it('should expose exactly ten acknowledged calls', () => {

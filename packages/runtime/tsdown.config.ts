@@ -29,7 +29,6 @@ const baseConfig: UserConfig = {
   entry: [
     'src/index.ts',
     'src/client/index.ts',
-    'src/parameter/index.ts',
     'src/configuration/index.ts',
     'src/configuration/zod.ts',
     'src/jobs/index.ts',
@@ -66,9 +65,6 @@ const baseConfig: UserConfig = {
     'src/nextjs/config.ts',
     'src/nextjs/browser-node-builtins.ts',
     'src/utils/package-info.ts',
-    'src/parameter-set.machine.ts',
-    'src/parameter-input.machine.ts',
-    'src/parameter-client.ts',
   ],
   sourcemap: true,
   clean: ['dist'],

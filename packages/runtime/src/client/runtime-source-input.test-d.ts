@@ -25,6 +25,8 @@ import { defineKernel } from '#types/runtime-kernel.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
 import type { KernelPlugin } from '#plugins/plugin-types.js';
+// oxlint-disable-next-line no-restricted-imports -- Runtime-private fixture stays outside the package build graph.
+import { createParameterDeclaration } from '../../test/support/kernel-worker.fixture.js';
 
 const code = 'export default () => null;';
 const bytes = new Uint8Array([1, 2, 3]);
@@ -148,7 +150,7 @@ const kernel = defineKernel({
     return { resolved: [], unresolved: [] };
   },
   async getParameters() {
-    return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+    return createParameterDeclaration();
   },
   async createGeometry() {
     return { nativeHandle: {} };
@@ -320,7 +322,7 @@ const contentEmptyKernel = defineKernel({
     return { resolved: [], unresolved: [] };
   },
   async getParameters() {
-    return { success: true, data: { defaultParameters: {}, jsonSchema: {} }, issues: [] };
+    return createParameterDeclaration();
   },
   async createGeometry(input) {
     expectTypeOf(input).not.toHaveProperty('content');

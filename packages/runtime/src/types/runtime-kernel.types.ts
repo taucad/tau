@@ -16,7 +16,7 @@ import type { FileExtension, LogLevel, GeometryResponse, FileStatEntry } from '@
 import type { FileSystemProvider, WatchEvent, WatchRequest } from '@taucad/filesystem';
 import type { KernelComputeCapability } from '#types/runtime-compute.types.js';
 import type { ExportGeometryResult, GetParameterDeclarationsResult, KernelIssue } from '#types/runtime.types.js';
-import type { ParameterResolutionOptions } from '#parameter/manifest.js';
+import type { ParameterResolutionOptions } from '@taucad/parameters';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
 import type { ExecuteResult, KernelBundler } from '#types/runtime-bundler-service.types.js';
 import type { GetDependenciesResult } from '#types/runtime-dependency.types.js';

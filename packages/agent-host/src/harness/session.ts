@@ -20,6 +20,7 @@ import type {
   HostToolDefinition,
   ModelInvocationBinding,
   ModelStreamEvent,
+  MaterializedDocument,
   ModelTransport,
   ToolRegistry,
 } from '#waist/ports.js';
@@ -55,13 +56,15 @@ import {
   createLiveMessageIdentityDiagnostic,
   createTransportFailureDiagnostic,
   createPortableId,
+  hasFileRef,
+  materializeAttachments,
   piMessageToProvider,
   providerMessageToPi,
   toJsonValue,
   toolInputToProvider,
   transportFailureFromProviderMessages,
 } from '#harness/session-record.js';
-import type { MessageIdentities, SessionRecord } from '#harness/session-record.js';
+import type { AttachmentReader, MessageIdentities, SessionRecord } from '#harness/session-record.js';
 import { applyHostToolResult, createAgentTools, normalizeToolInput } from '#harness/tools.js';
 import type { HostToolExecutionDetails, ToolResultSubstituter } from '#harness/tools.js';
 import { createInterruptRecoveryMessage } from '#harness/interrupt-recovery.js';
@@ -163,6 +166,8 @@ type CreateTransportStreamOptions = {
   readonly identities: MessageIdentities;
   readonly toolInputIds: Map<string, string>;
   readonly createId: () => string;
+  /** The side table for the messages this request carries (D15). */
+  readonly documents?: (() => ReadonlyMap<string, MaterializedDocument>) | undefined;
   readonly committedContext?: (() => TurnContextSnapshot | undefined) | undefined;
   readonly usePostCompactionContext?: (() => boolean) | undefined;
   readonly systemPromptBlocks?: (() => TurnContextSnapshot['systemPromptBlocks']) | undefined;
@@ -287,6 +292,7 @@ export const createTransportStreamFunction =
             ? await options.prepareInvocation(invocationPurpose, model.id, signal)
             : options.createId();
         const committedContext = options.committedContext?.();
+        const documents = options.documents?.();
         const events = options.transport.stream({
           attemptId,
           invocationPurpose,
@@ -320,6 +326,8 @@ export const createTransportStreamFunction =
               : []),
             ...providerHistory(context.messages as AgentMessage[], options),
           ],
+          // A copy: the session's table grows with later turns while a transport may still hold this one.
+          ...(documents === undefined || documents.size === 0 ? {} : { documents: new Map(documents) }),
           tools: hostTools(context),
           signal,
         });
@@ -823,6 +831,11 @@ export type CreateAgentSessionOptions = {
   readonly safeguardThresholds?: Partial<SafeguardThresholds> | undefined;
   readonly onSafeguardOutcome?: ((outcome: SafeguardOutcome) => Promise<void>) | undefined;
   readonly allowImageBlocks?: boolean | undefined;
+  /**
+   * Reads the bytes a durable `file-ref` names (D15). Absent, every reference
+   * is treated as not yet arrived: omitted from the request with a warning.
+   */
+  readonly attachments?: AttachmentReader | undefined;
   readonly createId?: (() => string) | undefined;
   readonly now?: (() => Date) | undefined;
   readonly onCompaction?: ((outcome: CompactionOutcome) => void) | undefined;
@@ -924,6 +937,36 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     createId,
     now: () => now().toISOString(),
   });
+  /*
+   * D15: durable rows name attachments; a model reads bytes. Each user message
+   * that references one is materialised once, by id, into a transient copy that
+   * pi holds in memory — the log is never rewritten — and every document read
+   * joins the side table that travels on each request.
+   */
+  const materializedById = new Map<string, ProviderMessage>();
+  const documents = new Map<string, MaterializedDocument>();
+  const warnedAbsent = new Set<string>();
+  const readAttachment = async (path: string): Promise<Uint8Array | undefined> =>
+    options.attachments?.read(options.chatId, path);
+  const materializeHistory = async (history: readonly ProviderMessage[]): Promise<ProviderMessage[]> => {
+    const pending = history.filter((message) => !materializedById.has(message.id) && hasFileRef(message));
+    const outcome = await materializeAttachments(pending, readAttachment);
+    for (const [index, message] of outcome.messages.entries()) {
+      materializedById.set(pending[index]!.id, message);
+    }
+    for (const [hash, document] of outcome.documents) {
+      documents.set(hash, document);
+    }
+    for (const path of outcome.absent) {
+      if (!warnedAbsent.has(path)) {
+        warnedAbsent.add(path);
+        console.warn(
+          `Chat ${options.chatId}: attachment ${path} is not available on this device; the model will not see it.`,
+        );
+      }
+    }
+    return history.map((message) => materializedById.get(message.id) ?? message);
+  };
   const initialHistory = await record.history();
   const initialEvents = await record.events();
   const initialProjection = initialEvents.findLast(
@@ -935,10 +978,14 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
   const model = modelFor(effectiveModel);
   const hydrateHistory = (history: readonly ProviderMessage[]): AgentMessage[] =>
     history.flatMap((message) => {
+      if (hasFileRef(message)) {
+        // Pi would stringify the reference into model-visible text; materialise first.
+        throw new TypeError(`Message ${message.id} reached hydration with an unmaterialised file-ref.`);
+      }
       const hydrated = providerMessageToPi(message, model, record.messages);
       return hydrated ? [hydrated] : [];
     });
-  const initialMessages = hydrateHistory(initialHistory);
+  const initialMessages = hydrateHistory(await materializeHistory(initialHistory));
   const committedMessageIds = new Set(initialHistory.map((message) => message.id));
   const toolInputIds = new Map(
     initialHistory.flatMap((message) =>
@@ -1124,6 +1171,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
     identities: record.messages,
     toolInputIds,
     createId,
+    documents: () => documents,
     ...(options.modelTransport.usesBillingAttempt ? { prepareInvocation, bindInvocation } : {}),
     committedContext: () => committedContext,
     usePostCompactionContext: () => restoreRecentSkillContent,
@@ -1343,7 +1391,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         recentSkills: options.recentSkills,
       });
       const beforeCompaction = await record.history();
-      await compaction.prepareTurn(hydrateHistory(beforeCompaction));
+      await compaction.prepareTurn(hydrateHistory(await materializeHistory(beforeCompaction)));
       const retainedHistory = await record.history();
       const retainedMessageIds = retainedHistory.map((retained) => retained.id);
       await record.append({
@@ -1377,7 +1425,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         return;
       }
       agent.state.systemPrompt = committedContext.systemPrompt;
-      agent.state.messages = hydrateHistory(await record.history());
+      agent.state.messages = hydrateHistory(await materializeHistory(await record.history()));
       await agent.continue();
     },
     steer: (message) => {

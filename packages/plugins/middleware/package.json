@@ -34,6 +34,7 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./parameter-units": "./src/parameter-units.middleware.ts",
     "./package.json": "./package.json"
   },
   "publishConfig": {
@@ -43,6 +44,11 @@
         "types": "./dist/index.d.mts",
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
+      },
+      "./parameter-units": {
+        "types": "./dist/parameter-units.middleware.d.mts",
+        "import": "./dist/parameter-units.middleware.mjs",
+        "default": "./dist/parameter-units.middleware.mjs"
       },
       "./package.json": "./package.json"
     },
@@ -58,6 +64,8 @@
     "@msgpack/msgpack": "catalog:",
     "@taucad/cache-core": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
+    "@taucad/parameters": "workspace:*",
+    "@taucad/units": "workspace:*",
     "deepmerge": "catalog:"
   },
   "peerDependencies": {

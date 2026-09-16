@@ -1,6 +1,6 @@
 import { contentDigest } from '@taucad/cache-core';
-import { compileParameterManifest } from '@taucad/runtime/parameter';
-import type { ParameterDeclaration, ParameterManifest } from '@taucad/runtime/parameter';
+import { compileParameterManifest } from '@taucad/parameters';
+import type { ParameterDeclaration, ParameterManifest } from '@taucad/parameters';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { GetParametersResult } from '@taucad/runtime/types';
 import { createMockRuntime } from '@taucad/runtime-testing';
@@ -22,7 +22,12 @@ const compile = async (declaration: ParameterDeclaration, resolution = {}): Prom
   compileParameterManifest({
     declaration,
     scope: { kind: 'source', authority: 'test', root: '', entry: 'main.ts' },
-    source: { id: 'test-kernel', version: '1.0.0', revision: dependency, capability: 'json-structure' },
+    source: {
+      id: 'test-kernel',
+      version: '1.0.0',
+      revision: dependency,
+      capability: 'json-structure',
+    },
     dependency,
     middleware,
     resolution,
@@ -30,7 +35,10 @@ const compile = async (declaration: ParameterDeclaration, resolution = {}): Prom
 
 const infer = async (
   manifest: ParameterManifest,
-  input: Readonly<{ mode?: 'default' | 'declared-only'; inferenceLanguage?: string }> = {},
+  input: Readonly<{
+    mode?: 'default' | 'declared-only';
+    inferenceLanguage?: string;
+  }> = {},
   angleDefault: 'deg' | 'rad' = 'deg',
 ): Promise<GetParametersResult> => {
   const definition = await resolveRuntimePluginDefinition('middleware', parameterUnits());
@@ -42,12 +50,128 @@ const infer = async (
 };
 
 describe('parameterUnits', () => {
+  it('infers only the reviewed English length corpus', async () => {
+    const expectedKinds = {
+      '/width': 'http://qudt.org/vocab/quantitykind/Width',
+      '/partHeight': 'http://qudt.org/vocab/quantitykind/Height',
+      '/model_depth': 'http://qudt.org/vocab/quantitykind/Depth',
+      '/hole-radius': 'http://qudt.org/vocab/quantitykind/Radius',
+      '/outerDiameter': 'http://qudt.org/vocab/quantitykind/Diameter',
+      '/travelDistance': 'http://qudt.org/vocab/quantitykind/Distance',
+      '/partLength': 'http://qudt.org/vocab/quantitykind/Length',
+      '/wallThickness': 'http://qudt.org/vocab/quantitykind/Length',
+      '/edgeClearance': 'http://qudt.org/vocab/quantitykind/Length',
+      '/panelGap': 'http://qudt.org/vocab/quantitykind/Length',
+      '/cellSize': 'http://qudt.org/vocab/quantitykind/Length',
+    } as const;
+    const unknown = [
+      'bitDepth',
+      'colorDepth',
+      'treeDepth',
+      'pixelWidth',
+      'scale',
+      'size',
+      'offset',
+      'margin',
+      'frequency',
+      'torque',
+      'energy',
+      'ratio',
+      'percent',
+      'segmentCount',
+      'widthAngle',
+      'mystery',
+    ] as const;
+    const names = [...Object.keys(expectedKinds).map((pointer) => pointer.slice(1)), ...unknown];
+    const manifest = await compile({
+      schema: {
+        ...root,
+        properties: Object.fromEntries(names.map((name) => [name, { type: 'double', default: 2 }])),
+      },
+      defaults: Object.fromEntries(names.map((name) => [name, 2])),
+    });
+
+    const inferred = await infer(manifest, { inferenceLanguage: 'en-NZ' });
+    expect(inferred.success).toBe(true);
+    if (!inferred.success) {
+      return;
+    }
+    for (const [pointer, quantityKind] of Object.entries(expectedKinds)) {
+      expect(inferred.data.bindings[pointer]).toMatchObject({
+        unit: 'mm',
+        quantityKind,
+        space: 'linear',
+      });
+      expect(
+        Object.values(inferred.data.provenance).some(
+          ({ field, origin, evidence }) =>
+            field === 'unit' && origin === 'inferred' && evidence?.includes(`instance=${pointer};`),
+        ),
+      ).toBe(true);
+    }
+    for (const name of unknown) {
+      expect(inferred.data.bindings[`/${name}`]?.unit).toBeUndefined();
+    }
+    expect(
+      Object.values(inferred.data.provenance).find(
+        ({ field, evidence }) => field === 'unit' && evidence?.includes('instance=/width;'),
+      )?.profile,
+    ).toContain('tau-parameter-units-03');
+    expect(await infer(inferred.data, { inferenceLanguage: 'en-NZ' })).toEqual(inferred);
+  });
+
+  it('preserves compatible and conflicting declared units without replacing them', async () => {
+    const compatible = await infer(
+      await compile({
+        schema: {
+          ...root,
+          properties: { width: { type: 'double', ucumUnit: 'cm' } },
+        },
+        defaults: { width: 20 },
+      }),
+    );
+    expect(compatible.success && compatible.data.bindings['/width']).toMatchObject({
+      unit: 'cm',
+      quantityKind: 'http://qudt.org/vocab/quantitykind/Width',
+      space: 'linear',
+    });
+    expect(
+      compatible.success &&
+        Object.values(compatible.data.provenance).find(
+          ({ field, origin }) => field === 'unit' && origin === 'declared',
+        ),
+    ).toBeDefined();
+
+    const conflicting = await compile({
+      schema: {
+        ...root,
+        properties: { width: { type: 'double', ucumUnit: 's' } },
+      },
+      defaults: { width: 20 },
+    });
+    const explicitWins = await infer(conflicting);
+    expect(explicitWins.success && explicitWins.data.bindings['/width']).toMatchObject({ unit: 's' });
+    expect(explicitWins.success && explicitWins.data.bindings['/width']).not.toHaveProperty('quantityKind');
+    expect(explicitWins.success && explicitWins.data.bindings['/width']).not.toHaveProperty('space');
+  });
+
   it('infers angle fields per claim while explicit and project semantics win', async () => {
-    const defaults = { cameraAngle: 38, rotationRadians: 0.5, nested: { tilt: 12 } };
+    const defaults = {
+      cameraAngle: 38,
+      rotationRadians: 0.5,
+      nested: { tilt: 12 },
+    };
     const declaration: ParameterDeclaration = {
       schema: {
         ...root,
-        definitions: { angle: { type: 'double', minimum: -180, maximum: 180, multipleOf: 0.5 } },
+        definitions: {
+          angle: {
+            type: 'double',
+            minimum: -180,
+            maximum: 180,
+            multipleOf: 0.5,
+          },
+        },
         properties: {
           cameraAngle: { type: 'double', minimum: 0, maximum: 90, default: 38 },
           rotationRadians: { type: 'double', ucumUnit: 'rad' },
@@ -73,7 +197,9 @@ describe('parameterUnits', () => {
       },
     };
     const before = structuredClone(declaration);
-    const first = await infer(await compile(declaration), { inferenceLanguage: 'en-NZ' });
+    const first = await infer(await compile(declaration), {
+      inferenceLanguage: 'en-NZ',
+    });
     expect(first.success).toBe(true);
     if (!first.success) {
       return;
@@ -94,15 +220,27 @@ describe('parameterUnits', () => {
     expect(first.data.bindings['/nested/tilt']).toMatchObject({
       unit: 'deg',
       constraints: { minimum: -180, maximum: 180, multipleOf: 0.5 },
-      schema: { resource: 'urn:taucad:parameter-schema:root', pointer: '/definitions/angle' },
+      schema: {
+        resource: 'urn:taucad:parameter-schema:root',
+        pointer: '/definitions/angle',
+      },
     });
     const inferred = Object.values(first.data.provenance).filter(({ origin }) => origin === 'inferred');
     expect(inferred).toHaveLength(7);
     expect(inferred).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ field: 'unit', rule: 'angle-default-v1/unit' }),
-        expect.objectContaining({ field: 'space', rule: 'angle-radian-token-v1/space' }),
-        expect.objectContaining({ field: 'space', rule: 'angle-default-v1/space' }),
+        expect.objectContaining({
+          field: 'unit',
+          rule: 'angle-default-v1/unit',
+        }),
+        expect.objectContaining({
+          field: 'space',
+          rule: 'angle-radian-token-v1/space',
+        }),
+        expect.objectContaining({
+          field: 'space',
+          rule: 'angle-default-v1/space',
+        }),
       ]),
     );
     expect(
@@ -126,6 +264,8 @@ describe('parameterUnits', () => {
           hexColor: { type: 'uint32' },
           mystery: { type: 'double' },
           cameraAngle: { type: 'double' },
+          widthDegreesRadians: { type: 'double' },
+          widthHeightAngle: { type: 'double' },
         },
       },
       defaults: {
@@ -135,14 +275,118 @@ describe('parameterUnits', () => {
         hexColor: 0xff_00_ff,
         mystery: 4,
         cameraAngle: 5,
+        widthDegreesRadians: 6,
+        widthHeightAngle: 7,
       },
     });
     const inferred = await infer(manifest);
-    expect(inferred.success && Object.keys(inferred.data.bindings)).toEqual(['/cameraAngle']);
+    expect(inferred.success).toBe(true);
+    if (!inferred.success) {
+      return;
+    }
+    expect(inferred.data.bindings['/cameraAngle']).toMatchObject({
+      unit: 'deg',
+    });
+    for (const pointer of [
+      '/triangleCount',
+      '/strainAngle',
+      '/energyTorque',
+      '/hexColor',
+      '/mystery',
+      '/widthDegreesRadians',
+      '/widthHeightAngle',
+    ]) {
+      expect(inferred.data.bindings[pointer]?.unit).toBeUndefined();
+    }
     const declaredOnly = await infer(manifest, { mode: 'declared-only' });
     expect(declaredOnly).toEqual({ success: true, data: manifest, issues: [] });
-    const unsupportedLanguage = await infer(manifest, { inferenceLanguage: 'fr' });
-    expect(unsupportedLanguage).toEqual({ success: true, data: manifest, issues: [] });
+    const unsupportedLanguage = await infer(manifest, {
+      inferenceLanguage: 'fr',
+    });
+    expect(unsupportedLanguage).toEqual({
+      success: true,
+      data: manifest,
+      issues: [],
+    });
+  });
+
+  it('infers digit-delimited and array-template fields without changing array data', async () => {
+    const defaults = {
+      width2: 2,
+      '2Width': 2.5,
+      widthArray: [1, 2],
+      parts: [{ width: 3 }, { width: 4 }],
+      nestedParts: [[{ width: 4.5 }]],
+      externalParts: [{ height: 4.75 }],
+      nullableWidthArray: [null, 5],
+    };
+    const manifest = await compile({
+      schema: {
+        ...root,
+        properties: {
+          width2: { type: 'double' },
+          '2Width': { type: 'double' },
+          widthArray: { type: 'array', items: { type: 'double' } },
+          parts: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: { width: { type: 'double' } },
+            },
+          },
+          nestedParts: {
+            type: 'array',
+            items: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: { width: { type: 'double' } },
+              },
+            },
+          },
+          externalParts: { type: { $ref: 'urn:taucad:test:external-parts' } },
+          nullableWidthArray: {
+            type: 'array',
+            items: { type: ['double', 'null'] },
+          },
+        },
+      },
+      resources: {
+        'urn:taucad:test:external-parts': {
+          ...root,
+          $id: 'urn:taucad:test:external-parts',
+          name: 'ExternalParts',
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { height: { type: 'double' } },
+          },
+        },
+      },
+      defaults,
+    });
+
+    const inferred = await infer(manifest);
+    expect(inferred.success).toBe(true);
+    if (!inferred.success) {
+      return;
+    }
+    expect(inferred.data.defaults).toEqual(defaults);
+    for (const pointer of [
+      '/width2',
+      '/2Width',
+      '/widthArray/*',
+      '/parts/*/width',
+      '/nestedParts/*/*/width',
+      '/externalParts/*/height',
+      '/nullableWidthArray/*',
+    ]) {
+      expect(inferred.data.bindings[pointer]).toMatchObject({
+        unit: 'mm',
+        space: 'linear',
+      });
+    }
+    expect(inferred.data.bindings['/parts/*/width']?.quantityKind).toBe('http://qudt.org/vocab/quantitykind/Width');
   });
 
   it('resolves external references independently and changes profile identity with the angle default', async () => {

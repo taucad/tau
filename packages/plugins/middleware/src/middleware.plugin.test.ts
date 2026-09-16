@@ -20,6 +20,7 @@ describe('@taucad/middleware', () => {
     expect(capabilities.middleware.map(({ id }) => id)).toEqual([
       'parameterFileResolver',
       'parameterCache',
+      'parameterUnits',
       'geometryCache',
       'gltfEdgeDetection',
     ]);
@@ -56,7 +57,10 @@ describe('@taucad/middleware', () => {
       'utf-8-validate',
       'ws',
     ]);
-    const offenders = readdirSync(sourceDirectory, { encoding: 'utf8', recursive: true })
+    const offenders = readdirSync(sourceDirectory, {
+      encoding: 'utf8',
+      recursive: true,
+    })
       .filter((name) => name.endsWith('.ts') && !name.includes('.test'))
       .flatMap((name) => {
         // Comments are prose, not payload: a doc comment naming `import('ws')` is not an import.

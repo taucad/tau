@@ -25,7 +25,11 @@ export const exitCodes = {
  *
  * @internal
  */
-export type CliError = Error & { readonly code: string; readonly exit: number };
+export type CliError = Error & {
+  readonly code: string;
+  readonly exit: number;
+  readonly details?: unknown;
+};
 
 /**
  * Build a scripted failure that carries its own exit code.
@@ -33,11 +37,22 @@ export type CliError = Error & { readonly code: string; readonly exit: number };
  * @internal
  * @param code - Stable machine-readable failure code, such as `INPUT_NOT_FOUND`.
  * @param message - Actionable failure text for a human reader.
- * @param exit - Process exit code from {@link exitCodes}; defaults to `error`.
+ * @param options - Process exit code, or exit code and machine-readable details.
  * @returns An error that {@link exitCodeFor} maps back to `exit`.
  */
-export const cliError = (code: string, message: string, exit: number = exitCodes.error): CliError =>
-  Object.assign(new Error(message), { code, exit });
+export const cliError = (
+  code: string,
+  message: string,
+  options: number | Readonly<{ exit?: number; details?: unknown }> = exitCodes.error,
+): CliError => {
+  const exit = typeof options === 'number' ? options : options.exit;
+  const details = typeof options === 'number' ? undefined : options.details;
+  return Object.assign(new Error(message), {
+    code,
+    exit: exit ?? exitCodes.error,
+    ...(details === undefined ? {} : { details }),
+  });
+};
 
 /**
  * Whether the CLI classified this failure itself.

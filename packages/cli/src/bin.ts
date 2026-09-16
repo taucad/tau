@@ -144,13 +144,17 @@ try {
   // A machine-mode stream whose last record is missing is indistinguishable from
   // a truncated one, so a failed `--jsonl` run still ends with its outcome.
   if (rawArgs.includes('--json') || rawArgs.includes('--jsonl')) {
-    const { code } = error as { readonly code?: unknown };
+    const { code, details } = error as {
+      readonly code?: unknown;
+      readonly details?: unknown;
+    };
     await emit({
       kind: 'outcome',
       ok: false,
       code: typeof code === 'string' ? code : 'CLI_FAILED',
       exit,
       message,
+      ...(details === undefined ? {} : { details }),
     });
   }
 }

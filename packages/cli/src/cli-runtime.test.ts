@@ -78,7 +78,13 @@ describe('createCliRuntime', () => {
     const expected = Object.keys(manifest.dependencies ?? {}).filter(
       (name) =>
         name.startsWith('@taucad/') &&
-        !['@taucad/agent-host', '@taucad/host', '@taucad/jobs-solvers', '@taucad/runtime'].includes(name),
+        ![
+          '@taucad/agent-host',
+          '@taucad/host',
+          '@taucad/jobs-solvers',
+          '@taucad/parameters',
+          '@taucad/runtime',
+        ].includes(name),
     );
     const actual = taucadImports(source).filter((name) => name !== '@taucad/runtime');
 
@@ -164,8 +170,28 @@ describe('createCliRuntime', () => {
       sources.map(async (entry) => {
         const path = join(entry.parentPath, entry.name);
         const content = await readFile(path, 'utf8');
+        const source = ts.createSourceFile(path, content, ts.ScriptTarget.Latest, true);
         for (const extension of extensions) {
-          if (content.includes(`'${extension}'`)) {
+          let ownsExtension = false;
+          const visit = (node: ts.Node): void => {
+            if (ts.isStringLiteral(node) && node.text === extension) {
+              const { parent } = node;
+              const comparedExpression = ts.isBinaryExpression(parent)
+                ? parent.left === node
+                  ? parent.right
+                  : parent.left
+                : undefined;
+              const isComputeMode =
+                comparedExpression !== undefined &&
+                ts.isPropertyAccessExpression(comparedExpression) &&
+                comparedExpression.name.text === 'computeMode';
+              ownsExtension ||= !isComputeMode;
+            }
+            ts.forEachChild(node, visit);
+          };
+          visit(source);
+          // oxlint-disable-next-line typescript/no-unnecessary-condition -- recursive AST traversal mutates this flag.
+          if (ownsExtension) {
             offenders.push(`${entry.name}: '${extension}'`);
           }
         }

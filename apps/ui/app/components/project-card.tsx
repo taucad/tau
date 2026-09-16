@@ -44,10 +44,7 @@ export function ProjectCard({
       )}
       {...properties}
     >
-      <Link
-        to={to}
-        className='absolute inset-0 z-10 rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset'
-      >
+      <Link to={to} className='absolute inset-0 z-10 rounded-xl focus-visible:focus-outline'>
         <span className='sr-only'>{linkLabel}</span>
       </Link>
       {children}

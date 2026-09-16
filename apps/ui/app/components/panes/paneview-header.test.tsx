@@ -319,7 +319,7 @@ describe('PaneviewHeaderControls', () => {
     expect(controls?.className).toContain('[&_button:hover]:text-foreground');
     expect(controls?.className).toContain('[&_button:focus-visible]:bg-muted-foreground/10');
     expect(controls?.className).toContain('[&_button:focus-visible]:text-foreground');
-    expect(controls?.className).toContain('[&_button:focus-visible]:ring-2');
+    expect(controls?.className).toContain('[&_button:focus-visible]:focus-outline');
     expect(controls?.className).toContain('[&_button[data-state=open]]:bg-muted-foreground/10');
     expect(controls?.className).toContain('[&_button[data-state=open]]:text-foreground');
   });

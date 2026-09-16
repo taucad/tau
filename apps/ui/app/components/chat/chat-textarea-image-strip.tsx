@@ -63,7 +63,7 @@ export const ChatTextareaImageStrip = memo(function ({
                 aria-label={`Open uploaded image ${index + 1}`}
                 className={cn(
                   'overflow-hidden rounded-md border bg-background hover:bg-accent',
-                  'outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  'outline-none focus-visible:focus-outline',
                   thumbnailSize[size],
                 )}
                 onMouseDown={(event) => {
@@ -82,7 +82,7 @@ export const ChatTextareaImageStrip = memo(function ({
                 className={cn(
                   'absolute top-1 right-1 z-10 flex size-5 items-center justify-center',
                   'rounded-full border bg-background text-muted-foreground',
-                  'outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring',
+                  'outline-none hover:text-foreground focus-visible:focus-outline',
                 )}
                 aria-label={`Remove uploaded image ${index + 1}`}
                 onPointerDown={(event) => {

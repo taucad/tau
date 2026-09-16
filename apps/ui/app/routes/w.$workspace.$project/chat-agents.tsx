@@ -206,7 +206,7 @@ const AgentRow = ({
       to={projectChatUrl(projectSlugs, agent.chatId)}
       aria-current={agent.focused ? 'page' : undefined}
       aria-label={`${agent.name}, ${agent.state}`}
-      className='block rounded-xl outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
+      className='block rounded-xl outline-hidden focus-visible:focus-outline'
     >
       {content}
     </Link>

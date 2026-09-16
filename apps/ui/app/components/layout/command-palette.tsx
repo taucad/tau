@@ -109,7 +109,7 @@ function CommandPalette({ isOpen, onOpenChange, items }: CommandPalettePropertie
       contentClassName='*:data-[slot=dialog-close]:hidden [&_[data-slot=command-input-wrapper]>svg]:hidden'
     >
       <CommandInput
-        className='h-12 border-0 bg-transparent px-3 text-base shadow-none focus-visible:ring-0 dark:bg-transparent'
+        className='h-12 border-0 bg-transparent px-3 text-base shadow-none focus-visible:outline-none dark:bg-transparent'
         placeholder='Search projects, chats, and actions...'
       />
       <CommandList className='py-0'>

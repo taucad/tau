@@ -13,7 +13,7 @@ const paneButtonVariants = cva(
     'flex shrink-0 select-none items-center justify-center rounded-sm',
     'text-muted-foreground transition-colors',
     'aria-pressed:bg-nested-action-hover',
-    'outline-none focus-visible:ring-2 focus-visible:ring-ring',
+    'outline-none focus-visible:focus-outline',
     'disabled:pointer-events-none disabled:opacity-50',
     "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   ],

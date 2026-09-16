@@ -301,7 +301,7 @@ function ChatRowContent({
           aria-current={isActive ? 'page' : undefined}
           aria-busy={isPending}
           aria-describedby={status === undefined ? undefined : descriptionId}
-          className='flex min-w-0 items-center gap-1.5 overflow-hidden rounded-md ring-sidebar-ring outline-hidden focus-visible:ring-2'
+          className='flex min-w-0 items-center gap-1.5 overflow-hidden rounded-md outline-hidden focus-visible:focus-outline'
         >
           {isPending ? <Loader className='size-3.5 shrink-0' /> : null}
           <span className={`truncate ${status?.unread === true ? 'font-medium text-foreground' : ''}`}>
@@ -359,8 +359,7 @@ function FailedChatActions({
           to={projectChatUrl(project.slugs, chat.id)}
           aria-label={`Open log for ${chat.name}`}
           className={nestedActionVariants({
-            className:
-              'rounded-sm px-1.5 text-xs text-muted-foreground ring-sidebar-ring outline-hidden focus-visible:ring-2',
+            className: 'rounded-sm px-1.5 text-xs text-muted-foreground outline-hidden focus-visible:focus-outline',
           })}
         >
           Open log

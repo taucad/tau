@@ -1419,7 +1419,7 @@ function FilePaneFilesSidecar({
         aria-valuemax={maximumFilesWidth}
         aria-valuenow={Math.round(width)}
         tabIndex={0}
-        className='absolute top-0 -left-1 z-10 h-full w-2 cursor-col-resize outline-none focus-visible:ring-2 focus-visible:ring-ring'
+        className='absolute top-0 -left-1 z-10 h-full w-2 cursor-col-resize outline-none focus-visible:focus-outline'
         onPointerDown={(event) => {
           drag.current = { x: event.clientX, width, currentWidth: width };
           event.currentTarget.setPointerCapture(event.pointerId);

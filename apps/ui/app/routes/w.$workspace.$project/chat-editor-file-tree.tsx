@@ -2096,7 +2096,7 @@ function TreeItem({
     const renameInputProps = item.getRenameInputProps() as React.InputHTMLAttributes<HTMLInputElement>;
     return (
       <div
-        className='relative flex h-7 items-center border border-input py-1 pr-1 pl-2 focus-within:ring-2 focus-within:ring-ring focus-within:ring-inset'
+        className='relative flex h-7 items-center border border-input py-1 pr-1 pl-2 focus-within:focus-outline'
         style={{ paddingLeft: `${paddingLeft}px` }}
       >
         {/* Indent guide lines (VS Code-style) */}
@@ -2126,7 +2126,7 @@ function TreeItem({
             <FileExtensionIcon filename={item.getItemName()} className='size-3.5 shrink-0 text-muted-foreground' />
           )}
           <input
-            className='h-full min-w-0 flex-1 border-none bg-transparent px-0 text-sm shadow-none outline-none focus:border-transparent focus:ring-0 focus:ring-offset-0'
+            className='h-full min-w-0 flex-1 border-none bg-transparent px-0 text-sm shadow-none outline-none focus:border-transparent focus-visible:outline-none'
             autoCorrect='off'
             {...renameInputProps}
             onFocus={(event) => {
@@ -2604,7 +2604,7 @@ function PendingFolderInput({
   return (
     <div className='flex w-full flex-col gap-0.5'>
       <div
-        className='flex h-7 w-full items-center border border-input py-1 pr-1 focus-within:ring-2 focus-within:ring-ring focus-within:ring-inset'
+        className='flex h-7 w-full items-center border border-input py-1 pr-1 focus-within:focus-outline'
         style={{ paddingLeft: `${paddingLeft}px` }}
       >
         <div className='flex min-w-0 flex-1 items-center gap-2'>
@@ -2612,7 +2612,7 @@ function PendingFolderInput({
           <input
             autoFocus
             value={value}
-            className='h-full min-w-0 flex-1 border-none bg-transparent px-0 text-sm shadow-none outline-none focus:border-transparent focus:ring-0 focus:ring-offset-0'
+            className='h-full min-w-0 flex-1 border-none bg-transparent px-0 text-sm shadow-none outline-none focus:border-transparent focus-visible:outline-none'
             placeholder='Folder name'
             onChange={(event) => {
               setValue(event.target.value);
@@ -2732,7 +2732,7 @@ function PendingFileInput({
   return (
     <div className='flex w-full flex-col gap-0.5'>
       <div
-        className='flex h-7 w-full items-center border border-input py-1 pr-1 focus-within:ring-2 focus-within:ring-ring focus-within:ring-inset'
+        className='flex h-7 w-full items-center border border-input py-1 pr-1 focus-within:focus-outline'
         style={{ paddingLeft: `${paddingLeft}px` }}
       >
         <div className='flex min-w-0 flex-1 items-center gap-2'>
@@ -2743,7 +2743,7 @@ function PendingFileInput({
           <input
             ref={inputRef}
             value={value}
-            className='h-full min-w-0 flex-1 border-none bg-transparent px-0 text-sm shadow-none outline-none focus:border-transparent focus:ring-0 focus:ring-offset-0'
+            className='h-full min-w-0 flex-1 border-none bg-transparent px-0 text-sm shadow-none outline-none focus:border-transparent focus-visible:outline-none'
             placeholder='New File'
             onChange={(event) => {
               setValue(event.target.value);

@@ -402,7 +402,14 @@
 
 @layer base {
   * {
-    @apply border-border focus-visible:outline-primary;
+    @apply border-border;
+  }
+
+  /* Focus fallback for controls that do not compose a shared primitive. `:where()` keeps it at zero
+     specificity so any component class still wins. Geometry lives in @taucad/ui's `focus-outline`
+     utility; never restate it here. */
+  :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+    @apply focus-outline;
   }
 
   html,

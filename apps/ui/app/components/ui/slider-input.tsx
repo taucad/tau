@@ -277,7 +277,7 @@ export const SliderInput = ({
       className={cn(
         'group/slider-input relative flex items-center overflow-hidden',
         className,
-        'ring-1 ring-border/50 ring-inset focus-within:ring-2 focus-within:ring-ring',
+        'ring-1 ring-border/50 ring-inset focus-within:focus-outline',
         disabled !== true && isReadOnly !== true && 'cursor-col-resize hover:ring-border',
         isReadOnly === true && disabled !== true && 'cursor-default',
         disabled === true && 'cursor-not-allowed',

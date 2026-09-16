@@ -137,7 +137,7 @@ export function TagsTrigger({
       <div
         className={cn(
           'group/tags-trigger flex h-auto min-h-9 w-full cursor-text flex-wrap items-center gap-1 rounded-md border border-input bg-background p-2 text-sm shadow-xs transition-[box-shadow] outline-none dark:bg-input/30',
-          'has-[[data-slot=input-tags-input]:focus-visible]:ring-2 has-[[data-slot=input-tags-input]:focus-visible]:ring-ring',
+          'has-[[data-slot=input-tags-input]:focus-visible]:focus-outline',
           disabled && 'cursor-not-allowed opacity-50',
           className,
         )}
@@ -206,7 +206,7 @@ export function TagsValue({
           type='button'
           data-tag-remove
           aria-label={`Remove ${children}`}
-          className='size-auto rounded-full outline-none hover:bg-primary-foreground/30 focus-visible:ring-2 focus-visible:ring-ring'
+          className='size-auto rounded-full outline-none hover:bg-primary-foreground/30 focus-visible:focus-outline'
           onClick={handleRemove}
           onPointerDown={handlePointerDown}
         >

@@ -695,7 +695,7 @@ export function ComponentRow({
   const VisibilityIcon = visibilityAction.Icon;
   const actionButtonClassName = cn(
     'flex size-5 items-center justify-center rounded-md opacity-0 transition-[opacity,color,background-color] duration-150',
-    'hover:bg-muted-foreground/10 hover:text-foreground focus-visible:bg-muted-foreground/10 focus-visible:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+    'hover:bg-muted-foreground/10 hover:text-foreground focus-visible:bg-muted-foreground/10 focus-visible:text-foreground focus-visible:opacity-100 focus-visible:focus-outline',
     'group-hover/part:opacity-100 group-focus-within/part:opacity-100 data-[state=open]:bg-muted-foreground/10 data-[state=open]:text-foreground data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100 motion-reduce:transition-none',
     (isHovered || isIsolated) && 'opacity-100',
   );
@@ -754,7 +754,7 @@ export function ComponentRow({
           ))}
           <button
             type='button'
-            className='flex h-full min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
+            className='flex h-full min-w-0 flex-1 items-center gap-2 rounded-sm text-left outline-none focus-visible:focus-outline'
             aria-label={node.name}
             aria-pressed={isSelected}
             onClick={toggleSelection}

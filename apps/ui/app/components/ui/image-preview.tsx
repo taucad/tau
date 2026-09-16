@@ -113,7 +113,7 @@ function ImagePreviewTrigger({ children }: ImagePreviewTriggerProps): React.JSX.
     <div
       role='button'
       tabIndex={0}
-      className='group/image-preview rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring'
+      className='group/image-preview rounded-md outline-none focus-visible:focus-outline'
       onMouseDown={(event) => {
         // Prevent blur events from firing on parent elements (e.g., textarea losing focus)
         event.preventDefault();

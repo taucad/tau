@@ -106,7 +106,7 @@ export function UserButton({
     <DropdownMenu>
       <DropdownMenuTrigger
         className={cn(
-          size === 'icon' && 'rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          size === 'icon' && 'rounded-full outline-none focus-visible:focus-outline',
           size === 'icon' && className,
         )}
         asChild={size !== 'icon'}

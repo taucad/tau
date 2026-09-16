@@ -163,7 +163,7 @@ export function PlanCards({
               className={cn(
                 'flex flex-1 flex-col gap-1.5 text-sm',
                 isFeatureListScrollable &&
-                  'max-h-80 scroll-shadows-y overscroll-contain pr-2 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+                  'max-h-80 scroll-shadows-y overscroll-contain pr-2 focus-visible:focus-outline',
               )}
               tabIndex={isFeatureListScrollable ? 0 : undefined}
             >

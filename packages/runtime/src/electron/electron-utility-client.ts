@@ -272,6 +272,12 @@ export const electronUtilityClient = (
   const releaseRuntimeHost = takeElectronRuntimeHostRelease(receivedPort);
   const wrappedPort = wrapMessagePort<unknown>(receivedPort, {
     label: 'electron-utility:renderer',
+    /* The renderer's end of the wire is a DOM `MessagePort`, but its far end is
+     * a `MessagePortMain` in the utility: it accepts a transfer list the far end
+     * cannot receive, detaching the caller's buffer and dropping the frame with
+     * no error (measured, L03 F-L03-3). `geometryDelivery: 'copy'` above is the
+     * same fact stated to the runtime; this makes the wire enforce it. */
+    copyOnly: true,
   });
   return createElectronUtilityClient({
     origin: 'renderer:client',

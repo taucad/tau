@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import type { ActorRefFrom } from 'xstate';
 import type { CapabilitiesManifest, ExportRoute } from '@taucad/runtime';
-import { fileParameterRecordProfile } from '@taucad/types';
 import type { FileExtension, FileParameterEntry, JSONValue } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import { admitParameterManifest } from '@taucad/parameters';
@@ -123,8 +122,6 @@ const mockParameterService = {
   resolveTarget: vi.fn(async (target: { entry: string }) => {
     const { entry } = target;
     const record: FileParameterEntry = {
-      recordVersion: 1,
-      profile: fileParameterRecordProfile,
       activeGroup: 'default',
       groups: { default: { values: {} } },
     };
@@ -136,8 +133,6 @@ const mockParameterService = {
   replaceTargetValues: vi.fn(
     async (target: { entry: string }, _manifest: unknown, { values }: { values: Record<string, JSONValue> }) => {
       const record: FileParameterEntry = {
-        recordVersion: 1,
-        profile: fileParameterRecordProfile,
         activeGroup: 'default',
         groups: { default: { values } },
       };
@@ -809,8 +804,6 @@ describe('ChatConverter', () => {
       }
       // Another client changed the record while this converter was closed.
       const record: FileParameterEntry = {
-        recordVersion: 1,
-        profile: fileParameterRecordProfile,
         activeGroup: 'default',
         groups: { default: { values: { binary: false } } },
       };

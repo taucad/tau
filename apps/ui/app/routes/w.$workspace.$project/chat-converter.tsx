@@ -722,7 +722,30 @@ export function ExportSchemaForm({
             target: compiled.target,
             group: parameterService.snapshot(compiled.entryPath)?.entry.activeGroup ?? 'default',
             editorInstance: parameterEditorInstance,
-            input: parameterService.input,
+            draft: (pointer) =>
+              parameterService.draft({
+                target: compiled.target,
+                group: parameterService.snapshot(compiled.entryPath)?.entry.activeGroup ?? 'default',
+                pointer,
+                editorInstance: parameterEditorInstance,
+              }),
+            setDraft: (pointer, draft) => {
+              parameterService.setDraft(
+                {
+                  target: compiled.target,
+                  group: parameterService.snapshot(compiled.entryPath)?.entry.activeGroup ?? 'default',
+                  pointer,
+                  editorInstance: parameterEditorInstance,
+                },
+                draft,
+              );
+            },
+            subscribeDrafts: parameterService.subscribeDrafts,
+            commit: async (field) =>
+              parameterService.commitValue(compiled.target, compiled.manifest, {
+                group: parameterService.snapshot(compiled.entryPath)?.entry.activeGroup ?? 'default',
+                ...field,
+              }),
             setValue: async (field) =>
               parameterService.submitValue(compiled.target, compiled.manifest, {
                 group: parameterService.snapshot(compiled.entryPath)?.entry.activeGroup ?? 'default',
@@ -818,7 +841,7 @@ export function ExportSchemaForm({
     defaultParameters: activeResolved.defaults,
     resetSingleParameter,
     parameterManifest: parameterSession.manifest,
-    parameterBindings: parameterEntry?.groups[parameterEntry.activeGroup]?.bindings,
+    parameterGroup: parameterEntry?.groups[parameterEntry.activeGroup],
     parameterEdit: {
       kind: 'authoritative',
       commit: { ...parameterSession.commit, group: parameterSnapshot.entry.activeGroup },

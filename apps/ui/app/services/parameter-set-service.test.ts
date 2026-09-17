@@ -1,6 +1,6 @@
 import { parameterEntryPath } from '@taucad/types';
 import { compileParameterManifest } from '@taucad/parameters';
-import type { ParameterManifest } from '@taucad/parameters';
+import type { ParameterManifest, ParameterSetRequestBase } from '@taucad/parameters';
 import { describe, expect, it, vi } from 'vitest';
 import { createParameterSetService } from '#services/parameter-set-service.js';
 
@@ -32,310 +32,19 @@ const sameBytes = (
 const parseEntry = (bytes: Uint8Array<ArrayBuffer> | undefined): unknown =>
   bytes === undefined ? undefined : JSON.parse(decoder.decode(bytes));
 
-describe('createParameterSetService', () => {
-  it('owns one checked parameter update through close', async () => {
-    const rootDirectory = '/projects/example';
-    const sourcePath = `${rootDirectory}/main.ts`;
-    const dependencyPath = `${rootDirectory}/shared.ts`;
-    const path = `${rootDirectory}/${parameterEntryPath('main.ts')}`;
-    const configurationEntry = 'provider-configuration/runtime/export/stl/options/schema-revision';
-    const configurationPath = `${rootDirectory}/${parameterEntryPath(configurationEntry)}`;
-    const renamedConfigurationEntry = 'provider-configuration/runtime/export/stl/options/schema-revision-2';
-    const renamedConfigurationPath = `${rootDirectory}/${parameterEntryPath(renamedConfigurationEntry)}`;
-    const sourceBytes = encoder.encode('export const width = 100;');
-    const dependencyBytes = encoder.encode('export const scale = 1;');
-    const files = new Map<string, Uint8Array<ArrayBuffer>>([
-      [sourcePath, sourceBytes],
-      [dependencyPath, dependencyBytes],
-      [
-        path,
-        encoder.encode(
-          JSON.stringify({
-            recordVersion: 1,
-            profile: 'tau-json-structure-units-03-v1',
-            activeGroup: 'default',
-            groups: { default: { values: { width: 100 } } },
-          }),
-        ),
-      ],
-    ]);
-    const listeners = new Map<string, Set<() => void>>();
-    const checkedUpdateStarted = Promise.withResolvers<void>();
-    const releaseCheckedUpdate = Promise.withResolvers<void>();
-    const retryUpdateStarted = Promise.withResolvers<void>();
-    const releaseRetryUpdate = Promise.withResolvers<void>();
-    const writeFileChecked = vi.fn(
-      async (input: Parameters<Parameters<typeof createParameterSetService>[0]['client']['writeFileChecked']>[0]) => {
-        const writesToSource = writeFileChecked.mock.calls.filter(([call]) => call.path === path).length;
-        if (input.path === path && writesToSource === 2) {
-          checkedUpdateStarted.resolve();
-          await releaseCheckedUpdate.promise;
-        }
-        if (input.path === path && writesToSource === 3) {
-          retryUpdateStarted.resolve();
-          await releaseRetryUpdate.promise;
-        }
-        const conflict = input.preconditions.find(
-          ({ path: preconditionPath, expected }) => !sameBytes(files.get(preconditionPath), expected),
-        );
-        if (conflict !== undefined) {
-          const actual = files.get(conflict.path);
-          return {
-            status: 'conflict',
-            conflicts: [
-              {
-                path: conflict.path,
-                actual: actual === undefined ? null : new Uint8Array(actual),
-              },
-            ],
-          } as const;
-        }
-        const data = typeof input.data === 'string' ? encoder.encode(input.data) : input.data;
-        files.set(input.path, new Uint8Array(data));
-        return {
-          status: 'applied',
-          content: new Uint8Array(data),
-        } as const;
-      },
-    );
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- structural test double covers the service's six-method authority seam
-    const client = {
-      exists: async (candidate: string) => files.has(candidate),
-      readFile: async (candidate: string) => {
-        const content = files.get(candidate);
-        return content === undefined ? new Uint8Array() : new Uint8Array(content);
-      },
-      writeFileChecked,
-      move: async (source: string, target: string) => {
-        const content = files.get(source);
-        if (content === undefined) {
-          throw new Error(`Missing move source: ${source}`);
-        }
-        files.set(target, content);
-        files.delete(source);
-        return { type: 'file', size: content.byteLength, mtimeMs: 0 } as const;
-      },
-      unlink: async (candidate: string) => {
-        files.delete(candidate);
-      },
-      rmdir: async (candidate: string) => {
-        for (const path of files.keys()) {
-          if (path === candidate || path.startsWith(`${candidate}/`)) {
-            files.delete(path);
-          }
-        }
-      },
-      mkdir: async () => undefined,
-    } as unknown as Parameters<typeof createParameterSetService>[0]['client'];
-    const service = createParameterSetService({
-      rootDirectory,
-      client,
-      subscribe: (candidate, listener) => {
-        const current = listeners.get(candidate) ?? new Set();
-        current.add(listener);
-        listeners.set(candidate, current);
-        return () => current.delete(listener);
-      },
-    });
-    const sourceRevision = revision(`sha256:${'1'.repeat(64)}`);
-    const manifest = await compileParameterManifest({
-      declaration: {
-        schema: {
-          $schema: 'https://json-structure.org/meta/extended/v0/#',
-          $id: 'urn:test:browser-parameters',
-          $uses: ['JSONSchemaUnits'],
-          name: 'Parameters',
-          type: 'object',
-          properties: { width: { type: 'double', ucumUnit: 'mm' } },
-        },
-        defaults: { width: 100 },
-        bindings: {
-          '/width': {
-            parameterId: 'width',
-            quantityKind: 'http://qudt.org/vocab/quantitykind/Length',
-            space: 'linear',
-          },
-        },
-      },
-      scope: {
-        kind: 'source',
-        authority: 'browser-filesystem',
-        root: rootDirectory,
-        entry: 'main.ts',
-      },
-      source: {
-        id: 'fixture',
-        version: '1',
-        revision: sourceRevision,
-        capability: 'json-structure',
-      },
-      dependency: sourceRevision,
-      middleware: sourceRevision,
-      sourceFiles: {
-        'main.ts': await digestBytes(sourceBytes),
-        'shared.ts': await digestBytes(dependencyBytes),
-      },
-    });
-    const configurationManifest = await compileParameterManifest({
-      declaration: {
-        schema: manifest.schema,
-        resources: manifest.resources,
-        defaults: manifest.defaults,
-        bindings: manifest.bindingDeclarations,
-      },
-      scope: {
-        kind: 'provider',
-        provider: 'runtime',
-        configuration: 'export/stl/options',
-      },
-      source: {
-        id: 'runtime:export/stl/options',
-        version: '1',
-        revision: sourceRevision,
-        capability: 'json-structure',
-      },
-      dependency: sourceRevision,
-      middleware: sourceRevision,
-    });
-    const configurationTarget = service.target(configurationEntry, 'provider-configuration');
-
-    files.set(sourcePath, encoder.encode('export const width = 101;'));
-    await expect(service.resolve('main.ts', manifest)).rejects.toMatchObject({ code: 'STALE_MANIFEST' });
-    files.set(sourcePath, sourceBytes);
-    files.set(dependencyPath, encoder.encode('export const scale = 2;'));
-    await expect(service.resolve('main.ts', manifest)).rejects.toMatchObject({ code: 'STALE_MANIFEST' });
-    expect(writeFileChecked).not.toHaveBeenCalled();
-    files.set(dependencyPath, dependencyBytes);
-
-    const [sourceSnapshot, duplicateSnapshot] = await Promise.all([
-      service.resolve('main.ts', manifest),
-      service.resolve('main.ts', manifest),
-    ]);
-    expect(duplicateSnapshot).toEqual(sourceSnapshot);
-    expect(service.snapshot('main.ts')).toEqual(sourceSnapshot);
-    const widthBinding = manifest.bindings['/width'];
-    if (widthBinding === undefined) {
-      throw new Error('Expected the compiled width binding.');
-    }
-    const input = {
-      editorInstance: 'editor-a',
-      binding: {
-        target: service.target('main.ts'),
-        group: 'default',
-        parameterId: widthBinding.parameter.value,
-        resource: widthBinding.schema.resource,
-        pointer: '/width',
-        nativeUnit: 'mm',
-        representation: 'binary64',
-        constraints: {},
-      },
-      acknowledgedValue: 100,
-      acknowledgedRevision: sourceSnapshot.identity,
-      display: { locale: 'en', unit: 'mm' },
-    } as const;
-    const retained = service.input(input);
-    retained.attach()();
-    const detach = retained.attach();
-    await Promise.resolve();
-    expect(retained.actor.getSnapshot().status).toBe('active');
-    retained.actor.send({ type: 'focus' });
-    retained.actor.send({ type: 'changeRaw', text: 'not a quantity' });
-    detach();
-    const remounted = service.input(input);
-    expect(remounted.actor).toBe(retained.actor);
-    expect(remounted.actor.getSnapshot().context.draft?.raw).toBe('not a quantity');
-    remounted.actor.send({ type: 'pressEscape' });
-    remounted.actor.send({ type: 'focus' });
-    remounted.actor.send({ type: 'changeRaw', text: '2.1 cm' });
-    expect(remounted.actor.getSnapshot().context.draft).toMatchObject({
-      raw: '2.1 cm',
-      status: 'complete-valid',
-      nativeValue: 21,
-    });
-    remounted.actor.send({ type: 'pressEnter' });
-    await vi.waitFor(() => {
-      expect(remounted.actor.getSnapshot().context.acknowledged.value).toBe(21);
-      expect(remounted.actor.getSnapshot().context.draft).toBeUndefined();
-    });
-    remounted.attach()();
-    await service.resolveTarget(configurationTarget, configurationManifest);
-    expect(files.has(configurationPath)).toBe(false);
-    await service.replaceTargetValues(configurationTarget, configurationManifest, { values: { width: 75 } });
-    const relocation = await service.prepareFileOperation({
-      kind: 'move',
-      oldPath: configurationEntry,
-      newPath: renamedConfigurationEntry,
-    });
-    // A reader that arrives mid-relocation waits for the operation instead of failing.
-    let relocatedReadSettled = false;
-    const relocatedRead = (async () => {
-      await service.resolve(configurationEntry, configurationManifest);
-      relocatedReadSettled = true;
-    })();
-    await Promise.resolve();
-    expect(relocatedReadSettled).toBe(false);
-    await relocation.commit();
-    await relocatedRead;
-    expect(files.has(configurationPath)).toBe(false);
-    expect(files.has(renamedConfigurationPath)).toBe(true);
-    const update = service.replaceValues('main.ts', manifest, { width: 125 });
-    await checkedUpdateStarted.promise;
-    files.set(sourcePath, encoder.encode('export const width = 999;'));
-    releaseCheckedUpdate.resolve();
-    await expect(update).rejects.toMatchObject({ code: 'STALE_MANIFEST' });
-    files.set(sourcePath, sourceBytes);
-    await service.resolve('main.ts', manifest);
-    const retryUpdate = service.replaceValues('main.ts', manifest, { width: 125 });
-    await retryUpdateStarted.promise;
-    remounted.actor.send({ type: 'focus' });
-    remounted.actor.send({ type: 'changeRaw', text: 'not a quantity' });
-    let closeSettled = false;
-    const close = (async (): Promise<void> => {
-      await service.close();
-      closeSettled = true;
-    })();
-    await Promise.resolve();
-    expect(closeSettled).toBe(false);
-    releaseRetryUpdate.resolve();
-    await retryUpdate;
-    await expect(close).rejects.toMatchObject({
-      code: 'UNSAVED_PARAMETER_DRAFTS',
-      drafts: [{ entry: 'main.ts', reason: 'invalid' }],
-    });
-    retained.actor.send({ type: 'discard' });
-    await service.close();
-
-    expect(writeFileChecked).toHaveBeenCalledTimes(4);
-    expect(configurationTarget).toEqual({
-      authority: 'provider-configuration',
-      root: rootDirectory,
-      entry: configurationEntry,
-    });
-    expect(parseEntry(files.get(renamedConfigurationPath))).toMatchObject({
-      groups: { default: { values: { width: 75 } } },
-    });
-    expect(parseEntry(files.get(path))).toMatchObject({
-      recordVersion: 1,
-      profile: 'tau-json-structure-units-03-v1',
-      groups: {
-        default: {
-          values: { width: 125 },
-          bindings: { '/width': { unit: 'mm', representation: 'binary64' } },
-        },
-      },
-    });
-    expect(decoder.decode(files.get(path))).toContain('"recordVersion": 1');
-    expect(decoder.decode(files.get(renamedConfigurationPath))).toContain('"width": 75');
-    expect([...listeners.values()].every((current) => current.size === 0)).toBe(true);
-    await expect(service.close()).resolves.toBeUndefined();
-  });
-});
-
 const fixtureRoot = '/projects/fixture';
 const fixtureRecordPath = `${fixtureRoot}/${parameterEntryPath('main.ts')}`;
 const lengthKind = 'http://qudt.org/vocab/quantitykind/Length';
 
 type WriteInput = Parameters<Parameters<typeof createParameterSetService>[0]['client']['writeFileChecked']>[0];
+
+/** The effective binding every fixture field carries, so a `base` matches what the planner resolves. */
+const fixtureBinding: NonNullable<ParameterSetRequestBase['binding']> = {
+  unit: 'mm',
+  quantityKind: lengthKind,
+  space: 'linear',
+  representation: 'binary64',
+};
 
 /** One project over an in-memory checked filesystem that enforces every precondition. */
 const serviceFixture = (initialRecord?: string) => {
@@ -421,32 +130,30 @@ const serviceFixture = (initialRecord?: string) => {
       sourceFiles: { 'main.ts': sourceRevision },
     });
   };
-  const editor = (manifest: ParameterManifest, editorInstance: string, pointer: '/width' | '/height' = '/width') => {
-    const binding = manifest.bindings[pointer]!;
-    return service.input({
-      editorInstance,
-      binding: {
-        target: service.target('main.ts'),
-        group: 'default',
-        parameterId: binding.parameter.value,
-        resource: binding.schema.resource,
-        pointer,
-        nativeUnit: 'mm',
-        quantityKind: lengthKind,
-        space: 'linear',
-        representation: 'binary64',
-        constraints: {},
-      },
-      display: { locale: 'en', unit: 'mm' },
-    }).actor;
-  };
-  const type = (actor: ReturnType<typeof editor>, text: string, enter = true): void => {
-    actor.send({ type: 'focus' });
-    actor.send({ type: 'changeRaw', text });
-    if (enter) {
-      actor.send({ type: 'pressEnter' });
-    }
-  };
+  const commit = async (
+    manifest: ParameterManifest,
+    input: Readonly<{
+      pointer: '/height' | '/width';
+      value: number;
+      base?: number;
+      pressure?: 'final' | 'transient';
+    }>,
+  ) =>
+    service.commitValue(service.target('main.ts'), manifest, {
+      group: 'default',
+      pointer: input.pointer,
+      value: input.value,
+      ...(input.base === undefined
+        ? {}
+        : { base: { pointer: input.pointer, value: input.base, binding: fixtureBinding } }),
+      ...(input.pressure === undefined ? {} : { pressure: input.pressure }),
+    });
+  const draftKey = (pointer: string, editorInstance: string) => ({
+    target: service.target('main.ts'),
+    group: 'default',
+    pointer,
+    editorInstance,
+  });
   const stored = (name: string): unknown =>
     (parseEntry(files.get(fixtureRecordPath)) as { groups?: Record<string, { values: Record<string, unknown> }> })
       .groups?.['default']?.values[name];
@@ -455,8 +162,8 @@ const serviceFixture = (initialRecord?: string) => {
     files,
     writes,
     manifestFor,
-    editor,
-    type,
+    commit,
+    draftKey,
     stored,
     setSource: (text: string) => {
       files.set(`${fixtureRoot}/main.ts`, encoder.encode(text));
@@ -466,6 +173,7 @@ const serviceFixture = (initialRecord?: string) => {
         listener();
       }
     },
+    listeners,
     hold: () => {
       const release = Promise.withResolvers<void>();
       gate = release.promise;
@@ -480,113 +188,122 @@ const serviceFixture = (initialRecord?: string) => {
   };
 };
 
-const interaction = (actor: { getSnapshot(): { value: unknown } }): unknown =>
-  (actor.getSnapshot().value as { active: { interaction: unknown } }).active.interaction;
-
 describe('parameter set service behaviours', () => {
-  it('commits a retained row after a source edit leaves every value unchanged', async () => {
+  it('commits each field against the live manifest after a source edit', async () => {
     const fixture = serviceFixture();
     const first = await fixture.manifestFor();
     await fixture.service.resolve('main.ts', first);
-    const width = fixture.editor(first, 'width');
-    const height = fixture.editor(first, 'height', '/height');
-    fixture.type(width, '110');
-    await vi.waitFor(() => {
-      expect(fixture.stored('width')).toBe(110);
+    expect(await fixture.commit(first, { pointer: '/width', value: 110, base: 100 })).toMatchObject({
+      status: 'committed',
     });
-    fixture.type(height, '12', false);
+
     fixture.setSource('source:2');
     const edited = await fixture.manifestFor('source:2');
     await fixture.service.resolve('main.ts', edited);
-    expect(height.getSnapshot().context.draft?.conflict).toBeUndefined();
-    fixture.type(width, '120');
-    await vi.waitFor(() => {
-      expect(fixture.stored('width')).toBe(120);
+    // A request built against the superseded manifest is refused rather than written.
+    expect(
+      await fixture.service.submit('main.ts', edited, {
+        requestId: 'stale-1',
+        draftGeneration: 1,
+        expected: { manifestRevision: first.revision },
+        pressure: 'final',
+        operation: {
+          kind: 'native-value',
+          group: 'default',
+          parameterId: edited.bindings['/width']!.parameter.value,
+          resource: edited.bindings['/width']!.schema.resource,
+          pointer: '/width',
+          value: 115,
+        },
+      }),
+    ).toMatchObject({ code: 'STALE_MANIFEST' });
+    expect(await fixture.commit(edited, { pointer: '/width', value: 120, base: 110 })).toMatchObject({
+      status: 'committed',
     });
-    height.send({ type: 'pressEnter' });
-    await vi.waitFor(() => {
-      expect(fixture.stored('height')).toBe(12);
+    expect(await fixture.commit(edited, { pointer: '/height', value: 12, base: 10 })).toMatchObject({
+      status: 'committed',
     });
+
+    expect([fixture.stored('width'), fixture.stored('height')]).toEqual([120, 12]);
     expect(fixture.writes).toHaveLength(3);
     await fixture.service.close();
   });
 
-  it('forwards a stale rejection to the row and commits after rebind', async () => {
+  it('refuses a second edit of the same field from a superseded base and commits from the fresh one', async () => {
     const fixture = serviceFixture();
     const manifest = await fixture.manifestFor();
     await fixture.service.resolve('main.ts', manifest);
     const release = fixture.hold();
-    const first = fixture.editor(manifest, 'first');
-    const second = fixture.editor(manifest, 'second');
-    fixture.type(first, '30');
-    fixture.type(second, '40');
+    const first = fixture.commit(manifest, { pointer: '/width', value: 30, base: 100 });
+    const stale = fixture.commit(manifest, { pointer: '/width', value: 40, base: 100 });
     release();
-    await vi.waitFor(() => {
-      expect(interaction(second)).toBe('conflicted');
+
+    expect(await first).toMatchObject({ status: 'committed' });
+    expect(await stale).toMatchObject({ code: 'STALE_MANIFEST' });
+    expect(await fixture.commit(manifest, { pointer: '/width', value: 40, base: 30 })).toMatchObject({
+      status: 'committed',
     });
-    second.send({ type: 'rebind' });
-    second.send({ type: 'pressEnter' });
-    await vi.waitFor(() => {
-      expect(fixture.stored('width')).toBe(40);
-    });
+    expect(fixture.stored('width')).toBe(40);
     await fixture.service.close();
   });
 
-  it('forwards an indeterminate write to the row as a failure', async () => {
+  it('commits another field while one field is superseded', async () => {
     const fixture = serviceFixture();
     const manifest = await fixture.manifestFor();
     await fixture.service.resolve('main.ts', manifest);
-    const width = fixture.editor(manifest, 'width');
+    await fixture.commit(manifest, { pointer: '/width', value: 30, base: 100 });
+
+    expect(await fixture.commit(manifest, { pointer: '/height', value: 12, base: 10 })).toMatchObject({
+      status: 'committed',
+    });
+    expect([fixture.stored('width'), fixture.stored('height')]).toEqual([30, 12]);
+    await fixture.service.close();
+  });
+
+  it('reports a lost write reply as indeterminate', async () => {
+    const fixture = serviceFixture();
+    const manifest = await fixture.manifestFor();
+    await fixture.service.resolve('main.ts', manifest);
     fixture.loseNextReply();
-    fixture.type(width, '30');
-    await vi.waitFor(() => {
-      expect(width.getSnapshot().context.submission?.outcome).toMatchObject({ status: 'indeterminate' });
+
+    expect(await fixture.commit(manifest, { pointer: '/width', value: 30, base: 100 })).toMatchObject({
+      status: 'indeterminate',
     });
-    expect(interaction(width)).toBe('failed');
   });
 
-  it('retains a displaced drag and settles the release that replaced it', async () => {
+  it('keeps only the newest queued value of one dragged field', async () => {
     const fixture = serviceFixture();
     const manifest = await fixture.manifestFor();
     await fixture.service.resolve('main.ts', manifest);
     const release = fixture.hold();
-    const busy = fixture.editor(manifest, 'busy', '/height');
-    fixture.type(busy, '11');
-    const dragged = fixture.service.input({
-      editorInstance: 'dragged',
-      pressure: 'continual',
-      binding: fixture.editor(manifest, 'probe').getSnapshot().context.acknowledged.binding,
-      display: { locale: 'en', unit: 'mm' },
-    }).actor;
-    const other = fixture.service.input({
-      editorInstance: 'other',
-      pressure: 'continual',
-      binding: dragged.getSnapshot().context.acknowledged.binding,
-      display: { locale: 'en', unit: 'mm' },
-    }).actor;
-    dragged.send({ type: 'pointerChanged', value: 30 });
-    dragged.send({ type: 'pointerChanged', value: 35 });
-    dragged.send({ type: 'pointerReleased' });
-    other.send({ type: 'pointerChanged', value: 40 });
-    expect(other.getSnapshot().context.diagnostic?.code).toBe('CANCELLED_BEFORE_APPLY');
+    const busy = fixture.commit(manifest, { pointer: '/height', value: 11, base: 10 });
+    const dropped = fixture.commit(manifest, { pointer: '/width', value: 30, base: 100, pressure: 'transient' });
+    const displaced = fixture.commit(manifest, { pointer: '/width', value: 35, base: 100, pressure: 'transient' });
+    const final = fixture.commit(manifest, { pointer: '/width', value: 40, base: 100 });
     release();
-    await vi.waitFor(() => {
-      expect(fixture.stored('width')).toBe(35);
-    });
+
+    expect(await busy).toMatchObject({ status: 'committed' });
+    expect(await dropped).toMatchObject({ status: 'cancelled-before-apply' });
+    expect(await displaced).toMatchObject({ status: 'cancelled-before-apply' });
+    expect(await final).toMatchObject({ status: 'committed' });
+    expect([fixture.stored('width'), fixture.stored('height')]).toEqual([40, 11]);
+    await fixture.service.close();
   });
 
-  it('drops a pending settlement when its row is disposed by a relocation', async () => {
+  it('retires the actor and removes the record when its source is deleted', async () => {
     const fixture = serviceFixture();
     const manifest = await fixture.manifestFor();
     await fixture.service.resolve('main.ts', manifest);
-    const width = fixture.editor(manifest, 'width');
+    const actor = fixture.service.actor('main.ts');
     const release = fixture.hold();
-    fixture.type(width, '30');
+    const pending = fixture.commit(manifest, { pointer: '/width', value: 30, base: 100 });
     const prepared = fixture.service.prepareFileOperation({ kind: 'delete', path: 'main.ts', directory: false });
     release();
+    await pending;
     const operation = await prepared;
     await operation.commit();
-    expect(width.getSnapshot().status).toBe('done');
+
+    expect(actor?.getSnapshot().status).toBe('done');
     expect(fixture.service.actor('main.ts')).toBeUndefined();
     expect(fixture.files.has(fixtureRecordPath)).toBe(false);
   });
@@ -595,10 +312,10 @@ describe('parameter set service behaviours', () => {
     const fixture = serviceFixture();
     const manifest = await fixture.manifestFor();
     await fixture.service.resolve('main.ts', manifest);
-    const width = fixture.editor(manifest, 'width');
-    fixture.type(width, '30', false);
+    fixture.service.setDraft(fixture.draftKey('/width', 'width'), { text: '30', valid: true });
     const refusals: unknown[] = [];
     fixture.service.subscribeUnsavedDrafts((refusal) => refusals.push(refusal));
+
     await expect(
       fixture.service.prepareFileOperation({ kind: 'move', oldPath: 'main.ts', newPath: 'renamed.ts' }),
     ).rejects.toMatchObject({ code: 'UNSAVED_PARAMETER_DRAFTS' });
@@ -606,6 +323,7 @@ describe('parameter set service behaviours', () => {
       { operation: 'relocate', drafts: [{ entry: 'main.ts', label: 'Width', reason: 'unsubmitted' }] },
     ]);
     expect(fixture.service.actor('main.ts')).toBeDefined();
+
     fixture.service.discardDrafts('main.ts');
     const prepared = await fixture.service.prepareFileOperation({
       kind: 'move',
@@ -620,7 +338,8 @@ describe('parameter set service behaviours', () => {
     const fixture = serviceFixture();
     const manifest = await fixture.manifestFor();
     await fixture.service.resolve('main.ts', manifest);
-    fixture.type(fixture.editor(manifest, 'width'), '30', false);
+    fixture.service.setDraft(fixture.draftKey('/width', 'width'), { text: '30', valid: true });
+
     await expect(fixture.service.close()).rejects.toMatchObject({
       code: 'UNSAVED_PARAMETER_DRAFTS',
       message: 'Some parameter edits were typed but not entered. Enter or discard them first.',
@@ -629,6 +348,41 @@ describe('parameter set service behaviours', () => {
     fixture.service.discardDrafts();
     await expect(fixture.service.close()).resolves.toBeUndefined();
     expect(fixture.writes).toHaveLength(0);
+    expect([...fixture.listeners.values()].every((current) => current.size === 0)).toBe(true);
+    await expect(fixture.service.close()).resolves.toBeUndefined();
+  });
+
+  it('names an invalid draft in its refusal', async () => {
+    const fixture = serviceFixture();
+    const manifest = await fixture.manifestFor();
+    await fixture.service.resolve('main.ts', manifest);
+    fixture.service.setDraft(fixture.draftKey('/width', 'width'), { text: 'not a quantity', valid: false });
+
+    await expect(fixture.service.close()).rejects.toMatchObject({
+      code: 'UNSAVED_PARAMETER_DRAFTS',
+      drafts: [{ entry: 'main.ts', reason: 'invalid' }],
+    });
+    fixture.service.discardDrafts();
+    await fixture.service.close();
+  });
+
+  it('retains one draft per editor instance and clears it individually', async () => {
+    const fixture = serviceFixture();
+    const manifest = await fixture.manifestFor();
+    await fixture.service.resolve('main.ts', manifest);
+    const changes = vi.fn();
+    fixture.service.subscribeDrafts(changes);
+    fixture.service.setDraft(fixture.draftKey('/width', 'panel'), { text: '30', valid: true });
+    fixture.service.setDraft(fixture.draftKey('/width', 'dialog'), { text: '31', valid: true });
+
+    expect(fixture.service.draft(fixture.draftKey('/width', 'panel'))).toEqual({ text: '30', valid: true });
+    expect(fixture.service.draft(fixture.draftKey('/width', 'dialog'))).toEqual({ text: '31', valid: true });
+    fixture.service.setDraft(fixture.draftKey('/width', 'panel'), undefined);
+    expect(fixture.service.draft(fixture.draftKey('/width', 'panel'))).toBeUndefined();
+    expect(fixture.service.unsavedDrafts()).toHaveLength(1);
+    expect(changes).toHaveBeenCalledTimes(3);
+    fixture.service.discardDrafts();
+    await fixture.service.close();
   });
 
   it('moves the record with its source on commit and restores it on rollback', async () => {
@@ -677,17 +431,24 @@ describe('parameter set service behaviours', () => {
   });
 
   it('reports an unreadable record as a typed failure and resets it against the preserved bytes', async () => {
-    const legacy = JSON.stringify({ activeGroup: 'default', groups: { default: { values: { width: 7 } } } });
-    const fixture = serviceFixture(legacy);
+    const retired = JSON.stringify({
+      recordVersion: 1,
+      profile: 'tau-json-structure-units-03-v1',
+      activeGroup: 'default',
+      groups: { default: { values: { width: 7 }, bindings: {} } },
+    });
+    const fixture = serviceFixture(retired);
     const manifest = await fixture.manifestFor();
     await expect(fixture.service.resolve('main.ts', manifest)).rejects.toMatchObject({ code: 'INVALID_RECORD' });
     expect(fixture.writes).toHaveLength(0);
-    expect(decoder.decode(fixture.files.get(fixtureRecordPath))).toBe(legacy);
+    expect(decoder.decode(fixture.files.get(fixtureRecordPath))).toBe(retired);
+
     await fixture.service.resetRecord('main.ts');
-    expect(fixture.writes[0]?.preconditions).toEqual([{ path: fixtureRecordPath, expected: encoder.encode(legacy) }]);
+    expect(fixture.writes[0]?.preconditions).toEqual([{ path: fixtureRecordPath, expected: encoder.encode(retired) }]);
     await expect(fixture.service.resolve('main.ts', manifest)).resolves.toMatchObject({
-      entry: { recordVersion: 1, groups: { default: { values: {} } } },
+      entry: { activeGroup: 'default', groups: { default: { values: {} } } },
     });
+    expect(decoder.decode(fixture.files.get(fixtureRecordPath))).not.toContain('recordVersion');
   });
 
   it('commits one non-numeric field without rewriting the group', async () => {
@@ -702,29 +463,63 @@ describe('parameter set service behaviours', () => {
     expect([fixture.stored('width'), fixture.stored('label')]).toEqual([50, 'lid']);
   });
 
-  it('refuses to create a row before its authority is known and seeds one after resolve', async () => {
+  it('resolves the target on demand when a field is committed before any read', async () => {
     const fixture = serviceFixture();
     const manifest = await fixture.manifestFor();
-    expect(() => fixture.editor(manifest, 'early')).toThrow(expect.objectContaining({ code: 'TARGET_UNAVAILABLE' }));
-    await fixture.service.resolve('main.ts', manifest);
-    expect(fixture.editor(manifest, 'late').getSnapshot().context.acknowledged).toMatchObject({ value: 100 });
+    expect(await fixture.commit(manifest, { pointer: '/width', value: 30, base: 100 })).toMatchObject({
+      status: 'committed',
+    });
+    expect(fixture.stored('width')).toBe(30);
+    await fixture.service.close();
   });
 
-  it('refreshes rows from an external record change', async () => {
+  it('adopts an external record change', async () => {
     const fixture = serviceFixture();
     const manifest = await fixture.manifestFor();
     await fixture.service.replaceValues('main.ts', manifest, { width: 50 });
-    const width = fixture.editor(manifest, 'width');
-    const snapshot = fixture.service.snapshot('main.ts')!;
     fixture.files.set(
       fixtureRecordPath,
-      encoder.encode(
-        JSON.stringify({ ...snapshot.entry, groups: { default: { values: { width: 64 } } }, lastOperation: undefined }),
-      ),
+      encoder.encode(JSON.stringify({ activeGroup: 'default', groups: { default: { values: { width: 64 } } } })),
     );
     fixture.notify();
+
     await vi.waitFor(() => {
-      expect(width.getSnapshot().context.acknowledged.value).toBe(64);
+      expect(fixture.service.snapshot('main.ts')?.entry.groups['default']?.values['width']).toBe(64);
     });
+    await fixture.service.close();
+  });
+
+  it('refuses a display preference rather than persisting it', async () => {
+    const fixture = serviceFixture();
+    const manifest = await fixture.manifestFor();
+    await fixture.service.resolve('main.ts', manifest);
+
+    // Only an authored unit reaches `groups.<g>.units`; a display choice stays with its client.
+    expect(
+      await fixture.service.submit('main.ts', manifest, {
+        requestId: 'unit-1',
+        draftGeneration: 1,
+        expected: fixture.service.snapshot('main.ts')!.identity,
+        pressure: 'final',
+        operation: { kind: 'display-preference', parameterId: 'width', unit: 'cm' },
+      }),
+    ).toMatchObject({ status: 'rejected', code: 'DISPLAY_ONLY_ACTION' });
+    expect(fixture.writes).toHaveLength(0);
+    await fixture.service.close();
+  });
+
+  it('serializes the record canonically with a trailing newline and no retired keys', async () => {
+    const fixture = serviceFixture();
+    const manifest = await fixture.manifestFor();
+    await fixture.service.replaceValues('main.ts', manifest, { width: 50, height: 12 });
+
+    const text = decoder.decode(fixture.files.get(fixtureRecordPath));
+    expect(text).toBe(
+      `${JSON.stringify(
+        { activeGroup: 'default', groups: { default: { values: { height: 12, width: 50 } } } },
+        undefined,
+        2,
+      )}\n`,
+    );
   });
 });

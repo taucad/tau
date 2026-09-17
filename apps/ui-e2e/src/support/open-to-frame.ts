@@ -130,7 +130,6 @@ const seedProject = async (userData: string, slug: string): Promise<{ example: s
   await writeFile(
     join(directory, '.tau', 'parameters', `${entry}.json`),
     JSON.stringify({
-      recordVersion: 1,
       profile: 'tau-json-structure-units-03-v1',
       activeGroup: 'default',
       groups: { default: { values: {} } },

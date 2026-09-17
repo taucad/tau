@@ -1,4 +1,5 @@
 import type { ParameterSnapshot } from '@taucad/parameters';
+import type { CheckedFileWriteResult } from '@taucad/types';
 import { expect, it } from 'vitest';
 import { createActor, fromCallback, fromPromise, waitFor } from 'xstate';
 import { parameterSetMachine, submitParameterRequest } from '#parameter-set.machine.js';
@@ -51,19 +52,55 @@ it('settles a repeated value as a durable no-op without another write', async ()
   harness.actor.stop();
 });
 
-it('holds an unprovable write as indeterminate, refuses new work, and reconciles on resolve', async () => {
+it('settles a failed write that left the record untouched as a known refusal', async () => {
   const fixture = await parameterSetHarness();
   fixture.actor.stop();
-  let visible = fixture.snapshot;
   let writes = 0;
   const actor = createActor(
     parameterSetMachine.provide({
       actors: {
-        loadParameterSet: fromPromise(async () => structuredClone(visible)),
-        commitParameterSet: fromPromise(async ({ input }) => {
+        loadParameterSet: fromPromise(async () => structuredClone(fixture.snapshot)),
+        commitParameterSet: fromPromise(async (): Promise<CheckedFileWriteResult> => {
           writes += 1;
-          void input;
-          throw new Error('Reply lost; replica not yet visible');
+          throw new Error('Reply lost; nothing was written');
+        }),
+      },
+    }),
+    { input: { target: fixture.snapshot.target } },
+  ).start();
+  await waitFor(actor, (state) => state.matches({ open: 'ready' }));
+  // The record still holds the bytes the change was planned from, so the write provably never landed.
+  await expect(submitParameterRequest(actor, groupRequest('refused', fixture))).resolves.toMatchObject({
+    status: 'known-not-applied-failure',
+    code: 'WRITE_FAILED',
+  });
+  await waitFor(actor, (state) => state.matches({ open: 'ready' }));
+  expect(writes).toBe(1);
+  actor.stop();
+});
+
+it('holds a write over foreign bytes as indeterminate, then accepts commands again after a watch event', async () => {
+  const fixture = await parameterSetHarness();
+  fixture.actor.stop();
+  // A third party replaced the record, so neither the intended nor the planned bytes are on disk.
+  const foreign: ParameterSnapshot = {
+    ...fixture.snapshot,
+    bytes: new TextEncoder().encode('{"activeGroup":"x","groups":{"x":{"values":{}}}}\n'),
+  };
+  let visible: ParameterSnapshot = fixture.snapshot;
+  let lost = true;
+  const actor = createActor(
+    parameterSetMachine.provide({
+      actors: {
+        loadParameterSet: fromPromise(async () => structuredClone(visible)),
+        commitParameterSet: fromPromise(async ({ input }): Promise<CheckedFileWriteResult> => {
+          if (lost) {
+            lost = false;
+            visible = foreign;
+            throw new Error('Reply lost after an unknown write');
+          }
+          visible = structuredClone(input.proposed);
+          return { status: 'applied', content: input.proposed.bytes! };
         }),
       },
     }),
@@ -72,19 +109,24 @@ it('holds an unprovable write as indeterminate, refuses new work, and reconciles
   const settled: ParameterSetOutcome[] = [];
   actor.on('settled', (event) => settled.push(event.outcome));
   await waitFor(actor, (state) => state.matches({ open: 'ready' }));
-  const request = groupRequest('uncertain', fixture);
-  actor.send({ type: 'submit', request });
+  actor.send({ type: 'submit', request: groupRequest('uncertain', fixture) });
   await waitFor(actor, (state) => state.matches({ open: 'uncertain' }));
-  expect(settled).toEqual([expect.objectContaining({ status: 'indeterminate', requestId: 'uncertain' })]);
+  expect(settled).toEqual([
+    expect.objectContaining({ status: 'indeterminate', requestId: 'uncertain', code: 'UNKNOWN_APPLICATION' }),
+  ]);
   await expect(submitParameterRequest(actor, groupRequest('blocked', fixture))).resolves.toMatchObject({
     status: 'rejected',
     code: 'WRITE_UNCERTAIN',
   });
-  visible = actor.getSnapshot().context.change!.proposed;
-  actor.send({ type: 'resolve' });
+  // The lockout must not wedge the editor: a later watch event reloads and reopens the actor, and
+  // the already-settled command is never settled a second time.
+  visible = fixture.snapshot;
+  actor.send({ type: 'watch.changed' });
   await waitFor(actor, (state) => state.matches({ open: 'ready' }));
-  expect(settled.at(-1)).toMatchObject({ status: 'committed', requestId: 'uncertain', write: 'reconciled' });
-  expect(writes).toBe(1);
+  await expect(submitParameterRequest(actor, groupRequest('after', fixture))).resolves.toMatchObject({
+    status: 'committed',
+  });
+  expect(settled.filter(({ requestId }) => requestId === 'uncertain')).toHaveLength(1);
   actor.stop();
 });
 
@@ -186,7 +228,7 @@ it('settles immediate startup submission and three edits with one load and no se
   await waitFor(actor, (state) => state.status === 'done');
 });
 
-it('does not apply a completed duplicate twice and rejects a content collision', async () => {
+it('refuses a re-delivered group creation from the record, without a durable receipt', async () => {
   const harness = await parameterSetHarness();
   const request: ParameterSetRequest = {
     requestId: 'duplicate',
@@ -196,14 +238,32 @@ it('does not apply a completed duplicate twice and rejects a content collision',
     expected: harness.snapshot.identity,
     operation: { kind: 'create-group', group: 'second' },
   };
-  const first = await harness.submit(request);
-  const second = await harness.submit(request);
-  expect(first.status).toBe('committed');
-  expect(second.status).toBe('committed');
+  expect(await harness.submit(request)).toMatchObject({ status: 'committed' });
+  // The record itself, not a stored request id, is what refuses the second delivery.
+  expect(await harness.submit(request)).toMatchObject({ status: 'rejected', code: 'GROUP_ALREADY_EXISTS' });
+  expect(harness.counts().writes).toBe(1);
+  harness.actor.stop();
+});
+
+it('rejects a reused request id while its original command is still in flight', async () => {
+  const gate = Promise.withResolvers<void>();
+  const harness = await parameterSetHarness(false, { gate: gate.promise });
+  const request: ParameterSetRequest = {
+    requestId: 'reused',
+    draftGeneration: 1,
+    fingerprint: 'label',
+    pressure: 'final',
+    expected: harness.snapshot.identity,
+    operation: { kind: 'create-group', group: 'second' },
+  };
+  const active = harness.submit(request);
+  await waitFor(harness.actor, (state) => state.matches({ open: 'applying' }));
   expect(await harness.submit({ ...request, operation: { kind: 'create-group', group: 'third' } })).toMatchObject({
     status: 'rejected',
     code: 'REQUEST_ID_COLLISION',
   });
+  gate.resolve();
+  expect(await active).toMatchObject({ status: 'committed' });
   expect(harness.counts().writes).toBe(1);
   harness.actor.stop();
 });
@@ -318,7 +378,8 @@ it('coalesces queued edits, settles every superseded request, and preserves fina
   expect(await transientB).toMatchObject({ status: 'cancelled-before-apply', requestId: 'transient-b' });
   gate.resolve();
   expect(await active).toMatchObject({ status: 'committed' });
-  expect(await final).toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+  // The record, not a whole-record revision, refuses the duplicate group the queued final names.
+  expect(await final).toMatchObject({ status: 'rejected', code: 'GROUP_ALREADY_EXISTS' });
   expect(await late).toMatchObject({ status: 'rejected', requestId: 'late' });
   expect(harness.counts().writes).toBe(1);
   harness.actor.stop();
@@ -395,6 +456,103 @@ it('rejects unsafe and over-budget requests before retaining or invoking them', 
   expect(accessed).toBe(false);
   expect(harness.counts().writes).toBe(0);
   expect(harness.actor.getSnapshot().context.active).toBeUndefined();
+  harness.actor.stop();
+});
+
+/**
+ * The filesystem worker delivers `fileWritten` asynchronously, so every commit echoes back as a
+ * change. The echo must never reject the command that follows it.
+ * Evidence for the original defect: `docs/research/artifacts/parameter-story-simplification-review/
+ * runs/2026-09-17-review/evidence/echo-race.test.ts`, which settled `r2` as `STALE_MANIFEST`.
+ */
+const widthEdit =
+  (harness: { snapshot: ParameterSnapshot }) =>
+  (requestId: string, value: number, expected: ParameterSetRequest['expected']): ParameterSetRequest => ({
+    requestId,
+    draftGeneration: 1,
+    expected,
+    pressure: 'final',
+    operation: {
+      kind: 'native-value',
+      group: 'default',
+      parameterId: 'width',
+      resource: harness.snapshot.manifest.bindings['/width']!.schema.resource,
+      pointer: '/width',
+      value,
+    },
+  });
+
+it('commits the next command when the previous write echoes during planning', async () => {
+  const harness = await parameterSetHarness();
+  const edit = widthEdit(harness);
+  expect(await harness.submit(edit('r1', 30, harness.snapshot.identity))).toMatchObject({ status: 'committed' });
+  const settled = harness.submit(edit('r2', 31, harness.actor.getSnapshot().context.current!.identity));
+  expect(harness.actor.getSnapshot().matches({ open: 'planning' })).toBe(true);
+  harness.actor.send({ type: 'watch.changed' });
+  expect(await settled).toMatchObject({ status: 'committed' });
+  expect(harness.counts().writes).toBe(2);
+  harness.actor.stop();
+});
+
+it('commits a command whose write is already applying when the previous echo lands', async () => {
+  const gate = Promise.withResolvers<void>();
+  const harness = await parameterSetHarness(false, { gate: gate.promise });
+  const settled = harness.submit(widthEdit(harness)('r1', 30, harness.snapshot.identity));
+  await waitFor(harness.actor, (state) => state.matches({ open: 'applying' }));
+  harness.actor.send({ type: 'watch.changed' });
+  gate.resolve();
+  expect(await settled).toMatchObject({ status: 'committed' });
+  await waitFor(harness.actor, (state) => state.matches({ open: 'ready' }));
+  expect(harness.counts().writes).toBe(1);
+  harness.actor.stop();
+});
+
+it('re-plans against fresh bytes when a foreign write lands during planning, and only base refuses', async () => {
+  const harness = await parameterSetHarness();
+  const edit = widthEdit(harness);
+  // A foreign writer moved a different field; the edit still commits against the fresh record.
+  const other = await harness.submit({
+    ...edit('foreign', 0, harness.snapshot.identity),
+    operation: { kind: 'create-group', group: 'other' },
+  });
+  expect(other).toMatchObject({ status: 'committed' });
+  const current = harness.actor.getSnapshot().context.current!;
+  const widthBinding = current.manifest.bindings['/width']!;
+  const base = {
+    pointer: '/width',
+    value: 25.4,
+    binding: {
+      unit: widthBinding.unit!,
+      quantityKind: widthBinding.quantityKind!,
+      space: widthBinding.space!,
+      representation: widthBinding.representation,
+    },
+  } as const;
+  const settled = harness.submit({ ...edit('r1', 31, current.identity), base });
+  harness.actor.send({ type: 'watch.changed' });
+  expect(await settled).toMatchObject({ status: 'committed' });
+  // The same field now holds 31, so a second edit built on the stale base 25.4 is refused.
+  expect(
+    await harness.submit({ ...edit('r2', 32, harness.actor.getSnapshot().context.current!.identity), base }),
+  ).toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+  harness.actor.stop();
+});
+
+it('displaces an older queued value edit for the same field with a newer one', async () => {
+  const gate = Promise.withResolvers<void>();
+  const harness = await parameterSetHarness(false, { gate: gate.promise });
+  const edit = widthEdit(harness);
+  const active = harness.submit(edit('active', 30, harness.snapshot.identity));
+  await waitFor(harness.actor, (state) => state.matches({ open: 'applying' }));
+  const superseded = harness.submit(edit('queued', 31, harness.snapshot.identity));
+  const latest = harness.submit(edit('latest', 32, harness.snapshot.identity));
+  expect(harness.actor.getSnapshot().context.pending.map(({ requestId }) => requestId)).toEqual(['latest']);
+  expect(await superseded).toMatchObject({ status: 'cancelled-before-apply', requestId: 'queued' });
+  gate.resolve();
+  expect(await active).toMatchObject({ status: 'committed' });
+  expect(await latest).toMatchObject({ status: 'committed' });
+  // The superseded release never reached a write.
+  expect(harness.counts().writes).toBe(2);
   harness.actor.stop();
 });
 

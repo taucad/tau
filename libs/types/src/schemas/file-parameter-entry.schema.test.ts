@@ -1,18 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { ZodError } from 'zod';
-import {
-  fileParameterEntrySchema,
-  fileParameterRecordProfile,
-  getActiveGroupValues,
-  parameterEntryPath,
-  parametersDirectory,
-} from '@taucad/types';
+import { fileParameterEntrySchema, getActiveGroupValues, parameterEntryPath, parametersDirectory } from '@taucad/types';
 
 const validEntry = {
-  recordVersion: 1,
-  profile: fileParameterRecordProfile,
   activeGroup: 'default',
-  order: ['default', 'alternate'],
   groups: {
     default: {
       values: {
@@ -30,40 +21,15 @@ const validEntry = {
 
 const emptyGroupName = '';
 
-const recordIdentity = {
-  sourceRevision: 'source:1',
-  manifestRevision: 'manifest:1',
-  valueRevision: 'value:1',
-  dependencyRevision: 'dependency:1',
-};
-
-const attributedBinding = {
-  parameter: { value: 'width', stability: 'stable' },
-  schema: { resource: 'urn:test:schema', pointer: '/properties/width' },
-  unit: 'mm',
-  quantityKind: 'length',
-  provenance: {
-    unit: {
-      origin: 'inferred',
-      producer: 'tau-defaults',
-      sourceRevision: 'source:1',
-      profile: 'tau-defaults-v1',
-      rule: 'length-name',
-      evidence: 'width',
-    },
-    quantityKind: {
-      origin: 'project',
-      producer: '.tau/parameters/main.ts.json',
-      sourceRevision: 'source:1',
-      evidence: 'binding:/width',
-    },
-  },
-};
-
 describe('fileParameterEntrySchema', () => {
-  it('should reject a record without its version and profile markers', () => {
-    const { recordVersion: _recordVersion, profile: _profile, ...unversioned } = validEntry;
-    expect(fileParameterEntrySchema.safeParse(unversioned).success).toBe(false);
+  it('should reject the pre-simplification record format outright', () => {
+    expect(
+      fileParameterEntrySchema.safeParse({
+        recordVersion: 1,
+        profile: 'tau-json-structure-units-03-v1',
+        ...validEntry,
+      }).success,
+    ).toBe(false);
   });
 
   it('should parse nested JSON parameter values without loss', () => {
@@ -74,12 +40,7 @@ describe('fileParameterEntrySchema', () => {
     const values = JSON.parse(
       '{"__proto__":{"unitsAuditMarker":42},"constructor":{"prototype":{"value":7}}}',
     ) as Record<string, unknown>;
-    const parsed = fileParameterEntrySchema.parse({
-      recordVersion: 1,
-      profile: fileParameterRecordProfile,
-      activeGroup: 'default',
-      groups: { default: { values } },
-    });
+    const parsed = fileParameterEntrySchema.parse({ activeGroup: 'default', groups: { default: { values } } });
 
     expect(Object.hasOwn(parsed.groups['default']!.values, '__proto__')).toBe(true);
     expect(Reflect.get(parsed.groups['default']!.values, '__proto__')).toEqual({ unitsAuditMarker: 42 });
@@ -87,22 +48,16 @@ describe('fileParameterEntrySchema', () => {
     expect(Reflect.get({}, 'unitsAuditMarker')).toBeUndefined();
   });
 
-  it('should atomically retain bindings, complete per-field provenance, identities, and a correlated receipt', () => {
+  it('should retain the units a person authored beside the values', () => {
     const entry = {
       ...validEntry,
       groups: {
         ...validEntry.groups,
         default: {
           ...validEntry.groups.default,
-          bindings: { '/width': attributedBinding },
+          units: { '/width': 'in' },
+          sourceUnits: { '/width': 'in' },
         },
-      },
-      identity: recordIdentity,
-      lastOperation: {
-        requestId: 'request-1',
-        fingerprint: 'operation-1',
-        outcome: 'committed',
-        ...recordIdentity,
       },
     };
 
@@ -180,83 +135,33 @@ describe('fileParameterEntrySchema', () => {
   });
 
   it.each([
-    { name: 'duplicate order entries', order: ['default', 'default'] },
-    { name: 'an unknown ordered group', order: ['default', 'missing'] },
-  ])('should reject $name', ({ order }) => {
-    expect(fileParameterEntrySchema.safeParse({ ...validEntry, order }).success).toBe(false);
+    { name: 'a group display order', extra: { order: ['default', 'alternate'] } },
+    { name: 'a persisted binding copy', extra: { groups: { default: { values: {}, bindings: {} } } } },
+    { name: 'a persisted record identity', extra: { identity: { manifestRevision: 'manifest:1' } } },
+    { name: 'a durable operation receipt', extra: { lastOperation: { requestId: 'request-1' } } },
+    { name: 'a schema profile marker', extra: { profile: 'tau-json-structure-units-03-v1' } },
+  ])('should reject $name', ({ extra }) => {
+    expect(fileParameterEntrySchema.safeParse({ ...validEntry, ...extra }).success).toBe(false);
   });
 
   it.each([
-    {
-      name: 'provenance without a binding value',
-      binding: { ...attributedBinding, unit: undefined },
-    },
-    {
-      name: 'incomplete inferred provenance',
-      binding: {
-        ...attributedBinding,
-        provenance: {
-          ...attributedBinding.provenance,
-          unit: {
-            origin: 'inferred',
-            producer: 'rule',
-            sourceRevision: 'source:1',
-          },
-        },
-      },
-    },
-    {
-      name: 'incomplete project provenance',
-      binding: {
-        ...attributedBinding,
-        provenance: {
-          ...attributedBinding.provenance,
-          unit: {
-            origin: 'project',
-            producer: 'project',
-            sourceRevision: 'source:1',
-          },
-        },
-      },
-    },
-  ])('should reject a persisted binding with $name', ({ binding }) => {
-    const entry = {
-      activeGroup: 'default',
-      groups: {
-        default: { values: { width: 10 }, bindings: { '/width': binding } },
-      },
-    };
-
-    expect(fileParameterEntrySchema.safeParse(entry).success).toBe(false);
+    { name: 'an empty unit', units: { '/width': '' } },
+    { name: 'a blank unit', units: { '/width': '   ' } },
+    { name: 'a non-pointer key', units: { width: 'mm' } },
+  ])('should reject an authored unit map with $name', ({ units }) => {
+    expect(
+      fileParameterEntrySchema.safeParse({ activeGroup: 'default', groups: { default: { values: {}, units } } })
+        .success,
+    ).toBe(false);
   });
 
-  it('should reject a receipt without record identity', () => {
-    const entry = {
-      ...validEntry,
-      lastOperation: {
-        requestId: 'request-1',
-        fingerprint: 'operation-1',
-        outcome: 'committed',
-        ...recordIdentity,
-      },
-    };
-    expect(fileParameterEntrySchema.safeParse(entry).success).toBe(false);
-  });
-
-  it('should preserve a durable receipt after the current source identity advances', () => {
-    const entry = {
-      ...validEntry,
-      identity: recordIdentity,
-      lastOperation: {
-        requestId: 'request-1',
-        fingerprint: 'operation-1',
-        outcome: 'committed',
-        ...recordIdentity,
-        valueRevision: 'value:older',
-      },
-    };
-
-    expect(fileParameterEntrySchema.parse(entry).lastOperation?.valueRevision).toBe('value:older');
+  it('should reject a source unit without the unit the value is authored in', () => {
+    expect(
+      fileParameterEntrySchema.safeParse({
+        activeGroup: 'default',
+        groups: { default: { values: {}, sourceUnits: { '/width': 'in' } } },
+      }).success,
+    ).toBe(false);
   });
 });
 

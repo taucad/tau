@@ -8,7 +8,6 @@ import {
   compileParameterManifest,
   resolveParameterSnapshot,
   planParameterChange,
-  classifyParameterReceipt,
   resolveParameterInputValues,
   readParameterRecord,
 } from '@taucad/parameters';
@@ -66,14 +65,7 @@ const manifest = async (sourceUnit = true, revision = digest) =>
 
 it('plans one checked first write without creating a record during resolution', async () => {
   const admitted = await manifest();
-  const source = { path: 'main.ts', expected: 'source:1' };
-  const current = await resolveParameterSnapshot({
-    target,
-    manifest: admitted,
-    path,
-    bytes: null,
-    preconditions: [source],
-  });
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
   expect(current.bytes).toBeNull();
   const before = structuredClone(current);
   const request: ParameterSetRequest = {
@@ -91,29 +83,20 @@ it('plans one checked first write without creating a record during resolution', 
       value: 101,
     },
   };
-  const plan = await planParameterChange({ current, request });
+  const plan = planParameterChange({ current, request });
   if (plan.status !== 'prepared') {
     throw new Error(JSON.stringify(plan));
   }
-  expect(plan.write.preconditions).toEqual([source, { path, expected: null }]);
+  // The sidecar's own bytes are the only precondition: no source file is pinned or digested.
+  expect(plan.write.preconditions).toEqual([{ path, expected: null }]);
   expect(plan.proposed.entry.groups['default']?.values).toEqual({ width: 101 });
   expect(current).toEqual(before);
-  expect(await planParameterChange({ current, request })).toEqual(plan);
-  expect(plan.fingerprint).not.toBe(request.fingerprint);
-  expect(classifyParameterReceipt({ change: plan, current: plan.proposed })).toBe('committed');
-  expect(classifyParameterReceipt({ change: plan, current })).toBe('indeterminate');
-  expect(classifyParameterReceipt({ change: plan, refused: true })).toBe('known-not-applied');
+  expect(planParameterChange({ current, request })).toEqual(plan);
 });
 
 it('rejects deleting the last group through the pure API', async () => {
-  const current = await resolveParameterSnapshot({
-    target,
-    manifest: await manifest(),
-    path,
-    bytes: null,
-    preconditions: [],
-  });
-  const plan = await planParameterChange({
+  const current = resolveParameterSnapshot({ target, manifest: await manifest(), path, bytes: null });
+  const plan = planParameterChange({
     current,
     request: {
       requestId: 'delete',
@@ -129,7 +112,7 @@ it('rejects deleting the last group through the pure API', async () => {
 
 it('requires explicit source-unit confirmation before one record write', async () => {
   const admitted = await manifest();
-  const current = await resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null, preconditions: [] });
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
   const request: ParameterSetRequest = {
     requestId: 'source-unit',
     draftGeneration: 0,
@@ -149,15 +132,13 @@ it('requires explicit source-unit confirmation before one record write', async (
         sourceRevision: admitted.source.revision,
         capability: 'change-source-unit:preserve-size:v1',
       },
-      dependencies: admitted.identity.sourceFiles,
     },
   };
-  const plan = await planParameterChange({ current, request });
+  const plan = planParameterChange({ current, request });
   expect(plan.status).toBe('prepared');
   if (plan.status !== 'prepared' || plan.confirmation === undefined) {
     throw new Error('Expected confirmation plan');
   }
-  expect(plan.confirmation.planFingerprint).toBe(plan.fingerprint);
   let writes = 0;
   const authority: Pick<ParameterAuthority, 'writeChecked'> = {
     writeChecked: async (write) => {
@@ -324,12 +305,11 @@ it('writes arbitrary JSON property names without traversing object prototypes', 
     dependency: digest,
     middleware: digest,
   });
-  const current = await resolveParameterSnapshot({
+  const current = resolveParameterSnapshot({
     target,
     manifest: await admitted,
     path,
     bytes: null,
-    preconditions: [],
   });
   const operation: ParameterSetRequest = {
     requestId: 'write-prototype-keys',
@@ -364,7 +344,7 @@ it('writes arbitrary JSON property names without traversing object prototypes', 
   };
 
   try {
-    const plan = await planParameterChange({ current, request: operation });
+    const plan = planParameterChange({ current, request: operation });
     expect(plan.status).toBe('prepared');
     if (plan.status !== 'prepared') {
       throw new Error('Expected a ready plan');
@@ -391,16 +371,10 @@ it('writes arbitrary JSON property names without traversing object prototypes', 
 
 it('uses the captured sidecar bytes if the caller mutates input during manifest admission', async () => {
   const admitted = await manifest();
-  const input: Parameters<typeof resolveParameterSnapshot>[0] = {
-    target,
-    manifest: admitted,
-    path,
-    bytes: null,
-    preconditions: [],
-  };
-  const loading = resolveParameterSnapshot(input);
+  const input: Parameters<typeof resolveParameterSnapshot>[0] = { target, manifest: admitted, path, bytes: null };
+  const loaded = resolveParameterSnapshot(input);
   Object.assign(input, { bytes: new TextEncoder().encode('invalid') });
-  await expect(loading).resolves.toMatchObject({ bytes: null, entry: { recordVersion: 1 } });
+  expect(loaded).toMatchObject({ bytes: null, entry: { activeGroup: 'default' } });
 });
 
 const twoFieldManifest = async () =>
@@ -477,8 +451,8 @@ const fieldRequest = (
 
 it('rebases a draft whose record revision moved only because another field changed', async () => {
   const admitted = await twoFieldManifest();
-  const current = await resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null, preconditions: [] });
-  const first = await planParameterChange({
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  const first = planParameterChange({
     current,
     request: fieldRequest(admitted, {
       requestId: 'width:1',
@@ -491,10 +465,12 @@ it('rebases a draft whose record revision moved only because another field chang
   if (first.status !== 'prepared') {
     throw new Error(JSON.stringify(first));
   }
-  expect(first.proposed.identity.valueRevision).not.toBe(current.identity.valueRevision);
+  // The record moved; its identity did not, because only the manifest is named there.
+  expect(first.proposed.bytes).not.toEqual(current.bytes);
+  expect(first.proposed.identity).toEqual(current.identity);
 
   // The height editor still holds the pre-edit revision and has never been refreshed.
-  const second = await planParameterChange({
+  const second = planParameterChange({
     current: first.proposed,
     request: fieldRequest(admitted, {
       requestId: 'height:1',
@@ -513,8 +489,8 @@ it('rebases a draft whose record revision moved only because another field chang
 
 it('refuses a rebase when the field the draft touches changed underneath it', async () => {
   const admitted = await twoFieldManifest();
-  const current = await resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null, preconditions: [] });
-  const first = await planParameterChange({
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  const first = planParameterChange({
     current,
     request: fieldRequest(admitted, {
       requestId: 'width:1',
@@ -527,7 +503,7 @@ it('refuses a rebase when the field the draft touches changed underneath it', as
   if (first.status !== 'prepared') {
     throw new Error(JSON.stringify(first));
   }
-  const conflicting = await planParameterChange({
+  const conflicting = planParameterChange({
     current: first.proposed,
     request: fieldRequest(admitted, {
       requestId: 'width:2',
@@ -543,8 +519,8 @@ it('refuses a rebase when the field the draft touches changed underneath it', as
 
 it('never rebases across a manifest revision change', async () => {
   const admitted = await twoFieldManifest();
-  const current = await resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null, preconditions: [] });
-  const stale = await planParameterChange({
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  const stale = planParameterChange({
     current,
     request: fieldRequest(admitted, {
       requestId: 'height:1',
@@ -560,8 +536,8 @@ it('never rebases across a manifest revision change', async () => {
 
 it('confines field-scoped rebase to a value edit of the same pointer in the active group', async () => {
   const admitted = await twoFieldManifest();
-  const current = await resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null, preconditions: [] });
-  const first = await planParameterChange({
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  const first = planParameterChange({
     current,
     request: fieldRequest(admitted, {
       requestId: 'width:1',
@@ -623,15 +599,13 @@ it('confines field-scoped rebase to a value edit of the same pointer in the acti
     ],
   ];
   const plans = await Promise.all(
-    scoped.map(
-      async ([label, request]) => [label, await planParameterChange({ current: first.proposed, request })] as const,
-    ),
+    scoped.map(async ([label, request]) => [label, planParameterChange({ current: first.proposed, request })] as const),
   );
   for (const [label, plan] of plans) {
     expect(plan.status, label).toBe('rejected');
   }
 
-  const inactive = await planParameterChange({
+  const inactive = planParameterChange({
     current: first.proposed,
     request: {
       ...fieldRequest(admitted, {
@@ -652,13 +626,14 @@ it('confines field-scoped rebase to a value edit of the same pointer in the acti
       },
     },
   });
-  expect(inactive).toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+  // A base never reaches a group the record does not hold; the record itself refuses the edit.
+  expect(inactive).toMatchObject({ status: 'rejected' });
 });
 
 it('keeps a source-unit choice across unrelated source edits and asks for rebind when its declaration changes', async () => {
   const admitted = await manifest();
-  const current = await resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null, preconditions: [] });
-  const plan = await planParameterChange({
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  const plan = planParameterChange({
     current,
     request: {
       requestId: 'unit',
@@ -686,8 +661,8 @@ it('keeps a source-unit choice across unrelated source edits and asks for rebind
   }
   const bytes = typeof plan.write.data === 'string' ? new TextEncoder().encode(plan.write.data) : plan.write.data;
   const edited = await manifest(true, contentDigest({ value: `sha256:${'2'.repeat(64)}` }));
-  const later = await resolveParameterSnapshot({ target, manifest: edited, path, bytes, preconditions: [] });
-  const edit = await planParameterChange({
+  const later = resolveParameterSnapshot({ target, manifest: edited, path, bytes });
+  const edit = planParameterChange({
     current: later,
     request: {
       requestId: 'value',
@@ -706,27 +681,26 @@ it('keeps a source-unit choice across unrelated source edits and asks for rebind
   });
   expect(edit.status).toBe('prepared');
 
+  // The producer no longer advertises the source-unit capability, so the saved claim is refused.
   const undeclared = await manifest(false, contentDigest({ value: `sha256:${'3'.repeat(64)}` }));
-  const outcome = await resolveParameterSnapshot({ target, manifest: undeclared, path, bytes, preconditions: [] }).then(
-    async (snapshot) =>
-      planParameterChange({
-        current: snapshot,
-        request: {
-          requestId: 'value:rebind',
-          draftGeneration: 1,
-          pressure: 'final',
-          expected: snapshot.identity,
-          operation: {
-            kind: 'native-value',
-            group: 'default',
-            parameterId: 'width',
-            resource: undeclared.bindings['/width']!.schema.resource,
-            pointer: '/width',
-            value: 12,
-          },
+  const snapshot = resolveParameterSnapshot({ target, manifest: undeclared, path, bytes });
+  expect(
+    planParameterChange({
+      current: snapshot,
+      request: {
+        requestId: 'value:rebind',
+        draftGeneration: 1,
+        pressure: 'final',
+        expected: snapshot.identity,
+        operation: {
+          kind: 'native-value',
+          group: 'default',
+          parameterId: 'width',
+          resource: undeclared.bindings['/width']!.schema.resource,
+          pointer: '/width',
+          value: 12,
         },
-      }),
-    (error: unknown) => error,
-  );
-  expect(outcome).toMatchObject({ code: 'SOURCE_UNIT_REBIND_REQUIRED' });
+      },
+    }),
+  ).toMatchObject({ code: 'SOURCE_UNIT_REBIND_REQUIRED' });
 });

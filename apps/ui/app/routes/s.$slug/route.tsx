@@ -5,7 +5,7 @@ import { getActiveGroupValues, parameterEntryPath, parseProjectManifestBytes } f
 import type { ProjectManifest } from '@taucad/types';
 import { findBuiltinExample } from '@taucad/tau-examples/builtin';
 import { sharePasswordLimits } from '@taucad/share/artifact';
-import { readParameterRecord } from '@taucad/parameters';
+import { requireParameterRecord } from '@taucad/parameters';
 import type { ShareOpenedArtifact } from '@taucad/share/artifact';
 import { parseShareSlug, parseShareUrl } from '@taucad/share/locator';
 import { isShareError, ShareError } from '@taucad/share/provider';
@@ -95,15 +95,11 @@ export const resolvePortableArtifact = (
   let parameters: Record<string, unknown> = {};
   let parameterDiagnostic: string | undefined;
   if (parameterFile) {
-    const record = readParameterRecord(parameterFile.content, {
-      migrationAvailable: false,
-    });
-    if (record.status === 'current' || record.status === 'legacy-readable' || record.status === 'migration-ready') {
-      parameters = getActiveGroupValues(record.record);
-    } else if (record.status === 'unsupported-preserved') {
-      parameterDiagnostic = 'Unsupported parameter record; source bytes are preserved.';
-    } else {
-      parameterDiagnostic = 'Invalid parameter record; source bytes are preserved.';
+    // The shared record policy: an unusable record is reported, never replaced by defaults silently.
+    try {
+      parameters = getActiveGroupValues(requireParameterRecord(parameterFile.content));
+    } catch (error) {
+      parameterDiagnostic = error instanceof Error ? error.message : String(error);
     }
   }
   return {

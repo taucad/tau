@@ -1,5 +1,4 @@
 // @vitest-environment node
-/* eslint-disable no-await-in-loop -- loader variants are validated sequentially against shared globals */
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 

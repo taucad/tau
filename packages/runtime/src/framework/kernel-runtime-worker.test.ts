@@ -8,7 +8,7 @@ import { createChannelClient, wrapMessagePort } from '@taucad/rpc';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { installWorkerCrashTrap } from '#transport/_internal/worker-crash-trap.js';
 import { createWorkerDispatcher, runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
-import type { RuntimeProtocol, RuntimeTranscodeArgs } from '#types/runtime-protocol.types.js';
+import type { RuntimeProtocol, RuntimeTranscodeArgs, TelemetryEntry } from '#types/runtime-protocol.types.js';
 import type {
   CreateGeometryInput,
   DeserializeNativeHandleInput,
@@ -1288,6 +1288,25 @@ describe('KernelRuntimeWorker kernel selection', () => {
 
       expect(result.success).toBe(true);
       expect(getInitSpy(meshDefinition)).toHaveBeenCalledOnce();
+    });
+
+    it('names the selected kernel on the selection span, so a trace says which kernel ran', async () => {
+      const entries: TelemetryEntry[] = [];
+      const scadDefinition = createMockKernelDefinition('openrscad');
+      const worker = await createMultiKernelWorker([
+        { id: 'openrscad', extensions: ['scad'], definition: scadDefinition },
+      ]);
+      worker.setTelemetrySend((batch) => entries.push(...batch));
+
+      await worker.createGeometry({ file: createGeometryFile('model.scad'), parameters: {} });
+      worker.flushTelemetry();
+
+      /* A resident native engine logs its own identity at fork, so the host log cannot say which
+       * kernel a render used. The trace has to. */
+      expect(entries.find(({ name }) => name === 'kernel.select')?.detail).toMatchObject({
+        file: 'model.scad',
+        kernelId: 'openrscad',
+      });
     });
 
     it('should select a kernel by extension when no detectImport is needed', async () => {

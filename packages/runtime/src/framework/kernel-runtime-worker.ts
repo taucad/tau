@@ -498,12 +498,17 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     runtime: KernelRuntime,
   ): Promise<RuntimeKernelBinding | undefined> {
     const span = runtime.tracer.startSpan('kernel.select', { file: input.entryPath });
+    let selected: { kernelId: string; method: SelectionMethod } | undefined;
     try {
       const selection = await this.selectKernel(input.entryPath, runtime);
       if (!selection) {
         return undefined;
       }
 
+      /* The selected kernel is on the span because nothing else in a trace says which kernel ran:
+       * a desktop host with a resident native engine logs that engine's identity at fork, whatever
+       * the render then selects. */
+      selected = { kernelId: selection.kernel.entry.id, method: selection.method };
       return {
         kernelId: selection.kernel.entry.id,
         kernelVersion: selection.kernel.definition.version,
@@ -514,7 +519,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       this.selectionErrors.set(input.entryPath, error);
       return undefined;
     } finally {
-      span.end();
+      span.end(selected);
     }
   }
 

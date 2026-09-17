@@ -139,7 +139,7 @@ test.skipIf(!codexAvailable)('uses native Tau skills and tools through the Codex
       .getByRole('option', { name: /^Codex/u })
       .first()
       .click();
-    await selectAgentModel(page, 'GPT-5.6-Sol');
+    await selectAgentModel(page, 'GPT-5.6-Luna');
     const gatewayCallsBefore = fixture.gatewayRequests.length;
     await submitPrompt(page, cadInspectionPrompt);
     await expect.poll(() => new URL(page.url()).searchParams.get('chat'), { timeout: 120_000 }).toBeTruthy();
@@ -331,11 +331,11 @@ test.skipIf(!codexAvailable || turbojetSourcePath === undefined)(
           .getByRole('option', { name: /^Codex/u })
           .first()
           .click();
-        await selectAgentModel(page, 'GPT-5.6-Sol');
+        await selectAgentModel(page, 'GPT-5.6-Luna');
       }
 
       const slug = await submitPrompt(page, externalPrompt);
-      const sourcePath = await waitForProjectOnDisk(session.pickedDirectory, slug, { extension: '.py' });
+      const sourcePath = await waitForProjectOnDisk(session.pickedDirectory, slug, { extension: '.py', page });
       await expect.poll(() => new URL(page.url()).searchParams.get('chat'), { timeout: 120_000 }).toBeTruthy();
       const chatId = activeChatId(page);
       const eventsPath = join(dirname(sourcePath), '.tau/chats', chatId, 'events.jsonl');
@@ -511,7 +511,7 @@ test.skipIf(!codexAvailable)(
         .getByRole('option', { name: /^Codex/u })
         .first()
         .click();
-      await selectAgentModel(page, 'GPT-5.6-Sol');
+      await selectAgentModel(page, 'GPT-5.6-Luna');
 
       await submitPrompt(page, externalPrompt);
 
@@ -661,7 +661,7 @@ test.skipIf(!codexAvailable)(
       /* 1–2. The Tau turn, in the default `direct` mode: it creates the project,
        * its first chat, and the first revision every later step names. */
       const slug = await submitPrompt(page, seedPrompt);
-      await waitForProjectOnDisk(session.pickedDirectory, slug, { extension: '.scad' });
+      await waitForProjectOnDisk(session.pickedDirectory, slug, { extension: '.scad', page });
       const directChatId = activeChatId(page);
       /* Re-derived on every read: the slug and the directory are both renamed
        * when the project-name generator answers. */
@@ -726,7 +726,7 @@ test.skipIf(!codexAvailable)(
         .getByRole('option', { name: /^Codex/u })
         .first()
         .click();
-      await selectAgentModel(page, 'GPT-5.6-Sol');
+      await selectAgentModel(page, 'GPT-5.6-Luna');
       await parkPointer(page);
       /* The composer picker replaced the deleted revision-mode selector (W7): a
          branch is made by name, and the chip then names it. */
@@ -965,7 +965,7 @@ test.skipIf(!codexAvailable)(
        * attachment picker (D20). */
       await selectChatModel(page, gatewayFixtureModelName);
       const slug = await submitPrompt(page, seedPrompt);
-      await waitForProjectOnDisk(session.pickedDirectory, slug, { extension: '.scad' });
+      await waitForProjectOnDisk(session.pickedDirectory, slug, { extension: '.scad', page });
 
       const rows = await openExecutionPicker(page);
       expect(rows.join('\n')).toMatch(/Codex/u);
@@ -973,7 +973,7 @@ test.skipIf(!codexAvailable)(
         .getByRole('option', { name: /^Codex/u })
         .first()
         .click();
-      await selectAgentModel(page, 'GPT-5.6-Sol');
+      await selectAgentModel(page, 'GPT-5.6-Luna');
 
       await page
         .locator('input[type="file"][accept*="application/pdf"]')

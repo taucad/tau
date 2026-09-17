@@ -240,6 +240,7 @@ vi.mock('#routes/w.$workspace.$project/project-route-notices.js', async () => {
 });
 
 const routeModule = await import('./project-route.js');
+const sessionsModule = await import('./project-live-sessions.js');
 
 const project = (id: string) =>
   projectToManifest({
@@ -304,7 +305,7 @@ const renderRouteProvider = ({
         shouldOpenFromTauCloud={shouldOpenFromTauCloud}
       >
         {children}
-        <routeModule.ProjectChatRoute />
+        <sessionsModule.ProjectChatRoute />
       </routeModule.ProjectRouteProviders>
     </SessionsProvider>
   );
@@ -402,7 +403,7 @@ describe('project route session identity', () => {
       order.push('editor');
     });
 
-    await routeModule.flushProjectSessionPersistence({
+    await sessionsModule.flushProjectSessionPersistence({
       parameterService: parameters,
       projectRef: project,
       editorRef: editor,
@@ -419,7 +420,7 @@ describe('project route session identity', () => {
     parameters.close.mockRejectedValue(new Error('checked parameter flush failed'));
 
     await expect(
-      routeModule.flushProjectSessionPersistence({
+      sessionsModule.flushProjectSessionPersistence({
         parameterService: parameters,
         projectRef: project,
         editorRef: editor,
@@ -447,7 +448,7 @@ describe('project route session identity', () => {
     editor.getSnapshot.mockReturnValue(editorSnapshotValue);
 
     await expect(
-      routeModule.flushProjectSessionPersistence({
+      sessionsModule.flushProjectSessionPersistence({
         parameterService: parameters,
         projectRef: project,
         editorRef: editor,

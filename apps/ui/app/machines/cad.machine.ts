@@ -202,6 +202,15 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
     throw new Error('File manager not initialized');
   }
 
+  // None of the kernel module graph depends on the filesystem, so load it while we wait for it.
+  const modules = Promise.all([
+    import('@taucad/runtime/client'),
+    import('@taucad/runtime/filesystem'),
+    lazyKernelOptionsFactory(),
+  ]);
+  // oxlint-disable-next-line promise/prefer-await-to-then -- an abort can skip the await below, and an unhandled rejection would take the page with it
+  modules.catch(() => undefined);
+
   const snapshot = await waitFor(fileManagerRef, (state) => state.matches('ready'), { signal });
 
   if (!snapshot.context.openFileSystemBridge) {
@@ -249,12 +258,8 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
 
   signal.throwIfAborted();
 
-  const [{ createRuntimeClient }, { fromFileSystemBridge }] = await Promise.all([
-    import('@taucad/runtime/client'),
-    import('@taucad/runtime/filesystem'),
-  ]);
+  const [{ createRuntimeClient }, { fromFileSystemBridge }, resolveKernelOptions] = await modules;
 
-  const resolveKernelOptions = await lazyKernelOptionsFactory();
   const computeConnection =
     getComputeReuseMode() === 'durable' && snapshot.context.projectId
       ? snapshot.context.openComputeBinding?.(snapshot.context.projectId)

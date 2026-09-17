@@ -1897,4 +1897,36 @@ describe('cadMachine', () => {
       actor.stop();
     });
   });
+
+  describe('kernel connection start-up', () => {
+    it('loads the kernel modules while the file manager is still opening', async () => {
+      const pendingFileManager = createActor(
+        setup({}).createMachine({ initial: 'opening', states: { opening: {}, ready: {} } }),
+      ).start();
+      let factoryCalled = false;
+      const kernelOptionsFactory: LazyKernelOptionsFactory = async () => {
+        factoryCalled = true;
+        return () => mock<ReturnType<KernelOptionsFactory>>();
+      };
+
+      const actor = createActor(cadMachine, {
+        input: {
+          shouldInitializeKernelOnStart: false,
+          fileManagerRef: pendingFileManager as unknown as NonNullable<CadContext['fileManagerRef']>,
+          kernelOptionsFactory,
+          fileSystemRoot: '/projects/test',
+        },
+      }).start();
+
+      // The module graph does not depend on the filesystem, so it must already be loading.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+      expect(factoryCalled).toBe(true);
+      expect(actor.getSnapshot().value).toBe('connecting');
+
+      actor.stop();
+      pendingFileManager.stop();
+    });
+  });
 });

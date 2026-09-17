@@ -569,9 +569,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       createChatFileStore({
         client: fileManager.client,
         projectIds: async () =>
-          (queryClient.getQueryData<ProjectListing>(['projects', { includeDeleted: true }])?.projects ?? []).map(
-            (entry) => entry.manifest.id,
-          ),
+          (queryClient.getQueryData<ProjectListing>(['projects'])?.projects ?? []).map((entry) => entry.manifest.id),
       }),
     [fileManager.client, queryClient],
   );
@@ -1756,10 +1754,6 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       await retryFailedRecoveries();
       const listing = await buildProjectListing(await discoverProjects());
       signal?.throwIfAborted();
-      const visibleListing: ProjectListing = {
-        ...listing,
-        projects: listing.projects.filter((project) => project.library.deletedAt === undefined),
-      };
       // A node workspace is addressed by its absolute host path — the same
       // physical identity `resolveStorageRootKey` derives — where a webaccess
       // one is addressed by its retained-handle id.
@@ -1778,8 +1772,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         candidateCount: selectedProjects.length + selectedConflicts.length,
         conflictCount: selectedConflicts.length,
         publish: async () => {
-          queryClient.setQueryData(['projects', { includeDeleted: true }], listing);
-          queryClient.setQueryData(['projects', { includeDeleted: false }], visibleListing);
+          queryClient.setQueryData(['projects'], listing);
         },
       };
     },

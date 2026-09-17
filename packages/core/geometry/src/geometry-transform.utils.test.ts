@@ -3,6 +3,7 @@ import {
   compactTriangleIndices,
   createVertexTransform,
   transformNormalArray,
+  transformVectorArrayChecked,
   transformVertexArray,
 } from '#geometry-transform.utils.js';
 
@@ -148,5 +149,35 @@ describe('createVertexTransform', () => {
     const result = transformNormalArray([0, 0, 1], { coordinateSystem: 'y-up' });
 
     expect([...result]).toEqual([0, 1, 0]);
+  });
+});
+
+describe('transformVectorArrayChecked', () => {
+  it('rotates and scales in the same pass the trust boundary is checked in', () => {
+    const positions = transformVectorArrayChecked({
+      vectors: [1000, 2000, 3000],
+      kind: 'position',
+      invalidMessage: 'bad mesh',
+    });
+    const directions = transformVectorArrayChecked({
+      vectors: [0, 1, 0],
+      kind: 'direction',
+      invalidMessage: 'bad mesh',
+    });
+
+    // The same mapping the unchecked helpers produce: a kernel validating its worker's bytes should
+    // not have to restate the rotation to get one pass over the array.
+    expect([...positions]).toEqual([...transformVertexArray([1000, 2000, 3000])]);
+    expect([...directions]).toEqual([...transformNormalArray([0, 1, 0])]);
+  });
+
+  it('rejects a non-finite component with the caller\u2019s own message', () => {
+    expect(() =>
+      transformVectorArrayChecked({
+        vectors: [0, Number.NaN, 0],
+        kind: 'position',
+        invalidMessage: 'PicoGK component "hull" contains invalid mesh values.',
+      }),
+    ).toThrow('PicoGK component "hull" contains invalid mesh values.');
   });
 });

@@ -464,6 +464,7 @@ describe('editorMachine', () => {
           [keepUnitId]: { hiddenComponentIds: ['component:Keep'] },
         },
       });
+      expect(actor.getSnapshot().context.viewSettings['view1']?.entryPath).toBeUndefined();
       actor.stop();
     });
 

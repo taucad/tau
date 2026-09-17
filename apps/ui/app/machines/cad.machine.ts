@@ -245,6 +245,8 @@ type RenderModelInput = {
   client: AppRuntimeClient | undefined;
   entryPath: string | undefined;
   parameters: Record<string, unknown>;
+  /** Whether no newer UI render was requested since this one. */
+  isLatestRequest: () => boolean;
 };
 
 const sceneSnapshotReaderActor = fromCallback<SceneSnapshotReaderEvent>(({ sendBack, receive }) => {
@@ -707,11 +709,20 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input })
     throw new Error('No model file is selected');
   }
 
-  await input.client.render({
+  const request = {
     source: { path: input.entryPath },
     parameters: input.parameters,
     content: { includeEdges: true },
-  });
+  } as const;
+  const outcome = await input.client.render(request);
+  // Runtime state events usually stop this actor before the render settles, so ask the machine
+  // whether this is still the latest request. If so, the runtime's watched rerender won, and it
+  // drops a concurrent open of another file (a rename races the watcher reporting the old path
+  // gone). Re-assert this unit's file once.
+  // ponytail: one retry; loop only if a render can keep losing to repeated external edits.
+  if (outcome.superseded && input.isLatestRequest()) {
+    await input.client.render(request);
+  }
 });
 
 /** Traces retained for the telemetry pane. A root span closes its trace, so the cut is trace-aligned. */
@@ -1355,10 +1366,11 @@ export const cadMachine = setup({
         submitting: {
           invoke: {
             src: 'renderModelActor',
-            input: ({ context }) => ({
+            input: ({ context, self }) => ({
               client: context.kernelClient,
               entryPath: context.entryPath,
               parameters: context.parameters,
+              isLatestRequest: () => self.getSnapshot().context.lastRequestedRenderId === context.lastRequestedRenderId,
             }),
             onDone: {
               target: '#cad.idle',

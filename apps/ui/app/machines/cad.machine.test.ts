@@ -6,6 +6,7 @@ import { RenderTimeoutError } from '@taucad/runtime/client';
 import type {
   CapabilitiesManifest,
   KernelIssue,
+  RenderOutcome,
   ProgressiveSceneUpdate,
   SceneNodeId,
   TelemetryEntry,
@@ -30,6 +31,12 @@ const noop = () => {
 };
 
 const createMockAppRuntimeClient = () => createMockRuntimeClient();
+
+/** A render that settled with its own geometry, so the machine has nothing to re-assert. */
+const settledRender = (): RenderOutcome => ({
+  superseded: false,
+  geometry: mock<RenderOutcome & { superseded: false }>().geometry,
+});
 
 const createKernelOptionsFactory = (): LazyKernelOptionsFactory => async () => () =>
   mock<ReturnType<KernelOptionsFactory>>({
@@ -412,6 +419,43 @@ describe('cadMachine', () => {
         content: { includeEdges: true },
       });
       expect(actor.getSnapshot().context.entryPath).toEqual(stubEntryPath);
+      actor.stop();
+    });
+
+    it('should re-assert the entry once when a watched rerender supersedes the render', async () => {
+      const { actor, mockClient } = await startAndConnect();
+      vi.mocked(mockClient.render).mockClear();
+      vi.mocked(mockClient.render).mockResolvedValueOnce({ superseded: true });
+      vi.mocked(mockClient.render).mockResolvedValueOnce(settledRender());
+
+      actor.send({ type: 'setEntryPath', entryPath: 'renamed.ts' });
+
+      await vi.waitFor(() => {
+        expect(mockClient.render).toHaveBeenCalledTimes(2);
+      });
+      expect(vi.mocked(mockClient.render).mock.calls[1]?.[0]).toEqual(
+        expect.objectContaining({ source: { path: 'renamed.ts' } }),
+      );
+      actor.stop();
+    });
+
+    it('should not re-assert a render that a newer entry replaced', async () => {
+      const { actor, mockClient } = await startAndConnect();
+      vi.mocked(mockClient.render).mockClear();
+      const first = Promise.withResolvers<{ superseded: true }>();
+      vi.mocked(mockClient.render).mockReturnValueOnce(first.promise);
+      vi.mocked(mockClient.render).mockResolvedValueOnce(settledRender());
+
+      actor.send({ type: 'setEntryPath', entryPath: 'old.ts' });
+      actor.send({ type: 'setEntryPath', entryPath: 'new.ts' });
+      first.resolve({ superseded: true });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(vi.mocked(mockClient.render).mock.calls.map(([request]) => request.source)).toEqual([
+        { path: 'old.ts' },
+        { path: 'new.ts' },
+      ]);
       actor.stop();
     });
 
@@ -1642,6 +1686,7 @@ describe('cadMachine', () => {
 
     it('should configure the timeout before submitting the first render', async () => {
       const mockClient = createMockAppRuntimeClient();
+      vi.mocked(mockClient.render).mockResolvedValue(settledRender());
       let resolveConnect!: () => void;
       const connectGate = new Promise<void>((resolve) => {
         resolveConnect = resolve;

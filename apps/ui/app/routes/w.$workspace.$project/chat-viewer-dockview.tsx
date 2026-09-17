@@ -22,6 +22,7 @@ import { useProject } from '#hooks/use-project.js';
 import { useFileTreeMap } from '#hooks/use-file-tree.js';
 import { defaultGraphicsSettings, parseGraphicsViewSettings } from '#constants/editor.constants.js';
 import type { GraphicsViewSettings } from '#constants/editor.constants.js';
+import type { ViewState } from '#types/editor.types.js';
 import { ChatViewer } from '#routes/w.$workspace.$project/chat-viewer.js';
 import { Dockview } from '#components/panes/dockview.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
@@ -109,6 +110,26 @@ export function replaceViewerNewTabWithFile({
   });
   onViewCreated(viewId, path);
   placeholder.api.close();
+}
+
+/**
+ * Make viewer panels follow their persisted view state: a renamed file retitles
+ * its panel, and a deleted file (path cleared by the editor machine) closes it.
+ */
+export function reconcileViewerPanelPaths(api: DockviewApi, viewSettings: Record<string, ViewState>): void {
+  for (const panel of api.panels) {
+    const viewState = viewSettings[panel.id];
+    if (!isViewerPanelParameters(panel.params) || !viewState || viewState.entryPath === panel.params.entryPath) {
+      continue;
+    }
+    const { entryPath } = viewState;
+    if (entryPath === undefined) {
+      panel.api.close();
+      continue;
+    }
+    panel.api.updateParameters({ entryPath });
+    panel.api.setTitle(entryPath.split('/').pop() ?? entryPath);
+  }
 }
 
 export function ensureViewerGroup(api: DockviewApi): void {
@@ -511,6 +532,13 @@ export const ViewerDockview = memo(function ({
       removeDisposable.dispose();
     };
   }, [api, projectRef, editorRef, viewSettings]);
+
+  // Follow filesystem renames/deletes routed into the editor machine's view state.
+  useEffect(() => {
+    if (api) {
+      reconcileViewerPanelPaths(api, viewSettings);
+    }
+  }, [api, viewSettings]);
 
   // Tag outgoing tab drags with the viewer MIME so the editor can identify them
   useEffect(() => {

@@ -416,14 +416,17 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       if (attachments === undefined || !attachments.has(input.attachmentId)) {
         return;
       }
-      if (attachments.size > 1) {
-        attachments.delete(input.attachmentId);
+      /* Dropped now, not after the wait: this holder is gone whatever the
+       * utility answers, and a retain that lands inside the wait re-adds its
+       * own id — deleting afterwards would take that re-adoption's id away, or,
+       * when the wait returns early, leave this one held forever. */
+      attachments.delete(input.attachmentId);
+      if (attachments.size > 0) {
         return;
       }
       const generation = attachmentGenerations.get(root);
       const spawned = utility;
       if (spawned === undefined) {
-        attachments.delete(input.attachmentId);
         projectAttachments.delete(root);
         attachmentGenerations.delete(root);
         runtimeContexts.delete(root);
@@ -457,13 +460,12 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         if (attachmentGenerations.get(root) !== generation) {
           return;
         }
-        attachments.delete(input.attachmentId);
-        if (attachments.size === 0) {
-          projectAttachments.delete(root);
-          attachmentGenerations.delete(root);
-          runtimeContexts.delete(root);
-          projectIds.delete(root);
-        }
+        /* An unmoved generation is the proof that nothing retained this root
+         * inside the wait, so the set this release emptied is still empty. */
+        projectAttachments.delete(root);
+        attachmentGenerations.delete(root);
+        runtimeContexts.delete(root);
+        projectIds.delete(root);
       } finally {
         const releasing = (releasingRoots.get(root) ?? 1) - 1;
         if (releasing === 0) {

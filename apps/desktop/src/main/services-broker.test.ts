@@ -210,6 +210,43 @@ describe('createServicesBroker', () => {
     ]);
   });
 
+  it('should drop a released attachment when another window retained the project mid-release', async () => {
+    const { broker, spawns } = brokerHarness();
+    const releaseFrames = (): Array<Record<string, unknown>> =>
+      (spawns[0]?.posted ?? []).filter(
+        (message): message is Record<string, unknown> =>
+          typeof message === 'object' &&
+          message !== null &&
+          'type' in message &&
+          message['type'] === 'agent-host-release',
+      );
+    broker.retainAgentHost({ workspaceRoot: '/home/a', projectId: 'a', attachmentId: 'window-1' });
+    broker.connect('agentHost', { workspaceRoot: '/home/a', projectId: 'a' });
+    const releasing = broker.releaseAgentHost(
+      { workspaceRoot: '/home/a', projectId: 'a', attachmentId: 'window-1' },
+      1000,
+    );
+
+    /* A second window adopts the project while window 1's release is in flight,
+       so the utility refuses that release — but window 1 is still gone. */
+    broker.retainAgentHost({ workspaceRoot: '/home/a', projectId: 'a', attachmentId: 'window-2' });
+    spawns[0]?.message({ type: 'agent-host-released', requestId: releaseFrames()[0]?.['requestId'] });
+    await releasing;
+
+    const remaining = broker.releaseAgentHost(
+      { workspaceRoot: '/home/a', projectId: 'a', attachmentId: 'window-2' },
+      1000,
+    );
+    /* Window 2 is the last holder: its release must reach the utility rather
+       than be absorbed by an attachment nobody holds any more. */
+    expect(releaseFrames()).toHaveLength(2);
+    spawns[0]?.message({ type: 'agent-host-released', requestId: releaseFrames()[1]?.['requestId'] });
+    await remaining;
+
+    spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-a', workspaceRoot: '/home/a' });
+    expect(spawns[0]?.postMessage).toHaveBeenCalledWith({ type: 'runtime-port-refused', requestId: 'runtime-a' });
+  });
+
   it('mints runtime ports only from a main-admitted agent context', () => {
     const { broker, connectRuntime, spawns } = brokerHarness();
     broker.connect('agentHost', {

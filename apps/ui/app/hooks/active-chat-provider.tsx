@@ -54,13 +54,18 @@ import { useKernel } from '#hooks/use-kernel.js';
 import { withTauExecutionModel } from '#utils/chat-execution.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
-import { draftHydrationOf, draftPersistenceFor, flushRecord, useComposerRecord } from '#hooks/composer-record.js';
+import {
+  draftHydrationOf,
+  draftPersistenceFor,
+  flushRecord,
+  storeAttachmentActorFor,
+  useComposerRecord,
+} from '#hooks/composer-record.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import type { ComposerRecordRef } from '#hooks/composer-record.js';
 import { createAttachmentStore } from '#db/attachment-store.js';
 import type { AttachmentStore } from '#db/attachment-store.js';
 import { attachmentUrl } from '#utils/attachment.utils.js';
-import type { Attachment } from '#utils/attachment.utils.js';
 import type { ChatMode } from '@taucad/chat/constants';
 import { useComposerRecordToasts } from '#hooks/use-composer-record-toasts.js';
 
@@ -217,13 +222,7 @@ function useComposerDraftMachine(attachments: AttachmentStore) {
         persistEditDraftActor: noopPersistEditDraftActor,
         persistSelectionActor: noopPersistSelectionActor,
         clearMessageEditActor: noopClearMessageEditActor,
-        storeAttachmentActor: fromSafeAsync<
-          { type: 'attachmentStored'; attachment: Attachment },
-          { bytes: Uint8Array<ArrayBuffer>; mediaType: string; filename?: string }
-        >(async ({ input }) => ({
-          type: 'attachmentStored',
-          attachment: await attachments.put(input.bytes, input.mediaType, input.filename),
-        })),
+        storeAttachmentActor: storeAttachmentActorFor(attachments),
         resizeImageActor,
       },
     });

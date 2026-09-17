@@ -11,7 +11,7 @@
  *
  * The `attachmentProcessing` region is the SINGLE path by which bytes enter a
  * draft. `addDraftAttachment` / `addEditDraftAttachment` accept a raw data URL
- * and enqueue it in `context.attachmentQueue`, after refusing a kind the
+ * (or a document's bytes) and enqueue it in `context.attachmentQueue`, after refusing a kind the
  * selected model cannot read (D20). Entries are processed FIFO: images pass
  * through `resizing` (`resizeImageActor`), documents skip it, and every entry
  * then enters `storing`, where `storeAttachmentActor` hashes and writes the
@@ -30,7 +30,7 @@
  * the record merges those patches over what it read (R5).
  */
 
-import { setup, assign, emit, enqueueActions } from 'xstate';
+import { setup, assertEvent, assign, emit, enqueueActions } from 'xstate';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { MyUIMessage, ModelInputModality, ModelSupport } from '@taucad/chat';
 import { modelSupportsInput } from '@taucad/chat';
@@ -39,16 +39,13 @@ import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 import { base64ToUint8Array } from 'uint8array-extras';
 import { attachmentKind, attachmentReferenceOf, attachmentUrl } from '#utils/attachment.utils.js';
-import type { Attachment, AttachmentKind } from '#utils/attachment.utils.js';
+import type { Attachment, AttachmentKind, AttachmentReference } from '#utils/attachment.utils.js';
 
 /**
- * An attachment held by a draft.
- *
- * `byteLength` is known when this device stored the bytes. A reference read
- * back from a file part does not carry it: the blueprint's file part is
- * `{ mediaType, filename?, url }`, with no size.
+ * An attachment held by a draft: a reference, whose `byteLength` is known only
+ * when this device stored the bytes (S3).
  */
-export type DraftAttachment = Omit<Attachment, 'byteLength'> & { readonly byteLength?: number };
+export type DraftAttachment = AttachmentReference;
 
 /** The selected model, as the kind refusal needs it: what it reads, and its name for the reason. */
 export type DraftAttachmentModel = {
@@ -128,8 +125,16 @@ export type DraftHydration = {
   mode?: ChatMode;
 };
 
-type AddAttachment = {
-  dataUrl: string;
+/**
+ * What an attachment arrives as: an image or document data URL, or a
+ * document's bytes as read, so a large PDF is never base64-decoded on the
+ * main thread (S7). Images always arrive as data URLs, for `resizing`.
+ */
+export type DraftAttachmentSource = string | { readonly bytes: Uint8Array<ArrayBuffer>; readonly mediaType: string };
+
+type AttachmentInput = { dataUrl: string } | { bytes: Uint8Array<ArrayBuffer>; mediaType: string };
+
+type AddAttachment = AttachmentInput & {
   filename?: string;
   /** Keep a generated capture byte for byte instead of resizing it. */
   preserveOriginal?: boolean;
@@ -211,12 +216,16 @@ const notDataUrlError = (): Error => new Error('The attachment is not a base64 d
 
 type Enqueued = { entry: AttachmentQueueEntry } | { error: Error };
 
-/** Build the queue entry for one data URL. A document is decoded here; an image waits for `resizing`. */
+/**
+ * Build the queue entry for one attachment. A document's bytes are taken as
+ * given, or decoded from its data URL; an image waits for `resizing`.
+ */
 const queueEntryFor = (
-  dataUrl: string,
+  source: AttachmentInput,
   options: { target: DraftTarget; editMessageId?: string; filename?: string; preserveOriginal: boolean },
 ): Enqueued => {
-  const mediaType = dataUrlPattern.exec(dataUrl)?.[1]?.toLowerCase();
+  const mediaType =
+    'bytes' in source ? source.mediaType.toLowerCase() : dataUrlPattern.exec(source.dataUrl)?.[1]?.toLowerCase();
   if (mediaType === undefined) {
     return { error: notDataUrlError() };
   }
@@ -228,10 +237,15 @@ const queueEntryFor = (
     ...(options.editMessageId === undefined ? {} : { editMessageId: options.editMessageId }),
     ...(options.filename === undefined ? {} : { filename: options.filename }),
   };
-  if (attachmentKind(mediaType) === 'image') {
-    return { entry: { ...base, dataUrl } };
+  if ('bytes' in source) {
+    return attachmentKind(mediaType) === 'image'
+      ? { error: new Error('An image must arrive as a data URL, so it can be resized.') }
+      : { entry: { ...base, bytes: source.bytes } };
   }
-  const decoded = decodeDataUrl(dataUrl);
+  if (attachmentKind(mediaType) === 'image') {
+    return { entry: { ...base, dataUrl: source.dataUrl } };
+  }
+  const decoded = decodeDataUrl(source.dataUrl);
   return decoded ? { entry: { ...base, bytes: decoded.bytes } } : { error: notDataUrlError() };
 };
 
@@ -270,7 +284,7 @@ const legacyEntries = (
 ): AttachmentQueueEntry[] =>
   legacy.flatMap((dataUrl) => {
     // Already processed when it was first attached, so it is kept byte for byte.
-    const result = queueEntryFor(dataUrl, { target, editMessageId, preserveOriginal: true });
+    const result = queueEntryFor({ dataUrl }, { target, editMessageId, preserveOriginal: true });
     return 'entry' in result ? [result.entry] : [];
   });
 
@@ -286,33 +300,6 @@ const touch = (
 
 const withoutEdit = (edits: Record<string, MyUIMessage>, messageId: string): Record<string, MyUIMessage> =>
   Object.fromEntries(Object.entries(edits).filter(([id]) => id !== messageId));
-
-// One array per combination, so a selector returning them compares equal across snapshots.
-const noKinds: readonly AttachmentKind[] = [];
-const imageKinds: readonly AttachmentKind[] = ['image'];
-const documentKinds: readonly AttachmentKind[] = ['document'];
-const allKinds: readonly AttachmentKind[] = ['image', 'document'];
-
-/**
- * The attachment kinds a draft holds, for the send gate to check against the
- * selected model (D20). The same kinds always return the same array.
- *
- * @param context - The draft machine's context.
- * @param target - The main draft or the open edit.
- * @returns The kinds present, images first.
- */
-export function attachmentKinds(
-  context: Pick<DraftMachineContext, 'draftAttachments' | 'editDraftAttachments'>,
-  target: DraftTarget,
-): readonly AttachmentKind[] {
-  const attachments = target === 'main' ? context.draftAttachments : context.editDraftAttachments;
-  const hasImage = attachments.some((attachment) => attachmentKind(attachment.mediaType) === 'image');
-  const hasDocument = attachments.some((attachment) => attachmentKind(attachment.mediaType) === 'document');
-  if (hasImage) {
-    return hasDocument ? allKinds : imageKinds;
-  }
-  return hasDocument ? documentKinds : noKinds;
-}
 
 /** Whether the queue head is an attachment for `target` (and, for an edit, for the edit still open). */
 const headAddresses = (context: DraftMachineContext, target: DraftTarget): boolean => {
@@ -425,7 +412,7 @@ export const draftMachine = setup({
         return;
       }
       const target: DraftTarget = event.type === 'addDraftAttachment' ? 'main' : 'edit';
-      const result = queueEntryFor(event.dataUrl, {
+      const result = queueEntryFor(event, {
         target,
         editMessageId: target === 'edit' ? context.activeEditMessageId : undefined,
         filename: event.filename,
@@ -961,14 +948,8 @@ export const draftMachine = setup({
           invoke: {
             src: 'clearMessageEditActor',
             input({ event }) {
-              const { messageId } = event as {
-                type: 'clearMessageEdit';
-                messageId: string;
-              };
-
-              return {
-                messageId,
-              };
+              assertEvent(event, 'clearMessageEdit');
+              return { messageId: event.messageId };
             },
             onDone: 'idle',
             onError: 'idle',

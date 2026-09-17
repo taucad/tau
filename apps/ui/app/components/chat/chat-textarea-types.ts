@@ -5,7 +5,7 @@ import type { ToolSelection } from '@taucad/chat';
 import { tauEditorPanelDragMime, tauFileDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
 import { useDraftActions, useDraftSelector } from '#hooks/use-chat.js';
 import type { DraftAttachmentOptions } from '#hooks/use-chat.js';
-import type { DraftAttachment } from '#hooks/draft.machine.js';
+import type { DraftAttachment, DraftAttachmentSource } from '#hooks/draft.machine.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { attachmentSendBlockReason } from '#utils/chat.utils.js';
 import {
@@ -44,6 +44,12 @@ export type ChatTextareaSubmitPayload = {
   /** The draft's stored attachments; the chat client promotes them before sending. */
   readonly attachments: readonly AttachmentReference[];
 };
+
+/** A dropped or picked file as the draft takes it: an image as a data URL, a document as its bytes (S7). */
+const readAttachmentSource = async (file: File): Promise<DraftAttachmentSource> =>
+  file.type.startsWith('image/')
+    ? readFileAsDataUrl(file)
+    : { bytes: new Uint8Array(await file.arrayBuffer()), mediaType: file.type };
 
 /**
  * What an entry point may say about an attachment it adds. The selected model
@@ -347,14 +353,14 @@ export function useChatTextareaLogic({
    * machine's, which names the model.
    */
   const addAttachment = useCallback(
-    (dataUrl: string, options?: ChatAttachmentAddOptions) => {
-      if (dataUrl.startsWith('data:image/') && !imageInputSupported) {
+    (source: DraftAttachmentSource, options?: ChatAttachmentAddOptions) => {
+      if (typeof source === 'string' && source.startsWith('data:image/') && !imageInputSupported) {
         rejectUnsupportedImageInput();
         return;
       }
 
       const add = mode === 'main' ? addDraftAttachment : addEditDraftAttachment;
-      add(dataUrl, { ...options, model: attachmentModel });
+      add(source, { ...options, model: attachmentModel });
     },
     [
       mode,
@@ -386,9 +392,10 @@ export function useChatTextareaLogic({
           continue;
         }
         try {
+          // A document goes in as bytes; only an image needs a data URL, for resizing (S7).
           // oxlint-disable-next-line no-await-in-loop -- reading files sequentially keeps attachment order
-          const dataUrl = await readFileAsDataUrl(file);
-          addAttachment(dataUrl, file.name ? { filename: file.name } : undefined);
+          const source = await readAttachmentSource(file);
+          addAttachment(source, file.name ? { filename: file.name } : undefined);
         } catch {
           toast.error(file.type.startsWith('image/') ? 'Failed to read image' : 'Failed to read file');
         }

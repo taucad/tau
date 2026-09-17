@@ -222,7 +222,7 @@ describe('createVertexResponseShim', () => {
     ).toBe('plan the cube');
   });
 
-  it('should leave every non-Vertex provider byte-identical through the gateway transport', async () => {
+  it('should leave every non-Vertex provider stream unchanged through the gateway transport', async () => {
     const textFor = async (providerKind: ModelProviderKind): Promise<string> => {
       const transport = createGatewayModelTransport({
         baseUrl: 'https://gateway.example',

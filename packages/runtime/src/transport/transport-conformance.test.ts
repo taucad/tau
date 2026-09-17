@@ -24,9 +24,9 @@ import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
 import type { Geometry } from '@taucad/types';
 import { z } from 'zod';
 
-import { fromFileSystemBridge, fromMemoryFs } from '#filesystem/runtime-filesystem.js';
+import { fromFileSystemBridge, fromFsLike, fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import { fromNodeFs } from '#filesystem/from-node-fs.js';
-import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
+import type { FsLike, RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { createRuntimeClient } from '#client/runtime-client-core.js';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
@@ -997,14 +997,16 @@ describe('transport conformance — web-socket (C2)', () => {
   });
 
   it.each([
-    ['inline without watch', fromMemoryFs(), false],
+    /* `fsLike` has no watch channel of its own; the memory store does (D15). */
+    ['inline without watch', fromFsLike({ promises: {} } as unknown as FsLike), false],
     [
-      'channel without watch',
+      'channel over a watching store',
       fromFileSystemBridge(() => createFileSystemBridgePort(extractInlineFileSystem(fromMemoryFs())!)),
-      false,
+      true,
     ],
     /* Never read — only `typeof fs.watch === 'function'` is under test. */
     ['inline with watch', fromNodeFs(import.meta.dirname), true],
+    ['inline memory with watch', fromMemoryFs(), true],
   ] as const)(
     'serves the consumer filesystem over a second socket %s',
     async (_label, fileSystem: RuntimeFileSystem, watchable: boolean) => {

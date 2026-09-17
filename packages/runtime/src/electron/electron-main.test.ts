@@ -363,6 +363,58 @@ describe('Electron main runtime helpers', () => {
     handle.dispose();
   });
 
+  it('adopts a prewarmed spare for a matching fork context and keeps one warm', async () => {
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    liveUtilities.length = 0;
+    const handle = registerElectronRuntimeMain({ utilityEntry: '/dist/main/kernel-host.js' });
+
+    handle.prewarm();
+    expect(liveUtilities).toHaveLength(1);
+    const spare = liveUtilities[0];
+    handle.connect({ purpose: 'main-process-client' });
+
+    /* The request was served by the process that was already running — no fork
+     * stands between it and the RPC hello — and a fresh spare took its place. */
+    expect(spare?.postMessage).toHaveBeenCalledOnce();
+    expect(liveUtilities).toHaveLength(2);
+    expect(liveUtilities[1]?.postMessage).not.toHaveBeenCalled();
+    handle.dispose();
+    expect(liveUtilities[1]?.kill).toHaveBeenCalledOnce();
+
+    /* A context that resolves to a different environment is a different pool
+     * key: the spare stays untouched and the request forks its own. */
+    liveUtilities.length = 0;
+    const keyed = registerElectronRuntimeMain({
+      utilityEntry: '/dist/main/kernel-host.js',
+      forkEnvAllowlist: [tauElectronDebugEnvName],
+      resolveFork: (context) => ({ env: { [tauElectronDebugEnvName]: context['debug'] ?? '0' } }),
+    });
+    keyed.prewarm();
+    keyed.connect({ purpose: 'main-process-client', context: { debug: '1' } });
+    expect(liveUtilities[0]?.postMessage).not.toHaveBeenCalled();
+    expect(liveUtilities[1]?.postMessage).toHaveBeenCalledOnce();
+    keyed.dispose();
+    liveUtilities.length = 0;
+  });
+
+  it('refuses a fork past the utility cap with a named error', async () => {
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    liveUtilities.length = 0;
+    const handle = registerElectronRuntimeMain({ utilityEntry: '/dist/main/kernel-host.js', maxUtilities: 2 });
+
+    const first = handle.connect({ purpose: 'main-process-client' });
+    handle.connect({ purpose: 'main-process-client' });
+    const refused = (): unknown => handle.connect({ purpose: 'main-process-client' });
+
+    expect(refused).toThrow(/2 utility processes/u);
+    expect(refused).toThrow(expect.objectContaining({ name: 'ElectronRuntimeUtilityLimitError' }));
+    /* The cap bounds processes, not lifetime leases: a released slot is reusable. */
+    first.dispose();
+    expect(refused).not.toThrow();
+    handle.dispose();
+    liveUtilities.length = 0;
+  });
+
   it('kills only the utility process addressed by a renderer release', async () => {
     const { registerElectronRuntimeMain } = await import('#electron/main.js');
     const sender = { once: vi.fn() };

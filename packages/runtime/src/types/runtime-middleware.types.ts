@@ -82,8 +82,6 @@ export type KernelMiddlewareRuntime<
   filesystem: KernelFileSystem;
   /** Shared compute reuse facet for middleware-owned work. `off` carries no operations. */
   readonly compute: KernelComputeCapability;
-  /** Live scene output is requested from this build; a terminal artifact cannot replace its execution. */
-  readonly progressiveSceneRequested: boolean;
   /** Type-safe state for persisting data during the wrap hook execution */
   state: MiddlewareState<State>;
   /** Resolved options (optionsSchema defaults merged with caller overrides) */

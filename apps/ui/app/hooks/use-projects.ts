@@ -32,9 +32,11 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
     error,
     refetch,
   } = useQuery({
-    queryKey: ['projects', { includeDeleted }],
+    // One key for one whole-workspace discovery pass per navigation: the deleted rows are
+    // filtered below rather than scanned again under a second key (W21).
+    queryKey: ['projects'],
     async queryFn() {
-      return getProjectListing({ includeDeleted });
+      return getProjectListing({ includeDeleted: true });
     },
     enabled: !isWorkerLoading,
     // No poll: worker filesystem events and cross-tab root broadcasts already
@@ -131,7 +133,9 @@ export function useProjects(options?: { includeDeleted?: boolean }) {
   );
 
   return {
-    projects: listing.projects.map(projectLibraryEntryToListItem),
+    projects: listing.projects
+      .map(projectLibraryEntryToListItem)
+      .filter((project) => includeDeleted || project.deletedAt === undefined),
     conflicts: listing.conflicts,
     recoveries: listing.recoveries,
     workspaceBindingRepairs: listing.workspaceBindingRepairs,

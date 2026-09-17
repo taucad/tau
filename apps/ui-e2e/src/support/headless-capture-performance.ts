@@ -1,9 +1,12 @@
 /* eslint-disable @nx/enforce-module-boundaries -- the measurement contract has one owner, shared by both harnesses. */
 import { z } from 'zod';
-// oxlint-disable-next-line no-restricted-imports -- one owner for the measurement contract both harnesses answer to.
-import { maximumBudgetCoefficientOfVariation } from '../../../runtime-e2e/src/benchmarks/measurement-tags.ts';
-// oxlint-disable-next-line no-restricted-imports -- same owner, type only.
+/* oxlint-disable no-restricted-imports -- one owner for the measurement contract both harnesses answer to. */
+import {
+  maximumBudgetCoefficientOfVariation,
+  readContention,
+} from '../../../runtime-e2e/src/benchmarks/measurement-tags.ts';
 import type { MeasurementTags } from '../../../runtime-e2e/src/benchmarks/measurement-tags.ts';
+/* oxlint-enable no-restricted-imports -- measurement-owner import scope ends here. */
 
 /* oxlint-disable tau-lint/no-time-unit-suffix -- The durable benchmark artifact names its millisecond unit explicitly. */
 
@@ -182,6 +185,43 @@ export const compareMilliseconds = (baseline: number, candidate: number): Benchm
   speedup: baseline / candidate,
   result: candidate <= baseline ? 'improvement' : 'regression',
 });
+
+/**
+ * Assemble the conditions this capture run was measured under (charter D14, I13).
+ *
+ * The browser cannot read a load average, so the runner states it: a run that did not record one
+ * records no tags at all, and `budgetVerdict` refuses it. An invented reading would bind a budget
+ * to a number nobody took.
+ *
+ * @param environment - The `import.meta.env` the spec was built with.
+ * @param observed - What the page itself reported: its adapter, isolation, and CPU count.
+ * @returns The tags, or `undefined` when the run recorded no load average.
+ */
+export const readBenchmarkMeasurement = (
+  environment: Readonly<Record<string, string | undefined>>,
+  observed: {
+    readonly adapter: MeasurementTags['adapter'];
+    readonly crossOriginIsolated: boolean;
+    readonly cpuCount: number;
+  },
+): MeasurementTags | undefined => {
+  const loadAverage1m = Number(environment['VITE_TAU_MEASUREMENT_LOAD_1M']);
+  if (!Number.isFinite(loadAverage1m)) {
+    return undefined;
+  }
+  return {
+    build: environment['VITE_TAU_MEASUREMENT_BUILD'] === 'development' ? 'development' : 'production',
+    wasmVariant: environment['VITE_TAU_MEASUREMENT_WASM_VARIANT'] ?? 'none',
+    adapter: observed.adapter,
+    kernelProcess: { kind: 'worker', role: 'headless capture renderer' },
+    crossOriginIsolated: observed.crossOriginIsolated,
+    contention: readContention({
+      loadAverage1m,
+      cpuCount: observed.cpuCount,
+      operatorTag: environment['VITE_TAU_MEASUREMENT_CONTENTION'],
+    }),
+  };
+};
 
 export const adapterCohort = (adapter: BenchmarkArtifact['environment']['adapter']): string =>
   `${adapter.backend}:${adapter.deviceType}:${adapter.name}`;

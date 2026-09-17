@@ -410,8 +410,6 @@ export type CreateMiddlewareRuntimeOptions = {
   filesystem: KernelFileSystem;
   /** Shared deterministic compute reuse service. */
   compute: KernelComputeCapability;
-  /** Whether this build must execute its observable scene output. False outside progressive builds. */
-  progressiveSceneRequested?: boolean;
   /** Array of dependencies for cache key computation */
   dependencies: readonly Dependency[];
   /** Pre-computed SHA-256 hash of all dependencies */
@@ -442,7 +440,6 @@ export function createMiddlewareRuntime<
     middlewareName,
     filesystem,
     compute,
-    progressiveSceneRequested = false,
     dependencies,
     dependencyHash,
     stateSchema,
@@ -456,7 +453,6 @@ export function createMiddlewareRuntime<
     logger: logger ?? createMiddlewareLogger(onLog, middlewareName),
     filesystem,
     compute,
-    progressiveSceneRequested,
     state: createMiddlewareState<State>(stateSchema),
     options: (options ?? {}) as Options,
     dependencies,

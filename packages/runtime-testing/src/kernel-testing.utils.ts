@@ -308,7 +308,6 @@ export const createMockRuntime = <
     logger: createMockLogger(),
     filesystem: createMockFileSystem(options?.filesystemOverrides),
     compute: createMockComputeRuntime(signal),
-    progressiveSceneRequested: false,
     state: createMockState<State>(),
     options: options?.options ?? (deepmerge({}, {}) as Options),
     dependencies: options?.dependencies ?? [],
@@ -438,7 +437,11 @@ const createMockComputeRuntime = (signal: AbortSignal): KernelComputeCapability 
 export const createMockKernelRuntime = (options?: {
   readonly filesystemOverrides?: MockFileSystemOptions;
   readonly signal?: AbortSignal;
-}): KernelRuntime & { logger: ReturnType<typeof createMockLogger>; filesystem: MockFileSystem } => {
+}): KernelRuntime & {
+  logger: ReturnType<typeof createMockLogger>;
+  filesystem: MockFileSystem;
+  tracer: { startSpan: ReturnType<typeof vi.fn> };
+} => {
   const signal = options?.signal ?? new AbortController().signal;
   return {
     signal,
@@ -447,13 +450,6 @@ export const createMockKernelRuntime = (options?: {
     filesystem: createMockFileSystem(options?.filesystemOverrides),
     fileContentCache: new Map(),
     getCompiledWasmModule: () => undefined,
-    scene: {
-      requested: false,
-      publish: async () => ({ type: 'not-requested' }),
-      publishUpdate: async () => ({ type: 'not-requested' }),
-      bookmark: async () => ({ type: 'not-requested' }),
-      flush: async () => undefined,
-    },
     compute: createMockComputeRuntime(signal),
     bundler: {
       resolveDependencies: async () => ({ resolved: [], unresolved: [] }),
@@ -464,7 +460,9 @@ export const createMockKernelRuntime = (options?: {
       success: false,
       issues: [{ message: 'Mock executor', code: 'RUNTIME', severity: 'error' }],
     }),
-    tracer: { startSpan: () => ({ end: () => undefined }) },
+    /* A spy, so a kernel's own spans and their end attributes are assertable — which is how a
+     * native kernel's stage timings are checked now that they are attributes rather than a log. */
+    tracer: { startSpan: vi.fn(() => ({ end: vi.fn() })) },
   };
 };
 

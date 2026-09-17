@@ -17,6 +17,7 @@ import type {
   ParameterSetRequest,
   ParameterSetRequestBase,
   ParameterSetTarget,
+  ParameterSnapshot,
 } from '@taucad/parameters';
 import { joinPath, parentDirectory } from '@taucad/utils/path';
 
@@ -62,7 +63,8 @@ export type UnsavedParameterDraftsRefusal = Readonly<{
 /** Project-lifetime facade over one native parameter actor per authority target. */
 export type ParameterSetService = Readonly<{
   target(filePath: string, authority?: string): ParameterSetTarget;
-  snapshot(filePath: string): ParameterSetAuthoritySnapshot | undefined;
+  /** The entry's held record, with the exact bytes its last committed write persisted. */
+  snapshot(filePath: string): Pick<ParameterSnapshot, 'entry' | 'identity' | 'bytes'> | undefined;
   /** The live set actor for an entry, once `resolve`/`resolveTarget` has created it. */
   actor(filePath: string): ActorRefFrom<typeof parameterSetMachine> | undefined;
   /** Observe set actors being created or retired, for `useSyncExternalStore` readers of `actor`. */
@@ -155,7 +157,7 @@ const operationError = (outcome: Exclude<ParameterSetOutcome, { status: 'committ
   });
 
 /** Immutably set one RFC 6901 pointer inside a group's values, creating intermediate objects. */
-const withPointerValue = (
+export const withPointerValue = (
   values: Readonly<Record<string, JSONValue>>,
   pointer: string,
   value: JSONValue,
@@ -238,7 +240,7 @@ export const createParameterSetService = (
   const absolutePath = (filePath: string): string => joinPath(options.rootDirectory, parameterEntryPath(filePath));
   const actorFor = (filePath: string): ActorRefFrom<typeof parameterSetMachine> | undefined =>
     [...clients.values()].find(({ target }) => target.entry === filePath)?.actor;
-  const currentFor = (filePath: string): ParameterSetAuthoritySnapshot | undefined =>
+  const currentFor = (filePath: string): ParameterSnapshot | undefined =>
     actorFor(filePath)?.getSnapshot().context.current;
   const pathMatches = (candidate: string, path: string): boolean =>
     candidate === path || candidate.startsWith(`${path}/`);

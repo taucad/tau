@@ -30,7 +30,6 @@ import type {
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 import type { KernelIssueCode } from '#types/kernel-issue-codes.js';
 import type { RuntimeContentInput, RuntimeContentKey } from '#types/runtime-content.types.js';
-import type { ProgressiveSceneCapability } from '#types/runtime-scene.types.js';
 
 // =============================================================================
 // Error Types
@@ -121,6 +120,15 @@ export type KernelSuccessResult<T> = {
   data: T;
   issues: KernelIssue[];
   serializedNativeHandle?: unknown;
+  /**
+   * Produce the durable native-handle snapshot on demand (D12).
+   *
+   * No display render reads a snapshot, so a kernel that can make one hands over this thunk and
+   * pays for it only where something asks: an export, a reheat, or a cache write. It resolves
+   * `undefined` once the handle it would read has been disposed, and is stripped from every
+   * published result — it is a function, and functions do not cross the wire.
+   */
+  serializeNativeHandleSnapshot?: () => unknown;
 };
 
 /**
@@ -409,8 +417,8 @@ export type RenderCapability<
   };
   /** Framework content supported by this kernel's composed render route. */
   content?: ContentCapability<RenderContentFor<Kernels, Middleware, Kernel>>;
-  /** Explicit progressive-scene support for this kernel. */
-  progressiveScene: ProgressiveSceneCapability;
+  /** Whether this kernel may serve the transient drag lane (D2). */
+  liveEdit?: boolean;
 };
 // oxlint-enable @typescript-eslint/no-explicit-any
 
@@ -452,7 +460,8 @@ export type CapabilitiesManifest<
         defaults: RenderOptionsFor<Kernels, K>;
       };
       content?: ContentCapability<RenderContentFor<Kernels, Middleware, K>>;
-      progressiveScene: ProgressiveSceneCapability;
+      /** Whether this kernel may serve the transient drag lane (D2). */
+      liveEdit?: boolean;
     };
   };
 };

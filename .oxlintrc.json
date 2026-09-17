@@ -12,6 +12,10 @@
     "**/dist/**",
     "**/dist-*/**",
     "**/generated/**",
+    // `@taucad/api-extractor` output: eight kernels emit `agent/resources.{js,d.ts}` verbatim from
+    // their published API, and a generator is not edited to satisfy a style rule.
+    "**/agent/resources.js",
+    "**/agent/resources.d.ts",
     "**/native/opencascade/geospec_opencascade_single.*",
     "**/wasm/**",
     "**/out-tsc/**",
@@ -981,22 +985,6 @@
     "@typescript-eslint/no-unnecessary-condition": "error"
   },
   "overrides": [
-    {
-      /*
-       * Debt to burn down: three call sites still pass an inline `useCadSelector`
-       * selector (realtime CAD performance charter W9, lane C-ui-main-thread — those
-       * files were outside that lane's write budget). Hoist each selector to module
-       * scope and delete this override.
-       */
-      "files": [
-        "apps/ui/app/routes/w.$workspace.$project/chat-viewer-status.tsx",
-        "apps/ui/app/routes/w.$workspace.$project/chat-stack-trace.tsx",
-        "apps/ui/app/components/geometry/cad/viewer-settings.tsx"
-      ],
-      "rules": {
-        "tau-lint/no-inline-actor-selector": "off"
-      }
-    },
     {
       /*
        * NestJS overrides:

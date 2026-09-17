@@ -8,7 +8,7 @@ import { createChannelClient, wrapMessagePort } from '@taucad/rpc';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { installWorkerCrashTrap } from '#transport/_internal/worker-crash-trap.js';
 import { createWorkerDispatcher, runtimeChannelSessionKey } from '#transport/_internal/runtime-worker-dispatcher.js';
-import type { RuntimeProtocol, RuntimeTranscodeArgs } from '#types/runtime-protocol.types.js';
+import type { RuntimeProtocol, RuntimeTranscodeArgs, TelemetryEntry } from '#types/runtime-protocol.types.js';
 import type {
   CreateGeometryInput,
   DeserializeNativeHandleInput,
@@ -1290,6 +1290,25 @@ describe('KernelRuntimeWorker kernel selection', () => {
       expect(getInitSpy(meshDefinition)).toHaveBeenCalledOnce();
     });
 
+    it('names the selected kernel on the selection span, so a trace says which kernel ran', async () => {
+      const entries: TelemetryEntry[] = [];
+      const scadDefinition = createMockKernelDefinition('openrscad');
+      const worker = await createMultiKernelWorker([
+        { id: 'openrscad', extensions: ['scad'], definition: scadDefinition },
+      ]);
+      worker.setTelemetrySend((batch) => entries.push(...batch));
+
+      await worker.createGeometry({ file: createGeometryFile('model.scad'), parameters: {} });
+      worker.flushTelemetry();
+
+      /* A resident native engine logs its own identity at fork, so the host log cannot say which
+       * kernel a render used. The trace has to. */
+      expect(entries.find(({ name }) => name === 'kernel.select')?.detail).toMatchObject({
+        file: 'model.scad',
+        kernelId: 'openrscad',
+      });
+    });
+
     it('should select a kernel by extension when no detectImport is needed', async () => {
       const scadDefinition = createMockKernelDefinition('openrscad');
 
@@ -2170,6 +2189,74 @@ describe('native-handle snapshot restoration', () => {
     },
   );
 
+  it('serializes the native handle only when something reads the snapshot', async () => {
+    const serializeNativeHandle = vi.fn(({ nativeHandle }: { nativeHandle: unknown }) => ({
+      label: handleLabel(nativeHandle),
+    }));
+    const definition = createMockKernelDefinition('lazy-snapshot-kernel', {
+      exportFormats: { gltf: { optionsSchema: z.object({}) } },
+      createGeometry: async () => ({
+        geometry: gltfGeometry('display'),
+        nativeHandle: { label: 'live-1' },
+        issues: [] as KernelIssue[],
+      }),
+      exportGeometry: async () => ({
+        success: true,
+        data: [exportFile('model.gltf', bytesFor('export'), 'model/gltf+json')],
+        issues: [],
+      }),
+      serializeNativeHandle,
+    });
+    const worker = await createMultiKernelWorker([{ id: 'lazy-snapshot-kernel', extensions: ['mock'], definition }]);
+
+    try {
+      await worker.createGeometry({ file: createGeometryFile('model.mock'), parameters: {} });
+      // D12: a display render never ships the snapshot, so producing one costs the frame for nothing.
+      expect(serializeNativeHandle).not.toHaveBeenCalled();
+
+      const artifact = (worker as unknown as { currentPublishedRender: MaterializedRender }).currentPublishedRender;
+      expect(artifact.serializedNativeHandleSlot?.serializedNativeHandle).toEqual({ label: 'live-1' });
+      expect(serializeNativeHandle).toHaveBeenCalledOnce();
+      // Memoised: a second reader of the same slot pays nothing.
+      expect(artifact.serializedNativeHandleSlot?.serializedNativeHandle).toEqual({ label: 'live-1' });
+      expect(serializeNativeHandle).toHaveBeenCalledOnce();
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('resolves no snapshot once the handle it would read is gone', async () => {
+    const serializeNativeHandle = vi.fn(({ nativeHandle }: { nativeHandle: unknown }) => ({
+      label: handleLabel(nativeHandle),
+    }));
+    const definition = createMockKernelDefinition('dangling-snapshot-kernel', {
+      exportFormats: { gltf: { optionsSchema: z.object({}) } },
+      createGeometry: async () => ({
+        geometry: gltfGeometry('display'),
+        nativeHandle: { label: 'live-1' },
+        issues: [] as KernelIssue[],
+      }),
+      serializeNativeHandle,
+    });
+    const worker = await createMultiKernelWorker([
+      { id: 'dangling-snapshot-kernel', extensions: ['mock'], definition },
+    ]);
+
+    try {
+      await worker.createGeometry({ file: createGeometryFile('model.mock'), parameters: {} });
+      const artifact = (worker as unknown as { currentPublishedRender: MaterializedRender }).currentPublishedRender;
+      await worker.cleanup();
+
+      /* Deferring the work means the thunk outlives the handle. Serialising a disposed kernel shape
+       * is a crash, not a missed optimisation, so a dead handle resolves to nothing and the caller
+       * reheats. */
+      expect(artifact.serializedNativeHandleSlot?.serializedNativeHandle).toBeUndefined();
+      expect(serializeNativeHandle).not.toHaveBeenCalled();
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
   it.each(['identityKey', 'kernelId', 'kernelVersion'] as const)(
     'rejects live and serialized slots with a mismatched %s binding',
     async (field) => {
@@ -2420,7 +2507,14 @@ describe('cache identity regressions', () => {
         };
       },
     });
-    const worker = await createMultiKernelWorker([{ id: 'watcherless-kernel', extensions: ['mock'], definition }]);
+    // The store this fixture serves does watch its own mutations (D15), so the watcherless
+    // freshness path needs a filesystem served without that channel.
+    const worker = new KernelRuntimeWorker({
+      runtime: defineRuntime({
+        kernels: [attachRuntimePluginDefinition({ id: 'watcherless-kernel', extensions: ['mock'] }, () => definition)],
+      }),
+    });
+    await initializeWorkerForTesting(worker, { watchable: false });
 
     const first = await worker.render({ file: createGeometryFile('model.mock'), parameters: {} });
     await getTestFileSystem().writeFile('model.mock', 'second');

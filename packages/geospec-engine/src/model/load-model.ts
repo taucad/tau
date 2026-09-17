@@ -370,7 +370,7 @@ export const createModelLoader = (defaults: CreateModelLoaderOptions = {}): Mana
     if (!forensicSink || !runtime.on) {
       return;
     }
-    stopTelemetry = runtime.on('telemetry', (entries) => {
+    stopTelemetry = runtime.on('telemetry', ({ entries }) => {
       for (const entry of entries) {
         forensicSink?.({ name: entry.name, value: entry.duration, unit: 'milliseconds' });
       }

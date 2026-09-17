@@ -345,19 +345,33 @@ export function ParametersNumber({
       aria-label={ariaLabel}
       onSliderChange={(next) => {
         setDraftValue(next);
-        if (!enableContinualOnChange || frameRef.current !== undefined) {
+        if (frameRef.current !== undefined) {
           return;
         }
         frameRef.current = globalThis.requestAnimationFrame(() => {
           frameRef.current = undefined;
           const native = toNative(next);
-          if (validateParameterInputValue(binding, native) === undefined && !Object.is(native, base.value)) {
+          if (validateParameterInputValue(binding, native) !== undefined || Object.is(native, base.value)) {
+            return;
+          }
+          /* D2: a drag renders on the transient lane, which persists nothing. `scrub` is absent
+           * unless the kernel declared cooperative cancellation, and the row then only shows the
+           * dragged value until the release commits it. */
+          if (commit?.scrub !== undefined) {
+            commit.scrub({ pointer: instancePointer, value: native });
+          } else if (enableContinualOnChange) {
             send(native, 'transient');
           }
         });
       }}
-      onSliderRelease={commitValue}
-      onSliderCancel={revert}
+      onSliderRelease={(next) => {
+        commit?.endScrub?.();
+        commitValue(next);
+      }}
+      onSliderCancel={() => {
+        commit?.endScrub?.();
+        revert();
+      }}
       onValueChange={commitValue}
       onTextChange={(text) => {
         retainDraft(

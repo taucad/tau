@@ -1,10 +1,11 @@
-import createInstance from 'replicad-opencascadejs/multi/init';
+/* The module's default export and one of its named exports are both `createInstance`; the local
+ * name says which one this is. */
+import initOpenCascade from 'replicad-opencascadejs/multi/init';
 import type { OpenCascadeInstance } from 'replicad-opencascadejs/multi/init';
 
 import type { OcctModuleFactory } from '@taucad/occt-core';
 
-/**
- */
+/** The OCCT module factory this loader hands the kernel. */
 export type ReplicadOpenCascadeModuleFactory = OcctModuleFactory<OpenCascadeInstance>;
 
-export const loadReplicadMultiWasm = async (): Promise<ReplicadOpenCascadeModuleFactory> => createInstance;
+export const loadReplicadMultiWasm = async (): Promise<ReplicadOpenCascadeModuleFactory> => initOpenCascade;

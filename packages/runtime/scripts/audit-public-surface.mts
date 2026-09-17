@@ -54,8 +54,6 @@ const allowedMembers: ReadonlySet<string> = new Set([
   'export',
   'transcode',
   'snapshotSource',
-  'readSceneSnapshot',
-  'listSceneBookmarks',
   'on',
   'terminate',
   'shutdown',

@@ -40,15 +40,13 @@ describe('RuntimeProtocol — runtime inventory guard (R20)', () => {
       'evaluateModel',
       'resolveParameters',
       'snapshotSource',
-      'readSceneSnapshot',
-      'listSceneBookmarks',
       'transcode',
       'cleanup',
     ]);
   });
 
-  it('exposes the bounded progressive-scene listen', () => {
-    expect([...runtimeProtocolListenNames]).toEqual(['sceneUpdates']);
+  it('declares no listen streams', () => {
+    expect([...runtimeProtocolListenNames]).toEqual([]);
   });
 
   it('exposes exactly 7 client → worker notify commands (T18)', () => {

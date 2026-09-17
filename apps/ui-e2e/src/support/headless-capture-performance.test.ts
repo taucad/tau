@@ -9,6 +9,7 @@ import {
   compareMilliseconds,
   measurementTagsSchema,
   percentile,
+  readBenchmarkMeasurement,
   readBenchmarkProvenance,
   summarizeSamples,
 } from './headless-capture-performance.js';
@@ -129,6 +130,37 @@ describe('headless capture benchmark evidence', () => {
         VITE_TAU_BENCH_NANORASTER_TARBALL_SHA256: 'c'.repeat(64),
       }),
     ).toMatchObject({ tauRevision: 'tau-revision', nanorasterRevision: 'nanoraster-revision' });
+  });
+});
+
+describe('readBenchmarkMeasurement', () => {
+  const observed = {
+    adapter: { api: 'webgpu', angle: 'metal', name: 'Apple M2', implementation: 'hardware' },
+    crossOriginIsolated: true,
+    cpuCount: 12,
+  } as const;
+
+  it('assembles the tags a budget needs from the run that produced them', () => {
+    const tags = readBenchmarkMeasurement(
+      {
+        VITE_TAU_MEASUREMENT_LOAD_1M: '2.5',
+        VITE_TAU_MEASUREMENT_BUILD: 'production',
+        VITE_TAU_MEASUREMENT_CONTENTION: 'quiet',
+      },
+      observed,
+    );
+
+    expect(measurementTagsSchema.parse(tags)).toMatchObject({
+      build: 'production',
+      adapter: observed.adapter,
+      crossOriginIsolated: true,
+      contention: { tag: 'quiet', source: 'operator', loadAverage1m: 2.5, cpuCount: 12 },
+    });
+  });
+
+  it('records no tags at all when the run did not record its load', () => {
+    // I13: an unknown contention is not a quiet one. Absent tags refuse the budget; invented ones bind it.
+    expect(readBenchmarkMeasurement({}, observed)).toBeUndefined();
   });
 });
 

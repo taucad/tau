@@ -345,7 +345,30 @@ describe('GltfMesh camera lifecycle', () => {
     expect(frameCounts).toEqual([1, 1, 1, 1]);
   });
 
-  it('publishes one bounded telemetry record after first frame and deferred analysis', async () => {
+  it('never builds section topology while no section tool is armed', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const analyze = vi.spyOn(sectionTopology, 'registerGltfSectionSurfaceSources').mockResolvedValue([]);
+    vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValue(createGltf());
+    const view = render(
+      <GltfMesh gltfFile={new Uint8Array([1])} geometryHash='idle' presentationRevision={1} enableMatcap={false} />,
+    );
+    await waitFor(() => {
+      expect(view.container.querySelector('primitive')).not.toBeNull();
+    });
+    mocks.frameCallback?.();
+    // D27: the presentation settles its telemetry without any topology work at all.
+    await waitFor(() => {
+      expect(mocks.graphicsActor.send).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'gltfPresentationMeasured' }),
+      );
+    });
+    await new Promise((resolve) => {
+      setTimeout(resolve, 120);
+    });
+    expect(analyze).not.toHaveBeenCalled();
+  });
+
+  it('publishes one bounded telemetry record after the first frame of an unarmed presentation', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValue(createGltf());
     const view = render(

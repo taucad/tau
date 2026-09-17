@@ -299,20 +299,23 @@ export const listAgentHostPlacements = async (
   } = {},
 ): Promise<readonly AgentHostPlacementTarget[]> => {
   directoryOutage = undefined;
-  const [origin, paired] = await Promise.all([
+  const bridge = (options.bridge ?? desktopBridge)();
+  const [origin, paired, desktopAgents] = await Promise.all([
     (options.discoverOrigin ?? discoverOriginAgentHost)(),
     (options.listHosts ?? listRemoteHosts)().catch((error: unknown) => {
       directoryOutage = error instanceof Error ? error.message : 'Tau could not reach your paired computers.';
       return [];
     }),
+    /* Asked for beside the other two rather than read off the launch bootstrap:
+     * main answers when its CLI and model probes settle, and the window no
+     * longer waits on them (D17). */
+    bridge?.externalAgents().catch(() => []) ?? [],
   ]);
   /* Launcher 2 first: on the desktop build the in-process host is always there
    * — no discovery, no network — so it is the placement a user reaches for. The
    * external agents are the one thing it *cannot* assume: main resolved and
    * CLI-probed them at startup, so they arrive on the bridge exactly as the
    * daemon's arrive on its descriptor. */
-  const bridge = (options.bridge ?? desktopBridge)();
-  const desktopAgents = bridge?.externalAgents ?? [];
   const desktopTarget: readonly AgentHostPlacementTarget[] =
     (options.desktop ?? isDesktopTarget)
       ? [

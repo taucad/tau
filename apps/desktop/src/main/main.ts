@@ -29,6 +29,7 @@ import { installElectronRuntimeHeaders, registerElectronRuntimeMain } from '@tau
 import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import { defaultConfigDirectory, discoverAcpAgents, externalAgentDescriptors } from '@taucad/host';
+import type { ExternalAgentDescriptor } from '@taucad/agent-host';
 
 import kernelUtilityEntry from '#tau/kernel-host.entry?modulePath';
 import servicesUtilityEntry from '#tau/services-host.entry?modulePath';
@@ -77,6 +78,7 @@ import { createOpenFileQueue } from '#main/open-files.js';
 import {
   appIconThemeChannel,
   agentHostSessionChannels,
+  externalAgentsChannel,
   quitChannels,
   bootstrapArgumentPrefix,
   desktopNativeKernelIds,
@@ -210,14 +212,19 @@ app.on('window-all-closed', () => {
 });
 
 const bootstrapElectronApp = async (): Promise<void> => {
-  await app.whenReady();
-  app.dock?.setIcon(applicationIcon);
   /* Finder hands a packaged app launchd's environment, which finds no vendor
    * CLI and carries none of the user's `CODEX_HOME`, proxy or CA settings; fix
    * it once here so discovery, the model probe and every utility fork inherit
    * the user's own login shell (G-ACP-PKG, decision Q13). The e2e specs that
-   * pin the launcher environment opt out inside the helper. */
-  const loginShell = app.isPackaged ? await loginShellEnvironment() : undefined;
+   * pin the launcher environment opt out inside the helper.
+   *
+   * Started before `whenReady`, awaited after (D17): spawning `$SHELL -ilc` cost
+   * 0.96-3.17 s on a packaged launch and nothing in Electron's own init needs
+   * its answer, so the two run side by side instead of end to end. */
+  const loginShellApplied = app.isPackaged ? loginShellEnvironment() : undefined;
+  await app.whenReady();
+  app.dock?.setIcon(applicationIcon);
+  const loginShell = await loginShellApplied;
   const environment = desktopEnvironment();
 
   const logDirectory = join(app.getPath('userData'), 'logs');
@@ -323,6 +330,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
       clientRoot,
       protocol,
       net,
+      /* OQ-P11: development and staging only. Unpackaged is exactly that here — a packaged app
+       * has no developer to take the profile. */
+      jsProfiling: !app.isPackaged,
       contentSecurityPolicy: contentSecurityPolicy(
         storageOrigin === undefined ? authenticatedOrigins : [...authenticatedOrigins, storageOrigin],
       ),
@@ -409,13 +419,15 @@ const bootstrapElectronApp = async (): Promise<void> => {
       }
       const compute: ComputeBinding =
         mode === 'durable' ? { mode, store: computeConnection(computeProjectRoot).store } : { mode };
+      /* The execution root reaches the utility rooted on `fileSystemPort`, and
+       * never through the process environment: an environment that varied per
+       * project would give every open its own pool key, so no warm spare could
+       * ever be adopted (W-L03-4). */
+      const forkEnvironment = { ...resolved.env };
+      delete forkEnvironment['TAU_PROJECT_ROOT'];
       return {
         ...resolved,
-        ...(registeredProjectRoot === undefined
-          ? {}
-          : {
-              env: { ...resolved.env, TAU_PROJECT_ROOT: executionRoot }, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
-            }),
+        env: forkEnvironment,
         compute,
         ...(context['purpose'] === 'ephemeral'
           ? {}
@@ -430,6 +442,10 @@ const bootstrapElectronApp = async (): Promise<void> => {
     },
     ...kernelUtilityDiagnostics(log),
   });
+  /* One kernel utility is forked now rather than when the first project asks
+   * for it: the fork and its module graph are ~176 ms the person would
+   * otherwise wait for with a project already on screen (W-L03-4). */
+  runtimeMain.prewarm();
 
   const trustedComputeRoot = (event: IpcMainInvokeEvent, projectRoot: unknown): string => {
     if (!trusted(event.senderFrame) || typeof projectRoot !== 'string' || !roots.isTrusted(projectRoot)) {
@@ -535,25 +551,46 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * shared budget would either kill it or make every boot wait on it. A probe
    * that fails or times out leaves the agent advertised with no model list — a
    * logged-out CLI must never remove the row. */
-  const acp = await discoverAcpAgents({ resolveFrom: import.meta.url, probeTimeout: 1500 });
-  /* The one canonical descriptor (VSC1): the renderer draws its rows from this,
-   * the utility gets the adapters themselves, and neither builds its own idea
-   * of what an agent is called or which models it offers. */
-  const acpDescriptors = externalAgentDescriptors(acp);
-  log.log('info', 'agent-host.external-agents', {
-    agents: acp.agents.map((adapter) => `${adapter.id}:${(adapter.models ?? []).length}`),
-    refused: acp.refused.map((refusal) => `${refusal.id}: ${refusal.code}`),
-  });
-  services.post({
-    type: 'agentHost',
-    config: {
-      gatewayBaseUrl: desktopAgentGatewayBaseUrl(environment),
-      systemPrompt: desktopAgentSystemPrompt,
-      tauApiUrl: environment['TAU_API_URL']!,
-      tauWebSocketUrl: environment['TAU_WEBSOCKET_URL']!,
-      externalAgents: acp.agents,
-    },
-  });
+  /**
+   * Discover the external agents and configure the host with them.
+   *
+   * A discovery that rejects must not take the process with it: the page then
+   * sees no external agents, which is the same answer a machine with no CLI
+   * gives.
+   *
+   * @returns The descriptors, empty when discovery failed.
+   */
+  const discoverExternalAgents = async (): Promise<readonly ExternalAgentDescriptor[]> => {
+    try {
+      const acp = await discoverAcpAgents({ resolveFrom: import.meta.url, probeTimeout: 1500 });
+      log.log('info', 'agent-host.external-agents', {
+        agents: acp.agents.map((adapter) => `${adapter.id}:${(adapter.models ?? []).length}`),
+        refused: acp.refused.map((refusal) => `${refusal.id}: ${refusal.code}`),
+      });
+      services.post({
+        type: 'agentHost',
+        config: {
+          gatewayBaseUrl: desktopAgentGatewayBaseUrl(environment),
+          systemPrompt: desktopAgentSystemPrompt,
+          tauApiUrl: environment['TAU_API_URL']!,
+          tauWebSocketUrl: environment['TAU_WEBSOCKET_URL']!,
+          externalAgents: acp.agents,
+        },
+      });
+      /* The one canonical descriptor (VSC1): the renderer draws its rows from this,
+       * the utility gets the adapters themselves, and neither builds its own idea
+       * of what an agent is called or which models it offers. */
+      return externalAgentDescriptors(acp);
+    } catch (error) {
+      log.log('error', 'agent-host.external-agents-failed', { message: String(error) });
+      return [];
+    }
+  };
+  /* Not awaited here (D17): the window used to be unable to exist until this
+   * settled, because the descriptors were frozen into its `additionalArguments`.
+   * They are served over `externalAgentsChannel` instead, so a hanging CLI or a
+   * slow model probe delays no pixel. */
+  const externalAgents = discoverExternalAgents();
 
   auth.onChange(() => {
     publishCredential();
@@ -579,6 +616,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     return false;
   };
 
+  ipcMain.handle(externalAgentsChannel, async (event) => (trusted(event.senderFrame) ? externalAgents : []));
   ipcMain.handle('tau:auth:sign-in', async (event) => {
     if (trusted(event.senderFrame)) {
       await auth.signIn();
@@ -761,7 +799,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
             env: clientEnvironment(environment),
             homeRoot,
             runtimeKernelIds: desktopNativeKernelIds,
-            externalAgents: acpDescriptors,
           })}`,
         ],
       },

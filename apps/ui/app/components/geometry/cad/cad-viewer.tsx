@@ -1,7 +1,6 @@
 import { memo, useMemo } from 'react';
 import type { CanvasProps } from '@react-three/fiber';
 import type { Geometry } from '@taucad/types';
-import type { ResolvedSceneSnapshot } from '@taucad/runtime';
 import { GltfMesh } from '#components/geometry/graphics/three/react/gltf-mesh.js';
 import type { ModelComponentSecondaryPointerTarget } from '#components/geometry/graphics/three/react/gltf-mesh.js';
 import { ThreeProvider } from '#components/geometry/graphics/three/three-context.js';
@@ -11,14 +10,12 @@ import { WebglErrorBoundary } from '#components/geometry/cad/webgl-error-boundar
 import { WebglErrorFallback } from '#components/geometry/cad/webgl-fallback.js';
 import { useGraphicsSelector } from '#hooks/use-graphics.js';
 import { mergeGraphicsBackendWithQueryOverride } from '#components/geometry/graphics/graphics-backend.js';
-import { ProgressiveScene } from '#components/geometry/graphics/three/react/progressive-scene.js';
 
 type CadViewerCanvasEventProperties = Pick<CanvasProps, 'eventSource' | 'eventPrefix'>;
 
 type CadViewerProperties = Omit<ThreeViewerProperties, 'graphicsBackend'> &
   CadViewerCanvasEventProperties & {
     readonly geometry?: Geometry;
-    readonly progressiveSceneSnapshot?: ResolvedSceneSnapshot;
     readonly sourceFile?: string;
     readonly enableSurfaces?: boolean;
     readonly enableLines?: boolean;
@@ -31,7 +28,6 @@ type CadViewerProperties = Omit<ThreeViewerProperties, 'graphicsBackend'> &
 export const CadViewer = memo(
   ({
     geometry,
-    progressiveSceneSnapshot,
     sourceFile,
     enableSurfaces = true,
     enableLines = true,
@@ -49,22 +45,12 @@ export const CadViewer = memo(
       [gpuAvailable, graphicsPreference, machineResolvedBackend],
     );
 
-    if (!progressiveSceneSnapshot && geometry?.format === 'svg') {
+    if (geometry?.format === 'svg') {
       return <SvgViewer enableGrid={properties.enableGrid} enableAxes={properties.enableAxes} geometry={geometry} />;
     }
 
     let scene: React.ReactNode;
-    if (progressiveSceneSnapshot) {
-      scene = (
-        <ProgressiveScene
-          snapshot={progressiveSceneSnapshot}
-          enableMatcap={enableMatcap}
-          enableSurfaces={enableSurfaces}
-          enableLines={enableLines}
-          onModelComponentSecondaryPointerCandidate={onModelComponentSecondaryPointerCandidate}
-        />
-      );
-    } else if (geometry?.format === 'gltf') {
+    if (geometry?.format === 'gltf') {
       scene = (
         <GltfMesh
           gltfFile={geometry.content}

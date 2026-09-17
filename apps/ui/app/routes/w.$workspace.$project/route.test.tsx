@@ -10,6 +10,9 @@ vi.mock('#routes/w.$workspace.$project/project-route.js', () => ({
     return <div>{children}</div>;
   },
   projectRouteHandle: { enablePageHeader: false },
+}));
+
+vi.mock('#routes/w.$workspace.$project/project-live-sessions.js', () => ({
   ProjectChatRoute: () => <div>Project chat</div>,
 }));
 

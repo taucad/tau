@@ -1016,8 +1016,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         return;
       }
       this.currentRenderOptions = request.options;
-      clearTimeout(this.paramDebounceTimer);
-      this.paramDebounceTimer = undefined;
+      this.clearScheduledRender();
       await this.executeRender(record);
     });
   }
@@ -1029,6 +1028,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     readonly operation?: { readonly options?: Record<string, unknown>; readonly content?: RuntimeContentInput };
   }): Promise<void> {
     const { record, file, parameters, operation } = input;
+    if (this.pendingOpenFileRecord === record) {
+      this.pendingOpenFileRecord = undefined;
+    }
     if (record !== this.activeRenderRecord || record.controller.signal.aborted) {
       return;
     }
@@ -1317,8 +1319,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     if (this.activeRenderRecord) {
       this.abortRenderRecord(this.activeRenderRecord, 'superseded');
     }
-    clearTimeout(this.paramDebounceTimer);
-    this.paramDebounceTimer = undefined;
+    this.clearScheduledRender();
     this.cleanupPromise = this.drainAndCleanup();
     return this.cleanupPromise;
   }
@@ -2825,8 +2826,16 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     if (options.publish) {
       this.onProgress?.('postProcessing');
     }
-    const { [nativeBuildInputSymbol]: _nativeBuildInput, ...publicDisplayResult } =
-      displayResult as CreateGeometryResult & NativeBuildInputCarrier;
+    /* The durable snapshot is an export artifact held by `serializedNativeHandleSlot`,
+     * not render output. Leaving it on the published result shipped it to the client
+     * on every display render through `toTransportResult` — 11 kB for a small
+     * Replicad model and 617 kB for the stress model, ~0.4x the GLB beside it — and
+     * msgpack-encoded it into the mesh cache entry a second time. */
+    const {
+      [nativeBuildInputSymbol]: _nativeBuildInput,
+      serializedNativeHandle: _serializedNativeHandle,
+      ...publicDisplayResult
+    } = displayResult as CreateGeometryResult & NativeBuildInputCarrier & { serializedNativeHandle?: unknown };
     // One render request produces one public geometry artifact.
     const result: MaterializedRenderResult = publicDisplayResult.success
       ? {
@@ -3594,13 +3603,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         return meshResult;
       }
 
-      // Compose the display result: mesh-phase artifact, create-phase warnings
-      // preserved, durable handle snapshot carried through unchanged.
+      // Compose the display result: mesh-phase artifact plus create-phase warnings.
+      // The durable handle snapshot stays in `serializedNativeHandleSlot`, which the
+      // export path reads; a display result never carries it.
       return {
         success: true,
         data: meshResult.data,
         issues: [...createResult.issues, ...meshResult.issues],
-        serializedNativeHandle: createResult.serializedNativeHandle,
       };
     } finally {
       meshSpan.end();
@@ -4332,21 +4341,50 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return this.signalView ? Atomics.load(this.signalView, signalSlot.abortGeneration) >>> 0 : this.renderGeneration;
   }
 
+  /** Drop the render {@link scheduleRender} has pending, if any. */
+  private clearScheduledRender(): void {
+    this.pendingRenderCancel?.();
+    this.pendingRenderCancel = undefined;
+  }
+
   /**
-   * Schedule a render after a debounce delay. Clears any existing timer.
+   * Schedule a render after a debounce delay. Clears any existing schedule.
+   *
+   * A zero delay means "next task", not "one clamped timer from now": a
+   * committed parameter edit is debounced by `parameterDebounce = 0` and used to
+   * pay `setTimeout`'s ~1.4 ms Node clamp on top of the render lane's own
+   * cooperative yield. The buffering turn itself is kept — it is what lets a
+   * superseding command or an abandoned client generation reservation settle the
+   * record before any work starts.
    *
    * @param renderDelay - Debounce delay before render fires. Milliseconds.
    */
   private scheduleRender(renderDelay: number, record: RenderCancellationRecord): void {
-    clearTimeout(this.paramDebounceTimer);
+    this.clearScheduledRender();
     this.pushState('buffering', record);
-    this.paramDebounceTimer = setTimeout(() => {
-      this.paramDebounceTimer = undefined;
+    const startRender = (): void => {
+      this.pendingRenderCancel = undefined;
       if (!this.operationAdmissionOpen) {
         return;
       }
       void this.runQueuedCommand(record, async () => this.executeRender(record));
-    }, renderDelay);
+    };
+    if (renderDelay <= 0) {
+      let cancelled = false;
+      this.pendingRenderCancel = () => {
+        cancelled = true;
+      };
+      scheduleMacrotask(() => {
+        if (!cancelled) {
+          startRender();
+        }
+      });
+      return;
+    }
+    const timer = setTimeout(startRender, renderDelay);
+    this.pendingRenderCancel = () => {
+      clearTimeout(timer);
+    };
   }
 
   /**
@@ -4702,6 +4740,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   private shouldScheduleExactPreview(paths: readonly string[]): boolean {
+    /* A pending open retargets the preview, so a change to the file it replaces (a rename or
+     * delete) must not supersede it and rerender the stale file. The lane judges the change
+     * again once the open has applied — see routeExactChangedPaths. */
+    if (this.activeRenderRecord !== undefined && this.activeRenderRecord === this.pendingOpenFileRecord) {
+      return false;
+    }
     const candidate = this.previewWatchCandidate;
     const previewPaths =
       candidate?.generation === this.currentRenderGeneration() ? candidate.paths : this.currentPreviewWatchPaths;
@@ -4719,7 +4763,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       this._invalidateCachesForPaths(paths);
     }
     this.onFileChanged(paths);
-    if (record === undefined || record !== this.activeRenderRecord || !this.currentFile) {
+    const preview =
+      record ??
+      (this.activeRenderRecord === undefined && this.shouldScheduleExactPreview(paths)
+        ? this.createAutonomousPreviewRecord()
+        : undefined);
+    if (preview === undefined || preview !== this.activeRenderRecord || !this.currentFile) {
       return;
     }
     this.invalidatePublishedArtifactState();
@@ -4727,7 +4776,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     for (const path of paths) {
       renderDebounce = Math.min(renderDebounce, this.currentPreviewWatchPaths.get(path) ?? fileChangeDebounce);
     }
-    this.scheduleRender(renderDebounce, record);
+    this.scheduleRender(renderDebounce, preview);
   }
 
   /**

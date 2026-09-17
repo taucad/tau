@@ -19,5 +19,10 @@ export function ChatMessageDataUsage({ usageParts }: { readonly usageParts: read
       ),
     [usageParts],
   );
-  return <Badge variant='outline'>{formatNumberAbbreviation(total)} tokens</Badge>;
+  // Ghost, and as tall as the copy button beside it, like the billed badge.
+  return (
+    <Badge variant='outline' className='h-7 border-none font-medium text-inherit'>
+      {formatNumberAbbreviation(total)} tokens
+    </Badge>
+  );
 }

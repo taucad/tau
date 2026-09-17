@@ -76,6 +76,7 @@ import type { ExternalAgentTurn } from '@taucad/agent-host/node-launcher';
 import type {
   ExternalAgentLogEvent,
   ExternalAgentLogin,
+  ExternalAgentStop,
   JsonObject,
   JsonValue,
   ProviderMessage,
@@ -124,12 +125,21 @@ const authRequiredCode = -32_000;
  * `terminal` stays `false`: neither pin ever calls a `terminal/*` method, and
  * advertising a capability Tau does not implement is a lie the protocol has no
  * way to catch (r4 §3).
+ *
+ * `_meta.jetbrains.air` opts into exactly one vendor extension both pins
+ * implement, `sessionFailure`. Without it a usage limit arrives twice — as
+ * assistant prose, then as a bare `-32603 Internal error` with a stack trace on
+ * stderr. With it the turn ends `end_turn` and names the failure once, typed,
+ * in the response's `_meta` (see {@link airSessionFailureOf}).
  */
 const clientCapabilities: ClientCapabilities = {
   fs: { readTextFile: true, writeTextFile: true },
   terminal: false,
   elicitation: { url: {} },
-  _meta: { 'terminal-auth': true },
+  _meta: {
+    'terminal-auth': true,
+    jetbrains: { air: { version: 1, capabilities: ['sessionFailure'] } },
+  },
 };
 
 /**
@@ -298,6 +308,55 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
     ? // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- a JSON object is a string-keyed record.
       (value as Record<string, unknown>)
     : undefined;
+
+/** One AIR `sessionFailure`, reduced to what a surface renders. */
+type AcpSessionFailure = ExternalAgentStop['failure'] & { readonly severity: string };
+
+/**
+ * The AIR `sessionFailure` an agent attached to a prompt response or a
+ * `session_info_update`, if it attached one.
+ *
+ * Only `severity: 'error'` is returned: a `warning` is an agent retrying on its
+ * own, which this turn has not failed from.
+ *
+ * @param meta - The `_meta` the agent sent.
+ * @returns The failure, or `undefined` when there is none or it is a warning.
+ */
+const airSessionFailureOf = (meta: unknown): AcpSessionFailure | undefined => {
+  const failure = asRecord(asRecord(asRecord(asRecord(meta)?.['jetbrains'])?.['air'])?.['sessionFailure']);
+  const { category, severity, title, actions } = failure ?? {};
+  if (typeof category !== 'string' || severity !== 'error' || typeof title !== 'string') {
+    return undefined;
+  }
+  return {
+    category,
+    severity,
+    title,
+    actions: Array.isArray(actions) ? actions.filter((action): action is string => typeof action === 'string') : [],
+  };
+};
+
+/**
+ * The sentence inside a provider error body an agent passed through as a title.
+ *
+ * Codex forwards some vendor refusals verbatim, so a title can be the raw
+ * `{"type":"error","error":{"message":…}}` JSON rather than prose (seen live
+ * for a model a ChatGPT account may not use).
+ *
+ * @param title - The failure title as the agent sent it.
+ * @returns The body's `error.message`, or the title unchanged.
+ */
+const providerSentence = (title: string): string => {
+  if (!title.startsWith('{')) {
+    return title;
+  }
+  try {
+    const message = asRecord(asRecord(JSON.parse(title))?.['error'])?.['message'];
+    return typeof message === 'string' && message !== '' ? message : title;
+  } catch {
+    return title;
+  }
+};
 
 /**
  * Whether an ACP restore failure proves that only the old session is unavailable.
@@ -1592,6 +1651,40 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
     sessionWrite = write();
   };
 
+  const authRequired = (): Error =>
+    Object.assign(
+      new Error(
+        `${options.adapter.id} is not logged in. Sign in to it on the machine running this agent, then try again.`,
+      ),
+      { code: 'EXTERNAL_AGENT_AUTH_REQUIRED', login: loginOf(options.adapter.id, facts.authMethods) },
+    );
+
+  /**
+   * The coded error for a failure the agent classified itself.
+   *
+   * `access` is the logged-out case and reuses its refusal. A `limit` is the
+   * person's own account and is not a crash; everything else is a stop the
+   * agent could still name. The provider's sentence is the message, verbatim,
+   * with no stderr: the agent already said what happened.
+   *
+   * @param stop - The AIR failure the agent sent.
+   * @returns The error the run records.
+   */
+  const stopped = (stop: AcpSessionFailure): Error => {
+    if (stop.category === 'access') {
+      return authRequired();
+    }
+    const title = providerSentence(stop.title);
+    const details: ExternalAgentStop = {
+      agentId: options.adapter.id,
+      failure: { category: stop.category, title, actions: stop.actions },
+    };
+    return Object.assign(new Error(title), {
+      code: stop.category === 'limit' ? 'EXTERNAL_AGENT_LIMIT_REACHED' : 'EXTERNAL_AGENT_FAILED',
+      details,
+    });
+  };
+
   /**
    * A refusal the user can act on, or the vendor failure that is left over.
    *
@@ -1600,7 +1693,8 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
    * `-32000` is the logged-out case, and it becomes `EXTERNAL_AGENT_AUTH_REQUIRED`
    * carrying the methods the agent listed, never `codex failed: Authentication
    * required` plus eight kilobytes of stderr (r4 §2). Everything else is a
-   * genuine failure and keeps the tail, because there is nothing better to say.
+   * genuine failure: the message says so plainly, and the stderr tail travels
+   * beside it as `details.diagnostics` for a surface to show on request.
    *
    * @param error - Whatever the connection or a guard threw.
    * @returns The error the run records.
@@ -1611,20 +1705,20 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
       return error;
     }
     if (code === authRequiredCode) {
-      return Object.assign(
-        new Error(
-          `${options.adapter.id} is not logged in. Sign in to it on the machine running this agent, then try again.`,
-        ),
-        { code: 'EXTERNAL_AGENT_AUTH_REQUIRED', login: loginOf(options.adapter.id, facts.authMethods) },
-      );
+      return authRequired();
     }
+    const vendorMessage = error instanceof Error ? error.message : String(error);
     const stderr = adapter.stderr();
-    return Object.assign(
-      new Error(
-        `${options.adapter.id} failed: ${error instanceof Error ? error.message : String(error)}${stderr === '' ? '' : `\n${stderr}`}`,
-      ),
-      { code: 'EXTERNAL_AGENT_FAILED' },
-    );
+    const details: ExternalAgentStop = {
+      agentId: options.adapter.id,
+      /* The card names the agent itself; its body is the vendor's own words. */
+      failure: { category: 'internal', title: vendorMessage, actions: ['retry'] },
+      ...(stderr === '' ? {} : { diagnostics: stderr }),
+    };
+    return Object.assign(new Error(`${options.adapter.displayName} stopped unexpectedly: ${vendorMessage}`), {
+      code: 'EXTERNAL_AGENT_FAILED',
+      details,
+    });
   };
 
   /**
@@ -2158,6 +2252,15 @@ export const openAcpSession = async (options: OpenAcpSessionOptions): Promise<Ac
           /* Advance only after the report is durable. Otherwise an append
            * failure makes the next successful turn under-report usage. */
           priorUsage = answered.usage ?? priorUsage;
+          /* A typed failure ends the turn `end_turn`: the stop reason alone
+           * would record a usage limit as a completed turn. Both pins attach
+           * this turn's failure here; a `session_info_update` failure belongs
+           * to another turn (Codex) or to no turn at all (Claude), so it never
+           * fails this one. */
+          const stop = airSessionFailureOf(answered._meta);
+          if (stop) {
+            throw stopped(stop);
+          }
           return {
             stopReason: answered.stopReason,
             acpSessionId,

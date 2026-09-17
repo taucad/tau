@@ -159,6 +159,54 @@ export const readHomeText = async (path: string): Promise<string | undefined> =>
   }, path);
 
 /**
+ * Read a Home file whose path carries a `*` directory segment.
+ *
+ * Home stores a project under its directory name rather than its id, so a
+ * chat's own records are only reachable through a wildcard. Same resolver as
+ * {@link listHomeDirectory}, reading one file instead of a listing.
+ *
+ * @param path - An absolute Home path, with at most one `*` per segment.
+ * @returns The file's text, or `undefined` when nothing matched.
+ */
+export const readHomeGlobText = async (path: string): Promise<string | undefined> =>
+  target.evaluate(async (filePath) => {
+    const resolve = async (
+      from: FileSystemDirectoryHandle,
+      segments: readonly string[],
+    ): Promise<string | undefined> => {
+      const [segment, ...rest] = segments;
+      if (segment === undefined) {
+        return undefined;
+      }
+      if (rest.length === 0) {
+        try {
+          const handle = await from.getFileHandle(segment);
+          const file = await handle.getFile();
+          return await file.text();
+        } catch {
+          return undefined;
+        }
+      }
+      if (segment === '*') {
+        for await (const handle of from.values()) {
+          const found = handle.kind === 'directory' ? await resolve(handle, rest) : undefined;
+          if (found !== undefined) {
+            return found;
+          }
+        }
+        return undefined;
+      }
+      try {
+        const child = await from.getDirectoryHandle(segment);
+        return await resolve(child, rest);
+      } catch {
+        return undefined;
+      }
+    };
+    return resolve(await navigator.storage.getDirectory(), filePath.split('/').filter(Boolean));
+  }, path);
+
+/**
  * Read a Home JSON file, or `undefined` when it does not exist.
  *
  * @param path - An absolute Home path.

@@ -295,7 +295,11 @@ test('rejects one of two stale browser-tab edits through the shared authority', 
     const primaryDiagnostic = await fieldDiagnostic(width);
     const secondaryDiagnostic = await fieldDiagnostic(width, 'secondary');
     const primaryRejected = primaryDiagnostic !== undefined;
-    expect(primaryDiagnostic ?? secondaryDiagnostic).toMatch(/parameter revision (?:changed|is stale)/iu);
+    /* The losing tab learns it lost either from the planner, once the winner's record reached it,
+     * or from its own checked write; the record itself names no writer. */
+    expect(primaryDiagnostic ?? secondaryDiagnostic).toMatch(
+      /field changed since this edit began|checked write precondition changed|changed to \d+ elsewhere/iu,
+    );
     const losingSurface: target.TargetSurface = primaryRejected ? 'primary' : 'secondary';
     const winningSurface: target.TargetSurface = primaryRejected ? 'secondary' : 'primary';
     const winningValue = await fieldNumber(width, winningSurface);
@@ -401,7 +405,8 @@ test('uses inferred units through checked edits, scrubbing, reopen, reset, and d
   expect(await target.evaluateLocator(canvas, (element) => (element as HTMLCanvasElement).toDataURL())).toBe(
     geometryBeforeDisplayChange,
   );
-  await target.expectCount(selectors.getByText('The authoritative parameter revision changed during editing.'), 0);
+  // A display-unit change is nobody else's edit, so no row reports the field moving underneath it.
+  await target.expectCount(selectors.getByText(/changed (?:to .* elsewhere|since this edit began)/iu), 0);
 });
 
 test('shows the same inferred units in the project preview', async () => {

@@ -11,6 +11,10 @@ type DecodedProviderError = {
 
 const textDecoder = new TextDecoder();
 
+/** Copy for the agent host's `NO_EVICTABLE_HISTORY` compaction refusal. */
+const noEvictableHistoryMessage =
+  "This chat's first message is too large to continue. Start a new chat and attach less.";
+
 /**
  * Client-side transport failure (request never reaches the API as structured JSON).
  * Mirrors AI SDK `Chat.makeRequest` disconnect classification in `ai` package
@@ -184,7 +188,12 @@ export function parseErrorForPersistence(error: Error): ChatError {
   // Parse structured ChatError from API
   const parsed = tryParseChatError(error.message);
   if (parsed) {
-    return parsed;
+    // The host's own sentence names its internals ("no safe history to evict"),
+    // which tells the person nothing they can act on. Keep it in `raw` and say
+    // what the only recovery is.
+    return parsed.code === 'NO_EVICTABLE_HISTORY'
+      ? { ...parsed, message: noEvictableHistoryMessage, raw: parsed.raw ?? error.message }
+      : parsed;
   }
 
   const decodedProviderError = tryDecodeProviderError(error.message);

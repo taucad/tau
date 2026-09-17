@@ -60,4 +60,23 @@ describe('parseErrorForPersistence', () => {
     expect(parsed.raw).toContain('Google request failed with status code 400');
     expect(parsed.message).not.toContain('91,123');
   });
+
+  it('should tell the person to start a new chat when nothing can be evicted', () => {
+    const parsed = parseErrorForPersistence(
+      new Error(
+        JSON.stringify({
+          category: errorCategory.generic,
+          title: 'Something went wrong',
+          message: 'Context is oversized but has no safe history to evict.',
+          code: 'NO_EVICTABLE_HISTORY',
+        }),
+      ),
+    );
+
+    expect(parsed.code).toBe('NO_EVICTABLE_HISTORY');
+    expect(parsed.message).toBe(
+      "This chat's first message is too large to continue. Start a new chat and attach less.",
+    );
+    expect(parsed.raw).toContain('Context is oversized but has no safe history to evict.');
+  });
 });

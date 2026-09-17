@@ -221,6 +221,57 @@ describe('useViewSettingsSync', () => {
     graphicsRef.stop();
   });
 
+  it('persists the camera pose once it settles instead of once per frame', async () => {
+    const graphicsRef = createActor(
+      graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }),
+      { input: {} },
+    ).start();
+    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
+    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
+    let cameraRig: ThreeCameraRig | undefined;
+
+    render(
+      <GraphicsProvider graphicsRef={graphicsRef}>
+        <SyncHarness
+          graphicsRef={graphicsRef}
+          editorRef={editorRef}
+          onRig={(rig) => {
+            cameraRig = rig;
+          }}
+        />
+      </GraphicsProvider>,
+    );
+
+    expect(cameraRig).toBeDefined();
+    editorSend.mockClear();
+    act(() => {
+      // An orbit: the pose changes every frame.
+      for (let frame = 0; frame < 10; frame++) {
+        cameraRig!.actorRef.send({
+          type: 'setView',
+          target: [frame, 0, 0],
+          direction: [1, 0, 0],
+          up: [0, 0, 1],
+          verticalSpan: 10 + frame,
+          perspectiveZoom: 1,
+        });
+      }
+    });
+
+    // No editor event -- and therefore no editor-subscriber fan-out -- while the
+    // camera is moving.
+    expect(editorSend).not.toHaveBeenCalled();
+
+    await waitFor(() => {
+      expect(editorSend).toHaveBeenCalledTimes(1);
+    });
+    expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
+      type: 'updateViewSettings',
+      settings: { cameraView: { target: [9, 0, 0], verticalSpan: 19 } },
+    });
+    graphicsRef.stop();
+  });
+
   it('defers camera sync until a non-3D viewer can clear stale state', async () => {
     const graphicsRef = createActor(
       graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }),

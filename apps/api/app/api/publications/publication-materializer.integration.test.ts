@@ -159,9 +159,9 @@ describe('publication materializer against real git', () => {
     expect(materialized.manifestKey).toContain(git(clonePath, 'rev-parse', 'refs/tags/v1^{commit}').trim());
   });
 
-  it('preserves unsupported parameter record bytes as authored publication data', async () => {
+  it('preserves unreadable parameter record bytes as authored publication data', async () => {
     const parameterBytes = utf8(
-      '{"recordVersion":2,"profile":"future","activeGroup":"alternate","groups":{"alternate":{"values":{"exact":"1.2300"}}}}',
+      '{"recordVersion":2,"activeGroup":"alternate","groups":{"alternate":{"values":{"exact":"1.2300"}}}}',
     );
     const repositoryPath = seed(
       new Map([

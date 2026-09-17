@@ -8,13 +8,13 @@ export type ParameterSetTarget = Readonly<{
   entry: string;
 }>;
 
-/** Revisions covering every semantic input to a parameter operation. @public */
-export type ParameterSetIdentity = Readonly<{
-  sourceRevision: string;
-  manifestRevision: string;
-  valueRevision: string;
-  dependencyRevision: string;
-}>;
+/**
+ * The admitted manifest a parameter operation was built from. A source change produces a new
+ * manifest revision, so this one token covers every semantic input; it is never persisted, and
+ * value-level concurrency is proved by the sidecar's own bytes plus the request's {@link
+ * ParameterSetRequestBase}. @public
+ */
+export type ParameterSetIdentity = Readonly<{ manifestRevision: string }>;
 
 /** Current durable parameter record and its checked authority identity. @public */
 export type ParameterSetAuthoritySnapshot = Readonly<{
@@ -76,26 +76,6 @@ export type ParameterSetOperation =
   | Readonly<{ kind: 'select-group'; group: string }>
   | Readonly<{ kind: 'rename-group'; group: string; nextGroup: string }>
   | Readonly<{
-      kind: 'confirm-inference';
-      group: string;
-      parameterId: string;
-      resource: string;
-      pointer: string;
-    }>
-  | Readonly<{
-      kind: 'bind-parameter';
-      group: string;
-      parameterId: string;
-      resource: string;
-      pointer: string;
-      binding: Readonly<{
-        unit?: string;
-        quantityKind?: string;
-        space?: 'linear' | 'difference' | 'point';
-        reference?: string;
-      }>;
-    }>
-  | Readonly<{
       kind: 'source-unit';
       mode: 'preserve-size' | 'reinterpret';
       group: string;
@@ -104,19 +84,13 @@ export type ParameterSetOperation =
       pointer: string;
       unit: string;
       producerCapability: ParameterSourceUnitCapability;
-      /**
-       * Optional source-file digests the caller observed, keyed like `manifest.identity.sourceFiles`.
-       * Each named file must match the admitted manifest; the confirmation always echoes the
-       * manifest's own source snapshot.
-       */
-      dependencies?: Readonly<Record<string, string>>;
     }>
   | Readonly<{ kind: 'display-preference'; parameterId: string; unit: string }>;
 
 /**
  * Field-scoped freshness evidence for one draft: the value and effective binding the editor was
- * working from. It lets the planner accept a request whose whole-record revision moved only
- * because a different field changed. @public
+ * working from. It is the whole value-level conflict rule: an edit commits while its own field
+ * still holds `base.value`, no matter what other fields changed meanwhile. @public
  */
 export type ParameterSetRequestBase = Readonly<{
   pointer: string;
@@ -134,16 +108,13 @@ export type ParameterSetRequestBase = Readonly<{
 export type ParameterSetRequest = Readonly<{
   requestId: string;
   draftGeneration: number;
-  /**
-   * Caller correlation label. The planner always derives the authoritative operation fingerprint
-   * from the target, expectation and operation, so this value never reaches the record.
-   */
+  /** Caller correlation label; it never reaches the record. */
   fingerprint?: string;
+  /** The manifest this request was built from; the planner refuses it once the live one differs. */
   expected: ParameterSetIdentity;
   /**
-   * When present and only `valueRevision` has moved, the planner rebases `expected` onto the
-   * current identity provided this field still holds `base.value` under an unchanged effective
-   * binding. Without it the strict whole-record rule applies.
+   * When present, a value edit commits only while its own field still holds `base.value` under an
+   * unchanged effective binding. Without it a value edit overwrites whatever the field now holds.
    */
   base?: ParameterSetRequestBase;
   pressure: 'transient' | 'final';
@@ -158,7 +129,6 @@ export type ParameterSetPlanResult =
       proposed: ParameterSetAuthoritySnapshot;
       planFingerprint: string;
       producerCapability: ParameterSourceUnitCapability;
-      dependencies: Readonly<Record<string, string>>;
     }>
   | Readonly<{ status: 'rejected'; code: string; message: string }>;
 

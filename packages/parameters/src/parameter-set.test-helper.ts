@@ -40,12 +40,11 @@ export const parameterSetHarness = async (
     middleware: digest,
     sourceFiles: { 'main.ts': await digestContent({ bytes: new TextEncoder().encode('source:1') }) },
   });
-  let current = await resolveParameterSnapshot({
+  let current = resolveParameterSnapshot({
     target,
     manifest,
     path: '.tau/parameters/main.ts.json',
     bytes: null,
-    preconditions: [],
   });
   let writes = 0;
   let loads = 0;

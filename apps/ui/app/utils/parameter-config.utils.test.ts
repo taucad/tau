@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { ZodError } from 'zod';
-import { fileParameterRecordProfile } from '@taucad/types';
 import { createDefaultEntry, createParameterEntry, serializeParameterEntry } from '#utils/parameter-config.utils.js';
 
 describe('parameter project-creation records', () => {
@@ -11,8 +10,6 @@ describe('parameter project-creation records', () => {
     });
 
     expect(entry).toMatchObject({
-      recordVersion: 1,
-      profile: fileParameterRecordProfile,
       activeGroup: 'default',
       groups: {
         default: { values: { width: 10, options: { enabled: true } } },

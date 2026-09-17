@@ -5,7 +5,7 @@ import { exposeFileSystem, filesystemBridgeConnectMessageType, openFileSystemBri
 import { createRuntimeClient, fromFileSystemBridge } from '@taucad/runtime';
 import { esbuild } from '@taucad/esbuild';
 import { replicad } from '@taucad/replicad';
-import { geometryCache } from '@taucad/middleware';
+import { geometryCache, parameterFileResolver } from '@taucad/middleware';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import type { GetParametersResult, WorkerState } from '@taucad/runtime/types';
 import { defineRuntime } from '@taucad/runtime/worker';
@@ -25,7 +25,7 @@ const delay = async (milliseconds: number): Promise<void> =>
   });
 
 describe('autonomous preview invalidation', () => {
-  it('should render once when a parameter update is followed by unrelated project writes', async () => {
+  it('should render once for a record write followed by unrelated project writes', async () => {
     const providerRegistry = new ProviderRegistry();
     const rootStorageRootKey = 'memory:parameter-update-root';
     const rootProvider = await providerRegistry.getProvider({
@@ -79,7 +79,7 @@ describe('autonomous preview invalidation', () => {
     );
     const runtime = defineRuntime({
       plugins: [replicad(), esbuild()],
-      middleware: [geometryCache()],
+      middleware: [geometryCache(), parameterFileResolver()],
     });
     const client = createRuntimeClient({
       transport: inProcessTransport({ runtime, fileSystem }),
@@ -90,21 +90,21 @@ describe('autonomous preview invalidation', () => {
     const stopParameters = client.on('parametersResolved', (result) => parameterFrames.push(result));
 
     try {
-      const initial = await client.render({
-        source: { path: 'main.ts' },
-        parameters: { width: 10 },
-      });
+      const initial = await client.render({ source: { path: 'main.ts' } });
       expect(initial.superseded).toBe(false);
       if (initial.superseded || !initial.geometry.success) {
         throw new Error('Expected the initial Replicad preview to render successfully');
       }
 
       states.length = 0;
-      const update = await client.updateParameters({ width: 20 });
-      expect(update.superseded).toBe(false);
-      if (update.superseded || !update.geometry.success) {
-        throw new Error('Expected the parameter update to render successfully');
-      }
+      /* The record is a watched dependency of the render, so the checked write alone brings the
+       * geometry up to date. Nothing else forwards the value to the kernel. */
+      await service.writeFile(
+        `/projects/${projectId}/.tau/parameters/main.ts.json`,
+        JSON.stringify({ activeGroup: 'default', groups: { default: { values: { width: 20 } } } }),
+      );
+      await delay(750);
+      expect(states.filter((state) => state === 'rendering')).toEqual(['rendering']);
 
       // Automatic thumbnail generation writes through a separate filesystem
       // client after the primary render settles. This derived artifact is not a

@@ -37,7 +37,7 @@ function createTestContext(options?: {
 }
 
 function makeEntry(entry: { activeGroup: string; groups: Record<string, unknown> }): string {
-  return JSON.stringify({ recordVersion: 1, profile: 'tau-json-structure-units-03-v1', ...entry });
+  return JSON.stringify(entry);
 }
 
 describe('parameterFileResolverMiddleware', () => {
@@ -160,30 +160,25 @@ describe('parameterFileResolverMiddleware', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it('applies current v1 records and rejects future profiles', async () => {
+  it('applies the current record and refuses one carrying retired keys', async () => {
     const current = createTestContext({
-      readFileResult: JSON.stringify({
-        recordVersion: 1,
-        profile: 'tau-json-structure-units-03-v1',
-        activeGroup: 'default',
-        groups: { default: { values: { width: 42 } } },
-      }),
+      readFileResult: JSON.stringify({ activeGroup: 'default', groups: { default: { values: { width: 42 } } } }),
     });
     await parameterFileResolverMiddleware.wrapCreateGeometry!(current.input, current.handler, current.runtime);
     expect(current.handler).toHaveBeenCalledWith(expect.objectContaining({ parameters: { width: 42 } }));
 
-    const future = createTestContext({
+    const retired = createTestContext({
       readFileResult: JSON.stringify({
-        recordVersion: 2,
-        profile: 'future',
+        recordVersion: 1,
+        profile: 'tau-json-structure-units-03-v1',
         activeGroup: 'default',
         groups: { default: { values: { width: 99 } } },
       }),
     });
     await expect(
-      parameterFileResolverMiddleware.wrapCreateGeometry!(future.input, future.handler, future.runtime),
-    ).rejects.toMatchObject({ issues: [{ code: 'UNSUPPORTED_RECORD' }] });
-    expect(future.handler).not.toHaveBeenCalled();
+      parameterFileResolverMiddleware.wrapCreateGeometry!(retired.input, retired.handler, retired.runtime),
+    ).rejects.toMatchObject({ issues: [{ code: 'INVALID_RECORD' }] });
+    expect(retired.handler).not.toHaveBeenCalled();
   });
 
   it('should preserve existing input parameters when no file overrides apply', async () => {

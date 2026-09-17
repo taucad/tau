@@ -9,7 +9,6 @@ const baseConfig: UserConfig = {
     'src/bounded-json.ts',
     'src/authority.ts',
     'src/parameter-set.machine.ts',
-    'src/parameter-input.machine.ts',
   ],
   copy: [
     { from: '../../license', to: 'dist', rename: 'LICENSE' },

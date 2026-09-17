@@ -7,10 +7,8 @@ import { toUcumLengthCode } from '#constants/length-units.js';
 import { ParametersNumber as ParametersNumberImplementation } from '#components/geometry/parameters/parameters-number.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import type { ParameterCommit } from '#components/geometry/parameters/rjsf-context.js';
-import type { ParameterFieldProjection, ParameterSetOutcome, ParameterSetRequest } from '@taucad/parameters';
-import { parameterInputMachine } from '@taucad/parameters/input-machine';
-import type { ParameterInputMachineInput } from '@taucad/parameters/input-machine';
-import { createActor } from 'xstate';
+import type { ParameterFieldProjection } from '@taucad/parameters';
+import type { ParameterDraft } from '#services/parameter-set-service.js';
 
 type TestUnits = Readonly<{ sourceSymbol: LengthSymbol; displaySymbol: LengthSymbol }>;
 
@@ -97,40 +95,45 @@ function ParametersNumber({
   );
 }
 
-/** The service resolves the acknowledged value and revision from the authority; tests stand in for it. */
-const authorityIdentity = {
-  sourceRevision: 'source-1',
-  manifestRevision: 'manifest-1',
-  valueRevision: 'value-1',
-  dependencyRevision: 'dependency-1',
-};
+type CommitCall = Parameters<ParameterCommit['commit']>[0];
 
-const machineInput = (request: Parameters<ParameterCommit['input']>[0]): ParameterInputMachineInput => ({
-  ...request,
-  acknowledgedValue: request.acknowledgedValue ?? 0,
-  acknowledgedRevision: request.acknowledgedRevision ?? authorityIdentity,
-});
-
-const createRetainedInput = (
-  submit?: (request: ParameterSetRequest) => Promise<ParameterSetOutcome>,
-): ParameterCommit['input'] => {
-  let retained: ReturnType<ParameterCommit['input']> | undefined;
-  return (input) => {
-    if (retained === undefined) {
-      const actor = createActor(parameterInputMachine, { input: machineInput(input) });
-      if (submit !== undefined) {
-        const settle = async (request: ParameterSetRequest): Promise<void> => {
-          const outcome = await submit(request);
-          actor.send({ type: 'settleSubmission', generation: request.draftGeneration, outcome });
-        };
-        actor.on('parameterSetIntent', (event) => {
-          void settle(event.request);
-        });
-      }
-      actor.start();
-      retained = { actor, attach: () => () => undefined };
+/** The service owns retained drafts and the checked write; this stands in for both. */
+const createParameterCommit = (
+  refuse?: () => Awaited<ReturnType<ParameterCommit['commit']>>,
+): ParameterCommit & Readonly<{ calls: CommitCall[] }> => {
+  const drafts = new Map<string, ParameterDraft>();
+  const listeners = new Set<() => void>();
+  const calls: CommitCall[] = [];
+  const notify = (): void => {
+    for (const listener of listeners) {
+      listener();
     }
-    return retained;
+  };
+  return {
+    target: { authority: 'test', root: '/', entry: 'main.ts' },
+    group: 'default',
+    editorInstance: 'test-editor',
+    calls,
+    draft: (pointer) => drafts.get(pointer),
+    setDraft: (pointer, draft) => {
+      if (draft === undefined) {
+        drafts.delete(pointer);
+      } else {
+        drafts.set(pointer, draft);
+      }
+      notify();
+    },
+    subscribeDrafts: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    commit: async (field) => {
+      calls.push(field);
+      return refuse?.();
+    },
+    setValue: vi.fn(async () => undefined),
   };
 };
 
@@ -282,6 +285,30 @@ describe('ParametersNumber', () => {
 
       // Should show 'in' unit
       expect(screen.getByText('in')).toBeTruthy();
+    });
+
+    it('shows the dragged value, not the authority value, while an approximated field is scrubbed', () => {
+      const { container } = render(
+        <TestWrapper>
+          <ParametersNumber
+            value={10}
+            defaultValue={10}
+            descriptor='length'
+            units={createUnits('mm', 'in')}
+            onChange={vi.fn()}
+            aria-label='Approximated width'
+          />
+        </TestWrapper>,
+      );
+      const sliderInput = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
+      Object.defineProperty(sliderInput, 'offsetWidth', { configurable: true, value: 100 });
+      const field = screen.getByRole('textbox', { name: 'Approximated width' });
+      const before = field.getAttribute('value');
+
+      fireSliderPointerEvent(sliderInput, 'pointerdown', { clientX: 0 });
+      fireSliderPointerEvent(sliderInput, 'pointermove', { clientX: 40 });
+
+      expect(field.getAttribute('value')).not.toBe(before);
     });
 
     it('should show approximation indicator when conversion results in rounding', () => {
@@ -550,28 +577,10 @@ describe('ParametersNumber', () => {
   });
 
   describe('Input Field Interactions', () => {
-    it('gives sibling authoritative inputs disjoint request identities', () => {
-      const editorInstances = new Map<string, string>();
-      const actors = new Map<string, ReturnType<ParameterCommit['input']>['actor']>();
-      const input: ParameterCommit['input'] = (actorInput) => {
-        editorInstances.set(actorInput.binding.pointer, actorInput.editorInstance);
-        let actor = actors.get(actorInput.editorInstance);
-        if (actor === undefined) {
-          actor = createActor(parameterInputMachine, { input: machineInput(actorInput) });
-          actor.start();
-          actors.set(actorInput.editorInstance, actor);
-        }
-        return { actor, attach: () => () => undefined };
-      };
-      const parameterCommit: ParameterCommit = {
-        target: { authority: 'test', root: '/', entry: 'main.ts' },
-        group: 'default',
-        editorInstance: 'shared-editor',
-        input,
-        setValue: vi.fn(async () => undefined),
-      };
-
-      const view = render(
+    it('keeps sibling rows on their own retained drafts', async () => {
+      const user = userEvent.setup();
+      const parameterCommit = createParameterCommit();
+      render(
         <TestWrapper>
           <ParametersNumber
             value={10}
@@ -600,72 +609,193 @@ describe('ParametersNumber', () => {
         </TestWrapper>,
       );
 
-      expect(editorInstances.get('/width')).not.toBe(editorInstances.get('/height'));
-      view.unmount();
-      for (const actor of actors.values()) {
-        actor.stop();
-      }
+      const width = screen.getByRole('textbox', { name: 'Width' });
+      await user.click(width);
+      await user.clear(width);
+      await user.type(width, '12');
+
+      expect(parameterCommit.draft('/width')).toEqual({ text: '12', valid: true });
+      expect(parameterCommit.draft('/height')).toBeUndefined();
+      expect(screen.getByRole('textbox', { name: 'Height' })).toHaveValue('10');
     });
 
-    it('keeps a dirty draft when the row re-renders with an equal but re-created binding', async () => {
+    it('keeps a dirty draft when an equal authority value is echoed back', async () => {
       const user = userEvent.setup();
-      const retain = createRetainedInput();
-      let retained: ReturnType<ParameterCommit['input']> | undefined;
-      const input: ParameterCommit['input'] = (request) => {
-        retained = retain(request);
-        return retained;
-      };
-      const parameterCommit: ParameterCommit = {
-        target: { authority: 'test', root: '/', entry: 'main.ts' },
-        group: 'default',
-        editorInstance: 'echo-editor',
-        input,
-        setValue: vi.fn(async () => undefined),
-      };
-      const row = (projection: ReturnType<typeof testProjection>) => (
+      const parameterCommit = createParameterCommit();
+      const row = (value: number): React.JSX.Element => (
         <TestWrapper>
           <ParametersNumber
-            value={10}
+            value={value}
             defaultValue={10}
-            fieldProjection={projection}
+            fieldProjection={{ ...testProjection('length', defaultUnits), instancePointer: '/width' }}
             parameterCommit={parameterCommit}
             onChange={vi.fn()}
             aria-label='Echo width'
           />
         </TestWrapper>
       );
-      const view = render(row({ ...testProjection('length', defaultUnits), instancePointer: '/width' }));
-      const actor = retained?.actor;
-      if (actor === undefined) {
-        throw new Error('The row did not retain an input actor.');
-      }
-      const sent: string[] = [];
-      const send = actor.send.bind(actor);
-      actor.send = (event) => {
-        sent.push(event.type);
-        send(event);
-      };
+      const view = render(row(10));
       const field = screen.getByRole('textbox', { name: 'Echo width' });
       await user.click(field);
       await user.clear(field);
       await user.type(field, '12');
-      view.rerender(row({ ...testProjection('length', defaultUnits), instancePointer: '/width' }));
 
-      expect(sent).not.toContain('refreshAuthority');
-      expect(actor.getSnapshot().context.draft).toMatchObject({ raw: '12', dirty: true });
-      expect(actor.getSnapshot().context.draft?.conflict).toBeUndefined();
+      view.rerender(row(10));
+
+      expect(field).toHaveValue('12');
+      expect(parameterCommit.draft('/width')).toEqual({ text: '12', valid: true });
+      expect(screen.queryByText(/changed to/)).not.toBeInTheDocument();
+    });
+
+    it('offers a conflict affordance when the field moves under a dirty draft', async () => {
+      const user = userEvent.setup();
+      const parameterCommit = createParameterCommit();
+      const row = (value: number): React.JSX.Element => (
+        <TestWrapper>
+          <ParametersNumber
+            value={value}
+            defaultValue={10}
+            fieldProjection={{ ...testProjection('length', defaultUnits), instancePointer: '/width' }}
+            parameterCommit={parameterCommit}
+            onChange={vi.fn()}
+            aria-label='Conflicted width'
+          />
+        </TestWrapper>
+      );
+      const view = render(row(10));
+      const field = screen.getByRole('textbox', { name: 'Conflicted width' });
+      await user.click(field);
+      await user.clear(field);
+      await user.type(field, '12');
+
+      view.rerender(row(30));
+
+      expect(field).toHaveValue('12');
+      expect(screen.getByText(/changed to 30 elsewhere/)).toBeVisible();
+
+      await user.keyboard('{Escape}');
+      expect(screen.queryByText(/changed to/)).not.toBeInTheDocument();
+      expect(parameterCommit.draft('/width')).toBeUndefined();
+    });
+
+    it('starts a new draft after a commit instead of reusing the entered text', async () => {
+      const user = userEvent.setup();
+      const parameterCommit = createParameterCommit();
+      render(
+        <TestWrapper>
+          <ParametersNumber
+            value={10}
+            defaultValue={10}
+            fieldProjection={{ ...testProjection('length', defaultUnits), instancePointer: '/width' }}
+            parameterCommit={parameterCommit}
+            onChange={vi.fn()}
+            aria-label='Sequential width'
+          />
+        </TestWrapper>,
+      );
+      const field = screen.getByRole('textbox', { name: 'Sequential width' });
+      await user.click(field);
+      await user.clear(field);
+      await user.type(field, '12');
+      await user.keyboard('{Enter}');
+
+      expect(parameterCommit.draft('/width')).toBeUndefined();
+      expect(parameterCommit.calls).toHaveLength(1);
+
+      await user.type(field, '7');
+      expect(parameterCommit.draft('/width')).toEqual({ text: '7', valid: true });
+    });
+
+    it('drops a retained draft the service discarded elsewhere', async () => {
+      const user = userEvent.setup();
+      const parameterCommit = createParameterCommit();
+      render(
+        <TestWrapper>
+          <ParametersNumber
+            value={10}
+            defaultValue={10}
+            fieldProjection={{ ...testProjection('length', defaultUnits), instancePointer: '/width' }}
+            parameterCommit={parameterCommit}
+            onChange={vi.fn()}
+            aria-label='Discarded width'
+          />
+        </TestWrapper>,
+      );
+      const field = screen.getByRole('textbox', { name: 'Discarded width' });
+      await user.click(field);
+      await user.clear(field);
+      await user.type(field, '12');
+
+      act(() => {
+        parameterCommit.setDraft('/width', undefined);
+      });
+      await user.tab();
+
+      expect(field).toHaveValue('10');
+    });
+
+    it('reports a refused final commit instead of showing the value as entered', async () => {
+      const user = userEvent.setup();
+      const parameterCommit = createParameterCommit(() => ({
+        status: 'rejected',
+        requestId: 'refused',
+        code: 'STALE_MANIFEST',
+        message: 'The field changed since this edit began.',
+      }));
+      render(
+        <TestWrapper>
+          <ParametersNumber
+            value={10}
+            defaultValue={10}
+            fieldProjection={{ ...testProjection('length', defaultUnits), instancePointer: '/width' }}
+            parameterCommit={parameterCommit}
+            onChange={vi.fn()}
+            aria-label='Refused width'
+          />
+        </TestWrapper>,
+      );
+      const field = screen.getByRole('textbox', { name: 'Refused width' });
+      await user.click(field);
+      await user.clear(field);
+      await user.type(field, '12');
+      await user.keyboard('{Enter}');
+
+      expect(await screen.findByText('The field changed since this edit began.')).toBeVisible();
+    });
+
+    it('stays silent when a newer edit displaced this one before it was applied', async () => {
+      const user = userEvent.setup();
+      const parameterCommit = createParameterCommit(() => ({
+        status: 'cancelled-before-apply',
+        requestId: 'displaced',
+      }));
+      render(
+        <TestWrapper>
+          <ParametersNumber
+            value={10}
+            defaultValue={10}
+            fieldProjection={{ ...testProjection('length', defaultUnits), instancePointer: '/width' }}
+            parameterCommit={parameterCommit}
+            onChange={vi.fn()}
+            aria-label='Displaced width'
+          />
+        </TestWrapper>,
+      );
+      const field = screen.getByRole('textbox', { name: 'Displaced width' });
+      await user.click(field);
+      await user.clear(field);
+      await user.type(field, '12');
+      await user.keyboard('{Enter}');
+      await waitFor(() => {
+        expect(parameterCommit.calls).toHaveLength(1);
+      });
+
+      expect(screen.queryByText('The parameter could not be saved.')).not.toBeInTheDocument();
     });
 
     it('restores retained invalid text into the visible input after remount', async () => {
       const user = userEvent.setup();
-      const input = createRetainedInput();
-      const parameterCommit: ParameterCommit = {
-        target: { authority: 'test', root: '/', entry: 'main.ts' },
-        group: 'default',
-        editorInstance: 'retained-editor',
-        input,
-        setValue: vi.fn(async () => undefined),
-      };
+      const parameterCommit = createParameterCommit();
       const view = (
         <TestWrapper>
           <ParametersNumber
@@ -683,6 +813,7 @@ describe('ParametersNumber', () => {
       await user.click(field);
       await user.clear(field);
       await user.type(field, 'invalid draft');
+      expect(parameterCommit.draft('/value')).toEqual({ text: 'invalid draft', valid: false });
       first.unmount();
 
       render(view);
@@ -766,22 +897,15 @@ describe('ParametersNumber', () => {
       expect(field).toHaveValue(text);
     });
 
-    it('converts an explicit display unit and waits for the authority outcome before acknowledging it', async () => {
+    it('converts an explicit display unit and commits the native value against its own field', async () => {
       const onChange = vi.fn();
       const user = userEvent.setup();
-      let settle: ((outcome: ParameterSetOutcome) => void) | undefined;
-      const submit = vi.fn(async (_request: ParameterSetRequest) => {
-        const outcome = await new Promise<ParameterSetOutcome>((resolve) => {
-          settle = resolve;
-        });
-        return outcome;
-      });
-      const identity = authorityIdentity;
+      const parameterCommit = createParameterCommit();
 
-      render(
+      const row = (value: number): React.JSX.Element => (
         <TestWrapper>
           <ParametersNumber
-            value={10}
+            value={value}
             defaultValue={10}
             descriptor='length'
             units={defaultUnits}
@@ -797,56 +921,84 @@ describe('ParametersNumber', () => {
               adornment: 'mm',
               guessed: false,
             }}
-            parameterCommit={{
-              target: {
-                authority: 'provider-configuration',
-                root: '/project',
-                entry: 'provider-configuration/runtime/export/stl/options',
-              },
-              group: 'default',
-              editorInstance: 'test-editor',
-              input: createRetainedInput(submit),
-              setValue: vi.fn(async () => undefined),
-            }}
+            parameterCommit={parameterCommit}
             onChange={onChange}
           />
-        </TestWrapper>,
+        </TestWrapper>
       );
+      const view = render(row(10));
 
       const input = screen.getByDisplayValue('10');
       await user.clear(input);
       await user.type(input, '2.1 cm');
       await user.keyboard('{Enter}');
 
-      expect(submit).toHaveBeenCalledOnce();
-      const request = submit.mock.calls[0]?.[0];
-      expect(request).toMatchObject({
-        expected: identity,
-        operation: {
-          kind: 'unit-value',
-          group: 'default',
-          parameterId: 'width',
+      expect(parameterCommit.calls).toEqual([
+        {
           pointer: '/width',
-          inputUnit: 'cm',
-          value: '2.1 cm',
+          value: 21,
+          pressure: 'final',
+          base: {
+            pointer: '/width',
+            value: 10,
+            binding: { representation: 'binary64', unit: 'mm' },
+          },
         },
-      });
+      ]);
+      // An authoritative row never reports through the form: the sidecar write is the render trigger.
       expect(onChange).not.toHaveBeenCalled();
-      if (request === undefined) {
-        throw new Error('Expected a submitted parameter request');
-      }
 
-      await act(async () => {
-        settle?.({
-          status: 'committed',
-          requestId: request.requestId,
-          write: 'applied',
-          revision: { ...identity, valueRevision: 'value-2' },
-        });
-      });
-
+      view.rerender(row(21));
       expect(input).toHaveValue('21');
-      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it('commits at most one transient value per animation frame while dragging', async () => {
+      const parameterCommit = createParameterCommit();
+      const frames: Array<() => void> = [];
+      const requestFrame = vi
+        .spyOn(globalThis, 'requestAnimationFrame')
+        .mockImplementation((callback: FrameRequestCallback) => {
+          frames.push(() => {
+            callback(0);
+          });
+          return frames.length;
+        });
+      vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => undefined);
+      try {
+        const { container } = render(
+          <TestWrapper>
+            <ParametersNumber
+              value={10}
+              defaultValue={10}
+              descriptor='length'
+              fieldProjection={{ ...testProjection('length', defaultUnits), instancePointer: '/width' }}
+              parameterCommit={parameterCommit}
+              enableContinualOnChange
+              onChange={vi.fn()}
+              aria-label='Dragged width'
+            />
+          </TestWrapper>,
+        );
+        const sliderInput = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
+        Object.defineProperty(sliderInput, 'offsetWidth', { configurable: true, value: 100 });
+
+        fireSliderPointerEvent(sliderInput, 'pointerdown', { clientX: 0 });
+        fireSliderPointerEvent(sliderInput, 'pointermove', { clientX: 10 });
+        fireSliderPointerEvent(sliderInput, 'pointermove', { clientX: 20 });
+        fireSliderPointerEvent(sliderInput, 'pointermove', { clientX: 30 });
+
+        expect(requestFrame).toHaveBeenCalledTimes(1);
+        expect(parameterCommit.calls).toHaveLength(0);
+
+        act(() => {
+          frames.pop()?.();
+        });
+
+        expect(parameterCommit.calls).toHaveLength(1);
+        expect(parameterCommit.calls[0]?.pressure).toBe('transient');
+      } finally {
+        vi.restoreAllMocks();
+      }
     });
 
     it('should update value when typing in input', async () => {

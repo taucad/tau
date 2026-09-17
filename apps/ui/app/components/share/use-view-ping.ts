@@ -1,5 +1,4 @@
 import { useEffect, useRef } from 'react';
-import { useSelector } from '@xstate/react';
 import { useCadPreview } from '#hooks/use-cad-preview.js';
 
 /** Milliseconds — minimum dwell time before recording a view ping. */
@@ -20,11 +19,8 @@ export const useViewPing = ({ publicationId, apiBaseUrl }: UseViewPingArgs): voi
   const interactedRef = useRef(false);
   const dwellMetRef = useRef(false);
 
-  const cadPreview = useCadPreview();
-  const { cadRef } = cadPreview;
-
-  // Subscribe to parameter changes — any change after mount counts as an interaction.
-  const parameters = useSelector(cadRef, (snapshot) => snapshot.context.parameters);
+  // Any parameter change after mount counts as an interaction.
+  const { parameters } = useCadPreview();
   const parametersInitRef = useRef<Record<string, unknown> | undefined>(parameters);
 
   useEffect(() => {

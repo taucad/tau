@@ -20,7 +20,7 @@ import { extractModifiedProperties } from '#utils/object.utils.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { rjsfValidator } from '#lib/rjsf-validator.js';
 import type { ParameterManifest } from '@taucad/parameters';
-import type { FileParameterEntry } from '@taucad/types';
+import type { ParameterGroup } from '@taucad/types';
 
 type ParametersProperties = {
   readonly parameters: Record<string, unknown>;
@@ -37,7 +37,7 @@ type ParametersProperties = {
   readonly isInitialExpanded?: boolean;
   readonly isAllExpanded?: boolean;
   readonly parameterManifest: ParameterManifest;
-  readonly parameterBindings?: FileParameterEntry['groups'][string]['bindings'];
+  readonly parameterGroup?: ParameterGroup;
   readonly parameterEdit: ParameterEdit;
 };
 
@@ -57,7 +57,7 @@ export function Parameters({
   isInitialExpanded = true,
   isAllExpanded,
   parameterManifest,
-  parameterBindings,
+  parameterGroup,
   parameterEdit,
 }: ParametersProperties): React.JSX.Element {
   'use no memo';
@@ -140,7 +140,7 @@ export function Parameters({
       },
       units,
       parameterManifest,
-      parameterBindings,
+      parameterGroup,
       parameterEdit,
     }),
     [
@@ -150,7 +150,7 @@ export function Parameters({
       defaultParameters,
       units,
       parameterManifest,
-      parameterBindings,
+      parameterGroup,
       parameterEdit,
     ],
   );
@@ -159,9 +159,9 @@ export function Parameters({
     () => mergeFormDefaults(jsonSchema ?? {}, defaultParameters, parameters),
     [jsonSchema, defaultParameters, parameters],
   );
-  /* Authoritative number rows read their own value from their input actor, so the form's own
-   * re-render is never what acknowledges an edit; deferring it keeps the whole RJSF tree off the
-   * urgent path while non-number widgets still see the committed data. */
+  /* A number row shows its own draft while it is being edited, so the form's re-render is never what
+   * acknowledges an edit; deferring it keeps the whole RJSF tree off the urgent path while every
+   * widget still settles on the committed data. */
   const deferredData = useDeferredValue(mergedData);
   const hasParameters = jsonSchema && Object.keys(jsonSchema.properties ?? {}).length > 0;
 

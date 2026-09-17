@@ -85,16 +85,10 @@ describe('ForkAction', () => {
   it('copies the complete parameter record bytes without rebuilding active values', async () => {
     const parameterBytes = new TextEncoder().encode(
       JSON.stringify({
-        recordVersion: 2,
-        profile: 'future',
         activeGroup: 'alternate',
-        order: ['default', 'alternate'],
         groups: {
           default: { values: { width: 10 } },
-          alternate: {
-            values: { width: '12.5' },
-            bindings: { '/width': { future: true } },
-          },
+          alternate: { values: { width: '12.5' }, units: { '/width': 'in' } },
         },
       }),
     );

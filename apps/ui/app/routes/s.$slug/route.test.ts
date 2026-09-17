@@ -121,7 +121,6 @@ describe('/s provider dispatch', () => {
 describe('portable parameter records', () => {
   it('reads a current record without rewriting the archived bytes', () => {
     const artifact = portableArtifact({
-      profile: 'tau-json-structure-units-03-v1',
       activeGroup: 'default',
       groups: { default: { values: { width: 12 } } },
     });
@@ -134,8 +133,8 @@ describe('portable parameter records', () => {
   });
 
   it.each([
-    [{ recordVersion: 2, profile: 'future', groups: {} }, 'unsupported record version'],
-    [{ activeGroup: 'default', groups: { default: { values: { width: 12 } } } }, 'not a valid record'],
+    [{ recordVersion: 1, activeGroup: 'default', groups: {} }, 'not a valid record'],
+    [{ activeGroup: 'missing', groups: { default: { values: { width: 12 } } } }, 'not a valid record'],
     ['{', 'not a valid record'],
   ])('preserves %s record bytes and reports the read-only diagnostic', (record, label) => {
     const artifact = portableArtifact(record);

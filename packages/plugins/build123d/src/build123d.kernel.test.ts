@@ -123,7 +123,7 @@ describe('Build123d kernel lifecycle errors', () => {
 
   it.each([
     ['{', 'INVALID_RECORD'],
-    [JSON.stringify({ recordVersion: 2, profile: 'future', groups: {} }), 'UNSUPPORTED_RECORD'],
+    [JSON.stringify({ recordVersion: 1, activeGroup: 'default', groups: {} }), 'INVALID_RECORD'],
   ])('reports the stored record %s as a typed %s issue before building', async (record, code) => {
     const context = createContext();
     runtime.filesystem.readFile = vi.fn().mockResolvedValue(new TextEncoder().encode(record));

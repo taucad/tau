@@ -433,9 +433,11 @@ describe('Build123d native kernel', () => {
       if (decoded.status !== 'current') {
         throw new Error('Expected a current parameter record');
       }
-      expect(decoded.record.groups['default']).toMatchObject({
+      // The record carries only the authored claim; the producer to convert back for is the live manifest's.
+      expect(decoded.record.groups['default']).toEqual({
         values: { width: 4 },
-        bindings: { '/width': { unit: 'cm', sourceUnit: { producer: 'build123d', producerUnit: 'mm' } } },
+        units: { '/width': 'cm' },
+        sourceUnits: { '/width': 'cm' },
       });
       const converted = await client.render({
         source: {

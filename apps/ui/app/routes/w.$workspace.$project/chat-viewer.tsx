@@ -57,8 +57,6 @@ const bottomControlsGutterPx = 16;
 const componentNameBadgeRightEdgeThresholdPx = 220;
 const componentNameBadgeBottomEdgeThresholdPx = 56;
 
-/** Stable `useCadSelector` defaults: a fresh literal per render invalidates the selector memo. */
-
 const getViewerSecondaryGesturePoint = (event: React.PointerEvent<HTMLDivElement>): ViewerSecondaryGesturePoint => ({
   clientX: event.clientX,
   clientY: event.clientY,
@@ -543,7 +541,6 @@ const ViewerContent = memo(function ({
         onContextMenu={handleCanvasRegionContextMenu}
         onPointerMove={updateViewerPointerPosition}
         onPointerLeave={clearViewerPointerPosition}
-        onPointerCancel={clearViewerPointerPosition}
       >
         {geometry ? (
           <CadViewer

@@ -47,7 +47,7 @@ import type {
   RenderPhase,
   RuntimeProtocol,
   RuntimeStateChangedArgs,
-  TelemetryEntry,
+  TelemetryBatch,
 } from '#types/runtime-protocol.types.js';
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
@@ -673,10 +673,10 @@ export class RuntimeWorkerClient {
     };
   }
 
-  /** Subscribe to telemetry batches. */
-  public onTelemetry(handler: (entries: readonly TelemetryEntry[]) => void): Unsubscribe {
-    return this.deferNotify('telemetry', ({ entries }) => {
-      handler(entries);
+  /** Subscribe to telemetry batches, each with the producer identity and clock anchor (I5). */
+  public onTelemetry(handler: (batch: TelemetryBatch) => void): Unsubscribe {
+    return this.deferNotify('telemetry', (batch) => {
+      handler(batch);
     });
   }
 

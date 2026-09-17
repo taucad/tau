@@ -1,7 +1,7 @@
 import { forwardRef, useImperativeHandle } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { TelemetryEntry } from '@taucad/runtime';
+import type { TelemetrySpanRecord } from '@taucad/runtime';
 import type { ActorRefFrom } from 'xstate';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -68,13 +68,18 @@ vi.mock('#components/ui/combobox-responsive.js', () => ({
   ),
 }));
 
-function entry(overrides: Partial<TelemetryEntry> & { name: string }): TelemetryEntry {
+/** One producer for every span in this file: identity is `origin.instance` plus `spanId` (I5). */
+const producer = { label: 'worker', instance: 'p1' } as const;
+
+function entry(overrides: Partial<TelemetrySpanRecord> & { name: string }): TelemetrySpanRecord {
   return {
     name: overrides.name,
     startTime: overrides.startTime ?? 0,
     duration: overrides.duration ?? 0,
     workerTimeOrigin: overrides.workerTimeOrigin ?? 1000,
     detail: overrides.detail,
+    origin: overrides.origin ?? producer,
+    epoch: overrides.epoch ?? 0,
   };
 }
 
@@ -135,7 +140,7 @@ describe('GeometryUnitTiming', () => {
 
   it('can inspect a historical trace without mixing its spans or metrics', () => {
     renderTiming({ cadRef: actor(), query: '' });
-    fireEvent.change(screen.getByRole('combobox', { name: 'Trace history' }), { target: { value: 'render-1' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Trace history' }), { target: { value: 'p1:render-1' } });
 
     expect(getTotalMetric()).toHaveTextContent('100ms');
     expect(screen.getByRole('treeitem', { name: /old\.operation/u })).toBeInTheDocument();

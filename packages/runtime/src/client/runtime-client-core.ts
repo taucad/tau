@@ -31,7 +31,7 @@ import type { KernelIssueCode } from '#types/kernel-issue-codes.js';
 import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
 import type {
   RuntimeExportModelArgs,
-  TelemetryEntry,
+  TelemetryBatch,
   RenderPhase,
   WorkerState,
 } from '#types/runtime-protocol.types.js';
@@ -888,7 +888,7 @@ type ClientTranscoders<Runtime> = [AnyRuntimeDefinition] extends [Runtime]
 type EventHandlers = {
   log: Topic<LogEntry>;
   progress: Topic<{ phase: RenderPhase; detail?: Record<string, unknown> }>;
-  telemetry: Topic<TelemetryEntry[]>;
+  telemetry: Topic<TelemetryBatch>;
   parametersResolved: Topic<GetParametersResult>;
   geometry: Topic<HashedGeometryResult>;
   state: Topic<{ state: WorkerState; detail?: string }>;
@@ -1165,7 +1165,7 @@ type RuntimeClientProjection<
     handler: (phase: RenderPhase, detail?: Record<string, unknown>) => void,
     options?: RuntimeSubscribeOptions,
   ): () => void;
-  on(event: 'telemetry', handler: (entries: TelemetryEntry[]) => void, options?: RuntimeSubscribeOptions): () => void;
+  on(event: 'telemetry', handler: (batch: TelemetryBatch) => void, options?: RuntimeSubscribeOptions): () => void;
   on(
     event: 'parametersResolved',
     handler: (result: GetParametersResult) => void,
@@ -1529,7 +1529,7 @@ export function createRuntimeClient(
   const handlers: EventHandlers = {
     log: new Topic<LogEntry>({ name: 'RuntimeClient.log' }),
     progress: new Topic<{ phase: RenderPhase; detail?: Record<string, unknown> }>({ name: 'RuntimeClient.progress' }),
-    telemetry: new Topic<TelemetryEntry[]>({ name: 'RuntimeClient.telemetry' }),
+    telemetry: new Topic<TelemetryBatch>({ name: 'RuntimeClient.telemetry' }),
     parametersResolved: new Topic<GetParametersResult>({ name: 'RuntimeClient.parametersResolved' }),
     geometry: new Topic<HashedGeometryResult>({ name: 'RuntimeClient.geometry' }),
     state: new Topic<{ state: WorkerState; detail?: string }>({ name: 'RuntimeClient.state' }),
@@ -1556,8 +1556,8 @@ export function createRuntimeClient(
     workerClient.onLog((entry) => {
       handlers.log.emit(entry);
     });
-    workerClient.onTelemetry((entries) => {
-      handlers.telemetry.emit([...entries]);
+    workerClient.onTelemetry((batch) => {
+      handlers.telemetry.emit(batch);
     });
     workerClient.onState(({ renderId, state, detail, geometryObserved }) => {
       if (
@@ -2252,7 +2252,7 @@ export function createRuntimeClient(
           }, options);
         }
         case 'telemetry': {
-          return handlers.telemetry.subscribe(handler as (entries: TelemetryEntry[]) => void, options);
+          return handlers.telemetry.subscribe(handler as (batch: TelemetryBatch) => void, options);
         }
         case 'parametersResolved': {
           return handlers.parametersResolved.subscribe(handler as (result: GetParametersResult) => void, options);

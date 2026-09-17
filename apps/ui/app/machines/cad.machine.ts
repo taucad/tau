@@ -6,7 +6,8 @@ import type {
   HashedGeometryResult,
   KernelIssue,
   RenderPhase,
-  TelemetryEntry,
+  TelemetryBatch,
+  TelemetrySpanRecord,
   WorkerState,
 } from '@taucad/runtime';
 import type { ParameterManifest } from '@taucad/parameters';
@@ -50,7 +51,7 @@ export type CadContext = {
   fileSystemRoot: string;
   parameterManifest?: ParameterManifest;
   renderPhase: RenderPhase | undefined;
-  telemetryEntries: TelemetryEntry[];
+  telemetryEntries: TelemetrySpanRecord[];
   renderTimeout: number;
   kernelClient?: AppRuntimeClient;
   capabilities?: AppCapabilitiesManifest;
@@ -95,7 +96,7 @@ type CadEvent =
   | { type: 'parametersParsed'; manifest: ParameterManifest }
   | { type: 'kernelIssue'; errors: KernelIssue[] }
   | { type: 'kernelProgress'; phase: RenderPhase }
-  | { type: 'kernelTelemetry'; entries: TelemetryEntry[] }
+  | { type: 'kernelTelemetry'; batch: TelemetryBatch }
   | {
       type: 'kernelLog';
       level: LogLevel;
@@ -298,8 +299,8 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
         data: entry.data,
       });
     }),
-    client.on('telemetry', (entries: TelemetryEntry[]) => {
-      machineRef.send({ type: 'kernelTelemetry', entries });
+    client.on('telemetry', (batch: TelemetryBatch) => {
+      machineRef.send({ type: 'kernelTelemetry', batch });
     }),
     client.on('error', (issues: KernelIssue[]) => {
       machineRef.send({ type: 'kernelIssue', errors: issues });
@@ -382,7 +383,7 @@ const maxTelemetryEntries = 2000;
  * `parentSpanId` on a root span and ends a parent after its children, so
  * counting roots backwards finds the boundary between whole traces.
  */
-const boundTelemetryEntries = (entries: TelemetryEntry[]): TelemetryEntry[] => {
+const boundTelemetryEntries = (entries: TelemetrySpanRecord[]): TelemetrySpanRecord[] => {
   const windowed = entries.length > maxTelemetryEntries ? entries.slice(-maxTelemetryEntries) : entries;
   let traces = 0;
   for (let index = windowed.length - 1; index >= 0; index--) {
@@ -476,7 +477,12 @@ export const cadMachine = setup({
     storeTelemetry: assign({
       telemetryEntries({ context, event }) {
         assertEvent(event, 'kernelTelemetry');
-        return boundTelemetryEntries([...context.telemetryEntries, ...event.entries]);
+        /* The producer and its clock anchor are batch fields on the wire, and this store outlives the
+         * batch: fold them into each span so a recycled client's `spanId` 0 cannot parent under the
+         * previous client's (I5). This is the same record the JSONL sink writes. */
+        const { origin, epoch } = event.batch;
+        const arrived = event.batch.entries.map((entry) => ({ ...entry, origin, epoch }));
+        return boundTelemetryEntries([...context.telemetryEntries, ...arrived]);
       },
     }),
     setEntryPath: assign({

@@ -144,12 +144,12 @@ const seedProject = async (userData: string, slug: string): Promise<{ example: s
  * only evaluated into the previous document.
  *
  * It also seeds the two preferences a fresh `--user-data-dir` has no value for.
- * `tauDebug` mounts the viewer test bridge. **`cad-kernel` decides which kernel
- * runs** — L10 finding F-L10-10: the active kernel comes from that preference
- * (`apps/ui/app/hooks/use-kernel.tsx:7,16`, stored by `use-cookie.ts` in
- * `localStorage` despite the name), defaults to `openscad`, and is *not* derived
- * from the project on disk. Seeding files alone produces an OpenSCAD row for
- * every kernel.
+ * `tauDebug` mounts the viewer test bridge. **`tau-cad-kernel` decides which
+ * kernel runs** — L10 finding F-L10-10: the active kernel comes from that
+ * preference (`apps/ui/app/hooks/use-kernel.tsx:7,16`, stored by `use-cookie.ts`
+ * in `localStorage` despite the name, under `metaConfig.cookiePrefix` + the
+ * name), defaults to `openscad`, and is *not* derived from the project on disk.
+ * Seeding files alone produces an OpenSCAD row for every kernel.
  */
 const instrument = (activeKernel: string): void => {
   type State = {
@@ -165,12 +165,13 @@ const instrument = (activeKernel: string): void => {
   const scope = globalThis as typeof globalThis & { __TAU_OPEN_TO_FRAME__?: State };
   try {
     localStorage.setItem('tau:flags', JSON.stringify({ tauDebug: true }));
-    /* Both shapes on purpose: `use-cookie.ts` stores this in localStorage at HEAD,
-     * but an older client build reads a real cookie, and the harness must select
-     * the kernel in whichever client root it is pointed at. */
-    localStorage.setItem('cad-kernel', JSON.stringify(activeKernel));
+    /* `use-cookie.ts` prefixes every preference with `metaConfig.cookiePrefix` (`tau-`), so the
+     * bare name this harness used to write was read by nothing and every kernel measured OpenSCAD.
+     * Both shapes on purpose: localStorage is where HEAD stores it, and an older client build reads
+     * the legacy cookie of the same (prefixed) name. */
+    localStorage.setItem('tau-cad-kernel', JSON.stringify(activeKernel));
     // oxlint-disable-next-line no-document-cookie -- the product's own cookie shape is the thing under test; a library would not reproduce it.
-    document.cookie = `cad-kernel=${encodeURIComponent(JSON.stringify(activeKernel))}; path=/`;
+    document.cookie = `tau-cad-kernel=${encodeURIComponent(JSON.stringify(activeKernel))}; path=/`;
   } catch {
     // A private context without storage still measures; only the bridge is lost.
   }
@@ -304,11 +305,24 @@ const coefficientOfVariation = (values: readonly number[]): number | undefined =
  * forking `openrscad` regardless, and a harness with no check published that as
  * a per-kernel row.
  */
-const observedEngine = (mainProcessLog: readonly string[] | undefined): string | undefined => {
-  const line = mainProcessLog?.findLast((entry) => entry.includes('kernel.engine'));
-  const engine = /"kernelId":"(?<kernel>[^"]+)"/u.exec(line ?? '')?.groups?.['kernel'];
-  const backend = /"backend":"(?<backend>[^"]+)"/u.exec(line ?? '')?.groups?.['backend'];
-  return engine === undefined ? undefined : `${engine}:${backend ?? 'unknown'}`;
+const observedEngine = async (
+  traceFile: string | undefined,
+  mainProcessLog: readonly string[] | undefined,
+): Promise<string | undefined> => {
+  if (traceFile === undefined) {
+    return undefined;
+  }
+  const body = await readFile(traceFile, 'utf8').catch(() => '');
+  const selection = body.split('\n').findLast((line) => line.includes('"kernel.select"'));
+  const kernel = /"kernelId":"(?<kernel>[^"]+)"/u.exec(selection ?? '')?.groups?.['kernel'];
+  if (kernel === undefined) {
+    return undefined;
+  }
+  /* The host log names whichever engine the fork loaded — a desktop fork loads its resident native
+   * engine whatever the render then selects — so it may only qualify the kernel the trace names. */
+  const engineLine = mainProcessLog?.findLast((entry) => entry.includes(`"kernelId":"${kernel}"`));
+  const backend = /"backend":"(?<backend>[^"]+)"/u.exec(engineLine ?? '')?.groups?.['backend'];
+  return `${kernel}:${backend ?? 'bundled'}`;
 };
 
 const tagsFor = (
@@ -521,7 +535,13 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
           )
           .catch(() => undefined)
       : undefined;
-  const engine = observedEngine(mainProcessLog);
+  /* Read while the host is still up: every producer's sink writes per batch, and the selection span
+   * is the first thing a render emits. */
+  const trace = await mergeRuntimeTrace({
+    directory: join(userData, 'logs/traces'),
+    destination: join(outputDirectory, `open-to-frame-${host}-${kernelId}-${String(iteration)}.trace.jsonl`),
+  }).catch(() => undefined);
+  const engine = await observedEngine(trace?.file, mainProcessLog);
   const invalidReason = sampleVerdict({
     marks,
     projectUrl,
@@ -541,15 +561,6 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
   const clientDigestAfter = clientRoot === undefined ? undefined : await digestOf(clientRoot).catch(() => 'unreadable');
   await application?.close().catch(() => undefined);
   await browser?.close().catch(() => undefined);
-  /* Read after the host exits, so every producer's stream has flushed, and before the user-data dir
-   * is removed with it. The wall clock says how long the open took; this says where it went. */
-  const trace =
-    host === 'desktop'
-      ? await mergeRuntimeTrace({
-          directory: join(userData, 'logs/traces'),
-          destination: join(outputDirectory, `open-to-frame-${host}-${kernelId}-${String(iteration)}.trace.jsonl`),
-        }).catch(() => undefined)
-      : undefined;
   /* Each cold sample fills an OPFS `/node_modules` under its own user-data dir. */
   await rm(userData, { recursive: true, force: true }).catch(() => undefined);
   await rm(picked, { recursive: true, force: true }).catch(() => undefined);

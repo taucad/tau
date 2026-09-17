@@ -1500,22 +1500,15 @@ export function GltfMesh({
     }
   }, [presentation]);
 
-  // Ordinary views schedule section analysis after presentation; active section
-  // views submit immediately and await the same promise before their next swap.
+  /* D27: section topology is built only for an armed section tool. It used to run 50 ms after every
+   * presentation, for every model, whether or not the feature was ever used — 283 ms of main thread at
+   * 100k triangles and 1.7 s at 1M, against a 16 ms pipeline. An active section view still submits
+   * immediately and awaits the same promise before its next swap. */
   useEffect(() => {
-    if (presentation?.sectionStatus !== 'pending') {
+    if (presentation?.sectionStatus !== 'pending' || !sectionView.isActive || !sectionView.enableMesh) {
       return;
     }
-    if (sectionView.isActive && sectionView.enableMesh) {
-      void ensureSectionAnalysis(presentation);
-      return;
-    }
-    const handle = setTimeout(() => {
-      void ensureSectionAnalysis(presentation);
-    }, 50);
-    return () => {
-      clearTimeout(handle);
-    };
+    void ensureSectionAnalysis(presentation);
   }, [ensureSectionAnalysis, presentation, sectionView.enableMesh, sectionView.isActive]);
 
   useFrame(() => {
@@ -1529,7 +1522,8 @@ export function GltfMesh({
     committed.firstFrameAt = performance.now();
     committed.timings.commitToFirstFrame = committed.firstFrameAt - committed.committedAt;
     committed.timings.receiptToFirstFrame = committed.firstFrameAt - committed.receivedAt;
-    if (committed.sectionStatus !== 'pending') {
+    // A presentation that never needed section topology is complete at its first frame (D27).
+    if (committed.sectionStatus !== 'pending' || committed.barrier === 'display-ready') {
       emitTelemetry(committed, 'presented');
     }
   });

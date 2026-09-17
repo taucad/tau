@@ -26,6 +26,7 @@ import { exposeElectronRuntime, relayElectronPorts } from '@taucad/runtime/elect
 import {
   appIconThemeChannel,
   agentHostSessionChannels,
+  externalAgentsChannel,
   quitChannels,
   computeControlChannels,
   readBootstrap,
@@ -93,7 +94,9 @@ contextBridge.exposeInMainWorld('tau', {
   },
   nodeFs: { homeRoot: bootstrap.homeRoot },
   runtimeKernelIds: bootstrap.runtimeKernelIds,
-  externalAgents: bootstrap.externalAgents,
+  /* A call, not a value (D17): main answers when ACP discovery settles, which no
+   * longer blocks this window's creation. */
+  externalAgents: async (): Promise<unknown> => ipcRenderer.invoke(externalAgentsChannel),
   compute: {
     inspect: async (projectRoot: string) =>
       (await ipcRenderer.invoke(computeControlChannels.inspect, projectRoot)) as unknown,

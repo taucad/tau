@@ -28,6 +28,7 @@ export const createConfigurationParameterOwner = (): Readonly<{
     const snapshot: NonNullable<ReturnType<ParameterSetService['snapshot']>> = {
       entry: record,
       identity,
+      bytes: null,
     };
     snapshots.set(entry, snapshot);
     changesFor(entry).emit();

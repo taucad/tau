@@ -144,6 +144,28 @@ describe('writeGlb', () => {
     expect(document.getRoot().listMeshes()).toHaveLength(1);
   });
 
+  it('writes no index buffer for a primitive whose indices would be the identity', async () => {
+    const indexed = createLinesInput();
+    const unindexed: GlbInput = {
+      nodes: [
+        {
+          ...indexed.nodes[0]!,
+          primitives: indexed.nodes[0]!.primitives.map(({ indices: _identity, ...primitive }) => primitive),
+        },
+      ],
+    };
+
+    const glb = writeGlb(unindexed);
+    const document = await new NodeIO().readBinary(glb);
+    const primitive = document.getRoot().listMeshes()[0]!.listPrimitives()[0]!;
+
+    // A de-indexed line soup is the common case for edge overlays; four bytes per vertex and an
+    // accessor for 0,1,2,… is pure waste, and glTF draws arrays when `indices` is absent.
+    expect(primitive.getIndices()).toBeNull();
+    expect(primitive.getAttribute('POSITION')!.getCount()).toBe(4);
+    expect(glb.byteLength).toBeLessThan(writeGlb(indexed).byteLength);
+  });
+
   it('should produce correct accessor counts for a single triangle', async () => {
     const glb = writeGlb(createSingleTriangleInput());
     const document = await new NodeIO().readBinary(glb);

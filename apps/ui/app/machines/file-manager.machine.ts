@@ -333,7 +333,11 @@ const connectWorkerActor = fromSafeAsync<WorkerConnectedEvent, { context: FileMa
     const bridge = createFileSystemBridge(worker);
     const { dispose: bridgeDispose } = bridge;
     const proxy = createFileSystemBridgeProxy(bridge);
-    await proxy.configureProjectRoots(await getProjectRootConfigs(context.onRootSkipped));
+    // Project roots are worker-global and every mutation re-syncs them (`syncProjectRoots`), so a
+    // nested mount inherits the root mount's configuration instead of rebuilding it (W21).
+    if (!context.sharedWorker) {
+      await proxy.configureProjectRoots(await getProjectRootConfigs(context.onRootSkipped));
+    }
     const previewPrefix = '/previews/';
     if (context.backendType === 'memory' && context.rootDirectory.startsWith(previewPrefix)) {
       await proxy.mount(context.rootDirectory, {
@@ -783,7 +787,9 @@ export const fileManagerMachine = setup({
         treeService?.startPolling();
         return;
       }
-      if (treeService === undefined) {
+      // Only the root mount observes other workspaces; a nested project mount polls its own
+      // tree only when that project is itself webaccess, handled above (W21).
+      if (treeService === undefined || context.sharedWorker) {
         return;
       }
       // async-iife: bootstrap — the root file manager also observes granted webaccess

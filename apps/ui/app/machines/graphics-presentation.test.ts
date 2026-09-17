@@ -1,5 +1,6 @@
 import { createActor, fromPromise } from 'xstate';
 import { describe, expect, it } from 'vitest';
+import { clearRendererSpans, rendererSpans } from '#lib/renderer-telemetry.js';
 import type { GeometryComponentManifest } from '@taucad/types';
 import type { GltfPresentationTelemetry } from '#machines/graphics.machine.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
@@ -142,21 +143,29 @@ describe('graphics GLTF presentation projection', () => {
     }
   });
 
-  it('keeps only the twenty newest completed telemetry records', () => {
+  it('measures a presentation onto the shared span model rather than a private ring', () => {
+    clearRendererSpans();
     const actor = createGraphicsActor();
     actor.start();
     try {
-      for (let revision = 1; revision <= 24; revision += 1) {
-        actor.send({
-          type: 'gltfPresentationMeasured',
-          telemetry: telemetry(revision),
-        });
-      }
-      expect(actor.getSnapshot().context.gltfPresentation.recentTelemetry).toHaveLength(20);
-      expect(actor.getSnapshot().context.gltfPresentation.recentTelemetry[0]?.revision).toBe(5);
-      expect(actor.getSnapshot().context.gltfPresentation.recentTelemetry.at(-1)?.revision).toBe(24);
+      actor.send({
+        type: 'gltfPresentationMeasured',
+        telemetry: { ...telemetry(7), durations: { parse: 3, receiptToFirstFrame: 40 } },
+      });
+
+      /* D21: the frame that presented the geometry lands beside the worker spans that produced it,
+       * under the renderer's own producer identity, instead of in a context field nothing read. */
+      expect(rendererSpans()).toMatchObject([
+        {
+          name: 'renderer.presentation',
+          duration: 40,
+          origin: { label: 'renderer' },
+          detail: { revision: 7, outcome: 'presented', backend: 'webgl', parse: 3, receiptToFirstFrame: 40 },
+        },
+      ]);
     } finally {
       actor.stop();
+      clearRendererSpans();
     }
   });
 });

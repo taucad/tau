@@ -200,13 +200,21 @@ export function useViewSettingsSync({
     const subscription = cameraRig.actorRef.subscribe(() => {
       clearTimeout(settleTimer);
       settleTimer = setTimeout(() => {
+        settleTimer = undefined;
         persistRef.current();
       }, cameraSettle);
     });
 
     return () => {
-      clearTimeout(settleTimer);
       subscription.unsubscribe();
+      if (settleTimer === undefined) {
+        return;
+      }
+      /* The pane can close, the file can change or the route can leave inside the settle window.
+       * Cancelling the timer there would throw away the pose the user just set, so the teardown is
+       * the flush. `persist` only sends when the settings actually changed. */
+      clearTimeout(settleTimer);
+      persistRef.current();
     };
   }, [cameraRig, enabled, persistCameraView]);
 }

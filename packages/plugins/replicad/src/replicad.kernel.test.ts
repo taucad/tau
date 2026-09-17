@@ -61,11 +61,14 @@ const testClients = new Set<TestClient>();
 /** Create a production-path in-process client for tests with the provided files. */
 const createClient = (
   files: Record<string, string>,
-  options?: ReplicadTestOptions & { readonly onTelemetry?: (entries: TelemetryEntry[]) => void },
+  options?: ReplicadTestOptions & { readonly onTelemetry?: (entries: readonly TelemetryEntry[]) => void },
 ): TestClient => {
   const client = createTestRuntimeClient({ runtime: createReplicadRuntime(options), files });
   if (options?.onTelemetry) {
-    client.on('telemetry', options.onTelemetry);
+    const { onTelemetry } = options;
+    client.on('telemetry', (batch) => {
+      onTelemetry(batch.entries);
+    });
   }
   testClients.add(client);
   return client;
@@ -3239,7 +3242,7 @@ describe('OC API Call Tracing', () => {
   }
 
   it('emits separate Replicad render spans for BRep execution, tessellation, and glTF packing', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       { 'box.ts': boxCode },
@@ -3289,7 +3292,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('emits a nested Replicad edge tessellation span when BRep edges are enabled', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       { 'box.ts': boxCode },
@@ -3324,7 +3327,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('uses prototype tessellation for repeated translated shape instances by default', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       { 'shafts.ts': repeatedCylinderCode },
@@ -3375,7 +3378,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('keeps the legacy per-shape tessellation path when tessellationInstancing is disabled', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       { 'shafts.ts': repeatedCylinderCode },
@@ -3406,7 +3409,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('uses prototype edge tessellation for repeated translated shape instances when BRep edges are enabled', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       { 'shafts.ts': repeatedCylinderCode },
@@ -3464,7 +3467,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('emits Replicad library summary telemetry under run-main when summary tracing is enabled', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       {
@@ -3509,7 +3512,7 @@ describe('OC API Call Tracing', () => {
   }, 15_000);
 
   it('emits Replicad library per-call telemetry under run-main when per-call tracing is enabled', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       {
@@ -3566,7 +3569,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('emits no Replicad library telemetry when library tracing is off', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       { 'box.ts': boxCode },
@@ -3590,7 +3593,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('emits Replicad library summary telemetry when user code fails after library calls', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       {
@@ -3630,7 +3633,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('emits an oc.summary span in summary mode', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       { 'box.ts': boxCode },
@@ -3658,7 +3661,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('emits individual oc.* spans in per-call mode', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       { 'box.ts': boxCode },
@@ -3685,7 +3688,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('emits no oc spans when tracing is off', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       { 'box.ts': boxCode },
@@ -3709,7 +3712,7 @@ describe('OC API Call Tracing', () => {
   });
 
   it('summary span contains per-class statistics', async () => {
-    const telemetryBatches: TelemetryEntry[][] = [];
+    const telemetryBatches: Array<readonly TelemetryEntry[]> = [];
 
     const client = createClient(
       { 'box.ts': boxCode },

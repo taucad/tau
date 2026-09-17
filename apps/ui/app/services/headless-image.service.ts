@@ -418,7 +418,7 @@ export class HeadlessImageService {
     }
     this.imageClient = client;
     if (this.dependencies.debug) {
-      this.unsubscribeTelemetry = client.on('telemetry', (entries) => this.activeTelemetry?.push(...entries));
+      this.unsubscribeTelemetry = client.on('telemetry', (batch) => this.activeTelemetry?.push(...batch.entries));
     }
     try {
       await client.connect();

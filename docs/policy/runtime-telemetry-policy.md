@@ -3,7 +3,7 @@ title: 'Kernel Telemetry Policy'
 description: 'Kernel worker telemetry: span naming, hierarchy rules, attribute conventions, and performance contracts. Covers RuntimeTracer, OC API tracing, and WorkerTelemetryCollector.'
 status: active
 created: '2026-02-20'
-updated: '2026-09-16'
+updated: '2026-09-18'
 related:
   - docs/policy/runtime-api-policy.md
   - docs/research/realtime-cad-performance-charter.md
@@ -178,9 +178,19 @@ Spans are emitted per producer and merged per session, so a batch must say who p
 
 - Every telemetry batch carries `origin`: `{ label, instance }`. `label` is the process role (`worker`, `utility`, `renderer`, `cli`, `main`, `node`); `instance` is a per-producer nonce minted once where the dispatcher is wired. A label alone does not discriminate producers — one session recycles kernel clients and opens several geometry units, and `spanId` restarts at `0` per tracer — so consumers key spans on `origin.instance` plus `spanId`, never on `spanId` alone.
 - Every telemetry batch carries `epoch`: the absolute Unix-epoch millisecond value of that realm's `performance.now()` zero, recomputed at each flush (`Date.now() - performance.now()`). Consumers reconcile clocks with `epoch + startTime`. `workerTimeOrigin` is the fallback, not the rule: it is captured once at realm start and never re-anchored, so realms that started on opposite sides of a system suspend or an NTP step disagree by that step.
-- `origin` and `epoch` are batch fields. They MUST NOT be added per span.
-- Telemetry MUST NOT accumulate without bound in any process. A machine or store that retains entries for display bounds them at the assign site — 20 traces' worth of entries, bounded entries per trace, with the trace the user has selected preserved across eviction — and MUST NOT copy the retained array per batch.
+- `origin` and `epoch` are batch fields **on the wire**: the tracer MUST NOT put them on a `TelemetryEntry`, because they are constant across a flush and paying for them per span is pure wire cost. Any consumer or sink that retains a span _beyond_ its batch folds them in and stores a `TelemetrySpanRecord` instead — a retained span with no producer and no clock anchor cannot be merged with anyone else's. One JSONL line is one such record.
+- Telemetry MUST NOT accumulate without bound in any process. A machine or store that retains entries for display bounds them at the assign site — 20 traces' worth of entries, bounded entries per trace, with the trace the user has selected preserved across eviction. A store that publishes to React rebuilds its array per batch by construction; what is forbidden is letting that array grow without a ceiling, because the copy is what reached 207 ms at 80k entries. A selection that must outlive eviction is held as the selected object, not as an id looked up in the surviving window.
 - File exporters enqueue and return. An exporter MUST NOT perform synchronous filesystem work in the flush turn, MUST attach an error handler and disable itself on failure rather than throwing out of the event loop, and MUST bound what it buffers. Native child processes never write telemetry files; their stage timings ride the existing control channel as numeric attributes on one span.
+
+## Sinks and Producers
+
+Spans are produced in every realm. Where they go is the host's answer, not the tracer's.
+
+- **Node realms** (desktop utility, CLI, in-process harnesses) write JSONL under `TAU_TELEMETRY_DIR`, or under the desktop's own diagnostics directory (`TAU_DESKTOP_LOG_DIR`), one file per producer, rotated at 5 MiB with one previous file kept. `TAU_TELEMETRY=0` turns it off. A run's trace is the merge of that directory ordered on `epoch + startTime`; both performance harnesses record the merged path as `MeasurementTags.runtimeTraceJsonl`.
+- **`TAU_TELEMETRY_FORMAT=otlp`** makes a sink write one OTLP JSON payload per flushed batch instead, which is what an OpenTelemetry collector's `otlpjsonfile` receiver reads. The conversion happens at the sink and nowhere else: no OpenTelemetry SDK runs in any Tau process. Trace and span ids are hashes of `origin.instance` plus `spanId`, because a tracer's ids restart at `0` per realm.
+- **The browser** has no host-visible file. The renderer buffers its spans bounded (`apps/ui/app/lib/renderer-telemetry.ts`), nothing is posted anywhere, and the trace leaves only by an explicit export from the telemetry pane, which merges the worker entries the CAD machine holds with the renderer's own buffer into the same JSONL.
+- **The renderer is a producer like any other**: one page-scoped `origin` (`label: 'renderer'`), `epoch` re-anchored per record, `renderer.presentation` for the frame that presented a model with the presentation pipeline's durations as attributes, and `renderer.long-animation-frame` from a `PerformanceObserver`. These observers are out-of-band by construction — the platform reports a Long Animation Frame only after a frame has already blocked for 50 ms — and the "no `PerformanceObserver`" rule scopes to the span-producer path (`WorkerTelemetryCollector` and the tracer), not to them.
+- **`Document-Policy: js-profiling`** is served on development and staging documents only: the SSR document sets it off the canonical production origin, and the desktop's `app://` handler sets it on an unpackaged build. Neither production nor a packaged app offers a profiler.
 
 ## OC API Call Tracing
 
@@ -282,3 +292,7 @@ Kernel-owned JavaScript libraries registered through Tau's built-in module regis
 | `wrapOcWithTracing`         | `packages/runtime/src/kernels/occt/oc-tracing.ts`                       | OC API call tracing proxy (shared by Replicad + OpenCascade) |
 | `buildSpanTree`             | `apps/ui/app/routes/projects_.$id/chat-kernel.tsx`                      | UI tree reconstruction                                       |
 | `createTelemetryAggregator` | `apps/ui/app/machines/kernel.machine.ts`                                | Main-thread forwarding                                       |
+| `openTelemetryFileSink`     | `packages/runtime/src/framework/telemetry-file-sink.ts`                 | Rotating per-producer JSONL, enqueue-and-return              |
+| `toOtlpJson`                | `packages/runtime/src/framework/telemetry-otlp.ts`                      | OTLP JSON shape, at the sink only                            |
+| `recordRendererSpan`        | `apps/ui/app/lib/renderer-telemetry.ts`                                 | Renderer producer, bounded buffer and manual export          |
+| `mergeRuntimeTrace`         | `apps/runtime-e2e/src/benchmarks/runtime-trace.ts`                      | One run's trace from every producer's file                   |

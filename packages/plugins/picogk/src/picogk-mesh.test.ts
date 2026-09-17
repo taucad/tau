@@ -5,7 +5,7 @@ import { transformNormalArray, transformVertexArray, validateTauCadTopology } fr
 import type { TauCadTopologyPayload } from '@taucad/geometry-core';
 import { describe, expect, it } from 'vitest';
 
-import { picogkArtifactToComponentGlbs, picogkArtifactToGlb } from '#picogk-mesh.js';
+import { picogkArtifactToGlb } from '#picogk-mesh.js';
 import type { PicogkBuild } from '#picogk.protocol.js';
 
 const artifact = (
@@ -52,7 +52,6 @@ const artifact = (
     byteLength: bytes.byteLength,
     sha256: createHash('sha256').update(bytes).digest('hex'),
     components: [component],
-    checkpoints: [],
     recycleAfterResponse: false,
     timings: {
       compileCacheHit: true,
@@ -160,16 +159,6 @@ describe('PicoGK mesh artifact adapter', () => {
     });
     expect(new TextDecoder().decode(glb)).toContain('component:picogk-1');
     expect(new TextDecoder().decode(glb)).not.toContain('"alphaMode":"BLEND"');
-  });
-
-  it('encodes dirty components as independently transferable stable-id assets', () => {
-    const { bytes, result } = artifact();
-
-    const component = picogkArtifactToComponentGlbs(bytes, result);
-
-    expect(component).toEqual([
-      { id: 'component:picogk-1', name: 'Asymmetric', content: picogkArtifactToGlb(bytes, result) },
-    ]);
   });
 
   it('preserves captured polylines as GLB line primitives and edge topology', () => {

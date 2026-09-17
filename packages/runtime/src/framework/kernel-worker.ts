@@ -6,7 +6,7 @@ import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { named, preserveMethodNames } from '#framework/named.js';
 import { getIsolationStatus } from '#cross-origin-isolation/headers.js';
-import type { FileExtension, OnWorkerLog } from '@taucad/types';
+import type { FileExtension, FileStat, OnWorkerLog } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import type { MessagePortLike } from '@taucad/rpc';
 import type {
@@ -99,15 +99,12 @@ import { setAbortContext, clearAbortContext } from '#framework/cooperative-abort
 import { createRuntimeFileSystem } from '#filesystem/create-runtime-filesystem.js';
 import { createComputeCapabilityHost } from '#cache/kernel-compute-runtime.js';
 import type { ComputeCapabilityHost } from '#cache/kernel-compute-runtime.js';
-import { createRetainedSceneStore, toSceneCacheValue } from '#cache/retained-scene-store.js';
-import type { RetainedSceneStore } from '#cache/retained-scene-store.js';
 import { toJSONSchema, z } from 'zod';
 import { createKernelError } from '#kernels/kernel-helpers.js';
 import { cooperativeYield, scheduleMacrotask } from '#framework/async-polyfills.js';
 import { parameterDebounce, fileChangeDebounce } from '#framework/runtime-framework.constants.js';
 import { canonicalJson, sha256Bytes, sha256String } from '@taucad/utils/hash';
-import { contentDigest, digestContent, digestScene } from '@taucad/cache-core';
-import type { SceneDigest } from '@taucad/cache-core';
+import { contentDigest } from '@taucad/cache-core';
 import { RuntimeTracer } from '#framework/runtime-tracer.js';
 import { WorkerTelemetryCollector } from '#framework/worker-telemetry.js';
 import { createMiddlewareRuntime } from '#middleware/runtime-middleware.js';
@@ -123,27 +120,6 @@ import {
   normalizeRuntimeContent,
   RuntimeContentUnsupportedError,
 } from '#types/runtime-content.types.js';
-import type {
-  KernelSceneRuntime,
-  ListSceneBookmarksInput,
-  ProgressiveSceneCapability,
-  ProgressiveSceneUpdate,
-  PublishSceneBookmarkInput,
-  PublishSceneGraphUpdateInput,
-  PublishSceneUpdateInput,
-  ReadSceneSnapshotInput,
-  ReadSceneSnapshotResult,
-  ResolvedSceneAsset,
-  ResolvedSceneSnapshot,
-  SceneAssetReplacement,
-  SceneAssetGeometry,
-  SceneBookmark,
-  SceneNodeId,
-  SceneTransform,
-  TauSceneManifest,
-  TauSceneNode,
-  TauSceneOperation,
-} from '#types/runtime-scene.types.js';
 import type { RuntimeContentInput, RuntimeContentKey } from '#types/runtime-content.types.js';
 import { packageVersion } from '#utils/package-info.js';
 import { admitParameterManifest, compileParameterManifest, ParameterAdmissionError } from '@taucad/parameters';
@@ -152,6 +128,7 @@ import { validateJsonSchemaValue } from '@taucad/parameters/schema';
 import type {
   DependencyResolutionContext,
   CommonDependencySet,
+  MiddlewareDependencySet,
   KernelBinding,
   MaterializedRender,
   MaterializedRenderResult,
@@ -188,25 +165,6 @@ type RenderCancellationRecord = {
 };
 
 const neverAbortedSignal = new AbortController().signal;
-const identitySceneTransform: SceneTransform = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
-const retainedSceneRenderLimit = 8;
-const retainedSceneBookmarkLimit = 256;
-const progressiveSceneKeyframeInterval = 24;
-const sceneTextEncoder = new TextEncoder();
-
-const createResolvedSceneAsset = async (source: SceneAssetGeometry): Promise<ResolvedSceneAsset> => {
-  const geometry: SceneAssetGeometry =
-    source.format === 'gltf' ? { format: 'gltf', content: new Uint8Array(source.content) } : { ...source };
-  const bytes = geometry.format === 'gltf' ? geometry.content : sceneTextEncoder.encode(geometry.content);
-  const contentDigest = await digestContent({ bytes });
-  return {
-    contentDigest,
-    mediaType: geometry.format === 'gltf' ? 'model/gltf-binary' : 'image/svg+xml',
-    byteLength: bytes.byteLength,
-    geometry,
-  };
-};
-
 /**
  * The minimum a row must satisfy to survive the runtime protocol's own
  * `kernelIssueSchema`. `code` is deliberately absent: the transport repairs an
@@ -414,9 +372,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   public onGeometryComputed?: (event: { readonly result: HashedGeometryResult; readonly renderId: string }) => void;
 
-  /** Backpressured progressive scene publication owned by the dispatcher. */
-  public onSceneUpdate?: (event: ProgressiveSceneUpdate) => Promise<void>;
-
   /**
    * Callback for pushing parameter results to the dispatcher. `renderId`
    * correlates the schema with its preview; generation remains internal
@@ -463,9 +418,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   /** Native render content declarations keyed by kernel ID. */
   protected readonly kernelRenderContentMap = new Map<string, readonly RuntimeContentKey[]>();
-
-  /** Explicit progressive-scene capability keyed by kernel ID. */
-  protected readonly kernelProgressiveSceneCapabilityMap = new Map<string, ProgressiveSceneCapability>();
+  /** Kernels that declared they can serve the transient drag lane (D2). */
+  protected readonly kernelLiveEditMap = new Map<string, boolean>();
 
   /** Validated init options and verified assets for selected-participant identity. */
   protected readonly kernelInitOptionsMap = new Map<string, Record<string, unknown>>();
@@ -551,7 +505,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private computeHost: ComputeCapabilityHost | undefined;
   /** Compute facet bound beside the filesystem; the library default is memory (EQ13). */
   private computeBinding: ComputeBinding = { mode: 'memory' };
-  private retainedSceneStore: RetainedSceneStore | undefined;
 
   /**
    * Internal logger instance.
@@ -567,12 +520,22 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   private readonly fileHashCache = new Map<string, string>();
   private readonly fileContentCache = new Map<string, Uint8Array<ArrayBuffer> | string>();
+  /**
+   * Existence and stat answers for the current operation, for the bundler's view only.
+   *
+   * `detect` and `bundle` are two full traversals of the same import graph, and inside each one a
+   * module is probed once per edge that names it: a module imported by ten others was probed
+   * thirty times per cold open. Cleared at every operation boundary.
+   */
+  private readonly fileExistsCache = new Map<string, boolean>();
+  private readonly fileStatCache = new Map<string, FileStat>();
+  private bundlerFilesystemView: KernelFileSystem | undefined;
   private readonly compiledWasmModules = new Map<string, WebAssembly.Module>();
   private parameterResultCache:
     | { readonly key: string; readonly result: Extract<GetParametersResult, { success: true }> }
     | undefined;
   private readonly commonDependencyCache = new Map<string, Promise<CommonDependencySet>>();
-  private readonly middlewareDependencyCache = new Map<string, Promise<Dependency[]>>();
+  private readonly middlewareDependencyCache = new Map<string, Promise<MiddlewareDependencySet>>();
 
   /**
    * Dynamically loaded middleware instances with their resolved configs.
@@ -609,6 +572,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private readonly bundleResultCache = new Map<string, BundleResult>();
 
   /** Paths which may schedule the current autonomous preview. */
+  /** A transient render displays its result without publishing it as the artifact (D2). */
+  private currentRenderTransient = false;
   private currentPreviewWatchPaths = new Map<string, number>();
 
   /** Middleware declarations owned by the current preview, retained for diagnostics/tests. */
@@ -649,24 +614,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private readonly renderCancellationRecords = new Map<string, RenderCancellationRecord>();
   private activeRenderRecord: RenderCancellationRecord | undefined;
   private operationSignal: AbortSignal | undefined;
-
-  /** Whether at least one transport consumer currently requested progressive scene delivery. */
-  private progressiveSceneRequested = false;
-  /** Per-render ordered scene state retained for live replay and bookmarks. */
-  private readonly progressiveScenes = new Map<
-    string,
-    {
-      sequence: number;
-      revision: number;
-      producerSceneGeneration?: number;
-      snapshot?: ResolvedSceneSnapshot;
-      sceneDigest?: SceneDigest;
-      bookmarks: SceneBookmark[];
-    }
-  >();
-  private readonly retainedSceneSnapshots = new Map<string, ResolvedSceneSnapshot>();
-  private scenePublicationTail: Promise<void> = Promise.resolve();
-  private scenePublicationError: unknown;
 
   /** SharedArrayBuffer signal channel for bidirectional abort/state signaling. */
   private signalView: Int32Array | undefined;
@@ -864,6 +811,26 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
   }
 
+  /**
+   * Resolve a host-compiled module, and say so when a supplied set misses (D20).
+   *
+   * A host and a kernel derive the same asset's URL through different bundles. When they disagree
+   * the supply silently does nothing — the kernel compiles its own copy and the host's is dead
+   * weight — so a miss against a non-empty set is reported with both sides of the disagreement.
+   *
+   * @param url - The asset URL the kernel resolved.
+   * @returns The host-compiled module, or undefined when the kernel must compile its own.
+   */
+  private getCompiledWasmModule(url: string): WebAssembly.Module | undefined {
+    const module = this.compiledWasmModules.get(url);
+    if (module === undefined && this.compiledWasmModules.size > 0) {
+      this.logger.warn(`No host-compiled WebAssembly module matches '${url}'; the kernel will compile its own.`, {
+        data: { requested: url, supplied: [...this.compiledWasmModules.keys()] },
+      });
+    }
+    return module;
+  }
+
   /** Flush any buffered telemetry entries to the main thread. */
   public flushTelemetry(): void {
     this.telemetryCollector?.flush();
@@ -877,37 +844,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   public setSignalBuffer(buffer: SharedArrayBuffer): void {
     this.signalView = new Int32Array(buffer);
-  }
-
-  /** Update demand for the always-present kernel scene sink. */
-  public setProgressiveSceneRequested(requested: boolean): void {
-    this.progressiveSceneRequested = requested;
-  }
-
-  /** Resolve one retained snapshot by opaque bookmark identity. */
-  public async readSceneSnapshot(
-    input: ReadSceneSnapshotInput,
-    signal?: AbortSignal,
-  ): Promise<ReadSceneSnapshotResult> {
-    signal?.throwIfAborted();
-    const snapshot = this.retainedSceneSnapshots.get(input.bookmarkId);
-    if (snapshot) {
-      return { type: 'found', snapshot: this.cloneSceneSnapshot(snapshot) };
-    }
-    if (!this._filesystem) {
-      return { type: 'missing' };
-    }
-    const retained = await this.getRetainedSceneStore().read({ bookmarkId: input.bookmarkId, signal });
-    if (!retained) {
-      return { type: 'missing' };
-    }
-    this.rememberSceneSnapshot(input.bookmarkId, retained);
-    return { type: 'found', snapshot: this.cloneSceneSnapshot(retained) };
-  }
-
-  /** List immutable bookmark metadata for one render. */
-  public listSceneBookmarks(input: ListSceneBookmarksInput): readonly SceneBookmark[] {
-    return [...(this.progressiveScenes.get(input.renderId)?.bookmarks ?? [])];
   }
 
   /**
@@ -969,6 +905,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         record,
         file,
         parameters: request.parameters,
+        transient: request.transient,
         operation: { options: request.options, content: request.content },
       }),
     );
@@ -1025,6 +962,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     readonly record: RenderCancellationRecord;
     readonly file: RuntimeFileLocator;
     readonly parameters?: Record<string, unknown>;
+    readonly transient?: boolean;
     readonly operation?: { readonly options?: Record<string, unknown>; readonly content?: RuntimeContentInput };
   }): Promise<void> {
     const { record, file, parameters, operation } = input;
@@ -1039,6 +977,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.currentParameters = parameters ?? {};
     this.currentRenderOptions = operation?.options;
     this.currentRenderContent = operation?.content;
+    this.currentRenderTransient = input.transient === true;
     this.clearScheduledRender();
 
     this.setActiveFile(canonicalFile);
@@ -1196,6 +1135,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     await previous;
     try {
       this.operationSignal = signal;
+      // One probe per path per operation (W22/D15): an operation is the coherence window the
+      // rest of the render already assumes, so a file appearing mid-operation is unobserved
+      // either way.
+      this.fileExistsCache.clear();
+      this.fileStatCache.clear();
       return await operation();
     } finally {
       this.operationSignal = undefined;
@@ -1327,7 +1271,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private async drainAndCleanup(): Promise<void> {
     await this.watchReconciliationTail;
     await this.operationTail;
-    await this.scenePublicationTail;
     await this.performCleanup();
   }
 
@@ -1346,9 +1289,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.pendingNativeHandle = undefined;
     this.currentPublishedRender = undefined;
     this.currentFile = undefined;
-    this.progressiveScenes.clear();
-    this.retainedSceneSnapshots.clear();
-    this.progressiveSceneRequested = false;
     // Nothing references the handles now — release them before onCleanup tears
     // down the kernel that owns their memory.
     this.disposeUnreachableNativeHandles();
@@ -1359,7 +1299,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.fileSystem = undefined;
     await this.computeHost?.dispose();
     this.computeHost = undefined;
-    this.retainedSceneStore = undefined;
 
     for (const transcoder of this.loadedTranscoders.values()) {
       if (!transcoder.initialized) {
@@ -1696,14 +1635,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       options?: Record<string, unknown>;
       content?: RuntimeContentInput;
     },
-    dependencyContext?: DependencyResolutionContext,
-    owner?: OperationOwner,
+    lane: { dependencyContext?: DependencyResolutionContext; owner?: OperationOwner; publish?: boolean } = {},
   ): Promise<HashedGeometryResult> {
+    const { dependencyContext, owner, publish = true } = lane;
     const { artifact } = await this.materializeRender(entry, {
       dependencyContext,
       owner,
       display: true,
-      publish: true,
+      publish,
     });
     const { result } = artifact;
     if (!result.success) {
@@ -2660,14 +2599,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             compute: this.createComputeRuntime(this.operationSignal ?? neverAbortedSignal),
             dependencies: nativeHandleDependencies,
             dependencyHash: nativeHandleKey,
-            progressiveSceneRequested:
-              options.publish &&
-              entry.export === undefined &&
-              this.activeRenderRecord !== undefined &&
-              this.progressiveSceneRequested &&
-              this.onSceneUpdate !== undefined &&
-              owner.binding !== undefined &&
-              this.kernelProgressiveSceneCapabilityMap.get(owner.binding.kernelId)?.type === 'supported',
             stateSchema: middleware.stateSchema,
             options: middlewareOptions,
             logger: this.getMiddlewareLogger(id, middleware.name),
@@ -2794,6 +2725,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       identity,
       success: internalResult.success,
       serializedNativeHandle,
+      serializeNativeHandleSnapshot: internalResult.success ? internalResult.serializeNativeHandleSnapshot : undefined,
     });
 
     // Mesh phase — display path only. Kernels that defer their display artifact
@@ -2834,8 +2766,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const {
       [nativeBuildInputSymbol]: _nativeBuildInput,
       serializedNativeHandle: _serializedNativeHandle,
+      serializeNativeHandleSnapshot: _serializeNativeHandleSnapshot,
       ...publicDisplayResult
-    } = displayResult as CreateGeometryResult & NativeBuildInputCarrier & { serializedNativeHandle?: unknown };
+    } = displayResult as CreateGeometryResult &
+      NativeBuildInputCarrier & { serializedNativeHandle?: unknown; serializeNativeHandleSnapshot?: () => unknown };
     // One render request produces one public geometry artifact.
     const result: MaterializedRenderResult = publicDisplayResult.success
       ? {
@@ -2887,6 +2821,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   protected captureNativeHandle(nativeHandle: unknown, owner?: OperationOwner): void {
     this.pendingNativeHandle = nativeHandle;
     this.ownNativeHandle(nativeHandle, owner);
+  }
+
+  /**
+   * Whether a native handle is still owned, and therefore still safe to read.
+   *
+   * `disposeUnreachableNativeHandles` deletes from the ownership registry before it disposes, so
+   * this is the precise liveness answer a deferred snapshot needs.
+   *
+   * @param nativeHandle - The handle to check.
+   * @returns True while the worker still owns it.
+   */
+  protected isNativeHandleLive(nativeHandle: unknown): boolean {
+    return this.ownedNativeHandles.has(nativeHandle);
   }
 
   private ownNativeHandle(nativeHandle: unknown, owner: OperationOwner | undefined): void {
@@ -2963,12 +2910,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   protected bindNativeHandleSlots(input: {
     readonly identity: RenderIdentity;
     readonly success: boolean;
+    /** A snapshot already in hand — a cache hit decodes one. */
     readonly serializedNativeHandle: unknown;
+    /** Or the means to make one on first read (D12). */
+    readonly serializeNativeHandleSnapshot?: (() => unknown) | undefined;
   }): {
     liveNativeHandleSlot?: NativeHandleSlot;
     serializedNativeHandleSlot?: SerializedNativeHandleSlot;
   } {
-    const { identity, success, serializedNativeHandle } = input;
+    const { identity, success, serializedNativeHandle, serializeNativeHandleSnapshot } = input;
     const identityKey = createNativeHandleIdentityKey(identity);
     const { pendingNativeHandle } = this;
     this.pendingNativeHandle = undefined;
@@ -2983,15 +2933,34 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           }
         : undefined;
 
-    const serializedNativeHandleSlot =
-      success && serializedNativeHandle !== undefined && serializedNativeHandle !== null
-        ? {
-            identityKey,
-            kernelId: identity.selectedKernelId,
-            kernelVersion: identity.selectedKernelVersion,
-            serializedNativeHandle,
-          }
-        : undefined;
+    const hasSnapshot = serializedNativeHandle !== undefined && serializedNativeHandle !== null;
+    if (!success || (!hasSnapshot && serializeNativeHandleSnapshot === undefined)) {
+      return { liveNativeHandleSlot, serializedNativeHandleSlot: undefined };
+    }
+
+    const serializedNativeHandleSlot: SerializedNativeHandleSlot = {
+      identityKey,
+      kernelId: identity.selectedKernelId,
+      kernelVersion: identity.selectedKernelVersion,
+      serializedNativeHandle,
+    };
+    if (hasSnapshot) {
+      return { liveNativeHandleSlot, serializedNativeHandleSlot };
+    }
+    /* Resolved on the first read and remembered, so an export and the reheat that follows it do not
+     * serialise the same shape twice — and so nothing pays on the display path that never reads. */
+    let resolved: { value: unknown } | undefined;
+    Object.defineProperty(serializedNativeHandleSlot, 'serializedNativeHandle', {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        resolved ??= { value: serializeNativeHandleSnapshot!() };
+        return resolved.value;
+      },
+      set: (value: unknown) => {
+        resolved = { value };
+      },
+    });
 
     return { liveNativeHandleSlot, serializedNativeHandleSlot };
   }
@@ -4075,6 +4044,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         identity,
         success: reheatResult.success,
         serializedNativeHandle: reheatResult.success ? reheatResult.serializedNativeHandle : undefined,
+        serializeNativeHandleSnapshot: reheatResult.success ? reheatResult.serializeNativeHandleSnapshot : undefined,
       });
       renderArtifact.liveNativeHandleSlot = slots.liveNativeHandleSlot;
       renderArtifact.serializedNativeHandleSlot = slots.serializedNativeHandleSlot;
@@ -4504,8 +4474,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             options: this.currentRenderOptions,
             content: contentResult.content,
           },
-          dependencyContext,
-          owner,
+          { dependencyContext, owner, publish: !this.currentRenderTransient },
         );
 
         if (this.isAborted(record)) {
@@ -4517,8 +4486,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
       const result = await renderWork();
       this.onProgress = undefined;
-
-      await this.createSceneRuntime(record.controller.signal).flush();
 
       flushRenderTelemetry();
       this.onGeometryComputed?.({ result, renderId: record.renderId });
@@ -4819,7 +4786,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const rawOptions = bundlerOptions ?? {};
       const validatedOptions = definition.optionsSchema ? definition.optionsSchema.parse(rawOptions) : rawOptions;
 
-      const context = await definition.initialize(validatedOptions, { filesystem: this.filesystem });
+      const context = await definition.initialize(validatedOptions, { filesystem: this.bundlerFilesystem });
       const loaded = { definition, ctx: context };
 
       for (const extension of extensions) {
@@ -5084,7 +5051,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       {
         renderOptions: { schema: JSONSchema7; defaults: Record<string, unknown> };
         content?: { schema: JSONSchema7; defaults: RuntimeContentInput };
-        progressiveScene: ProgressiveSceneCapability;
+        liveEdit?: boolean;
       }
     > = {};
     for (const kernelId of this.kernelRenderContentMap.keys()) {
@@ -5101,11 +5068,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         }
       }
       const content = this.buildContentCapability('render', [...keys]);
-      const progressiveScene = this.kernelProgressiveSceneCapabilityMap.get(kernelId) ?? {
-        type: 'unsupported',
-        reason: 'Kernel does not publish progressive scene updates.',
+      renderCapabilities[kernelId] = {
+        renderOptions,
+        ...(content ? { content } : {}),
+        ...(this.kernelLiveEditMap.get(kernelId) === true ? { liveEdit: true } : {}),
       };
-      renderCapabilities[kernelId] = { renderOptions, ...(content ? { content } : {}), progressiveScene };
     }
 
     const registrations: CapabilitiesManifest['registrations'] = [
@@ -5451,6 +5418,58 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
+   * The filesystem the bundler reads through (D15).
+   *
+   * A cold open resolved the same graph twice and read the same bytes three times over: once per
+   * bundler pass and once more for the dependency hashes. Contents come from `fileContentCache` —
+   * the map `clearVolatileFileCaches` and the watch invalidator already keep honest — and
+   * existence from the operation-scoped probe caches, so each module is probed and read once.
+   *
+   * @returns The kernel filesystem with reads and probes served from the caches.
+   */
+  private get bundlerFilesystem(): KernelFileSystem {
+    const base = this.filesystem;
+    this.bundlerFilesystemView ??= {
+      ...base,
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- an overloaded method cannot be written as an arrow.
+      readFile: (async (path: string, encoding?: 'utf8') => {
+        let content = this.fileContentCache.get(path);
+        if (content === undefined) {
+          content = await base.readFile(path);
+          // Project sources only: a CDN package artifact is read twice per cold open and can be
+          // megabytes, and this cache lives as long as the watch does.
+          if (!path.startsWith('node_modules/')) {
+            this.fileContentCache.set(path, content);
+          }
+        }
+        if (encoding !== 'utf8') {
+          return typeof content === 'string' ? new TextEncoder().encode(content) : content;
+        }
+        return typeof content === 'string' ? content : new TextDecoder().decode(content);
+      }) as KernelFileSystem['readFile'],
+      exists: async (path: string) => {
+        const cached = this.fileExistsCache.get(path);
+        if (cached !== undefined) {
+          return cached;
+        }
+        const answer = await base.exists(path);
+        this.fileExistsCache.set(path, answer);
+        return answer;
+      },
+      stat: async (path: string) => {
+        const cached = this.fileStatCache.get(path);
+        if (cached !== undefined) {
+          return cached;
+        }
+        const entry = await base.stat(path);
+        this.fileStatCache.set(path, entry);
+        return entry;
+      },
+    };
+    return this.bundlerFilesystemView;
+  }
+
+  /**
    * Compute all dependencies for cache key computation.
    * Gathers file dependencies, middleware signatures, framework version, kernel options,
    * parameters (for geometry computation), and bundled assets.
@@ -5521,13 +5540,22 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
     }
 
-    const phaseDependencies = await middlewareDependencies;
-    if (input.owner.kind === 'render-artifact' && this.previewWatchCandidate) {
-      this.previewWatchCandidate.coherent = true;
+    const phase = await middlewareDependencies;
+    /* The declarations are registered here rather than where they are discovered: discovery is
+     * cached, and a render that answers from that cache still reads those paths and still has to
+     * watch them. Registering only on a miss made a re-opened entry deaf to an external edit of
+     * the paths its middleware declared. */
+    const previewCandidate = input.owner.kind === 'render-artifact' ? this.previewWatchCandidate : undefined;
+    if (previewCandidate) {
+      for (const [path, watchDebounce] of phase.watchPaths) {
+        previewCandidate.paths.set(path, watchDebounce);
+        previewCandidate.middlewarePaths.set(path, watchDebounce);
+      }
+      previewCandidate.coherent = true;
     }
     const runtimeDeps: Dependency[] = [
       ...common.fileDependencies,
-      ...phaseDependencies,
+      ...phase.dependencies,
       ...common.trailingDependencies,
     ];
 
@@ -5616,10 +5644,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     // 2. Read uncached files
     const uncachedPaths = rootedPaths.filter((p) => !this.fileHashCache.has(p));
     if (uncachedPaths.length > 0) {
+      // The bundler just read these through `fileContentCache`; only what it did not touch is read
+      // here (W22). A hash still needs the bytes, so a cached *string* is re-encoded, not re-read.
+      const unreadPaths = uncachedPaths.filter((p) => !this.fileContentCache.has(p));
       const readSpan = this.tracer.startSpan('deps.read', {
-        fileCount: uncachedPaths.length,
+        fileCount: unreadPaths.length,
       });
-      const contentMap: Record<string, Uint8Array<ArrayBuffer>> = await this.filesystem.readFiles(uncachedPaths);
+      const contentMap: Record<string, Uint8Array<ArrayBuffer>> = unreadPaths.length > 0
+        ? await this.filesystem.readFiles(unreadPaths)
+        : {};
+      for (const path of uncachedPaths) {
+        const cached = this.fileContentCache.get(path);
+        if (cached !== undefined) {
+          contentMap[path] = typeof cached === 'string' ? new TextEncoder().encode(cached) : cached;
+        }
+      }
       readSpan.end();
 
       const hashSpan = this.tracer.startSpan('deps.hash', {
@@ -5685,11 +5724,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private async computeMiddlewareDependencies(
     owner: OperationOwner,
     middleware: ResolvedMiddleware[],
-  ): Promise<Dependency[]> {
+  ): Promise<MiddlewareDependencySet> {
     const discoverInput: GetDependenciesInput = {
       entryPath: assertRootedPath(joinRelativePath(owner.file.path, owner.file.filename)),
     };
-    const previewCandidate = owner.kind === 'render-artifact' ? this.previewWatchCandidate : undefined;
     const declarations: MiddlewareDependencyDeclaration[] = [];
     for (const { middleware: definition, options, enabled, id } of middleware) {
       if (!enabled || !definition.getDependencies) {
@@ -5726,12 +5764,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
 
     const fileDependencies: FileDependency[] = [];
+    const watchPaths = new Map<string, number>();
     for (const declaration of declarations) {
-      const watchDebounce = declaration.watchDebounce ?? fileChangeDebounce;
-      if (previewCandidate) {
-        previewCandidate.paths.set(declaration.path, watchDebounce);
-        previewCandidate.middlewarePaths.set(declaration.path, watchDebounce);
-      }
+      watchPaths.set(declaration.path, declaration.watchDebounce ?? fileChangeDebounce);
       if (!this.fileHashCache.has(declaration.path)) {
         try {
           // oxlint-disable-next-line no-await-in-loop -- Individual reads preserve declaration order and missing-file semantics.
@@ -5761,10 +5796,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         index,
         options,
       }));
-    if (previewCandidate) {
-      previewCandidate.coherent = true;
-    }
-    return [...fileDependencies, ...signatureDependencies];
+    return { dependencies: [...fileDependencies, ...signatureDependencies], watchPaths };
   }
 
   /**
@@ -5889,418 +5921,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return facade;
   }
 
-  private cloneSceneSnapshot(snapshot: ResolvedSceneSnapshot): ResolvedSceneSnapshot {
-    return {
-      manifest: structuredClone(snapshot.manifest),
-      assets: snapshot.assets.map((asset) => ({
-        ...asset,
-        geometry:
-          asset.geometry.format === 'gltf'
-            ? { format: 'gltf', content: new Uint8Array(asset.geometry.content) }
-            : { ...asset.geometry },
-      })),
-    };
-  }
-
-  private getRetainedSceneStore(): RetainedSceneStore {
-    this.retainedSceneStore ??= createRetainedSceneStore(this.filesystem);
-    return this.retainedSceneStore;
-  }
-
-  private rememberSceneSnapshot(bookmarkId: string, snapshot: ResolvedSceneSnapshot): void {
-    while (this.retainedSceneSnapshots.size >= retainedSceneBookmarkLimit) {
-      const oldest = this.retainedSceneSnapshots.keys().next().value;
-      if (oldest === undefined) {
-        break;
-      }
-      this.retainedSceneSnapshots.delete(oldest);
-    }
-    this.retainedSceneSnapshots.set(bookmarkId, this.cloneSceneSnapshot(snapshot));
-  }
-
-  private getOrCreateProgressiveScene(renderId: string): {
-    sequence: number;
-    revision: number;
-    producerSceneGeneration?: number;
-    snapshot?: ResolvedSceneSnapshot;
-    sceneDigest?: SceneDigest;
-    bookmarks: SceneBookmark[];
-  } {
-    const existing = this.progressiveScenes.get(renderId);
-    if (existing) {
-      return existing;
-    }
-    while (this.progressiveScenes.size >= retainedSceneRenderLimit) {
-      const oldest = this.progressiveScenes.entries().next().value as
-        | [string, { bookmarks: SceneBookmark[] }]
-        | undefined;
-      if (!oldest) {
-        break;
-      }
-      for (const bookmark of oldest[1].bookmarks) {
-        this.retainedSceneSnapshots.delete(bookmark.id);
-      }
-      this.progressiveScenes.delete(oldest[0]);
-    }
-    const state = { sequence: 0, revision: 0, bookmarks: [] as SceneBookmark[] };
-    this.progressiveScenes.set(renderId, state);
-    return state;
-  }
-
-  private async executeScenePublication<T>(previous: Promise<void>, operation: () => Promise<T>): Promise<T> {
-    await previous;
-    return operation();
-  }
-
-  private async settleScenePublication(result: Promise<unknown>): Promise<void> {
-    try {
-      await result;
-    } catch (error) {
-      this.scenePublicationError ??= error;
-    }
-  }
-
-  private async enqueueScenePublication<T>(operation: () => Promise<T>): Promise<T> {
-    const result = this.executeScenePublication(this.scenePublicationTail, operation);
-    this.scenePublicationTail = this.settleScenePublication(result);
-    return result;
-  }
-
-  private async publishSceneReset(
-    input: PublishSceneUpdateInput,
-    signal: AbortSignal,
-  ): ReturnType<KernelSceneRuntime['publish']> {
-    const record = this.activeRenderRecord;
-    const state = record ? this.progressiveScenes.get(record.renderId) : undefined;
-    return this.publishSceneGraphUpdate(
-      {
-        operation: 'reset',
-        sceneGeneration: (state?.producerSceneGeneration ?? -1) + 1,
-        upserts: [
-          {
-            id: record ? `render:${record.renderId}:root` : 'render:unavailable:root',
-            ...(input.label === undefined ? {} : { name: input.label }),
-            geometry: input.geometry,
-          },
-        ],
-        removedComponentIds: [],
-        ...(input.presentation === undefined ? {} : { presentation: input.presentation }),
-      },
-      signal,
-    );
-  }
-
-  private async publishSceneGraphUpdate(
-    input: PublishSceneGraphUpdateInput,
-    signal: AbortSignal,
-  ): ReturnType<KernelSceneRuntime['publishUpdate']> {
-    if (!this.progressiveSceneRequested || !this.onSceneUpdate) {
-      return { type: 'not-requested' };
-    }
-    const record = this.activeRenderRecord;
-    if (!record || record.controller.signal.aborted) {
-      return { type: 'not-requested' };
-    }
-    return this.enqueueScenePublication(async () => {
-      signal.throwIfAborted();
-      if (record !== this.activeRenderRecord || !this.progressiveSceneRequested || !this.onSceneUpdate) {
-        return { type: 'not-requested' };
-      }
-      const state = this.getOrCreateProgressiveScene(record.renderId);
-      if (!Number.isSafeInteger(input.sceneGeneration) || input.sceneGeneration < 0) {
-        throw new TypeError('Scene generation must be a non-negative safe integer.');
-      }
-      if (input.operation === 'refinement') {
-        if (
-          !state.snapshot ||
-          state.sceneDigest === undefined ||
-          state.producerSceneGeneration !== input.sceneGeneration
-        ) {
-          throw new Error('A progressive scene refinement requires the current semantic scene generation.');
-        }
-        if (input.replacements.length === 0) {
-          throw new TypeError('A progressive scene refinement requires at least one replacement.');
-        }
-        const ids = new Set<string>();
-        const nodes = { ...structuredClone(state.snapshot.manifest.nodes) };
-        const retainedAssets = new Map(state.snapshot.assets.map((asset) => [asset.contentDigest, asset] as const));
-        const replacements: SceneAssetReplacement[] = [];
-        for (const replacement of input.replacements) {
-          if (replacement.id.length === 0 || !replacement.id.isWellFormed() || ids.has(replacement.id)) {
-            throw new TypeError('Progressive scene refinement ids must be unique, non-empty, well-formed strings.');
-          }
-          ids.add(replacement.id);
-          const node = nodes[replacement.id];
-          if (!node?.geometry) {
-            throw new Error(`Progressive scene refinement replaced unknown component "${replacement.id}".`);
-          }
-          // oxlint-disable-next-line no-await-in-loop -- every replacement must be hashed before publication.
-          const asset = await createResolvedSceneAsset(replacement.geometry);
-          if (asset.contentDigest === node.geometry.contentDigest) {
-            throw new Error(`Progressive scene refinement for "${replacement.id}" did not change its representation.`);
-          }
-          replacements.push({ nodeId: node.id, previous: node.geometry.contentDigest, replacement: asset });
-          retainedAssets.set(asset.contentDigest, asset);
-          nodes[replacement.id] = {
-            ...node,
-            geometry: {
-              contentDigest: asset.contentDigest,
-              semanticDigest: node.geometry.semanticDigest ?? node.geometry.contentDigest,
-              mediaType: asset.mediaType,
-              byteLength: asset.byteLength,
-            },
-          };
-        }
-        const manifest = { ...state.snapshot.manifest, nodes };
-        const referencedAssets = new Set(
-          Object.values(nodes).flatMap((node) => (node.geometry ? [node.geometry.contentDigest] : [])),
-        );
-        const snapshot = {
-          manifest,
-          assets: [...retainedAssets.values()].filter((asset) => referencedAssets.has(asset.contentDigest)),
-        } satisfies ResolvedSceneSnapshot;
-        const update = {
-          type: 'refinement',
-          renderId: record.renderId,
-          sequence: state.sequence + 1,
-          revision: state.revision,
-          sceneDigest: state.sceneDigest,
-          replacements,
-        } satisfies ProgressiveSceneUpdate;
-        await this.onSceneUpdate(update);
-        signal.throwIfAborted();
-        state.sequence = update.sequence;
-        state.snapshot = this.cloneSceneSnapshot(snapshot);
-        return {
-          type: 'published',
-          sequence: update.sequence,
-          revision: update.revision,
-          sceneDigest: update.sceneDigest,
-        };
-      }
-      if (input.operation === 'delta') {
-        if (!state.snapshot || state.sceneDigest === undefined || state.producerSceneGeneration === undefined) {
-          throw new Error('A progressive scene delta requires a prior reset.');
-        }
-        if (
-          input.baseSceneGeneration !== state.producerSceneGeneration ||
-          input.sceneGeneration <= input.baseSceneGeneration
-        ) {
-          throw new Error('Progressive scene generations must form one strictly ordered chain.');
-        }
-      }
-
-      const upsertIds = new Set<string>();
-      for (const component of input.upserts) {
-        if (component.id.length === 0 || !component.id.isWellFormed() || upsertIds.has(component.id)) {
-          throw new TypeError('Progressive scene component ids must be unique, non-empty, well-formed strings.');
-        }
-        if (component.name !== undefined && !component.name.isWellFormed()) {
-          throw new TypeError('Progressive scene component names must be well-formed strings.');
-        }
-        upsertIds.add(component.id);
-      }
-      const removedIds = new Set<string>();
-      for (const componentId of input.removedComponentIds) {
-        if (
-          componentId.length === 0 ||
-          !componentId.isWellFormed() ||
-          removedIds.has(componentId) ||
-          upsertIds.has(componentId)
-        ) {
-          throw new TypeError('Progressive scene removals must be unique, valid ids disjoint from upserts.');
-        }
-        removedIds.add(componentId);
-      }
-
-      const previousManifest = input.operation === 'delta' ? state.snapshot!.manifest : undefined;
-      const nodes = new Map<string, TauSceneNode>(
-        previousManifest ? Object.entries(structuredClone(previousManifest.nodes)) : [],
-      );
-      const rootNodeIds = previousManifest ? [...previousManifest.rootNodeIds] : [];
-      const retainedAssets = new Map(
-        input.operation === 'delta' ? state.snapshot!.assets.map((asset) => [asset.contentDigest, asset] as const) : [],
-      );
-      const publishedAssets = new Map<ResolvedSceneAsset['contentDigest'], ResolvedSceneAsset>();
-      const operations: TauSceneOperation[] = [];
-
-      for (const componentId of removedIds) {
-        if (!nodes.delete(componentId)) {
-          throw new Error(`Progressive scene delta removed unknown component "${componentId}".`);
-        }
-        const rootIndex = rootNodeIds.indexOf(componentId as SceneNodeId);
-        if (rootIndex !== -1) {
-          rootNodeIds.splice(rootIndex, 1);
-        }
-        operations.push({ type: 'remove-node', nodeId: componentId as SceneNodeId });
-      }
-
-      for (const component of input.upserts) {
-        // oxlint-disable-next-line no-await-in-loop -- each component digest must settle before its node is published.
-        const asset = await createResolvedSceneAsset(component.geometry);
-        const nodeId = component.id as SceneNodeId;
-        const previous = nodes.get(component.id);
-        const node: TauSceneNode = {
-          id: nodeId,
-          ...(component.name === undefined && previous?.name === undefined
-            ? {}
-            : { name: component.name ?? previous?.name }),
-          childIds: [],
-          geometry: {
-            contentDigest: asset.contentDigest,
-            semanticDigest: asset.contentDigest,
-            mediaType: asset.mediaType,
-            byteLength: asset.byteLength,
-          },
-          transform: identitySceneTransform,
-          visible: true,
-        };
-        nodes.set(component.id, node);
-        if (!rootNodeIds.includes(nodeId)) {
-          rootNodeIds.push(nodeId);
-        }
-        retainedAssets.set(asset.contentDigest, asset);
-        publishedAssets.set(asset.contentDigest, asset);
-        operations.push({ type: 'upsert-node', node });
-      }
-
-      const presentation =
-        input.presentation === undefined
-          ? structuredClone(previousManifest?.presentation ?? {})
-          : structuredClone(input.presentation);
-      if (input.operation === 'delta' && input.presentation !== undefined) {
-        operations.push({ type: 'set-presentation', presentation });
-      }
-      const manifest: TauSceneManifest = {
-        schemaVersion: 1,
-        rootNodeIds,
-        nodes: Object.fromEntries(nodes),
-        presentation,
-      };
-      const referencedAssets = new Set(
-        Object.values(manifest.nodes).flatMap((node) => (node.geometry ? [node.geometry.contentDigest] : [])),
-      );
-      const snapshot = {
-        manifest,
-        assets: [...retainedAssets.values()].filter((asset) => referencedAssets.has(asset.contentDigest)),
-      } satisfies ResolvedSceneSnapshot;
-      const sceneDigest = await digestScene({ value: toSceneCacheValue(manifest) });
-      const publishKeyframe =
-        input.operation === 'reset' || (state.revision + 1) % progressiveSceneKeyframeInterval === 0;
-      const update: ProgressiveSceneUpdate = publishKeyframe
-        ? {
-            type: 'reset',
-            renderId: record.renderId,
-            sequence: state.sequence + 1,
-            revision: state.revision + 1,
-            sceneDigest,
-            snapshot,
-            skippedBefore: input.operation === 'reset' ? 0 : state.sequence,
-          }
-        : {
-            type: 'delta',
-            renderId: record.renderId,
-            sequence: state.sequence + 1,
-            baseRevision: state.revision,
-            revision: state.revision + 1,
-            baseSceneDigest: state.sceneDigest!,
-            sceneDigest,
-            operations,
-            assets: [...publishedAssets.values()],
-          };
-      await this.onSceneUpdate(update);
-      signal.throwIfAborted();
-      state.sequence = update.sequence;
-      state.revision = update.revision;
-      state.producerSceneGeneration = input.sceneGeneration;
-      state.sceneDigest = sceneDigest;
-      state.snapshot = this.cloneSceneSnapshot(snapshot);
-      return {
-        type: 'published',
-        sequence: update.sequence,
-        revision: update.revision,
-        sceneDigest,
-      };
-    });
-  }
-
-  private async publishSceneBookmark(
-    input: PublishSceneBookmarkInput,
-    signal: AbortSignal,
-  ): ReturnType<KernelSceneRuntime['bookmark']> {
-    if (!this.progressiveSceneRequested || !this.onSceneUpdate) {
-      return { type: 'not-requested' };
-    }
-    const record = this.activeRenderRecord;
-    if (!record || record.controller.signal.aborted) {
-      return { type: 'not-requested' };
-    }
-    return this.enqueueScenePublication(async () => {
-      signal.throwIfAborted();
-      const state = this.progressiveScenes.get(record.renderId);
-      if (!state?.snapshot || !state.sceneDigest || !this.onSceneUpdate) {
-        return { type: 'not-requested' };
-      }
-      const bookmark = {
-        id: randomUuid(),
-        ...(input.label === undefined ? {} : { label: input.label }),
-        source: input.source,
-        sceneDigest: state.sceneDigest,
-        retained: true,
-      } satisfies SceneBookmark;
-      const { snapshot } = state;
-      await this.getRetainedSceneStore().retain({ bookmark, snapshot, signal });
-      signal.throwIfAborted();
-      const update = {
-        type: 'bookmark',
-        renderId: record.renderId,
-        sequence: state.sequence + 1,
-        revision: state.revision,
-        bookmark,
-      } satisfies ProgressiveSceneUpdate;
-      await this.onSceneUpdate(update);
-      state.sequence = update.sequence;
-      state.bookmarks.push(bookmark);
-      this.rememberSceneSnapshot(bookmark.id, snapshot);
-      while (state.bookmarks.length > retainedSceneBookmarkLimit) {
-        const expired = state.bookmarks.shift();
-        if (expired) {
-          this.retainedSceneSnapshots.delete(expired.id);
-        }
-      }
-      return { type: 'published', bookmark };
-    });
-  }
-
-  private createSceneRuntime(signal: AbortSignal): KernelSceneRuntime {
-    const requested = (): boolean => this.progressiveSceneRequested && this.onSceneUpdate !== undefined;
-    return {
-      get requested() {
-        return requested();
-      },
-      publish: async (input) => this.publishSceneReset(input, signal),
-      publishUpdate: async (input) => this.publishSceneGraphUpdate(input, signal),
-      bookmark: async (input) => this.publishSceneBookmark(input, signal),
-      flush: async () => {
-        await this.scenePublicationTail;
-        if (this.scenePublicationError !== undefined) {
-          const error = this.scenePublicationError;
-          this.scenePublicationError = undefined;
-          this.logger.warn('Progressive scene delivery failed; continuing with the atomic final render.', {
-            data: {
-              error:
-                error instanceof Error
-                  ? error.message
-                  : typeof error === 'string'
-                    ? error
-                    : 'Unknown progressive scene delivery error.',
-            },
-          });
-        }
-      },
-    };
-  }
-
   private createComputeRuntime(signal: AbortSignal): KernelComputeCapability {
     this.computeHost ??= createComputeCapabilityHost({
       binding: this.computeBinding,
@@ -6373,9 +5993,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         return result;
       },
       tracer: this.tracer,
-      scene: this.createSceneRuntime(signal),
       compute: this.createComputeRuntime(signal),
-      getCompiledWasmModule: (url) => this.compiledWasmModules.get(url),
+      getCompiledWasmModule: (url) => this.getCompiledWasmModule(url),
       emitEvent: () => {
         throw new Error('Kernel events require a selected kernel runtime.');
       },

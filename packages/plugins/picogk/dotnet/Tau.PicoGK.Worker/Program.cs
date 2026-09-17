@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
@@ -7,7 +8,7 @@ namespace Tau.PicoGK.Worker;
 
 internal static class Program
 {
-    private const int ProtocolVersion = 3;
+    private const int ProtocolVersion = 4;
     private const int MaximumRequestCharacters = 1_048_576;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly object ProtocolGate = new();
@@ -46,8 +47,18 @@ internal static class Program
                 picogkVersion = typeof(Library).Assembly.GetName().Version!.ToString(),
             });
 
-            string? line;
-            while ((line = input.ReadLine()) is not null)
+            /* W17: frames are read on their own thread so a cancel arriving while a build runs is seen
+             * while it can still stop it. The reader pairs each request with the token it can be
+             * cancelled through; the lane is serialized, so a cancel can only mean the request whose
+             * frame was read last. */
+            var frames = new BlockingCollection<(string Line, CancellationTokenSource Cancellation)>();
+            var reader = new Thread(() => ReadFrames(input, frames))
+            {
+                IsBackground = true,
+                Name = "Tau protocol reader",
+            };
+            reader.Start();
+            foreach (var (line, cancellation) in frames.GetConsumingEnumerable())
             {
                 if (line.Length > MaximumRequestCharacters) return 2;
                 Request request;
@@ -64,12 +75,21 @@ internal static class Program
                 if (request.ProtocolVersion != ProtocolVersion) return 2;
                 try
                 {
-                    var shouldStop = Dispatch(request, arguments);
+                    var shouldStop = Dispatch(request, arguments, cancellation.Token);
                     if (shouldStop) return 0;
                 }
                 catch (WorkerException exception)
                 {
                     Write(new { protocolVersion = ProtocolVersion, requestId = request.RequestId, error = new { issues = exception.Issues } });
+                }
+                catch (OperationCanceledException)
+                {
+                    Write(new
+                    {
+                        protocolVersion = ProtocolVersion,
+                        requestId = request.RequestId,
+                        error = new { issues = new[] { new Issue("The PicoGK build was cancelled.", "CS_TAU_CANCELLED", "runtime", "error") } },
+                    });
                 }
                 catch (Exception exception)
                 {
@@ -89,7 +109,38 @@ internal static class Program
         }
     }
 
-    private static bool Dispatch(Request request, Arguments arguments)
+    private static void ReadFrames(TextReader input, BlockingCollection<(string, CancellationTokenSource)> frames)
+    {
+        CancellationTokenSource? active = null;
+        string? line;
+        while ((line = input.ReadLine()) is not null)
+        {
+            if (IsCancelFrame(line))
+            {
+                active?.Cancel();
+                continue;
+            }
+            active = new CancellationTokenSource();
+            frames.Add((line, active));
+        }
+        frames.CompleteAdding();
+    }
+
+    private static bool IsCancelFrame(string line)
+    {
+        // An oversized or malformed frame is not a cancel; the request loop owns its rejection.
+        if (line.Length > MaximumRequestCharacters) return false;
+        try
+        {
+            return JsonSerializer.Deserialize<Request>(line, JsonOptions)?.Method == "cancel";
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool Dispatch(Request request, Arguments arguments, CancellationToken cancellation)
     {
         switch (request.Method)
         {
@@ -114,55 +165,10 @@ internal static class Program
             {
                 ValidateEntryPath(request.Params, arguments.Workspace);
                 var parameters = request.Params.GetProperty("parameters");
-                var capture = ParseCaptureOptions(request.Params);
+                // A build superseded before it started pays nothing beyond its own frame.
+                cancellation.ThrowIfCancellationRequested();
                 var compiled = CompilationService.Compile(arguments.Workspace);
-                var progressRoot = Path.Combine(arguments.Artifacts, $"progress-{Guid.NewGuid():N}");
-                var sequence = 0;
-                var streamScene = StreamScene(request.Params);
-                var compute = ParseComputeCache(request.Params, arguments.Artifacts);
-                Action<SceneProgress>? onProgress = streamScene
-                    ? progress =>
-                    {
-                        var artifact = progress.Upserts.Count == 0
-                            ? null
-                            : MeshArtifactWriter.WriteSceneComponents(progressRoot, progress.Upserts);
-                        Write(new
-                        {
-                            protocolVersion = ProtocolVersion,
-                            type = "event",
-                            requestId = request.RequestId,
-                            sequence = ++sequence,
-                            @event = new
-                            {
-                                kind = "scene",
-                                mode = progress.Mode.ToString().ToLowerInvariant(),
-                                operation = progress.Operation.ToString().ToLowerInvariant(),
-                                baseSceneGeneration = progress.BaseSceneGeneration,
-                                sceneGeneration = progress.SceneGeneration,
-                                artifact,
-                                removedComponentIds = progress.RemovedComponentIds,
-                                presentation = progress.Presentation,
-                                bookmark = progress.Bookmark,
-                            },
-                        });
-                    }
-                    : null;
-                ModelExecutionResult execution;
-                try
-                {
-                    execution = ModelRunner.Execute(
-                        compiled,
-                        arguments.Artifacts,
-                        parameters,
-                        capture,
-                        onProgress,
-                        compute);
-                }
-                catch
-                {
-                    CleanupProgressArtifacts(progressRoot);
-                    throw;
-                }
+                var execution = ModelRunner.Execute(compiled, arguments.Artifacts, parameters, cancellation);
                 var result = MeshArtifactWriter.Write(
                     arguments.Artifacts,
                     execution,
@@ -183,8 +189,7 @@ internal static class Program
                         new WorkerMetrics(
                             ManagedHeapBytesAfterCollection(),
                             execution.PicoGkNativeBytes,
-                            Environment.WorkingSet)),
-                    execution.ComputePublications);
+                            Environment.WorkingSet)));
                 Write(new { protocolVersion = ProtocolVersion, requestId = request.RequestId, result });
                 return false;
             }
@@ -193,87 +198,6 @@ internal static class Program
                 return true;
             default:
                 throw new WorkerException(new Issue($"Unknown PicoGK worker method '{request.Method}'.", "CS_TAU_PROTOCOL", "validation", "error"));
-        }
-    }
-
-    internal static SceneCaptureOptions ParseCaptureOptions(JsonElement parameters)
-    {
-        if (!parameters.TryGetProperty("capture", out var value)) return SceneCaptureOptions.Default;
-        var modeValue = value.GetProperty("mode").GetString();
-        var mode = modeValue switch
-        {
-            "explicit" => SceneCaptureMode.Explicit,
-            "update" => SceneCaptureMode.Update,
-            "operation" => SceneCaptureMode.Operation,
-            _ => throw new WorkerException(new Issue(
-                "PicoGK capture mode must be explicit, update, or operation.",
-                "CS_TAU_CAPTURE_MODE",
-                "validation",
-                "error")),
-        };
-        var interval = value.TryGetProperty("minimumIntervalMilliseconds", out var intervalValue)
-            ? intervalValue.GetInt32()
-            : SceneCaptureOptions.Default.MinimumIntervalMilliseconds;
-        var maximumPending = value.TryGetProperty("maximumPendingCommands", out var pendingValue)
-            ? pendingValue.GetInt32()
-            : SceneCaptureOptions.Default.MaximumPendingCommands;
-        if (interval is < 0 or > 10_000 || maximumPending is < 1 or > 4_096)
-        {
-            throw new WorkerException(new Issue(
-                "PicoGK capture bounds are outside the supported range.",
-                "CS_TAU_CAPTURE_BOUNDS",
-                "validation",
-                "error"));
-        }
-        return new SceneCaptureOptions(mode, interval, maximumPending);
-    }
-
-    internal static ComputeMaterializationCache? ParseComputeCache(JsonElement parameters, string artifactRoot)
-    {
-        if (!parameters.TryGetProperty("compute", out var value)) return null;
-        var request = value.Deserialize<ComputeRequest>(JsonOptions)
-            ?? throw new WorkerException(new Issue("PicoGK compute request is invalid.", "CS_TAU_COMPUTE", "validation", "error"));
-        if (request.ModelDigest is null || request.Prepared is null ||
-            !request.ModelDigest.StartsWith("sha256:", StringComparison.Ordinal) || request.ModelDigest.Length != 71)
-        {
-            throw new WorkerException(new Issue("PicoGK compute model identity is invalid.", "CS_TAU_COMPUTE", "validation", "error"));
-        }
-        var root = Path.GetFullPath(artifactRoot) + Path.DirectorySeparatorChar;
-        var prepared = new List<(string CacheKey, GeometrySnapshot Snapshot)>();
-        foreach (var artifact in request.Prepared)
-        {
-            var path = Path.GetFullPath(artifact.ArtifactPath);
-            if (!path.StartsWith(root, StringComparison.Ordinal)) continue;
-            try
-            {
-                prepared.Add((artifact.CacheKey, MeshArtifactWriter.ReadComputeArtifact(artifact)));
-            }
-            catch (Exception error) when (error is IOException or InvalidDataException)
-            {
-                // Durable corruption is a cache miss; the model remains authoritative.
-            }
-        }
-        return new ComputeMaterializationCache(prepared);
-    }
-
-    [ExcludeFromCodeCoverage]
-    private static bool StreamScene(JsonElement parameters) =>
-        parameters.TryGetProperty("streamScene", out var value) && value.GetBoolean();
-
-    [ExcludeFromCodeCoverage]
-    private static void CleanupProgressArtifacts(string path)
-    {
-        try
-        {
-            if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
-        }
-        catch (IOException)
-        {
-            // The host may be consuming a frame concurrently; its session owns final orphan cleanup.
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // Preserve the model error; the confined session cleanup retries deletion.
         }
     }
 

@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto';
 
-import { formatPrimitiveSelector, srgbTupleToLinear, writeGlb } from '@taucad/geometry-core';
+import {
+  formatPrimitiveSelector,
+  srgbTupleToLinear,
+  transformVectorArrayChecked,
+  writeGlb,
+} from '@taucad/geometry-core';
 import type { GlbNode, TauCadTopologyComponent, TauCadTopologyPayload } from '@taucad/geometry-core';
 import { tauCadTopologyExtension } from '@taucad/runtime/types';
 
@@ -9,13 +14,6 @@ import type { PicogkBuild } from '#picogk.protocol.js';
 const scalarBytes = 4;
 type PicogkComponent = PicogkBuild['components'][number];
 type PicogkMeshArtifact = Pick<PicogkBuild, 'artifactPath' | 'byteLength' | 'sha256' | 'components'>;
-
-/** One stable PicoGK component encoded as an independently transferable GLB asset. */
-export type PicogkComponentGlb = {
-  readonly id: string;
-  readonly name: string;
-  readonly content: Uint8Array<ArrayBuffer>;
-};
 
 const viewFloat32 = (bytes: Uint8Array<ArrayBuffer>, offset: number, count: number): Float32Array<ArrayBuffer> => {
   if (offset % scalarBytes !== 0 || offset + count * scalarBytes > bytes.byteLength) {
@@ -59,40 +57,29 @@ const recordRanges = (component: PicogkComponent, occupied: Array<readonly [numb
   }
 };
 
-/** Vertex scale from the worker's CAD millimetres to the GLB's metres. */
-const millimetersToMeters = 1 / 1000;
-
 /**
  * Validate one component's vectors and rotate them from CAD Z-up into the GLB's Y-up in one pass.
  *
- * The finiteness scan is the only trust boundary between user-authored C# and the GPU buffer, so it
- * stays exactly as strict as before; only its implementation changes. It runs in the same loop as
- * the rotation because a separate callback pass over the same typed array costs more than the whole
- * rest of the adapter. The rotation matches `transformVertexArray`/`transformNormalArray` in
- * `@taucad/geometry-core`, which the adapter's tests use as the oracle for that equivalence.
+ * The finiteness scan is the only trust boundary between user-authored C# and the GPU buffer, and it
+ * runs in the same loop as the rotation because a separate callback pass over the same typed array
+ * costs more than the whole rest of the adapter. Both live in `@taucad/geometry-core` now, so this
+ * adapter states the rotation nowhere.
  *
  * @param source - Component vectors viewed in place in the confined artifact bytes.
- * @param scale - Length scale applied to every component, `1` for direction vectors.
+ * @param kind - `position` scales CAD millimetres to metres; `direction` only rotates.
  * @param name - Component name, for the rejection message.
  * @returns The rotated vectors, ready for the GLB writer's single copy.
  */
-const toGlbVectors = (source: Float32Array<ArrayBuffer>, scale: number, name: string): Float32Array<ArrayBuffer> => {
-  const target = new Float32Array(source.length);
-  for (let index = 0; index < source.length; index += 3) {
-    const x = source[index]!;
-    const y = source[index + 1]!;
-    const z = source[index + 2]!;
-    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
-      // oxlint-disable-next-line unicorn/prefer-type-error -- rejecting worker mesh content, not a caller's type.
-      throw new Error(`PicoGK component "${name}" contains invalid mesh values.`);
-    }
-    // Negative zero is normalized away so equal geometry always encodes to equal bytes.
-    target[index] = x === 0 ? 0 : x * scale;
-    target[index + 1] = z === 0 ? 0 : z * scale;
-    target[index + 2] = y === 0 ? 0 : -y * scale;
-  }
-  return target;
-};
+const toGlbVectors = (
+  source: Float32Array<ArrayBuffer>,
+  kind: 'direction' | 'position',
+  name: string,
+): Float32Array<ArrayBuffer> =>
+  transformVectorArrayChecked({
+    vectors: source,
+    kind,
+    invalidMessage: `PicoGK component "${name}" contains invalid mesh values.`,
+  });
 
 /**
  * Reject indices that point past the component's own vertices, in one pass and without a callback.
@@ -133,8 +120,8 @@ const componentsToGlb = (
     const sourcePositions = viewFloat32(bytes, component.positionOffset, component.positionCount);
     const sourceNormals = isTriangle ? viewFloat32(bytes, component.normalOffset, component.normalCount) : undefined;
     const sourceIndices = viewUint32(bytes, component.indexOffset, component.indexCount);
-    const positions = toGlbVectors(sourcePositions, millimetersToMeters, component.name);
-    const normals = sourceNormals ? toGlbVectors(sourceNormals, 1, component.name) : undefined;
+    const positions = toGlbVectors(sourcePositions, 'position', component.name);
+    const normals = sourceNormals ? toGlbVectors(sourceNormals, 'direction', component.name) : undefined;
     assertIndexRange(sourceIndices, sourcePositions.length / 3, component.name);
     const displayColor = component.color;
     const materialColor = srgbTupleToLinear(displayColor);
@@ -205,22 +192,4 @@ export const picogkArtifactToGlb = (
 ): Uint8Array<ArrayBuffer> => {
   assertArtifactIntegrity(bytes, result);
   return componentsToGlb(bytes, result.components);
-};
-
-/**
- * Split one dirty-component artifact batch into independently transferable immutable GLBs.
- * @param bytes Confined artifact bytes read from the worker.
- * @param result Validated artifact descriptor containing only dirty components.
- * @returns One GLB asset for each stable component id in worker order.
- */
-export const picogkArtifactToComponentGlbs = (
-  bytes: Uint8Array<ArrayBuffer>,
-  result: PicogkMeshArtifact,
-): readonly PicogkComponentGlb[] => {
-  assertArtifactIntegrity(bytes, result);
-  return result.components.map((component) => ({
-    id: component.id,
-    name: component.name,
-    content: componentsToGlb(bytes, [component]),
-  }));
 };

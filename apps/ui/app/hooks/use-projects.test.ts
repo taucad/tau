@@ -8,7 +8,7 @@ const { projectManager, query, registry, useQuery, worker } = vi.hoisted(() => {
   >();
   let references: Readonly<Record<string, Record<string, unknown>>> = {};
   const operations: string[] = [];
-  const queryState = { isLoading: false };
+  const queryState: { isLoading: boolean; data: unknown } = { isLoading: false, data: undefined };
   const actor = {
     getSnapshot: () => ({ context: { refs: references } }),
     subscribe: (
@@ -52,7 +52,7 @@ const { projectManager, query, registry, useQuery, worker } = vi.hoisted(() => {
       operations,
     },
     useQuery: vi.fn((_options: Record<string, unknown>) => ({
-      data: undefined,
+      data: queryState.data,
       /* TanStack reports a *disabled* query as pending-but-not-loading, which is
        * the whole point of the readiness pin below. */
       isLoading: queryState.isLoading,
@@ -191,5 +191,36 @@ describe('useProjects listing query', () => {
 
   it('leaves window-focus refetching at its default so a backgrounded tab refreshes on return', () => {
     expect(listingQueryOptions()).not.toHaveProperty('refetchOnWindowFocus');
+  });
+
+  /* Two keys meant two whole-workspace discovery passes per navigation (W21 / D19). */
+  it('reads one key whichever deleted filter the caller asks for', () => {
+    useQuery.mockClear();
+    renderHook(() => useProjects());
+    renderHook(() => useProjects({ includeDeleted: true }));
+
+    const keys = useQuery.mock.calls.map((call) => JSON.stringify(call[0]['queryKey']));
+    expect(new Set(keys).size).toBe(1);
+  });
+
+  it('filters the deleted rows out of the shared listing', () => {
+    const entry = (id: string, deletedAt?: number) => ({
+      manifest: { id, name: id },
+      library: { lastActivityAt: 1, ...(deletedAt === undefined ? {} : { deletedAt }) },
+      locator: { backend: 'indexeddb' },
+    });
+    query.data = {
+      projects: [entry('proj_live'), entry('proj_trashed', 5)],
+      conflicts: [],
+      recoveries: [],
+      workspaceBindingRepairs: [],
+    };
+
+    const visible = renderHook(() => useProjects());
+    const all = renderHook(() => useProjects({ includeDeleted: true }));
+
+    expect(visible.result.current.projects.map(({ id }) => id)).toEqual(['proj_live']);
+    expect(all.result.current.projects.map(({ id }) => id)).toEqual(['proj_live', 'proj_trashed']);
+    query.data = undefined;
   });
 });

@@ -82,7 +82,6 @@ export type {
 export type * from '#types/runtime-middleware.types.js';
 export type * from '#types/runtime-content.types.js';
 export type * from '#types/runtime-source-snapshot.types.js';
-export type * from '#types/runtime-scene.types.js';
 export {
   contentDefault,
   normalizeRuntimeContent,

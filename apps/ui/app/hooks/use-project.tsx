@@ -5,7 +5,13 @@ import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { Remote } from 'comlink';
 import { useQueryClient } from '@tanstack/react-query';
-import { parseProjectManifestBytes, projectToManifest, serializeProjectManifest } from '@taucad/types';
+import {
+  getActiveGroupValues,
+  parameterEntryPath,
+  parseProjectManifestBytes,
+  projectToManifest,
+  serializeProjectManifest,
+} from '@taucad/types';
 import type { ProjectManifest } from '@taucad/types';
 import type { ParameterManifest } from '@taucad/parameters';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
@@ -380,6 +386,87 @@ export function ProjectProvider({
     (state) => state.context.mainEntryPath,
   );
   const logRef = useSelector(actorRef, (state) => state.context.logRef);
+  const appliedParameterValues = useRef(new Map<string, string>());
+  /* Keyed by entry path but bound to one actor: a retired and re-created set actor at the same path
+   * (move rollback, delete and recreate, retried close) gets a fresh subscription. */
+  const parameterObservers = useRef(new Map<string, Readonly<{ actor: unknown; unsubscribe: () => void }>>());
+
+  /* The kernel learns a committed value from the set actor's own notification, which runs in the
+   * same synchronous turn as the checked write — ahead of React's render of this provider. */
+  const dispatchParameters = useCallback(
+    (entryPath: string, mode: 'dispatch' | 'seed' = 'dispatch'): void => {
+      const cadRef = actorRef.getSnapshot().context.geometryUnits.get(entryPath);
+      const current = parameterService.snapshot(entryPath);
+      if (cadRef === undefined || current === undefined) {
+        return;
+      }
+      const fingerprint = JSON.stringify(getActiveGroupValues(current.entry));
+      const appliedFingerprint = appliedParameterValues.current.get(entryPath);
+      if (mode === 'dispatch' && appliedFingerprint !== fingerprint && current.bytes !== null) {
+        /* Only the bytes the authority just persisted travel: the runtime resolves the values from
+         * them and observes that revision itself, so the sidecar's own watch event has nothing left
+         * to re-render, and this machine keeps no second copy of the stored values. */
+        cadRef.send({ type: 'commitParameters', stage: { [parameterEntryPath(entryPath)]: current.bytes } });
+      }
+      appliedParameterValues.current.set(entryPath, fingerprint);
+    },
+    [actorRef, parameterService],
+  );
+
+  const observeParameters = useCallback(
+    (entryPath: string): void => {
+      const actor = parameterService.actor(entryPath);
+      const existing = parameterObservers.current.get(entryPath);
+      if (actor === undefined || existing?.actor === actor) {
+        return;
+      }
+      existing?.unsubscribe();
+      let last: unknown;
+      const subscription = actor.subscribe((snapshot) => {
+        const { current } = snapshot.context;
+        if (current !== undefined && current !== last) {
+          last = current;
+          dispatchParameters(entryPath);
+        }
+      });
+      parameterObservers.current.set(entryPath, {
+        actor,
+        unsubscribe: () => {
+          subscription.unsubscribe();
+        },
+      });
+      /* The first observation only records what the record holds: `parameterFileResolver` reads the
+       * same file on every render, so the unit's opening render already carries these values and
+       * dispatching them here would render the model a second time for no change. */
+      dispatchParameters(entryPath, 'seed');
+    },
+    [dispatchParameters, parameterService],
+  );
+
+  useEffect(() => {
+    const observers = parameterObservers.current;
+    const observeAll = (): void => {
+      for (const entryPath of geometryUnits.keys()) {
+        observeParameters(entryPath);
+      }
+    };
+    observeAll();
+    const unsubscribeActors = parameterService.subscribeActors(observeAll);
+    for (const [entryPath, { unsubscribe }] of observers) {
+      if (!geometryUnits.has(entryPath)) {
+        unsubscribe();
+        observers.delete(entryPath);
+        appliedParameterValues.current.delete(entryPath);
+      }
+    }
+    return () => {
+      unsubscribeActors();
+      for (const { unsubscribe } of observers.values()) {
+        unsubscribe();
+      }
+      observers.clear();
+    };
+  }, [geometryUnits, observeParameters, parameterService]);
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
   const resolvedRequestedChatId = useSelector(editorRef, (state) => state.context.requestedChatId);
   const focusedChatResolved = useSelector(editorRef, (state) => state.matches({ ready: { operation: 'idle' } }));

@@ -113,11 +113,22 @@ export type CommonDependencySet = {
   readonly trailingDependencies: Dependency[];
 };
 
+/**
+ * One middleware execution list's declared dependencies plus the watch paths those declarations
+ * name. The paths travel with the cached dependencies so a cache hit still arms the same watch.
+ * @public
+ */
+export type MiddlewareDependencySet = {
+  readonly dependencies: Dependency[];
+  /** Declared watch path to its debounce tier, in declaration order. */
+  readonly watchPaths: ReadonlyMap<string, number>;
+};
+
 export type DependencyResolutionContext = {
   /** Kernel/file/framework dependencies shared by parameter and geometry phases. */
   commonDependencies?: Promise<CommonDependencySet>;
   /** Phase-specific middleware dependencies keyed by the concrete execution list. */
-  middlewareDependenciesByExecutionList?: Map<string, Promise<Dependency[]>>;
+  middlewareDependenciesByExecutionList?: Map<string, Promise<MiddlewareDependencySet>>;
 };
 
 /**

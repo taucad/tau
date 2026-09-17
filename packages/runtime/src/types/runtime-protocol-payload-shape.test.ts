@@ -132,12 +132,6 @@ describe('runtime-protocol payload-shape coverage (C18)', () => {
         fixture: {
           renderOptions: { schema: {}, defaults: {}, futureRenderOption: true },
           content: { schema: {}, defaults: { includeTopology: true }, futureContent: true },
-          progressiveScene: {
-            type: 'supported',
-            deliveries: ['reset'],
-            bookmarks: ['explicit'],
-            replay: ['live', 'retained'],
-          },
           futureRenderCapability: true,
         },
       },

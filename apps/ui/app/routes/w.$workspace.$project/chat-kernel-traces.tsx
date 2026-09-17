@@ -1,4 +1,12 @@
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, ListFilter, Settings2 } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Download,
+  ListFilter,
+  Settings2,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Virtuoso } from 'react-virtuoso';
@@ -627,6 +635,7 @@ export function TraceToolbar({
   onDisplaySettingsChange,
   onFiltersChange,
   onToggleCollapseAll,
+  onExport,
 }: {
   readonly viewMode: ViewMode;
   readonly displaySettings: DisplaySettings;
@@ -636,6 +645,7 @@ export function TraceToolbar({
   readonly onDisplaySettingsChange: (settings: DisplaySettings) => void;
   readonly onFiltersChange: (filters: FilterCondition[]) => void;
   readonly onToggleCollapseAll: () => void;
+  readonly onExport: () => void;
 }): React.JSX.Element {
   const activeFilterCount = filters.filter(({ value }) => value !== '').length;
 
@@ -722,6 +732,10 @@ export function TraceToolbar({
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <PaneButton tooltip='Export trace' aria-label='Export trace' onClick={onExport}>
+          <Download className='size-3.5' />
+        </PaneButton>
 
         <PaneButton
           tooltip={isAllCollapsed ? 'Expand all spans' : 'Collapse all spans'}

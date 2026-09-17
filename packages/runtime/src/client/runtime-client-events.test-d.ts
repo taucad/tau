@@ -6,7 +6,7 @@
 
 import { describe, expectTypeOf, it } from 'vitest';
 import type { RenderStatus, RuntimeClient } from '#client/runtime-client.js';
-import type { TelemetryEntry } from '#types/runtime-protocol.types.js';
+import type { TelemetryBatch } from '#types/runtime-protocol.types.js';
 
 // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- pure type testing
 const client = {} as RuntimeClient;
@@ -27,9 +27,9 @@ describe('RuntimeClient event surface', () => {
     expectTypeOf(off).toEqualTypeOf<() => void>();
   });
 
-  it('should accept "telemetry" with TelemetryEntry[] payload', () => {
-    const off = client.on('telemetry', (entries) => {
-      expectTypeOf(entries).toEqualTypeOf<TelemetryEntry[]>();
+  it('should accept "telemetry" with a batch payload carrying its producer and epoch', () => {
+    const off = client.on('telemetry', (batch) => {
+      expectTypeOf(batch).toEqualTypeOf<TelemetryBatch>();
     });
     expectTypeOf(off).toEqualTypeOf<() => void>();
   });

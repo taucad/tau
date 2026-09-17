@@ -249,6 +249,9 @@ const config = [
       '**/stats.html',
       '**/out-tsc',
       '**/generated',
+      // `@taucad/api-extractor` output, one per kernel package.
+      '**/agent/resources.js',
+      '**/agent/resources.d.ts',
       '**/assets',
       '**/.netlify',
       '**/*.prompt.example.*',

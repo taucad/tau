@@ -48,6 +48,14 @@ export type ParameterCommit = Readonly<{
   ): Promise<ParameterSetOutcome | undefined>;
   /** Commit one field of the active group; non-numeric widgets never rewrite the whole group. */
   setValue(field: Readonly<{ pointer: string; value: JSONValue }>): Promise<void>;
+  /**
+   * Show one field's in-flight drag value without persisting it (D2). Absent when the active kernel
+   * did not declare that it can serve the drag lane, in which case the row previews the value alone
+   * and the model re-renders on release.
+   */
+  scrub?(field: Readonly<{ pointer: string; value: JSONValue }>): void;
+  /** End a drag: the released value is committed through `setValue`. */
+  endScrub?(): void;
 }>;
 
 export type ParameterEdit =

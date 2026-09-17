@@ -631,7 +631,7 @@ describe('useProjectManager.createProject', () => {
     workerChangeSubscriptions.clear();
   });
 
-  it('publishes connected-workspace projects into both same-tab query variants before resolving', async () => {
+  it('publishes connected-workspace projects into the one listing key before resolving', async () => {
     mockIsFileSystemAccessSupported = true;
     mockListProjectManifests.mockResolvedValue(liveWorkspaceDiscovery);
     mockListWorkspaces.mockResolvedValue([{ workspaceId: 'wsp_live', name: 'Workshop', slug: 'workshop' }]);
@@ -649,13 +649,12 @@ describe('useProjectManager.createProject', () => {
       projectCount: 1,
       minted: true,
     });
-    expect(queryClient.getQueryData<ProjectListing>(['projects', { includeDeleted: false }])?.projects).toEqual([
+    expect(queryClient.getQueryData<ProjectListing>(['projects'])?.projects).toEqual([
       expect.objectContaining({
         manifest: fakeProject,
         slugs: { workspaceSlug: 'workshop', projectSlug: 'test-project' },
       }),
     ]);
-    expect(queryClient.getQueryData<ProjectListing>(['projects', { includeDeleted: true }])?.projects).toHaveLength(1);
     expect(result.current.workspaceConnection).toMatchObject({ phase: 'ready', projectCount: 1 });
   });
 

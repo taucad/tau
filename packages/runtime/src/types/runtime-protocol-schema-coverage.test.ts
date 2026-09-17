@@ -60,10 +60,10 @@ describe('runtime-protocol schema coverage (C15)', () => {
     }
   });
 
-  it('should expose exactly the protocol inventory: 10 calls, 18 notifies, and 1 listen (T18)', () => {
-    expect(Object.keys(runtimeProtocolSchemas.calls)).toHaveLength(10);
+  it('should expose exactly the protocol inventory: 8 calls, 18 notifies, and no listens (T18)', () => {
+    expect(Object.keys(runtimeProtocolSchemas.calls)).toHaveLength(8);
     expect(Object.keys(runtimeProtocolSchemas.notifies)).toHaveLength(18);
-    expect(Object.keys(runtimeProtocolSchemas.listens)).toHaveLength(1);
+    expect(Object.keys(runtimeProtocolSchemas.listens)).toHaveLength(0);
   });
 
   it('validates kernel issue codes from the canonical registry', () => {

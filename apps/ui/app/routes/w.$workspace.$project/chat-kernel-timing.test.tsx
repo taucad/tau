@@ -1,11 +1,15 @@
 import { forwardRef, useImperativeHandle } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import type { TelemetryEntry } from '@taucad/runtime';
+import type { TelemetrySpanRecord } from '@taucad/runtime';
 import type { ActorRefFrom } from 'xstate';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { GeometryUnitTiming } from '#routes/w.$workspace.$project/chat-kernel-timing.js';
+import { clearRendererSpans, recordRendererSpan, rendererSpans, telemetryJsonl } from '#lib/renderer-telemetry.js';
+
+const { downloadBlob } = vi.hoisted(() => ({ downloadBlob: vi.fn() }));
+vi.mock('@taucad/utils/file', () => ({ downloadBlob }));
 
 vi.mock('react-virtuoso', () => ({
   Virtuoso: forwardRef(
@@ -68,13 +72,18 @@ vi.mock('#components/ui/combobox-responsive.js', () => ({
   ),
 }));
 
-function entry(overrides: Partial<TelemetryEntry> & { name: string }): TelemetryEntry {
+/** One producer for every span in this file: identity is `origin.instance` plus `spanId` (I5). */
+const producer = { label: 'worker', instance: 'p1' } as const;
+
+function entry(overrides: Partial<TelemetrySpanRecord> & { name: string }): TelemetrySpanRecord {
   return {
     name: overrides.name,
     startTime: overrides.startTime ?? 0,
     duration: overrides.duration ?? 0,
     workerTimeOrigin: overrides.workerTimeOrigin ?? 1000,
     detail: overrides.detail,
+    origin: overrides.origin ?? producer,
+    epoch: overrides.epoch ?? 0,
   };
 }
 
@@ -101,8 +110,11 @@ const telemetryEntries = [
   }),
 ];
 
-function actor(renderPhase?: string): ActorRefFrom<typeof cadMachine> {
-  const snapshot = { context: { renderPhase, telemetryEntries } };
+function actor(
+  renderPhase?: string,
+  entries: TelemetrySpanRecord[] = telemetryEntries,
+): ActorRefFrom<typeof cadMachine> {
+  const snapshot = { context: { renderPhase, telemetryEntries: entries } };
   return {
     getSnapshot: () => snapshot,
     subscribe: () => ({ unsubscribe: vi.fn() }),
@@ -135,7 +147,7 @@ describe('GeometryUnitTiming', () => {
 
   it('can inspect a historical trace without mixing its spans or metrics', () => {
     renderTiming({ cadRef: actor(), query: '' });
-    fireEvent.change(screen.getByRole('combobox', { name: 'Trace history' }), { target: { value: 'render-1' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Trace history' }), { target: { value: 'p1:render-1' } });
 
     expect(getTotalMetric()).toHaveTextContent('100ms');
     expect(screen.getByRole('treeitem', { name: /old\.operation/u })).toBeInTheDocument();
@@ -184,6 +196,60 @@ describe('GeometryUnitTiming', () => {
     const toolbar = screen.getByRole('button', { name: 'Filter spans' }).closest('.border-border');
     expect(toolbar).toHaveClass('border-b');
     expect(toolbar).not.toHaveClass('border-y');
+  });
+
+  it('keeps the trace the user pinned after the machine has evicted its spans', () => {
+    const view = renderTiming({ cadRef: actor(), query: '' });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Trace history' }), { target: { value: 'p1:render-1' } });
+    expect(getTotalMetric()).toHaveTextContent('100ms');
+
+    // D9: the bounded ring drops the oldest trace. A pane that only held its id would silently
+    // snap back to the newest one and lose what the user was reading.
+    view.rerender(
+      <TooltipProvider>
+        <GeometryUnitTiming cadRef={actor(undefined, telemetryEntries.slice(2))} query='' />
+      </TooltipProvider>,
+    );
+
+    expect(getTotalMetric()).toHaveTextContent('100ms');
+    expect(screen.getByRole('treeitem', { name: /old\.operation/u })).toBeInTheDocument();
+  });
+
+  it('exports every producer\u2019s spans as one JSONL trace', () => {
+    clearRendererSpans();
+    recordRendererSpan('renderer.presentation', { startTime: 210, duration: 12 });
+    renderTiming({ cadRef: actor(), query: '' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export trace' }));
+
+    expect(downloadBlob).toHaveBeenCalledOnce();
+    const [blob, filename] = downloadBlob.mock.calls[0]! as [Blob, string];
+    expect(filename).toMatch(/\.jsonl$/u);
+    /* D8: a browser tab has no sink, so this download is the flush — and it must carry both
+     * producers. jsdom's Blob exposes no reader, so the byte count stands in for the body: drop
+     * the renderer span and it no longer matches. */
+    expect(blob.size).toBe(telemetryJsonl([...telemetryEntries, ...rendererSpans()]).length);
+    expect(rendererSpans().map(({ name }) => name)).toEqual(['renderer.presentation']);
+    clearRendererSpans();
+  });
+
+  it('exports the pinned trace the ring has already evicted', () => {
+    clearRendererSpans();
+    const view = renderTiming({ cadRef: actor(), query: '' });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Trace history' }), { target: { value: 'p1:render-1' } });
+
+    const survivors = telemetryEntries.slice(2);
+    view.rerender(
+      <TooltipProvider>
+        <GeometryUnitTiming cadRef={actor(undefined, survivors)} query='' />
+      </TooltipProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Export trace' }));
+
+    /* D9 keeps the evicted trace on screen; exporting only the machine's buffer would hand over a
+     * file missing exactly the trace being read. Byte count stands in for the body (jsdom Blob). */
+    const [blob] = downloadBlob.mock.calls.at(-1)! as [Blob, string];
+    expect(blob.size).toBe(telemetryJsonl([...survivors, ...telemetryEntries.slice(0, 2)]).length);
   });
 
   it('exposes tree metadata and keyboard focus while preserving collapse through filtering', async () => {

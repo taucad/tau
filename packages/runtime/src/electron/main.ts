@@ -131,6 +131,12 @@ export type RegisterElectronRuntimeMainOptions = {
    */
   readonly execArgv?: readonly string[];
   /**
+   * Most utility processes this broker may hold at once, spare included.
+   * The (N+1)th request is refused with an {@link ElectronRuntimeUtilityLimitError}
+   * rather than left to the operating system's memory pressure.
+   */
+  readonly maxUtilities?: number;
+  /**
    * Electron IPC main implementation, primarily for alternate hosts and tests.
    * Also the admission seam: a view that filters before delegating to the real
    * `ipcMain` gates which frames may fork a utility.
@@ -178,7 +184,33 @@ export type ElectronRuntimeMainHandle = {
   connect(input: ElectronRuntimeMainConnectInput): ElectronRuntimeMainConnection;
   /** Unregister IPC listeners and terminate every utility host owned by this broker. */
   dispose(): void;
+  /**
+   * Fork the idle spare for the statically configured entry and environment,
+   * so the first request that resolves to them is served by a process that is
+   * already past its module graph. A no-op once a spare exists or the cap is
+   * reached; a request whose resolved environment differs forks its own.
+   */
+  prewarm(): void;
 };
+
+/**
+ * Refusal raised when a fork would exceed
+ * {@link RegisterElectronRuntimeMainOptions.maxUtilities}.
+ *
+ * @public
+ */
+export class ElectronRuntimeUtilityLimitError extends Error {
+  /**
+   * Name the cap in the message: a refusal that does not say what was reached
+   * reads like a crash.
+   *
+   * @param limit - The cap that was reached.
+   */
+  public constructor(limit: number) {
+    super(`registerElectronRuntimeMain: refusing to exceed ${limit} utility processes`);
+    this.name = 'ElectronRuntimeUtilityLimitError';
+  }
+}
 
 /** A main-owned request for one isolated runtime utility. @public */
 export type ElectronRuntimeMainConnectInput = {
@@ -208,16 +240,44 @@ const isMessagePortMain = (value: unknown): value is MessagePortMain =>
   typeof (value as { start?: unknown }).start === 'function' &&
   typeof (value as { close?: unknown }).close === 'function';
 
-/** One supervised utility, from its fork to the exit its listeners report. */
+/**
+ * One supervised utility, from its fork to the exit its listeners report.
+ *
+ * A pooled spare is the same record with no `hostId`: it is forked before any
+ * request exists, so the identity, the renderer that leases it and the exit
+ * observer are all assigned when a request adopts it.
+ */
 type LiveUtility = {
   readonly utility: UtilityProcess;
-  readonly sender?: IpcMainEvent['sender'];
+  /** Same entry and same environment: what makes a spare adoptable. */
+  readonly key: string;
+  sender?: IpcMainEvent['sender'];
+  /** Assigned on adoption; absent while the record is an idle spare. */
+  hostId?: string;
+  onExit?: (exit: ElectronRuntimeHostExit) => void;
   /** Set before `kill()`, so the `'exit'` listener can attribute the death. */
   released: boolean;
   /** Last {@link maxStderrTailChars} characters the utility wrote to stderr. */
   stderrTail: string;
   computeServer?: { dispose(): void };
 };
+
+/**
+ * Pool identity of one fork.
+ *
+ * Only the entry and the environment can differ between two forks of one
+ * broker — `execArgv`, `serviceName`, `stdio` and the working directory are
+ * broker-wide — so they are the whole key (D17).
+ *
+ * @param entry - Resolved utility entry path.
+ * @param env - Environment the utility would be forked with.
+ * @returns A string equal exactly for forks that produce interchangeable processes.
+ */
+const forkKey = (entry: string, env: ForkOptions['env']): string =>
+  JSON.stringify([
+    entry,
+    env === undefined ? null : Object.entries(env).sort(([left], [right]) => left.localeCompare(right)),
+  ]);
 
 /* Bounds on the renderer-supplied fork context. It arrives on the same IPC
  * channel any frame holding the preload bridge may send on, so it is untrusted
@@ -232,6 +292,10 @@ const maxRuntimeRequestIdChars = 128;
  * a chatty utility cannot grow main's heap. Characters rather than bytes: the
  * difference only makes the bound slightly generous for a non-ASCII tail. */
 const maxStderrTailChars = 4096;
+/* One utility per open project plus a little slack, which is what a person can
+ * have open at once; past it the honest answer is a refusal naming the cap
+ * rather than an operating system that starts killing processes. */
+const defaultMaxUtilities = 8;
 /* Electron emits a utility's `'exit'` before it has delivered the piped
  * stderr, so a boot death — `ERR_MODULE_NOT_FOUND` a millisecond after the
  * fork — is reported with an empty tail unless the exit report waits for the
@@ -411,10 +475,135 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
   const targetIpcMain = options.ipcMain ?? defaultIpcMain;
   const forkEnvAllowlist: ReadonlySet<string> = new Set(options.forkEnvAllowlist ?? []);
   const liveUtilities = new Map<string, LiveUtility>();
+  const maxUtilities = options.maxUtilities ?? defaultMaxUtilities;
+  let spare: LiveUtility | undefined;
   let disposed = false;
 
   const reportError = (error: unknown): void => {
     options.onError?.(toError(error));
+  };
+
+  /**
+   * Fork one utility that no request owns yet.
+   *
+   * Its piped streams are read from the first byte — a stream nobody reads
+   * fills and stalls the child — but nothing is *reported* until adoption,
+   * because before that there is no host to attribute the bytes to.
+   *
+   * @param utilityEntry - Resolved entry module.
+   * @param env - Environment for the fork, or undefined to inherit main's.
+   * @param key - {@link forkKey} for this entry and environment.
+   * @returns The unadopted record.
+   */
+  const forkUtility = (utilityEntry: string, env: ForkOptions['env'], key: string): LiveUtility => {
+    const spawnedUtility = utilityProcess.fork(utilityEntry, [], {
+      env,
+      /* Copied because Electron declares `execArgv?: string[]` (TS4104). */
+      ...(options.execArgv === undefined ? {} : { execArgv: [...options.execArgv] }),
+      serviceName: options.serviceName ?? 'tau-runtime-host',
+      stdio: options.stdio ?? 'pipe',
+    });
+    const record: LiveUtility = { utility: spawnedUtility, key, released: false, stderrTail: '' };
+    /* A piped stream nobody reads fills and stalls the child, so both are read
+     * whether or not an observer is installed. stdout is the utility's own
+     * logging concern; stderr is kept because it is the only account of a boot
+     * death, which by definition never reaches the runtime wire. */
+    spawnedUtility.stdout?.resume();
+    spawnedUtility.stderr?.on('data', (chunk: unknown) => {
+      const text = String(chunk);
+      record.stderrTail = (record.stderrTail + text).slice(-maxStderrTailChars);
+      if (record.hostId !== undefined) {
+        options.onUtilityStderr?.({ hostId: record.hostId, chunk: text });
+      }
+    });
+    /* Named rather than an IIFE, and read after the drain: the tail that
+     * explains a boot death only exists once the pipe has been delivered. */
+    const reportExit = async (hostId: string, code: number): Promise<void> => {
+      record.computeServer?.dispose();
+      await drainStream(spawnedUtility.stderr);
+      const exit: ElectronRuntimeHostExit = {
+        exitCode: code,
+        released: record.released,
+        ...(record.stderrTail === '' ? {} : { stderrTail: record.stderrTail }),
+      };
+      options.onUtilityExit?.({ hostId, ...exit });
+      record.onExit?.(exit);
+    };
+    spawnedUtility.on('exit', (code: number) => {
+      /* Synchronous, so a re-fork racing the drain never sees the dead record. */
+      if (spare === record) {
+        spare = undefined;
+      }
+      const { hostId } = record;
+      /* A spare that died before adoption leases nothing and owes no report:
+       * whatever killed it kills the next fork of the same entry too, and that
+       * one has a host to report against. */
+      if (hostId !== undefined) {
+        liveUtilities.delete(hostId);
+        void reportExit(hostId, code);
+      }
+    });
+    return record;
+  };
+
+  const releaseSpare = (): void => {
+    const record = spare;
+    if (!record) {
+      return;
+    }
+    spare = undefined;
+    record.released = true;
+    try {
+      record.utility.kill();
+    } catch {
+      /* Best-effort */
+    }
+  };
+
+  /**
+   * Take the spare when it was warmed for exactly this fork, fork otherwise.
+   *
+   * @param utilityEntry - Resolved entry module.
+   * @param env - Environment this request resolved to.
+   * @param key - {@link forkKey} for that pair.
+   * @returns An unadopted record, warm or cold.
+   * @throws ElectronRuntimeUtilityLimitError When the broker is already at its cap.
+   */
+  const acquireUtility = (utilityEntry: string, env: ForkOptions['env'], key: string): LiveUtility => {
+    if (spare !== undefined && spare.key !== key) {
+      /* The pool follows the contexts this application actually forks: a spare
+       * no request can adopt is memory, not warmth. */
+      releaseSpare();
+    }
+    if (spare === undefined) {
+      if (liveUtilities.size >= maxUtilities) {
+        throw new ElectronRuntimeUtilityLimitError(maxUtilities);
+      }
+      return forkUtility(utilityEntry, env, key);
+    }
+    const record = spare;
+    spare = undefined;
+    return record;
+  };
+
+  /**
+   * Hold one idle utility for the next request with this key.
+   *
+   * @param utilityEntry - Resolved entry module.
+   * @param env - Environment the next request of this key would fork with.
+   * @param key - {@link forkKey} for that pair.
+   */
+  const ensureSpare = (utilityEntry: string, env: ForkOptions['env'], key: string): void => {
+    /* The spare is inside the cap, never above it: the pool trades a process
+     * the application would have forked anyway for latency, not more memory. */
+    if (disposed || spare !== undefined || liveUtilities.size >= maxUtilities) {
+      return;
+    }
+    try {
+      spare = forkUtility(utilityEntry, env, key);
+    } catch (error) {
+      reportError(error);
+    }
   };
 
   const releaseUtility = (hostId: string): void => {
@@ -459,56 +648,27 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
     }
     const resolvedEntry = resolved.utilityEntry ?? options.utilityEntry;
     const utilityEntry = resolvedEntry instanceof URL ? fileURLToPath(resolvedEntry) : resolvedEntry;
-    let spawnedUtility: UtilityProcess;
+    const env = resolved.env === undefined ? options.env : { ...options.env, ...resolved.env };
+    const key = forkKey(utilityEntry, env);
+    const adopted = spare?.key === key;
+    let record: LiveUtility;
     try {
-      spawnedUtility = utilityProcess.fork(utilityEntry, [], {
-        env: resolved.env === undefined ? options.env : { ...options.env, ...resolved.env },
-        /* Copied because Electron declares `execArgv?: string[]` (TS4104). */
-        ...(options.execArgv === undefined ? {} : { execArgv: [...options.execArgv] }),
-        serviceName: options.serviceName ?? 'tau-runtime-host',
-        stdio: options.stdio ?? 'pipe',
-      });
+      record = acquireUtility(utilityEntry, env, key);
     } catch (error) {
       resolved.fileSystemPort?.close();
       throw error;
     }
+    const spawnedUtility = record.utility;
     const hostId = randomUUID();
-    const record: LiveUtility = {
-      utility: spawnedUtility,
-      released: false,
-      stderrTail: '',
-      ...(sender === undefined ? {} : { sender }),
-    };
+    record.hostId = hostId;
+    if (sender !== undefined) {
+      record.sender = sender;
+    }
+    if (onExit !== undefined) {
+      record.onExit = onExit;
+    }
     liveUtilities.set(hostId, record);
     options.onUtilityFork?.({ hostId, entry: utilityEntry });
-    /* A piped stream nobody reads fills and stalls the child, so both are read
-     * whether or not an observer is installed. stdout is the utility's own
-     * logging concern; stderr is kept because it is the only account of a boot
-     * death, which by definition never reaches the runtime wire. */
-    spawnedUtility.stdout?.resume();
-    spawnedUtility.stderr?.on('data', (chunk: unknown) => {
-      const text = String(chunk);
-      record.stderrTail = (record.stderrTail + text).slice(-maxStderrTailChars);
-      options.onUtilityStderr?.({ hostId, chunk: text });
-    });
-    /* Named rather than an IIFE, and read after the drain: the tail that
-     * explains a boot death only exists once the pipe has been delivered. */
-    const reportExit = async (code: number): Promise<void> => {
-      record.computeServer?.dispose();
-      await drainStream(spawnedUtility.stderr);
-      const exit: ElectronRuntimeHostExit = {
-        exitCode: code,
-        released: record.released,
-        ...(record.stderrTail === '' ? {} : { stderrTail: record.stderrTail }),
-      };
-      options.onUtilityExit?.({ hostId, ...exit });
-      onExit?.(exit);
-    };
-    spawnedUtility.on('exit', (code: number) => {
-      /* Synchronous, so a re-fork racing the drain never sees the dead record. */
-      liveUtilities.delete(hostId);
-      void reportExit(code);
-    });
 
     let ports: MessageChannelMain | undefined;
     let computePorts: MessageChannelMain | undefined;
@@ -550,6 +710,12 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
         },
         transferred,
       );
+      /* Only after an adoption: a broker that never prewarmed asked for no
+       * pool, and the day it does ask, the spare it just spent is replaced so
+       * the *next* open is warm too. */
+      if (adopted) {
+        ensureSpare(utilityEntry, env, key);
+      }
       return { hostId, port: ports.port1 };
     } catch (error) {
       try {
@@ -657,9 +823,17 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
       disposed = true;
       targetIpcMain.off(channel, listener);
       targetIpcMain.off(releaseChannel, releaseListener);
+      releaseSpare();
       for (const hostId of liveUtilities.keys()) {
         releaseUtility(hostId);
       }
+    },
+    prewarm(): void {
+      if (disposed) {
+        throw new Error('registerElectronRuntimeMain: broker is disposed');
+      }
+      const entry = options.utilityEntry instanceof URL ? fileURLToPath(options.utilityEntry) : options.utilityEntry;
+      ensureSpare(entry, options.env, forkKey(entry, options.env));
     },
   };
 };

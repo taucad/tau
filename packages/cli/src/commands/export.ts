@@ -233,7 +233,7 @@ export const exportCommand = defineCommand({
       }
     });
     if (telemetryPath) {
-      client.on('telemetry', (entries) => telemetryEntries.push(...entries));
+      client.on('telemetry', (batch) => telemetryEntries.push(...batch.entries));
     }
 
     let runtimeExportPhase: CliProfilePhase | undefined;

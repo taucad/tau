@@ -40,7 +40,9 @@ export type GeoSpecRuntimeClient = {
   terminate(): void;
   on?(
     event: 'telemetry',
-    handler: (entries: Array<{ name: string; duration: number; startTime: number; workerTimeOrigin: number }>) => void,
+    handler: (batch: {
+      readonly entries: ReadonlyArray<{ name: string; duration: number; startTime: number; workerTimeOrigin: number }>;
+    }) => void,
   ): () => void;
   export<const Format extends GeoSpecRuntimeExportFormat, const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(
     format: Format,

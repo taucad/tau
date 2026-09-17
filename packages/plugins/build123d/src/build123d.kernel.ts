@@ -6,7 +6,7 @@ import {
   defineKernel,
   isNotFoundError,
 } from '@taucad/runtime/kernel';
-import type { ComputeAnnouncement, KernelIssue } from '@taucad/runtime/kernel';
+import type { ComputeAnnouncement, KernelIssue, KernelRuntime } from '@taucad/runtime/kernel';
 import { createExportFile, parametersDirectory } from '@taucad/runtime/types';
 import { requireParameterRecord, resolveProducerParameterValues } from '@taucad/parameters';
 import { actionDigest, canonicalizeComputeAction, contentDigest } from '@taucad/cache-core';
@@ -19,6 +19,7 @@ import {
   build123dBuildSchema,
   build123dComputeDescriptorLimit,
 } from '#build123d.protocol.js';
+import type { Build123dAnalysis } from '#build123d.protocol.js';
 import { build123dExportSchemas, build123dOptionsSchema, build123dRenderSchema } from '#build123d.schemas.js';
 import { Build123dWorkerError, PythonSession } from '#python-session.js';
 import { createWorkspaceMirror } from '#build123d-workspace-mirror.js';
@@ -100,6 +101,36 @@ const recordFrom = (bytes: Uint8Array<ArrayBuffer>, fileName: string): ReturnTyp
   }
 };
 
+/**
+ * One analyze request, spanned.
+ *
+ * Every entry point asked the worker the same question with the same arguments;
+ * D8 wants that wire time in the trace, and it belongs in one place rather than
+ * three.
+ *
+ * @param entryPath - Model entry the worker analyzes.
+ * @param runtime - Kernel runtime, for its abort signal and tracer.
+ * @param context - Kernel context holding the session and its observed dependencies.
+ * @returns The worker's analysis.
+ */
+const analyzeEntry = async (
+  entryPath: string,
+  runtime: Pick<KernelRuntime, 'signal' | 'tracer'>,
+  context: { readonly session: PythonSession; readonly observedDependencies: string[] },
+): Promise<Build123dAnalysis> => {
+  const span = runtime.tracer.startSpan('build123d.analyze', { entryPath });
+  try {
+    return await context.session.request({
+      method: 'analyze',
+      params: { entryPath, observedDependencies: context.observedDependencies },
+      schema: build123dAnalysisSchema,
+      signal: runtime.signal,
+    });
+  } finally {
+    span.end();
+  }
+};
+
 /** `build123d` kernel capability. @public */
 export const build123dKernel = defineKernel({
   id: 'build123d',
@@ -108,6 +139,8 @@ export const build123dKernel = defineKernel({
   version: '0.11.1+python3.13.ocp7.9.3.1.1.protocol1.topology1',
   optionsSchema: build123dOptionsSchema,
   render: { optionsSchema: build123dRenderSchema },
+  // D2: the Python worker answers `cancelMethod: 'cancel'` itself and keeps its resident prefix.
+  liveEdit: true,
   exportFormats: {
     glb: { optionsSchema: build123dExportSchemas.glb },
     step: { optionsSchema: build123dExportSchemas.step },
@@ -141,17 +174,9 @@ export const build123dKernel = defineKernel({
   },
 
   async getDependencies({ entryPath }, runtime, context) {
-    await context.mirror.sync(runtime.filesystem);
+    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
     try {
-      const analysis = await context.session.request({
-        method: 'analyze',
-        params: {
-          entryPath,
-          observedDependencies: context.observedDependencies,
-        },
-        schema: build123dAnalysisSchema,
-        signal: runtime.signal,
-      });
+      const analysis = await analyzeEntry(entryPath, runtime, context);
       return { resolved: analysis.resolved, unresolved: analysis.unresolved };
     } catch (error) {
       throw new Build123dKernelError(issuesFrom(error, entryPath));
@@ -159,17 +184,9 @@ export const build123dKernel = defineKernel({
   },
 
   async getParameters({ entryPath }, runtime, context) {
-    await context.mirror.sync(runtime.filesystem);
+    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
     try {
-      const analysis = await context.session.request({
-        method: 'analyze',
-        params: {
-          entryPath,
-          observedDependencies: context.observedDependencies,
-        },
-        schema: build123dAnalysisSchema,
-        signal: runtime.signal,
-      });
+      const analysis = await analyzeEntry(entryPath, runtime, context);
       if (!analysis.declaration) {
         throw new Error('Build123d analyzer omitted its parameter declaration.');
       }
@@ -180,21 +197,13 @@ export const build123dKernel = defineKernel({
   },
 
   async createGeometry({ entryPath, parameters }, runtime, context) {
-    await context.mirror.sync(runtime.filesystem);
+    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
     let executionParameters = parameters;
     try {
       const parameterPath = assertRootedPath(`${parametersDirectory}/${entryPath}.json`);
       const bytes = await runtime.filesystem.readFile(parameterPath);
       const entry = recordFrom(bytes, parameterPath);
-      const analysis = await context.session.request({
-        method: 'analyze',
-        params: {
-          entryPath,
-          observedDependencies: context.observedDependencies,
-        },
-        schema: build123dAnalysisSchema,
-        signal: runtime.signal,
-      });
+      const analysis = await analyzeEntry(entryPath, runtime, context);
       if (!analysis.declaration) {
         throw new Error('Build123d analyzer omitted its parameter declaration.');
       }
@@ -210,20 +219,25 @@ export const build123dKernel = defineKernel({
       }
     }
     const build = async (compute: Record<string, unknown> | undefined) => {
-      const result = await context.session.request({
-        method: 'build',
-        params: {
-          entryPath,
-          parameters: executionParameters,
-          ...(compute ? { compute } : {}),
-        },
-        schema: build123dBuildSchema,
-        signal: runtime.signal,
-        // G-F5: an abort stops the worker at its next funnel boundary and keeps the resident prefix.
-        cancelMethod: 'cancel',
-      });
-      context.observedDependencies = result.observedDependencies;
-      return result;
+      const span = runtime.tracer.startSpan('build123d.build', { entryPath });
+      try {
+        const result = await context.session.request({
+          method: 'build',
+          params: {
+            entryPath,
+            parameters: executionParameters,
+            ...(compute ? { compute } : {}),
+          },
+          schema: build123dBuildSchema,
+          signal: runtime.signal,
+          // G-F5: an abort stops the worker at its next funnel boundary and keeps the resident prefix.
+          cancelMethod: 'cancel',
+        });
+        context.observedDependencies = result.observedDependencies;
+        return result;
+      } finally {
+        span.end();
+      }
     };
 
     try {

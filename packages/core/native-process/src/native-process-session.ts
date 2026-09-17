@@ -12,6 +12,8 @@ import { launchInNativeSandbox } from '#native-sandbox.js';
 
 const maxProtocolLineBytes = 1_048_576;
 const maxStderrBytes = 65_536;
+/** Verified runtime payloads by fingerprint, shared by every session in this process (D24). */
+const verifiedRuntimePayloads = new Map<string, Promise<void>>();
 const maxQueueDepth = 16;
 const terminationGraceMilliseconds = 500;
 
@@ -263,7 +265,6 @@ export class NativeProcessSession<Issue> {
   private queue = Promise.resolve();
   private queueDepth = 0;
   private requestSequence = 0;
-  private verified: Promise<void> | undefined;
   private termination: Promise<void> | undefined;
   private closed = false;
   // oxlint-disable-next-line typescript/parameter-properties -- erasableSyntaxOnly forbids parameter properties.
@@ -382,8 +383,22 @@ export class NativeProcessSession<Issue> {
   }
 
   private async verifyResources(): Promise<void> {
-    this.verified ??= this.verifyResourceDigests();
-    await this.verified;
+    /* D24: the runtime root ships inside the signed bundle, so its digests are a property of the
+     * installed payload rather than of a session. Sweeping per session charged every opened project
+     * a fresh 167 MiB hash of bytes another session had already verified in this process. */
+    const fingerprint = createHash('sha256')
+      .update(
+        [
+          this.options.runtimePath,
+          this.options.executablePath,
+          this.options.executableSha256,
+          ...this.options.resources.map(({ path, sha256 }) => `${path}\u0000${sha256}`),
+        ].join('\u0000'),
+      )
+      .digest('hex');
+    const verified = verifiedRuntimePayloads.get(fingerprint) ?? this.verifyResourceDigests();
+    verifiedRuntimePayloads.set(fingerprint, verified);
+    await verified;
   }
 
   private async verifyResourceDigests(): Promise<void> {

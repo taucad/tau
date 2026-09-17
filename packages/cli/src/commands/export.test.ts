@@ -307,15 +307,19 @@ describe('exportCommand', () => {
     const telemetryPath = join(workspace, 'profile.json');
     exportFunction.mockImplementationOnce(async () => {
       const telemetryListener = onFunction.mock.calls.find(([event]) => event === 'telemetry')?.[1];
-      telemetryListener?.([
-        {
-          name: 'kernel.export-model',
-          startTime: performance.now(),
-          duration: 0,
-          workerTimeOrigin: performance.timeOrigin,
-          detail: { spanId: 'root', format: 'glb' },
-        },
-      ]);
+      telemetryListener?.({
+        origin: { label: 'cli', instance: 'test-producer' },
+        epoch: Date.now() - performance.now(),
+        entries: [
+          {
+            name: 'kernel.export-model',
+            startTime: performance.now(),
+            duration: 0,
+            workerTimeOrigin: performance.timeOrigin,
+            detail: { spanId: 'root', format: 'glb' },
+          },
+        ],
+      });
       return buildSuccessResult(bytes);
     });
     const command = await importExportCommand();

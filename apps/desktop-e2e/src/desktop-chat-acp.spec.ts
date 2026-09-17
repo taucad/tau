@@ -116,8 +116,8 @@ test.skipIf(!codexAvailable)('uses native Tau skills and tools through the Codex
     await selectKernel(page, 'OpenSCAD');
     await connectPickedFolder(session);
     /* 1. Both adapters main discovered are offered as rows on this computer.
-     * The renderer reads them from the preload bootstrap, so this is the
-     * renderer half of the one discovery main performed. */
+     * The renderer asks main for them over `externalAgentsChannel` (D17), so
+     * this is the renderer half of the one discovery main performed. */
     const rows = await openExecutionPicker(page);
     /* Lane 15's selector work replaced the "· This computer" suffix: a row is
      * named for the adapter and described by where it runs (Q12.3). */

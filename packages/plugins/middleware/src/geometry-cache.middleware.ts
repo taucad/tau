@@ -108,11 +108,22 @@ const buildCodec: CacheCodec<CreateGeometryResult> = {
     if (result.data?.format === 'webrtc') {
       throw new Error('Live WebRTC geometry is not reusable.');
     }
-    if (result.data === undefined && result.serializedNativeHandle === undefined) {
+    /* D12: a fresh build carries the means to make its snapshot, not the snapshot — nothing on the
+     * display path reads one. A cache entry has to hold the value, so this is where it is made. */
+    const serializedNativeHandle = result.serializedNativeHandle ?? result.serializeNativeHandleSnapshot?.();
+    if (result.data === undefined && serializedNativeHandle === undefined) {
       throw new Error('A reusable build requires geometry or a serialized native handle.');
     }
-    const { [nativeBuildInputSymbol]: _nativeBuildInput, ...publicResult } = result;
-    return msgpackEncode({ schemaVersion: 1, result: publicResult, nativeBuildInput });
+    const {
+      [nativeBuildInputSymbol]: _nativeBuildInput,
+      serializeNativeHandleSnapshot: _serializeNativeHandleSnapshot,
+      ...publicResult
+    } = result;
+    return msgpackEncode({
+      schemaVersion: 1,
+      result: { ...publicResult, ...(serializedNativeHandle === undefined ? {} : { serializedNativeHandle }) },
+      nativeBuildInput,
+    });
   },
   decode: ({ bytes }) => {
     const entry = buildEntrySchema.parse(msgpackDecode(bytes));
@@ -153,25 +164,20 @@ export const geometryCache = defineMiddleware({
   name: 'GeometryCache',
   version: '2.0.0',
 
-  async wrapCreateGeometry(input, handler, { compute, dependencyHash, logger, tracer, progressiveSceneRequested }) {
-    // A terminal-only cache entry cannot replay scene operations or bookmarks.
-    // Inner deterministic work can still reuse compute; publish this terminal result for atomic consumers.
-    const liveResult = progressiveSceneRequested ? await handler(input) : undefined;
+  async wrapCreateGeometry(input, handler, { compute, dependencyHash, logger, tracer }) {
     if (compute.status !== 'on') {
-      return liveResult ?? handler(input);
+      return handler(input);
     }
     const result = await traceCacheOperation(tracer, 'cache.geometry.build.evaluate', async () =>
       compute.evaluate({
         action: dependencyAction('build', dependencyHash, buildCodec),
         codec: buildCodec,
         policy: 'best-effort',
-        compute: async () => liveResult ?? handler(input),
+        compute: async () => handler(input),
       }),
     );
-    logger.debug(
-      `Geometry build cache ${result.source} for ${dependencyHash}${progressiveSceneRequested ? ' (live scene executed)' : ''}`,
-    );
-    return liveResult ?? result.value;
+    logger.debug(`Geometry build cache ${result.source} for ${dependencyHash}`);
+    return result.value;
   },
 
   async wrapMeshGeometry(input, handler, { compute, dependencyHash, logger, tracer }) {

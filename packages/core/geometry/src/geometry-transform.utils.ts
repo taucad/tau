@@ -112,6 +112,48 @@ export function transformNormalArray(
   return transformedNormals;
 }
 
+/**
+ * Transform vectors and reject non-finite input in the same pass.
+ *
+ * A kernel reading a worker's bytes has to validate them — that is a trust boundary — and a separate
+ * callback pass over the same typed array costs more than the whole rotation. This is the fused
+ * version, so no kernel has to restate the rotation to get one pass.
+ *
+ * @param input - The vectors, whether they are positions or directions, the output convention, and
+ * the message a rejection carries.
+ * @returns The transformed vectors.
+ * @throws When any component is not finite, with `input.invalidMessage`.
+ * @public
+ */
+export function transformVectorArrayChecked(input: {
+  readonly vectors: ArrayLike<number>;
+  /** Directions are rotated but never scaled; positions are both. */
+  readonly kind: 'direction' | 'position';
+  readonly options?: GeometryOutputTransformOptions;
+  readonly invalidMessage: string;
+}): Float32Array<ArrayBuffer> {
+  const { vectors, kind, invalidMessage } = input;
+  const coordinateSystem = input.options?.coordinateSystem ?? 'y-up';
+  const scale = kind === 'direction' ? 1 : lengthScaleFromMillimeters(input.options?.unit?.length);
+  const transformed = new Float32Array(vectors.length);
+
+  for (let index = 0; index < vectors.length; index += 3) {
+    const x = vectors[index]!;
+    const y = vectors[index + 1]!;
+    const z = vectors[index + 2]!;
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      // oxlint-disable-next-line unicorn/prefer-type-error -- rejecting mesh content, not a caller's type.
+      throw new Error(invalidMessage);
+    }
+    /* Negative zero is normalized away so equal geometry always encodes to equal bytes. */
+    transformed[index] = normalizeSignedZero(x * scale);
+    transformed[index + 1] = normalizeSignedZero(coordinateSystem === 'z-up' ? y * scale : z * scale);
+    transformed[index + 2] = normalizeSignedZero(coordinateSystem === 'z-up' ? z * scale : -y * scale);
+  }
+
+  return transformed;
+}
+
 /** Remove zero-area and repeated triangles while preserving index-group ownership. @public */
 export function compactTriangleIndices<Group extends { start: number; count: number }>(options: {
   positions: ArrayLike<number>;

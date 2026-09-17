@@ -342,6 +342,9 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
 }));
 
 const routeModule = await import('#routes/w.$workspace.$project/project-route.js');
+/* The live-session subtree is behind a `lazy()` boundary (W21). Importing it here settles that
+ * boundary in the first `act` flush, so a rendered route is complete when `settle()` returns. */
+await import('#routes/w.$workspace.$project/project-live-sessions.js');
 
 const ready = (projectId: string): ProjectRouteAccess => ({
   status: 'ready',

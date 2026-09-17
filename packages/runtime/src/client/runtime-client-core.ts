@@ -31,7 +31,7 @@ import type { KernelIssueCode } from '#types/kernel-issue-codes.js';
 import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
 import type {
   RuntimeExportModelArgs,
-  TelemetryEntry,
+  TelemetryBatch,
   RenderPhase,
   WorkerState,
 } from '#types/runtime-protocol.types.js';
@@ -72,13 +72,6 @@ import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
 import type { ParameterResolutionOptions } from '@taucad/parameters';
 import { assertRootedPath } from '@taucad/utils/path';
-import type {
-  ProgressiveSceneUpdate,
-  ReadSceneSnapshotResult,
-  RuntimeListSceneBookmarksInput,
-  RuntimeReadSceneSnapshotInput,
-  SceneBookmark,
-} from '#types/runtime-scene.types.js';
 
 export type { RuntimeConfigInput, RuntimeConfigOutput, RuntimeConfigProvider } from '#worker/runtime-definition.js';
 
@@ -193,6 +186,18 @@ export type RuntimeRenderInput<
   readonly source: RuntimeSource<Files>;
   readonly parameters?: Record<string, unknown>;
   readonly renderOptions?: CollectRenderOptions<Kernels>;
+  /**
+   * Bytes written onto the runtime's filesystem in the same envelope as the command, before
+   * dependency resolution. The runtime observes them as the paths' current revision, so a host
+   * that persists the same bytes in parallel does not also trigger a watched re-render.
+   */
+  readonly stage?: Readonly<Record<string, Uint8Array<ArrayBuffer> | string>>;
+  /**
+   * Render this value for display only. The result reaches the `geometry` event, but it never
+   * becomes the published artifact: exports and retained handles keep answering the last committed
+   * render, and nothing is persisted. Drag lanes use this; a committed edit never does.
+   */
+  readonly transient?: boolean;
 } & ContentRequestFor<RenderContentFor<Kernels, Middleware>>;
 
 /** Request-scoped model evaluation input with exact render-schema inference. @public */
@@ -695,6 +700,24 @@ const normalizeRuntimeSource = (source: RuntimeSource | unknown): NormalizedRunt
   throw new TypeError('Runtime source must include either `files` or `path`.');
 };
 
+/** Fold a command's own staged bytes into the source's, so both reach the worker in one envelope. */
+const withStagedFiles = (
+  normalized: NormalizedRuntimeSource,
+  stage: Readonly<Record<string, Uint8Array<ArrayBuffer> | string>> | undefined,
+): NormalizedRuntimeSource => {
+  if (stage === undefined) {
+    return normalized;
+  }
+  if (!isRecord(stage)) {
+    throw new TypeError('Runtime `stage` must be a map of runtime paths to bytes.');
+  }
+  const merged: Record<string, Uint8Array<ArrayBuffer>> = { ...normalized.stage };
+  for (const [filename, content] of Object.entries(stage)) {
+    merged[assertRuntimeFilePath(filename)] = toStagedBytes(filename, content);
+  }
+  return { ...normalized, stage: merged };
+};
+
 const normalizeSnapshotAdditionalPaths = (
   value: readonly RuntimeSourceSnapshotAdditionalPath[] | undefined,
 ): readonly RuntimeSourceSnapshotAdditionalPath[] | undefined => {
@@ -865,10 +888,9 @@ type ClientTranscoders<Runtime> = [AnyRuntimeDefinition] extends [Runtime]
 type EventHandlers = {
   log: Topic<LogEntry>;
   progress: Topic<{ phase: RenderPhase; detail?: Record<string, unknown> }>;
-  telemetry: Topic<TelemetryEntry[]>;
+  telemetry: Topic<TelemetryBatch>;
   parametersResolved: Topic<GetParametersResult>;
   geometry: Topic<HashedGeometryResult>;
-  sceneUpdate: Topic<ProgressiveSceneUpdate>;
   state: Topic<{ state: WorkerState; detail?: string }>;
   renderStatus: Topic<RenderStatus>;
   error: Topic<KernelIssue[]>;
@@ -1068,12 +1090,6 @@ type RuntimeClientProjection<
     readonly signal?: AbortSignal;
   }): Promise<GetParametersResult>;
 
-  /** Resolve a retained progressive-scene snapshot without rerunning the kernel. */
-  readSceneSnapshot(input: RuntimeReadSceneSnapshotInput): Promise<ReadSceneSnapshotResult>;
-
-  /** List retained timeline bookmarks for one render. */
-  listSceneBookmarks(input: RuntimeListSceneBookmarksInput): Promise<readonly SceneBookmark[]>;
-
   /**
    * Render a source through the autonomous render loop.
    *
@@ -1137,11 +1153,6 @@ type RuntimeClientProjection<
    * @returns Unsubscribe function
    */
   on(event: 'geometry', handler: (result: HashedGeometryResult) => void, options?: RuntimeSubscribeOptions): () => void;
-  on(
-    event: 'sceneUpdate',
-    handler: (update: ProgressiveSceneUpdate) => void,
-    options?: RuntimeSubscribeOptions,
-  ): () => void;
   on(event: 'renderStatus', handler: (status: RenderStatus) => void, options?: RuntimeSubscribeOptions): () => void;
   on(
     event: 'state',
@@ -1154,7 +1165,7 @@ type RuntimeClientProjection<
     handler: (phase: RenderPhase, detail?: Record<string, unknown>) => void,
     options?: RuntimeSubscribeOptions,
   ): () => void;
-  on(event: 'telemetry', handler: (entries: TelemetryEntry[]) => void, options?: RuntimeSubscribeOptions): () => void;
+  on(event: 'telemetry', handler: (batch: TelemetryBatch) => void, options?: RuntimeSubscribeOptions): () => void;
   on(
     event: 'parametersResolved',
     handler: (result: GetParametersResult) => void,
@@ -1295,8 +1306,6 @@ export function createRuntimeClient(
 
   let workerClient: RuntimeWorkerClient | undefined;
   let workerClientWired = false;
-  let sceneSubscriberCount = 0;
-  let sceneWorkerUnsubscribe: (() => void) | undefined;
   let activeRenderTimeout = options.renderTimeout ?? 0;
   assertValidRenderTimeout(activeRenderTimeout);
   if (activeRenderTimeout > 0 && transport.renderTimeoutRecovery.kind === 'unsupported') {
@@ -1520,37 +1529,15 @@ export function createRuntimeClient(
   const handlers: EventHandlers = {
     log: new Topic<LogEntry>({ name: 'RuntimeClient.log' }),
     progress: new Topic<{ phase: RenderPhase; detail?: Record<string, unknown> }>({ name: 'RuntimeClient.progress' }),
-    telemetry: new Topic<TelemetryEntry[]>({ name: 'RuntimeClient.telemetry' }),
+    telemetry: new Topic<TelemetryBatch>({ name: 'RuntimeClient.telemetry' }),
     parametersResolved: new Topic<GetParametersResult>({ name: 'RuntimeClient.parametersResolved' }),
     geometry: new Topic<HashedGeometryResult>({ name: 'RuntimeClient.geometry' }),
-    sceneUpdate: new Topic<ProgressiveSceneUpdate>({ name: 'RuntimeClient.sceneUpdate' }),
     state: new Topic<{ state: WorkerState; detail?: string }>({ name: 'RuntimeClient.state' }),
     renderStatus: new Topic<RenderStatus>({ name: 'RuntimeClient.renderStatus' }),
     error: new Topic<KernelIssue[]>({ name: 'RuntimeClient.error' }),
     capabilities: new Topic<CapabilitiesManifest>({ name: 'RuntimeClient.capabilities' }),
     activeKernelChanged: new Topic<string | undefined>({ name: 'RuntimeClient.activeKernelChanged' }),
   };
-
-  function ensureSceneWorkerSubscription(client: RuntimeWorkerClient): void {
-    if (sceneSubscriberCount === 0 || sceneWorkerUnsubscribe) {
-      return;
-    }
-    sceneWorkerUnsubscribe = client.onSceneUpdate(
-      (update) => {
-        handlers.sceneUpdate.emit(update);
-      },
-      (error) => {
-        handlers.error.emit([
-          {
-            message: error instanceof Error ? error.message : String(error),
-            code: 'RUNTIME',
-            type: 'runtime',
-            severity: 'warning',
-          },
-        ]);
-      },
-    );
-  }
 
   function getWorkerClient(): RuntimeWorkerClient {
     if (!workerClient) {
@@ -1569,8 +1556,8 @@ export function createRuntimeClient(
     workerClient.onLog((entry) => {
       handlers.log.emit(entry);
     });
-    workerClient.onTelemetry((entries) => {
-      handlers.telemetry.emit([...entries]);
+    workerClient.onTelemetry((batch) => {
+      handlers.telemetry.emit(batch);
     });
     workerClient.onState(({ renderId, state, detail, geometryObserved }) => {
       if (
@@ -1661,7 +1648,6 @@ export function createRuntimeClient(
       _capabilities = capabilities;
       handlers.capabilities.emit(capabilities);
     });
-    ensureSceneWorkerSubscription(workerClient);
     return workerClient;
   }
 
@@ -1694,8 +1680,6 @@ export function createRuntimeClient(
     pendingParameterResolutions.clear();
     workerClient?.terminate();
     workerClient = undefined;
-    sceneWorkerUnsubscribe = undefined;
-    sceneSubscriberCount = 0;
     setLifecycleState('terminated');
     hasSettledRender = false;
     latestWorkerState = 'idle';
@@ -1788,7 +1772,6 @@ export function createRuntimeClient(
           if (workerClient === connectedWorkerClient) {
             workerClient = undefined;
             workerClientWired = false;
-            sceneWorkerUnsubscribe = undefined;
           }
           hasRenderFailure = true;
           setLifecycleState('unconnected');
@@ -2046,7 +2029,7 @@ export function createRuntimeClient(
       assertRecordInput('evaluate', 'parameters', input.parameters);
       assertRecordInput('evaluate', 'renderOptions', input.renderOptions);
       assertRecordInput('evaluate', 'content', input.content);
-      const normalized = normalizeRuntimeSource(input.source);
+      const normalized = withStagedFiles(normalizeRuntimeSource(input.source), input.stage);
       input.signal?.throwIfAborted();
       const client = await waitForSignal(ensureConnected(), input.signal);
       assertIntentAdmissionOpen();
@@ -2123,24 +2106,6 @@ export function createRuntimeClient(
       }
     },
 
-    async readSceneSnapshot(input: RuntimeReadSceneSnapshotInput): Promise<ReadSceneSnapshotResult> {
-      assertIntentAdmissionOpen();
-      if (!isRecord(input) || typeof input.bookmarkId !== 'string' || input.bookmarkId.length === 0) {
-        throw new TypeError('RuntimeClient.readSceneSnapshot requires a non-empty bookmarkId.');
-      }
-      const client = await ensureConnected();
-      return trackInFlight(client.readSceneSnapshot({ bookmarkId: input.bookmarkId }, input.signal));
-    },
-
-    async listSceneBookmarks(input: RuntimeListSceneBookmarksInput): Promise<readonly SceneBookmark[]> {
-      assertIntentAdmissionOpen();
-      if (!isRecord(input) || typeof input.renderId !== 'string' || input.renderId.length === 0) {
-        throw new TypeError('RuntimeClient.listSceneBookmarks requires a non-empty renderId.');
-      }
-      const client = await ensureConnected();
-      return trackInFlight(client.listSceneBookmarks({ renderId: input.renderId }, input.signal));
-    },
-
     async render<const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(
       input: RuntimeRenderInput<KernelPlugin[], MiddlewarePlugin[], Files>,
     ): Promise<RenderOutcome> {
@@ -2152,7 +2117,10 @@ export function createRuntimeClient(
       assertRecordInput('render', 'parameters', input.parameters);
       assertRecordInput('render', 'renderOptions', input.renderOptions);
       assertRecordInput('render', 'content', input.content);
-      const normalized = normalizeRuntimeSource(input.source);
+      const normalized = withStagedFiles(normalizeRuntimeSource(input.source), input.stage);
+      if (input.transient === true && normalized.stage !== undefined) {
+        throw new TypeError('A transient render is never persisted, so it cannot stage bytes.');
+      }
       const parameters = input.parameters ?? {};
       const { renderOptions, content } = input;
       const admissionClient = getWorkerClient();
@@ -2174,7 +2142,11 @@ export function createRuntimeClient(
             admission,
           );
         } else {
-          client.openFile(normalized.file, { parameters, options: renderOptions, content }, admission);
+          client.openFile(
+            normalized.file,
+            { parameters, options: renderOptions, content, ...(input.transient === true ? { transient: true } : {}) },
+            admission,
+          );
         }
       } catch (error) {
         admissionClient.settleSelectedPreview(admission.renderId);
@@ -2280,38 +2252,13 @@ export function createRuntimeClient(
           }, options);
         }
         case 'telemetry': {
-          return handlers.telemetry.subscribe(handler as (entries: TelemetryEntry[]) => void, options);
+          return handlers.telemetry.subscribe(handler as (batch: TelemetryBatch) => void, options);
         }
         case 'parametersResolved': {
           return handlers.parametersResolved.subscribe(handler as (result: GetParametersResult) => void, options);
         }
         case 'geometry': {
           return handlers.geometry.subscribe(handler as (result: HashedGeometryResult) => void, options);
-        }
-        case 'sceneUpdate': {
-          sceneSubscriberCount += 1;
-          const client = getWorkerClient();
-          ensureSceneWorkerSubscription(client);
-          const offTopic = handlers.sceneUpdate.subscribe(handler as (update: ProgressiveSceneUpdate) => void);
-          let active = true;
-          const unsubscribe = (): void => {
-            if (!active) {
-              return;
-            }
-            active = false;
-            options?.signal?.removeEventListener('abort', unsubscribe);
-            offTopic();
-            sceneSubscriberCount -= 1;
-            if (sceneSubscriberCount === 0) {
-              sceneWorkerUnsubscribe?.();
-              sceneWorkerUnsubscribe = undefined;
-            }
-          };
-          options?.signal?.addEventListener('abort', unsubscribe, { once: true });
-          if (options?.signal?.aborted) {
-            unsubscribe();
-          }
-          return unsubscribe;
         }
         case 'renderStatus': {
           return handlers.renderStatus.subscribe(handler as (status: RenderStatus) => void, options);

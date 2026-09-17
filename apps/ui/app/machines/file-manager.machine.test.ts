@@ -579,6 +579,35 @@ describe('fileManagerMachine', () => {
       actor.stop();
     });
 
+    it('should not reconfigure the project roots the root mount already installed', async () => {
+      const sharedWorker = {
+        terminate: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        postMessage: vi.fn(),
+      } as unknown as Worker;
+
+      const actor = createActor(fileManagerMachine, {
+        input: {
+          rootDirectory: '/projects/shared-proj',
+          shouldInitializeOnStart: true,
+          projectId: 'shared-proj',
+          sharedWorker,
+        },
+      });
+      actor.start();
+
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+
+      // The roots are worker-global and every mutation re-syncs them, so a nested mount
+      // re-running the whole configuration is pure startup cost.
+      expect(mockConfigureProjectRoots).not.toHaveBeenCalled();
+      expect(mockGetProjectRootConfigs).not.toHaveBeenCalled();
+      actor.stop();
+    });
+
     it('should still call waitForWorkerReady when no sharedWorker (fresh worker)', async () => {
       mockWaitForWorkerReady.mockResolvedValue(undefined);
 

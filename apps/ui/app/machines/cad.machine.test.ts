@@ -3,25 +3,13 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { assign, createActor, setup, waitFor } from 'xstate';
 import { RenderTimeoutError } from '@taucad/runtime/client';
-import type {
-  CapabilitiesManifest,
-  KernelIssue,
-  RenderOutcome,
-  ProgressiveSceneUpdate,
-  SceneNodeId,
-  TelemetryEntry,
-} from '@taucad/runtime';
+import type { CapabilitiesManifest, KernelIssue, RenderOutcome, TelemetryEntry } from '@taucad/runtime';
 import { createMockRuntimeClient } from '@taucad/runtime-testing';
 import type { ParameterManifest } from '@taucad/parameters';
 import type { Geometry } from '@taucad/types';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
-import {
-  cadMachine,
-  disposeCadRuntime,
-  selectCadFailureIssues,
-  selectCanSaveSelectedSceneStage,
-} from '#machines/cad.machine.js';
+import { cadMachine, disposeCadRuntime, selectCadFailureIssues } from '#machines/cad.machine.js';
 import type { CadContext } from '#machines/cad.machine.js';
 import { logMachine } from '#machines/logs.machine.js';
 import type { AppRuntimeClient, KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
@@ -197,6 +185,9 @@ function createExportableRuntimeClient(): AppRuntimeClient {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+/** One producer for every telemetry batch a case sends (I5). */
+const telemetryOrigin = { label: 'worker', instance: 'test-producer' } as const;
 
 describe('cadMachine', () => {
   describe('filesystem binding replacement', () => {
@@ -438,6 +429,43 @@ describe('cadMachine', () => {
         { path: 'old.ts' },
         { path: 'new.ts' },
       ]);
+      actor.stop();
+    });
+
+    it('should dispatch a committed edit as a render carrying the sidecar bytes', async () => {
+      const { actor, mockClient } = await startAndConnect();
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
+      vi.mocked(mockClient.render).mockClear();
+      const stage = { '.tau/parameters/main.ts.json': new Uint8Array([1, 2, 3]) };
+
+      actor.send({ type: 'commitParameters', stage });
+
+      /* D1: persistence is not dispatch. The edit reaches the kernel here with the bytes the
+       * authority just wrote, not a second copy of the values and not through the watch. */
+      expect(mockClient.render).toHaveBeenCalledWith({
+        source: { path: stubEntryPath },
+        content: { includeEdges: true },
+        stage,
+      });
+      actor.stop();
+    });
+
+    it('should dispatch a drag sample as a transient render that stages nothing', async () => {
+      const { actor, mockClient } = await startAndConnect();
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
+      actor.send({ type: 'commitParameters', stage: { '.tau/parameters/main.ts.json': new Uint8Array([1, 2, 3]) } });
+      vi.mocked(mockClient.render).mockClear();
+
+      actor.send({ type: 'scrubParameters', parameters: { height: 21 } });
+
+      // D2: a drag sample is never persisted, so it carries no sidecar bytes even though the
+      // committed edit before it did.
+      expect(mockClient.render).toHaveBeenCalledWith({
+        source: { path: stubEntryPath },
+        parameters: { height: 21 },
+        content: { includeEdges: true },
+        transient: true,
+      });
       actor.stop();
     });
 
@@ -845,65 +873,6 @@ describe('cadMachine', () => {
     });
   });
 
-  describe('scene stage availability', () => {
-    /** A frame whose only node references an asset the update never carried. */
-    const unresolvableReset: ProgressiveSceneUpdate = {
-      type: 'reset',
-      renderId: 'render-stage',
-      sequence: 0,
-      revision: 0,
-      sceneDigest: 'scene-stage-0' as Extract<ProgressiveSceneUpdate, { type: 'reset' }>['sceneDigest'],
-      skippedBefore: 0,
-      snapshot: {
-        manifest: {
-          schemaVersion: 1,
-          rootNodeIds: ['root' as SceneNodeId],
-          nodes: {
-            root: {
-              id: 'root' as SceneNodeId,
-              childIds: [],
-              transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-              visible: true,
-              geometry: {
-                contentDigest: 'asset-missing' as Extract<
-                  ProgressiveSceneUpdate,
-                  { type: 'reset' }
-                >['snapshot']['assets'][number]['contentDigest'],
-                mediaType: 'model/gltf-binary',
-                byteLength: 4,
-              },
-            },
-          },
-          presentation: {},
-        },
-        assets: [],
-      },
-    };
-
-    it('should answer save availability from the selected entry and fail loudly on an unmaterialisable stage', async () => {
-      const fileManagerRef = mock<NonNullable<CadContext['fileManagerRef']>>();
-      const { actor } = await startAndConnect({ fileManagerRef });
-
-      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
-      actor.send({ type: 'sceneUpdate', update: unresolvableReset });
-
-      // Reading the selector must not replay/materialise the timeline: the
-      // selected entry is in memory, so the action is offered.
-      expect(selectCanSaveSelectedSceneStage(actor.getSnapshot())).toBe(true);
-
-      // The save path -- not the selector -- owns materialisation and reports
-      // the unresolvable reference.
-      actor.send({ type: 'saveSelectedSceneStage' });
-      expect(actor.getSnapshot().context.sceneTimeline.artifactSave).toEqual({
-        status: 'failed',
-        sequence: 0,
-        message: 'The selected preview stage is not available as a complete scene reference',
-      });
-
-      actor.stop();
-    });
-  });
-
   describe('kernel logs', () => {
     it.each([undefined, { component: 'Replicad', operation: 'render' }, { component: 'Replicad', file: '/main.ts' }])(
       'should attribute %j origin to the current compilation unit',
@@ -1052,7 +1021,8 @@ describe('cadMachine', () => {
       const { actor } = await enterRendering();
 
       const entries = mock<TelemetryEntry[]>([{ name: 'test', startTime: 0, duration: 100, workerTimeOrigin: 0 }]);
-      actor.send({ type: 'kernelTelemetry', entries });
+
+      actor.send({ type: 'kernelTelemetry', batch: { entries, origin: telemetryOrigin, epoch: 0 } });
       expect(actor.getSnapshot().context.telemetryEntries).toHaveLength(1);
       actor.stop();
     });
@@ -1064,22 +1034,26 @@ describe('cadMachine', () => {
       const sendTrace = (trace: number): void => {
         actor.send({
           type: 'kernelTelemetry',
-          entries: [
-            {
-              name: 'kernel.bundle',
-              startTime: trace,
-              duration: 1,
-              workerTimeOrigin: 0,
-              detail: { spanId: `child-${String(trace)}`, parentSpanId: `root-${String(trace)}` },
-            },
-            {
-              name: 'kernel.render',
-              startTime: trace,
-              duration: 2,
-              workerTimeOrigin: 0,
-              detail: { spanId: `root-${String(trace)}` },
-            },
-          ],
+          batch: {
+            origin: telemetryOrigin,
+            epoch: 0,
+            entries: [
+              {
+                name: 'kernel.bundle',
+                startTime: trace,
+                duration: 1,
+                workerTimeOrigin: 0,
+                detail: { spanId: `child-${String(trace)}`, parentSpanId: `root-${String(trace)}` },
+              },
+              {
+                name: 'kernel.render',
+                startTime: trace,
+                duration: 2,
+                workerTimeOrigin: 0,
+                detail: { spanId: `root-${String(trace)}` },
+              },
+            ],
+          },
         });
       };
 
@@ -1817,6 +1791,38 @@ describe('cadMachine', () => {
       expect(selected?.[0]?.message).toBe('The selected CAD render failed');
       expect(selectCadFailureIssues(actor.getSnapshot())).toBe(selected);
       actor.stop();
+    });
+  });
+
+  describe('kernel connection start-up', () => {
+    it('loads the kernel modules while the file manager is still opening', async () => {
+      const pendingFileManager = createActor(
+        setup({}).createMachine({ initial: 'opening', states: { opening: {}, ready: {} } }),
+      ).start();
+      let factoryCalled = false;
+      const kernelOptionsFactory: LazyKernelOptionsFactory = async () => {
+        factoryCalled = true;
+        return () => mock<ReturnType<KernelOptionsFactory>>();
+      };
+
+      const actor = createActor(cadMachine, {
+        input: {
+          shouldInitializeKernelOnStart: false,
+          fileManagerRef: pendingFileManager as unknown as NonNullable<CadContext['fileManagerRef']>,
+          kernelOptionsFactory,
+          fileSystemRoot: '/projects/test',
+        },
+      }).start();
+
+      // The module graph does not depend on the filesystem, so it must already be loading.
+      await new Promise((resolve) => {
+        setTimeout(resolve, 0);
+      });
+      expect(factoryCalled).toBe(true);
+      expect(actor.getSnapshot().value).toBe('connecting');
+
+      actor.stop();
+      pendingFileManager.stop();
     });
   });
 });

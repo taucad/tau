@@ -1316,6 +1316,7 @@ export function createRuntimeClient(
   let activeTranscodeTimeout = options.transcodeTimeout ?? defaultTranscodeTimeout;
   assertValidTranscodeTimeout(activeTranscodeTimeout);
   let terminalCause: RuntimeTerminatedCause | undefined;
+  let terminalDetail: RuntimeTerminatedDetail | undefined;
   let lifecycleState: RuntimeLifecycleState = 'unconnected';
   let intentAdmissionOpen = true;
   let gracefulShutdownPromise: Promise<void> | undefined;
@@ -1366,10 +1367,16 @@ export function createRuntimeClient(
     }
   }
 
+  /* Every rejection after the first termination repeats what that termination
+   * observed. Dropping the detail here turns a host that died with an exit code
+   * and a stderr line into the bare "RuntimeClient has been terminated.", which
+   * is the sentence a person sees for a re-served terminated client. */
+  const terminatedError = (): RuntimeTerminatedError => new RuntimeTerminatedError(terminalCause, terminalDetail);
+
   function assertActive(operation: string): void {
     assertIntentAdmissionOpen();
     if (lifecycleState === 'terminated') {
-      throw new RuntimeTerminatedError(terminalCause);
+      throw terminatedError();
     }
     if (lifecycleState !== 'connected') {
       throw new RuntimeNotConnectedError(operation);
@@ -1387,13 +1394,13 @@ export function createRuntimeClient(
   function assertNotTerminated(): void {
     assertIntentAdmissionOpen();
     if (lifecycleState === 'terminated') {
-      throw new RuntimeTerminatedError(terminalCause);
+      throw terminatedError();
     }
   }
 
   function assertIntentAdmissionOpen(): void {
     if (!intentAdmissionOpen) {
-      throw new RuntimeTerminatedError(terminalCause);
+      throw terminatedError();
     }
   }
 
@@ -1656,6 +1663,7 @@ export function createRuntimeClient(
       return;
     }
     terminalCause = causeKind;
+    terminalDetail = detail;
     intentAdmissionOpen = false;
     const error = new RuntimeTerminatedError(causeKind, detail);
     connectionAttempt?.reject(error);
@@ -1732,7 +1740,7 @@ export function createRuntimeClient(
   // oxlint-disable-next-line promise-function-async -- all callers must receive the shared single-flight promise by identity.
   function ensureConnected(): Promise<RuntimeWorkerClient> {
     if (lifecycleState === 'terminated') {
-      return Promise.reject(new RuntimeTerminatedError(terminalCause));
+      return Promise.reject(terminatedError());
     }
     if (workerClient && lifecycleState === 'connected') {
       return Promise.resolve(workerClient);
@@ -1754,7 +1762,7 @@ export function createRuntimeClient(
         resolvingConfig = false;
         await connectedWorkerClient.initialize({ config });
         if (readLifecycleState() === 'terminated') {
-          throw new RuntimeTerminatedError(terminalCause);
+          throw terminatedError();
         }
         _capabilities = connectedWorkerClient.capabilities;
         if (_capabilities) {
@@ -1858,7 +1866,7 @@ export function createRuntimeClient(
     connect(): Promise<void> {
       assertIntentAdmissionOpen();
       if (lifecycleState === 'terminated') {
-        return Promise.reject(new RuntimeTerminatedError(terminalCause));
+        return Promise.reject(terminatedError());
       }
       if (lifecycleState === 'connected') {
         return Promise.resolve();
@@ -2239,7 +2247,7 @@ export function createRuntimeClient(
       // `client.on('geometry', ...)` is loud rather than silently subscribing
       // to a dead handler set that will never fire.
       if (lifecycleState === 'terminated') {
-        throw new RuntimeTerminatedError(terminalCause);
+        throw terminatedError();
       }
 
       switch (event) {

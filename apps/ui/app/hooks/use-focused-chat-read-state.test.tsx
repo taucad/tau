@@ -7,6 +7,7 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import type { ChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import { useFocusedChatReadState } from '#hooks/use-focused-chat-read-state.js';
+import { useComposerRecordToasts } from '#hooks/use-composer-record-toasts.js';
 
 vi.mock('@xstate/react', () => ({
   useSelector: <Snapshot, Selection>(
@@ -21,12 +22,14 @@ vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: vi.fn() }))
  * from the store's record, is what the hook reads. */
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: vi.fn() }));
 vi.mock('#hooks/use-sidebar-status.js', () => ({ useChatSidebarStatus: vi.fn() }));
+vi.mock('#hooks/use-composer-record-toasts.js', () => ({ useComposerRecordToasts: vi.fn() }));
 
 const unreadChats = new Set<string>();
 const recordedUnread = new Set<string>();
 const markViewed = vi.fn();
 const focusChat = vi.fn();
 const blurChat = vi.fn();
+const unreadRecordRef = vi.fn((projectId: string) => ({ projectId }));
 const editorRef = { getSnapshot: () => ({ context: { focusedChatId: 'chat-focused' } }) };
 let visibilityState: DocumentVisibilityState = 'visible';
 
@@ -53,6 +56,7 @@ describe('useFocusedChatReadState', () => {
       markViewed,
       focusChat,
       blurChat,
+      unreadRecordRef,
       isUnread: (chatId: string) => recordedUnread.has(chatId),
     } as unknown as ReturnType<typeof useChatSessionStore>);
     vi.mocked(useChatSidebarStatus).mockImplementation((_projectId, chatId) => status(unreadChats.has(chatId)));
@@ -134,6 +138,15 @@ describe('useFocusedChatReadState', () => {
 
     expect(markViewed).toHaveBeenCalledExactlyOnceWith('chat-focused');
     expect(vi.mocked(useProjectManager)).not.toHaveBeenCalled();
+  });
+
+  it('should surface failures of the project unread record (G2)', () => {
+    renderHook(() => {
+      useFocusedChatReadState();
+    });
+
+    expect(unreadRecordRef).toHaveBeenCalledWith('project-1');
+    expect(useComposerRecordToasts).toHaveBeenLastCalledWith({ projectId: 'project-1' });
   });
 
   it('should tell the store which chat is focused, and take it back on unmount (R3)', () => {

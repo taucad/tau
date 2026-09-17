@@ -14,9 +14,10 @@
  * - Reads `useChatSessionStore()` (no subscription needed —
  *   `useFlushOnClose` stores the callback by ref, so the latest store
  *   snapshot is read at flush time, not at registration time).
- * - On hidden preparation, iterates `store.list()`, calls `flushNow` on the
- *   `persistenceActorRef` and `draftActorRef` of every session.
- *   The producer stage resolves only after both actors acknowledge idle, so
+ * - On hidden preparation, calls `flushNow` on every session's
+ *   `persistenceActorRef` and asks the store to flush every composer record
+ *   (`flushComposerRecords`, R9). The producer stage resolves only once the
+ *   persistence actors are idle and no record write is on the wire, so
  *   revision preparation cannot cut ahead of their bytes.
  *   Disposed chats (e.g. a focused chat closed mid-session) are not
  *   touched because they are no longer in the store's snapshot.
@@ -35,20 +36,15 @@ export function GlobalChatFlushGuard(): ReactNode {
 
   useFlushOnClose(
     async () => {
-      const acknowledgements: Array<Promise<unknown>> = [];
+      const acknowledgements: Array<Promise<unknown>> = [store.flushComposerRecords()];
       for (const chatId of store.list()) {
         const session = store.get(chatId);
         if (!session) {
           continue;
         }
         session.persistenceActorRef.send({ type: 'flushNow' });
-        session.draftActorRef.send({ type: 'flushNow' });
         acknowledgements.push(
           waitFor(session.persistenceActorRef, (state) => state.matches({ messagePersistence: 'idle' })),
-          waitFor(
-            session.draftActorRef,
-            (state) => state.matches({ inputSaving: 'idle' }) && state.matches({ editSaving: 'idle' }),
-          ),
         );
       }
       await Promise.all(acknowledgements);

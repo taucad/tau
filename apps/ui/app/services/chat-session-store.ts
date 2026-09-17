@@ -32,7 +32,7 @@ import type { Chat } from '@ai-sdk/react';
 import type { ChatStatus } from 'ai';
 import { Topic } from '@taucad/events';
 import { z } from 'zod';
-import { createActor } from 'xstate';
+import { createActor, waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { CadAgentExecution, Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
 import { isAnyToolPart } from '@taucad/chat';
@@ -44,18 +44,19 @@ import type { ProjectSessionActorRef } from '#machines/project-session.machine.j
 import { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import type { ChatRequest } from '#hooks/chat-persistence.machine.js';
 import { buildDraftMessage, draftMachine } from '#hooks/draft.machine.js';
-import { createComposerRecordActor, draftHydrationOf, draftPersistenceFor } from '#hooks/composer-record.js';
+import {
+  createComposerRecordActor,
+  draftHydrationOf,
+  draftPersistenceFor,
+  flushRecord,
+  stopWhenWritesSettle,
+} from '#hooks/composer-record.js';
 import type { ComposerRecordRef } from '#hooks/composer-record.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
 import type { ComposerRecordClient } from '#db/composer-record-store.js';
 import { createChatAttachmentStore } from '#db/attachment-store.js';
 import type { AttachmentReference } from '#utils/attachment.utils.js';
-import {
-  deferredRecordStore,
-  referencedAttachments,
-  removeRecord,
-  stopWhenWritesSettle,
-} from '#services/chat-session-store-composer.js';
+import { deferredRecordStore, referencedAttachments, removeRecord } from '#services/chat-session-store-composer.js';
 import type { ComposerBinding, UnreadRecord } from '#services/chat-session-store-composer.js';
 import { resizeImageActor } from '#hooks/resize-image.actor.js';
 import { inspect } from '#machines/inspector.js';
@@ -925,6 +926,44 @@ export class ChatSessionStore {
     }
     await this.#setUnreadWhenBound(session.composer, chatId, false);
     await removeRecord(session.composerRecordRef);
+  }
+
+  /**
+   * The actor that owns a project's unread record, for surfacing its write and
+   * read failures (G2).
+   *
+   * @param projectId - The project whose unread record is wanted.
+   * @returns The running record actor.
+   * @public
+   */
+  public unreadRecordRef(projectId: string): ComposerRecordRef {
+    return this.#unreadRecord(projectId).ref;
+  }
+
+  /**
+   * Hand every composer's unwritten state to its record and wait until none
+   * is on the wire (R9). Drafts flush their debounce first, so the patch they
+   * send is the one the record then writes; a record waiting out a retry is
+   * written now; a released chat's last write is waited for.
+   *
+   * @public
+   */
+  public async flushComposerRecords(): Promise<void> {
+    const sessions = [...this.#sessions.values()];
+    await Promise.all(
+      sessions.map(async (session) => {
+        session.draftActorRef.send({ type: 'flushNow' });
+        await waitFor(
+          session.draftActorRef,
+          (state) => state.matches({ inputSaving: 'idle' }) && state.matches({ editSaving: 'idle' }),
+        );
+      }),
+    );
+    await Promise.all([
+      ...sessions.map(async (session) => flushRecord(session.composerRecordRef)),
+      ...[...this.#unreadRecords.values()].map(async (unread) => flushRecord(unread.ref)),
+      ...this.#composerDrains.values(),
+    ]);
   }
 
   /**

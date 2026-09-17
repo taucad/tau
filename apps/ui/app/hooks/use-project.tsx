@@ -7,6 +7,7 @@ import type { Remote } from 'comlink';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   getActiveGroupValues,
+  parameterEntryPath,
   parseProjectManifestBytes,
   projectToManifest,
   serializeProjectManifest,
@@ -404,7 +405,13 @@ export function ProjectProvider({
       const appliedFingerprint =
         appliedParameterValues.current.get(entryPath) ?? JSON.stringify(cadRef.getSnapshot().context.parameters);
       if (appliedFingerprint !== fingerprint) {
-        cadRef.send({ type: 'setParameters', parameters });
+        /* The bytes the authority just persisted travel with the value: the runtime observes that
+         * revision itself, so the sidecar's own watch event has nothing left to re-render. */
+        cadRef.send({
+          type: 'setParameters',
+          parameters,
+          ...(current.bytes === null ? {} : { stage: { [parameterEntryPath(entryPath)]: current.bytes } }),
+        });
       }
       appliedParameterValues.current.set(entryPath, fingerprint);
     },

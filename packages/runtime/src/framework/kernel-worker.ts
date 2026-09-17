@@ -128,6 +128,7 @@ import { validateJsonSchemaValue } from '@taucad/parameters/schema';
 import type {
   DependencyResolutionContext,
   CommonDependencySet,
+  MiddlewareDependencySet,
   KernelBinding,
   MaterializedRender,
   MaterializedRenderResult,
@@ -522,7 +523,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     | { readonly key: string; readonly result: Extract<GetParametersResult, { success: true }> }
     | undefined;
   private readonly commonDependencyCache = new Map<string, Promise<CommonDependencySet>>();
-  private readonly middlewareDependencyCache = new Map<string, Promise<Dependency[]>>();
+  private readonly middlewareDependencyCache = new Map<string, Promise<MiddlewareDependencySet>>();
 
   /**
    * Dynamically loaded middleware instances with their resolved configs.
@@ -5402,13 +5403,22 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
     }
 
-    const phaseDependencies = await middlewareDependencies;
-    if (input.owner.kind === 'render-artifact' && this.previewWatchCandidate) {
-      this.previewWatchCandidate.coherent = true;
+    const phase = await middlewareDependencies;
+    /* The declarations are registered here rather than where they are discovered: discovery is
+     * cached, and a render that answers from that cache still reads those paths and still has to
+     * watch them. Registering only on a miss made a re-opened entry deaf to an external edit of
+     * the paths its middleware declared. */
+    const previewCandidate = input.owner.kind === 'render-artifact' ? this.previewWatchCandidate : undefined;
+    if (previewCandidate) {
+      for (const [path, watchDebounce] of phase.watchPaths) {
+        previewCandidate.paths.set(path, watchDebounce);
+        previewCandidate.middlewarePaths.set(path, watchDebounce);
+      }
+      previewCandidate.coherent = true;
     }
     const runtimeDeps: Dependency[] = [
       ...common.fileDependencies,
-      ...phaseDependencies,
+      ...phase.dependencies,
       ...common.trailingDependencies,
     ];
 
@@ -5566,11 +5576,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private async computeMiddlewareDependencies(
     owner: OperationOwner,
     middleware: ResolvedMiddleware[],
-  ): Promise<Dependency[]> {
+  ): Promise<MiddlewareDependencySet> {
     const discoverInput: GetDependenciesInput = {
       entryPath: assertRootedPath(joinRelativePath(owner.file.path, owner.file.filename)),
     };
-    const previewCandidate = owner.kind === 'render-artifact' ? this.previewWatchCandidate : undefined;
     const declarations: MiddlewareDependencyDeclaration[] = [];
     for (const { middleware: definition, options, enabled, id } of middleware) {
       if (!enabled || !definition.getDependencies) {
@@ -5607,12 +5616,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
 
     const fileDependencies: FileDependency[] = [];
+    const watchPaths = new Map<string, number>();
     for (const declaration of declarations) {
-      const watchDebounce = declaration.watchDebounce ?? fileChangeDebounce;
-      if (previewCandidate) {
-        previewCandidate.paths.set(declaration.path, watchDebounce);
-        previewCandidate.middlewarePaths.set(declaration.path, watchDebounce);
-      }
+      watchPaths.set(declaration.path, declaration.watchDebounce ?? fileChangeDebounce);
       if (!this.fileHashCache.has(declaration.path)) {
         try {
           // oxlint-disable-next-line no-await-in-loop -- Individual reads preserve declaration order and missing-file semantics.
@@ -5642,10 +5648,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         index,
         options,
       }));
-    if (previewCandidate) {
-      previewCandidate.coherent = true;
-    }
-    return [...fileDependencies, ...signatureDependencies];
+    return { dependencies: [...fileDependencies, ...signatureDependencies], watchPaths };
   }
 
   /**

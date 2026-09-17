@@ -112,8 +112,6 @@ export type ChatStorage = {
   getAllChats(options?: { includeDeleted?: boolean }): Promise<Chat[]>;
   getChatsForResource(resourceId: string, options?: { includeDeleted?: boolean }): Promise<Chat[]>;
   deleteChat(chatId: string): Promise<void>;
-  duplicateChat(chatId: string): Promise<Chat>;
-  duplicateResourceChats(sourceResourceId: string, targetResourceId: string): Promise<Record<string, string>>;
   /** Write one chat record as given, for replaying a project creation. */
   putChatRecord(chat: Chat): Promise<void>;
 };

@@ -458,37 +458,6 @@ export function createChatFileStore(
       return listOptions?.includeDeleted === true ? chats : chats.filter((chat) => !isDeleted(chat));
     },
 
-    duplicateChat: async (chatId) => {
-      const projectId = await locate(chatId);
-      const chat = projectId === undefined ? undefined : await readChatDirectory(projectId, chatId);
-      if (chat === undefined) {
-        throw new Error(`Chat not found: ${chatId}`);
-      }
-      return create(chat.resourceId, {
-        name: `${chat.name} (Copy)`,
-        messages: chat.messages,
-        activeExecution: chat.activeExecution,
-        activeKernel: chat.activeKernel,
-      });
-    },
-
-    duplicateResourceChats: async (sourceResourceId, targetResourceId) => {
-      const listed = await listProjectChats(sourceResourceId);
-      const chats = listed.filter((chat) => !isDeleted(chat));
-      const pairs = await Promise.all(
-        chats.map(async (chat) => {
-          const copy = await create(targetResourceId, {
-            name: chat.name,
-            messages: chat.messages,
-            activeExecution: chat.activeExecution,
-            activeKernel: chat.activeKernel,
-          });
-          return [chat.id, copy.id] as const;
-        }),
-      );
-      return Object.fromEntries(pairs);
-    },
-
     putChatRecord: async (chat) => {
       await writeRecord(chat.resourceId, chat);
     },

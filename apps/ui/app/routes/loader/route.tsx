@@ -152,9 +152,9 @@ export default function LoaderShowcase(): React.JSX.Element {
         </p>
         <h1 className='text-4xl font-semibold tracking-tight text-balance md:text-5xl'>Liquid metal loader</h1>
         <p className='max-w-[64ch] text-lg text-muted-foreground'>
-          One chrome body, bent like a metalbender would: a transformation front sweeps across the surface, the metal
-          turns molten and granular where it moves, then snaps into the next geometric form and rings still. Five forms,
-          a random walk that never bounces between two of them more than twice, looping forever.
+          One chrome body, bent like a metalbender would: a wave of liquid metal rolls across the surface, ripples
+          trailing in its wake, and the next geometric form settles out of the flow behind it. Five forms, a random walk
+          that never bounces between two of them more than twice, looping forever.
         </p>
       </header>
 

@@ -11,9 +11,7 @@ import {
   dot,
   exp,
   float,
-  floor,
   Fn,
-  hash,
   If,
   int,
   log,
@@ -25,8 +23,8 @@ import {
   normalize,
   positionLocal,
   saturate,
+  sin,
   smoothstep,
-  sqrt,
   step,
   transformNormalToView,
   uniform,
@@ -51,23 +49,25 @@ export type MetalMorphMaterialOptions = Readonly<{
   color?: Color;
   /** GGX roughness of the polished body at rest. */
   roughnessRest?: number;
-  /** GGX roughness inside the molten band; liquid metal reads slightly oily. */
+  /** GGX roughness inside the liquid band; flowing metal stays glossy, only a touch softer than the polish. */
   roughnessMolten?: number;
-  /** Thin-film iridescence strength inside the molten band (tempering colours on heated steel). */
+  /** Thin-film iridescence strength inside the liquid band (faint tempering colours on the flowing metal). */
   iridescence?: number;
-  /** Back-ease overshoot applied to the travelling front; 0 removes the snap. */
+  /** Back-ease overshoot applied to the travelling front; 0 removes the spring entirely. */
   overshoot?: number;
   /** Half-width of the transformation front, as a fraction of the body's extent along the sweep axis. */
   frontBand?: number;
-  /** Low-frequency liquid undulation, in render units. */
+  /** Broad laminar undulation of the liquid surface, in render units. */
   flowAmplitude?: number;
-  /** Spatial frequency of the liquid undulation. */
+  /** Spatial frequency of the undulation. */
   flowScale?: number;
-  /** Height of the packed "atom" domes that granulate the molten surface, in render units. */
-  atomAmplitude?: number;
-  /** Atoms per render unit along the surface. */
-  atomScale?: number;
-  /** Outward swell of the molten band, in render units. */
+  /** Height of the ripple train trailing the crest, in render units. */
+  rippleAmplitude?: number;
+  /** Crest-to-crest spacing of the ripples, as a fraction of the body's extent along the sweep axis. */
+  rippleWavelength?: number;
+  /** Distance behind the crest over which the ripples fade, as a fraction of the body's extent. */
+  rippleDecay?: number;
+  /** Outward swell of the crest, in render units. */
   swell?: number;
   /** Radial amplitude of the settle wobble, in render units. */
   ringAmplitude?: number;
@@ -94,28 +94,30 @@ export type MetalMorphMaterialHandles = Readonly<{
 
 const defaultOptions: Required<Omit<MetalMorphMaterialOptions, 'color'>> = {
   roughnessRest: 0.1,
-  roughnessMolten: 0.34,
-  iridescence: 0.7,
-  overshoot: 1.3,
-  frontBand: 0.2,
-  flowAmplitude: 0.05,
-  flowScale: 2.3,
-  atomAmplitude: 0.028,
-  atomScale: 9,
-  swell: 0.045,
-  ringAmplitude: 0.03,
+  roughnessMolten: 0.2,
+  iridescence: 0.35,
+  overshoot: 0.15,
+  frontBand: 0.28,
+  flowAmplitude: 0.03,
+  flowScale: 1.7,
+  rippleAmplitude: 0.016,
+  rippleWavelength: 0.16,
+  rippleDecay: 0.24,
+  swell: 0.055,
+  ringAmplitude: 0.02,
 };
 
-/** Keeps the eight-cell atom lattice exact: jitter below 0.35 guarantees the nearest feature is a checked cell. */
-const atomJitter = 0.34;
 /** Finite-difference step for the displacement gradient, in render units on the unit sphere. */
 const gradientStep = 0.015;
 /** Iridescence film thickness range in nanometres, mapped from the local heat field. */
 const iridescenceThicknessNanometres = { thin: 140, thick: 480 } as const;
-/** Positive integer lattice hash: integer offsets keep the truncating hash inputs distinct and non-negative. */
-const latticeOffset = 512;
-const latticeSecondChannel = 1_000_003;
-const latticeThirdChannel = 2_000_003;
+/** Height, in render units, at which the undulation reads as fully heated for the film thickness. */
+const heatHeight = 0.03;
+/** Radians per second the ripple crests roll back through the wake. */
+const rippleRollRate = 1.6;
+/** The wake behind the crest stays liquid this many times longer than the metal ahead of it. */
+const wakeWidth = 1.8;
+const crestWidth = 0.8;
 /** Radius reported for planes the sampled ray runs away from, so they never win the nearest-exit search. */
 const unreachablePlaneRadius = 1e9;
 /** Dimensionless guard that rejects planes the sampled ray grazes. */
@@ -133,95 +135,74 @@ type PlaneTableUniforms = Readonly<{
   roundness: UniformArrayNode<'float'>;
 }>;
 
-/**
- * Three pseudo-random values per integer lattice cell. `hash` truncates its seed to an unsigned integer, so
- * channels are separated by integer offsets rather than fractions.
- */
-const latticeHash = Fn(([cell]: [Node<'vec3'>]) => {
-  const seed = dot(cell.add(vec3(latticeOffset, latticeOffset, latticeOffset)), vec3(1, 131, 17_161)).toVar();
-  return vec3(hash(seed), hash(seed.add(latticeSecondChannel)), hash(seed.add(latticeThirdChannel)));
-});
+/** Uniforms that place the travelling front along the sweep axis. */
+type FrontUniforms = Readonly<{
+  uSweepAxis: UniformNode<'vec3', Vector3>;
+  uProgress: UniformNode<'float', number>;
+  uFrontBand: UniformNode<'float', number>;
+}>;
+
+/** Position of the crest along the sweep axis, 0 to 1, overshooting the body by one band at either end. */
+const frontPositionOf = (uniforms: FrontUniforms): Node<'float'> =>
+  uniforms.uProgress.mul(float(1).add(uniforms.uFrontBand.mul(2))).sub(uniforms.uFrontBand);
 
 /**
- * Distance to the nearest jittered lattice point using only the eight cells whose centres surround the
- * point. With jitter below 0.35 the nearest point always lies in one of those cells, so the field is exact.
+ * Reusable displacement height at a point on the unit sphere: one broad octave of laminar undulation plus a
+ * train of ripples that trails the crest and fades into the wake, so the transformed metal reads as a wave
+ * rolling over the body. Invoked three times per vertex (value and forward differences), so every local
+ * stays unnamed.
  */
-const atomField = Fn(([point]: [Node<'vec3'>]) => {
-  const shifted = point.sub(0.5).toVar();
-  const cell = floor(shifted).toVar();
-  const local = shifted.sub(cell).add(0.5).toVar();
-  const nearest = float(9).toVar();
-  for (const dx of [0, 1]) {
-    for (const dy of [0, 1]) {
-      for (const dz of [0, 1]) {
-        const offset = vec3(dx, dy, dz);
-        const jitter = latticeHash(cell.add(offset)).sub(0.5).mul(atomJitter);
-        const feature = offset.add(0.5).add(jitter);
-        const delta = feature.sub(local).toVar();
-        nearest.assign(min(nearest, dot(delta, delta)));
-      }
-    }
-  }
-  return sqrt(nearest);
-});
-
-/**
- * Reusable displacement height at a point on the unit sphere: two octaves of Perlin flow plus packed atom
- * domes. Invoked three times per vertex (value and forward differences), so every local stays unnamed.
- */
-const createDisplacementField = (uniforms: {
-  readonly uFlowScale: UniformNode<'float', number>;
-  readonly uFlowAmplitude: UniformNode<'float', number>;
-  readonly uAtomScale: UniformNode<'float', number>;
-  readonly uAtomAmplitude: UniformNode<'float', number>;
-}) =>
+const createDisplacementField = (
+  uniforms: FrontUniforms &
+    Readonly<{
+      uFlowScale: UniformNode<'float', number>;
+      uFlowAmplitude: UniformNode<'float', number>;
+      uRippleAmplitude: UniformNode<'float', number>;
+      uRippleWavelength: UniformNode<'float', number>;
+      uRippleDecay: UniformNode<'float', number>;
+    }>,
+) =>
   Fn(([point, seed, time]: [Node<'vec3'>, Node<'vec3'>, Node<'float'>]) => {
-    const drift = vec3(float(0), time.mul(0.6), time.mul(0.35));
-    const flow = mx_noise_float(point.mul(uniforms.uFlowScale).add(seed).add(drift))
-      .add(
-        mx_noise_float(
-          point
-            .mul(uniforms.uFlowScale.mul(2.3))
-            .sub(seed)
-            .add(vec3(time.mul(0.5), 0, 0)),
-        ).mul(0.45),
-      )
+    const drift = vec3(float(0), time.mul(0.35), time.mul(0.2));
+    const flow = mx_noise_float(point.mul(uniforms.uFlowScale).add(seed).add(drift)).toVar();
+    // Distance behind the crest; the ripples only develop in the wake and fade with that distance.
+    const wake = frontPositionOf(uniforms).sub(dot(point, uniforms.uSweepAxis).mul(0.5).add(0.5)).toVar();
+    const envelope = smoothstep(float(0), uniforms.uFrontBand.mul(0.5), wake)
+      .mul(exp(max(wake, float(0)).div(uniforms.uRippleDecay).negate()))
       .toVar();
-    const atomDistance = atomField(point.mul(uniforms.uAtomScale).add(seed.mul(3.1)).add(time.mul(0.12)));
-    const dome = float(1)
-      .sub(smoothstep(float(0), float(0.62), atomDistance))
-      .toVar();
-    return flow.mul(uniforms.uFlowAmplitude).add(dome.mul(dome).mul(uniforms.uAtomAmplitude));
+    const crests = sin(
+      wake
+        .div(uniforms.uRippleWavelength)
+        .mul(Math.PI * 2)
+        .sub(time.mul(rippleRollRate)),
+    );
+    // A slow noise breaks the crests' regularity without adding any grain of its own.
+    const grain = float(0.75).add(mx_noise_float(point.mul(1.4).sub(seed)).mul(0.25));
+    return flow.mul(uniforms.uFlowAmplitude).add(crests.mul(envelope).mul(grain).mul(uniforms.uRippleAmplitude));
   });
 
 /**
  * Travelling-front weights for one direction on the body, packed as `weight, frontness, alongSweep, local`.
  * Shared by the vertex stage (positions) and the fragment stage (exact normals), so every local stays unnamed.
  */
-const createFrontField = (uniforms: {
-  readonly uSweepAxis: UniformNode<'vec3', Vector3>;
-  readonly uProgress: UniformNode<'float', number>;
-  readonly uFrontBand: UniformNode<'float', number>;
-  readonly uOvershoot: UniformNode<'float', number>;
-}) =>
+const createFrontField = (uniforms: FrontUniforms & Readonly<{ uOvershoot: UniformNode<'float', number> }>) =>
   Fn(([direction]: [Node<'vec3'>]) => {
     // Vertices behind the front already carry the target form.
     const alongSweep = dot(direction, uniforms.uSweepAxis).mul(0.5).add(0.5).toVar();
-    const frontPosition = uniforms.uProgress
-      .mul(float(1).add(uniforms.uFrontBand.mul(2)))
-      .sub(uniforms.uFrontBand)
-      .toVar();
+    const frontPosition = frontPositionOf(uniforms).toVar();
     const local = float(1)
       .sub(smoothstep(frontPosition.sub(uniforms.uFrontBand), frontPosition.add(uniforms.uFrontBand), alongSweep))
       .toVar();
-    // Back-ease overshoot: the surface snaps past its target and springs back as the front passes.
+    // A gentle back-ease: the surface flows just past its target and settles as the crest passes.
     const shifted = local.sub(1).toVar();
     const weight = float(1)
       .add(uniforms.uOvershoot.add(1).mul(shifted).mul(shifted).mul(shifted))
       .add(uniforms.uOvershoot.mul(shifted).mul(shifted))
       .toVar();
-    // Liquid amount peaks on the front itself.
-    const frontness = exp(alongSweep.sub(frontPosition).div(uniforms.uFrontBand.mul(0.9)).pow(2).negate()).toVar();
+    // Liquid amount peaks on the crest and lingers in the wake behind it.
+    const ahead = alongSweep.sub(frontPosition).toVar();
+    const width = mix(uniforms.uFrontBand.mul(wakeWidth), uniforms.uFrontBand.mul(crestWidth), step(float(0), ahead));
+    const frontness = exp(ahead.div(width).pow(2).negate()).toVar();
     return vec4(weight, frontness, alongSweep, local);
   });
 
@@ -339,8 +320,9 @@ export const createMetalMorphNodeMaterial = (
   const uFrontBand = uniform(settings.frontBand, 'float');
   const uFlowAmplitude = uniform(settings.flowAmplitude, 'float');
   const uFlowScale = uniform(settings.flowScale, 'float');
-  const uAtomAmplitude = uniform(settings.atomAmplitude, 'float');
-  const uAtomScale = uniform(settings.atomScale, 'float');
+  const uRippleAmplitude = uniform(settings.rippleAmplitude, 'float');
+  const uRippleWavelength = uniform(settings.rippleWavelength, 'float');
+  const uRippleDecay = uniform(settings.rippleDecay, 'float');
   const uSwell = uniform(settings.swell, 'float');
   const uRingAmplitude = uniform(settings.ringAmplitude, 'float');
   const uRoughnessRest = uniform(settings.roughnessRest, 'float');
@@ -370,7 +352,16 @@ export const createMetalMorphNodeMaterial = (
     return picked;
   };
 
-  const displacementField = createDisplacementField({ uFlowScale, uFlowAmplitude, uAtomScale, uAtomAmplitude });
+  const displacementField = createDisplacementField({
+    uSweepAxis,
+    uProgress,
+    uFrontBand,
+    uFlowScale,
+    uFlowAmplitude,
+    uRippleAmplitude,
+    uRippleWavelength,
+    uRippleDecay,
+  });
   const frontField = createFrontField({ uSweepAxis, uProgress, uFrontBand, uOvershoot });
   const roundedNormalField = createRoundedNormalField({
     planes: uPlanes,
@@ -433,7 +424,7 @@ export const createMetalMorphNodeMaterial = (
     vDirection.assign(direction);
     vPerturbation.assign(tangent.mul(gradientTangent).add(bitangent.mul(gradientBitangent)).mul(molten));
     vMolten.assign(molten);
-    vHeat.assign(smoothstep(float(-0.06), float(0.06), height));
+    vHeat.assign(smoothstep(float(-heatHeight), float(heatHeight), height));
 
     return displaced;
   })();

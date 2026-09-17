@@ -1225,6 +1225,28 @@ describe('KernelWorker lifecycle', () => {
       }
     });
 
+    it('lets a pending open retarget the preview before a change to the replaced file is routed', async () => {
+      const worker = createConfiguredWorker();
+      try {
+        await openAndWaitForRender(worker, createGeometryFile('main.ts'));
+        const preview = observePreview(worker);
+        const settled = preview.waitForState(
+          ({ renderId, state }) => renderId === previewId(101) && (state === 'idle' || state === 'error'),
+        );
+
+        // A rename opens the moved file while the watcher reports the old path as gone.
+        worker.handleOpenFile({ renderId: previewId(101), file: createGeometryFile('renamed.ts'), parameters: {} });
+        await worker.notifyFileChanged(['main.ts']);
+        await settled;
+        await flushMicrotasks();
+
+        expect(preview.geometries.map(({ renderId }) => renderId)).toEqual([previewId(101)]);
+        expect(preview.states.every(({ renderId }) => renderId === previewId(101))).toBe(true);
+      } finally {
+        await worker.cleanup();
+      }
+    });
+
     it('should route staged peer writes exactly without scheduling the active preview', async () => {
       const worker = createConfiguredWorker();
       try {

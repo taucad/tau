@@ -14,8 +14,7 @@
  * the write, its coalescing and its retry curve from that point on.
  */
 
-import { useMemo } from 'react';
-import { useActorRef } from '@xstate/react';
+import { useEffect, useState } from 'react';
 import { createActor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { MyUIMessage } from '@taucad/chat';
@@ -91,16 +90,84 @@ export function draftHydrationOf(record: ComposerRecord | 'absent'): DraftHydrat
   };
 }
 
+/** Resolve once no write of `ref` is on the wire (or the actor has stopped). */
+export const writesSettled = async (ref: ComposerRecordRef): Promise<void> => {
+  const settled = (snapshot: ReturnType<ComposerRecordRef['getSnapshot']>): boolean =>
+    snapshot.status !== 'active' || !snapshot.matches({ writes: 'persisting' });
+  if (settled(ref.getSnapshot())) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    const subscription = ref.subscribe({
+      next: (snapshot) => {
+        if (settled(snapshot)) {
+          subscription.unsubscribe();
+          resolve();
+        }
+      },
+      complete: resolve,
+    });
+  });
+};
+
+/**
+ * Write whatever `ref` holds now, including a patch waiting out its retry, and
+ * resolve once that write has left the wire.
+ *
+ * @param ref - The record actor to flush.
+ */
+export const flushRecord = async (ref: ComposerRecordRef): Promise<void> => {
+  ref.send({ type: 'flushNow' });
+  await writesSettled(ref);
+};
+
+/**
+ * Stop a record actor once no write is on the wire, so a closing composer keeps
+ * its last keystroke. A retrying write is abandoned; it is failing anyway.
+ *
+ * @param ref - The record actor to stop.
+ */
+export const stopWhenWritesSettle = async (ref: ComposerRecordRef): Promise<void> => {
+  await writesSettled(ref);
+  ref.stop();
+};
+
+/** Live mounts per actor, so Strict Mode's disconnect-then-reconnect does not stop a record it keeps using. */
+const mounts = new WeakMap<ComposerRecordRef, number>();
+
 /**
  * Mount a record actor for the lifetime of the calling component.
+ *
+ * The hook owns one actor per store: a new store starts a fresh actor, which
+ * reads its own record, and the previous one stops once its last write lands.
  *
  * @param store - The store for this surface's record.
  * @returns The running actor; the composer is interactive before it resolves.
  */
 export function useComposerRecord(store: ComposerRecordStore): ComposerRecordRef {
-  const logic = useMemo(() => composerRecordMachine.provide(composerRecordActors(store)), [store]);
+  const [owned, setOwned] = useState(() => ({ store, ref: createComposerRecordActor(store) }));
+  let current = owned;
+  if (owned.store !== store) {
+    current = { store, ref: createComposerRecordActor(store) };
+    setOwned(current);
+  }
+  const { ref } = current;
 
-  return useActorRef(logic, { input: {} });
+  useEffect(() => {
+    mounts.set(ref, (mounts.get(ref) ?? 0) + 1);
+    ref.start();
+    return () => {
+      mounts.set(ref, (mounts.get(ref) ?? 1) - 1);
+      // Strict Mode reconnects within the same commit; only a mount that stays released stops the actor.
+      queueMicrotask(() => {
+        if (mounts.get(ref) === 0) {
+          void stopWhenWritesSettle(ref);
+        }
+      });
+    };
+  }, [ref]);
+
+  return ref;
 }
 
 /**

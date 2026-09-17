@@ -186,6 +186,8 @@ export const composerRecordMachine = setup({
   },
   guards: {
     hasPending: ({ context }) => hasFields(context.pending),
+    /** An empty patch changes nothing; writing it would only create an absent file. */
+    hasPatchFields: ({ event }) => event.type === 'patch' && hasFields(event.fields),
     hasAttemptsLeft: ({ context }) => context.attempt <= context.retryMaxAttempts,
     hasWorkAfterDrop: ({ context }) => hasFields(retainedAfterDrop(context)),
     /** The record still exists: nothing has asked for it to be removed. */
@@ -265,7 +267,7 @@ export const composerRecordMachine = setup({
         idle: {
           always: { guard: not('isLive'), target: 'stopped' },
           on: {
-            patch: { target: 'persisting', actions: 'mergePending' },
+            patch: { guard: 'hasPatchFields', target: 'persisting', actions: 'mergePending' },
             flushNow: { guard: 'hasPending', target: 'persisting' },
           },
         },
@@ -332,16 +334,15 @@ export const composerRecordMachine = setup({
           // Removal does not wait out a retry (the record is going away), so the
           // timer must die here — a retry that fired after the unlink would
           // recreate the file.
-          always: { guard: not('isLive'), target: 'stopped' },
-          after: {
-            retryDelay: [
-              { guard: 'hasAttemptsLeft', target: 'persisting' },
-              { target: 'idle', actions: 'emitWriteStalled' },
-            ],
-          },
+          // A spent budget is known the moment the failure lands; the stall is announced then, not after a delay.
+          always: [
+            { guard: not('isLive'), target: 'stopped' },
+            { guard: not('hasAttemptsLeft'), target: 'idle', actions: 'emitWriteStalled' },
+          ],
+          after: { retryDelay: 'persisting' },
           on: {
             // A fresh edit is the user asking again; do not make them wait out the curve.
-            patch: { target: 'persisting', actions: 'mergePending' },
+            patch: { guard: 'hasPatchFields', target: 'persisting', actions: 'mergePending' },
             flushNow: 'persisting',
           },
         },

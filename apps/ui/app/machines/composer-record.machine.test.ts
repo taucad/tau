@@ -344,6 +344,40 @@ describe('composerRecordMachine', () => {
       expect(harness.writes.at(-1)).toEqual({ draft: userMessage('one') });
       actor.stop();
     });
+
+    it('should emit writeStalled on the failure that spends the budget, with no timer advance (G3)', async () => {
+      const { actor, harness, emitted } = createHarness({ retryMaxAttempts: 1 });
+      actor.start();
+      await flush();
+      actor.send({ type: 'patch', fields: { draft: userMessage('one') } });
+      await flush();
+      harness.settle.shift()?.reject(new Error('EIO'));
+      await flush();
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      harness.settle.shift()?.reject(new Error('EIO'));
+      await flush();
+
+      expect(typesOf(emitted)).toEqual(['recordLoaded', 'writeFailed', 'writeFailed', 'writeStalled']);
+      expect(actor.getSnapshot().matches({ writes: 'idle' })).toBe(true);
+      actor.stop();
+    });
+
+    it('should write a retrying patch at once when flushed', async () => {
+      const { actor, harness } = createHarness();
+      actor.start();
+      await flush();
+      actor.send({ type: 'patch', fields: { draft: userMessage('one') } });
+      await flush();
+      harness.settle.shift()?.reject(new Error('EIO'));
+      await flush();
+
+      actor.send({ type: 'flushNow' });
+      await flush();
+
+      expect(harness.writes).toHaveLength(2);
+      actor.stop();
+    });
   });
 
   describe('unrepairable input (P28)', () => {
@@ -551,6 +585,19 @@ describe('composerRecordMachine', () => {
       expect(typesOf(emitted)).toContain('recordRemoved');
       actor.stop();
     });
+  });
+
+  it('should start no write for a patch that carries no fields (S8)', async () => {
+    const { actor, harness } = createHarness();
+    actor.start();
+    await flush();
+
+    actor.send({ type: 'patch', fields: {} });
+    await flush();
+
+    expect(harness.writes).toEqual([]);
+    expect(actor.getSnapshot().matches({ writes: 'idle' })).toBe(true);
+    actor.stop();
   });
 
   it('keeps the loaded record available to hydration consumers', async () => {

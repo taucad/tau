@@ -1,6 +1,7 @@
 /* oxlint-disable no-await-in-loop -- UI steps are intentionally sequential. */
 import { basename, dirname, join } from 'node:path';
 import process from 'node:process';
+import { setTimeout } from 'node:timers/promises';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { expect } from 'vitest';
 import type { Locator, Page } from 'playwright';
@@ -307,6 +308,34 @@ export const waitForRunToSettle = async (page: Page, settleTimeout: number): Pro
   await expectCount(stopButtonOf(page), 0, settleTimeout);
 };
 
+/** How long a source file may take to appear before the wait is a failure. */
+const waitForProjectTimeout = 180_000;
+/**
+ * How long the route is allowed to settle before an empty transcript counts as
+ * evidence. The shell renders the seeded turn's own user message within a
+ * second or two of the navigation; anything still empty this late is not
+ * mid-render.
+ */
+const lostSeedGrace = 30_000;
+
+/**
+ * Whether the composer holds a prompt that no message in the transcript answers.
+ *
+ * The signature of a seeded first turn the shell dropped: the loader restored
+ * the prompt as a draft and no run was ever dispatched, so waiting out the full
+ * {@link waitForProjectTimeout} only delays the same failure.
+ *
+ * @param page - The renderer.
+ * @returns True when the transcript is empty and the composer is not.
+ */
+const seedIsBackInComposer = async (page: Page): Promise<boolean> => {
+  const composer = composerOf(page);
+  if ((await page.locator('article').count()) > 0 || (await composer.count()) === 0) {
+    return false;
+  }
+  return ((await composer.textContent({ timeout: 5000 })) ?? '').trim() !== '';
+};
+
 /**
  * Poll the real filesystem for the project directory the shell wrote.
  *
@@ -317,6 +346,9 @@ export const waitForRunToSettle = async (page: Page, settleTimeout: number): Pro
  * @param slug - The project slug taken from the URL.
  * @param options - What counts as the source.
  * @param options.extension - The source extension the kernel owns.
+ * @param options.page - The renderer, when the caller drives a seeded first
+ * turn. With it, a turn the shell dropped is reported the moment it is
+ * diagnosable instead of at the 180 s timeout.
  * @param options.writtenAfter - Milliseconds (`mtimeMs`). Only a source last
  * written after this instant counts. Pass the seed's mtime when the turn
  * under test follows a seeded one, so the seed's own bytes cannot satisfy the
@@ -327,9 +359,9 @@ export const waitForRunToSettle = async (page: Page, settleTimeout: number): Pro
 export const waitForProjectOnDisk = async (
   directory: string,
   slug: string,
-  options: { readonly extension: string; readonly writtenAfter?: number },
+  options: { readonly extension: string; readonly page?: Page; readonly writtenAfter?: number },
 ): Promise<string> => {
-  const { extension, writtenAfter = Number.NEGATIVE_INFINITY } = options;
+  const { extension, page, writtenAfter = Number.NEGATIVE_INFINITY } = options;
   const projectRoot = join(directory, slug);
   const isFreshSource = (entry: string): boolean => {
     if (!entry.endsWith(extension)) {
@@ -338,21 +370,33 @@ export const waitForProjectOnDisk = async (
     const stat = statSync(join(projectRoot, entry));
     return stat.size > 0 && stat.mtimeMs > writtenAfter;
   };
-  let found: string | undefined;
-  await expect
-    .poll(
-      () => {
-        /* Non-empty, not merely present: project creation scaffolds a
-         * zero-byte source file and the chat's `create_file` tool fills it
-         * afterwards, so an existence check passes ~2 s after submit and
-         * proves nothing about the run. */
-        found = existsSync(projectRoot) ? readdirSync(projectRoot).find((entry) => isFreshSource(entry)) : undefined;
-        return found;
-      },
-      { timeout: 180_000 },
-    )
-    .toBeDefined();
-  return join(projectRoot, found!);
+  /* Non-empty, not merely present: project creation scaffolds a zero-byte
+   * source file and the chat's `create_file` tool fills it afterwards, so an
+   * existence check passes ~2 s after submit and proves nothing about the run. */
+  const freshSource = (): string | undefined =>
+    existsSync(projectRoot) ? readdirSync(projectRoot).find((entry) => isFreshSource(entry)) : undefined;
+  /* Hand-rolled rather than `expect.poll`: the poll retries a callback that
+   * throws until its own timeout, so the diagnosis below could never cut the
+   * wait short from inside one. */
+  const deadline = Date.now() + waitForProjectTimeout;
+  const diagnoseAfter = Date.now() + lostSeedGrace;
+  for (;;) {
+    const found = freshSource();
+    if (found !== undefined) {
+      return join(projectRoot, found);
+    }
+    if (page !== undefined && Date.now() > diagnoseAfter && (await seedIsBackInComposer(page))) {
+      throw new Error(
+        `The seeded turn was lost: the transcript is empty and the prompt is back in the composer, so no ${extension} source will ever reach ${projectRoot}.`,
+      );
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `No non-empty ${extension} source appeared in ${projectRoot} within ${String(waitForProjectTimeout / 1000)} s.`,
+      );
+    }
+    await setTimeout(250);
+  }
 };
 
 /**

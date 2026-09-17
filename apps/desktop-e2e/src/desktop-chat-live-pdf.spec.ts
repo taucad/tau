@@ -1,13 +1,15 @@
-import { readFileSync, statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { afterEach, expect, test } from 'vitest';
 import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
+import { durableMessages } from '#support/acp-evidence.js';
 import { gatewayFixtureModelName, installGatewayFixture } from '#support/gateway-fixture.js';
 import type { GatewayFixture } from '#support/gateway-fixture.js';
 import { deleteTauTestUser, seedTauTestUser, tauCreditBalanceAtoms, tauTestAccount } from '#support/tau-account.js';
 import {
+  activeChatId,
   connectPickedFolder,
   expectSignedIn,
   expectVisible,
@@ -35,6 +37,15 @@ import {
  * on the stubbed Anthropic host; the live turn's own wire (`TAU_E2E_LIVE_MODEL`,
  * OpenAI by default) reaches the real provider and earns the credit delta.
  */
+
+/**
+ * The tools that reach the runtime through the services host.
+ *
+ * This row used to pass through a total runtime failure: it asserts source text
+ * and credits only, and a refused workspace root answers the model with error
+ * *results* rather than failing the run.
+ */
+const runtimeToolNames = new Set(['get_kernel_result', 'screenshot', 'test_model']);
 
 const live = process.env['TAU_E2E_LIVE_LLM'] === 'true';
 const modelName = process.env['TAU_E2E_LIVE_MODEL'] ?? 'GPT-5.6 Luna';
@@ -97,6 +108,21 @@ test.skipIf(!live)('models the bracket from the attached specification on a live
       writtenAfter: seedWritten,
     });
     await waitForRunToSettle(page, 480_000);
+
+    /* Read from the durable log the host wrote, not from the transcript: the
+     * run completes either way, and a failed runtime tool is only visible in
+     * the tool output the log kept. */
+    const eventsPath = join(session.pickedDirectory, slug, '.tau/chats', activeChatId(page), 'events.jsonl');
+    const failedRuntimeTools = durableMessages(existsSync(eventsPath) ? readFileSync(eventsPath, 'utf8') : '')
+      .filter(
+        (message) =>
+          message.role === 'tool-output' && message.isError === true && runtimeToolNames.has(message.toolName ?? ''),
+      )
+      .map((message) => `${message.toolName ?? 'unknown'}: ${JSON.stringify(message.content).slice(0, 2e3)}`);
+    expect(failedRuntimeTools, `a runtime tool failed during the live run:\n${failedRuntimeTools.join('\n')}`).toEqual(
+      [],
+    );
+
     const creditsAfter = await tauCreditBalanceAtoms(token);
     const spentAtoms = creditsBefore - creditsAfter;
     console.info(

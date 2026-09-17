@@ -220,9 +220,23 @@ export const forwardRendererDiagnostics = (
       recover?.();
     }
   });
+  /* A renderer stuck in an error-boundary loop repeats one line at render speed.
+   * Forwarding each one rotates the log away from whatever is being diagnosed,
+   * so a streak is counted and reported once it ends. */
+  let repeated: { readonly key: string; readonly level: DiagnosticLevel; count: number } | undefined;
   webContents.on('console-message', (details) => {
     const { level, message, sourceId, lineNumber } = (details ?? {}) as Record<string, unknown>;
-    log.log(normalizeRendererLevel(level), 'renderer.console', {
+    const rendererLevel = normalizeRendererLevel(level);
+    const key = [rendererLevel, message, sourceId, lineNumber].map(String).join(' | ');
+    if (repeated?.key === key) {
+      repeated.count += 1;
+      return;
+    }
+    if (repeated && repeated.count > 0) {
+      log.log(repeated.level, 'renderer.console', { message: `↳ repeated ×${String(repeated.count)}` });
+    }
+    repeated = { key, level: rendererLevel, count: 0 };
+    log.log(rendererLevel, 'renderer.console', {
       message,
       source: sourceId,
       line: lineNumber,

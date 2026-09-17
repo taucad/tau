@@ -1218,6 +1218,20 @@ describe('RuntimeClient render timeout control plane', () => {
     await termination;
   });
 
+  it("should keep the first termination's detail when a terminated client is called again", async () => {
+    const { client, closeTransport } = createStatusClientFixture();
+    await client.connect();
+
+    closeTransport({ cause: 'host-exit', exitCode: 1, phase: 'boot', stderrTail: 'ERR_MODULE_NOT_FOUND\n' });
+    await nextTask();
+
+    await expect(client.render({ source: { path: 'after.ts' } })).rejects.toMatchObject({
+      causeKind: 'transport-closed',
+      detail: { exitCode: 1, phase: 'boot', stderrTail: 'ERR_MODULE_NOT_FOUND\n' },
+      message: 'The runtime host failed to start (exit code 1): ERR_MODULE_NOT_FOUND.',
+    });
+  });
+
   it('keeps a host exit that follows terminate() an explicit termination', async () => {
     const { client, closeTransport } = createStatusClientFixture();
     await client.connect();

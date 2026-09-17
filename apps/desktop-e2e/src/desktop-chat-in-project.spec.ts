@@ -5,7 +5,13 @@ import { afterEach, expect, test } from 'vitest';
 import type { Page } from 'playwright';
 import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
-import { gatewayFixtureFinalText, gatewayFixtureModelName, installGatewayFixture } from '#support/gateway-fixture.js';
+import {
+  gatewayFixtureFinalText,
+  gatewayFixtureModelName,
+  gatewayFixtureScadSource,
+  installGatewayFixture,
+  startGatewayFixture,
+} from '#support/gateway-fixture.js';
 import type { GatewayFixture } from '#support/gateway-fixture.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
@@ -75,6 +81,43 @@ const recordTurnMarker = async (page: Page): Promise<() => Promise<readonly stri
     page.evaluate(() => [...((globalThis as { tauTurnMarkerLabels?: string[] }).tauTurnMarkerLabels ?? [])]);
 };
 
+/** One `tool_result` block as the provider wire carries it. */
+type WireToolResult = {
+  readonly content?: unknown;
+  readonly is_error?: unknown;
+  readonly tool_use_id?: unknown;
+  readonly type?: unknown;
+};
+
+/**
+ * Every failed `tool_result` in one forwarded provider request, bounded so the
+ * failure message stays readable.
+ *
+ * The runtime tool below runs in the services utility against the picked folder,
+ * which is the one path the deterministic tier never exercised: a root the
+ * services host refuses answers the agent with an *error result*, not with a
+ * failed run, so every other assertion in this row still passes. Same check as
+ * `desktop-image-geospec.spec.ts:131-138`, which only runs in the packaged tier.
+ * Every request carries the whole conversation, so the last one covers both
+ * turns.
+ *
+ * @param request - A forwarded provider request body.
+ * @returns One bounded JSON line per failed tool result.
+ */
+const failedToolResults = (request: unknown): readonly string[] => {
+  const messages = (request as { readonly messages?: ReadonlyArray<{ readonly content?: unknown }> }).messages ?? [];
+  return messages
+    .flatMap((message) => (Array.isArray(message.content) ? (message.content as readonly WireToolResult[]) : []))
+    .filter((block) => block.type === 'tool_result' && block.is_error === true)
+    .map((block) =>
+      JSON.stringify({
+        toolUseId: block.tool_use_id,
+        content:
+          typeof block.content === 'string' ? block.content.slice(0, 2e3) : JSON.stringify(block.content).slice(0, 2e3),
+      }),
+    );
+};
+
 let session: DesktopSession | undefined;
 let fixture: GatewayFixture | undefined;
 let seededEmail: string | undefined;
@@ -96,7 +139,17 @@ test('builds an openrscad model on disk from the project chat', async () => {
   const token = await seedTauTestUser(account);
   session = await launchDesktopApp({ token });
   const { page } = session;
-  fixture = await installGatewayFixture(page);
+  /* The scripted turn runs the kernel as well as writing it: `get_kernel_result`
+   * is the only deterministic row that makes the services utility ask the
+   * services host for the project's filesystem, which is where a refused root
+   * shows up. */
+  fixture = await startGatewayFixture({
+    toolCalls: [
+      { name: 'create_file', input: { targetFile: 'main.scad', content: gatewayFixtureScadSource } },
+      { name: 'get_kernel_result', input: { targetFile: 'main.scad' } },
+    ],
+  });
+  await fixture.routeThrough(page);
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
@@ -116,11 +169,11 @@ test('builds an openrscad model on disk from the project chat', async () => {
     /* Let the seeding turn finish rather than cancelling it. Cancelling raced:
      * a turn this short can settle before its stop button ever renders, and a
      * seed that published *after* the truncation below left two publications
-     * and a wedged assertion. Two gateway requests is the turn's own completion
-     * signal — the tool call and the closing message — so waiting on it is
-     * exact where the UI affordance is not. `cancelRun` keeps its coverage in
-     * the external-write test. */
-    const scriptedRequestsPerTurn = 2;
+     * and a wedged assertion. Three gateway requests is the turn's own
+     * completion signal — one per scripted tool call plus the closing message —
+     * so waiting on it is exact where the UI affordance is not. `cancelRun`
+     * keeps its coverage in the external-write test. */
+    const scriptedRequestsPerTurn = 3;
     await expect
       .poll(() => fixture!.gatewayRequests.length, { timeout: 120_000 })
       .toBeGreaterThanOrEqual(scriptedRequestsPerTurn);
@@ -133,7 +186,7 @@ test('builds an openrscad model on disk from the project chat', async () => {
      * captured faithfully as an empty base revision and reads as a Tau defect
      * (FIX-REVGRAPH § B in `chat-revision-mode-local-default-blueprint.md`). */
     /** Milliseconds (`mtimeMs`). */
-    const seedWritten = statSync(await waitForProjectOnDisk(root, slug, { extension: '.scad' })).mtimeMs;
+    const seedWritten = statSync(await waitForProjectOnDisk(root, slug, { extension: '.scad', page })).mtimeMs;
     const gatewayCallsBefore = fixture.gatewayRequests.length;
 
     const markerLabels = await recordTurnMarker(page);
@@ -154,6 +207,11 @@ test('builds an openrscad model on disk from the project chat', async () => {
     await expectLauncher2Turn(session.logPath, join(root, slug), activeChatId(page));
 
     await expectModelBuilt({ finalText: gatewayFixtureFinalText, logPath: session.logPath, page, sourcePath });
+
+    /* The runtime tools really ran. Asserted after the closing line, because the
+     * request that carries the last turn's results is the one that answers it. */
+    const failedTools = failedToolResults(fixture.gatewayRequests.at(-1));
+    expect(failedTools, `desktop agent tools failed:\n${failedTools.join('\n')}`).toEqual([]);
 
     /* Row 18: working → saving → saved, on this turn, in that order. */
     const lastLabel = async (): Promise<string | undefined> => {

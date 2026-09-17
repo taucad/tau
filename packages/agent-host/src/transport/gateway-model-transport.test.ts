@@ -1107,6 +1107,25 @@ describe('createGatewayModelTransport', () => {
     });
   });
 
+  it('carries the gateway Retry-After into the refusal details', async () => {
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(
+        async () =>
+          new Response(JSON.stringify({ type: 'error', error: { type: 'FUNDED_OPERATION_LIMIT', message: 'Busy.' } }), {
+            status: 429,
+            headers: { 'content-type': 'application/json', 'retry-after': '30' },
+          }),
+      ),
+    });
+
+    await expect(collect(transport.stream(request()))).rejects.toMatchObject({
+      code: 'FUNDED_OPERATION_LIMIT',
+      status: 429,
+      details: { retryAfterSeconds: 30 },
+    });
+  });
+
   it('refuses a catalog-resolved provider whose wire is unsupported before fetch', async () => {
     const fetchSpy = vi.fn();
     const transport = createGatewayModelTransport({

@@ -290,6 +290,17 @@ export const gatewayResponseError = async (response: Response): Promise<GatewayM
   if (zodUtility.isObject(payload)) {
     const parsed =
       gatewayEnvelopeError(payload, response.status, fallback) ?? flattenedGatewayError(payload, response.status);
+    const retryAfterSeconds = Number(response.headers.get('retry-after') ?? Number.NaN);
+    if (parsed && Number.isInteger(retryAfterSeconds) && retryAfterSeconds >= 0) {
+      // The card tells the customer when to try again instead of guessing.
+      return new GatewayModelTransportError({
+        code: parsed.code,
+        message: parsed.message,
+        status: parsed.status,
+        rawType: parsed.rawType,
+        details: { ...parsed.details, retryAfterSeconds },
+      });
+    }
     if (parsed) {
       return parsed;
     }

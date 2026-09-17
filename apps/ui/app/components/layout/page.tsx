@@ -266,8 +266,15 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
     );
   }
 
+  /*
+   * W5/Finding 5b: the shell is above the composed route providers, not below
+   * them. A route that contributes a provider changes the length of this list,
+   * and anything nested inside it changes tree depth — which React implements
+   * by unmounting and re-creating the subtree. Only the route's own content
+   * needs those providers, so only the route's own content sits inside them.
+   */
   return (
-    <Compose components={Providers}>
+    <>
       {desktopDragBand}
       <SidebarProvider className='h-dvh min-h-0 overflow-hidden'>
         <ApplicationShell isDesktopTarget={desktopTarget}>
@@ -339,11 +346,13 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
             <section
               className={cn('h-dvh', enableOverflowY && 'overflow-y-auto', enablePageHeader && headerOffsetClasses)}
             >
-              <SectionContent error={error} enablePageFooter={enablePageFooter} />
+              <Compose components={Providers}>
+                <SectionContent error={error} enablePageFooter={enablePageFooter} />
+              </Compose>
             </section>
           </SidebarInset>
         </ApplicationShell>
       </SidebarProvider>
-    </Compose>
+    </>
   );
 }

@@ -126,14 +126,16 @@ test('serves the utility MCP endpoint to an agent it spawned', async () => {
     const thought = page.getByRole('button', { name: 'Thought briefly' }).last();
     await expectVisible(thought, 60_000);
     await thought.click();
-    const thoughtBody = page.getByRole('button', { name: 'Collapse thought' }).last();
-    await expectVisible(thoughtBody, 60_000);
+    /* The expanded body is a region, not a second toggle: df777801e made the
+     * trigger the only reasoning toggle, so `Collapse thought` and
+     * click-body-to-collapse (with its focus return) no longer exist. The body
+     * is `role='region'` named `${label} details` in
+     * `chat-message-reasoning.tsx`. */
+    await expectVisible(page.getByRole('region', { name: 'Thought briefly details' }).last(), 60_000);
     const thoughtSummary = page.getByText('Confirming test completion and readiness', { exact: true });
     await expectVisible(thoughtSummary, 60_000);
     expect(await thoughtSummary.evaluate((element) => getComputedStyle(element).fontStyle)).toBe('italic');
     expect(await thoughtSummary.evaluate((element) => getComputedStyle(element).fontWeight)).toBe('400');
-    await thoughtBody.click();
-    await expect.poll(async () => thought.evaluate((element) => element === document.activeElement)).toBe(true);
 
     const testActivity = page.getByRole('button', { name: /(?:^|, )ran tests$/iu }).last();
     await expectVisible(testActivity, 60_000);

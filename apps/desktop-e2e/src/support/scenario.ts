@@ -440,7 +440,14 @@ export const expectModelBuilt = async (options: {
    * render ride on top of that here. */
   await expectVisible(page.getByText(finalText, { exact: true }), 420_000);
 
-  await expectCount(page.getByText('Current', { exact: true }), 1, 60_000);
+  /* The turn's own revision marker, not `Current`: 75b24eef3 replaced the full
+   * `RevisionMarker` in the transcript with the compact `ChatRevisionMarker`,
+   * whose only "Current" lives inside a `CollapsibleContent` that is closed —
+   * and therefore unmounted — by default. The live region is the part that is
+   * always rendered (`chat-revision-marker.tsx:246-253`). */
+  const turnMarker = page.getByRole('status', { name: 'Turn revision status' }).last();
+  await expectVisible(turnMarker, 60_000);
+  await expect.poll(async () => (await turnMarker.textContent()) ?? '', { timeout: 60_000 }).toMatch(/^Rev \d+ saved/u);
   await expectCount(page.getByText(/ROOT_UNAVAILABLE/u), 0);
   await expectCount(page.getByText('File not found', { exact: true }), 0);
   await expectCount(page.getByRole('status', { name: 'Waiting for geometry' }), 0, 120_000);
@@ -547,46 +554,43 @@ export const geometryCacheSnapshot = (sourcePath: string): ReadonlySet<string> =
   new Set(geometryCacheEntries(sourcePath).map(({ actionDigest }) => actionDigest));
 
 /**
- * Assert the kernel utility re-parsed **and** re-rendered the bytes an
- * external writer just put on disk.
+ * Assert the kernel re-parsed the bytes an external writer just put on disk.
  *
- * Both witnesses are the kernel's own disk artifacts, written by the utility
- * process through `fromNodeFs(projectRoot)` — so they exist only if the write
- * crossed the shell's second watcher and reached the kernel (charter
- * acceptance 5, "two authorities, one disk"):
+ * The witness is the Parameters pane. Its inputs are built from the kernel's own
+ * customizer parse of the file the utility watches through
+ * `fromNodeFs(projectRoot)`, so a declaration that exists *only* in the new
+ * bytes cannot be listed unless that write crossed the shell's second watcher
+ * and reached the kernel (charter acceptance 5, "two authorities, one disk").
+ * Pair it with {@link expectGeometryFramed}, which covers the render half — the
+ * viewer can be framed from the previous geometry, so framing alone proves
+ * nothing about the new bytes.
  *
- * - `parameterCache()` publishes the resolved parse into the compute CAS, so
- *   a referenced content blob naming a declaration that exists only in the
- *   new bytes cannot come from the old ones.
- * - `geometryCache()` publishes a validated geometry action record into
- *   `.tau/cache/compute/v1`, so an action digest absent from `before` proves
- *   that the new dependency identity reached the render pipeline.
+ * The two previous witnesses read `.tau/cache/compute/v1`. 5608f5051 deleted
+ * that CAS from the product along with `createRetainedSceneStore`, and
+ * `createProjectComputeStores` has had no product caller since, so both polls
+ * could only ever run out their timeout.
  *
  * `.tau/parameters/<source>.json` is deliberately **not** the witness: that
  * file is the renderer's parameter *value* store (`{activeGroup, groups}`),
  * written only when a user changes a value, and never carries the source's
  * declarations.
  *
- * @param sourcePath - The project source that was rewritten.
- * @param token - A declaration present only in the new bytes.
- * @param before - The geometry cache snapshot taken before the write.
+ * @param page - The renderer.
+ * @param parameterLabel - The pane's label for a declaration present only in the
+ *   new bytes, in `formatDisplayLabel` casing (`tauSmokeDepth` reads as
+ *   `Tau Smoke Depth`).
  * @returns Nothing.
  */
-export const expectKernelReparsed = async (
-  sourcePath: string,
-  token: string,
-  before: ReadonlySet<string>,
-): Promise<void> => {
-  await expect
-    /* 60 s, not the usual 180: a watched re-parse either lands within a few
-     * seconds or the write never reached the kernel at all. */
-    .poll(() => parameterCacheContents(sourcePath).some((content) => content.includes(token)), { timeout: 60_000 })
-    .toBe(true);
-  await expect
-    .poll(() => geometryCacheEntries(sourcePath).some(({ actionDigest }) => !before.has(actionDigest)), {
-      timeout: 60_000,
-    })
-    .toBe(true);
+export const expectKernelReparsed = async (page: Page, parameterLabel: string): Promise<void> => {
+  await page
+    .getByRole('button', { name: /Search/u })
+    .first()
+    .click();
+  await page.getByPlaceholder('Search projects, chats, and actions...').fill('Open parameters');
+  await page.getByText('Open parameters', { exact: true }).first().click();
+  /* 60 s, not the usual 180: a watched re-parse either lands within a few
+   * seconds or the write never reached the kernel at all. */
+  await expectVisible(page.getByLabel(`Input for ${parameterLabel}`).first(), 60_000);
 };
 
 /** The chat id the project route carries, which names the durable log's directory. */

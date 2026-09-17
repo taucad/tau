@@ -73,7 +73,18 @@ export type GatewayFixtureToolCall = {
 
 /** Optional multi-round tool script; the existing single-file input remains the default. */
 export type GatewayFixtureScript = {
-  readonly toolCalls: readonly GatewayFixtureToolCall[];
+  /**
+   * The tool calls one turn emits, in order.
+   *
+   * A function is handed the zero-based turn index, so a second turn in the same
+   * chat can write *different* bytes. Replaying the same arguments is not
+   * neutral: a byte-identical rewrite settles as `turn.finalized` with no
+   * changed paths (nothing to save, so no revision marker), and two turns of
+   * identical `create_file`/`get_kernel_result` pairs are exactly the four-event
+   * alternation the host's `ping_pong` safeguard nudges on
+   * (`packages/agent-host/src/harness/safeguards.ts:397-416`).
+   */
+  readonly toolCalls: readonly GatewayFixtureToolCall[] | ((turn: number) => readonly GatewayFixtureToolCall[]);
 };
 
 const defaultGatewayFixtureFile: GatewayFixtureFile = {
@@ -132,6 +143,22 @@ export const endsWithToolResult = (body: { readonly messages?: readonly WireMess
   return Array.isArray(last) && last.some((block) => (block as { readonly type?: string }).type === 'tool_result');
 };
 
+const holdsToolResult = (message: WireMessage): boolean =>
+  Array.isArray(message.content) &&
+  message.content.some((block) => (block as { readonly type?: string }).type === 'tool_result');
+
+/**
+ * Which turn this request belongs to, zero-based.
+ *
+ * A turn is one *prompt*: every other user message in the history carries the
+ * previous round's `tool_result` blocks.
+ *
+ * @param body - The decoded Anthropic request body.
+ * @returns The zero-based turn index.
+ */
+const turnIndex = (body: { readonly messages?: readonly WireMessage[] }): number =>
+  (body.messages ?? []).filter((message) => message.role === 'user' && !holdsToolResult(message)).length - 1;
+
 const completedToolCallCount = (body: { readonly messages?: readonly WireMessage[] }): number => {
   let count = 0;
   const { messages = [] } = body;
@@ -163,7 +190,7 @@ const completedToolCallCount = (body: { readonly messages?: readonly WireMessage
 export const startGatewayFixture = async (
   input: GatewayFixtureFile | GatewayFixtureScript = defaultGatewayFixtureFile,
 ): Promise<GatewayFixture> => {
-  const toolCalls: readonly GatewayFixtureToolCall[] =
+  const script: GatewayFixtureScript['toolCalls'] =
     'toolCalls' in input ? input.toolCalls : [{ name: 'create_file', input }];
   const gatewayRequests: unknown[] = [];
   const supplierModels: string[] = [];
@@ -223,7 +250,7 @@ export const startGatewayFixture = async (
 
         const index = requestIndex++;
         const completedCalls = completedToolCallCount(body);
-        const toolCall = toolCalls[completedCalls];
+        const toolCall = (typeof script === 'function' ? script(turnIndex(body)) : script)[completedCalls];
         const closing = toolCall === undefined;
         const writeEvent = (event: string, data: unknown): void => {
           response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);

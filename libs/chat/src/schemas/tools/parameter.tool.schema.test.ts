@@ -106,7 +106,6 @@ describe('parameter tool schemas', () => {
               valueRevision: 'value',
               dependencyRevision: 'dependency',
             },
-            access: { status: 'current', writeAllowed: true },
           },
         },
       }),

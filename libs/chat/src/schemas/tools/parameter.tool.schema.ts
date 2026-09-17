@@ -1,4 +1,4 @@
-import { currentFileParameterEntrySchema } from '@taucad/types';
+import { fileParameterEntrySchema } from '@taucad/types';
 import { z } from 'zod';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
 
@@ -122,7 +122,7 @@ export const parameterSetOperationSchema = z.discriminatedUnion('kind', [
       pointer: z.string(),
       unit: tokenSchema,
       producerCapability: parameterSourceUnitCapabilitySchema,
-      dependencies: z.object({}).catchall(tokenSchema),
+      dependencies: z.object({}).catchall(tokenSchema).optional(),
     })
     .strict(),
   z
@@ -136,16 +136,10 @@ export const parameterSetOperationSchema = z.discriminatedUnion('kind', [
 
 const parameterDiagnosticSchema = z
   .object({
-    code: z.enum([
-      'INVALID_SCHEMA',
-      'INVALID_ANNOTATION',
-      'INVALID_REFERENCE',
-      'RESOURCE_LIMIT',
-      'METADATA_CONFLICT',
-      'SEMANTICS_UNRESOLVED',
-      'REPRESENTATION_UNSUPPORTED',
-      'LEGACY_PROJECTION_LOSS',
-    ]),
+    // Manifest, record, authority and host producers each own codes; the vocabulary stays open like outcome codes.
+    code: tokenSchema.describe(
+      'Stable diagnostic code, for example INVALID_SCHEMA, INVALID_RECORD, UNSUPPORTED_RECORD, RESOLUTION_FAILED, WATCH_FAILED or RESOLUTION_SUPERSEDED.',
+    ),
     message: z.string(),
     severity: z.enum(['error', 'warning']),
     resource: z.string(),
@@ -159,14 +153,8 @@ const parameterDiagnosticSchema = z
 
 const parameterAuthoritySnapshotSchema = z
   .object({
-    entry: currentFileParameterEntrySchema,
+    entry: fileParameterEntrySchema,
     identity: parameterSetIdentitySchema,
-    access: z
-      .object({
-        status: z.enum(['current', 'legacy-readable']),
-        writeAllowed: z.boolean(),
-      })
-      .strict(),
   })
   .strict();
 

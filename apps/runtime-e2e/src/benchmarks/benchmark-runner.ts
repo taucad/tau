@@ -24,6 +24,7 @@ import type { BenchmarkCase, BenchmarkKernel } from '#benchmarks/benchmark-suite
 import type { CpuProfile, CpuProfiler } from '#benchmarks/cpu-profiler.js';
 import type { ProfileAnalysis } from '#benchmarks/profile-analyzer.js';
 import { noRendererAdapter, readContention } from '#benchmarks/measurement-tags.js';
+import { mergeRuntimeTrace } from '#benchmarks/runtime-trace.js';
 import type { MeasurementTags } from '#benchmarks/measurement-tags.js';
 
 // =============================================================================
@@ -533,6 +534,17 @@ export async function runBenchmarks(
   onProgress?.(totalWork, totalWork, 'done');
 
   const wasmSizes = await collectWasmSizes();
+  /* W28: the dispatcher's sink already wrote this run's spans, one file per producer, wherever the
+   * operator pointed `TAU_TELEMETRY_DIR`. Naming the merge in the artifact is what lets a regression
+   * be read rather than guessed — the same file the open-to-frame driver records. */
+  const traceDirectory = process.env['TAU_TELEMETRY_DIR'];
+  const trace =
+    traceDirectory === undefined
+      ? undefined
+      : await mergeRuntimeTrace({
+          directory: `${traceDirectory}/traces`,
+          destination: `${traceDirectory}/benchmark-trace.jsonl`,
+        });
 
   return {
     timestamp: new Date().toISOString(),
@@ -540,7 +552,7 @@ export async function runBenchmarks(
     results,
     totalDurationMs: performance.now() - runStart,
     wasmSizes,
-    measurement,
+    measurement: trace === undefined ? measurement : { ...measurement, runtimeTraceJsonl: trace.file },
   };
 }
 

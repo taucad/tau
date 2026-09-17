@@ -422,8 +422,8 @@ const main = async () => {
   /* `--watch off`: hide `watch`/`watchReady` from the inline base the transport mints, so the client's autonomous
    * watched-filesystem rerender (`runtime-client-core.ts` RenderOutcome doc :264) cannot supersede a benchmark render
    * after the `unrelated` source edit, and `kernel-worker.ts:318` takes the watcherless freshness path instead. This
-   * also equalises the arms: `fromMemoryFs`'s base has no `watch` at all (`from-memory-fs-handle.ts`), so leaving
-   * watch on would give the memory arm a structurally different freshness path from bypass/durable.
+   * also equalises the arms: every base the harness mints watches its own mutations (`fromMemoryFs` included, D15),
+   * so an arm that kept its watcher would take a structurally different freshness path from one that did not.
    * The opaque `RuntimeFileSystem` is a spec object carrying ONE module-private symbol whose value is the handle
    * (`transport/_internal/runtime-filesystem-handle.ts:59`) — it must be re-wrapped through that symbol, never
    * spread by string keys (doing so yields `{}` and `inProcessTransport` rejects it). */

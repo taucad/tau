@@ -601,6 +601,18 @@ describe('projectMachine', () => {
       actor.stop();
     });
 
+    it('should point a moved geometry unit at its new file', async () => {
+      const actor = await startAndLoad();
+      actor.send({ type: 'createGeometryUnit', entryPath: 'parts/main.ts' });
+      const unit = actor.getSnapshot().context.geometryUnits.get('parts/main.ts');
+
+      actor.send({ type: 'fileMoved', oldPath: 'parts', newPath: 'models' });
+
+      expect(actor.getSnapshot().context.geometryUnits.get('models/main.ts')).toBe(unit);
+      expect(unit!.getSnapshot().context.entryPath).toBe('models/main.ts');
+      actor.stop();
+    });
+
     it('should clear exportability when a geometry unit file is deleted', async () => {
       const actor = await startAndLoad();
       actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });

@@ -1,10 +1,15 @@
 import { Editor } from '@monaco-editor/react';
 import type { EditorProps } from '@monaco-editor/react';
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { OctagonAlert, RefreshCw } from 'lucide-react';
 import type { CompletionRegistration } from 'monacopilot';
 import type * as Monaco from 'monaco-editor';
+import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
 import { configureMonaco, registerCompletions } from '#lib/monaco.lib.client.js';
+import { useMonacoConfiguration } from '#hooks/use-monaco-configuration.js';
+import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
+import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { Theme, useTheme } from '#hooks/use-theme.js';
 import { useCookie } from '#hooks/use-cookie.js';
@@ -107,14 +112,16 @@ const monacoOverlayRestoreStyles = [
   '[&_.parameter-hints-widget_:is(h1,h2,h3,h4)]:[margin-block:0.5rem_0.25rem]',
 ] as const;
 
-// Initialization may import a chunk that contains this module. Defer it until
-// render so that chunk evaluation can finish before Monaco's async work starts.
-const ConfiguredEditor = lazy(async () => {
-  await configureMonaco();
-  return { default: Editor };
-});
-
+/**
+ * A Monaco editor with Tau's theme, fonts and widget placement.
+ *
+ * It mounts `Editor` only once Monaco is configured — `Editor` calls
+ * `loader.init()`, which would otherwise fetch the loader's CDN Monaco — and
+ * shows the pane placeholder until then. It never suspends, so no Suspense
+ * boundary above it has to stand in for the surrounding UI.
+ */
 export function CodeEditor({ className, options: optionsFromProps, ...rest }: CodeEditorProperties): React.JSX.Element {
+  const configuration = useMonacoConfiguration();
   const { theme, isHighContrast } = useTheme();
   const [areInlayHintsEnabled] = useCookie(cookieName.codeInlayHints, false);
   const completionRef = useRef<CompletionRegistration | undefined>(null);
@@ -293,32 +300,50 @@ export function CodeEditor({ className, options: optionsFromProps, ...rest }: Co
     [className],
   );
 
-  return (
-    <Suspense
-      fallback={
-        <div
-          role='status'
-          aria-label='Loading editor'
-          aria-busy='true'
-          className='flex size-full items-center justify-center'
+  const placeholder = rest.loading ?? <EditorPanePlaceholder label='Loading editor' />;
+
+  if (configuration.status === 'failed') {
+    return (
+      <div role='alert' className='size-full bg-background'>
+        <PanelEmptyState
+          icon={OctagonAlert}
+          iconClassName='text-feature'
+          title="Couldn't load the code editor"
+          description='Check your connection, then try again.'
         >
-          {rest.loading ?? 'Loading editor…'}
-        </div>
-      }
-    >
-      <ConfiguredEditor
-        keepCurrentModel
-        className={classNames}
-        theme={monacoTheme}
-        wrapperProps={{
-          // `ph-no-capture`: session replay never records source code.
-          className: 'editor-container ph-no-capture',
-          style: { height: '100%' },
-        }}
-        options={options}
-        onMount={handleMount}
-        {...rest}
-      />
-    </Suspense>
+          <Button
+            type='button'
+            onClick={() => {
+              void configureMonaco().catch(() => undefined);
+            }}
+          >
+            <RefreshCw />
+            Try again
+          </Button>
+        </PanelEmptyState>
+      </div>
+    );
+  }
+
+  if (configuration.status !== 'ready') {
+    // oxlint-disable-next-line react/jsx-no-useless-fragment -- forwarding the caller's node
+    return <>{placeholder}</>;
+  }
+
+  return (
+    <Editor
+      keepCurrentModel
+      className={classNames}
+      theme={monacoTheme}
+      wrapperProps={{
+        // `ph-no-capture`: session replay never records source code.
+        className: 'editor-container ph-no-capture',
+        style: { height: '100%' },
+      }}
+      options={options}
+      onMount={handleMount}
+      {...rest}
+      loading={placeholder}
+    />
   );
 }

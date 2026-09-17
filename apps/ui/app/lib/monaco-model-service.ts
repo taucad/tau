@@ -313,6 +313,17 @@ export class MonacoModelService {
   }
 
   /**
+   * Whether `path` has a model this service created (or carried across a
+   * rename) with its workspace content subscriptions attached. An editor for a
+   * workspace file mounts only once this holds or its hold has settled: an
+   * editor that mounts first creates the model itself, and the workspace file
+   * system then adopts that model without subscribing it to file changes.
+   */
+  public hasSyncedModel(path: string): boolean {
+    return this.syncedPaths.has(path);
+  }
+
+  /**
    * Get diagnostics for dev-mode observability.
    */
   public getDiagnostics(): ServiceDiagnostics {

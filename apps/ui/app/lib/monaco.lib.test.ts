@@ -79,26 +79,31 @@ vi.mock('monaco-editor/esm/vs/language/json/monaco.contribution.js', () => ({
 vi.mock('monaco-editor/esm/vs/language/typescript/monaco.contribution.js', () => ({}));
 
 describe('configureMonaco', () => {
+  /* `configureMonaco` memoizes per module instance; each test gets its own. */
   beforeEach(() => {
+    vi.resetModules();
     mockMark.mockClear();
     mockMeasure.mockClear();
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Monaco global
+    vi.stubGlobal('self', { MonacoEnvironment: undefined });
   });
 
-  it('should leave Monaco unconfigured when FontFaceSet is unavailable', async () => {
+  it('should configure Monaco without priming fonts when FontFaceSet is unavailable', async () => {
     const { loader } = await import('@monaco-editor/react');
     const { configureMonaco } = await import('#lib/monaco.lib.client.js');
+    const monaco = await import('monaco-editor');
+    vi.mocked(loader.config).mockClear();
     Reflect.deleteProperty(document, 'fonts');
 
-    await configureMonaco();
+    await expect(configureMonaco()).resolves.toBe(monaco);
 
-    expect(loader.config).not.toHaveBeenCalled();
+    expect(loader.config).toHaveBeenCalledWith({ monaco });
   });
 
   it('should configure workers and all four GitHub themes', async () => {
     const { configureMonaco } = await import('#lib/monaco.lib.client.js');
-
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- Monaco global
-    vi.stubGlobal('self', { MonacoEnvironment: undefined });
+    const monaco = await import('monaco-editor');
+    vi.mocked(monaco.editor.defineTheme).mockClear();
     // Jsdom omits the FontFaceSet API; stub the surface configureMonaco touches
     // (Geist Mono prime + remeasure-on-loadingdone listener).
     Object.defineProperty(document, 'fonts', {
@@ -132,7 +137,6 @@ describe('configureMonaco', () => {
     expect(mockMark).toHaveBeenCalledWith('ts-worker:create');
     expect(mockMeasure).toHaveBeenCalledWith('ts-worker:cold-start', 'ts-worker:create');
 
-    const monaco = await import('monaco-editor');
     const definedThemes = vi.mocked(monaco.editor.defineTheme).mock.calls;
     expect(definedThemes.map(([themeId]) => themeId)).toEqual([
       'github-dark',
@@ -142,5 +146,71 @@ describe('configureMonaco', () => {
     ]);
     expect(definedThemes.find(([themeId]) => themeId === 'github-dark-high-contrast')?.[1].base).toBe('hc-black');
     expect(definedThemes.find(([themeId]) => themeId === 'github-light-high-contrast')?.[1].base).toBe('hc-light');
+  });
+});
+
+describe('Monaco configuration state', () => {
+  const stubFonts = (): void => {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Monaco global
+    vi.stubGlobal('self', { MonacoEnvironment: undefined });
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: { load: vi.fn(async () => []), addEventListener: vi.fn() },
+    });
+  };
+
+  beforeEach(() => {
+    vi.resetModules();
+    stubFonts();
+  });
+
+  /* Subscribing is what starts configuration (from a commit-phase effect), and
+   * `ready` is published only after `loader.config` has run, so a reader of
+   * `ready` can mount `Editor` without the loader reaching for its CDN. */
+  it('starts on first subscription and publishes the instance after the loader is configured', async () => {
+    const { loader } = await import('@monaco-editor/react');
+    const { getMonacoConfiguration, subscribeMonacoConfiguration } = await import('#lib/monaco.lib.client.js');
+    const monaco = await import('monaco-editor');
+    vi.mocked(loader.config).mockClear();
+    expect(getMonacoConfiguration()).toEqual({ status: 'idle' });
+
+    const seen: string[] = [];
+    const unsubscribe = subscribeMonacoConfiguration(() => {
+      const state = getMonacoConfiguration();
+      seen.push(state.status);
+      if (state.status === 'ready') {
+        expect(loader.config).toHaveBeenCalledWith({ monaco });
+      }
+    });
+    expect(getMonacoConfiguration()).toEqual({ status: 'pending' });
+    await vi.waitFor(() => {
+      expect(getMonacoConfiguration()).toEqual({ status: 'ready', monaco });
+    });
+    expect(seen).toEqual(['pending', 'ready']);
+
+    const snapshot = getMonacoConfiguration();
+    const late = vi.fn();
+    subscribeMonacoConfiguration(late);
+    expect(getMonacoConfiguration()).toBe(snapshot);
+    expect(late).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it('publishes a failure and retries on the next subscription', async () => {
+    const { getHighlighter } = await import('#lib/shiki.lib.js');
+    vi.mocked(getHighlighter).mockRejectedValueOnce(new Error('chunk failed'));
+    const { getMonacoConfiguration, subscribeMonacoConfiguration } = await import('#lib/monaco.lib.client.js');
+
+    const first = subscribeMonacoConfiguration(() => undefined);
+    await vi.waitFor(() => {
+      expect(getMonacoConfiguration()).toMatchObject({ status: 'failed', error: new Error('chunk failed') });
+    });
+
+    const second = subscribeMonacoConfiguration(() => undefined);
+    await vi.waitFor(() => {
+      expect(getMonacoConfiguration().status).toBe('ready');
+    });
+    first();
+    second();
   });
 });

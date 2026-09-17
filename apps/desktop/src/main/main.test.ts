@@ -6,7 +6,7 @@ import type { Worker as NodeWorker } from 'node:worker_threads';
 import type * as WorkerThreads from 'node:worker_threads';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { computeControlChannels, quitChannels } from '#shared/desktop-bootstrap.js';
+import { computeControlChannels, quitChannels, servicesPortRelayTag } from '#shared/desktop-bootstrap.js';
 
 const originalTitle = process.title;
 const originalUncaught = new Set(process.listeners('uncaughtException'));
@@ -403,6 +403,30 @@ describe('desktop main compute owner', () => {
       });
       expect(state.log).toHaveBeenCalledWith('error', 'main.shutdown', expect.any(Error));
       expect(state.workers[1]!.threadId).toBe(-1);
+    },
+    bootMilliseconds,
+  );
+
+  it(
+    'should reject a relayed port request that main refuses',
+    async () => {
+      await bootstrap();
+      const postMessage = vi.fn();
+      const senderFrame = { url: 'app://tau/index.html', postMessage };
+
+      for (const listener of state.ipcListeners.get(servicesPortRelayTag) ?? []) {
+        listener(
+          { senderFrame },
+          { requestId: 'req-1', concern: 'agentHost', context: { workspaceRoot: '/somewhere/never/opened' } },
+        );
+      }
+
+      // The renderer awaits this relay; a silent refusal is a permanent wait.
+      expect(postMessage).toHaveBeenCalledWith(servicesPortRelayTag, {
+        requestId: 'req-1',
+        error: 'services.untrusted-root',
+      });
+      expect(state.servicesConnect).not.toHaveBeenCalledWith('agentHost', expect.anything());
     },
     bootMilliseconds,
   );

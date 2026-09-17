@@ -745,11 +745,23 @@ const bootstrapElectronApp = async (): Promise<void> => {
     if (typeof requestId !== 'string') {
       return;
     }
+    /* A refusal is an answer. The renderer awaits this relay for its request
+     * id, so returning in silence left `nodeFs` and the agent host waiting on a
+     * port main had already decided never to send. The frame can be gone by the
+     * time a refusal is written — at quit, where the broker refuses by design. */
+    const refuse = (reason: string): void => {
+      try {
+        event.senderFrame?.postMessage(servicesPortRelayTag, { requestId, error: reason });
+      } catch {
+        /* The renderer that asked is gone; there is nobody left to tell. */
+      }
+    };
     /* The renderer names the concern; main validates it against the served set
      * rather than ignoring it, so a future second concern cannot be reached by
      * a stale caller and today's only one cannot be mistyped into silence. */
     if (!rendererServicesConcerns.includes(concern as ServicesConcern)) {
       log.log('error', 'services.unknown-concern', { concern });
+      refuse('services.unknown-concern');
       return;
     }
     try {
@@ -760,6 +772,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
        * wrong directory is worse than no agent host. */
       if (concern === 'agentHost' && !roots.isTrusted(resolved['workspaceRoot'] ?? '')) {
         log.log('error', 'services.untrusted-root', { concern, workspaceRoot: resolved['workspaceRoot'] });
+        refuse('services.untrusted-root');
         return;
       }
       if (
@@ -769,12 +782,14 @@ const bootstrapElectronApp = async (): Promise<void> => {
         resolved['computeMode'] !== 'durable'
       ) {
         log.log('error', 'services.invalid-compute-mode');
+        refuse('services.invalid-compute-mode');
         return;
       }
       const port = services.connect(concern as ServicesConcern, resolved);
       event.senderFrame?.postMessage(servicesPortRelayTag, { requestId }, [port]);
     } catch (error) {
       log.log('error', 'services.connect-failed', error);
+      refuse('services.connect-failed');
     }
   });
 

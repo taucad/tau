@@ -475,6 +475,10 @@ export const projectRevisionsMachine = setup({
   guards: {
     turnIsNew: ({ context }, params: Readonly<{ turnId: string }>) => context.turnRefs[params.turnId] === undefined,
     registryUnanswered: ({ context }) => !context.registrySettled,
+    /* V9: a run id is minted once per gesture and *is* the idempotency key, so
+     * the same one arriving twice is a bug in the caller, never a queue. */
+    runIsAlreadyHeld: ({ context, event }) =>
+      event.type === 'admitTurn' && context.turnRefs[event.turnId]?.getSnapshot().context.runId === event.runId,
   },
   actions: {
     /* R12: every terminal state of a turn drops its ref, not just the two that
@@ -487,7 +491,15 @@ export const projectRevisionsMachine = setup({
       enqueue.stopChild(ref);
       enqueue.assign({
         turnRefs: Object.fromEntries(Object.entries(context.turnRefs).filter(([turnId]) => turnId !== params.turnId)),
+        /* The hold this turn id had is over, so the admissions it delayed are
+         * released with it — in arrival order (V8). */
+        pendingAdmissions: context.pendingAdmissions.filter((admission) => admission.turnId !== params.turnId),
       });
+      for (const admission of context.pendingAdmissions) {
+        if (admission.turnId === params.turnId) {
+          enqueue.raise({ type: 'admitTurn', ...admission });
+        }
+      }
     }),
     /*
      * One `resolution` child per conflicted branch head (S33, A38).
@@ -763,6 +775,7 @@ export const projectRevisionsMachine = setup({
             }),
           },
           {
+            guard: 'runIsAlreadyHeld',
             actions: emit(
               ({ event }): Extract<ProjectRevisionsMachineEmitted, { readonly type: 'turnRefused' }> => ({
                 type: 'turnRefused',
@@ -770,9 +783,27 @@ export const projectRevisionsMachine = setup({
                 chatId: event.chatId,
                 runId: event.runId,
                 code: 'TURN_ALREADY_LEASED',
-                reason: 'This chat is still settling its previous turn.',
+                reason: 'This run has already taken this chat’s checkout.',
               }),
             ),
+          },
+          {
+            /*
+             * V8: a held turn id delays an admission inside its owner.
+             *
+             * An edit or a *Try again* leases the turn id of the message it
+             * rewinds to, which is the id the previous run of that turn leased.
+             * Refusing it outright put a banner in front of the person for a
+             * condition that clears itself in well under a second — and no page
+             * code read the code to recover from it. The root is what knows when
+             * the hold ends, so the root is what waits.
+             */
+            actions: assign({
+              pendingAdmissions: ({ context, event }) => {
+                const { type: _type, ...admission } = event;
+                return [...context.pendingAdmissions, admission];
+              },
+            }),
           },
         ],
         turnPrepared: {

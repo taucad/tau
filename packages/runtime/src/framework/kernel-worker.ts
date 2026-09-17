@@ -811,6 +811,26 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
   }
 
+  /**
+   * Resolve a host-compiled module, and say so when a supplied set misses (D20).
+   *
+   * A host and a kernel derive the same asset's URL through different bundles. When they disagree
+   * the supply silently does nothing — the kernel compiles its own copy and the host's is dead
+   * weight — so a miss against a non-empty set is reported with both sides of the disagreement.
+   *
+   * @param url - The asset URL the kernel resolved.
+   * @returns The host-compiled module, or undefined when the kernel must compile its own.
+   */
+  private getCompiledWasmModule(url: string): WebAssembly.Module | undefined {
+    const module = this.compiledWasmModules.get(url);
+    if (module === undefined && this.compiledWasmModules.size > 0) {
+      this.logger.warn(`No host-compiled WebAssembly module matches '${url}'; the kernel will compile its own.`, {
+        data: { requested: url, supplied: [...this.compiledWasmModules.keys()] },
+      });
+    }
+    return module;
+  }
+
   /** Flush any buffered telemetry entries to the main thread. */
   public flushTelemetry(): void {
     this.telemetryCollector?.flush();
@@ -5935,7 +5955,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       },
       tracer: this.tracer,
       compute: this.createComputeRuntime(signal),
-      getCompiledWasmModule: (url) => this.compiledWasmModules.get(url),
+      getCompiledWasmModule: (url) => this.getCompiledWasmModule(url),
       emitEvent: () => {
         throw new Error('Kernel events require a selected kernel runtime.');
       },

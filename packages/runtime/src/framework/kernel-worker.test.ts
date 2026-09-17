@@ -358,6 +358,43 @@ describe('KernelWorker lifecycle', () => {
     vi.restoreAllMocks();
   });
 
+  describe('host-compiled wasm modules', () => {
+    /* A host and a kernel derive the same asset's URL through different bundles; when they
+     * disagree the supply is silently dead weight (D20). */
+    it('hands a kernel the module supplied for its url and reports a miss against a supplied set', async () => {
+      const onLog = vi.fn();
+      const worker = createConfiguredWorker({ onLog });
+      const module = await WebAssembly.compile(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
+      worker.setCompiledWasmModules([{ url: 'https://example.test/occt-multi.wasm', module }]);
+      const runtime = (worker as unknown as { createRuntime(): KernelRuntime }).createRuntime();
+
+      expect(runtime.getCompiledWasmModule('https://example.test/occt-multi.wasm')).toBe(module);
+      expect(onLog).not.toHaveBeenCalled();
+
+      expect(runtime.getCompiledWasmModule('https://example.test/occt-single.wasm')).toBeUndefined();
+      expect(onLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          level: 'warn',
+          // oxlint-disable-next-line typescript/no-unsafe-assignment -- Vitest's asymmetric matcher is intentionally untyped.
+          message: expect.stringContaining('occt-single.wasm'),
+          data: {
+            requested: 'https://example.test/occt-single.wasm',
+            supplied: ['https://example.test/occt-multi.wasm'],
+          },
+        }),
+      );
+    });
+
+    it('stays silent when no host supplied anything', () => {
+      const onLog = vi.fn();
+      const worker = createConfiguredWorker({ onLog });
+      const runtime = (worker as unknown as { createRuntime(): KernelRuntime }).createRuntime();
+
+      expect(runtime.getCompiledWasmModule('https://example.test/occt-multi.wasm')).toBeUndefined();
+      expect(onLog).not.toHaveBeenCalled();
+    });
+  });
+
   describe('bundler filesystem', () => {
     /* `detect` and `bundle` traverse the same graph, and a module imported by ten others was
      * probed once per edge: 146 filesystem operations for a 7-module cold open (D15). */

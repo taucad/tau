@@ -15,7 +15,6 @@ import {
   parameterManifestWireSchema,
 } from '@taucad/chat/schemas';
 import type { ExportFile, HashedGeometryResult, KernelIssue } from '@taucad/runtime/types';
-import { admitParameterManifest } from '@taucad/parameters';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { parameterSetMachine } from '@taucad/parameters/set-machine';
@@ -161,7 +160,9 @@ export const createRuntimeParameterAgentClient = (
           targetFile,
         );
       }
-      const manifest = await admitParameterManifest(current.manifest);
+      // The snapshot's manifest was admitted where it entered this process; reading the sidecar
+      // again carries no new semantic evidence, so it is not re-validated per read.
+      const { manifest } = current;
       context?.signal?.throwIfAborted();
       return {
         success: true,

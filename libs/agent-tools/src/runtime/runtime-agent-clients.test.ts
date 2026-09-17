@@ -498,12 +498,11 @@ describe('createRuntimeParameterAgentClient', () => {
       dependency: digest,
       middleware: digest,
     });
-    const current = await resolveParameterSnapshot({
+    const current = resolveParameterSnapshot({
       target,
       manifest,
       path: '.tau/parameters/main.py.json',
       bytes: null,
-      preconditions: [],
     });
     const commit = vi.fn(async ({ input }: { input: { proposed: typeof current } }) => {
       await gate;
@@ -542,7 +541,7 @@ describe('createRuntimeParameterAgentClient', () => {
     const { actor, adapter, request, commit } = await fixture();
     const result = await adapter.applyParameterOperation({
       ...request,
-      expected: { ...request.expected, sourceRevision: 'stale' },
+      expected: { manifestRevision: 'stale' },
     });
     expect(result).toMatchObject({
       success: true,
@@ -703,7 +702,7 @@ describe('createRuntimeParameterAgentClient', () => {
     actor.stop();
   });
 
-  it('projects only the wire snapshot and semantically re-admits manifests', async () => {
+  it('projects only the wire snapshot, without re-admitting the manifest per read', async () => {
     const { actor, adapter, current } = await fixture();
     const result = await adapter.getParameters({ targetFile: 'main.py' });
     expect(result).toMatchObject({ success: true, status: 'resolved', current: { identity: current.identity } });
@@ -711,12 +710,7 @@ describe('createRuntimeParameterAgentClient', () => {
       throw new Error('Expected resolved parameters');
     }
     expect(Object.keys(result.current).sort()).toEqual(['entry', 'identity']);
-    // Snapshots share the compiled manifest, which is deep-frozen, so corrupt a copy of it.
-    Object.assign(current, { manifest: { ...current.manifest, revision: 'invalid' } });
-    await expect(adapter.getParameters({ targetFile: 'main.py' })).resolves.toMatchObject({
-      success: false,
-      errorCode: 'VALIDATION_ERROR',
-    });
+    expect(result.current.identity).toEqual({ manifestRevision: current.manifest.revision });
     actor.stop();
   });
 });

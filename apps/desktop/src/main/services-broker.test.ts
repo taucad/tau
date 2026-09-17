@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- environment names are SCREAMING_SNAKE */
-import { mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -178,6 +178,38 @@ describe('createServicesBroker', () => {
     ]);
   });
 
+  it('should refuse a stale release once the project was retained again', async () => {
+    const { broker, spawns } = brokerHarness();
+    /* `${sessionEpoch}:${projectId}` repeats across a remount, so the id alone
+     * cannot tell a re-adoption from the attachment that is releasing. */
+    const attachmentId = 'window-1';
+    broker.retainAgentHost({ workspaceRoot: '/home/a', projectId: 'a', attachmentId });
+    broker.connect('agentHost', { workspaceRoot: '/home/a', projectId: 'a' });
+    const releasing = broker.releaseAgentHost({ workspaceRoot: '/home/a', projectId: 'a', attachmentId }, 1000);
+    const releaseFrame = spawns[0]?.posted.find(
+      (message): message is Record<string, unknown> =>
+        typeof message === 'object' &&
+        message !== null &&
+        'type' in message &&
+        message['type'] === 'agent-host-release',
+    );
+
+    broker.retainAgentHost({ workspaceRoot: '/home/a', projectId: 'a', attachmentId });
+    broker.connect('agentHost', { workspaceRoot: '/home/a', projectId: 'a' });
+
+    const reconnectFrame = spawns[0]?.posted.at(-1) as { context?: Record<string, string> } | undefined;
+    expect(reconnectFrame?.context?.['attachmentGeneration']).not.toBe(String(releaseFrame?.['attachmentGeneration']));
+
+    spawns[0]?.message({ type: 'agent-host-released', requestId: releaseFrame?.['requestId'] });
+    await releasing;
+
+    /* The re-adopted grant survives the release it did not belong to. */
+    spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-a', workspaceRoot: '/home/a' });
+    expect(spawns[0]?.postMessage).toHaveBeenCalledWith({ type: 'runtime-port', requestId: 'runtime-a' }, [
+      { id: 'runtime' },
+    ]);
+  });
+
   it('mints runtime ports only from a main-admitted agent context', () => {
     const { broker, connectRuntime, spawns } = brokerHarness();
     broker.connect('agentHost', {
@@ -229,7 +261,9 @@ describe('createServicesBroker', () => {
         definition: 'default',
       });
     } finally {
-      rmSync(alias, { force: true });
+      /* `rmSync` follows a directory symlink and refuses it; the link itself is
+       * what has to go, and before its target so it never dangles. */
+      unlinkSync(alias);
       rmSync(canonical, { force: true, recursive: true });
     }
   });

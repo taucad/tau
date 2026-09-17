@@ -5,6 +5,7 @@ import { composerRecordPaths, recordAttachmentsPath } from '#db/composer-record-
 import { File, FileText, ImageOff } from 'lucide-react';
 import { cn } from '@taucad/ui/utils/cn';
 import { attachmentAbsentLabel, attachmentDownloadName, useAttachmentSource } from '#hooks/use-attachment-source.js';
+import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { formatBytes } from '#lib/format-bytes.js';
 
 /** The directories one project chat's attachment references resolve against. */
@@ -32,8 +33,8 @@ export const useChatAttachmentDirectories = (): ChatAttachmentDirectories | unde
   useContext(ChatAttachmentDirectoriesContext);
 
 type AttachmentFileChipProperties = {
-  /** The directory the part's `attachments/` reference resolves against. */
-  readonly directory: string | undefined;
+  /** The directories the part's `attachments/` reference resolves against, in order. */
+  readonly directory: AttachmentDirectories;
   readonly part: { readonly url: string; readonly mediaType: string; readonly filename?: string };
   /** The part is an image whose preview failed; the chip is its download fallback. */
   readonly isError?: boolean;
@@ -89,7 +90,7 @@ export function AttachmentFileChip({
 }
 
 type AttachmentImageProperties = {
-  readonly directory: string | undefined;
+  readonly directory: AttachmentDirectories;
   readonly part: { readonly url: string; readonly mediaType: string };
   readonly alt: string;
   readonly className?: string;

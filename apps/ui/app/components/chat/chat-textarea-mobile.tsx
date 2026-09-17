@@ -1,4 +1,5 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useId, useState } from 'react';
+import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { Plus, Wrench, Paperclip, ChevronRight } from 'lucide-react';
 import type { ToolSelection } from '@taucad/chat';
 import { Button } from '@taucad/ui/components/button';
@@ -14,7 +15,7 @@ import { ChatKernelSelector } from '#components/chat/chat-kernel-selector.js';
 import { ChatToolSelector } from '#components/chat/chat-tool-selector.js';
 import { ChatContextActions } from '#components/chat/chat-context-actions.js';
 import { ChatTextareaBorderBeam } from '#components/chat/chat-textarea-border-beam.js';
-import { ChatTextareaMobileImages } from '#components/chat/chat-textarea-mobile-images.js';
+import { ChatTextareaAttachmentRail } from '#components/chat/chat-textarea-image-strip.js';
 import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-button.js';
 import { focusTrapAttribute } from '#components/chat/chat-textarea-types.js';
 import type { ChatAttachmentAddOptions, ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
@@ -54,7 +55,7 @@ type ChatTextareaMobileProperties = {
   readonly isSubmitting: boolean;
   readonly inputText: string;
   readonly attachments: readonly DraftAttachment[];
-  readonly attachmentDirectory: string;
+  readonly attachmentDirectory: AttachmentDirectories;
   readonly sendBlockReason: string | undefined;
   readonly attachmentAccept: string;
   readonly attachmentInputSupported: boolean;
@@ -182,6 +183,7 @@ export const ChatTextareaMobile = memo(function ({
   setSelectedMenuIndex,
 }: ChatTextareaMobileProperties): React.JSX.Element {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const blockReasonId = useId();
   const {
     execution: { execution },
     canSelectExecution,
@@ -463,10 +465,12 @@ export const ChatTextareaMobile = memo(function ({
           }}
           onPointerDown={handlePointerDown}
         >
-          <ChatTextareaMobileImages
+          <ChatTextareaAttachmentRail
             attachments={attachments}
             directory={attachmentDirectory}
             blockReason={sendBlockReason}
+            blockReasonId={blockReasonId}
+            size='mobile'
             onRemove={removeAttachment}
           />
           {/*
@@ -559,6 +563,7 @@ export const ChatTextareaMobile = memo(function ({
             sendBlockReason !== undefined ||
             (inputText.trim().length === 0 && attachments.length === 0)
           }
+          describedBy={sendBlockReason === undefined ? undefined : blockReasonId}
           formattedCancelKeyCombination={formattedCancelKeyCombination}
           onSubmit={handleSubmit}
           onCancel={handleCancelClick}

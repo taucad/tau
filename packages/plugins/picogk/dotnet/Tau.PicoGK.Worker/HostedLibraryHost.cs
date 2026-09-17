@@ -16,6 +16,9 @@ namespace Tau.PicoGK.Worker;
 
 internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
 {
+    // How long the hosting thread waits between viewer polls while the model is still running.
+    private const int ViewerPollIntervalMilliseconds = 5;
+
     private readonly string artifactRoot;
     private ModelExecutionResult? result;
     private bool disposed;
@@ -61,10 +64,12 @@ internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
             initialize.Stop();
 
             var task = Task.Run(fnTask.Invoke);
-            while (!task.IsCompleted)
+            // D25: the model's completion wakes this thread. Sleeping the poll interval instead
+            // paid up to a whole interval after the model had already finished, on every render.
+            var completed = ((IAsyncResult)task).AsyncWaitHandle;
+            while (!completed.WaitOne(ViewerPollIntervalMilliseconds))
             {
                 viewer.bPoll();
-                Thread.Sleep(5);
             }
             viewer.bPoll();
             backend.Complete();

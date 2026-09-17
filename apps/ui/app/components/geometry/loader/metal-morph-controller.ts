@@ -22,6 +22,7 @@ import {
   createMetalMorphNodeMaterial,
   metalMorphShapeAttributeName,
 } from '#components/geometry/loader/metal-morph-material.node.js';
+import type { MetalMorphMaterialOptions } from '#components/geometry/loader/metal-morph-material.node.js';
 import {
   createSeededRandom,
   defaultMorphTiming,
@@ -33,7 +34,12 @@ import type { MorphPhase, MorphTimingConfig } from '#components/geometry/loader/
 import { getMetalMorphGeometryData, metalMorphShapeIds } from '#components/geometry/loader/metal-morph-shapes.js';
 import type { MetalMorphGeometryData, MetalMorphShapeId } from '#components/geometry/loader/metal-morph-shapes.js';
 
-export type MetalMorphLoaderQuality = 'balanced' | 'high';
+/**
+ * Cost tier. `inline` suits spinners under about 120 px (coarse body, no bloom, no thin film, 30 fps,
+ * low-power adapter); `balanced` mid-size surfaces; `high` hero surfaces with bloom, thin film and an
+ * adaptive governor that steps pixel ratio, bloom and frame rate down when frames run long.
+ */
+export type MetalMorphLoaderQuality = 'inline' | 'balanced' | 'high';
 export type MetalMorphLoaderTheme = 'dark' | 'light';
 /** GPU API the node renderer ended up on after Three's own fallback. */
 export type MetalMorphBackendInUse = 'webgpu' | 'webgl2';
@@ -53,6 +59,12 @@ export type MetalMorphLoaderStatistics = Readonly<{
   vertexCount: number;
   isBloomEnabled: boolean;
   isPlaying: boolean;
+  /** Frames per second the loop currently aims for, after any adaptive cap. */
+  targetFrameRate: number;
+  /** Governor step in effect: 0 none, 1 pixel ratio reduced, 2 bloom off, 3 frame rate halved. */
+  adaptiveLevel: number;
+  /** Device pixel ratio the canvas currently renders at. */
+  pixelRatio: number;
 }>;
 
 /** Pixel statistics of one frame read back from an offscreen target, independent of canvas presentation. */
@@ -80,7 +92,7 @@ export type MetalMorphLoaderOptions = Readonly<{
   canvas: HTMLCanvasElement;
   backend: ResolvedGraphicsBackend;
   theme: MetalMorphLoaderTheme;
-  /** `high` tessellates finer and adds bloom; `balanced` suits small inline spinners. */
+  /** Cost tier; see {@link MetalMorphLoaderQuality}. */
   quality?: MetalMorphLoaderQuality;
   /** Deterministic sequencing seed; omitted for a fresh random loop. */
   seed?: number;
@@ -128,8 +140,62 @@ const maximumFrameDelta = 100;
 /** Milliseconds between frames-per-second estimates. */
 const statisticsWindow = 500;
 const historyLimit = 16;
-const icosphereDetailByQuality: Readonly<Record<MetalMorphLoaderQuality, number>> = { balanced: 5, high: 6 };
 const bloomSettings = { strength: 0.18, radius: 0.3, threshold: 1.35, alphaGain: 0.8 } as const;
+
+type QualityProfile = Readonly<{
+  /** Icosphere subdivisions; vertex count is `10 * 4^detail + 2`. */
+  detail: number;
+  bloom: boolean;
+  /** PMREM cube face size for the studio environment. */
+  environmentSize: number;
+  targetFrameRate: number;
+  material: MetalMorphMaterialOptions;
+  powerPreference: 'high-performance' | 'low-power';
+}>;
+
+/** Every tier keeps the fillets smooth: at these tessellations a fillet still spans several triangles. */
+const qualityProfiles: Readonly<Record<MetalMorphLoaderQuality, QualityProfile>> = {
+  inline: {
+    detail: 3,
+    bloom: false,
+    environmentSize: 64,
+    targetFrameRate: 30,
+    material: { iridescence: 0, perturbNormals: false },
+    powerPreference: 'low-power',
+  },
+  balanced: {
+    detail: 4,
+    bloom: false,
+    environmentSize: 128,
+    targetFrameRate: 60,
+    material: { iridescence: 0 },
+    powerPreference: 'low-power',
+  },
+  high: {
+    detail: 5,
+    bloom: true,
+    environmentSize: 256,
+    targetFrameRate: 60,
+    material: {},
+    powerPreference: 'high-performance',
+  },
+};
+
+/** Frames per second the loop settles to once the governor caps it. */
+const reducedFrameRate = 30;
+const reducedPixelRatioScale = 0.75;
+/** Milliseconds of slack under the frame cap, so a display tick just short of the interval still draws. */
+const frameCapTolerance = 3;
+/** Average frame interval, relative to the target, above which a statistics window counts as slow. */
+const adaptiveSlowRatio = 1.35;
+/** Average frame interval, relative to the target, below which a window counts as having headroom. */
+const adaptiveFastRatio = 1.05;
+const adaptiveSlowWindows = 2;
+/** Windows of headroom before a governor step is undone; doubles each time a step has to be repeated. */
+const adaptiveRecoveryWindows = 8;
+const adaptiveRecoveryWindowsLimit = 64;
+/** Governor steps, least visible first. */
+const adaptiveLevels = { pixelRatio: 1, bloom: 2, frameRate: 3 } as const;
 /** Side length of the square readback; a multiple of 64 texels keeps WebGPU copy rows unpadded. */
 const captureSize = 256;
 /** WebGPU aligns copied rows to this many bytes; a padded readback is unpacked with this stride. */
@@ -249,16 +315,16 @@ const createBloomPipeline = (
  * environment and a continuous loop that flows the body between five forms.
  */
 export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalMorphLoaderController => {
-  const quality = options.quality ?? 'high';
+  const profile = qualityProfiles[options.quality ?? 'high'];
   const timing = options.timing ?? defaultMorphTiming;
   const random = createSeededRandom(options.seed ?? randomSeed());
   const scene = new Scene();
   const camera = new PerspectiveCamera(26, 1, 0.5, 40);
   camera.position.set(0, 0.3, cameraDistance);
   camera.lookAt(0, 0, 0);
-  const geometryData = getMetalMorphGeometryData(icosphereDetailByQuality[quality]);
+  const geometryData = getMetalMorphGeometryData(profile.detail);
   const geometry = buildGeometry(geometryData);
-  const { material, handles } = createMetalMorphNodeMaterial();
+  const { material, handles } = createMetalMorphNodeMaterial(profile.material);
   const mesh = new Mesh(geometry, material);
   mesh.frustumCulled = false;
   mesh.quaternion.copy(initialOrientation);
@@ -276,11 +342,16 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
   let wantsPlayback = false;
   let isLooping = false;
   let pendingSize: { width: number; height: number; pixelRatio: number } | undefined;
+  let requestedSize: { width: number; height: number; pixelRatio: number } | undefined;
   let elapsed = 0;
   let lastFrameTime: number | undefined;
   let framesInWindow = 0;
   let windowElapsed = 0;
   let framesPerSecond = 0;
+  let adaptiveLevel = 0;
+  let slowWindows = 0;
+  let headroomWindows = 0;
+  let recoveryWindows = adaptiveRecoveryWindows;
 
   let currentShape: MetalMorphShapeId = options.initialShape ?? metalMorphShapeIds[0];
   let nextShape = currentShape;
@@ -371,8 +442,75 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
     }
   };
 
+  const effectiveFrameRate = (): number =>
+    adaptiveLevel >= adaptiveLevels.frameRate
+      ? Math.min(reducedFrameRate, profile.targetFrameRate)
+      : profile.targetFrameRate;
+
+  const applySize = (size: { width: number; height: number; pixelRatio: number }): void => {
+    requestedSize = size;
+    if (!renderer) {
+      pendingSize = size;
+      return;
+    }
+    const pixelRatio =
+      adaptiveLevel >= adaptiveLevels.pixelRatio
+        ? Math.max(1, size.pixelRatio * reducedPixelRatioScale)
+        : size.pixelRatio;
+    renderer.setPixelRatio(pixelRatio);
+    renderer.setSize(size.width, size.height, false);
+    frameCamera(camera, size.width, size.height);
+  };
+
+  const setAdaptiveLevel = (level: number): void => {
+    const next = Math.max(0, Math.min(adaptiveLevels.frameRate, level));
+    if (next === adaptiveLevel) {
+      return;
+    }
+    adaptiveLevel = next;
+    slowWindows = 0;
+    headroomWindows = 0;
+    if (requestedSize) {
+      applySize(requestedSize);
+    }
+    const wantsBloom = profile.bloom && adaptiveLevel < adaptiveLevels.bloom;
+    if (renderer && wantsBloom && !pipeline) {
+      pipeline = createBloomPipeline(renderer, scene, camera);
+    } else if (!wantsBloom && pipeline) {
+      pipeline.dispose();
+      pipeline = undefined;
+    }
+  };
+
+  /** Step the cost down while frames run long, and back up, more cautiously each time, once there is headroom. */
+  const govern = (averageInterval: number, frameInterval: number): void => {
+    if (averageInterval > frameInterval * adaptiveSlowRatio) {
+      headroomWindows = 0;
+      slowWindows += 1;
+      if (slowWindows >= adaptiveSlowWindows && adaptiveLevel < adaptiveLevels.frameRate) {
+        setAdaptiveLevel(adaptiveLevel + 1);
+        recoveryWindows = Math.min(recoveryWindows * 2, adaptiveRecoveryWindowsLimit);
+      }
+      return;
+    }
+    slowWindows = 0;
+    if (averageInterval < frameInterval * adaptiveFastRatio && adaptiveLevel > 0) {
+      headroomWindows += 1;
+      if (headroomWindows >= recoveryWindows) {
+        setAdaptiveLevel(adaptiveLevel - 1);
+      }
+      return;
+    }
+    headroomWindows = 0;
+  };
+
   const frame = (time: number): void => {
     if (isDisposed() || !isLooping) {
+      return;
+    }
+    const frameInterval = 1000 / effectiveFrameRate();
+    if (lastFrameTime !== undefined && time - lastFrameTime < frameInterval - frameCapTolerance) {
+      // Under the frame cap this display tick is skipped; the clock catches up on the next drawn frame.
       return;
     }
     const delta = lastFrameTime === undefined ? 0 : Math.min(maximumFrameDelta, Math.max(0, time - lastFrameTime));
@@ -383,19 +521,10 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
     windowElapsed += delta;
     if (windowElapsed >= statisticsWindow) {
       framesPerSecond = (framesInWindow * 1000) / windowElapsed;
+      govern(windowElapsed / framesInWindow, frameInterval);
       framesInWindow = 0;
       windowElapsed = 0;
     }
-  };
-
-  const applySize = (size: { width: number; height: number; pixelRatio: number }): void => {
-    if (!renderer) {
-      pendingSize = size;
-      return;
-    }
-    renderer.setPixelRatio(size.pixelRatio);
-    renderer.setSize(size.width, size.height, false);
-    frameCamera(camera, size.width, size.height);
   };
 
   const startLoop = (): void => {
@@ -418,7 +547,10 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
   // A named function rather than an IIFE: TypeScript narrows captured flags inside immediately invoked
   // expressions, which would hide the playback request made while initialisation was still awaiting.
   const initialise = async (): Promise<void> => {
-    const created = await createRenderer('showcase', options.backend, options.canvas);
+    const created = await createRenderer('showcase', options.backend, {
+      canvas: options.canvas,
+      powerPreference: profile.powerPreference,
+    });
     if (isDisposed()) {
       created.dispose();
       return;
@@ -429,9 +561,9 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
     renderer.setClearColor(0x00_00_00, 0);
     applySize(pendingSize ?? { width: 256, height: 256, pixelRatio: 1 });
     pendingSize = undefined;
-    environment = createMetalMorphEnvironment(renderer, theme);
+    environment = createMetalMorphEnvironment(renderer, theme, { size: profile.environmentSize });
     scene.environment = environment.texture;
-    if (quality === 'high') {
+    if (profile.bloom) {
       pipeline = createBloomPipeline(renderer, scene, camera);
     }
     await renderer.compileAsync(scene, camera);
@@ -476,7 +608,7 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
         return;
       }
       const previous = environment;
-      environment = createMetalMorphEnvironment(renderer, theme);
+      environment = createMetalMorphEnvironment(renderer, theme, { size: profile.environmentSize });
       scene.environment = environment.texture;
       previous?.dispose();
       if (isReady && !isLooping) {
@@ -507,6 +639,9 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
       vertexCount: geometryData.vertexCount,
       isBloomEnabled: pipeline !== undefined,
       isPlaying: isLooping,
+      targetFrameRate: effectiveFrameRate(),
+      adaptiveLevel,
+      pixelRatio: renderer?.getPixelRatio() ?? 1,
     }),
     getShaderSource: async () => {
       if (!renderer) {

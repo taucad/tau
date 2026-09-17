@@ -34,6 +34,16 @@ describe('createMetalMorphNodeMaterial', () => {
     expect(material.iridescenceNode).toBeDefined();
   });
 
+  it('should leave the thin-film model and the gradient probes out of a spinner material', () => {
+    const { material } = createMetalMorphNodeMaterial({ iridescence: 0, perturbNormals: false });
+
+    expect(material.iridescence).toBe(0);
+    expect(material.iridescenceNode).toBeNull();
+    expect(material.iridescenceThicknessNode).toBeNull();
+    expect(material.positionNode).toBeDefined();
+    expect(material.normalNode).toBeDefined();
+  });
+
   it('should animate through uniform mutation without rebuilding the graph', () => {
     const { material, handles } = createMetalMorphNodeMaterial();
     const { positionNode } = material;

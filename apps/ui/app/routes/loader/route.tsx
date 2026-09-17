@@ -311,8 +311,8 @@ export default function LoaderShowcase(): React.JSX.Element {
             {isInlineSizesVisible ? (
               <div className='flex items-end gap-6'>
                 <Suspense fallback={<Loader className='size-4' />}>
-                  <MetalMorphLoaderLazy className='size-10' quality='balanced' label='Loading' />
-                  <MetalMorphLoaderLazy className='size-24' quality='balanced' label='Loading' />
+                  <MetalMorphLoaderLazy className='size-10' quality='inline' label='Loading' />
+                  <MetalMorphLoaderLazy className='size-24' quality='inline' label='Loading' />
                 </Suspense>
               </div>
             ) : null}

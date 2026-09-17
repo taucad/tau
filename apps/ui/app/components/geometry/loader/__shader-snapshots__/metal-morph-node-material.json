@@ -17,7 +17,7 @@
     "positionNode": "<nodeRef>",
     "roughnessNode": "<nodeRef>"
   },
-  "iridescence": 0,
+  "iridescence": 0.5,
   "iridescenceIOR": 1.28,
   "iridescenceThicknessRange": [140, 480],
   "metadata": {

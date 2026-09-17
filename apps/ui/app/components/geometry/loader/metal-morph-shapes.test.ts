@@ -4,12 +4,10 @@ import {
   buildIcosphere,
   extractConvexFaces,
   getMetalMorphGeometryData,
-  getMetalMorphPlaneTable,
   icosphereVertexCount,
   metalMorphShapeDefinitions,
   metalMorphShapeIds,
   prepareSolid,
-  sampleFromPlaneTable,
   sampleRadial,
 } from '#components/geometry/loader/metal-morph-shapes.js';
 import type { Vector3Tuple } from '#components/geometry/loader/metal-morph-shapes.js';
@@ -217,59 +215,5 @@ describe('getMetalMorphGeometryData', () => {
       }
     }
     expect(getMetalMorphGeometryData(2)).toBe(data);
-  });
-});
-
-describe('getMetalMorphPlaneTable', () => {
-  it('should flatten every shape into contiguous core and side planes with crease twins', () => {
-    const table = getMetalMorphPlaneTable();
-
-    expect(table.descriptors).toHaveLength(metalMorphShapeIds.length);
-    expect(table.planes).toHaveLength(130);
-    expect(table.twins).toHaveLength(130);
-    expect(table.descriptors).toEqual([
-      [0, 12, 12, 4],
-      [60, 8, 68, 3],
-      [92, 6, 98, 0],
-      [98, 12, 110, 0],
-      [110, 20, 130, 0],
-    ]);
-    expect(table.roundness).toEqual(metalMorphShapeIds.map((id) => metalMorphShapeDefinitions[id].roundness));
-    for (const [index, plane] of table.planes.entries()) {
-      expect(Math.hypot(plane[0], plane[1], plane[2])).toBeCloseTo(1, 9);
-      expect(plane[3]).toBeGreaterThan(0);
-      const twin = table.twins[index]!;
-      const isSidePlane = table.descriptors.some(
-        (descriptor) =>
-          descriptor[3] > 0 && index >= descriptor[2] && index < descriptor[2] + descriptor[1] * descriptor[3],
-      );
-      if (isSidePlane) {
-        expect(Math.hypot(twin[0], twin[1], twin[2])).toBeCloseTo(1, 9);
-        expect(twin).not.toEqual(plane);
-        expect(table.planes).toContainEqual(twin);
-      } else {
-        expect(twin).toEqual([0, 0, 0, 0]);
-      }
-    }
-    expect(getMetalMorphPlaneTable()).toBe(table);
-  });
-
-  it('should reproduce the radial sampler through the shader lookup order for every shape', () => {
-    const table = getMetalMorphPlaneTable();
-    for (const [shapeIndex, id] of metalMorphShapeIds.entries()) {
-      const solid = prepareSolid(metalMorphShapeDefinitions[id]);
-      for (let sample = 0; sample < 300; sample += 1) {
-        const theta = (sample / 300) * Math.PI * 2 * 5.17;
-        const z = 1 - (2 * (sample + 0.5)) / 300;
-        const ring = Math.sqrt(1 - z * z);
-        const direction: Vector3Tuple = [ring * Math.cos(theta), ring * Math.sin(theta), z];
-        const expected = sampleRadial(solid, direction);
-        const actual = sampleFromPlaneTable(table, shapeIndex, direction);
-        expect(actual.radius).toBeCloseTo(expected.radius, 9);
-        expect(actual.normal[0]).toBeCloseTo(expected.normal[0], 9);
-        expect(actual.normal[1]).toBeCloseTo(expected.normal[1], 9);
-        expect(actual.normal[2]).toBeCloseTo(expected.normal[2], 9);
-      }
-    }
   });
 });

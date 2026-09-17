@@ -712,14 +712,12 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
    * @param runId - The run whose admission is waiting.
    * @param reason - What the host can tell the person, already a sentence.
    */
-  const refuseAdmission = (runId: string, reason: string): void => {
+  const refuseAdmission = (runId: string, reason: string, code = 'REVISION_PREPARE_FAILED'): void => {
     const pending = admissions.get(runId);
     admissions.delete(runId);
     placements.delete(runId);
     pending?.reject(
-      Object.assign(new Error(`This project could not open a revision for the turn: ${reason}`), {
-        code: 'REVISION_PREPARE_FAILED',
-      }),
+      Object.assign(new Error(`This project could not open a revision for the turn: ${reason}`), { code }),
     );
   };
   /** Monotonic per checkout, one increment per content-change event (A38, F9). */
@@ -869,6 +867,13 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
      * already resolved at `leased` and there is nothing here to settle.
      */
     refuseAdmission(event.runId, failure.reason);
+  });
+  /* R10: a second admission for a turn id the root still holds is answered now,
+   * with its own code, instead of waiting out `admissionMilliseconds`. Edit and
+   * retry reuse the first turn's message id as the lease key, so this is the
+   * answer a chat gets when its previous turn actor is still retiring. */
+  actor.on('turnRefused', (event) => {
+    refuseAdmission(event.runId, event.reason, event.code);
   });
   actor.start();
   published = selectRevisionStatus(actor.getSnapshot());

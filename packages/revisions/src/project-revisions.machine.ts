@@ -374,6 +374,23 @@ export type ProjectRevisionsMachineEmitted =
       checkoutId: string;
     }>
   | Readonly<{ type: 'switchRefused'; branch: string; reason: string }>
+  /**
+   * A second admission for a turn id this root still holds (R10).
+   *
+   * Ignoring it silently left its caller waiting out the whole admission bound
+   * and then hearing that the turn was never leased — which names nothing
+   * anybody can act on. Edit and retry reuse the first turn's message id as the
+   * lease key, so this is the answer a chat gets when it re-admits a turn whose
+   * previous actor is still retiring.
+   */
+  | Readonly<{
+      type: 'turnRefused';
+      turnId: string;
+      chatId: string;
+      runId: string;
+      code: 'TURN_ALREADY_LEASED';
+      reason: string;
+    }>
   | Readonly<{ type: 'leaseRetired'; runId: string }>
   | Readonly<{ type: 'removalOffered'; checkoutId: string }>
   | Readonly<{ type: 'checkoutFailed'; operation: CheckoutOperation; reason: string }>
@@ -744,6 +761,18 @@ export const projectRevisionsMachine = setup({
                 }),
               }),
             }),
+          },
+          {
+            actions: emit(
+              ({ event }): Extract<ProjectRevisionsMachineEmitted, { readonly type: 'turnRefused' }> => ({
+                type: 'turnRefused',
+                turnId: event.turnId,
+                chatId: event.chatId,
+                runId: event.runId,
+                code: 'TURN_ALREADY_LEASED',
+                reason: 'This chat is still settling its previous turn.',
+              }),
+            ),
           },
         ],
         turnPrepared: {

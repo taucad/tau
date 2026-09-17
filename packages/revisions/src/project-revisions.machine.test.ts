@@ -319,6 +319,14 @@ describe('projectRevisionsMachine', () => {
 
     expect(Object.keys(harness.actor.getSnapshot().context.turnRefs)).toEqual(['turn-1']);
     expect(harness.promises.inputsFor('prepare')).toEqual([{ turnId: 'turn-1', chatId: 'chat-1', runId: 'run-1' }]);
+    /* Ignoring the second admission left its caller waiting out the whole
+     * admission bound before hearing that the turn was never leased. */
+    expect(harness.emitted.find((event) => event.type === 'turnRefused')).toMatchObject({
+      turnId: 'turn-1',
+      chatId: 'chat-1',
+      runId: 'run-2',
+      code: 'TURN_ALREADY_LEASED',
+    });
 
     harness.actor.stop();
   });

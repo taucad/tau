@@ -560,7 +560,6 @@ test('project and chat rows reveal their actions over a dissolving name', async 
     if (!projects[0] || !projects[1] || !chat) {
       throw new Error('Sidebar project rows were not ready.');
     }
-    const projectBounds = projects[0].getBoundingClientRect();
     const nextProjectBounds = projects[1].getBoundingClientRect();
     const chatBounds = chat.getBoundingClientRect();
     const chatList = chat.closest<HTMLElement>('[data-slot="sidebar-menu-sub"]');

@@ -142,15 +142,11 @@
       "executor": "nx:run-commands",
       "cache": false,
       "metadata": {
-        "description": "W18 two-client tier: chromium.launch() beside electron.launch() in one node-side vitest process, a real UI server on :3014 (apps/ui/server.ts, started by the spec), the dedicated API on :4014, and a git http-backend fixture in mktemp. Kept off test:e2e because it needs the built web UI as well as the desktop shell, and six of its cases are red pins on product defects. No dependsOn api:build: that chain reaches runtime:build, which is red on Node 24 for a tsdown config-loader bug, and global-setup.ts builds apps/api itself."
+        "description": "W18 two-client tier: chromium.launch() beside electron.launch() in one node-side vitest process, a real UI server on :3014 (apps/ui/server.ts, started by the spec), the dedicated API on :4014, and a git http-backend fixture in mktemp. Kept off test:e2e because it needs the built web UI as well as the desktop shell, and six of its cases are red pins on product defects. No dependsOn api:build: that chain reaches runtime:build, which is red on Node 24 for a tsdown config-loader bug, and global-setup.ts builds apps/api itself. The web UI is built by the first command rather than a dependsOn, because it must be the cloud variant (TAU_CLOUD_ENABLED=true is a build-time input of ui:build) and a dependency task inherits only the caller's environment: a self-host build hands every account canSyncFiles and renders no plan gate, so the entitlement and Upgrade rows could never be observed."
       },
       "dependsOn": [
         {
           "projects": ["desktop"],
-          "target": "build"
-        },
-        {
-          "projects": ["ui"],
           "target": "build"
         },
         {
@@ -162,8 +158,9 @@
         "cwd": "{workspaceRoot}/apps/desktop-e2e",
         "parallel": false,
         "commands": [
+          "TAU_CLOUD_ENABLED=true pnpm --dir ../.. exec nx run ui:build",
           "./scripts/ensure-services.sh",
-          "../../node_modules/.bin/vitest run --config vitest.config.ts src/two-client.spec.ts"
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/two-client.spec.ts src/sync-refusals.spec.ts"
         ],
         "env": {
           "TAU_E2E_API_URL": "http://localhost:4014"

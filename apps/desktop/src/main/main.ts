@@ -30,8 +30,8 @@ import { connectSqliteComputeStoreWorker } from '@taucad/runtime/node';
 import type { ComputeBinding } from '@taucad/runtime/types';
 import { defaultConfigDirectory, discoverAcpAgents, externalAgentDescriptors } from '@taucad/host';
 
-import kernelUtilityEntry from '#tau/kernel-host?modulePath';
-import servicesUtilityEntry from '#tau/services-host?modulePath';
+import kernelUtilityEntry from '#tau/kernel-host.entry?modulePath';
+import servicesUtilityEntry from '#tau/services-host.entry?modulePath';
 import computeStoreWorkerEntry from '#main/compute-store.worker?modulePath';
 
 import { appOrigin, appSchemePrivileges, registerAppProtocol } from '#main/app-protocol.js';
@@ -65,7 +65,12 @@ import {
 } from '#main/project-roots.js';
 import { createServicesBroker, rendererServicesConcerns } from '#main/services-broker.js';
 import type { ServicesConcern } from '#main/services-broker.js';
-import { loginShellEnvironment, packagedEsbuildEnvironment, utilityEnvironment } from '#main/utility-environment.js';
+import {
+  compileCacheEnvironment,
+  loginShellEnvironment,
+  packagedEsbuildEnvironment,
+  utilityEnvironment,
+} from '#main/utility-environment.js';
 import { createQuickLookController, removeStaleQuickLookSessions } from '#main/quick-look.js';
 import type { QuickLookController } from '#main/quick-look.js';
 import { createOpenFileQueue } from '#main/open-files.js';
@@ -374,6 +379,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
      * engine actually loaded — the version never crosses the runtime wire. */
     env: utilityEnvironment(environment, {
       ...esbuildEnvironment,
+      ...compileCacheEnvironment(app.getPath('userData')),
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_BUILD123D_RESOURCE_ROOT: build123dResourceRoot, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_PICOGK_RESOURCE_ROOT: picogkResourceRoot, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
@@ -456,6 +462,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     env: utilityEnvironment(environment, {
       ...esbuildEnvironment,
       ...gitEnvironment,
+      ...compileCacheEnvironment(app.getPath('userData')),
       TAU_CONFIG_DIR: tauConfigDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_AUTHORITY_DIR: authorityDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name
       TAU_DESKTOP_LOG_DIR: logDirectory, // eslint-disable-line @typescript-eslint/naming-convention -- environment name

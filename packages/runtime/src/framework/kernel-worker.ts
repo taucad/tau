@@ -103,7 +103,7 @@ import { createRetainedSceneStore, toSceneCacheValue } from '#cache/retained-sce
 import type { RetainedSceneStore } from '#cache/retained-scene-store.js';
 import { toJSONSchema, z } from 'zod';
 import { createKernelError } from '#kernels/kernel-helpers.js';
-import { cooperativeYield } from '#framework/async-polyfills.js';
+import { cooperativeYield, scheduleMacrotask } from '#framework/async-polyfills.js';
 import { parameterDebounce, fileChangeDebounce } from '#framework/runtime-framework.constants.js';
 import { canonicalJson, sha256Bytes, sha256String } from '@taucad/utils/hash';
 import { contentDigest, digestContent, digestScene } from '@taucad/cache-core';
@@ -700,6 +700,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /** Current file for autonomous render loop. */
   private currentFile: RuntimeFileLocator | undefined;
 
+  /** An admitted open-file command that has not yet retargeted {@link currentFile}. */
+  private pendingOpenFileRecord: RenderCancellationRecord | undefined;
+
   /** Current parameters for autonomous render loop. */
   private currentParameters: Record<string, unknown> = {};
 
@@ -712,8 +715,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /** Framework-owned content requirements retained across autonomous rerenders. */
   private currentRenderContent: RuntimeContentInput | undefined;
 
-  /** Debounce timer for parameter change re-renders. */
-  private paramDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Cancels the render {@link scheduleRender} has pending, whether it waits on a timer or a macrotask. */
+  private pendingRenderCancel: (() => void) | undefined;
 
   /** Last state pushed via `pushState`, used to deduplicate repeated emissions. */
   private lastPushedState?: { readonly renderId: string; readonly state: WorkerState; readonly detail?: string };
@@ -938,6 +941,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     if (!record) {
       return;
     }
+    this.pendingOpenFileRecord = record;
     await this.runQueuedCommand(record, async () => {
       if (Object.keys(stage).length > 0) {
         await this.writeFilesAndInvalidate(stage);
@@ -959,6 +963,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     if (!record) {
       return;
     }
+    this.pendingOpenFileRecord = record;
     void this.runQueuedCommand(record, async () =>
       this.applyOpenFileIntent({
         record,
@@ -1032,8 +1037,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.currentParameters = parameters ?? {};
     this.currentRenderOptions = operation?.options;
     this.currentRenderContent = operation?.content;
-    clearTimeout(this.paramDebounceTimer);
-    this.paramDebounceTimer = undefined;
+    this.clearScheduledRender();
 
     this.setActiveFile(canonicalFile);
     const entryCandidate = {

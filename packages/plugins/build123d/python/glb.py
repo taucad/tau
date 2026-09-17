@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
-import math
 import struct
 from pathlib import Path
 from typing import Any
+
+import numpy
 
 GLTF_TRIANGLES = 4
 GLTF_LINES = 1
@@ -22,10 +23,11 @@ def _bounds(values: list[float]) -> tuple[list[float], list[float]]:
         raise ValueError("Position arrays must contain XYZ triples")
     if not values:
         raise ValueError("Position arrays must not be empty")
-    axes = (values[0::3], values[1::3], values[2::3])
-    if any(not math.isfinite(value) for value in values):
+    # Bounds come from the float32 values the accessor actually stores, as glTF 2.0 requires.
+    axes = numpy.asarray(values, dtype=numpy.float32).reshape(-1, 3)
+    if not numpy.isfinite(axes).all():
         raise ValueError("Position arrays must contain only finite values")
-    return [min(axis) for axis in axes], [max(axis) for axis in axes]
+    return axes.min(axis=0).tolist(), axes.max(axis=0).tolist()
 
 
 class _Buffer:
@@ -45,13 +47,14 @@ class _Buffer:
 
 
 def _floats(values: list[float]) -> bytes:
-    return struct.pack(f"<{len(values)}f", *values)
+    return numpy.asarray(values, dtype="<f4").tobytes()
 
 
 def _uints(values: list[int]) -> bytes:
-    if any(value < 0 or value > 0xFFFF_FFFF for value in values):
+    indices = numpy.asarray(values, dtype=numpy.int64)
+    if ((indices < 0) | (indices > 0xFFFF_FFFF)).any():
         raise ValueError("Indices must be unsigned 32-bit integers")
-    return struct.pack(f"<{len(values)}I", *values)
+    return indices.astype("<u4").tobytes()
 
 
 def validate_glb(payload: bytes) -> None:

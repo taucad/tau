@@ -38,6 +38,7 @@ const hookState = vi.hoisted(() => ({
   fileManager: undefined as unknown,
   invalidateProjectedChats: vi.fn(),
   refreshFromStorage: vi.fn(async () => undefined),
+  getChat: vi.fn(async (_chatId: string): Promise<{ id: string; checkoutId?: string } | undefined> => undefined),
 }));
 const revisionRoot = vi.hoisted(() => ({
   commands: [] as WorkerRevisionCommand[],
@@ -56,33 +57,50 @@ vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ projectId: hookState.projectId }),
 }));
 let chats = [{ id: 'chat_1', checkoutId: 'checkout-durable' }];
-vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats }) }));
+/* A fresh array on every render, exactly as react-query hands back a refetched
+ * `data`. Anything the provider derives from it churns its context value. */
+vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats: [...chats] }) }));
 vi.mock('#hooks/use-project-manager.js', () => ({
-  useProjectManager: () => ({ invalidateProjectedChats: hookState.invalidateProjectedChats }),
+  useProjectManager: () => ({
+    invalidateProjectedChats: hookState.invalidateProjectedChats,
+    getChat: hookState.getChat,
+  }),
 }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
   useChatSessionStore: () => ({ refreshFromStorage: hookState.refreshFromStorage }),
 }));
+const revisionClient = vi.hoisted(() => {
+  let held: unknown;
+  /* One client for the whole file: the real hook memoizes on project and
+   * worker, so any identity churn a test observes is the provider's own. */
+  return {
+    stable: (created: unknown): unknown => {
+      held ??= created;
+      return held;
+    },
+  };
+});
 vi.mock('#hooks/use-revision-status.js', () => ({
-  useRevisionClient: () => ({
-    status: () => undefined,
-    subscribe: () => () => undefined,
-    subscribeEvents: (listener: (event: WorkerRevisionEvent) => void) => {
-      revisionRoot.eventListeners.add(listener);
-      return () => revisionRoot.eventListeners.delete(listener);
-    },
-    subscribeToasts: () => () => undefined,
-    admitTurn: async (input: { turnId: string; chatId: string; runId: string; checkoutId?: string }) => {
-      revisionRoot.admitted.push(input);
-      await revisionRoot.hold?.promise;
-      if (revisionRoot.refuse !== undefined) {
-        throw Object.assign(new Error(revisionRoot.refuse), { code: 'REVISION_PREPARE_FAILED' });
-      }
-      return { checkoutId: 'live', root: '/projects/project_test', baseRevisionId: 'rev-base' };
-    },
-    send: (command: WorkerRevisionCommand) => revisionRoot.commands.push(command),
-    close: () => undefined,
-  }),
+  useRevisionClient: () =>
+    revisionClient.stable({
+      status: () => undefined,
+      subscribe: () => () => undefined,
+      subscribeEvents: (listener: (event: WorkerRevisionEvent) => void) => {
+        revisionRoot.eventListeners.add(listener);
+        return () => revisionRoot.eventListeners.delete(listener);
+      },
+      subscribeToasts: () => () => undefined,
+      admitTurn: async (input: { turnId: string; chatId: string; runId: string; checkoutId?: string }) => {
+        revisionRoot.admitted.push(input);
+        await revisionRoot.hold?.promise;
+        if (revisionRoot.refuse !== undefined) {
+          throw Object.assign(new Error(revisionRoot.refuse), { code: 'REVISION_PREPARE_FAILED' });
+        }
+        return { checkoutId: 'live', root: '/projects/project_test', baseRevisionId: 'rev-base' };
+      },
+      send: (command: WorkerRevisionCommand) => revisionRoot.commands.push(command),
+      close: () => undefined,
+    }),
 }));
 
 const client = (exists: ReturnType<typeof vi.fn>): FileSystemClientFacade =>
@@ -188,6 +206,7 @@ const bindFileManager = (project: RootedFileSystem): void => {
 
 beforeEach(() => {
   hookState.invalidateProjectedChats.mockClear();
+  hookState.getChat.mockImplementation(async (chatId: string) => chats.find((chat) => chat.id === chatId));
   hookState.refreshFromStorage.mockClear();
   revisionRoot.commands.length = 0;
   revisionRoot.admitted.length = 0;
@@ -264,7 +283,7 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
     await act(async () => {
       await result.current.markAdmitted('chat_1', 'turn_1');
       await result.current.markRunId('chat_1', 'run_browser_1');
-      await result.current.finalize('chat_1');
+      await result.current.finalize('chat_1', 'run_browser_1');
     });
 
     expect(written.filter((path) => path.includes('.tau/workspaces'))).toEqual([]);
@@ -294,12 +313,12 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
     bindFileManager(project);
     const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
 
-    await act(async () => result.current.prepare('chat_done', { turnId: 'turn_done' }));
-    await act(async () => result.current.finalize('chat_done'));
-    await act(async () => result.current.prepare('chat_gone', { turnId: 'turn_gone' }));
-    await act(async () => result.current.discard('chat_gone'));
-    await act(async () => result.current.prepare('chat_dead', { turnId: 'turn_dead' }));
-    await act(async () => result.current.retireClaim('chat_dead'));
+    const done = await act(async () => result.current.prepare('chat_done', { turnId: 'turn_done' }));
+    await act(async () => result.current.finalize('chat_done', done.runId));
+    const gone = await act(async () => result.current.prepare('chat_gone', { turnId: 'turn_gone' }));
+    await act(async () => result.current.discard('chat_gone', gone.runId));
+    const dead = await act(async () => result.current.prepare('chat_dead', { turnId: 'turn_dead' }));
+    await act(async () => result.current.retireClaim('chat_dead', dead.runId));
 
     expect(revisionRoot.commands).toEqual([
       { command: 'turnCompleted', turnId: 'turn_done' },
@@ -308,6 +327,38 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
     ]);
     expect(result.current.get('chat_done')).toBeUndefined();
     expect(result.current.get('chat_gone')).toBeUndefined();
+  });
+
+  it('should refuse a settlement that names a run the current claim is not', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    const { result } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    const first = await act(async () => result.current.prepare('chat_roll', { turnId: 'turn_roll_1' }));
+    await act(async () => result.current.discard('chat_roll', first.runId));
+    const second = await act(async () => result.current.prepare('chat_roll', { turnId: 'turn_roll_2' }));
+    /* The first run's settlement, decided while the second turn is already
+     * placed. It may not reach the second turn's lease. */
+    await act(async () => result.current.finalize('chat_roll', first.runId));
+
+    expect(revisionRoot.commands).toEqual([{ command: 'turnAbandoned', turnId: 'turn_roll_1' }]);
+    expect(result.current.get('chat_roll')).toMatchObject({ runId: second.runId });
+  });
+
+  it('should keep its context value identity-stable across a chats refetch', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    const { result, rerender } = renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+    const published = result.current;
+
+    chats = [{ id: 'chat_1', checkoutId: 'checkout-durable' }];
+    rerender();
+
+    expect(result.current.prepare).toBe(published.prepare);
+    expect(result.current).toBe(published);
+    /* Identity stability may not cost the placement its checkout. */
+    await act(async () => result.current.prepare('chat_1', { turnId: 'turn_stable' }));
+    expect(revisionRoot.admitted.at(-1)).toMatchObject({ checkoutId: 'checkout-durable' });
   });
 
   it('should send a completion that arrives while the turn is still being placed', async () => {
@@ -324,7 +375,7 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
     await waitFor(() => {
       expect(revisionRoot.admitted).toHaveLength(1);
     });
-    await act(async () => result.current.finalize('chat_race'));
+    await act(async () => result.current.finalize('chat_race', revisionRoot.admitted[0]?.runId));
     revisionRoot.hold.resolve();
     revisionRoot.hold = undefined;
     await preparing;

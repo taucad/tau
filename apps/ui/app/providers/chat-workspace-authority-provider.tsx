@@ -14,7 +14,6 @@ import type {
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
-import { useChats } from '#hooks/use-chats.js';
 import type { FileSystemClientFacade } from '#hooks/use-file-manager.js';
 import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import { useProject } from '#hooks/use-project.js';
@@ -96,10 +95,10 @@ type ChatWorkspaceAuthorityContextValue = Readonly<{
    * reader as one `turn.finalized` — emitted by the worker root here, written
    * into the chat's durable log on a Node host, in one schema (S9).
    */
-  finalize: (chatId: string) => Promise<void>;
-  discard: (chatId: string) => Promise<void>;
+  finalize: (chatId: string, runId: string | undefined) => Promise<void>;
+  discard: (chatId: string, runId: string | undefined) => Promise<void>;
   /** Let go of a turn whose run the host can no longer substantiate. */
-  retireClaim: (chatId: string) => Promise<void>;
+  retireClaim: (chatId: string, runId: string | undefined) => Promise<void>;
   subscribe: (listener: () => void) => () => void;
   /** Point the workbench at the checkout this chat's turns land on (D10). */
   followChat: (chatId: string) => void;
@@ -360,14 +359,16 @@ type BrowserWorkspaceAuthorityState = {
   readonly rootedFileSystem: RootedFileSystem;
   readonly turns: Map<string, TurnRecord>;
   /**
-   * The lease turn id of a chat whose admission is still in flight.
+   * The lease of a chat whose admission is still in flight.
    *
    * A run can finish before its own `admitTurn` resolves. The record that
    * `drop` reads is written when the placement lands, so without this the
    * completion has nothing to name and is lost — the lease is never retired and
-   * the turn waits out the root's cut bound (W3c §7.2).
+   * the turn waits out the root's cut bound (W3c §7.2). It carries the run id
+   * as well, because a settlement has to name the run it settles even when the
+   * claim it belongs to has not landed yet.
    */
-  readonly placing: Map<string, string>;
+  readonly placing: Map<string, { readonly leaseTurnId: string; readonly runId: string }>;
   readonly pending: Map<string, Promise<PreparedChatWorkspace>>;
   /** Chats seeded by *Ask chat to resolve*, by chat id (S33). */
   readonly conflicts: Map<
@@ -433,8 +434,7 @@ export const browserWorkspaceAuthorityTestApi = {
 export function ChatWorkspaceAuthorityProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const { projectId } = useProject();
   const fileManager = useFileManager();
-  const { invalidateProjectedChats } = useProjectManager();
-  const { chats } = useChats(projectId);
+  const { getChat, invalidateProjectedChats } = useProjectManager();
   const chatSessions = useChatSessionStore();
   const { rootDirectory, proxy: providerIdentity } = fileManager.fileManagerRef.getSnapshot().context;
   const state = getBrowserWorkspaceAuthority({
@@ -523,15 +523,32 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
     }
   }, [state]);
 
+  /**
+   * Retire the lease of the run this settlement names, and no other.
+   *
+   * Reading "whichever claim is current" is what let a decision made about one
+   * run abandon the *next* turn's lease: a settlement racing a claim rollover
+   * released the fresh admission, and the root answered that with a
+   * `turn.failed` recorded under a run the host had not admitted yet. A
+   * settlement names one run; if that is not the run this chat currently holds,
+   * the claim is somebody else's and the settlement is over.
+   */
   const drop = useCallback(
-    (chatId: string, command: 'turnCompleted' | 'turnAbandoned'): void => {
-      const leaseTurnId = state.turns.get(chatId)?.leaseTurnId ?? state.placing.get(chatId);
-      if (leaseTurnId === undefined) {
+    (chatId: string, command: 'turnCompleted' | 'turnAbandoned', runId: string | undefined): void => {
+      const current = state.turns.get(chatId) ?? state.placing.get(chatId);
+      if (current === undefined) {
+        return;
+      }
+      const currentRunId = 'prepared' in current ? current.prepared.runId : current.runId;
+      if (currentRunId !== runId) {
+        console.warn(
+          `[chatWorkspaceAuthority] ${command} for run ${runId ?? '(none)'} does not name chat ${chatId}'s current run ${currentRunId ?? '(none)'}; the lease is left held.`,
+        );
         return;
       }
       state.turns.delete(chatId);
       state.placing.delete(chatId);
-      revisions?.send({ command, turnId: leaseTurnId });
+      revisions?.send({ command, turnId: current.leaseTurnId });
       notify();
     },
     [notify, revisions, state],
@@ -557,9 +574,15 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
          * run. */
         const runId = generatePrefixedId(idPrefix.run);
         const leaseTurnId = options?.turnId ?? runId;
-        state.placing.set(chatId, leaseTurnId);
+        state.placing.set(chatId, { leaseTurnId, runId });
         const conflict = state.conflicts.get(chatId);
-        const checkoutId = conflict?.checkoutId ?? chats.find((chat) => chat.id === chatId)?.checkoutId;
+        /* Read at call time through the manager's own accessor. Deriving it
+         * from the `useChats` query's `data` made `prepare` — and the whole
+         * context value — a new identity on every chats refetch, and every
+         * message persist invalidates that query: effects documented as
+         * mount-only re-ran mid-dispatch. */
+        const chat = await getChat(chatId);
+        const checkoutId = conflict?.checkoutId ?? chat?.checkoutId;
         const placement = await revisions.admitTurn({
           turnId: leaseTurnId,
           chatId,
@@ -606,7 +629,7 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         state.pending.delete(chatId);
       }
     },
-    [chats, notify, projectId, revisions, state],
+    [getChat, notify, projectId, revisions, state],
   );
 
   const update = useCallback(
@@ -674,14 +697,14 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         update(chatId, { runId, admitted: true });
       },
       get: (chatId) => state.turns.get(chatId)?.prepared,
-      finalize: async (chatId) => {
-        drop(chatId, 'turnCompleted');
+      finalize: async (chatId, runId) => {
+        drop(chatId, 'turnCompleted', runId);
       },
-      discard: async (chatId) => {
-        drop(chatId, 'turnAbandoned');
+      discard: async (chatId, runId) => {
+        drop(chatId, 'turnAbandoned', runId);
       },
-      retireClaim: async (chatId) => {
-        drop(chatId, 'turnAbandoned');
+      retireClaim: async (chatId, runId) => {
+        drop(chatId, 'turnAbandoned', runId);
       },
       subscribe: (listener) => {
         state.listeners.add(listener);

@@ -1327,6 +1327,19 @@ describe('ChatSessionStore', () => {
       expect(store.get('chat_approval')).toBeDefined();
     });
 
+    it('should notify status subscribers when a durable run is released', () => {
+      const store = createStore();
+      store.acquire('chat_release');
+      store.retainDurableRun({ chatId: 'chat_release', runId: 'run_release', state: 'terminal' });
+      const status = vi.fn();
+      store.subscribeStatus('chat_release', status);
+
+      store.releaseDurableRun({ chatId: 'chat_release', runId: 'run_release' });
+
+      expect(status).toHaveBeenCalledTimes(1);
+      expect(store.getDurableRunId('chat_release')).toBeUndefined();
+    });
+
     it('adopts a freshly admitted transport run before settling a waiting response', () => {
       const store = createStore();
       store.acquire('chat_fresh_waiting');

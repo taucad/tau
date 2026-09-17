@@ -8,6 +8,7 @@ import { AgentHostWorkerError } from '#services/agent-host-client.js';
 import type { AgentHostClient } from '#services/agent-host-client.js';
 import {
   BrowserPlacementChatTransport,
+  clearBrowserAgentHostRun,
   getBrowserAgentHostRun,
   getHostFinalizedTurns,
   isBrowserAgentHostRunResumable,
@@ -246,6 +247,77 @@ describe('BrowserPlacementChatTransport', () => {
     expect(onError).toHaveBeenCalledWith(refusal);
     expect(chat.status).toBe('error');
     expect(chat.error).toBe(refusal);
+    unregister();
+  });
+
+  it('should not re-publish a cleared run when its late settlement replays', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-cleared-run';
+    const runId = 'run-cleared-run';
+    let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    const lifecycleOnly = clientFor(chatId, runId, {
+      start: vi.fn(async () => {
+        listener?.(chatId, {
+          version: 1,
+          leaderEpoch: 'leader-cleared',
+          sequence: 1,
+          recordedAt: '2026-09-01T00:00:01.000Z',
+          runId,
+          type: 'run.lifecycle',
+          state: 'completed',
+        });
+        return snapshot(chatId, runId);
+      }),
+      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+        listener = next;
+        return () => {
+          listener = undefined;
+        };
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-cleared-run',
+        backend: 'opfs',
+        providerBasePath: 'project-cleared-run',
+      }),
+      createClient: async () => lifecycleOnly,
+      markRunId: async () => undefined,
+    });
+    const chat = new Chat<MyUIMessage>({ id: chatId, transport: new BrowserPlacementChatTransport() });
+
+    await chat.sendMessage(
+      { id: 'user-cleared-run', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] },
+      { body: browserBody({ runId, trigger: 'submit' }) },
+    );
+    await vi.waitFor(() => {
+      expect(getBrowserAgentHostRun(chatId)).toMatchObject({ runId, state: 'completed' });
+    });
+
+    /* What project settlement does the moment it finalizes the turn. The
+     * stream is still subscribed, waiting out this run's settlement. */
+    clearBrowserAgentHostRun(chatId);
+    listener?.(chatId, {
+      version: 1,
+      leaderEpoch: 'leader-cleared',
+      sequence: 2,
+      recordedAt: '2026-09-01T00:00:02.000Z',
+      runId,
+      type: 'turn.finalized',
+      turnId: `message-${chatId}`,
+      chatId,
+      projectId: `project-${chatId}`,
+      revisionId: 'revision-cleared-run',
+      changedPaths: ['main.ts'],
+      treeId: 'tree-cleared-run',
+      trigger: 'turn',
+      runIds: [runId],
+    });
+
+    await vi.waitFor(() => {
+      expect(getHostFinalizedTurns().some((settlement) => settlement.runId === runId)).toBe(true);
+    });
+    expect(getBrowserAgentHostRun(chatId)).toBeUndefined();
     unregister();
   });
 

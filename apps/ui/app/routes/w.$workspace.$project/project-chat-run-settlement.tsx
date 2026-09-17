@@ -20,7 +20,7 @@
  */
 
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import { useChatWorkspaceAuthority, usePreparedChatWorkspace } from '#providers/chat-workspace-authority-provider.js';
@@ -46,21 +46,34 @@ const retireUnsubstantiatedRun = async (input: {
   readonly chatId: string;
   readonly runId: string;
   readonly store: Pick<ChatSessionStore, 'releaseDurableRun'>;
-  readonly retireClaim: (chatId: string) => Promise<void>;
+  readonly retireClaim: (chatId: string, runId: string | undefined) => Promise<void>;
 }): Promise<void> => {
-  await input.retireClaim(input.chatId);
+  await input.retireClaim(input.chatId, input.runId);
   input.store.releaseDurableRun({ chatId: input.chatId, runId: input.runId });
 };
 
 /**
- * A claim admitted before its run id was ever recorded names no run to
- * substantiate, so it can never settle — and it blocks every later submit for
- * that chat behind the bounded admission wait. It is retirable only once its
- * chat is idle: mount discovery can re-run while a submit is still awaiting the
- * run id its admission has yet to deliver.
+ * Whether this chat's claim may be retired at all.
+ *
+ * A claim is retirable only while its chat is idle. Discovery can re-run at any
+ * moment, and a chat that is mid-dispatch holds the claim for the turn being
+ * admitted *right now*: retiring it released the lease the revision root was
+ * holding for that turn, and the root answered the release with a `turn.failed`
+ * recorded under a run the host had not admitted yet — which then made the host
+ * refuse the admission outright. Applied to every retire branch, not just the
+ * claim that names no run.
  */
-const isRetirableUnfencedClaim = (status: ReturnType<ChatSessionStore['getStatus']>): boolean =>
-  status !== 'submitted' && status !== 'streaming';
+const isRetirableClaim = (
+  store: Pick<ChatSessionStore, 'getStatus' | 'getDurableRunState'>,
+  chatId: string,
+): boolean => {
+  const status = store.getStatus(chatId);
+  if (status === 'submitted' || status === 'streaming') {
+    return false;
+  }
+  const durableRunState = store.getDurableRunState(chatId);
+  return durableRunState !== 'active' && durableRunState !== 'reattaching';
+};
 
 export function ProjectChatRunSettlement(): ReactNode {
   const store = useChatSessionStore();
@@ -71,9 +84,24 @@ export function ProjectChatRunSettlement(): ReactNode {
     () => store.list(),
   );
 
+  /* Discovery is mount-time recovery and is keyed on nothing, by construction.
+   * Keying it on the authority value re-ran it on every chats refetch — and a
+   * dispatch persists the user's message, which *is* a chats refetch — so a
+   * turn being admitted was reclaimed mid-flight and its lease abandoned. Both
+   * collaborators are read through refs so no owner can reopen that by
+   * changing what its own hook returns. */
+  const authorityRef = useRef(workspaceAuthority);
+  const storeRef = useRef(store);
+  useEffect(() => {
+    authorityRef.current = workspaceAuthority;
+    storeRef.current = store;
+  }, [store, workspaceAuthority]);
+
   useEffect(() => {
     let cancelled = false;
     const discover = async (): Promise<void> => {
+      const workspaceAuthority = authorityRef.current;
+      const store = storeRef.current;
       const reclaimed = await workspaceAuthority.reclaimAll();
       if (cancelled) {
         return;
@@ -83,14 +111,18 @@ export function ProjectChatRunSettlement(): ReactNode {
           continue;
         }
         if (!workspace.runId) {
-          if (isRetirableUnfencedClaim(store.getStatus(workspace.chatId))) {
+          if (isRetirableClaim(store, workspace.chatId)) {
             // oxlint-disable-next-line no-await-in-loop -- retirement belongs to the exact claim just proven unsubstantiable.
-            await workspaceAuthority.retireClaim(workspace.chatId);
+            await workspaceAuthority.retireClaim(workspace.chatId, undefined);
           }
           continue;
         }
         const browserRun = getBrowserAgentHostRun(workspace.chatId);
-        if (browserRun !== undefined && browserRun.runId !== workspace.runId) {
+        if (
+          browserRun !== undefined &&
+          browserRun.runId !== workspace.runId &&
+          isRetirableClaim(store, workspace.chatId)
+        ) {
           // The claim names a run this tab's host does not own and no other
           // authority can substantiate any more.
           // oxlint-disable-next-line no-await-in-loop -- retirement belongs to the exact run just proven absent.
@@ -125,7 +157,8 @@ export function ProjectChatRunSettlement(): ReactNode {
     return () => {
       cancelled = true;
     };
-  }, [store, workspaceAuthority]);
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- mount-only by construction; both collaborators are read through refs.
+  }, []);
 
   return (
     <>
@@ -198,18 +231,21 @@ function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): React
     const settleOrTakeCompletedRun = async (
       authoritativeRunId: string,
     ): Promise<ReturnType<typeof getBrowserAgentHostRun>> => {
-      if (getHostFinalizedTurns().some((settlement) => settlement.runId === workspace.runId)) {
+      if (getHostFinalizedTurns().some((settlement) => settlement.runId === authoritativeRunId)) {
         /* The host already attested this run's settlement, so the turn is
          * recorded and the root has let its lease go. Never ask for a second
          * settlement over newer live edits — release the claim and let the run
          * go (the `turn.finalized` record is the fact, not this page). */
-        await workspaceAuthority.discard(chatId);
+        await workspaceAuthority.discard(chatId, authoritativeRunId);
         store.releaseDurableRun({ chatId, runId: authoritativeRunId });
         clearBrowserAgentHostRun(chatId);
         return undefined;
       }
       const localRun = getBrowserAgentHostRun(chatId);
       if (localRun?.runId !== authoritativeRunId) {
+        if (!isRetirableClaim(store, chatId)) {
+          return undefined;
+        }
         // No host log owns this run any more: retire the claim rather than
         // leave the chat wedged behind an admission that can never settle.
         await retireUnsubstantiatedRun({
@@ -221,7 +257,7 @@ function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): React
         return undefined;
       }
       if (localRun.state === 'failed' || localRun.state === 'cancelled') {
-        await workspaceAuthority.discard(chatId);
+        await workspaceAuthority.discard(chatId, authoritativeRunId);
         store.releaseDurableRun({ chatId, runId: authoritativeRunId });
         clearBrowserAgentHostRun(chatId);
         return undefined;
@@ -264,7 +300,7 @@ function SingleChatRunSettlement({ chatId }: { readonly chatId: string }): React
        * the host's fact, and it reaches the page as `turn.finalized` (or
        * `turn.conflicted`) on the revision port, never as this call's return
        * value. */
-      await workspaceAuthority.finalize(chatId);
+      await workspaceAuthority.finalize(chatId, authoritativeRunId);
       store.releaseDurableRun({ chatId, runId: authoritativeRunId });
       clearBrowserAgentHostRun(chatId);
     };

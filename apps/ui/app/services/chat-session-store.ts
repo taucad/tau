@@ -643,6 +643,11 @@ export class ChatSessionStore {
     }
     session.durableRunId = undefined;
     session.durableRunState = undefined;
+    /* Every other writer of these two fields wakes the chat's status topic, and
+     * the settlement components read both through `useSyncExternalStore`: a
+     * silent release left them deciding from the released run's snapshot until
+     * some unrelated status change happened to arrive. */
+    this.#statusTopics.get(input.chatId)?.emit();
     this.#disposeIfUnreferenced(session);
   }
 

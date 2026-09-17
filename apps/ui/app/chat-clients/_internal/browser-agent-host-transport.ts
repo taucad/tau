@@ -571,10 +571,23 @@ const createHostStream = <Message extends UIMessage>(input: {
     let attaching: Array<AgentLogEvent | AgentLiveEvent> | undefined = [];
     const terminalEvent = Promise.withResolvers<void>();
     const turnSettlement = Promise.withResolvers<void>();
+    let isRunPublished = false;
     const publishRun = (): void => {
       if (runId === undefined) {
         return;
       }
+      /* Project settlement clears this chat's run record the moment it
+       * finalizes the turn, while this stream is still subscribed waiting out
+       * that very settlement. Its replay used to re-publish the record, and
+       * every later reader saw a completed run the page had already retired —
+       * which is what made reload discovery compare the *next* turn's claim
+       * against a zombie and abandon its lease. A stream never resurrects a
+       * record it has already published; a fresh stream for the same run (a
+       * refused turn the user funds and continues) starts clean and may. */
+      if (isRunPublished && !browserRuns.has(input.chatId)) {
+        return;
+      }
+      isRunPublished = true;
       setBrowserAgentHostRun(input.chatId, {
         runId,
         state,

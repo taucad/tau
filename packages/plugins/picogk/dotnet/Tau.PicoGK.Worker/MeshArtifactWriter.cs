@@ -1,5 +1,6 @@
-using System.Security.Cryptography;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 
 namespace Tau.PicoGK.Worker;
 
@@ -76,17 +77,22 @@ internal static class MeshArtifactWriter
         Directory.CreateDirectory(artifactRoot);
         var path = Path.Combine(artifactRoot, $"{Guid.NewGuid():N}.tau-mesh");
         var ranges = new List<ComponentRange>(components.Count);
+        long byteLength;
+        /* W31/D24: the artifact is hashed in the pass that makes it durable. Reading the file back to
+         * hash it was a second full pass over every mesh. The scalars are written as whole spans —
+         * little-endian, which every supported target is and which the host reader already assumes —
+         * instead of one `BinaryWriter` call per float. */
+        using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         using (var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-        using (var writer = new BinaryWriter(stream))
         {
             foreach (var component in components)
             {
                 var positionOffset = stream.Position;
-                foreach (var value in component.Positions) writer.Write(value);
+                Append(stream, digest, MemoryMarshal.AsBytes<float>(component.Positions));
                 var normalOffset = stream.Position;
-                foreach (var value in component.Normals) writer.Write(value);
+                Append(stream, digest, MemoryMarshal.AsBytes<float>(component.Normals));
                 var indexOffset = stream.Position;
-                foreach (var value in component.Indices) writer.Write(value);
+                Append(stream, digest, MemoryMarshal.AsBytes<uint>(component.Indices));
                 ranges.Add(new ComponentRange(
                     component.Id,
                     component.Kind,
@@ -101,12 +107,14 @@ internal static class MeshArtifactWriter
                     indexOffset,
                     component.Indices.Length));
             }
+            byteLength = stream.Position;
         }
-        using var input = File.OpenRead(path);
-        return (
-            path,
-            input.Length,
-            Convert.ToHexString(SHA256.HashData(input)).ToLowerInvariant(),
-            ranges);
+        return (path, byteLength, Convert.ToHexString(digest.GetHashAndReset()).ToLowerInvariant(), ranges);
+    }
+
+    private static void Append(Stream stream, IncrementalHash digest, ReadOnlySpan<byte> bytes)
+    {
+        stream.Write(bytes);
+        digest.AppendData(bytes);
     }
 }

@@ -19,6 +19,7 @@
  * shell can show.
  */
 
+import { join } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { launchDesktopApp } from '#support/desktop-app.js';
@@ -84,3 +85,33 @@ describe('the desktop quit hold (S48(17), D31, P49)', () => {
     expect(log, 'the renderer did not answer the quit ask').toMatch(/main\.renderer-quiesce.*quiesced/u);
   }, 900_000);
 });
+
+/**
+ * W15: a composer record write that is still pending when the person quits.
+ *
+ * `draftMachine` debounces its edits, so a draft typed and abandoned inside that
+ * window exists only in memory until something flushes it — which on quit is the
+ * renderer hold's `flushNow` fan-out (`global-chat-flush-guard.tsx`). Removing
+ * that fan-out leaves the file absent, which is exactly what this row reads.
+ */
+it('flushes a pending composer record write before the shell exits', async () => {
+  const draft = 'Quit before the debounce fires.';
+  const session = await launchDesktopApp({ token: unauthenticatedToken });
+  try {
+    await session.page.goto('app://tau/', { waitUntil: 'domcontentloaded' });
+    const composer = session.page.locator('[aria-label="Ask Tau to build anything..."]').first();
+    await composer.waitFor({ state: 'visible', timeout: 120_000 });
+    await composer.click();
+    await composer.fill(draft);
+    /* No settle wait on purpose: the draft must still be in flight, which is the
+     * whole point of the hold. */
+    await session.application.evaluate(async ({ app }) => {
+      app.quit();
+    });
+
+    const recordPath = join(session.homeRoot, '.tau/composers/new-project.json');
+    await expect.poll(async () => readFile(recordPath, 'utf8').catch(() => ''), { timeout: 120_000 }).toContain(draft);
+  } finally {
+    await session.close();
+  }
+}, 900_000);

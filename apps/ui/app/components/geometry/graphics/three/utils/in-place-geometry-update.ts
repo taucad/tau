@@ -11,7 +11,9 @@ import { deindexPositions, getFatLineSourceIndices } from '#components/geometry/
 /** GlTF primitive mode for `LINES`. */
 const linesMode = 1;
 /** Component counts per glTF accessor type, for the types a Tau kernel emits. */
+/* eslint-disable @typescript-eslint/naming-convention -- glTF accessor type names are the format's own identifiers. */
 const componentsByType: Record<string, number> = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 };
+/* eslint-enable @typescript-eslint/naming-convention -- scope ends with the glTF constant. */
 const componentTypeFloat = 5126;
 const componentTypeUnsignedInt = 5125;
 const componentTypeUnsignedShort = 5123;
@@ -24,7 +26,7 @@ const componentBytes: Record<number, number> = {
   [componentTypeUnsignedByte]: 1,
 };
 
-type IndexArray = Uint32Array<ArrayBufferLike> | Uint16Array<ArrayBufferLike> | Uint8Array<ArrayBuffer>;
+type IndexArray = Uint32Array | Uint16Array | Uint8Array<ArrayBuffer>;
 type AccessorArray = Float32Array<ArrayBuffer> | IndexArray;
 
 /**

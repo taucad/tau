@@ -41,6 +41,7 @@ Then follow the [AGENTS policy](../../docs/policy/agents-md-policy.md), the [pro
 
 - [Create Package workflow](../../.agents/skills/create-package/SKILL.md)
 - [Learning maintenance](../../.agents/skills/update-agent-memory/SKILL.md)
+- [Parameter record policy](../../docs/policy/parameter-record-policy.md)
 - [Workspace project policy](../../docs/policy/workspace-project-policy.md)
 - [Testing policy](../../docs/policy/testing-policy.md)
 - [Library API policy](../../docs/policy/library-api-policy.md)
@@ -51,9 +52,11 @@ Keep this file limited to verified local entrypoints, invariants and checks. Put
 
 Record durable project-specific facts here after verifying them in current source. Keep task progress in its existing execution record. Route learning candidates through the learning-maintenance owner above, promoting broader rules to their narrowest canonical owner.
 
-- The input machine is split: `src/parameter-input.model.ts` holds its types and pure helpers, and `src/parameter-input.machine.ts` holds the machine and re-exports the public types for the `./input-machine` entry. Put new pure helpers in the model.
-- `parameterSetMachine` keeps `context.pending` as a bounded queue (`pendingLimit`). Displacement is keyed by field for value edits, by parameter for display preferences, and by kind and group otherwise.
-- A `resolve` in the held mode goes to `refreshing`, whose load input carries `current`; `sameResolution` compares normalised modes, with `undefined` meaning `default`. The host loader decides whether that refresh re-resolves: agent hosts use `reloadParameterSnapshot`, and the UI service compares manifest revisions. A plan awaiting confirmation ignores a same-mode `resolve`.
+- The record holds only what a person authored: `activeGroup`, each group's `values`, and its optional `units`/`sourceUnits` keyed by instance pointer. The schema is strict, so a retired key refuses the whole record. Anything derivable from the live manifest belongs in the manifest.
+- `ParameterSetIdentity` is one `manifestRevision`. Value-level concurrency is the sidecar's own bytes as the write precondition plus the request's field-scoped `base`; nothing revision-like is persisted.
+- `parameterSetMachine` keeps `context.pending` as a bounded queue (`pendingLimit`, 8). Displacement is keyed by field for value edits, by parameter for display preferences, and by kind and group otherwise.
+- A `resolve` in the held mode goes to `refreshing`, whose load input carries `current`; `sameResolution` compares normalised modes, with `undefined` meaning `default`. The host loader decides whether that refresh re-resolves: agent hosts re-resolve because the agent edits sources between reads, and the UI service compares manifest revisions. A plan awaiting confirmation ignores a same-mode `resolve`.
+- A `watch.changed` during `planning` or `confirmation` refreshes and re-plans; only `base` decides whether the field itself moved. `refreshing` compares bytes and manifest revision, so this actor's own write echoes back without re-publishing `loaded`.
 - Every `settled` emission carries its request. Unmatched confirm or cancel commands emit `command-rejected`, so adapters listen for both.
 - `requireParameterRecord` is the only invalid-record policy. Kernels, middleware, routes and the loader call it rather than branching on `readParameterRecord` themselves.
-- Test manifests used with `loadParameterSnapshot` must pin `sourceFiles` to the digests of the bytes their `semanticPreconditions` return; the loader refuses a manifest without them.
+- `ParameterAuthority` is bytes only (`path`, `read`, `writeChecked`). Test manifests used with `loadParameterSnapshot` need no source-file pinning.

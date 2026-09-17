@@ -156,7 +156,7 @@ type QualityProfile = Readonly<{
 /** Every tier keeps the fillets smooth: at these tessellations a fillet still spans several triangles. */
 const qualityProfiles: Readonly<Record<MetalMorphLoaderQuality, QualityProfile>> = {
   inline: {
-    detail: 3,
+    detail: 4,
     bloom: false,
     environmentSize: 64,
     targetFrameRate: 30,
@@ -164,7 +164,7 @@ const qualityProfiles: Readonly<Record<MetalMorphLoaderQuality, QualityProfile>>
     powerPreference: 'low-power',
   },
   balanced: {
-    detail: 4,
+    detail: 5,
     bloom: false,
     environmentSize: 128,
     targetFrameRate: 60,
@@ -310,6 +310,19 @@ const createBloomPipeline = (
   return post;
 };
 
+/** Scene pass only, with the renderer's tone mapping and output encoding, for offscreen readbacks. */
+const createCapturePipeline = (
+  renderer: WebGPURenderer,
+  scene: Scene,
+  camera: PerspectiveCamera,
+): InstanceType<typeof ThreeRenderPipeline> => {
+  /* oxlint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access -- TSL fluent builder is typed as `any` in `@types/three`. */
+  const post = new ThreeRenderPipeline(renderer);
+  post.outputNode = pass(scene, camera).getTextureNode('output');
+  /* oxlint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
+  return post;
+};
+
 /**
  * Framework-agnostic driver for the liquid-metal loader: one node renderer, one body, a procedural studio
  * environment and a continuous loop that flows the body between five forms.
@@ -332,6 +345,7 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
 
   let renderer: WebGPURenderer | undefined;
   let pipeline: InstanceType<typeof ThreeRenderPipeline> | undefined;
+  let capturePipeline: InstanceType<typeof ThreeRenderPipeline> | undefined;
   let environment: MetalMorphEnvironment | undefined;
   let { theme } = options;
   let speed = options.speed ?? 1;
@@ -347,6 +361,7 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
   let lastFrameTime: number | undefined;
   let framesInWindow = 0;
   let windowElapsed = 0;
+  let windowStartedAt: number | undefined;
   let framesPerSecond = 0;
   let adaptiveLevel = 0;
   let slowWindows = 0;
@@ -515,15 +530,19 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
     }
     const delta = lastFrameTime === undefined ? 0 : Math.min(maximumFrameDelta, Math.max(0, time - lastFrameTime));
     lastFrameTime = time;
+    windowStartedAt ??= time;
     advance(delta);
     draw();
     framesInWindow += 1;
     windowElapsed += delta;
     if (windowElapsed >= statisticsWindow) {
-      framesPerSecond = (framesInWindow * 1000) / windowElapsed;
-      govern(windowElapsed / framesInWindow, frameInterval);
+      // Statistics use wall-clock time, not the clamped loop deltas, so a struggling device reads truthfully.
+      const windowDuration = Math.max(1, time - windowStartedAt);
+      framesPerSecond = (framesInWindow * 1000) / windowDuration;
+      govern(windowDuration / framesInWindow, frameInterval);
       framesInWindow = 0;
       windowElapsed = 0;
+      windowStartedAt = time;
     }
   };
 
@@ -533,6 +552,9 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
     }
     isLooping = true;
     lastFrameTime = undefined;
+    windowStartedAt = undefined;
+    framesInWindow = 0;
+    windowElapsed = 0;
     void renderer.setAnimationLoop(frame);
   };
 
@@ -657,18 +679,20 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
       if (!renderer || !isReady) {
         throw new Error('The metal morph loader renderer is not ready.');
       }
-      // The output target receives the same tone-mapped, display-encoded image the canvas would, from the
-      // bloom pipeline or the plain output pass alike; it is released before the readback awaits.
+      // A plain scene pass with the renderer's output transform draws the same tone-mapped, display-encoded
+      // body the canvas shows, whatever the governor has done to bloom; the target is released before the
+      // readback awaits.
+      capturePipeline ??= createCapturePipeline(renderer, scene, camera);
       const target = new RenderTarget(captureSize, captureSize, { depthBuffer: false });
       try {
-        renderer.setOutputRenderTarget(target);
+        renderer.setRenderTarget(target);
         advance(0);
-        draw();
-        renderer.setOutputRenderTarget(null);
+        capturePipeline.render();
+        renderer.setRenderTarget(null);
         const pixels = await renderer.readRenderTargetPixelsAsync(target, 0, 0, captureSize, captureSize);
         return analyseCapture(pixels, resolveBackendInUse(renderer));
       } finally {
-        renderer.setOutputRenderTarget(null);
+        renderer.setRenderTarget(null);
         target.dispose();
       }
     },
@@ -679,6 +703,7 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
       lifecycle.disposed = true;
       stopLoop();
       pipeline?.dispose();
+      capturePipeline?.dispose();
       environment?.dispose();
       geometry.dispose();
       material.dispose();

@@ -9,7 +9,7 @@ import type { RuntimeAgentClient } from '@taucad/agent-tools/runtime';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { admitParameterManifest } from '@taucad/parameters';
 import type { ParameterManifest, ParameterResolutionOptions, ParameterSetTarget } from '@taucad/parameters';
-import { loadParameterSnapshot, refreshParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
+import { reloadParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
 import type { ParameterAuthority } from '@taucad/parameters/authority';
 import { createActor, fromCallback, fromPromise, waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -1498,10 +1498,16 @@ const initialize = async (request: AgentHostWorkerInitializeRequest, sessionId: 
       const actor = createActor(
         parameterSetMachine.provide({
           actors: {
+            // An agent read in the held mode re-reads only the sidecar unless the source bytes changed.
             loadParameterSet: fromPromise(async ({ input, signal }) =>
-              input.current === undefined
-                ? loadParameterSnapshot({ target, authority, manifest, resolution: input.resolution, signal })
-                : refreshParameterSnapshot({ current: input.current, authority, signal }),
+              reloadParameterSnapshot({
+                target,
+                authority,
+                manifest,
+                resolution: input.resolution,
+                current: input.current,
+                signal,
+              }),
             ),
             commitParameterSet: fromPromise(async ({ input: change, signal }) =>
               commitParameterChange({ change, authority, signal }),

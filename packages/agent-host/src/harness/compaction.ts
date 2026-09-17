@@ -36,9 +36,12 @@ const compactableTools = new Set([
 
 /** Typed failure used when compaction cannot restore provider headroom. @public */
 export class HostCompactionError extends Error {
-  public readonly code: 'SUMMARY_REQUIRED' | 'NO_EVICTABLE_HISTORY' | 'CIRCUIT_BREAKER_OPEN';
+  public readonly code: 'SUMMARY_REQUIRED' | 'NO_EVICTABLE_HISTORY' | 'SESSION_LOG_INTEGRITY' | 'CIRCUIT_BREAKER_OPEN';
 
-  public constructor(code: 'SUMMARY_REQUIRED' | 'NO_EVICTABLE_HISTORY' | 'CIRCUIT_BREAKER_OPEN', message: string) {
+  public constructor(
+    code: 'SUMMARY_REQUIRED' | 'NO_EVICTABLE_HISTORY' | 'SESSION_LOG_INTEGRITY' | 'CIRCUIT_BREAKER_OPEN',
+    message: string,
+  ) {
     super(message);
     this.name = 'HostCompactionError';
     this.code = code;
@@ -318,7 +321,7 @@ export const installCompaction = (
       options.record.messages.transfer(original, replacement);
       const messageId = options.record.messages.get(replacement);
       if (!messageId) {
-        throw new HostCompactionError('NO_EVICTABLE_HISTORY', 'A durable tool result has no session-log identity.');
+        throw new HostCompactionError('SESSION_LOG_INTEGRITY', 'A durable tool result has no session-log identity.');
       }
       return { messageId, replacement };
     });
@@ -439,7 +442,7 @@ export const installCompaction = (
         const piIds = evicted.map((message) => options.record.messages.get(message));
         if (piIds.some((id) => id === undefined)) {
           throw new HostCompactionError(
-            'NO_EVICTABLE_HISTORY',
+            'SESSION_LOG_INTEGRITY',
             'Durable compacted history has missing session-log ids.',
           );
         }
@@ -464,7 +467,7 @@ export const installCompaction = (
           )
           .map((message) => message.id);
         if (history.length > 0 && piIds.some((id) => !durableIds.includes(id!))) {
-          throw new HostCompactionError('NO_EVICTABLE_HISTORY', 'Durable compacted history diverged from pi history.');
+          throw new HostCompactionError('SESSION_LOG_INTEGRITY', 'Durable compacted history diverged from pi history.');
         }
         await options.record.append({
           type: 'history.compacted',

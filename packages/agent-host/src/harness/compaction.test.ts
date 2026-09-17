@@ -319,6 +319,46 @@ describe('Compaction', () => {
     });
   });
 
+  /*
+   * `NO_EVICTABLE_HISTORY` is the token-budget refusal, and the chat surfaces
+   * it as "this chat's first message is too large to continue — start a new
+   * chat and attach less". A session-log integrity refusal cannot be answered
+   * that way, so it must not borrow that code.
+   */
+  it('should not code a session-log integrity refusal as an oversized turn', async () => {
+    const messages: UserMessage[] = Array.from({ length: 8 }, (_, index) => ({
+      role: 'user',
+      content: String(index).repeat(4000),
+      timestamp: index,
+    }));
+    const agent = new Agent({
+      streamFn: () => createAssistantMessageEventStream(),
+      initialState: { model: stubModel, messages },
+    });
+    const compaction = installCompaction({
+      agent,
+      record: {
+        // Nothing was ever recorded, so the durable eviction cannot name a
+        // single message it is about to evict.
+        messages: new MessageIdentities(() => 'unused'),
+        append: async () => undefined,
+        events: async () => [],
+        history: async () => [],
+      },
+      contextWindow: 8192,
+      summarize: async () => 'durable summary',
+    });
+    const base = vi.fn() as unknown as Parameters<typeof compaction.wrapStreamFn>[0];
+
+    expect(await compaction.prepareTurn(messages)).toBe(messages);
+    const stream = await compaction.wrapStreamFn(base)(stubModel, { messages });
+    const result = await stream.result();
+
+    expect(base).not.toHaveBeenCalled();
+    expect(result.errorMessage).toBe('Durable compacted history has missing session-log ids.');
+    expect(result.diagnostics?.[0]).toMatchObject({ error: { code: 'SESSION_LOG_INTEGRITY' } });
+  });
+
   it('should evict durable assistant, tool-input, and tool-output rows as one tier-2 group', async () => {
     const file = createMemoryEventLogFile();
     const seedLog = await file.open();

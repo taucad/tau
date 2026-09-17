@@ -335,6 +335,7 @@ export class RuntimeWorkerClient {
       readonly parameters?: Record<string, unknown>;
       readonly options?: Record<string, unknown>;
       readonly content?: RuntimeContentInput;
+      readonly transient?: boolean;
     },
     admission: RuntimePreviewIdentity,
   ): void {
@@ -348,6 +349,7 @@ export class RuntimeWorkerClient {
         parameters: input.parameters ?? {},
         ...(input.options === undefined ? {} : { options: input.options }),
         ...(input.content === undefined ? {} : { content: input.content }),
+        ...(input.transient === true ? { transient: true } : {}),
       });
     });
   }

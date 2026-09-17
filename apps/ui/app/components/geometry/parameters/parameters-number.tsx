@@ -409,12 +409,20 @@ const AuthoritativeParametersNumber = ({
       aria-label={ariaLabel}
       onSliderChange={(nextValue) => {
         parameterRef.send({ type: 'pointerChanged', value: nextValue });
+        /* The drag value the kernel needs is the native one the input machine just derived, not the
+         * display number the slider reports. `scrub` is absent unless the kernel declared the lane. */
+        const { nativeValue } = parameterRef.getSnapshot().context.draft ?? {};
+        if (nativeValue !== undefined) {
+          parameterCommit.scrub?.({ pointer: binding.pointer, value: nativeValue });
+        }
       }}
       onSliderRelease={() => {
         parameterRef.send({ type: 'pointerReleased' });
+        parameterCommit.endScrub?.();
       }}
       onSliderCancel={() => {
         parameterRef.send({ type: 'pointerCancelled' });
+        parameterCommit.endScrub?.();
       }}
       onValueChange={(nextValue) => {
         parameterRef.send({ type: 'changeRaw', text: String(nextValue) });

@@ -288,6 +288,7 @@ const renderCapabilitySchema = z
       })
       .catchall(z.unknown()),
     content: contentCapabilitySchema.optional(),
+    liveEdit: z.boolean().optional(),
   })
   .catchall(z.unknown());
 
@@ -447,6 +448,7 @@ export const runtimeOpenFileArgsSchema = z
     parameters: z.record(z.string(), z.unknown()),
     options: z.record(z.string(), z.unknown()).optional(),
     content: runtimeContentSchema.optional(),
+    transient: z.boolean().optional(),
   })
   .catchall(z.unknown());
 

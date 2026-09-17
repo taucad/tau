@@ -156,7 +156,7 @@ const operationError = (outcome: Exclude<ParameterSetOutcome, { status: 'committ
   });
 
 /** Immutably set one RFC 6901 pointer inside a group's values, creating intermediate objects. */
-const withPointerValue = (
+export const withPointerValue = (
   values: Readonly<Record<string, JSONValue>>,
   pointer: string,
   value: JSONValue,

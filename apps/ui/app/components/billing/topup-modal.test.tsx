@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type * as ReactQuery from '@tanstack/react-query';
 import { TopupModal } from '#components/billing/topup-modal.js';
 
 const client = vi.hoisted(() => ({
@@ -38,13 +39,24 @@ const PaymentConflict = vi.hoisted(
       }
     },
 );
+const CollectionUnavailable = vi.hoisted(() => class extends Error {});
+const entitlements = vi.hoisted(() => ({
+  current: { isResolved: true, paymentCollectionAvailable: true, paymentMethod: { brand: 'visa', last4: '4242' } },
+}));
+const invalidateQueries = vi.hoisted(() => vi.fn());
 vi.mock('#lib/billing-payment-client.js', () => ({
   ...client,
   BillingPaymentConflict: PaymentConflict,
+  BillingCollectionUnavailable: CollectionUnavailable,
+  purchasesUnavailableMessage: 'Purchases are not available yet.',
   createPaymentRequestId: () => 'request_1',
 }));
 vi.mock('@taucad/billing/hooks/use-entitlements', () => ({
-  useEntitlements: () => ({ paymentMethod: { brand: 'visa', last4: '4242' } }),
+  useEntitlements: () => entitlements.current,
+}));
+vi.mock('@tanstack/react-query', async (importOriginal) => ({
+  ...(await importOriginal<typeof ReactQuery>()),
+  useQueryClient: () => ({ invalidateQueries }),
 }));
 vi.mock('@taucad/billing/hooks/billing-session', () => ({
   useBillingSession: () => session.current,
@@ -110,6 +122,11 @@ describe('TopupModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     client.getUnresolvedPaymentActions.mockResolvedValue([]);
+    entitlements.current = {
+      isResolved: true,
+      paymentCollectionAvailable: true,
+      paymentMethod: { brand: 'visa', last4: '4242' },
+    };
     session.current = {
       apiBaseUrl: 'https://api.tau.new',
       environment: 'development',
@@ -132,9 +149,9 @@ describe('TopupModal', () => {
     );
     const view = renderModal();
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /review us\$25/i })).toBeEnabled();
+      expect(screen.getByRole('button', { name: /review purchase with saved card/i })).toBeEnabled();
     });
-    await userEvent.click(screen.getByRole('button', { name: /review us\$25/i }));
+    await userEvent.click(screen.getByRole('button', { name: /review purchase with saved card/i }));
     session.current = { ...session.current, userId: 'user-b' };
     view.rerender(
       <MemoryRouter>
@@ -243,9 +260,9 @@ describe('TopupModal', () => {
     client.prepareTopup.mockResolvedValue(wireAction('prepared'));
     renderModal();
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /review us\$25/i })).toBeEnabled();
+      expect(screen.getByRole('button', { name: /review purchase with saved card/i })).toBeEnabled();
     });
-    await userEvent.click(screen.getByRole('button', { name: /review us\$25/i }));
+    await userEvent.click(screen.getByRole('button', { name: /review purchase with saved card/i }));
     expect(client.prepareTopup).toHaveBeenCalledWith(
       {
         apiBaseUrl: 'https://api.tau.new',
@@ -267,7 +284,7 @@ describe('TopupModal', () => {
     renderModal();
     await userEvent.click(screen.getByRole('button', { name: 'Other' }));
     await userEvent.type(screen.getByRole('spinbutton', { name: 'Custom amount' }), '31.25');
-    await userEvent.click(screen.getByRole('button', { name: /review us\$31\.25/i }));
+    await userEvent.click(screen.getByRole('button', { name: /review purchase with saved card/i }));
     expect(client.prepareTopup).toHaveBeenCalledWith(
       {
         apiBaseUrl: 'https://api.tau.new',
@@ -331,5 +348,43 @@ describe('TopupModal', () => {
     expect(await screen.findByRole('heading', { name: 'Credits added' })).toBeInTheDocument();
     expect(screen.getByText(/mastercard.*4{4}/i)).toBeInTheDocument();
     expect(screen.getByText(/us\$27\.50 charged/i)).toBeInTheDocument();
+  });
+
+  it.each([
+    ['unavailable', { isResolved: true, paymentCollectionAvailable: false }, true],
+    ['unresolved', { isResolved: false, paymentCollectionAvailable: false }, false],
+  ])('disables every purchase control while collection is %s', async (_label, state, showsNote) => {
+    entitlements.current = { ...entitlements.current, ...state };
+    renderModal();
+    await waitFor(() => {
+      expect(client.getUnresolvedPaymentActions).toHaveBeenCalled();
+    });
+    expect(screen.getByRole('button', { name: /review purchase with saved card/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /use another card in checkout/i })).toBeDisabled();
+    expect(screen.queryByText('Purchases are not available yet.') !== null).toBe(showsNote);
+  });
+
+  it('reports a collection refusal without asking the customer to retry', async () => {
+    const { toast } = await import('#components/ui/sonner.js');
+    client.prepareTopup.mockRejectedValue(new CollectionUnavailable());
+    renderModal();
+    const review = screen.getByRole('button', { name: /review purchase with saved card/i });
+    await waitFor(() => {
+      expect(review).toBeEnabled();
+    });
+    await userEvent.click(review);
+    await waitFor(() => {
+      expect(toast.warning).toHaveBeenCalledWith('Purchases are not available yet.');
+    });
+  });
+
+  it('refreshes billing data once a saved-card purchase is fulfilled', async () => {
+    client.getUnresolvedPaymentActions.mockResolvedValue([wireAction('prepared')]);
+    client.confirmPaymentAction.mockResolvedValue(wireAction('fulfilled'));
+    renderModal();
+    await userEvent.click(await screen.findByRole('button', { name: 'Confirm quote' }));
+    await waitFor(() => {
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['billing'] });
+    });
   });
 });

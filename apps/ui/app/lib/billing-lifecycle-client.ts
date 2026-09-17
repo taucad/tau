@@ -1,6 +1,7 @@
 // eslint-disable-next-line @nx/enforce-module-boundaries -- UI owns this first-party billing HTTP boundary
 import { wireAccountClosureSchema, wireAutoReloadConsentSchema, wirePaymentActionSchema } from '@taucad/billing';
 import type { WireAccountClosure, WireAutoReloadConsent, WirePaymentAction } from '@taucad/billing';
+import { parseCollectionRefusal } from '#lib/billing-payment-client.js';
 import type { PaymentActionBinding } from '#lib/billing-payment-client.js';
 
 const base = (binding: PaymentActionBinding): string => `${binding.apiBaseUrl.replace(/\/$/u, '')}/v1/billing`;
@@ -16,7 +17,9 @@ const request = async (binding: PaymentActionBinding, path: string, init?: Reque
     throw new Error('Financial session changed');
   }
   if (!response.ok) {
-    throw new Error(`Billing lifecycle request failed with ${response.status}`);
+    throw (
+      (await parseCollectionRefusal(response)) ?? new Error(`Billing lifecycle request failed with ${response.status}`)
+    );
   }
   const body: unknown = await response.json();
   if (!binding.financialSession?.isCurrent() && binding.financialSession !== undefined) {

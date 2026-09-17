@@ -46,6 +46,37 @@ describe('wrapMessagePort', () => {
       a.close();
     }).toThrow('P close failed');
   });
+
+  it('copies instead of transferring on a copyOnly wire, and still transfers without it', async () => {
+    /* The renderer end of the Electron utility wire: a DOM-shaped port whose
+     * far end is a `MessagePortMain`. Left to itself it honours the transfer
+     * list, detaches the caller's buffer, and the far end drops the frame. */
+    const { port1, port2 } = new MessageChannel();
+    const received: unknown[] = [];
+    const far = wrapMessagePort<unknown>(port2, { label: 'far' });
+    far.onMessage((data) => received.push(data));
+    far.start?.();
+
+    const copyOnly = wrapMessagePort(port1, { label: 'electron-utility:renderer', copyOnly: true });
+    const bytes = new Uint8Array([1, 2, 3]);
+    copyOnly.postMessage({ bytes }, [bytes.buffer as unknown as Transferable]);
+    /* The whole point: the caller keeps its buffer, so the far end gets bytes. */
+    expect(bytes.buffer.byteLength).toBe(3);
+
+    /* Default wires still transfer: the browser worker pool depends on it. */
+    const transferring = wrapMessagePort(port1, { label: 'worker' });
+    const owned = new Uint8Array([4, 5, 6]);
+    transferring.postMessage({ owned }, [owned.buffer as unknown as Transferable]);
+    expect(owned.buffer.byteLength).toBe(0);
+
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, 20);
+    });
+    expect(received).toEqual([{ bytes: new Uint8Array([1, 2, 3]) }, { owned: new Uint8Array([4, 5, 6]) }]);
+
+    port1.close();
+    port2.close();
+  });
 });
 
 /* JSON stands in for the production msgpack codec, which lives in
@@ -439,12 +470,15 @@ describe('wrapMessagePortMain', () => {
     expect(received).toEqual(['hello']);
   });
 
-  it('drops non-port transfer entries Electron would reject, and still posts the value', () => {
+  it('drops non-port transfer entries Electron would reject, and still posts the value whole', () => {
+    /* The fs bridge lists every `ArrayBuffer` it reads (`wrapAsTransferables`)
+     * without knowing which wire it is on, so this degradation is load-bearing:
+     * refusing here refuses every desktop project open (L10 F-L10-9). */
     const [near, far] = linkedFakePorts();
     const [handoff] = linkedFakePorts();
     const received: unknown[] = [];
     wrapMessagePortMain<unknown>(far).onMessage((data) => received.push(data));
-    const wrapped = wrapMessagePortMain<unknown>(near);
+    const wrapped = wrapMessagePortMain<unknown>(near, { label: 'utility:wire' });
 
     const bytes = new Uint8Array([1, 2, 3]);
     expect(() => {
@@ -453,6 +487,8 @@ describe('wrapMessagePortMain', () => {
     wrapped.postMessage({ handoff }, [handoff as unknown as Transferable]);
 
     expect(received).toEqual([{ bytes }, { handoff }]);
+    /* Copied, not transferred: the sender still owns its bytes. */
+    expect(bytes.buffer.byteLength).toBe(3);
   });
 
   it('goes silent and reports the death exactly once when the far end disentangles', () => {

@@ -260,8 +260,18 @@ test('renders and replays a legacy log that inlines base64 image bytes', async (
     const chatsRoot = join(session.homeRoot, slug, '.tau/chats');
 
     /* One chat directory, copied and rewritten: same ids everywhere, and the
-     * first user row carries an inline image block instead of a `file-ref`. */
-    cpSync(join(chatsRoot, chatId), join(chatsRoot, legacyChatId), { recursive: true });
+     * first user row carries an inline image block instead of a `file-ref`.
+     *
+     * Everything but the live writer lock. The settled chat's log is still open,
+     * so its `events.jsonl.lock` names *this* Electron services process
+     * (`packages/agent-host/src/node.ts:70-107`); copied along, the legacy chat
+     * starts life holding a lock no one will ever release — its attach refuses
+     * with `WRITER_LOCKED` ("already has an active Node writer") and no turn
+     * ever reaches the gateway. */
+    cpSync(join(chatsRoot, chatId), join(chatsRoot, legacyChatId), {
+      recursive: true,
+      filter: (source) => !source.endsWith('.lock'),
+    });
     const legacyLog = join(chatsRoot, legacyChatId, 'events.jsonl');
     let inlined = false;
     const rewritten = readFileSync(legacyLog, 'utf8')

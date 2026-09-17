@@ -225,7 +225,17 @@ test('builds an openrscad model on disk from the project chat', async () => {
     const failedTools = failedToolResults(fixture.gatewayRequests.at(-1));
     expect(failedTools, `desktop agent tools failed:\n${failedTools.join('\n')}`).toEqual([]);
 
-    /* Row 18: working → saving → saved, on this turn, in that order. */
+    /* Row 18: working, then the save this turn confirms, in that order.
+     *
+     * *Saving revision* is the "run ended, recording unsettled" window
+     * (`chat-turn-revision-story-blueprint.md` state table), and a turn this
+     * short can have no such window: the chat machine's
+     * `completedWithFinalizedSettlement` takes a run whose settlement already
+     * arrived from `completed` straight to `done` without passing through
+     * `finishing` (`chat-session.machine.ts:339-343`), and the marker prefers a
+     * settled revision over any run state (`chat-turn-revision-state.ts:73`).
+     * So assert the promise — Working first, the confirmed save last, and any
+     * *Saving revision* strictly between them — not the intermediate beat. */
     const lastLabel = async (): Promise<string | undefined> => {
       const seen = await markerLabels();
       return seen.at(-1);
@@ -235,13 +245,15 @@ test('builds an openrscad model on disk from the project chat', async () => {
     /* `turnRevisionLabel`'s working copy: "New revision", or "Starting …" once a
      * base revision has a name. */
     const working = labels.findLastIndex((label) => label === 'New revision' || label.startsWith('Starting '));
-    const saving = labels.lastIndexOf('Saving revision');
     console.info(`[desktop-e2e] in-project turn marker: ${JSON.stringify(labels)}`);
     expect(working, `marker never said Working: ${JSON.stringify(labels)}`).toBeGreaterThanOrEqual(0);
-    expect(saving, `marker never said Saving revision after Working: ${JSON.stringify(labels)}`).toBeGreaterThan(
-      working,
-    );
-    expect(labels.length - 1).toBeGreaterThan(saving);
+    expect(labels.length - 1, `marker never settled after Working: ${JSON.stringify(labels)}`).toBeGreaterThan(working);
+    /* Sliced from Working, because the seeding turn's own labels are in front. */
+    const thisTurn = labels.slice(working);
+    expect(
+      thisTurn.lastIndexOf('Saving revision'),
+      `Saving revision outlived this turn's save: ${JSON.stringify(labels)}`,
+    ).toBeLessThan(thisTurn.length - 1);
     console.info(`[desktop-e2e] in-project prompt-to-framed-geometry: ${String(Date.now() - promptStart)} ms`);
     console.info(`[desktop-e2e] in-project API chat calls: ${JSON.stringify(fixture.apiChatRequests)}`);
     expectNoDesktopAnalytics(session);

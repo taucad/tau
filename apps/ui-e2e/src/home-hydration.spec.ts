@@ -124,7 +124,6 @@ test('keeps a Home draft with an image and a PDF across a reload and hands both 
   const chatId = new URL(await target.currentUrl()).searchParams.get('chat')!;
   const { configs } = await readProjectStorageState();
   expect(configs).toHaveLength(1);
-  const { projectId } = configs[0]!;
 
   // Promoted before the startup request was written (D18), then cleared from Home.
   await expect

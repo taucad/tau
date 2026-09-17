@@ -99,17 +99,21 @@ describe('PicoGK kernel', () => {
     definition = await resolveRuntimePluginDefinition('kernel', picogkKernel(kernelOptions));
   });
 
-  it('never stats the generated root thumbnail during workspace discovery', async () => {
-    const filesystem = createMockFileSystem({
-      readdirResult: ['main.cs', 'thumbnail.webp', 'tau.json', 'package.json'],
-      readFileResult: 'x',
-    });
-    filesystem.mocks.lstat.mockImplementation(async (path: string) => {
-      if (path === 'thumbnail.webp') {
-        throw new Error('Generated thumbnail changed');
-      }
-      return { type: 'file', size: 1, mtimeMs: 0, contentKind: 'text' };
-    });
+  it('never reads the generated root thumbnail during workspace discovery', async () => {
+    const filesystem = createMockFileSystem({ readFileResult: 'x' });
+    filesystem.mocks.readdirStat.mockImplementation(async (directory: string) =>
+      directory === ''
+        ? ['main.cs', 'thumbnail.webp', 'tau.json', 'package.json'].map((name) => ({
+            type: 'file' as const,
+            size: 1,
+            mtimeMs: 0,
+            contentKind: 'text' as const,
+            lineCount: 1,
+            path: name,
+            name,
+          }))
+        : [],
+    );
     const mirrorRuntime = { ...createMockKernelRuntime(), filesystem };
     const value = await definition.initialize(kernelOptions, mirrorRuntime);
     try {

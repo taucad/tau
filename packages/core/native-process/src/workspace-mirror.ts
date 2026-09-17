@@ -48,12 +48,19 @@ export const createWorkspaceMirror = async (options: WorkspaceMirrorOptions): Pr
   process.once('exit', cleanupRoot);
   process.once('SIGINT', exitAfterCleanup);
   process.once('SIGTERM', exitAfterCleanup);
-  const hashes = new Map<string, string>();
+  /** Mirrored file to the stat it was mirrored from and the hash of the bytes written. */
+  const mirrored = new Map<string, { size: number; mtimeMs: number; hash: string }>();
+  /* D6's racily-clean rule: a stat is only trusted once it is older than the sync that recorded it.
+   * A file modified within the same millisecond as its own mirroring, keeping its size, is
+   * indistinguishable by stat alone, so it is re-read until its mtime falls behind a completed sync. */
+  /** Milliseconds. When the previous completed sync began reading. */
+  let previousSyncStarted = Number.NEGATIVE_INFINITY;
   const excludedDirectories = new Set([...defaultExcludedDirectories, ...(options.excludedDirectories ?? [])]);
   const excludedFileSuffixes = options.excludedFileSuffixes ?? [];
 
   const sync = async (filesystem: KernelFileSystem): Promise<readonly string[]> => {
-    const files: Array<{ readonly path: string; readonly size: number }> = [];
+    const started = Date.now();
+    const files: Array<{ readonly path: string; readonly size: number; readonly mtimeMs: number }> = [];
     const folded = new Map<string, string>();
     let entryCount = 0;
     let totalBytes = 0;
@@ -62,9 +69,10 @@ export const createWorkspaceMirror = async (options: WorkspaceMirrorOptions): Pr
       if (depth > maxDepth) {
         throw new Error(`${options.displayName} workspace exceeds ${String(maxDepth)} directory levels.`);
       }
-      const names = await filesystem.readdir(directory);
-      for (const name of names.toSorted()) {
-        const path = assertRootedPath(joinRelativePath(directory, name));
+      // One listing carries every child's stat, so a directory costs one call rather than 1 + N.
+      const listing = await filesystem.readdirStat(directory);
+      for (const entry of listing.toSorted((left, right) => (left.name < right.name ? -1 : 1))) {
+        const path = assertRootedPath(joinRelativePath(directory, entry.name));
         if (excludedPaths.has(path)) {
           continue;
         }
@@ -74,9 +82,8 @@ export const createWorkspaceMirror = async (options: WorkspaceMirrorOptions): Pr
           throw new Error(`${options.displayName} workspace has a case-colliding path: ${collision} and ${path}.`);
         }
         folded.set(canonicalName, path);
-        const stat = await filesystem.lstat(path);
-        if (stat.type === 'dir') {
-          if (!excludedDirectories.has(name)) {
+        if (entry.type === 'dir') {
+          if (!excludedDirectories.has(entry.name)) {
             await visit(path, depth + 1);
           }
           continue;
@@ -85,39 +92,48 @@ export const createWorkspaceMirror = async (options: WorkspaceMirrorOptions): Pr
           continue;
         }
         entryCount += 1;
-        totalBytes += stat.size;
-        if (entryCount > maxEntries || stat.size > maxFileBytes || totalBytes > maxWorkspaceBytes) {
+        totalBytes += entry.size;
+        if (entryCount > maxEntries || entry.size > maxFileBytes || totalBytes > maxWorkspaceBytes) {
           throw new Error(`${options.displayName} workspace exceeds its mirror size limits.`);
         }
-        files.push({ path, size: stat.size });
+        files.push({ path, size: entry.size, mtimeMs: entry.mtimeMs });
       }
     };
 
     await visit('', 0);
     for (const file of files) {
+      const previous = mirrored.get(file.path);
+      if (
+        previous !== undefined &&
+        previous.size === file.size &&
+        previous.mtimeMs === file.mtimeMs &&
+        previous.mtimeMs < previousSyncStarted
+      ) {
+        continue;
+      }
       const bytes = await filesystem.readFile(file.path);
       if (bytes.byteLength !== file.size) {
         throw new Error(`${options.displayName} workspace changed while mirroring: ${file.path}.`);
       }
       const hash = await sha256Bytes(bytes);
-      if (hashes.get(file.path) === hash) {
-        continue;
+      if (previous?.hash !== hash) {
+        const destination = join(workspacePath, file.path);
+        await mkdir(dirname(destination), { recursive: true });
+        const temporary = `${destination}.tau-${randomUUID()}.tmp`;
+        await writeFile(temporary, bytes, { mode: 0o600 });
+        await rename(temporary, destination);
       }
-      const destination = join(workspacePath, file.path);
-      await mkdir(dirname(destination), { recursive: true });
-      const temporary = `${destination}.tau-${randomUUID()}.tmp`;
-      await writeFile(temporary, bytes, { mode: 0o600 });
-      await rename(temporary, destination);
-      hashes.set(file.path, hash);
+      mirrored.set(file.path, { size: file.size, mtimeMs: file.mtimeMs, hash });
     }
     const paths = files.map(({ path }) => path);
     const current = new Set(paths);
-    for (const path of hashes.keys()) {
+    for (const path of mirrored.keys()) {
       if (!current.has(path)) {
         await rm(join(workspacePath, path), { force: true });
-        hashes.delete(path);
+        mirrored.delete(path);
       }
     }
+    previousSyncStarted = started;
     return paths.sort();
   };
 

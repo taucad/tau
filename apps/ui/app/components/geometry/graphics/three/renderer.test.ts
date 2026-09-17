@@ -168,4 +168,13 @@ describe('createRenderer showcase preset', () => {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- three.js constructor option name
     expect(created?.options).toMatchObject({ forceWebGL: true, alpha: true, antialias: true });
   });
+
+  it('should forward the adapter power preference for spinners', async () => {
+    const { createRenderer } = await import('#components/geometry/graphics/three/renderer.js');
+
+    const canvas = document.createElement('canvas');
+    await createRenderer('showcase', 'webgpu', { canvas, powerPreference: 'low-power' });
+
+    expect(hoisted.createdRenderers.at(0)?.options).toMatchObject({ powerPreference: 'low-power' });
+  });
 });

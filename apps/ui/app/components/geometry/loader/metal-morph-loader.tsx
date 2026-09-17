@@ -23,6 +23,7 @@ export type MetalMorphLoaderProperties = Readonly<{
   label?: string;
   /** `status` announces a busy state, the default for a real loading indicator; `img` describes a showcase. */
   semantic?: 'status' | 'img';
+  /** Cost tier: `inline` for spinners, `balanced` for mid-size surfaces, `high` for hero surfaces. */
   quality?: MetalMorphLoaderQuality;
   /** Deterministic sequencing seed; omit for a fresh random loop. */
   seed?: number;

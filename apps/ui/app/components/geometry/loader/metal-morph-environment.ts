@@ -106,6 +106,7 @@ const disposeMeshes = (meshes: ReadonlyArray<Mesh<PlaneGeometry | SphereGeometry
 export const createMetalMorphEnvironment = (
   renderer: WebGPURenderer,
   variant: MetalMorphEnvironmentVariant,
+  options?: Readonly<{ size?: number }>,
 ): MetalMorphEnvironment => {
   const palette = metalMorphEnvironmentPalettes[variant];
   const studio = new Scene();
@@ -115,7 +116,7 @@ export const createMetalMorphEnvironment = (
   const generator = new PMREMGenerator(renderer);
   try {
     return generator.fromScene(studio, environmentBlurRadians, 0.1, domeRadius * 2, {
-      size: environmentResolution,
+      size: options?.size ?? environmentResolution,
     });
   } finally {
     generator.dispose();

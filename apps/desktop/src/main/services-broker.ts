@@ -120,14 +120,20 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
   const projectIds = new Map<string, string>();
   /* Turn checkouts the utility registered, kept apart from the project contexts
    * `connect()` owns: a candidate turn's kernel and GeoSpec tools must reach the
-   * tree its file tools write, and that tree lives only for the turn (V19). The
-   * separate set is what makes a release frame unable to evict a project. */
+   * tree its file tools write (V19). The registration lives for as long as some
+   * turn holds the checkout — the tree itself outlives them, until an explicit
+   * discard. The separate set is what makes a release frame unable to evict a
+   * project. */
   const checkoutContexts = new Set<string>();
   const runtimeLeases = new Map<string, ReturnType<ServicesBrokerOptions['connectRuntime']>>();
   const runtimeLeaseClosures = new Map<string, Promise<void>>();
   const projectAttachments = new Map<string, Set<string>>();
   const attachmentGenerations = new Map<string, number>();
   const releaseWaiters = new Map<string, ReturnType<typeof Promise.withResolvers<void>>>();
+  /* Roots with a release in flight, by how many. `releaseAgentHost` awaits the
+   * utility, and a window that remounts inside that wait re-adopts the project
+   * under the attachment id that is releasing. */
+  const releasingRoots = new Map<string, number>();
   let releaseRequest = 0;
   let utility: UtilityProcess | undefined;
   let acceptingConnections = true;
@@ -174,7 +180,8 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
    * Register or release one turn checkout as a runtime root.
    *
    * A candidate turn's kernel and GeoSpec tools must reach the tree its file
-   * tools write, and that tree lives only for the turn (V19). The grant is
+   * tools write (V19). A settlement releases the registration, not the tree:
+   * only an explicit discard removes a checkout. The grant is
    * still main's: a checkout is admissible only inside Tau's configured
    * per-project checkout directory, and only a checkout registered here is
    * releasable — a release naming the project would silently disarm every later
@@ -394,7 +401,9 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
     retainAgentHost(input) {
       const root = canonicalRoot(input.workspaceRoot);
       const attachments = projectAttachments.get(root) ?? new Set<string>();
-      if (!attachments.has(input.attachmentId)) {
+      /* A retain during a release is a new adoption even under the same id: the
+       * generation is what lets the utility refuse the release it outran. */
+      if (!attachments.has(input.attachmentId) || releasingRoots.has(root)) {
         attachmentGenerations.set(root, (attachmentGenerations.get(root) ?? 0) + 1);
       }
       attachments.add(input.attachmentId);
@@ -439,8 +448,15 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
         }, boundMilliseconds);
         releaseTimeout.unref();
       });
+      releasingRoots.set(root, (releasingRoots.get(root) ?? 0) + 1);
       try {
         await Promise.race([pending.promise, deadline]);
+        /* The utility refused this release because the project was retained
+         * again while it was in flight; dropping main's grant now would strand
+         * the launcher that re-adoption is already using. */
+        if (attachmentGenerations.get(root) !== generation) {
+          return;
+        }
         attachments.delete(input.attachmentId);
         if (attachments.size === 0) {
           projectAttachments.delete(root);
@@ -449,6 +465,12 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
           projectIds.delete(root);
         }
       } finally {
+        const releasing = (releasingRoots.get(root) ?? 1) - 1;
+        if (releasing === 0) {
+          releasingRoots.delete(root);
+        } else {
+          releasingRoots.set(root, releasing);
+        }
         if (releaseTimeout !== undefined) {
           clearTimeout(releaseTimeout);
         }

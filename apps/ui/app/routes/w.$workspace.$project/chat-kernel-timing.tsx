@@ -6,6 +6,8 @@ import type { FilterCondition } from '#components/kernel/trace-condition-picker.
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { Button } from '@taucad/ui/components/button';
+import { downloadBlob } from '@taucad/utils/file';
+import { rendererSpans, telemetryJsonl } from '#lib/renderer-telemetry.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type {
   DisplaySettings,
@@ -238,6 +240,13 @@ export const GeometryUnitTiming = memo(function GeometryUnitTiming({
   }, []);
 
   const allCollapsibleIds = useMemo(() => collectAllSpanIds(processedTree), [processedTree]);
+
+  /* D8/OQ1: the browser has no host-visible sink, so the buffered spans leave by a deliberate act —
+   * every producer in one file, ordered on the absolute clock the epochs carry. */
+  const exportTrace = useCallback(() => {
+    const body = telemetryJsonl([...telemetryEntries, ...rendererSpans()]);
+    downloadBlob(new Blob([body], { type: 'application/x-ndjson' }), 'tau-trace.jsonl');
+  }, [telemetryEntries]);
   const isAllCollapsed =
     allCollapsibleIds.size > 0 && [...allCollapsibleIds].every((spanId) => collapsedSpans.has(spanId));
   const toggleCollapseAll = useCallback(() => {
@@ -289,6 +298,7 @@ export const GeometryUnitTiming = memo(function GeometryUnitTiming({
 
           <div className='mt-2 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-card'>
             <TraceToolbar
+              onExport={exportTrace}
               viewMode={viewMode}
               displaySettings={displaySettings}
               filters={filters}

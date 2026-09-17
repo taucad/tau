@@ -6,6 +6,10 @@ import type { ActorRefFrom } from 'xstate';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { GeometryUnitTiming } from '#routes/w.$workspace.$project/chat-kernel-timing.js';
+import { clearRendererSpans, recordRendererSpan, rendererSpans, telemetryJsonl } from '#lib/renderer-telemetry.js';
+
+const { downloadBlob } = vi.hoisted(() => ({ downloadBlob: vi.fn() }));
+vi.mock('@taucad/utils/file', () => ({ downloadBlob }));
 
 vi.mock('react-virtuoso', () => ({
   Virtuoso: forwardRef(
@@ -189,6 +193,24 @@ describe('GeometryUnitTiming', () => {
     const toolbar = screen.getByRole('button', { name: 'Filter spans' }).closest('.border-border');
     expect(toolbar).toHaveClass('border-b');
     expect(toolbar).not.toHaveClass('border-y');
+  });
+
+  it('exports every producer\u2019s spans as one JSONL trace', () => {
+    clearRendererSpans();
+    recordRendererSpan('renderer.presentation', { startTime: 210, duration: 12 });
+    renderTiming({ cadRef: actor(), query: '' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export trace' }));
+
+    expect(downloadBlob).toHaveBeenCalledOnce();
+    const [blob, filename] = downloadBlob.mock.calls[0]! as [Blob, string];
+    expect(filename).toMatch(/\.jsonl$/u);
+    /* D8: a browser tab has no sink, so this download is the flush — and it must carry both
+     * producers. jsdom's Blob exposes no reader, so the byte count stands in for the body: drop
+     * the renderer span and it no longer matches. */
+    expect(blob.size).toBe(telemetryJsonl([...telemetryEntries, ...rendererSpans()]).length);
+    expect(rendererSpans().map(({ name }) => name)).toEqual(['renderer.presentation']);
+    clearRendererSpans();
   });
 
   it('exposes tree metadata and keyboard focus while preserving collapse through filtering', async () => {

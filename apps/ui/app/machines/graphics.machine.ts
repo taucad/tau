@@ -14,6 +14,7 @@ import {
   probeWebGpuSupport,
   resolveGraphicsBackendPreference,
 } from '#components/geometry/graphics/graphics-backend.js';
+import { recordRendererSpan } from '#lib/renderer-telemetry.js';
 import { deriveModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionSource, ViewerHoverSuppressionReason } from '#machines/model-interaction.machine.js';
 
@@ -67,10 +68,7 @@ export type GltfPresentationProjection = Readonly<{
   presentedRevision: number;
   presentedKey?: string;
   phase: 'idle' | 'preparing' | 'awaiting-analysis' | 'presented' | 'failed';
-  recentTelemetry: readonly GltfPresentationTelemetry[];
 }>;
-
-const maximumGltfPresentationTelemetryRecords = 20;
 
 const withGltfPresentationPhase = (
   projection: Omit<GltfPresentationProjection, 'phase'>,
@@ -917,17 +915,19 @@ export const graphicsMachine = setup({
       },
     }),
 
-    recordGltfPresentationTelemetry: assign({
-      gltfPresentation({ context, event }) {
-        assertEvent(event, 'gltfPresentationMeasured');
-        return {
-          ...context.gltfPresentation,
-          recentTelemetry: [...context.gltfPresentation.recentTelemetry, event.telemetry].slice(
-            -maximumGltfPresentationTelemetryRecords,
-          ),
-        };
-      },
-    }),
+    /* D21: the presented frame joins the worker spans that produced it, under the renderer's own
+     * producer identity. The durations ride as attributes rather than as invented child spans —
+     * only their total is anchored to a real clock reading, exactly as the kernels report timings. */
+    recordGltfPresentationTelemetry({ event }) {
+      assertEvent(event, 'gltfPresentationMeasured');
+      const { durations, ...attributes } = event.telemetry;
+      const duration = durations.receiptToFirstFrame ?? durations.commitToFirstFrame ?? 0;
+      recordRendererSpan('renderer.presentation', {
+        startTime: performance.now() - duration,
+        duration,
+        attributes: { ...attributes, ...durations },
+      });
+    },
 
     updateSceneRadius: enqueueActions(({ enqueue, event }) => {
       assertEvent(event, 'sceneRadiusUpdated');
@@ -1605,7 +1605,6 @@ export const graphicsMachine = setup({
         requestedRevision: 0,
         presentedRevision: 0,
         phase: 'idle',
-        recentTelemetry: [],
       },
     };
   },
@@ -1993,7 +1992,3 @@ export const selectPresentedGeometryKey = (snapshot: GraphicsSnapshot): string =
 
 export const selectPresentedGltfRevision = (snapshot: GraphicsSnapshot): number =>
   snapshot.context.gltfPresentation.presentedRevision;
-
-export const selectLatestGltfPresentationTelemetry = (
-  snapshot: GraphicsSnapshot,
-): GltfPresentationTelemetry | undefined => snapshot.context.gltfPresentation.recentTelemetry.at(-1);

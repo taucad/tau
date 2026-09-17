@@ -188,23 +188,36 @@ export function ParametersNumber({
       onChange(native);
       return;
     }
-    // The sidecar write is what re-renders the model, so an authoritative row reports nothing here.
-    void commit.commit({
-      pointer: instancePointer,
-      value: native,
-      pressure,
-      base: {
-        pointer: instancePointer,
-        value: base.value,
-        binding: {
-          representation: base.binding.representation,
-          ...(base.binding.nativeUnit === undefined ? {} : { unit: base.binding.nativeUnit }),
-          ...(base.binding.quantityKind === undefined ? {} : { quantityKind: base.binding.quantityKind }),
-          ...(base.binding.space === undefined ? {} : { space: base.binding.space }),
-          ...(base.binding.reference === undefined ? {} : { reference: base.binding.reference }),
-        },
-      },
-    });
+    // The sidecar write is what re-renders the model, so an authoritative row reports no value here.
+    // It does report a refusal: a transient value is superseded by design, but a final one that the
+    // authority did not take must not look entered.
+    const settle = async (): Promise<void> => {
+      try {
+        const outcome = await commit.commit({
+          pointer: instancePointer,
+          value: native,
+          pressure,
+          base: {
+            pointer: instancePointer,
+            value: base.value,
+            binding: {
+              representation: base.binding.representation,
+              ...(base.binding.nativeUnit === undefined ? {} : { unit: base.binding.nativeUnit }),
+              ...(base.binding.quantityKind === undefined ? {} : { quantityKind: base.binding.quantityKind }),
+              ...(base.binding.space === undefined ? {} : { space: base.binding.space }),
+              ...(base.binding.reference === undefined ? {} : { reference: base.binding.reference }),
+            },
+          },
+        });
+        if (pressure === 'final' && outcome !== undefined && outcome.status !== 'committed') {
+          setInputDiagnostic('message' in outcome ? outcome.message : 'The parameter could not be saved.');
+        }
+      } catch (error) {
+        setInputDiagnostic(error instanceof Error ? error.message : 'The parameter could not be saved.');
+      }
+    };
+    // async-iife: bootstrap -- an input handler cannot return the authority's settlement.
+    void settle();
   };
 
   /** Enter a value from the slider or the stepper; text entry goes through {@link commitText}. */

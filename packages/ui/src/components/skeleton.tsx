@@ -2,7 +2,8 @@ import { cn } from '#utils/cn.js';
 
 /**
  * Render a non-interactive loading placeholder. No APG pattern applies; pair it
- * with status text when loading state must be announced.
+ * with status text when loading state must be announced. The pulse stops under
+ * reduced motion.
  *
  * @public
  * @param properties - Standard div properties.
@@ -17,7 +18,13 @@ import { cn } from '#utils/cn.js';
  * ```
  */
 function Skeleton({ className, ...properties }: React.HTMLAttributes<HTMLDivElement>): React.JSX.Element {
-  return <div data-slot='skeleton' className={cn('animate-pulse rounded-md bg-muted', className)} {...properties} />;
+  return (
+    <div
+      data-slot='skeleton'
+      className={cn('animate-pulse rounded-md bg-muted motion-reduce:animate-none', className)}
+      {...properties}
+    />
+  );
 }
 
 export { Skeleton };

@@ -392,8 +392,8 @@ export class NativeProcessSession<Issue> {
           this.options.runtimePath,
           this.options.executablePath,
           this.options.executableSha256,
-          ...this.options.resources.map(({ path, sha256 }) => `${path} ${sha256}`),
-        ].join(' '),
+          ...this.options.resources.map(({ path, sha256 }) => `${path}\u0000${sha256}`),
+        ].join('\u0000'),
       )
       .digest('hex');
     const verified = verifiedRuntimePayloads.get(fingerprint) ?? this.verifyResourceDigests();

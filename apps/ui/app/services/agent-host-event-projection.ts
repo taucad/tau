@@ -19,7 +19,8 @@ const errorText = (value: unknown, fallback: string): string => {
   }
   if (isRecord(value) && typeof value['message'] === 'string') {
     if (typeof value['code'] === 'string' && typeof value['status'] === 'number') {
-      const category = httpStatusToCategory(value['status']);
+      // The gateway code is authoritative; the status is only a fallback for uncoded failures.
+      const category = value['code'] === 'INSUFFICIENT_CREDIT' ? 'credits' : httpStatusToCategory(value['status']);
       const { details } = value;
       return JSON.stringify({
         category,

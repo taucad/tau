@@ -27,6 +27,30 @@ export class BillingPaymentConflict extends Error {
   }
 }
 
+/** Shown wherever a purchase control is unavailable because this deployment cannot collect payment. */
+export const purchasesUnavailableMessage = 'Purchases are not available yet.';
+
+/** The API refused a purchase because this deployment cannot collect payment; retrying cannot help. */
+export class BillingCollectionUnavailable extends Error {
+  public constructor() {
+    super(purchasesUnavailableMessage);
+    this.name = 'BillingCollectionUnavailable';
+  }
+}
+
+/** Returns the typed refusal for a 403 `payment_collection_disabled`, or undefined for any other response. */
+export const parseCollectionRefusal = async (response: Response): Promise<BillingCollectionUnavailable | undefined> => {
+  if (response.status !== 403) {
+    return undefined;
+  }
+  const body: unknown = await response
+    .clone()
+    .json()
+    .catch(() => undefined);
+  const message = body && typeof body === 'object' ? (body as { message?: unknown }).message : undefined;
+  return message === 'payment_collection_disabled' ? new BillingCollectionUnavailable() : undefined;
+};
+
 const assertBoundAction = (action: WirePaymentAction, binding: PaymentActionBinding): WirePaymentAction => {
   if (
     action.environment !== binding.environment ||
@@ -80,7 +104,9 @@ const actionRequest = async (
     if (conflict) {
       throw conflict;
     }
-    throw new Error(`Billing payment request failed with ${response.status}`);
+    throw (
+      (await parseCollectionRefusal(response)) ?? new Error(`Billing payment request failed with ${response.status}`)
+    );
   }
   const body: unknown = await response.json();
   assertCurrentSession(binding);

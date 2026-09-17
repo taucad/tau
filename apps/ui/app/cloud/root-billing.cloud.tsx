@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useSession } from '@better-auth-ui/react';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { BillingSessionProvider, useBillingSession } from '@taucad/billing/hooks/billing-session';
 import { formatCreditAtoms } from '@taucad/billing';
@@ -60,6 +61,7 @@ const paymentActionIdPattern = /^[A-Za-z0-9._:-]{1,128}$/u;
 export const useCloudPaymentActionReturn = (): void => {
   const { apiBaseUrl, environment, userId } = useBillingSession();
   const financialSession = useFinancialSession();
+  const queryClient = useQueryClient();
   const [returnedActionId, clearReturnedAction] = useSearchParameter('payment_action', paymentActionParameter);
   /* Latched at mount, because clearing the parameter re-renders: the bounded
    * re-check below outlives the URL it arrived on, and reading the live value
@@ -86,11 +88,18 @@ export const useCloudPaymentActionReturn = (): void => {
     let active = true;
     type PaymentAction = Awaited<ReturnType<typeof getPaymentAction>>;
     const announce = (action: PaymentAction): string | number | undefined => {
+      if (action.state === 'fulfilled' || action.state === 'completed') {
+        // Balance, plan and saved card all changed; cached entitlements would otherwise stay Free for minutes.
+        void queryClient.invalidateQueries({ queryKey: ['billing'] });
+      }
       switch (action.state) {
         case 'fulfilled': {
           return action.receipt
             ? toast.success(`${formatCreditAtoms(BigInt(action.receipt.grantedCreditAtoms))} credits added.`)
             : undefined;
+        }
+        case 'completed': {
+          return action.purpose === 'subscription_checkout' ? toast.success('Tau Pro is active.') : undefined;
         }
         case 'funds_received': {
           return toast('Payment received. Credits are still being added.');
@@ -176,6 +185,8 @@ export const useCloudPaymentActionReturn = (): void => {
         }
       } catch {
         if (active) {
+          // A failed check must not leave the parameter to re-run on every reload.
+          clearReturnedActionRef.current('');
           toast.warning('Could not check the returned payment.');
         }
       }
@@ -184,5 +195,5 @@ export const useCloudPaymentActionReturn = (): void => {
     return () => {
       active = false;
     };
-  }, [actionId, apiBaseUrl, environment, financialSession, userId]);
+  }, [actionId, apiBaseUrl, environment, financialSession, queryClient, userId]);
 };

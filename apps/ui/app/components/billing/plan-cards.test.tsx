@@ -19,8 +19,13 @@ const PaymentConflict = vi.hoisted(
       }
     },
 );
+const CollectionUnavailable = vi.hoisted(() => class extends Error {});
+const entitlements = vi.hoisted(() => ({ current: { isResolved: true, paymentCollectionAvailable: true } }));
+vi.mock('@taucad/billing/hooks/use-entitlements', () => ({ useEntitlements: () => entitlements.current }));
 vi.mock('#lib/billing-payment-client.js', () => ({
   BillingPaymentConflict: PaymentConflict,
+  BillingCollectionUnavailable: CollectionUnavailable,
+  purchasesUnavailableMessage: 'Purchases are not available yet.',
   createPaymentRequestId: () => 'request_1',
   createSubscriptionAction,
   followPaymentRedirect,
@@ -34,7 +39,34 @@ vi.mock('@taucad/billing/hooks/billing-session', () => ({
 }));
 
 describe('PlanCards', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    entitlements.current = { isResolved: true, paymentCollectionAvailable: true };
+  });
+  it.each([
+    [{ isResolved: true, paymentCollectionAvailable: false }, true],
+    [{ isResolved: false, paymentCollectionAvailable: false }, false],
+  ])('keeps Subscribe disabled until collection is available (%o)', (state, showsNote) => {
+    entitlements.current = state;
+    render(
+      <MemoryRouter>
+        <PlanCards />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('button', { name: 'Subscribe Now' })).toBeDisabled();
+    expect(screen.queryByText('Purchases are not available yet.') !== null).toBe(showsNote);
+  });
+  it('shows the availability copy instead of a retry when the API refuses collection', async () => {
+    createSubscriptionAction.mockRejectedValue(new CollectionUnavailable());
+    render(
+      <MemoryRouter>
+        <PlanCards />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Subscribe Now' }));
+    expect(await screen.findByText('Purchases are not available yet.')).toBeInTheDocument();
+    expect(screen.queryByText(/try again/i)).toBeNull();
+  });
   it('starts the first-party Pro subscription action', async () => {
     createSubscriptionAction.mockResolvedValue({
       state: 'redirect_required',

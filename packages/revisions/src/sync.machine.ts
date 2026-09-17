@@ -988,13 +988,28 @@ export const syncMachine = setup({
                 actions: { type: 'rememberFetch', params: ({ event }) => event.output },
               },
             ],
-            onError: {
-              target: '#sync.queued',
-              actions: assign({
-                error: ({ event }) => reason(event.error),
-                reason: ({ event }) => syncFailureReason(event.error),
-              }),
-            },
+            onError: [
+              /* A refusal no wait can satisfy is terminal here too (C3b/N2):
+               * the backoff would only re-fetch it. */
+              {
+                guard: ({ event }) => isFatal(event.error),
+                target: '#sync.failed',
+                actions: [
+                  assign({
+                    error: ({ event }) => reason(event.error),
+                    reason: ({ event }) => syncFailureReason(event.error),
+                  }),
+                  { type: 'settlePush', params: { outcome: 'failed' } },
+                ],
+              },
+              {
+                target: '#sync.queued',
+                actions: assign({
+                  error: ({ event }) => reason(event.error),
+                  reason: ({ event }) => syncFailureReason(event.error),
+                }),
+              },
+            ],
           },
         },
         fastForwarding: {
@@ -1005,13 +1020,28 @@ export const syncMachine = setup({
               target: 'done',
               actions: { type: 'reportFastForward', params: ({ event }) => event.output },
             },
-            onError: {
-              target: '#sync.queued',
-              actions: assign({
-                error: ({ event }) => reason(event.error),
-                reason: ({ event }) => syncFailureReason(event.error),
-              }),
-            },
+            onError: [
+              /* A refusal no wait can satisfy is terminal here too (C3b/N2):
+               * the backoff would only re-fetch it. */
+              {
+                guard: ({ event }) => isFatal(event.error),
+                target: '#sync.failed',
+                actions: [
+                  assign({
+                    error: ({ event }) => reason(event.error),
+                    reason: ({ event }) => syncFailureReason(event.error),
+                  }),
+                  { type: 'settlePush', params: { outcome: 'failed' } },
+                ],
+              },
+              {
+                target: '#sync.queued',
+                actions: assign({
+                  error: ({ event }) => reason(event.error),
+                  reason: ({ event }) => syncFailureReason(event.error),
+                }),
+              },
+            ],
           },
         },
         /** A dirty or diverged checkout merges by the ordinary rules (A2/A22). */
@@ -1045,13 +1075,28 @@ export const syncMachine = setup({
               },
               { target: 'done' },
             ],
-            onError: {
-              target: '#sync.queued',
-              actions: assign({
-                error: ({ event }) => reason(event.error),
-                reason: ({ event }) => syncFailureReason(event.error),
-              }),
-            },
+            onError: [
+              /* A refusal no wait can satisfy is terminal here too (C3b/N2):
+               * the backoff would only re-fetch it. */
+              {
+                guard: ({ event }) => isFatal(event.error),
+                target: '#sync.failed',
+                actions: [
+                  assign({
+                    error: ({ event }) => reason(event.error),
+                    reason: ({ event }) => syncFailureReason(event.error),
+                  }),
+                  { type: 'settlePush', params: { outcome: 'failed' } },
+                ],
+              },
+              {
+                target: '#sync.queued',
+                actions: assign({
+                  error: ({ event }) => reason(event.error),
+                  reason: ({ event }) => syncFailureReason(event.error),
+                }),
+              },
+            ],
           },
         },
         done: { type: 'final' },

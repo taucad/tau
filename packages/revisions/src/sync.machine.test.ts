@@ -41,6 +41,7 @@
  * | 35 | `backedUp --open--> opening` | a client reopening a retained native root fetches again |
  * | 36 | `pushing → recording → queued` (refused `main`, `upToDate` fetch) | **C3a**: exactly one push, then the backoff — never the unbounded fetch↔push cycle |
  * | 37 | `pushing → onError(REMOTE_NOT_ENTITLED) → recording → failed` | **C3b/N2**: a refusal no wait can satisfy is terminal and says why |
+ * | 43 | `opening.fetching → onError(REMOTE_NOT_ENTITLED) → failed` | **C3b/N2**: the same, on the opening fetch rather than the push |
  * | 38 | `opening.fetching(ahead) → pushing` | **C15**: a device ahead of the remote pushes, instead of reading *Backed up* |
  * | 39 | `pushing --revisionMinted(close)--> recording → pushing` | **C17**: a close cut mid-push skips the debounce |
  * | 40 | `opening --offline--> queued` + `pushSettled { queued }` | **C18**: a correlated `syncNow` made offline settles instead of hanging |
@@ -469,6 +470,34 @@ describe('syncMachine', () => {
     /* No backoff reaches a state that pushes: only the person does. */
     harness.clock.advance(600_000);
     expect(harness.effects.inputsFor('push')).toHaveLength(1);
+
+    harness.stop();
+  });
+
+  /* Lane E2's two-client row 4 found this on the wire: a plan that lapses
+   * answers the *opening fetch* first, and that edge went to `queued` for every
+   * code, so the backoff re-fetched a refusal no wait can satisfy, forever. */
+  it('row 43 (C3b/N2): a terminal refusal on the opening fetch fails instead of retrying on backoff', async () => {
+    const harness = start();
+    await vi.waitFor(() => {
+      expect(harness.effects.running('fetch')).toBe(1);
+    });
+    harness.effects.settle('fetch', {
+      error: Object.assign(new Error('Syncing files to Tau Cloud is a paid plan feature.'), {
+        code: 'REMOTE_NOT_ENTITLED',
+      }),
+    });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('failed')).toBe(true);
+    });
+
+    const facet = selectSyncFacet(harness.actor.getSnapshot());
+    expect(facet.reason).toBe('notEntitled');
+    expect(facet.error).toBe('Syncing files to Tau Cloud is a paid plan feature.');
+
+    /* No backoff re-opens the pull: only the person does. */
+    harness.clock.advance(600_000);
+    expect(harness.effects.inputsFor('fetch')).toHaveLength(1);
 
     harness.stop();
   });

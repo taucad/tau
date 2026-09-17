@@ -325,7 +325,6 @@ const target = { authority: 'memory', root: '/project', entry: 'main.ts' };
 const authority = {
   path: () => '.tau/parameters/main.ts.json',
   read: async () => bytes?.slice() ?? null,
-  semanticPreconditions: async () => [],
   writeChecked: async (input) => {
     const expected = input.preconditions.find(({ path }) => path === input.path)?.expected ?? null;
     if (!equalBytes(bytes, expected)) {

@@ -310,21 +310,15 @@ describe('cadMachine', () => {
       actor.start();
       expect(actor.getSnapshot().value).toBe('connecting');
 
-      actor.send({
-        type: 'initializeModel',
-        entryPath: stubEntryPath,
-        parameters: { width: 10 },
-      });
+      actor.send({ type: 'initializeModel', entryPath: stubEntryPath });
 
       expect(actor.getSnapshot().context.entryPath).toEqual(stubEntryPath);
-      expect(actor.getSnapshot().context.parameters).toEqual({ width: 10 });
 
       resolveConnect();
       await waitFor(actor, (s) => s.value === 'idle');
 
       expect(mockClient.render).toHaveBeenCalledWith({
         source: { path: stubEntryPath },
-        parameters: { width: 10 },
         content: { includeEdges: true },
       });
       actor.stop();
@@ -338,17 +332,6 @@ describe('cadMachine', () => {
 
       actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
       expect(actor.getSnapshot().context.entryPath).toEqual(stubEntryPath);
-      actor.stop();
-    });
-
-    it('should buffer setParameters during connecting', () => {
-      const { actor } = createTestActor({
-        connectResult: async () => new Promise<never>(noop),
-      });
-      actor.start();
-
-      actor.send({ type: 'setParameters', parameters: { depth: 5 } });
-      expect(actor.getSnapshot().context.parameters).toEqual({ depth: 5 });
       actor.stop();
     });
 
@@ -403,7 +386,6 @@ describe('cadMachine', () => {
       actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
       expect(mockClient.render).toHaveBeenCalledWith({
         source: { path: stubEntryPath },
-        parameters: {},
         content: { includeEdges: true },
       });
       expect(actor.getSnapshot().context.entryPath).toEqual(stubEntryPath);
@@ -447,36 +429,31 @@ describe('cadMachine', () => {
       actor.stop();
     });
 
-    it('should dispatch setParameters as a render carrying the committed sidecar bytes', async () => {
+    it('should dispatch a committed edit as a render carrying the sidecar bytes', async () => {
       const { actor, mockClient } = await startAndConnect();
       actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
       vi.mocked(mockClient.render).mockClear();
       const stage = { '.tau/parameters/main.ts.json': new Uint8Array([1, 2, 3]) };
 
-      actor.send({ type: 'setParameters', parameters: { height: 20 }, stage });
+      actor.send({ type: 'commitParameters', stage });
 
-      // D1: persistence is not dispatch. The edit reaches the kernel here, not through the watch.
+      /* D1: persistence is not dispatch. The edit reaches the kernel here with the bytes the
+       * authority just wrote, not a second copy of the values and not through the watch. */
       expect(mockClient.render).toHaveBeenCalledWith({
         source: { path: stubEntryPath },
-        parameters: { height: 20 },
         content: { includeEdges: true },
         stage,
       });
-      expect(actor.getSnapshot().context.parameters).toEqual({ height: 20 });
       actor.stop();
     });
 
     it('should dispatch a drag sample as a transient render that stages nothing', async () => {
       const { actor, mockClient } = await startAndConnect();
       actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
-      actor.send({
-        type: 'setParameters',
-        parameters: { height: 20 },
-        stage: { '.tau/parameters/main.ts.json': new Uint8Array([1, 2, 3]) },
-      });
+      actor.send({ type: 'commitParameters', stage: { '.tau/parameters/main.ts.json': new Uint8Array([1, 2, 3]) } });
       vi.mocked(mockClient.render).mockClear();
 
-      actor.send({ type: 'setParameters', parameters: { height: 21 }, transient: true });
+      actor.send({ type: 'scrubParameters', parameters: { height: 21 } });
 
       // D2: a drag sample is never persisted, so it carries no sidecar bytes even though the
       // committed edit before it did.
@@ -489,17 +466,13 @@ describe('cadMachine', () => {
       actor.stop();
     });
 
-    it('should forward initializeModel as render with parameters', async () => {
+    it('should forward initializeModel as a render carrying no values', async () => {
       const { actor, mockClient } = await startAndConnect();
 
-      actor.send({
-        type: 'initializeModel',
-        entryPath: stubEntryPath,
-        parameters: { width: 10 },
-      });
+      actor.send({ type: 'initializeModel', entryPath: stubEntryPath });
+      // Stored values reach the kernel through the watched sidecar, never through this request.
       expect(mockClient.render).toHaveBeenCalledWith({
         source: { path: stubEntryPath },
-        parameters: { width: 10 },
         content: { includeEdges: true },
       });
       expect(actor.getSnapshot().context.entryPath).toEqual(stubEntryPath);
@@ -521,13 +494,11 @@ describe('cadMachine', () => {
       expect(main.mockClient.render).toHaveBeenCalledOnce();
       expect(main.mockClient.render).toHaveBeenCalledWith({
         source: { path: 'main.scad' },
-        parameters: {},
         content: { includeEdges: true },
       });
       expect(nested.mockClient.render).toHaveBeenCalledOnce();
       expect(nested.mockClient.render).toHaveBeenCalledWith({
         source: { path: 'lib/cube.scad' },
-        parameters: {},
         content: { includeEdges: true },
       });
       expect(main.actor.getSnapshot().context.entryPath).toBe('main.scad');
@@ -643,7 +614,7 @@ describe('cadMachine', () => {
         geometry: stubGeometry,
         issues: [],
       });
-      actor.send({ type: 'setParameters', parameters: { radius: -1 } });
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
       const requestedRenderId = actor.getSnapshot().context.lastRequestedRenderId;
       expect(actor.getSnapshot().context.geometry).toBe(stubGeometry);
       expect(actor.getSnapshot().context.latestGeometryOutcome).toBeUndefined();
@@ -1030,18 +1001,8 @@ describe('cadMachine', () => {
       actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
       expect(mockClient.render).toHaveBeenCalledWith({
         source: { path: stubEntryPath },
-        parameters: {},
         content: { includeEdges: true },
       });
-      actor.stop();
-    });
-
-    it('should update context on setParameters during rendering without forwarding', async () => {
-      const { actor, mockClient } = await enterRendering();
-
-      actor.send({ type: 'setParameters', parameters: { depth: 5 } });
-      expect(mockClient.updateParameters).not.toHaveBeenCalled();
-      expect(actor.getSnapshot().context.parameters).toEqual({ depth: 5 });
       actor.stop();
     });
 
@@ -1150,17 +1111,8 @@ describe('cadMachine', () => {
       actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
       expect(mockClient.render).toHaveBeenCalledWith({
         source: { path: stubEntryPath },
-        parameters: {},
         content: { includeEdges: true },
       });
-      actor.stop();
-    });
-
-    it('should accept setParameters during buffering', async () => {
-      const { actor } = await enterBuffering();
-
-      actor.send({ type: 'setParameters', parameters: { width: 10 } });
-      expect(actor.getSnapshot().context.parameters).toEqual({ width: 10 });
       actor.stop();
     });
 
@@ -1228,7 +1180,6 @@ describe('cadMachine', () => {
       expect(actor.getSnapshot().context.kernelClient).toBeDefined();
       expect(mockClient.render).toHaveBeenCalledWith({
         source: { path: stubEntryPath },
-        parameters: {},
         content: { includeEdges: true },
       });
       actor.stop();
@@ -1255,11 +1206,7 @@ describe('cadMachine', () => {
       await waitFor(actor, (s) => s.value === 'error');
       expect(actor.getSnapshot().context.kernelClient).toBeUndefined();
 
-      actor.send({
-        type: 'initializeModel',
-        entryPath: stubEntryPath,
-        parameters: { width: 10 },
-      });
+      actor.send({ type: 'initializeModel', entryPath: stubEntryPath });
       expect(actor.getSnapshot().value).toBe('connecting');
       expect(actor.getSnapshot().context.entryPath).toEqual(stubEntryPath);
 
@@ -1267,35 +1214,8 @@ describe('cadMachine', () => {
       expect(actor.getSnapshot().context.kernelClient).toBeDefined();
       expect(mockClient.render).toHaveBeenCalledWith({
         source: { path: stubEntryPath },
-        parameters: { width: 10 },
         content: { includeEdges: true },
       });
-      actor.stop();
-    });
-
-    it('should stay in error on setParameters and only update context', async () => {
-      const mockClient = createMockAppRuntimeClient();
-      let connectAttempt = 0;
-
-      const { actor } = createTestActor({
-        connectResult: async () => {
-          connectAttempt++;
-          if (connectAttempt === 1) {
-            throw new Error('Connection refused');
-          }
-          return {
-            type: 'kernelConnected',
-            client: mockClient,
-            cleanups: [] as Array<() => void>,
-          };
-        },
-      });
-      actor.start();
-      await waitFor(actor, (s) => s.value === 'error');
-
-      actor.send({ type: 'setParameters', parameters: { depth: 5 } });
-      expect(actor.getSnapshot().value).toBe('error');
-      expect(actor.getSnapshot().context.parameters).toEqual({ depth: 5 });
       actor.stop();
     });
 
@@ -1303,11 +1223,7 @@ describe('cadMachine', () => {
       const { actor } = await enterError();
       expect(actor.getSnapshot().context.kernelClient).toBeDefined();
 
-      actor.send({
-        type: 'initializeModel',
-        entryPath: stubEntryPath,
-        parameters: { width: 10 },
-      });
+      actor.send({ type: 'initializeModel', entryPath: stubEntryPath });
       expect(actor.getSnapshot().value).toBe('connecting');
       actor.stop();
     });
@@ -1318,16 +1234,6 @@ describe('cadMachine', () => {
 
       actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
       expect(actor.getSnapshot().value).toBe('connecting');
-      actor.stop();
-    });
-
-    it('should stay in error on setParameters even when kernelClient existed', async () => {
-      const { actor } = await enterError();
-      expect(actor.getSnapshot().context.kernelClient).toBeDefined();
-
-      actor.send({ type: 'setParameters', parameters: { depth: 5 } });
-      expect(actor.getSnapshot().value).toBe('error');
-      expect(actor.getSnapshot().context.parameters).toEqual({ depth: 5 });
       actor.stop();
     });
 
@@ -1439,7 +1345,6 @@ describe('cadMachine', () => {
 
       expect(context.entryPath).toBeUndefined();
       expect(context.screenshot).toBeUndefined();
-      expect(context.parameters).toEqual({});
       expect(context.parameterManifest).toBeUndefined();
       expect(context.latestGeometryOutcome).toBeUndefined();
       expect(context.geometry).toBeUndefined();
@@ -1491,7 +1396,6 @@ describe('cadMachine', () => {
       actor.send({ type: 'setEntryPath', entryPath: newEntryPath });
       expect(mockClient.render).toHaveBeenCalledWith({
         source: { path: newEntryPath },
-        parameters: {},
         content: { includeEdges: true },
       });
       expect(actor.getSnapshot().context.entryPath).toEqual(newEntryPath);
@@ -1536,7 +1440,6 @@ describe('cadMachine', () => {
       await waitFor(actor, (s) => s.value === 'idle');
       expect(mockClient.render).toHaveBeenCalledWith({
         source: { path: stubEntryPath },
-        parameters: {},
         content: { includeEdges: true },
       });
 
@@ -1702,25 +1605,11 @@ describe('cadMachine', () => {
       actor.stop();
     });
 
-    it('should bump lastRequestedRenderId on setParameters event', async () => {
-      const { actor } = await startAndConnect();
-      const before = actor.getSnapshot().context.lastRequestedRenderId;
-
-      actor.send({ type: 'setParameters', parameters: { width: 10 } });
-
-      expect(actor.getSnapshot().context.lastRequestedRenderId).toBe(before + 1);
-      actor.stop();
-    });
-
     it('should bump lastRequestedRenderId on initializeModel event', async () => {
       const { actor } = await startAndConnect();
       const before = actor.getSnapshot().context.lastRequestedRenderId;
 
-      actor.send({
-        type: 'initializeModel',
-        entryPath: stubEntryPath,
-        parameters: { width: 5 },
-      });
+      actor.send({ type: 'initializeModel', entryPath: stubEntryPath });
 
       expect(actor.getSnapshot().context.lastRequestedRenderId).toBe(before + 1);
       actor.stop();
@@ -1730,7 +1619,7 @@ describe('cadMachine', () => {
       const { actor } = await startAndConnect();
 
       actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
-      actor.send({ type: 'setParameters', parameters: { width: 7 } });
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
       const requestedAfterTwoBumps = actor.getSnapshot().context.lastRequestedRenderId;
       expect(requestedAfterTwoBumps).toBeGreaterThan(0);
 
@@ -1793,7 +1682,6 @@ describe('cadMachine', () => {
 
       expect(mockClient.render).toHaveBeenCalledWith({
         source: { path: stubEntryPath },
-        parameters: {},
         content: { includeEdges: true },
       });
       actor.stop();

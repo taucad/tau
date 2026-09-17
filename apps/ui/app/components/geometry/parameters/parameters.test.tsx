@@ -3557,9 +3557,10 @@ describe('Parameters - admitted unit projection', () => {
     expect(screen.getByText(/Decimal values are preserved/)).toBeInTheDocument();
   });
 
-  it('uses a checked project source-unit binding for values and adornments', () => {
-    const admitted = manifest('declared');
-    const binding = admitted.bindings['/width']!;
+  it('uses an authored project unit for values and adornments', () => {
+    // The authored claim is the "project" provenance: it reinterprets an inferred unit and
+    // silences the inferred badge. A conflicting *declared* unit is refused by the planner instead.
+    const admitted = manifest('inferred');
     render(
       <TestWrapper>
         <Parameters
@@ -3568,31 +3569,7 @@ describe('Parameters - admitted unit projection', () => {
           jsonSchema={schema}
           units={{ length: { displaySymbol: 'cm' } }}
           parameterManifest={admitted}
-          parameterBindings={{
-            '/width': {
-              parameter: binding.parameter,
-              schema: binding.schema,
-              representation: binding.representation,
-              unit: 'cm',
-              quantityKind: binding.quantityKind,
-              space: binding.space,
-              constraints: { default: 10, minimum: 0.1, maximum: 20 },
-              sourceUnit: {
-                producer: 'build123d',
-                producerUnit: 'mm',
-                sourceRevision: 'source',
-                capability: 'change-source-unit:preserve-size:v1',
-              },
-              provenance: {
-                unit: {
-                  origin: 'project',
-                  producer: 'build123d',
-                  sourceRevision: 'source',
-                  evidence: 'source-unit:/width',
-                },
-              },
-            },
-          }}
+          parameterGroup={{ values: { width: 10 }, units: { '/width': 'cm' } }}
           onParametersChange={vi.fn()}
         />
       </TestWrapper>,

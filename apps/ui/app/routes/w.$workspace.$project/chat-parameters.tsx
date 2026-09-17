@@ -72,7 +72,7 @@ import type { cadMachine } from '#machines/cad.machine.js';
 import type { ParameterManifest } from '@taucad/parameters';
 import { getActiveGroupValues } from '@taucad/types';
 import type { FileParameterEntry, JSONValue } from '@taucad/types';
-import type { ParameterSetService } from '#services/parameter-set-service.js';
+import type { ParameterDraft, ParameterSetService } from '#services/parameter-set-service.js';
 import { withPointerValue } from '#services/parameter-set-service.js';
 import { createDefaultEntry } from '#utils/parameter-config.utils.js';
 import { sortGeometryUnitEntries } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
@@ -86,32 +86,25 @@ const toggleParametersKeyCombination = projectWorkspaceKeyCombinations.parameter
 
 type ParameterSetActor = NonNullable<ReturnType<ParameterSetService['actor']>>;
 type ParameterSetState = ReturnType<ParameterSetActor['getSnapshot']>;
-type ParameterGroupBindings = FileParameterEntry['groups'][string]['bindings'];
+type ParameterGroupState = FileParameterEntry['groups'][string] | undefined;
 
 const currentEntryOf = (state: ParameterSetState | undefined): FileParameterEntry | undefined =>
   state?.context.current?.entry;
 const activeGroupOf = (state: ParameterSetState | undefined): string | undefined => currentEntryOf(state)?.activeGroup;
 const activeGroupValuesOf = (state: ParameterSetState | undefined): Record<string, unknown> =>
   getActiveGroupValues(currentEntryOf(state));
-const activeGroupBindingsOf = (state: ParameterSetState | undefined): ParameterGroupBindings => {
+const activeParameterGroupOf = (state: ParameterSetState | undefined): ParameterGroupState => {
   const entry = currentEntryOf(state);
-  return entry === undefined ? undefined : entry.groups[entry.activeGroup]?.bindings;
+  return entry === undefined ? undefined : entry.groups[entry.activeGroup];
 };
 
-/** The record is re-parsed per snapshot, so bindings need a value comparison to stay identity-stable. */
-const shallowEqualBindings = (left: ParameterGroupBindings, right: ParameterGroupBindings): boolean => {
-  if (left === right) {
-    return true;
-  }
-  if (left === undefined || right === undefined) {
-    return false;
-  }
-  const keys = Object.keys(left);
-  return (
-    keys.length === Object.keys(right).length &&
-    keys.every((key) => JSON.stringify(left[key]) === JSON.stringify(right[key]))
-  );
-};
+/* The record is re-parsed per snapshot, so the group needs a value comparison to stay
+ * identity-stable. ponytail: only the authored unit claims are compared, because this group reaches
+ * the form solely as the unit refinement of each field's binding; values travel their own path. */
+const sameGroupClaims = (left: ParameterGroupState, right: ParameterGroupState): boolean =>
+  left === right ||
+  (JSON.stringify(left?.units) === JSON.stringify(right?.units) &&
+    JSON.stringify(left?.sourceUnits) === JSON.stringify(right?.sourceUnits));
 
 const sameManifestRevision = (left: ParameterManifest | undefined, right: ParameterManifest | undefined): boolean =>
   left === right || (left?.revision !== undefined && left.revision === right?.revision);
@@ -150,7 +143,8 @@ const authorityFailureOf = (
 ): Readonly<{ code: string; message: string }> | undefined =>
   state?.matches({ open: 'disconnected' }) === true ? state.context.diagnostic : undefined;
 
-const unreadableRecordCodes = new Set(['INVALID_RECORD', 'UNSUPPORTED_RECORD']);
+/** The single invalid-record policy refuses every unreadable record with this one code. */
+const unreadableRecordCode = 'INVALID_RECORD';
 
 /** A typed load failure with the one recovery that fits it: reset an unreadable record, or retry. */
 function ParameterAuthorityFailure({
@@ -165,7 +159,7 @@ function ParameterAuthorityFailure({
   readonly failure: Readonly<{ code: string; message: string }>;
 }): React.JSX.Element {
   const { parameterService } = useProject();
-  const unreadable = unreadableRecordCodes.has(failure.code);
+  const unreadable = failure.code === unreadableRecordCode;
   return (
     <div role='alert' className='flex flex-col items-start gap-2 p-3 text-sm'>
       <p className='text-destructive'>
@@ -548,7 +542,7 @@ function useScrubDispatch(
       }
       const next = pending.current;
       pending.current = undefined;
-      cadRef.send({ type: 'setParameters', parameters: next, transient: true });
+      cadRef.send({ type: 'scrubParameters', parameters: next });
     }
     return {
       scrub(field: Readonly<{ pointer: string; value: JSONValue }>): void {
@@ -599,7 +593,7 @@ function GeometryUnitParameters({
   const authorityFailure = useSelector(parameterActor, authorityFailureOf);
   const activeGroup = useSelector(parameterActor, activeGroupOf);
   const parameters = useSelector(parameterActor, activeGroupValuesOf);
-  const parameterBindings = useSelector(parameterActor, activeGroupBindingsOf, shallowEqualBindings);
+  const parameterGroup = useSelector(parameterActor, activeParameterGroupOf, sameGroupClaims);
   const parameterEditorInstance = useId();
   const scrub = useScrubDispatch(cadRef, parameterActor);
   const parameterCommit = useMemo(
@@ -610,7 +604,30 @@ function GeometryUnitParameters({
             target: parameterService.target(entryPath),
             group: activeGroup,
             editorInstance: parameterEditorInstance,
-            input: parameterService.input,
+            draft: (pointer: string) =>
+              parameterService.draft({
+                target: parameterService.target(entryPath),
+                group: activeGroup,
+                pointer,
+                editorInstance: parameterEditorInstance,
+              }),
+            setDraft: (pointer: string, draft: ParameterDraft | undefined) => {
+              parameterService.setDraft(
+                {
+                  target: parameterService.target(entryPath),
+                  group: activeGroup,
+                  pointer,
+                  editorInstance: parameterEditorInstance,
+                },
+                draft,
+              );
+            },
+            subscribeDrafts: parameterService.subscribeDrafts,
+            commit: async (field: Parameters<ParameterCommit['commit']>[0]) =>
+              parameterService.commitValue(parameterService.target(entryPath), parameterManifest, {
+                group: activeGroup,
+                ...field,
+              }),
             setValue: async (field: Parameters<ParameterCommit['setValue']>[0]) =>
               parameterService.submitValue(parameterService.target(entryPath), parameterManifest, {
                 group: activeGroup,
@@ -658,7 +675,7 @@ function GeometryUnitParameters({
       defaultParameters={defaultParameters}
       jsonSchema={jsonSchema}
       parameterManifest={parameterManifest}
-      parameterBindings={parameterBindings}
+      parameterGroup={parameterGroup}
       parameterEdit={parameterEdit}
       units={units}
       className='overflow-hidden rounded-b-xl border border-border bg-card [&_[data-slot=parameter-catalog]]:m-0 [&_[data-slot=parameter-catalog]]:rounded-none [&_[data-slot=parameter-catalog]]:border-0 [&_[data-slot=parameter-catalog]]:bg-transparent [&_[data-slot=parameter-catalog]]:p-2'

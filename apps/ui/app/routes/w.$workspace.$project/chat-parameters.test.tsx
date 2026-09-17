@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ActorRefFrom } from 'xstate';
-import { fileParameterRecordProfile } from '@taucad/types';
 import type { FileParameterEntry } from '@taucad/types';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { ChatParameters } from '#routes/w.$workspace.$project/chat-parameters.js';
@@ -89,8 +88,6 @@ const mockParameterService = {
     let entry = mockParameterEntries.get(entryPath) ?? mockEmptyParameterEntries.get(entryPath);
     if (entry === undefined) {
       entry = {
-        recordVersion: 1,
-        profile: fileParameterRecordProfile,
         activeGroup: 'default',
         groups: { default: { values: {} } },
       };
@@ -429,8 +426,6 @@ describe('ChatParameters', () => {
       [
         'main.ts',
         {
-          recordVersion: 1,
-          profile: fileParameterRecordProfile,
           activeGroup: 'default',
           groups: { default: { values: { width: 15 } } },
         },
@@ -589,8 +584,6 @@ describe('ParameterGroupSelector', () => {
       [
         'main.ts',
         {
-          recordVersion: 1,
-          profile: fileParameterRecordProfile,
           activeGroup: 'default',
           groups: {
             default: { values: {} },
@@ -608,8 +601,6 @@ describe('ParameterGroupSelector', () => {
       [
         'main.ts',
         {
-          recordVersion: 1,
-          profile: fileParameterRecordProfile,
           activeGroup: 'default',
           groups: {
             default: { values: {} },
@@ -620,8 +611,6 @@ describe('ParameterGroupSelector', () => {
       [
         'helper.ts',
         {
-          recordVersion: 1,
-          profile: fileParameterRecordProfile,
           activeGroup: 'default',
           groups: { default: { values: {} } },
         },
@@ -642,8 +631,6 @@ describe('ParameterGroupSelector', () => {
       [
         'main.ts',
         {
-          recordVersion: 1,
-          profile: fileParameterRecordProfile,
           activeGroup: 'default',
           groups: { default: { values: {} } },
         },
@@ -681,8 +668,6 @@ describe('ParameterGroupSelector', () => {
       [
         'main.ts',
         {
-          recordVersion: 1,
-          profile: fileParameterRecordProfile,
           activeGroup: 'default',
           groups: { default: { values: { width: 15 } } },
         },
@@ -712,8 +697,6 @@ describe('ParameterGroupManager — active group name', () => {
       [
         'main.ts',
         {
-          recordVersion: 1,
-          profile: fileParameterRecordProfile,
           activeGroup: 'my-custom-group',
           groups: {
             default: { values: {} },
@@ -734,8 +717,6 @@ describe('ParameterGroupManager — active group name', () => {
       [
         'main.ts',
         {
-          recordVersion: 1,
-          profile: fileParameterRecordProfile,
           activeGroup: 'default',
           groups: {
             default: { values: {} },
@@ -754,8 +735,6 @@ describe('ParameterGroupManager — active group name', () => {
       [
         'main.ts',
         {
-          recordVersion: 1,
-          profile: fileParameterRecordProfile,
           activeGroup: 'alternate',
           groups: {
             default: { values: {} },
@@ -780,8 +759,6 @@ describe('ParametersPanelHeader context menu', () => {
       [
         'main.ts',
         {
-          recordVersion: 1,
-          profile: fileParameterRecordProfile,
           activeGroup: 'default',
           groups: { default: { values: {} } },
         },

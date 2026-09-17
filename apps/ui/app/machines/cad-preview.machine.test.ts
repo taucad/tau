@@ -1,4 +1,5 @@
 // @vitest-environment node
+/* eslint-disable @typescript-eslint/naming-convention -- test data uses filenames as object keys */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActor, waitFor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
@@ -82,11 +83,9 @@ describe('cadPreviewMachine + cadMachine integration', () => {
 
     expect(mockClient.render).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
-      parameters: { width: 42 },
       content: { includeEdges: true },
     });
-    // D1: the CAD machine's render carries the parameters; a second direct dispatch would re-render.
-    expect(mockClient.updateParameters).not.toHaveBeenCalled();
+    expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
 
     cadRef.stop();
     previewRef.stop();
@@ -169,11 +168,9 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     expect(cadSnapshot.context.entryPath).toBe('main.ts');
     expect(mockClient.render).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
-      parameters: { width: 42 },
       content: { includeEdges: true },
     });
-    // D1: the CAD machine's render carries the parameters; a second direct dispatch would re-render.
-    expect(mockClient.updateParameters).not.toHaveBeenCalled();
+    expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
 
     cadRef.stop();
     previewRef.stop();
@@ -252,7 +249,6 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     // InitializeModel should have been sent to cadRef (now in idle)
     expect(mockClient.render).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
-      parameters: {},
       content: { includeEdges: true },
     });
 
@@ -348,11 +344,9 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     expect(cadSnapshot.context.entryPath).toBe('main.ts');
     expect(mockClient.render).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
-      parameters: { width: 42 },
       content: { includeEdges: true },
     });
-    // D1: the CAD machine's render carries the parameters; a second direct dispatch would re-render.
-    expect(mockClient.updateParameters).not.toHaveBeenCalled();
+    expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
 
     cadRef.stop();
     previewRef.stop();
@@ -481,11 +475,9 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     expect(cadRef.getSnapshot().context.entryPath).toBe('main.ts');
     expect(mockClient.render).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
-      parameters: { width: 42 },
       content: { includeEdges: true },
     });
-    // D1: the CAD machine's render carries the parameters; a second direct dispatch would re-render.
-    expect(mockClient.updateParameters).not.toHaveBeenCalled();
+    expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
 
     cadRef.stop();
     previewRef.stop();

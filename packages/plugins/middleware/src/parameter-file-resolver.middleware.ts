@@ -12,10 +12,7 @@ const errorMessage = (error: unknown): string => (error instanceof Error ? error
 
 /** The kernel issue for a record `requireParameterRecord` refused. */
 const recordIssue = (error: unknown): KernelIssue => ({
-  code:
-    error instanceof Error && 'code' in error && error.code === 'UNSUPPORTED_RECORD'
-      ? 'UNSUPPORTED_RECORD'
-      : 'INVALID_RECORD',
+  code: 'INVALID_RECORD',
   message: errorMessage(error),
   type: 'runtime',
   severity: 'error',

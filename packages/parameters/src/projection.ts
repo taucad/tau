@@ -1,5 +1,5 @@
 import { convert, createQuantity } from '@taucad/units/quantity';
-import type { FileParameterEntry } from '@taucad/types';
+import type { ParameterGroup } from '@taucad/types';
 import type { UnitDiagnostic } from '@taucad/units/unit';
 import type { ParameterBinding, ParameterManifest } from '#manifest.js';
 import { resolveParameterBinding } from '#manifest.js';
@@ -10,9 +10,6 @@ export type ParameterFieldDisplay = Readonly<{
   unit?: string;
   locale?: string;
 }>;
-
-/** Persisted project binding that can refine an admitted field projection. @public */
-export type ParameterFieldAuthorityBinding = NonNullable<FileParameterEntry['groups'][string]['bindings']>[string];
 
 /** UI-neutral projection of one effective parameter binding. @public */
 export type ParameterFieldProjection = Readonly<{
@@ -91,21 +88,22 @@ const unsupported = (
  * @param manifest - Effective admitted parameter manifest.
  * @param instancePointer - JSON instance pointer of the field.
  * @param display - Optional client-owned display unit and locale.
+ * @param group - Optional stored group, whose authored units refine the admitted binding.
  * @returns A stable field projection without changing native values.
  * @public
  */
-// oxlint-disable-next-line max-params -- Projection correlates one optional persisted authority binding.
+// oxlint-disable-next-line max-params -- Projection correlates one optional stored group.
 export const projectParameterField = (
   manifest: ParameterManifest,
   instancePointer: string,
   display: ParameterFieldDisplay = {},
-  authorityBinding?: ParameterFieldAuthorityBinding,
+  group?: ParameterGroup,
 ): ParameterFieldProjection => {
   const nativeBinding = resolveParameterBinding(manifest, instancePointer);
   if (!nativeBinding) {
     return { status: 'unknown', instancePointer, guessed: false };
   }
-  const binding = resolveEffectiveParameterBinding(manifest, instancePointer, nativeBinding, authorityBinding);
+  const binding = resolveEffectiveParameterBinding(manifest, instancePointer, nativeBinding, group);
   if (binding.representation === 'decimal') {
     return unsupported(instancePointer, binding, {
       code: 'REPRESENTATION_UNSUPPORTED',
@@ -116,7 +114,7 @@ export const projectParameterField = (
   const fieldProvenance = Object.fromEntries(
     fields.map((field) => [
       field,
-      resolveEffectiveParameterProvenance(manifest, instancePointer, nativeBinding, field, authorityBinding),
+      resolveEffectiveParameterProvenance(manifest, instancePointer, nativeBinding, field, group),
     ]),
   ) as Record<(typeof fields)[number], ReturnType<typeof resolveEffectiveParameterProvenance>>;
   const unitOrigin = fieldProvenance.unit?.origin ?? (binding.unit === undefined ? undefined : 'declared');

@@ -400,18 +400,13 @@ export function ProjectProvider({
       if (cadRef === undefined || current === undefined) {
         return;
       }
-      const parameters = getActiveGroupValues(current.entry);
-      const fingerprint = JSON.stringify(parameters);
-      const appliedFingerprint =
-        appliedParameterValues.current.get(entryPath) ?? JSON.stringify(cadRef.getSnapshot().context.parameters);
-      if (mode === 'dispatch' && appliedFingerprint !== fingerprint) {
-        /* The bytes the authority just persisted travel with the value: the runtime observes that
-         * revision itself, so the sidecar's own watch event has nothing left to re-render. */
-        cadRef.send({
-          type: 'setParameters',
-          parameters,
-          ...(current.bytes === null ? {} : { stage: { [parameterEntryPath(entryPath)]: current.bytes } }),
-        });
+      const fingerprint = JSON.stringify(getActiveGroupValues(current.entry));
+      const appliedFingerprint = appliedParameterValues.current.get(entryPath);
+      if (mode === 'dispatch' && appliedFingerprint !== fingerprint && current.bytes !== null) {
+        /* Only the bytes the authority just persisted travel: the runtime resolves the values from
+         * them and observes that revision itself, so the sidecar's own watch event has nothing left
+         * to re-render, and this machine keeps no second copy of the stored values. */
+        cadRef.send({ type: 'commitParameters', stage: { [parameterEntryPath(entryPath)]: current.bytes } });
       }
       appliedParameterValues.current.set(entryPath, fingerprint);
     },
@@ -591,10 +586,9 @@ export function ProjectProvider({
 
   const resolveParameterEntry = useCallback(
     (filePath: string, manifest: ParameterManifest) => {
-      // `resolve` creates the set actor synchronously, so the geometry observer can attach before
-      // the load settles and will dispatch the first loaded snapshot.
+      /* `resolve` creates the set actor synchronously. Nothing forwards its values to the kernel:
+       * the runtime watches the sidecar itself, so the checked write is the only render trigger. */
       const operation = parameterService.resolve(filePath, manifest);
-      observeParameters(filePath);
       // A failed load is shown in the panel with its recovery action, so it is not also a toast.
       const settle = async (): Promise<void> => {
         try {
@@ -606,7 +600,7 @@ export function ProjectProvider({
       // async-iife: bootstrap -- resolution is observed through the set actor, not this promise.
       void settle();
     },
-    [observeParameters, parameterService],
+    [parameterService],
   );
 
   const setGeometryUnitParameters = useCallback(

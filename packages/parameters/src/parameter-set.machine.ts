@@ -4,9 +4,9 @@ import type { CheckedFileWriteResult } from '@taucad/types';
 import type { ParameterResolutionOptions } from '#manifest.js';
 import { planParameterChange } from '#planning.js';
 import type { ParameterChange } from '#planning.js';
-import { classifyParameterReceipt } from '#receipt.js';
+import { sameRecordBytes } from '#record.js';
 import type { ParameterSnapshot } from '#snapshot.js';
-import { sameIdentity, sameRequestDelivery, validRequestShape, validTarget } from '#request.js';
+import { sameRequestDelivery, validRequestShape, validTarget } from '#request.js';
 import type { ParameterSetOutcome, ParameterSetRequest, ParameterSetTarget, ParameterSetPlanResult } from '#types.js';
 
 /** Input for the one actor that sequences edits to a parameter target. @public */
@@ -91,9 +91,10 @@ const errorDiagnostic = (
   code: typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : fallback,
   message: errorMessage(error),
 });
-// Pending commands beyond this bound are refused `BUSY` with the editor's draft intact.
-const pendingLimit = 16;
-// Commands for the same field (or the same group operation) may displace each other's transient pressure.
+// Pending commands beyond this bound are refused `BUSY` with the editor's draft intact. Newer
+// commands for the same field displace older queued ones, so a burst never needs a deep queue.
+const pendingLimit = 8;
+// Commands for the same field (or the same group operation) displace each other while queued.
 const pressureKey = (request: ParameterSetRequest): string => {
   const { operation } = request;
   switch (operation.kind) {
@@ -109,11 +110,19 @@ const pressureKey = (request: ParameterSetRequest): string => {
     }
   }
 };
-// Index of the pending transient a new command replaces, or -1 to append.
+/**
+ * Index of the queued command a new one replaces, or -1 to append. A queued command has not been
+ * planned or written, so a newer value for the same field supersedes it whatever its pressure: a
+ * burst of slider releases collapses to the last one instead of each paying a plan and a write.
+ * Every other operation still only displaces an unsettled transient.
+ */
 const displacedIndex = (pending: readonly ParameterSetRequest[], request: ParameterSetRequest): number => {
-  const key = pressureKey(request);
-  const index = pending.findLastIndex((item) => pressureKey(item) === key);
-  return index !== -1 && pending[index]!.pressure === 'transient' ? index : -1;
+  const index = pending.findLastIndex((item) => pressureKey(item) === pressureKey(request));
+  if (index === -1) {
+    return -1;
+  }
+  const valueEdit = request.operation.kind === 'native-value' || request.operation.kind === 'unit-value';
+  return valueEdit || pending[index]!.pressure === 'transient' ? index : -1;
 };
 const canonicalResolution = (resolution: ParameterResolutionOptions | undefined): string => {
   const { mode, ...rest } = resolution ?? {};
@@ -128,6 +137,36 @@ const cancelledSettlement = (request: ParameterSetRequest): ParameterSetEmission
   request,
   outcome: { status: 'cancelled-before-apply', requestId: request.requestId },
 });
+/**
+ * Settle an uncertain checked write by reading the record back. Equal to the bytes we meant to
+ * write, the intended state holds; still equal to the bytes we planned from, the write never
+ * landed; anything else is a foreign write over an unknown outcome.
+ */
+const recoveredOutcome = (
+  context: ParameterSetMachineContext,
+  reloaded: ParameterSnapshot,
+): Extract<ParameterSetOutcome, { status: 'committed' | 'known-not-applied-failure' | 'indeterminate' }> => {
+  const { requestId } = context.active!;
+  const change = context.change!;
+  if (sameRecordBytes(reloaded.bytes, change.write.data)) {
+    return { status: 'committed', requestId, revision: reloaded.identity, write: 'reconciled' };
+  }
+  if (sameRecordBytes(reloaded.bytes, change.write.preconditions[0]?.expected ?? null)) {
+    return {
+      status: 'known-not-applied-failure',
+      requestId,
+      code: 'WRITE_FAILED',
+      message: 'The parameter record still holds the bytes this change was planned from.',
+    };
+  }
+  return {
+    status: 'indeterminate',
+    requestId,
+    code: 'UNKNOWN_APPLICATION',
+    message: 'The parameter record holds bytes this actor did not write; the write outcome is unknown.',
+  };
+};
+
 const knownRefusal = (error: unknown): boolean =>
   typeof error === 'object' &&
   error !== null &&
@@ -200,6 +239,8 @@ export const parameterSetMachine = setup({
     clear: assign(({ context }) =>
       context.outcome?.status === 'indeterminate' ? {} : { active: undefined, change: undefined },
     ),
+    /** Leave the uncertain lockout: the command already settled, so only the stale evidence goes. */
+    clearUncertain: assign({ active: undefined, change: undefined, outcome: undefined }),
     refresh: assign(({ context }) => ({ refresh: context.refresh ?? 'record' })),
     resolve: assign(({ context, event }) => ({
       refresh: 'manifest',
@@ -372,8 +413,13 @@ export const parameterSetMachine = setup({
             onDone: {
               target: 'route',
               actions: enqueueActions(({ context, event, enqueue }) => {
-                // The echo of this actor's own write keeps its identity: adopt the bytes, publish nothing.
-                if (context.current === undefined || !sameIdentity(event.output.identity, context.current.identity)) {
+                // The echo of this actor's own write re-reads the same bytes under the same
+                // manifest: adopt the snapshot, publish nothing.
+                if (
+                  context.current === undefined ||
+                  !sameRecordBytes(event.output.bytes, context.current.bytes) ||
+                  event.output.identity.manifestRevision !== context.current.identity.manifestRevision
+                ) {
                   enqueue.emit({ type: 'loaded', current: event.output });
                 }
                 enqueue.assign({ current: event.output, diagnostic: undefined });
@@ -403,6 +449,9 @@ export const parameterSetMachine = setup({
             { guard: ({ context }) => context.diagnostic?.code === 'WATCH_FAILED', target: 'disconnected' },
             { guard: 'reload', target: 'loading' },
             { guard: 'refresh', target: 'refreshing' },
+            // A command an authority change interrupted is re-planned against the fresh record,
+            // never rejected: only `base` decides whether the field itself moved under it.
+            { guard: 'active', target: 'planning' },
             { guard: 'pending', target: 'planning', actions: 'dequeue' },
             { target: 'ready' },
           ],
@@ -482,15 +531,8 @@ export const parameterSetMachine = setup({
               { guard: 'invalidClose', actions: 'emitCloseBlocked' },
               { target: 'settled', actions: ['closing', 'cancelled'] },
             ],
-            'watch.changed': {
-              target: 'settled',
-              actions: [
-                'refresh',
-                assign(({ context }) => ({
-                  outcome: rejected(context.active!.requestId, 'STALE_MANIFEST', 'Authority changed during planning.'),
-                })),
-              ],
-            },
+            // Re-read and plan the same command again; the write never started, so nothing is lost.
+            'watch.changed': { target: 'refreshing' },
             resolve: [
               { guard: 'sameResolution' },
               {
@@ -546,19 +588,9 @@ export const parameterSetMachine = setup({
               { guard: 'invalidClose', actions: 'emitCloseBlocked' },
               { target: 'settled', actions: ['closing', 'cancelled'] },
             ],
-            'watch.changed': {
-              target: 'settled',
-              actions: [
-                'refresh',
-                assign(({ context }) => ({
-                  outcome: rejected(
-                    context.active!.requestId,
-                    'STALE_MANIFEST',
-                    'Authority changed before confirmation.',
-                  ),
-                })),
-              ],
-            },
+            // Re-plan against the fresh record; the caller is asked to confirm the new plan instead
+            // of losing the command, and the stale plan fingerprint can no longer be confirmed.
+            'watch.changed': { target: 'refreshing' },
             resolve: [
               { guard: 'sameResolution' },
               {
@@ -648,20 +680,7 @@ export const parameterSetMachine = setup({
               actions: assign(({ context, event }) => ({
                 current: event.output,
                 refresh: undefined,
-                outcome:
-                  classifyParameterReceipt({ change: context.change!, current: event.output }) === 'committed'
-                    ? {
-                        status: 'committed',
-                        requestId: context.active!.requestId,
-                        revision: event.output.identity,
-                        write: 'reconciled',
-                      }
-                    : {
-                        status: 'indeterminate',
-                        requestId: context.active!.requestId,
-                        code: 'UNKNOWN_APPLICATION',
-                        message: 'The available receipt cannot establish whether the write committed.',
-                      },
+                outcome: recoveredOutcome(context, event.output),
               })),
             },
             onError: {
@@ -681,8 +700,10 @@ export const parameterSetMachine = setup({
         uncertain: {
           entry: ['failPending', assign({ closing: false })],
           on: {
-            resolve: { target: 'recovering', actions: 'resolve' },
-            'watch.changed': { target: 'recovering' },
+            // The command already settled as indeterminate; recovering means reloading the record
+            // and accepting commands again, never settling that command a second time.
+            resolve: { target: 'loading', actions: ['resolve', 'clearUncertain'] },
+            'watch.changed': { target: 'loading', actions: 'clearUncertain' },
             close: {
               actions: assign({
                 diagnostic: { code: 'WRITE_UNCERTAIN', message: 'The previous write outcome remains uncertain.' },

@@ -16,7 +16,7 @@ import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/
 import { createRuntimeClient } from '@taucad/runtime';
 import { admitParameterManifest } from '@taucad/parameters';
 import type { ParameterManifest, ParameterResolutionOptions, ParameterSetTarget } from '@taucad/parameters';
-import { reloadParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
+import { loadParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
 import type { ParameterAuthority } from '@taucad/parameters/authority';
 import { createActor, fromCallback, fromPromise, waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -442,6 +442,22 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
    */
   const agentRuntimes = new Map<string, Promise<ReturnType<typeof createRuntimeClient>>>();
   const agentParameters = new Map<string, Map<string, Promise<ParameterActor>>>();
+  /**
+   * A manifest arriving over the runtime transport is admitted once, at this boundary, and cached
+   * by its revision: re-reading a sidecar carries no new semantic evidence to re-validate.
+   * ponytail: one entry per live revision, cleared when a new one arrives.
+   */
+  const admittedManifests = new Map<string, Promise<ParameterManifest>>();
+  const admitManifestOnce = async (manifest: ParameterManifest): Promise<ParameterManifest> => {
+    const held = admittedManifests.get(manifest.revision);
+    if (held !== undefined) {
+      return held;
+    }
+    const admitted = admitParameterManifest(manifest);
+    admittedManifests.clear();
+    admittedManifests.set(manifest.revision, admitted);
+    return admitted;
+  };
   const agentRuntimeClosures = new Map<string, Set<Promise<void>>>();
   const agentRuntimeCloseFailures: unknown[] = [];
 
@@ -648,7 +664,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
             { code: result.issues[0]?.code ?? 'PARAMETER_RESOLUTION_FAILED' },
           );
         }
-        return admitParameterManifest(result.data);
+        return admitManifestOnce(result.data);
       };
       const authority: ParameterAuthority = {
         path: () => sidecar,
@@ -659,18 +675,6 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
         writeChecked: async ({ signal, ...write }) => {
           signal?.throwIfAborted();
           return provider.writeFileChecked(write);
-        },
-        semanticPreconditions: async (_target, signal) => {
-          const snapshot = await runtime.snapshotSource({
-            source: { path: targetFile },
-            signal,
-          });
-          if (!snapshot.success) {
-            throw Object.assign(new Error(snapshot.issues.map(({ message }) => message).join('; ')), {
-              code: snapshot.issues[0]?.code ?? 'SOURCE_SNAPSHOT_FAILED',
-            });
-          }
-          return snapshot.data.files.map(({ path, content }) => ({ path, expected: content }));
         },
       };
       const observe = (changed: () => void, failed: (error: unknown) => void): (() => void) => {
@@ -705,14 +709,14 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       const actor = createActor(
         parameterSetMachine.provide({
           actors: {
-            // An agent read in the held mode re-reads only the sidecar unless the source bytes changed.
+            /* An agent edits the source between reads, so every load re-resolves; the manifest is
+             * admitted only once per revision, and the sidecar bytes decide what changed. */
             loadParameterSet: fromPromise(async ({ input, signal }) =>
-              reloadParameterSnapshot({
+              loadParameterSnapshot({
                 target,
                 authority,
                 manifest,
-                resolution: input.resolution,
-                current: input.current,
+                ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
                 signal,
               }),
             ),

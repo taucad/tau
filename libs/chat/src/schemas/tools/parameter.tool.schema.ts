@@ -21,15 +21,11 @@ const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 );
 const jsonObjectSchema = z.object({}).catchall(jsonValueSchema);
 
-/** Checked identity shared by parameter reads and operations. @public */
-export const parameterSetIdentitySchema = z
-  .object({
-    sourceRevision: tokenSchema,
-    manifestRevision: tokenSchema,
-    valueRevision: tokenSchema,
-    dependencyRevision: tokenSchema,
-  })
-  .strict();
+/**
+ * The admitted manifest a parameter read or operation was built from. A source change produces a
+ * new manifest revision, so this one token covers every semantic input. @public
+ */
+export const parameterSetIdentitySchema = z.object({ manifestRevision: tokenSchema }).strict();
 
 const parameterSourceUnitCapabilitySchema = z
   .object({
@@ -105,15 +101,6 @@ export const parameterSetOperationSchema = z.discriminatedUnion('kind', [
     .strict(),
   z
     .object({
-      kind: z.enum(['confirm-inference']),
-      group: tokenSchema,
-      parameterId: tokenSchema,
-      resource: tokenSchema,
-      pointer: z.string(),
-    })
-    .strict(),
-  z
-    .object({
       kind: z.enum(['source-unit']),
       mode: z.enum(['preserve-size', 'reinterpret']),
       group: tokenSchema,
@@ -122,7 +109,6 @@ export const parameterSetOperationSchema = z.discriminatedUnion('kind', [
       pointer: z.string(),
       unit: tokenSchema,
       producerCapability: parameterSourceUnitCapabilitySchema,
-      dependencies: z.object({}).catchall(tokenSchema).optional(),
     })
     .strict(),
   z
@@ -138,7 +124,7 @@ const parameterDiagnosticSchema = z
   .object({
     // Manifest, record, authority and host producers each own codes; the vocabulary stays open like outcome codes.
     code: tokenSchema.describe(
-      'Stable diagnostic code, for example INVALID_SCHEMA, INVALID_RECORD, UNSUPPORTED_RECORD, RESOLUTION_FAILED, WATCH_FAILED or RESOLUTION_SUPERSEDED.',
+      'Stable diagnostic code, for example INVALID_SCHEMA, INVALID_RECORD, RESOLUTION_FAILED, WATCH_FAILED or RESOLUTION_SUPERSEDED.',
     ),
     message: z.string(),
     severity: z.enum(['error', 'warning']),
@@ -231,7 +217,6 @@ const parameterSetOutcomeSchema = z.discriminatedUnion('status', [
       proposed: parameterAuthoritySnapshotSchema,
       planFingerprint: tokenSchema,
       producerCapability: parameterSourceUnitCapabilitySchema,
-      dependencies: z.object({}).catchall(tokenSchema),
     })
     .strict(),
   z

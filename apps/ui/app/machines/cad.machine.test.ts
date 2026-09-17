@@ -3,13 +3,24 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { assign, createActor, setup, waitFor } from 'xstate';
 import { RenderTimeoutError } from '@taucad/runtime/client';
-import type { CapabilitiesManifest, KernelIssue, TelemetryEntry } from '@taucad/runtime';
+import type {
+  CapabilitiesManifest,
+  KernelIssue,
+  ProgressiveSceneUpdate,
+  SceneNodeId,
+  TelemetryEntry,
+} from '@taucad/runtime';
 import { createMockRuntimeClient } from '@taucad/runtime-testing';
 import type { ParameterManifest } from '@taucad/parameters';
 import type { Geometry } from '@taucad/types';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
-import { cadMachine, disposeCadRuntime, selectCadFailureIssues } from '#machines/cad.machine.js';
+import {
+  cadMachine,
+  disposeCadRuntime,
+  selectCadFailureIssues,
+  selectCanSaveSelectedSceneStage,
+} from '#machines/cad.machine.js';
 import type { CadContext } from '#machines/cad.machine.js';
 import { logMachine } from '#machines/logs.machine.js';
 import type { AppRuntimeClient, KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
@@ -42,6 +53,7 @@ function createTestActor(options?: {
   shouldInitializeKernelOnStart?: boolean;
   parentRef?: CadContext['parentRef'];
   logRef?: CadContext['logActorRef'];
+  fileManagerRef?: CadContext['fileManagerRef'];
 }) {
   const mockClient = createMockAppRuntimeClient();
   const cleanups: Array<() => void> = [];
@@ -73,6 +85,7 @@ function createTestActor(options?: {
       logRef: options?.logRef,
       kernelOptionsFactory,
       fileSystemRoot: '/projects/test',
+      fileManagerRef: options?.fileManagerRef,
     },
   });
 
@@ -790,6 +803,94 @@ describe('cadMachine', () => {
       actor.stop();
       parentRef.stop();
     });
+
+    it('should not notify the parent when export availability is unchanged', async () => {
+      const parentRef = createParentActor();
+      const mockClient = createExportableRuntimeClient();
+      const { actor } = await startAndConnect({
+        parentRef,
+        connectResult: async () => ({
+          type: 'kernelConnected',
+          client: mockClient,
+          cleanups: [],
+        }),
+      });
+
+      actor.send({ type: 'activeKernelChanged', kernelId: 'replicad' });
+      actor.send({ type: 'geometryComputed', geometry: stubGeometry, issues: [] });
+      await waitFor(parentRef, (state) => state.context.events.at(-1)?.available === true);
+      const notifications = parentRef.getSnapshot().context.events.length;
+
+      // Repeated results that leave availability at `true` must not mint a new
+      // parent snapshot for its 20-odd subscribers.
+      actor.send({ type: 'geometryComputed', geometry: stubGeometry, issues: [] });
+      actor.send({ type: 'geometryComputed', geometry: stubGeometry, issues: [] });
+      actor.send({ type: 'activeKernelChanged', kernelId: 'replicad' });
+      await Promise.resolve();
+
+      expect(parentRef.getSnapshot().context.events).toHaveLength(notifications);
+      actor.stop();
+      parentRef.stop();
+    });
+  });
+
+  describe('scene stage availability', () => {
+    /** A frame whose only node references an asset the update never carried. */
+    const unresolvableReset: ProgressiveSceneUpdate = {
+      type: 'reset',
+      renderId: 'render-stage',
+      sequence: 0,
+      revision: 0,
+      sceneDigest: 'scene-stage-0' as Extract<ProgressiveSceneUpdate, { type: 'reset' }>['sceneDigest'],
+      skippedBefore: 0,
+      snapshot: {
+        manifest: {
+          schemaVersion: 1,
+          rootNodeIds: ['root' as SceneNodeId],
+          nodes: {
+            root: {
+              id: 'root' as SceneNodeId,
+              childIds: [],
+              transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+              visible: true,
+              geometry: {
+                contentDigest: 'asset-missing' as Extract<
+                  ProgressiveSceneUpdate,
+                  { type: 'reset' }
+                >['snapshot']['assets'][number]['contentDigest'],
+                mediaType: 'model/gltf-binary',
+                byteLength: 4,
+              },
+            },
+          },
+          presentation: {},
+        },
+        assets: [],
+      },
+    };
+
+    it('should answer save availability from the selected entry and fail loudly on an unmaterialisable stage', async () => {
+      const fileManagerRef = mock<NonNullable<CadContext['fileManagerRef']>>();
+      const { actor } = await startAndConnect({ fileManagerRef });
+
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
+      actor.send({ type: 'sceneUpdate', update: unresolvableReset });
+
+      // Reading the selector must not replay/materialise the timeline: the
+      // selected entry is in memory, so the action is offered.
+      expect(selectCanSaveSelectedSceneStage(actor.getSnapshot())).toBe(true);
+
+      // The save path -- not the selector -- owns materialisation and reports
+      // the unresolvable reference.
+      actor.send({ type: 'saveSelectedSceneStage' });
+      expect(actor.getSnapshot().context.sceneTimeline.artifactSave).toEqual({
+        status: 'failed',
+        sequence: 0,
+        message: 'The selected preview stage is not available as a complete scene reference',
+      });
+
+      actor.stop();
+    });
   });
 
   describe('kernel logs', () => {
@@ -952,6 +1053,44 @@ describe('cadMachine', () => {
       const entries = mock<TelemetryEntry[]>([{ name: 'test', startTime: 0, duration: 100, workerTimeOrigin: 0 }]);
       actor.send({ type: 'kernelTelemetry', entries });
       expect(actor.getSnapshot().context.telemetryEntries).toHaveLength(1);
+      actor.stop();
+    });
+
+    it('should retain only the most recent traces, cut on whole-trace boundaries', async () => {
+      const { actor } = await enterRendering();
+
+      // One trace = a child span followed by its root (a parent ends last).
+      const sendTrace = (trace: number): void => {
+        actor.send({
+          type: 'kernelTelemetry',
+          entries: [
+            {
+              name: 'kernel.bundle',
+              startTime: trace,
+              duration: 1,
+              workerTimeOrigin: 0,
+              detail: { spanId: `child-${String(trace)}`, parentSpanId: `root-${String(trace)}` },
+            },
+            {
+              name: 'kernel.render',
+              startTime: trace,
+              duration: 2,
+              workerTimeOrigin: 0,
+              detail: { spanId: `root-${String(trace)}` },
+            },
+          ],
+        });
+      };
+
+      for (let trace = 0; trace < 60; trace++) {
+        sendTrace(trace);
+      }
+
+      const { telemetryEntries } = actor.getSnapshot().context;
+      // 20 whole traces, oldest first, with no orphaned child from an evicted trace.
+      expect(telemetryEntries).toHaveLength(40);
+      expect(telemetryEntries[0]?.detail?.['parentSpanId']).toBe('root-40');
+      expect(telemetryEntries.at(-1)?.detail?.['spanId']).toBe('root-59');
       actor.stop();
     });
   });

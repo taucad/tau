@@ -164,7 +164,10 @@ export type StreamFlowControlOptions = {
  * @public
  */
 export type Channel<P extends RpcProtocol = EmptyRpcProtocol> = {
-  /** Resolves once the server's `lh` (hello) frame has been received. Pre-ready calls queue. */
+  /**
+   * Resolves once the server's `lh` (hello) frame has been received, and rejects
+   * when no hello arrives within the client's hello deadline. Pre-ready calls queue.
+   */
   readonly ready: Promise<void>;
   /** Resolves once the channel is fully closed (remote ack or timeout fallback). */
   readonly closed: Promise<void>;
@@ -391,6 +394,20 @@ const resolveListenIterable = async (result: unknown): Promise<AsyncIterable<unk
 };
 
 const defaultCloseTimeout = 5000;
+/**
+ * A client whose server never sends its hello has no wire, and every caller
+ * awaiting `ready` — or queued behind it — waits forever. Matches the bridge's
+ * own call deadline so a dead peer fails the same way at both layers.
+ */
+const defaultHelloTimeout = 30_000;
+/** Keep a pending deadline from holding a Node process open; browsers have no `unref`. */
+const unrefTimer = (timer: ReturnType<typeof setTimeout>): void => {
+  const maybeUnref = (timer as { unref?: () => void }).unref;
+  if (typeof maybeUnref === 'function') {
+    maybeUnref.call(timer);
+  }
+};
+
 const defaultInitialStreamCredits = 16;
 const defaultMaxStreamFrameBytes = 16 * 1024 * 1024;
 const defaultMaxStreamOwnedBytes = 64 * 1024 * 1024;
@@ -579,10 +596,7 @@ const createCloseController = (options: {
     timer = setTimeout(() => {
       finalize('timeout');
     }, closeHandshakeTimeout);
-    const maybeUnref = (timer as { unref?: () => void }).unref;
-    if (typeof maybeUnref === 'function') {
-      maybeUnref.call(timer);
-    }
+    unrefTimer(timer);
   };
 
   return {
@@ -730,7 +744,8 @@ export const createChannelServerOptions = <P extends RpcProtocol, T extends Chan
 
 /**
  * Create an RPC client over a {@link Port}. Resolves {@link Channel.ready} after the server's
- * hello frame is observed; calls made before `ready` are queued.
+ * hello frame is observed; calls made before `ready` are queued. A server that sends no hello
+ * rejects `ready` and closes the channel rather than leaving its callers pending.
  *
  * @param options - Channel client construction options (port, sessionKey, optional schemas, ...).
  * @returns A typed {@link Channel} bound to the supplied port.
@@ -764,9 +779,24 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
   let isReady = false;
   let resolveReady: () => void = (): void => undefined;
   let rejectReady: (reason: Error) => void = (): void => undefined;
+  /* A server that never sends its hello closes the channel instead of leaving
+   * `ready` — and every call queued behind it — pending for the session. Armed
+   * before the port is wired, so a hello only ever clears a timer that exists;
+   * `rejectReady` and `closeController` are bound long before it can fire. */
+  const helloTimer = setTimeout(() => {
+    rejectReady(new Error(`Channel server sent no hello within ${defaultHelloTimeout}ms.`));
+    closeController.initiateLocal('hello-timeout');
+  }, defaultHelloTimeout);
+  unrefTimer(helloTimer);
   const ready = new Promise<void>((resolve, reject) => {
-    resolveReady = resolve;
-    rejectReady = reject;
+    resolveReady = (): void => {
+      clearTimeout(helloTimer);
+      resolve();
+    };
+    rejectReady = (reason): void => {
+      clearTimeout(helloTimer);
+      reject(reason);
+    };
   });
   // async-iife: bootstrap — silence unhandledrejection when consumers never await ready;
   // the public `ready` promise itself remains unwrapped so consumers can handle errors.

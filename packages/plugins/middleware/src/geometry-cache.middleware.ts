@@ -153,25 +153,20 @@ export const geometryCache = defineMiddleware({
   name: 'GeometryCache',
   version: '2.0.0',
 
-  async wrapCreateGeometry(input, handler, { compute, dependencyHash, logger, tracer, progressiveSceneRequested }) {
-    // A terminal-only cache entry cannot replay scene operations or bookmarks.
-    // Inner deterministic work can still reuse compute; publish this terminal result for atomic consumers.
-    const liveResult = progressiveSceneRequested ? await handler(input) : undefined;
+  async wrapCreateGeometry(input, handler, { compute, dependencyHash, logger, tracer }) {
     if (compute.status !== 'on') {
-      return liveResult ?? handler(input);
+      return handler(input);
     }
     const result = await traceCacheOperation(tracer, 'cache.geometry.build.evaluate', async () =>
       compute.evaluate({
         action: dependencyAction('build', dependencyHash, buildCodec),
         codec: buildCodec,
         policy: 'best-effort',
-        compute: async () => liveResult ?? handler(input),
+        compute: async () => handler(input),
       }),
     );
-    logger.debug(
-      `Geometry build cache ${result.source} for ${dependencyHash}${progressiveSceneRequested ? ' (live scene executed)' : ''}`,
-    );
-    return liveResult ?? result.value;
+    logger.debug(`Geometry build cache ${result.source} for ${dependencyHash}`);
+    return result.value;
   },
 
   async wrapMeshGeometry(input, handler, { compute, dependencyHash, logger, tracer }) {

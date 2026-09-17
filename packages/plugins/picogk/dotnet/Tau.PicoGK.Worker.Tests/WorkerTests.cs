@@ -403,9 +403,6 @@ Library.Go(2f, () =>
         Assert.Empty(line.Normals);
         Assert.Equal(new uint[] { 0, 1, 1, 2 }, line.Indices);
         Assert.Contains(5f, line.Positions);
-        var checkpoint = Assert.Single(result.Checkpoints);
-        Assert.Equal("preview.tga", checkpoint.Path);
-        Assert.True(checkpoint.SceneGeneration > 0);
         Assert.All(new[]
         {
             result.Timings.EntryPointInvoke,
@@ -425,12 +422,10 @@ using System.Numerics;
 using PicoGK;
 Library.Go(2f, () => Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 3)));
 """);
-        var compute = new ComputeMaterializationCache([]);
-        var result = ModelRunner.Execute(CompilationService.Compile(root), Path.Combine(root, "artifacts"), compute: compute);
+        var result = ModelRunner.Execute(CompilationService.Compile(root), Path.Combine(root, "artifacts"));
         Assert.Single(result.Components);
         Assert.NotEmpty(result.Components[0].Positions);
         Assert.True(result.Timings.MeshConstruction >= 0);
-        Assert.Single(result.ComputePublications!);
 
         Write("main.cs", "throw new InvalidOperationException(\"model exploded\");");
         Assert.Contains("model exploded", Assert.Throws<InvalidOperationException>(() =>
@@ -472,7 +467,6 @@ Library.Go(2f, () => Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 3)));
             Assert.Equal("CS_TAU_VIEWER_PRESENTATION", Assert.Throws<WorkerException>(() => backend.SetFieldOfView(float.NaN)).Issues[0].Code);
             Assert.Equal("CS_TAU_VIEWER_PRESENTATION", Assert.Throws<WorkerException>(() => backend.SetFieldOfView(7)).Issues[0].Code);
             backend.RequestScreenShot(Path.Combine(artifactRoot, "ignored.tga"));
-            Assert.Throws<WorkerException>(() => backend.RequestScreenShot(Path.Combine(root, "escaped.tga")));
 
             using var mesh = Utils.mshCreateCube(new Vector3(2, 4, 6));
             backend.SetObjectMatrix(mesh, Matrix4x4.CreateTranslation(1, 2, 3));
@@ -492,7 +486,6 @@ Library.Go(2f, () => Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 3)));
             var captured = backend.Extract();
             Assert.Equal(3, captured.Components.Count);
             Assert.Equal("group-0-object-1", captured.Components[0].Name);
-            Assert.Single(captured.Checkpoints);
             backend.Remove(voxels);
             backend.Remove(voxels);
             backend.Remove(line);
@@ -555,99 +548,7 @@ Library.Go(2f, () => Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 3)));
     }
 
     [Fact]
-    public void CaptureBackendPublishesBoundedReconstructibleFramesBeforeCompletion()
-    {
-        using var library = new Library(1f);
-        Library.RegisterGlobalLibrary(library);
-        try
-        {
-            var frames = new List<SceneProgress>();
-            using var firstFrame = new ManualResetEventSlim();
-            using var backend = new CaptureViewerBackend(
-                Path.Combine(root, "progress-artifacts"),
-                new SceneCaptureOptions(SceneCaptureMode.Operation, 0, 1),
-                progress =>
-                {
-                    lock (frames) frames.Add(progress);
-                    firstFrame.Set();
-                });
-            using var mesh = Utils.mshCreateCube(new Vector3(2, 2, 2));
-            backend.Add(mesh, 1);
-
-            Assert.True(firstFrame.Wait(TimeSpan.FromSeconds(2)));
-            Assert.NotEmpty(frames);
-            Assert.Equal(1, frames[0].SceneGeneration);
-            Assert.Single(frames[0].Upserts);
-            backend.Complete();
-            var final = Assert.Single(backend.Extract().Components);
-            var lastFrame = Assert.Single(frames[^1].Upserts);
-            Assert.Equal(final.Name, lastFrame.Name);
-            Assert.Equal(final.Positions, lastFrame.Positions);
-            Assert.Throws<InvalidOperationException>(() => backend.Add(mesh, 2));
-        }
-        finally
-        {
-            Library.UnregisterGlobalLibrary();
-        }
-    }
-
-    [Fact]
-    public void CaptureBackendCoalescesRateLimitedOperationFramesAndHonorsExplicitBookmarks()
-    {
-        using var library = new Library(1f);
-        Library.RegisterGlobalLibrary(library);
-        try
-        {
-            var operationFrames = new List<SceneProgress>();
-            using (var backend = new CaptureViewerBackend(
-                Path.Combine(root, "coalesced-progress"),
-                new SceneCaptureOptions(SceneCaptureMode.Operation, 10_000, 2),
-                operationFrames.Add))
-            using (var first = Utils.mshCreateCube(Vector3.One))
-            using (var second = Utils.mshCreateCube(Vector3.One))
-            {
-                backend.Add(first, 1);
-                backend.Add(second, 2);
-                backend.Complete();
-                Assert.Equal(2, operationFrames.Count);
-                Assert.Equal(2, operationFrames.SelectMany(frame => frame.Upserts).Select(component => component.Id).Distinct().Count());
-            }
-
-            var noOpFrames = new List<SceneProgress>();
-            using (var backend = new CaptureViewerBackend(
-                Path.Combine(root, "semantic-noop-progress"),
-                new SceneCaptureOptions(SceneCaptureMode.Operation, 0, 2),
-                noOpFrames.Add))
-            using (var stable = Utils.mshCreateCube(Vector3.One))
-            {
-                backend.Add(stable, 2);
-                backend.Poll();
-                backend.SetGroupMatrix(2, Matrix4x4.Identity);
-                backend.Complete();
-                Assert.Single(noOpFrames);
-            }
-
-            var explicitFrames = new List<SceneProgress>();
-            var artifactRoot = Path.Combine(root, "explicit-progress");
-            using var explicitBackend = new CaptureViewerBackend(
-                artifactRoot,
-                new SceneCaptureOptions(SceneCaptureMode.Explicit, 0, 2),
-                explicitFrames.Add);
-            using var mesh = Utils.mshCreateCube(Vector3.One);
-            explicitBackend.Add(mesh, 1);
-            explicitBackend.RequestScreenShot(Path.Combine(artifactRoot, "bookmark.tga"));
-            explicitBackend.Complete();
-            var bookmark = Assert.Single(explicitFrames).Bookmark;
-            Assert.Equal("bookmark.tga", bookmark?.Path);
-        }
-        finally
-        {
-            Library.UnregisterGlobalLibrary();
-        }
-    }
-
-    [Fact]
-    public void HostedViewerPulsesFiniteGroupAnimationAtBoundedCadence()
+    public void HostedViewerAppliesFiniteGroupAnimationBeforeTheFinalScene()
     {
         Write("main.cs", """
 using System.Numerics;
@@ -665,34 +566,15 @@ Library.Go(1f, () =>
     System.Threading.Thread.Sleep(90);
 });
 """);
-        var frames = new List<(long Milliseconds, SceneProgress Progress)>();
-        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var result = ModelRunner.Execute(CompilationService.Compile(root), Path.Combine(root, "animation-artifacts"));
 
-        var result = ModelRunner.Execute(
-            CompilationService.Compile(root),
-            Path.Combine(root, "animation-artifacts"),
-            capture: new SceneCaptureOptions(SceneCaptureMode.Operation, 12, 16),
-            onProgress: progress => frames.Add((clock.ElapsedMilliseconds, progress)));
-
-        Assert.InRange(frames.Count, 3, 12);
-        Assert.All(frames.Zip(frames.Skip(1)), pair =>
-            Assert.True(pair.First.Progress.SceneGeneration < pair.Second.Progress.SceneGeneration));
-        Assert.All(frames.Skip(1).SkipLast(1).Zip(frames.Skip(2).SkipLast(1)), pair =>
-            Assert.True(pair.Second.Milliseconds - pair.First.Milliseconds >= 8));
-        Assert.True(AxisExtent(frames[0].Progress.Upserts[0].Positions, 0) < 3f);
         Assert.True(AxisExtent(result.Components[0].Positions, 0) > 5f);
         Assert.True(AxisExtent(result.Components[0].Positions, 1) < 3f);
     }
 
     [Fact]
-    public void HostedViewerPublishesSupportedPresentationAndRejectsUnavailableEnvironment()
+    public void HostedViewerAcceptsPresentationCallsAndRejectsUnavailableEnvironment()
     {
-        Assert.True(CaptureViewerBackend.PresentationEquals(new ScenePresentation(), new ScenePresentation()));
-        Assert.False(CaptureViewerBackend.PresentationEquals(new ScenePresentation(), new ScenePresentation([1, 1, 1, 1])));
-        Assert.False(CaptureViewerBackend.PresentationEquals(new ScenePresentation([1, 1, 1, 1]), new ScenePresentation()));
-        Assert.False(CaptureViewerBackend.PresentationEquals(
-            new ScenePresentation([1, 1, 1, 1]),
-            new ScenePresentation([0, 0, 0, 1])));
         Write("main.cs", """
 using System.Numerics;
 using PicoGK;
@@ -704,16 +586,8 @@ Library.Go(1f, () =>
     Library.oViewer().Add(Utils.mshCreateCube(Vector3.One));
 });
 """);
-        var frames = new List<SceneProgress>();
-        ModelRunner.Execute(
-            CompilationService.Compile(root),
-            Path.Combine(root, "presentation-artifacts"),
-            capture: new SceneCaptureOptions(SceneCaptureMode.Operation, 0, 16),
-            onProgress: frames.Add);
-
-        var presentation = frames.Select(frame => frame.Presentation).Last(value => value is not null)!;
-        Assert.Equal([0.1f, 0.2f, 0.3f, 0.4f], presentation.Background!);
-        Assert.InRange(presentation.FieldOfViewDegrees!.Value, 59.99f, 60.01f);
+        var accepted = ModelRunner.Execute(CompilationService.Compile(root), Path.Combine(root, "presentation-artifacts"));
+        Assert.Single(accepted.Components);
 
         Write("main.cs", "using PicoGK; Library.Go(1f, () => { }, strLightsFile: \"environment.zip\");");
         var unsupported = Assert.Throws<WorkerException>(() => ModelRunner.Execute(
@@ -723,111 +597,8 @@ Library.Go(1f, () =>
     }
 
     [Fact]
-    public void ProgressiveCaptureUsesStableIdsAndTransfersOnlyChangedComponents()
-    {
-        Write("main.cs", """
-using System.Numerics;
-using PicoGK;
-
-Library.Go(1f, () =>
-{
-    var viewer = Library.oViewer();
-    var retained = Utils.mshCreateCube(new Vector3(2, 3, 4));
-    var changing = Utils.mshCreateCube(new Vector3(5, 6, 7));
-    viewer.Add(retained, 1);
-    viewer.RequestScreenShot(System.IO.Path.Combine(Library.strLogFolder, "retained.tga"));
-    viewer.Add(changing, 2);
-    viewer.RequestScreenShot(System.IO.Path.Combine(Library.strLogFolder, "added.tga"));
-    viewer.SetObjectMatrix(changing, Matrix4x4.CreateTranslation(9, 0, 0));
-    viewer.RequestScreenShot(System.IO.Path.Combine(Library.strLogFolder, "moved.tga"));
-    viewer.RequestScreenShot(System.IO.Path.Combine(Library.strLogFolder, "unchanged.tga"));
-    viewer.Remove(retained);
-    viewer.RequestScreenShot(System.IO.Path.Combine(Library.strLogFolder, "removed.tga"));
-});
-""");
-        var progress = new List<SceneProgress>();
-
-        var result = ModelRunner.Execute(
-            CompilationService.Compile(root),
-            Path.Combine(root, "delta-artifacts"),
-            capture: new SceneCaptureOptions(SceneCaptureMode.Explicit, 0, 16),
-            onProgress: progress.Add);
-
-        Assert.Equal(5, progress.Count);
-        Assert.Equal(SceneProgressOperation.Reset, progress[0].Operation);
-        var retainedId = Assert.Single(progress[0].Upserts).Id;
-        Assert.Empty(progress[0].RemovedComponentIds);
-        Assert.Equal(SceneProgressOperation.Delta, progress[1].Operation);
-        var changingId = Assert.Single(progress[1].Upserts).Id;
-        Assert.NotEqual(retainedId, changingId);
-        Assert.Equal(changingId, Assert.Single(progress[2].Upserts).Id);
-        Assert.Empty(progress[3].Upserts);
-        Assert.Empty(progress[3].RemovedComponentIds);
-        Assert.Empty(progress[4].Upserts);
-        Assert.Equal([retainedId], progress[4].RemovedComponentIds);
-        Assert.Equal(changingId, Assert.Single(result.Components).Id);
-
-        var reconstructed = new Dictionary<string, ExtractedComponent>(StringComparer.Ordinal);
-        foreach (var update in progress)
-        {
-            if (update.Operation == SceneProgressOperation.Reset) reconstructed.Clear();
-            foreach (var removed in update.RemovedComponentIds) reconstructed.Remove(removed);
-            foreach (var upsert in update.Upserts) reconstructed[upsert.Id] = upsert;
-        }
-        var terminal = Assert.Single(result.Components);
-        var streamed = Assert.Single(reconstructed.Values);
-        Assert.Equal(terminal, streamed);
-        Assert.Equal(terminal.Positions, streamed.Positions);
-        Assert.Equal(terminal.Normals, streamed.Normals);
-        Assert.Equal(terminal.Indices, streamed.Indices);
-    }
-
-    [Fact]
-    public void ProgressiveCaptureDoesNotAdvanceTheBaseForSemanticNoOps()
-    {
-        Write("main.cs", """
-using System.IO;
-using System.Numerics;
-using PicoGK;
-
-Library.Go(1f, () =>
-{
-    var viewer = Library.oViewer();
-    var mesh = Utils.mshCreateCube(new Vector3(2, 3, 4));
-    viewer.Add(mesh, 1);
-    viewer.RequestScreenShot(Path.Combine(Library.strLogFolder, "added.tga"));
-    viewer.SetGroupMatrix(1, Matrix4x4.Identity);
-    viewer.RequestScreenShot(Path.Combine(Library.strLogFolder, "unchanged.tga"));
-    viewer.SetObjectMatrix(mesh, Matrix4x4.CreateTranslation(5, 0, 0));
-    viewer.RequestScreenShot(Path.Combine(Library.strLogFolder, "moved.tga"));
-});
-""");
-        var progress = new List<SceneProgress>();
-
-        ModelRunner.Execute(
-            CompilationService.Compile(root),
-            Path.Combine(root, "semantic-noop-artifacts"),
-            capture: new SceneCaptureOptions(SceneCaptureMode.Explicit, 0, 16),
-            onProgress: progress.Add);
-
-        Assert.Equal(3, progress.Count);
-        Assert.Equal(SceneProgressOperation.Reset, progress[0].Operation);
-        Assert.Equal(1, progress[0].SceneGeneration);
-        Assert.Equal(SceneProgressOperation.Delta, progress[1].Operation);
-        Assert.Equal(1, progress[1].BaseSceneGeneration);
-        Assert.Equal(2, progress[1].SceneGeneration);
-        Assert.Empty(progress[1].Upserts);
-        Assert.Equal("unchanged.tga", progress[1].Bookmark?.Path);
-        Assert.Equal(SceneProgressOperation.Delta, progress[2].Operation);
-        Assert.Equal(1, progress[2].BaseSceneGeneration);
-        Assert.Equal(3, progress[2].SceneGeneration);
-        Assert.Single(progress[2].Upserts);
-    }
-
-    [Fact]
     public void NormalsAndMixedArtifactLayoutAreDeterministic()
     {
-        Assert.Throws<ArgumentException>(() => MeshArtifactWriter.WriteSceneComponents(root, []));
         var positions = new float[] { 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 5, 5 };
         var normals = ModelRunner.VertexNormals(positions, [0, 1, 2]);
         Assert.Equal(new float[] { 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1 }, normals);
@@ -836,8 +607,7 @@ Library.Go(1f, () =>
             new ExtractedComponent("component:picogk-1", "triangles", "triangle", [1, 0, 0, 1], 0.2f, 0.8f, positions[..9], normals[..9], [0, 1, 2]),
             new ExtractedComponent("component:picogk-2", "lines", "line", [0, 1, 0, 1], 0, 1, [0, 0, 0, 1, 1, 1], [], [0, 1]),
         };
-        var checkpoints = new[] { new SceneCheckpoint("preview.tga", 1) };
-        var execution = new ModelExecutionResult(components, checkpoints, 2, true, new ModelTimings(0, 0, 0, 0, 0, 0));
+        var execution = new ModelExecutionResult(components, 2, true, new ModelTimings(0, 0, 0, 0, 0, 0));
         var result = MeshArtifactWriter.Write(
             root,
             execution,
@@ -849,7 +619,6 @@ Library.Go(1f, () =>
         Assert.Equal(116, result.ByteLength);
         Assert.Equal("triangles", result.Components[0].Kind);
         Assert.Equal("lines", result.Components[1].Kind);
-        Assert.Equal(checkpoints, result.Checkpoints);
         Assert.Equal(0, result.Components[0].PositionOffset);
         Assert.Equal(36, result.Components[0].NormalOffset);
         Assert.Equal(72, result.Components[0].IndexOffset);
@@ -860,211 +629,6 @@ Library.Go(1f, () =>
         Assert.Equal(2, result.Metrics.PicoGkNativeBytes);
         Assert.Equal(3, result.Metrics.ProcessWorkingSetBytes);
         Assert.Equal(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(result.ArtifactPath))).ToLowerInvariant(), result.Sha256);
-    }
-
-    [Fact]
-    public void VdbContentHashOmitsOnlyValidatedArchiveUuid()
-    {
-        var bytes = new byte[65];
-        BinaryPrimitives.WriteInt64LittleEndian(bytes, 0x56444220);
-        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(8), 225);
-        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(12), 13);
-        bytes[20] = 1;
-        Encoding.ASCII.GetBytes("01234567-89AB-CDEF-0123-456789ABCDEF").CopyTo(bytes, 21);
-        var digest = ComputeMaterializationCache.VdbKey(new MemoryStream([.. bytes]));
-        Assert.NotNull(digest);
-        var otherUuid = bytes.ToArray();
-        Encoding.ASCII.GetBytes("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE").CopyTo(otherUuid, 21);
-        Assert.Equal(digest, ComputeMaterializationCache.VdbKey(new MemoryStream(otherUuid)));
-        foreach (var offset in new[] { 12, 16, 57, 64 })
-        {
-            var changed = bytes.ToArray();
-            changed[offset]++;
-            Assert.NotEqual(digest, ComputeMaterializationCache.VdbKey(new MemoryStream(changed)));
-        }
-        foreach (var offset in new[] { 0, 8, 20, 29 })
-        {
-            var invalid = bytes.ToArray();
-            invalid[offset] = 0;
-            Assert.Null(ComputeMaterializationCache.VdbKey(new MemoryStream(invalid)));
-        }
-        Assert.Null(ComputeMaterializationCache.VdbKey(new MemoryStream(bytes[..56])));
-    }
-
-    [Fact]
-    public void VoxelContentHashPreservesPrecisionAndSourceMetadataAndCacheFailuresAreMisses()
-    {
-        using var library = new Library(1f);
-        Library.RegisterGlobalLibrary(library);
-        try
-        {
-            using var sphere = Voxels.voxSphere(Vector3.Zero, 2);
-            sphere.oMetaData().SetValue("is_saved_as_half_float", 1f);
-            var cache = new ComputeMaterializationCache([]);
-            using var backend = new CaptureViewerBackend(Path.Combine(root, "full-precision"), compute: cache);
-            backend.Add(sphere, 0);
-            backend.Complete();
-            var firstKey = Assert.Single(cache.Publications).CacheKey;
-            Assert.True(sphere.oMetaData().bGetValueAt("is_saved_as_half_float", out float flag));
-            Assert.Equal(1f, flag);
-            sphere.oMetaData().RemoveValue("is_saved_as_half_float");
-            var nextCache = new ComputeMaterializationCache([]);
-            using var next = new CaptureViewerBackend(Path.Combine(root, "full-precision-next"), compute: nextCache);
-            next.Add(sphere, 0);
-            next.Complete();
-            Assert.Equal(firstKey, Assert.Single(nextCache.Publications).CacheKey);
-
-            var missing = Path.Combine(root, "unavailable-cache");
-            var unavailable = new ComputeMaterializationCache([]);
-            using var noCache = new CaptureViewerBackend(missing, compute: unavailable);
-            Directory.Delete(missing);
-            noCache.Add(sphere, 0);
-            noCache.Complete();
-            Assert.Single(noCache.Extract().Components);
-            Assert.Empty(unavailable.Publications);
-        }
-        finally
-        {
-            Library.UnregisterGlobalLibrary();
-        }
-    }
-
-    [Fact]
-    public void ComponentMaterializationUsesGeometryContentInsteadOfCaptureOrder()
-    {
-        using var library = new Library(1f);
-        Library.RegisterGlobalLibrary(library);
-        try
-        {
-            var cold = new ComputeMaterializationCache([]);
-            using var first = new CaptureViewerBackend(Path.Combine(root, "content-cold"), compute: cold);
-            using var small = Voxels.voxSphere(Vector3.Zero, 2);
-            first.Add(small, 0);
-            first.Complete();
-            var firstGeometry = Assert.Single(first.Extract().Components);
-            var prepared = cold.Publications.Select(item => (item.CacheKey, item.Snapshot)).ToArray();
-
-            var warm = new ComputeMaterializationCache(prepared);
-            using var changed = new CaptureViewerBackend(Path.Combine(root, "content-changed"), compute: warm);
-            using var large = Voxels.voxSphere(new Vector3(20, 0, 0), 5);
-            using var duplicate = small.voxDuplicate();
-            changed.Add(large, 0);
-            changed.Add(small, 1);
-            changed.Add(duplicate, 2);
-            changed.Complete();
-            var changedGeometry = changed.Extract().Components;
-            Assert.True(changedGeometry[0].Positions.Max() > 20);
-            Assert.Equal(firstGeometry.Positions, changedGeometry[1].Positions);
-            Assert.Equal(firstGeometry.Positions, changedGeometry[2].Positions);
-            Assert.NotSame(changedGeometry[1].Positions, changedGeometry[2].Positions);
-            Assert.Single(warm.Publications);
-            Assert.NotEqual(prepared[0].CacheKey, warm.Publications[0].CacheKey);
-        }
-        finally
-        {
-            Library.UnregisterGlobalLibrary();
-        }
-    }
-
-    [Fact]
-    public void ComponentMaterializationCacheRoundTripsImmutableBytesAndSkipsVoxelMeshing()
-    {
-        var snapshot = new GeometrySnapshot("triangles", [0, 0, 0, 1, 0, 0, 0, 1, 0], [0, 1, 2], null);
-        var execution = new ModelExecutionResult(
-            [new ExtractedComponent("component:picogk-1", "triangles", "part", [1, 1, 1, 1], 0, 1, snapshot.Positions, [0, 0, 1, 0, 0, 1, 0, 0, 1], snapshot.Indices)],
-            [], 0, false, new ModelTimings(0, 0, 0, 0, 0, 0),
-            [new ComputeSnapshotPublication("1:voxels", snapshot)]);
-        var written = MeshArtifactWriter.Write(root, execution, new WorkerDiagnostics(
-            new WorkerTimings(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new WorkerMetrics(0, 0, 0)),
-            execution.ComputePublications);
-        var artifact = Assert.Single(written.ComputePublications);
-        var restored = MeshArtifactWriter.ReadComputeArtifact(artifact);
-        snapshot.Positions[0] = 99;
-        Assert.Equal(0, restored.Positions[0]);
-
-        using var library = new Library(1f);
-        Library.RegisterGlobalLibrary(library);
-        try
-        {
-            var cold = new ComputeMaterializationCache([]);
-            using var first = new CaptureViewerBackend(Path.Combine(root, "compute-cold"), compute: cold);
-            using var voxels = Voxels.voxSphere(Vector3.Zero, 2);
-            first.Add(voxels, 0);
-            first.Complete();
-            var coldGeometry = Assert.Single(first.Extract().Components);
-            var cache = new ComputeMaterializationCache(cold.Publications.Select(item => (item.CacheKey, item.Snapshot)));
-            using var backend = new CaptureViewerBackend(Path.Combine(root, "compute-hit"), compute: cache);
-            backend.Add(voxels, 0);
-            backend.Complete();
-            var captured = backend.Extract();
-            Assert.Equal(0, captured.MeshConstruction);
-            Assert.Empty(cache.Publications);
-            Assert.Equal(coldGeometry.Positions, captured.Components[0].Positions);
-            Assert.NotSame(coldGeometry.Indices, captured.Components[0].Indices);
-        }
-        finally
-        {
-            Library.UnregisterGlobalLibrary();
-        }
-
-        File.WriteAllBytes(artifact.ArtifactPath, [9]);
-        Assert.Throws<InvalidDataException>(() => MeshArtifactWriter.ReadComputeArtifact(artifact));
-
-        var sameLengthCorruption = artifact with { ArtifactPath = Path.Combine(root, "corrupt.tau-compute") };
-        File.WriteAllBytes(sameLengthCorruption.ArtifactPath, new byte[sameLengthCorruption.ByteLength]);
-        Assert.Throws<InvalidDataException>(() => MeshArtifactWriter.ReadComputeArtifact(sameLengthCorruption));
-        foreach (var invalid in new[]
-        {
-            artifact with { ArtifactPath = sameLengthCorruption.ArtifactPath, Sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(sameLengthCorruption.ArtifactPath))).ToLowerInvariant(), Kind = "lines" },
-            artifact with { ArtifactPath = sameLengthCorruption.ArtifactPath, Sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(sameLengthCorruption.ArtifactPath))).ToLowerInvariant(), PositionCount = 0 },
-            artifact with { ArtifactPath = sameLengthCorruption.ArtifactPath, Sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(sameLengthCorruption.ArtifactPath))).ToLowerInvariant(), IndexCount = 0 },
-            artifact with { ArtifactPath = sameLengthCorruption.ArtifactPath, Sha256 = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(sameLengthCorruption.ArtifactPath))).ToLowerInvariant(), PositionCount = 1 },
-        })
-        {
-            Assert.Throws<InvalidDataException>(() => MeshArtifactWriter.ReadComputeArtifact(invalid));
-        }
-
-        var emptyCache = new ComputeMaterializationCache([]);
-        Assert.False(emptyCache.TryGet("missing", out _));
-        Library.RegisterGlobalLibrary(library);
-        try
-        {
-            using var coldBackend = new CaptureViewerBackend(Path.Combine(root, "compute-miss"), compute: emptyCache);
-            using var coldMesh = Utils.mshCreateCube(Vector3.One);
-            coldBackend.Add(coldMesh, 0);
-            coldBackend.Complete();
-            Assert.Single(emptyCache.Publications);
-        }
-        finally
-        {
-            Library.UnregisterGlobalLibrary();
-        }
-    }
-
-    [Fact]
-    public void ComputeRequestParsingIsConfinedAndTreatsCorruptionAsAMiss()
-    {
-        Assert.Null(Program.ParseComputeCache(Json("{}"), root));
-        Assert.Throws<WorkerException>(() => Program.ParseComputeCache(Json("{\"compute\":null}"), root));
-        Assert.Throws<WorkerException>(() => Program.ParseComputeCache(Json("{\"compute\":{\"modelDigest\":\"bad\",\"prepared\":[]}}"), root));
-        Assert.Throws<WorkerException>(() => Program.ParseComputeCache(Json("{\"compute\":{\"modelDigest\":\"sha256:short\",\"prepared\":[]}}"), root));
-        Assert.Throws<WorkerException>(() => Program.ParseComputeCache(Json($"{{\"compute\":{{\"modelDigest\":\"sha256:{new string('1', 64)}\"}}}}"), root));
-        var path = Path.Combine(root, "prepared.tau-compute");
-        var bytes = new byte[24];
-        File.WriteAllBytes(path, bytes);
-        var digest = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-        var descriptor = new ComputeArtifact("1:mesh", "triangles", path, bytes.Length, digest, 3, 3);
-        var valid = JsonSerializer.SerializeToElement(new { compute = new ComputeRequest($"sha256:{new string('1', 64)}", [descriptor]) });
-        var cache = Program.ParseComputeCache(valid, root)!;
-        Assert.True(cache.TryGet("1:mesh", out _));
-
-        var corrupt = descriptor with { Sha256 = new string('0', 64) };
-        var ignored = JsonSerializer.SerializeToElement(new { compute = new ComputeRequest($"sha256:{new string('2', 64)}", [corrupt]) });
-        Assert.False(Program.ParseComputeCache(ignored, root)!.TryGet("1:mesh", out _));
-
-        var outside = descriptor with { ArtifactPath = Path.Combine(Path.GetTempPath(), "outside.tau-compute") };
-        var confined = JsonSerializer.SerializeToElement(new { compute = new ComputeRequest($"sha256:{new string('3', 64)}", [outside]) });
-        Assert.False(Program.ParseComputeCache(confined, root)!.TryGet("1:mesh", out _));
     }
 
     [Fact]
@@ -1092,9 +656,9 @@ Library.Go(2f, () =>
         Assert.Throws<KeyNotFoundException>(() => Program.ParseArguments(["--workspace", root]));
 
         var output = Run(arguments, """
-{"protocolVersion":3,"requestId":"1","method":"analyze","params":{"entryPath":"main.cs"}}
-{"protocolVersion":3,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{},"streamScene":true}}
-{"protocolVersion":3,"requestId":"3","method":"shutdown","params":{}}
+{"protocolVersion":4,"requestId":"1","method":"analyze","params":{"entryPath":"main.cs"}}
+{"protocolVersion":4,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{}}}
+{"protocolVersion":4,"requestId":"3","method":"shutdown","params":{}}
 """);
         Assert.Contains("\"type\":\"ready\"", output);
         Assert.Contains("\"defaultParameters\":{}", output);
@@ -1102,37 +666,7 @@ Library.Go(2f, () =>
         Assert.Contains("\"entryPointInvoke\"", output);
         Assert.Contains("\"shutdown\":true", output);
         Assert.Single(Directory.GetFiles(artifacts, "*.tau-mesh"));
-        var frames = output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => JsonDocument.Parse(line))
-            .ToArray();
-        try
-        {
-            var buildEvent = Array.FindIndex(frames, frame =>
-                frame.RootElement.TryGetProperty("type", out var type) && type.GetString() == "event" &&
-                frame.RootElement.GetProperty("requestId").GetString() == "2");
-            var buildTerminal = Array.FindIndex(frames, frame =>
-                !frame.RootElement.TryGetProperty("type", out _) &&
-                frame.RootElement.TryGetProperty("requestId", out var id) && id.GetString() == "2");
-            Assert.True(buildEvent >= 0);
-            Assert.True(buildEvent < buildTerminal);
-            Assert.Single(frames, frame =>
-                !frame.RootElement.TryGetProperty("type", out _) &&
-                frame.RootElement.TryGetProperty("requestId", out var id) && id.GetString() == "2");
-            var eventValue = frames[buildEvent].RootElement.GetProperty("event");
-            Assert.Equal("reset", eventValue.GetProperty("operation").GetString());
-            Assert.Equal(JsonValueKind.Null, eventValue.GetProperty("baseSceneGeneration").ValueKind);
-            Assert.Equal(1, eventValue.GetProperty("sceneGeneration").GetInt32());
-            Assert.Empty(eventValue.GetProperty("removedComponentIds").EnumerateArray());
-            Assert.Equal("component:picogk-1", eventValue.GetProperty("artifact").GetProperty("components")[0].GetProperty("id").GetString());
-            Assert.Equal(1, frames[buildEvent].RootElement.GetProperty("sequence").GetInt32());
-            Assert.Contains(frames, frame =>
-                frame.RootElement.TryGetProperty("type", out var type) && type.GetString() == "event" &&
-                frame.RootElement.GetProperty("event").GetProperty("artifact").ValueKind == JsonValueKind.Null);
-        }
-        finally
-        {
-            foreach (var frame in frames) frame.Dispose();
-        }
+        Assert.DoesNotContain("\"type\":\"event\"", output);
 
         foreach (var parameters in new[] { "[]", "{\"unexpected\":1}" })
         {
@@ -1149,12 +683,12 @@ Library.Go(2f, () =>
         Assert.Equal(2, Program.Run(arguments, new StringReader("{"), new StringWriter(), error));
         Assert.NotEmpty(error.ToString());
         Assert.Equal(2, Program.Run(arguments, new StringReader("null"), new StringWriter(), new StringWriter()));
-        Assert.Equal(2, Program.Run(arguments, new StringReader("{\"protocolVersion\":2,\"requestId\":\"1\",\"method\":\"x\",\"params\":{}}"), new StringWriter(), new StringWriter()));
+        Assert.Equal(2, Program.Run(arguments, new StringReader("{\"protocolVersion\":3,\"requestId\":\"1\",\"method\":\"x\",\"params\":{}}"), new StringWriter(), new StringWriter()));
         Assert.Equal(2, Program.Run(arguments, new StringReader(new string('x', 1_048_577)), new StringWriter(), new StringWriter()));
 
-        var output = Run(arguments, "{\"protocolVersion\":3,\"requestId\":\"2\",\"method\":\"unknown\",\"params\":{}}");
+        var output = Run(arguments, "{\"protocolVersion\":4,\"requestId\":\"2\",\"method\":\"unknown\",\"params\":{}}");
         Assert.Contains("CS_TAU_PROTOCOL", output);
-        output = Run(arguments, "{\"protocolVersion\":3,\"requestId\":\"3\",\"method\":\"analyze\",\"params\":{}}");
+        output = Run(arguments, "{\"protocolVersion\":4,\"requestId\":\"3\",\"method\":\"analyze\",\"params\":{}}");
         Assert.Contains("CS_TAU_RUNTIME", output);
         Assert.DoesNotContain("\"location\":null", output);
 
@@ -1165,31 +699,12 @@ Library.Go(2f, () =>
         {
             Assert.ThrowsAny<Exception>(() => Program.ValidateEntryPath(Json(json), root));
         }
-        Assert.Equal(SceneCaptureMode.Update, Program.ParseCaptureOptions(Json("{}")).Mode);
-        Assert.Equal(
-            SceneCaptureMode.Explicit,
-            Program.ParseCaptureOptions(Json("{\"capture\":{\"mode\":\"explicit\",\"minimumIntervalMilliseconds\":0,\"maximumPendingCommands\":1}}")).Mode);
-        Assert.Throws<WorkerException>(() => Program.ParseCaptureOptions(Json("{\"capture\":{\"mode\":\"unknown\"}}")));
-        Assert.Equal(SceneCaptureMode.Operation, Program.ParseCaptureOptions(Json("{\"capture\":{\"mode\":\"operation\"}}")).Mode);
-        foreach (var capture in new[]
-        {
-            "{\"mode\":\"update\",\"minimumIntervalMilliseconds\":-1}",
-            "{\"mode\":\"update\",\"minimumIntervalMilliseconds\":10001}",
-            "{\"mode\":\"update\",\"maximumPendingCommands\":0}",
-            "{\"mode\":\"update\",\"maximumPendingCommands\":4097}",
-        })
-        {
-            Assert.Throws<WorkerException>(() => Program.ParseCaptureOptions(Json($"{{\"capture\":{capture}}}")));
-        }
-
-        output = Run(arguments, "{\"protocolVersion\":3,\"requestId\":\"3a\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{},\"streamScene\":false}}");
+        output = Run(arguments, "{\"protocolVersion\":4,\"requestId\":\"3a\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
         Assert.Contains("CS_TAU_NO_SCENE", output);
 
         Write("main.cs", "using System; using System.Numerics; using PicoGK; Library.Go(1f, () => { Library.oViewer().Add(Utils.mshCreateCube(Vector3.One)); throw new InvalidOperationException(\"failed after start\"); });");
-        output = Run(arguments, "{\"protocolVersion\":3,\"requestId\":\"4\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{},\"streamScene\":true}}");
+        output = Run(arguments, "{\"protocolVersion\":4,\"requestId\":\"4\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
         Assert.Contains("failed after start", output);
-        Assert.Empty(Directory.GetDirectories(Path.Combine(root, "artifacts"), "progress-*"));
-        Assert.Empty(Directory.GetFiles(Path.Combine(root, "artifacts"), "*.tau-compute"));
     }
 
     [Fact]
@@ -1252,7 +767,7 @@ Library.Go(2f, () =>
         var originalError = Console.Error;
         try
         {
-            Console.SetIn(new StringReader("{\"protocolVersion\":3,\"requestId\":\"main\",\"method\":\"shutdown\",\"params\":{}}"));
+            Console.SetIn(new StringReader("{\"protocolVersion\":4,\"requestId\":\"main\",\"method\":\"shutdown\",\"params\":{}}"));
             var output = new StringWriter();
             Console.SetOut(output);
             Console.SetError(new StringWriter());

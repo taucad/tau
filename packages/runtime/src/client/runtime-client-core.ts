@@ -72,13 +72,6 @@ import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
 import type { ParameterResolutionOptions } from '@taucad/parameters';
 import { assertRootedPath } from '@taucad/utils/path';
-import type {
-  ProgressiveSceneUpdate,
-  ReadSceneSnapshotResult,
-  RuntimeListSceneBookmarksInput,
-  RuntimeReadSceneSnapshotInput,
-  SceneBookmark,
-} from '#types/runtime-scene.types.js';
 
 export type { RuntimeConfigInput, RuntimeConfigOutput, RuntimeConfigProvider } from '#worker/runtime-definition.js';
 
@@ -868,7 +861,6 @@ type EventHandlers = {
   telemetry: Topic<TelemetryEntry[]>;
   parametersResolved: Topic<GetParametersResult>;
   geometry: Topic<HashedGeometryResult>;
-  sceneUpdate: Topic<ProgressiveSceneUpdate>;
   state: Topic<{ state: WorkerState; detail?: string }>;
   renderStatus: Topic<RenderStatus>;
   error: Topic<KernelIssue[]>;
@@ -1068,12 +1060,6 @@ type RuntimeClientProjection<
     readonly signal?: AbortSignal;
   }): Promise<GetParametersResult>;
 
-  /** Resolve a retained progressive-scene snapshot without rerunning the kernel. */
-  readSceneSnapshot(input: RuntimeReadSceneSnapshotInput): Promise<ReadSceneSnapshotResult>;
-
-  /** List retained timeline bookmarks for one render. */
-  listSceneBookmarks(input: RuntimeListSceneBookmarksInput): Promise<readonly SceneBookmark[]>;
-
   /**
    * Render a source through the autonomous render loop.
    *
@@ -1137,11 +1123,6 @@ type RuntimeClientProjection<
    * @returns Unsubscribe function
    */
   on(event: 'geometry', handler: (result: HashedGeometryResult) => void, options?: RuntimeSubscribeOptions): () => void;
-  on(
-    event: 'sceneUpdate',
-    handler: (update: ProgressiveSceneUpdate) => void,
-    options?: RuntimeSubscribeOptions,
-  ): () => void;
   on(event: 'renderStatus', handler: (status: RenderStatus) => void, options?: RuntimeSubscribeOptions): () => void;
   on(
     event: 'state',
@@ -1295,8 +1276,6 @@ export function createRuntimeClient(
 
   let workerClient: RuntimeWorkerClient | undefined;
   let workerClientWired = false;
-  let sceneSubscriberCount = 0;
-  let sceneWorkerUnsubscribe: (() => void) | undefined;
   let activeRenderTimeout = options.renderTimeout ?? 0;
   assertValidRenderTimeout(activeRenderTimeout);
   if (activeRenderTimeout > 0 && transport.renderTimeoutRecovery.kind === 'unsupported') {
@@ -1523,34 +1502,12 @@ export function createRuntimeClient(
     telemetry: new Topic<TelemetryEntry[]>({ name: 'RuntimeClient.telemetry' }),
     parametersResolved: new Topic<GetParametersResult>({ name: 'RuntimeClient.parametersResolved' }),
     geometry: new Topic<HashedGeometryResult>({ name: 'RuntimeClient.geometry' }),
-    sceneUpdate: new Topic<ProgressiveSceneUpdate>({ name: 'RuntimeClient.sceneUpdate' }),
     state: new Topic<{ state: WorkerState; detail?: string }>({ name: 'RuntimeClient.state' }),
     renderStatus: new Topic<RenderStatus>({ name: 'RuntimeClient.renderStatus' }),
     error: new Topic<KernelIssue[]>({ name: 'RuntimeClient.error' }),
     capabilities: new Topic<CapabilitiesManifest>({ name: 'RuntimeClient.capabilities' }),
     activeKernelChanged: new Topic<string | undefined>({ name: 'RuntimeClient.activeKernelChanged' }),
   };
-
-  function ensureSceneWorkerSubscription(client: RuntimeWorkerClient): void {
-    if (sceneSubscriberCount === 0 || sceneWorkerUnsubscribe) {
-      return;
-    }
-    sceneWorkerUnsubscribe = client.onSceneUpdate(
-      (update) => {
-        handlers.sceneUpdate.emit(update);
-      },
-      (error) => {
-        handlers.error.emit([
-          {
-            message: error instanceof Error ? error.message : String(error),
-            code: 'RUNTIME',
-            type: 'runtime',
-            severity: 'warning',
-          },
-        ]);
-      },
-    );
-  }
 
   function getWorkerClient(): RuntimeWorkerClient {
     if (!workerClient) {
@@ -1661,7 +1618,6 @@ export function createRuntimeClient(
       _capabilities = capabilities;
       handlers.capabilities.emit(capabilities);
     });
-    ensureSceneWorkerSubscription(workerClient);
     return workerClient;
   }
 
@@ -1694,8 +1650,6 @@ export function createRuntimeClient(
     pendingParameterResolutions.clear();
     workerClient?.terminate();
     workerClient = undefined;
-    sceneWorkerUnsubscribe = undefined;
-    sceneSubscriberCount = 0;
     setLifecycleState('terminated');
     hasSettledRender = false;
     latestWorkerState = 'idle';
@@ -1788,7 +1742,6 @@ export function createRuntimeClient(
           if (workerClient === connectedWorkerClient) {
             workerClient = undefined;
             workerClientWired = false;
-            sceneWorkerUnsubscribe = undefined;
           }
           hasRenderFailure = true;
           setLifecycleState('unconnected');
@@ -2123,24 +2076,6 @@ export function createRuntimeClient(
       }
     },
 
-    async readSceneSnapshot(input: RuntimeReadSceneSnapshotInput): Promise<ReadSceneSnapshotResult> {
-      assertIntentAdmissionOpen();
-      if (!isRecord(input) || typeof input.bookmarkId !== 'string' || input.bookmarkId.length === 0) {
-        throw new TypeError('RuntimeClient.readSceneSnapshot requires a non-empty bookmarkId.');
-      }
-      const client = await ensureConnected();
-      return trackInFlight(client.readSceneSnapshot({ bookmarkId: input.bookmarkId }, input.signal));
-    },
-
-    async listSceneBookmarks(input: RuntimeListSceneBookmarksInput): Promise<readonly SceneBookmark[]> {
-      assertIntentAdmissionOpen();
-      if (!isRecord(input) || typeof input.renderId !== 'string' || input.renderId.length === 0) {
-        throw new TypeError('RuntimeClient.listSceneBookmarks requires a non-empty renderId.');
-      }
-      const client = await ensureConnected();
-      return trackInFlight(client.listSceneBookmarks({ renderId: input.renderId }, input.signal));
-    },
-
     async render<const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(
       input: RuntimeRenderInput<KernelPlugin[], MiddlewarePlugin[], Files>,
     ): Promise<RenderOutcome> {
@@ -2287,31 +2222,6 @@ export function createRuntimeClient(
         }
         case 'geometry': {
           return handlers.geometry.subscribe(handler as (result: HashedGeometryResult) => void, options);
-        }
-        case 'sceneUpdate': {
-          sceneSubscriberCount += 1;
-          const client = getWorkerClient();
-          ensureSceneWorkerSubscription(client);
-          const offTopic = handlers.sceneUpdate.subscribe(handler as (update: ProgressiveSceneUpdate) => void);
-          let active = true;
-          const unsubscribe = (): void => {
-            if (!active) {
-              return;
-            }
-            active = false;
-            options?.signal?.removeEventListener('abort', unsubscribe);
-            offTopic();
-            sceneSubscriberCount -= 1;
-            if (sceneSubscriberCount === 0) {
-              sceneWorkerUnsubscribe?.();
-              sceneWorkerUnsubscribe = undefined;
-            }
-          };
-          options?.signal?.addEventListener('abort', unsubscribe, { once: true });
-          if (options?.signal?.aborted) {
-            unsubscribe();
-          }
-          return unsubscribe;
         }
         case 'renderStatus': {
           return handlers.renderStatus.subscribe(handler as (status: RenderStatus) => void, options);

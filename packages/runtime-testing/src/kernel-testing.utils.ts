@@ -308,7 +308,6 @@ export const createMockRuntime = <
     logger: createMockLogger(),
     filesystem: createMockFileSystem(options?.filesystemOverrides),
     compute: createMockComputeRuntime(signal),
-    progressiveSceneRequested: false,
     state: createMockState<State>(),
     options: options?.options ?? (deepmerge({}, {}) as Options),
     dependencies: options?.dependencies ?? [],
@@ -447,13 +446,6 @@ export const createMockKernelRuntime = (options?: {
     filesystem: createMockFileSystem(options?.filesystemOverrides),
     fileContentCache: new Map(),
     getCompiledWasmModule: () => undefined,
-    scene: {
-      requested: false,
-      publish: async () => ({ type: 'not-requested' }),
-      publishUpdate: async () => ({ type: 'not-requested' }),
-      bookmark: async () => ({ type: 'not-requested' }),
-      flush: async () => undefined,
-    },
     compute: createMockComputeRuntime(signal),
     bundler: {
       resolveDependencies: async () => ({ resolved: [], unresolved: [] }),

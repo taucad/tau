@@ -33,7 +33,6 @@ import type {
   RuntimeContentKey,
 } from '#types/runtime-content.types.js';
 import { validateRuntimeContentDeclarations } from '#types/runtime-content.types.js';
-import type { KernelSceneRuntime, ProgressiveSceneCapability } from '#types/runtime-scene.types.js';
 
 // =============================================================================
 // Kernel Logging
@@ -159,8 +158,6 @@ export type KernelRuntime = {
   bundler: KernelBundler;
   /** Span tracer for kernel-authored performance instrumentation */
   tracer: RuntimeSpanTracer;
-  /** Always-present progressive scene service; cheap no-op when no consumer requested it. */
-  readonly scene: KernelSceneRuntime;
   /** Compute reuse facet for the active operation. `off` carries no operations at all. */
   readonly compute: KernelComputeCapability;
   /** Resolve a host-compiled WASM module by its absolute asset URL. */
@@ -205,8 +202,6 @@ export type KernelRenderDefinition<
   readonly optionsSchema?: Schema;
   /** Framework content properties fulfilled natively by this render route. */
   readonly content?: Content;
-  /** Optional kernel support declaration; the resolved manifest always carries an explicit supported/unsupported facet. */
-  readonly progressiveScene?: ProgressiveSceneCapability;
 };
 
 /** One native export format declared by a kernel author. @public */

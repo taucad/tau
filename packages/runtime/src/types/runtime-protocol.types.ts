@@ -20,17 +20,6 @@ import type {
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
 import type { ParameterResolutionOptions } from '@taucad/parameters';
-import type {
-  ListSceneBookmarksInput,
-  ProgressiveSceneUpdate,
-  ReadSceneSnapshotInput,
-  ReadSceneSnapshotResult,
-  ResolvedSceneAsset,
-  ResolvedSceneSnapshot,
-  SceneAssetReplacement,
-  SceneBookmark,
-  TauSceneOperation,
-} from '#types/runtime-scene.types.js';
 
 // =============================================================================
 // Two-Layer Geometry Transport Types
@@ -72,43 +61,6 @@ export type GeometryResponseTransport = GeometrySvg | GeometryGltfTransport | Ge
  * @public
  */
 export type GeometryTransport = GeometryResponseTransport & { readonly hash: string };
-
-/** Scene asset bytes delivered for the first use of a digest in one stream. @public */
-export type InlineResolvedSceneAssetTransport = Omit<ResolvedSceneAsset, 'geometry'> & {
-  readonly delivery: 'inline';
-  readonly geometry: GeometryTransport;
-};
-
-/** Scene asset resolved from an earlier inline delivery in the same stream. @public */
-export type ReferencedResolvedSceneAssetTransport = Omit<ResolvedSceneAsset, 'geometry'> & {
-  readonly delivery: 'reference';
-};
-
-/** Content-addressed scene asset delivery used on the wire. @public */
-export type ResolvedSceneAssetTransport = InlineResolvedSceneAssetTransport | ReferencedResolvedSceneAssetTransport;
-
-/** Materialised scene snapshot shape used on the wire before transport resolution. @public */
-export type ResolvedSceneSnapshotTransport = Omit<ResolvedSceneSnapshot, 'assets'> & {
-  readonly assets: readonly ResolvedSceneAssetTransport[];
-};
-
-/** Progressive scene event with binary assets still expressed as transport deliveries. @public */
-export type ProgressiveSceneUpdateTransport =
-  | (Omit<Extract<ProgressiveSceneUpdate, { readonly type: 'reset' }>, 'snapshot'> & {
-      readonly snapshot: ResolvedSceneSnapshotTransport;
-    })
-  | (Omit<Extract<ProgressiveSceneUpdate, { readonly type: 'delta' }>, 'assets' | 'operations'> & {
-      readonly operations: readonly TauSceneOperation[];
-      readonly assets: readonly ResolvedSceneAssetTransport[];
-    })
-  | (Omit<Extract<ProgressiveSceneUpdate, { readonly type: 'refinement' }>, 'replacements'> & {
-      readonly replacements: ReadonlyArray<
-        Omit<SceneAssetReplacement, 'replacement'> & {
-          readonly replacement: ResolvedSceneAssetTransport;
-        }
-      >;
-    })
-  | Extract<ProgressiveSceneUpdate, { readonly type: 'bookmark' }>;
 
 /**
  * Full geometry result in transit (wire format).
@@ -552,8 +504,7 @@ export const runtimeProtocolNotifyNames = [
 ] as const;
 
 /**
- * Request/response call name inventory — exactly ten calls, including
- * retained progressive-scene lookups. The legacy `render` call is deleted; the
+ * Request/response call name inventory — exactly eight calls. The legacy `render` call is deleted; the
  * autonomous `openFile` notify + `geometryComputed` correlation by
  * `renderId` replaces it (R18, mirrors LSP `didOpen` + diagnostics).
  * @public
@@ -565,14 +516,12 @@ export const runtimeProtocolCallNames = [
   'evaluateModel',
   'resolveParameters',
   'snapshotSource',
-  'readSceneSnapshot',
-  'listSceneBookmarks',
   'transcode',
   'cleanup',
 ] as const;
 
-/** Consumer-pulled, flow-controlled stream inventory. @public */
-export const runtimeProtocolListenNames = ['sceneUpdates'] as const;
+/** Consumer-pulled, flow-controlled stream inventory; the runtime declares none. @public */
+export const runtimeProtocolListenNames = [] as const;
 
 /**
  * Typed `@taucad/rpc` protocol contract for the kernel runtime worker.
@@ -592,7 +541,6 @@ export const runtimeProtocolListenNames = ['sceneUpdates'] as const;
  *   autonomous events (`parametersResolved`, `geometryComputed`,
  *   `errorEvent`, `progress`, `activeKernelChanged`, `stateChanged`,
  *   `log`, `logBatch`, `telemetry`, `capabilitiesUpdated`, `kernelEvent`).
- * - `listens`: the consumer-pulled, flow-controlled progressive-scene stream.
  *
  * Binary delivery uses {@link WithTransferables} sidecars on the
  * `export` call result and the `geometryComputed` notify args. The
@@ -635,17 +583,6 @@ export type RuntimeProtocol = {
     readonly snapshotSource: {
       readonly args: RuntimeSourceSnapshotArgs;
       readonly result: RuntimeSourceSnapshotResult;
-    };
-    readonly readSceneSnapshot: {
-      readonly args: ReadSceneSnapshotInput;
-      readonly result: ReadSceneSnapshotResult;
-      readonly wireResult:
-        | { readonly type: 'found'; readonly snapshot: ResolvedSceneSnapshotTransport }
-        | { readonly type: 'missing' };
-    };
-    readonly listSceneBookmarks: {
-      readonly args: ListSceneBookmarksInput;
-      readonly result: readonly SceneBookmark[];
     };
     readonly transcode: {
       readonly args: RuntimeTranscodeArgs;
@@ -706,11 +643,5 @@ export type RuntimeProtocol = {
     };
     readonly kernelEvent: { readonly args: RuntimeKernelMessageArgs };
   };
-  readonly listens: {
-    readonly sceneUpdates: {
-      readonly args: { readonly afterSequence?: number };
-      readonly event: ProgressiveSceneUpdate;
-      readonly wireEvent: ProgressiveSceneUpdateTransport;
-    };
-  };
+  readonly listens: Record<never, never>;
 };

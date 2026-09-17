@@ -48,9 +48,6 @@ import type {
   RuntimeProtocol,
   RuntimeStateChangedArgs,
   TelemetryEntry,
-  ProgressiveSceneUpdateTransport,
-  ResolvedSceneAssetTransport,
-  ResolvedSceneSnapshotTransport,
 } from '#types/runtime-protocol.types.js';
 import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
@@ -62,17 +59,6 @@ import {
   transcodeTimeoutRecoveryGrace,
 } from '#framework/runtime-framework.constants.js';
 import { validateProtocolHeader } from '#types/protocol-header.types.js';
-import { digestContent } from '@taucad/cache-core';
-import type {
-  ListSceneBookmarksInput,
-  ProgressiveSceneUpdate,
-  ReadSceneSnapshotInput,
-  ReadSceneSnapshotResult,
-  ResolvedSceneAsset,
-  ResolvedSceneSnapshot,
-  SceneBookmark,
-} from '#types/runtime-scene.types.js';
-
 /** Unsubscribe handle for {@link RuntimeWorkerClient} subscription helpers. */
 export type Unsubscribe = () => void;
 
@@ -283,7 +269,6 @@ export class RuntimeWorkerClient {
     readonly issues: readonly KernelIssue[];
   }>({ name: 'runtime-worker-client.local-timeouts' });
   private readonly disposers: Unsubscribe[] = [];
-  private readonly sceneConsumers = new Set<Promise<void>>();
   private _capabilities: CapabilitiesManifest | undefined;
   private terminated = false;
 
@@ -519,32 +504,6 @@ export class RuntimeWorkerClient {
     return this.channel!.call('snapshotSource', request, signal);
   }
 
-  /** Resolve a retained progressive-scene snapshot by opaque bookmark identity. */
-  public async readSceneSnapshot(
-    request: ReadSceneSnapshotInput,
-    signal?: AbortSignal,
-  ): Promise<ReadSceneSnapshotResult> {
-    this.ensureNotTerminated();
-    this.ensureChannel();
-    const result = await this.channel!.call('readSceneSnapshot', request, signal);
-    return result.type === 'found'
-      ? {
-          type: 'found',
-          snapshot: await this.resolveSceneSnapshot(result.snapshot as unknown as ResolvedSceneSnapshotTransport),
-        }
-      : result;
-  }
-
-  /** List retained progressive-scene bookmarks for one render. */
-  public async listSceneBookmarks(
-    request: ListSceneBookmarksInput,
-    signal?: AbortSignal,
-  ): Promise<readonly SceneBookmark[]> {
-    this.ensureNotTerminated();
-    this.ensureChannel();
-    return this.channel!.call('listSceneBookmarks', request, signal);
-  }
-
   /** Send a direct transcoder RPC over caller-owned artifacts. */
   public async transcode(request: RuntimeTranscodeArgs, signal?: AbortSignal): Promise<ExportGeometryResult> {
     this.ensureNotTerminated();
@@ -672,46 +631,6 @@ export class RuntimeWorkerClient {
       this.selectedPreview!.geometryObserved = true;
       void this.resolveGeometryNotification(result, renderId, handler);
     });
-  }
-
-  /** Subscribe to ordered, already-materialised progressive scene updates. */
-  public onSceneUpdate(
-    handler: (update: ProgressiveSceneUpdate) => void,
-    onFailure?: (error: unknown) => void,
-  ): Unsubscribe {
-    let controller: AbortController | undefined;
-    let active = true;
-    const start = (channel: Channel<RuntimeProtocol>): void => {
-      if (!active || controller) {
-        return;
-      }
-      controller = new AbortController();
-      const settled = (): void => {
-        this.sceneConsumers.delete(consumption);
-      };
-      const consumption = this.monitorSceneUpdates(channel, handler, {
-        signal: controller.signal,
-        onFailure,
-        settled,
-      });
-      this.sceneConsumers.add(consumption);
-    };
-    let unsubscribePending: Unsubscribe | undefined;
-    if (this.channel) {
-      start(this.channel);
-    } else {
-      unsubscribePending = this.pendingSubscriptions.subscribe(start);
-    }
-    const unsubscribe = (): void => {
-      if (!active) {
-        return;
-      }
-      active = false;
-      unsubscribePending?.();
-      controller?.abort();
-    };
-    this.disposers.push(unsubscribe);
-    return unsubscribe;
   }
 
   /** Subscribe to autonomous error events. `renderId` is absent only for connection-scoped failures. */
@@ -1020,172 +939,6 @@ export class RuntimeWorkerClient {
     }
     if (this.isSelectedPreviewPublishable(renderId)) {
       handler(resolved, renderId);
-    }
-  }
-
-  private cloneSceneAsset(asset: ResolvedSceneAsset): ResolvedSceneAsset {
-    return {
-      contentDigest: asset.contentDigest,
-      mediaType: asset.mediaType,
-      byteLength: asset.byteLength,
-      geometry:
-        asset.geometry.format === 'gltf'
-          ? { format: 'gltf', content: new Uint8Array(asset.geometry.content) }
-          : {
-              format: 'svg',
-              content: asset.geometry.content,
-              ...(asset.geometry.name === undefined ? {} : { name: asset.geometry.name }),
-            },
-    };
-  }
-
-  private assertSceneAssetMetadata(
-    asset: Omit<ResolvedSceneAsset, 'geometry'>,
-    geometry: ResolvedSceneAsset['geometry'],
-  ): void {
-    const mediaType = geometry.format === 'gltf' ? 'model/gltf-binary' : 'image/svg+xml';
-    const byteLength =
-      geometry.format === 'gltf' ? geometry.content.byteLength : new TextEncoder().encode(geometry.content).byteLength;
-    if (asset.mediaType !== mediaType || asset.byteLength !== byteLength) {
-      throw new Error(`Progressive scene asset metadata mismatch for ${asset.contentDigest}.`);
-    }
-  }
-
-  private async resolveSceneAsset(
-    asset: ResolvedSceneAssetTransport,
-    assetsByDigest: Map<ResolvedSceneAsset['contentDigest'], ResolvedSceneAsset>,
-  ): Promise<ResolvedSceneAsset> {
-    if (asset.delivery === 'reference') {
-      const cached = assetsByDigest.get(asset.contentDigest);
-      if (!cached) {
-        throw new Error(`Unknown progressive scene asset reference ${asset.contentDigest}.`);
-      }
-      if (cached.mediaType !== asset.mediaType || cached.byteLength !== asset.byteLength) {
-        throw new Error(`Progressive scene asset metadata mismatch for ${asset.contentDigest}.`);
-      }
-      return this.cloneSceneAsset(cached);
-    }
-
-    if (asset.geometry.hash !== asset.contentDigest) {
-      throw new Error(`Progressive scene asset integrity check failed for ${asset.contentDigest}.`);
-    }
-    const geometry = await this.transport.resolveGeometry(asset.geometry);
-    if (geometry.format === 'webrtc') {
-      throw new TypeError('Progressive scene assets cannot contain live WebRTC streams.');
-    }
-    this.assertSceneAssetMetadata(asset, geometry);
-    const bytes = geometry.format === 'gltf' ? geometry.content : new TextEncoder().encode(geometry.content);
-    const actualDigest = await digestContent({ bytes });
-    if (actualDigest !== asset.contentDigest) {
-      throw new Error(`Progressive scene asset integrity check failed for ${asset.contentDigest}.`);
-    }
-    const resolved = this.cloneSceneAsset({
-      contentDigest: asset.contentDigest,
-      mediaType: asset.mediaType,
-      byteLength: asset.byteLength,
-      geometry,
-    });
-    assetsByDigest.set(asset.contentDigest, resolved);
-    return this.cloneSceneAsset(resolved);
-  }
-
-  private async resolveSceneSnapshot(
-    snapshot: ResolvedSceneSnapshotTransport,
-    assetsByDigest = new Map<ResolvedSceneAsset['contentDigest'], ResolvedSceneAsset>(),
-  ): Promise<ResolvedSceneSnapshot> {
-    const assets: ResolvedSceneAsset[] = [];
-    for (const asset of snapshot.assets) {
-      // oxlint-disable-next-line no-await-in-loop -- preserve asset order and bound materialisation ownership.
-      assets.push(await this.resolveSceneAsset(asset, assetsByDigest));
-    }
-    return { manifest: snapshot.manifest, assets };
-  }
-
-  private async resolveSceneUpdate(
-    update: ProgressiveSceneUpdateTransport,
-    assetsByDigest: Map<ResolvedSceneAsset['contentDigest'], ResolvedSceneAsset>,
-  ): Promise<ProgressiveSceneUpdate> {
-    switch (update.type) {
-      case 'reset': {
-        return {
-          ...update,
-          snapshot: await this.resolveSceneSnapshot(update.snapshot, assetsByDigest),
-        };
-      }
-      case 'delta': {
-        const assets: ResolvedSceneAsset[] = [];
-        for (const asset of update.assets) {
-          // oxlint-disable-next-line no-await-in-loop -- preserve update order and bound materialisation ownership.
-          assets.push(await this.resolveSceneAsset(asset, assetsByDigest));
-        }
-        return { ...update, assets };
-      }
-      case 'refinement': {
-        const replacements = [];
-        for (const replacement of update.replacements) {
-          // oxlint-disable-next-line no-await-in-loop -- preserve replacement order and bound materialisation ownership.
-          const resolved = await this.resolveSceneAsset(replacement.replacement, assetsByDigest);
-          replacements.push({ ...replacement, replacement: resolved });
-        }
-        return { ...update, replacements };
-      }
-      case 'bookmark': {
-        return update;
-      }
-    }
-  }
-
-  private async monitorSceneUpdates(
-    channel: Channel<RuntimeProtocol>,
-    handler: (update: ProgressiveSceneUpdate) => void,
-    options: {
-      readonly signal: AbortSignal;
-      readonly onFailure?: (error: unknown) => void;
-      readonly settled: () => void;
-    },
-  ): Promise<void> {
-    try {
-      await this.consumeSceneUpdates(channel, options.signal, handler);
-    } catch (error) {
-      if (!options.signal.aborted) {
-        options.onFailure?.(error);
-      }
-    } finally {
-      options.settled();
-    }
-  }
-
-  private async consumeSceneUpdates(
-    channel: Channel<RuntimeProtocol>,
-    signal: AbortSignal,
-    handler: (update: ProgressiveSceneUpdate) => void,
-  ): Promise<void> {
-    let lastSequence = 0;
-    let activeRenderId: string | undefined;
-    const assetsByDigest = new Map<ResolvedSceneAsset['contentDigest'], ResolvedSceneAsset>();
-    for await (const wireUpdate of channel.listen('sceneUpdates', {}, signal)) {
-      const update = await this.resolveSceneUpdate(
-        wireUpdate as unknown as ProgressiveSceneUpdateTransport,
-        assetsByDigest,
-      );
-      if (!this.isSelectedPreviewPublishable(update.renderId)) {
-        continue;
-      }
-      if (activeRenderId !== update.renderId) {
-        if (update.type !== 'reset') {
-          throw new Error('A progressive scene stream must begin with a reset snapshot.');
-        }
-        activeRenderId = update.renderId;
-        lastSequence = 0;
-      }
-      if (update.sequence <= lastSequence) {
-        throw new Error(`Progressive scene sequence ${update.sequence} is not monotonic.`);
-      }
-      if (update.type !== 'reset' && update.sequence !== lastSequence + 1) {
-        throw new Error(`Progressive scene sequence gap after ${lastSequence}; a reset snapshot is required.`);
-      }
-      lastSequence = update.sequence;
-      handler(update);
     }
   }
 

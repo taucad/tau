@@ -8,10 +8,9 @@ type EdgeData = {
   normal: Vertex3;
 };
 
-/** Edge geometry represented as indexed line segments. @public */
+/** Edge geometry as a de-indexed line soup: every pair of vertices is one segment. @public */
 export type EdgeDetectionResult = {
   positions: Float32Array<ArrayBuffer>;
-  indices: Uint32Array<ArrayBuffer>;
 };
 
 const hashVertex = ([x, y, z]: Vertex3): string => `${x},${y},${z}`;
@@ -42,7 +41,7 @@ const dot = (a: Vertex3, b: Vertex3): number => a[0] * b[0] + a[1] * b[1] + a[2]
  * @param positions - Flat XYZ vertex positions.
  * @param indices - Optional triangle indices; omit for sequential triangle soup.
  * @param thresholdDegrees - Minimum face-normal angle classified as sharp.
- * @returns Indexed line-segment positions.
+ * @returns Line-segment positions, two vertices per segment and no index buffer.
  * @public
  */
 export const detectEdges = (
@@ -99,8 +98,5 @@ export const detectEdges = (
     }
   }
 
-  return {
-    positions: new Float32Array(edgeVertices),
-    indices: Uint32Array.from({ length: edgeVertices.length / 3 }, (_, index) => index),
-  };
+  return { positions: new Float32Array(edgeVertices) };
 };

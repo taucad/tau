@@ -141,15 +141,12 @@ function buildNodeFromReplicadGeometry({
 
   if (edges.lines.length > 0) {
     const linePositions = transformVertexArray(edges.lines, transformOptions);
-    const lineIndices = new Uint32Array(linePositions.length / 3);
-    for (let index = 0; index < lineIndices.length; index++) {
-      lineIndices[index] = index;
-    }
 
     primitives.push({
+      /* No index buffer: the edge overlay is already a de-indexed segment soup, and glTF draws
+       * arrays when `indices` is absent. */
       mode: Primitive.Mode['LINES']!,
       positions: linePositions,
-      indices: lineIndices,
       ...(includeTauTopology
         ? {
             extras: {

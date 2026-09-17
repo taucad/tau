@@ -354,6 +354,15 @@ test('client navigation keeps every project-scoped resource on one logical proje
 });
 
 test('chat navigation preserves ordering until an accepted user submit advances recency', async () => {
+  /* Recency advances inside `actions.sendMessage`, which runs only after
+   * `admitWorkspace` resolves — and that awaits the model catalog for up to
+   * 20 s. `GET /v1/models` is stubbed only by this fixture, so without it the
+   * submit below cannot advance anything inside any poll. The script is one
+   * closing text turn: the row asserts the ordering the accepted submit
+   * produces, not the reply. */
+  await target.installAgentHostGatewayFixture([
+    { text: 'Recency advanced.', usage: { inputTokens: 20, outputTokens: 8 } },
+  ]);
   await target.navigate('/__e2e/project-navigation?activity=1');
   await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
   await target.expectVisible(selectors.getByRole('link', { name: chatNames.older, exact: true }), 60_000);
@@ -383,7 +392,9 @@ test('chat navigation preserves ordering until an accepted user submit advances 
   const composer = selectors.getByCss('.tiptap[contenteditable="true"]').first();
   await target.fill(composer, 'advance this chat');
   await target.press(composer, 'Enter');
-  await expect.poll(readActivityChatOrder).toEqual([chatNames.older, chatNames.newer]);
+  /* Admission is the gate, not the render: 20 s of model-catalog wait plus a
+   * workspace prepare do not fit vitest's 1 s default poll. */
+  await expect.poll(readActivityChatOrder, { timeout: 60_000 }).toEqual([chatNames.older, chatNames.newer]);
 
   const afterSubmit = await readChatActivitySnapshot();
   const olderBefore = beforeNavigation.chats.find(({ name }) => name === chatNames.older)!;
@@ -422,17 +433,24 @@ test('project and chat rows reveal their actions over a dissolving name', async 
     const newProject = [...document.querySelectorAll<HTMLElement>('[data-sidebar="menu-button"]')].find((button) =>
       button.textContent.includes('New Project'),
     );
-    const projects = [...document.querySelectorAll<HTMLElement>('[data-slot="sidebar-group-label"]')].find(
-      (label) => label.textContent === 'Projects',
+    /* `ProjectsLabel` appends a `N live` count beside the word whenever a
+     * project is open (`project-navigation.tsx:427-430`), so the label reads
+     * `Projects1 live` here. */
+    const projects = [...document.querySelectorAll<HTMLElement>('[data-slot="sidebar-group-label"]')].find((label) =>
+      label.textContent.startsWith('Projects'),
     );
     const platform = [...document.querySelectorAll<HTMLElement>('[data-slot="sidebar-group-label"]')].find(
       (label) => label.textContent === 'Platform',
     );
     const project = document.querySelector<HTMLElement>('[data-slot="project-trigger"]');
     const navButtons = [...document.querySelectorAll<HTMLElement>('[data-sidebar="menu-button"]')];
-    const projectLibrary = navButtons.find((button) => button.textContent.includes('Project Library'));
-    const files = navButtons.find((button) => button.textContent.includes('Files'));
-    if (!search || !newProject || !projects || !platform || !project || !projectLibrary || !files) {
+    /* Two `navMain` rows (`route.constants.ts`), which is where the sidebar's
+     * standing destinations live: `navSecondary` — and with it the `Files` row
+     * this used to read — moved into the user dropdown in `be3d0eb6e`, and
+     * `Project Library` has never been a committed label. */
+    const projectsNav = navButtons.find((button) => button.textContent.trim() === 'Projects');
+    const community = navButtons.find((button) => button.textContent.trim() === 'Community');
+    if (!search || !newProject || !projects || !platform || !project || !projectsNav || !community) {
       throw new Error('Sidebar controls were not ready.');
     }
     const searchBounds = search.getBoundingClientRect();
@@ -447,7 +465,7 @@ test('project and chat rows reveal their actions over a dissolving name', async 
     return {
       fontSizes: [getComputedStyle(search).fontSize, getComputedStyle(newProject).fontSize],
       heightDelta: Math.abs(searchBounds.height - newProjectBounds.height),
-      horizontalEdges: [search, newProject, project, projectLibrary, files].map((element) => {
+      horizontalEdges: [search, newProject, project, projectsNav, community].map((element) => {
         const bounds = element.getBoundingClientRect();
         return [bounds.left, bounds.right];
       }),
@@ -479,7 +497,7 @@ test('project and chat rows reveal their actions over a dissolving name', async 
     expect(Math.abs(edges[0]! - headerControlMetrics.horizontalEdges[0]![0]!)).toBeLessThanOrEqual(0.5);
     expect(Math.abs(edges[1]! - headerControlMetrics.horizontalEdges[0]![1]!)).toBeLessThanOrEqual(0.5);
   }
-  await target.expectVisible(selectors.getByRole('link', { name: 'Project Library' }));
+  await target.expectVisible(selectors.getByRole('link', { name: 'Projects', exact: true }));
 
   const paneHeaderHeightDelta = await target.evaluate(() => {
     const chatHeader = document.querySelector<HTMLElement>('[data-slot="floating-panel-content-header"]');

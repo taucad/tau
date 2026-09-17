@@ -21,8 +21,13 @@ export type MetalMorphLoaderProperties = Readonly<{
   className?: string;
   /** Accessible name. The default names the loading state it stands for. */
   label?: string;
-  /** `status` announces a busy state, the default for a real loading indicator; `img` describes a showcase. */
-  semantic?: 'status' | 'img';
+  /**
+   * `status` announces a busy state, the default for a real loading indicator; `img` describes a showcase;
+   * `presentation` hides the loader from assistive technology, for a row that already carries its own status.
+   */
+  semantic?: 'status' | 'img' | 'presentation';
+  /** Stands in until the first frame is on the canvas; the default suits a surface of at least 24 px. */
+  fallback?: React.ReactNode;
   /** Cost tier: `inline` for spinners, `balanced` for mid-size surfaces, `high` for hero surfaces. */
   quality?: MetalMorphLoaderQuality;
   /** Deterministic sequencing seed; omit for a fresh random loop. */
@@ -72,6 +77,7 @@ export function MetalMorphLoader({
   className,
   label = defaultLabel,
   semantic = 'status',
+  fallback,
   quality = 'high',
   seed,
   speed = 1,
@@ -230,11 +236,14 @@ export function MetalMorphLoader({
     controller.renderOnce();
   }, [shouldPlay, status]);
 
+  const isDecorative = semantic === 'presentation';
+
   return (
     <div
       ref={rootRef}
-      role={semantic}
-      aria-label={label}
+      role={isDecorative ? undefined : semantic}
+      aria-hidden={isDecorative ? true : undefined}
+      aria-label={isDecorative ? undefined : label}
       aria-busy={semantic === 'status' ? true : undefined}
       data-state={status}
       data-playing={shouldPlay ? 'true' : 'false'}
@@ -250,7 +259,7 @@ export function MetalMorphLoader({
       />
       {status === 'ready' ? null : (
         <div className='absolute inset-0 flex items-center justify-center'>
-          <Loader className='size-6 text-muted-foreground' />
+          {fallback ?? <Loader className='size-6 text-muted-foreground' />}
         </div>
       )}
     </div>

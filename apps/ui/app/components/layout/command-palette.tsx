@@ -18,7 +18,6 @@ import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { menuItemLayoutClass } from '@taucad/ui/components/menu.variants';
 import { useTypedMatches } from '#hooks/use-typed-matches.js';
-import { ProjectNavigationCommandItems } from '#components/nav/project-navigation-command-items.js';
 import { SidebarMenuButton } from '#components/ui/sidebar.js';
 
 /**
@@ -30,6 +29,14 @@ type CommandPaletteContextValue = {
 };
 
 const CommandPaletteContext = createContext<CommandPaletteContextValue | undefined>(undefined);
+
+/*
+ * The aggregated items ride a second context so registering never changes the
+ * registration context's identity: `useCommandPaletteItems` lists that identity
+ * as an effect dependency, so sharing one context would re-run the effect on
+ * every registration and register forever.
+ */
+const CommandPaletteItemsContext = createContext<CommandPaletteItem[]>([]);
 
 /**
  * Hook for creating and registering command palette items
@@ -252,7 +259,16 @@ function CommandPaletteMobile({ items }: CommandPaletteMobileProperties): React.
   );
 }
 
-function CommandPaletteProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
+/**
+ * Owns the palette registry for the whole page.
+ *
+ * It sits above both the sidebar — which renders the trigger — and the composed
+ * route providers, so a route's items can register from inside its own
+ * providers (see `RouteCommandPaletteItems`).
+ * @param properties - The subtree that registers and consumes palette items.
+ * @returns The registry provider.
+ */
+export function CommandPaletteProvider({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   const [itemsMap, setItemsMap] = useState<Map<string, CommandPaletteItem[]>>(new Map());
 
   const contextValue = useMemo(
@@ -289,28 +305,24 @@ function CommandPaletteProvider({ children }: { readonly children: React.ReactNo
 
   return (
     <CommandPaletteContext.Provider value={contextValue}>
-      {children}
-      {/* Render UI with aggregated items */}
-      {allItems.length > 0 ? (
-        <div className='flex items-center gap-2'>
-          <CommandPaletteTrigger items={allItems} />
-          <CommandPaletteMobile items={allItems} />
-        </div>
-      ) : null}
+      <CommandPaletteItemsContext.Provider value={allItems}>{children}</CommandPaletteItemsContext.Provider>
     </CommandPaletteContext.Provider>
   );
 }
 
 /**
- * Renders command palette item providers and UI
+ * Registers the matched routes' command palette items.
+ *
+ * These are invisible components, but they read their own route's context — the
+ * project items need `ProjectProvider` — so they render inside the composed
+ * route providers rather than beside the trigger in the sidebar.
+ * @returns The matched routes' registration components.
  */
-function CommandsContent(): React.JSX.Element {
+export function RouteCommandPaletteItems(): React.JSX.Element {
   const commandPaletteMatches = useTypedMatches((handles) => handles.commandPalette);
 
   return (
     <>
-      <ProjectNavigationCommandItems />
-      {/* Render all command palette item providers (invisible components that register items) */}
       {commandPaletteMatches.map((match) => (
         <Fragment key={match.id}>{match.handle.commandPalette?.(match)}</Fragment>
       ))}
@@ -319,12 +331,16 @@ function CommandsContent(): React.JSX.Element {
 }
 
 /**
- * Commands component - aggregates and renders command palette items from all routes
+ * Sidebar search entry point: the palette trigger over every registered item.
+ * @returns The palette trigger and its mobile equivalent.
  */
-export function Commands(): React.JSX.Element {
-  return (
-    <CommandPaletteProvider>
-      <CommandsContent />
-    </CommandPaletteProvider>
-  );
+export function Commands(): React.JSX.Element | undefined {
+  const allItems = useContext(CommandPaletteItemsContext);
+
+  return allItems.length > 0 ? (
+    <div className='flex items-center gap-2'>
+      <CommandPaletteTrigger items={allItems} />
+      <CommandPaletteMobile items={allItems} />
+    </div>
+  ) : undefined;
 }

@@ -17,6 +17,7 @@ import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from '#comp
 import { useTypedMatches } from '#hooks/use-typed-matches.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { Compose } from '#components/ui/utils/compose.js';
+import { CommandPaletteProvider, RouteCommandPaletteItems } from '#components/layout/command-palette.js';
 import { RouteFooter } from '#components/layout/route-footer.js';
 import { SettingsDialog } from '#components/settings/settings-dialog.js';
 import { useResolvedAuth } from '#hooks/use-resolved-auth.js';
@@ -167,7 +168,6 @@ const ApplicationShell = ({
           {children}
         </Allotment.Pane>
       </Allotment>
-      <SettingsDialog />
     </div>
   );
 };
@@ -272,9 +272,13 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
    * and anything nested inside it changes tree depth — which React implements
    * by unmounting and re-creating the subtree. Only the route's own content
    * needs those providers, so only the route's own content sits inside them.
+   *
+   * The command palette is the one piece of shell chrome fed by the routes: its
+   * registry therefore sits above both, the sidebar keeps the trigger, and the
+   * routes register from inside their own providers.
    */
   return (
-    <>
+    <CommandPaletteProvider>
       {desktopDragBand}
       <SidebarProvider className='h-dvh min-h-0 overflow-hidden'>
         <ApplicationShell isDesktopTarget={desktopTarget}>
@@ -347,12 +351,16 @@ export function Page({ error }: { readonly error?: ReactNode }): React.JSX.Eleme
               className={cn('h-dvh', enableOverflowY && 'overflow-y-auto', enablePageHeader && headerOffsetClasses)}
             >
               <Compose components={Providers}>
+                <RouteCommandPaletteItems />
+                {/* Its compute section reads the active project; the dialog is a
+                    portal, so only its place in the React tree matters. */}
+                <SettingsDialog />
                 <SectionContent error={error} enablePageFooter={enablePageFooter} />
               </Compose>
             </section>
           </SidebarInset>
         </ApplicationShell>
       </SidebarProvider>
-    </>
+    </CommandPaletteProvider>
   );
 }

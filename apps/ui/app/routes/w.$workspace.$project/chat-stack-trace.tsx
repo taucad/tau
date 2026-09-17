@@ -506,7 +506,7 @@ export function ChatStackTrace({ entryPath, className, side, ...props }: ChatSta
         });
         setFocusedChatId(newChat.id);
       } else {
-        cadChat.submit({ text: errorPrompt });
+        void cadChat.submit({ text: errorPrompt });
       }
     },
     [

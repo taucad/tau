@@ -191,7 +191,8 @@ export const ChatHistory = memo(function (props: {
   const submitChat = cadChat.submit;
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
     async ({ content, attachments }) => {
-      submitChat({ text: content, attachments });
+      // Pending until the message lands, so the composer stays busy through admission (R8).
+      await submitChat({ text: content, attachments });
     },
     [submitChat],
   );

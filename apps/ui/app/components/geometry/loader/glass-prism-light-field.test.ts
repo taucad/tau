@@ -43,7 +43,7 @@ describe('refractiveIndex', () => {
 
     expect(violet).toBeGreaterThan(red);
     expect(red).toBeGreaterThan(1.5);
-    expect(violet).toBeLessThan(1.75);
+    expect(violet).toBeLessThan(1.8);
   });
 });
 

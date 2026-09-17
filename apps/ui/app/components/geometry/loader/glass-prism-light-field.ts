@@ -26,10 +26,10 @@ export type GlassDispersion = Readonly<{
 }>;
 
 /**
- * A dense flint with its dispersion pushed well past nature, about twice a real flint's, so every
- * morphology shows colour, not only the prism, and a spectrum still reads at spinner sizes.
+ * A dense flint with its dispersion pushed well past nature, about two and a half times a real flint's, so
+ * every morphology shows colour, not only the prism, and a spectrum still reads at spinner sizes.
  */
-export const defaultGlassDispersion: GlassDispersion = { base: 1.55, dispersion: 0.03 };
+export const defaultGlassDispersion: GlassDispersion = { base: 1.55, dispersion: 0.036 };
 
 export type LightBeam = Readonly<{
   /** Where the bundle starts, outside the body. */
@@ -69,18 +69,25 @@ export type LightSheetTraceOptions = Readonly<{
    * at full strength it competes with the spectrum, so the loader dims it.
    */
   strayScale?: number;
+  /**
+   * Weight applied to the split light inside and beyond the body. Physically the colours sum back to the
+   * beam; drawn that way they read fainter than it, since they no longer overlap, so the loader lifts them.
+   */
+  spectrumGain?: number;
   /** Distance a ray travels once it has left the body or missed it. */
   reach: number;
 }>;
 
 const rawSpectrum: ReadonlyArray<{ wavelength: number; color: readonly [number, number, number] }> = [
-  { wavelength: 430, color: [0.3, 0, 1] },
-  { wavelength: 470, color: [0, 0.3, 1] },
-  { wavelength: 500, color: [0, 0.9, 0.6] },
-  { wavelength: 540, color: [0.2, 1, 0.05] },
-  { wavelength: 580, color: [1, 0.85, 0] },
-  { wavelength: 620, color: [1, 0.3, 0] },
-  { wavelength: 660, color: [0.85, 0, 0.05] },
+  { wavelength: 420, color: [0.35, 0, 1] },
+  { wavelength: 450, color: [0.1, 0.12, 1] },
+  { wavelength: 480, color: [0, 0.5, 1] },
+  { wavelength: 505, color: [0, 0.92, 0.7] },
+  { wavelength: 535, color: [0.15, 1, 0.08] },
+  { wavelength: 565, color: [0.72, 1, 0] },
+  { wavelength: 585, color: [1, 0.78, 0] },
+  { wavelength: 615, color: [1, 0.32, 0] },
+  { wavelength: 650, color: [0.9, 0, 0.05] },
 ];
 
 const channelTotals: [number, number, number] = [0, 0, 0];
@@ -90,7 +97,7 @@ for (const sample of rawSpectrum) {
   channelTotals[2] += sample.color[2];
 }
 
-/** Seven samples from violet to red whose colours sum to white, so the split beam adds back to the beam. */
+/** Nine samples from violet to red whose colours sum to white, so the split beam adds back to the beam. */
 export const spectralSamples: readonly SpectralSample[] = rawSpectrum.map((sample) => ({
   wavelength: sample.wavelength,
   color: [sample.color[0] / channelTotals[0], sample.color[1] / channelTotals[1], sample.color[2] / channelTotals[2]],
@@ -107,12 +114,15 @@ const surfaceEpsilon = 1e-6;
 const defaultMaxInteractions = 4;
 const defaultMinIntensity = 0.03;
 const defaultStrayScale = 1;
+const defaultSpectrumGain = 1;
 
 const white: readonly [number, number, number] = [1, 1, 1];
 
 type Edge = Readonly<{
   start: SheetVector;
   end: SheetVector;
+  /** `end - start`, kept so the hot loop allocates nothing per edge. */
+  along: SheetVector;
   /** Unit outward normal. */
   normal: SheetVector;
 }>;
@@ -141,36 +151,55 @@ const buildEdges = (polygon: readonly SheetVector[]): Edge[] => {
   const outwardSign = doubleArea >= 0 ? 1 : -1;
   return polygon.map((start, index) => {
     const end = polygon[(index + 1) % polygon.length]!;
-    const along = normalize([end[0] - start[0], end[1] - start[1]]);
-    return { start, end, normal: [along[1] * outwardSign, -along[0] * outwardSign] };
+    const along: SheetVector = [end[0] - start[0], end[1] - start[1]];
+    const unit = normalize(along);
+    return { start, end, along, normal: [unit[1] * outwardSign, -unit[0] * outwardSign] };
   });
 };
 
 type Ray = Readonly<{ origin: SheetVector; direction: SheetVector }>;
 
-/** Nearest edge crossed by the ray beyond `surfaceEpsilon`, ignoring `skipEdge`. */
+/**
+ * Nearest edge crossed by the ray beyond `surfaceEpsilon`, ignoring `skipEdge`. This is the hot loop of a
+ * frame (rays × wavelengths × interactions × edges), so it works in scalars and allocates only its result.
+ */
 const intersect = (edges: readonly Edge[], { origin, direction }: Ray, skipEdge: number): Hit | undefined => {
-  let best: Hit | undefined;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let bestEdge = -1;
+  const [originX, originZ] = origin;
+  const [directionX, directionZ] = direction;
   for (const [index, edge] of edges.entries()) {
     if (index === skipEdge) {
       continue;
     }
-    const edgeVector: SheetVector = [edge.end[0] - edge.start[0], edge.end[1] - edge.start[1]];
-    const denominator = direction[0] * edgeVector[1] - direction[1] * edgeVector[0];
+    const alongX = edge.along[0];
+    const alongZ = edge.along[1];
+    const denominator = directionX * alongZ - directionZ * alongX;
     if (Math.abs(denominator) < 1e-12) {
       continue;
     }
-    const offset: SheetVector = [edge.start[0] - origin[0], edge.start[1] - origin[1]];
-    const distance = (offset[0] * edgeVector[1] - offset[1] * edgeVector[0]) / denominator;
-    const along = (offset[0] * direction[1] - offset[1] * direction[0]) / denominator;
-    if (distance <= surfaceEpsilon || along < -1e-9 || along > 1 + 1e-9) {
+    const offsetX = edge.start[0] - originX;
+    const offsetZ = edge.start[1] - originZ;
+    const distance = (offsetX * alongZ - offsetZ * alongX) / denominator;
+    if (distance <= surfaceEpsilon || distance >= bestDistance) {
       continue;
     }
-    if (best === undefined || distance < best.distance) {
-      best = { point: add(origin, direction, distance), normal: edge.normal, distance, edge: index };
+    const along = (offsetX * directionZ - offsetZ * directionX) / denominator;
+    if (along < -1e-9 || along > 1 + 1e-9) {
+      continue;
     }
+    bestDistance = distance;
+    bestEdge = index;
   }
-  return best;
+  if (bestEdge < 0) {
+    return undefined;
+  }
+  return {
+    point: [originX + directionX * bestDistance, originZ + directionZ * bestDistance],
+    normal: edges[bestEdge]!.normal,
+    distance: bestDistance,
+    edge: bestEdge,
+  };
 };
 
 /** Unpolarised Fresnel reflectance for a ray meeting an interface from index `from` into index `into`. */
@@ -217,6 +246,7 @@ export const traceLightSheet = (options: LightSheetTraceOptions): RaySegment[] =
   const maxInteractions = options.maxInteractions ?? defaultMaxInteractions;
   const minIntensity = options.minIntensity ?? defaultMinIntensity;
   const strayScale = options.strayScale ?? defaultStrayScale;
+  const spectrumGain = options.spectrumGain ?? defaultSpectrumGain;
   const edges = buildEdges(options.polygon);
   const direction = normalize(options.beam.direction);
   const across: SheetVector = [-direction[1], direction[0]];
@@ -264,14 +294,14 @@ export const traceLightSheet = (options: LightSheetTraceOptions): RaySegment[] =
       const hit = intersect(edges, branch, branch.edge);
       if (hit === undefined) {
         // A degenerate polygon can leak a ray; let it go rather than loop.
-        leave(branch, { color: sample.color, intensity: branch.intensity }, 'exit');
+        leave(branch, { color: sample.color, intensity: branch.intensity * spectrumGain }, 'exit');
         continue;
       }
       segments.push({
         start: branch.origin,
         end: hit.point,
         color: sample.color,
-        intensity: branch.intensity,
+        intensity: branch.intensity * spectrumGain,
         kind: 'internal',
         taper: false,
       });
@@ -283,7 +313,7 @@ export const traceLightSheet = (options: LightSheetTraceOptions): RaySegment[] =
       if (transmitted !== undefined && branch.intensity * (1 - reflectance) >= minIntensity) {
         leave(
           { origin: hit.point, direction: transmitted },
-          { color: sample.color, intensity: branch.intensity * (1 - reflectance) },
+          { color: sample.color, intensity: branch.intensity * (1 - reflectance) * spectrumGain },
           'exit',
         );
       }

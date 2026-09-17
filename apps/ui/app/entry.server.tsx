@@ -7,6 +7,7 @@ import { renderToPipeableStream } from 'react-dom/server';
 import type { RenderToPipeableStreamOptions } from 'react-dom/server';
 import { ServerRouter } from 'react-router';
 import type { AppLoadContext, EntryContext } from 'react-router';
+import { isCanonicalProductionUrl } from '#lib/canonical-url.js';
 
 export const streamTimeout = 5000;
 
@@ -21,6 +22,12 @@ export default function handleRequest(
   _loadContext: AppLoadContext,
 ): Promise<Response> | Response {
   applyHandleRequestHeaders(responseHeaders);
+  /* OQ-P11: `Document-Policy: js-profiling` lets a developer take a real sampling profile of this
+   * document from `Profiler`. It is off the production origin, where it would offer every visitor's
+   * browser a profiler it has no use for. */
+  if (!isCanonicalProductionUrl(request.url)) {
+    responseHeaders.set('Document-Policy', 'js-profiling');
+  }
 
   if (request.method.toUpperCase() === 'HEAD') {
     return new Response(null, {

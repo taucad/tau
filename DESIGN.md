@@ -109,6 +109,13 @@ exact changes on request. Authored design files precede a labelled project-setup
 group. The complete history belongs in Revisions, without duplicating its full
 card in chat.
 
+While a turn runs, the chat history always ends with one activity indicator
+unless the newest content already moves: streaming text, a loading tool card
+or a pending approval. The run state decides whether work is live; part states
+only decide whether something else already shows it. A collapsed activity group
+with a running row shows a spinner in place of its icon. The chat header and
+sidebar add no second live cue.
+
 **Saved**, **checks passed**, **work finished** and **backed up** are independent
 facts. A saved revision can contain interrupted or unverified work. Loading is
 not empty, unknown is not unchanged, and command acknowledgement is not proof

@@ -1,5 +1,4 @@
 // @vitest-environment node
-/* eslint-disable @typescript-eslint/naming-convention -- test data uses filenames as object keys */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createActor, waitFor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
@@ -86,7 +85,8 @@ describe('cadPreviewMachine + cadMachine integration', () => {
       parameters: { width: 42 },
       content: { includeEdges: true },
     });
-    expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
+    // D1: the CAD machine's render carries the parameters; a second direct dispatch would re-render.
+    expect(mockClient.updateParameters).not.toHaveBeenCalled();
 
     cadRef.stop();
     previewRef.stop();
@@ -172,7 +172,8 @@ describe('cadPreviewMachine + cadMachine integration', () => {
       parameters: { width: 42 },
       content: { includeEdges: true },
     });
-    expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
+    // D1: the CAD machine's render carries the parameters; a second direct dispatch would re-render.
+    expect(mockClient.updateParameters).not.toHaveBeenCalled();
 
     cadRef.stop();
     previewRef.stop();
@@ -350,7 +351,8 @@ describe('cadPreviewMachine + cadMachine integration', () => {
       parameters: { width: 42 },
       content: { includeEdges: true },
     });
-    expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
+    // D1: the CAD machine's render carries the parameters; a second direct dispatch would re-render.
+    expect(mockClient.updateParameters).not.toHaveBeenCalled();
 
     cadRef.stop();
     previewRef.stop();
@@ -482,7 +484,8 @@ describe('cadPreviewMachine + cadMachine integration', () => {
       parameters: { width: 42 },
       content: { includeEdges: true },
     });
-    expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
+    // D1: the CAD machine's render carries the parameters; a second direct dispatch would re-render.
+    expect(mockClient.updateParameters).not.toHaveBeenCalled();
 
     cadRef.stop();
     previewRef.stop();

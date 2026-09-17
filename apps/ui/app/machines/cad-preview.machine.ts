@@ -47,9 +47,9 @@ const prepareFilesActor = fromSafeAsync<void, PrepareFilesInput>(async () => {
 });
 
 /**
- * Waits for cadRef's kernel client to become available, then sends parameters
- * directly to the kernel. Handles the deferred case where prepareFiles
- * completes before the kernel connects.
+ * Waits for cadRef's kernel client to become available, then hands the parameters to the CAD
+ * machine, which dispatches the render. Handles the deferred case where prepareFiles completes
+ * before the kernel connects.
  */
 const ensureParametersActor = fromSafeAsync<void, EnsureParametersInput>(async ({ input, signal }) => {
   const { cadRef, parameters } = input;
@@ -57,11 +57,8 @@ const ensureParametersActor = fromSafeAsync<void, EnsureParametersInput>(async (
     return;
   }
 
-  const snapshot = await waitFor(cadRef, (s) => s.context.kernelClient !== undefined, { signal });
-  const { kernelClient } = snapshot.context;
-  if (kernelClient) {
-    void kernelClient.updateParameters(parameters);
-  }
+  await waitFor(cadRef, (s) => s.context.kernelClient !== undefined, { signal });
+  cadRef.send({ type: 'setParameters', parameters });
 });
 
 /**
@@ -98,12 +95,12 @@ export const cadPreviewMachine = setup({
     }),
     forwardSetParameters: enqueueActions(({ enqueue, context, event }) => {
       if (event.type === 'setParameters') {
+        // The CAD machine dispatches the render for a parameter change (D1); a second direct
+        // `updateParameters` here would render the same value twice.
         enqueue.sendTo(context.cadRef, {
           type: 'setParameters',
           parameters: event.parameters,
         });
-        const { kernelClient } = context.cadRef.getSnapshot().context;
-        void kernelClient?.updateParameters(event.parameters);
       }
     }),
   },

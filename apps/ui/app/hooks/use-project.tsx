@@ -394,7 +394,7 @@ export function ProjectProvider({
   /* The kernel learns a committed value from the set actor's own notification, which runs in the
    * same synchronous turn as the checked write — ahead of React's render of this provider. */
   const dispatchParameters = useCallback(
-    (entryPath: string): void => {
+    (entryPath: string, mode: 'dispatch' | 'seed' = 'dispatch'): void => {
       const cadRef = actorRef.getSnapshot().context.geometryUnits.get(entryPath);
       const current = parameterService.snapshot(entryPath);
       if (cadRef === undefined || current === undefined) {
@@ -404,7 +404,7 @@ export function ProjectProvider({
       const fingerprint = JSON.stringify(parameters);
       const appliedFingerprint =
         appliedParameterValues.current.get(entryPath) ?? JSON.stringify(cadRef.getSnapshot().context.parameters);
-      if (appliedFingerprint !== fingerprint) {
+      if (mode === 'dispatch' && appliedFingerprint !== fingerprint) {
         /* The bytes the authority just persisted travel with the value: the runtime observes that
          * revision itself, so the sidecar's own watch event has nothing left to re-render. */
         cadRef.send({
@@ -440,7 +440,10 @@ export function ProjectProvider({
           subscription.unsubscribe();
         },
       });
-      dispatchParameters(entryPath);
+      /* The first observation only records what the record holds: `parameterFileResolver` reads the
+       * same file on every render, so the unit's opening render already carries these values and
+       * dispatching them here would render the model a second time for no change. */
+      dispatchParameters(entryPath, 'seed');
     },
     [dispatchParameters, parameterService],
   );

@@ -447,11 +447,21 @@ describe('cadMachine', () => {
       actor.stop();
     });
 
-    it('should update context on setParameters without forwarding to kernel from cad.machine', async () => {
+    it('should dispatch setParameters as a render carrying the committed sidecar bytes', async () => {
       const { actor, mockClient } = await startAndConnect();
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
+      vi.mocked(mockClient.render).mockClear();
+      const stage = { '.tau/parameters/main.ts.json': new Uint8Array([1, 2, 3]) };
 
-      actor.send({ type: 'setParameters', parameters: { height: 20 } });
-      expect(mockClient.updateParameters).not.toHaveBeenCalled();
+      actor.send({ type: 'setParameters', parameters: { height: 20 }, stage });
+
+      // D1: persistence is not dispatch. The edit reaches the kernel here, not through the watch.
+      expect(mockClient.render).toHaveBeenCalledWith({
+        source: { path: stubEntryPath },
+        parameters: { height: 20 },
+        content: { includeEdges: true },
+        stage,
+      });
       expect(actor.getSnapshot().context.parameters).toEqual({ height: 20 });
       actor.stop();
     });

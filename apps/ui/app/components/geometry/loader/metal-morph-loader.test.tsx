@@ -30,6 +30,8 @@ vi.mock('#components/geometry/loader/metal-morph-controller.js', () => ({
       setTheme: vi.fn(),
       setSpeed: vi.fn(),
       jumpTo: vi.fn(),
+      tune: vi.fn(),
+      getTuning: vi.fn(),
       getSequenceState: vi.fn(
         (): MetalMorphSequenceState => ({
           phase: 'rest',

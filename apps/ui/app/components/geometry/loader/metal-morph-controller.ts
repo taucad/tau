@@ -15,20 +15,34 @@ import { getGeneratedShaderSource } from '#components/geometry/graphics/three/ut
 import { captureFrameThrough, resolveBackendInUse } from '#components/geometry/loader/showcase-capture.js';
 import type { ShowcaseBackendInUse, ShowcaseFrameCapture } from '#components/geometry/loader/showcase-capture.js';
 import { adaptiveLevels, createShowcaseFrameLoop } from '#components/geometry/loader/showcase-frame-loop.js';
-import { createBloomPipeline, createCapturePipeline } from '#components/geometry/loader/showcase-post.js';
-import type { ShowcaseRenderPipeline } from '#components/geometry/loader/showcase-post.js';
-import { createMetalMorphEnvironment } from '#components/geometry/loader/metal-morph-environment.js';
-import type { MetalMorphEnvironment } from '#components/geometry/loader/metal-morph-environment.js';
 import {
+  createBloomPipeline,
+  createCapturePipeline,
+  defaultBloomSettings,
+} from '#components/geometry/loader/showcase-post.js';
+import type { ShowcaseBloomChain, ShowcaseRenderPipeline } from '#components/geometry/loader/showcase-post.js';
+import { createMetalMorphEnvironment } from '#components/geometry/loader/metal-morph-environment.js';
+import type {
+  MetalMorphEnvironment,
+  MetalMorphStudioIntensities,
+} from '#components/geometry/loader/metal-morph-environment.js';
+import { metalMorphEnvironmentPalettes } from '#components/geometry/loader/metal-morph.constants.js';
+import {
+  applyMetalMorphMaterialTuning,
   createMetalMorphNodeMaterial,
   metalMorphShapeAttributeName,
+  readMetalMorphMaterialTuning,
 } from '#components/geometry/loader/metal-morph-material.node.js';
-import type { MetalMorphMaterialOptions } from '#components/geometry/loader/metal-morph-material.node.js';
+import type {
+  MetalMorphMaterialOptions,
+  MetalMorphMaterialTuning,
+} from '#components/geometry/loader/metal-morph-material.node.js';
 import {
   createSeededRandom,
   defaultMorphTiming,
   pickNextShape,
   randomSeed,
+  rebaseMorphElapsed,
   sampleMorphTimeline,
 } from '#components/geometry/loader/metal-morph-sequence.js';
 import type { MorphPhase, MorphTimingConfig } from '#components/geometry/loader/metal-morph-sequence.js';
@@ -71,6 +85,44 @@ export type MetalMorphLoaderStatistics = Readonly<{
 /** Pixel statistics of one frame read back from an offscreen target, independent of canvas presentation. */
 export type MetalMorphFrameCapture = ShowcaseFrameCapture;
 
+/** The bloom halo's knobs. */
+export type MetalMorphBloomTuning = Readonly<{
+  strength: number;
+  radius: number;
+  threshold: number;
+}>;
+
+/**
+ * Everything about the loader's look and motion that can change while it runs: the surface and flow
+ * uniforms, the body colour, the loop timing, the tumble, the exposure, the bloom and the studio's
+ * emitters. What lands here is written back into the defaults.
+ */
+export type MetalMorphTuning = Readonly<{
+  material: MetalMorphMaterialTuning;
+  /** Body colour as an sRGB hex string; the material stores it linear. */
+  bodyColor: string;
+  timing: MorphTimingConfig;
+  /** Radians per second of the resting tumble. */
+  restingSpinRate: number;
+  /** Additional radians per second at the peak of a bend. */
+  bendingSpinRate: number;
+  exposure: number;
+  bloom: MetalMorphBloomTuning;
+  environment: MetalMorphStudioIntensities;
+}>;
+
+/** A partial change to the tuning; every field and sub-field is optional. */
+export type MetalMorphTuningPatch = Readonly<{
+  material?: Partial<MetalMorphMaterialTuning>;
+  bodyColor?: string;
+  timing?: Partial<MorphTimingConfig>;
+  restingSpinRate?: number;
+  bendingSpinRate?: number;
+  exposure?: number;
+  bloom?: Partial<MetalMorphBloomTuning>;
+  environment?: Partial<MetalMorphStudioIntensities>;
+}>;
+
 export type MetalMorphLoaderOptions = Readonly<{
   canvas: HTMLCanvasElement;
   backend: ResolvedGraphicsBackend;
@@ -104,6 +156,9 @@ export type MetalMorphLoaderController = Readonly<{
   setSpeed: (speed: number) => void;
   /** Start morphing to `shape` now, or make it the next target when a morph is already under way. */
   jumpTo: (shape: MetalMorphShapeId) => void;
+  /** Change any of the tuning while the loop runs; uniforms take effect on the next frame, the studio is re-prefiltered. */
+  tune: (patch: MetalMorphTuningPatch) => void;
+  getTuning: () => MetalMorphTuning;
   getSequenceState: () => MetalMorphSequenceState;
   getStatistics: () => MetalMorphLoaderStatistics;
   /** Generated backend shader source for the body, for backend evidence. */
@@ -201,7 +256,7 @@ const shapeIndex = (shape: MetalMorphShapeId): number => metalMorphShapeIds.inde
  */
 export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalMorphLoaderController => {
   const profile = qualityProfiles[options.quality ?? 'high'];
-  const timing = options.timing ?? defaultMorphTiming;
+  let timing = options.timing ?? defaultMorphTiming;
   const random = createSeededRandom(options.seed ?? randomSeed());
   const scene = new Scene();
   const camera = new PerspectiveCamera(26, 1, 0.5, 40);
@@ -216,11 +271,21 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
   scene.add(mesh);
 
   let renderer: WebGPURenderer | undefined;
-  let pipeline: ShowcaseRenderPipeline | undefined;
+  let bloomChain: ShowcaseBloomChain | undefined;
   let capturePipeline: ShowcaseRenderPipeline | undefined;
   let environment: MetalMorphEnvironment | undefined;
   let { theme } = options;
   let speed = options.speed ?? 1;
+  let restingSpin = restingSpinRate;
+  let bendingSpin = bendingSpinRate;
+  let exposure = 1;
+  let bloomTuning: MetalMorphBloomTuning = {
+    strength: defaultBloomSettings.strength,
+    radius: defaultBloomSettings.radius,
+    threshold: defaultBloomSettings.threshold,
+  };
+  /** Overrides on the theme's studio; the palette's own intensities apply where a key is absent. */
+  let studioOverrides: Partial<MetalMorphStudioIntensities> = {};
   // Read through a function so a disposal that happened during an `await` is observed rather than narrowed away.
   const lifecycle = { disposed: false };
   const isDisposed = (): boolean => lifecycle.disposed;
@@ -303,7 +368,7 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
     spinAxis.set(Math.sin(seconds * 0.21) * 0.8, 1, Math.cos(seconds * 0.17) * 0.8).normalize();
     worldSweep.copy(sweepAxis).applyQuaternion(mesh.quaternion);
     spinAxis.lerp(worldSweep, sample.spinImpulse * 0.6).normalize();
-    const angle = ((restingSpinRate + sample.spinImpulse * bendingSpinRate) * deltaMilliseconds * speed) / 1000;
+    const angle = ((restingSpin + sample.spinImpulse * bendingSpin) * deltaMilliseconds * speed) / 1000;
     spinStep.setFromAxisAngle(spinAxis, angle);
     mesh.quaternion.premultiply(spinStep).normalize();
   };
@@ -312,8 +377,8 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
     if (!renderer || isDisposed()) {
       return;
     }
-    if (pipeline) {
-      pipeline.render();
+    if (bloomChain) {
+      bloomChain.pipeline.render();
     } else {
       renderer.render(scene, camera);
     }
@@ -342,11 +407,11 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
       applySize(requestedSize);
     }
     const wantsBloom = profile.bloom && level < adaptiveLevels.bloom;
-    if (renderer && wantsBloom && !pipeline) {
-      pipeline = createBloomPipeline(renderer, { scene, camera });
-    } else if (!wantsBloom && pipeline) {
-      pipeline.dispose();
-      pipeline = undefined;
+    if (renderer && wantsBloom && !bloomChain) {
+      bloomChain = createBloomPipeline(renderer, { scene, camera }, { ...defaultBloomSettings, ...bloomTuning });
+    } else if (!wantsBloom && bloomChain) {
+      bloomChain.dispose();
+      bloomChain = undefined;
     }
   };
 
@@ -369,6 +434,20 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
     loop.start(renderer);
   };
 
+  const buildEnvironment = (target: WebGPURenderer): MetalMorphEnvironment =>
+    createMetalMorphEnvironment(target, theme, { size: profile.environmentSize, intensities: studioOverrides });
+
+  /** Prefilter the studio again for the current theme and overrides, and show it if the loop is held. */
+  const rebuildEnvironment = (target: WebGPURenderer): void => {
+    const previous = environment;
+    environment = buildEnvironment(target);
+    scene.environment = environment.texture;
+    previous?.dispose();
+    if (isReady && !loop.isLooping()) {
+      draw();
+    }
+  };
+
   // A named function rather than an IIFE: TypeScript narrows captured flags inside immediately invoked
   // expressions, which would hide the playback request made while initialisation was still awaiting.
   const initialise = async (): Promise<void> => {
@@ -382,14 +461,14 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
     }
     renderer = created;
     renderer.toneMapping = ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1;
+    renderer.toneMappingExposure = exposure;
     renderer.setClearColor(0x00_00_00, 0);
     applySize(pendingSize ?? { width: 256, height: 256, pixelRatio: 1 });
     pendingSize = undefined;
-    environment = createMetalMorphEnvironment(renderer, theme, { size: profile.environmentSize });
+    environment = buildEnvironment(renderer);
     scene.environment = environment.texture;
     if (profile.bloom) {
-      pipeline = createBloomPipeline(renderer, { scene, camera });
+      bloomChain = createBloomPipeline(renderer, { scene, camera }, { ...defaultBloomSettings, ...bloomTuning });
     }
     await renderer.compileAsync(scene, camera);
     if (isDisposed()) {
@@ -432,16 +511,69 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
       if (!renderer) {
         return;
       }
-      const previous = environment;
-      environment = createMetalMorphEnvironment(renderer, theme, { size: profile.environmentSize });
-      scene.environment = environment.texture;
-      previous?.dispose();
-      if (isReady && !loop.isLooping()) {
-        draw();
-      }
+      rebuildEnvironment(renderer);
     },
     setSpeed: (nextSpeed) => {
       speed = Math.max(0, nextSpeed);
+    },
+    tune: (patch) => {
+      if (patch.material) {
+        applyMetalMorphMaterialTuning(handles.tuning, patch.material);
+      }
+      if (patch.bodyColor !== undefined) {
+        material.color.set(patch.bodyColor);
+      }
+      if (patch.timing) {
+        const next = { ...timing, ...patch.timing };
+        elapsed = rebaseMorphElapsed(elapsed, timing, next);
+        timing = next;
+      }
+      restingSpin = patch.restingSpinRate ?? restingSpin;
+      bendingSpin = patch.bendingSpinRate ?? bendingSpin;
+      if (patch.exposure !== undefined) {
+        exposure = patch.exposure;
+        if (renderer) {
+          renderer.toneMappingExposure = exposure;
+        }
+      }
+      if (patch.bloom) {
+        bloomTuning = { ...bloomTuning, ...patch.bloom };
+        if (bloomChain) {
+          bloomChain.strength.value = bloomTuning.strength;
+          bloomChain.radius.value = bloomTuning.radius;
+          bloomChain.threshold.value = bloomTuning.threshold;
+        }
+      }
+      if (patch.environment) {
+        studioOverrides = { ...studioOverrides, ...patch.environment };
+        if (renderer) {
+          rebuildEnvironment(renderer);
+          return;
+        }
+      }
+      if (isReady && !loop.isLooping()) {
+        advance(0);
+        draw();
+      }
+    },
+    getTuning: () => {
+      const palette = metalMorphEnvironmentPalettes[theme];
+      return {
+        material: readMetalMorphMaterialTuning(handles.tuning),
+        bodyColor: `#${material.color.getHexString()}`,
+        timing,
+        restingSpinRate: restingSpin,
+        bendingSpinRate: bendingSpin,
+        exposure,
+        bloom: bloomTuning,
+        environment: {
+          keyIntensity: palette.keyIntensity,
+          rimIntensity: palette.rimIntensity,
+          fillIntensity: palette.fillIntensity,
+          accentIntensity: palette.accentIntensity,
+          ...studioOverrides,
+        },
+      };
     },
     jumpTo: (shape) => {
       if (phase === 'rest' && shape === currentShape) {
@@ -462,7 +594,7 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
       backend: renderer ? resolveBackendInUse(renderer) : 'webgl2',
       framesPerSecond: loop.getFramesPerSecond(),
       vertexCount: geometryData.vertexCount,
-      isBloomEnabled: pipeline !== undefined,
+      isBloomEnabled: bloomChain !== undefined,
       isPlaying: loop.isLooping(),
       targetFrameRate: loop.getTargetFrameRate(),
       adaptiveLevel: loop.getAdaptiveLevel(),
@@ -494,7 +626,7 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
       }
       lifecycle.disposed = true;
       loop.stop();
-      pipeline?.dispose();
+      bloomChain?.dispose();
       capturePipeline?.dispose();
       environment?.dispose();
       geometry.dispose();

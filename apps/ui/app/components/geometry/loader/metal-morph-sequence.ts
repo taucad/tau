@@ -161,3 +161,17 @@ export const sampleMorphTimeline = (
     scale: 1 - 0.03 * gaussian(progress, 0.09, 0.07) + 0.02 * gaussian(progress, 0.5, 0.22),
   };
 };
+
+/**
+ * The clock reading that puts a loop at the same cycle, phase and progress under `to` as `elapsed` does under
+ * `from`, so timing can change while the loop runs without a jump or a repeated transition.
+ */
+export const rebaseMorphElapsed = (elapsed: number, from: MorphTimingConfig, to: MorphTimingConfig): number => {
+  const sample = sampleMorphTimeline(elapsed, from);
+  const cycleDuration = to.restDuration + to.morphDuration;
+  const local =
+    sample.phase === 'rest'
+      ? sample.phaseProgress * to.restDuration
+      : to.restDuration + sample.phaseProgress * to.morphDuration;
+  return sample.cycleIndex * cycleDuration + local;
+};

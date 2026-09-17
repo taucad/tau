@@ -1,6 +1,6 @@
 import type { PerspectiveCamera, Scene } from 'three';
 import { RenderPipeline as ThreeRenderPipeline } from 'three/webgpu';
-import type { WebGPURenderer } from 'three/webgpu';
+import type { UniformNode, WebGPURenderer } from 'three/webgpu';
 import { luminance, pass, saturate, vec4 } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 
@@ -27,12 +27,21 @@ export const defaultBloomSettings: ShowcaseBloomSettings = {
 /** The scene and camera a pipeline draws. */
 export type ShowcaseView = Readonly<{ scene: Scene; camera: PerspectiveCamera }>;
 
+/** A bloom chain: the pipeline to draw through, and the halo's knobs as live uniforms. */
+export type ShowcaseBloomChain = Readonly<{
+  pipeline: ShowcaseRenderPipeline;
+  strength: UniformNode<'float', number>;
+  radius: UniformNode<'float', number>;
+  threshold: UniformNode<'float', number>;
+  dispose: () => void;
+}>;
+
 /** Scene pass plus a bloom halo, with coverage for the halo so it composites over the page. */
 export const createBloomPipeline = (
   renderer: WebGPURenderer,
   view: ShowcaseView,
   settings: ShowcaseBloomSettings = defaultBloomSettings,
-): ShowcaseRenderPipeline => {
+): ShowcaseBloomChain => {
   const scenePass = pass(view.scene, view.camera);
   /* oxlint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access -- TSL fluent builder is typed as `any` in `@types/three`; the graph is verified by the backend e2e spec. */
   const scenePassColor = scenePass.getTextureNode('output');
@@ -43,7 +52,15 @@ export const createBloomPipeline = (
   const post = new ThreeRenderPipeline(renderer);
   post.outputNode = vec4(composed.rgb, alpha);
   /* oxlint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access */
-  return post;
+  return {
+    pipeline: post,
+    strength: glow.strength,
+    radius: glow.radius,
+    threshold: glow.threshold,
+    dispose: () => {
+      post.dispose();
+    },
+  };
 };
 
 /** Scene pass only, with the renderer's tone mapping and output encoding, for offscreen readbacks. */

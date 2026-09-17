@@ -13,6 +13,8 @@ import type {
   MetalMorphLoaderQuality,
   MetalMorphLoaderStatistics,
   MetalMorphSequenceState,
+  MetalMorphTuning,
+  MetalMorphTuningPatch,
 } from '#components/geometry/loader/metal-morph-controller.js';
 import type { MetalMorphLoaderStatus } from '#components/geometry/loader/metal-morph-loader.js';
 import { getMetalMorphSpinnerService } from '#components/geometry/loader/metal-morph-spinner-service.js';
@@ -76,6 +78,9 @@ type MetalMorphDebugBridge = Readonly<{
   captureFrame: () => Promise<MetalMorphFrameCapture>;
   /** Subscriber and renderer counts for the inline spinners, which all share one renderer. */
   getSpinnerDiagnostics: () => MetalMorphSpinnerDiagnostics;
+  /** Tune the stage and the shared spinner renderer together, for finding the configuration that ships. */
+  tune: (patch: MetalMorphTuningPatch) => void;
+  getTuning: () => MetalMorphTuning;
 }>;
 
 type MetalMorphDebugGlobal = typeof globalThis & { __TAU_METAL_MORPH__?: MetalMorphDebugBridge };
@@ -194,6 +199,11 @@ export default function LoaderShowcase(): React.JSX.Element {
       getShaderSource: async () => controller.getShaderSource(),
       captureFrame: async () => controller.captureFrame(),
       getSpinnerDiagnostics: () => getMetalMorphSpinnerService().getDiagnostics(),
+      tune: (patch) => {
+        controller.tune(patch);
+        getMetalMorphSpinnerService().tune(patch);
+      },
+      getTuning: () => controller.getTuning(),
     };
     (globalThis as MetalMorphDebugGlobal).__TAU_METAL_MORPH__ = bridge;
     return () => {

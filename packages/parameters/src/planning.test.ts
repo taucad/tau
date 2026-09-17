@@ -110,6 +110,30 @@ it('rejects deleting the last group through the pure API', async () => {
   expect(plan).toMatchObject({ status: 'rejected', code: 'LAST_GROUP_DELETE' });
 });
 
+it('names the missing group when a value edit addresses one that does not exist', async () => {
+  const admitted = await manifest();
+  const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });
+  const plan = planParameterChange({
+    current,
+    request: {
+      requestId: 'edit:absent',
+      draftGeneration: 0,
+      fingerprint: 'absent',
+      pressure: 'final',
+      expected: current.identity,
+      operation: {
+        kind: 'native-value',
+        group: 'metric',
+        parameterId: 'width',
+        resource: admitted.bindings['/width']!.schema.resource,
+        pointer: '/width',
+        value: 101,
+      },
+    },
+  });
+  expect(plan).toMatchObject({ status: 'rejected', code: 'GROUP_NOT_FOUND' });
+});
+
 it('requires explicit source-unit confirmation before one record write', async () => {
   const admitted = await manifest();
   const current = resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null });

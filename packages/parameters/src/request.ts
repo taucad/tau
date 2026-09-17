@@ -218,6 +218,17 @@ const sourceUnitCapability = (value: unknown): ParameterSourceUnitCapability | u
   };
 };
 
+/** Operations that edit a group in place; the planner asserts the group exists, so this proves it. */
+const inPlaceGroupKinds: ReadonlySet<string> = new Set([
+  'select-group',
+  'reset-group',
+  'replace-group-values',
+  'native-value',
+  'unit-value',
+  'batch',
+  'source-unit',
+]);
+
 /** Reject a group operation the current record cannot satisfy. @internal */
 export const groupOperationRejection = (
   request: ParameterSetRequest | undefined,
@@ -233,11 +244,7 @@ export const groupOperationRejection = (
       message: `Parameter group "${operation.group}" already exists.`,
     };
   }
-  if (
-    operation.kind === 'select-group' ||
-    operation.kind === 'reset-group' ||
-    operation.kind === 'replace-group-values'
-  ) {
+  if (inPlaceGroupKinds.has(operation.kind)) {
     return Object.hasOwn(current.entry.groups, operation.group)
       ? undefined
       : {

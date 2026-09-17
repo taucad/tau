@@ -3,6 +3,7 @@ import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { Switch } from '@taucad/ui/components/switch';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
+import { tauCloudEnabled } from '#cloud/cloud-enabled.js';
 
 function SettingRow({
   label,
@@ -34,21 +35,23 @@ export function AgentSettings(): React.JSX.Element {
 
   return (
     <div className='flex flex-col gap-6 pb-6'>
-      <SettingsSectionCard>
-        <CardHeader>
-          <CardTitle>Metadata Display</CardTitle>
-        </CardHeader>
-        <CardContent className='flex flex-col gap-4'>
-          <SettingsItem settingId='show-credits'>
-            <SettingRow
-              label='Show Credits'
-              description='Display the Tau credits charged for each message in the chat history'
-            >
-              <Switch aria-label='Show Credits' checked={showCredits} onCheckedChange={setShowCredits} />
-            </SettingRow>
-          </SettingsItem>
-        </CardContent>
-      </SettingsSectionCard>
+      {tauCloudEnabled ? (
+        <SettingsSectionCard>
+          <CardHeader>
+            <CardTitle>Metadata Display</CardTitle>
+          </CardHeader>
+          <CardContent className='flex flex-col gap-4'>
+            <SettingsItem settingId='show-credits'>
+              <SettingRow
+                label='Show Credits'
+                description='Display the Tau credits charged for each message in the chat history'
+              >
+                <Switch aria-label='Show Credits' checked={showCredits} onCheckedChange={setShowCredits} />
+              </SettingRow>
+            </SettingsItem>
+          </CardContent>
+        </SettingsSectionCard>
+      ) : null}
 
       <SettingsSectionCard>
         <CardHeader>

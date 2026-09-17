@@ -10,11 +10,18 @@ type SettingsItemProps = {
   readonly className?: string;
 };
 
-/** An explicit, focusable destination for a registered setting. */
-export function SettingsItem({ settingId, children, className }: SettingsItemProps): React.JSX.Element {
+/**
+ * An explicit, focusable destination for a registered setting.
+ *
+ * The registry is the single source of truth for which settings exist in this
+ * deployment, so a setting it filters out (Tau Cloud entries in a self-hosted
+ * build) renders nothing instead of crashing the panel. Unknown ids are a
+ * compile error via `SettingId`.
+ */
+export function SettingsItem({ settingId, children, className }: SettingsItemProps): React.JSX.Element | undefined {
   const definition = settingsSections.flatMap((section) => section.entries).find((entry) => entry.id === settingId);
   if (!definition) {
-    throw new Error(`Unknown setting: ${settingId}`);
+    return undefined;
   }
   return (
     <section

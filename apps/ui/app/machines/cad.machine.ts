@@ -743,6 +743,7 @@ export const cadMachine = setup({
           actions: ['bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
         },
         setParameters: {
+          target: '#cad.rendering.submitting',
           actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'],
         },
         setCodeIssues: { actions: 'setCodeIssues' },
@@ -789,6 +790,7 @@ export const cadMachine = setup({
           actions: ['bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
         },
         setParameters: {
+          target: '#cad.rendering.submitting',
           actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'],
         },
         setCodeIssues: { actions: 'setCodeIssues' },
@@ -904,6 +906,8 @@ export const cadMachine = setup({
           actions: ['bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
         },
         setParameters: {
+          target: '#cad.rendering.submitting',
+          reenter: true,
           actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'],
         },
         setCodeIssues: { actions: 'setCodeIssues' },

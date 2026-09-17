@@ -57,15 +57,13 @@ describe('RuntimeTracer', () => {
         file: 'main.ts',
         count: 43,
         result: 'ok',
-        devtools: {
-          properties: [
-            ['file', 'main.ts'],
-            ['count', '43'],
-            ['result', 'ok'],
-          ],
-        },
       },
     });
+    // The DevTools track payload is meaningful only as `performance.measure` detail
+    // and every entry consumer strips it; building it per span cost 57 % of span CPU
+    // and 45 % of the wire bytes, so it must not reach the entry sink.
+    expect(entries[1]!.detail).not.toHaveProperty('devtools');
+    expect(entries[0]!.detail).not.toHaveProperty('devtools');
   });
 
   it('mirrors uniquely named measures only when DevTools telemetry is enabled', () => {
@@ -82,7 +80,10 @@ describe('RuntimeTracer', () => {
     }
     expect(typeof options.start).toBe('number');
     expect(typeof options.duration).toBe('number');
-    expect(options.detail).toMatchObject({ spanId: '0' });
+    expect(options.detail).toMatchObject({
+      spanId: '0',
+      devtools: { dataType: 'track-entry', track: 'Kernel Pipeline', trackGroup: 'Tau' },
+    });
   });
 
   it('drops stale spans after reset without clearing unrelated timeline entries', () => {

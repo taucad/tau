@@ -112,7 +112,7 @@ describe('ProjectChatRunSettlement', () => {
     render(<ProjectChatRunSettlement />);
 
     await waitFor(() => {
-      expect(harness.finalize).toHaveBeenCalledWith('chat_1');
+      expect(harness.finalize).toHaveBeenCalledWith('chat_1', 'run_1');
     });
     expect(harness.releaseDurableRun).toHaveBeenCalledWith({
       chatId: 'chat_1',
@@ -133,7 +133,7 @@ describe('ProjectChatRunSettlement', () => {
     render(<ProjectChatRunSettlement />);
 
     await waitFor(() => {
-      expect(harness.discard).toHaveBeenCalledWith('chat_1');
+      expect(harness.discard).toHaveBeenCalledWith('chat_1', 'run_1');
     });
     expect(harness.finalize).not.toHaveBeenCalled();
     expect(harness.releaseDurableRun).toHaveBeenCalledWith({
@@ -148,7 +148,7 @@ describe('ProjectChatRunSettlement', () => {
     render(<ProjectChatRunSettlement />);
 
     await waitFor(() => {
-      expect(harness.retireClaim).toHaveBeenCalledWith('chat_1');
+      expect(harness.retireClaim).toHaveBeenCalledWith('chat_1', 'run_1');
     });
     expect(harness.finalize).not.toHaveBeenCalled();
     expect(harness.releaseDurableRun).toHaveBeenCalledWith({
@@ -168,7 +168,7 @@ describe('ProjectChatRunSettlement', () => {
     render(<ProjectChatRunSettlement />);
 
     await waitFor(() => {
-      expect(harness.discard).toHaveBeenCalledWith('chat_1');
+      expect(harness.discard).toHaveBeenCalledWith('chat_1', 'run_1');
     });
     expect(harness.finalize).not.toHaveBeenCalled();
     expect(harness.releaseDurableRun).toHaveBeenCalledWith({
@@ -214,6 +214,51 @@ describe('ProjectChatRunSettlement', () => {
         runId: 'run_1',
         state: 'active',
       });
+    });
+  });
+
+  /**
+   * F2/F4: discovery is documented as mount-time recovery, and the claim it
+   * compares against this tab's run record may be *newer* than that record. A
+   * claim whose chat is mid-dispatch is never unsubstantiated — its run id is
+   * the one being admitted right now — and retiring it released the lease the
+   * revision root was holding for that very turn.
+   */
+  it('should not retire an admitted claim while its chat is submitted', async () => {
+    harness.status = 'submitted';
+    harness.durableRunId = undefined;
+    harness.durableRunState = undefined;
+    harness.workspace = { ...workspace, runId: 'run_2' };
+    harness.browserRun = { runId: 'run_1', state: 'completed', eventCount: 3, turnId: 'turn_1' };
+    harness.reclaimAll.mockResolvedValue([{ ...workspace, runId: 'run_2' }]);
+
+    render(<ProjectChatRunSettlement />);
+
+    await waitFor(() => {
+      expect(harness.retainDurableRun).toHaveBeenCalledWith({
+        chatId: 'chat_1',
+        runId: 'run_2',
+        state: 'active',
+      });
+    });
+    expect(harness.retireClaim).not.toHaveBeenCalled();
+    expect(harness.discard).not.toHaveBeenCalled();
+  });
+
+  it('should run discovery once per mount, not when the authority changes identity', async () => {
+    harness.reclaimAll.mockResolvedValue([]);
+    const view = render(<ProjectChatRunSettlement />);
+
+    await waitFor(() => {
+      expect(harness.reclaimAll).toHaveBeenCalledTimes(1);
+    });
+    /* The mocked provider hands back a fresh context value on every render,
+     * exactly as the real one did whenever the chats query refetched. */
+    view.rerender(<ProjectChatRunSettlement />);
+    view.rerender(<ProjectChatRunSettlement />);
+
+    await waitFor(() => {
+      expect(harness.reclaimAll).toHaveBeenCalledTimes(1);
     });
   });
 

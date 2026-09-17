@@ -305,19 +305,21 @@ export async function installBillingProtections(client: postgres.Sql): Promise<v
           mutable := ARRAY['automatic_source_accepted_at','automatic_terminal_outcome','automatic_terminal_at','state','updated_at','paid_at','paid_evidence','payment_intent_id','charge_id','fulfilled_at','receipt_id','granted_atoms','fulfilled_revision'];
           IF (OLD.state IN ('paid','fulfilled','failed','canceled') AND to_jsonb(OLD) IS DISTINCT FROM to_jsonb(NEW))
             OR (OLD.state = 'paid_unfulfilled' AND NEW.state NOT IN ('paid_unfulfilled','fulfilled'))
-            OR (OLD.state <> 'prepared' AND NEW.state IN ('prepared','canceled'))
+            OR (OLD.state <> 'prepared' AND NEW.state = 'prepared')
+            OR (OLD.state NOT IN ('prepared','pending','attention') AND NEW.state = 'canceled')
             OR (OLD.paid_evidence IS NOT NULL AND ROW(OLD.paid_evidence,OLD.paid_at,OLD.payment_intent_id,OLD.charge_id)
               IS DISTINCT FROM ROW(NEW.paid_evidence,NEW.paid_at,NEW.payment_intent_id,NEW.charge_id))
           THEN RAISE EXCEPTION 'payment cannot regress or replace evidence' USING ERRCODE = '23514'; END IF;
           IF OLD.state <> NEW.state AND NOT (
             (OLD.state = 'prepared' AND NEW.state IN ('creating','pending','attention','paid_unfulfilled','canceled','failed')) OR
             (OLD.state = 'creating' AND NEW.state IN ('pending','attention','paid_unfulfilled','failed')) OR
-            (OLD.state = 'pending' AND NEW.state IN ('attention','paid_unfulfilled','failed')) OR
-            (OLD.state = 'attention' AND NEW.state IN ('creating','pending','paid_unfulfilled','failed')) OR
+            (OLD.state = 'pending' AND NEW.state IN ('attention','paid_unfulfilled','failed','canceled')) OR
+            (OLD.state = 'attention' AND NEW.state IN ('creating','pending','paid_unfulfilled','failed','canceled')) OR
             (OLD.state = 'paid_unfulfilled' AND NEW.state = 'fulfilled'))
           THEN RAISE EXCEPTION 'invalid purchase transition' USING ERRCODE = '23514'; END IF;
           IF NEW.state IN ('failed','canceled') AND EXISTS (
-            SELECT FROM billing.billing_provider_leg WHERE purchase_id = NEW.id AND dispatch_started_at IS NOT NULL AND state <> 'no_charge')
+            SELECT FROM billing.billing_provider_leg WHERE purchase_id = NEW.id AND dispatch_started_at IS NOT NULL
+              AND state NOT IN ('no_charge','expired'))
           THEN RAISE EXCEPTION 'charge-capable payment cannot be discarded' USING ERRCODE = '23514'; END IF;
           IF NEW.state = 'fulfilled' THEN
             SELECT * INTO receipt FROM billing.credit_transaction WHERE id = NEW.receipt_id;
@@ -369,6 +371,22 @@ export async function installBillingProtections(client: postgres.Sql): Promise<v
               AND c.stripe_account_id = NEW.terminal_evidence->>'stripeAccountId'
               AND c.livemode::text = NEW.terminal_evidence->>'livemode'))
           THEN RAISE EXCEPTION 'subscription checkout expiry must prove no created source' USING ERRCODE = '23514'; END IF;
+          IF NEW.kind = 'payment_intent' AND NEW.terminal_evidence IS NOT NULL AND (
+            NEW.state <> 'no_charge' OR NEW.provider_object_id IS NOT NULL
+            OR NEW.terminal_evidence->>'version' IS DISTINCT FROM 'stripe-request-rejected-v1'
+            OR NEW.terminal_evidence->>'idempotencyKey' IS DISTINCT FROM NEW.idempotency_key)
+          THEN RAISE EXCEPTION 'rejected payment request must match its unlinked leg' USING ERRCODE = '23514'; END IF;
+          IF NEW.kind = 'checkout_payment' AND NEW.terminal_evidence IS NOT NULL AND (
+            NEW.state <> 'expired' OR NEW.terminal_evidence->>'version' IS DISTINCT FROM 'stripe-payment-checkout-expired-v1'
+            OR NEW.terminal_evidence->>'status' IS DISTINCT FROM 'expired' OR NEW.terminal_evidence->>'mode' IS DISTINCT FROM 'payment'
+            OR NEW.terminal_evidence->>'checkoutSessionId' IS DISTINCT FROM NEW.provider_object_id
+            OR NEW.terminal_evidence->>'paymentStatus' IS DISTINCT FROM 'unpaid'
+            OR NEW.terminal_evidence->>'amountReceived' IS DISTINCT FROM '0'
+            OR NOT EXISTS (SELECT FROM billing.billing_stripe_customer c WHERE c.id = NEW.customer_binding_id
+              AND c.account_id = NEW.account_id AND c.stripe_customer_id = NEW.terminal_evidence->>'customerId'
+              AND c.stripe_account_id = NEW.terminal_evidence->>'stripeAccountId'
+              AND c.livemode::text = NEW.terminal_evidence->>'livemode'))
+          THEN RAISE EXCEPTION 'payment checkout expiry must prove no collected funds' USING ERRCODE = '23514'; END IF;
           IF NEW.kind = 'subscription_cancel' AND NEW.terminal_evidence IS NOT NULL AND (
             NEW.state <> 'no_charge' OR NEW.terminal_evidence->>'version' IS DISTINCT FROM 'stripe-subscription-canceled-v1'
             OR NEW.terminal_evidence->>'status' IS DISTINCT FROM 'canceled'

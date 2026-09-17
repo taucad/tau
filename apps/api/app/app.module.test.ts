@@ -4,6 +4,7 @@ import { mockDeep } from 'vitest-mock-extended';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { createBillingStripeClient, stripeApiVersion } from '#api/billing/billing-stripe.js';
 import { DatabaseService } from '#database/database.service.js';
+import { fundedGatewayProviderIds } from '#api/providers/provider-gateway.js';
 import { getEnvironment } from '#config/environment.config.js';
 import { Test } from '@nestjs/testing';
 import { describe, expect, it } from 'vitest';
@@ -49,6 +50,9 @@ describe('AppModule', () => {
       STRIPE_SECRET_KEY: 'sk_test_module',
       STRIPE_READ_SECRET_KEY: 'rk_test_module',
       STRIPE_WEBHOOK_SECRET: webhookSecret,
+      STRIPE_PRICE_ID_PRO_MONTHLY: 'price_module_fixture',
+      STRIPE_PRODUCT_ID_CREDIT_PACK: 'prod_module_fixture',
+      BILLING_PROVIDER_ACCOUNTS: Object.fromEntries(fundedGatewayProviderIds.map((id) => [id, `${id}-module-fixture`])),
     });
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...getEnvironment(), TAU_CLOUD_ENABLED: true })],

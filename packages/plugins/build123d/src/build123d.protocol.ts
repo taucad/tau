@@ -99,6 +99,8 @@ export const build123dAnalysisSchema = z.object({
   resolved: z.array(z.string()),
   unresolved: z.array(z.string()),
 });
+/** What the Python worker answers `analyze` with. @public */
+export type Build123dAnalysis = z.infer<typeof build123dAnalysisSchema>;
 
 /** One entry of a bounded compute bundle: its identities and its slice of the binary payload. */
 export const build123dComputeDescriptorSchema = z.object({

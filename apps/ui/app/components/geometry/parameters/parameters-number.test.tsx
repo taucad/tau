@@ -98,7 +98,9 @@ function ParametersNumber({
 type CommitCall = Parameters<ParameterCommit['commit']>[0];
 
 /** The service owns retained drafts and the checked write; this stands in for both. */
-const createParameterCommit = (): ParameterCommit & Readonly<{ calls: CommitCall[] }> => {
+const createParameterCommit = (
+  refuse?: () => Awaited<ReturnType<ParameterCommit['commit']>>,
+): ParameterCommit & Readonly<{ calls: CommitCall[] }> => {
   const drafts = new Map<string, ParameterDraft>();
   const listeners = new Set<() => void>();
   const calls: CommitCall[] = [];
@@ -129,7 +131,7 @@ const createParameterCommit = (): ParameterCommit & Readonly<{ calls: CommitCall
     },
     commit: async (field) => {
       calls.push(field);
-      return undefined;
+      return refuse?.();
     },
     setValue: vi.fn(async () => undefined),
   };
@@ -730,6 +732,35 @@ describe('ParametersNumber', () => {
       await user.tab();
 
       expect(field).toHaveValue('10');
+    });
+
+    it('reports a refused final commit instead of showing the value as entered', async () => {
+      const user = userEvent.setup();
+      const parameterCommit = createParameterCommit(() => ({
+        status: 'rejected',
+        requestId: 'refused',
+        code: 'STALE_MANIFEST',
+        message: 'The field changed since this edit began.',
+      }));
+      render(
+        <TestWrapper>
+          <ParametersNumber
+            value={10}
+            defaultValue={10}
+            fieldProjection={{ ...testProjection('length', defaultUnits), instancePointer: '/width' }}
+            parameterCommit={parameterCommit}
+            onChange={vi.fn()}
+            aria-label='Refused width'
+          />
+        </TestWrapper>,
+      );
+      const field = screen.getByRole('textbox', { name: 'Refused width' });
+      await user.click(field);
+      await user.clear(field);
+      await user.type(field, '12');
+      await user.keyboard('{Enter}');
+
+      expect(await screen.findByText('The field changed since this edit began.')).toBeVisible();
     });
 
     it('restores retained invalid text into the visible input after remount', async () => {

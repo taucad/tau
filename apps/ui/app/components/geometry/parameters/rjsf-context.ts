@@ -1,7 +1,12 @@
 import { createContext, useContext } from 'react';
 import type { LengthSymbol } from '#constants/length-units.js';
 import type { JSONValue, ParameterGroup } from '@taucad/types';
-import type { ParameterManifest, ParameterSetRequest, ParameterSetTarget } from '@taucad/parameters';
+import type {
+  ParameterManifest,
+  ParameterSetOutcome,
+  ParameterSetRequest,
+  ParameterSetTarget,
+} from '@taucad/parameters';
 import type { ParameterDraft } from '#services/parameter-set-service.js';
 
 export type Units = {
@@ -40,7 +45,7 @@ export type ParameterCommit = Readonly<{
       base?: ParameterSetRequest['base'];
       pressure?: ParameterSetRequest['pressure'];
     }>,
-  ): Promise<unknown>;
+  ): Promise<ParameterSetOutcome | undefined>;
   /** Commit one field of the active group; non-numeric widgets never rewrite the whole group. */
   setValue(field: Readonly<{ pointer: string; value: JSONValue }>): Promise<void>;
 }>;

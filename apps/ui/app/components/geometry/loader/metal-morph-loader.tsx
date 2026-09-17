@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { RefCallback } from 'react';
 import { cn } from '@taucad/ui/utils/cn';
 import {
   probeWebGpuSupport,
@@ -6,6 +7,11 @@ import {
   resolveGraphicsBackendPreference,
 } from '#components/geometry/graphics/graphics-backend.js';
 import { createMetalMorphLoader } from '#components/geometry/loader/metal-morph-controller.js';
+import {
+  useDocumentHidden,
+  useIsIntersecting,
+  useReducedMotion,
+} from '#components/geometry/loader/metal-morph-playback-gates.js';
 import type {
   MetalMorphLoaderController,
   MetalMorphLoaderQuality,
@@ -21,13 +27,8 @@ export type MetalMorphLoaderProperties = Readonly<{
   className?: string;
   /** Accessible name. The default names the loading state it stands for. */
   label?: string;
-  /**
-   * `status` announces a busy state, the default for a real loading indicator; `img` describes a showcase;
-   * `presentation` hides the loader from assistive technology, for a row that already carries its own status.
-   */
-  semantic?: 'status' | 'img' | 'presentation';
-  /** Stands in until the first frame is on the canvas; the default suits a surface of at least 24 px. */
-  fallback?: React.ReactNode;
+  /** `status` announces a busy state, the default for a real loading indicator; `img` describes a showcase. */
+  semantic?: 'status' | 'img';
   /** Cost tier: `inline` for spinners, `balanced` for mid-size surfaces, `high` for hero surfaces. */
   quality?: MetalMorphLoaderQuality;
   /** Deterministic sequencing seed; omit for a fresh random loop. */
@@ -45,39 +46,22 @@ export type MetalMorphLoaderProperties = Readonly<{
   onStatusChange?: (status: MetalMorphLoaderStatus) => void;
 }>;
 
-const motionQuery = '(prefers-reduced-motion: reduce)';
-const subscribeMotion = (callback: () => void): (() => void) => {
-  const query = globalThis.matchMedia(motionQuery);
-  query.addEventListener('change', callback);
-  return () => {
-    query.removeEventListener('change', callback);
-  };
-};
-const getMotion = (): boolean => globalThis.matchMedia(motionQuery).matches;
-const serverMotion = (): boolean => true;
-
-const subscribeDocumentVisibility = (callback: () => void): (() => void) => {
-  document.addEventListener('visibilitychange', callback);
-  return () => {
-    document.removeEventListener('visibilitychange', callback);
-  };
-};
-const getDocumentHidden = (): boolean => document.hidden;
-const serverDocumentHidden = (): boolean => false;
-
 const defaultLabel = 'Loading';
 const defaultMaxPixelRatio = 2;
 
 /**
- * Tau's loading indicator: one chrome body that flows between five geometric forms, rendered with the
- * WebGPU node renderer (WebGL 2 fallback) and paused whenever it is offscreen, hidden, held, or the visitor
- * prefers reduced motion, in which case a single still frame stands in.
+ * A liquid-metal surface with a renderer of its own: one chrome body that flows between five geometric forms,
+ * drawn by the WebGPU node renderer (WebGL 2 fallback) and paused whenever it is offscreen, hidden, held, or
+ * the visitor prefers reduced motion, in which case a single still frame stands in.
+ *
+ * This owns a GPU context, so it suits a surface large enough to justify one — the showcase stage, a hero.
+ * An inline spinner uses {@link import('./metal-morph-spinner.js').MetalMorphSpinner} instead, which shares
+ * one renderer across every spinner on the page.
  */
 export function MetalMorphLoader({
   className,
   label = defaultLabel,
   semantic = 'status',
-  fallback,
   quality = 'high',
   seed,
   speed = 1,
@@ -95,16 +79,23 @@ export function MetalMorphLoader({
   const onReadyRef = useRef(onReady);
   const onStatusChangeRef = useRef(onStatusChange);
   const [status, setStatus] = useState<MetalMorphLoaderStatus>('pending');
-  const [isVisible, setIsVisible] = useState(false);
   const { theme } = useTheme();
-  const reducedMotion = useSyncExternalStore(subscribeMotion, getMotion, serverMotion);
-  const isDocumentHidden = useSyncExternalStore(subscribeDocumentVisibility, getDocumentHidden, serverDocumentHidden);
+  const reducedMotion = useReducedMotion();
+  const isDocumentHidden = useDocumentHidden();
+  const [rootNode, setRootNode] = useState<HTMLDivElement>();
+  const isVisible = useIsIntersecting(rootNode);
 
   useEffect(() => {
     onSequenceChangeRef.current = onSequenceChange;
     onReadyRef.current = onReady;
     onStatusChangeRef.current = onStatusChange;
   }, [onReady, onSequenceChange, onStatusChange]);
+
+  // A callback ref as well as the ref object: the observer hooks need the element on the commit that made it.
+  const attachRoot = useCallback<RefCallback<HTMLDivElement>>((node) => {
+    rootRef.current = node;
+    setRootNode(node ?? undefined);
+  }, []);
 
   const publishStatus = useCallback((next: MetalMorphLoaderStatus): void => {
     setStatus(next);
@@ -194,20 +185,6 @@ export function MetalMorphLoader({
   }, [initialShape, maxPixelRatio, publishStatus, quality, seed]);
 
   useEffect(() => {
-    const root = rootRef.current;
-    if (!root) {
-      return;
-    }
-    const observer = new IntersectionObserver(([entry]) => {
-      setIsVisible(entry?.isIntersecting ?? false);
-    });
-    observer.observe(root);
-    return () => {
-      observer.disconnect();
-    };
-  }, []);
-
-  useEffect(() => {
     if (status !== 'ready') {
       return;
     }
@@ -236,14 +213,11 @@ export function MetalMorphLoader({
     controller.renderOnce();
   }, [shouldPlay, status]);
 
-  const isDecorative = semantic === 'presentation';
-
   return (
     <div
-      ref={rootRef}
-      role={isDecorative ? undefined : semantic}
-      aria-hidden={isDecorative ? true : undefined}
-      aria-label={isDecorative ? undefined : label}
+      ref={attachRoot}
+      role={semantic}
+      aria-label={label}
       aria-busy={semantic === 'status' ? true : undefined}
       data-state={status}
       data-playing={shouldPlay ? 'true' : 'false'}
@@ -259,7 +233,7 @@ export function MetalMorphLoader({
       />
       {status === 'ready' ? null : (
         <div className='absolute inset-0 flex items-center justify-center'>
-          {fallback ?? <Loader className='size-6 text-muted-foreground' />}
+          <Loader className='size-6 text-muted-foreground' />
         </div>
       )}
     </div>

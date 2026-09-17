@@ -82,9 +82,18 @@ export type MetalMorphGeometryData = Readonly<{
   /** Unit directions, three floats per vertex; doubles as the mesh `position` attribute. */
   directions: Float32Array;
   index: Uint32Array;
-  /** Packed `normal.xyz, radius` samples, four floats per vertex, keyed by shape. */
+  /**
+   * Interleaved samples, {@link metalMorphSampleStride} floats per vertex, keyed by shape: `normal.xyz, radius`
+   * then the unit direction the sample was taken along and one float of padding. That direction is the vertex's
+   * icosphere direction drawn into the shape's fillets (see {@link concentrateDirection}), so it differs per shape.
+   */
   shapes: Readonly<Record<MetalMorphShapeId, Float32Array>>;
 }>;
+
+/** Floats per vertex in a packed shape buffer: two `vec4` slots, so both attributes read from one GPU buffer. */
+export const metalMorphSampleStride = 8;
+/** Float offset of the sampling direction inside a packed vertex. */
+export const metalMorphDirectionOffset = 4;
 
 const goldenRatio = (1 + Math.sqrt(5)) / 2;
 /** Dimensionless coplanarity guard for unit-scale solids. */
@@ -411,6 +420,160 @@ export const sampleRadial = (solid: PreparedSolid, direction: Vector3Tuple): Rad
   return fillCreases(spike, twins, query);
 };
 
+/**
+ * A planar triangle of the sharp solid: a pyramid flank of a stellated form, whose three edges are a ridge, a
+ * ridge and a crease, or one wedge of a plain face fanned from its centroid, where only the outer edge is real.
+ */
+type FeaturePatch = Readonly<{
+  corners: readonly [Vector3Tuple, Vector3Tuple, Vector3Tuple];
+  /** Whether the edge opposite each corner is a feature of the solid rather than a construction line. */
+  isFeature: readonly [boolean, boolean, boolean];
+  /** Band width as a fraction of the altitude onto each edge, so the band is one width in render units. */
+  band: readonly [number, number, number];
+}>;
+
+/**
+ * Width, in render units, of the band along every feature inside which samples are drawn toward it. Four times
+ * the reach of a fillet: wide enough that several rows land inside every fillet, narrow enough that each patch
+ * keeps an untouched interior.
+ */
+const featureBand = 0.3;
+/** A band never claims more than this share of a patch, so every patch keeps an untouched interior. */
+const maximumBandShare = 0.45;
+
+const featurePatchesCache = new Map<MetalMorphShapeId, ReadonlyArray<readonly FeaturePatch[]>>();
+
+const patchOf = (
+  corners: readonly [Vector3Tuple, Vector3Tuple, Vector3Tuple],
+  isFeature: readonly [boolean, boolean, boolean],
+): FeaturePatch => {
+  const doubleArea = length(cross(subtract(corners[1], corners[0]), subtract(corners[2], corners[0])));
+  const bandOnto = (first: Vector3Tuple, second: Vector3Tuple): number =>
+    Math.min(maximumBandShare, featureBand / (doubleArea / length(subtract(second, first))));
+  return {
+    corners,
+    isFeature,
+    band: [bandOnto(corners[1], corners[2]), bandOnto(corners[2], corners[0]), bandOnto(corners[0], corners[1])],
+  };
+};
+
+/** Feature patches of every core face: the flanks of the pyramid raised on it, or the face fanned into wedges. */
+const featurePatchesOf = (solid: PreparedSolid): ReadonlyArray<readonly FeaturePatch[]> => {
+  const cached = featurePatchesCache.get(solid.id);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const patches = solid.faces.map((face, faceIndex): FeaturePatch[] => {
+    const sides = solid.spikes?.[faceIndex];
+    if (sides !== undefined) {
+      return sides.map((side) =>
+        patchOf([side.vertices[0]!, side.vertices[1]!, side.vertices[2]!], [true, true, true]),
+      );
+    }
+    const centroid = centroidOf(face.vertices);
+    return face.vertices.map((start, index) =>
+      patchOf([centroid, start, face.vertices[(index + 1) % face.vertices.length]!], [true, false, false]),
+    );
+  });
+  featurePatchesCache.set(solid.id, patches);
+  return patches;
+};
+
+/**
+ * Coordinates of `direction` between the unit directions of a patch's corners, summing to one. Taken against
+ * the corners themselves they would follow the radial projection, which crowds a spike's samples at its base
+ * and stretches them fourfold toward its apex, because the flank lies nearly edge-on to its rays. Against the
+ * corner directions they are close to uniform over the patch of sphere, so the samples land evenly across the
+ * plane. A resting flank is flat and would not care; a morphing one blends two such parametrisations, and any
+ * stretch in either shows up as facets.
+ */
+const directionalBarycentrics = (
+  corners: FeaturePatch['corners'],
+  direction: Vector3Tuple,
+): readonly [number, number, number] | undefined => {
+  const [unitA, unitB, unitC] = [normalize(corners[0]), normalize(corners[1]), normalize(corners[2])];
+  // Cramer's rule on `u unitA + v unitB + w unitC = t direction`: each weight is a scalar triple product.
+  const u = dot(direction, cross(unitB, unitC));
+  const v = dot(direction, cross(unitC, unitA));
+  const w = dot(direction, cross(unitA, unitB));
+  const total = u + v + w;
+  if (Math.abs(total) < grazingDenominatorTolerance) {
+    return undefined;
+  }
+  return [u / total, v / total, w / total];
+};
+
+/**
+ * Where a coordinate inside the band lands. It collapses quadratically onto the edge, so the rows nearest a
+ * ridge meet on its crest rather than zig-zag across it, and rejoins the identity with no kink at the band's
+ * far side. Higher orders and narrower bands were measured and resolve the fillets no better.
+ */
+const collapse = (coordinate: number, band: number): number => {
+  if (coordinate >= band) {
+    return coordinate;
+  }
+  const share = coordinate / band;
+  return band * share * share * (2 - share);
+};
+
+/** How strongly a construction line pulls at `coordinate` from a real edge: fully on it, not at all past the band. */
+const bandFade = (coordinate: number, band: number): number => {
+  const remaining = Math.max(0, 1 - coordinate / band);
+  return remaining * remaining;
+};
+
+/**
+ * Draw a sampling direction toward the features of a solid.
+ *
+ * The rounded surface is flat except inside fillet bands far narrower than the shared mesh, and a flat patch
+ * is exact under any triangulation. Sampled uniformly, a fillet catches one or two vertex rows at irregular
+ * offsets from its crest, so the silhouette zig-zags from vertex to vertex. Moving the samples into the
+ * fillets spends the same vertices where the curvature is.
+ *
+ * The pull acts on barycentric coordinates, so a point on an edge slides along that edge and both patches
+ * sharing it agree on where it goes: the map stays continuous. Past the band a coordinate is untouched, which
+ * keeps the interior of every patch linear, so a morph between two shapes shows no facets. A
+ * construction line only pulls inside the band of the real edge it ends on, which is what gathers samples
+ * around a corner without gathering them along the line or at a face centre.
+ */
+export const concentrateDirection = (solid: PreparedSolid, direction: Vector3Tuple): Vector3Tuple => {
+  const core = nearestExit(solid.faces, direction);
+  let best: { patch: FeaturePatch; weights: readonly [number, number, number]; inside: number } | undefined;
+  for (const patch of featurePatchesOf(solid)[core.index] ?? []) {
+    const weights = directionalBarycentrics(patch.corners, direction);
+    if (weights === undefined) {
+      continue;
+    }
+    const inside = Math.min(...weights);
+    if (best === undefined || inside > best.inside) {
+      best = { patch, weights, inside };
+    }
+  }
+  if (best === undefined) {
+    return direction;
+  }
+  const { patch } = best;
+  // On a cell boundary the direction can fall a rounding error outside every patch; clamping absorbs it.
+  const weights = best.weights.map((weight) => Math.max(weight, 0));
+  let nearFeature = 0;
+  for (const [index, weight] of weights.entries()) {
+    if (patch.isFeature[index]!) {
+      nearFeature = Math.max(nearFeature, bandFade(weight, patch.band[index]!));
+    }
+  }
+  const pulled = weights.map((weight, index) => {
+    const strength = patch.isFeature[index]! ? 1 : nearFeature;
+    return weight - strength * (weight - collapse(weight, patch.band[index]!));
+  });
+  const total = pulled[0]! + pulled[1]! + pulled[2]!;
+  const [a, b, c] = patch.corners;
+  return normalize([
+    (pulled[0]! * a[0] + pulled[1]! * b[0] + pulled[2]! * c[0]) / total,
+    (pulled[0]! * a[1] + pulled[1]! * b[1] + pulled[2]! * c[1]) / total,
+    (pulled[0]! * a[2] + pulled[1]! * b[2] + pulled[2]! * c[2]) / total,
+  ]);
+};
+
 const icosahedronFaces: ReadonlyArray<readonly [number, number, number]> = [
   [0, 11, 5],
   [0, 5, 1],
@@ -508,14 +671,15 @@ export const getMetalMorphGeometryData = (detail: number): MetalMorphGeometryDat
   const vertexCount = positions.length / 3;
   const entries = metalMorphShapeIds.map((id) => {
     const solid = prepareSolid(metalMorphShapeDefinitions[id]);
-    const packed = new Float32Array(vertexCount * 4);
+    const packed = new Float32Array(vertexCount * metalMorphSampleStride);
     for (let vertex = 0; vertex < vertexCount; vertex += 1) {
-      const direction: Vector3Tuple = [positions[vertex * 3]!, positions[vertex * 3 + 1]!, positions[vertex * 3 + 2]!];
+      const direction = concentrateDirection(solid, [
+        positions[vertex * 3]!,
+        positions[vertex * 3 + 1]!,
+        positions[vertex * 3 + 2]!,
+      ]);
       const sample = sampleRadial(solid, direction);
-      packed[vertex * 4] = sample.normal[0];
-      packed[vertex * 4 + 1] = sample.normal[1];
-      packed[vertex * 4 + 2] = sample.normal[2];
-      packed[vertex * 4 + 3] = sample.radius;
+      packed.set([...sample.normal, sample.radius, ...direction, 0], vertex * metalMorphSampleStride);
     }
     return [id, packed] as const;
   });

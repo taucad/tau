@@ -39,10 +39,13 @@ import { getMetalMorphPlaneTable, metalMorphShapeIds } from '#components/geometr
 
 // Node types must stay literals for TSL generics; grouping them under one `as const` object satisfies
 // `tau-lint(no-literal-const-assertion)` while preserving tsgo narrowing (a bare `'vec4'` widens).
-const nodeTypes = { packedSample: 'vec4', scalar: 'float' } as const;
+const nodeTypes = { packedSample: 'vec4', direction: 'vec3', scalar: 'float' } as const;
 
 /** Vertex attribute carrying one shape's packed `normal.xyz, radius` sample, indexed like {@link metalMorphShapeIds}. */
 export const metalMorphShapeAttributeName = (index: number): string => `shapeSample${index}`;
+
+/** Vertex attribute carrying the unit direction one shape's sample was taken along; see `concentrateDirection`. */
+export const metalMorphDirectionAttributeName = (index: number): string => `shapeDirection${index}`;
 
 export type MetalMorphMaterialOptions = Readonly<{
   /** Linear base reflectance of the metal. */
@@ -56,17 +59,6 @@ export type MetalMorphMaterialOptions = Readonly<{
    * `0` leaves the thin-film model out of the shader entirely.
    */
   iridescence?: number;
-  /**
-   * Tilt the shading normal by the displacement gradient while the metal is liquid. Costs two extra field
-   * evaluations per vertex, which small spinners cannot show.
-   */
-  perturbNormals?: boolean;
-  /**
-   * Recover the stellated forms' normals per fragment from their plane table. Their ridges and creases are
-   * narrower than the shared mesh, so interpolated vertex normals zig-zag along them at hero sizes; small
-   * spinners cannot show the difference and skip the loops.
-   */
-  exactStarNormals?: boolean;
   /** Back-ease overshoot applied to the travelling front; 0 removes the spring entirely. */
   overshoot?: number;
   /** Half-width of the transformation front, as a fraction of the body's extent along the sweep axis. */
@@ -75,13 +67,19 @@ export type MetalMorphMaterialOptions = Readonly<{
   flowAmplitude?: number;
   /** Spatial frequency of the undulation. */
   flowScale?: number;
-  /** Height of the ripple train trailing the crest, in render units. */
+  /**
+   * Height of the ripple train trailing the crest, in render units. The shading normal tilts by this over the
+   * wavelength, so raising one without the other is what turns churn into noise.
+   */
   rippleAmplitude?: number;
   /** Crest-to-crest spacing of the ripples, as a fraction of the body's extent along the sweep axis. */
   rippleWavelength?: number;
   /** Distance behind the crest over which the ripples fade, as a fraction of the body's extent. */
   rippleDecay?: number;
-  /** Outward swell of the crest, in render units. */
+  /**
+   * Outward swell of the crest, in render units: a bulge under the crest envelope. It displaces along the
+   * surface normal without tilting it, so it is the lever that strengthens the wave without adding glints.
+   */
   swell?: number;
   /** Radial amplitude of the settle wobble, in render units. */
   ringAmplitude?: number;
@@ -112,25 +110,26 @@ const defaultOptions: Required<Omit<MetalMorphMaterialOptions, 'color'>> = {
   iridescence: 0.35,
   overshoot: 0.15,
   frontBand: 0.28,
-  flowAmplitude: 0.03,
-  flowScale: 1.7,
-  rippleAmplitude: 0.016,
-  rippleWavelength: 0.16,
-  rippleDecay: 0.24,
-  swell: 0.055,
+  flowAmplitude: 0.04,
+  flowScale: 2.3,
+  rippleAmplitude: 0.026,
+  rippleWavelength: 0.145,
+  rippleDecay: 0.3,
+  swell: 0.09,
   ringAmplitude: 0.02,
-  perturbNormals: true,
-  exactStarNormals: true,
 };
 
 /** Finite-difference step for the displacement gradient, in render units on the unit sphere. */
 const gradientStep = 0.015;
 /** Iridescence film thickness range in nanometres, mapped from the local heat field. */
 const iridescenceThicknessNanometres = { thin: 140, thick: 480 } as const;
-/** Height, in render units, at which the undulation reads as fully heated for the film thickness. */
-const heatHeight = 0.03;
+/**
+ * Height, in render units, at which the undulation reads as fully heated for the film thickness. It tracks
+ * `flowAmplitude`, so the tempering colours keep their range rather than saturating as the churn grows.
+ */
+const heatHeight = 0.04;
 /** Radians per second the ripple crests roll back through the wake. */
-const rippleRollRate = 1.6;
+const rippleRollRate = 2;
 /** The wake behind the crest stays liquid this many times longer than the metal ahead of it. */
 const wakeWidth = 1.8;
 const crestWidth = 0.8;
@@ -192,8 +191,9 @@ const createDisplacementField = (
         .mul(Math.PI * 2)
         .sub(time.mul(rippleRollRate)),
     );
-    // A slow noise breaks the crests' regularity without adding any grain of its own.
-    const grain = float(0.75).add(mx_noise_float(point.mul(1.4).sub(seed)).mul(0.25));
+    // A slow noise breaks the crests' regularity without adding any grain of its own. It swings wide enough
+    // that neighbouring crests differ markedly in height, which is what reads as churn rather than corrugation.
+    const grain = float(0.55).add(mx_noise_float(point.mul(1.4).sub(seed)).mul(0.45));
     return flow.mul(uniforms.uFlowAmplitude).add(crests.mul(envelope).mul(grain).mul(uniforms.uRippleAmplitude));
   });
 
@@ -304,7 +304,7 @@ const createStarNormalField = (table: PlaneTableUniforms) =>
 /**
  * Liquid-metal body material for the loader. One TSL graph serves the WebGPU and WebGL 2 backends of the
  * node renderer; all animation flows through uniform mutation so the pipeline compiles once. Positions and
- * normals morph per vertex from the packed samples: the fillets of the plain solids are baked into those
+ * normals morph per vertex from the packed samples, each taken along that shape's own feature-seeking direction: the fillets of the plain solids are baked into those
  * normals, only the stellated forms recover their sharper ridges per fragment, and the liquid fields are
  * skipped by a uniform branch while the body rests.
  */
@@ -349,12 +349,23 @@ export const createMetalMorphNodeMaterial = (
   const shapeAttributes: ReadonlyArray<AttributeNode<'vec4'>> = metalMorphShapeIds.map((_id, index) =>
     attribute(metalMorphShapeAttributeName(index), nodeTypes.packedSample),
   );
+  const directionAttributes: ReadonlyArray<AttributeNode<'vec3'>> = metalMorphShapeIds.map((_id, index) =>
+    attribute(metalMorphDirectionAttributeName(index), nodeTypes.direction),
+  );
   // Branch-free selection: every packed sample is weighted by 1 when its index matches and 0 otherwise.
+  const pickWeight = (index: Node<'float'>, attributeIndex: number): Node<'float'> =>
+    float(1).sub(min(abs(index.sub(attributeIndex)), float(1)));
   const pickShape = (index: Node<'float'>): Node<'vec4'> => {
     let picked: Node<'vec4'> = vec4(0, 0, 0, 0);
     for (const [attributeIndex, sample] of shapeAttributes.entries()) {
-      const weight = float(1).sub(min(abs(index.sub(attributeIndex)), float(1)));
-      picked = picked.add(sample.mul(weight));
+      picked = picked.add(sample.mul(pickWeight(index, attributeIndex)));
+    }
+    return picked;
+  };
+  const pickDirection = (index: Node<'float'>): Node<'vec3'> => {
+    let picked: Node<'vec3'> = vec3(0, 0, 0);
+    for (const [attributeIndex, sampled] of directionAttributes.entries()) {
+      picked = picked.add(sampled.mul(pickWeight(index, attributeIndex)));
     }
     return picked;
   };
@@ -380,8 +391,9 @@ export const createMetalMorphNodeMaterial = (
   const isStellated = (index: Node<'float'>): Node<'bool'> =>
     vec4(uDescriptors.element(index.toInt())).w.greaterThan(float(0));
 
-  const vNormal = varyingProperty('vec3', 'tauMorphNormalVarying');
   const vDirection = varyingProperty('vec3', 'tauMorphDirectionVarying');
+  const vFromDirection = varyingProperty('vec3', 'tauMorphFromDirectionVarying');
+  const vToDirection = varyingProperty('vec3', 'tauMorphToDirectionVarying');
   const vFromNormal = varyingProperty('vec3', 'tauMorphFromNormalVarying');
   const vToNormal = varyingProperty('vec3', 'tauMorphToNormalVarying');
   const vPerturbation = varyingProperty('vec3', 'tauMorphPerturbationVarying');
@@ -406,12 +418,16 @@ export const createMetalMorphNodeMaterial = (
     const direction = positionLocal.toVar('tauMorphDirection');
     const source = pickShape(uFromIndex).toVar('tauMorphSource');
     const target = pickShape(uToIndex).toVar('tauMorphTarget');
+    // Each shape sampled this vertex along its own direction, drawn into that shape's fillets, so the body
+    // morphs between positions rather than between radii along one shared direction.
+    const sourceDirection = pickDirection(uFromIndex).toVar('tauMorphSourceDirection');
+    const targetDirection = pickDirection(uToIndex).toVar('tauMorphTargetDirection');
     const front = frontField(direction).toVar('tauMorphFront');
     const weight = front.x;
     const frontness = front.y;
     const alongSweep = front.z;
 
-    const radius = mix(source.w, target.w, weight).toVar('tauMorphRadius');
+    const surface = mix(sourceDirection.mul(source.w), targetDirection.mul(target.w), weight).toVar('tauMorphSurface');
     const faceNormal = normalize(
       mix(source.xyz, target.xyz, saturate(weight)).add(direction.mul(normalBlendNudge)),
     ).toVar('tauMorphVertexNormal');
@@ -422,20 +438,18 @@ export const createMetalMorphNodeMaterial = (
     // The liquid fields only exist while a transition is under way; at rest one uniform branch skips them.
     If(uMolten.greaterThan(float(0)), () => {
       height.assign(displacementField(direction, uSeedOffset, uTime));
-      if (settings.perturbNormals) {
-        // Branch-free helper axis: world up unless the face normal is nearly vertical, then world right.
-        const helperAxis = mix(vec3(0, 1, 0), vec3(1, 0, 0), step(float(0.9), abs(faceNormal.y)));
-        const tangent = normalize(cross(faceNormal, helperAxis));
-        const bitangent = cross(faceNormal, tangent);
-        const probeStep = float(gradientStep);
-        const gradientTangent = displacementField(direction.add(tangent.mul(probeStep)), uSeedOffset, uTime)
-          .sub(height)
-          .div(probeStep);
-        const gradientBitangent = displacementField(direction.add(bitangent.mul(probeStep)), uSeedOffset, uTime)
-          .sub(height)
-          .div(probeStep);
-        perturbation.assign(tangent.mul(gradientTangent).add(bitangent.mul(gradientBitangent)).mul(molten));
-      }
+      // Branch-free helper axis: world up unless the face normal is nearly vertical, then world right.
+      const helperAxis = mix(vec3(0, 1, 0), vec3(1, 0, 0), step(float(0.9), abs(faceNormal.y)));
+      const tangent = normalize(cross(faceNormal, helperAxis));
+      const bitangent = cross(faceNormal, tangent);
+      const probeStep = float(gradientStep);
+      const gradientTangent = displacementField(direction.add(tangent.mul(probeStep)), uSeedOffset, uTime)
+        .sub(height)
+        .div(probeStep);
+      const gradientBitangent = displacementField(direction.add(bitangent.mul(probeStep)), uSeedOffset, uTime)
+        .sub(height)
+        .div(probeStep);
+      perturbation.assign(tangent.mul(gradientTangent).add(bitangent.mul(gradientBitangent)).mul(molten));
     });
 
     const relief = height.add(uSwell).mul(molten).toVar('tauMorphRelief');
@@ -443,15 +457,13 @@ export const createMetalMorphNodeMaterial = (
       .mul(uRingAmplitude)
       .mul(cos(alongSweep.mul(Math.PI * 2)))
       .toVar('tauMorphRing');
-    const displaced = direction.mul(radius.add(ringWave)).add(faceNormal.mul(relief));
+    const displaced = surface.add(normalize(surface).mul(ringWave)).add(faceNormal.mul(relief));
 
-    if (settings.exactStarNormals) {
-      vDirection.assign(direction);
-      vFromNormal.assign(source.xyz);
-      vToNormal.assign(target.xyz);
-    } else {
-      vNormal.assign(faceNormal);
-    }
+    vDirection.assign(direction);
+    vFromDirection.assign(sourceDirection);
+    vToDirection.assign(targetDirection);
+    vFromNormal.assign(source.xyz);
+    vToNormal.assign(target.xyz);
     vPerturbation.assign(perturbation);
     vMolten.assign(molten);
     if (useIridescence) {
@@ -461,27 +473,26 @@ export const createMetalMorphNodeMaterial = (
     return displaced;
   })();
 
-  material.normalNode = settings.exactStarNormals
-    ? Fn(() => {
-        const direction = normalize(vDirection).toVar('tauMorphFragmentDirection');
-        const front = frontField(direction).toVar('tauMorphFragmentFront');
-        const fromNormal = normalize(vFromNormal).toVar('tauMorphFromNormal');
-        const toNormal = normalize(vToNormal).toVar('tauMorphToNormal');
-        // Uniform branches: only a stellated form pays for its plane loops, and a resting one pays once.
-        If(isStellated(uFromIndex), () => {
-          fromNormal.assign(starNormalField(uFromIndex, direction));
-        });
-        If(uToIndex.equal(uFromIndex), () => {
-          toNormal.assign(fromNormal);
-        }).ElseIf(isStellated(uToIndex), () => {
-          toNormal.assign(starNormalField(uToIndex, direction));
-        });
-        const faceNormal = normalize(
-          mix(fromNormal, toNormal, saturate(front.x)).add(direction.mul(normalBlendNudge)),
-        ).toVar('tauMorphFragmentNormal');
-        return transformNormalToView(normalize(faceNormal.sub(vPerturbation)));
-      })()
-    : Fn(() => transformNormalToView(normalize(vNormal.sub(vPerturbation))))();
+  material.normalNode = Fn(() => {
+    const direction = normalize(vDirection).toVar('tauMorphFragmentDirection');
+    const front = frontField(direction).toVar('tauMorphFragmentFront');
+    const fromNormal = normalize(vFromNormal).toVar('tauMorphFromNormal');
+    const toNormal = normalize(vToNormal).toVar('tauMorphToNormal');
+    // Uniform branches: only a stellated form pays for its plane loops, and a resting one pays once.
+    // Each form's normal is a function of the direction that form sampled, not of the shared one.
+    If(isStellated(uFromIndex), () => {
+      fromNormal.assign(starNormalField(uFromIndex, normalize(vFromDirection)));
+    });
+    If(uToIndex.equal(uFromIndex), () => {
+      toNormal.assign(fromNormal);
+    }).ElseIf(isStellated(uToIndex), () => {
+      toNormal.assign(starNormalField(uToIndex, normalize(vToDirection)));
+    });
+    const faceNormal = normalize(
+      mix(fromNormal, toNormal, saturate(front.x)).add(direction.mul(normalBlendNudge)),
+    ).toVar('tauMorphFragmentNormal');
+    return transformNormalToView(normalize(faceNormal.sub(vPerturbation)));
+  })();
   material.roughnessNode = mix(uRoughnessRest, uRoughnessMolten, vMolten);
   if (useIridescence) {
     material.iridescenceNode = vMolten.mul(uIridescence);

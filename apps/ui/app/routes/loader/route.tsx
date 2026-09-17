@@ -18,6 +18,7 @@ import type { MetalMorphLoaderStatus } from '#components/geometry/loader/metal-m
 import { metalMorphShapeIds, metalMorphShapeLabels } from '#components/geometry/loader/metal-morph-shapes.js';
 import type { MetalMorphShapeId } from '#components/geometry/loader/metal-morph-shapes.js';
 import { LazySection } from '#components/ui/lazy-section.js';
+import { ChatActivitySpinner } from '#components/chat/chat-activity-spinner.js';
 import { Loader } from '#components/ui/loader.js';
 import { useFeature } from '#flags/use-feature.js';
 import type { Handle } from '#types/matches.types.js';
@@ -38,19 +39,14 @@ type QualityTier = Readonly<{
 
 const qualityTiers: readonly QualityTier[] = [
   {
-    id: 'inline',
-    label: 'Inline',
-    detail: '2,562 vertices · 64 px environment · interpolated normals · no ripple detail · 30 fps cap',
-  },
-  {
     id: 'balanced',
     label: 'Balanced',
-    detail: '10,242 vertices · 128 px environment · exact ridge normals · ripple detail · no bloom',
+    detail: '10,242 vertices · 128 px environment · exact ridge normals · ripple detail · no bloom · no thin film',
   },
   {
     id: 'high',
     label: 'High',
-    detail: '10,242 vertices · 256 px environment · exact ridge normals · ripple detail · bloom · thin film',
+    detail: '40,962 vertices · 256 px environment · exact ridge normals · ripple detail · bloom · thin film',
   },
 ];
 
@@ -123,7 +119,7 @@ export default function LoaderShowcase(): React.JSX.Element {
   const [statistics, setStatistics] = useState<MetalMorphLoaderStatistics>();
   const [isPaused, setIsPaused] = useState(false);
   const [speed, setSpeed] = useState<PlaybackSpeed>('1');
-  const [isInlineSizesVisible, setIsInlineSizesVisible] = useState(false);
+  const [isSpinnerSizesVisible, setIsSpinnerSizesVisible] = useState(false);
   const [isComparisonVisible, setIsComparisonVisible] = useState(false);
   const [readyComparisonSurfaces, setReadyComparisonSurfaces] = useState(0);
 
@@ -349,19 +345,29 @@ export default function LoaderShowcase(): React.JSX.Element {
           </section>
 
           <section aria-labelledby='sizes-heading' className='space-y-3'>
-            <SectionHeading id='sizes-heading'>Inline sizes</SectionHeading>
+            <SectionHeading id='sizes-heading'>Spinner sizes</SectionHeading>
             <div className='flex items-center gap-3'>
-              <Switch id='inline-sizes' checked={isInlineSizesVisible} onCheckedChange={setIsInlineSizesVisible} />
-              <Label htmlFor='inline-sizes'>Render 40 px and 96 px spinners</Label>
+              <Switch id='spinner-sizes' checked={isSpinnerSizesVisible} onCheckedChange={setIsSpinnerSizesVisible} />
+              <Label htmlFor='spinner-sizes'>Render 40 px and 96 px spinners</Label>
             </div>
-            {isInlineSizesVisible ? (
+            {isSpinnerSizesVisible ? (
               <div className='flex items-end gap-6'>
                 <Suspense fallback={<Loader className='size-4' />}>
-                  <MetalMorphLoaderLazy className='size-10' quality='inline' label='Loading' />
-                  <MetalMorphLoaderLazy className='size-24' quality='inline' label='Loading' />
+                  <MetalMorphLoaderLazy className='size-10' quality='balanced' label='Loading' />
+                  <MetalMorphLoaderLazy className='size-24' quality='balanced' label='Loading' />
                 </Suspense>
               </div>
             ) : null}
+            <div data-slot='chat-row-sample' className='text-xs text-muted-foreground'>
+              <div className='flex h-6 items-center gap-1.5'>
+                <Pause aria-hidden='true' className='size-3 shrink-0' />
+                <span>Settled chat row</span>
+              </div>
+              <div className='flex h-6 items-center gap-1.5'>
+                <ChatActivitySpinner />
+                <span>Working chat row</span>
+              </div>
+            </div>
           </section>
         </aside>
       </div>
@@ -369,13 +375,13 @@ export default function LoaderShowcase(): React.JSX.Element {
       <section aria-labelledby='fidelity-heading' className='space-y-3'>
         <SectionHeading id='fidelity-heading'>Fidelity</SectionHeading>
         <p className='max-w-[80ch] text-sm text-muted-foreground'>
-          The three cost tiers side by side, each running the same seeded walk through all five forms. Every surface
-          waits until the last one has its first frame, so the columns stay in step and the only difference you see is
-          the tier. Each column pairs a hero-size stage with the {comparisonSpinnerLabel} a chat row would use.
+          Both cost tiers side by side, each running the same seeded walk through all five forms. Every surface waits
+          until the last one has its first frame, so the columns stay in step and the only difference you see is the
+          tier. Each column pairs a hero-size stage with the {comparisonSpinnerLabel} a chat row would use.
         </p>
         <div className='flex items-center gap-3'>
           <Switch id='fidelity-compare' checked={isComparisonVisible} onCheckedChange={handleComparisonToggle} />
-          <Label htmlFor='fidelity-compare'>Compare inline, balanced and high</Label>
+          <Label htmlFor='fidelity-compare'>Compare balanced and high</Label>
         </div>
         {isComparisonVisible ? (
           <div className='grid gap-6 sm:grid-cols-3'>

@@ -1,5 +1,6 @@
 /* oxlint-disable no-await-in-loop -- Every loop here drives one client, one `git` child or one database statement after another on purpose. */
 import { createHash } from 'node:crypto';
+import { existsSync, readdirSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -1869,3 +1870,132 @@ describe('a git remote', () => {
 
 /** Kept for the git-remote cases that push with a Tau credential. */
 void basicAuthorization;
+
+/**
+ * W15: attachments across two devices (blueprint §Sync, D26, W12).
+ *
+ * The chat ref carries the bytes once. Device A sends an image and a PDF, the
+ * remote holds one blob per attachment under `attachments/<sha256>.<ext>` — plain
+ * git objects, never LFS pointers, which a closed chat tree could not resolve —
+ * and device B renders both after one fetch. A later turn in the same chat adds
+ * no attachment object at all, which is what "written once" means on the wire.
+ */
+describe('chat attachments across two clients', () => {
+  it('should carry an image and a PDF once and render them on the second device', async () => {
+    const accountOwner = required(owner, 'The account was not seeded.');
+    const fixturesRoot = resolve(import.meta.dirname, '../fixtures');
+    const photoPath = join(fixturesRoot, 'bracket-photo.jpg');
+    const specPath = join(fixturesRoot, 'bracket-spec.pdf');
+    const photoBytes = await readFile(photoPath);
+    const specBytes = await readFile(specPath);
+    const photoName = `${createHash('sha256').update(photoBytes).digest('hex')}.jpg`;
+    const specName = `${createHash('sha256').update(specBytes).digest('hex')}.pdf`;
+    const source = await launchBrowserClient({ oneTimeToken: await mintOneTimeToken(bearer) });
+    const destination = await launchDesktopApp({ token: bearer });
+    const fixture = await startGatewayFixture({ toolCalls: [] });
+    const firstPrompt = 'Read the attached specification and photo.';
+    const secondPrompt = 'Keep going from the same attachments.';
+
+    try {
+      await fixture.routeThrough(source.page);
+      await fixture.routeThrough(destination.page);
+      const sourceSlug = await createProjectInBrowser(source, 'W18 Chat Attachments');
+      const projectId = required(await browserProjectId(source, sourceSlug), 'The attachment project id is absent.');
+      await registerProjectOnRemote(accountOwner, projectId, 'W18 Chat Attachments');
+      await openSyncRegion(source);
+      await chooseTauCloud(source);
+      await selectChatModel(source.page, gatewayFixtureModelName);
+
+      await source.page
+        .locator('input[type="file"][accept*="application/pdf"]')
+        .first()
+        .setInputFiles([photoPath, specPath]);
+      await source.page
+        .getByText(/^PDF · /u)
+        .first()
+        .waitFor({ state: 'visible', timeout: 60_000 });
+      await sendPrompt(source.page, firstPrompt);
+      const chatId = activeChatId(source.page);
+      const chatRef = `refs/tau/chats/${chatId}`;
+      const repository = tauRepository(projectId);
+      await expect
+        .poll(async () => gitOutput(repository, ['rev-parse', chatRef]), {
+          message: 'the chat ref carrying the attachments must reach Tau Cloud',
+          timeout: 180_000,
+        })
+        .toBeDefined();
+      const firstHead = required(await gitOutput(repository, ['rev-parse', chatRef]), 'The chat ref is absent.');
+
+      /* One object per attachment, at its content-addressed name and its exact
+       * size: an LFS pointer would be 127 bytes and the wrong name (D26). */
+      await expect
+        .poll(
+          async () => {
+            const listing = await gitOutput(repository, ['ls-tree', '-r', '-l', chatRef]);
+            return (listing ?? '')
+              .split('\n')
+              .map((row) => row.trim().split(/\s+/u))
+              .map((columns) => ({ type: columns[1], size: columns[3], path: columns[4] }))
+              .filter(({ type, path }) => type === 'blob' && path?.startsWith('attachments/'))
+              .map(({ path, size }) => `${path!} ${size!}`)
+              .sort();
+          },
+          { message: 'the chat tree must carry both attachments as plain blobs', timeout: 180_000 },
+        )
+        .toEqual(
+          [
+            `attachments/${photoName} ${String(photoBytes.byteLength)}`,
+            `attachments/${specName} ${String(specBytes.byteLength)}`,
+          ].sort(),
+        );
+
+      const destinationSlug = await openTauCloudProject(destination.page, {
+        projectsUrl: 'app://tau/projects',
+        name: 'W18 Chat Attachments',
+        direction: 'chat attachments device A→device B',
+      });
+      await openBrowserChat(destination, chatId);
+      await expect
+        .poll(async () => destination.page.getByText(firstPrompt, { exact: true }).count(), { timeout: 180_000 })
+        .toBeGreaterThan(0);
+
+      /* Fetched once, written down beside the log, and rendered from there. */
+      const destinationAttachments = join(destination.homeRoot, destinationSlug, '.tau/chats', chatId, 'attachments');
+      await expect
+        .poll(() => (existsSync(destinationAttachments) ? readdirSync(destinationAttachments).sort() : []), {
+          message: 'device B must write both fetched attachment blobs down beside the log',
+          timeout: 180_000,
+        })
+        .toEqual([photoName, specName].sort());
+      await destination.page
+        .getByRole('link', { name: 'bracket-spec.pdf' })
+        .first()
+        .waitFor({ state: 'visible', timeout: 120_000 });
+      await destination.page
+        .getByRole('button', { name: /^Open image /u })
+        .first()
+        .waitFor({ state: 'visible', timeout: 120_000 });
+
+      // A later turn in the same chat re-references the same blobs: no new bytes.
+      await selectChatModel(destination.page, gatewayFixtureModelName);
+      await sendPrompt(destination.page, secondPrompt);
+      await expect
+        .poll(async () => gitOutput(repository, ['rev-parse', chatRef]), {
+          message: 'the second turn must publish a new chat head',
+          timeout: 180_000,
+        })
+        .not.toBe(firstHead);
+      const added = await gitOutput(repository, ['rev-list', '--objects', `${firstHead}..${chatRef}`]);
+      expect(
+        (added ?? '').split('\n').filter((row) => row.includes('attachments/')),
+        'the second turn transferred attachment bytes again',
+      ).toEqual([]);
+    } catch (error) {
+      await captureAndRethrow(error, 'two-client-chat-attachments', [source, destination]);
+    } finally {
+      await fixture.close();
+      await destination.close();
+      await source.close();
+    }
+  }, 900_000);
+});

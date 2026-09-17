@@ -43,7 +43,7 @@
         "parallel": false,
         "commands": [
           "./scripts/ensure-services.sh",
-          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-in-project.spec.ts src/desktop-chat-replay.spec.ts src/desktop-chat-launcher-2.spec.ts src/desktop-mcp-fixture.spec.ts"
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-in-project.spec.ts src/desktop-chat-replay.spec.ts src/desktop-chat-launcher-2.spec.ts src/desktop-mcp-fixture.spec.ts src/desktop-chat-attachments.spec.ts"
         ],
         "env": {
           "TAU_E2E_API_URL": "http://localhost:4014"
@@ -94,7 +94,7 @@
         "parallel": false,
         "commands": [
           "./scripts/ensure-services.sh",
-          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-live.spec.ts"
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-chat-live.spec.ts src/desktop-chat-live-pdf.spec.ts"
         ],
         "env": {
           "TAU_E2E_API_URL": "http://localhost:4014",

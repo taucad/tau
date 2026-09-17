@@ -10,4 +10,10 @@ describe('Skeleton', () => {
     expect(skeleton).toHaveClass('bg-muted');
     expect(skeleton).not.toHaveClass('bg-primary/10');
   });
+
+  it('stops pulsing under reduced motion', () => {
+    render(<Skeleton aria-label='Loading' />);
+
+    expect(screen.getByLabelText('Loading')).toHaveClass('animate-pulse', 'motion-reduce:animate-none');
+  });
 });

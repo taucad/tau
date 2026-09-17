@@ -7,7 +7,7 @@ import { ChatToolDescription } from '#components/chat/chat-tool-text.js';
 
 export function ChatMessagePartUnknown({ part }: { readonly part: UIMessagePart<never, never> }): React.JSX.Element {
   return (
-    <Collapsible className='group/collapsible flex w-full flex-col justify-center rounded-md border border-destructive/20 bg-destructive/10 text-sm'>
+    <Collapsible className='group/collapsible flex w-full flex-col justify-center overflow-hidden rounded-md border border-destructive/20 bg-destructive/10 text-sm'>
       <CollapsibleTrigger asChild>
         <button
           type='button'

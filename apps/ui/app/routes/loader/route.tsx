@@ -15,6 +15,8 @@ import type {
   MetalMorphSequenceState,
 } from '#components/geometry/loader/metal-morph-controller.js';
 import type { MetalMorphLoaderStatus } from '#components/geometry/loader/metal-morph-loader.js';
+import { getMetalMorphSpinnerService } from '#components/geometry/loader/metal-morph-spinner-service.js';
+import type { MetalMorphSpinnerDiagnostics } from '#components/geometry/loader/metal-morph-spinner-service.js';
 import { metalMorphShapeIds, metalMorphShapeLabels } from '#components/geometry/loader/metal-morph-shapes.js';
 import type { MetalMorphShapeId } from '#components/geometry/loader/metal-morph-shapes.js';
 import { LazySection } from '#components/ui/lazy-section.js';
@@ -25,6 +27,11 @@ import type { Handle } from '#types/matches.types.js';
 const MetalMorphLoaderLazy = lazy(async () => {
   const module = await import('#components/geometry/loader/metal-morph-loader.js');
   return { default: module.MetalMorphLoader };
+});
+
+const MetalMorphSpinnerLazy = lazy(async () => {
+  const module = await import('#components/geometry/loader/metal-morph-spinner.js');
+  return { default: module.MetalMorphSpinner };
 });
 
 type PlaybackSpeed = '0.5' | '1' | '1.5';
@@ -67,6 +74,8 @@ type MetalMorphDebugBridge = Readonly<{
   getShaderSource: () => Promise<{ readonly vertexShader: string; readonly fragmentShader: string }>;
   /** Offscreen readback of the current pose through the active backend. */
   captureFrame: () => Promise<MetalMorphFrameCapture>;
+  /** Subscriber and renderer counts for the inline spinners, which all share one renderer. */
+  getSpinnerDiagnostics: () => MetalMorphSpinnerDiagnostics;
 }>;
 
 type MetalMorphDebugGlobal = typeof globalThis & { __TAU_METAL_MORPH__?: MetalMorphDebugBridge };
@@ -121,6 +130,14 @@ export default function LoaderShowcase(): React.JSX.Element {
   const [status, setStatus] = useState<MetalMorphLoaderStatus>('pending');
   const [sequence, setSequence] = useState<MetalMorphSequenceState>();
   const [statistics, setStatistics] = useState<MetalMorphLoaderStatistics>();
+  const [spinnerDiagnostics, setSpinnerDiagnostics] = useState<MetalMorphSpinnerDiagnostics>({
+    subscriberCount: 0,
+    activeCount: 0,
+    rendererCount: 0,
+    isLooping: false,
+    sourceSize: 0,
+    backend: undefined,
+  });
   const [isPaused, setIsPaused] = useState(false);
   const [speed, setSpeed] = useState<PlaybackSpeed>('1');
   const [isInlineSizesVisible, setIsInlineSizesVisible] = useState(false);
@@ -158,6 +175,7 @@ export default function LoaderShowcase(): React.JSX.Element {
     }
     const statisticsTimer = setInterval(() => {
       setStatistics(controller.getStatistics());
+      setSpinnerDiagnostics(getMetalMorphSpinnerService().getDiagnostics());
     }, statisticsRefresh);
     return () => {
       clearInterval(statisticsTimer);
@@ -172,6 +190,7 @@ export default function LoaderShowcase(): React.JSX.Element {
       getState: () => ({ ...controller.getSequenceState(), ...controller.getStatistics(), status }),
       getShaderSource: async () => controller.getShaderSource(),
       captureFrame: async () => controller.captureFrame(),
+      getSpinnerDiagnostics: () => getMetalMorphSpinnerService().getDiagnostics(),
     };
     (globalThis as MetalMorphDebugGlobal).__TAU_METAL_MORPH__ = bridge;
     return () => {
@@ -340,6 +359,12 @@ export default function LoaderShowcase(): React.JSX.Element {
               <dd className='tabular-nums'>{statistics ? statistics.vertexCount.toLocaleString() : '—'}</dd>
               <dt className='text-muted-foreground'>Bloom</dt>
               <dd>{statistics ? (statistics.isBloomEnabled ? 'On' : 'Off') : '—'}</dd>
+              <dt className='text-muted-foreground'>Inline spinners</dt>
+              <dd className='tabular-nums'>
+                {spinnerDiagnostics.subscriberCount === 0
+                  ? 'None mounted'
+                  : `${spinnerDiagnostics.subscriberCount} sharing ${spinnerDiagnostics.rendererCount} context`}
+              </dd>
               <dt className='text-muted-foreground'>Status</dt>
               <dd>{status}</dd>
             </dl>
@@ -350,6 +375,10 @@ export default function LoaderShowcase(): React.JSX.Element {
 
           <section aria-labelledby='sizes-heading' className='space-y-3'>
             <SectionHeading id='sizes-heading'>Inline sizes</SectionHeading>
+            <p className='text-sm text-muted-foreground'>
+              Both draw from one shared renderer rather than owning one each, so a chat history full of working rows
+              still costs a single GPU context.
+            </p>
             <div className='flex items-center gap-3'>
               <Switch id='inline-sizes' checked={isInlineSizesVisible} onCheckedChange={setIsInlineSizesVisible} />
               <Label htmlFor='inline-sizes'>Render 40 px and 96 px spinners</Label>
@@ -357,8 +386,8 @@ export default function LoaderShowcase(): React.JSX.Element {
             {isInlineSizesVisible ? (
               <div className='flex items-end gap-6'>
                 <Suspense fallback={<Loader className='size-4' />}>
-                  <MetalMorphLoaderLazy className='size-10' quality='inline' label='Loading' />
-                  <MetalMorphLoaderLazy className='size-24' quality='inline' label='Loading' />
+                  <MetalMorphSpinnerLazy className='size-10' fallback={<Loader className='size-4' />} />
+                  <MetalMorphSpinnerLazy className='size-24' fallback={<Loader className='size-6' />} />
                 </Suspense>
               </div>
             ) : null}

@@ -32,6 +32,8 @@ Use `createRenderer` in `graphics/three/renderer.ts`. The `viewport` preset owns
 
 A showcase surface is not an interactive viewer: it may prefer WebGPU when an adapter exists because Three falls back to the WebGL 2 backend on its own, and it must pause while offscreen, hidden, or under reduced motion. It scales its own cost to the device: tessellation, post-processing, thin-film shading and frame rate follow a quality tier, and a frame-time governor steps pixel ratio, bloom and frame rate down under load.
 
+Inline spinners do not each get a renderer. A browser allows a page sixteen live WebGL 2 contexts and evicts the oldest without warning, and every spinner draws the same animation, so one page-level service owns a single inline-tier controller and copies each frame it draws into the plain 2D canvas each spinner holds (`metal-morph-spinner-service.ts`, `MetalMorphSpinner`). A product surface mounts `MetalMorphSpinner`, never a dedicated loader per row; `MetalMorphLoader` stays for a surface large enough to justify its own context, such as the showcase stage. The service holds the same playback gates as a dedicated loader and releases its renderer once the page has gone without spinners.
+
 Do not instantiate a renderer in a consumer unless that file is an established shared factory with an explicit use case.
 
 ### 3. Maintain portable shader paths

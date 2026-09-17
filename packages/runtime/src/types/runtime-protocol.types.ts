@@ -184,6 +184,21 @@ export type RuntimePreviewIdentity = {
 };
 
 /**
+ * Producer identity carried by every telemetry batch.
+ *
+ * `label` alone does not discriminate producers: one session recycles kernel
+ * clients and opens several geometry units, and `RuntimeTracer` restarts
+ * `spanId` at `0` per instance. Consumers key spans on `instance` + `spanId`.
+ * @public
+ */
+export type TelemetryOrigin = {
+  /** Process role, e.g. `worker`, `utility`, `renderer`, `main`, `node`, `cli`. */
+  label: string;
+  /** Per-producer nonce, minted once where the dispatcher is wired. */
+  instance: string;
+};
+
+/**
  * Completed telemetry span emitted by the runtime worker.
  * @public
  */
@@ -678,7 +693,12 @@ export type RuntimeProtocol = {
       readonly wireArgs: RuntimeLogBatchArgsWire;
     };
     readonly telemetry: {
-      readonly args: { readonly entries: readonly TelemetryEntry[] };
+      readonly args: {
+        readonly entries: readonly TelemetryEntry[];
+        readonly origin: TelemetryOrigin;
+        /** Absolute Unix-epoch value of this realm's `performance.now()` zero, taken at flush. Milliseconds. */
+        readonly epoch: number;
+      };
     };
     readonly capabilitiesUpdated: {
       readonly args: { readonly capabilities: CapabilitiesManifest };

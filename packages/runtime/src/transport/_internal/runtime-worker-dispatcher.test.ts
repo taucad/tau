@@ -1468,15 +1468,44 @@ describe('createWorkerDispatcher', () => {
       });
       fixture = await buildFixture(worker);
 
-      const seen: Array<{ entries: unknown[] }> = [];
-      fixture.client.onNotify('telemetry', (args) => seen.push(args as { entries: unknown[] }));
+      const seen: Array<{
+        entries: readonly unknown[];
+        origin?: { label?: string; instance?: string };
+        epoch?: number;
+      }> = [];
+      fixture.client.onNotify('telemetry', (args) => seen.push(args));
 
       expect(setTelemetrySend).toHaveBeenCalledTimes(1);
+      const before = Date.now();
       telemetryFn!([{ name: 't', startTime: 0, duration: 1, workerTimeOrigin: 0 }]);
       await flushMicrotasks();
 
       expect(seen).toHaveLength(1);
       expect(seen[0]!.entries).toHaveLength(1);
+      // Every exported batch names its producer and anchors its clock (I5): without
+      // the nonce two producers both emit spanId "0" and consumers mis-parent them.
+      expect(seen[0]!.origin?.label).toEqual(expect.any(String));
+      expect(seen[0]!.origin?.instance).toEqual(expect.any(String));
+      expect(seen[0]!.epoch).toBeGreaterThan(0);
+      expect(seen[0]!.epoch! + performance.now()).toBeGreaterThanOrEqual(before - 1);
+    });
+
+    it('mints one origin instance per dispatcher, not one per batch', async () => {
+      let telemetryFn: ((entries: unknown[]) => void) | undefined;
+      const setTelemetrySend = vi.fn((fn: (entries: unknown[]) => void): void => {
+        telemetryFn = fn;
+      }) as unknown as KernelWorker['setTelemetrySend'];
+      fixture = await buildFixture(createMockWorker({ setTelemetrySend }));
+
+      const seen: Array<{ origin?: { instance?: string } }> = [];
+      fixture.client.onNotify('telemetry', (args) => seen.push(args));
+
+      telemetryFn!([{ name: 'a', startTime: 0, duration: 1, workerTimeOrigin: 0 }]);
+      telemetryFn!([{ name: 'b', startTime: 1, duration: 1, workerTimeOrigin: 0 }]);
+      await flushMicrotasks();
+
+      expect(seen).toHaveLength(2);
+      expect(seen[0]!.origin?.instance).toBe(seen[1]!.origin?.instance);
     });
   });
 });

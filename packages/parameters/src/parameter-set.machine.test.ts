@@ -165,6 +165,32 @@ it('publishes only the latest overlapping load and keeps the last good snapshot 
   actor.stop();
 });
 
+it('hands a same-mode re-resolution the held snapshot, leaving the host to decide what it re-reads', async () => {
+  const fixture = await parameterSetHarness();
+  fixture.actor.stop();
+  const inputs: Array<{ current?: ParameterSnapshot }> = [];
+  const actor = createActor(
+    parameterSetMachine.provide({
+      actors: {
+        loadParameterSet: fromPromise(async ({ input }: { input: { current?: ParameterSnapshot } }) => {
+          inputs.push(input);
+          return fixture.snapshot;
+        }),
+      },
+    }),
+    { input: { target: fixture.snapshot.target } },
+  ).start();
+  await waitFor(actor, (state) => state.matches({ open: 'ready' }));
+  actor.send({ type: 'resolve' });
+  await waitFor(actor, (state) => state.matches({ open: 'ready' }));
+
+  /* A held-mode `resolve` reaches the loader with `current`, exactly as a watch event does. A host
+   * that treats that as "only the sidecar changed" never re-resolves the producer, so an agent host
+   * that edits sources between reads must load unconditionally. */
+  expect(inputs.map(({ current }) => current !== undefined)).toEqual([false, true]);
+  actor.stop();
+});
+
 it('cancels a queued command once without planning or applying it', async () => {
   const gate = Promise.withResolvers<void>();
   const harness = await parameterSetHarness(false, { gate: gate.promise });

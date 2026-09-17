@@ -92,10 +92,18 @@ export const shaderSites = [
     backends: ['webgl', 'webgpu'],
     risks: ['custom-position', 'transparency', 'lifecycle', 'hot-path'],
   },
+  {
+    id: 'glass-prism-loader',
+    modules: ['#components/geometry/loader/glass-prism-material.node.ts'],
+    authoring: ['tsl', 'render-pipeline'],
+    backends: ['webgl', 'webgpu'],
+    risks: ['custom-position', 'transparency', 'lifecycle', 'hot-path'],
+  },
 ] as const;
 
 const graphicsBackendEndToEnd = 'apps/ui-e2e/src/graphics-backend.spec.ts';
 const metalMorphLoaderEndToEnd = 'apps/ui-e2e/src/metal-morph-loader.spec.ts';
+const glassPrismLoaderEndToEnd = 'apps/ui-e2e/src/glass-prism-loader.spec.ts';
 const metalMorphLoaderRoot = 'apps/ui/app/components/geometry/loader';
 const generatedShaderEndToEnd = 'apps/ui-e2e/src/shader-fixture.spec.ts';
 const evidence = (unit: string, semantic: string, generatedSource = `${unit}::${semantic}`) => ({
@@ -183,5 +191,28 @@ export const shaderEvidence = {
       `${metalMorphLoaderEndToEnd}::renders one body of 10,242 vertices with the bloom chain enabled`,
     ],
     'gpu-whole-frame': [`${metalMorphLoaderEndToEnd}::sustains the loop under a bounded frame interval`],
+  },
+  'glass-prism-loader': {
+    reference: [
+      `${metalMorphLoaderRoot}/glass-prism-light-field.test.ts::should spread a spectrum through a prism with violet deviated furthest`,
+      `${metalMorphLoaderRoot}/glass-prism-light-field.test.ts::should turn a beam by a right angle through total internal reflection`,
+      `${metalMorphLoaderRoot}/glass-prism-shapes.test.ts::should cut a three-cornered section from the resting prism`,
+    ],
+    'generated-source': [
+      `${metalMorphLoaderRoot}/glass-prism-material.node.test.ts::matches stable stripped glass node material snapshot`,
+      `${glassPrismLoaderEndToEnd}::compiles the glass body through Three`,
+    ],
+    'real-compile': [`${glassPrismLoaderEndToEnd}::compiles the glass body through Three`],
+    pixels: [`${glassPrismLoaderEndToEnd}::renders a glass body and a spectrum through`],
+    'depth-clipping': [
+      `${glassPrismLoaderEndToEnd}::keeps the transparent canvas clear outside the light sheet through`,
+    ],
+    'backend-differential': [`${glassPrismLoaderEndToEnd}::renders the same resting glass on both backends`],
+    lifecycle: [
+      `${metalMorphLoaderRoot}/glass-prism-loader.test.tsx::should forward theme and speed to the controller and dispose it on unmount`,
+      `${metalMorphLoaderRoot}/glass-prism-material.node.test.ts::should animate through uniform mutation without rebuilding the graph`,
+    ],
+    'structural-perf': [`${glassPrismLoaderEndToEnd}::renders one body of 10,242 vertices with the light sheet traced`],
+    'gpu-whole-frame': [`${glassPrismLoaderEndToEnd}::sustains the loop under a bounded frame interval`],
   },
 } as const;

@@ -62,6 +62,9 @@ import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 import { logFlushDebounce } from '#framework/runtime-framework.constants.js';
 import { createErrorTrap } from '#framework/worker-error-trap.js';
+import { createTelemetryOrigin, telemetryEpoch } from '#framework/worker-telemetry.js';
+import type { TelemetryBatch, TelemetryExporter } from '#framework/telemetry-file-sink.js';
+import { openTelemetryFileSink, telemetryDirectory } from '#framework/telemetry-file-sink.js';
 import { packageVersion } from '#utils/package-info.js';
 import { protocolVersion } from '#types/protocol-header.types.js';
 import type {
@@ -398,6 +401,9 @@ const inlineBinaryEncoder: BinaryEncoder = (_key, source) => {
  *   server explicitly. The dispatcher owns autonomous-event fan-out via
  *   the same handle for the lifetime of the worker.
  */
+/** Telemetry batches held while the trace sink opens; bootstrap spans matter, unbounded buffers do not. */
+const maxBufferedTelemetryBatches = 64;
+
 export function createWorkerDispatcher(
   worker: KernelWorker,
   port: Port<unknown>,
@@ -445,8 +451,47 @@ export function createWorkerDispatcher(
     logFlushTimer ??= setTimeout(flushLogs, logFlushDebounce);
   };
 
+  /* Producer identity is minted once here, where the dispatcher is wired, and
+   * rides every batch: span ids restart at `0` per tracer, so a recycled client
+   * or a second open geometry unit would otherwise re-parent its spans onto the
+   * first producer's tree in any file or pane that merges them. */
+  const telemetryOrigin = createTelemetryOrigin();
+  let telemetryFileSink: TelemetryExporter | undefined;
+  const telemetryTraceDirectory = telemetryDirectory();
+  let telemetrySinkPending = telemetryTraceDirectory !== undefined;
+  /* Spans emitted before the sink's `node:fs` import resolves are held, bounded:
+   * bootstrap spans are the ones a startup timeline most needs. */
+  const bufferedTelemetry: TelemetryBatch[] = [];
+  if (telemetryTraceDirectory !== undefined) {
+    const openedSink = openTelemetryFileSink({
+      directory: telemetryTraceDirectory,
+      fileName: `${telemetryOrigin.label}-${telemetryOrigin.instance}.jsonl`,
+    });
+    // async-iife: bootstrap — the dispatcher factory is synchronous and nothing downstream waits on the sink.
+    // oxlint-disable-next-line promise/prefer-await-to-then -- the sink attaches when its node:fs import resolves.
+    void openedSink.then(
+      (sink) => {
+        telemetrySinkPending = false;
+        telemetryFileSink = sink;
+        for (const batch of bufferedTelemetry.splice(0)) {
+          sink?.write(batch);
+        }
+      },
+      () => {
+        telemetrySinkPending = false;
+        bufferedTelemetry.length = 0;
+      },
+    );
+  }
+
   worker.setTelemetrySend((entries: TelemetryEntry[]) => {
-    notify('telemetry', { entries });
+    const batch: TelemetryBatch = { entries, origin: telemetryOrigin, epoch: telemetryEpoch() };
+    notify('telemetry', batch);
+    if (telemetryFileSink) {
+      telemetryFileSink.write(batch);
+    } else if (telemetrySinkPending && bufferedTelemetry.length < maxBufferedTelemetryBatches) {
+      bufferedTelemetry.push(batch);
+    }
   });
 
   let callbacksWired = false;
@@ -752,6 +797,9 @@ export function createWorkerDispatcher(
           }
           flushLogs();
           await worker.cleanup();
+          telemetryFileSink?.close();
+          telemetryFileSink = undefined;
+          telemetrySinkPending = false;
           computeStoreClient?.dispose();
           computeStoreClient = undefined;
           return null as unknown as CallResult;

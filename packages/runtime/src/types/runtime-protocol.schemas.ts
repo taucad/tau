@@ -760,9 +760,18 @@ export const runtimeLogBatchArgsSchema = z
   })
   .catchall(z.unknown());
 
+const telemetryOriginSchema = z
+  .object({
+    label: z.string(),
+    instance: z.string(),
+  })
+  .catchall(z.unknown());
+
 export const runtimeTelemetryArgsSchema = z
   .object({
     entries: z.array(telemetryEntrySchema),
+    origin: telemetryOriginSchema,
+    epoch: z.number(),
   })
   .catchall(z.unknown());
 

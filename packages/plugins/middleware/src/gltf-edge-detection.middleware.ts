@@ -98,8 +98,7 @@ function addEdgePrimitivesToDocument(document: Document, thresholdDegrees: numbe
         .setAttribute(
           'POSITION',
           document.createAccessor('edge-positions').setType('VEC3').setArray(edgeResult.positions),
-        )
-        .setIndices(document.createAccessor('edge-indices').setType('SCALAR').setArray(edgeResult.indices));
+        );
       edgePrimitive.setExtras({ ...primitive.getExtras() });
 
       primitivesToAdd.push(edgePrimitive);

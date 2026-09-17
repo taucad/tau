@@ -158,7 +158,7 @@ describe('Replicad — GeoSpec STEP export', () => {
   it('should trace the complete model-to-STEP phase set', async () => {
     const client = createTestRuntimeClient({ runtime, files: { 'main.ts': datumModelSource } });
     const labels: string[] = [];
-    const unsubscribe = client.on('telemetry', (entries) => labels.push(...entries.map(({ name }) => name)));
+    const unsubscribe = client.on('telemetry', ({ entries }) => labels.push(...entries.map(({ name }) => name)));
     try {
       const result = await client.export('step', { source: { path: 'main.ts' } });
       assertSuccess(result, 'GeoSpec STEP export');

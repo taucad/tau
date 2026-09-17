@@ -77,7 +77,7 @@ const invoke = async (input: {
 }): Promise<BenchmarkRow> => {
   const { client, fixture, index, state } = input;
   const telemetry: TelemetryEntry[] = [];
-  const off = client.on('telemetry', (batch) => telemetry.push(...batch));
+  const off = client.on('telemetry', (batch) => telemetry.push(...batch.entries));
   const entrySource = fixture.files[fixture.entry];
   if (typeof entrySource !== 'string') {
     throw new TypeError(`Missing browser fixture entry '${fixture.entry}'.`);

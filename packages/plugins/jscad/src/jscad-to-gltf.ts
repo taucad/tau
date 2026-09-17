@@ -268,15 +268,6 @@ function extractTopologyEdgePositions(
   return detectEdges(new Float32Array(meshData.vertices), undefined, thresholdDegrees).positions;
 }
 
-function createSequentialIndices(vertexCount: number): Uint32Array<ArrayBuffer> {
-  const indices = new Uint32Array(vertexCount);
-  for (let index = 0; index < indices.length; index++) {
-    indices[index] = index;
-  }
-
-  return indices;
-}
-
 /**
  * Build a GlbNode from a single normalized JSCAD part.
  *
@@ -330,9 +321,10 @@ function buildNodeFromJscadPart(
   if (edgeVertices.length > 0) {
     const linePositions = transformVertexArray(edgeVertices, transformOptions);
     primitives.push({
+      /* No index buffer: the edge overlay is already a de-indexed segment soup, and glTF draws
+       * arrays when `indices` is absent. */
       mode: Primitive.Mode['LINES']!,
       positions: linePositions,
-      indices: createSequentialIndices(linePositions.length / 3),
       material: {
         ...cadEdgeOverlayMaterialDefaults,
         baseColorFactor: [...cadEdgeOverlayMaterialDefaults.baseColorFactor],

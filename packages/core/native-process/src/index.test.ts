@@ -8,6 +8,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -404,6 +405,25 @@ ${keepAlive}`;
     }
   });
 
+  it('verifies one signed runtime payload once per process, not once per session', async () => {
+    const value = fixture(respondingWorker(`({protocolVersion:1,requestId:request.requestId,result:{}})`));
+    await request(value.session);
+    await value.session.cleanup();
+    /* D24: the payload is verified where it becomes trusted — once, for the whole process. A second
+     * session over the same signed root starts without re-hashing it, which is observable here as a
+     * post-verification edit that no longer fails the second session. */
+    writeFileSync(value.options.resources[0]!.path, 'tampered');
+    const second = new NativeProcessSession<Issue>(value.options);
+    await expect(request(second)).resolves.toBeDefined();
+    await second.cleanup();
+
+    const fresh = fixture(respondingWorker(`({protocolVersion:1,requestId:request.requestId,result:{}})`));
+    writeFileSync(fresh.options.resources[0]!.path, 'tampered');
+    const unverified = new NativeProcessSession<Issue>(fresh.options);
+    await expect(request(unverified)).rejects.toThrow(/support resource/);
+    await unverified.cleanup();
+  });
+
   it('should refuse to spawn the worker when the sandbox cannot wrap it', async () => {
     for (const failure of [new Error('profile rejected'), 'launcher exited']) {
       const value = fixture(
@@ -719,21 +739,29 @@ ${keepAlive}`);
   });
 });
 
+/** Wire a mocked filesystem's batched listing from a directory-to-names description. */
+const mockListing = (
+  filesystem: ReturnType<typeof createMockFileSystem>,
+  names: (directory: string) => string[],
+  stat: (path: string) => { type: 'dir' | 'file'; size: number; mtimeMs: number },
+): void => {
+  filesystem.mocks.readdirStat.mockImplementation(async (directory: string) =>
+    names(directory).map((name) => {
+      const path = directory === '' ? name : `${directory}/${name}`;
+      const entry = stat(path);
+      return entry.type === 'dir' ? { ...entry, path, name } : { ...entry, path, name, contentKind: 'binary' };
+    }),
+  );
+};
+
 describe('createWorkspaceMirror', () => {
   it('excludes only exact rooted paths before stat or read, preserving nested assets and context', async () => {
-    const filesystem = createMockFileSystem({
-      readdirResult: (directory) =>
-        directory === '' ? ['thumbnail.webp', 'nested', 'tau.json', 'package.json'] : ['thumbnail.webp'],
-      readFileResult: 'x',
-    });
-    filesystem.mocks.lstat.mockImplementation(async (path: string) => {
-      if (path === 'thumbnail.webp') {
-        throw new Error('Generated thumbnail changed');
-      }
-      return path === 'nested'
-        ? { type: 'dir', size: 0, mtimeMs: 0 }
-        : { type: 'file', size: 1, mtimeMs: 0, contentKind: 'text' };
-    });
+    const filesystem = createMockFileSystem({ readFileResult: 'x' });
+    mockListing(
+      filesystem,
+      (directory) => (directory === '' ? ['thumbnail.webp', 'nested', 'tau.json', 'package.json'] : ['thumbnail.webp']),
+      (path) => (path === 'nested' ? { type: 'dir', size: 0, mtimeMs: 0 } : { type: 'file', size: 1, mtimeMs: 0 }),
+    );
     const options = { temporaryPrefix: 'tau-mirror-test-', displayName: 'Test', excludedPaths: ['thumbnail.webp'] };
     const mirror = await createWorkspaceMirror(options);
     try {
@@ -748,9 +776,13 @@ describe('createWorkspaceMirror', () => {
     }
   });
 
-  it.each(['lstat', 'readFile'] as const)('propagates unrelated %s failures', async (operation) => {
-    const filesystem = createMockFileSystem({ readdirResult: ['main.cs'], readFileResult: 'x' });
-    filesystem.mocks.lstat.mockResolvedValue({ type: 'file', size: 1, mtimeMs: 0, contentKind: 'text' });
+  it.each(['readdirStat', 'readFile'] as const)('propagates unrelated %s failures', async (operation) => {
+    const filesystem = createMockFileSystem({ readFileResult: 'x' });
+    mockListing(
+      filesystem,
+      () => ['main.cs'],
+      () => ({ type: 'file', size: 1, mtimeMs: 0 }),
+    );
     const error = new Error('Workspace unavailable');
     filesystem.mocks[operation].mockRejectedValue(error);
     const mirror = await createWorkspaceMirror({ temporaryPrefix: 'tau-mirror-test-', displayName: 'Test' });
@@ -770,19 +802,20 @@ describe('createWorkspaceMirror', () => {
       ['nested/helper.cs', new TextEncoder().encode('helper')],
       ['nested/data.dll', new TextEncoder().encode('excluded')],
     ]);
-    const filesystem = createMockFileSystem({
-      readdirResult: (directory) =>
+    const mtimes = new Map([...files.keys()].map((path) => [path, 1000]));
+    const filesystem = createMockFileSystem({ readFileResult: (path) => files.get(path)! });
+    mockListing(
+      filesystem,
+      (directory) =>
         directory === ''
           ? ['node_modules', 'nested', 'main.cs']
           : directory === 'nested'
             ? ['helper.cs', 'data.dll']
             : [],
-      readFileResult: (path) => files.get(path)!,
-    });
-    filesystem.mocks.lstat.mockImplementation(async (path: string) =>
-      path === 'nested' || path === 'node_modules'
-        ? { type: 'dir', size: 0, mtimeMs: 0 }
-        : { type: 'file', size: files.get(path)!.byteLength, mtimeMs: 0, contentKind: 'text' },
+      (path) =>
+        path === 'nested' || path === 'node_modules'
+          ? { type: 'dir', size: 0, mtimeMs: 0 }
+          : { type: 'file', size: files.get(path)!.byteLength, mtimeMs: mtimes.get(path)! },
     );
     const mirror = await createWorkspaceMirror({
       temporaryPrefix: 'tau-mirror-test-',
@@ -794,11 +827,35 @@ describe('createWorkspaceMirror', () => {
     expect(process.listenerCount('SIGTERM')).toBe(terminateListeners + 1);
     roots.push(mirror.rootPath);
     await expect(mirror.sync(filesystem)).resolves.toEqual(['main.cs', 'nested/helper.cs']);
+    // D6: one listing call per directory, and every mirrored file read exactly once.
+    expect(filesystem.mocks.readdirStat.mock.calls.map((call) => String(call[0]))).toEqual(['', 'nested']);
+    expect(filesystem.mocks.lstat).not.toHaveBeenCalled();
+    expect(filesystem.mocks.readFile).toHaveBeenCalledTimes(2);
+
+    filesystem.mocks.readFile.mockClear();
     await expect(mirror.sync(filesystem)).resolves.toEqual(['main.cs', 'nested/helper.cs']);
+    // An unchanged workspace reads no file bytes at all.
+    expect(filesystem.mocks.readFile).not.toHaveBeenCalled();
+
+    /* Racily clean: main.cs is stamped in the millisecond the last sync ran, so its stat cannot
+     * prove it unchanged — it is read again even though size and mtime repeat. helper.cs is older
+     * than that sync and stays trusted. */
+    files.set('main.cs', new TextEncoder().encode('ONE'));
+    mtimes.set('main.cs', Date.now());
+    await expect(mirror.sync(filesystem)).resolves.toEqual(['main.cs', 'nested/helper.cs']);
+    expect(filesystem.mocks.readFile.mock.calls.map((call) => String(call[0]))).toEqual(['main.cs']);
+    expect(readFileSync(join(mirror.workspacePath, 'main.cs'), 'utf8')).toBe('ONE');
+
     files.set('main.cs', new TextEncoder().encode('two'));
+    mtimes.set('main.cs', 2000);
     files.delete('nested/helper.cs');
-    filesystem.mocks.readdir.mockImplementation(async (directory: string) => (directory === '' ? ['main.cs'] : []));
+    mockListing(
+      filesystem,
+      (directory) => (directory === '' ? ['main.cs'] : []),
+      (path) => ({ type: 'file', size: files.get(path)!.byteLength, mtimeMs: mtimes.get(path)! }),
+    );
     await expect(mirror.sync(filesystem)).resolves.toEqual(['main.cs']);
+    expect(readFileSync(join(mirror.workspacePath, 'main.cs'), 'utf8')).toBe('two');
     await mirror.cleanup();
     expect(existsSync(mirror.rootPath)).toBe(false);
     expect(process.listenerCount('exit')).toBe(exitListeners);
@@ -807,31 +864,42 @@ describe('createWorkspaceMirror', () => {
   });
 
   it('rejects case collisions, concurrent changes, depth, and size limits', async () => {
-    const collision = createMockFileSystem({ readdirResult: ['A.cs', 'a.cs'], readFileResult: 'x' });
-    collision.mocks.lstat.mockResolvedValue({ type: 'file', size: 1, mtimeMs: 0, contentKind: 'text' });
+    const collision = createMockFileSystem({ readFileResult: 'x' });
+    mockListing(
+      collision,
+      () => ['A.cs', 'a.cs'],
+      () => ({ type: 'file', size: 1, mtimeMs: 0 }),
+    );
     const collisionMirror = await createWorkspaceMirror({ temporaryPrefix: 'tau-mirror-test-', displayName: 'Test' });
     roots.push(collisionMirror.rootPath);
     await expect(collisionMirror.sync(collision)).rejects.toThrow(/case-colliding/);
 
-    const deep = createMockFileSystem({ readdirResult: (directory) => [directory ? 'next' : 'root'] });
-    deep.mocks.lstat.mockResolvedValue({ type: 'dir', size: 0, mtimeMs: 0 });
+    const deep = createMockFileSystem();
+    mockListing(
+      deep,
+      (directory) => [directory ? 'next' : 'root'],
+      () => ({ type: 'dir', size: 0, mtimeMs: 0 }),
+    );
     const deepMirror = await createWorkspaceMirror({ temporaryPrefix: 'tau-mirror-test-', displayName: 'Test' });
     roots.push(deepMirror.rootPath);
     await expect(deepMirror.sync(deep)).rejects.toThrow(/directory levels/);
 
-    const large = createMockFileSystem({ readdirResult: ['large.cs'] });
-    large.mocks.lstat.mockResolvedValue({
-      type: 'file',
-      size: 32 * 1024 * 1024 + 1,
-      mtimeMs: 0,
-      contentKind: 'binary',
-    });
+    const large = createMockFileSystem();
+    mockListing(
+      large,
+      () => ['large.cs'],
+      () => ({ type: 'file', size: 32 * 1024 * 1024 + 1, mtimeMs: 0 }),
+    );
     const largeMirror = await createWorkspaceMirror({ temporaryPrefix: 'tau-mirror-test-', displayName: 'Test' });
     roots.push(largeMirror.rootPath);
     await expect(largeMirror.sync(large)).rejects.toThrow(/size limits/);
 
-    const changed = createMockFileSystem({ readdirResult: ['main.cs'], readFileResult: 'xx' });
-    changed.mocks.lstat.mockResolvedValue({ type: 'file', size: 1, mtimeMs: 0, contentKind: 'text' });
+    const changed = createMockFileSystem({ readFileResult: 'xx' });
+    mockListing(
+      changed,
+      () => ['main.cs'],
+      () => ({ type: 'file', size: 1, mtimeMs: 0 }),
+    );
     const mirror = await createWorkspaceMirror({ temporaryPrefix: 'tau-mirror-test-', displayName: 'Test' });
     roots.push(mirror.rootPath);
     await expect(mirror.sync(changed)).rejects.toThrow(/changed while mirroring/);

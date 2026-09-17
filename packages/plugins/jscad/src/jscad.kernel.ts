@@ -398,17 +398,13 @@ export const jscadKernel = defineKernel({
     const artifacts: GeometryResponse[] = [];
     const issues: KernelIssue[] = [];
     if (nativeHandle.some((part) => isRenderableJscadPart(part, context.modeling))) {
-      try {
-        // The GLB packer owns the single normalization, so it also owns the
-        // topology verdict derived from it.
-        const gltf = jscadToGltf(nativeHandle, { includeEdges: content?.includeEdges === true }, context.modeling);
-        artifacts.push({ format: 'gltf', content: gltf.content });
-        issues.push(...gltf.issues);
-      } catch (error) {
-        runtime.logger.warn('Failed to convert JSCAD assembly to GLTF', {
-          data: error,
-        });
-      }
+      /* The GLB packer owns the single normalization, so it also owns the topology verdict derived
+       * from it. A throw here is not caught: catching saved nothing — the finalizer refuses a phase
+       * with no artifact anyway — and it replaced the conversion's own message with
+       * `NO_RENDER_GEOMETRY`, leaving the cause in a log line no product surface reads. */
+      const gltf = jscadToGltf(nativeHandle, { includeEdges: content?.includeEdges === true }, context.modeling);
+      artifacts.push({ format: 'gltf', content: gltf.content });
+      issues.push(...gltf.issues);
     } else {
       artifacts.push(createEmptyGltfGeometry());
     }

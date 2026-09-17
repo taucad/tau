@@ -35,6 +35,8 @@ export type CadPreviewContextValue = {
   readonly defaultParameters: Record<string, unknown>;
   readonly jsonSchema: JSONSchema7 | undefined;
   readonly parameterManifest: ParameterManifest | undefined;
+  /** Values this preview last sent to the kernel; a change is a viewer interaction. */
+  readonly parameters: Record<string, unknown>;
   readonly setParameters: (parameters: Record<string, unknown>) => void;
 };
 
@@ -306,6 +308,7 @@ function CadPreviewPipeline({
 
   // Initialization error from the preview machine
   const initError = useSelector(previewRef, (s) => s.context.initError);
+  const previewParameters = useSelector(previewRef, (s) => s.context.parameters);
 
   const status = useMemo(
     () =>
@@ -358,9 +361,21 @@ function CadPreviewPipeline({
       defaultParameters,
       jsonSchema,
       parameterManifest,
+      parameters: previewParameters,
       setParameters,
     }),
-    [geometry, status, error, cadRef, graphicsRef, defaultParameters, jsonSchema, parameterManifest, setParameters],
+    [
+      geometry,
+      status,
+      error,
+      cadRef,
+      graphicsRef,
+      defaultParameters,
+      jsonSchema,
+      parameterManifest,
+      previewParameters,
+      setParameters,
+    ],
   );
 
   return <CadPreviewContext.Provider value={value}>{children}</CadPreviewContext.Provider>;

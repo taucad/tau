@@ -5,12 +5,7 @@ import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { Remote } from 'comlink';
 import { useQueryClient } from '@tanstack/react-query';
-import {
-  getActiveGroupValues,
-  parseProjectManifestBytes,
-  projectToManifest,
-  serializeProjectManifest,
-} from '@taucad/types';
+import { parseProjectManifestBytes, projectToManifest, serializeProjectManifest } from '@taucad/types';
 import type { ProjectManifest } from '@taucad/types';
 import type { ParameterManifest } from '@taucad/parameters';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
@@ -385,83 +380,6 @@ export function ProjectProvider({
     (state) => state.context.mainEntryPath,
   );
   const logRef = useSelector(actorRef, (state) => state.context.logRef);
-  const appliedParameterValues = useRef(new Map<string, string>());
-  /* Keyed by entry path but bound to one actor: a retired and re-created set actor at the same path
-   * (move rollback, delete and recreate, retried close) gets a fresh subscription. */
-  const parameterObservers = useRef(new Map<string, Readonly<{ actor: unknown; unsubscribe: () => void }>>());
-
-  /* The kernel learns a committed value from the set actor's own notification, which runs in the
-   * same synchronous turn as the checked write — ahead of React's render of this provider. */
-  const dispatchParameters = useCallback(
-    (entryPath: string): void => {
-      const cadRef = actorRef.getSnapshot().context.geometryUnits.get(entryPath);
-      const current = parameterService.snapshot(entryPath);
-      if (cadRef === undefined || current === undefined) {
-        return;
-      }
-      const parameters = getActiveGroupValues(current.entry);
-      const fingerprint = JSON.stringify(parameters);
-      const appliedFingerprint =
-        appliedParameterValues.current.get(entryPath) ?? JSON.stringify(cadRef.getSnapshot().context.parameters);
-      if (appliedFingerprint !== fingerprint) {
-        cadRef.send({ type: 'setParameters', parameters });
-      }
-      appliedParameterValues.current.set(entryPath, fingerprint);
-    },
-    [actorRef, parameterService],
-  );
-
-  const observeParameters = useCallback(
-    (entryPath: string): void => {
-      const actor = parameterService.actor(entryPath);
-      const existing = parameterObservers.current.get(entryPath);
-      if (actor === undefined || existing?.actor === actor) {
-        return;
-      }
-      existing?.unsubscribe();
-      let last: unknown;
-      const subscription = actor.subscribe((snapshot) => {
-        const { current } = snapshot.context;
-        if (current !== undefined && current !== last) {
-          last = current;
-          dispatchParameters(entryPath);
-        }
-      });
-      parameterObservers.current.set(entryPath, {
-        actor,
-        unsubscribe: () => {
-          subscription.unsubscribe();
-        },
-      });
-      dispatchParameters(entryPath);
-    },
-    [dispatchParameters, parameterService],
-  );
-
-  useEffect(() => {
-    const observers = parameterObservers.current;
-    const observeAll = (): void => {
-      for (const entryPath of geometryUnits.keys()) {
-        observeParameters(entryPath);
-      }
-    };
-    observeAll();
-    const unsubscribeActors = parameterService.subscribeActors(observeAll);
-    for (const [entryPath, { unsubscribe }] of observers) {
-      if (!geometryUnits.has(entryPath)) {
-        unsubscribe();
-        observers.delete(entryPath);
-        appliedParameterValues.current.delete(entryPath);
-      }
-    }
-    return () => {
-      unsubscribeActors();
-      for (const { unsubscribe } of observers.values()) {
-        unsubscribe();
-      }
-      observers.clear();
-    };
-  }, [geometryUnits, observeParameters, parameterService]);
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
   const resolvedRequestedChatId = useSelector(editorRef, (state) => state.context.requestedChatId);
   const focusedChatResolved = useSelector(editorRef, (state) => state.matches({ ready: { operation: 'idle' } }));
@@ -581,10 +499,9 @@ export function ProjectProvider({
 
   const resolveParameterEntry = useCallback(
     (filePath: string, manifest: ParameterManifest) => {
-      // `resolve` creates the set actor synchronously, so the geometry observer can attach before
-      // the load settles and will dispatch the first loaded snapshot.
+      /* `resolve` creates the set actor synchronously. Nothing forwards its values to the kernel:
+       * the runtime watches the sidecar itself, so the checked write is the only render trigger. */
       const operation = parameterService.resolve(filePath, manifest);
-      observeParameters(filePath);
       // A failed load is shown in the panel with its recovery action, so it is not also a toast.
       const settle = async (): Promise<void> => {
         try {
@@ -596,7 +513,7 @@ export function ProjectProvider({
       // async-iife: bootstrap -- resolution is observed through the set actor, not this promise.
       void settle();
     },
-    [observeParameters, parameterService],
+    [parameterService],
   );
 
   const setGeometryUnitParameters = useCallback(

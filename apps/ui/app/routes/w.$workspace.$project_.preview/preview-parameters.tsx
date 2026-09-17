@@ -9,8 +9,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import { useCadPreview } from '#hooks/use-cad-preview.js';
 
 export function PreviewParameters(): React.JSX.Element {
-  const { cadRef, graphicsRef, defaultParameters, jsonSchema, parameterManifest, setParameters } = useCadPreview();
-  const parameters = useSelector(cadRef, (snapshot) => snapshot.context.parameters);
+  const { graphicsRef, defaultParameters, jsonSchema, parameterManifest, parameters, setParameters } = useCadPreview();
   const displaySymbol = useSelector(graphicsRef, (state) => state.context.displayUnits.length.symbol);
   const units = { length: { displaySymbol } } as const;
 

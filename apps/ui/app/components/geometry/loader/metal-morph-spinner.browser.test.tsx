@@ -29,6 +29,15 @@ const canvases = (container: HTMLElement): HTMLCanvasElement[] => [
   ...container.querySelectorAll<HTMLCanvasElement>('canvas'),
 ];
 
+/** The canvas's pixels, for comparing one spinner's frame with another's. */
+const pixelsOf = (canvas: HTMLCanvasElement): Uint8ClampedArray => {
+  const context = canvas.getContext('2d');
+  if (!context || canvas.width === 0) {
+    return new Uint8ClampedArray(0);
+  }
+  return context.getImageData(0, 0, canvas.width, canvas.height).data;
+};
+
 const hasPaintedPixels = (canvas: HTMLCanvasElement): boolean => {
   const context = canvas.getContext('2d');
   if (!context || canvas.width === 0) {
@@ -80,6 +89,42 @@ describe('metal morph spinner service in a real browser', () => {
       expect(diagnostics.subscriberCount).toBe(spinnerCount);
       expect(diagnostics.sourceSize).toBeGreaterThanOrEqual(32);
       expect(diagnostics.backend).toMatch(/webgpu|webgl2/);
+
+      view.unmount();
+    },
+    warmUpTimeout,
+  );
+
+  it(
+    'should paint every spinner with the same frame, in unison',
+    async () => {
+      const view = mountSpinners(spinnerCount);
+      const service = getMetalMorphSpinnerService();
+
+      await vi.waitFor(
+        () => {
+          expect(service.getDiagnostics().rendererCount).toBe(1);
+        },
+        { timeout: warmUpTimeout, interval: 100 },
+      );
+      const mounted = canvases(view.container);
+      await vi.waitFor(
+        () => {
+          expect(mounted.every((canvas) => hasPaintedPixels(canvas))).toBe(true);
+        },
+        { timeout: warmUpTimeout, interval: 100 },
+      );
+
+      // Every spinner is the same size, so a shared frame means byte-identical pixels on every canvas; a
+      // spinner that missed a frame, or read a stale snapshot, shows up as a different image. The comparison
+      // runs inside one task so no frame can land between two reads.
+      const [first, ...others] = mounted.map((canvas) => pixelsOf(canvas));
+      expect(first?.length).toBeGreaterThan(0);
+      for (const [index, pixels] of others.entries()) {
+        expect(pixels.length, `spinner ${index + 2} has the same size`).toBe(first!.length);
+        expect(pixels, `spinner ${index + 2} shows the same frame as the first`).toEqual(first);
+      }
+      expect(service.getDiagnostics()).toMatchObject({ missedFrameCount: 0, paintFailureCount: 0 });
 
       view.unmount();
     },

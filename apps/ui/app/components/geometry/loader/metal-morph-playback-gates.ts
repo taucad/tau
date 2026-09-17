@@ -48,8 +48,11 @@ export const useIsIntersecting = (element: Element | undefined): boolean => {
     if (!element) {
       return;
     }
-    const observer = new IntersectionObserver(([entry]) => {
-      setIsIntersecting(entry?.isIntersecting ?? false);
+    const observer = new IntersectionObserver((entries) => {
+      // Entries arrive oldest first, and a surface that left and returned before the observer's task ran
+      // delivers both changes at once: only the newest says where it is now.
+      const latest = entries.at(-1);
+      setIsIntersecting(latest?.isIntersecting ?? false);
     });
     observer.observe(element);
     return () => {

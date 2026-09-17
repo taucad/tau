@@ -21,7 +21,7 @@ import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { serializeMessage } from '#utils/chat.utils.js';
 import { parseInlineReferences } from '#utils/at-reference.utils.js';
-import type { ActivityFamily, ActivityGroup } from '#utils/assistant-message-activity.js';
+import type { ActivityFamily, ActivityGroup, AggregatedGroup } from '#utils/assistant-message-activity.js';
 import { groupAssistantParts, findLastMeaningfulPartIndex } from '#utils/assistant-message-activity.js';
 import { AtReferenceChip } from '#components/chat/at-reference-chip.js';
 import { ContextChip } from '#components/chat/context-chip.js';
@@ -482,9 +482,51 @@ function renderActivityGroup(
       icon={activityIcons[group.families[0] ?? 'other']}
       isActive={context.isActiveGroup}
     >
-      {group.parts.map((part, i) => renderAssistantPart(part, group.partIndices[i]!, context))}
+      {renderActivityRows(group, context)}
     </ChatActivityGroup>
   );
+}
+
+type ReasoningPart = Extract<MyMessagePart, { type: 'reasoning' }>;
+
+/** Tool rows in order, with each consecutive reasoning run as one nested thought. */
+function renderActivityRows(group: AggregatedGroup, context: PartRenderContext): React.JSX.Element[] {
+  const rows: React.JSX.Element[] = [];
+  let run: ReasoningPart[] = [];
+  let runStart = 0;
+  let runEnd = 0;
+  const flushRun = (isTrailing: boolean): void => {
+    if (run.length === 0) {
+      return;
+    }
+    rows.push(
+      <ChatMessageReasoning
+        key={`${context.messageId}-reasoning-${runStart}`}
+        parts={run}
+        hasContent={runEnd < context.lastMeaningfulIndex}
+        isMessageActive={context.isActiveGroup && isTrailing}
+      />,
+    );
+    run = [];
+  };
+  for (const [i, part] of group.parts.entries()) {
+    const partIndex = group.partIndices[i]!;
+    if (part.type === 'reasoning') {
+      if (run.length === 0) {
+        runStart = partIndex;
+      }
+      run.push(part);
+      runEnd = partIndex;
+      continue;
+    }
+    flushRun(false);
+    const row = renderAssistantPart(part, partIndex, context);
+    if (row) {
+      rows.push(row);
+    }
+  }
+  flushRun(true);
+  return rows;
 }
 
 const activityIcons: Record<ActivityFamily, LucideIcon> = {

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import type { Chat } from '@taucad/chat';
@@ -269,6 +269,23 @@ describe('ProjectChatList', () => {
     mockChatStatus.mockReturnValue(status({ state: 'working' }));
     render(<ProjectChatList project={project} isProjectActive />);
     fireEvent.click(screen.getByRole('button', { name: 'Stop Chat 12' }));
+    expect(mockCloseChat).toHaveBeenCalledExactlyOnceWith('proj_one', 'chat_12');
+  });
+
+  it('opens the same actions on right-click anywhere on the row', async () => {
+    mockChatStatus.mockReturnValue(status({ state: 'working' }));
+    render(<ProjectChatList project={project} isProjectActive />);
+    const row = screen.getByRole('link', { name: 'Chat 12' }).closest<HTMLElement>('[data-slot=chat-trigger]')!;
+    fireEvent.contextMenu(row);
+
+    const menu = await screen.findByRole('menu');
+    expect(row).toHaveAttribute('data-state', 'open');
+    expect(
+      within(menu)
+        .getAllByRole('menuitem')
+        .map((item) => item.textContent),
+    ).toEqual(['Rename', 'Stop', 'Delete']);
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Stop Chat 12' }));
     expect(mockCloseChat).toHaveBeenCalledExactlyOnceWith('proj_one', 'chat_12');
   });
 

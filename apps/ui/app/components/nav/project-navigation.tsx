@@ -23,7 +23,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
@@ -33,12 +32,15 @@ import { StatusMark } from '#components/nav/status-mark.js';
 import {
   SidebarFailureRow,
   SidebarRowActions,
+  SidebarRowContextMenu,
   SidebarRowLink,
+  SidebarRowMenuButton,
   SidebarRowSkeleton,
   sidebarRowButtonClass,
   sidebarRowClass,
   sidebarRowEditorClass,
 } from '#components/nav/sidebar-row.js';
+import type { SidebarRowMenuItems } from '#components/nav/sidebar-row.js';
 import { CloseProjectDialog } from '#components/nav/project-close-dialogs.js';
 import { useLiveProjectIds } from '#hooks/use-sessions.js';
 import {
@@ -255,149 +257,144 @@ function ProjectNavigationItem({
   const [askingToClose, setAskingToClose] = useState(false);
   const [askingToDelete, setAskingToDelete] = useState(false);
 
-  return (
-    <SidebarMenuItem className={cn(isExpanded && 'my-1 first:mt-0 last:mb-0')}>
-      <div data-slot='project-trigger' data-active={isActive} className={sidebarRowClass(isEditing)}>
-        <Button
-          type='button'
-          variant='ghost'
-          size='icon'
-          className={sidebarRowButtonClass}
-          aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${project.name}`}
-          aria-expanded={isExpanded}
-          aria-controls={chatsId}
-          onClick={() => {
-            void onToggle();
+  const menuItems: SidebarRowMenuItems = ({ Item, Separator }) => (
+    <>
+      <Item
+        disabled={!project.slugs}
+        onSelect={() => {
+          void onCreateChat();
+        }}
+      >
+        <SquarePen aria-hidden />
+        New chat
+      </Item>
+      <Item onSelect={onRename}>
+        <Pencil aria-hidden />
+        Rename
+      </Item>
+      <Item
+        onSelect={() => {
+          void onDuplicate();
+        }}
+      >
+        <Copy aria-hidden />
+        Duplicate
+      </Item>
+      <Item disabled={!project.slugs} onSelect={onShare}>
+        <Forward aria-hidden />
+        Share project
+      </Item>
+      {row.glyph === 'none' ? null : (
+        <Item
+          aria-label={`Close ${project.name}`}
+          onSelect={() => {
+            if (row.runs > 0) {
+              setAskingToClose(true);
+              return;
+            }
+            closeProject(project.id);
           }}
         >
-          {hasMark ? (
-            <StatusMark facts={facts} className='group-focus-within/row:hidden group-hover/row:hidden' />
-          ) : null}
-          <ChevronRight
-            aria-hidden
-            className={cn(
-              'size-3.5 transition-transform motion-reduce:transition-none',
-              isExpanded && 'rotate-90',
-              hasMark && 'hidden group-focus-within/row:block group-hover/row:block',
-            )}
-          />
-        </Button>
-        {isEditing ? (
-          <InlineTextEditor
-            value={project.name}
+          <X aria-hidden />
+          Close
+        </Item>
+      )}
+      <Separator />
+      <Item
+        variant='destructive'
+        onSelect={() => {
+          if (row.runs > 0) {
+            setAskingToDelete(true);
+          } else {
+            void onDelete();
+          }
+        }}
+      >
+        <Trash2 aria-hidden />
+        Delete
+      </Item>
+    </>
+  );
+
+  return (
+    <SidebarMenuItem className={cn(isExpanded && 'my-1 first:mt-0 last:mb-0')}>
+      <SidebarRowContextMenu items={menuItems} isDisabled={isEditing} className='w-48'>
+        <div data-slot='project-trigger' data-active={isActive} className={sidebarRowClass(isEditing)}>
+          <Button
+            type='button'
             variant='ghost'
-            shouldStartEditing
-            className={sidebarRowEditorClass}
-            onSave={onRenameSave}
-            onEditingChange={onEditingChange}
-          />
-        ) : (
-          <>
-            <SidebarRowLink
-              to={target}
-              name={project.name}
-              sentence={facts.sentence}
-              descriptionId={`project-status-${project.id}`}
-              isActive={isActive}
-              isPending={isPending}
-              onClick={onOpen}
+            size='icon'
+            className={sidebarRowButtonClass}
+            aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${project.name}`}
+            aria-expanded={isExpanded}
+            aria-controls={chatsId}
+            onClick={() => {
+              void onToggle();
+            }}
+          >
+            {hasMark ? (
+              <StatusMark facts={facts} className='group-focus-within/row:hidden group-hover/row:hidden' />
+            ) : null}
+            <ChevronRight
+              aria-hidden
+              className={cn(
+                'size-3.5 transition-transform motion-reduce:transition-none',
+                isExpanded && 'rotate-90',
+                hasMark && 'hidden group-focus-within/row:block group-hover/row:block',
+              )}
             />
-            <SidebarRowActions>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type='button'
-                    variant='ghost'
-                    size='icon'
-                    className={sidebarRowButtonClass}
-                    aria-label={`More actions for ${project.name}`}
-                  >
-                    <MoreHorizontal aria-hidden className='size-3.5' />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent
+          </Button>
+          {isEditing ? (
+            <InlineTextEditor
+              value={project.name}
+              variant='ghost'
+              shouldStartEditing
+              className={sidebarRowEditorClass}
+              onSave={onRenameSave}
+              onEditingChange={onEditingChange}
+            />
+          ) : (
+            <>
+              <SidebarRowLink
+                to={target}
+                name={project.name}
+                sentence={facts.sentence}
+                descriptionId={`project-status-${project.id}`}
+                isActive={isActive}
+                isPending={isPending}
+                onClick={onOpen}
+              />
+              <SidebarRowActions>
+                <SidebarRowMenuButton
+                  name={project.name}
+                  items={menuItems}
+                  className='w-48'
                   side={isMobile ? 'bottom' : 'right'}
                   align={isMobile ? 'end' : 'start'}
-                  className='w-48'
-                >
-                  <DropdownMenuItem
-                    disabled={!project.slugs}
-                    onSelect={() => {
-                      void onCreateChat();
-                    }}
-                  >
-                    <SquarePen aria-hidden />
-                    New chat
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={onRename}>
-                    <Pencil aria-hidden />
-                    Rename
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onSelect={() => {
-                      void onDuplicate();
-                    }}
-                  >
-                    <Copy aria-hidden />
-                    Duplicate
-                  </DropdownMenuItem>
-                  <DropdownMenuItem disabled={!project.slugs} onSelect={onShare}>
-                    <Forward aria-hidden />
-                    Share project
-                  </DropdownMenuItem>
-                  {row.glyph === 'none' ? null : (
-                    <DropdownMenuItem
-                      aria-label={`Close ${project.name}`}
-                      onSelect={() => {
-                        if (row.runs > 0) {
-                          setAskingToClose(true);
-                          return;
-                        }
-                        closeProject(project.id);
+                />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='icon'
+                      className={sidebarRowButtonClass}
+                      aria-label={`New chat in ${project.name}`}
+                      disabled={!project.slugs}
+                      onClick={() => {
+                        void onCreateChat();
                       }}
                     >
-                      <X aria-hidden />
-                      Close
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    variant='destructive'
-                    onSelect={() => {
-                      if (row.runs > 0) {
-                        setAskingToDelete(true);
-                      } else {
-                        void onDelete();
-                      }
-                    }}
-                  >
-                    <Trash2 aria-hidden />
-                    Delete
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type='button'
-                    variant='ghost'
-                    size='icon'
-                    className={sidebarRowButtonClass}
-                    aria-label={`New chat in ${project.name}`}
-                    disabled={!project.slugs}
-                    onClick={() => {
-                      void onCreateChat();
-                    }}
-                  >
-                    <SquarePen aria-hidden className='size-3.5' />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side='right'>New chat</TooltipContent>
-              </Tooltip>
-            </SidebarRowActions>
-          </>
-        )}
-      </div>
+                      <SquarePen aria-hidden className='size-3.5' />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side='right'>New chat</TooltipContent>
+                </Tooltip>
+              </SidebarRowActions>
+            </>
+          )}
+        </div>
+      </SidebarRowContextMenu>
       <CloseProjectDialog row={row} name={project.name} isOpen={askingToClose} onOpenChange={setAskingToClose} />
       <CloseProjectDialog
         row={row}

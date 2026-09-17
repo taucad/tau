@@ -11,9 +11,13 @@ import {
 import type { BenchmarkArtifact, BenchmarkSample } from '#support/headless-capture-performance.js';
 import {
   benchmarkArtifactSchema,
+  readBenchmarkMeasurement,
   readBenchmarkProvenance,
   summarizeSamples,
 } from '#support/headless-capture-performance.js';
+// oxlint-disable-next-line no-restricted-imports -- one owner for the measurement contract both harnesses answer to.
+// eslint-disable-next-line @nx/enforce-module-boundaries -- same owner.
+import { rendererAngle } from '../../runtime-e2e/src/benchmarks/measurement-tags.ts';
 
 /* oxlint-disable no-await-in-loop, tau-lint/no-time-unit-suffix -- Samples are sequential; the durable artifact names its millisecond unit explicitly. */
 
@@ -335,6 +339,18 @@ test('records canonical GLB capture wall-time distributions', async () => {
       viewport: [innerWidth, innerHeight] as [number, number],
     };
   }, benchmarkEnvironment['VITE_TAU_BENCH_GPU_BACKEND'] ?? 'swiftshader');
+  /* One reading of the adapter feeds both the durable `environment` block and the measurement tags,
+   * so the artifact cannot describe two different devices. */
+  const measurement = readBenchmarkMeasurement(benchmarkEnvironment, {
+    adapter: {
+      api: 'webgpu',
+      angle: rendererAngle(environment.launchArguments),
+      name: environment.adapter.name,
+      implementation: environment.adapter.deviceType === 'cpu' ? 'software' : 'ambiguous',
+    },
+    crossOriginIsolated: environment.crossOriginIsolated,
+    cpuCount: environment.hardwareConcurrency,
+  });
   const pageState = await target.evaluate(
     () =>
       (globalThis as typeof globalThis & { __TAU_CAPTURE_BENCHMARK__?: BenchmarkPageState }).__TAU_CAPTURE_BENCHMARK__!,
@@ -345,6 +361,7 @@ test('records canonical GLB capture wall-time distributions', async () => {
     startedAt,
     finishedAt: new Date().toISOString(),
     ...(provenance ? { provenance } : {}),
+    ...(measurement ? { measurement } : {}),
     environment,
     scenarios: {
       firstOverlap: { ...distribution(firstOverlap, 0), discarded: firstOverlapDiscarded },

@@ -4,6 +4,8 @@ import {
   buildIcosphere,
   extractConvexFaces,
   getMetalMorphGeometryData,
+  metalMorphDirectionOffset,
+  metalMorphSampleStride,
   getMetalMorphPlaneTable,
   icosphereVertexCount,
   metalMorphShapeDefinitions,
@@ -203,20 +205,53 @@ describe('getMetalMorphGeometryData', () => {
     expect(Object.keys(data.shapes).sort()).toEqual([...metalMorphShapeIds].sort());
     for (const id of metalMorphShapeIds) {
       const packed = data.shapes[id];
-      expect(packed).toHaveLength(data.vertexCount * 4);
+      expect(packed).toHaveLength(data.vertexCount * metalMorphSampleStride);
       for (let vertex = 0; vertex < data.vertexCount; vertex += 1) {
-        const radius = packed[vertex * 4 + 3]!;
+        const offset = vertex * metalMorphSampleStride;
+        const radius = packed[offset + 3]!;
+        const direction = packed.subarray(offset + metalMorphDirectionOffset, offset + metalMorphDirectionOffset + 3);
         const dot =
-          packed[vertex * 4]! * data.directions[vertex * 3]! +
-          packed[vertex * 4 + 1]! * data.directions[vertex * 3 + 1]! +
-          packed[vertex * 4 + 2]! * data.directions[vertex * 3 + 2]!;
+          packed[offset]! * direction[0]! + packed[offset + 1]! * direction[1]! + packed[offset + 2]! * direction[2]!;
         expect(Number.isFinite(radius)).toBe(true);
         expect(radius).toBeGreaterThan(0.25);
         expect(radius).toBeLessThanOrEqual(1.1);
+        expect(Math.hypot(direction[0]!, direction[1]!, direction[2]!)).toBeCloseTo(1, 5);
         expect(dot).toBeGreaterThan(0);
       }
     }
     expect(getMetalMorphGeometryData(2)).toBe(data);
+  });
+
+  it('should keep the resting mesh within three quarters of a hero pixel of the rounded surface', () => {
+    // Jagged silhouettes are this number: how far linear interpolation across a triangle strays from the
+    // rounded solid. Sampled uniformly the stars strayed 2.5 to 11 px at the hero's 445 px stage; the hero
+    // tier subdivides once more than this and stays under a quarter of a pixel.
+    const heroPixelsPerUnit = 445 / 2.44;
+    const data = getMetalMorphGeometryData(5);
+    for (const id of metalMorphShapeIds) {
+      const solid = prepareSolid(metalMorphShapeDefinitions[id]);
+      const packed = data.shapes[id];
+      const positionOf = (vertex: number): [number, number, number] => {
+        const offset = vertex * metalMorphSampleStride;
+        const radius = packed[offset + 3]!;
+        return [
+          packed[offset + metalMorphDirectionOffset]! * radius,
+          packed[offset + metalMorphDirectionOffset + 1]! * radius,
+          packed[offset + metalMorphDirectionOffset + 2]! * radius,
+        ];
+      };
+      let worst = 0;
+      for (let triangle = 0; triangle < data.index.length; triangle += 3) {
+        const corners = [0, 1, 2].map((corner) => positionOf(data.index[triangle + corner]!));
+        const centroid = [0, 1, 2].map((axis) => (corners[0]![axis]! + corners[1]![axis]! + corners[2]![axis]!) / 3);
+        const length = Math.hypot(centroid[0]!, centroid[1]!, centroid[2]!);
+        const direction = normalise([centroid[0]!, centroid[1]!, centroid[2]!]);
+        const exact = sampleRadial(solid, direction);
+        const facing = exact.normal[0] * direction[0] + exact.normal[1] * direction[1] + exact.normal[2] * direction[2];
+        worst = Math.max(worst, Math.abs(exact.radius - length) * facing * heroPixelsPerUnit);
+      }
+      expect(worst, id).toBeLessThan(0.75);
+    }
   });
 });
 

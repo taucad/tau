@@ -248,4 +248,55 @@ describe('MetalMorphLoader', () => {
     unmount();
     expect(controller.dispose).toHaveBeenCalledTimes(1);
   });
+
+  it('should keep a pooled renderer across mounts, paused on its pose, and adopt it before the first paint', async () => {
+    const { MetalMorphLoader } = await import('#components/geometry/loader/metal-morph-loader.js');
+    const poolKey = `pool-${String(Math.random())}`;
+
+    const first = render(<MetalMorphLoader poolKey={poolKey} quality='balanced' semantic='presentation' />);
+    await waitFor(() => {
+      expect(first.container.querySelector('[data-state="ready"]')).not.toBeNull();
+    });
+    const controller = lastController();
+    // The pool owns the canvas, so React renders none of its own for a pooled loader.
+    const canvasOf = (view: typeof first): HTMLCanvasElement | undefined =>
+      view.container.querySelector('canvas') ?? undefined;
+    const pooledCanvas = canvasOf(first);
+    expect(pooledCanvas).not.toBeNull();
+    expect(hoisted.controllers).toHaveLength(1);
+
+    first.unmount();
+    // Handed back rather than thrown away: the next mount continues this walk instead of starting one.
+    expect(controller.dispose).not.toHaveBeenCalled();
+    expect(controller.pause).toHaveBeenCalled();
+
+    const second = render(<MetalMorphLoader poolKey={poolKey} quality='balanced' semantic='presentation' />);
+    // Ready in the same commit, without awaiting: nothing for the stand-in to cover.
+    expect(second.container.querySelector('[data-state="ready"]')).not.toBeNull();
+    expect(hoisted.controllers).toHaveLength(1);
+    expect(canvasOf(second)).toBe(pooledCanvas);
+
+    // A second mount alongside the holder cannot take the one canvas, so it builds its own.
+    const third = render(<MetalMorphLoader poolKey={poolKey} quality='balanced' semantic='presentation' />);
+    await waitFor(() => {
+      expect(hoisted.controllers).toHaveLength(2);
+    });
+    third.unmount();
+    expect(lastController().dispose).toHaveBeenCalledTimes(1);
+    second.unmount();
+  });
+
+  it('should warm a pooled renderer before any mount asks for it', async () => {
+    const { MetalMorphLoader, warmMetalMorphLoader } =
+      await import('#components/geometry/loader/metal-morph-loader.js');
+    const poolKey = `warm-${String(Math.random())}`;
+
+    await warmMetalMorphLoader({ poolKey, theme: 'dark', quality: 'balanced' });
+    expect(hoisted.controllers).toHaveLength(1);
+
+    const view = render(<MetalMorphLoader poolKey={poolKey} quality='balanced' semantic='presentation' />);
+    expect(view.container.querySelector('[data-state="ready"]')).not.toBeNull();
+    expect(hoisted.controllers).toHaveLength(1);
+    view.unmount();
+  });
 });

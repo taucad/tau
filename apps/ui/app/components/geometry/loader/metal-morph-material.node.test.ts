@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   createMetalMorphNodeMaterial,
+  metalMorphDirectionAttributeName,
   metalMorphShapeAttributeName,
 } from '#components/geometry/loader/metal-morph-material.node.js';
 import { metalMorphShapeIds } from '#components/geometry/loader/metal-morph-shapes.js';
@@ -34,11 +35,9 @@ describe('createMetalMorphNodeMaterial', () => {
     expect(material.iridescenceNode).toBeDefined();
   });
 
-  it('should leave the thin-film model and the gradient probes out of a spinner material', () => {
+  it('should leave the thin-film model out of a spinner material', () => {
     const { material } = createMetalMorphNodeMaterial({
       iridescence: 0,
-      perturbNormals: false,
-      exactStarNormals: false,
     });
 
     expect(material.iridescence).toBe(0);
@@ -73,6 +72,13 @@ describe('createMetalMorphNodeMaterial', () => {
       'shapeSample2',
       'shapeSample3',
       'shapeSample4',
+    ]);
+    expect(metalMorphShapeIds.map((_id, index) => metalMorphDirectionAttributeName(index))).toEqual([
+      'shapeDirection0',
+      'shapeDirection1',
+      'shapeDirection2',
+      'shapeDirection3',
+      'shapeDirection4',
     ]);
   });
 });

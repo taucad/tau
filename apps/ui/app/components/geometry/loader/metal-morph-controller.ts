@@ -2,6 +2,8 @@ import {
   ACESFilmicToneMapping,
   BufferAttribute,
   BufferGeometry,
+  InterleavedBuffer,
+  InterleavedBufferAttribute,
   Mesh,
   PerspectiveCamera,
   Quaternion,
@@ -20,6 +22,7 @@ import { createMetalMorphEnvironment } from '#components/geometry/loader/metal-m
 import type { MetalMorphEnvironment } from '#components/geometry/loader/metal-morph-environment.js';
 import {
   createMetalMorphNodeMaterial,
+  metalMorphDirectionAttributeName,
   metalMorphShapeAttributeName,
 } from '#components/geometry/loader/metal-morph-material.node.js';
 import type { MetalMorphMaterialOptions } from '#components/geometry/loader/metal-morph-material.node.js';
@@ -31,15 +34,21 @@ import {
   sampleMorphTimeline,
 } from '#components/geometry/loader/metal-morph-sequence.js';
 import type { MorphPhase, MorphTimingConfig } from '#components/geometry/loader/metal-morph-sequence.js';
-import { getMetalMorphGeometryData, metalMorphShapeIds } from '#components/geometry/loader/metal-morph-shapes.js';
+import {
+  getMetalMorphGeometryData,
+  metalMorphDirectionOffset,
+  metalMorphSampleStride,
+  metalMorphShapeIds,
+} from '#components/geometry/loader/metal-morph-shapes.js';
 import type { MetalMorphGeometryData, MetalMorphShapeId } from '#components/geometry/loader/metal-morph-shapes.js';
 
 /**
- * Cost tier. `inline` suits spinners under about 120 px (coarse body, no bloom, no thin film, 30 fps,
- * low-power adapter); `balanced` mid-size surfaces; `high` hero surfaces with bloom, thin film and an
- * adaptive governor that steps pixel ratio, bloom and frame rate down when frames run long.
+ * Cost tier. `balanced` suits spinners and mid-size surfaces (no bloom, no thin film, low-power adapter);
+ * `high` hero surfaces with bloom, thin film, a finer body and an adaptive governor that steps pixel ratio,
+ * bloom and frame rate down when frames run long. Both shade their ridges per fragment: a coarser tier than
+ * these cannot hold a clean silhouette even at glyph size.
  */
-export type MetalMorphLoaderQuality = 'inline' | 'balanced' | 'high';
+export type MetalMorphLoaderQuality = 'balanced' | 'high';
 export type MetalMorphLoaderTheme = 'dark' | 'light';
 /** GPU API the node renderer ended up on after Three's own fallback. */
 export type MetalMorphBackendInUse = 'webgpu' | 'webgl2';
@@ -153,16 +162,12 @@ type QualityProfile = Readonly<{
   powerPreference: 'high-performance' | 'low-power';
 }>;
 
-/** Every tier keeps the fillets smooth: at these tessellations a fillet still spans several triangles. */
+/**
+ * Every tier keeps the silhouettes smooth: the shapes draw their samples into the fillets, so at these
+ * tessellations the mesh stays within a fraction of a pixel of the rounded surface at the size the tier serves.
+ * The hero tier spends one more subdivision on the in-between forms, where two shapes' fillets overlap.
+ */
 const qualityProfiles: Readonly<Record<MetalMorphLoaderQuality, QualityProfile>> = {
-  inline: {
-    detail: 4,
-    bloom: false,
-    environmentSize: 64,
-    targetFrameRate: 30,
-    material: { iridescence: 0, perturbNormals: false, exactStarNormals: false },
-    powerPreference: 'low-power',
-  },
   balanced: {
     detail: 5,
     bloom: false,
@@ -172,7 +177,7 @@ const qualityProfiles: Readonly<Record<MetalMorphLoaderQuality, QualityProfile>>
     powerPreference: 'low-power',
   },
   high: {
-    detail: 5,
+    detail: 6,
     bloom: true,
     environmentSize: 256,
     targetFrameRate: 60,
@@ -212,8 +217,15 @@ const buildGeometry = (data: MetalMorphGeometryData): BufferGeometry => {
   const geometry = new BufferGeometry();
   geometry.setAttribute('position', new BufferAttribute(data.directions, 3));
   geometry.setIndex(new BufferAttribute(data.index, 1));
+  // One interleaved buffer per shape carries both of its attributes: WebGPU binds at most eight vertex buffers,
+  // and a buffer per attribute would need eleven.
   for (const [index, id] of metalMorphShapeIds.entries()) {
-    geometry.setAttribute(metalMorphShapeAttributeName(index), new BufferAttribute(data.shapes[id], 4));
+    const packed = new InterleavedBuffer(data.shapes[id], metalMorphSampleStride);
+    geometry.setAttribute(metalMorphShapeAttributeName(index), new InterleavedBufferAttribute(packed, 4, 0));
+    geometry.setAttribute(
+      metalMorphDirectionAttributeName(index),
+      new InterleavedBufferAttribute(packed, 3, metalMorphDirectionOffset),
+    );
   }
   geometry.computeBoundingSphere();
   return geometry;

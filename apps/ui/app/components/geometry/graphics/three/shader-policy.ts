@@ -179,7 +179,7 @@ export const shaderEvidence = {
       `${metalMorphLoaderRoot}/metal-morph-material.node.test.ts::should animate through uniform mutation without rebuilding the graph`,
     ],
     'structural-perf': [
-      `${metalMorphLoaderEndToEnd}::renders one body of 10,242 vertices with the bloom chain enabled`,
+      `${metalMorphLoaderEndToEnd}::renders one body of 40,962 vertices with the bloom chain enabled`,
     ],
     'gpu-whole-frame': [`${metalMorphLoaderEndToEnd}::sustains the loop under a bounded frame interval`],
   },

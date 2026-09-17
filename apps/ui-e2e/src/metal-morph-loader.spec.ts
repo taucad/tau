@@ -431,7 +431,12 @@ test.describe('metal morph loader', () => {
         .poll(async () => readSpinnerDiagnostics().then((diagnostics) => diagnostics?.subscriberCount))
         .toBe(0);
 
-      await target.click(selectors.getByLabelText('Render 40 px and 96 px spinners'));
+      // Force the toggle: the switch sits below a stage that never stops moving, so the harness would wait
+      // for a stability the page does not offer.
+      await target.click(selectors.getByLabelText('Render 40 px and 96 px spinners'), {
+        force: true,
+        timeout: 15_000,
+      });
 
       // Two spinners, one renderer: the count the browser's sixteen-context cap makes matter.
       await expect

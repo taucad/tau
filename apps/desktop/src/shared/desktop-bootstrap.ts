@@ -8,8 +8,6 @@
  * renderer repeat the literal.
  */
 
-import type { ExternalAgentDescriptor } from '@taucad/agent-host';
-
 /** Argument prefix main uses to hand the preload its bootstrap payload. */
 export const bootstrapArgumentPrefix = '--tau-bootstrap=';
 
@@ -38,6 +36,16 @@ export const quitChannels = {
   quiesced: 'tau:quit:quiesced',
 } as const;
 
+/**
+ * The external ACP agents launcher 2 can start (W4-ACP).
+ *
+ * A call rather than a bootstrap value (D17): resolving them runs a CLI probe
+ * and a real vendor model session on a 5 s clock, and freezing the answer into
+ * `additionalArguments` made the window's *existence* wait on both. Main
+ * answers when discovery settles, which is before any chat surface asks.
+ */
+export const externalAgentsChannel = 'tau:external-agents';
+
 /** IPC methods for bounded compute-store authority controls. */
 export const computeControlChannels = {
   inspect: 'tau:compute:inspect',
@@ -62,22 +70,6 @@ export type DesktopBootstrap = {
   readonly homeRoot: string;
   /** Capability advertisement used by the shared renderer's product catalog. */
   readonly runtimeKernelIds: readonly string[];
-  /**
-   * External ACP agents launcher 2 knows about (W4-ACP), as the one canonical
-   * descriptor (VSC1) — model list included, refusal code for one that cannot
-   * be started — which the selector draws one row each from. Same lifetime as
-   * {@link DesktopBootstrap.runtimeKernelIds}: a capability main resolved, and
-   * probed, before the window existed, so the page reads it rather than
-   * probing for it.
-   */
-  readonly externalAgents: readonly ExternalAgentDescriptor[];
-  /**
-   * Revision modes launcher 2 records a turn in (V17 / VSC5). The composer
-   * offers its revision selector from this and nothing else, so a desktop build
-   * that published none would silently take the choice away. Same shape and
-   * lifetime as {@link DesktopBootstrap.externalAgents}: a capability of the
-   * host main starts, known before the window existed.
-   */
 };
 
 /**
@@ -89,7 +81,7 @@ export type DesktopBootstrap = {
 export const readBootstrap = (argv: readonly string[]): DesktopBootstrap => {
   const argument = argv.find((entry) => entry.startsWith(bootstrapArgumentPrefix));
   if (!argument) {
-    return { env: {}, homeRoot: '', runtimeKernelIds: [], externalAgents: [] };
+    return { env: {}, homeRoot: '', runtimeKernelIds: [] };
   }
   try {
     const parsed = JSON.parse(argument.slice(bootstrapArgumentPrefix.length)) as Partial<DesktopBootstrap>;
@@ -97,11 +89,10 @@ export const readBootstrap = (argv: readonly string[]): DesktopBootstrap => {
       env: parsed.env ?? {},
       homeRoot: parsed.homeRoot ?? '',
       runtimeKernelIds: parsed.runtimeKernelIds ?? [],
-      externalAgents: parsed.externalAgents ?? [],
     };
   } catch {
     /* A malformed payload is a shell bug, not a renderer input; boot with
      * nothing so the renderer's own `Missing TAU_API_URL` names the failure. */
-    return { env: {}, homeRoot: '', runtimeKernelIds: [], externalAgents: [] };
+    return { env: {}, homeRoot: '', runtimeKernelIds: [] };
   }
 };

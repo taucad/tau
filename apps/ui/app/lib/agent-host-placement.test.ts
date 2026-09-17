@@ -296,7 +296,7 @@ describe('listAgentHostPlacements', () => {
   it('publishes every discovered placement, and no revision capability (W3d)', async () => {
     const targets = await listAgentHostPlacements({
       desktop: true,
-      bridge: () => ({ externalAgents: [] }) as unknown as DesktopBridge,
+      bridge: () => ({ externalAgents: async () => [] }) as unknown as DesktopBridge,
       discoverOrigin: async () => descriptor,
       listHosts: async () => [
         {
@@ -324,7 +324,7 @@ describe('listAgentHostPlacements', () => {
     await expect(
       listAgentHostPlacements({
         desktop: true,
-        bridge: () => ({ externalAgents: [claudeAgent, codexAgent] }) as unknown as DesktopBridge,
+        bridge: () => ({ externalAgents: async () => [claudeAgent, codexAgent] }) as unknown as DesktopBridge,
         discoverOrigin: async () => undefined,
         listHosts: async () => [],
       }),

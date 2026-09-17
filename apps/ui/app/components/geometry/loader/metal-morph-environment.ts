@@ -135,13 +135,18 @@ export const prefilterStudio = (
   }
 };
 
-/** The chrome studio for one theme; see {@link prefilterStudio}. */
+/** The emitter intensities of a palette, the part of the studio a surface is tuned against. */
+export type MetalMorphStudioIntensities = Readonly<
+  Pick<MetalMorphEnvironmentPalette, 'keyIntensity' | 'rimIntensity' | 'fillIntensity' | 'accentIntensity'>
+>;
+
+/** The chrome studio for one theme, with any of its emitter intensities overridden; see {@link prefilterStudio}. */
 export const createMetalMorphEnvironment = (
   renderer: WebGPURenderer,
   variant: MetalMorphEnvironmentVariant,
-  options?: Readonly<{ size?: number }>,
+  options?: Readonly<{ size?: number; intensities?: Partial<MetalMorphStudioIntensities> }>,
 ): MetalMorphEnvironment => {
-  const palette = metalMorphEnvironmentPalettes[variant];
+  const palette: MetalMorphEnvironmentPalette = { ...metalMorphEnvironmentPalettes[variant], ...options?.intensities };
   return prefilterStudio(
     renderer,
     {

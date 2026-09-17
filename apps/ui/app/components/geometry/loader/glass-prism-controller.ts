@@ -50,7 +50,11 @@ import { captureFrameThrough, resolveBackendInUse } from '#components/geometry/l
 import type { ShowcaseBackendInUse, ShowcaseFrameCapture } from '#components/geometry/loader/showcase-capture.js';
 import { adaptiveLevels, createShowcaseFrameLoop } from '#components/geometry/loader/showcase-frame-loop.js';
 import { createBloomPipeline, createCapturePipeline } from '#components/geometry/loader/showcase-post.js';
-import type { ShowcaseBloomSettings, ShowcaseRenderPipeline } from '#components/geometry/loader/showcase-post.js';
+import type {
+  ShowcaseBloomChain,
+  ShowcaseBloomSettings,
+  ShowcaseRenderPipeline,
+} from '#components/geometry/loader/showcase-post.js';
 
 /**
  * Cost tier. `inline` suits spinners under about 120 px (coarse body, a dozen rays, 30 fps, low-power
@@ -291,7 +295,7 @@ export const createGlassPrismLoader = (options: GlassPrismLoaderOptions): GlassP
 
   let renderer: WebGPURenderer | undefined;
   let materials: ReturnType<typeof createGlassPrismBodyMaterials> | undefined;
-  let pipeline: ShowcaseRenderPipeline | undefined;
+  let bloomChain: ShowcaseBloomChain | undefined;
   let capturePipeline: ShowcaseRenderPipeline | undefined;
   let environment: StudioEnvironment | undefined;
   let { theme } = options;
@@ -459,8 +463,8 @@ export const createGlassPrismLoader = (options: GlassPrismLoaderOptions): GlassP
     if (!renderer || isDisposed()) {
       return;
     }
-    if (pipeline) {
-      pipeline.render();
+    if (bloomChain) {
+      bloomChain.pipeline.render();
     } else {
       renderer.render(scene, camera);
     }
@@ -487,11 +491,11 @@ export const createGlassPrismLoader = (options: GlassPrismLoaderOptions): GlassP
       applySize(requestedSize);
     }
     const wantsBloom = profile.bloom && theme === 'dark' && level < adaptiveLevels.bloom;
-    if (renderer && wantsBloom && !pipeline) {
-      pipeline = createBloomPipeline(renderer, { scene, camera }, glassBloom);
-    } else if (!wantsBloom && pipeline) {
-      pipeline.dispose();
-      pipeline = undefined;
+    if (renderer && wantsBloom && !bloomChain) {
+      bloomChain = createBloomPipeline(renderer, { scene, camera }, glassBloom);
+    } else if (!wantsBloom && bloomChain) {
+      bloomChain.dispose();
+      bloomChain = undefined;
     }
   };
 
@@ -547,7 +551,7 @@ export const createGlassPrismLoader = (options: GlassPrismLoaderOptions): GlassP
     });
     applyThemeToScene();
     if (profile.bloom && theme === 'dark') {
-      pipeline = createBloomPipeline(renderer, { scene, camera }, glassBloom);
+      bloomChain = createBloomPipeline(renderer, { scene, camera }, glassBloom);
     }
     await renderer.compileAsync(scene, camera);
     if (isDisposed()) {
@@ -624,7 +628,7 @@ export const createGlassPrismLoader = (options: GlassPrismLoaderOptions): GlassP
       framesPerSecond: loop.getFramesPerSecond(),
       vertexCount: geometryData.vertexCount,
       ribbonCount,
-      isBloomEnabled: pipeline !== undefined,
+      isBloomEnabled: bloomChain !== undefined,
       isPlaying: loop.isLooping(),
       targetFrameRate: loop.getTargetFrameRate(),
       adaptiveLevel: loop.getAdaptiveLevel(),
@@ -655,7 +659,7 @@ export const createGlassPrismLoader = (options: GlassPrismLoaderOptions): GlassP
       }
       lifecycle.disposed = true;
       loop.stop();
-      pipeline?.dispose();
+      bloomChain?.dispose();
       capturePipeline?.dispose();
       environment?.dispose();
       geometry.dispose();

@@ -85,6 +85,55 @@ export type MetalMorphMaterialOptions = Readonly<{
   swell?: number;
   /** Radial amplitude of the settle wobble, in render units. */
   ringAmplitude?: number;
+  /** Thin-film thickness, in nanometres, where the flowing metal is coolest. */
+  filmThicknessThin?: number;
+  /** Thin-film thickness, in nanometres, where the flowing metal is hottest. */
+  filmThicknessThick?: number;
+}>;
+
+/**
+ * Every parameter of the surface and the flow that a live uniform carries, so a surface can be tuned while
+ * it runs and the values that land can be written back into the defaults.
+ */
+export type MetalMorphMaterialTuning = Readonly<{
+  roughnessRest: number;
+  roughnessMolten: number;
+  /** Thin-film strength inside the liquid band; no effect on a material built with `iridescence: 0`. */
+  iridescence: number;
+  filmThicknessThin: number;
+  filmThicknessThick: number;
+  overshoot: number;
+  frontBand: number;
+  flowAmplitude: number;
+  flowScale: number;
+  rippleAmplitude: number;
+  rippleWavelength: number;
+  rippleDecay: number;
+  swell: number;
+  ringAmplitude: number;
+}>;
+
+/** The tuning parameters in a stable order, for iteration. */
+export const metalMorphMaterialTuningKeys = [
+  'roughnessRest',
+  'roughnessMolten',
+  'iridescence',
+  'filmThicknessThin',
+  'filmThicknessThick',
+  'overshoot',
+  'frontBand',
+  'flowAmplitude',
+  'flowScale',
+  'rippleAmplitude',
+  'rippleWavelength',
+  'rippleDecay',
+  'swell',
+  'ringAmplitude',
+] as const satisfies ReadonlyArray<keyof MetalMorphMaterialTuning>;
+
+/** One live uniform per tuning parameter. */
+export type MetalMorphTuningUniforms = Readonly<{
+  [Key in keyof MetalMorphMaterialTuning]: UniformNode<'float', number>;
 }>;
 
 export type MetalMorphMaterialHandles = Readonly<{
@@ -104,7 +153,40 @@ export type MetalMorphMaterialHandles = Readonly<{
   uSweepAxis: UniformNode<'vec3', Vector3>;
   /** Noise domain offset so every transition churns differently. */
   uSeedOffset: UniformNode<'vec3', Vector3>;
+  /** The surface and flow parameters, live. */
+  tuning: MetalMorphTuningUniforms;
 }>;
+
+/** Write every parameter present in `patch` into its uniform; the graph is untouched. */
+export const applyMetalMorphMaterialTuning = (
+  uniforms: MetalMorphTuningUniforms,
+  patch: Partial<MetalMorphMaterialTuning>,
+): void => {
+  for (const key of metalMorphMaterialTuningKeys) {
+    const value = patch[key];
+    if (value !== undefined) {
+      uniforms[key].value = value;
+    }
+  }
+};
+
+/** The parameters the uniforms currently carry. */
+export const readMetalMorphMaterialTuning = (uniforms: MetalMorphTuningUniforms): MetalMorphMaterialTuning => ({
+  roughnessRest: uniforms.roughnessRest.value,
+  roughnessMolten: uniforms.roughnessMolten.value,
+  iridescence: uniforms.iridescence.value,
+  filmThicknessThin: uniforms.filmThicknessThin.value,
+  filmThicknessThick: uniforms.filmThicknessThick.value,
+  overshoot: uniforms.overshoot.value,
+  frontBand: uniforms.frontBand.value,
+  flowAmplitude: uniforms.flowAmplitude.value,
+  flowScale: uniforms.flowScale.value,
+  rippleAmplitude: uniforms.rippleAmplitude.value,
+  rippleWavelength: uniforms.rippleWavelength.value,
+  rippleDecay: uniforms.rippleDecay.value,
+  swell: uniforms.swell.value,
+  ringAmplitude: uniforms.ringAmplitude.value,
+});
 
 const defaultOptions: Required<Omit<MetalMorphMaterialOptions, 'color'>> = {
   roughnessRest: 0.1,
@@ -119,14 +201,14 @@ const defaultOptions: Required<Omit<MetalMorphMaterialOptions, 'color'>> = {
   rippleDecay: 0.24,
   swell: 0.055,
   ringAmplitude: 0.02,
+  filmThicknessThin: 140,
+  filmThicknessThick: 480,
   perturbNormals: true,
   exactStarNormals: true,
 };
 
 /** Finite-difference step for the displacement gradient, in render units on the unit sphere. */
 const gradientStep = 0.015;
-/** Iridescence film thickness range in nanometres, mapped from the local heat field. */
-const iridescenceThicknessNanometres = { thin: 140, thick: 480 } as const;
 /** Height, in render units, at which the undulation reads as fully heated for the film thickness. */
 const heatHeight = 0.03;
 /** Radians per second the ripple crests roll back through the wake. */
@@ -342,6 +424,8 @@ export const createMetalMorphNodeMaterial = (
   const uRoughnessRest = uniform(settings.roughnessRest, 'float');
   const uRoughnessMolten = uniform(settings.roughnessMolten, 'float');
   const uIridescence = uniform(settings.iridescence, 'float');
+  const uFilmThin = uniform(settings.filmThicknessThin, 'float');
+  const uFilmThick = uniform(settings.filmThicknessThick, 'float');
   const useIridescence = settings.iridescence > 0;
 
   const planeTable = getMetalMorphPlaneTable();
@@ -405,7 +489,7 @@ export const createMetalMorphNodeMaterial = (
           iridescence: settings.iridescence,
           // eslint-disable-next-line @typescript-eslint/naming-convention -- three.js material property name
           iridescenceIOR: 1.28,
-          iridescenceThicknessRange: [iridescenceThicknessNanometres.thin, iridescenceThicknessNanometres.thick],
+          iridescenceThicknessRange: [settings.filmThicknessThin, settings.filmThicknessThick],
         }
       : {}),
   });
@@ -493,15 +577,36 @@ export const createMetalMorphNodeMaterial = (
   material.roughnessNode = mix(uRoughnessRest, uRoughnessMolten, vMolten);
   if (useIridescence) {
     material.iridescenceNode = vMolten.mul(uIridescence);
-    material.iridescenceThicknessNode = mix(
-      float(iridescenceThicknessNanometres.thin),
-      float(iridescenceThicknessNanometres.thick),
-      vHeat,
-    );
+    material.iridescenceThicknessNode = mix(uFilmThin, uFilmThick, vHeat);
   }
 
   return {
     material,
-    handles: { uFromIndex, uToIndex, uProgress, uMolten, uRing, uTime, uSweepAxis, uSeedOffset },
+    handles: {
+      uFromIndex,
+      uToIndex,
+      uProgress,
+      uMolten,
+      uRing,
+      uTime,
+      uSweepAxis,
+      uSeedOffset,
+      tuning: {
+        roughnessRest: uRoughnessRest,
+        roughnessMolten: uRoughnessMolten,
+        iridescence: uIridescence,
+        filmThicknessThin: uFilmThin,
+        filmThicknessThick: uFilmThick,
+        overshoot: uOvershoot,
+        frontBand: uFrontBand,
+        flowAmplitude: uFlowAmplitude,
+        flowScale: uFlowScale,
+        rippleAmplitude: uRippleAmplitude,
+        rippleWavelength: uRippleWavelength,
+        rippleDecay: uRippleDecay,
+        swell: uSwell,
+        ringAmplitude: uRingAmplitude,
+      },
+    },
   };
 };

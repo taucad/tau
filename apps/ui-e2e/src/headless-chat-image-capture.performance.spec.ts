@@ -15,9 +15,10 @@ import {
   readBenchmarkProvenance,
   summarizeSamples,
 } from '#support/headless-capture-performance.js';
-// oxlint-disable-next-line no-restricted-imports -- one owner for the measurement contract both harnesses answer to.
-// eslint-disable-next-line @nx/enforce-module-boundaries -- same owner.
+/* eslint-disable @nx/enforce-module-boundaries -- one owner for the measurement contract both harnesses answer to. */
+// oxlint-disable-next-line no-restricted-imports -- same owner; the disable has to sit on the import's own line.
 import { rendererAngle } from '../../runtime-e2e/src/benchmarks/measurement-tags.ts';
+/* eslint-enable @nx/enforce-module-boundaries -- scope ends at the import. */
 
 /* oxlint-disable no-await-in-loop, tau-lint/no-time-unit-suffix -- Samples are sequential; the durable artifact names its millisecond unit explicitly. */
 

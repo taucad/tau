@@ -118,11 +118,13 @@ export function ChatInterfaceStatus({ className, ...props }: ChatInterfaceStatus
     }
   };
 
+  // Escape belongs to this status only while it is shown, and never to a focused field.
   const { formattedKeyCombination } = useKeybinding(
     {
       key: 'Escape',
     },
     handleClose,
+    { enabled: isVisible, ignoreInputs: true },
   );
 
   const { label, description, tooltipLabel, tips } = useStatusInfo(mode);

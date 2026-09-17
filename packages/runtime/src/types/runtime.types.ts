@@ -120,6 +120,15 @@ export type KernelSuccessResult<T> = {
   data: T;
   issues: KernelIssue[];
   serializedNativeHandle?: unknown;
+  /**
+   * Produce the durable native-handle snapshot on demand (D12).
+   *
+   * No display render reads a snapshot, so a kernel that can make one hands over this thunk and
+   * pays for it only where something asks: an export, a reheat, or a cache write. It resolves
+   * `undefined` once the handle it would read has been disposed, and is stripped from every
+   * published result — it is a function, and functions do not cross the wire.
+   */
+  serializeNativeHandleSnapshot?: () => unknown;
 };
 
 /**

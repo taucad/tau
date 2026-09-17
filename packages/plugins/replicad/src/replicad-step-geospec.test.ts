@@ -171,7 +171,6 @@ describe('Replicad — GeoSpec STEP export', () => {
       expect.arrayContaining([
         'create.runOcMain',
         'create.resolveInterfaces',
-        'create.serializeNativeHandle',
         'export.exportSTEP',
         'step.product.prepare',
         'step.document.build',
@@ -180,6 +179,9 @@ describe('Replicad — GeoSpec STEP export', () => {
         'step.file.transfer',
       ]),
     );
+    /* D12: the export ran off the live handle, so no snapshot was ever needed. Serialising one here
+     * was pure cost — a BREP write of the whole model — and it is gone with the deferral. */
+    expect(labels).not.toContain('create.serializeNativeHandle');
   });
 
   it('should preserve resolved interfaces across independent public-client renders', async () => {

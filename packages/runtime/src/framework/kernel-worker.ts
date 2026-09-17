@@ -2725,6 +2725,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       identity,
       success: internalResult.success,
       serializedNativeHandle,
+      serializeNativeHandleSnapshot: internalResult.success ? internalResult.serializeNativeHandleSnapshot : undefined,
     });
 
     // Mesh phase — display path only. Kernels that defer their display artifact
@@ -2765,8 +2766,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const {
       [nativeBuildInputSymbol]: _nativeBuildInput,
       serializedNativeHandle: _serializedNativeHandle,
+      serializeNativeHandleSnapshot: _serializeNativeHandleSnapshot,
       ...publicDisplayResult
-    } = displayResult as CreateGeometryResult & NativeBuildInputCarrier & { serializedNativeHandle?: unknown };
+    } = displayResult as CreateGeometryResult &
+      NativeBuildInputCarrier & { serializedNativeHandle?: unknown; serializeNativeHandleSnapshot?: () => unknown };
     // One render request produces one public geometry artifact.
     const result: MaterializedRenderResult = publicDisplayResult.success
       ? {
@@ -2818,6 +2821,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   protected captureNativeHandle(nativeHandle: unknown, owner?: OperationOwner): void {
     this.pendingNativeHandle = nativeHandle;
     this.ownNativeHandle(nativeHandle, owner);
+  }
+
+  /**
+   * Whether a native handle is still owned, and therefore still safe to read.
+   *
+   * `disposeUnreachableNativeHandles` deletes from the ownership registry before it disposes, so
+   * this is the precise liveness answer a deferred snapshot needs.
+   *
+   * @param nativeHandle - The handle to check.
+   * @returns True while the worker still owns it.
+   */
+  protected isNativeHandleLive(nativeHandle: unknown): boolean {
+    return this.ownedNativeHandles.has(nativeHandle);
   }
 
   private ownNativeHandle(nativeHandle: unknown, owner: OperationOwner | undefined): void {
@@ -2894,12 +2910,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   protected bindNativeHandleSlots(input: {
     readonly identity: RenderIdentity;
     readonly success: boolean;
+    /** A snapshot already in hand — a cache hit decodes one. */
     readonly serializedNativeHandle: unknown;
+    /** Or the means to make one on first read (D12). */
+    readonly serializeNativeHandleSnapshot?: (() => unknown) | undefined;
   }): {
     liveNativeHandleSlot?: NativeHandleSlot;
     serializedNativeHandleSlot?: SerializedNativeHandleSlot;
   } {
-    const { identity, success, serializedNativeHandle } = input;
+    const { identity, success, serializedNativeHandle, serializeNativeHandleSnapshot } = input;
     const identityKey = createNativeHandleIdentityKey(identity);
     const { pendingNativeHandle } = this;
     this.pendingNativeHandle = undefined;
@@ -2914,15 +2933,34 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           }
         : undefined;
 
-    const serializedNativeHandleSlot =
-      success && serializedNativeHandle !== undefined && serializedNativeHandle !== null
-        ? {
-            identityKey,
-            kernelId: identity.selectedKernelId,
-            kernelVersion: identity.selectedKernelVersion,
-            serializedNativeHandle,
-          }
-        : undefined;
+    const hasSnapshot = serializedNativeHandle !== undefined && serializedNativeHandle !== null;
+    if (!success || (!hasSnapshot && serializeNativeHandleSnapshot === undefined)) {
+      return { liveNativeHandleSlot, serializedNativeHandleSlot: undefined };
+    }
+
+    const serializedNativeHandleSlot = {
+      identityKey,
+      kernelId: identity.selectedKernelId,
+      kernelVersion: identity.selectedKernelVersion,
+    } as SerializedNativeHandleSlot;
+    if (hasSnapshot) {
+      serializedNativeHandleSlot.serializedNativeHandle = serializedNativeHandle;
+      return { liveNativeHandleSlot, serializedNativeHandleSlot };
+    }
+    /* Resolved on the first read and remembered, so an export and the reheat that follows it do not
+     * serialise the same shape twice — and so nothing pays on the display path that never reads. */
+    let resolved: { value: unknown } | undefined;
+    Object.defineProperty(serializedNativeHandleSlot, 'serializedNativeHandle', {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        resolved ??= { value: serializeNativeHandleSnapshot!() };
+        return resolved.value;
+      },
+      set: (value: unknown) => {
+        resolved = { value };
+      },
+    });
 
     return { liveNativeHandleSlot, serializedNativeHandleSlot };
   }
@@ -4006,6 +4044,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         identity,
         success: reheatResult.success,
         serializedNativeHandle: reheatResult.success ? reheatResult.serializedNativeHandle : undefined,
+        serializeNativeHandleSnapshot: reheatResult.success ? reheatResult.serializeNativeHandleSnapshot : undefined,
       });
       renderArtifact.liveNativeHandleSlot = slots.liveNativeHandleSlot;
       renderArtifact.serializedNativeHandleSlot = slots.serializedNativeHandleSlot;

@@ -2189,6 +2189,74 @@ describe('native-handle snapshot restoration', () => {
     },
   );
 
+  it('serializes the native handle only when something reads the snapshot', async () => {
+    const serializeNativeHandle = vi.fn(({ nativeHandle }: { nativeHandle: unknown }) => ({
+      label: handleLabel(nativeHandle),
+    }));
+    const definition = createMockKernelDefinition('lazy-snapshot-kernel', {
+      exportFormats: { gltf: { optionsSchema: z.object({}) } },
+      createGeometry: async () => ({
+        geometry: gltfGeometry('display'),
+        nativeHandle: { label: 'live-1' },
+        issues: [] as KernelIssue[],
+      }),
+      exportGeometry: async () => ({
+        success: true,
+        data: [exportFile('model.gltf', bytesFor('export'), 'model/gltf+json')],
+        issues: [],
+      }),
+      serializeNativeHandle,
+    });
+    const worker = await createMultiKernelWorker([{ id: 'lazy-snapshot-kernel', extensions: ['mock'], definition }]);
+
+    try {
+      await worker.createGeometry({ file: createGeometryFile('model.mock'), parameters: {} });
+      // D12: a display render never ships the snapshot, so producing one costs the frame for nothing.
+      expect(serializeNativeHandle).not.toHaveBeenCalled();
+
+      const artifact = (worker as unknown as { currentPublishedRender: MaterializedRender }).currentPublishedRender;
+      expect(artifact.serializedNativeHandleSlot?.serializedNativeHandle).toEqual({ label: 'live-1' });
+      expect(serializeNativeHandle).toHaveBeenCalledOnce();
+      // Memoised: a second reader of the same slot pays nothing.
+      expect(artifact.serializedNativeHandleSlot?.serializedNativeHandle).toEqual({ label: 'live-1' });
+      expect(serializeNativeHandle).toHaveBeenCalledOnce();
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
+  it('resolves no snapshot once the handle it would read is gone', async () => {
+    const serializeNativeHandle = vi.fn(({ nativeHandle }: { nativeHandle: unknown }) => ({
+      label: handleLabel(nativeHandle),
+    }));
+    const definition = createMockKernelDefinition('dangling-snapshot-kernel', {
+      exportFormats: { gltf: { optionsSchema: z.object({}) } },
+      createGeometry: async () => ({
+        geometry: gltfGeometry('display'),
+        nativeHandle: { label: 'live-1' },
+        issues: [] as KernelIssue[],
+      }),
+      serializeNativeHandle,
+    });
+    const worker = await createMultiKernelWorker([
+      { id: 'dangling-snapshot-kernel', extensions: ['mock'], definition },
+    ]);
+
+    try {
+      await worker.createGeometry({ file: createGeometryFile('model.mock'), parameters: {} });
+      const artifact = (worker as unknown as { currentPublishedRender: MaterializedRender }).currentPublishedRender;
+      await worker.cleanup();
+
+      /* Deferring the work means the thunk outlives the handle. Serialising a disposed kernel shape
+       * is a crash, not a missed optimisation, so a dead handle resolves to nothing and the caller
+       * reheats. */
+      expect(artifact.serializedNativeHandleSlot?.serializedNativeHandle).toBeUndefined();
+      expect(serializeNativeHandle).not.toHaveBeenCalled();
+    } finally {
+      await worker.cleanup();
+    }
+  });
+
   it.each(['identityKey', 'kernelId', 'kernelVersion'] as const)(
     'rejects live and serialized slots with a mismatched %s binding',
     async (field) => {

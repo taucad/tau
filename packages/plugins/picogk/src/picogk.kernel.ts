@@ -80,7 +80,7 @@ export const picogkKernel = defineKernel({
 
   async getDependencies({ entryPath }, runtime, context) {
     try {
-      const paths = await context.mirror.sync(runtime.filesystem);
+      const paths = await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
       return {
         resolved: paths.filter((path) => !tauSystemArtifacts.has(path)),
         unresolved: [],
@@ -91,7 +91,7 @@ export const picogkKernel = defineKernel({
   },
 
   async getParameters({ entryPath }, runtime, context) {
-    await context.mirror.sync(runtime.filesystem);
+    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
     try {
       const started = performance.now();
       const analysis = await context.session.request({
@@ -115,7 +115,7 @@ export const picogkKernel = defineKernel({
   },
 
   async createGeometry({ entryPath, parameters }, runtime, context) {
-    await context.mirror.sync(runtime.filesystem);
+    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
     try {
       const started = performance.now();
       const result = await context.session.request({

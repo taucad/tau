@@ -863,6 +863,32 @@ describe('createWorkspaceMirror', () => {
     expect(process.listenerCount('SIGTERM')).toBe(terminateListeners);
   });
 
+  it('takes bytes the runtime already read from its content cache', async () => {
+    const filesystem = createMockFileSystem({ readFileResult: () => new TextEncoder().encode('from disk') });
+    mockListing(
+      filesystem,
+      (directory) => (directory === '' ? ['main.cs', 'notes.md'] : []),
+      () => ({ type: 'file', size: 9, mtimeMs: 0 }),
+    );
+    const mirror = await createWorkspaceMirror({ temporaryPrefix: 'tau-mirror-test-', displayName: 'Test' });
+    roots.push(mirror.rootPath);
+    try {
+      await mirror.sync(
+        filesystem,
+        new Map<string, Uint8Array<ArrayBuffer> | string>([
+          ['main.cs', 'in memory'],
+          // Shorter than the stat says: the cache entry is stale, so the file is read instead.
+          ['notes.md', new Uint8Array(3)],
+        ]),
+      );
+      expect(filesystem.mocks.readFile.mock.calls.map((call) => String(call[0]))).toEqual(['notes.md']);
+      expect(readFileSync(join(mirror.workspacePath, 'main.cs'), 'utf8')).toBe('in memory');
+      expect(readFileSync(join(mirror.workspacePath, 'notes.md'), 'utf8')).toBe('from disk');
+    } finally {
+      await mirror.cleanup();
+    }
+  });
+
   it('rejects case collisions, concurrent changes, depth, and size limits', async () => {
     const collision = createMockFileSystem({ readFileResult: 'x' });
     mockListing(

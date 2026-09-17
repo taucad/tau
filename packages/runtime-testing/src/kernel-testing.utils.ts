@@ -437,7 +437,11 @@ const createMockComputeRuntime = (signal: AbortSignal): KernelComputeCapability 
 export const createMockKernelRuntime = (options?: {
   readonly filesystemOverrides?: MockFileSystemOptions;
   readonly signal?: AbortSignal;
-}): KernelRuntime & { logger: ReturnType<typeof createMockLogger>; filesystem: MockFileSystem } => {
+}): KernelRuntime & {
+  logger: ReturnType<typeof createMockLogger>;
+  filesystem: MockFileSystem;
+  tracer: { startSpan: ReturnType<typeof vi.fn> };
+} => {
   const signal = options?.signal ?? new AbortController().signal;
   return {
     signal,
@@ -456,7 +460,9 @@ export const createMockKernelRuntime = (options?: {
       success: false,
       issues: [{ message: 'Mock executor', code: 'RUNTIME', severity: 'error' }],
     }),
-    tracer: { startSpan: () => ({ end: () => undefined }) },
+    /* A spy, so a kernel's own spans and their end attributes are assertable — which is how a
+     * native kernel's stage timings are checked now that they are attributes rather than a log. */
+    tracer: { startSpan: vi.fn(() => ({ end: vi.fn() })) },
   };
 };
 

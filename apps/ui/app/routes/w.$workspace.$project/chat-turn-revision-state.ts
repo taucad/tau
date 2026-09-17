@@ -86,7 +86,14 @@ export const deriveTurnRevisionState = (facts: TurnRevisionFacts): TurnRevisionS
   if (facts.outcome === 'failed') {
     return { kind: 'notSaved' };
   }
-  if (!facts.isLatestTurn || facts.isSettledWithoutChange) {
+  if (!facts.isLatestTurn) {
+    return hidden;
+  }
+  /* A settlement that names no revision hides the summary only when the turn
+     also ended cleanly. A refused turn settles the same way — abandoned, never
+     confirmed — and hiding it there unmounted the card and left the person
+     reading the *previous* turn's "Rev n saved". */
+  if (facts.isSettledWithoutChange && !facts.hasError) {
     return hidden;
   }
   return deriveUnsettledState(facts);

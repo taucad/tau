@@ -14,6 +14,7 @@ import { NodeFsProviderClient } from '@taucad/filesystem/backend';
 import { acquireNodeAuthorityWriter } from '@taucad/filesystem/backend/node';
 import type { NodeFsWatchEvent } from '@taucad/filesystem/backend/node';
 import { tauRemoteUrl } from '@taucad/revisions';
+import type { RuntimeClient } from '@taucad/runtime/client';
 
 import { startHostDaemon } from '#host-daemon.js';
 import type { HostDaemonEvent } from '#host-daemon.js';
@@ -247,6 +248,20 @@ const isShutdownRuntimeClient = (client: agentTools.HostRuntimeClient): client i
 const requireShutdownRuntimeClient = (client: agentTools.HostRuntimeClient): ShutdownRuntimeClient => {
   if (!isShutdownRuntimeClient(client)) {
     throw new TypeError('Expected the daemon runtime lifecycle handle.');
+  }
+  return client;
+};
+
+type TerminableRuntimeClient = agentTools.HostRuntimeClient & Pick<RuntimeClient, 'lifecycleState' | 'terminate'>;
+
+/** Whether the tool-facing projection retains the client's own termination state. */
+const isTerminableRuntimeClient = (client: agentTools.HostRuntimeClient): client is TerminableRuntimeClient =>
+  'terminate' in client && typeof client.terminate === 'function';
+
+/** Narrow the tool-facing runtime projection back to the client's own termination state. */
+const requireTerminableRuntimeClient = (client: agentTools.HostRuntimeClient): TerminableRuntimeClient => {
+  if (!isTerminableRuntimeClient(client)) {
+    throw new TypeError('Expected the daemon runtime client.');
   }
   return client;
 };
@@ -722,6 +737,38 @@ describe('startHostDaemon', () => {
       await expect(provider.readFile('during-runtime-close.txt', 'utf8')).rejects.toBeInstanceOf(Error);
     } finally {
       allowShutdown.resolve();
+      await daemon.close();
+    }
+  }, 20_000);
+
+  it('should reconnect the agent runtime after its socket closes while the child lives', async () => {
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'tau-host-daemon-runtime-reconnect-'));
+    process.env['TAU_CONFIG_DIR'] = temporaryDirectory;
+    process.chdir(fileURLToPath(new URL('../../..', import.meta.url)));
+    const relay = await startRelay();
+    registrySpy.mockClear();
+    const daemon = await startPairedAgentDaemon(temporaryDirectory, relay, []);
+    await daemon.ready;
+
+    const runtimeClient = registrySpy.mock.lastCall?.[0]?.runtimeClient;
+    if (!runtimeClient) {
+      throw new TypeError('Expected the daemon to build its tool registry over a runtime client.');
+    }
+    const root = join(temporaryDirectory, 'workspace');
+    try {
+      const client = requireTerminableRuntimeClient(await runtimeClient(root));
+      expect(await runtimeClient(root)).toBe(client);
+
+      /* A dropped web socket with the child still alive terminates the client
+       * and evicts nothing: `agentRuntimes` is cleared only on a child exit or
+       * on the last candidate delete, so every later tool call would be handed
+       * this same dead client. */
+      client.terminate();
+      const replacement = requireTerminableRuntimeClient(await runtimeClient(root));
+
+      expect(replacement).not.toBe(client);
+      expect(replacement.lifecycleState).not.toBe('terminated');
+    } finally {
       await daemon.close();
     }
   }, 20_000);

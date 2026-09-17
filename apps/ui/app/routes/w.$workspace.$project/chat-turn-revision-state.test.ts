@@ -79,6 +79,19 @@ describe('deriveTurnRevisionState', () => {
     });
   });
 
+  /*
+   * A refused turn settles as `turn.finalized` with no changed paths, which is
+   * abandonment, not confirmation: the run failed before it could write. Hiding
+   * the marker there unmounted the card and left the person reading the
+   * *previous* turn's "Rev 1 saved".
+   */
+  it('should say Save not confirmed when a failed turn settles without a change', () => {
+    const state = deriveTurnRevisionState(
+      facts({ isSettledWithoutChange: true, hasError: true, runState: 'failed', base: { kind: 'revision', n: 1 } }),
+    );
+    expect(turnRevisionLabel(state, 0)).toBe('Save not confirmed');
+  });
+
   it('should hold the last known state while reconnecting or retrying', () => {
     const previous = { kind: 'saving' } as const;
     expect(deriveTurnRevisionState(facts({ runState: 'reconnecting', previous }))).toBe(previous);

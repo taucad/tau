@@ -1212,7 +1212,17 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         return;
       }
       record.messages.set(partial, messageId);
-      const assistant = piMessageToProvider(partial, record.messages);
+      const provider = piMessageToProvider(partial, record.messages);
+      /* The block has not ended yet: a checkpoint row lets its live end (or the
+       * message end's final row) close it, so the end time survives and a
+       * reattach keeps later text (chat activity indicator closeout R9). */
+      const assistant: ProviderMessage = {
+        ...provider,
+        metadata: {
+          ...provider.metadata,
+          tauInternal: { kind: 'stream-checkpoint', ...provider.metadata?.tauInternal, streamState: 'checkpoint' },
+        },
+      };
       await record.append(
         committedMessageIds.has(messageId)
           ? { type: 'message.envelope-replaced', messageId, replacement: assistant }

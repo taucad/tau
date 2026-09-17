@@ -10,6 +10,7 @@ import { cn } from '@taucad/ui/utils/cn';
 import type {
   MetalMorphFrameCapture,
   MetalMorphLoaderController,
+  MetalMorphLoaderQuality,
   MetalMorphLoaderStatistics,
   MetalMorphSequenceState,
 } from '#components/geometry/loader/metal-morph-controller.js';
@@ -27,6 +28,39 @@ const MetalMorphLoaderLazy = lazy(async () => {
 });
 
 type PlaybackSpeed = '0.5' | '1' | '1.5';
+
+type QualityTier = Readonly<{
+  id: MetalMorphLoaderQuality;
+  label: string;
+  /** What the tier spends its budget on, for the caption under each column. */
+  detail: string;
+}>;
+
+const qualityTiers: readonly QualityTier[] = [
+  {
+    id: 'inline',
+    label: 'Inline',
+    detail: '2,562 vertices · 64 px environment · interpolated normals · no ripple detail · 30 fps cap',
+  },
+  {
+    id: 'balanced',
+    label: 'Balanced',
+    detail: '10,242 vertices · 128 px environment · exact ridge normals · ripple detail · no bloom',
+  },
+  {
+    id: 'high',
+    label: 'High',
+    detail: '10,242 vertices · 256 px environment · exact ridge normals · ripple detail · bloom · thin film',
+  },
+];
+
+/** Side length, in pixels, of the spinner beside each tier's stage; the size a chat row would use. */
+const comparisonSpinnerLabel = '96 px spinner';
+/** Seeded walk that visits all five forms across five transitions and returns to the cube it started on. */
+const comparisonSeed = 17;
+const comparisonInitialShape: MetalMorphShapeId = 'cube';
+/** One stage and one spinner per tier; the comparison only starts once every surface has its first frame. */
+const comparisonSurfaceCount = qualityTiers.length * 2;
 
 type MetalMorphDebugBridge = Readonly<{
   getState: () => MetalMorphSequenceState & MetalMorphLoaderStatistics & { readonly status: MetalMorphLoaderStatus };
@@ -90,6 +124,8 @@ export default function LoaderShowcase(): React.JSX.Element {
   const [isPaused, setIsPaused] = useState(false);
   const [speed, setSpeed] = useState<PlaybackSpeed>('1');
   const [isInlineSizesVisible, setIsInlineSizesVisible] = useState(false);
+  const [isComparisonVisible, setIsComparisonVisible] = useState(false);
+  const [readyComparisonSurfaces, setReadyComparisonSurfaces] = useState(0);
 
   const handleReady = useCallback((ready: MetalMorphLoaderController): void => {
     setController(ready);
@@ -105,6 +141,15 @@ export default function LoaderShowcase(): React.JSX.Element {
 
   const togglePaused = useCallback((): void => {
     setIsPaused((previous) => !previous);
+  }, []);
+
+  const handleComparisonToggle = useCallback((checked: boolean): void => {
+    setReadyComparisonSurfaces(0);
+    setIsComparisonVisible(checked);
+  }, []);
+
+  const handleComparisonSurfaceReady = useCallback((): void => {
+    setReadyComparisonSurfaces((count) => count + 1);
   }, []);
 
   useEffect(() => {
@@ -135,6 +180,7 @@ export default function LoaderShowcase(): React.JSX.Element {
   }, [controller, isTauDebugEnabled, status]);
 
   const currentShape = sequence?.currentShape;
+  const isComparisonRunning = readyComparisonSurfaces >= comparisonSurfaceCount;
   // Ordinals are absolute positions in the loop, so keys stay stable when the bounded history shifts.
   const historyEntries = useMemo(() => {
     if (!sequence) {
@@ -319,6 +365,59 @@ export default function LoaderShowcase(): React.JSX.Element {
           </section>
         </aside>
       </div>
+
+      <section aria-labelledby='fidelity-heading' className='space-y-3'>
+        <SectionHeading id='fidelity-heading'>Fidelity</SectionHeading>
+        <p className='max-w-[80ch] text-sm text-muted-foreground'>
+          The three cost tiers side by side, each running the same seeded walk through all five forms. Every surface
+          waits until the last one has its first frame, so the columns stay in step and the only difference you see is
+          the tier. Each column pairs a hero-size stage with the {comparisonSpinnerLabel} a chat row would use.
+        </p>
+        <div className='flex items-center gap-3'>
+          <Switch id='fidelity-compare' checked={isComparisonVisible} onCheckedChange={handleComparisonToggle} />
+          <Label htmlFor='fidelity-compare'>Compare inline, balanced and high</Label>
+        </div>
+        {isComparisonVisible ? (
+          <div className='grid gap-6 sm:grid-cols-3'>
+            {qualityTiers.map((tier) => (
+              <figure key={tier.id} className='space-y-3'>
+                <div className='relative aspect-square w-full overflow-hidden rounded-2xl border bg-muted/40'>
+                  <Suspense fallback={<StageSkeleton />}>
+                    <MetalMorphLoaderLazy
+                      className='size-full'
+                      semantic='img'
+                      label={`${tier.label} fidelity stage`}
+                      quality={tier.id}
+                      seed={comparisonSeed}
+                      initialShape={comparisonInitialShape}
+                      isPaused={!isComparisonRunning}
+                      onReady={handleComparisonSurfaceReady}
+                    />
+                  </Suspense>
+                </div>
+                <div className='flex items-center gap-3'>
+                  <Suspense fallback={<Loader className='size-6 text-muted-foreground' />}>
+                    <MetalMorphLoaderLazy
+                      className='size-24 shrink-0'
+                      semantic='img'
+                      label={`${tier.label} fidelity spinner`}
+                      quality={tier.id}
+                      seed={comparisonSeed}
+                      initialShape={comparisonInitialShape}
+                      isPaused={!isComparisonRunning}
+                      onReady={handleComparisonSurfaceReady}
+                    />
+                  </Suspense>
+                  <figcaption className='space-y-1'>
+                    <span className='block text-sm font-medium'>{tier.label}</span>
+                    <span className='block text-xs text-muted-foreground'>{tier.detail}</span>
+                  </figcaption>
+                </div>
+              </figure>
+            ))}
+          </div>
+        ) : null}
+      </section>
 
       <section aria-labelledby='usage-heading' className='space-y-3'>
         <SectionHeading id='usage-heading'>Usage</SectionHeading>

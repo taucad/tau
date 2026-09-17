@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
+import { installBillingProtections } from '#database/billing-protections.js';
 
 /** Drizzle's generated journal; `when` is the millisecond stamp the migrator stores as `created_at`. */
 type MigrationJournal = { entries: Array<{ readonly tag: string; readonly when: number }> };
@@ -91,15 +92,20 @@ export async function installApiRuntimeRole(client: postgres.Sql): Promise<void>
     await transaction`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO tau_api_runtime`;
     await transaction`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO tau_api_runtime`;
     await transaction`REVOKE ALL ON public.subscription, public.subscription_extension FROM tau_api_runtime`;
+    // Every replica proves schema compatibility at boot by reading the migrator's bookkeeping table.
+    await transaction`GRANT USAGE ON SCHEMA drizzle TO tau_api_runtime`;
+    await transaction`GRANT SELECT ON drizzle.__drizzle_migrations TO tau_api_runtime`;
   });
 }
 
 /**
  * Protected one-shot migration job: the only identity permitted to run DDL.
  *
- * Runs on its own `max: 1` connection under the migration identity, then refreshes the
- * runtime role grants (`GRANT … ON ALL TABLES` is a snapshot, so new tables need this
- * after every migration) and proves the result matches the build's journal head.
+ * Runs on its own `max: 1` connection under the migration identity, then reinstalls the
+ * billing protections and refreshes the runtime role grants (`GRANT … ON ALL TABLES` is a
+ * snapshot and the trigger list is explicit, so new tables need both after every migration)
+ * and proves the result matches the build's journal head. This is the release command, so a
+ * fresh database is never left without its financial triggers or runtime roles.
  * Re-running it applies nothing: the migrator's own bookkeeping table is the fence.
  */
 export async function runMigrationJob(databaseUrl: string): Promise<{ applied: number; head: MigrationHead }> {
@@ -113,6 +119,7 @@ export async function runMigrationJob(databaseUrl: string): Promise<{ applied: n
   try {
     const before = await readAppliedMigrations(client);
     await migrate(drizzle(client), { migrationsFolder });
+    await installBillingProtections(client);
     await installApiRuntimeRole(client);
     await assertSchemaCompatibility(client);
     const after = await readAppliedMigrations(client);

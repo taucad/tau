@@ -101,7 +101,6 @@ beforeEach(() => {
 describe('buildAgentProjection', () => {
   it('projects live focus, model/provider, the default branch, and running state', () => {
     const source = chat('chat-focused', 100, [message('turn-1', 200)]);
-    source.hasUnreadTurn = true;
     const session = buildSession({
       chatEntity: source,
       events: [{ type: 'runLifecycle', phase: 'running' }],
@@ -219,6 +218,17 @@ describe('buildAgentProjection', () => {
     });
     expect(parkedProjection).toMatchObject({ state: 'idle', pendingApprovalCount: 0 });
     expect(parkedProjection).not.toHaveProperty('detail');
+  });
+
+  /* W8 (D9, I26): the chat row is no source of unread. A legacy chat whose
+   * record still carries `hasUnreadTurn` reads unread only when its machine —
+   * restored from the unread record — says so. */
+  it('ignores a legacy hasUnreadTurn on the chat row', () => {
+    const legacy = Object.assign(chat('chat-legacy', 100), { hasUnreadTurn: true });
+
+    expect(buildAgentProjection({ chat: legacy, defaultModel, resolveModel, defaultWorkspace: 'tau' })).toMatchObject({
+      unread: false,
+    });
   });
 
   it('orders attention and active work ahead of errors and idle agents', () => {

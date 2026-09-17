@@ -119,31 +119,41 @@ describe('reasoningDurationMs', () => {
 });
 
 describe('ChatMessageReasoning', () => {
-  it('renders adjacent chunks as one direct, normal-weight italic reasoning body', () => {
+  it('keeps the thought trigger above one normal-weight italic reasoning body', () => {
     renderReasoning([reasoning('First summary'), reasoning('**Confirming completion**')]);
-    const body = screen.getByRole('group', { name: 'Collapse thought' });
 
+    const trigger = screen.getByRole('button', { name: 'Thought briefly' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(trigger).not.toHaveClass('italic');
+    expect(trigger.querySelector('.lucide-thought-bubble')).toHaveClass('size-3', 'shrink-0');
+    expect(trigger.querySelector('.lucide-chevron-right')).toHaveClass('opacity-0');
+
+    const body = screen.getByRole('region', { name: 'Thought briefly details' });
+    expect(body).toHaveClass('reasoning-body', 'font-normal', 'italic');
+    expect(body.className).toContain('[&_*]:font-normal');
+    expect(body.querySelector('.lucide-thought-bubble')).toBeNull();
     expect(screen.getAllByTestId('reasoning-markdown')).toHaveLength(2);
-    const reasoningBody = body.closest('.reasoning-body');
-    expect(reasoningBody).toHaveClass('reasoning-body', 'font-normal', 'italic');
-    expect(reasoningBody?.className).toContain('[&_*]:font-normal');
-    expect(body.querySelector('.lucide-thought-bubble')).toHaveClass('size-3', 'shrink-0');
-    expect(screen.getByRole('button', { name: 'Collapse thought' })).toHaveClass('opacity-0');
     expect(screen.queryByText(/Reasoning|Thinking/u)).not.toBeInTheDocument();
   });
 
-  it('collapses the whole body to the union duration and restores trigger focus', async () => {
+  it('toggles only from the trigger and reports the union duration', async () => {
     const user = userEvent.setup();
     renderReasoning([reasoning('One', { start: 0, end: 1000 }), reasoning('Two', { start: 3000, end: 5000 })]);
-    const focus = vi.spyOn(HTMLElement.prototype, 'focus');
-
-    await user.click(screen.getByRole('group', { name: 'Collapse thought' }));
-
     const trigger = screen.getByRole('button', { name: 'Thought for 3 seconds' });
+
+    await user.click(screen.getByText('One'));
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+
+    await user.click(trigger);
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
-    expect(trigger).toHaveFocus();
-    expect(focus).toHaveBeenLastCalledWith({ focusVisible: false });
     expect(screen.queryByText('One')).not.toBeInTheDocument();
+
+    trigger.focus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByText('One')).toBeInTheDocument();
+    await user.keyboard(' ');
+    expect(screen.queryByText('One')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 
   it('uses Thought briefly when complete interval evidence is unavailable', () => {
@@ -152,37 +162,14 @@ describe('ChatMessageReasoning', () => {
     const trigger = screen.getByRole('button', { name: 'Thought briefly' });
     expect(trigger).toHaveAttribute('aria-expanded', 'false');
     expect(trigger).toHaveClass('text-xs', 'gap-1.5');
-    expect(trigger).not.toHaveClass('italic');
-    expect(trigger.querySelector('.lucide-thought-bubble')).toHaveClass('size-3', 'shrink-0');
-    expect(trigger.querySelector('.lucide-chevron-right')).toHaveClass('opacity-0');
   });
 
-  it('lets links and text selection work without collapsing reasoning', async () => {
+  it('lets links inside the body work without collapsing reasoning', async () => {
     const user = userEvent.setup();
     renderReasoning([reasoning('[docs](https://example.com)')]);
 
     await user.click(screen.getByRole('link', { name: 'docs' }));
-    expect(screen.getByRole('group', { name: 'Collapse thought' })).toBeInTheDocument();
-
-    vi.spyOn(globalThis, 'getSelection').mockReturnValue({ toString: () => 'selected text' } as Selection);
-    await user.click(screen.getByRole('group', { name: 'Collapse thought' }));
-    expect(screen.getByRole('group', { name: 'Collapse thought' })).toBeInTheDocument();
-  });
-
-  it('collapses from Enter and Space on the reasoning body', async () => {
-    const user = userEvent.setup();
-    const first = renderReasoning([reasoning('Keyboard')]);
-    screen.getByRole('button', { name: 'Collapse thought' }).focus();
-    await user.keyboard('{Enter}');
-    expect(screen.getByRole('button', { name: 'Thought briefly' })).toBeInTheDocument();
-    first.unmount();
-
-    renderReasoning([reasoning('Keyboard')]);
-    screen.getByRole('button', { name: 'Collapse thought' }).focus();
-    const focus = vi.spyOn(HTMLElement.prototype, 'focus');
-    await user.keyboard(' ');
-    expect(screen.getByRole('button', { name: 'Thought briefly' })).toHaveFocus();
-    expect(focus).toHaveBeenLastCalledWith({ focusVisible: true });
+    expect(screen.getByRole('button', { name: 'Thought briefly' })).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('preserves an explicit collapse while the active sequence receives another chunk', async () => {
@@ -190,7 +177,7 @@ describe('ChatMessageReasoning', () => {
     const first = reasoning('First', { state: 'streaming' });
     const { rerender } = renderReasoning([first], { active: true });
 
-    await user.click(screen.getByRole('group', { name: 'Collapse thought' }));
+    await user.click(screen.getByRole('button', { name: 'Thought briefly' }));
     rerender(
       <ChatMessageReasoning
         parts={[first, reasoning('Second', { state: 'streaming' })]}
@@ -209,7 +196,7 @@ describe('ChatMessageReasoning', () => {
     active.unmount();
 
     const completed = renderReasoning([reasoning('Done')], { hasContent: true });
-    expect(screen.getByRole('button', { name: 'Thought briefly' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Thought briefly' })).toHaveAttribute('aria-expanded', 'false');
     completed.unmount();
 
     const blank = renderReasoning([reasoning('  ')]);

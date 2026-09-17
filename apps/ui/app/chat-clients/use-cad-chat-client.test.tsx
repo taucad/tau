@@ -4,6 +4,7 @@ import { renderHook, act, waitFor } from '@testing-library/react';
 import { mock } from 'vitest-mock-extended';
 import type { Chat } from '@ai-sdk/react';
 import type { CadAgentConfigInput, CadAgentExecution, MyUIMessage } from '@taucad/chat';
+import { attachmentUrl } from '#utils/attachment.utils.js';
 import { useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
 import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
@@ -220,6 +221,9 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
   }),
 }));
 
+const toastHarness = vi.hoisted(() => ({ error: vi.fn() }));
+vi.mock('sonner', () => ({ toast: toastHarness }));
+
 const useCadAgentConfigMock = vi.mocked(useCadAgentConfig);
 const useActiveChatInstanceMock = vi.mocked(useActiveChatInstance);
 const useChatActionsMock = vi.mocked(useChatActions);
@@ -280,6 +284,11 @@ const installSessionStore = (partial: Partial<ChatSessionStore>): void => {
 
 /** The store's host-log reattach, re-armed per test. */
 let reattachHostChat = vi.fn();
+/** The store's draft-attachment promotion, re-armed per test. */
+let promoteDraftAttachments = vi.fn<ChatSessionStore['promoteDraftAttachments']>();
+
+const imageAttachment = { hash: 'a'.repeat(64), mediaType: 'image/png', byteLength: 11 };
+const pdfAttachment = { hash: 'b'.repeat(64), mediaType: 'application/pdf', filename: 'bracket-spec.pdf' };
 
 const installActiveSession = (activeChatId: string): void => {
   vi.mocked(useActiveChatSession).mockReturnValue({
@@ -332,7 +341,9 @@ beforeEach(() => {
   installActiveSession('chat_test');
   persistedErrors.length = 0;
   reattachHostChat = vi.fn();
+  promoteDraftAttachments = vi.fn(async () => undefined);
   installSessionStore({
+    promoteDraftAttachments,
     setLatestAgentBody: vi.fn(),
     startRun: vi.fn((_chatId: string, body: Readonly<Record<string, unknown>>) => body),
     endRun: vi.fn(),
@@ -599,6 +610,40 @@ describe('useCadChatClient', () => {
       expect(actions.retryMessage).toHaveBeenCalled();
     });
     expect(creditPreflightHarness.calls).toEqual([['openai-gpt-retry', 'GPT Retry']]);
+  });
+
+  it('should refuse a retry on a model that cannot read a PDF earlier in the history (G5)', () => {
+    const messages: MyUIMessage[] = [
+      {
+        id: 'msg_user',
+        role: 'user',
+        parts: [
+          {
+            type: 'file',
+            mediaType: 'application/pdf',
+            filename: 'bracket-spec.pdf',
+            url: attachmentUrl(pdfAttachment),
+          },
+          { type: 'text', text: 'Read the spec.' },
+        ],
+      },
+      { id: 'msg_assistant', role: 'assistant', parts: [{ type: 'text', text: 'Done.' }] },
+    ];
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => messages });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    const actions = buildActions();
+    installActions(actions);
+
+    const { result } = renderHook(() => useCadChatClient());
+    act(() => {
+      result.current.retry('msg_assistant', 'openai-gpt-retry');
+    });
+
+    expect(actions.retryMessage).not.toHaveBeenCalled();
+    expect(persistedErrors).toEqual([
+      expect.objectContaining({ message: "GPT Retry can't read PDFs. Remove the PDF or pick another model." }),
+    ]);
   });
 
   it('places an external-agent turn on its daemon, naming the agent and no Tau model', async () => {
@@ -928,6 +973,74 @@ describe('useCadChatClient', () => {
     expect(options).toEqual({ body: expectRunBody() });
   });
 
+  it('should promote draft attachments into the chat before sending a message that references them', async () => {
+    useActiveChatInstanceMock.mockReturnValue(mock<Chat<MyUIMessage>>());
+    const actions = buildActions();
+    installActions(actions);
+    const { result } = renderHook(() => useCadChatClient());
+
+    act(() => {
+      result.current.submit({ text: 'look at this', attachments: [imageAttachment] });
+    });
+
+    await waitFor(() => {
+      expect(actions.sendMessage).toHaveBeenCalledTimes(1);
+    });
+    expect(promoteDraftAttachments).toHaveBeenCalledWith('chat_test', [imageAttachment]);
+    expect(promoteDraftAttachments.mock.invocationCallOrder[0]).toBeLessThan(
+      actions.sendMessage.mock.invocationCallOrder[0]!,
+    );
+    const [sentMessage] = actions.sendMessage.mock.calls[0]! as [MyUIMessage];
+    expect(sentMessage.parts).toEqual([
+      {
+        type: 'file',
+        mediaType: 'image/png',
+        url: `attachments/${imageAttachment.hash}.png`,
+        providerMetadata: { common: { byteLength: 11 } },
+      },
+      { type: 'text', text: 'look at this' },
+    ]);
+  });
+
+  it('should send nothing and toast once when an attachment cannot be promoted', async () => {
+    useActiveChatInstanceMock.mockReturnValue(mock<Chat<MyUIMessage>>());
+    const actions = buildActions();
+    installActions(actions);
+    promoteDraftAttachments.mockRejectedValue(new Error('Attachment is missing; nothing was copied.'));
+    const { result } = renderHook(() => useCadChatClient());
+
+    act(() => {
+      result.current.submit({ text: 'look at this', attachments: [imageAttachment] });
+    });
+
+    await waitFor(() => {
+      expect(toastHarness.error).toHaveBeenCalledOnce();
+    });
+    expect(toastHarness.error).toHaveBeenCalledWith(expect.stringMatching(/wasn't sent/u), {
+      id: 'chat-attachment-promotion',
+    });
+    expect(actions.sendMessage).not.toHaveBeenCalled();
+    // Nothing is admitted for a turn that never sends.
+    expect(workspaceHarness.prepare).not.toHaveBeenCalled();
+  });
+
+  it('should refuse a PDF the selected model cannot read, naming the model, before promoting anything', () => {
+    useActiveChatInstanceMock.mockReturnValue(mock<Chat<MyUIMessage>>());
+    const actions = buildActions();
+    installActions(actions);
+    const { result } = renderHook(() => useCadChatClient());
+
+    act(() => {
+      result.current.submit({ text: 'read the spec', attachments: [pdfAttachment] });
+    });
+
+    expect(promoteDraftAttachments).not.toHaveBeenCalled();
+    expect(actions.sendMessage).not.toHaveBeenCalled();
+    expect(persistedErrors).toEqual([
+      expect.objectContaining({ message: "GPT 5.5 can't read PDFs. Remove the PDF or pick another model." }),
+    ]);
+  });
+
   it.each(['submitted', 'streaming'] as const)(
     'should ignore submit/edit/retry/regenerate while a %s request is in flight',
     (status) => {
@@ -1082,14 +1195,16 @@ describe('useCadChatClient', () => {
     const { result } = renderHook(() => useCadChatClient());
 
     act(() => {
-      result.current.edit('msg_99', { text: 'edited content', imageUrls: ['data:image/png;base64,AAA'] });
+      result.current.edit('msg_99', { text: 'edited content', attachments: [imageAttachment] });
     });
 
     await waitFor(() => {
       expect(actions.editMessage).toHaveBeenCalledTimes(1);
     });
+    // Rewritten for W7: an edit carries attachment references, promoted into the chat first.
+    expect(promoteDraftAttachments).toHaveBeenCalledWith('chat_test', [imageAttachment]);
     expect(actions.editMessage).toHaveBeenCalledWith('msg_99', 'edited content', {
-      imageUrls: ['data:image/png;base64,AAA'],
+      attachments: [imageAttachment],
       body: expectRunBody(),
     });
   });

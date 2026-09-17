@@ -1,11 +1,9 @@
 import { NavLink } from 'react-router';
 import { NewProjectChatComposer } from '#components/chat/new-project-chat-composer.js';
-import { KernelSelector } from '#components/chat/kernel-selector.js';
 import { HomeNewProjectComposerProvider } from '#hooks/active-chat-provider.js';
 import { Separator } from '@taucad/ui/components/separator';
 import { InteractiveHoverButton } from '#components/magicui/interactive-hover-button.js';
 import { Loader } from '#components/ui/loader.js';
-import { useKernel } from '#hooks/use-kernel.js';
 
 /**
  * The homepage chat hero: "What can I help you build?" over the real chat
@@ -14,8 +12,6 @@ import { useKernel } from '#hooks/use-kernel.js';
  * both of which start new projects from the same persistent homepage draft.
  */
 export function HomepageChatHero(): React.JSX.Element {
-  const { kernel, setKernel } = useKernel();
-
   return (
     <div className='container mx-auto px-4 py-6 pb-12 md:px-6 md:pt-32'>
       <div className='mx-auto max-w-3xl space-y-6 md:space-y-8'>
@@ -25,18 +21,7 @@ export function HomepageChatHero(): React.JSX.Element {
           </h1>
         </div>
 
-        <HomeNewProjectComposerProvider
-          fallback={
-            <div className='space-y-4'>
-              <div className='flex justify-center'>
-                <KernelSelector selectedKernel={kernel} onKernelChange={setKernel} />
-              </div>
-              <div className='flex justify-center py-6'>
-                <Loader />
-              </div>
-            </div>
-          }
-        >
+        <HomeNewProjectComposerProvider>
           <NewProjectChatComposer />
         </HomeNewProjectComposerProvider>
         <div className='mx-auto my-6 flex w-20 items-center justify-center'>

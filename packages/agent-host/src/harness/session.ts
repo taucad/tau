@@ -1142,7 +1142,8 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         );
       });
       if (!completed) {
-        const recovered = await options.modelTransport.lookupAttempt?.(prepared.attemptId, signal);
+        const transport = options.modelTransport;
+        const recovered = await transport.lookupAttempt?.(prepared.attemptId, signal);
         if (recovered && !bound) {
           await record.append({
             type: 'model.invocation-bound',
@@ -1151,7 +1152,12 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
             status: recovered.status,
           });
         }
-        throw new Error(`Model invocation ${prepared.attemptId} has no durable result; it will not be sent again.`);
+        // The owner-scoped ledger has no operation for an unbound attempt only when admission refused it
+        // (for example a 402 before a top-up), so nothing was charged and a fresh attempt is safe.
+        const refused = transport.lookupAttempt !== undefined && recovered === undefined && !bound;
+        if (!refused) {
+          throw new Error(`Model invocation ${prepared.attemptId} has no durable result; it will not be sent again.`);
+        }
       }
     }
     const attemptId = createId();

@@ -1,5 +1,6 @@
 import type { InputCountCapability } from '#api/billing/billable-model-input-count.js';
-import { BadRequestException } from '@nestjs/common';
+import { HttpStatus } from '@nestjs/common';
+import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import { validateAnthropicHeaders } from '#api/llm/llm-gateway.headers.js';
 import { qualifiedMeterContracts } from '#api/billing/billing-policy.js';
 import { maximumMeterCharge } from '#api/billing/billable-model-bound.js';
@@ -425,6 +426,10 @@ const admittedAnthropicBeta = (value: string): string | undefined => {
   }
 };
 
+/** A client-fault refusal in the gateway's typed envelope. */
+const invalidRequest = (message: string): LlmGatewayError =>
+  new LlmGatewayError(HttpStatus.BAD_REQUEST, 'INVALID_REQUEST', message);
+
 /**
  * Admit the provider headers the funded contract forwards.
  *
@@ -448,7 +453,7 @@ const admitPriceHeaders = (
       admitted = admittedAnthropicBeta(value);
     }
     if (admitted === undefined) {
-      throw new BadRequestException('Provider header is outside the funded request contract');
+      throw invalidRequest('Provider header is outside the funded request contract');
     }
     transportHeaders[normalizedName] = admitted;
   }
@@ -463,17 +468,21 @@ export class CodeOwnedBillableModelQualificationResolver implements BillableMode
     const transportHeaders = admitPriceHeaders(intent);
     const parsed = safeParseBillableModelRequest(intent.body, intent.providerWire);
     if (!parsed.success) {
-      throw new BadRequestException('Model request is outside the funded request contract');
+      throw invalidRequest('Model request is outside the funded request contract');
     }
     const selected = routeById.get(parsed.data.model);
     if (!selected || selected.wire !== intent.providerWire) {
-      throw new BadRequestException('Model route is not qualified');
+      throw new LlmGatewayError(HttpStatus.BAD_REQUEST, 'MODEL_NOT_IN_CATALOG', 'Model route is not qualified');
     }
     if (!selected.rates) {
-      throw new BadRequestException(`Model route is temporarily unavailable: ${selected.temporaryUnavailableReason}`);
+      throw new LlmGatewayError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        'PROVIDER_UNAVAILABLE',
+        `Model route is temporarily unavailable: ${selected.temporaryUnavailableReason}`,
+      );
     }
     if (selected.allowsImage === false && billableModelRequestContainsImage(parsed.data)) {
-      throw new BadRequestException('Images are not qualified for this model route');
+      throw invalidRequest('Images are not qualified for this model route');
     }
     const maximumOutput = billableModelOutputMaximum(parsed.data);
     if (
@@ -481,11 +490,11 @@ export class CodeOwnedBillableModelQualificationResolver implements BillableMode
       parsed.data[selected.outputParameter] === undefined ||
       maximumOutput > selected.outputMaximum
     ) {
-      throw new BadRequestException('Exactly one bounded output-token maximum is required');
+      throw invalidRequest('Exactly one bounded output-token maximum is required');
     }
     const contextBound = (selected.combinedMaximum ?? selected.contextMaximum) - maximumOutput;
     if (contextBound < 0n) {
-      throw new BadRequestException('Output maximum exceeds the provider context');
+      throw invalidRequest('Output maximum exceeds the provider context');
     }
     /* The request's own bound, falling closed onto the provider context whenever an
      * element carries no documented token bound. */
@@ -516,11 +525,16 @@ export class CodeOwnedBillableModelQualificationResolver implements BillableMode
     const adapter = this.dependencies.adapters.get(selected.routeId);
     const credentialAccount = this.dependencies.credentialAccounts.get(selected.providerId);
     if (!adapter || !credentialAccount) {
-      throw new BadRequestException('Model route runtime is unavailable');
+      // Deployment fault, not a client one: the caller may retry once the provider is configured.
+      throw new LlmGatewayError(
+        HttpStatus.SERVICE_UNAVAILABLE,
+        'PROVIDER_UNAVAILABLE',
+        'The model provider is unavailable.',
+      );
     }
     const selectedCount = this.dependencies.inputCounters?.has(selected.routeId) ?? false;
     if (selectedCount && selected.providerId !== 'openai') {
-      throw new BadRequestException('Exact input counting is not qualified for this route');
+      throw invalidRequest('Exact input counting is not qualified for this route');
     }
     const contractId = contractRouteId(selected.routeId, pinned.longContext);
     const meterContractId = `model-meter-v1:${contractId}`;

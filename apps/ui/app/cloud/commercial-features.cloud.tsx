@@ -18,6 +18,8 @@ export const useCommercialFeatures = (): {
   /** Whether this plan may connect a Git remote (N4). */
   readonly canConnectGitHub: boolean;
   readonly hasNoTrainGuarantee: boolean;
+  /** False until the plan is known; upgrade prompts stay hidden so a Pro customer is never asked to buy Pro. */
+  readonly isResolved: boolean;
   readonly requestUpgrade: () => void;
 } => {
   const entitlements = useEntitlements();
@@ -27,6 +29,7 @@ export const useCommercialFeatures = (): {
     canSyncFiles: entitlements.canSyncFiles,
     canConnectGitHub: entitlements.canConnectGitHub,
     hasNoTrainGuarantee: entitlements.tier !== 'free',
+    isResolved: entitlements.isResolved,
     requestUpgrade: useCallback(() => {
       openSettings('billing');
     }, [openSettings]),

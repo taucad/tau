@@ -3,7 +3,7 @@ title: 'Revisions Policy'
 description: 'Rules for revision identity, checkouts, RevisionPort parity, actor composition, sync, records, remotes, refusal classification, latency budgets, conflicts, publication, and project liveness.'
 status: active
 created: '2026-09-14'
-updated: '2026-09-16'
+updated: '2026-09-17'
 related:
   - docs/research/revisions-sync-closeout-blueprint.md
   - docs/architecture/workspace-filesystem-and-revisions.md
@@ -206,7 +206,7 @@ Create backups through bounded storage operations. Stream large bundles as check
 
 ### 12. Carry chats on record refs
 
-Store the readable checkout projection at `.tau/chats/<chatId>/chat.json` plus `events/<deviceId>.jsonl`; derive messages from the log. Store `refs/tau/chats/<chatId>` as an orphan-parented chain whose trees carry the chat record and per-device segments. Write local chat records and refs through protected host writers and revision object plumbing. When materializing records received from a remote, only the fetch path writes the checkout projection through the host-owned record authority.
+Store the readable checkout projection at `.tau/chats/<chatId>/chat.json` plus `events/<deviceId>.jsonl` and sent attachments at `attachments/<64 hex>.<jpg|png|webp|gif|pdf>`; derive messages from the log. Store `refs/tau/chats/<chatId>` as an orphan-parented chain whose closed trees carry exactly the chat record, per-device segments and those content-addressed attachment blobs (`assertChatTree` in `packages/revisions/src/chat-ref.ts` refuses any other entry). Record a chat ref with `WriteRevisionInput.largeObjects: false`: its tree is stored verbatim as plain blobs and never cleaned into LFS pointers, because a closed tree cannot carry the `.gitattributes` a pointer needs and attachments are capped (4 MiB images, 20 MiB PDFs) where plain git carries them on any remote. Every other writer keeps the default `true`. Write local chat records and refs through protected host writers and revision object plumbing. When materializing records received from a remote, only the fetch path writes the checkout projection through the host-owned record authority.
 
 Validate a complete fetched chat tree before writing any record. Admit the chat metadata and foreign per-device segments only; never overwrite the local root append log, this device's segment, or newer local metadata. Combine stale-parent record refs without projecting their old bytes back onto the checkout. Isolate every record preparation, transport, and replay failure so it cannot block authored history or a sibling record ref.
 

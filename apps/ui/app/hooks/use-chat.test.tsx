@@ -164,6 +164,51 @@ vi.mock('#utils/error.utils.js', () => ({
   }),
 }));
 
+// The session store and the composer provider reach composer records and
+// attachments through the worker filesystem client; an in-memory one stands
+// in for it, starting empty.
+const fileManager = vi.hoisted(() => {
+  const files = new Map<string, Uint8Array<ArrayBuffer>>();
+  const notFound = (path: string): Error => Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
+  const under = (path: string): string[] =>
+    [...files.keys()].filter((entry) => entry.startsWith(`${path}/`)).map((entry) => entry.slice(path.length + 1));
+  return {
+    client: {
+      async readFile(path: string) {
+        const bytes = files.get(path);
+        if (bytes === undefined) {
+          throw notFound(path);
+        }
+        return bytes;
+      },
+      async writeFile(path: string, data: Uint8Array<ArrayBuffer>) {
+        files.set(path, data);
+      },
+      exists: async (path: string) => files.has(path),
+      async readdir(path: string) {
+        const names = under(path);
+        if (names.length === 0) {
+          throw notFound(path);
+        }
+        return names;
+      },
+      async unlink(path: string) {
+        files.delete(path);
+      },
+      async rmdir(path: string) {
+        for (const name of under(path)) {
+          files.delete(`${path}/${name}`);
+        }
+      },
+    },
+  };
+});
+
+vi.mock('#hooks/use-file-manager.js', () => ({
+  useFileManager: () => fileManager,
+  useOptionalFileManager: () => fileManager,
+}));
+
 vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({
     patchChat: harness.patchChat,
@@ -277,7 +322,7 @@ function createComposerWrapper() {
   return function Wrapper({ children }: { readonly children: ReactNode }) {
     return (
       <ChatSessionStoreProvider>
-        <ChatComposerProvider>{children}</ChatComposerProvider>
+        <ChatComposerProvider surface='marketing'>{children}</ChatComposerProvider>
       </ChatSessionStoreProvider>
     );
   };

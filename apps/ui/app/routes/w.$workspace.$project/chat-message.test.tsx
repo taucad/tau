@@ -376,7 +376,7 @@ describe('ChatMessage use_skill tool rendering', () => {
 });
 
 describe('ChatMessage activity composition', () => {
-  it('renders adjacent reasoning chunks in one disclosure and preserves tool boundaries', () => {
+  it('nests reasoning runs inside the activity group, one thought per run', () => {
     const message: MyUIMessage = {
       id: 'msg-reasoning-chain',
       role: 'assistant',
@@ -396,11 +396,16 @@ describe('ChatMessage activity composition', () => {
 
     render(<ChatMessage messageId={message.id} />);
 
+    const group = screen.getByTestId('chat-activity-group');
     const reasoningBlocks = screen.getAllByTestId('chat-message-reasoning');
+    expect(screen.getAllByTestId('chat-activity-group')).toHaveLength(1);
     expect(reasoningBlocks).toHaveLength(2);
+    for (const block of reasoningBlocks) {
+      expect(group).toContainElement(block);
+    }
     expect(reasoningBlocks[0]).toHaveTextContent('Inspecting the model|Confirming dimensions');
     expect(reasoningBlocks[1]).toHaveTextContent('Preparing the answer');
-    expect(screen.getByTestId('chat-activity-group')).toHaveAttribute('data-summary', 'Reading files');
+    expect(group).toHaveAttribute('data-summary', 'Reading files');
   });
 });
 

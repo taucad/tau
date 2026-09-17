@@ -20,8 +20,10 @@ release_command = 'node /app/dist/billing-command.js migrate --environment prod-
 app = 'node /app/dist/main.js'
 # One worker opens at most one PostgreSQL connection (billing-command postgres max: 1).
 billing-recovery = 'node /app/dist/billing-command.js recover-llm-worker --environment prod-us --limit 100 --poll-milliseconds 5000'
-# One Stripe/DB worker fulfils webhook-queued payment sources every five seconds and runs
-# the independent journal sweep every fifteen minutes. Without it paid purchases are never credited.
+# One Stripe/DB worker fulfils webhook-queued payment sources, charges consented automatic
+# reloads (only once BILLING_LIVE_COLLECTION_ENABLED=true), cancels closed accounts' subscriptions
+# and runs the scheduled sweeps. Without it paid purchases are never credited. Run exactly one
+# Machine: `fly scale count billing-operations=1 billing-recovery=1`.
 billing-operations = 'node /app/dist/billing-command.js billing-operations-worker --environment prod-us --limit 100 --poll-milliseconds 5000'
 
 [env]

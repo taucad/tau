@@ -380,9 +380,9 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
     } else {
       await firstDatabase.update(creditAccount).set({ status: 'closed' }).where(eq(creditAccount.id, accountId));
     }
-    await expect(firstLedger.ensureAccountBinding({ environment: 'development', authUserId: userId })).rejects.toThrow(
-      'Financial owner is revoked or closed',
-    );
+    await expect(
+      firstLedger.ensureAccountBinding({ environment: 'development', authUserId: userId }),
+    ).rejects.toMatchObject({ status: 403, message: 'Financial owner is revoked or closed' });
     const bindings = await firstDatabase
       .select()
       .from(schema.billingOwnerBinding)
@@ -424,6 +424,54 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
     expect(await firstLedger.admitOperation(admission(fixture, 'cash-resumed', 1n))).toMatchObject({
       status: 'admitted',
     });
+  });
+
+  it('restricts only the account a cash case names and keeps admitting other customers', async () => {
+    const fixture = await createFixture();
+    const stripeAccountId = `acct_scope_${randomUUID()}`;
+    await firstDatabase.insert(schema.billingStripeCustomer).values({
+      id: randomUUID(),
+      accountId: fixture.accountId,
+      environment: fixture.environment,
+      stripeAccountId,
+      livemode: false,
+      stripeCustomerId: `cus_${randomUUID()}`,
+    });
+    const caseIds = [randomUUID(), randomUUID()];
+    const openCase = async (id: string, accountId: string | undefined): Promise<void> => {
+      await firstDatabase.insert(schema.billingFinancialCase).values({
+        id,
+        environment: fixture.environment,
+        stripeAccountId,
+        livemode: false,
+        accountId,
+        kind: 'refund_unresolved',
+        dedupeKey: id,
+        sourceType: 'refund',
+        sourceId: `re_${id}`,
+        evidence: {},
+        owner: 'finance',
+        nextStep: 'reconcile',
+        firstEffectiveAt: new Date(),
+      });
+    };
+    try {
+      // Another customer's unattributed refund once denied every account holding a Stripe Customer here.
+      await openCase(caseIds[0] ?? '', undefined);
+      expect(await firstLedger.admitOperation(admission(fixture, 'scope-unattributed', 1n))).toMatchObject({
+        status: 'admitted',
+      });
+      await openCase(caseIds[1] ?? '', fixture.accountId);
+      expect(await firstLedger.admitOperation(admission(fixture, 'scope-owned', 1n))).toEqual({
+        status: 'denied',
+        reason: 'account_restricted',
+      });
+    } finally {
+      await firstDatabase
+        .update(schema.billingFinancialCase)
+        .set({ state: 'resolved', resolvedAt: new Date(), resolutionEvidence: { fixture: true } })
+        .where(inArray(schema.billingFinancialCase.id, caseIds));
+    }
   });
 
   it('should preserve source holds, normalize reversal debt, and replay terminal receipts', async () => {
@@ -574,11 +622,18 @@ describe('CreditLedgerService PostgreSQL foundation', () => {
       .from(creditAccount)
       .where(eq(creditAccount.id, fixture.accountId));
     state = afterCompensation[0];
+    // The charge spent promotional credit first, so compensation refills promo rather than minting purchased credit.
     expect(state).toMatchObject({
-      purchasedAtoms: 70_000n,
+      promoAtoms: 10_000n,
+      purchasedAtoms: 60_000n,
       debtAtoms: 0n,
       purchasedHeldAtoms: 0n,
     });
+    const [compensation] = await firstDatabase
+      .select()
+      .from(schema.creditTransaction)
+      .where(eq(schema.creditTransaction.id, compensationId));
+    expect(compensation).toMatchObject({ promoDeltaAtoms: 10_000n, planDeltaAtoms: 0n, purchasedDeltaAtoms: 0n });
   });
 
   it('should decode compensation sums and credit distinct partials exactly up to the original charge', async () => {

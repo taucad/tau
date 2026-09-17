@@ -1,10 +1,19 @@
-import { useState, useRef, useEffect, useCallback, useImperativeHandle } from 'react';
+import { useState, useRef, useEffect, useCallback, useImperativeHandle, useMemo } from 'react';
 import { modelSupportsInput } from '@taucad/chat';
 import type { ToolSelection } from '@taucad/chat';
 import { tauEditorPanelDragMime, tauFileDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
 import { useDraftActions, useDraftSelector } from '#hooks/use-chat.js';
-import type { DraftImageOptions } from '#hooks/use-chat.js';
+import type { DraftAttachmentOptions } from '#hooks/use-chat.js';
+import type { DraftAttachment } from '#hooks/draft.machine.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
+import { attachmentSendBlockReason } from '#utils/chat.utils.js';
+import {
+  attachmentKind,
+  isSupportedAttachmentMediaType,
+  supportedAttachmentMediaTypes,
+} from '#utils/attachment.utils.js';
+import type { AttachmentReference } from '#utils/attachment.utils.js';
+import { homeComposerAttachmentDirectory, useChatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
 import { toast } from '#components/ui/sonner.js';
@@ -31,8 +40,17 @@ import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js
  */
 export type ChatTextareaSubmitPayload = {
   readonly content: string;
-  readonly imageUrls: string[];
+  /** The draft's stored attachments; the chat client promotes them before sending. */
+  readonly attachments: readonly AttachmentReference[];
 };
+
+/**
+ * What an entry point may say about an attachment it adds. The selected model
+ * is supplied by the composer, which owns it.
+ *
+ * @public
+ */
+export type ChatAttachmentAddOptions = Omit<DraftAttachmentOptions, 'model'>;
 
 /**
  * Kind of drag currently hovering over the chat textarea.
@@ -187,11 +205,22 @@ export function useChatTextareaLogic({
   selectedMenuIndex: number;
   isSubmitting: boolean;
   inputText: string;
-  images: string[];
+  attachments: readonly DraftAttachment[];
+  /** Why Send is disabled for the current attachments and model, shown beside them (D20). */
+  sendBlockReason: string | undefined;
+  /** An attachment is still being resized or stored; sending now would leave it behind. */
+  isAttaching: boolean;
+  /** The caller's `isSubmitDisabled`, or an attachment still on its way (F4). */
+  isSubmitDisabled: boolean;
+  /** The directory the draft's attachment references resolve against. */
+  attachmentDirectory: string;
+  /** The picker's `accept` list: the attachment types the selected model can read. */
+  attachmentAccept: string;
   selectedToolChoice: ToolSelection;
   status: string;
   selectedModel: ResolvedModel;
   imageInputSupported: boolean;
+  attachmentInputSupported: boolean;
   formattedCancelKeyCombination: string;
 
   // Refs
@@ -214,14 +243,14 @@ export function useChatTextareaLogic({
   handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   handleTextChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
   handleContextMenuSelect: (text: string) => void;
-  handleContextImageAdd: (image: string, options?: DraftImageOptions) => void;
+  handleContextImageAdd: (image: string, options?: ChatAttachmentAddOptions) => void;
   handleAddText: (text: string) => void;
-  handleAddImage: (image: string, options?: DraftImageOptions) => void;
+  handleAddImage: (image: string, options?: ChatAttachmentAddOptions) => void;
   rejectUnsupportedImageInput: () => void;
   handleTextareaBlur: () => void;
   handlePointerDown: (event: React.MouseEvent<HTMLDivElement>) => void;
   focusInput: () => void;
-  removeImage: (index: number) => void;
+  removeAttachment: (index: number) => void;
   setDraftToolChoice: (choice: ToolSelection) => void;
   setShowContextMenu: (show: boolean) => void;
   setAtSymbolPosition: (position: number) => void;
@@ -247,24 +276,43 @@ export function useChatTextareaLogic({
     model: { model: selectedModel },
     status,
     stop,
+    attachmentSource,
   } = useChatComposer();
-  const imageInputSupported = modelSupportsInput(selectedModel.model?.support, 'image');
+  const support = selectedModel.model?.support;
+  const imageInputSupported = modelSupportsInput(support, 'image');
+  const pdfInputSupported = modelSupportsInput(support, 'pdf');
+  const attachmentInputSupported = imageInputSupported || pdfInputSupported;
+  const attachmentModel = useMemo(() => ({ name: selectedModel.name, support }), [selectedModel.name, support]);
+  const attachmentAccept = useMemo(
+    () =>
+      supportedAttachmentMediaTypes
+        .filter((mediaType) => modelSupportsInput(support, attachmentKind(mediaType) === 'image' ? 'image' : 'pdf'))
+        .join(','),
+    [support],
+  );
+  // A project chat's draft lives beside its composer record; a pre-project composer names its own directory.
+  const attachmentDirectory =
+    useChatAttachmentDirectories()?.composer ?? attachmentSource ?? homeComposerAttachmentDirectory;
 
   // Read draft state from machine based on mode
   const inputText = useDraftSelector((state) => (mode === 'main' ? state.draftText : state.editDraftText));
-  const images = useDraftSelector((state) => (mode === 'main' ? state.draftImages : state.editDraftImages));
+  const attachments = useDraftSelector((state) =>
+    mode === 'main' ? state.draftAttachments : state.editDraftAttachments,
+  );
+  const sendBlockReason = attachmentSendBlockReason(attachments, attachmentModel);
+  const isAttaching = useDraftSelector((state) => (mode === 'main' ? state.attachingMain : state.attachingEdit));
   const selectedToolChoice = useDraftSelector((state) =>
     mode === 'main' ? (state.draftToolChoice as ToolSelection) : 'auto',
   );
 
   const {
     setDraftText,
-    addDraftImage,
-    removeDraftImage,
+    addDraftAttachment,
+    removeDraftAttachment,
     setDraftToolChoice,
     setEditDraftText,
-    addEditDraftImage,
-    removeEditDraftImage,
+    addEditDraftAttachment,
+    removeEditDraftAttachment,
   } = useDraftActions();
 
   // Helper functions that call the correct action based on mode
@@ -285,54 +333,89 @@ export function useChatTextareaLogic({
     });
   }, []);
 
-  const addImage = useCallback(
-    (image: string, options?: DraftImageOptions) => {
-      if (!imageInputSupported) {
+  /**
+   * Add one attachment to the draft. An image the model cannot read is refused
+   * here with the vision toast; any other refusal (a PDF, D20) is the draft
+   * machine's, which names the model.
+   */
+  const addAttachment = useCallback(
+    (dataUrl: string, options?: ChatAttachmentAddOptions) => {
+      if (dataUrl.startsWith('data:image/') && !imageInputSupported) {
         rejectUnsupportedImageInput();
         return;
       }
 
-      if (mode === 'main') {
-        addDraftImage(image, options);
-      } else {
-        addEditDraftImage(image, options);
-      }
+      const add = mode === 'main' ? addDraftAttachment : addEditDraftAttachment;
+      add(dataUrl, { ...options, model: attachmentModel });
     },
-    [mode, addDraftImage, addEditDraftImage, imageInputSupported, rejectUnsupportedImageInput],
+    [
+      mode,
+      addDraftAttachment,
+      addEditDraftAttachment,
+      attachmentModel,
+      imageInputSupported,
+      rejectUnsupportedImageInput,
+    ],
   );
 
-  const removeImage = useCallback(
+  const removeAttachment = useCallback(
     (index: number) => {
       if (mode === 'main') {
-        removeDraftImage(index);
+        removeDraftAttachment(index);
       } else {
-        removeEditDraftImage(index);
+        removeEditDraftAttachment(index);
       }
     },
-    [mode, removeDraftImage, removeEditDraftImage],
+    [mode, removeDraftAttachment, removeEditDraftAttachment],
+  );
+
+  /** Read OS files in order and add the ones the store accepts; the rest get one toast each. */
+  const addFiles = useCallback(
+    async (files: Iterable<File>): Promise<void> => {
+      for (const file of files) {
+        if (!isSupportedAttachmentMediaType(file.type)) {
+          toast.error('Only images and PDFs are supported');
+          continue;
+        }
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- reading files sequentially keeps attachment order
+          const dataUrl = await readFileAsDataUrl(file);
+          addAttachment(dataUrl, file.name ? { filename: file.name } : undefined);
+        } catch {
+          toast.error(file.type.startsWith('image/') ? 'Failed to read image' : 'Failed to read file');
+        }
+      }
+    },
+    [addAttachment],
   );
 
   // Refs for stable handleSubmit — prevents re-render cascades through memo'd children
   const inputTextRef = useRef(inputText);
-  const imagesRef = useRef(images);
+  const attachmentsRef = useRef(attachments);
+  const sendBlockReasonRef = useRef(sendBlockReason);
+  const isAttachingRef = useRef(isAttaching);
   const isSubmittingRef = useRef(isSubmitting);
   const submitInFlightRef = useRef(false);
   const isSubmitDisabledRef = useRef(isSubmitDisabled);
   const onSubmitRef = useRef(onSubmit);
   useEffect(() => {
     inputTextRef.current = inputText;
-    imagesRef.current = images;
+    attachmentsRef.current = attachments;
+    sendBlockReasonRef.current = sendBlockReason;
+    isAttachingRef.current = isAttaching;
     isSubmittingRef.current = isSubmitting;
     isSubmitDisabledRef.current = isSubmitDisabled;
     onSubmitRef.current = onSubmit;
-  }, [images, inputText, isSubmitDisabled, isSubmitting, onSubmit]);
+  }, [attachments, inputText, isAttaching, isSubmitDisabled, isSubmitting, onSubmit, sendBlockReason]);
 
   const handleSubmit = useCallback(async (): Promise<void> => {
     if (
-      (inputTextRef.current.trim().length === 0 && imagesRef.current.length === 0) ||
+      (inputTextRef.current.trim().length === 0 && attachmentsRef.current.length === 0) ||
       isSubmittingRef.current ||
       submitInFlightRef.current ||
-      isSubmitDisabledRef.current
+      isSubmitDisabledRef.current ||
+      sendBlockReasonRef.current !== undefined ||
+      isAttachingRef.current
     ) {
       return;
     }
@@ -342,7 +425,7 @@ export function useChatTextareaLogic({
     try {
       await onSubmitRef.current({
         content: inputTextRef.current,
-        imageUrls: imagesRef.current,
+        attachments: attachmentsRef.current,
       });
     } finally {
       submitInFlightRef.current = false;
@@ -395,15 +478,15 @@ export function useChatTextareaLogic({
         event.key === 'Backspace' &&
         textareaReference.current?.selectionStart === 0 &&
         textareaReference.current.selectionEnd === 0 &&
-        imagesRef.current.length > 0
+        attachmentsRef.current.length > 0
       ) {
         event.preventDefault();
-        removeImage(imagesRef.current.length - 1);
+        removeAttachment(attachmentsRef.current.length - 1);
       } else if (event.key === 'Escape') {
         onEscapePressedRef.current?.();
       }
     },
-    [handleSubmit, removeImage],
+    [handleSubmit, removeAttachment],
   );
 
   const handleDragOver = useCallback((event: React.DragEvent): void => {
@@ -460,10 +543,11 @@ export function useChatTextareaLogic({
         return;
       }
 
-      // 4. OS files (images) — read sequentially and hand the raw data URL
-      // to the draft machine. Resizing + error toast are owned by the
-      // `imageProcessing` chokepoint inside `draftMachine`; the only failure
-      // class we still own here is the file-read step itself.
+      // 4. OS files (images and PDFs) — read sequentially and hand the raw
+      // data URL to the draft machine. Resizing, storing, kind refusal and
+      // their toasts are owned by the `attachmentProcessing` chokepoint inside
+      // `draftMachine`; the only failure class we still own here is the
+      // file-read step itself.
       if (dataTransfer.files.length > 0) {
         const hasImageFile = [...dataTransfer.files].some((file) => file.type.startsWith('image/'));
         if (hasImageFile && !imageInputSupported) {
@@ -471,59 +555,38 @@ export function useChatTextareaLogic({
           return;
         }
 
-        for (const file of dataTransfer.files) {
-          if (file.type.startsWith('image/')) {
-            try {
-              // oxlint-disable-next-line no-await-in-loop -- reading files sequentially
-              const dataUrl = await readFileAsDataUrl(file);
-              addImage(dataUrl);
-            } catch {
-              toast.error('Failed to read image');
-            }
-          } else {
-            toast.error('Only images are supported');
-          }
-        }
+        await addFiles(dataTransfer.files);
       }
     },
-    [addImage, imageInputSupported, onViewerScreenshotDrop, onAddContextChips, rejectUnsupportedImageInput],
+    [addFiles, imageInputSupported, onViewerScreenshotDrop, onAddContextChips, rejectUnsupportedImageInput],
   );
 
   const handleFileSelect = useCallback((): void => {
-    if (!imageInputSupported) {
+    if (!attachmentInputSupported) {
       rejectUnsupportedImageInput();
       return;
     }
 
     fileInputReference.current?.click();
-  }, [imageInputSupported, rejectUnsupportedImageInput]);
+  }, [attachmentInputSupported, rejectUnsupportedImageInput]);
 
   const handleFileChange = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
       if (event.target.files && event.target.files.length > 0) {
-        if (!imageInputSupported) {
+        if (!attachmentInputSupported) {
           rejectUnsupportedImageInput();
           event.target.value = '';
           return;
         }
 
-        for (const file of event.target.files) {
-          if (file.type.startsWith('image/')) {
-            try {
-              // oxlint-disable-next-line no-await-in-loop -- reading files sequentially
-              const dataUrl = await readFileAsDataUrl(file);
-              addImage(dataUrl);
-            } catch {
-              toast.error('Failed to read image');
-            }
-          }
-        }
-
+        // Copy first: clearing the input empties its live `FileList`.
+        const files = [...event.target.files];
         // Clear the input so the same file can be selected again
         event.target.value = '';
+        await addFiles(files);
       }
     },
-    [addImage, imageInputSupported, rejectUnsupportedImageInput],
+    [addFiles, attachmentInputSupported, rejectUnsupportedImageInput],
   );
 
   const focusInput = useCallback((): void => {
@@ -548,13 +611,13 @@ export function useChatTextareaLogic({
 
       return handleClipboardImagePaste({
         event,
-        onImage: addImage,
+        onImage: addAttachment,
         onReadError: () => {
           toast.error('Failed to read image');
         },
       });
     },
-    [addImage, imageInputSupported, rejectUnsupportedImageInput],
+    [addAttachment, imageInputSupported, rejectUnsupportedImageInput],
   );
 
   const handleAddText = useCallback(
@@ -566,11 +629,11 @@ export function useChatTextareaLogic({
   );
 
   const handleAddImage = useCallback(
-    (image: string, options?: DraftImageOptions): void => {
-      addImage(image, options);
+    (image: string, options?: ChatAttachmentAddOptions): void => {
+      addAttachment(image, options);
       focusInput();
     },
-    [focusInput, addImage],
+    [focusInput, addAttachment],
   );
 
   const handleTextChange = useCallback(
@@ -657,7 +720,7 @@ export function useChatTextareaLogic({
   );
 
   const handleContextImageAdd = useCallback(
-    (image: string): void => {
+    (image: string, options?: ChatAttachmentAddOptions): void => {
       // Close the menu and remove the @ symbol
       setShowContextMenu(false);
       setAtSymbolPosition(-1);
@@ -671,10 +734,10 @@ export function useChatTextareaLogic({
         setText(newText);
       }
 
-      addImage(image);
+      addAttachment(image, options);
       focusInput();
     },
-    [inputText, atSymbolPosition, contextSearchQuery, focusInput, setText, addImage],
+    [inputText, atSymbolPosition, contextSearchQuery, focusInput, setText, addAttachment],
   );
 
   useEffect(() => {
@@ -745,11 +808,17 @@ export function useChatTextareaLogic({
     selectedMenuIndex,
     isSubmitting,
     inputText,
-    images,
+    attachments,
+    sendBlockReason,
+    isAttaching,
+    isSubmitDisabled: isSubmitDisabled || isAttaching,
+    attachmentDirectory,
+    attachmentAccept,
     selectedToolChoice,
     status,
     selectedModel,
     imageInputSupported,
+    attachmentInputSupported,
     formattedCancelKeyCombination,
 
     // Refs
@@ -776,7 +845,7 @@ export function useChatTextareaLogic({
     handleTextareaBlur,
     handlePointerDown,
     focusInput,
-    removeImage,
+    removeAttachment,
     setDraftToolChoice,
     setShowContextMenu,
     setAtSymbolPosition,

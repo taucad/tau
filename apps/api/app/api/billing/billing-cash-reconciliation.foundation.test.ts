@@ -1,11 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
+import type { Stripe } from 'stripe';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '#database/schema.js';
 import { cashProjectionDigest, cashProjectionEvidenceSchema } from '#api/billing/billing-payment-contract.js';
-import { assertNewCollectionCashScope } from '#api/billing/billing-cash-reconciliation.service.js';
+import {
+  BillingCashReconciliationService,
+  assertNewCollectionCashScope,
+} from '#api/billing/billing-cash-reconciliation.service.js';
 
 const databaseUrl = process.env['BILLING_TEST_DATABASE_URL'];
 if (databaseUrl === undefined || process.env['BILLING_TEST_OWNED'] === undefined) {
@@ -115,5 +119,70 @@ describe('cash reconciliation foundation', () => {
 
     await expect(assertNewCollectionCashScope({ database }, scope, accountId)).rejects.toThrow('cash_scope_attention');
     await expect(assertNewCollectionCashScope({ database }, scope, independentAccountId)).resolves.toBeUndefined();
+  });
+
+  it('lets an operator re-scope an unattributed case only once its owned successor exists, then resolve it', async () => {
+    const stripeAccountId = `acct_operator_${randomUUID()}`;
+    const scope = { environment: 'development', stripeAccountId, livemode: false } as const;
+    const accountId = randomUUID();
+    const bystanderId = randomUUID();
+    await database.insert(schema.creditAccount).values([
+      { id: accountId, environment: 'development' },
+      { id: bystanderId, environment: 'development' },
+    ]);
+    const sourceId = `re_${randomUUID()}`;
+    const row = (id: string, owner: string | undefined) => ({
+      id,
+      ...scope,
+      kind: 'refund_unresolved',
+      dedupeKey: owner === undefined ? `refund_unresolved:${sourceId}` : `refund_unresolved:${sourceId}:${owner}`,
+      accountId: owner,
+      sourceType: 'refund',
+      sourceId,
+      evidence: {},
+      owner: 'billing-operations',
+      nextStep: 'qualify_source_and_resolve',
+      firstEffectiveAt: new Date(),
+    });
+    const unattributed = randomUUID();
+    await database.insert(schema.billingFinancialCase).values(row(unattributed, undefined));
+    const operator = new BillingCashReconciliationService({ database }, {} as unknown as Stripe, scope);
+    const request = {
+      environment: 'development',
+      caseId: unattributed,
+      disposition: 'rescoped',
+      reviewActorId: 'operator_fixture',
+      reason: 'CL12 re-scope',
+    } as const;
+    // An unattributed case still pauses new collection for everyone on this Stripe account.
+    await expect(assertNewCollectionCashScope({ database }, scope, bystanderId)).rejects.toThrow(
+      'cash_scope_attention',
+    );
+    await expect(operator.resolveCaseByOperator(request)).rejects.toThrow('case_rescope_unowned');
+
+    const owned = randomUUID();
+    await database.insert(schema.billingFinancialCase).values(row(owned, accountId));
+    await expect(operator.resolveCaseByOperator(request)).resolves.toEqual({
+      caseId: unattributed,
+      before: 'open',
+      after: 'resolved',
+    });
+    await expect(assertNewCollectionCashScope({ database }, scope, bystanderId)).resolves.toBeUndefined();
+    await expect(assertNewCollectionCashScope({ database }, scope, accountId)).rejects.toThrow('cash_scope_attention');
+
+    await expect(
+      operator.resolveCaseByOperator({ ...request, caseId: owned, disposition: 'resolved', reason: 'refund reviewed' }),
+    ).resolves.toEqual({ caseId: owned, before: 'open', after: 'resolved' });
+    await expect(assertNewCollectionCashScope({ database }, scope, accountId)).resolves.toBeUndefined();
+    const [resolved] = await database
+      .select()
+      .from(schema.billingFinancialCase)
+      .where(eq(schema.billingFinancialCase.id, owned));
+    expect(resolved?.resolutionEvidence).toEqual({
+      disposition: 'resolved',
+      reviewActorId: 'operator_fixture',
+      reason: 'refund reviewed',
+      previousState: 'open',
+    });
   });
 });

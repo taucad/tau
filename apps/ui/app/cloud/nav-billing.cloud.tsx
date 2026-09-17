@@ -14,9 +14,10 @@ export const billingNavRoutes: NavRoute[] = [
 ];
 
 export function NavBillingItem(): React.JSX.Element {
-  const { tier } = useEntitlements();
+  const { tier, isResolved } = useEntitlements();
   const { open: openSettings } = useSettingsDialog();
-  return tier === 'free' ? (
+  // Until the plan is known, show the neutral Billing entry so a Pro customer is never asked to upgrade.
+  return isResolved && tier === 'free' ? (
     <DropdownMenuItem
       onSelect={() => {
         openSettings('billing');

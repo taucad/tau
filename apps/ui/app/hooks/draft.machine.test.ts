@@ -147,6 +147,12 @@ const settled = async (actor: ReturnType<typeof createHarness>['actor']) =>
     (snapshot) => snapshot.context.attachmentQueue.length === 0 && snapshot.matches({ attachmentProcessing: 'idle' }),
   );
 
+/** Wait past the save debounce, so a write that was going to happen has happened. */
+const pastDebounce = async (): Promise<void> =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, 250);
+  });
+
 const allSavingIdle = (actor: ReturnType<typeof createHarness>['actor']): boolean => {
   const snapshot = actor.getSnapshot();
   return (
@@ -657,7 +663,7 @@ describe('draftMachine', () => {
       actor.stop();
     });
 
-    it('should keep typed text and write it back when the composer was edited first', async () => {
+    it('should keep typed text without a write-back when the composer was edited first (R5)', async () => {
       const { actor, drafts } = createHarness();
       actor.start();
       actor.send({ type: 'setDraftText', text: 'typed before the read' });
@@ -668,14 +674,16 @@ describe('draftMachine', () => {
       expect(context.draftAttachments).toEqual([]);
       // Untouched fields still converge on the record.
       expect(context).toMatchObject({ draftToolChoice: 'required', draftMode: 'plan' });
-      // The write-back skips the debounce.
-      expect(actor.getSnapshot().matches({ inputSaving: 'persisting' })).toBe(true);
+      // The keystroke's own debounced save is the only write; hydration adds none.
+      expect(actor.getSnapshot().matches({ inputSaving: 'pending' })).toBe(true);
       await waitFor(actor, () => drafts.length === 1);
       expect(drafts[0]!.draft.parts).toEqual([{ type: 'text', text: 'typed before the read' }]);
+      await pastDebounce();
+      expect(drafts).toHaveLength(1);
       actor.stop();
     });
 
-    it('should keep a locally chosen mode and write back only what was touched', async () => {
+    it('should keep a locally chosen mode and write nothing more on hydration (R5)', async () => {
       const { actor, drafts, selections } = createHarness();
       actor.start();
       actor.send({ type: 'setDraftMode', mode: 'plan' });
@@ -687,9 +695,71 @@ describe('draftMachine', () => {
       expect(context.draftToolChoice).toBe('required');
       // The draft was never touched, so the stored one applies.
       expect(context.draftText).toBe('stored prompt');
-      await waitFor(actor, () => selections.length === 2);
-      expect(selections[1]).toEqual({ mode: 'plan' });
+      await pastDebounce();
+      expect(selections).toEqual([{ mode: 'plan' }]);
       expect(drafts).toEqual([]);
+      actor.stop();
+    });
+
+    it('should still apply the stored draft after an attachment the model cannot read was refused (F3)', async () => {
+      const { actor, drafts, stored } = createHarness();
+      actor.start();
+      actor.send({ type: 'addDraftAttachment', dataUrl: pdf, filename: 'spec.pdf', model: imageOnlyModel });
+      actor.send({ type: 'addDraftAttachment', dataUrl: 'not a data url', model: imageAndPdfModel });
+      actor.send({ type: 'hydrateDraft', draft: recordDraft });
+
+      expect(actor.getSnapshot().context.draftText).toBe('stored prompt');
+      await pastDebounce();
+      expect({ drafts, stored }).toEqual({ drafts: [], stored: [] });
+      actor.stop();
+    });
+
+    it('should append an attachment that lands after a hydration to the hydrated draft', async () => {
+      const release = Promise.withResolvers<void>();
+      const { actor } = createHarness({
+        store: async ({ bytes, mediaType }) => {
+          await release.promise;
+          return { hash: hashB, mediaType, byteLength: bytes.byteLength };
+        },
+      });
+      actor.start();
+      actor.send({ type: 'addDraftAttachment', dataUrl: pdf, model: imageAndPdfModel });
+      actor.send({ type: 'hydrateDraft', draft: recordDraft });
+      release.resolve();
+      await settled(actor);
+
+      expect(actor.getSnapshot().context).toMatchObject({
+        draftText: 'stored prompt',
+        draftAttachments: [
+          { hash: hashA, mediaType: 'application/pdf', filename: 'spec.pdf' },
+          { hash: hashB, mediaType: 'application/pdf' },
+        ],
+      });
+      actor.stop();
+    });
+
+    it('should leave a closed edit without the attachment that was still storing when it closed', async () => {
+      const release = Promise.withResolvers<void>();
+      const { actor, edits } = createHarness({
+        store: async ({ bytes, mediaType }) => {
+          await release.promise;
+          return { hash: hashB, mediaType, byteLength: bytes.byteLength };
+        },
+      });
+      actor.start();
+      actor.send({ type: 'startEditingMessage', messageId: 'msg-1', originalMessage: originalMessage('edit') });
+      actor.send({ type: 'addEditDraftAttachment', dataUrl: pdf, model: imageAndPdfModel });
+      await waitFor(actor, (snapshot) => snapshot.matches({ attachmentProcessing: 'storing' }));
+
+      actor.send({ type: 'exitEditMode' });
+      release.resolve();
+      await pastDebounce();
+
+      const { context } = actor.getSnapshot();
+      expect(context.attachmentQueue).toEqual([]);
+      expect(actor.getSnapshot().matches({ attachmentProcessing: 'idle' })).toBe(true);
+      expect(context.messageEdits['msg-1']!.parts).toEqual([{ type: 'text', text: 'edit' }]);
+      expect(edits.every((edit) => edit.draft.parts.every((part) => part.type === 'text'))).toBe(true);
       actor.stop();
     });
 
@@ -874,7 +944,7 @@ describe('draftMachine', () => {
     it('should emit attachmentStoreFailed and add nothing when storing rejects', async () => {
       const { actor, drafts } = createHarness({
         store: async () => {
-          throw new Error('Attachment exceeds the 20 MB limit for documents.');
+          throw new Error('Attachment exceeds the 16 MB limit for documents.');
         },
       });
       const emitSpy = vi.fn<(event: Extract<DraftEmittedEvents, { type: 'attachmentStoreFailed' }>) => void>();
@@ -883,7 +953,7 @@ describe('draftMachine', () => {
       actor.send({ type: 'addDraftAttachment', dataUrl: pdf, model: imageAndPdfModel });
       await settled(actor);
       expect(emitSpy).toHaveBeenCalledOnce();
-      expect(emitSpy.mock.calls[0]![0].error.message).toBe('Attachment exceeds the 20 MB limit for documents.');
+      expect(emitSpy.mock.calls[0]![0].error.message).toBe('Attachment exceeds the 16 MB limit for documents.');
       expect(actor.getSnapshot().context.draftAttachments).toEqual([]);
       expect(actor.getSnapshot().matches({ inputSaving: 'idle' })).toBe(true);
       expect(drafts).toEqual([]);

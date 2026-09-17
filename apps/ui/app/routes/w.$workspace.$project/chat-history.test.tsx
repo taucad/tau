@@ -4,7 +4,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import type { MyUIMessage } from '@taucad/chat';
 import { chatTurnRequestSchema } from '@taucad/chat/schemas';
-import type { ChatTextareaHandle } from '#components/chat/chat-textarea-types.js';
+import type {
+  ChatTextareaHandle,
+  ChatTextareaProperties,
+  ChatTextareaSubmitPayload,
+} from '#components/chat/chat-textarea-types.js';
+import type { CadChatSubmitInput } from '#chat-clients/use-cad-chat-client.js';
 
 // `useKernel` must NOT be called from chat-history anymore — guard with a
 // throwing mock so any regression is caught loudly.
@@ -64,7 +69,7 @@ vi.mock('#hooks/use-chat.js', () => ({
       messageOrder: messages.map((m) => m.id),
     });
   },
-  useChatContext: () => ({ persistenceActorRef: fakePersistenceActorRef }),
+  useChatContext: () => ({ activeChatId: 'chat_test', persistenceActorRef: fakePersistenceActorRef }),
 }));
 
 // Capture the body the chat client receives on submit so the wire-format
@@ -72,7 +77,7 @@ vi.mock('#hooks/use-chat.js', () => ({
 const submitMock = vi.fn();
 const cadChatRef: {
   current: {
-    submit: (input: { readonly text: string; readonly imageUrls?: readonly string[] }) => void;
+    submit: (input: CadChatSubmitInput) => void;
     agent: unknown;
   };
 } = {
@@ -96,7 +101,7 @@ vi.mock('#chat-clients/use-cad-chat-client.js', () => ({
 // can both invoke onSubmit directly and assert that empty-cancel
 // recoveries refocus the composer.
 const capturedTextarea: {
-  onSubmit?: (payload: { content: string; imageUrls: string[] }) => Promise<void>;
+  onSubmit?: ChatTextareaProperties['onSubmit'];
   className?: string;
   focus: ReturnType<typeof vi.fn<() => void>>;
 } = {
@@ -105,7 +110,7 @@ const capturedTextarea: {
 vi.mock('#components/chat/chat-textarea.js', () => ({
   ChatTextarea: (properties: {
     readonly ref?: React.Ref<ChatTextareaHandle>;
-    readonly onSubmit?: (payload: { content: string; imageUrls: string[] }) => Promise<void>;
+    readonly onSubmit?: ChatTextareaProperties['onSubmit'];
     readonly className?: string;
   }): React.JSX.Element => {
     capturedTextarea.onSubmit = properties.onSubmit;
@@ -224,11 +229,10 @@ vi.mock('react-virtuoso', () => ({
 
 const { ChatHistory } = await import('#routes/w.$workspace.$project/chat-history.js');
 
-const submitDraft = async (content = 'hello') => {
-  await capturedTextarea.onSubmit?.({
-    content,
-    imageUrls: [],
-  });
+const draftAttachment = { hash: 'f'.repeat(64), mediaType: 'application/pdf', filename: 'spec.pdf' };
+
+const submitDraft = async (content = 'hello', attachments: ChatTextareaSubmitPayload['attachments'] = []) => {
+  await capturedTextarea.onSubmit?.({ content, attachments });
 };
 
 const message = (id: string, role: MyUIMessage['role']): MyUIMessage => ({
@@ -252,12 +256,12 @@ describe('ChatHistory — submit routes through useCadChatClient', () => {
     expect(screen.getByTestId('chat-textarea').parentElement).toHaveClass('max-w-xl');
   });
 
-  it('calls cadChat.submit with the text and imageUrls payload from the textarea', async () => {
+  it('calls cadChat.submit with the text and attachment references from the textarea', async () => {
     render(<ChatHistory />);
-    await submitDraft('design a desk');
+    await submitDraft('design a desk', [draftAttachment]);
 
     expect(submitMock).toHaveBeenCalledTimes(1);
-    expect(submitMock).toHaveBeenCalledWith({ text: 'design a desk', imageUrls: [] });
+    expect(submitMock).toHaveBeenCalledWith({ text: 'design a desk', attachments: [draftAttachment] });
   });
 
   // Wire-format invariant. The chat-client builds the per-request `agent`

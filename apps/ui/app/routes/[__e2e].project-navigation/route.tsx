@@ -4,6 +4,8 @@ import type { ProjectManifest } from '@taucad/types';
 import { Loader } from '#components/ui/loader.js';
 import { getEnvironment } from '#environment.config.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
+import { useFileManager } from '#hooks/use-file-manager.js';
+import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
 import { projectUrl } from '#utils/project-url.utils.js';
 import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';
 
@@ -40,15 +42,9 @@ export const loader = async (): Promise<Response> => {
 };
 
 const ProjectNavigationDebugRoute = (): React.JSX.Element => {
-  const {
-    createProject,
-    createChat,
-    getChatsForResource,
-    getProjectLibraryState,
-    patchChat,
-    setChatUnreadState,
-    isLoading,
-  } = useProjectManager();
+  const { createProject, createChat, getChatsForResource, getProjectLibraryState, patchChat, isLoading } =
+    useProjectManager();
+  const { client } = useFileManager();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const seedActivityChats = searchParams.get('activity') === '1';
@@ -81,7 +77,9 @@ const ProjectNavigationDebugRoute = (): React.JSX.Element => {
           }
           await wait(25);
           const newerChat = await createChat(projectA.id, { name: 'Newer activity', messages: [] });
-          await setChatUnreadState(newerChat.id, true);
+          // Unread lives in the project's composer unread record, which the chat-session store restores on bind (D9).
+          const unreadRecord = createComposerRecordStore(client, composerRecordPaths.unread(projectA.id));
+          await unreadRecord.patch({ unread: { [newerChat.id]: true } });
           await wait(25);
           await patchChat(olderChat.id, 'name', 'Older activity');
           const scope = globalThis as typeof globalThis & {
@@ -91,17 +89,20 @@ const ProjectNavigationDebugRoute = (): React.JSX.Element => {
           };
           scope.__TAU_CHAT_ACTIVITY_TEST__ = {
             async read() {
-              const [chats, projectState] = await Promise.all([
+              const [chats, projectState, unreadRead] = await Promise.all([
                 getChatsForResource(projectA.id),
                 getProjectLibraryState(projectA.id),
+                unreadRecord.read(),
               ]);
+              const unread = unreadRead.status === 'valid' ? (unreadRead.record.unread ?? {}) : {};
               if (!projectState) {
                 throw new Error('Project Navigation A has no library state');
               }
               return {
                 chats: chats
                   .filter((chat) => chatActivityNames.includes(chat.name as (typeof chatActivityNames)[number]))
-                  .sort((left, right) => left.name.localeCompare(right.name)),
+                  .sort((left, right) => left.name.localeCompare(right.name))
+                  .map((chat) => ({ ...chat, unread: unread[chat.id] === true })),
                 projectLastActivityAt: projectState.lastActivityAt,
               };
             },
@@ -128,10 +129,10 @@ const ProjectNavigationDebugRoute = (): React.JSX.Element => {
     createChat,
     createProject,
     getChatsForResource,
+    client,
     getProjectLibraryState,
     isLoading,
     navigate,
-    setChatUnreadState,
     patchChat,
     seedActivityChats,
   ]);

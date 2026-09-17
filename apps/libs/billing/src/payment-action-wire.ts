@@ -128,10 +128,19 @@ export const paymentActionRequestSchema = z
   .object({ requestId: financialIdentitySchema, returnPath: returnPathSchema })
   .strict();
 
+/** Inclusive USD minor-unit bounds for one top-up principal; the API, Stripe contract and UI share them. */
+export const topupPrincipalBoundsMinor = { minimum: 500, maximum: 500_000 } as const;
+
 /** Prepare a displayed quote before authorizing collection. */
 export const topupActionRequestSchema = paymentActionRequestSchema
   .extend({
-    amountMinor: unsignedIntegerStringSchema,
+    amountMinor: unsignedIntegerStringSchema.refine(
+      (value) =>
+        value.length <= 7 &&
+        Number(value) >= topupPrincipalBoundsMinor.minimum &&
+        Number(value) <= topupPrincipalBoundsMinor.maximum,
+      'Top-up amount is outside the supported range',
+    ),
     method: z.enum(['saved_card', 'checkout']),
   })
   .strict();

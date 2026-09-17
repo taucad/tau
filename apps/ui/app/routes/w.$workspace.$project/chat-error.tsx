@@ -15,6 +15,8 @@ import { ChatErrorServiceUnavailable } from '#routes/w.$workspace.$project/chat-
 import { ChatErrorCredits } from '#routes/w.$workspace.$project/chat-error-credits.js';
 import { ChatErrorRateLimit } from '#routes/w.$workspace.$project/chat-error-rate-limit.js';
 import { ChatErrorTool } from '#routes/w.$workspace.$project/chat-error-tool.js';
+import { ChatErrorAgentStop } from '#routes/w.$workspace.$project/chat-error-agent-stop.js';
+import { externalAgentStopCodes, externalAgentStopSchema } from '@taucad/agent-host';
 
 /**
  * Attempts to format a string as pretty-printed JSON.
@@ -113,6 +115,14 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
     );
   };
 
+  // An external agent's own stop carries its classification; it outranks the category.
+  const agentStop = (externalAgentStopCodes as readonly string[]).includes(parsedError.code ?? '')
+    ? externalAgentStopSchema.safeParse(parsedError.details)
+    : undefined;
+  if (agentStop?.success) {
+    return <ChatErrorAgentStop className={cn('min-w-0', className)} stop={agentStop.data} />;
+  }
+
   // Route to specialized error components based on category
   // All cases from ErrorCategory are handled explicitly for exhaustive matching
   const { category } = parsedError;
@@ -141,6 +151,11 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
           className={cn('min-w-0', className)}
           title={parsedError.code === 'FUNDED_OPERATION_LIMIT' ? 'Funded operation limit reached' : undefined}
           description={parsedError.message}
+          retryAfterSeconds={
+            typeof parsedError.details?.['retryAfterSeconds'] === 'number'
+              ? parsedError.details['retryAfterSeconds']
+              : undefined
+          }
         />
       );
     }

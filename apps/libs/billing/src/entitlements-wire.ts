@@ -34,6 +34,7 @@ export const wireEntitlementsSchema = z.object({
   paidThrough: z.iso.datetime().nullable(),
   graceEndsAt: z.iso.datetime().nullable(),
   cancelAtPeriodEnd: z.boolean(),
+  paymentCollectionAvailable: z.boolean(),
 });
 
 /**

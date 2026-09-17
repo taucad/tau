@@ -19,8 +19,10 @@ import { useActorRef } from '@xstate/react';
 import { createActor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { MyUIMessage } from '@taucad/chat';
-import type { ComposerRecordStore } from '#db/composer-record-store.js';
+import type { ChatMode } from '@taucad/chat/constants';
+import type { ComposerRecord, ComposerRecordStore } from '#db/composer-record-store.js';
 import { createEmptyDraftMessage } from '#hooks/draft.machine.js';
+import type { DraftHydration } from '#hooks/draft.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { composerRecordActors, composerRecordMachine } from '#machines/composer-record.machine.js';
 import type { Attachment } from '#utils/attachment.utils.js';
@@ -32,6 +34,7 @@ export type ComposerRecordRef = ActorRefFrom<typeof composerRecordMachine>;
 export type DraftPersistenceActors = {
   persistDraftActor: ReturnType<typeof persistDraftActorFor>;
   persistEditDraftActor: ReturnType<typeof persistEditDraftActorFor>;
+  persistSelectionActor: ReturnType<typeof persistSelectionActorFor>;
   clearMessageEditActor: ReturnType<typeof clearMessageEditActorFor>;
   storeAttachmentActor: ReturnType<typeof storeAttachmentActorFor>;
 };
@@ -44,6 +47,12 @@ const persistDraftActorFor = (recordRef: ComposerRecordRef) =>
 const persistEditDraftActorFor = (recordRef: ComposerRecordRef) =>
   fromSafeAsync<void, { messageId: string; draft: MyUIMessage }>(async ({ input }) => {
     recordRef.send({ type: 'patch', fields: { messageEdits: { [input.messageId]: input.draft } } });
+  });
+
+// The draft machine sends only the fields the user touched, so they pass through as given — no defaults.
+const persistSelectionActorFor = (recordRef: ComposerRecordRef) =>
+  fromSafeAsync<void, { toolChoice?: string | string[]; mode?: ChatMode }>(async ({ input }) => {
+    recordRef.send({ type: 'patch', fields: input });
   });
 
 const clearMessageEditActorFor = (recordRef: ComposerRecordRef) =>
@@ -61,6 +70,26 @@ const storeAttachmentActorFor = (store: ComposerRecordStore) =>
     type: 'attachmentStored',
     attachment: await store.attachments.put(input.bytes, input.mediaType, input.filename),
   }));
+
+/**
+ * The `hydrateDraft` fields a loaded record carries: every composer field it
+ * holds, and nothing for an absent one.
+ *
+ * @param record - What `recordLoaded` delivered.
+ * @returns The fields to hydrate the draft with.
+ */
+export function draftHydrationOf(record: ComposerRecord | 'absent'): DraftHydration {
+  if (record === 'absent') {
+    return {};
+  }
+  const { draft, messageEdits, toolChoice, mode } = record;
+  return {
+    ...(draft === undefined ? {} : { draft }),
+    ...(messageEdits === undefined ? {} : { messageEdits }),
+    ...(toolChoice === undefined ? {} : { toolChoice }),
+    ...(mode === undefined ? {} : { mode }),
+  };
+}
 
 /**
  * Mount a record actor for the lifetime of the calling component.
@@ -93,12 +122,13 @@ export function createComposerRecordActor(store: ComposerRecordStore): ComposerR
  *
  * @param recordRef - The record actor that owns the writes.
  * @param store - The same record's store, for attachment bytes.
- * @returns The four actors `draftMachine.provide()` expects.
+ * @returns The five actors `draftMachine.provide()` expects.
  */
 export function draftPersistenceFor(recordRef: ComposerRecordRef, store: ComposerRecordStore): DraftPersistenceActors {
   return {
     persistDraftActor: persistDraftActorFor(recordRef),
     persistEditDraftActor: persistEditDraftActorFor(recordRef),
+    persistSelectionActor: persistSelectionActorFor(recordRef),
     clearMessageEditActor: clearMessageEditActorFor(recordRef),
     storeAttachmentActor: storeAttachmentActorFor(store),
   };

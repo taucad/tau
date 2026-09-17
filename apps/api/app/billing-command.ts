@@ -6,6 +6,9 @@ import { runBillingBudgetCommand } from '#api/billing/billing-budget.command.js'
 import { BillingCashService } from '#api/billing/billing-cash.service.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
+import { resolveBillingCollection } from '#api/billing/billing-collection.js';
+import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
+import { recoverAndCancelStripeClosure } from '#api/billing/billing-account-closure-stripe.js';
 import process from 'node:process';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
@@ -13,7 +16,10 @@ import { financialEnvironmentSchema } from '@taucad/billing';
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { BillingJournalReconciliationService } from '#api/billing/billing-journal-reconciliation.service.js';
-import { BillingCashReconciliationService } from '#api/billing/billing-cash-reconciliation.service.js';
+import {
+  BillingCashReconciliationService,
+  cashBlockingFinancialCaseKinds,
+} from '#api/billing/billing-cash-reconciliation.service.js';
 import { BillingPurchaseReconciliationService } from '#api/billing/billing-purchase-reconciliation.service.js';
 import { BillingSupplierReconciliationService } from '#api/billing/billing-supplier-reconciliation.service.js';
 import { registerBillableModelMeterContracts } from '#api/billing/billable-model-qualification.js';
@@ -43,13 +49,18 @@ const createRecoveryNoticeTransport = (
   const config = {
     get: (key: string): string => process.env[key] ?? (key === 'TAU_EMAIL_REPLY_TO' ? 'help@taucad.dev' : ''),
   };
-  return new BillingRecoveryNoticeEmailTransport(database, new EmailService(config as never), frontendURL);
+  return new BillingRecoveryNoticeEmailTransport(
+    database,
+    new EmailService(config as unknown as ConstructorParameters<typeof EmailService>[0]),
+    frontendURL,
+  );
 };
 
 /** Protected billing entry in the API image; no HTTP server, dotenv or provider initialization. */
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  if (String(process.env.TAU_CLOUD_ENABLED) !== 'true') {
+  // `migrate` is the release command for the whole API schema, so a cloud-off deployment still needs it.
+  if (args[0] !== 'migrate' && String(process.env.TAU_CLOUD_ENABLED) !== 'true') {
     throw new Error('billing-command requires TAU_CLOUD_ENABLED=true');
   }
   registerBillableModelMeterContracts();
@@ -74,7 +85,6 @@ async function main(): Promise<void> {
     lifecycle: 'tau_billing_runtime',
     'recover-payments': 'tau_billing_runtime',
     'billing-operations-worker': 'tau_billing_runtime',
-    'billing-reload-worker': 'tau_billing_runtime',
     'recover-llm': 'tau_billing_runtime',
     'recover-llm-worker': 'tau_billing_runtime',
     'reconcile-journal': 'tau_billing_runtime',
@@ -116,6 +126,18 @@ async function main(): Promise<void> {
         ) {
           throw new Error('Protected mutation key requires a complete development loopback fixture');
         }
+        // Outside the fixture, the deployment's write key performs mutations only where it collects.
+        const writeKey = process.env.STRIPE_SECRET_KEY;
+        const collection = protectedKey
+          ? null
+          : resolveBillingCollection({
+              environment,
+              stripeAccountId,
+              livemode: mode === 'true',
+              liveCollectionEnabled: String(process.env.BILLING_LIVE_COLLECTION_ENABLED) === 'true',
+              monthlyPriceId: process.env.STRIPE_PRICE_ID_PRO_MONTHLY,
+              topupProductId: process.env.STRIPE_PRODUCT_ID_CREDIT_PACK,
+            });
         const result = await runBillingLifecycleCommand({
           database: { database: drizzle(client, { schema }) },
           sourceStripe,
@@ -124,7 +146,9 @@ async function main(): Promise<void> {
                 protectedStripe: createBillingStripeClient({ secretKey: protectedKey, fixtureUrl }),
                 fixture: { monthlyPriceId, topupProductId },
               }
-            : {}),
+            : writeKey && collection
+              ? { protectedStripe: createBillingStripeClient({ secretKey: writeKey, fixtureUrl }), collection }
+              : {}),
           environment: financialEnvironmentSchema.parse(environment),
           stripeAccountId,
           livemode: mode === 'true',
@@ -425,18 +449,28 @@ async function main(): Promise<void> {
             'Usage: billing-operations-worker --environment ENVIRONMENT --limit 1..100 --poll-milliseconds 1000..300000',
           );
         }
-        const secretKey = process.env.STRIPE_READ_SECRET_KEY;
+        const readSecretKey = process.env.STRIPE_READ_SECRET_KEY;
+        const writeSecretKey = process.env.STRIPE_SECRET_KEY;
         const stripeAccountId = process.env.STRIPE_ACCOUNT_ID;
         const livemode = String(process.env.STRIPE_LIVEMODE);
-        if (!secretKey || !stripeAccountId || (livemode !== 'true' && livemode !== 'false')) {
-          throw new Error('Read-only Stripe source key, account and explicit mode are required');
+        if (!readSecretKey || !writeSecretKey || !stripeAccountId || (livemode !== 'true' && livemode !== 'false')) {
+          throw new Error('Separate write and read Stripe keys, account and explicit mode are required');
         }
         const limit = Number(args[4]);
         const pollMilliseconds = Number(args[6]);
         const billingEnvironment = financialEnvironmentSchema.parse(environment);
-        const sourceStripe = createBillingStripeClient({
-          secretKey,
-          fixtureUrl: process.env['BILLING_STRIPE_FIXTURE_URL'],
+        const fixtureUrl = process.env['BILLING_STRIPE_FIXTURE_URL'];
+        const sourceStripe = createBillingStripeClient({ secretKey: readSecretKey, fixtureUrl });
+        const stripe = createBillingStripeClient({ secretKey: writeSecretKey, fixtureUrl });
+        // The same resolver as the API: this worker charges reloads and cancels subscriptions, so it
+        // collects exactly when the API may, and never in a mode the API would refuse.
+        const collection = resolveBillingCollection({
+          environment: billingEnvironment,
+          stripeAccountId,
+          livemode: livemode === 'true',
+          liveCollectionEnabled: String(process.env.BILLING_LIVE_COLLECTION_ENABLED) === 'true',
+          monthlyPriceId: process.env.STRIPE_PRICE_ID_PRO_MONTHLY,
+          topupProductId: process.env.STRIPE_PRODUCT_ID_CREDIT_PACK,
         });
         const database = { database: drizzle(client, { schema }) };
         const policy = new BillingPolicyService(database);
@@ -448,20 +482,39 @@ async function main(): Promise<void> {
         });
         const payments = new BillingPaymentsService(
           database,
-          sourceStripe,
+          stripe,
           sourceStripe,
           {
             environment: billingEnvironment,
             stripeAccountId,
             livemode: livemode === 'true',
+            // Worker charges never build redirect URLs; the hosted origin belongs to the API process.
             uiOrigin: 'https://unused.invalid',
             webhookSecret: '',
-            collection: null,
+            collection,
           },
           policy,
           ledger,
           cash,
           createRecoveryNoticeTransport(database),
+        );
+        const closures = new BillingAccountClosureService(
+          database,
+          {
+            recoverAndCancel: async (input) =>
+              recoverAndCancelStripeClosure(
+                {
+                  database: database.database,
+                  sourceStripe,
+                  protectedStripe: stripe,
+                  environment: billingEnvironment,
+                  stripeAccountId,
+                  livemode: livemode === 'true',
+                },
+                input,
+              ),
+          },
+          billingEnvironment,
         );
         const { sdk } = await import('#telemetry/otel.js');
         const sourceConfig = {
@@ -469,7 +522,8 @@ async function main(): Promise<void> {
           stripeAccountId,
           livemode: livemode === 'true',
         };
-        const journal = new BillingJournalReconciliationService(database, new MetricsService(), sourceConfig);
+        const caseMetrics = new MetricsService();
+        const journal = new BillingJournalReconciliationService(database, caseMetrics, sourceConfig);
         const cashScans = new BillingCashReconciliationService(database, sourceStripe, sourceConfig);
         const purchaseScans = new BillingPurchaseReconciliationService(database, sourceStripe, sourceConfig);
         const supplier = new BillingSupplierReconciliationService(database, sourceConfig);
@@ -508,8 +562,9 @@ async function main(): Promise<void> {
         // Independent source reconciliation is hourly; its window is the previous complete UTC day.
         const scanIntervalMilliseconds = 60 * 60_000;
         const dayMilliseconds = 24 * 60 * 60_000;
-        // Start one cadence in: boot stays free of provider I/O, and restarts do not re-scan immediately.
-        let lastScanAt = Date.now();
+        // Due at boot: a worker restarted more often than hourly must still scan. A window whose cash scan
+        // already completed costs one row read, so restarts do not repeat provider I/O.
+        let lastScanAt = Number.NEGATIVE_INFINITY;
         try {
           while (!shutdown.signal.aborted) {
             const startedAt = Date.now();
@@ -563,6 +618,14 @@ async function main(): Promise<void> {
                 );
               }
             }
+            if (payments.collectionAvailable) {
+              // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
+              await runJob('billing.reload_work', async () =>
+                payments.processReloadWork({ environment: billingEnvironment, limit }),
+              );
+            }
+            // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
+            await runJob('billing.account_closure', async () => closures.reconcileDue({ limit }));
             // oxlint-disable-next-line no-await-in-loop -- one worker serializes its jobs on one DB connection
             await runJob('billing.reload_expiry', async () =>
               payments.expireReloadRecoveries({ environment: billingEnvironment, limit }),
@@ -595,121 +658,51 @@ async function main(): Promise<void> {
                   windowEnd,
                   lookbackStart: new Date(windowStart.getTime() - dayMilliseconds),
                 });
-                const cash = await cashScans.runScan({ scanId, maximumPagesPerStream: 20 });
+                // The purchase comparison is stateless per pass, so it runs even when the cash scan is done or busy.
+                let cash: string;
+                try {
+                  if (await cashScans.isComplete(scanId)) {
+                    cash = 'complete';
+                  } else {
+                    const scanned = await cashScans.runScan({ scanId, maximumPagesPerStream: 20 });
+                    cash = scanned.status;
+                  }
+                } catch (error) {
+                  cash = error instanceof Error ? `failed:${error.message}` : 'failed';
+                }
                 const purchase = await purchaseScans.runScan({
                   scanId,
                   maximumObligations: 100,
                   maximumGrants: 100,
                   maximumSubscriptions: 100,
                 });
-                return { scanId, cash: cash.status, purchases: purchase.status };
+                // A paid obligation with no grant (for example a lost success webhook) holds the customer's
+                // money without credit; the per-kind gauge is what the alert watches.
+                const openCases = await client<Array<{ kind: string; open: number }>>`
+                  SELECT kind, count(*)::int AS open FROM billing.billing_financial_case
+                  WHERE environment = ${billingEnvironment} AND state IN ('open', 'attention')
+                  GROUP BY kind`;
+                for (const kind of new Set([...cashBlockingFinancialCaseKinds, ...openCases.map((row) => row.kind)])) {
+                  caseMetrics.billingOpenFinancialCases.record(openCases.find((row) => row.kind === kind)?.open ?? 0, {
+                    kind,
+                  });
+                }
+                const unfulfilled = openCases.find((row) => row.kind === 'unfulfilled_purchase_obligation')?.open ?? 0;
+                if (unfulfilled > 0) {
+                  console.error(
+                    JSON.stringify({
+                      event: 'billing.alert',
+                      environment,
+                      kind: 'unfulfilled_purchase_obligation',
+                      open: unfulfilled,
+                    }),
+                  );
+                }
+                if (cash !== 'complete' && cash !== 'incomplete') {
+                  throw new Error(`cash scan ${cash}; purchases ${purchase.status}`);
+                }
+                return { scanId, cash, purchases: purchase.status };
               });
-            }
-            try {
-              // oxlint-disable-next-line no-await-in-loop -- the continuous worker deliberately sleeps between polls
-              await wait(pollMilliseconds, undefined, { signal: shutdown.signal });
-            } catch {
-              break;
-            }
-          }
-        } finally {
-          process.removeListener('SIGINT', stop);
-          process.removeListener('SIGTERM', stop);
-          await sdk.shutdown();
-        }
-        break;
-      }
-      case 'billing-reload-worker': {
-        if (
-          args.length !== 7 ||
-          args[1] !== '--environment' ||
-          args[3] !== '--limit' ||
-          !/^[1-9][0-9]{0,2}$/u.test(args[4]!) ||
-          Number(args[4]) > 100 ||
-          args[5] !== '--poll-milliseconds' ||
-          !/^[1-9][0-9]{3,5}$/u.test(args[6]!) ||
-          Number(args[6]) > 300_000
-        ) {
-          throw new Error(
-            'Usage: billing-reload-worker --environment ENVIRONMENT --limit 1..100 --poll-milliseconds 1000..300000',
-          );
-        }
-        const secretKey = process.env.STRIPE_SECRET_KEY;
-        const readSecretKey = process.env.STRIPE_READ_SECRET_KEY;
-        const stripeAccountId = process.env.STRIPE_ACCOUNT_ID;
-        const livemode = String(process.env.STRIPE_LIVEMODE);
-        const monthlyPriceId = process.env.STRIPE_PRICE_ID_PRO_MONTHLY;
-        const topupProductId = process.env.STRIPE_PRODUCT_ID_CREDIT_PACK;
-        if (!secretKey || !readSecretKey || !stripeAccountId || !monthlyPriceId || !topupProductId) {
-          throw new Error('Separate collection and read Stripe keys, account and catalog identifiers are required');
-        }
-        // The API composes collection only in explicit test mode; a live worker would charge an unqualified catalog.
-        // Both refusals are permanent, so they fail the boot rather than letting the loop spin on ForbiddenException.
-        if (livemode !== 'false') {
-          throw new Error('Automatic reload collection requires explicit Stripe test mode');
-        }
-        if (environment.startsWith('prod-')) {
-          throw new Error('Automatic reload collection is not enabled for production environments');
-        }
-        const limit = Number(args[4]);
-        const pollMilliseconds = Number(args[6]);
-        const billingEnvironment = financialEnvironmentSchema.parse(environment);
-        const fixtureUrl = process.env['BILLING_STRIPE_FIXTURE_URL'];
-        const stripe = createBillingStripeClient({ secretKey, fixtureUrl });
-        const sourceStripe = createBillingStripeClient({ secretKey: readSecretKey, fixtureUrl });
-        const database = { database: drizzle(client, { schema }) };
-        const policy = new BillingPolicyService(database);
-        const ledger = new CreditLedgerService(database, policy);
-        const config = { environment: billingEnvironment, stripeAccountId, livemode: false };
-        const cash = new BillingCashService(database, stripe, sourceStripe, ledger, config);
-        const payments = new BillingPaymentsService(
-          database,
-          stripe,
-          sourceStripe,
-          {
-            ...config,
-            // Reload charges never build redirect URLs; the hosted origin belongs to the API process.
-            uiOrigin: 'https://unused.invalid',
-            webhookSecret: '',
-            collection: { kind: 'stripe_test', monthlyPriceId, topupProductId },
-          },
-          policy,
-          ledger,
-          cash,
-        );
-        const { sdk } = await import('#telemetry/otel.js');
-        const shutdown = new AbortController();
-        const stop = (): void => {
-          shutdown.abort();
-        };
-        process.once('SIGINT', stop);
-        process.once('SIGTERM', stop);
-        try {
-          while (!shutdown.signal.aborted) {
-            const startedAt = Date.now();
-            try {
-              // oxlint-disable-next-line no-await-in-loop -- one worker serializes reload charges on one DB connection
-              const worked = await payments.processReloadWork({ environment: billingEnvironment, limit });
-              console.log(
-                JSON.stringify({
-                  event: 'billing.reload_work_batch',
-                  environment,
-                  processed: worked.processed.length,
-                  pending: worked.pending.length,
-                  failed: worked.failed.length,
-                  durationMilliseconds: Date.now() - startedAt,
-                }),
-              );
-            } catch (error) {
-              console.error(
-                JSON.stringify({
-                  event: 'billing.reload_work_batch',
-                  environment,
-                  outcome: 'failed',
-                  failureKind: error instanceof Error ? error.name : 'UnknownError',
-                  durationMilliseconds: Date.now() - startedAt,
-                }),
-              );
             }
             try {
               // oxlint-disable-next-line no-await-in-loop -- the continuous worker deliberately sleeps between polls

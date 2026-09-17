@@ -29,6 +29,8 @@
  * | `tools` | emits a Codex-style `read`/`execute`/`think`/`fetch`/`edit` tool sequence with locations, diff and terminal content, each `pending → in_progress → completed` |
  * | `clear-title` | clears the write call title on its terminal update, exercising ACP presence semantics |
  * | `skills` / `skill-names` | reports complete native skill files, or only their names for packaged-host checks |
+ * | `fail:quota` / `fail:rate` / `fail:context` / `fail:model` | stops on that provider failure the way both pinned adapters do: a typed AIR `sessionFailure` on an `end_turn` response when the client advertised it, else the provider sentence as text and a `-32603` rejection; `model` is a service failure whose title is a raw provider JSON body, as Codex sends one |
+ * | `crash` | writes a stack to stderr and rejects `-32603 Internal error`, whatever the client advertised |
  *
  * Anything that has to be decided *before* a prompt exists is steered by
  * `TAU_FAKE_AGENT_MODE`, which a test's own `AcpAdapter` literal supplies
@@ -114,6 +116,50 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
 
 /** Whether the client advertised `elicitation.url`, read at `initialize`. */
 let urlElicitation = false;
+
+/** Whether the client advertised the AIR `sessionFailure` extension, read at `initialize`. */
+let airSessionFailures = false;
+
+/**
+ * Whether one `initialize` request opted into AIR typed session failures.
+ *
+ * @param params - The `initialize` parameters as received.
+ * @returns `true` for `_meta.jetbrains.air` version 1 or later listing `sessionFailure`.
+ */
+const advertisesAirSessionFailures = (params: Record<string, unknown>): boolean => {
+  const air = asRecord(asRecord(asRecord(asRecord(params['clientCapabilities'])?.['_meta'])?.['jetbrains'])?.['air']);
+  const capabilities = air?.['capabilities'];
+  return (
+    typeof air?.['version'] === 'number' &&
+    air['version'] >= 1 &&
+    Array.isArray(capabilities) &&
+    capabilities.includes('sessionFailure')
+  );
+};
+
+/** The provider failures `fail:<kind>` stops on, as both adapters' policy tables classify them. */
+const providerFailures: Record<
+  string,
+  { readonly category: string; readonly title: string; readonly actions: readonly string[] }
+> = {
+  quota: {
+    category: 'limit',
+    title:
+      "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 20th, 2026 4:07 PM.",
+    actions: [],
+  },
+  rate: { category: 'limit', title: 'Codex is temporarily rate limited.', actions: ['retry'] },
+  context: { category: 'limit', title: 'Codex ran out of room in its context window.', actions: ['new_session'] },
+  model: {
+    category: 'service',
+    title: JSON.stringify({
+      type: 'error',
+      status: 400,
+      error: { type: 'invalid_request_error', message: 'The requested model is not supported for this account.' },
+    }),
+    actions: ['retry'],
+  },
+};
 
 /**
  * Whether one `initialize` request advertised URL elicitation.
@@ -800,6 +846,7 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
   switch (message.method) {
     case 'initialize': {
       urlElicitation = advertisesUrlElicitation(params);
+      airSessionFailures = advertisesAirSessionFailures(params);
       if (mode === 'silent') {
         /* The adapter that never answers: the client's own timeout is the only
          * thing that can end this turn. */
@@ -882,6 +929,41 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
        * gone" indistinguishable from "the model refused" (review 1-review S5). */
       if (!promptSession || promptSession.closed) {
         fail(-32_602, 'Unknown session');
+        return;
+      }
+      const promptSessionId = asString(params['sessionId']);
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the prompt block list is fixed by ACP.
+      const text = promptText((params['prompt'] ?? []) as readonly unknown[]);
+      const limit = providerFailures[/fail:([a-z]+)/u.exec(text)?.[1] ?? ''];
+      if (limit && airSessionFailures) {
+        reply({
+          stopReason: 'end_turn',
+          _meta: {
+            jetbrains: {
+              air: {
+                version: 1,
+                sessionFailure: {
+                  id: `${promptSessionId}:error`,
+                  revision: 1,
+                  category: limit.category,
+                  severity: 'error',
+                  title: limit.title,
+                  actions: limit.actions,
+                },
+              },
+            },
+          },
+        });
+        return;
+      }
+      if (limit !== undefined || text.includes('crash')) {
+        if (limit !== undefined) {
+          await textChunk(promptSessionId, `${limit.title}\n\n`);
+        }
+        process.stderr.write(
+          `[SYSTEM_ERROR] Prompt for session ${promptSessionId} failed: RequestError: Internal error\n    at fake-agent\n`,
+        );
+        fail(-32_603, 'Internal error');
         return;
       }
       reply(

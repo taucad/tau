@@ -278,6 +278,7 @@ function ItemList<T>({
 }) {
   const [search, setSearch] = React.useState('');
   const lastSearchLoad = React.useRef('');
+  const nonEmptyGroups = React.useMemo(() => groupedItems.filter((group) => group.items.length > 0), [groupedItems]);
 
   type FlatItem =
     | { type: 'item'; item: T; groupName: string; value: string; keywords: readonly string[] }
@@ -285,7 +286,7 @@ function ItemList<T>({
 
   // Flatten all items from all groups for virtualization, including group headers
   const flattenedItems = React.useMemo((): FlatItem[] => {
-    return groupedItems.flatMap((group) => [
+    return nonEmptyGroups.flatMap((group) => [
       { type: 'header', groupName: group.name } as const,
       ...group.items.map(
         (item) =>
@@ -298,7 +299,7 @@ function ItemList<T>({
           }) as const,
       ),
     ]);
-  }, [groupedItems, getKeywords, getValue]);
+  }, [nonEmptyGroups, getKeywords, getValue]);
 
   // Filter items based on search
   const filteredItems = React.useMemo((): FlatItem[] => {
@@ -396,7 +397,7 @@ function ItemList<T>({
         ) : null}
         <CommandList>
           {filteredItems.length === 0 ? (
-            <CommandEmpty>{emptyListMessage}</CommandEmpty>
+            <CommandEmpty className='mx-2'>{emptyListMessage}</CommandEmpty>
           ) : (
             <Virtuoso
               style={{ height: `${virtualizationHeight}px` }}
@@ -429,8 +430,8 @@ function ItemList<T>({
     <Command>
       {isSearchEnabled ? <CommandInput placeholder={searchPlaceHolder} /> : null}
       <CommandList>
-        <CommandEmpty>{emptyListMessage}</CommandEmpty>
-        {groupedItems.map((group) => (
+        <CommandEmpty className='mx-2'>{emptyListMessage}</CommandEmpty>
+        {nonEmptyGroups.map((group) => (
           <CommandGroup key={group.name} heading={group.name}>
             {group.items.map((item) => {
               const value = getValue(item);

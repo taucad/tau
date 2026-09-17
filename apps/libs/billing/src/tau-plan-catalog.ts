@@ -64,7 +64,8 @@ export const tauPlanCatalog: PlanCatalogEntry[] = [
     tagline: 'Scale your CAD workflow with more credits',
     priceMonthly: 20,
     priceLabel: '$20',
-    priceSubLabel: '/month',
+    // Stripe Tax is added at checkout, so the displayed price names it.
+    priceSubLabel: '/month USD, plus applicable tax',
     features: [
       'Everything in Free',
       '2,000 credits every month',

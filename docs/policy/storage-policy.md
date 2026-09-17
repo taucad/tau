@@ -3,7 +3,7 @@ title: 'Storage Policy'
 description: 'Store-selection boundary (what belongs in IndexedDB at all) plus rules for atomic read-modify-write semantics, field-scoped patches, and concurrent-writer safety in client-side persistent storage providers.'
 status: active
 created: '2026-04-20'
-updated: '2026-09-14'
+updated: '2026-09-17'
 related:
   - docs/policy/project-manifest-policy.md
   - docs/policy/filesystem-authority-policy.md
@@ -14,6 +14,7 @@ related:
   - docs/research/chat-user-activity-ordering-blueprint.md
   - docs/research/project-updated-at-activity-boundary.md
   - docs/research/tau-json-project-library-state-boundary.md
+  - docs/research/project-chat-draft-persistence-blueprint.md
 ---
 
 # Storage Policy
@@ -32,22 +33,28 @@ This policy locks the fix in and prevents the same shape of bug recurring in fut
 
 Before applying any rule below, put the data in the right store. Portable project content stays in the project filesystem. IndexedDB is permitted only for state whose meaning is explicitly local to the browser/profile or whose authoritative data has not yet moved to the filesystem.
 
-| Data                                                                                  | Store                                               | Governed by                                          |
-| ------------------------------------------------------------------------------------- | --------------------------------------------------- | ---------------------------------------------------- |
-| Portable project declaration                                                          | Project filesystem (`tau.json`)                     | `docs/policy/project-manifest-policy.md`             |
-| Entry paths, thumbnails, parameter sidecars, caches                                   | Project filesystem                                  | `docs/policy/project-manifest-policy.md`             |
-| Host-local project library lifecycle (`lastActivityAt`, `deletedAt`, `revisionState`) | Dedicated `projectLibraryStates` object store       | This policy + manifest policy Rules 6–9              |
-| Project chat records and session logs                                                 | Project filesystem (`.tau/chats/**`)                | This policy's RMW rules + filesystem policy          |
-| Home pre-project composer draft and execution                                         | Home workspace (`/.tau/composers/new-project.json`) | This policy's RMW rules + filesystem policy          |
-| Browser-local application state (editor layout, resource links)                       | Object store via `IndexedDbStorageProvider`         | This policy's RMW rules                              |
-| Browser-local app chrome preferences (project disclosure)                             | Dedicated `appUiPreferences` object store           | This policy's RMW rules                              |
-| Per-device filesystem configuration (`ProjectFileSystemConfig`, workspace handles)    | Dedicated `tau-fs-handles` database                 | This policy + filesystem-authority policy Rules 9/11 |
+| Data                                                                                  | Store                                                                                                                                           | Governed by                                            |
+| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Portable project declaration                                                          | Project filesystem (`tau.json`)                                                                                                                 | `docs/policy/project-manifest-policy.md`               |
+| Entry paths, thumbnails, parameter sidecars, caches                                   | Project filesystem                                                                                                                              | `docs/policy/project-manifest-policy.md`               |
+| Host-local project library lifecycle (`lastActivityAt`, `deletedAt`, `revisionState`) | Dedicated `projectLibraryStates` object store                                                                                                   | This policy + manifest policy Rules 6–9                |
+| Project chat records and session logs                                                 | Project filesystem (`.tau/chats/**`)                                                                                                            | This policy's RMW rules + filesystem policy            |
+| Home pre-project composer draft and execution                                         | Home workspace (`/.tau/composers/new-project.json`)                                                                                             | This policy's RMW rules + filesystem policy            |
+| Project chat composer (draft, message edits, tool choice, mode), per device           | Home workspace (`/.tau/composers/chats/<projectId>/<chatId>.json`)                                                                              | This policy's RMW rules + composer record rules below  |
+| Per-project unread chat set, per device                                               | Home workspace (`/.tau/composers/chats/<projectId>/unread.json`)                                                                                | This policy's RMW rules + composer record rules below  |
+| Draft-stage attachment bytes (images, PDFs)                                           | Home workspace (`attachments/` beside the owning composer record; `/.tau/composers/<surface>/attachments` for pre-project surfaces without one) | Composer record rules below                            |
+| Sent chat attachment bytes                                                            | Project filesystem (`.tau/chats/<chatId>/attachments/<sha256>.<ext>`)                                                                           | Composer record rules below + revisions policy Rule 12 |
+| Browser-local application state (editor layout, resource links)                       | Object store via `IndexedDbStorageProvider`                                                                                                     | This policy's RMW rules                                |
+| Browser-local app chrome preferences (project disclosure)                             | Dedicated `appUiPreferences` object store                                                                                                       | This policy's RMW rules                                |
+| Per-device filesystem configuration (`ProjectFileSystemConfig`, workspace handles)    | Dedicated `tau-fs-handles` database                                                                                                             | This policy + filesystem-authority policy Rules 9/11   |
 
 The legacy `projects` object store remains frozen and is cleared only after each row has been converted to a verified strict-v1 filesystem project and its `updatedAt`, `deletedAt`, and `revisionState` have been mapped to verified `ProjectLibraryState`. This is legacy storage conversion, not manifest-version migration. The store must not be repurposed: its `id` key path, full-project API, and legacy cleanup race with the correct local overlay. `projectLibraryStates` is a separate store keyed by `projectId`; it may contain only the fields permitted by the manifest policy and cannot establish project existence.
 
 Adding any other object store requires a documented parity exemption in the PR description: state why no agent, CLI, or on-disk consumer needs the data and why an existing local store cannot own it. A cache of manifest-derived fields is not exempt merely because listing is slow; measure first and keep any justified projection rebuildable and non-authoritative.
 
-The Home new-project composer is workspace-private host state, not a partial `Chat`. Its sole record is `/.tau/composers/new-project.json`, outside `/projects/**` and `.tau/chats/**`. Draft and execution writers use one keyed, field-scoped read-modify-write path so either field is preserved while the other changes; no fake project, fake chat, object-store mirror, migration reader, revision, export, or agent view may own it.
+Composer state is workspace-private, per-device host state, never a partial `Chat`. Every composer record — the Home new-project record, one record per project chat, and one unread record per project — is the same versioned envelope under `/.tau/composers/`, outside `/projects/**` and `.tau/chats/**`, served by `createComposerRecordStore` (`apps/ui/app/db/composer-record-store.ts`; paths only through `composerRecordPaths`) and driven only by `composer-record.machine`. Writers use one keyed, field-scoped read-modify-write path so each field is preserved while another changes; empty drafts, empty edits and `false` unread entries are omitted, and stored empties read as absent. `Chat`, `chat.json` and `ChatStorage` carry no draft, edit or unread field; no fake project, fake chat, object-store mirror, migration reader, revision, export, or agent view may own composer state. A chat with no project has no record: it reads as absent and drops record writes.
+
+Attachments are bytes named by their SHA-256 and written once per directory through `createAttachmentStore` (`apps/ui/app/db/attachment-store.ts`). Records and log rows hold only `attachments/<sha256>.<ext>` references relative to their own directory; never store a `data:` URL in a composer record. Draft-stage bytes live beside the composer record (or in their surface's own directory); sending copies them into the chat's `attachments/` through `createChatAttachmentStore` before the message is sent, and a failed copy sends nothing. Each owner reclaims its own directory: `retainOnly` after a send or create, record removal on chat deletion, and one recursive removal of `/.tau/composers/chats/<projectId>` on permanent project deletion. A soft-deleted chat keeps its own `attachments/`, because its tombstone and durable log still reference them.
 
 `appUiPreferences` has that parity exemption for project disclosure. Expanded/collapsed project rows are browser chrome with no meaning to agents, the CLI, project collaborators, or an on-disk project. The state cannot belong to `projectLibraryStates` because it is not lifecycle or revision data, cannot belong to `editor` because it spans project routes rather than describing one project's workbench, and cannot belong to `chats` because it is not conversation data. The store therefore contains one sparse browser-profile-local row keyed by `singleton`; clearing a permanently deleted project's field is the only lifecycle coupling.
 
@@ -127,23 +134,22 @@ public async updateChat(chatId: string, update: PartialDeep<Chat>): Promise<Chat
 
 ### 3. Prefer field-scoped helpers over partial merges
 
-For every named slot on `Chat` or `ProjectLibraryState` that is updated by more than one writer, expose a field-scoped helper (`patchChat`, `setMessageEdit`, `clearMessageEdit`, `softDeleteChat`, `touchProjectActivity`, …) and call that from production code. Reserve full-row replacement for explicit import/bootstrap paths.
+For every named slot on `Chat` or `ProjectLibraryState` that is updated by more than one writer, expose a field-scoped helper (`patchChat`, `touchChatRecency`, `softDeleteChat`, `touchProjectActivity`, …) and call that from production code. Reserve full-row replacement for explicit import/bootstrap paths.
 
 **Why**: A partial-merge writer reads the entire row and re-`put`s the entire row. Even with rule 1, the call site is still expressing "I read everything, I write everything", which makes future fields silently vulnerable as soon as a second writer appears. Field-scoped helpers make the blast radius equal to the named slot.
 
 CORRECT:
 
 ```typescript
-await patchChat(input.chatId, 'draft', input.draft);
-await setMessageEdit(input.chatId, input.messageId, input.draft);
-await clearMessageEdit(input.chatId, input.messageId);
+await patchChat(input.chatId, 'checkoutId', input.checkoutId);
+await composerRecordStore.patch({ messageEdits: { [input.messageId]: input.draft } });
 ```
 
 INCORRECT:
 
 ```typescript
-await updateChat(input.chatId, { draft: input.draft }, { ignoreKeys: ['draft'] });
-await updateChat(input.chatId, { messageEdits: { [input.messageId]: input.draft } });
+await updateChat(input.chatId, { checkoutId: input.checkoutId }, { ignoreKeys: ['checkoutId'] });
+await patchChat(input.chatId, 'draft', input.draft); // composer state is never a `Chat` field
 ```
 
 ### 4. No `ignoreKeys` / `customMerge` escape hatches
@@ -172,8 +178,8 @@ CORRECT:
 
 ```typescript
 this.atomicChatMutation(chatId, (chat) => {
-  if (!chat.messageEdits || !(messageId in chat.messageEdits)) return false;
-  delete chat.messageEdits[messageId];
+  if (chat.checkoutId === checkoutId) return false;
+  chat.checkoutId = checkoutId;
   return true;
 });
 ```
@@ -184,7 +190,7 @@ Do not add low-level timestamp flags to storage, filesystem, worker, or hook API
 
 `Chat.recencyAt` is the sole chat-recency authority. Advance it strictly through `touchChatRecency` only after Tau accepts an explicit user send, edit/resubmit, retry, regenerate, or manual-continue action. Generic message/error/draft/config persistence, assistant streaming, startup hydration, automatic retry, navigation, unread/read transitions, and generated labels must never advance it or touch parent-project activity. Legacy rows resolve chat recency from the raw legacy activity field, then the newest stamped user message, then `createdAt`; never fall back to `updatedAt` or an assistant timestamp.
 
-Set `hasUnreadTurn` through `setChatUnreadState`. The semantic writer must be atomic and idempotent while preserving `updatedAt` and `recencyAt` byte-for-byte. Background terminal success/error turns and approval-request transitions set it; aborts and disconnects do not. An active, visible, focused chat clears it. The writer invalidates material chat row/collection queries but never touches or invalidates project recency.
+Unread is per-device composer state, not a chat field. `ChatSessionStore` is the single writer of each project's unread record; `chat-session.machine`'s `read` region restores from it (`unreadRestored`) and raises its own `approvalPending` trigger. Background terminal success/failure turns and newly pending approvals set it; aborts and disconnects do not. An active, visible, focused chat clears it. Unread writes never touch `chat.json`, chat `updatedAt`/`recencyAt`, or project recency.
 
 `lastActivityAt` is not a generic row `updatedAt` and is never computed from filesystem mtimes. A no-op activity call must skip its write and invalidation. The one-off audited pre-release workspace snapshot seeds known projects from their old semantic `updatedAt` while discovery is quiesced; first discovery of any other valid project may seed it to discovery time.
 
@@ -192,7 +198,7 @@ Set `hasUnreadTurn` through `setChatUnreadState`. The semantic writer must be at
 
 ### 7. Concurrent regression coverage is mandatory for new fields
 
-When a new field is added to `Chat` or `ProjectLibraryState` and is written by more than one actor or hook, add a concurrency regression test in `apps/ui/app/db/indexeddb-storage.test.ts` that fires both writers `Promise.all`-style for at least 100 iterations against a fresh row and asserts every writer's last-written value is preserved.
+When a new field is added to `Chat`, `ProjectLibraryState` or a composer record and is written by more than one actor or hook, add a concurrency regression test beside its store (`apps/ui/app/db/indexeddb-storage.test.ts`, `apps/ui/app/db/composer-record-store.test.ts`) that fires both writers `Promise.all`-style for at least 100 iterations against a fresh row and asserts every writer's last-written value is preserved.
 
 **Why**: The original draft-resurrection bug was timing-dependent and a single-shot test passed by luck. The 100+-iteration loop is the only reliable way to expose the race in a deterministic test runner.
 
@@ -201,13 +207,9 @@ Reference template:
 ```typescript
 for (let i = 0; i < iterations; i++) {
   const text = `iter-${i}`;
-  await Promise.all([
-    provider.patchChat(chat.id, 'draft', draftMessage(text)),
-    provider.patchChat(chat.id, 'messages', [userMessage(text)]),
-  ]);
-  const final = await provider.getChat(chat.id);
-  expect(final?.draft).toMatchObject({ parts: [{ type: 'text', text }] });
-  expect(final?.messages[0]?.parts[0]).toEqual({ type: 'text', text });
+  await Promise.all([store.patch({ draft: draftMessage(text) }), store.patch({ toolChoice: `tool-${i}` })]);
+  const final = await store.read();
+  expect(final).toMatchObject({ status: 'valid', record: { draft: { parts: [{ type: 'text', text }] } } });
 }
 ```
 
@@ -245,23 +247,23 @@ const patchChat = useCallback(
 
 ## Decision Table: which API to use
 
-| Scenario                                       | API to call                                                   |
-| ---------------------------------------------- | ------------------------------------------------------------- |
-| Single top-level field on a chat               | `patchChat(chatId, key, value)`                               |
-| Single entry in `chat.messageEdits`            | `setMessageEdit(chatId, messageId, draft)`                    |
-| Remove a single entry in `chat.messageEdits`   | `clearMessageEdit(chatId, messageId)`                         |
-| Soft-delete a chat                             | `softDeleteChat(chatId)` (`deleteChat` forwards to this)      |
-| Full chat replacement (e.g. import, duplicate) | `updateChat(chatId, fullChat)` with `fullChat.id === chatId`  |
-| Generated chat label                           | `applyGeneratedChatName(chatId, name)`                        |
-| Navigation repair empty chat                   | `createNavigationRepairChat(projectId)`                       |
-| Accepted user chat action                      | `touchChatRecency(chatId, timestamp)`                         |
-| Unread/read transition                         | `setChatUnreadState(chatId, hasUnreadTurn)`                   |
-| Material project activity                      | `touchProjectActivity(projectId, timestamp)`                  |
-| Soft-delete / restore project                  | `trashProject(projectId)` / `restoreProject(projectId)`       |
-| Revision pointer                               | `setProjectRevisionState(projectId, revisionState)`           |
-| Permanent project deletion                     | Journaled filesystem delete, then `deleteProjectLibraryState` |
-| Portable project metadata                      | Project manifest writer, never an object-store patch          |
-| Project name before creation                   | Semantic naming request, then strict manifest creation        |
+| Scenario                                       | API to call                                                                     |
+| ---------------------------------------------- | ------------------------------------------------------------------------------- |
+| Single top-level field on a chat               | `patchChat(chatId, key, value)`                                                 |
+| Draft, message edit, tool choice or mode       | Chat's composer record actor (`patch`), via `draftPersistenceFor`               |
+| Store an attachment                            | `AttachmentStore.put(bytes, mediaType, filename)`                               |
+| Soft-delete a chat                             | `softDeleteChat(chatId)` (`deleteChat` forwards to this)                        |
+| Full chat replacement (e.g. import, duplicate) | `updateChat(chatId, fullChat)` with `fullChat.id === chatId`                    |
+| Generated chat label                           | `applyGeneratedChatName(chatId, name)`                                          |
+| Navigation repair empty chat                   | `createNavigationRepairChat(projectId)`                                         |
+| Accepted user chat action                      | `touchChatRecency(chatId, timestamp)`                                           |
+| Unread/read transition                         | `ChatSessionStore` (`markViewed` / its unread decision) → project unread record |
+| Material project activity                      | `touchProjectActivity(projectId, timestamp)`                                    |
+| Soft-delete / restore project                  | `trashProject(projectId)` / `restoreProject(projectId)`                         |
+| Revision pointer                               | `setProjectRevisionState(projectId, revisionState)`                             |
+| Permanent project deletion                     | Journaled filesystem delete, then `deleteProjectLibraryState`                   |
+| Portable project metadata                      | Project manifest writer, never an object-store patch                            |
+| Project name before creation                   | Semantic naming request, then strict manifest creation                          |
 
 ## Summary Checklist
 
@@ -276,13 +278,13 @@ Before merging a storage-layer change:
 - [ ] Chat ordering reads `recencyAt` through the canonical legacy fallback and never reads `updatedAt`.
 - [ ] Unread/read transitions preserve row/recency timestamps and never touch project recency.
 - [ ] Derived metadata and navigation repair use semantic operations, not timestamp flags.
-- [ ] A concurrency regression test in `apps/ui/app/db/indexeddb-storage.test.ts` covers the new field with ≥100 iterations.
+- [ ] A concurrency regression test beside the store covers the new field with ≥100 iterations.
 - [ ] React Query invalidation hits both collection and row keys only when a material row change occurred, except create/delete membership changes.
 
 ## References
 
 - Research: `docs/research/chat-draft-resurrection-race.md`
-- Implementation: `apps/ui/app/db/indexeddb-storage.ts`, `apps/ui/app/db/keyed-mutex.ts`
+- Implementation: `apps/ui/app/db/indexeddb-storage.ts`, `apps/ui/app/db/keyed-mutex.ts`, `apps/ui/app/db/composer-record-store.ts`, `apps/ui/app/db/attachment-store.ts`, `apps/ui/app/machines/composer-record.machine.ts`
 - Contract: `apps/ui/app/types/storage.types.ts`
 - Hook surfaces: `apps/ui/app/hooks/use-chats.ts`, `apps/ui/app/hooks/use-project-manager.tsx`, `apps/ui/app/hooks/use-chat.tsx`
 - Related: `docs/policy/xstate-policy.md`, `docs/policy/filesystem-policy.md`, `docs/policy/testing-policy.md`

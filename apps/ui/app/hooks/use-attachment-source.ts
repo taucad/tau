@@ -1,0 +1,153 @@
+/**
+ * Resolve a file part's URL to something an `<img>` or download link can use
+ * (blueprint §Flows: Render).
+ *
+ * An `attachments/<hash>.<ext>` reference is read from the directory that owns
+ * it and served as an object URL. One object URL exists per absolute path,
+ * however many consumers show it, and it is revoked when the last of them
+ * unmounts. A `data:` URL (legacy rows, D14) passes through unchanged.
+ */
+
+import { useEffect, useMemo, useState } from 'react';
+import { createAttachmentStore } from '#db/attachment-store.js';
+import { useOptionalFileManager } from '#hooks/use-file-manager.js';
+import { attachmentFileName, attachmentReferenceOf, isSupportedAttachmentMediaType } from '#utils/attachment.utils.js';
+
+/** What a consumer renders for one file part. */
+export type AttachmentSource =
+  | { readonly status: 'loading' }
+  /** The bytes are not on this device (yet); render the placeholder. */
+  | { readonly status: 'absent' }
+  /** `byteLength` is known when the bytes were read here, not for a passthrough URL. */
+  | { readonly status: 'ready'; readonly src: string; readonly byteLength?: number };
+
+const loading: AttachmentSource = { status: 'loading' };
+const absent: AttachmentSource = { status: 'absent' };
+
+/** The label a consumer shows for an `absent` source. */
+export const attachmentAbsentLabel = 'Not available on this device yet';
+
+type CacheEntry = {
+  consumers: number;
+  source: Promise<AttachmentSource>;
+  /** Set once the object URL exists, so the last release can revoke it. */
+  url?: string;
+};
+
+// Ponytail: one module-level map keyed by absolute path; the path already names its directory.
+const cache = new Map<string, CacheEntry>();
+
+type AttachmentReader = Parameters<typeof createAttachmentStore>[0];
+
+type AttachmentRequest = {
+  readonly client: AttachmentReader;
+  readonly directory: string;
+  readonly url: string;
+  readonly mediaType: string;
+};
+
+const pathOf = (directory: string, url: string): string => `${directory}/${url.slice('attachments/'.length)}`;
+
+const load = async (entry: CacheEntry, request: AttachmentRequest): Promise<AttachmentSource> => {
+  const bytes = await createAttachmentStore(request.client, request.directory).read(request.url);
+  if (bytes === undefined) {
+    return absent;
+  }
+  const objectUrl = URL.createObjectURL(new Blob([bytes], { type: request.mediaType }));
+  if (entry.consumers === 0) {
+    // Every consumer left while the bytes were loading.
+    URL.revokeObjectURL(objectUrl);
+  } else {
+    entry.url = objectUrl;
+  }
+  return { status: 'ready', src: objectUrl, byteLength: bytes.byteLength };
+};
+
+const acquire = (request: AttachmentRequest): CacheEntry => {
+  const path = pathOf(request.directory, request.url);
+  const existing = cache.get(path);
+  if (existing) {
+    existing.consumers += 1;
+    return existing;
+  }
+  const entry: CacheEntry = { consumers: 1, source: Promise.resolve(loading) };
+  entry.source = load(entry, request);
+  cache.set(path, entry);
+  return entry;
+};
+
+const release = (path: string, entry: CacheEntry): void => {
+  entry.consumers -= 1;
+  if (entry.consumers > 0) {
+    return;
+  }
+  cache.delete(path);
+  if (entry.url !== undefined) {
+    URL.revokeObjectURL(entry.url);
+  }
+};
+
+/**
+ * The name a download of this part is saved under: its own `filename`, else
+ * the attachment's stored name, else `undefined` for the caller's fallback.
+ */
+export const attachmentDownloadName = (part: {
+  readonly url: string;
+  readonly mediaType: string;
+  readonly filename?: string;
+}): string | undefined => {
+  if (part.filename !== undefined) {
+    return part.filename;
+  }
+  const reference = attachmentReferenceOf(part);
+  return reference && isSupportedAttachmentMediaType(reference.mediaType) ? attachmentFileName(reference) : undefined;
+};
+
+/**
+ * The renderable source of one file part.
+ *
+ * @param directory - The absolute directory that owns the part's `attachments/` reference, when known.
+ * @param part - The file part's URL and media type.
+ * @returns `ready` with a URL to render, `loading`, or `absent` for bytes this device does not hold.
+ */
+export function useAttachmentSource(
+  directory: string | undefined,
+  part: { readonly url: string; readonly mediaType: string },
+): AttachmentSource {
+  // Optional: a surface without a filesystem still renders `data:` parts, and shows references as absent.
+  const client = useOptionalFileManager()?.client;
+  const [resolved, setResolved] = useState<{ path: string; source: AttachmentSource } | undefined>(undefined);
+  const isReference = attachmentReferenceOf(part) !== undefined;
+  const path = isReference && directory !== undefined && client !== undefined ? pathOf(directory, part.url) : undefined;
+  const passthrough = useMemo<AttachmentSource>(() => ({ status: 'ready', src: part.url }), [part.url]);
+
+  useEffect(() => {
+    if (path === undefined || directory === undefined || client === undefined) {
+      return undefined;
+    }
+    const entry = acquire({ client, directory, url: part.url, mediaType: part.mediaType });
+    let active = true;
+    const settle = async (): Promise<void> => {
+      const source = await entry.source;
+      if (active) {
+        setResolved({ path, source });
+      }
+    };
+    // async-iife: bootstrap — the shared entry owns the read; a consumer that unmounted ignores its result
+    void settle();
+    return () => {
+      active = false;
+      release(path, entry);
+    };
+  }, [client, directory, part.mediaType, part.url, path]);
+
+  if (!isReference) {
+    // `data:` and other legacy URLs render as they are.
+    return passthrough;
+  }
+  if (path === undefined) {
+    // Nowhere to read the bytes from on this surface.
+    return absent;
+  }
+  return resolved?.path === path ? resolved.source : loading;
+}

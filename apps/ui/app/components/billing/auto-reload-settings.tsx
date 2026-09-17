@@ -4,10 +4,13 @@ import type { WireAutoReloadConsent, WirePaymentAction } from '@taucad/billing';
 import { Button } from '@taucad/ui/components/button';
 import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { SettingsSectionCard } from '#components/settings/settings-item.js';
+import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import {
+  BillingCollectionUnavailable,
   confirmPaymentAction,
   createPaymentRequestId,
   followPaymentRedirect,
+  purchasesUnavailableMessage,
   recoverPaymentAction,
 } from '#lib/billing-payment-client.js';
 import type { PaymentActionBinding } from '#lib/billing-payment-client.js';
@@ -15,6 +18,16 @@ import { getReloadConsent, prepareReloadConsent, revokeReloadConsent } from '#li
 import { useFinancialSession } from '#providers/financial-session-provider.js';
 
 /* oxlint-disable no-void, unicorn/no-negated-condition -- event handlers deliberately fire tracked UI operations */
+
+/* eslint-disable @typescript-eslint/naming-convention -- keys are the wire's snake_case consent states. */
+const consentStateLabel: Record<WireAutoReloadConsent['state'], string> = {
+  pending_setup: 'Waiting for card setup',
+  enabled: 'On',
+  paused_terms: 'Paused because the terms changed. Turn it off, then review the new terms.',
+  disabled_failures: 'Off after failed payments',
+  revoked: 'Off',
+};
+/* eslint-enable @typescript-eslint/naming-convention -- end wire state keys. */
 
 const money = (minor: string): string => `US$${(Number(minor) / 100).toFixed(2)}`;
 
@@ -25,6 +38,9 @@ export function AutoReloadSettings({
   readonly binding: PaymentActionBinding | undefined;
 }): React.JSX.Element {
   const financial = useFinancialSession();
+  const { isResolved, paymentCollectionAvailable } = useEntitlements();
+  const [load, setLoad] = useState<'loading' | 'loaded' | 'failed'>('loading');
+  const [attempt, setAttempt] = useState(0);
   const [consent, setConsent] = useState<WireAutoReloadConsent>();
   const [action, setAction] = useState<WirePaymentAction>();
   const [error, setError] = useState<string>();
@@ -41,6 +57,8 @@ export function AutoReloadSettings({
       subjectId: binding.subjectId,
     };
     const token = financial.capture();
+    // oxlint-disable-next-line react/set-state-in-effect -- the owned GET starts from a visible loading state
+    setLoad('loading');
     // async-iife: bootstrap
     void (async () => {
       try {
@@ -48,14 +66,15 @@ export function AutoReloadSettings({
         if (token.isCurrent()) {
           setConsent(value);
           setAction(value?.setupAction ?? undefined);
+          setLoad('loaded');
         }
       } catch {
         if (token.isCurrent()) {
-          setError('Automatic reload is unavailable. Try again.');
+          setLoad('failed');
         }
       }
     })();
-  }, [binding?.apiBaseUrl, binding?.environment, binding?.ownerId, binding?.subjectId, financial]);
+  }, [binding?.apiBaseUrl, binding?.environment, binding?.ownerId, binding?.subjectId, financial, attempt]);
 
   const refresh = async (): Promise<void> => {
     if (!binding) {
@@ -74,9 +93,13 @@ export function AutoReloadSettings({
     setError(undefined);
     try {
       await operation();
-    } catch {
+    } catch (error_) {
       if (guard.isCurrent()) {
-        setError('Could not update automatic reload. Try again.');
+        setError(
+          error_ instanceof BillingCollectionUnavailable
+            ? purchasesUnavailableMessage
+            : 'Could not update automatic reload. Try again.',
+        );
       }
     } finally {
       if (guard.isCurrent()) {
@@ -91,7 +114,28 @@ export function AutoReloadSettings({
         <CardTitle className='text-base'>Automatic reload</CardTitle>
       </CardHeader>
       <CardContent className='flex flex-col gap-3 text-sm'>
-        {consent ? (
+        {load === 'loading' ? (
+          <p className='text-muted-foreground' role='status' aria-busy='true'>
+            Loading automatic reload…
+          </p>
+        ) : undefined}
+        {load === 'failed' ? (
+          <div className='flex items-center justify-between gap-2'>
+            <p className='text-muted-foreground' role='alert'>
+              Automatic reload settings could not be loaded.
+            </p>
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => {
+                setAttempt((value) => value + 1);
+              }}
+            >
+              Retry
+            </Button>
+          </div>
+        ) : undefined}
+        {load !== 'loaded' ? undefined : consent ? (
           <dl className='grid grid-cols-2 gap-1 text-muted-foreground'>
             <dt>Reload amount</dt>
             <dd>{money(consent.terms.principalMinor)}</dd>
@@ -108,7 +152,7 @@ export function AutoReloadSettings({
             <dt>Failure limit</dt>
             <dd>{consent.terms.terminalFailureLimit}</dd>
             <dt>Status</dt>
-            <dd>{consent.state.replaceAll('_', ' ')}</dd>
+            <dd>{consentStateLabel[consent.state]}</dd>
             {consent.paymentMethod ? (
               <>
                 <dt>Card</dt>
@@ -166,9 +210,9 @@ export function AutoReloadSettings({
             Continue setup
           </Button>
         ) : undefined}
-        {!consent || consent.state === 'revoked' ? (
+        {load === 'loaded' && (!consent || consent.state === 'revoked') ? (
           <Button
-            disabled={busy || !binding}
+            disabled={busy || !binding || !isResolved || !paymentCollectionAvailable}
             onClick={() =>
               void run(async () => {
                 const token = financial.capture();
@@ -188,6 +232,9 @@ export function AutoReloadSettings({
           >
             Review automatic reload
           </Button>
+        ) : undefined}
+        {load === 'loaded' && isResolved && !paymentCollectionAvailable && (!consent || consent.state === 'revoked') ? (
+          <p className='text-muted-foreground'>{purchasesUnavailableMessage}</p>
         ) : undefined}
         {consent && consent.state !== 'revoked' ? (
           <Button
@@ -210,7 +257,11 @@ export function AutoReloadSettings({
             Turn off automatic reload
           </Button>
         ) : undefined}
-        {error ? <p className='text-warning'>{error}</p> : undefined}
+        {error ? (
+          <p className='text-warning' role='alert'>
+            {error}
+          </p>
+        ) : undefined}
       </CardContent>
     </SettingsSectionCard>
   );

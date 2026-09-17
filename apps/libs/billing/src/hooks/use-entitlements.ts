@@ -7,7 +7,11 @@ import { useBillingSession } from './billing-session.js';
 
 const freeFallback = entitlementsFromTier('free');
 
-export const useEntitlements = (): Entitlements => {
+/**
+ * The viewer's entitlements. Until the server answers, `isResolved` is false and the value is the Free
+ * fallback, so callers that name a plan or offer a purchase render a neutral state instead.
+ */
+export const useEntitlements = (): Entitlements & { readonly isResolved: boolean } => {
   const { apiBaseUrl, userId } = useBillingSession();
   const { data } = useQuery({
     queryKey: ['billing', 'entitlements', apiBaseUrl, userId],
@@ -21,7 +25,7 @@ export const useEntitlements = (): Entitlements => {
       return parseEntitlements(await response.json());
     },
   });
-  return data ?? freeFallback;
+  return data === undefined ? { ...freeFallback, isResolved: false } : { ...data, isResolved: true };
 };
 
 export const useKernelTierRequirement = (

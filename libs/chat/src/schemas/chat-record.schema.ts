@@ -16,19 +16,17 @@ import type { Chat } from '#types/chat.types.js';
  * stripped — a strict schema here would silently delete a newer client's field
  * every time an older one saved the chat.
  *
- * Four {@link Chat} fields are deliberately *not* part of it (D25/A39/S39,
- * P26):
+ * One {@link Chat} field is deliberately *not* part of it (D25/A39/S39, P26):
+ * **`messages`** is derived, not stored. The chat's transcript is the session
+ * log's, rebuilt from `events.jsonl` on open; a copy in the record would be a
+ * second history of the same turns, and `chat.json` is the one path two devices
+ * both claim, so the loser's copy would overwrite the winner's on every replay —
+ * through the very path AC17 says must lose no record.
  *
- * - **`messages`** — derived, not stored. The chat's transcript is the session
- *   log's, rebuilt from `events.jsonl` on open; a copy in the record would be a
- *   second history of the same turns, and `chat.json` is the one path two
- *   devices both claim, so the loser's copy would overwrite the winner's on
- *   every replay — through the very path AC17 says must lose no record.
- * - **`draft`** and **`messageEdits`** — what a person has typed and not sent.
- *   Per-device UI state: a half-written message is not something the other
- *   device should be shown, let alone have overwritten.
- * - **`hasUnreadTurn`** — per client (A36/I26): a record that carried it would
- *   clear the badge on device B because someone read the turn on device A.
+ * A record written before the composer records existed also carries `draft`,
+ * `messageEdits` and `hasUnreadTurn`. Those are this device's (a half-written
+ * message, an unread badge) and now live in its composer records, so the reader
+ * accepts such a record and drops the three keys, and the writer never emits them.
  */
 
 const timestamp = z.number().int().nonnegative();
@@ -51,20 +49,20 @@ export const chatRecordSchema = z
 export type ChatRecord = Omit<Chat, (typeof omittedChatFields)[number]>;
 
 /**
- * The chat fields that never reach the file.
- *
- * `messages` because the log derives it; `draft` and `messageEdits` because a
- * half-written message is this device's; `hasUnreadTurn` because unread is this
- * client's answer, not the chat's.
+ * The chat fields that never reach the file: `messages`, because the log
+ * derives it.
  *
  * @public
  */
-export const omittedChatFields = [
-  'messages',
-  'draft',
-  'messageEdits',
-  'hasUnreadTurn',
-] as const satisfies ReadonlyArray<keyof Chat>;
+export const omittedChatFields = ['messages'] as const satisfies ReadonlyArray<keyof Chat>;
+
+/** Per-device keys a pre-composer-record chat file may still carry; dropped on read and write. */
+const legacyChatFields = ['draft', 'messageEdits', 'hasUnreadTurn'] as const;
+
+const droppedFields = new Set<string>([...omittedChatFields, ...legacyChatFields]);
+
+const withoutDroppedFields = (value: Readonly<Record<string, unknown>>): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(value).filter(([key]) => !droppedFields.has(key)));
 
 /* The *paths* a chat lives at belong to `@taucad/revisions`' `chat-refs`
  * module, which has to know them to build the ref's tree; this module owns the
@@ -93,12 +91,11 @@ export const omittedChatFields = [
  * ```
  */
 export const serializeChatRecord = (chat: Chat | ChatRecord): string => {
-  const omitted = new Set<string>(omittedChatFields);
-  /* `undefined` is not JSON: a cleared draft has to *leave* the record rather
+  /* `undefined` is not JSON: a cleared field has to *leave* the record rather
    * than sit in it as a key with no value, or two devices would disagree about
    * whether the field is set. */
-  const entries: ReadonlyArray<readonly [string, unknown]> = Object.entries(chat);
-  const record = Object.fromEntries(entries.filter(([key, value]) => value !== undefined && !omitted.has(key)));
+  const entries = Object.entries(withoutDroppedFields(chat));
+  const record = Object.fromEntries(entries.filter(([, value]) => value !== undefined));
   return `${JSON.stringify(record, undefined, 2)}\n`;
 };
 
@@ -120,5 +117,5 @@ export const parseChatRecord = (text: string): ChatRecord | undefined => {
   }
   const result = chatRecordSchema.safeParse(parsed);
   // oxlint-disable-next-line typescript-eslint/consistent-type-assertions -- the open schema validates the required half; the rest rides through as written (D14).
-  return result.success ? (result.data as ChatRecord) : undefined;
+  return result.success ? (withoutDroppedFields(result.data) as ChatRecord) : undefined;
 };

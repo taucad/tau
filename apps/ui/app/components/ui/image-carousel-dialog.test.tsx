@@ -5,6 +5,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ImageCarouselDialog } from '#components/ui/image-carousel-dialog.js';
 import type { ImageCarouselDialogItem } from '#components/ui/image-carousel-dialog.js';
 
+const attachmentDirectory = '/projects/p1/.tau/chats/c1/attachments';
+const attachmentHash = 'c'.repeat(64);
+const readFile = vi.fn(async (_path: string) => new Uint8Array([137, 80, 78, 71]));
+const fileManager = { client: { readFile } };
+vi.mock('#hooks/use-file-manager.js', () => ({
+  useOptionalFileManager: () => fileManager,
+}));
+
 type MockCarouselOptions = {
   readonly loop?: boolean;
   readonly startIndex?: number;
@@ -139,6 +147,7 @@ vi.mock('@taucad/ui/components/carousel', async () => {
 const items: ImageCarouselDialogItem[] = Array.from({ length: 5 }, (_, index) => ({
   id: `item-${index + 1}`,
   src: `data:image/svg+xml,item-${index + 1}`,
+  mediaType: 'image/svg+xml',
   alt: `Item ${index + 1}`,
   downloadName: `item-${index + 1}.png`,
 }));
@@ -149,7 +158,15 @@ describe('ImageCarouselDialog', () => {
   });
 
   it('should initialize Embla with the clicked image index and update chrome from select events only', async () => {
-    render(<ImageCarouselDialog initialIndex={2} isOpen items={items} onOpenChange={vi.fn()} />);
+    render(
+      <ImageCarouselDialog
+        directory={attachmentDirectory}
+        initialIndex={2}
+        isOpen
+        items={items}
+        onOpenChange={vi.fn()}
+      />,
+    );
 
     await waitFor(() => {
       expect(carouselMock.api.on).toHaveBeenCalledWith('select', expect.any(Function));
@@ -172,18 +189,48 @@ describe('ImageCarouselDialog', () => {
   it('should create each open session from the supplied initial index', async () => {
     const onOpenChange = vi.fn();
     const { rerender } = render(
-      <ImageCarouselDialog initialIndex={0} isOpen={false} items={items} onOpenChange={onOpenChange} />,
+      <ImageCarouselDialog
+        directory={attachmentDirectory}
+        initialIndex={0}
+        isOpen={false}
+        items={items}
+        onOpenChange={onOpenChange}
+      />,
     );
 
-    rerender(<ImageCarouselDialog initialIndex={4} isOpen items={items} onOpenChange={onOpenChange} />);
+    rerender(
+      <ImageCarouselDialog
+        directory={attachmentDirectory}
+        initialIndex={4}
+        isOpen
+        items={items}
+        onOpenChange={onOpenChange}
+      />,
+    );
 
     await waitFor(() => {
       expect(carouselMock.optionsHistory.at(-1)).toMatchObject({ startIndex: 4 });
     });
     expect(screen.getByText('5 / 5')).toBeInTheDocument();
 
-    rerender(<ImageCarouselDialog initialIndex={4} isOpen={false} items={items} onOpenChange={onOpenChange} />);
-    rerender(<ImageCarouselDialog initialIndex={1} isOpen items={items} onOpenChange={onOpenChange} />);
+    rerender(
+      <ImageCarouselDialog
+        directory={attachmentDirectory}
+        initialIndex={4}
+        isOpen={false}
+        items={items}
+        onOpenChange={onOpenChange}
+      />,
+    );
+    rerender(
+      <ImageCarouselDialog
+        directory={attachmentDirectory}
+        initialIndex={1}
+        isOpen
+        items={items}
+        onOpenChange={onOpenChange}
+      />,
+    );
 
     await waitFor(() => {
       expect(carouselMock.optionsHistory.at(-1)).toMatchObject({ startIndex: 1 });
@@ -191,8 +238,44 @@ describe('ImageCarouselDialog', () => {
     expect(screen.getByText('2 / 5')).toBeInTheDocument();
   });
 
+  it('should download a stored attachment from its object URL under its stored name', async () => {
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:stored-image', revokeObjectURL: vi.fn() }));
+    try {
+      const stored: ImageCarouselDialogItem = {
+        id: 'stored',
+        src: `attachments/${attachmentHash}.png`,
+        mediaType: 'image/png',
+        alt: 'Stored image',
+      };
+      render(
+        <ImageCarouselDialog
+          directory={attachmentDirectory}
+          initialIndex={0}
+          isOpen
+          items={[stored]}
+          onOpenChange={vi.fn()}
+        />,
+      );
+
+      const link = await screen.findByRole('link', { name: `Download ${attachmentHash}.png` });
+      expect(link).toHaveAttribute('href', 'blob:stored-image');
+      expect(link).toHaveAttribute('download', `${attachmentHash}.png`);
+      expect(readFile).toHaveBeenCalledWith(`${attachmentDirectory}/${attachmentHash}.png`);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('should eager-load full dialog images', () => {
-    render(<ImageCarouselDialog initialIndex={0} isOpen items={items} onOpenChange={vi.fn()} />);
+    render(
+      <ImageCarouselDialog
+        directory={attachmentDirectory}
+        initialIndex={0}
+        isOpen
+        items={items}
+        onOpenChange={vi.fn()}
+      />,
+    );
 
     for (const image of screen.getAllByRole('img')) {
       expect(image).toHaveAttribute('loading', 'eager');

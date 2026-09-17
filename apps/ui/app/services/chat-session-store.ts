@@ -43,12 +43,25 @@ import type { ChatSessionActorRef } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import type { ChatRequest } from '#hooks/chat-persistence.machine.js';
-import { draftMachine } from '#hooks/draft.machine.js';
+import { buildDraftMessage, draftMachine } from '#hooks/draft.machine.js';
+import { createComposerRecordActor, draftHydrationOf, draftPersistenceFor } from '#hooks/composer-record.js';
+import type { ComposerRecordRef } from '#hooks/composer-record.js';
+import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
+import type { ComposerRecordClient } from '#db/composer-record-store.js';
+import { createChatAttachmentStore } from '#db/attachment-store.js';
+import type { AttachmentReference } from '#utils/attachment.utils.js';
+import {
+  deferredRecordStore,
+  referencedAttachments,
+  removeRecord,
+  stopWhenWritesSettle,
+} from '#services/chat-session-store-composer.js';
+import type { ComposerBinding, UnreadRecord } from '#services/chat-session-store-composer.js';
 import { resizeImageActor } from '#hooks/resize-image.actor.js';
 import { inspect } from '#machines/inspector.js';
 import { clearLedger } from '#services/rpc-ledger.js';
 import { parseErrorForPersistence } from '#utils/error.utils.js';
-import { extractMimeTypeFromDataUrl, finalizeInterruptedToolParts, stampMessageCreatedAt } from '#utils/chat.utils.js';
+import { buildUserMessage, finalizeInterruptedToolParts, stampMessageCreatedAt } from '#utils/chat.utils.js';
 import {
   bindDurableChatRun,
   createChatInstance,
@@ -80,6 +93,16 @@ const admissionEnvelopeSchema = z.strictObject({
  * object so `setDependencies` is one atomic swap (no torn reads if a render
  * mid-acquire updates one closure at a time).
  */
+/**
+ * Whether the person can see the page: visible and focused. A host with no
+ * document (a test, a daemon) counts as active. The one attention predicate
+ * the store and the focused-chat hook share (R3).
+ *
+ * @returns `true` when the document is visible and focused, or absent.
+ */
+export const isDocumentActive = (): boolean =>
+  typeof document === 'undefined' || (document.visibilityState === 'visible' && document.hasFocus());
+
 export type ChatSessionDeps = {
   getChat: (chatId: string) => Promise<ChatEntity | undefined>;
   patchChat: <K extends keyof ChatEntity>(
@@ -88,14 +111,17 @@ export type ChatSessionDeps = {
     value: ChatEntity[K],
   ) => Promise<ChatEntity | undefined>;
   touchChatRecency: (chatId: string, requestedAt: number) => Promise<ChatEntity | undefined>;
-  setChatUnreadState: (chatId: string, hasUnreadTurn: boolean) => Promise<ChatEntity | undefined>;
   consumeChatStartupRequest: (chatId: string, requestId: string) => Promise<ChatEntity | undefined>;
   commitCancelledDraftRestore: (
     chatId: string,
     input: CommitCancelledDraftRestoreInput,
   ) => Promise<ChatEntity | undefined>;
-  setMessageEdit: (chatId: string, messageId: string, draft: MyUIMessage) => Promise<ChatEntity | undefined>;
-  clearMessageEdit: (chatId: string, messageId: string) => Promise<ChatEntity | undefined>;
+  /**
+   * The worker filesystem client. It reaches the Home workspace's
+   * `/.tau/composers` records and each project's `.tau/chats` attachments from
+   * any route (D1, D13).
+   */
+  client: ComposerRecordClient;
 };
 
 export type ChatSession = {
@@ -103,6 +129,11 @@ export type ChatSession = {
   readonly chat: Chat<MyUIMessage>;
   readonly persistenceActorRef: ActorRefFrom<typeof chatPersistenceMachine>;
   readonly draftActorRef: ActorRefFrom<typeof draftMachine>;
+  /**
+   * This chat's composer record on this device (D2): draft, edits, tool choice
+   * and mode. A surface mounts `useComposerRecordToasts` on it.
+   */
+  readonly composerRecordRef: ComposerRecordRef;
   /**
    * This chat's state in the agent-state vocabulary (D32, S45).
    *
@@ -119,34 +150,18 @@ export type ChatSession = {
 // Module-scoped singletons / helpers
 // ---------------------------------------------------------------------------
 
+const missingClient = async (): Promise<never> => {
+  throw new Error('ChatSessionStore: client not provided');
+};
+
 /**
- * Rebuilds the user message currently being edited. Resets only the
- * user-facing fields — text/image parts, `createdAt`, and `status` — and
- * spreads the original message's metadata through untouched. Per-turn
- * agent config travels via `body.agent` on the wire (composed by the
- * chat-client from `useCadAgentConfig`), never via per-message metadata.
+ * The user message being edited, rebuilt by the one builder. It keeps the
+ * original's id and metadata and refreshes only `createdAt` and `status`; the
+ * turn's agent config travels in `body.agent`, never in message metadata.
  */
-function buildEditedMessage(original: MyUIMessage, request: Extract<ChatRequest, { kind: 'edit' }>): MyUIMessage {
-  return {
-    id: request.messageId,
-    role: 'user',
-    parts: [
-      { type: 'text', text: request.content },
-      ...(request.imageUrls?.map(
-        (url) =>
-          ({
-            type: 'file',
-            url,
-            mediaType: extractMimeTypeFromDataUrl(url),
-          }) as const,
-      ) ?? []),
-    ],
-    metadata: {
-      ...original.metadata,
-      createdAt: Date.now(),
-      status: 'pending',
-    },
-  };
+function editedMessage(original: MyUIMessage, request: Extract<ChatRequest, { kind: 'edit' }>): MyUIMessage {
+  const built = buildUserMessage({ text: request.content, attachments: request.attachments });
+  return { ...built, id: request.messageId, metadata: { ...original.metadata, ...built.metadata } };
 }
 
 /**
@@ -322,6 +337,15 @@ type InternalSession = ChatSession & {
     durable?: string;
     lifecycle?: string;
   };
+  /**
+   * The chat's record store and project, once its project is known. The record
+   * actor exists from the first frame; its I/O waits for this (D7).
+   */
+  composer: Promise<ComposerBinding | undefined>;
+  /** Settle {@link InternalSession.composer}; only the first call counts. */
+  bindComposer: (projectId: string | undefined) => void;
+  /** Composer work that must reach the record before its actor stops (a cancelled-draft restore). */
+  composerWork: Set<Promise<unknown>>;
   /** Cleanups for the per-chat subscriptions wired up at session creation. */
   dispose: () => void;
 };
@@ -379,9 +403,19 @@ export class ChatSessionStore {
    * candidate, *Close* asking for the life of the document.
    */
   readonly #projectSessions = new Map<string, ProjectSessionActorRef>();
+  /** One unread record per project (D2, D9), kept for the store's lifetime. */
+  readonly #unreadRecords = new Map<string, UnreadRecord>();
+  /**
+   * A released chat's record actor, still writing. A reacquired session reads
+   * its record only after this settles, so it never reads what is about to be
+   * overwritten.
+   */
+  readonly #composerDrains = new Map<string, Promise<void>>();
   #settlementUnsubscribe: (() => void) | undefined;
   /** The project whose chats are being acquired right now. */
   #focusedProjectId: string | undefined;
+  /** The chat the person has in front of them (R3); only it counts as attended. */
+  #focusedChatId: string | undefined;
   readonly #membershipTopic = new Topic<void>({ name: 'ChatSessionStore.membership' });
   readonly #chatTopics = new Map<string, Topic<void>>();
   readonly #statusTopics = new Map<string, Topic<void>>();
@@ -409,20 +443,19 @@ export class ChatSessionStore {
     async touchChatRecency() {
       throw new Error('ChatSessionStore: touchChatRecency not provided');
     },
-    async setChatUnreadState() {
-      throw new Error('ChatSessionStore: setChatUnreadState not provided');
-    },
     async consumeChatStartupRequest() {
       throw new Error('ChatSessionStore: consumeChatStartupRequest not provided');
     },
     async commitCancelledDraftRestore() {
       throw new Error('ChatSessionStore: commitCancelledDraftRestore not provided');
     },
-    async setMessageEdit() {
-      throw new Error('ChatSessionStore: setMessageEdit not provided');
-    },
-    async clearMessageEdit() {
-      throw new Error('ChatSessionStore: clearMessageEdit not provided');
+    client: {
+      readFile: missingClient,
+      writeFile: missingClient,
+      exists: missingClient,
+      readdir: missingClient,
+      unlink: missingClient,
+      rmdir: missingClient,
     },
   };
 
@@ -781,6 +814,7 @@ export class ChatSessionStore {
       this.#replayPersistedFailure(session);
       this.#replayPersistedSettlement(session);
       this.#syncChatState(session);
+      this.#restoreUnread(session);
     }
     if (this.#projectSessions.size === 0) {
       this.#settlementUnsubscribe?.();
@@ -809,9 +843,37 @@ export class ChatSessionStore {
     this.setProjectSession(projectId, this.#projectSessions.get(projectId));
   }
 
-  /** Tell a chat the person is looking at it, so `unread` clears (S45). @public */
+  /**
+   * Say which chat the person has in front of them (R3). Every sidebar row holds
+   * a view of its chat, so a view is not attention: only the focused chat, in an
+   * active document, is attended when a turn ends.
+   *
+   * @param chatId - The focused chat.
+   * @public
+   */
+  public focusChat(chatId: string): void {
+    this.#focusedChatId = chatId;
+  }
+
+  /**
+   * Stop treating a chat as focused, unless another chat has taken focus since.
+   *
+   * @param chatId - The chat that lost focus.
+   * @public
+   */
+  public blurChat(chatId: string): void {
+    if (this.#focusedChatId === chatId) {
+      this.#focusedChatId = undefined;
+    }
+  }
+
+  /** Tell a chat the person is looking at it, so `unread` clears (S45) — in its machine and its record (D9). @public */
   public markViewed(chatId: string): void {
-    this.#sessions.get(chatId)?.stateActorRef?.send({ type: 'viewed' });
+    const session = this.#sessions.get(chatId);
+    session?.stateActorRef?.send({ type: 'viewed' });
+    if (session !== undefined) {
+      void this.#setUnreadWhenBound(session.composer, chatId, false);
+    }
   }
 
   /**
@@ -827,6 +889,205 @@ export class ChatSessionStore {
    */
   public stopRun(chatId: string): void {
     this.#sessions.get(chatId)?.persistenceActorRef.send({ type: 'stopRequest' });
+  }
+
+  /**
+   * Whether this chat is unread on this device, as its project's unread record
+   * says (D9). The restore source for the chat's machine.
+   *
+   * @param chatId - A chat with a live session.
+   * @returns `true` once the record, or this store, has marked it unread.
+   * @public
+   */
+  public isUnread(chatId: string): boolean {
+    const projectId = this.#sessions.get(chatId)?.projectId;
+    return projectId !== undefined && (this.#unreadRecords.get(projectId)?.chats.has(chatId) ?? false);
+  }
+
+  /**
+   * Stop a chat's live composer record before the chat is deleted (D11).
+   *
+   * The record actor drains its in-flight write, removes the record, and ends
+   * in `removed`, so a patch that arrives later — a debounced keystroke, a
+   * restore — is dropped instead of writing the deleted record back. The chat's
+   * unread entry is cleared with it. A chat with no live session has no actor to
+   * stop; the chat store removes its record file either way.
+   *
+   * @param chatId - The chat being deleted.
+   * @public
+   */
+  public async removeChat(chatId: string): Promise<void> {
+    // A released chat's record may still be landing its last write; removing under it would bring the file back.
+    await this.#composerDrains.get(chatId);
+    const session = this.#sessions.get(chatId);
+    if (session === undefined) {
+      return;
+    }
+    await this.#setUnreadWhenBound(session.composer, chatId, false);
+    await removeRecord(session.composerRecordRef);
+  }
+
+  /**
+   * Stop every live composer record of a project before its records are
+   * removed (D11), so a late unread decision or keystroke cannot recreate
+   * `unread.json` or a chat record under the deleted project.
+   *
+   * @param projectId - The project being permanently deleted.
+   * @public
+   */
+  public async removeProject(projectId: string): Promise<void> {
+    // Ponytail: waits on every released chat's drain, not only this project's; drains are one write long.
+    await Promise.all(this.#composerDrains.values());
+    const sessions = [...this.#sessions.values()].filter((session) => session.projectId === projectId);
+    await Promise.all([
+      ...sessions.map(async (session) => removeRecord(session.composerRecordRef)),
+      // Kept in the map once removed: a later decision for this project reaches the terminal actor and is dropped.
+      removeRecord(this.#unreadRecord(projectId).ref),
+    ]);
+  }
+
+  /**
+   * Copy a draft's attachments into the chat's own directory before they are
+   * sent (D18). Resolves only when every blob is durable there.
+   *
+   * @param chatId - The chat about to send.
+   * @param attachments - The draft's attachments, stored beside its record.
+   * @throws When any attachment cannot be copied; nothing should be sent then.
+   * @public
+   */
+  public async promoteDraftAttachments(chatId: string, attachments: readonly AttachmentReference[]): Promise<void> {
+    if (attachments.length === 0) {
+      return;
+    }
+    const session = this.#sessions.get(chatId);
+    if (session === undefined) {
+      throw new Error(`ChatSessionStore: cannot send attachments from inactive chat ${chatId}`);
+    }
+    const binding = await session.composer;
+    if (binding === undefined) {
+      throw new Error(`Chat ${chatId} belongs to no project, so its attachments cannot be sent.`);
+    }
+    const { record, chatAttachments } = binding;
+    const copies = await Promise.allSettled(
+      attachments.map(async (attachment) => {
+        // A blob the chat already holds is skipped, so an edit re-referencing a sent attachment moves nothing.
+        if (await chatAttachments.has(attachment)) {
+          return undefined;
+        }
+        await record.attachments.copyTo(chatAttachments, attachment);
+        return attachment;
+      }),
+    );
+    const failure = copies.find((copy) => copy.status === 'rejected');
+    if (failure !== undefined) {
+      // Nothing was sent, so nothing references what this send copied; the chat ref would otherwise carry it.
+      const copied = copies.flatMap((copy) => (copy.status === 'fulfilled' && copy.value ? [copy.value] : []));
+      await Promise.allSettled(copied.map(async (attachment) => chatAttachments.remove(attachment)));
+      throw failure.reason instanceof Error
+        ? failure.reason
+        : new Error('Attachment promotion failed.', { cause: failure.reason });
+    }
+  }
+
+  /**
+   * Unlink the draft-stage bytes nothing in the composer references any more,
+   * once a send has cleared the draft (D11, "Send").
+   *
+   * @param chatId - The chat that just sent.
+   * @public
+   */
+  public async releaseDraftAttachments(chatId: string): Promise<void> {
+    const session = this.#sessions.get(chatId);
+    if (session === undefined) {
+      return;
+    }
+    const binding = await session.composer;
+    await binding?.record.attachments.retainOnly(referencedAttachments(session.draftActorRef.getSnapshot().context));
+  }
+
+  /** This project's unread record actor, created and read on first use. */
+  #unreadRecord(projectId: string): UnreadRecord {
+    const existing = this.#unreadRecords.get(projectId);
+    if (existing) {
+      return existing;
+    }
+    const ref = createComposerRecordActor(
+      createComposerRecordStore(this.#deps.client, composerRecordPaths.unread(projectId)),
+    );
+    const unread: UnreadRecord = { ref, chats: new Set(), clearedBeforeLoad: new Set(), loaded: false };
+    ref.on('recordLoaded', ({ record }) => {
+      unread.loaded = true;
+      for (const chatId of Object.keys(record === 'absent' ? {} : (record.unread ?? {}))) {
+        if (!unread.clearedBeforeLoad.has(chatId)) {
+          unread.chats.add(chatId);
+        }
+      }
+      unread.clearedBeforeLoad.clear();
+      for (const session of this.#sessions.values()) {
+        if (session.projectId === projectId) {
+          this.#restoreUnread(session);
+        }
+      }
+    });
+    this.#unreadRecords.set(projectId, unread);
+    ref.start();
+    return unread;
+  }
+
+  /** Tell a bound chat machine what the unread record says (D9); `read` is its default, so only unread is sent. */
+  #restoreUnread(session: InternalSession): void {
+    if (session.projectId !== undefined && this.#unreadRecords.get(session.projectId)?.chats.has(session.chatId)) {
+      session.stateActorRef?.send({ type: 'unreadRestored' });
+    }
+  }
+
+  /** Record an unread decision once the chat's project is known; a chat with no project has no record. */
+  async #setUnreadWhenBound(
+    composer: Promise<ComposerBinding | undefined>,
+    chatId: string,
+    value: boolean,
+  ): Promise<void> {
+    const binding = await composer;
+    if (binding !== undefined) {
+      this.#setUnread(binding.projectId, chatId, value);
+    }
+  }
+
+  /** Hand a binding over only after a released predecessor's writes have landed. */
+  async #afterComposerDrain(chatId: string, binding: ComposerBinding): Promise<ComposerBinding> {
+    await this.#composerDrains.get(chatId);
+    return binding;
+  }
+
+  /** Let a released chat's restore and in-flight write land, then stop its record actor. */
+  async #drainComposer(session: InternalSession, drained: PromiseWithResolvers<void>): Promise<void> {
+    try {
+      await Promise.allSettled(session.composerWork);
+      await stopWhenWritesSettle(session.composerRecordRef);
+    } finally {
+      drained.resolve();
+      if (this.#composerDrains.get(session.chatId) === drained.promise) {
+        this.#composerDrains.delete(session.chatId);
+      }
+    }
+  }
+
+  /** The store's unread decision, written to the one record that holds it (D9). */
+  #setUnread(projectId: string, chatId: string, value: boolean): void {
+    const unread = this.#unreadRecord(projectId);
+    if (unread.chats.has(chatId) === value && (value || unread.loaded)) {
+      return;
+    }
+    if (value) {
+      unread.chats.add(chatId);
+      unread.clearedBeforeLoad.delete(chatId);
+    } else {
+      unread.chats.delete(chatId);
+      if (!unread.loaded) {
+        unread.clearedBeforeLoad.add(chatId);
+      }
+    }
+    unread.ref.send({ type: 'patch', fields: { unread: { [chatId]: value } } });
   }
 
   /** The project session that owns this chat's run accounting (R2). */
@@ -852,6 +1113,7 @@ export class ChatSessionStore {
     this.#replayPersistedFailure(session);
     this.#replayPersistedSettlement(session);
     this.#syncChatState(session);
+    this.#restoreUnread(session);
   }
 
   #createSession(chatId: string, projectId: string | undefined): InternalSession {
@@ -863,20 +1125,53 @@ export class ChatSessionStore {
     let session: InternalSession;
     let approvalWasPending = false;
 
-    const markUnreadIfUnattended = (): void => {
-      const documentIsActive =
-        typeof document === 'undefined' || (document.visibilityState === 'visible' && document.hasFocus());
-      if (session.viewRefcount > 0 && documentIsActive) {
+    // `undefined` is a chat with no project: it has nowhere to keep a composer, so its record I/O fails.
+    const composer = Promise.withResolvers<ComposerBinding | undefined>();
+    let composerBound = false;
+    const bindComposer = (owner: string | undefined): void => {
+      if (composerBound) {
         return;
       }
-      void depsRef().setChatUnreadState(chatId, true);
+      composerBound = true;
+      if (owner === undefined) {
+        composer.resolve(undefined);
+        return;
+      }
+      const { client } = depsRef();
+      this.#unreadRecord(owner);
+      const binding: ComposerBinding = {
+        projectId: owner,
+        record: createComposerRecordStore(client, composerRecordPaths.chat(owner, chatId)),
+        chatAttachments: createChatAttachmentStore(client, owner, chatId),
+      };
+      composer.resolve(this.#afterComposerDrain(chatId, binding));
+    };
+    const recordStore = deferredRecordStore(composer.promise);
+    const composerRecordRef = createComposerRecordActor(recordStore);
+
+    const markUnreadIfUnattended = (): void => {
+      if (this.#focusedChatId === chatId && isDocumentActive()) {
+        return;
+      }
+      void this.#setUnreadWhenBound(composer.promise, chatId, true);
+    };
+
+    const readChatRow = async (id: string): Promise<ChatEntity | undefined> => {
+      try {
+        return await depsRef().getChat(id);
+      } catch (error) {
+        // An unreadable row still has a composer: bind it where the chat was opened, so its writes,
+        // promotion and deletion do not wait forever on a binding nothing else will settle.
+        bindComposer(session.projectId);
+        throw error;
+      }
     };
 
     const persistenceActorRef = createActor(
       chatPersistenceMachine.provide({
         actors: {
           loadChatActor: fromSafeAsync(async ({ input, signal }) => {
-            const loadedChat = await depsRef().getChat(input.chatId);
+            const loadedChat = await readChatRow(input.chatId);
             signal.throwIfAborted();
             if (this.#sessions.get(input.chatId) !== session) {
               return { type: 'chatRetrieved', chat: undefined };
@@ -891,6 +1186,9 @@ export class ChatSessionStore {
               if (session.chat.messages.length === 0) {
                 session.chat.messages = [];
               }
+              // No row to name the owner: the chat is being created in the project it was acquired from.
+              bindComposer(session.projectId);
+              session.draftActorRef.send({ type: 'initializeFromChat' });
 
               return { type: 'chatRetrieved', chat: undefined };
             }
@@ -901,6 +1199,7 @@ export class ChatSessionStore {
              * ownership fact; correct the provisional binding before a seeded
              * or user run can report lifecycle to the wrong project. */
             this.#rebindSessionProject(session, loadedChat.resourceId);
+            bindComposer(loadedChat.resourceId);
 
             // Defensive guard: only seed messages from the loaded chat when
             // the live `Chat` instance has not started accumulating its own
@@ -924,7 +1223,7 @@ export class ChatSessionStore {
               }
 
               if (isEligibleStartupRequest && consumedChat) {
-                session.draftActorRef.send({ type: 'initializeFromChat', chat: consumedChat });
+                session.draftActorRef.send({ type: 'initializeFromChat' });
                 session.chat.messages = consumedChat.messages;
 
                 /* This dispatch *is* the host stream for the chat's first turn.
@@ -950,26 +1249,23 @@ export class ChatSessionStore {
             }
 
             const pendingTailRestore = buildPendingTailDraftRestore(session.chat.messages);
+            session.draftActorRef.send({ type: 'initializeFromChat' });
             if (pendingTailRestore) {
-              const draft = buildDraftFromUserMessage(pendingTailRestore.userMessage);
+              session.chat.messages = pendingTailRestore.truncatedMessages;
+              await restoreDraft(pendingTailRestore.userMessage);
               const restoredChat = await depsRef().commitCancelledDraftRestore(input.chatId, {
                 messages: pendingTailRestore.truncatedMessages,
-                draft,
                 clearStartupRequestId: startupRequest?.id,
               });
               const healedChat = restoredChat ?? {
                 ...hydratedChat,
                 messages: pendingTailRestore.truncatedMessages,
-                draft,
                 startupRequest: undefined,
               };
-              session.chat.messages = pendingTailRestore.truncatedMessages;
-              session.draftActorRef.send({ type: 'initializeFromChat', chat: healedChat });
 
               return { type: 'chatRetrieved', chat: healedChat };
             }
 
-            session.draftActorRef.send({ type: 'initializeFromChat', chat: hydratedChat });
             this.#replayPersistedSettlement(session);
             // Reattach to any admitted queued/running/waiting run after a
             // reload. The host transport replays the whole durable log from
@@ -1012,21 +1308,55 @@ export class ChatSessionStore {
 
     const draftActorRef = createActor(
       draftMachine.provide({
-        actors: {
-          persistDraftActor: fromSafeAsync<void, { draft: MyUIMessage }>(async ({ input }) => {
-            await depsRef().patchChat(chatId, 'draft', input.draft);
-          }),
-          persistEditDraftActor: fromSafeAsync<void, { messageId: string; draft: MyUIMessage }>(async ({ input }) => {
-            await depsRef().setMessageEdit(chatId, input.messageId, input.draft);
-          }),
-          clearMessageEditActor: fromSafeAsync<void, { messageId: string }>(async ({ input }) => {
-            await depsRef().clearMessageEdit(chatId, input.messageId);
-          }),
-          resizeImageActor,
-        },
+        actors: { ...draftPersistenceFor(composerRecordRef, recordStore), resizeImageActor },
       }),
       { input: {}, inspect },
     );
+    /**
+     * Put a cancelled turn's message back in the composer, durably.
+     *
+     * The draft shows at once. Its attachments live in the chat's directory, so
+     * each is copied back beside the record (idempotent by hash) before the
+     * record is told to reference it; bytes that are already gone stay a
+     * placeholder (D19) rather than failing the restore.
+     */
+    const restoreDraft = async (userMessage: MyUIMessage): Promise<void> => {
+      const draft = buildDraftFromUserMessage(userMessage);
+      draftActorRef.send({ type: 'loadDraftFromMessageTransient', draft });
+      const work = persistRestoredDraft();
+      session.composerWork.add(work);
+      try {
+        await work;
+      } finally {
+        session.composerWork.delete(work);
+      }
+    };
+    const persistRestoredDraft = async (): Promise<void> => {
+      const binding = await composer.promise;
+      if (binding === undefined) {
+        return;
+      }
+      const restored = draftActorRef.getSnapshot().context;
+      await Promise.all(
+        restored.draftAttachments.map(async (attachment) => {
+          try {
+            await binding.chatAttachments.copyTo(binding.record.attachments, attachment);
+          } catch (error) {
+            console.warn('[ChatSessionStore] a restored attachment is not on this device', error);
+          }
+        }),
+      );
+      const current = draftActorRef.getSnapshot().context;
+      composerRecordRef.send({
+        type: 'patch',
+        fields: { draft: buildDraftMessage(current.draftText, current.draftAttachments) },
+      });
+    };
+
+    // Subscribed before the record actor starts, so its read cannot resolve unheard (D7).
+    const recordLoadedSubscription = composerRecordRef.on('recordLoaded', ({ record }) => {
+      draftActorRef.send({ type: 'hydrateDraft', ...draftHydrationOf(record) });
+    });
 
     const chat = createChatInstance({
       chatId,
@@ -1146,7 +1476,7 @@ export class ChatSessionStore {
                 return;
               }
               const originalMessage = chat.messages[messageIndex]!;
-              chat.messages = [...chat.messages.slice(0, messageIndex), buildEditedMessage(originalMessage, request)];
+              chat.messages = [...chat.messages.slice(0, messageIndex), editedMessage(originalMessage, request)];
               void chat.regenerate({ body: requestBody });
               return;
             }
@@ -1238,14 +1568,10 @@ export class ChatSessionStore {
       'restoreCancelledDraft',
       async ({ userMessage, truncatedMessages }) => {
         resetMilestonePersistTracking();
-        const draft = buildDraftFromUserMessage(userMessage);
         chat.messages = truncatedMessages;
-        draftActorRef.send({ type: 'loadDraftFromMessageTransient', draft });
         try {
-          await depsRef().commitCancelledDraftRestore(chatId, {
-            messages: truncatedMessages,
-            draft,
-          });
+          await restoreDraft(userMessage);
+          await depsRef().commitCancelledDraftRestore(chatId, { messages: truncatedMessages });
         } catch (error) {
           const persistenceError =
             error instanceof Error ? error : new Error('Failed to restore cancelled draft', { cause: error });
@@ -1345,6 +1671,7 @@ export class ChatSessionStore {
 
     persistenceActorRef.start();
     draftActorRef.start();
+    composerRecordRef.start();
 
     // oxlint-disable-next-line eslint/prefer-const -- assigned after `session.dispose` captures it so immediate actor emissions cannot observe a partial session.
     let lifecycleSubscription: { unsubscribe: () => void } | undefined;
@@ -1357,6 +1684,10 @@ export class ChatSessionStore {
       lastState: { inFlight: 0, approvals: 0 },
       persistenceActorRef,
       draftActorRef,
+      composerRecordRef,
+      composer: composer.promise,
+      bindComposer,
+      composerWork: new Set(),
       viewRefcount: 1,
       runHeld: false,
       durableRunId: undefined,
@@ -1373,6 +1704,7 @@ export class ChatSessionStore {
         }
         session.latestAgentBodyWaiters.clear();
         dispatchSubscription.unsubscribe();
+        recordLoadedSubscription.unsubscribe();
         stopSubscription.unsubscribe();
         finishedSubscription.unsubscribe();
         stoppedSubscription.unsubscribe();
@@ -1404,6 +1736,7 @@ export class ChatSessionStore {
     // actor may dispatch a startup run, whose non-view hold must be able to
     // reference the fully initialised session.
     persistenceActorRef.send({ type: 'setActiveChatId', chatId });
+    this.#restoreUnread(session);
 
     return session;
   }
@@ -1637,7 +1970,14 @@ export class ChatSessionStore {
 
     session.dispose();
     session.persistenceActorRef.stop();
+    // A debounced keystroke is handed to the record before the draft stops, and the record outlives it until written.
+    session.draftActorRef.send({ type: 'flushNow' });
     session.draftActorRef.stop();
+    // A chat released before its row loaded still belongs to the project it was opened in; its flush lands there.
+    session.bindComposer(session.projectId);
+    const drained = Promise.withResolvers<void>();
+    this.#composerDrains.set(session.chatId, drained.promise);
+    void this.#drainComposer(session, drained);
     /* The session owns the chat machine; asking it to let go is what stops it. */
     this.#sessionOwner(session)?.send({ type: 'chatClosed', chatId: session.chatId });
     this.#sessions.delete(session.chatId);

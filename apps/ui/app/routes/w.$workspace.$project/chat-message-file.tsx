@@ -1,18 +1,14 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { FileUIPart } from 'ai';
-import { File } from 'lucide-react';
-import { cn } from '@taucad/ui/utils/cn';
+import { AttachmentFileChip, AttachmentImage } from '#components/chat/attachment-preview.js';
 import { ImageCarouselDialog } from '#components/ui/image-carousel-dialog.js';
 import { OmniScroller } from '#components/ui/omni-scroller.js';
 
-type ChatMessageFileProperties = {
-  readonly part: FileUIPart;
-  readonly isError?: boolean;
-};
-
 type ChatMessageFileAttachmentsProperties = {
   readonly parts: readonly FileUIPart[];
+  /** The chat's attachment directory, which its `attachments/` references resolve against. */
+  readonly directory: string | undefined;
 };
 
 type AttachmentEntry =
@@ -29,28 +25,7 @@ function isImagePart(part: FileUIPart): boolean {
   return part.mediaType.startsWith('image/');
 }
 
-export function ChatMessageFile({ part, isError = false }: ChatMessageFileProperties): ReactNode {
-  return (
-    <div className='flex shrink-0 items-center gap-2 rounded-lg border bg-background p-3'>
-      <File className='size-5 text-muted-foreground' />
-      <div className='flex flex-1 flex-col gap-1'>
-        <a
-          href={part.url}
-          download={part.filename}
-          className={cn('text-sm font-medium hover:underline', isError && 'text-destructive')}
-          target='_blank'
-          rel='noopener noreferrer'
-        >
-          {part.filename ?? 'File'}
-        </a>
-        {isError ? <span className='text-xs text-destructive'>Failed to load image. Click to download.</span> : null}
-        <span className='text-xs text-muted-foreground'>{part.mediaType}</span>
-      </div>
-    </div>
-  );
-}
-
-export function ChatMessageFileAttachments({ parts }: ChatMessageFileAttachmentsProperties): ReactNode {
+export function ChatMessageFileAttachments({ parts, directory }: ChatMessageFileAttachmentsProperties): ReactNode {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewInitialIndex, setPreviewInitialIndex] = useState(0);
   const [failedImageUrls, setFailedImageUrls] = useState<ReadonlySet<string>>(() => new Set());
@@ -77,9 +52,10 @@ export function ChatMessageFileAttachments({ parts }: ChatMessageFileAttachments
       imageParts.map((part, index) => ({
         id: `${part.url}-${index}`,
         src: part.url,
+        mediaType: part.mediaType,
         alt: part.filename ?? `Uploaded image ${index + 1}`,
         label: part.filename,
-        downloadName: part.filename ?? `uploaded-image-${index + 1}.png`,
+        downloadName: part.filename,
       })),
     [imageParts],
   );
@@ -117,9 +93,10 @@ export function ChatMessageFileAttachments({ parts }: ChatMessageFileAttachments
         {attachmentEntries.map((entry, entryIndex) => {
           if (entry.type === 'file') {
             return (
-              <ChatMessageFile
+              <AttachmentFileChip
                 // oxlint-disable-next-line react/no-array-index-key -- file URLs can repeat across message attachments
                 key={`file-${entryIndex}-${entry.part.url}`}
+                directory={directory}
                 part={entry.part}
                 isError={entry.isError}
               />
@@ -149,12 +126,12 @@ export function ChatMessageFileAttachments({ parts }: ChatMessageFileAttachments
                     setPreviewOpen(true);
                   }}
                 >
-                  <img
+                  <AttachmentImage
+                    directory={directory}
+                    part={part}
                     alt={part.filename ?? `Uploaded image ${imageIndex + 1}`}
                     className='size-full object-contain'
-                    loading='lazy'
-                    src={part.url}
-                    onError={() => {
+                    onUnavailable={() => {
                       markImageFailed(part.url);
                     }}
                   />
@@ -165,6 +142,7 @@ export function ChatMessageFileAttachments({ parts }: ChatMessageFileAttachments
         })}
       </OmniScroller>
       <ImageCarouselDialog
+        directory={directory}
         initialIndex={previewInitialIndex}
         isOpen={previewOpen}
         items={carouselItems}

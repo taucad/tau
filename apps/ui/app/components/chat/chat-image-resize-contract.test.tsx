@@ -9,8 +9,8 @@
  *
  * The 12 entry points (OS drag-drop, file picker, paste, Tiptap paste, viewer
  * toolbar, viewer-pane drag, desktop @-suggestion single + composite, mobile
- * @-popover current/all/per-view, and edit-mode draft) all converge on these
- * two methods. We assert the contract by driving the **real**
+ * @-popover current/all/per-view, and edit-mode draft) all converge on
+ * `addDraftAttachment` / `addEditDraftAttachment`. We assert the contract by driving the **real**
  * `resizeImageActor` (wrapping the **real** `resizeImageForChat` with
  * FakeImage stubs where upload compression applies) through every entry-point category. Failure paths are
  * also covered: a corrupt image in a multi-file batch must NOT block the
@@ -26,12 +26,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createActor, waitFor as xstateWaitFor } from 'xstate';
 import { draftMachine } from '#hooks/draft.machine.js';
 import { resizeImageActor } from '#hooks/resize-image.actor.js';
+import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { MAX_DATA_URL_LENGTH } from '#utils/resize-image.js';
+import type { Attachment } from '#utils/attachment.utils.js';
+import type { DraftAttachmentModel } from '#hooks/draft.machine.js';
 
 const SMALL_JPEG_DATA_URL = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
 const SMALL_PNG_DATA_URL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==';
 const OVERSIZED_RAW_URL = `data:image/png;base64,${'A'.repeat(2_000_000)}`;
-const MALFORMED_URL = 'data:text/plain;base64,SGVsbG8=';
+const MALFORMED_URL = 'data:image/png,not-base64';
 
 let mockImageWidth = 4000;
 let mockImageHeight = 4000;
@@ -85,7 +88,7 @@ beforeEach(() => {
     }
     return document.createElementNS('http://www.w3.org/1999/xhtml', tag);
   };
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- electron's WebviewTag overload is the one mockImplementation captures; the mock only ever builds HTML elements.
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions, typescript/no-deprecated -- electron's WebviewTag overload is the one mockImplementation captures (and the one marked deprecated); the mock only ever builds HTML elements.
   vi.spyOn(document, 'createElement').mockImplementation(createElementMock as typeof document.createElement);
 });
 
@@ -94,35 +97,68 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const provideRealResize = () => draftMachine.provide({ actors: { resizeImageActor } });
+const visionModel: DraftAttachmentModel = {
+  name: 'Vision',
+  support: { modalities: { input: ['text', 'image'], output: ['text'] } },
+};
+
+type StoreInput = { bytes: Uint8Array<ArrayBuffer>; mediaType: string; filename?: string };
+
+/** What reached `storing`, in order: the bytes the draft will reference. */
+const stored: StoreInput[] = [];
+
+const provideRealResize = () =>
+  draftMachine.provide({
+    actors: {
+      resizeImageActor,
+      storeAttachmentActor: fromSafeAsync<{ type: 'attachmentStored'; attachment: Attachment }, StoreInput>(
+        async ({ input }) => {
+          stored.push(input);
+          return {
+            type: 'attachmentStored',
+            attachment: {
+              hash: String(stored.length).padStart(64, '0'),
+              mediaType: input.mediaType,
+              byteLength: input.bytes.byteLength,
+            },
+          };
+        },
+      ),
+    },
+  });
 
 const startActor = () => {
+  stored.length = 0;
   const actor = createActor(provideRealResize(), { input: {} });
   actor.start();
   return actor;
 };
 
+/** Base64 data-URL length of stored bytes, the unit `MAX_DATA_URL_LENGTH` is stated in. */
+const dataUrlLength = (input: StoreInput): number =>
+  `data:${input.mediaType};base64,`.length + Math.ceil(input.bytes.byteLength / 3) * 4;
+
 type EntryDispatch = (actor: ReturnType<typeof startActor>, raw: string) => void;
 
 const dispatchToMain: EntryDispatch = (actor, raw) => {
-  actor.send({ type: 'addDraftImage', image: raw });
+  actor.send({ type: 'addDraftAttachment', dataUrl: raw, model: visionModel });
 };
 
 const dispatchPreservedToMain: EntryDispatch = (actor, raw) => {
-  actor.send({ type: 'addDraftImage', image: raw, preserveOriginal: true });
+  actor.send({ type: 'addDraftAttachment', dataUrl: raw, preserveOriginal: true, model: visionModel });
 };
 
 const dispatchToEdit: EntryDispatch = (actor, raw) => {
   actor.send({ type: 'startEditingMessage', messageId: 'msg-edit-1' });
-  actor.send({ type: 'addEditDraftImage', image: raw });
+  actor.send({ type: 'addEditDraftAttachment', dataUrl: raw, model: visionModel });
 };
 
 /**
  * The 12 image entry points, every one of which dispatches either
- * `addDraftImage` (entries #1-11) or `addEditDraftImage` (entry #12) with a
- * raw data URL. We test the chokepoint at the convergence point — if
- * `addDraftImage(raw)` applies the requested policy in `draftImages`, then by
- * construction every caller does too.
+ * `addDraftAttachment` (entries #1-11) or `addEditDraftAttachment` (entry #12)
+ * with a raw data URL. We test the chokepoint at the convergence point — if
+ * `addDraftAttachment(raw)` applies the requested policy to the bytes it
+ * stores, then by construction every caller does too.
  */
 type EntryTarget = 'main' | 'edit';
 type EntryPoint = {
@@ -199,19 +235,23 @@ describe('Chat-image resize chokepoint — contract for all 12 entry points', ()
         const resultState = await xstateWaitFor(
           actor,
           (s) => {
-            const list = entry.target === 'main' ? s.context.draftImages : s.context.editDraftImages;
-            return list.length === 1 && s.context.imageQueue.length === 0;
+            const list = entry.target === 'main' ? s.context.draftAttachments : s.context.editDraftAttachments;
+            return list.length === 1 && s.context.attachmentQueue.length === 0;
           },
           { timeout: 2000 },
         );
-        const resized = (
-          entry.target === 'main' ? resultState.context.draftImages : resultState.context.editDraftImages
-        )[0]!;
+        expect(
+          (entry.target === 'main'
+            ? resultState.context.draftAttachments
+            : resultState.context.editDraftAttachments)[0],
+        ).toMatchObject({ hash: '1'.padStart(64, '0') });
+        const [kept] = stored;
         if (entry.preserveOriginal) {
-          expect(resized).toBe(OVERSIZED_RAW_URL);
+          expect(kept).toMatchObject({ mediaType: 'image/png' });
+          expect(dataUrlLength(kept!)).toBe(OVERSIZED_RAW_URL.length);
         } else {
-          expect(resized.length).toBeLessThanOrEqual(MAX_DATA_URL_LENGTH);
-          expect(resized.startsWith('data:image/')).toBe(true);
+          expect(kept).toMatchObject({ mediaType: 'image/jpeg' });
+          expect(dataUrlLength(kept!)).toBeLessThanOrEqual(MAX_DATA_URL_LENGTH);
         }
       } finally {
         actor.stop();
@@ -234,19 +274,28 @@ describe('Chat-image resize chokepoint — contract for all 12 entry points', ()
       mockImageHeight = 100;
 
       for (const raw of inputs) {
-        actor.send({ type: 'addDraftImage', image: raw });
+        actor.send({ type: 'addDraftAttachment', dataUrl: raw, model: visionModel });
       }
 
       const finalState = await xstateWaitFor(
         actor,
-        (s) => s.context.draftImages.length === 5 && s.context.imageQueue.length === 0,
+        (s) => s.context.draftAttachments.length === 5 && s.context.attachmentQueue.length === 0,
         { timeout: 2000 },
       );
 
-      expect(finalState.context.draftImages).toHaveLength(5);
-      for (const url of finalState.context.draftImages) {
-        expect(url.length).toBeLessThanOrEqual(MAX_DATA_URL_LENGTH);
-        expect(url.startsWith('data:image/')).toBe(true);
+      expect(finalState.context.draftAttachments.map((attachment) => attachment.hash)).toEqual(
+        ['1', '2', '3', '4', '5'].map((index) => index.padStart(64, '0')),
+      );
+      // Small images pass through unchanged; the oversized ones were compressed to JPEG.
+      expect(stored.map((input) => input.mediaType)).toEqual([
+        'image/png',
+        'image/jpeg',
+        'image/jpeg',
+        'image/jpeg',
+        'image/png',
+      ]);
+      for (const input of stored) {
+        expect(dataUrlLength(input)).toBeLessThanOrEqual(MAX_DATA_URL_LENGTH);
       }
     } finally {
       actor.stop();
@@ -264,11 +313,11 @@ describe('Chat-image resize chokepoint — contract for all 12 entry points', ()
         failures.push(event.error);
       });
 
-      actor.send({ type: 'addDraftImage', image: SMALL_PNG_DATA_URL });
-      actor.send({ type: 'addDraftImage', image: corruptRaw });
-      actor.send({ type: 'addDraftImage', image: SMALL_JPEG_DATA_URL });
-      actor.send({ type: 'addDraftImage', image: SMALL_PNG_DATA_URL });
-      actor.send({ type: 'addDraftImage', image: SMALL_JPEG_DATA_URL });
+      actor.send({ type: 'addDraftAttachment', dataUrl: SMALL_PNG_DATA_URL, model: visionModel });
+      actor.send({ type: 'addDraftAttachment', dataUrl: corruptRaw, model: visionModel });
+      actor.send({ type: 'addDraftAttachment', dataUrl: SMALL_JPEG_DATA_URL, model: visionModel });
+      actor.send({ type: 'addDraftAttachment', dataUrl: SMALL_PNG_DATA_URL, model: visionModel });
+      actor.send({ type: 'addDraftAttachment', dataUrl: SMALL_JPEG_DATA_URL, model: visionModel });
 
       // Use small images so they short-circuit the resize ladder
       mockImageWidth = 100;
@@ -276,11 +325,11 @@ describe('Chat-image resize chokepoint — contract for all 12 entry points', ()
 
       const finalState = await xstateWaitFor(
         actor,
-        (s) => s.context.draftImages.length === 4 && s.context.imageQueue.length === 0,
+        (s) => s.context.draftAttachments.length === 4 && s.context.attachmentQueue.length === 0,
         { timeout: 2000 },
       );
 
-      expect(finalState.context.draftImages).toHaveLength(4);
+      expect(finalState.context.draftAttachments).toHaveLength(4);
       expect(failures).toHaveLength(1);
       expect(failures[0]).toBeInstanceOf(Error);
       expect(failures[0]!.message).toBe('Failed to load image');
@@ -290,21 +339,22 @@ describe('Chat-image resize chokepoint — contract for all 12 entry points', ()
     }
   });
 
-  it('should emit imageResizeFailed and leave draftImages empty when the only image cannot be parsed', async () => {
+  it('should emit attachmentStoreFailed and leave draftAttachments empty when the only image cannot be parsed', async () => {
     const actor = startActor();
     try {
       const failures: Error[] = [];
-      const subscription = actor.on('imageResizeFailed', (event) => {
+      const subscription = actor.on('attachmentStoreFailed', (event) => {
         failures.push(event.error);
       });
 
-      actor.send({ type: 'addDraftImage', image: MALFORMED_URL });
+      actor.send({ type: 'addDraftAttachment', dataUrl: MALFORMED_URL, model: visionModel });
 
-      await xstateWaitFor(actor, (s) => s.context.imageQueue.length === 0, { timeout: 2000 });
+      await xstateWaitFor(actor, (s) => s.context.attachmentQueue.length === 0, { timeout: 2000 });
 
-      expect(actor.getSnapshot().context.draftImages).toEqual([]);
+      expect(actor.getSnapshot().context.draftAttachments).toEqual([]);
+      expect(stored).toEqual([]);
       expect(failures).toHaveLength(1);
-      expect(failures[0]!.message).toBe('Invalid image data URL');
+      expect(failures[0]!.message).toBe('The attachment is not a base64 data URL.');
       expect(failures[0]!.name).toBe('Error');
       subscription.unsubscribe();
     } finally {

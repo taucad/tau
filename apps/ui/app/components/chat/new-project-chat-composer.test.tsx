@@ -12,6 +12,8 @@ const mockRefresh = vi.fn(async () => undefined);
 let capturedTextarea: ChatTextareaProperties | undefined;
 let locationState: ProjectCreationLocationState;
 let composerExecution: CadAgentExecution;
+let attachmentSource: string | undefined;
+let draftAttachments: Array<{ hash: string; mediaType: string; byteLength?: number; filename?: string }>;
 
 vi.mock('react-router', () => ({ useNavigate: () => mockNavigate }));
 vi.mock('#components/chat/chat-textarea.js', () => ({
@@ -60,6 +62,8 @@ vi.mock('#hooks/use-project-creation-location-error.js', () => ({
 }));
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useChatComposer: () => ({
+    draftActorRef: { getSnapshot: () => ({ context: { draftAttachments } }) },
+    attachmentSource,
     model: { modelId: 'gpt-test' },
     execution: { execution: composerExecution },
     consumeDraft: mockConsumeDraft,
@@ -94,6 +98,8 @@ describe('NewProjectChatComposer', () => {
     capturedTextarea = undefined;
     locationState = readyLocation();
     composerExecution = { kind: 'tau', model: 'gpt-test' };
+    draftAttachments = [];
+    attachmentSource = undefined;
     mockCreateProject.mockResolvedValue({ slugs: { workspaceSlug: 'workshop', projectSlug: 'bracket' } });
   });
 
@@ -113,14 +119,21 @@ describe('NewProjectChatComposer', () => {
       render(<NewProjectChatComposer />);
 
       await act(async () => {
-        await capturedTextarea?.onSubmit({ content: 'Build a bracket', imageUrls: [] });
+        await capturedTextarea?.onSubmit({ content: 'Build a bracket', attachments: [] });
       });
 
       expect(mockCreateProject).toHaveBeenCalledWith(expect.objectContaining({ activeExecution: execution }));
     },
   );
 
-  it('passes exact product selection and chat context, then consumes before navigation', async () => {
+  // Rewritten (W6): the startup message references the draft's stored
+  // attachments; the textarea's data URLs are no longer the source.
+  it('passes exact product selection and the stored draft attachments, then consumes before navigation', async () => {
+    const hash = 'a'.repeat(64);
+    draftAttachments = [
+      { hash, mediaType: 'image/png', byteLength: 3 },
+      { hash: 'b'.repeat(64), mediaType: 'application/pdf', byteLength: 9, filename: 'spec.pdf' },
+    ];
     render(<NewProjectChatComposer />);
     expect(capturedTextarea?.creationLocationControls?.toolbar).toBeDefined();
     expect(capturedTextarea?.creationLocationControls?.field).toBeDefined();
@@ -131,13 +144,19 @@ describe('NewProjectChatComposer', () => {
     expect(screen.getByTestId('location-field')).toHaveAttribute('data-is-inside-focus-trap', 'true');
 
     await act(async () => {
-      await capturedTextarea?.onSubmit({ content: 'Build a bracket', imageUrls: ['data:image/png;base64,a'] });
+      await capturedTextarea?.onSubmit({ content: 'Build a bracket', attachments: [] });
     });
 
     expect(mockCreateProject).toHaveBeenCalledWith({
       kernel: 'openscad',
       activeExecution: { kind: 'tau', model: 'gpt-test' },
-      initialMessage: { content: 'Build a bracket', imageUrls: ['data:image/png;base64,a'] },
+      initialMessage: {
+        content: 'Build a bracket',
+        attachments: [
+          { hash, mediaType: 'image/png' },
+          { hash: 'b'.repeat(64), mediaType: 'application/pdf', filename: 'spec.pdf' },
+        ],
+      },
       editorState: {
         panelState: { desktopLayout: { chatOpen: true, compactAuxiliary: 'chat' }, mobileActiveTab: 'chat' },
       },
@@ -148,6 +167,27 @@ describe('NewProjectChatComposer', () => {
     expect(mockConsumeDraft.mock.invocationCallOrder[0]).toBeLessThan(mockNavigate.mock.invocationCallOrder[0]!);
   });
 
+  // New (W6, P39): a surface with its own directory names it, so resume copies from there.
+  it('names the surface attachment directory when the provider has one', async () => {
+    attachmentSource = '/.tau/composers/marketing/attachments';
+    draftAttachments = [{ hash: 'a'.repeat(64), mediaType: 'image/png' }];
+    render(<NewProjectChatComposer />);
+
+    await act(async () => {
+      await capturedTextarea?.onSubmit({ content: '', attachments: [] });
+    });
+
+    expect(mockCreateProject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        initialMessage: {
+          content: '',
+          attachments: [{ hash: 'a'.repeat(64), mediaType: 'image/png' }],
+          attachmentSource: '/.tau/composers/marketing/attachments',
+        },
+      }),
+    );
+  });
+
   it('retains the draft and refreshes selected-folder status after a typed failure', async () => {
     const error = new Error('disconnected');
     mockCreateProject.mockRejectedValue(error);
@@ -155,10 +195,11 @@ describe('NewProjectChatComposer', () => {
     render(<NewProjectChatComposer />);
 
     await act(async () => {
-      await capturedTextarea?.onSubmit({ content: 'Keep this draft', imageUrls: [] });
+      await capturedTextarea?.onSubmit({ content: 'Keep this draft', attachments: [] });
     });
 
     expect(mockPresentLocationError).toHaveBeenCalledWith(error);
+    // Nothing ran that would release the Home draft or its bytes.
     expect(mockRefresh).toHaveBeenCalledOnce();
     expect(mockNavigate).not.toHaveBeenCalled();
     expect(mockConsumeDraft).not.toHaveBeenCalled();

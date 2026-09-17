@@ -84,6 +84,7 @@ export {
   paymentActionRequestSchema,
   topupActionRequestSchema,
   paymentActionListQuerySchema,
+  topupPrincipalBoundsMinor,
 } from '#payment-action-wire.js';
 export type { WireAutoReloadConsent, WireAccountClosure, WireFinancialCase } from '#payment-lifecycle-wire.js';
 export {

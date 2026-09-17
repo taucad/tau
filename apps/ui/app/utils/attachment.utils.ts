@@ -13,6 +13,13 @@ export type AttachmentKind = 'image' | 'document';
 /** The part of an attachment its stored name is derived from. */
 export type AttachmentName = Pick<Attachment, 'hash' | 'mediaType'>;
 
+/**
+ * An attachment as a file part names it: enough to find, copy and label the
+ * bytes. `byteLength` is present only when the writer had the stored
+ * attachment in hand; a reference read back from a record never does (P29).
+ */
+export type AttachmentReference = AttachmentName & Readonly<Partial<Pick<Attachment, 'filename' | 'byteLength'>>>;
+
 /** A stored attachment. `hash` is the lowercase hex SHA-256 of the bytes. */
 export type Attachment = {
   readonly hash: string;
@@ -70,8 +77,12 @@ export const attachmentFileName = (attachment: AttachmentName): string => {
 /** The reference stored in a file part or log row, relative to the owning directory. */
 export const attachmentUrl = (attachment: AttachmentName): string => `attachments/${attachmentFileName(attachment)}`;
 
-/** Cap after processing: images 4 MiB (captures included), documents 20 MiB (D17). */
-export const attachmentCapBytes = (kind: AttachmentKind): number => (kind === 'image' ? 4 : 20) * 1024 * 1024;
+/**
+ * Cap after processing: images 4 MiB (captures included), documents 16 MiB (D17,
+ * amended R1). One maximal document must fit the agent host's per-request
+ * attachment budget and the gateway's request bound together with its turn.
+ */
+export const attachmentCapBytes = (kind: AttachmentKind): number => (kind === 'image' ? 4 : 16) * 1024 * 1024;
 
 const attachmentDirectory = 'attachments/';
 const attachmentFileNamePattern = /^[\da-f]{64}\.(?:jpg|png|webp|gif|pdf)$/;
@@ -79,3 +90,20 @@ const attachmentFileNamePattern = /^[\da-f]{64}\.(?:jpg|png|webp|gif|pdf)$/;
 /** Whether a URL is an attachment reference, as opposed to a `data:` URL or anything else. */
 export const isAttachmentUrl = (url: string): boolean =>
   url.startsWith(attachmentDirectory) && attachmentFileNamePattern.test(url.slice(attachmentDirectory.length));
+
+/**
+ * The attachment a file part references, or `undefined` for a `data:` URL or
+ * any other non-reference. The part's own media type names the bytes.
+ */
+export const attachmentReferenceOf = (part: {
+  readonly url: string;
+  readonly mediaType: string;
+  readonly filename?: string;
+}): AttachmentReference | undefined =>
+  isAttachmentUrl(part.url)
+    ? {
+        hash: part.url.slice(attachmentDirectory.length, attachmentDirectory.length + 64),
+        mediaType: part.mediaType,
+        ...(part.filename === undefined ? {} : { filename: part.filename }),
+      }
+    : undefined;

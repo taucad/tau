@@ -113,6 +113,11 @@ vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => harness.projectManager,
 }));
 
+// These sessions never bind a project, so the composer record client is never reached.
+vi.mock('#hooks/use-file-manager.js', () => ({
+  useFileManager: () => ({ client: {} }),
+}));
+
 const { ChatSessionStoreProvider, useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
 const { useChatSession, useChatSessionSnapshot } = await import('#hooks/use-chat-session.js');
 

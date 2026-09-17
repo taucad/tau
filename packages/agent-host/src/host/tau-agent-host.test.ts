@@ -1144,6 +1144,60 @@ the cancelled tools left the system unchanged.
     expect(closedChats).toEqual(['chat-external-session', 'chat-external-session']);
   });
 
+  it('should record the stop details an external runner throws on its failed run', async () => {
+    const file = createMemoryLogFile();
+    const details = {
+      agentId: 'stub-agent',
+      failure: { category: 'limit', title: 'You have hit your usage limit.', actions: [] },
+    };
+    const externalPort: ExternalAgentPort = {
+      list: () => ['stub-agent'],
+      run: async () => {
+        throw Object.assign(new Error('You have hit your usage limit.'), {
+          code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+          details,
+        });
+      },
+    };
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: file.open,
+        transport: {
+          stream: () => {
+            throw new Error('An external turn must never reach the Tau model.');
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'external-stop',
+      }),
+      externalRunners: { acp: externalPort },
+    });
+
+    await host.admit({
+      chatId: 'chat-external-stop',
+      runId: 'run-external-stop',
+      trigger: 'submit',
+      message: { id: 'turn-external-stop', role: 'user', content: 'Run this elsewhere.' },
+      config: {
+        systemPrompt: 'unused by an external turn',
+        toolChoice: 'none',
+        agent: { kind: 'acp', id: 'stub-agent' },
+      },
+    });
+
+    await vi.waitFor(async () => {
+      const log = await file.open();
+      const events = await log.read();
+      const failed = events.flatMap((event) =>
+        event.type === 'run.lifecycle' && event.state === 'failed' ? [event.detail] : [],
+      );
+      expect(failed).toEqual([
+        { message: 'You have hit your usage limit.', code: 'EXTERNAL_AGENT_LIMIT_REACHED', details },
+      ]);
+    });
+    await host.close();
+  });
+
   it('holds cancel open until an external run settles as cancelled', async () => {
     const file = createMemoryLogFile();
     const settled = Promise.withResolvers<void>();

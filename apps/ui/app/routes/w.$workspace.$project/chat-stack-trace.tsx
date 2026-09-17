@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ChevronRight, Sparkles } from 'lucide-react';
 import type { KernelProvider, KernelIssue, KernelStackFrame, IssueSeverity } from '@taucad/runtime';
 import { idPrefix, languageFromKernel } from '@taucad/types/constants';
@@ -20,7 +20,7 @@ import { buildUserMessage } from '#utils/chat.utils.js';
 import { decodeTextFile } from '#utils/filesystem.utils.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { selectCadFailureIssues } from '#machines/cad.machine.js';
+import { selectCadEntryIssues, selectCadFailureIssues } from '#machines/cad.machine.js';
 
 const shiftKey = formatKeyCombination({ key: 'Shift' });
 
@@ -451,7 +451,8 @@ export function ChatStackTrace({ entryPath, className, side, ...props }: ChatSta
   const isCadActorStale = cadRef ? !cadRef.id.includes(projectId) : true;
 
   const failureIssues = useCadSelector(selectCadFailureIssues, undefined);
-  const entryIssues = useCadSelector((state) => state.context.kernelIssues.get(entryPath), undefined);
+  const selectEntryIssues = useMemo(() => selectCadEntryIssues(entryPath), [entryPath]);
+  const entryIssues = useCadSelector(selectEntryIssues, undefined);
   const errors = isCadActorStale ? undefined : (failureIssues ?? entryIssues);
 
   // The chat-client composes the per-request `agent` payload (model, kernel,

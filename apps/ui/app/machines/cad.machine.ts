@@ -1016,6 +1016,27 @@ export const selectCadFailureIssues = (snapshot: CadSnapshot): readonly KernelIs
   return selectIssuesByPrecedence(snapshot.context, ['__connection__', snapshot.context.entryPath, '__render__']);
 };
 
+/** The phase a viewer shows while the CAD actor is busy, or `undefined` when it is not. */
+export const selectCadLoadingPhase = (snapshot: CadSnapshot): 'buffering' | 'connecting' | 'rendering' | undefined => {
+  if (!snapshot.hasTag('cad-loading')) {
+    return undefined;
+  }
+  for (const phase of ['connecting', 'buffering', 'rendering'] as const) {
+    if (snapshot.matches(phase)) {
+      return phase;
+    }
+  }
+  return undefined;
+};
+
+/** Select one entry's kernel issues. A factory because the entry path is the caller's, not the machine's. */
+export const selectCadEntryIssues =
+  (entryPath: string) =>
+  (snapshot: CadSnapshot): readonly KernelIssue[] | undefined =>
+    snapshot.context.kernelIssues.get(entryPath);
+
+export const selectCadRenderTimeout = (snapshot: CadSnapshot): number => snapshot.context.renderTimeout;
+
 export const selectCadGeometry = (snapshot: CadSnapshot): Geometry | undefined => snapshot.context.geometry;
 export const selectCadUnits = (snapshot: CadSnapshot): CadContext['units'] => snapshot.context.units;
 export const selectCadKernelClient = (snapshot: CadSnapshot): AppRuntimeClient | undefined =>

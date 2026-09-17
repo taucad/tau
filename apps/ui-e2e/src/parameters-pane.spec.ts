@@ -368,7 +368,7 @@ test('uses inferred units through checked edits, scrubbing, reopen, reset, and d
   await target.press(widthInput, 'Escape');
   await expect.poll(async () => fieldNumber(widthInput)).toBe(21);
 
-  const filter = selectors.getByRole('textbox', { name: 'Filter parameters' });
+  const filter = selectors.getByRole('searchbox', { name: 'Filter parameters' });
   await target.fill(filter, 'width');
   await target.expectCount(selectors.getByLabelText('Input for Height'), 0);
   await target.click(selectors.getByRole('button', { name: 'Clear search' }));
@@ -433,9 +433,9 @@ test('keeps rounded file disclosures accessible and reorderable through Paneview
   await target.expectAttribute(main, 'aria-expanded', 'true');
   await target.expectAttribute(secondary, 'aria-expanded', 'false');
 
-  const filter = selectors.getByRole('textbox', { name: 'Filter parameters' });
+  const filter = selectors.getByRole('searchbox', { name: 'Filter parameters' });
   await target.expectVisible(filter);
-  await target.expectCount(selectors.getByRole('textbox', { name: 'Filter parameters' }), 1);
+  await target.expectCount(selectors.getByRole('searchbox', { name: 'Filter parameters' }), 1);
   await target.expectCount(selectors.getByRole('button', { name: /show search|hide search/iu }), 0);
 
   const dimensions = selectors.getByRole('button', { name: 'Group: Dimensions' }).first();

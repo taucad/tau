@@ -16,6 +16,7 @@ const noop = (): void => undefined;
 const baseProps = {
   content: '# hello',
   language: 'markdown',
+  isEditorReady: true,
   onChange: noop,
   onValidate: noop,
 };
@@ -34,5 +35,20 @@ describe('ChatEditorMarkdownViewer', () => {
 
     expect(screen.getByTestId('code-editor')).toBeInTheDocument();
     expect(screen.queryByTestId('markdown-preview')).not.toBeInTheDocument();
+  });
+
+  it('should show the pane placeholder until the source editor may mount', () => {
+    render(
+      <ChatEditorMarkdownViewer
+        paneId='pane-doc'
+        filePath='docs/README.md'
+        viewId='source'
+        {...baseProps}
+        isEditorReady={false}
+      />,
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent('Loading README.md');
+    expect(screen.queryByTestId('code-editor')).not.toBeInTheDocument();
   });
 });

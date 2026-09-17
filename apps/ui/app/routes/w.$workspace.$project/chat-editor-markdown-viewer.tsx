@@ -1,6 +1,6 @@
 import { CodeEditor } from '#components/code/code-editor.client.js';
 import { MarkdownViewerChat } from '#components/markdown/markdown-viewer-chat.js';
-import { Loader } from '#components/ui/loader.js';
+import { EditorPanePlaceholder } from '#components/code/editor-pane-placeholder.js';
 import type { ChatEditorViewerProps } from '#routes/w.$workspace.$project/chat-editor-viewer.types.js';
 import { createMonacoPath } from '#routes/w.$workspace.$project/chat-editor-viewer.types.js';
 
@@ -8,6 +8,7 @@ export function ChatEditorMarkdownViewer({
   filePath,
   content,
   language,
+  isEditorReady,
   onChange,
   onValidate,
   readOnly,
@@ -23,9 +24,13 @@ export function ChatEditorMarkdownViewer({
     );
   }
 
+  const placeholder = <EditorPanePlaceholder label={`Loading ${filePath.split('/').pop() ?? filePath}`} />;
+  if (!isEditorReady) {
+    return placeholder;
+  }
   return (
     <CodeEditor
-      loading={<Loader className='size-20 stroke-1 text-primary' />}
+      loading={placeholder}
       className='h-full bg-background'
       defaultLanguage={language}
       defaultValue={content}

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { forwardRef, useEffect, useImperativeHandle } from 'react';
+import { createContext, forwardRef, useContext, useEffect, useImperativeHandle } from 'react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ResolvedAuth } from '#hooks/use-resolved-auth.js';
@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({
   sidebarOpen: true,
   allotmentResize: vi.fn(),
   providers: [] as Array<{ handle: { providers: () => React.JSXElementConstructor<React.PropsWithChildren> } }>,
+  commandPalette: [] as Array<{ id: string; handle: { commandPalette: () => ReactNode } }>,
   sidebarMounts: 0,
 }));
 
@@ -53,7 +54,7 @@ vi.mock('#hooks/use-typed-matches.js', () => ({
         ? [{ id: 'breadcrumb', handle: { breadcrumb: () => <span>Projects</span> } }]
         : [],
       actions: [],
-      commandPalette: [],
+      commandPalette: state.commandPalette,
       enablePageWrapper:
         state.enablePageWrapper === undefined ? [] : [{ handle: { enablePageWrapper: state.enablePageWrapper } }],
       enablePageHeader:
@@ -118,7 +119,11 @@ vi.mock('#components/icons/tau-wordmark.js', () => ({
   TauWordmark: (properties: React.ComponentProps<'svg'>) => <svg {...properties} />,
 }));
 vi.mock('#components/cookie-consent.js', () => ({ CookieConsent: () => null }));
-vi.mock('#components/settings/settings-dialog.js', () => ({ SettingsDialog: () => null }));
+vi.mock('#components/settings/settings-dialog.js', () => ({
+  /* `ComputeReuseSettings` inside the real dialog reads the project context the
+   * matched route contributes, so the dialog is probed the same way. */
+  SettingsDialog: () => (useContext(RouteProviderContext) ? <span>Settings dialog</span> : undefined),
+}));
 
 const { Page } = await import('#components/layout/page.js');
 
@@ -131,13 +136,29 @@ beforeEach(() => {
   state.sidebarOpen = true;
   state.allotmentResize.mockReset();
   state.providers = [];
+  state.commandPalette = [];
   state.sidebarMounts = 0;
   vi.unstubAllEnvs();
 });
 
+const RouteProviderContext = createContext(false);
+
 /** What a route handle contributes: a component wrapped around the page. */
 function RouteProvider({ children }: React.PropsWithChildren): React.JSX.Element {
-  return <div data-slot='route-provider'>{children}</div>;
+  return (
+    <RouteProviderContext.Provider value>
+      <div data-slot='route-provider'>{children}</div>
+    </RouteProviderContext.Provider>
+  );
+}
+
+/**
+ * Stands in for `ProjectCommandPaletteItems`: it needs its own route's context
+ * and renders nothing without it, which is how the project palette emptied
+ * silently once the shell moved above the composed providers.
+ */
+function RouteCommandPaletteProbe(): React.JSX.Element | undefined {
+  return useContext(RouteProviderContext) ? <span>Project commands</span> : undefined;
 }
 
 describe('Page application shell', () => {
@@ -183,6 +204,23 @@ describe('Page application shell', () => {
 
     expect(screen.getByText('Page content').closest('[data-slot=route-provider]')).not.toBeNull();
     expect(state.sidebarMounts).toBe(1);
+  });
+
+  it("should render a route's command palette items inside that route's providers", () => {
+    state.providers = [{ handle: { providers: () => RouteProvider } }];
+    state.commandPalette = [{ id: 'project', handle: { commandPalette: () => <RouteCommandPaletteProbe /> } }];
+
+    render(<Page />);
+
+    expect(screen.getByText('Project commands').closest('[data-slot=route-provider]')).not.toBeNull();
+  });
+
+  it('should render the settings dialog inside the matched routes providers', () => {
+    state.providers = [{ handle: { providers: () => RouteProvider } }];
+
+    render(<Page />);
+
+    expect(screen.getByText('Settings dialog').closest('[data-slot=route-provider]')).not.toBeNull();
   });
 
   it('hides the outer sidebar pane on mobile while keeping main content mounted', () => {

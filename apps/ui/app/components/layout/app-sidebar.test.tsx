@@ -33,6 +33,10 @@ vi.mock('#components/layout/command-palette.js', () => ({
   Commands: () => <button type='button'>Search projects and chats</button>,
 }));
 
+vi.mock('#components/nav/project-navigation-command-items.js', () => ({
+  ProjectNavigationCommandItems: () => undefined,
+}));
+
 vi.mock('#components/nav/nav-chat.js', () => ({
   NavChat: () => null,
 }));

@@ -17,6 +17,7 @@
  */
 
 import { isNode } from '#framework/environment.js';
+import { toOtlpJson } from '#framework/telemetry-otlp.js';
 import type { TelemetryBatch, TelemetrySpanRecord } from '#types/runtime-protocol.types.js';
 
 /** A sink that accepts batches without blocking the emitting thread. */
@@ -56,6 +57,23 @@ export function telemetryDirectory(): string | undefined {
   return base ? `${base}/traces` : undefined;
 }
 
+/** The line shape a sink writes. */
+export type TelemetryFileFormat = 'jsonl' | 'otlp';
+
+/**
+ * Resolve the line shape this realm writes.
+ *
+ * Tau's own readers — the trace pane, the runtime-e2e comparator — read the
+ * native span shape, so it stays the default; `TAU_TELEMETRY_FORMAT=otlp`
+ * hands the same spans to an external collector instead (D8).
+ *
+ * @returns The configured format, `jsonl` unless OTLP was asked for.
+ */
+export function telemetryFormat(): TelemetryFileFormat {
+  // oxlint-disable-next-line n/prefer-global/process -- same environment `telemetryDirectory` reads
+  return /^otlp$/iu.test(process.env['TAU_TELEMETRY_FORMAT'] ?? '') ? 'otlp' : 'jsonl';
+}
+
 /**
  * Open a rotating JSONL span sink.
  *
@@ -69,6 +87,8 @@ export async function openTelemetryFileSink(options: {
   readonly fileName: string;
   /** Rotate once the file passes this size. Defaults to 5 MiB. */
   readonly maxBytes?: number;
+  /** Line shape. Defaults to Tau's own span records. */
+  readonly format?: TelemetryFileFormat;
 }): Promise<TelemetryExporter | undefined> {
   const [{ createWriteStream, mkdirSync, renameSync }, { join }] = await Promise.all([
     import('node:fs'),
@@ -122,9 +142,13 @@ export async function openTelemetryFileSink(options: {
         return;
       }
       let lines = '';
-      for (const entry of batch.entries) {
-        const record: TelemetrySpanRecord = { ...entry, origin: batch.origin, epoch: batch.epoch };
-        lines += `${JSON.stringify(record)}\n`;
+      if (options.format === 'otlp') {
+        lines = `${toOtlpJson(batch)}\n`;
+      } else {
+        for (const entry of batch.entries) {
+          const record: TelemetrySpanRecord = { ...entry, origin: batch.origin, epoch: batch.epoch };
+          lines += `${JSON.stringify(record)}\n`;
+        }
       }
       if (!stream || stream.writableLength > maxBufferedBytes) {
         return;

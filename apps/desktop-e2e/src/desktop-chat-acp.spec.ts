@@ -925,3 +925,83 @@ test.skipIf(!codexAvailable)(
   },
   900_000,
 );
+
+/**
+ * W15: an image and a PDF reach the external agent as content blocks (D23).
+ *
+ * An ACP turn never touches the gateway, so the only place the bytes can be
+ * observed from here is the agent's own answer: the two numbers live *only*
+ * inside `bracket-spec.pdf`, and the dark bore lives *only* inside the photo.
+ * The durable rows are checked beside it — a chat that inlined base64 instead of
+ * writing `file-ref` rows would still answer, and would still be wrong.
+ */
+test.skipIf(!codexAvailable)(
+  'hands an image and a PDF to the external agent as content blocks',
+  async () => {
+    const account = tauTestAccount('acp-attachments');
+    seededEmail = account.email;
+    const token = await seedTauTestUser(account);
+    session = await launchDesktopApp({ token, packaged });
+    if (packaged) {
+      await authenticatePackagedDesktop(session, token);
+    }
+    const { page } = session;
+    fixture = await installGatewayFixture(page);
+    const fixturesRoot = join(import.meta.dirname, '../fixtures');
+    const attachmentPrompt =
+      'Two files are attached: a specification and a photo. ' +
+      'Do not create or edit any file. Reply with exactly one line: ' +
+      'HOLE=<hole diameter in mm from the specification> PLATE=<plate thickness in mm from the specification> ' +
+      'DARK=<yes if the photo shows a dark circular bore, otherwise no>';
+
+    try {
+      await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
+      await expectSignedIn(page);
+      await selectKernel(page, 'OpenSCAD');
+      await connectPickedFolder(session);
+
+      /* The model row is picked first: the model picker exists only while the
+       * execution is Tau, and its catalog row is what gates the composer's
+       * attachment picker (D20). */
+      await selectChatModel(page, gatewayFixtureModelName);
+      const slug = await submitPrompt(page, seedPrompt);
+      await waitForProjectOnDisk(session.pickedDirectory, slug, { extension: '.scad' });
+
+      const rows = await openExecutionPicker(page);
+      expect(rows.join('\n')).toMatch(/Codex/u);
+      await page
+        .getByRole('option', { name: /^Codex/u })
+        .first()
+        .click();
+      await selectAgentModel(page, 'GPT-5.6-Sol');
+
+      await page
+        .locator('input[type="file"][accept*="application/pdf"]')
+        .first()
+        .setInputFiles([join(fixturesRoot, 'bracket-photo.jpg'), join(fixturesRoot, 'bracket-spec.pdf')]);
+      await expectVisible(page.getByText(/^PDF · /u).first(), 60_000);
+      await expectVisible(page.getByRole('button', { name: 'Open uploaded image 1' }), 60_000);
+
+      const chatId = activeChatId(page);
+      const logPath = join(session.pickedDirectory, slug, '.tau/chats', chatId, 'events.jsonl');
+      await sendPrompt(page, attachmentPrompt);
+
+      await expect
+        .poll(() => (existsSync(logPath) ? readFileSync(logPath, 'utf8') : ''), { timeout: 600_000 })
+        .toMatch(/HOLE\s*=/u);
+      const events = readFileSync(logPath, 'utf8');
+      /* Durable rows stay by reference on every path, external included (D14). */
+      expect(events).toContain('"file-ref"');
+      expect(events).not.toContain('"data":"/9j/');
+      const answer = events.slice(events.lastIndexOf('HOLE='));
+      expect(answer, 'the agent did not read the specification PDF').toMatch(/HOLE\s*=\s*"?7\.3/u);
+      expect(answer, 'the agent did not read the specification PDF').toMatch(/PLATE\s*=\s*"?4\.5/u);
+      expect(answer, 'the agent did not receive the image').toMatch(/DARK\s*=\s*"?yes/iu);
+      console.info(`[desktop-e2e] acp attachment answer: ${answer.slice(0, 200)}`);
+    } catch (error) {
+      await session.capture('acp-attachments-failure');
+      throw error;
+    }
+  },
+  900_000,
+);

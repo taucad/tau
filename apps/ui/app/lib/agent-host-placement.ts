@@ -278,6 +278,21 @@ let directoryOutage: string | undefined;
  */
 export const hostDirectoryOutage = (): string | undefined => directoryOutage;
 
+let discoveryIncomplete = false;
+
+/**
+ * Whether the last listing lost a source and is missing rows it should carry.
+ *
+ * A failed external-agent call used to be indistinguishable from a computer
+ * that simply has no Claude Code or Codex installed, and discovery runs once
+ * per project — so one transient IPC failure hid them until the project
+ * changed. Callers re-run discovery while this is true.
+ *
+ * @returns Whether the listing is worth retrying.
+ * @internal
+ */
+export const hostPlacementsIncomplete = (): boolean => discoveryIncomplete;
+
 /**
  * Every placement target this page can see, rung 1 first.
  *
@@ -299,6 +314,7 @@ export const listAgentHostPlacements = async (
   } = {},
 ): Promise<readonly AgentHostPlacementTarget[]> => {
   directoryOutage = undefined;
+  discoveryIncomplete = false;
   const bridge = (options.bridge ?? desktopBridge)();
   const [origin, paired, desktopAgents] = await Promise.all([
     (options.discoverOrigin ?? discoverOriginAgentHost)(),
@@ -309,7 +325,13 @@ export const listAgentHostPlacements = async (
     /* Asked for beside the other two rather than read off the launch bootstrap:
      * main answers when its CLI and model probes settle, and the window no
      * longer waits on them (D17). */
-    bridge?.externalAgents().catch(() => []) ?? [],
+    bridge?.externalAgents().catch((error: unknown) => {
+      /* Keep the row, mark the listing incomplete: an empty answer here reads
+       * as "nothing is installed", which is the wrong story to tell. */
+      discoveryIncomplete = true;
+      console.error('[agentHostPlacement] external agent listing failed', error);
+      return [];
+    }) ?? [],
   ]);
   /* Launcher 2 first: on the desktop build the in-process host is always there
    * — no discovery, no network — so it is the placement a user reaches for. The

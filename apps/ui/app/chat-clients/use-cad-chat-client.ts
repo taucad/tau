@@ -780,12 +780,6 @@ export const useCadChatClient = (): CadChatClient => {
        * turn is pre-flighted and wire-checked against a model it never runs. */
       turnExecution?: CadAgentExecution,
     ) => {
-      // A Tau Host turn needs no browser workspace authority; every other Tau
-      // turn does, and dispatching without one would compose a body naming a
-      // workspace no claim carries.
-      if (!workspaceAuthority && agent.execution.kind === 'tau' && agent.execution.hostId === undefined) {
-        return;
-      }
       if (preparing.current) {
         // A submit that silently returns looks to the user like a lost message.
         surfaceDispatchFailure(new Error('This chat is still starting an earlier turn. Try again in a moment.'));
@@ -800,7 +794,7 @@ export const useCadChatClient = (): CadChatClient => {
         preparing.current = false;
       }
     },
-    [admitWorkspace, agent.execution, surfaceDispatchFailure, workspaceAuthority],
+    [admitWorkspace, agent.execution, surfaceDispatchFailure],
   );
 
   // Publish how a bodyless dispatch composes its wire body, so startup

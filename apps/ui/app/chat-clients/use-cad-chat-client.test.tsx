@@ -27,6 +27,8 @@ const workspaceHarness = vi.hoisted(() => ({
   listeners: new Set<() => void>(),
   admissionGate: undefined as Promise<void> | undefined,
   prepare: vi.fn(),
+  /** Whether the chat renders under a `ChatWorkspaceAuthorityProvider`. */
+  mounted: true,
 }));
 const browserHostHarness = vi.hoisted(() => ({
   registration: undefined as
@@ -203,22 +205,25 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
       durability: 'transactional-rewrite',
     };
   },
-  useOptionalChatWorkspaceAuthority: () => ({
-    get: () => workspaceHarness.current,
-    prepare: workspaceHarness.prepare,
-    finalize: async () => undefined,
-    discard: async () => undefined,
-    markAdmitted: async () => {
-      await workspaceHarness.admissionGate;
-      workspaceHarness.current = { ...workspaceHarness.current!, admitted: true };
-    },
-    markCancelled: async () => undefined,
-    markRunId: async () => undefined,
-    subscribe: (listener: () => void) => {
-      workspaceHarness.listeners.add(listener);
-      return () => workspaceHarness.listeners.delete(listener);
-    },
-  }),
+  useOptionalChatWorkspaceAuthority: () =>
+    workspaceHarness.mounted
+      ? {
+          get: () => workspaceHarness.current,
+          prepare: workspaceHarness.prepare,
+          finalize: async () => undefined,
+          discard: async () => undefined,
+          markAdmitted: async () => {
+            await workspaceHarness.admissionGate;
+            workspaceHarness.current = { ...workspaceHarness.current!, admitted: true };
+          },
+          markCancelled: async () => undefined,
+          markRunId: async () => undefined,
+          subscribe: (listener: () => void) => {
+            workspaceHarness.listeners.add(listener);
+            return () => workspaceHarness.listeners.delete(listener);
+          },
+        }
+      : undefined,
 }));
 
 const toastHarness = vi.hoisted(() => ({ error: vi.fn() }));
@@ -320,6 +325,7 @@ beforeEach(() => {
   browserHostHarness.run = undefined;
   workspaceHarness.listeners.clear();
   workspaceHarness.admissionGate = undefined;
+  workspaceHarness.mounted = true;
   workspaceHarness.current = {
     execution: { hostId: 'host_test', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
     admitted: false,
@@ -456,6 +462,32 @@ describe('useCadChatClient', () => {
       });
     } finally {
       vi.useRealTimers();
+      consoleError.mockRestore();
+    }
+  });
+
+  it('should surface a dispatch failure when no workspace authority is mounted', async () => {
+    workspaceHarness.mounted = false;
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => [] });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    const actions = buildActions();
+    installActions(actions);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      const { result } = renderHook(() => useCadChatClient());
+      await act(async () => {
+        await result.current.submit({ text: 'no authority is mounted' });
+      });
+
+      expect(actions.sendMessage).not.toHaveBeenCalled();
+      expect(persistedErrors).toEqual([
+        expect.objectContaining({
+          message: expect.stringContaining('durable workspace authority is unavailable') as unknown,
+        }),
+      ]);
+    } finally {
       consoleError.mockRestore();
     }
   });

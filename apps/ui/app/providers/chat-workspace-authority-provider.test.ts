@@ -18,6 +18,7 @@ import { createElement } from 'react';
 import type { PropsWithChildren } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import type { ProviderCapabilities, RootedFileSystem } from '@taucad/filesystem';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
@@ -30,7 +31,9 @@ import {
   readRootedBridgeCapabilities,
   useChatWorkspaceAuthority,
   usePreparedChatWorkspace,
+  waitForRootedBridgeOpener,
 } from '#providers/chat-workspace-authority-provider.js';
+import type { FileManagerRef } from '#machines/file-manager.machine.types.js';
 import type { WorkerRevisionCommand, WorkerRevisionEvent } from '#machines/file-manager.worker.revisions.js';
 
 const hookState = vi.hoisted(() => ({
@@ -553,5 +556,39 @@ describe('the project working copy the page hands the browser agent host', () =>
     await expect(readRootedBridgeCapabilities(prepared.openFileSystemBridge)).resolves.toMatchObject({
       writable: capabilities.writable,
     });
+  });
+});
+
+describe('waitForRootedBridgeOpener', () => {
+  type FileManagerSnapshot = ReturnType<FileManagerRef['getSnapshot']>;
+
+  /** A file-manager actor that never mints the opener, with the context a test dictates. */
+  const openerlessFileManager = (error?: Error): FileManagerRef =>
+    mock<FileManagerRef>({
+      getSnapshot: () =>
+        mock<FileManagerSnapshot>({
+          context: mock<FileManagerSnapshot['context']>({ error, openFileSystemBridge: undefined }),
+        }),
+      subscribe: () => ({ unsubscribe: () => undefined }),
+    });
+
+  it('should reject the rooted bridge wait when the file manager fails', async () => {
+    await expect(waitForRootedBridgeOpener(openerlessFileManager(new Error('worker crashed')))).rejects.toThrow(
+      'worker crashed',
+    );
+  });
+
+  it('should reject the rooted bridge wait when no opener arrives within the timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = expect(waitForRootedBridgeOpener(openerlessFileManager())).rejects.toThrow(
+        'did not finish starting',
+      );
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

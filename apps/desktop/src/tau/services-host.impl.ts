@@ -539,7 +539,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         void (async () => {
           try {
             await releaseAgentHost(
-              resolve(root),
+              canonicalPath(root),
               projectId,
               typeof attachmentGeneration === 'number' ? attachmentGeneration : undefined,
             );
@@ -583,7 +583,14 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       port.close();
       return;
     }
-    const workspaceRoot = resolve(requested);
+    /* The physical spelling, because main addresses this project by its
+     * realpath when it releases it while the renderer holds the spelling the
+     * person granted — under `$TMPDIR` those differ by `/private`, and a
+     * launcher filed under one of them is unreachable from the other. Every map
+     * keyed off this root (launchers, generations, project ids, revision trees,
+     * MCP routes, runtime clients through the checkouts beneath it) shares the
+     * one key. */
+    const workspaceRoot = canonicalPath(requested);
     launcherProjectIds.set(workspaceRoot, projectId);
     const requestedGeneration = Number(context?.['attachmentGeneration']);
     if (Number.isSafeInteger(requestedGeneration) && requestedGeneration >= 0) {
@@ -608,6 +615,14 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         if (runtimeClients.get(root) === existingClient) {
           runtimeClients.delete(root);
           connectedRuntimeClients.delete(root);
+        }
+        /* Re-read after the await, the daemon's own shape (`host-daemon.ts`):
+         * a concurrent caller waking from the same corpse may already have
+         * installed its reconnect, and overwriting it here would leave its
+         * client and main lease live with nothing left holding them. */
+        const reconnect = runtimeClients.get(root);
+        if (reconnect !== undefined) {
+          return reconnect;
         }
       }
       if (!requestRuntimePort) {

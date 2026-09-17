@@ -694,7 +694,9 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     hosts.push(harness.host);
     harness.host.handleMessage(frame({ type: 'allowRoots', roots: [workspaceRoot] }));
     harness.host.handleMessage(frame({ type: 'agentHost', config: { ...config, ...overrides } }));
-    return { ...harness, workspaceRoot };
+    /* The spelling the person granted and the physical one the host files this
+       project under; under `$TMPDIR` they differ by `/private`. */
+    return { ...harness, workspaceRoot, physicalRoot: realpathSync.native(workspaceRoot) };
   };
 
   /** One external-agent turn, admitted the way the renderer admits it. */
@@ -857,7 +859,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
   it("should keep the runtime client and main's grant while another run holds the checkout", async () => {
     const runtimeContext = vi.fn();
     const broker = runtimePortBroker();
-    const { host, workspaceRoot } = await configuredHost(
+    const { host, physicalRoot, workspaceRoot } = await configuredHost(
       {},
       { requestRuntimePort: broker.requestRuntimePort, runtimeContext },
     );
@@ -872,14 +874,14 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     checkouts.delete('run-1');
 
     expect(runtimeClientCalls[0]!.terminate).not.toHaveBeenCalled();
-    expect(runtimeContext).not.toHaveBeenCalledWith('release', cwd, workspaceRoot);
+    expect(runtimeContext).not.toHaveBeenCalledWith('release', cwd, physicalRoot);
     await expect(registry.runtimeClient!(cwd)).resolves.toBe(client);
   });
 
   it("should release main's grant and terminate the client when the last run leaves", async () => {
     const runtimeContext = vi.fn();
     const broker = runtimePortBroker();
-    const { host, workspaceRoot } = await configuredHost(
+    const { host, physicalRoot, workspaceRoot } = await configuredHost(
       {},
       { requestRuntimePort: broker.requestRuntimePort, runtimeContext },
     );
@@ -898,7 +900,7 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
       expect(runtimeClientCalls[0]!.terminate).toHaveBeenCalledOnce();
     });
     expect(runtimeContext.mock.calls.filter(([action]) => action === 'release')).toEqual([
-      ['release', cwd, workspaceRoot],
+      ['release', cwd, physicalRoot],
     ]);
   });
 
@@ -953,23 +955,85 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     expect(runtimeClientCalls[1]!.lifecycleState).not.toBe('terminated');
   });
 
+  it('should share one reconnect between concurrent callers of a terminated client', async () => {
+    const broker = runtimePortBroker();
+    const { host, workspaceRoot } = await configuredHost({}, { requestRuntimePort: broker.requestRuntimePort });
+    connect(host, workspaceRoot);
+    const registry = toolRegistryCalls.at(-1)!;
+    await registry.runtimeClient!(workspaceRoot);
+
+    runtimeClientCalls[0]!.terminate();
+    const [first, second] = await Promise.all([
+      registry.runtimeClient!(workspaceRoot),
+      registry.runtimeClient!(workspaceRoot),
+    ]);
+
+    /* The caller that loses the race would hold a live client and a main lease
+       that neither map can reach, so nothing ever terminates it. */
+    expect(first).toBe(second);
+    expect(runtimeClientCalls).toHaveLength(2);
+    expect(broker.ports).toHaveLength(2);
+  });
+
+  it('should release the agent host when main names the project by its physical path', async () => {
+    const released = vi.fn();
+    const { host, log, workspaceRoot } = await configuredHost({}, { agentHostReleased: released });
+    const channel = new MessageChannel();
+    channels.push(channel);
+    host.handleMessage(
+      frame(
+        {
+          type: 'concern',
+          concern: 'agentHost',
+          context: { workspaceRoot, projectId: 'proj_test', attachmentGeneration: '1' },
+        },
+        [channel.port1 as unknown as UtilityPort],
+      ),
+    );
+
+    /* Main keys its own registry by the realpath while the renderer holds the
+       spelling the person granted, and under `$TMPDIR` those differ. */
+    host.handleMessage(
+      frame({
+        type: 'agent-host-release',
+        requestId: 'release-physical',
+        workspaceRoot: realpathSync.native(workspaceRoot),
+        projectId: 'proj_test',
+        attachmentGeneration: 1,
+      }),
+    );
+    await vi.waitFor(
+      () => {
+        expect(released).toHaveBeenCalledWith('release-physical');
+      },
+      { timeout: 10_000 },
+    );
+
+    /* A release that reported success and left the launcher running is worse
+       than a refusal: main has already dropped the grant it needs. */
+    connect(host, workspaceRoot);
+    expect(log.mock.calls.findLast(([event]) => event === 'agent-host-served')?.[1]).toMatchObject({
+      reused: false,
+    });
+  });
+
   it('keeps one always-on launcher per root across connections', async () => {
-    const { host, log, workspaceRoot } = await configuredHost();
+    const { host, log, physicalRoot, workspaceRoot } = await configuredHost();
     connect(host, workspaceRoot);
     connect(host, workspaceRoot);
 
     const served = log.mock.calls.filter(([event]) => event === 'agent-host-served');
     expect(served).toEqual([
-      ['agent-host-served', { workspaceRoot, reused: false }],
+      ['agent-host-served', { workspaceRoot: physicalRoot, reused: false }],
       /* A second window on the same project attaches to the run already
          executing; a second launcher would fork the durable log. */
-      ['agent-host-served', { workspaceRoot, reused: true }],
+      ['agent-host-served', { workspaceRoot: physicalRoot, reused: true }],
     ]);
   });
 
   it('awaits one project release without stopping another launcher', async () => {
     const released = vi.fn();
-    const { host, log, workspaceRoot } = await configuredHost({}, { agentHostReleased: released });
+    const { host, log, physicalRoot, workspaceRoot } = await configuredHost({}, { agentHostReleased: released });
     const otherRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-agent-other-'));
     workspaces.push(otherRoot);
     host.handleMessage(frame({ type: 'allowRoots', roots: [workspaceRoot, otherRoot] }));
@@ -995,8 +1059,8 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     connect(host, otherRoot, 'project-b');
     connect(host, workspaceRoot, 'project-a');
     expect(log.mock.calls.filter(([event]) => event === 'agent-host-served').slice(-2)).toEqual([
-      ['agent-host-served', { workspaceRoot: otherRoot, reused: true }],
-      ['agent-host-served', { workspaceRoot, reused: false }],
+      ['agent-host-served', { workspaceRoot: realpathSync.native(otherRoot), reused: true }],
+      ['agent-host-served', { workspaceRoot: physicalRoot, reused: false }],
     ]);
   });
 

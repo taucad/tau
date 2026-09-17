@@ -454,19 +454,22 @@ export const createServicesBroker = (options: ServicesBrokerOptions): ServicesBr
       releasingRoots.set(root, (releasingRoots.get(root) ?? 0) + 1);
       try {
         await Promise.race([pending.promise, deadline]);
-        /* The utility refused this release because the project was retained
-         * again while it was in flight; dropping main's grant now would strand
-         * the launcher that re-adoption is already using. */
-        if (attachmentGenerations.get(root) !== generation) {
-          return;
-        }
-        /* An unmoved generation is the proof that nothing retained this root
-         * inside the wait, so the set this release emptied is still empty. */
-        projectAttachments.delete(root);
-        attachmentGenerations.delete(root);
-        runtimeContexts.delete(root);
-        projectIds.delete(root);
       } finally {
+        /* Whatever the utility answered — including a timeout or a refusal,
+         * where main stops waiting for good — the last holder is already gone,
+         * so main's grant must go with it. Keeping it left
+         * `computeProjectRoot` answering for a root nobody holds, and minted
+         * runtime ports off it.
+         *
+         * The one exception is a moved generation: the project was retained
+         * again while this release was in flight, and dropping the grant now
+         * would strand the launcher that re-adoption is already using. */
+        if (attachmentGenerations.get(root) === generation) {
+          projectAttachments.delete(root);
+          attachmentGenerations.delete(root);
+          runtimeContexts.delete(root);
+          projectIds.delete(root);
+        }
         const releasing = (releasingRoots.get(root) ?? 1) - 1;
         if (releasing === 0) {
           releasingRoots.delete(root);

@@ -1,5 +1,5 @@
-import { assign, emit, enqueueActions, setup } from 'xstate';
-import type { ActorRefFrom, AnyActorRef } from 'xstate';
+import { assign, emit, enqueueActions, fromCallback, setup } from 'xstate';
+import type { ActorRefFrom, AnyActorRef, EventObject } from 'xstate';
 
 /**
  * One chat's live state (D32, S45).
@@ -9,6 +9,12 @@ import type { ActorRefFrom, AnyActorRef } from 'xstate';
  * here, reached by the source signal named in that row. Nothing derives a
  * second status from flags — `use-agent-projections.ts` and W20's sidebar read
  * these snapshots.
+ *
+ * The `host` region is this machine's first owned resource: one
+ * {@link ChatHostServices} binding per chat, held for the actor's life and
+ * re-invoked only when the turn's placement changes, so the chat's agent-host
+ * registration can no longer be emptied by a transcript that truncates under
+ * it (policy §16 — the chat session owns the agent-host binding).
  *
  * It never spawns a `turn.machine`. Settlement is not this machine's verb
  * either: `ProjectChatRunSettlement` at the route still sends `prepare` /
@@ -62,6 +68,8 @@ export type ChatSessionMachineContext = Readonly<{
   activeRunId: string | undefined;
   /** A matching host outcome that arrived before `run.lifecycle: completed`. */
   pendingSettlement: ChatTurnSettlementObservation | undefined;
+  /** Where this chat's next turn runs; the `host` region re-binds when it moves. */
+  placement: string;
 }>;
 
 /** One host-attested outcome, kept correlated through the UI state machine. @public */
@@ -78,6 +86,8 @@ export type ChatTurnSettlementObservation =
 /** Events accepted by chatSessionMachine. @public */
 export type ChatSessionMachineEvent =
   | { readonly type: 'runLifecycle'; readonly phase: ChatRunPhase; readonly runId?: string; readonly reason?: string }
+  /** The route's live agent selection for this chat; only its placement is state. */
+  | { readonly type: 'agentConfigChanged'; readonly placement: string }
   | { readonly type: 'interruptRecorded'; readonly state: 'requested' | 'resolved'; readonly count?: number }
   | { readonly type: 'toolParts'; readonly inFlight: number; readonly approvals: number; readonly toolName?: string }
   | { readonly type: 'requestLifecycle'; readonly phase: ChatRequestLifecycle }
@@ -115,7 +125,17 @@ export const chatSessionMachine = setup({
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
     emitted: {} as ChatSessionMachineEmitted,
   },
+  actors: {
+    /* Replaced by `sessions-store.ts` with the real registration. The default
+     * keeps this file free of the transport, the DOM and React, which is what
+     * lets the machine's own rows run headless. */
+    hostBinding: fromCallback<EventObject, { readonly chatId: string; readonly placement: string }>(
+      () => () => undefined,
+    ),
+  },
   guards: {
+    placementChanged: ({ context, event }) =>
+      event.type === 'agentConfigChanged' && event.placement !== context.placement,
     /* A tool part in flight is what "running a tool" means; deltas never get
      * here, so `running` with nothing in flight is generating (the table). */
     isToolInFlight: ({ context }) => context.toolsInFlight > 0,
@@ -179,6 +199,9 @@ export const chatSessionMachine = setup({
         enqueue.raise({ type: 'approvalPending' });
       }
     }),
+    recordPlacement: assign({
+      placement: ({ context, event }) => (event.type === 'agentConfigChanged' ? event.placement : context.placement),
+    }),
     recordPendingFailure: assign({
       failureReason: ({ context }) =>
         context.pendingSettlement?.type === 'turnFailedObserved'
@@ -199,6 +222,7 @@ export const chatSessionMachine = setup({
     branch: undefined,
     activeRunId: undefined,
     pendingSettlement: undefined,
+    placement: '',
   }),
   type: 'parallel',
   on: {
@@ -399,6 +423,31 @@ export const chatSessionMachine = setup({
          * go would stop this actor and blank the row.
          */
         close: { target: '.stopped', actions: ['clearRunDetail', 'announce'] },
+      },
+    },
+    /*
+     * The chat's agent-host binding (C1, V6).
+     *
+     * One invocation for the actor's life, re-entered only when the placement
+     * moves — a chat that switches from this browser to a daemon rebinds once,
+     * not once per render of every transcript message.
+     */
+    host: {
+      initial: 'bound',
+      states: {
+        bound: {
+          invoke: {
+            id: 'hostBinding',
+            src: 'hostBinding',
+            input: ({ context }) => ({ chatId: context.chatId, placement: context.placement }),
+          },
+          on: {
+            agentConfigChanged: [
+              { guard: 'placementChanged', actions: 'recordPlacement', target: 'bound', reenter: true },
+              { actions: 'recordPlacement' },
+            ],
+          },
+        },
       },
     },
     read: {

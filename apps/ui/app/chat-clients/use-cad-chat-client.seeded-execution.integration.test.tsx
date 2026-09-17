@@ -26,6 +26,7 @@ import type * as CadAgentConfigModuleShape from '#hooks/use-cad-agent-config.js'
 import { ChatSessionStore } from '#services/chat-session-store.js';
 import { ActiveChatProvider, ChatComposerProvider, useChatComposer } from '#hooks/active-chat-provider.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
+import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
 
 /** The Tau model the cookie holds — what the un-hydrated fallback rebuilds from. */
 const cookieModelId = 'openai-gpt-5.6-luna';
@@ -224,6 +225,9 @@ const dispatchSeededTurn = async (activeExecution: CadAgentExecution): Promise<R
 
   render(
     <ActiveChatProvider chatId={chatId}>
+      {/* The chat's one turn host publishes the bodyless body factory the
+          seeded dispatch composes through; the view beside it only reads. */}
+      <ChatTurnHost />
       <Client />
     </ActiveChatProvider>,
   );

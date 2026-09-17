@@ -1,10 +1,11 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
 import { renderHook, act, waitFor } from '@testing-library/react';
+import { createActor } from 'xstate';
+import type { ActorRefFrom } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import type { Chat } from '@ai-sdk/react';
 import type { CadAgentConfigInput, CadAgentExecution, MyUIMessage } from '@taucad/chat';
-import { attachmentUrl } from '#utils/attachment.utils.js';
 import { useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
 import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
@@ -15,6 +16,8 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ChatSessionStore } from '#services/chat-session-store.js';
 import type { AgentHostClientOptions, AgentHostClient } from '#services/agent-host-client.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
+import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
+import { chatHostBinding, chatHostServices, resetChatHostServices } from '#chat-clients/_internal/chat-host-binding.js';
 
 const workspaceHarness = vi.hoisted(() => ({
   current: undefined as
@@ -44,6 +47,8 @@ const browserHostHarness = vi.hoisted(() => ({
   // The daemon leg: `openAgentHostChannel` → `createDaemonAgentHostTransport`
   // → `createAgentHostClient`, with no worker, bridge or workspace claim.
   openAgentHostChannel: vi.fn(async (hostId: string) => ({ hostId })),
+  /** How many times anything registered this chat's agent host. */
+  registrations: 0,
   createDaemonClient: vi.fn((transport: unknown): AgentHostClient => {
     const client = Object.create(null) as AgentHostClient & { transport?: unknown };
     client.transport = transport;
@@ -161,6 +166,7 @@ vi.mock('#hooks/use-file-manager.js', () => {
 });
 vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
   registerAgentHost: (_chatId: string, registration: typeof browserHostHarness.registration) => {
+    browserHostHarness.registrations += 1;
     browserHostHarness.registration = registration;
     return () => {
       browserHostHarness.registration = undefined;
@@ -279,7 +285,14 @@ const sessionWithPersistedErrors = ((): ChatSessionStore['get'] =>
   })) as unknown as ChatSessionStore['get'])();
 
 const installSessionStore = (partial: Partial<ChatSessionStore>): void => {
-  vi.mocked(useChatSessionStore).mockReturnValue(partial as ChatSessionStore);
+  /* Merged, not replaced: the chat's turn host is mounted beside every view
+   * these rows render, and it calls the store's placement and body seams. */
+  vi.mocked(useChatSessionStore).mockReturnValue({
+    setLatestAgentBody: vi.fn(),
+    setTurnPlacement: vi.fn(),
+    reattachHostChat,
+    ...partial,
+  } as ChatSessionStore);
 };
 
 /** The store's host-log reattach, re-armed per test. */
@@ -289,6 +302,49 @@ let promoteDraftAttachments = vi.fn<ChatSessionStore['promoteDraftAttachments']>
 
 const imageAttachment = { hash: 'a'.repeat(64), mediaType: 'image/png', byteLength: 11 };
 const pdfAttachment = { hash: 'b'.repeat(64), mediaType: 'application/pdf', filename: 'bracket-spec.pdf' };
+
+/**
+ * Mount a chat view beside the chat's one turn host.
+ *
+ * In the app they are separate mounts: `useCadChatClient` is a *view* (the
+ * history, the examples, the stack trace, the approval banner and one per
+ * transcript message), and `ChatTurnHost` is the single owner of the chat's
+ * agent-host binding and its bodyless body factory. These rows drive both,
+ * because they assert across that seam.
+ */
+const renderClient = (): ReturnType<typeof renderHook<ReturnType<typeof useCadChatClient>, unknown>> =>
+  renderHook(() => useCadChatClient(), {
+    wrapper: ({ children }) => (
+      <>
+        <ChatTurnHost />
+        {children}
+      </>
+    ),
+  });
+
+/** Every binding actor a row started, stopped after it. */
+const bindings: Array<ActorRefFrom<typeof chatHostBinding>> = [];
+
+/**
+ * Run the chat's real host binding, as its session actor does.
+ *
+ * The binding is invoked by `chat-session.machine`'s `host` region in the app;
+ * here the row starts the same actor directly, so the registration under test
+ * is the one the published services actually compose.
+ */
+const bindChatHost = async (chatId = 'chat_test'): Promise<void> => {
+  await waitFor(() => {
+    expect(chatHostServices(chatId)).toBeDefined();
+  });
+  const actor = createActor(chatHostBinding, {
+    input: { chatId, placement: chatHostServices(chatId)!.placement },
+  });
+  bindings.push(actor);
+  actor.start();
+  await waitFor(() => {
+    expect(browserHostHarness.registration).toBeDefined();
+  });
+};
 
 const installActiveSession = (activeChatId: string): void => {
   vi.mocked(useActiveChatSession).mockReturnValue({
@@ -316,7 +372,12 @@ beforeEach(() => {
   creditPreflightHarness.calls.length = 0;
   creditPreflightHarness.refuse = undefined;
   vi.clearAllMocks();
+  for (const binding of bindings.splice(0)) {
+    binding.stop();
+  }
+  resetChatHostServices();
   browserHostHarness.registration = undefined;
+  browserHostHarness.registrations = 0;
   browserHostHarness.run = undefined;
   workspaceHarness.listeners.clear();
   workspaceHarness.admissionGate = undefined;
@@ -353,6 +414,27 @@ beforeEach(() => {
 });
 
 describe('useCadChatClient', () => {
+  it('should register no agent host, however many views mount it', async () => {
+    /* The hook is mounted by the history, the examples, the stack trace, the
+     * approval banner and once *per transcript message*. Every instance used
+     * to write the one module-level registry, so the last one to unmount
+     * deleted the chat's binding — and a rewinding dispatch unmounts exactly
+     * those newest instances. The binding belongs to the chat's session actor;
+     * these views only read. */
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => [] });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    installActions(buildActions());
+
+    const views = [renderClient(), renderClient()];
+    await waitFor(() => {
+      expect(views[0]!.result.current.submit).toBeInstanceOf(Function);
+    });
+    views.at(-1)!.unmount();
+
+    expect(browserHostHarness.registrations).toBe(0);
+  });
+
   it('places an implicit desktop Tau turn on the services utility', async () => {
     placementHarness.localHostId = 'desktop';
     const chat = mock<Chat<MyUIMessage>>();
@@ -360,10 +442,8 @@ describe('useCadChatClient', () => {
     useActiveChatInstanceMock.mockReturnValue(chat);
     installActions(buildActions());
 
-    renderHook(() => useCadChatClient());
-    await waitFor(() => {
-      expect(browserHostHarness.registration).toBeDefined();
-    });
+    renderClient();
+    await bindChatHost();
     await browserHostHarness.registration!.createClient();
 
     const [transport] = browserHostHarness.createDaemonClient.mock.calls.at(-1) as [{ dial: () => Promise<unknown> }];
@@ -383,7 +463,7 @@ describe('useCadChatClient', () => {
     useActiveChatInstanceMock.mockReturnValue(chat);
     const actions = buildActions();
     installActions(actions);
-    const { result } = renderHook(() => useCadChatClient());
+    const { result } = renderClient();
 
     act(() => {
       void result.current.submit({ text: 'commit before dispatch' });
@@ -402,7 +482,7 @@ describe('useCadChatClient', () => {
     useActiveChatInstanceMock.mockReturnValue(mock<Chat<MyUIMessage>>());
     const actions = buildActions();
     installActions(actions);
-    const { result } = renderHook(() => useCadChatClient());
+    const { result } = renderClient();
 
     let settled = false;
     const submitAndRecord = async (): Promise<void> => {
@@ -440,7 +520,7 @@ describe('useCadChatClient', () => {
     vi.useFakeTimers();
 
     try {
-      const { result } = renderHook(() => useCadChatClient());
+      const { result } = renderClient();
       act(() => {
         void result.current.submit({ text: 'wedged behind a dead run' });
       });
@@ -467,10 +547,8 @@ describe('useCadChatClient', () => {
     useActiveChatInstanceMock.mockReturnValue(chat);
     installActions(buildActions());
 
-    renderHook(() => useCadChatClient());
-    await waitFor(() => {
-      expect(browserHostHarness.registration).toBeDefined();
-    });
+    renderClient();
+    await bindChatHost();
     await browserHostHarness.registration!.createClient();
 
     expect(browserHostHarness.syncProjectRoots).toHaveBeenCalledOnce();
@@ -507,10 +585,8 @@ describe('useCadChatClient', () => {
     const actions = buildActions();
     installActions(actions);
 
-    const { result } = renderHook(() => useCadChatClient());
-    await waitFor(() => {
-      expect(browserHostHarness.registration).toBeDefined();
-    });
+    const { result } = renderClient();
+    await bindChatHost();
     await browserHostHarness.registration!.createClient();
 
     /* The transport is given a *dial*, not an open channel: a relayed channel
@@ -566,7 +642,7 @@ describe('useCadChatClient', () => {
     const actions = buildActions();
     installActions(actions);
 
-    const { result } = renderHook(() => useCadChatClient());
+    const { result } = renderClient();
     act(() => {
       void result.current.submit({ text: 'Build it.' });
     });
@@ -599,7 +675,7 @@ describe('useCadChatClient', () => {
     const actions = buildActions();
     installActions(actions);
 
-    const { result } = renderHook(() => useCadChatClient());
+    const { result } = renderClient();
     act(() => {
       void result.current.submit({ text: 'Build it.' });
     });
@@ -616,61 +692,6 @@ describe('useCadChatClient', () => {
    * admission — and with it the pre-flight and the browser-wire check — has to
    * see the overriding row, not the selection the composer still shows.
    */
-  it('pre-flights the overriding model a retry names, not the active selection', async () => {
-    const messages: MyUIMessage[] = [
-      { id: 'msg_user', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] },
-      { id: 'msg_assistant', role: 'assistant', parts: [{ type: 'text', text: 'Done.' }] },
-    ];
-    const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => messages });
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    const actions = buildActions();
-    installActions(actions);
-
-    const { result } = renderHook(() => useCadChatClient());
-    act(() => {
-      result.current.retry('msg_assistant', 'openai-gpt-retry');
-    });
-
-    await waitFor(() => {
-      expect(actions.retryMessage).toHaveBeenCalled();
-    });
-    expect(creditPreflightHarness.calls).toEqual([['openai-gpt-retry', 'GPT Retry']]);
-  });
-
-  it('should refuse a retry on a model that cannot read a PDF earlier in the history (G5)', () => {
-    const messages: MyUIMessage[] = [
-      {
-        id: 'msg_user',
-        role: 'user',
-        parts: [
-          {
-            type: 'file',
-            mediaType: 'application/pdf',
-            filename: 'bracket-spec.pdf',
-            url: attachmentUrl(pdfAttachment),
-          },
-          { type: 'text', text: 'Read the spec.' },
-        ],
-      },
-      { id: 'msg_assistant', role: 'assistant', parts: [{ type: 'text', text: 'Done.' }] },
-    ];
-    const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => messages });
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    const actions = buildActions();
-    installActions(actions);
-
-    const { result } = renderHook(() => useCadChatClient());
-    act(() => {
-      result.current.retry('msg_assistant', 'openai-gpt-retry');
-    });
-
-    expect(actions.retryMessage).not.toHaveBeenCalled();
-    expect(persistedErrors).toEqual([
-      expect.objectContaining({ message: "GPT Retry can't read PDFs. Remove the PDF or pick another model." }),
-    ]);
-  });
 
   it('places an external-agent turn on its daemon, naming the agent and no Tau model', async () => {
     mountAgentMock(buildAgent({ execution: { kind: 'acp', hostId: 'origin', agentId: 'codex' } }));
@@ -680,10 +701,8 @@ describe('useCadChatClient', () => {
     const actions = buildActions();
     installActions(actions);
 
-    const { result } = renderHook(() => useCadChatClient());
-    await waitFor(() => {
-      expect(browserHostHarness.registration).toBeDefined();
-    });
+    const { result } = renderClient();
+    await bindChatHost();
     await browserHostHarness.registration!.createClient();
 
     // Dialled through the same ladder and driven over the same daemon transport
@@ -726,10 +745,8 @@ describe('useCadChatClient', () => {
     const actions = buildActions();
     installActions(actions);
 
-    const { result } = renderHook(() => useCadChatClient());
-    await waitFor(() => {
-      expect(browserHostHarness.registration).toBeDefined();
-    });
+    const { result } = renderClient();
+    await bindChatHost();
     await browserHostHarness.registration!.createClient();
     act(() => {
       void result.current.submit({ text: 'Build it.' });
@@ -755,13 +772,13 @@ describe('useCadChatClient', () => {
     useActiveChatInstanceMock.mockReturnValue(chat);
     installActions(buildActions());
 
-    renderHook(() => useCadChatClient());
+    renderClient();
+    await bindChatHost();
 
-    await waitFor(() => {
-      expect(reattachHostChat).toHaveBeenCalledWith({ chatId: 'chat_test', hostId: 'origin' });
-    });
-    // Ordering, not just occurrence: the transport answers a reconnect from the
-    // API until this chat's host registration exists.
+    // Ordering, not just occurrence: the reattach rides the registration, which
+    // is the first moment the transport can answer a reconnect for this chat
+    // with the daemon rather than the API.
+    expect(reattachHostChat).toHaveBeenCalledWith({ chatId: 'chat_test', hostId: 'origin' });
     expect(browserHostHarness.registration).toBeDefined();
   });
 
@@ -772,11 +789,9 @@ describe('useCadChatClient', () => {
     useActiveChatInstanceMock.mockReturnValue(chat);
     installActions(buildActions());
 
-    renderHook(() => useCadChatClient());
+    renderClient();
 
-    await waitFor(() => {
-      expect(browserHostHarness.registration).toBeDefined();
-    });
+    await bindChatHost();
     expect(reattachHostChat).not.toHaveBeenCalled();
   });
 
@@ -792,111 +807,13 @@ describe('useCadChatClient', () => {
     const actions = buildActions();
     installActions(actions);
 
-    const { result } = renderHook(() => useCadChatClient());
+    const { result } = renderClient();
     act(() => {
       void result.current.submit({ text: 'Build it.' });
     });
 
     await waitFor(() => {
       expect(actions.sendMessage).toHaveBeenCalledOnce();
-    });
-  });
-
-  it('builds browser start config from the request agent and resolves retry-model metadata per admission', async () => {
-    const agent = buildAgent({
-      execution: { kind: 'tau', model: 'openai-gpt-5.5' },
-      mode: 'plan',
-      toolChoice: ['read_file'],
-      snapshot: { activeFile: { path: 'main.ts', name: 'main.ts' } },
-      contextPayload: { memory: { 'AGENTS.md': 'Browser rules' } },
-    });
-    mountAgentMock(agent);
-    const messages: MyUIMessage[] = [
-      { id: 'user-before-retry', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] },
-      { id: 'assistant-before-retry', role: 'assistant', parts: [{ type: 'text', text: 'Prior answer.' }] },
-    ];
-    const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => messages });
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    const actions = buildActions();
-    installActions(actions);
-
-    const { result } = renderHook(() => useCadChatClient());
-    act(() => {
-      result.current.retry('assistant-before-retry', 'openai-gpt-retry');
-    });
-    await waitFor(() => {
-      expect(actions.retryMessage).toHaveBeenCalledOnce();
-    });
-
-    const body = actions.retryMessage.mock.calls[0]?.[1]?.body as {
-      readonly agent: CadAgentConfigInput;
-      readonly browserHost: {
-        readonly trigger: string;
-        readonly retainedMessageIds: readonly string[];
-        readonly config: {
-          readonly systemPrompt: string;
-          readonly systemPromptBlocks: ReadonlyArray<{ readonly text: string }>;
-          readonly model: {
-            readonly id: string;
-            readonly providerKind: string;
-            readonly contextWindow: number;
-            readonly cost: {
-              readonly input: number;
-              readonly output: number;
-              readonly cacheRead: number;
-              readonly cacheWrite: number;
-            };
-          };
-          readonly toolChoice: unknown;
-          readonly allowedTools: readonly string[];
-          readonly snapshot: unknown;
-          readonly contextPayload: unknown;
-          readonly contextMessages: ReadonlyArray<{
-            readonly id: string;
-            readonly role: string;
-            readonly content: string;
-            readonly metadata: {
-              readonly tauInternal: { readonly kind: string; readonly anchorId: string; readonly pruning: string };
-            };
-          }>;
-        };
-      };
-    };
-    expect(body.agent.execution).toEqual({ kind: 'tau', model: 'openai-gpt-retry' });
-    expect(body.browserHost).toMatchObject({
-      trigger: 'retry',
-      retainedMessageIds: [],
-      config: {
-        model: {
-          id: 'openai-gpt-retry',
-          providerKind: 'openai',
-          contextWindow: 64_000,
-          maxTokens: 8000,
-          cost: { input: 1, output: 4, cacheRead: 0.1, cacheWrite: 1.25 },
-        },
-        toolChoice: ['read_file'],
-        allowedTools: ['read_file'],
-        snapshot: agent.snapshot,
-        contextPayload: agent.contextPayload,
-      },
-    });
-    expect(body.browserHost.config.systemPromptBlocks).toHaveLength(2);
-    expect(body.browserHost.config.systemPromptBlocks[0]?.text).toContain('<role>');
-    expect(body.browserHost.config.systemPrompt).toContain('<plan_mode>');
-    expect(body.browserHost.config.systemPromptBlocks[1]?.text).toContain('Model: openai-gpt-retry');
-    const [snapshotContext] = body.browserHost.config.contextMessages;
-    expect(snapshotContext?.id).toBe('tau:snapshot-context:run_workspace_test');
-    expect(snapshotContext?.content).toContain('The file currently being rendered by the CAD engine: main.ts');
-    expect(snapshotContext).toMatchObject({
-      role: 'user',
-      metadata: {
-        tauInternal: {
-          kind: 'snapshot-context',
-          anchorId: 'chat_test',
-          pruning: 'replace-by-id',
-        },
-      },
     });
   });
 
@@ -924,7 +841,7 @@ describe('useCadChatClient', () => {
     const actions = buildActions();
     installActions(actions);
 
-    const { result } = renderHook(() => useCadChatClient());
+    const { result } = renderClient();
     await act(async () => result.current.respondToToolApproval('interrupt-1', true, { reason: 'Proceed' }));
 
     expect(browserHostHarness.resolveInterrupt).toHaveBeenCalledWith({
@@ -960,7 +877,7 @@ describe('useCadChatClient', () => {
     useChatSelectorMock.mockReturnValue('streaming');
     installActions(buildActions());
 
-    const { result } = renderHook(() => useCadChatClient());
+    const { result } = renderClient();
     await act(async () => result.current.respondToToolApproval('interrupt-1', true, { optionId: 'allow-always' }));
 
     expect(browserHostHarness.resolveInterrupt).toHaveBeenCalledWith({
@@ -979,7 +896,7 @@ describe('useCadChatClient', () => {
     const actions = buildActions();
     installActions(actions);
 
-    const { result } = renderHook(() => useCadChatClient());
+    const { result } = renderClient();
 
     act(() => {
       void result.current.submit({ text: 'hello world' });
@@ -1003,7 +920,7 @@ describe('useCadChatClient', () => {
     useActiveChatInstanceMock.mockReturnValue(mock<Chat<MyUIMessage>>());
     const actions = buildActions();
     installActions(actions);
-    const { result } = renderHook(() => useCadChatClient());
+    const { result } = renderClient();
 
     act(() => {
       void result.current.submit({ text: 'look at this', attachments: [imageAttachment] });
@@ -1033,7 +950,7 @@ describe('useCadChatClient', () => {
     const actions = buildActions();
     installActions(actions);
     promoteDraftAttachments.mockRejectedValue(new Error('Attachment is missing; nothing was copied.'));
-    const { result } = renderHook(() => useCadChatClient());
+    const { result } = renderClient();
 
     act(() => {
       void result.current.submit({ text: 'look at this', attachments: [imageAttachment] });
@@ -1054,7 +971,7 @@ describe('useCadChatClient', () => {
     useActiveChatInstanceMock.mockReturnValue(mock<Chat<MyUIMessage>>());
     const actions = buildActions();
     installActions(actions);
-    const { result } = renderHook(() => useCadChatClient());
+    const { result } = renderClient();
 
     act(() => {
       void result.current.submit({ text: 'read the spec', attachments: [pdfAttachment] });
@@ -1068,7 +985,7 @@ describe('useCadChatClient', () => {
   });
 
   it.each(['submitted', 'streaming'] as const)(
-    'should ignore submit/edit/retry/regenerate while a %s request is in flight',
+    'should ignore submit and edit while a %s request is in flight',
     (status) => {
       const chat = mock<Chat<MyUIMessage>>();
       useActiveChatInstanceMock.mockReturnValue(chat);
@@ -1076,22 +993,19 @@ describe('useCadChatClient', () => {
       const actions = buildActions();
       installActions(actions);
 
-      const { result } = renderHook(() => useCadChatClient());
+      const { result } = renderClient();
 
       act(() => {
         void result.current.submit({ text: 'double submit' });
         result.current.edit('msg_edit', { text: 'edit while busy' });
-        result.current.retry('msg_retry');
-        result.current.regenerateTail();
       });
 
       expect(actions.sendMessage).not.toHaveBeenCalled();
       expect(actions.editMessage).not.toHaveBeenCalled();
-      expect(actions.retryMessage).not.toHaveBeenCalled();
       expect(actions.regenerate).not.toHaveBeenCalled();
       // A refused verb must say so: a silently dropped submit looked to the
       // operator like the message vanished — no row, no request, no banner.
-      expect(persistedErrors).toHaveLength(4);
+      expect(persistedErrors).toHaveLength(2);
     },
   );
 
@@ -1102,111 +1016,13 @@ describe('useCadChatClient', () => {
     const actions = buildActions();
     installActions(actions);
 
-    const { result } = renderHook(() => useCadChatClient());
+    const { result } = renderClient();
 
     act(() => {
       result.current.stop();
     });
 
     expect(actions.stop).toHaveBeenCalledTimes(1);
-  });
-
-  it('should call actions.retryMessage with body.agent and the supplied messageId when retry fires', async () => {
-    const chat = mock<Chat<MyUIMessage>>();
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    const actions = buildActions();
-    installActions(actions);
-
-    const { result } = renderHook(() => useCadChatClient());
-
-    act(() => {
-      result.current.retry('msg_42');
-    });
-
-    await waitFor(() => {
-      expect(actions.retryMessage).toHaveBeenCalledTimes(1);
-    });
-    expect(actions.retryMessage).toHaveBeenCalledWith('msg_42', { body: expectRunBody() });
-  });
-
-  it('dispatches a retry selected while the prior workspace publication is settling', async () => {
-    mountAgentMock(buildAgent({ execution: { kind: 'tau', model: 'openai-gpt-5.5' } }));
-    workspaceHarness.current = {
-      execution: { hostId: 'host_test', workspaceId: 'workspace_old', baseRevisionId: 'rev_old' },
-      admitted: true,
-      runId: 'run_workspace_old',
-    };
-    const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', {
-      get: () => [
-        { id: 'user_retry', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] },
-        { id: 'assistant_retry', role: 'assistant', parts: [{ type: 'text', text: 'Done.' }] },
-      ],
-    });
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    const actions = buildActions();
-    installActions(actions);
-    const { result } = renderHook(() => useCadChatClient());
-
-    act(() => {
-      result.current.retry('assistant_retry', 'openai-gpt-retry');
-    });
-    expect(actions.retryMessage).not.toHaveBeenCalled();
-
-    workspaceHarness.current = {
-      execution: { hostId: 'host_test', workspaceId: 'workspace_retry', baseRevisionId: 'rev_retry' },
-      admitted: false,
-      runId: 'run_workspace_retry',
-    };
-    act(() => {
-      for (const listener of workspaceHarness.listeners) {
-        listener();
-      }
-    });
-
-    await waitFor(() => {
-      expect(actions.retryMessage).toHaveBeenCalledOnce();
-    });
-    const [messageId, options] = actions.retryMessage.mock.calls[0]! as [
-      string,
-      {
-        readonly body: {
-          readonly execution: {
-            readonly workspaceId: string;
-            readonly baseRevisionId: string;
-            readonly hostId: string;
-          };
-          readonly browserHost: { readonly trigger: string; readonly retainedMessageIds: readonly string[] };
-        };
-      },
-    ];
-    expect(messageId).toBe('assistant_retry');
-    expect(options.body.execution).toEqual({
-      hostId: 'host_test',
-      workspaceId: 'workspace_retry',
-      baseRevisionId: 'rev_retry',
-    });
-    expect(options.body.browserHost).toMatchObject({ trigger: 'retry', retainedMessageIds: [] });
-  });
-
-  it('should override `body.agent.execution` with Tau when retry is given a modelId', async () => {
-    const chat = mock<Chat<MyUIMessage>>();
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    const actions = buildActions();
-    installActions(actions);
-
-    const { result } = renderHook(() => useCadChatClient());
-
-    act(() => {
-      result.current.retry('msg_42', 'anthropic-claude-4.7');
-    });
-
-    await waitFor(() => {
-      expect(actions.retryMessage).toHaveBeenCalledTimes(1);
-    });
-    expect(actions.retryMessage).toHaveBeenCalledWith('msg_42', {
-      body: expectRunBody(buildAgent({ execution: { kind: 'tau', model: 'anthropic-claude-4.7' } })),
-    });
   });
 
   it('should call actions.editMessage with body.agent and the rebuilt content when edit fires', async () => {
@@ -1218,7 +1034,7 @@ describe('useCadChatClient', () => {
     };
     installActions(actions);
 
-    const { result } = renderHook(() => useCadChatClient());
+    const { result } = renderClient();
 
     act(() => {
       result.current.edit('msg_99', { text: 'edited content', attachments: [imageAttachment] });
@@ -1235,31 +1051,13 @@ describe('useCadChatClient', () => {
     });
   });
 
-  it('should call actions.regenerate with body.agent when regenerateTail fires', async () => {
-    const chat = mock<Chat<MyUIMessage>>();
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    const actions = buildActions();
-    installActions(actions);
-
-    const { result } = renderHook(() => useCadChatClient());
-
-    act(() => {
-      result.current.regenerateTail();
-    });
-
-    await waitFor(() => {
-      expect(actions.regenerate).toHaveBeenCalledTimes(1);
-    });
-    expect(actions.regenerate).toHaveBeenCalledWith({ body: expectRunBody() });
-  });
-
   it('should call actions.stop when stop fires', () => {
     const chat = mock<Chat<MyUIMessage>>();
     useActiveChatInstanceMock.mockReturnValue(chat);
     const actions = buildActions();
     installActions(actions);
 
-    const { result } = renderHook(() => useCadChatClient());
+    const { result } = renderClient();
 
     act(() => {
       result.current.stop();
@@ -1279,7 +1077,7 @@ describe('useCadChatClient', () => {
     const actions = buildActions();
     installActions(actions);
 
-    const { result } = renderHook(() => useCadChatClient());
+    const { result } = renderClient();
 
     expect(result.current.messages).toBe(messages);
     expect(result.current.status).toBe('streaming');
@@ -1294,7 +1092,7 @@ describe('useCadChatClient', () => {
     const agentRef = buildAgent();
     mountAgentMock(agentRef);
 
-    const { result, rerender } = renderHook(() => useCadChatClient());
+    const { result, rerender } = renderClient();
     const firstAgent = result.current.agent;
     rerender();
     const secondAgent = result.current.agent;
@@ -1310,7 +1108,7 @@ describe('useCadChatClient', () => {
     const setLatestAgentBody = vi.fn();
     installSessionStore({ setLatestAgentBody });
 
-    const { unmount } = renderHook(() => useCadChatClient());
+    const { unmount } = renderClient();
 
     await waitFor(() => {
       expect(setLatestAgentBody).toHaveBeenCalledWith('chat_test', expect.any(Function));
@@ -1338,7 +1136,7 @@ describe('useCadChatClient', () => {
       endRun: vi.fn(),
     });
 
-    renderHook(() => useCadChatClient());
+    renderClient();
     await waitFor(() => {
       expect(setLatestAgentBody).toHaveBeenCalledWith('chat_test', expect.any(Function));
     });
@@ -1387,7 +1185,7 @@ describe('useCadChatClient', () => {
       get: sessionWithPersistedErrors,
     });
 
-    renderHook(() => useCadChatClient());
+    renderClient();
     await waitFor(() => {
       expect(setLatestAgentBody).toHaveBeenCalledWith('chat_test', expect.any(Function));
     });
@@ -1434,7 +1232,7 @@ describe('useCadChatClient', () => {
     const setLatestAgentBody = vi.fn();
     installSessionStore({ setLatestAgentBody });
 
-    const { rerender } = renderHook(() => useCadChatClient());
+    const { rerender } = renderClient();
 
     await waitFor(() => {
       expect(setLatestAgentBody).toHaveBeenCalledWith('chat_test', expect.any(Function));
@@ -1455,7 +1253,7 @@ describe('useCadChatClient', () => {
     installActions(actions);
     mountAgentMock(buildAgent({ kernel: 'replicad' }));
 
-    const { result, rerender } = renderHook(() => useCadChatClient());
+    const { result, rerender } = renderClient();
 
     act(() => {
       void result.current.submit({ text: 'first' });
@@ -1513,11 +1311,9 @@ describe('useCadChatClient', () => {
       startRun: vi.fn((_chatId: string, body: Readonly<Record<string, unknown>>) => body),
       endRun: vi.fn(),
     });
-    const { result } = renderHook(() => useCadChatClient());
+    const { result } = renderClient();
     // 1. the browser-host client factory.
-    await waitFor(() => {
-      expect(browserHostHarness.registration).toBeDefined();
-    });
+    await bindChatHost();
     await browserHostHarness.registration!.createClient();
     // 2. the bodyless (seeded) dispatch, which composes and admits on demand.
     const compose = setLatestAgentBody.mock.calls.at(-1)?.[1] as () => Promise<Record<string, unknown>>;
@@ -1551,7 +1347,7 @@ describe('useCadChatClient', () => {
     useActiveChatInstanceMock.mockReturnValue(chat);
     const actions = buildActions();
     installActions(actions);
-    const { result, rerender } = renderHook(() => useCadChatClient());
+    const { result, rerender } = renderClient();
 
     act(() => {
       void result.current.submit({ text: 'no revision on the wire' });

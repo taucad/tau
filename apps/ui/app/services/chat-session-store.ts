@@ -329,6 +329,8 @@ type InternalSession = ChatSession & {
   latestAgentBodyWaiters: Set<(compose: LatestAgentBodyFactory | undefined) => void>;
   /** The project this chat belongs to; its session owns the run accounting. */
   projectId: string | undefined;
+  /** Where this chat's next turn runs, as its turn host last said. */
+  placement: string | undefined;
   /** What was last handed to `stateActorRef`, so nothing is sent twice. */
   lastState: {
     phase?: ChatRunPhase;
@@ -749,6 +751,28 @@ export class ChatSessionStore {
   }
 
   /**
+   * Say where this chat's next turn runs.
+   *
+   * The chat's session actor owns its agent-host binding and re-invokes it on
+   * this and on nothing else; a model or prompt change is read when the client
+   * is created, so it must not churn the registration. Published by the chat's
+   * one `ChatTurnHost`, and replayed to the machine when a project session
+   * spawns it.
+   *
+   * @param chatId - The chat whose placement moved.
+   * @param placement - The daemon host id, or the execution kind for a local one.
+   * @public
+   */
+  public setTurnPlacement(chatId: string, placement: string): void {
+    const session = this.#sessions.get(chatId);
+    if (!session || session.placement === placement) {
+      return;
+    }
+    session.placement = placement;
+    session.stateActorRef?.send({ type: 'agentConfigChanged', placement });
+  }
+
+  /**
    * Begin non-view ownership for one logical run and return its immutable,
    * versioned wire body. Repeated calls while the persistence machine
    * preempts or retries a run keep one hold but may replace the active body
@@ -816,6 +840,11 @@ export class ChatSessionStore {
       }
       ref.send({ type: 'openChat', chatId: session.chatId });
       session.stateActorRef = ref.getSnapshot().context.chatRefs[session.chatId];
+      /* A chat machine that has just been spawned has never been told where its
+       * turns run, so its host binding would invoke on an empty placement. */
+      if (session.placement !== undefined) {
+        session.stateActorRef?.send({ type: 'agentConfigChanged', placement: session.placement });
+      }
       session.lastState = { inFlight: 0, approvals: 0 };
       this.#replayPersistedFailure(session);
       this.#replayPersistedSettlement(session);
@@ -1770,6 +1799,7 @@ export class ChatSessionStore {
       status: chat.status,
       latestAgentBody: undefined,
       latestAgentBodyWaiters: new Set(),
+      placement: undefined,
       dispose: () => {
         for (const resolve of session.latestAgentBodyWaiters) {
           resolve(undefined);

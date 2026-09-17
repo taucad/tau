@@ -60,9 +60,9 @@ describe('attachment identity', () => {
     expect(isAttachmentUrl(url)).toBe(false);
   });
 
-  it('should cap images at 4 MiB and documents at 20 MiB', () => {
+  it('should cap images at 4 MiB and documents at 16 MiB', () => {
     expect(attachmentCapBytes('image')).toBe(4 * 1024 * 1024);
-    expect(attachmentCapBytes('document')).toBe(20 * 1024 * 1024);
+    expect(attachmentCapBytes('document')).toBe(16 * 1024 * 1024);
   });
 
   it('should read the reference a file part names back into the attachment it came from', () => {

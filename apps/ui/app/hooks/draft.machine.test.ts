@@ -874,7 +874,7 @@ describe('draftMachine', () => {
     it('should emit attachmentStoreFailed and add nothing when storing rejects', async () => {
       const { actor, drafts } = createHarness({
         store: async () => {
-          throw new Error('Attachment exceeds the 20 MB limit for documents.');
+          throw new Error('Attachment exceeds the 16 MB limit for documents.');
         },
       });
       const emitSpy = vi.fn<(event: Extract<DraftEmittedEvents, { type: 'attachmentStoreFailed' }>) => void>();
@@ -883,7 +883,7 @@ describe('draftMachine', () => {
       actor.send({ type: 'addDraftAttachment', dataUrl: pdf, model: imageAndPdfModel });
       await settled(actor);
       expect(emitSpy).toHaveBeenCalledOnce();
-      expect(emitSpy.mock.calls[0]![0].error.message).toBe('Attachment exceeds the 20 MB limit for documents.');
+      expect(emitSpy.mock.calls[0]![0].error.message).toBe('Attachment exceeds the 16 MB limit for documents.');
       expect(actor.getSnapshot().context.draftAttachments).toEqual([]);
       expect(actor.getSnapshot().matches({ inputSaving: 'idle' })).toBe(true);
       expect(drafts).toEqual([]);

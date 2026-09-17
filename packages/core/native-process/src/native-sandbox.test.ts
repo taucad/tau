@@ -1,7 +1,9 @@
 // @vitest-environment node
 import { realpathSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
+import { join } from 'node:path';
 
+import type { getDefaultWritePaths } from '@anthropic-ai/sandbox-runtime';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { launchInNativeSandbox, NativeRuntimeUnavailableError, nativeSandboxPolicy } from '#index.js';
@@ -14,7 +16,9 @@ const sandbox = vi.hoisted(() => ({
   wrap: vi.fn<(command: string, ...rest: unknown[]) => void>(),
   wrapFailure: undefined as unknown,
 }));
-vi.mock('@anthropic-ai/sandbox-runtime', () => ({
+vi.mock('@anthropic-ai/sandbox-runtime', async (importActual) => ({
+  // The default write roots stay real: the profile's deny list is derived from them.
+  ...(await importActual<{ getDefaultWritePaths: typeof getDefaultWritePaths }>()),
   // eslint-disable-next-line @typescript-eslint/naming-convention -- mirrors the runtime's exported class.
   SandboxManager: {
     isSupportedPlatform: () => sandbox.supported,
@@ -143,12 +147,20 @@ describe('nativeSandboxPolicy', () => {
     expect(policy.filesystem.denyRead).toContain(realpathSync(tmpdir()));
     expect(policy.filesystem.allowRead).toEqual(['/opt/runtime', '/private/workspace', '/private/artifacts']);
     expect(policy.filesystem.allowWrite).toEqual(['/private/artifacts']);
-    expect(policy.filesystem.denyWrite).toEqual([]);
+    // The runtime grants these to every command by default; a CAD worker must not inherit them.
+    // Its `/dev` devices stay writable because the worker's stdio needs them.
+    expect(policy.filesystem.denyWrite).toEqual([
+      '/tmp/claude',
+      '/private/tmp/claude',
+      join(homedir(), '.npm/_logs'),
+      join(homedir(), '.claude/debug'),
+    ]);
+    expect(policy.filesystem.denyWrite.filter((path) => path.startsWith('/dev/'))).toEqual([]);
     expect(nativeSandboxPolicy().filesystem).toEqual({
       denyRead: policy.filesystem.denyRead,
       allowRead: [],
       allowWrite: [],
-      denyWrite: [],
+      denyWrite: policy.filesystem.denyWrite,
     });
   });
 });

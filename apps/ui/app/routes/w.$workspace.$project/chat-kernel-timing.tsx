@@ -7,11 +7,13 @@ import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { Button } from '@taucad/ui/components/button';
 import { downloadBlob } from '@taucad/utils/file';
+import type { TelemetrySpanRecord } from '@taucad/runtime';
 import { rendererSpans, telemetryJsonl } from '#lib/renderer-telemetry.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type {
   DisplaySettings,
   PipelineLane,
+  SpanNode,
   TelemetryTrace,
   ViewMode,
 } from '#routes/w.$workspace.$project/chat-kernel-types.js';
@@ -250,9 +252,25 @@ export const GeometryUnitTiming = memo(function GeometryUnitTiming({
   /* D8/OQ1: the browser has no host-visible sink, so the buffered spans leave by a deliberate act —
    * every producer in one file, ordered on the absolute clock the epochs carry. */
   const exportTrace = useCallback(() => {
-    const body = telemetryJsonl([...telemetryEntries, ...rendererSpans()]);
+    /* The pane keeps showing a pinned trace after the ring evicted it (D9), so the export carries
+     * it too: the buffer alone would omit exactly what the user is looking at. While the trace is
+     * still buffered its nodes hold those same records, so identity is the whole deduplication. */
+    const buffered = new Set<TelemetrySpanRecord>(telemetryEntries);
+    const evicted: TelemetrySpanRecord[] = [];
+    const collect = (node: SpanNode): void => {
+      if (!buffered.has(node.entry)) {
+        evicted.push(node.entry);
+      }
+      for (const child of node.children) {
+        collect(child);
+      }
+    };
+    if (selectedTrace) {
+      collect(selectedTrace.root);
+    }
+    const body = telemetryJsonl([...telemetryEntries, ...evicted, ...rendererSpans()]);
     downloadBlob(new Blob([body], { type: 'application/x-ndjson' }), 'tau-trace.jsonl');
-  }, [telemetryEntries]);
+  }, [selectedTrace, telemetryEntries]);
   const isAllCollapsed =
     allCollapsibleIds.size > 0 && [...allCollapsibleIds].every((spanId) => collapsedSpans.has(spanId));
   const toggleCollapseAll = useCallback(() => {

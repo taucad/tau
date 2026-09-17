@@ -394,7 +394,7 @@ export const jscadKernel = defineKernel({
     return { nativeHandle: normalizeJscadParts(shapes, context.modeling) };
   },
 
-  async meshGeometry({ nativeHandle, content }, runtime, context) {
+  async meshGeometry({ nativeHandle, content }, _runtime, context) {
     const artifacts: GeometryResponse[] = [];
     const issues: KernelIssue[] = [];
     if (nativeHandle.some((part) => isRenderableJscadPart(part, context.modeling))) {

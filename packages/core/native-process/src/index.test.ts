@@ -18,6 +18,7 @@ import type { readFile, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import type { getDefaultWritePaths } from '@anthropic-ai/sandbox-runtime';
 import { createMockFileSystem, createMockLogger } from '@taucad/runtime-testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -49,7 +50,9 @@ const sandbox = vi.hoisted(() => ({
   wrapFailure: undefined as unknown,
   launcher: '/bin/sh',
 }));
-vi.mock('@anthropic-ai/sandbox-runtime', () => ({
+vi.mock('@anthropic-ai/sandbox-runtime', async (importActual) => ({
+  // The default write roots stay real: the profile's deny list is derived from them.
+  ...(await importActual<{ getDefaultWritePaths: typeof getDefaultWritePaths }>()),
   // eslint-disable-next-line @typescript-eslint/naming-convention -- mirrors the runtime's exported class.
   SandboxManager: {
     isSupportedPlatform: () => sandbox.supported,

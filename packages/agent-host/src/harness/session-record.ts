@@ -7,7 +7,7 @@ import type { DurableEventLog, HostRunFailure, MaterializedDocument } from '#wai
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { reduceEventLog } from '#log/reducer.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
-import { fileRefBlockSchema } from '#log/event-schema.js';
+import { attachmentPathPattern, fileRefBlockSchema } from '#log/event-schema.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type {
   AgentLogEvent,
@@ -300,7 +300,7 @@ export const chatAttachmentPath = (chatId: string, path: string): string => {
   if (!chatId || chatId === '.' || chatId === '..' || /[/\\]/u.test(chatId)) {
     throw Object.assign(new Error('chatId must be one storage path segment.'), { code: 'STORAGE_PATH_INVALID' });
   }
-  if (!fileRefBlockSchema.safeParse({ type: 'file-ref', path, mimeType: 'application/octet-stream' }).success) {
+  if (!attachmentPathPattern.test(path)) {
     throw Object.assign(new Error(`"${path}" is not an attachment path.`), { code: 'STORAGE_PATH_INVALID' });
   }
   return `.tau/chats/${chatId}/${path}`;
@@ -315,6 +315,14 @@ export const chatAttachmentPath = (chatId: string, path: string): string => {
  */
 export const documentSentinel = (hash: string): string => `⟃tau:document:${hash}⟄`;
 
+/**
+ * The text a user message is left with when every attachment it held was
+ * omitted, so the turn still reaches the model instead of vanishing (F10).
+ *
+ * @internal
+ */
+export const absentAttachmentMarker = '[attachment not available on this device]';
+
 /** Builds the transient block a document reference becomes. @public */
 export type DocumentBlockBuilder = (
   hash: string,
@@ -328,8 +336,10 @@ export type MaterializedAttachments = {
   readonly messages: ProviderMessage[];
   /** Each document read, keyed by its SHA-256 (the side table). */
   readonly documents: Map<string, MaterializedDocument>;
-  /** The paths of references whose bytes were absent, or unreadable rows; each was omitted. */
+  /** The paths of references whose bytes were absent or could not be read; each was omitted. */
   readonly absent: string[];
+  /** How many reference rows were malformed; each was omitted. */
+  readonly malformed: number;
 };
 
 const hashOf = (path: string): string => path.slice('attachments/'.length, path.lastIndexOf('.'));
@@ -343,8 +353,11 @@ const isFileRef = (block: unknown): boolean => zodUtility.isObject(block) && blo
  * mutated. An image becomes an inline `image` block. A document becomes the
  * block `buildDocument` returns — by default a text block holding its
  * {@link documentSentinel} — and an entry in the side table. A reference whose
- * bytes are absent, or a malformed reference row, is omitted and reported in
- * `absent`; it never throws (D19).
+ * bytes are absent or unreadable is omitted and reported in `absent`, and a
+ * malformed reference row is omitted and counted in `malformed`; it never
+ * throws (D19). A user message left with no content keeps
+ * {@link absentAttachmentMarker}, because every provider codec drops an empty
+ * message and the user's turn would vanish with it.
  *
  * @param messages - Durable provider history.
  * @param read - Reads one attachment path of the owning chat.
@@ -359,17 +372,26 @@ export const materializeAttachments = async (
 ): Promise<MaterializedAttachments> => {
   const documents = new Map<string, MaterializedDocument>();
   const absent: string[] = [];
+  let malformed = 0;
+  const readOrAbsent = async (path: string): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+    try {
+      return await read(path);
+    } catch {
+      // An unreadable file (EACCES, EIO) is, to this turn, a file that is not here.
+      return undefined;
+    }
+  };
   const materializeBlock = async (block: JsonValue): Promise<JsonValue[]> => {
     if (!isFileRef(block)) {
       return [block];
     }
     const parsed = fileRefBlockSchema.safeParse(block);
     if (!parsed.success) {
-      absent.push('a malformed file-ref row');
+      malformed += 1;
       return [];
     }
     const reference = parsed.data;
-    const bytes = await read(reference.path);
+    const bytes = await readOrAbsent(reference.path);
     if (bytes === undefined) {
       absent.push(reference.path);
       return [];
@@ -392,11 +414,12 @@ export const materializeAttachments = async (
       if (message.role !== 'user' || !Array.isArray(message.content) || !message.content.some(isFileRef)) {
         return message;
       }
-      const content = await Promise.all(message.content.map(materializeBlock));
-      return { ...message, content: content.flat() };
+      const blocks = await Promise.all(message.content.map(materializeBlock));
+      const content = blocks.flat();
+      return { ...message, content: content.length === 0 ? [{ type: 'text', text: absentAttachmentMarker }] : content };
     }),
   );
-  return { messages: materialized, documents, absent };
+  return { messages: materialized, documents, absent, malformed };
 };
 
 /**

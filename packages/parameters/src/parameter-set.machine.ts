@@ -6,7 +6,7 @@ import { planParameterChange } from '#planning.js';
 import type { ParameterChange } from '#planning.js';
 import { classifyParameterReceipt } from '#receipt.js';
 import type { ParameterSnapshot } from '#snapshot.js';
-import { sameRequestDelivery, validRequestShape, validTarget } from '#request.js';
+import { sameIdentity, sameRequestDelivery, validRequestShape, validTarget } from '#request.js';
 import type { ParameterSetOutcome, ParameterSetRequest, ParameterSetTarget, ParameterSetPlanResult } from '#types.js';
 
 /** Input for the one actor that sequences edits to a parameter target. @public */
@@ -21,7 +21,8 @@ export type ParameterSetMachineContext = ParameterSetMachineInput &
   Readonly<{
     current?: ParameterSnapshot;
     active?: ParameterSetRequest;
-    pending?: ParameterSetRequest;
+    /** Bounded FIFO of admitted commands; only a transient for the same field is ever displaced. */
+    pending: readonly ParameterSetRequest[];
     change?: Extract<ParameterChange, { status: 'prepared' }>;
     outcome?: ParameterSetOutcome;
     refresh?: 'record' | 'manifest';
@@ -39,7 +40,15 @@ export type ParameterSetMachineEvent =
   | Readonly<{ type: 'close'; invalidDrafts?: readonly string[] }>;
 /** Native command results remain observable even across immediate state transitions. @public */
 export type ParameterSetEmission =
-  | Readonly<{ type: 'settled'; outcome: ParameterSetOutcome; request?: ParameterSetRequest }>
+  | Readonly<{
+      type: 'settled';
+      outcome: ParameterSetOutcome;
+      request: ParameterSetRequest;
+      /** Authority identity when the command settled, so a rejected editor can adopt it. */
+      current?: ParameterSetRequest['expected'];
+    }>
+  /** A confirm or cancel that names no command this actor holds; never a settlement of a submitted request. */
+  | Readonly<{ type: 'command-rejected'; outcome: Extract<ParameterSetOutcome, { status: 'rejected' }> }>
   | Readonly<{ type: 'loaded'; current: ParameterSnapshot }>
   | Readonly<{
       type: 'confirmation-required';
@@ -82,6 +91,43 @@ const errorDiagnostic = (
   code: typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : fallback,
   message: errorMessage(error),
 });
+// Pending commands beyond this bound are refused `BUSY` with the editor's draft intact.
+const pendingLimit = 16;
+// Commands for the same field (or the same group operation) may displace each other's transient pressure.
+const pressureKey = (request: ParameterSetRequest): string => {
+  const { operation } = request;
+  switch (operation.kind) {
+    case 'native-value':
+    case 'unit-value': {
+      return JSON.stringify(['value', operation.group, operation.pointer]);
+    }
+    case 'display-preference': {
+      return JSON.stringify([operation.kind, operation.parameterId]);
+    }
+    default: {
+      return JSON.stringify([operation.kind, operation.group]);
+    }
+  }
+};
+// Index of the pending transient a new command replaces, or -1 to append.
+const displacedIndex = (pending: readonly ParameterSetRequest[], request: ParameterSetRequest): number => {
+  const key = pressureKey(request);
+  const index = pending.findLastIndex((item) => pressureKey(item) === key);
+  return index !== -1 && pending[index]!.pressure === 'transient' ? index : -1;
+};
+const canonicalResolution = (resolution: ParameterResolutionOptions | undefined): string => {
+  const { mode, ...rest } = resolution ?? {};
+  return JSON.stringify(
+    Object.entries(mode === 'declared-only' ? { ...rest, mode } : rest).toSorted(([left], [right]) =>
+      left.localeCompare(right),
+    ),
+  );
+};
+const cancelledSettlement = (request: ParameterSetRequest): ParameterSetEmission => ({
+  type: 'settled',
+  request,
+  outcome: { status: 'cancelled-before-apply', requestId: request.requestId },
+});
 const knownRefusal = (error: unknown): boolean =>
   typeof error === 'object' &&
   error !== null &&
@@ -103,24 +149,26 @@ export const parameterSetMachine = setup({
     closing: ({ context }) => context.closing,
     uncertain: ({ context }) => context.outcome?.status === 'indeterminate',
     invalidClose: ({ event }) => event.type === 'close' && (event.invalidDrafts?.length ?? 0) > 0,
-    pending: ({ context }) => context.pending !== undefined,
+    pending: ({ context }) => context.pending.length > 0,
+    sameResolution: ({ context, event }) =>
+      event.type === 'resolve' && canonicalResolution(event.resolution) === canonicalResolution(context.resolution),
     refresh: ({ context }) => context.refresh !== undefined,
     reload: ({ context }) => context.refresh === 'manifest',
     active: ({ context }) => context.active !== undefined,
     validSubmission: ({ event }) => event.type === 'submit' && validRequestShape(event.request),
     sameDelivery: ({ context, event }) =>
       event.type === 'submit' &&
-      [context.active, context.pending].some(
+      [context.active, ...context.pending].some(
         (request) => request !== undefined && sameRequestDelivery(request, event.request),
       ),
     collision: ({ context, event }) =>
       event.type === 'submit' &&
-      [context.active, context.pending].some((request) => request?.requestId === event.request.requestId),
+      [context.active, ...context.pending].some((request) => request?.requestId === event.request.requestId),
     queueAvailable: ({ context, event }) =>
       event.type === 'submit' &&
       !context.closing &&
       validRequestShape(event.request) &&
-      (context.pending === undefined || context.pending.pressure === 'transient' || event.request.pressure === 'final'),
+      (context.pending.length < pendingLimit || displacedIndex(context.pending, event.request) !== -1),
     activeCancellation: ({ context, event }) =>
       event.type === 'cancel' && context.active?.requestId === event.requestId,
     confirmed: ({ context, event }) =>
@@ -136,16 +184,19 @@ export const parameterSetMachine = setup({
       if (event.type !== 'submit') {
         return;
       }
-      if (context.pending !== undefined) {
-        enqueue.emit({
-          type: 'settled',
-          request: context.pending,
-          outcome: { status: 'cancelled-before-apply', requestId: context.pending.requestId },
-        });
+      const index = displacedIndex(context.pending, event.request);
+      if (index === -1) {
+        enqueue.assign({ pending: [...context.pending, structuredClone(event.request)] });
+        return;
       }
-      enqueue.assign({ pending: structuredClone(event.request) });
+      enqueue.emit(cancelledSettlement(context.pending[index]!));
+      enqueue.assign({ pending: context.pending.with(index, structuredClone(event.request)) });
     }),
-    dequeue: assign(({ context }) => ({ active: context.pending, pending: undefined, outcome: undefined })),
+    dequeue: assign(({ context }) => ({
+      active: context.pending[0],
+      pending: context.pending.slice(1),
+      outcome: undefined,
+    })),
     clear: assign(({ context }) =>
       context.outcome?.status === 'indeterminate' ? {} : { active: undefined, change: undefined },
     ),
@@ -155,79 +206,91 @@ export const parameterSetMachine = setup({
       resolution: event.type === 'resolve' ? event.resolution : context.resolution,
     })),
     closing: enqueueActions(({ context, enqueue }) => {
-      if (context.pending !== undefined) {
-        enqueue.emit({
-          type: 'settled',
-          request: context.pending,
-          outcome: { status: 'cancelled-before-apply', requestId: context.pending.requestId },
-        });
+      for (const request of context.pending) {
+        enqueue.emit(cancelledSettlement(request));
       }
-      enqueue.assign({ closing: true, pending: undefined });
+      enqueue.assign({ closing: true, pending: [] });
     }),
     cancelPending: enqueueActions(({ context, event, enqueue }) => {
-      if (event.type === 'cancel' && context.pending?.requestId === event.requestId) {
+      if (event.type !== 'cancel') {
+        return;
+      }
+      const index = context.pending.findIndex((request) => request.requestId === event.requestId);
+      if (index !== -1) {
+        enqueue.emit(cancelledSettlement(context.pending[index]!));
+        enqueue.assign({ pending: context.pending.toSpliced(index, 1) });
+      } else if (context.active?.requestId !== event.requestId) {
         enqueue.emit({
-          type: 'settled',
-          request: context.pending,
-          outcome: { status: 'cancelled-before-apply', requestId: event.requestId },
-        });
-        enqueue.assign({ pending: undefined });
-      } else if (event.type === 'cancel' && context.active?.requestId !== event.requestId) {
-        enqueue.emit({
-          type: 'settled',
-          outcome: rejected(event.requestId, 'UNKNOWN_REQUEST', 'No matching parameter operation is pending.'),
+          type: 'command-rejected',
+          outcome: {
+            status: 'rejected',
+            requestId: event.requestId,
+            code: 'UNKNOWN_REQUEST',
+            message: 'No matching parameter operation is pending.',
+          },
         });
       }
     }),
     failPending: enqueueActions(({ context, enqueue }) => {
-      if (context.pending !== undefined) {
+      for (const request of context.pending) {
         enqueue.emit({
           type: 'settled',
-          request: context.pending,
-          outcome: rejected(context.pending.requestId, 'LOAD_FAILED', 'Parameter authority could not be loaded.'),
+          request,
+          outcome: rejected(request.requestId, 'LOAD_FAILED', 'Parameter authority could not be loaded.'),
         });
-        enqueue.assign({ pending: undefined });
+      }
+      if (context.pending.length > 0) {
+        enqueue.assign({ pending: [] });
       }
     }),
     cancelled: assign(({ context }) => ({
       outcome: { status: 'cancelled-before-apply', requestId: context.active!.requestId },
     })),
-    emitOutcome: emit(({ context }) => ({ type: 'settled', request: context.active!, outcome: context.outcome! })),
-    emitBusy: emit(({ event }) => ({
+    emitOutcome: emit(({ context }) => ({
       type: 'settled',
-      request: event.type === 'submit' ? event.request : undefined!,
-      outcome: rejected(
-        event.type === 'submit' ? submittedId(event.request) : 'unknown',
-        'BUSY',
-        'A parameter command is already pending.',
-      ),
+      request: context.active!,
+      outcome: context.outcome!,
+      ...(context.current === undefined ? {} : { current: context.current.identity }),
     })),
-    emitCollision: emit(({ event }) => ({
-      type: 'settled',
-      request: event.type === 'submit' ? event.request : undefined!,
-      outcome: rejected(
-        event.type === 'submit' ? submittedId(event.request) : 'unknown',
-        'REQUEST_ID_COLLISION',
-        'Request ID was reused with different content.',
-      ),
-    })),
+    emitBusy: enqueueActions(({ event, enqueue }) => {
+      if (event.type === 'submit') {
+        enqueue.emit({
+          type: 'settled',
+          request: event.request,
+          outcome: rejected(submittedId(event.request), 'BUSY', 'A parameter command is already pending.'),
+        });
+      }
+    }),
+    emitCollision: enqueueActions(({ event, enqueue }) => {
+      if (event.type === 'submit') {
+        enqueue.emit({
+          type: 'settled',
+          request: event.request,
+          outcome: rejected(
+            submittedId(event.request),
+            'REQUEST_ID_COLLISION',
+            'Request ID was reused with different content.',
+          ),
+        });
+      }
+    }),
     emitCloseBlocked: emit(({ event }) => ({
       type: 'close-blocked',
       invalidDrafts: event.type === 'close' ? (event.invalidDrafts ?? []) : [],
     })),
-    emitInvalid: emit(({ event }) => ({
-      type: 'settled',
-      request: event.type === 'submit' ? event.request : undefined!,
-      outcome: rejected(
-        event.type === 'submit' ? submittedId(event.request) : 'unknown',
-        'INVALID_REQUEST',
-        'Invalid parameter command.',
-      ),
-    })),
+    emitInvalid: enqueueActions(({ event, enqueue }) => {
+      if (event.type === 'submit') {
+        enqueue.emit({
+          type: 'settled',
+          request: event.request,
+          outcome: rejected(submittedId(event.request), 'INVALID_REQUEST', 'Invalid parameter command.'),
+        });
+      }
+    }),
   },
 }).createMachine({
   id: 'parameter-set',
-  context: ({ input }) => ({ ...input, refresh: undefined, closing: false }),
+  context: ({ input }) => ({ ...input, pending: [], refresh: undefined, closing: false }),
   initial: 'validating',
   states: {
     validating: {
@@ -245,7 +308,7 @@ export const parameterSetMachine = setup({
           { guard: 'queueAvailable', actions: 'queue' },
           { actions: 'emitBusy' },
         ],
-        resolve: { actions: 'resolve' },
+        resolve: [{ guard: 'sameResolution', actions: 'refresh' }, { actions: 'resolve' }],
         'watch.changed': { actions: 'refresh' },
         'watch.error': {
           actions: assign(({ event }) => ({
@@ -257,8 +320,13 @@ export const parameterSetMachine = setup({
         cancel: { actions: 'cancelPending' },
         confirm: {
           actions: emit(({ event }) => ({
-            type: 'settled',
-            outcome: rejected(event.requestId, 'STALE_PLAN', 'No matching confirmation is pending.'),
+            type: 'command-rejected',
+            outcome: {
+              status: 'rejected',
+              requestId: event.requestId,
+              code: 'STALE_PLAN',
+              message: 'No matching confirmation is pending.',
+            },
           })),
         },
       },
@@ -285,7 +353,7 @@ export const parameterSetMachine = setup({
               target: 'disconnected',
               actions: assign(({ event }) => ({ diagnostic: { code: 'WATCH_FAILED', message: event.message } })),
             },
-            resolve: { target: 'loading', reenter: true, actions: 'resolve' },
+            resolve: [{ guard: 'sameResolution' }, { target: 'loading', reenter: true, actions: 'resolve' }],
             close: [
               { guard: 'invalidClose', actions: 'emitCloseBlocked' },
               { target: '#parameter-set.closed', actions: 'closing' },
@@ -303,10 +371,13 @@ export const parameterSetMachine = setup({
             }),
             onDone: {
               target: 'route',
-              actions: [
-                assign(({ event }) => ({ current: event.output, diagnostic: undefined })),
-                emit(({ event }) => ({ type: 'loaded', current: event.output })),
-              ],
+              actions: enqueueActions(({ context, event, enqueue }) => {
+                // The echo of this actor's own write keeps its identity: adopt the bytes, publish nothing.
+                if (context.current === undefined || !sameIdentity(event.output.identity, context.current.identity)) {
+                  enqueue.emit({ type: 'loaded', current: event.output });
+                }
+                enqueue.assign({ current: event.output, diagnostic: undefined });
+              }),
             },
             onError: {
               target: 'disconnected',
@@ -318,7 +389,7 @@ export const parameterSetMachine = setup({
               target: 'disconnected',
               actions: assign(({ event }) => ({ diagnostic: { code: 'WATCH_FAILED', message: event.message } })),
             },
-            resolve: { target: 'loading', actions: 'resolve' },
+            resolve: [{ guard: 'sameResolution' }, { target: 'loading', actions: 'resolve' }],
             close: [
               { guard: 'invalidClose', actions: 'emitCloseBlocked' },
               { target: '#parameter-set.closed', actions: 'closing' },
@@ -339,7 +410,10 @@ export const parameterSetMachine = setup({
         ready: {
           on: {
             submit: [{ guard: 'validSubmission', target: 'planning', actions: 'accept' }, { actions: 'emitInvalid' }],
-            resolve: { target: 'loading', actions: 'resolve' },
+            resolve: [
+              { guard: 'sameResolution', target: 'refreshing' },
+              { target: 'loading', actions: 'resolve' },
+            ],
             'watch.changed': { target: 'refreshing' },
             'watch.error': {
               target: 'disconnected',
@@ -417,19 +491,22 @@ export const parameterSetMachine = setup({
                 })),
               ],
             },
-            resolve: {
-              target: 'settled',
-              actions: [
-                'resolve',
-                assign(({ context }) => ({
-                  outcome: rejected(
-                    context.active!.requestId,
-                    'STALE_MANIFEST',
-                    'Semantic context changed before commit.',
-                  ),
-                })),
-              ],
-            },
+            resolve: [
+              { guard: 'sameResolution' },
+              {
+                target: 'settled',
+                actions: [
+                  'resolve',
+                  assign(({ context }) => ({
+                    outcome: rejected(
+                      context.active!.requestId,
+                      'STALE_MANIFEST',
+                      'Semantic context changed before commit.',
+                    ),
+                  })),
+                ],
+              },
+            ],
             'watch.error': {
               target: 'settled',
               actions: [
@@ -482,19 +559,22 @@ export const parameterSetMachine = setup({
                 })),
               ],
             },
-            resolve: {
-              target: 'settled',
-              actions: [
-                'resolve',
-                assign(({ context }) => ({
-                  outcome: rejected(
-                    context.active!.requestId,
-                    'STALE_MANIFEST',
-                    'Semantic context changed before commit.',
-                  ),
-                })),
-              ],
-            },
+            resolve: [
+              { guard: 'sameResolution' },
+              {
+                target: 'settled',
+                actions: [
+                  'resolve',
+                  assign(({ context }) => ({
+                    outcome: rejected(
+                      context.active!.requestId,
+                      'STALE_MANIFEST',
+                      'Semantic context changed before commit.',
+                    ),
+                  })),
+                ],
+              },
+            ],
             'watch.error': {
               target: 'settled',
               actions: [
@@ -645,7 +725,13 @@ export const parameterSetMachine = setup({
   },
 });
 
-/** Subscribe before sending one command; all sequencing and settlement belong to the actor. @public */
+/**
+ * Subscribe before sending one command; all sequencing and settlement belong to the actor.
+ * @param actor - The parameter-set actor that owns the target.
+ * @param request - The command to submit.
+ * @returns The command's settlement; rejects if the actor stops before settling it.
+ * @public
+ */
 export const submitParameterRequest = async (
   actor: ActorRefFrom<typeof parameterSetMachine>,
   request: ParameterSetRequest,
@@ -655,7 +741,7 @@ export const submitParameterRequest = async (
   }
   return new Promise((resolve, reject) => {
     const outcome = actor.on('settled', (event) => {
-      if (event.request !== undefined && sameRequestDelivery(event.request, request)) {
+      if (sameRequestDelivery(event.request, request)) {
         outcome.unsubscribe();
         lifecycle.unsubscribe();
         resolve(event.outcome);

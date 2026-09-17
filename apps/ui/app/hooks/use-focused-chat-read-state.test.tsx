@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import type { ComposerRecordRef } from '#hooks/composer-record.js';
+import type { ChatSessionStore } from '#services/chat-session-store.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import type { ChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import { useFocusedChatReadState } from '#hooks/use-focused-chat-read-state.js';
+import { useComposerRecordToasts } from '#hooks/use-composer-record-toasts.js';
 
 vi.mock('@xstate/react', () => ({
   useSelector: <Snapshot, Selection>(
@@ -21,13 +25,21 @@ vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: vi.fn() }))
  * from the store's record, is what the hook reads. */
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: vi.fn() }));
 vi.mock('#hooks/use-sidebar-status.js', () => ({ useChatSidebarStatus: vi.fn() }));
+vi.mock('#hooks/use-composer-record-toasts.js', () => ({ useComposerRecordToasts: vi.fn() }));
 
 const unreadChats = new Set<string>();
 const recordedUnread = new Set<string>();
 const markViewed = vi.fn();
 const focusChat = vi.fn();
 const blurChat = vi.fn();
-const editorRef = { getSnapshot: () => ({ context: { focusedChatId: 'chat-focused' } }) };
+const unreadRecord = mock<ComposerRecordRef>();
+const unreadRecordRef = vi.fn((_projectId: string) => unreadRecord);
+type ProjectContext = NonNullable<ReturnType<typeof useProject>>;
+type EditorRef = ProjectContext['editorRef'];
+const editorRef = mock<EditorRef>();
+editorRef.getSnapshot.mockReturnValue(
+  mock<ReturnType<EditorRef['getSnapshot']>>({ context: { focusedChatId: 'chat-focused' } }),
+);
 let visibilityState: DocumentVisibilityState = 'visible';
 
 const status = (unread: boolean): ChatSidebarStatus => ({
@@ -49,18 +61,19 @@ describe('useFocusedChatReadState', () => {
     focusChat.mockReset();
     blurChat.mockReset();
     vi.mocked(useProjectManager).mockReset();
-    vi.mocked(useChatSessionStore).mockReturnValue({
-      markViewed,
-      focusChat,
-      blurChat,
-      isUnread: (chatId: string) => recordedUnread.has(chatId),
-    } as unknown as ReturnType<typeof useChatSessionStore>);
+    vi.mocked(useChatSessionStore).mockReturnValue(
+      mock<ChatSessionStore>({
+        markViewed,
+        focusChat,
+        blurChat,
+        unreadRecordRef,
+        isUnread: (chatId: string) => recordedUnread.has(chatId),
+      }),
+    );
     vi.mocked(useChatSidebarStatus).mockImplementation((_projectId, chatId) => status(unreadChats.has(chatId)));
     vi.spyOn(document, 'hasFocus').mockReturnValue(true);
     vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibilityState);
-    vi.mocked(useProject).mockReturnValue({ projectId: 'project-1', editorRef } as unknown as ReturnType<
-      typeof useProject
-    >);
+    vi.mocked(useProject).mockReturnValue(mock<ProjectContext>({ projectId: 'project-1', editorRef }));
   });
 
   afterEach(() => {
@@ -134,6 +147,15 @@ describe('useFocusedChatReadState', () => {
 
     expect(markViewed).toHaveBeenCalledExactlyOnceWith('chat-focused');
     expect(vi.mocked(useProjectManager)).not.toHaveBeenCalled();
+  });
+
+  it('should surface failures of the project unread record (G2)', () => {
+    renderHook(() => {
+      useFocusedChatReadState();
+    });
+
+    expect(unreadRecordRef).toHaveBeenCalledWith('project-1');
+    expect(useComposerRecordToasts).toHaveBeenLastCalledWith(unreadRecord);
   });
 
   it('should tell the store which chat is focused, and take it back on unmount (R3)', () => {

@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { loginShellEnvironment, packagedEsbuildEnvironment, utilityEnvironment } from '#main/utility-environment.js';
+import {
+  compileCacheEnvironment,
+  loginShellEnvironment,
+  packagedEsbuildEnvironment,
+  utilityEnvironment,
+  utilityEnvironmentNames,
+} from '#main/utility-environment.js';
 
 describe('utilityEnvironment', () => {
   it('copies only the allowlisted names', () => {
@@ -41,6 +47,40 @@ describe('utilityEnvironment', () => {
 
   it('omits an allowlisted name that main itself does not have', () => {
     expect(utilityEnvironment({})).toEqual({});
+  });
+});
+
+describe('compileCacheEnvironment', () => {
+  /* A packaged macOS layout: the bundle is signed and read-only, the data root is not. */
+  const bundle = '/Applications/Tau.app/Contents/Resources';
+  const userData = '/Users/someone/Library/Application Support/Tau';
+
+  it('should put the compile cache under the app data root', () => {
+    expect(compileCacheEnvironment(userData)).toEqual({
+      TAU_COMPILE_CACHE_DIR: '/Users/someone/Library/Application Support/Tau/compile-cache',
+    });
+  });
+
+  it('should keep the compile cache out of the signed bundle', () => {
+    const { TAU_COMPILE_CACHE_DIR: directory } = compileCacheEnvironment(userData);
+    expect(directory.startsWith(`${userData}/`)).toBe(true);
+    expect(directory.startsWith(bundle)).toBe(false);
+    expect(directory).not.toContain('app.asar');
+  });
+
+  it('should never name the directory NODE_COMPILE_CACHE', () => {
+    /* Electron's utility bootstrap reads that variable, reports the cache as
+     * already enabled and then writes nothing, which disables the very cache it
+     * names. Measured at 43.5.1; the fork entries pass the directory instead. */
+    expect(Object.keys(compileCacheEnvironment(userData))).toEqual(['TAU_COMPILE_CACHE_DIR']);
+    expect(utilityEnvironmentNames).not.toContain('NODE_COMPILE_CACHE');
+  });
+
+  it('should reach every utility fork through the allowlisted addition', () => {
+    expect(utilityEnvironment({ PATH: '/usr/bin' }, compileCacheEnvironment(userData))).toEqual({
+      PATH: '/usr/bin',
+      TAU_COMPILE_CACHE_DIR: '/Users/someone/Library/Application Support/Tau/compile-cache',
+    });
   });
 });
 

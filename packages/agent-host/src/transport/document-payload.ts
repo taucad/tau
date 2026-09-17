@@ -108,8 +108,8 @@ export const fitAttachmentBudget = (
 /**
  * Build the `onPayload` step that turns document sentinels into provider blocks (D21).
  *
- * A standalone sentinel text block becomes the wire's native document block at the
- * same position, which keeps the prompt-cache prefix stable. A sentinel embedded in
+ * A standalone sentinel text block in a user message becomes the wire's native
+ * document block at the same position, which keeps the prompt-cache prefix stable. A sentinel embedded in
  * larger text — pi's compaction summariser serialises history to text — becomes
  * the neutral marker `[attached document: <name>]`, or `[attached document]` when
  * the side table does not name it (P32). The payload is rewritten in place.
@@ -143,21 +143,24 @@ export const rewriteDocuments =
       rewritten.any = true;
       return replaced;
     };
-    const visit = (value: unknown): unknown => {
+    // `role` is the enclosing message's: only a user's own block becomes a document; any other
+    // role (a model echoing the sentinel) gets the neutral marker, which every wire accepts (G7).
+    const visit = (value: unknown, role: unknown): unknown => {
       if (typeof value === 'string') {
         return rewriteText(value);
       }
       if (Array.isArray(value)) {
         for (const [index, item] of value.entries()) {
-          value[index] = visit(item);
+          value[index] = visit(item, role);
         }
         return value;
       }
       if (!zodUtility.isObject(value)) {
         return value;
       }
+      const ownRole = typeof value['role'] === 'string' ? value['role'] : role;
       const hash =
-        textBlockTypes.has(value['type'] as string) && typeof value['text'] === 'string'
+        ownRole === 'user' && textBlockTypes.has(value['type'] as string) && typeof value['text'] === 'string'
           ? standaloneSentinel.exec(value['text'])?.[1]
           : undefined;
       if (hash !== undefined) {
@@ -171,10 +174,10 @@ export const rewriteDocuments =
         return nativeBlock({ wire, hash, document, cacheControl: value['cache_control'] });
       }
       for (const [key, item] of Object.entries(value)) {
-        value[key] = visit(item);
+        value[key] = visit(item, ownRole);
       }
       return value;
     };
-    const result = visit(payload);
+    const result = visit(payload, undefined);
     return rewritten.any ? result : undefined;
   };

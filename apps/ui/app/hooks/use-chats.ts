@@ -18,7 +18,6 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
     patchChat: patchChatInManager,
     softDeleteChat: softDeleteChatInManager,
     deleteChat: deleteChatInManager,
-    duplicateChat: duplicateChatInManager,
     isLoading: isWorkerLoading,
   } = useProjectManager();
   const chatSessions = useChatSessionStore();
@@ -69,16 +68,6 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
       void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
     },
     [chatSessions, deleteChatInManager, resourceId, queryClient],
-  );
-
-  const duplicateChat = useCallback(
-    async (chatId: string): Promise<Chat> => {
-      const newChat = await duplicateChatInManager(chatId);
-      void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
-      void queryClient.invalidateQueries({ queryKey: ['all-chats'] });
-      return newChat;
-    },
-    [duplicateChatInManager, resourceId, queryClient],
   );
 
   const updateChatName = useCallback(
@@ -144,7 +133,6 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
     applyGeneratedChatName,
     softDeleteChat,
     deleteChat,
-    duplicateChat,
     updateChatName,
   };
 }

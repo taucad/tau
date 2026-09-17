@@ -136,12 +136,14 @@ describe('ChatRevisionMarker', () => {
        the diff and must not be a second announcement (C46). */
     expect(screen.getByRole('status').textContent).toBe('Rev 5 saved');
     expect(screen.getByLabelText('Turn revision').textContent).toContain('Rev 5 saved · 2 files');
-    const toggle = screen.getByRole('button', { name: 'View turn revision details' });
-    expect(toggle.textContent).toContain('View changes');
+    /* The whole header is the disclosure; no separate Details button (R11). */
+    const toggle = screen.getByRole('button', { name: 'Rev 5 saved · 2 files · revision details' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect(screen.queryByText('Files · 2')).toBeNull();
+    expect(screen.queryByRole('button', { name: /^(Details|View changes)$/ })).toBeNull();
 
     fireEvent.click(toggle);
-    expect(toggle.textContent).toContain('Hide details');
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByRole('button', { name: 'Name version' })).not.toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Files · 2' }));
     expect(screen.getByText('bracket.scad')).not.toBeNull();
@@ -152,7 +154,7 @@ describe('ChatRevisionMarker', () => {
   it('should read Current as neutral text on the head revision', () => {
     setRevisions({ byTurnId: new Map([['u1', revision()]]), headRevisionId: 'rev-5' });
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
-    fireEvent.click(screen.getByRole('button', { name: 'View turn revision details' }));
+    fireEvent.click(screen.getByRole('button', { name: /revision details$/ }));
     expect(screen.getByText('Current')).not.toBeNull();
     expect(screen.queryByRole('button', { name: /Restore/ })).toBeNull();
   });
@@ -173,7 +175,7 @@ describe('ChatRevisionMarker', () => {
     chatState.status = 'streaming';
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
     const status = screen.getByRole('status');
-    expect(status.textContent).toBe('Starting from Rev 4 · Working');
+    expect(status.textContent).toBe('Starting from Rev 4');
     expect(status.getAttribute('aria-busy')).toBe('true');
   });
 
@@ -198,7 +200,7 @@ describe('ChatRevisionMarker', () => {
     render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
 
     expect(screen.getByRole('status').textContent).toBe('Save not confirmed');
-    fireEvent.click(screen.getByRole('button', { name: 'View turn revision details' }));
+    fireEvent.click(screen.getByRole('button', { name: /revision details$/ }));
     expect(screen.getByText(/Rev 4 is the last confirmed revision/)).not.toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(continueChat).toHaveBeenCalledOnce();

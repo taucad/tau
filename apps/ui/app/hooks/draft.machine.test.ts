@@ -4,10 +4,12 @@ import { createActor, waitFor } from 'xstate';
 import type { MyUIMessage } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';
 import { sha256Bytes } from '@taucad/utils/hash';
-import { base64ToUint8Array } from 'uint8array-extras';
-import { attachmentKinds, draftMachine } from '#hooks/draft.machine.js';
+import { base64ToUint8Array, uint8ArrayToBase64 } from 'uint8array-extras';
+import { createAttachmentStore } from '#db/attachment-store.js';
+import { draftMachine } from '#hooks/draft.machine.js';
 import type { DraftAttachmentModel, DraftEmittedEvents } from '#hooks/draft.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
+import { attachmentCapBytes } from '#utils/attachment.utils.js';
 import type { Attachment } from '#utils/attachment.utils.js';
 
 type PersistDraftInput = { draft: MyUIMessage };
@@ -319,6 +321,38 @@ describe('draftMachine', () => {
         { type: 'text', text: 'model the bracket' },
         { type: 'file', mediaType: 'application/pdf', filename: 'spec.pdf', url: `attachments/${hash}.pdf` },
       ]);
+      actor.stop();
+    });
+  });
+
+  describe('document bytes (S7)', () => {
+    it('should store a document handed over as bytes exactly as a data URL would', async () => {
+      const { actor } = createHarness();
+      actor.start();
+
+      actor.send({
+        type: 'addDraftAttachment',
+        bytes: bytesOf(pdf),
+        mediaType: 'application/pdf',
+        filename: 'spec.pdf',
+        model: imageAndPdfModel,
+      });
+
+      await waitFor(actor, (snap) => snap.context.draftAttachments.length === 1);
+      expect(actor.getSnapshot().context.draftAttachments).toEqual([await storedAs(pdf, 'spec.pdf')]);
+      actor.stop();
+    });
+
+    it('should refuse image bytes, which must arrive as a data URL to be resized', () => {
+      const { actor } = createHarness();
+      const failed = vi.fn();
+      actor.on('attachmentStoreFailed', failed);
+      actor.start();
+
+      actor.send({ type: 'addDraftAttachment', bytes: bytesOf(pngA), mediaType: 'image/png', model: imageAndPdfModel });
+
+      expect(failed).toHaveBeenCalledOnce();
+      expect(actor.getSnapshot().context.attachmentQueue).toEqual([]);
       actor.stop();
     });
   });
@@ -921,6 +955,44 @@ describe('draftMachine', () => {
       actor.stop();
     });
 
+    it('should refuse a preserved capture over the image cap in a real store, storing nothing', async () => {
+      const files = new Map<string, Uint8Array<ArrayBuffer>>();
+      const missing = async (path: string): Promise<never> => {
+        throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
+      };
+      const attachments = createAttachmentStore(
+        {
+          readFile: async (path) => files.get(path) ?? missing(path),
+          writeFile: async (path, data) => {
+            files.set(path, data);
+          },
+          exists: async (path) => files.has(path),
+          readdir: missing,
+          unlink: async (path) => {
+            files.delete(path);
+          },
+          rmdir: async () => undefined,
+        },
+        '/.tau/composers/new-project/attachments',
+      );
+      const { actor, resized } = createHarness({
+        store: async ({ bytes, mediaType, filename }) => attachments.put(bytes, mediaType, filename),
+      });
+      const failed = vi.fn();
+      actor.on('attachmentStoreFailed', failed);
+      actor.start();
+      const oversized = `data:image/png;base64,${uint8ArrayToBase64(new Uint8Array(attachmentCapBytes('image') + 1))}`;
+
+      actor.send({ type: 'addDraftAttachment', dataUrl: oversized, preserveOriginal: true, model: imageOnlyModel });
+      await settled(actor);
+
+      expect(failed).toHaveBeenCalledOnce();
+      expect(resized).toEqual([oversized]);
+      expect(actor.getSnapshot().context.draftAttachments).toEqual([]);
+      expect(files.size).toBe(0);
+      actor.stop();
+    });
+
     it('should emit imageResizeFailed when the resize actor rejects', async () => {
       const { actor } = createHarness({
         resize: async () => {
@@ -1106,38 +1178,6 @@ describe('draftMachine', () => {
       actor.send({ type: 'addDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
       expect(() => actor.stop()).not.toThrow();
       expect(actor.getSnapshot().status).toBe('stopped');
-    });
-  });
-
-  // ===========================================================================
-  // attachmentKinds — what the send gate checks against the selected model
-  // ===========================================================================
-  describe('attachmentKinds', () => {
-    it('should report the kinds each draft holds', async () => {
-      const { actor } = createHarness();
-      actor.start();
-      expect(attachmentKinds(actor.getSnapshot().context, 'main')).toEqual([]);
-      actor.send({ type: 'addDraftAttachment', dataUrl: pdf, model: imageAndPdfModel });
-      await waitFor(actor, (snap) => snap.context.draftAttachments.length === 1);
-      expect(attachmentKinds(actor.getSnapshot().context, 'main')).toEqual(['document']);
-      actor.send({ type: 'addDraftAttachment', dataUrl: pngA, model: imageAndPdfModel });
-      await waitFor(actor, (snap) => snap.context.draftAttachments.length === 2);
-      expect(attachmentKinds(actor.getSnapshot().context, 'main')).toEqual(['image', 'document']);
-      expect(attachmentKinds(actor.getSnapshot().context, 'edit')).toEqual([]);
-      actor.send({ type: 'removeDraftAttachment', index: 0 });
-      expect(attachmentKinds(actor.getSnapshot().context, 'main')).toEqual(['image']);
-      actor.stop();
-    });
-
-    it('should return the same array for the same kinds, so selectors do not re-render', async () => {
-      const { actor } = createHarness();
-      actor.start();
-      actor.send({ type: 'addDraftAttachment', dataUrl: pngA, model: imageOnlyModel });
-      await waitFor(actor, (snap) => snap.context.draftAttachments.length === 1);
-      const first = attachmentKinds(actor.getSnapshot().context, 'main');
-      actor.send({ type: 'setDraftText', text: 'x' });
-      expect(attachmentKinds(actor.getSnapshot().context, 'main')).toBe(first);
-      actor.stop();
     });
   });
 });

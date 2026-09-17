@@ -293,28 +293,37 @@ describe('ChatMessage column wrapper layout', () => {
     expect(wrapper.className).toContain('mx-4');
   });
 
-  it('should still mount ChatMessagePlanning as a sibling of the message bubble inside the column wrapper', () => {
+  it('attaches the footer to the user bubble and puts the indicator below both', () => {
     setMessages([userMessage('msg-1', 'go')]);
-
-    render(<ChatMessage messageId='msg-1' />);
-
-    const wrapper = getColumnWrapper();
-    const planning = screen.getByTestId('chat-message-planning');
-    expect(planning.parentElement).toBe(wrapper);
-    expect(planning.dataset['messageId']).toBe('msg-1');
-  });
-
-  it('renders footer after ChatMessagePlanning and before the assistant action row', () => {
-    setMessages([assistantMessage('msg-1', 'Hello there')]);
 
     render(<ChatMessage messageId='msg-1' footer={<div data-testid='revision-footer'>marker</div>} />);
 
+    const wrapper = getColumnWrapper();
     const planning = screen.getByTestId('chat-message-planning');
     const footer = screen.getByTestId('revision-footer');
+    const bubble = screen.getByRole('button', { name: 'go' });
+    /* Bubble and card share one gapless surface; the indicator is the column's last row (R2, R11). */
+    expect(footer.parentElement).toBe(bubble.parentElement);
+    expect(bubble.className).toContain('z-10');
+    expect(bubble.className).toContain('rounded-lg');
+    expect(planning.parentElement).toBe(wrapper);
+    expect(wrapper.lastElementChild).toBe(planning);
+    expect(planning.dataset['messageId']).toBe('msg-1');
+  });
+
+  it('renders the assistant indicator flush after its parts and before the action row', () => {
+    setMessages([assistantMessage('msg-1', 'Hello there')]);
+
+    render(<ChatMessage messageId='msg-1' />);
+
+    const planning = screen.getByTestId('chat-message-planning');
+    const text = screen.getByText('Hello there');
     const copyButton = screen.getByTestId('copy-button');
 
-    expect(planning.compareDocumentPosition(footer)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-    expect(footer.compareDocumentPosition(copyButton)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(text.compareDocumentPosition(planning)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(planning.compareDocumentPosition(copyButton)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(planning.parentElement?.className).toContain('gap-0');
+    expect(planning.className).toBe('');
   });
 
   it('should cap collapsed long user bubbles at max-h-58.5 for parity with focused ChatTextarea, without nested Virtuoso scroll', () => {
@@ -324,7 +333,7 @@ describe('ChatMessage column wrapper layout', () => {
     render(<ChatMessage messageId='msg-1' />);
 
     const wrapper = getColumnWrapper();
-    const innerBubble = wrapper.firstElementChild;
+    const innerBubble = wrapper.firstElementChild?.firstElementChild;
     if (!(innerBubble instanceof HTMLDivElement)) {
       throw new Error('inner bubble not found');
     }

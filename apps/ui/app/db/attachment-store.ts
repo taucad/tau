@@ -16,13 +16,14 @@ import {
   attachmentCapBytes,
   attachmentFileName,
   attachmentKind,
+  attachmentUrlPrefix,
   isAttachmentUrl,
   isSupportedAttachmentMediaType,
 } from '#utils/attachment.utils.js';
 import type { Attachment, AttachmentReference } from '#utils/attachment.utils.js';
 
-/** The filesystem surface an attachment store needs, so tests and hosts can supply anything shaped like it. */
-type AttachmentClient = {
+/** The filesystem surface an attachment or composer record store needs, so tests and hosts can supply anything shaped like it. */
+export type AttachmentClient = {
   readFile: (path: string) => Promise<Uint8Array<ArrayBuffer>>;
   writeFile: (path: string, data: Uint8Array<ArrayBuffer>) => Promise<void>;
   exists: (path: string) => Promise<boolean>;
@@ -49,9 +50,8 @@ export type AttachmentStore = {
 // Keyed by absolute path, so two stores over the same directory still serialise.
 const mutex = new KeyedMutex<string>();
 
-const attachmentDirectory = 'attachments/';
-
-const isNotFound = (error: unknown): boolean => {
+/** Whether a filesystem error means the path is not there. */
+export const isNotFound = (error: unknown): boolean => {
   const code = getErrno(error);
   return code === 'ENOENT' || code === 'ENOTDIR' || (error as { name?: unknown }).name === 'NotFoundError';
 };
@@ -65,8 +65,8 @@ const fileNameOf = (ref: AttachmentRef): string | undefined => {
   if (typeof ref !== 'string') {
     return isSupportedAttachmentMediaType(ref.mediaType) ? attachmentFileName(ref) : undefined;
   }
-  const name = ref.startsWith(attachmentDirectory) ? ref.slice(attachmentDirectory.length) : ref;
-  return isAttachmentUrl(`${attachmentDirectory}${name}`) ? name : undefined;
+  const name = ref.startsWith(attachmentUrlPrefix) ? ref.slice(attachmentUrlPrefix.length) : ref;
+  return isAttachmentUrl(`${attachmentUrlPrefix}${name}`) ? name : undefined;
 };
 
 /** Create the attachment store rooted at `directory`. */

@@ -37,7 +37,7 @@ function createTestContext(options?: {
 }
 
 function makeEntry(entry: { activeGroup: string; groups: Record<string, unknown> }): string {
-  return JSON.stringify(entry);
+  return JSON.stringify({ recordVersion: 1, profile: 'tau-json-structure-units-03-v1', ...entry });
 }
 
 describe('parameterFileResolverMiddleware', () => {

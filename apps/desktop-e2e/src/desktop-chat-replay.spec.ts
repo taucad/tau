@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { afterEach, expect, test } from 'vitest';
 import { launchDesktopApp } from '#support/desktop-app.js';
@@ -22,6 +22,7 @@ import {
   geometryCacheSnapshot,
   selectChatModel,
   selectKernel,
+  sendPrompt,
   submitPrompt,
   waitForProjectOnDisk,
 } from '#support/scenario.js';
@@ -228,3 +229,88 @@ test('renders an external write through the native kernel utility', async () => 
     throw error;
   }
 });
+
+/**
+ * W15 (D14): a chat whose durable log inlines base64 still renders and replays.
+ *
+ * Every log written before this wave holds `{ type: 'image', mimeType, data }`
+ * rows, and there is no migration: the reducer, the projection, the materialiser
+ * and the provider mapper all keep that arm forever. The legacy chat is built by
+ * copying the settled chat's own directory and rewriting one user row, so the
+ * only difference from a live chat is the block shape under test.
+ */
+test('renders and replays a legacy log that inlines base64 image bytes', async () => {
+  const account = tauTestAccount('legacy-inline');
+  seededEmail = account.email;
+  const token = await seedTauTestUser(account);
+  session = await launchDesktopApp({ token });
+  const { page } = session;
+  fixture = await installGatewayFixture(page);
+  const legacyChatId = 'chat_legacyInlineImage000';
+  const imageBase64 = readFileSync(resolve(import.meta.dirname, '../fixtures/bracket-photo.jpg')).toString('base64');
+
+  try {
+    await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
+    await expectSignedIn(page);
+    await selectKernel(page, 'OpenSCAD');
+    await selectChatModel(page, gatewayFixtureModelName);
+
+    const slug = await submitPrompt(page, prompt);
+    await expect.poll(() => fixture!.gatewayRequests.length, { timeout: 120_000 }).toBeGreaterThanOrEqual(2);
+    await waitForProjectOnDisk(session.homeRoot, slug, { extension: '.scad' });
+    const chatId = activeChatId(page);
+    const chatsRoot = join(session.homeRoot, slug, '.tau/chats');
+
+    /* One chat directory, copied and rewritten: same ids everywhere, and the
+     * first user row carries an inline image block instead of a `file-ref`. */
+    cpSync(join(chatsRoot, chatId), join(chatsRoot, legacyChatId), { recursive: true });
+    const legacyLog = join(chatsRoot, legacyChatId, 'events.jsonl');
+    let inlined = false;
+    const rewritten = readFileSync(legacyLog, 'utf8')
+      .split('\n')
+      .filter((line) => line.trim() !== '')
+      .map((line) => {
+        const event = JSON.parse(line.split(chatId).join(legacyChatId)) as {
+          type?: string;
+          message?: { role?: string; content?: unknown };
+        };
+        if (!inlined && event.type === 'message.appended' && event.message?.role === 'user') {
+          const { content } = event.message;
+          const legacyBlock = { type: 'image', mimeType: 'image/jpeg', data: imageBase64 };
+          const blocks = Array.isArray(content) ? [...(content as unknown[])] : [{ type: 'text', text: content }];
+          Object.assign(event.message, { content: [legacyBlock, ...blocks] });
+          inlined = true;
+        }
+        return JSON.stringify(event);
+      })
+      .join('\n');
+    expect(inlined, 'the settled chat has no user row to rewrite').toBe(true);
+    writeFileSync(legacyLog, `${rewritten}\n`);
+    const chatRecord = join(chatsRoot, legacyChatId, 'chat.json');
+    writeFileSync(
+      chatRecord,
+      readFileSync(chatRecord, 'utf8').split(chatId).join(legacyChatId).split(`"${prompt}"`).join('"Legacy chat"'),
+    );
+
+    const url = new URL(page.url());
+    url.searchParams.set('chat', legacyChatId);
+    await page.goto(url.href, { waitUntil: 'domcontentloaded' });
+
+    // Renders: the legacy block projects to a `data:` file part, not a reference.
+    const legacyImage = page.getByRole('button', { name: /^Open image 1$/u }).first();
+    await expectVisible(legacyImage, 120_000);
+    await expect
+      .poll(async () => legacyImage.locator('img').first().getAttribute('src'), { timeout: 60_000 })
+      .toMatch(/^data:image\/jpeg/u);
+
+    // Replays: the next turn puts the same inline bytes on the provider wire.
+    const requestsBefore = fixture.gatewayRequests.length;
+    await sendPrompt(page, 'Continue from the legacy history.');
+    await expect.poll(() => fixture!.gatewayRequests.length, { timeout: 180_000 }).toBeGreaterThan(requestsBefore);
+    const replayed = JSON.stringify(fixture.gatewayRequests.slice(requestsBefore));
+    expect(replayed, 'the legacy inline image never reached the provider').toContain(imageBase64);
+  } catch (error) {
+    await session.capture('legacy-inline-failure');
+    throw error;
+  }
+}, 900_000);

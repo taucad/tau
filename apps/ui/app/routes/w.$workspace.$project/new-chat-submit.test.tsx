@@ -9,7 +9,7 @@
  * Original symptom:
  *   1. User submits in chat A → message streams + persists to chat A.
  *   2. User clicks "new chat" → editor's `focusedChatId` flips to chat B
- *      (a fresh row in IndexedDB).
+ *      (a fresh chat record).
  *   3. User types and submits in chat B → message is silently swallowed
  *      and / or `patchChat` is fired against chat A's id, blowing away
  *      chat A's history.

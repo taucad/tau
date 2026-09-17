@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,7 +30,10 @@ it('admits one writer across two actual Node transport clients and refreshes the
     return { channel, provider: new NodeFsProviderClient(channel, root) };
   });
   const target = { authority: 'node', root, entry: 'main.ts' };
-  const digest = `sha256:${'1'.repeat(64)}` as Parameters<typeof compileParameterManifest>[0]['dependency'];
+  type Digest = Parameters<typeof compileParameterManifest>[0]['dependency'];
+  const digest = `sha256:${'1'.repeat(64)}` as Digest;
+  // The loader proves the manifest was compiled from the pinned source bytes.
+  const sourceDigest = `sha256:${createHash('sha256').update('source:1').digest('hex')}` as Digest;
   const manifest = await compileParameterManifest({
     declaration: {
       schema: {
@@ -46,6 +50,7 @@ it('admits one writer across two actual Node transport clients and refreshes the
     source: { id: 'fixture', version: '1', revision: digest, capability: 'json-structure' },
     dependency: digest,
     middleware: digest,
+    sourceFiles: { 'main.ts': sourceDigest },
   });
   const actors = connections.map(({ provider }) => {
     const byteAuthority: ParameterAuthority = {

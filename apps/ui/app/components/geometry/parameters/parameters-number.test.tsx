@@ -568,6 +568,7 @@ describe('ParametersNumber', () => {
         group: 'default',
         editorInstance: 'shared-editor',
         input,
+        setValue: vi.fn(async () => undefined),
       };
 
       const view = render(
@@ -606,6 +607,55 @@ describe('ParametersNumber', () => {
       }
     });
 
+    it('keeps a dirty draft when the row re-renders with an equal but re-created binding', async () => {
+      const user = userEvent.setup();
+      const retain = createRetainedInput();
+      let retained: ReturnType<ParameterCommit['input']> | undefined;
+      const input: ParameterCommit['input'] = (request) => {
+        retained = retain(request);
+        return retained;
+      };
+      const parameterCommit: ParameterCommit = {
+        target: { authority: 'test', root: '/', entry: 'main.ts' },
+        group: 'default',
+        editorInstance: 'echo-editor',
+        input,
+        setValue: vi.fn(async () => undefined),
+      };
+      const row = (projection: ReturnType<typeof testProjection>) => (
+        <TestWrapper>
+          <ParametersNumber
+            value={10}
+            defaultValue={10}
+            fieldProjection={projection}
+            parameterCommit={parameterCommit}
+            onChange={vi.fn()}
+            aria-label='Echo width'
+          />
+        </TestWrapper>
+      );
+      const view = render(row({ ...testProjection('length', defaultUnits), instancePointer: '/width' }));
+      const actor = retained?.actor;
+      if (actor === undefined) {
+        throw new Error('The row did not retain an input actor.');
+      }
+      const sent: string[] = [];
+      const send = actor.send.bind(actor);
+      actor.send = (event) => {
+        sent.push(event.type);
+        send(event);
+      };
+      const field = screen.getByRole('textbox', { name: 'Echo width' });
+      await user.click(field);
+      await user.clear(field);
+      await user.type(field, '12');
+      view.rerender(row({ ...testProjection('length', defaultUnits), instancePointer: '/width' }));
+
+      expect(sent).not.toContain('refreshAuthority');
+      expect(actor.getSnapshot().context.draft).toMatchObject({ raw: '12', dirty: true });
+      expect(actor.getSnapshot().context.draft?.conflict).toBeUndefined();
+    });
+
     it('restores retained invalid text into the visible input after remount', async () => {
       const user = userEvent.setup();
       const input = createRetainedInput();
@@ -614,6 +664,7 @@ describe('ParametersNumber', () => {
         group: 'default',
         editorInstance: 'retained-editor',
         input,
+        setValue: vi.fn(async () => undefined),
       };
       const view = (
         <TestWrapper>
@@ -755,6 +806,7 @@ describe('ParametersNumber', () => {
               group: 'default',
               editorInstance: 'test-editor',
               input: createRetainedInput(submit),
+              setValue: vi.fn(async () => undefined),
             }}
             onChange={onChange}
           />

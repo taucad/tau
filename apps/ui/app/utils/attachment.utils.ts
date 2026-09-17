@@ -84,12 +84,13 @@ export const attachmentUrl = (attachment: AttachmentName): string => `attachment
  */
 export const attachmentCapBytes = (kind: AttachmentKind): number => (kind === 'image' ? 4 : 16) * 1024 * 1024;
 
-const attachmentDirectory = 'attachments/';
+/** The prefix every attachment reference URL carries. */
+export const attachmentUrlPrefix = 'attachments/';
 const attachmentFileNamePattern = /^[\da-f]{64}\.(?:jpg|png|webp|gif|pdf)$/;
 
 /** Whether a URL is an attachment reference, as opposed to a `data:` URL or anything else. */
 export const isAttachmentUrl = (url: string): boolean =>
-  url.startsWith(attachmentDirectory) && attachmentFileNamePattern.test(url.slice(attachmentDirectory.length));
+  url.startsWith(attachmentUrlPrefix) && attachmentFileNamePattern.test(url.slice(attachmentUrlPrefix.length));
 
 /**
  * The attachment a file part references, or `undefined` for a `data:` URL or
@@ -102,7 +103,7 @@ export const attachmentReferenceOf = (part: {
 }): AttachmentReference | undefined =>
   isAttachmentUrl(part.url)
     ? {
-        hash: part.url.slice(attachmentDirectory.length, attachmentDirectory.length + 64),
+        hash: part.url.slice(attachmentUrlPrefix.length, attachmentUrlPrefix.length + 64),
         mediaType: part.mediaType,
         ...(part.filename === undefined ? {} : { filename: part.filename }),
       }

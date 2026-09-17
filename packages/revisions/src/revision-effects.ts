@@ -1619,6 +1619,17 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     ...(entry.reason === undefined ? {} : { reason: entry.reason }),
   });
 
+  /**
+   * Whether a throw from a history push is answered per ref, where the records
+   * still push beside it: the server's own per-ref refusal, or storage.
+   *
+   * @param error - What the push threw.
+   * @returns `true` to report it per ref; `false` to let the scheduler classify it.
+   */
+  const staysPerRef = (error: unknown): boolean =>
+    error instanceof LfsQuotaError ||
+    (error instanceof RevisionPortError && (error.code === 'REMOTE_REJECTED' || error.code === 'REMOTE_REF_CONFLICT'));
+
   /** Every ref of one push, refused with one reason — a quota, or a throw. */
   const refusedAll = (
     names: readonly string[],
@@ -3046,6 +3057,14 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
             );
             results.push(...pushed.refs.map((entry) => outcomeOf(entry, localHeads)));
           } catch (error) {
+            /* A refusal of the whole push — a credential, a plan, a missing
+             * repository, the network — is the scheduler's to classify (its R5
+             * path): flattened into per-ref outcomes it read as a ref refusal,
+             * and every class offered *Sync now*. Only the server's own per-ref
+             * answer and storage stay here, where the records still push. */
+            if (!staysPerRef(error)) {
+              throw error;
+            }
             /* Storage is the one refusal that is not a failed connection: the
              * files are named and `remote.machine` owns the list (D16, P19). */
             const message = error instanceof Error ? error.message : 'History could not be backed up.';

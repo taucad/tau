@@ -15,6 +15,7 @@ import * as jscadModelingImport from '@jscad/modeling';
 import { jscadKernel } from '#jscad.kernel.js';
 import { resolveJscadModeling } from '#jscad-modeling.js';
 import { jscadToGltf } from '#jscad-to-gltf.js';
+import { normalizeJscadParts } from '#jscad-parts.js';
 import {
   createMockKernelRuntime,
   createGeometryTestHelpers,
@@ -166,6 +167,29 @@ const jscadGlbExportOptions = {
 } as const;
 
 const testModeling = resolveJscadModeling(jscadModelingImport);
+
+// `JscadModeling` declares only the members the kernel itself needs. The resolved
+// runtime object carries the whole `@jscad/modeling` API, which the serializer unit
+// tests below use to build handles without going through a render.
+const testJscadApi = testModeling as unknown as {
+  primitives: {
+    cuboid: (options: unknown) => Record<string, unknown>;
+    sphere: (options: unknown) => Record<string, unknown>;
+    cylinder: (options: unknown) => Record<string, unknown>;
+  };
+  booleans: { subtract: (subject: unknown, tool: unknown) => Record<string, unknown> };
+  transforms: { translate: (offset: readonly number[], shape: unknown) => Record<string, unknown> };
+};
+
+/** The shape `jscadCubeCutoutSource` returns, built directly. */
+const buildJscadCubeCutout = (): unknown => {
+  const { primitives, booleans } = testJscadApi;
+  const cubeSize = 50;
+  return booleans.subtract(
+    primitives.cuboid({ size: [cubeSize, cubeSize, cubeSize], center: [0, 0, cubeSize / 2] }),
+    primitives.cylinder({ radius: 10, height: 60, center: [0, 0, cubeSize / 2], segments: 64 }),
+  );
+};
 
 describe('JscadWorker', () => {
   beforeAll(async () => {
@@ -810,6 +834,80 @@ module.exports = { main, getParameterDefinitions }
           geometry: { topology: { irregularEdges: number } };
         };
         expect(invalidIssueDetails.geometry.topology.irregularEdges).toBeGreaterThan(0);
+      });
+
+      it('should raise the non-manifold warning from the mesh phase, not from createGeometry', async () => {
+        // The non-manifold-section fixture shape: a closed cuboid with its +Z face
+        // removed, leaving four unmatched boundary edges.
+        const openCube = testModeling.geometries.geom3.fromPoints([
+          [
+            [-2, -2, -2],
+            [-2, 2, -2],
+            [2, 2, -2],
+            [2, -2, -2],
+          ],
+          [
+            [2, -2, -2],
+            [2, 2, -2],
+            [2, 2, 2],
+            [2, -2, 2],
+          ],
+          [
+            [-2, -2, -2],
+            [-2, -2, 2],
+            [-2, 2, 2],
+            [-2, 2, -2],
+          ],
+          [
+            [-2, 2, -2],
+            [-2, 2, 2],
+            [2, 2, 2],
+            [2, 2, -2],
+          ],
+          [
+            [-2, -2, -2],
+            [2, -2, -2],
+            [2, -2, 2],
+            [-2, -2, 2],
+          ],
+        ]);
+        const nativeHandle = normalizeJscadParts(openCube, testModeling);
+
+        const { meshGeometry, exportGeometry } = jscadDefinition;
+        expect(meshGeometry).toBeDefined();
+        if (!meshGeometry) {
+          return;
+        }
+
+        const meshed = await meshGeometry(
+          { nativeHandle, options: {}, content: { includeEdges: true } },
+          createMockKernelRuntime(),
+          { modulesRegistered: true, modeling: testModeling },
+        );
+
+        // Reverting D11 moves this warning back to createGeometry and empties
+        // the mesh phase's issue list.
+        const meshIssue = meshed.issues?.find((issue) => issue.code === 'GEOMETRY_INVALID');
+        expect(meshIssue).toBeDefined();
+        if (!meshIssue) {
+          return;
+        }
+        expect(meshIssue.severity).toBe('warning');
+        expect(meshIssue.message).toContain('is not a closed oriented solid: non-manifold edges 4');
+        const meshTopology = (meshIssue.details as { geometry: { topology: Record<string, number> } }).geometry
+          .topology;
+        expect(meshTopology).toMatchObject({ openBoundaryEdges: 4, irregularEdges: 4, nonManifoldEdges: 0 });
+
+        const exported = await exportGeometry(
+          { format: 'glb', nativeHandle, options: jscadGlbExportOptions, content: { includeEdges: true } },
+          createMockKernelRuntime(),
+          { modulesRegistered: true, modeling: testModeling },
+        );
+        expect(exported.success).toBe(true);
+        if (!exported.success) {
+          return;
+        }
+        expect(exported.issues.filter((issue) => issue.code === 'GEOMETRY_INVALID')).toHaveLength(1);
       });
 
       it('should not warn for the equivalent 2D profile composed before one extrusion', async () => {
@@ -2070,28 +2168,26 @@ module.exports = { main, getParameterDefinitions }
 // =============================================================================
 
 describe('serializeNativeHandle', () => {
-  it('should serialize nativeHandle to compact binary arrays', async () => {
-    const result = await createGeometry(
-      {
-        'box.ts': `
-          const { cuboid } = require('@jscad/modeling').primitives;
-          module.exports = { main: () => cuboid({ size: [20, 20, 20] }) };
-        `,
-      },
-      'box.ts',
-    );
-
-    expect(result.success).toBe(true);
-    if (!result.success) {
-      return;
+  // Charter D12 (W6b) takes the durable snapshot off a display render's published
+  // result, so these serializer unit tests take the handle from the kernel
+  // definition instead of from `client.render()`. Every assertion about the
+  // serializer's own behaviour is unchanged; the durable cache round-trip tests
+  // later in this block still exercise the render path.
+  const serializeShape = (shape: unknown): JscadSerializedNativeHandleEntry[] => {
+    const { serializeNativeHandle } = jscadDefinition;
+    if (!serializeNativeHandle) {
+      throw new Error('The JSCAD kernel does not define serializeNativeHandle.');
     }
+    return serializeNativeHandle(
+      { nativeHandle: normalizeJscadParts(shape, testModeling) },
+      createMockKernelRuntime(),
+      { modulesRegistered: true, modeling: testModeling },
+    ) as JscadSerializedNativeHandleEntry[];
+  };
 
-    expect(result.serializedNativeHandle).toBeDefined();
-    const serialized = result.serializedNativeHandle as Array<{
-      type: string;
-      data: Float32Array;
-      name?: string;
-    }>;
+  it('should serialize nativeHandle to compact binary arrays', () => {
+    const serialized = serializeShape(testJscadApi.primitives.cuboid({ size: [20, 20, 20] }));
+
     expect(serialized).toHaveLength(1);
     expect(serialized[0]!.type).toBe('geom3');
     expect(serialized[0]!.name).toBe('Shape 1');
@@ -2100,17 +2196,8 @@ describe('serializeNativeHandle', () => {
   });
 
   it('should deserialize serialized handles using the normalized package import shape', async () => {
-    const result = await createGeometry(
-      {
-        'cutout.ts': jscadCubeCutoutSource,
-      },
-      'cutout.ts',
-    );
+    const serializedNativeHandle = serializeShape(buildJscadCubeCutout());
 
-    expect(result.success).toBe(true);
-    if (!result.success) {
-      return;
-    }
     const { deserializeNativeHandle } = jscadDefinition;
     expect(deserializeNativeHandle).toBeDefined();
     if (!deserializeNativeHandle) {
@@ -2119,12 +2206,12 @@ describe('serializeNativeHandle', () => {
 
     const restored = deserializeNativeHandle(
       {
-        serializedNativeHandle: result.serializedNativeHandle as JscadSerializedNativeHandleEntry[],
+        serializedNativeHandle,
       },
       createMockKernelRuntime(),
       { modulesRegistered: true, modeling: testModeling },
     );
-    const glb = jscadToGltf(
+    const { content: glb } = jscadToGltf(
       restored,
       {
         coordinateSystem: 'z-up',
@@ -2138,19 +2225,15 @@ describe('serializeNativeHandle', () => {
   });
 
   it('should deserialize MessagePack-decoded compact binary handles and export GLB bytes', async () => {
-    const result = await createGeometry({ 'cutout.ts': jscadCubeCutoutSource }, 'cutout.ts');
+    const serializedNativeHandle = serializeShape(buildJscadCubeCutout());
 
-    expect(result.success).toBe(true);
-    if (!result.success) {
-      return;
-    }
     const { deserializeNativeHandle, exportGeometry } = jscadDefinition;
     expect(deserializeNativeHandle).toBeDefined();
     if (!deserializeNativeHandle) {
       return;
     }
 
-    const decodedSerializedNativeHandle = msgpackDecode(msgpackEncode(result.serializedNativeHandle));
+    const decodedSerializedNativeHandle = msgpackDecode(msgpackEncode(serializedNativeHandle));
     const decodedEntry = (decodedSerializedNativeHandle as Array<{ data: unknown }>)[0];
     expect(decodedEntry?.data).not.toBeInstanceOf(Float32Array);
     expect(ArrayBuffer.isView(decodedEntry?.data)).toBe(true);
@@ -2332,33 +2415,13 @@ describe('serializeNativeHandle', () => {
     }
   });
 
-  it('should serialize multiple shapes', async () => {
-    const result = await createGeometry(
-      {
-        'shapes.ts': `
-          const { cuboid, sphere } = require('@jscad/modeling').primitives;
-          module.exports = {
-            main: () => [
-              Object.assign(cuboid({ size: [10, 10, 10] }), { name: 'Box' }),
-              Object.assign(sphere({ radius: 5 }), { name: 'Ball' }),
-            ],
-          };
-        `,
-      },
-      'shapes.ts',
-    );
+  it('should serialize multiple shapes', () => {
+    const { primitives } = testJscadApi;
+    const serialized = serializeShape([
+      Object.assign(primitives.cuboid({ size: [10, 10, 10] }), { name: 'Box' }),
+      Object.assign(primitives.sphere({ radius: 5 }), { name: 'Ball' }),
+    ]);
 
-    expect(result.success).toBe(true);
-    if (!result.success) {
-      return;
-    }
-
-    expect(result.serializedNativeHandle).toBeDefined();
-    const serialized = result.serializedNativeHandle as Array<{
-      type: string;
-      data: Float32Array;
-      name?: string;
-    }>;
     expect(serialized).toHaveLength(2);
     expect(serialized[0]!.type).toBe('geom3');
     expect(serialized[0]!.name).toBe('Box');
@@ -2367,28 +2430,14 @@ describe('serializeNativeHandle', () => {
   });
 
   it('should preserve serialized part names after handle deserialization for GLB output', async () => {
-    const result = await createGeometry(
-      {
-        'assembly.ts': `
-          const { cuboid } = require('@jscad/modeling').primitives;
-          const { translate } = require('@jscad/modeling').transforms;
-          module.exports = {
-            main: () => [
-              Object.assign(cuboid({ size: [10, 10, 10] }), { name: 'Housing' }),
-              Object.assign(translate([20, 0, 0], cuboid({ size: [6, 6, 6] })), { name: 'Carrier' }),
-            ],
-          };
-        `,
-      },
-      'assembly.ts',
-    );
+    const { primitives, transforms } = testJscadApi;
+    const serializedNativeHandle = serializeShape([
+      Object.assign(primitives.cuboid({ size: [10, 10, 10] }), { name: 'Housing' }),
+      Object.assign(transforms.translate([20, 0, 0], primitives.cuboid({ size: [6, 6, 6] })), {
+        name: 'Carrier',
+      }),
+    ]);
 
-    expect(result.success).toBe(true);
-    if (!result.success) {
-      return;
-    }
-
-    expect(result.serializedNativeHandle).toBeDefined();
     const { deserializeNativeHandle } = jscadDefinition;
     expect(deserializeNativeHandle).toBeDefined();
     if (!deserializeNativeHandle) {
@@ -2397,13 +2446,13 @@ describe('serializeNativeHandle', () => {
 
     const restoredHandle = deserializeNativeHandle(
       {
-        serializedNativeHandle: result.serializedNativeHandle as JscadSerializedNativeHandleEntry[],
+        serializedNativeHandle,
       },
       createMockKernelRuntime(),
       { modulesRegistered: true, modeling: testModeling },
     );
 
-    const glb = jscadToGltf(
+    const { content: glb } = jscadToGltf(
       restoredHandle,
       {
         coordinateSystem: 'z-up',

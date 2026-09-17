@@ -110,12 +110,12 @@ describe('composerRecordMachine', () => {
     vi.useRealTimers();
   });
 
-  it('exports exactly one machine value', () => {
+  it('should export exactly one machine value', () => {
     expect(Object.values(machineModule).filter((value) => isMachine(value))).toEqual([composerRecordMachine]);
   });
 
   describe('no loading stall', () => {
-    it('reaches usable when the record is absent', async () => {
+    it('should reach usable when the record is absent', async () => {
       const { actor, emitted } = createHarness();
 
       actor.start();
@@ -126,7 +126,7 @@ describe('composerRecordMachine', () => {
       actor.stop();
     });
 
-    it('reaches usable with the record when the bytes are valid', async () => {
+    it('should reach usable with the record when the bytes are valid', async () => {
       const record: ComposerRecord = { version: 1, draft: userMessage('bracket'), mode: 'plan' };
       const { actor, emitted } = createHarness({ read: async () => ({ status: 'valid', record }) });
 
@@ -139,7 +139,7 @@ describe('composerRecordMachine', () => {
       actor.stop();
     });
 
-    it('reaches usable with an empty record when the bytes are invalid', async () => {
+    it('should reach usable with an empty record when the bytes are invalid', async () => {
       const error = new Error('unexpected token');
       const { actor, emitted } = createHarness({ read: async () => ({ status: 'invalid', error }) });
 
@@ -152,7 +152,7 @@ describe('composerRecordMachine', () => {
       actor.stop();
     });
 
-    it('reaches usable when readRecord rejects — the composer never waits on I/O', async () => {
+    it('should reach usable when readRecord rejects — the composer never waits on I/O', async () => {
       const { actor, emitted } = createHarness({
         read: async () => {
           throw new Error('EIO');
@@ -167,7 +167,7 @@ describe('composerRecordMachine', () => {
       actor.stop();
     });
 
-    it('accepts a patch while the record is still loading', async () => {
+    it('should accept a patch while the record is still loading', async () => {
       let release = (): void => undefined;
       const { actor, harness } = createHarness({
         read: async () => {
@@ -194,7 +194,7 @@ describe('composerRecordMachine', () => {
   });
 
   describe('coalescing', () => {
-    it('lands a patch that arrives during persisting in the next write', async () => {
+    it('should land a patch that arrives during persisting in the next write', async () => {
       const { actor, harness } = createHarness();
 
       actor.start();
@@ -219,7 +219,7 @@ describe('composerRecordMachine', () => {
       actor.stop();
     });
 
-    it('merges keyed maps rather than replacing them', async () => {
+    it('should merge keyed maps rather than replacing them', async () => {
       const { actor, harness } = createHarness();
 
       actor.start();
@@ -237,7 +237,7 @@ describe('composerRecordMachine', () => {
       actor.stop();
     });
 
-    it('drops nothing across 100 interleavings', async () => {
+    it('should drop nothing across 100 interleavings', async () => {
       const { actor, harness } = createHarness();
 
       actor.start();
@@ -269,7 +269,7 @@ describe('composerRecordMachine', () => {
   });
 
   describe('failure edge', () => {
-    it('retains the patch, emits writeFailed, and retries on the backoff curve', async () => {
+    it('should retain the patch, emit writeFailed, and retry on the backoff curve', async () => {
       const { actor, harness, emitted } = createHarness();
 
       actor.start();
@@ -299,7 +299,7 @@ describe('composerRecordMachine', () => {
       actor.stop();
     });
 
-    it('short-circuits the retry wait when a fresh patch arrives', async () => {
+    it('should short-circuit the retry wait when a fresh patch arrives', async () => {
       const { actor, harness } = createHarness();
 
       actor.start();
@@ -319,7 +319,7 @@ describe('composerRecordMachine', () => {
       actor.stop();
     });
 
-    it('retains the patch and emits writeStalled when the budget is exhausted', async () => {
+    it('should retain the patch and emit writeStalled when the budget is exhausted', async () => {
       const { actor, harness, emitted } = createHarness({ retryMaxAttempts: 2 });
 
       actor.start();
@@ -344,10 +344,44 @@ describe('composerRecordMachine', () => {
       expect(harness.writes.at(-1)).toEqual({ draft: userMessage('one') });
       actor.stop();
     });
+
+    it('should emit writeStalled on the failure that spends the budget, with no timer advance (G3)', async () => {
+      const { actor, harness, emitted } = createHarness({ retryMaxAttempts: 1 });
+      actor.start();
+      await flush();
+      actor.send({ type: 'patch', fields: { draft: userMessage('one') } });
+      await flush();
+      harness.settle.shift()?.reject(new Error('EIO'));
+      await flush();
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      harness.settle.shift()?.reject(new Error('EIO'));
+      await flush();
+
+      expect(typesOf(emitted)).toEqual(['recordLoaded', 'writeFailed', 'writeFailed', 'writeStalled']);
+      expect(actor.getSnapshot().matches({ writes: 'idle' })).toBe(true);
+      actor.stop();
+    });
+
+    it('should write a retrying patch at once when flushed', async () => {
+      const { actor, harness } = createHarness();
+      actor.start();
+      await flush();
+      actor.send({ type: 'patch', fields: { draft: userMessage('one') } });
+      await flush();
+      harness.settle.shift()?.reject(new Error('EIO'));
+      await flush();
+
+      actor.send({ type: 'flushNow' });
+      await flush();
+
+      expect(harness.writes).toHaveLength(2);
+      actor.stop();
+    });
   });
 
   describe('unrepairable input (P28)', () => {
-    it('drops the offending fields so a later good patch still persists', async () => {
+    it('should drop the offending fields so a later good patch still persists', async () => {
       const { actor, harness, emitted } = createHarness({
         write: async (fields, index) => {
           if (fields.draft !== undefined) {
@@ -376,7 +410,7 @@ describe('composerRecordMachine', () => {
       actor.stop();
     });
 
-    it('spends no retry attempt on a patch that can never succeed', async () => {
+    it('should spend no retry attempt on a patch that can never succeed', async () => {
       const { actor, harness } = createHarness({
         write: async (fields) => {
           if (fields.draft !== undefined) {
@@ -402,7 +436,7 @@ describe('composerRecordMachine', () => {
   });
 
   describe('removal', () => {
-    it('drains the in-flight write before removing the record', async () => {
+    it('should drain the in-flight write before removing the record', async () => {
       const { actor, harness, emitted } = createHarness();
 
       actor.start();
@@ -425,7 +459,7 @@ describe('composerRecordMachine', () => {
       actor.stop();
     });
 
-    it('removes immediately when no write is in flight', async () => {
+    it('should remove immediately when no write is in flight', async () => {
       const { actor, harness } = createHarness();
 
       actor.start();
@@ -438,7 +472,7 @@ describe('composerRecordMachine', () => {
       actor.stop();
     });
 
-    it('removes a record whose read has not settled', async () => {
+    it('should remove a record whose read has not settled', async () => {
       const { actor, harness } = createHarness({
         read: async () =>
           new Promise<ComposerRecordReadResult>(() => {
@@ -455,7 +489,7 @@ describe('composerRecordMachine', () => {
       actor.stop();
     });
 
-    it('writes nothing once the record has been removed, so a deleted draft cannot come back', async () => {
+    it('should write nothing once the record has been removed, so a deleted draft cannot come back', async () => {
       // Deleting a chat removes its record through the store without stopping
       // this actor; a late flush from the composer must not recreate the file.
       const { actor, harness } = createHarness();
@@ -477,7 +511,7 @@ describe('composerRecordMachine', () => {
       expect(harness.removes).toEqual([0]);
     });
 
-    it('starts no write once removal has begun, even for a patch that arrives mid-drain', async () => {
+    it('should start no write once removal has begun, even for a patch that arrives mid-drain', async () => {
       const { actor, harness } = createHarness();
 
       actor.start();
@@ -498,7 +532,7 @@ describe('composerRecordMachine', () => {
       expect(actor.getSnapshot().matches({ lifecycle: 'removed' })).toBe(true);
     });
 
-    it('does not re-persist the leftovers of an unwritable patch once removal has begun', async () => {
+    it('should not re-persist the leftovers of an unwritable patch once removal has begun', async () => {
       const { actor, harness } = createHarness();
 
       actor.start();
@@ -515,7 +549,7 @@ describe('composerRecordMachine', () => {
       expect(actor.getSnapshot().matches({ lifecycle: 'removed' })).toBe(true);
     });
 
-    it('abandons a retrying patch on removal instead of retrying it into a deleted file', async () => {
+    it('should abandon a retrying patch on removal instead of retrying it into a deleted file', async () => {
       const { actor, harness } = createHarness();
 
       actor.start();
@@ -535,7 +569,7 @@ describe('composerRecordMachine', () => {
       expect(actor.getSnapshot().matches({ lifecycle: 'removed' })).toBe(true);
     });
 
-    it('reaches removed even when the store cannot delete the record', async () => {
+    it('should reach removed even when the store cannot delete the record', async () => {
       const { actor, emitted } = createHarness({
         remove: async () => {
           throw new Error('EBUSY');
@@ -553,7 +587,20 @@ describe('composerRecordMachine', () => {
     });
   });
 
-  it('keeps the loaded record available to hydration consumers', async () => {
+  it('should start no write for a patch that carries no fields (S8)', async () => {
+    const { actor, harness } = createHarness();
+    actor.start();
+    await flush();
+
+    actor.send({ type: 'patch', fields: {} });
+    await flush();
+
+    expect(harness.writes).toEqual([]);
+    expect(actor.getSnapshot().matches({ writes: 'idle' })).toBe(true);
+    actor.stop();
+  });
+
+  it('should keep the loaded record available to hydration consumers', async () => {
     const record: ComposerRecord = { version: 1, toolChoice: ['cad'], mode: 'agent' };
     const { actor } = createHarness({ read: async () => ({ status: 'valid', record }) });
 
@@ -565,7 +612,7 @@ describe('composerRecordMachine', () => {
     actor.stop();
   });
 
-  it('never starts a second timer of its own', () => {
+  it('should never start a second timer of its own', () => {
     // The debounce stays in `draftMachine`; the only delay this machine owns is
     // the retry curve, so an idle machine schedules nothing.
     const { actor } = createHarness({

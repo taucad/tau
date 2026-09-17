@@ -1,4 +1,9 @@
+/* eslint-disable @nx/enforce-module-boundaries -- the measurement contract has one owner, shared by both harnesses. */
 import { z } from 'zod';
+// oxlint-disable-next-line no-restricted-imports -- one owner for the measurement contract both harnesses answer to.
+import { maximumBudgetCoefficientOfVariation } from '../../../runtime-e2e/src/benchmarks/measurement-tags.ts';
+// oxlint-disable-next-line no-restricted-imports -- same owner, type only.
+import type { MeasurementTags } from '../../../runtime-e2e/src/benchmarks/measurement-tags.ts';
 
 /* oxlint-disable tau-lint/no-time-unit-suffix -- The durable benchmark artifact names its millisecond unit explicitly. */
 
@@ -27,6 +32,35 @@ const provenanceSchema = z.object({
   nanorasterTarballSha256: recordedSha256Schema,
 });
 
+/**
+ * The conditions a capture run was measured under (charter D14). The shape is
+ * owned by `apps/runtime-e2e/src/benchmarks/measurement-tags.ts` so both
+ * harnesses answer the budget question the same way; this is its durable view.
+ */
+export const measurementTagsSchema: z.ZodType<MeasurementTags> = z.object({
+  build: z.enum(['development', 'production']),
+  wasmVariant: z.string().min(1),
+  adapter: z.object({
+    api: z.enum(['none', 'webgl', 'webgpu']),
+    angle: z.enum(['default', 'metal', 'none', 'swiftshader']),
+    name: z.string(),
+    implementation: z.enum(['ambiguous', 'hardware', 'software']),
+  }),
+  kernelProcess: z.object({
+    kind: z.enum(['in-process', 'native', 'utility', 'worker']),
+    role: z.string().min(1),
+    pid: z.number().int().positive().optional(),
+  }),
+  crossOriginIsolated: z.boolean(),
+  contention: z.object({
+    tag: z.enum(['contended', 'quiet']),
+    source: z.enum(['load-average', 'operator']),
+    loadAverage1m: z.number().nonnegative(),
+    cpuCount: z.number().int().positive(),
+  }),
+  runtimeTraceJsonl: z.string().min(1).optional(),
+});
+
 const summarySchema = z.object({
   count: z.number().int().positive(),
   minimum: z.number().nonnegative(),
@@ -37,6 +71,8 @@ const summarySchema = z.object({
   mean: z.number().nonnegative(),
   standardDeviation: z.number().nonnegative(),
   coefficientOfVariation: z.number().nonnegative(),
+  /** False when the samples are too spread to mean anything: the scenario is refused, not averaged. */
+  varianceAccepted: z.boolean(),
 });
 
 export const benchmarkArtifactSchema = z.object({
@@ -45,6 +81,11 @@ export const benchmarkArtifactSchema = z.object({
   startedAt: z.iso.datetime(),
   finishedAt: z.iso.datetime(),
   provenance: provenanceSchema.optional(),
+  /**
+   * Absent on a run recorded before S0. Such a run is attribution evidence and
+   * never a budget — `budgetVerdict` refuses it.
+   */
+  measurement: measurementTagsSchema.optional(),
   environment: z.object({
     browser: z.string().min(1),
     launchArguments: z.array(z.string()),
@@ -124,6 +165,7 @@ export const summarizeSamples = (samples: readonly BenchmarkSample[]): Benchmark
     mean,
     standardDeviation,
     coefficientOfVariation: mean === 0 ? 0 : standardDeviation / mean,
+    varianceAccepted: mean === 0 ? true : standardDeviation / mean <= maximumBudgetCoefficientOfVariation,
   };
 };
 
@@ -145,3 +187,4 @@ export const adapterCohort = (adapter: BenchmarkArtifact['environment']['adapter
   `${adapter.backend}:${adapter.deviceType}:${adapter.name}`;
 
 /* oxlint-enable tau-lint/no-time-unit-suffix -- Durable artifact field scope ends here. */
+/* eslint-enable @nx/enforce-module-boundaries -- cross-harness measurement owner scope ends here. */

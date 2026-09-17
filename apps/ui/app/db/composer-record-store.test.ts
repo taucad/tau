@@ -97,7 +97,10 @@ const memoryClient = (initial?: Readonly<Record<string, string>>) => {
       if (names.length === 0) {
         throw notFound(path);
       }
-      expect(options).toEqual({ recursive: true });
+      // A real non-recursive rmdir refuses a directory that still holds files.
+      if (options?.recursive !== true) {
+        throw Object.assign(new Error(`ENOTEMPTY: ${path}`), { code: 'ENOTEMPTY' });
+      }
       for (const name of names) {
         files.delete(`${path}/${name}`);
       }
@@ -195,6 +198,19 @@ describe('composer record store', () => {
               type: 'file',
               url: `../${imageHash}.jpg`,
               mediaType: 'image/jpeg',
+            },
+          ]),
+        }),
+      ],
+      [
+        'an attachment whose extension contradicts its media type (S9)',
+        JSON.stringify({
+          version: 1,
+          draft: userMessage([
+            {
+              type: 'file',
+              url: `attachments/${documentHash}.pdf`,
+              mediaType: 'image/png',
             },
           ]),
         }),

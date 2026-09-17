@@ -37,6 +37,20 @@ def main(params: Params):
 """
 
 
+HELPER_MODEL = """from dataclasses import dataclass
+from build123d import Box
+
+import helper
+
+@dataclass(frozen=True)
+class Params:
+    depth: float = 3.0
+
+def main(params: Params):
+    return Box(helper.WIDTH, params.depth, 4)
+"""
+
+
 CUT_MODEL = """from dataclasses import dataclass
 from build123d import Box, Cylinder
 
@@ -170,6 +184,7 @@ class WorkerTest(unittest.TestCase):
             (root / "link").symlink_to(root / "real", target_is_directory=True)
             sibling = parent / "workspace-sibling"
             sibling.mkdir()
+            known = frozenset(sys.modules)
             module_paths = {
                 "tau_test_project": root / "module.py",
                 "tau_test_package": root / "package" / "module.py",
@@ -206,44 +221,30 @@ class WorkerTest(unittest.TestCase):
             for module in modules:
                 sys.modules[module.__name__] = module
             try:
-                class ModuleSnapshot(dict[str, object]):
-                    copies = 0
-
-                    def copy(self) -> dict[str, object]:
-                        self.copies += 1
-                        return super().copy()
-
-                pathlib_result = {}
-                for name, module in tuple(sys.modules.items()):
-                    file_name = getattr(module, "__file__", None)
-                    if not isinstance(file_name, str):
-                        continue
-                    path = Path(file_name)
-                    if not path.is_absolute():
-                        path = path.absolute()
-                    if worker._is_relative_to(path, root) and path.suffix == ".py":
-                        pathlib_result[name] = path.relative_to(root).as_posix()
-                self.assertEqual(worker._project_modules(root), pathlib_result)
+                worker._record_project_modules(root, known)
                 self.assertEqual(
-                    worker._project_modules(root),
+                    dict(worker._LOADED_PROJECT_MODULES),
                     {
                         project_module.__name__: "module.py",
                         package_module.__name__: "package/module.py",
                         linked_module.__name__: "link/module.py",
                     },
                 )
-                snapshot = ModuleSnapshot(sys.modules)
-                with patch.object(worker.sys, "modules", snapshot):
-                    self.assertEqual(worker._project_modules(root), pathlib_result)
-                self.assertEqual(snapshot.copies, 1)
+                # Modules already loaded when the build started are never the build's own imports.
+                worker._record_project_modules(root, frozenset(sys.modules))
+                self.assertEqual(dict(worker._LOADED_PROJECT_MODULES), {})
+
+                worker._record_project_modules(root, known)
                 with patch("worker.importlib.invalidate_caches") as invalidate:
-                    worker._evict_project_modules(root)
+                    worker._evict_project_modules()
                     invalidate.assert_called_once()
+                self.assertEqual(dict(worker._LOADED_PROJECT_MODULES), {})
                 self.assertNotIn(project_module.__name__, sys.modules)
                 self.assertNotIn(package_module.__name__, sys.modules)
                 self.assertNotIn(linked_module.__name__, sys.modules)
                 self.assertIn(sibling_module.__name__, sys.modules)
             finally:
+                worker._LOADED_PROJECT_MODULES.clear()
                 for module in modules:
                     sys.modules.pop(module.__name__, None)
 
@@ -347,6 +348,41 @@ class WorkerTest(unittest.TestCase):
                     self.assertRaisesRegex(TypeError, message),
                 ):
                     worker._load_model(root, "main.py", {})
+
+    def test_project_module_memo_is_invalidated_by_an_edited_dependency(self) -> None:
+        """W14: the per-interpreter memo evicts the modules the previous build imported, failed builds included."""
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            helper = root / "helper.py"
+            entry = root / "main.py"
+            helper.write_text("WIDTH = 2.0\n", encoding="utf-8")
+            entry.write_text(HELPER_MODEL, encoding="utf-8")
+            sys.path.insert(0, str(root))
+            try:
+                # The worker runs as `python -I -B` (python-session.ts:110); without that, edits inside one
+                # mtime tick would be served from a stale __pycache__ entry instead of from the memo.
+                with patch.object(sys, "dont_write_bytecode", True):
+                    shapes, observed = worker._load_model(root, "main.py", {})
+                    self.assertEqual(observed, ["helper.py", "main.py"])
+                    self.assertAlmostEqual(shapes[0].bounding_box().size.X, 2.0)
+
+                    # A build that imports the dependency and then fails still records it for the next eviction.
+                    helper.write_text("WIDTH = 7.0\n", encoding="utf-8")
+                    entry.write_text(
+                        HELPER_MODEL.replace("return Box", "raise ValueError('boom')\n    return Box"), encoding="utf-8"
+                    )
+                    with self.assertRaisesRegex(ValueError, "boom"):
+                        worker._load_model(root, "main.py", {})
+
+                    helper.write_text("WIDTH = 9.0\n", encoding="utf-8")
+                    entry.write_text(HELPER_MODEL, encoding="utf-8")
+                    shapes, observed = worker._load_model(root, "main.py", {})
+                    self.assertAlmostEqual(shapes[0].bounding_box().size.X, 9.0)
+                    self.assertEqual(observed, ["helper.py", "main.py"])
+            finally:
+                sys.path.remove(str(root))
+                worker._evict_project_modules()
 
     def test_geometry_helpers_and_worker_dispatch(self) -> None:
         from build123d import Axis, Box, Compound, Cylinder, Sphere

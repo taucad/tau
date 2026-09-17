@@ -13,6 +13,7 @@ import {
   listViewerSelectableFiles,
   replaceViewerNewTabWithFile,
   createInheritedGraphicsSettings,
+  reconcileViewerPanelPaths,
   ViewerEmptyFilePicker,
 } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
@@ -32,6 +33,39 @@ describe('ensureViewerGroup', () => {
 
     expect(addGroup).toHaveBeenCalledOnce();
     expect(groups).toHaveLength(1);
+  });
+});
+
+describe('reconcileViewerPanelPaths', () => {
+  const createPanel = (id: string, params: Record<string, unknown>) => ({
+    id,
+    params,
+    api: { close: vi.fn(), setTitle: vi.fn(), updateParameters: vi.fn() },
+  });
+
+  it('retitles a renamed viewer and closes a deleted one', () => {
+    const renamed = createPanel('view-renamed', { viewId: 'view-renamed', entryPath: 'models/box-corner.js' });
+    const deleted = createPanel('view-deleted', { viewId: 'view-deleted', entryPath: 'models/gone.js' });
+    const unchanged = createPanel('view-same', { viewId: 'view-same', entryPath: 'models/same.js' });
+    const launcher = createPanel('pane:new', { mode: 'launcher' });
+    const api = { panels: [renamed, deleted, unchanged, launcher] } as unknown as DockviewApi;
+    const graphicsSettings = { ...defaultGraphicsSettings };
+
+    reconcileViewerPanelPaths(api, {
+      'view-renamed': { entryPath: 'models/box-corner2.js', graphicsSettings },
+      'view-deleted': { entryPath: undefined, graphicsSettings },
+      'view-same': { entryPath: 'models/same.js', graphicsSettings },
+    });
+
+    expect(renamed.api.updateParameters).toHaveBeenCalledExactlyOnceWith({ entryPath: 'models/box-corner2.js' });
+    expect(renamed.api.setTitle).toHaveBeenCalledExactlyOnceWith('box-corner2.js');
+    expect(deleted.api.close).toHaveBeenCalledOnce();
+    for (const panel of [renamed, unchanged, launcher]) {
+      expect(panel.api.close).not.toHaveBeenCalled();
+    }
+    for (const panel of [unchanged, launcher]) {
+      expect(panel.api.updateParameters).not.toHaveBeenCalled();
+    }
   });
 });
 

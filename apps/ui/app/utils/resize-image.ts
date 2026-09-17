@@ -7,7 +7,12 @@
  */
 const MAX_DIMENSION = 1568;
 
-/** Maximum base64 data URL length (~1 MB raw after base64 expansion). */
+/**
+ * Maximum base64 data URL length (~1 MB raw after base64 expansion). The
+ * upload compression target, deliberately well inside the store's image cap
+ * (`attachmentCapBytes('image')`, 4 MiB): only a `preserveOriginal` capture
+ * can reach that cap, and the store refuses it there.
+ */
 export const MAX_DATA_URL_LENGTH = 1_398_102;
 
 /** JPEG quality steps tried in order until the output fits. */

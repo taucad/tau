@@ -1,5 +1,5 @@
 import { convert, createQuantity } from '@taucad/units/quantity';
-import type { CurrentFileParameterEntry } from '@taucad/types';
+import type { FileParameterEntry } from '@taucad/types';
 import type { UnitDiagnostic } from '@taucad/units/unit';
 import type { ParameterBinding, ParameterManifest } from '#manifest.js';
 import { resolveParameterBinding } from '#manifest.js';
@@ -12,9 +12,7 @@ export type ParameterFieldDisplay = Readonly<{
 }>;
 
 /** Persisted project binding that can refine an admitted field projection. @public */
-export type ParameterFieldAuthorityBinding = NonNullable<
-  CurrentFileParameterEntry['groups'][string]['bindings']
->[string];
+export type ParameterFieldAuthorityBinding = NonNullable<FileParameterEntry['groups'][string]['bindings']>[string];
 
 /** UI-neutral projection of one effective parameter binding. @public */
 export type ParameterFieldProjection = Readonly<{

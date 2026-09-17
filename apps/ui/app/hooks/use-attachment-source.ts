@@ -6,12 +6,21 @@
  * it and served as an object URL. One object URL exists per absolute path,
  * however many consumers show it, and it is revoked when the last of them
  * unmounts. A `data:` URL (legacy rows, D14) passes through unchanged.
+ *
+ * `absent` is settled for the life of the consumer: bytes that arrive later (a
+ * sync still landing) show once the part remounts. D19 asks only for the
+ * placeholder.
  */
 
 import { useEffect, useMemo, useState } from 'react';
 import { createAttachmentStore } from '#db/attachment-store.js';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
-import { attachmentFileName, attachmentReferenceOf, isSupportedAttachmentMediaType } from '#utils/attachment.utils.js';
+import {
+  attachmentFileName,
+  attachmentReferenceOf,
+  attachmentUrlPrefix,
+  isSupportedAttachmentMediaType,
+} from '#utils/attachment.utils.js';
 
 /** What a consumer renders for one file part. */
 export type AttachmentSource =
@@ -46,7 +55,7 @@ type AttachmentRequest = {
   readonly mediaType: string;
 };
 
-const pathOf = (directory: string, url: string): string => `${directory}/${url.slice('attachments/'.length)}`;
+const pathOf = (directory: string, url: string): string => `${directory}/${url.slice(attachmentUrlPrefix.length)}`;
 
 const load = async (entry: CacheEntry, request: AttachmentRequest): Promise<AttachmentSource> => {
   const bytes = await createAttachmentStore(request.client, request.directory).read(request.url);
@@ -104,50 +113,76 @@ export const attachmentDownloadName = (part: {
 };
 
 /**
+ * Where a part's `attachments/` reference may live, most likely first. An open
+ * edit names its composer's directory and then its chat's, because a sent
+ * attachment it re-references stays only in the chat's.
+ */
+export type AttachmentDirectories = string | readonly string[] | undefined;
+
+/**
  * The renderable source of one file part.
  *
- * @param directory - The absolute directory that owns the part's `attachments/` reference, when known.
+ * @param directories - The absolute directories that may own the part's `attachments/` reference, in order; the
+ *   first that holds the bytes wins.
  * @param part - The file part's URL and media type.
- * @returns `ready` with a URL to render, `loading`, or `absent` for bytes this device does not hold.
+ * @returns `ready` with a URL to render, `loading`, or `absent` when no directory on this device holds the bytes.
  */
 export function useAttachmentSource(
-  directory: string | undefined,
+  directories: AttachmentDirectories,
   part: { readonly url: string; readonly mediaType: string },
 ): AttachmentSource {
   // Optional: a surface without a filesystem still renders `data:` parts, and shows references as absent.
   const client = useOptionalFileManager()?.client;
-  const [resolved, setResolved] = useState<{ path: string; source: AttachmentSource } | undefined>(undefined);
+  const [resolved, setResolved] = useState<{ key: string; source: AttachmentSource } | undefined>(undefined);
   const isReference = attachmentReferenceOf(part) !== undefined;
-  const path = isReference && directory !== undefined && client !== undefined ? pathOf(directory, part.url) : undefined;
+  const listed = typeof directories === 'string' ? [directories] : (directories ?? []);
+  // A string, so a caller's fresh array of the same directories does not re-read.
+  const key =
+    isReference && listed.length > 0 && client !== undefined
+      ? listed.map((directory) => pathOf(directory, part.url)).join('\n')
+      : undefined;
   const passthrough = useMemo<AttachmentSource>(() => ({ status: 'ready', src: part.url }), [part.url]);
 
   useEffect(() => {
-    if (path === undefined || directory === undefined || client === undefined) {
+    if (key === undefined || client === undefined) {
       return undefined;
     }
-    const entry = acquire({ client, directory, url: part.url, mediaType: part.mediaType });
+    const held: Array<{ path: string; entry: CacheEntry }> = [];
     let active = true;
     const settle = async (): Promise<void> => {
-      const source = await entry.source;
-      if (active) {
-        setResolved({ path, source });
+      for (const path of key.split('\n')) {
+        const directory = path.slice(0, path.lastIndexOf('/'));
+        const entry = acquire({ client, directory, url: part.url, mediaType: part.mediaType });
+        held.push({ path, entry });
+        // oxlint-disable-next-line no-await-in-loop -- directories are tried in order; a later one is read only when an earlier one lacks the bytes
+        const source = await entry.source;
+        if (!active) {
+          return;
+        }
+        if (source.status !== 'absent') {
+          setResolved({ key, source });
+          return;
+        }
       }
+      setResolved({ key, source: absent });
     };
-    // async-iife: bootstrap — the shared entry owns the read; a consumer that unmounted ignores its result
+    // async-iife: bootstrap — the shared entries own the reads; a consumer that unmounted ignores their results
     void settle();
     return () => {
       active = false;
-      release(path, entry);
+      for (const { path, entry } of held) {
+        release(path, entry);
+      }
     };
-  }, [client, directory, part.mediaType, part.url, path]);
+  }, [client, key, part.mediaType, part.url]);
 
   if (!isReference) {
     // `data:` and other legacy URLs render as they are.
     return passthrough;
   }
-  if (path === undefined) {
+  if (key === undefined) {
     // Nowhere to read the bytes from on this surface.
     return absent;
   }
-  return resolved?.path === path ? resolved.source : loading;
+  return resolved?.key === key ? resolved.source : loading;
 }

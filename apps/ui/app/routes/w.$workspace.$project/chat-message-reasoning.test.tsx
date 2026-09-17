@@ -177,7 +177,7 @@ describe('ChatMessageReasoning', () => {
     const first = reasoning('First', { state: 'streaming' });
     const { rerender } = renderReasoning([first], { active: true });
 
-    await user.click(screen.getByRole('button', { name: 'Thought briefly' }));
+    await user.click(screen.getByRole('button', { name: 'Thinking…' }));
     rerender(
       <ChatMessageReasoning
         parts={[first, reasoning('Second', { state: 'streaming' })]}
@@ -186,8 +186,21 @@ describe('ChatMessageReasoning', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'Thought briefly' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: 'Thinking…' })).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText('Second')).not.toBeInTheDocument();
+  });
+
+  it('says Thinking while the trailing thought streams and its duration once it ends (S04)', () => {
+    const live = renderReasoning([reasoning('Checking the grid', { state: 'streaming' })], { active: true });
+    expect(screen.getByRole('button', { name: 'Thinking…' })).toHaveAttribute('aria-expanded', 'true');
+    live.unmount();
+
+    const history = renderReasoning([reasoning('Checked', { state: 'streaming' })], { hasContent: true });
+    expect(screen.getByRole('button', { name: 'Thought briefly' })).toBeInTheDocument();
+    history.unmount();
+
+    renderReasoning([reasoning('Checked')], { active: true });
+    expect(screen.getByRole('button', { name: 'Thought briefly' })).toBeInTheDocument();
   });
 
   it('renders active reasoning open, completed upstream reasoning closed, and no blank placeholder', () => {

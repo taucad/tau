@@ -158,8 +158,8 @@ vi.mock('@taucad/host', () => ({
   discoverAcpAgents: vi.fn(async () => ({ agents: [], refused: [] })),
   externalAgentDescriptors: vi.fn(() => []),
 }));
-vi.mock('#tau/kernel-host?modulePath', () => ({ default: '/kernel-host.js' }));
-vi.mock('#tau/services-host?modulePath', () => ({ default: '/services-host.js' }));
+vi.mock('#tau/kernel-host.entry?modulePath', () => ({ default: '/kernel-host.entry.js' }));
+vi.mock('#tau/services-host.entry?modulePath', () => ({ default: '/services-host.entry.js' }));
 vi.mock('#main/compute-store.worker?modulePath', () => ({
   default: new URL('compute-store.worker.ts', import.meta.url),
 }));
@@ -217,6 +217,9 @@ vi.mock('#main/services-broker.js', () => ({
 vi.mock('#main/utility-environment.js', () => ({
   loginShellEnvironment: vi.fn(async () => undefined),
   packagedEsbuildEnvironment: vi.fn(() => ({})),
+  compileCacheEnvironment: vi.fn((userDataPath: string) => ({
+    TAU_COMPILE_CACHE_DIR: join(userDataPath, 'compile-cache'),
+  })),
   utilityEnvironment: vi.fn((_environment: unknown, additions: NodeJS.ProcessEnv = {}) => {
     state.utilityEnvironmentAdditions.push(additions);
     return {};
@@ -303,6 +306,12 @@ describe('desktop main compute owner', () => {
       expect(state.utilityEnvironmentAdditions.at(-1)?.['TAU_DESKTOP_AUTHORITY_DIR']).toBe(
         join(state.userData, 'filesystem-authority'),
       );
+      /* W12: every forked realm is told where its compile cache lives, and it is
+       * the app's own data root — never the read-only signed bundle. */
+      expect(state.utilityEnvironmentAdditions.length).toBeGreaterThanOrEqual(2);
+      for (const additions of state.utilityEnvironmentAdditions) {
+        expect(additions['TAU_COMPILE_CACHE_DIR']).toBe(join(state.userData, 'compile-cache'));
+      }
       const off = state.resolveFork!({ projectRoot, computeMode: 'off' });
       expect(off.compute).toEqual({ mode: 'off' });
       expect(state.workers).toHaveLength(0);

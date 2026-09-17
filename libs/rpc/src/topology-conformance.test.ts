@@ -288,7 +288,8 @@ describe('Channel<P> topology conformance', () => {
     // The Electron arm: a `worker_threads` channel driven through its emitter
     // API is the same shape as `MessagePortMain`, so the adapter is exercised
     // without an Electron binary. `bytes` proves the copy-only transfer list —
-    // the `ArrayBuffer` is filtered out and the payload still arrives whole.
+    // the `ArrayBuffer` is filtered out, the payload still arrives whole, and
+    // the assertion below pins that the caller keeps its buffer.
     const channel = new NodeMessageChannel();
     const serverPort = wrapMessagePortMain<unknown>(channel.port1, { label: 'T5.server' });
     const clientPort = wrapMessagePortMain<unknown>(channel.port2, { label: 'T5.client' });
@@ -301,6 +302,14 @@ describe('Channel<P> topology conformance', () => {
     expect(result.echo).toBe('hi');
     expect(result.bytesLength).toBe(8);
     expect(result.ticks).toEqual([0, 1, 2]);
+
+    /* I10: nothing but a port crosses this wire. A caller that asks for a
+     * transfer gets a copy — the payload arrives whole and it keeps its
+     * buffer, instead of the far end receiving an empty one. */
+    const owned = new Uint8Array(new ArrayBuffer(8));
+    expect(await client.call('bytes', { value: { bytes: owned }, transferables: [owned.buffer] })).toBe(8);
+    expect(owned.buffer.byteLength).toBe(8);
+
     await new Promise<void>((resolve) => {
       setImmediate(resolve);
     });

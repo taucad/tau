@@ -386,7 +386,7 @@ describe('useCadChatClient', () => {
     const { result } = renderHook(() => useCadChatClient());
 
     act(() => {
-      result.current.submit({ text: 'commit before dispatch' });
+      void result.current.submit({ text: 'commit before dispatch' });
     });
 
     expect(actions.sendMessage).not.toHaveBeenCalled();
@@ -394,6 +394,32 @@ describe('useCadChatClient', () => {
     await waitFor(() => {
       expect(actions.sendMessage).toHaveBeenCalledOnce();
     });
+  });
+
+  it('keeps submit pending until the admitted message is handed to the chat (S01)', async () => {
+    const admission = Promise.withResolvers<void>();
+    workspaceHarness.admissionGate = admission.promise;
+    useActiveChatInstanceMock.mockReturnValue(mock<Chat<MyUIMessage>>());
+    const actions = buildActions();
+    installActions(actions);
+    const { result } = renderHook(() => useCadChatClient());
+
+    let settled = false;
+    const submitAndRecord = async (): Promise<void> => {
+      await result.current.submit({ text: 'wait for admission' });
+      settled = true;
+    };
+    let pending: Promise<void> = Promise.resolve();
+    act(() => {
+      pending = submitAndRecord();
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    admission.resolve();
+    await act(async () => pending);
+    expect(settled).toBe(true);
+    expect(actions.sendMessage).toHaveBeenCalledOnce();
   });
 
   it('surfaces a bounded admission wait on the chat error banner instead of dropping the submit', async () => {
@@ -416,7 +442,7 @@ describe('useCadChatClient', () => {
     try {
       const { result } = renderHook(() => useCadChatClient());
       act(() => {
-        result.current.submit({ text: 'wedged behind a dead run' });
+        void result.current.submit({ text: 'wedged behind a dead run' });
       });
 
       await act(async () => vi.advanceTimersByTimeAsync(20_000));
@@ -498,7 +524,7 @@ describe('useCadChatClient', () => {
     expect(browserHostHarness.syncProjectRoots).not.toHaveBeenCalled();
 
     act(() => {
-      result.current.submit({ text: 'Build it.' });
+      void result.current.submit({ text: 'Build it.' });
     });
     await waitFor(() => {
       expect(actions.sendMessage).toHaveBeenCalled();
@@ -542,7 +568,7 @@ describe('useCadChatClient', () => {
 
     const { result } = renderHook(() => useCadChatClient());
     act(() => {
-      result.current.submit({ text: 'Build it.' });
+      void result.current.submit({ text: 'Build it.' });
     });
 
     await waitFor(() => {
@@ -575,7 +601,7 @@ describe('useCadChatClient', () => {
 
     const { result } = renderHook(() => useCadChatClient());
     act(() => {
-      result.current.submit({ text: 'Build it.' });
+      void result.current.submit({ text: 'Build it.' });
     });
 
     await waitFor(() => {
@@ -671,7 +697,7 @@ describe('useCadChatClient', () => {
     expect(browserHostHarness.syncProjectRoots).not.toHaveBeenCalled();
 
     act(() => {
-      result.current.submit({ text: 'Build it.' });
+      void result.current.submit({ text: 'Build it.' });
     });
     await waitFor(() => {
       expect(actions.sendMessage).toHaveBeenCalled();
@@ -706,7 +732,7 @@ describe('useCadChatClient', () => {
     });
     await browserHostHarness.registration!.createClient();
     act(() => {
-      result.current.submit({ text: 'Build it.' });
+      void result.current.submit({ text: 'Build it.' });
     });
     await waitFor(() => {
       expect(actions.sendMessage).toHaveBeenCalled();
@@ -768,7 +794,7 @@ describe('useCadChatClient', () => {
 
     const { result } = renderHook(() => useCadChatClient());
     act(() => {
-      result.current.submit({ text: 'Build it.' });
+      void result.current.submit({ text: 'Build it.' });
     });
 
     await waitFor(() => {
@@ -956,7 +982,7 @@ describe('useCadChatClient', () => {
     const { result } = renderHook(() => useCadChatClient());
 
     act(() => {
-      result.current.submit({ text: 'hello world' });
+      void result.current.submit({ text: 'hello world' });
     });
 
     await waitFor(() => {
@@ -980,7 +1006,7 @@ describe('useCadChatClient', () => {
     const { result } = renderHook(() => useCadChatClient());
 
     act(() => {
-      result.current.submit({ text: 'look at this', attachments: [imageAttachment] });
+      void result.current.submit({ text: 'look at this', attachments: [imageAttachment] });
     });
 
     await waitFor(() => {
@@ -1010,7 +1036,7 @@ describe('useCadChatClient', () => {
     const { result } = renderHook(() => useCadChatClient());
 
     act(() => {
-      result.current.submit({ text: 'look at this', attachments: [imageAttachment] });
+      void result.current.submit({ text: 'look at this', attachments: [imageAttachment] });
     });
 
     await waitFor(() => {
@@ -1031,7 +1057,7 @@ describe('useCadChatClient', () => {
     const { result } = renderHook(() => useCadChatClient());
 
     act(() => {
-      result.current.submit({ text: 'read the spec', attachments: [pdfAttachment] });
+      void result.current.submit({ text: 'read the spec', attachments: [pdfAttachment] });
     });
 
     expect(promoteDraftAttachments).not.toHaveBeenCalled();
@@ -1053,7 +1079,7 @@ describe('useCadChatClient', () => {
       const { result } = renderHook(() => useCadChatClient());
 
       act(() => {
-        result.current.submit({ text: 'double submit' });
+        void result.current.submit({ text: 'double submit' });
         result.current.edit('msg_edit', { text: 'edit while busy' });
         result.current.retry('msg_retry');
         result.current.regenerateTail();
@@ -1432,7 +1458,7 @@ describe('useCadChatClient', () => {
     const { result, rerender } = renderHook(() => useCadChatClient());
 
     act(() => {
-      result.current.submit({ text: 'first' });
+      void result.current.submit({ text: 'first' });
     });
     await waitFor(() => {
       expect(actions.sendMessage).toHaveBeenCalledOnce();
@@ -1445,7 +1471,7 @@ describe('useCadChatClient', () => {
     rerender();
 
     act(() => {
-      result.current.submit({ text: 'second' });
+      void result.current.submit({ text: 'second' });
     });
 
     expect(actions.sendMessage).toHaveBeenCalledTimes(1);
@@ -1500,7 +1526,7 @@ describe('useCadChatClient', () => {
     // No retained claim: the submit must mint one through `prepare` too.
     workspaceHarness.current = undefined;
     act(() => {
-      result.current.submit({ text: 'branch mode' });
+      void result.current.submit({ text: 'branch mode' });
     });
     await waitFor(() => {
       expect(actions.sendMessage).toHaveBeenCalledOnce();
@@ -1528,7 +1554,7 @@ describe('useCadChatClient', () => {
     const { result, rerender } = renderHook(() => useCadChatClient());
 
     act(() => {
-      result.current.submit({ text: 'no revision on the wire' });
+      void result.current.submit({ text: 'no revision on the wire' });
     });
     await waitFor(() => {
       expect(actions.sendMessage).toHaveBeenCalledOnce();
@@ -1546,7 +1572,7 @@ describe('useCadChatClient', () => {
     workspaceHarness.current = undefined;
     rerender();
     act(() => {
-      result.current.submit({ text: 'second turn' });
+      void result.current.submit({ text: 'second turn' });
     });
     await waitFor(() => {
       expect(workspaceHarness.prepare.mock.calls.at(-1)?.[0]).toBe('chat_test');

@@ -256,3 +256,50 @@ describe('ParametersWidget boolean contract', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 });
+
+describe('ParametersWidget authoritative commits', () => {
+  it('commits a boolean as one field instead of replacing the whole group', () => {
+    const setValue = vi.fn(async () => undefined);
+    const onChange = vi.fn();
+    const props = widgetProps({ name: 'width', schema: { type: 'boolean' }, value: false, onChange });
+    props.registry.formContext = {
+      ...formContext,
+      parameterEdit: {
+        kind: 'authoritative',
+        commit: {
+          target: { authority: 'test', root: '/', entry: 'main.ts' },
+          group: 'default',
+          editorInstance: 'editor',
+          input: vi.fn(),
+          setValue,
+        },
+      },
+    };
+    renderWidget(props);
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Toggle for Width' }));
+
+    expect(setValue).toHaveBeenCalledWith({ pointer: '/width', value: true });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('keeps transient forms on the RJSF change path', () => {
+    const onChange = vi.fn();
+    renderWidget(widgetProps({ name: 'width', schema: { type: 'boolean' }, value: false, onChange }));
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Toggle for Width' }));
+
+    expect(onChange).toHaveBeenCalledWith(true);
+  });
+
+  it('admits the empty numeric fallback through the numeric constraints', () => {
+    const onChange = vi.fn();
+    renderWidget(widgetProps({ value: undefined, schema: { type: 'number', minimum: 0, maximum: 10 }, onChange }));
+    const input = screen.getByRole('spinbutton', { name: 'Input for Width' });
+
+    fireEvent.change(input, { target: { value: '-3' } });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: '4' } });
+    expect(onChange).toHaveBeenCalledWith(4);
+  });
+});

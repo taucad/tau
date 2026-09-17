@@ -9,9 +9,6 @@ const harness = vi.hoisted(() => ({
     getChat: vi.fn().mockResolvedValue(undefined),
     patchChat: vi.fn().mockResolvedValue(undefined),
     touchChatRecency: vi.fn().mockResolvedValue(undefined),
-    setChatUnreadState: vi.fn().mockResolvedValue(undefined),
-    setMessageEdit: vi.fn().mockResolvedValue(undefined),
-    clearMessageEdit: vi.fn().mockResolvedValue(undefined),
     consumeChatStartupRequest: vi.fn().mockResolvedValue(undefined),
     commitCancelledDraftRestore: vi.fn().mockResolvedValue(undefined),
   },
@@ -65,7 +62,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({
 }));
 
 const { ChatSessionStoreProvider, useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
-const { UnloadProvider } = await import('#hooks/use-flush-on-close.js');
+const { UnloadProvider, useFlushOnClose } = await import('#hooks/use-flush-on-close.js');
 const { GlobalChatFlushGuard } = await import('#components/global-chat-flush-guard.js');
 const { ChatSessionStore } = await import('#services/chat-session-store.js');
 
@@ -77,7 +74,7 @@ const { ChatSessionStore } = await import('#services/chat-session-store.js');
  * `ChatInstanceRecord`s by hand; with the store, every acquired session is
  * a first-class object whose XState refs we can intercept directly.
  */
-function renderWithStore(): {
+function renderWithStore(onSessionStage: () => void = () => undefined): {
   store: InstanceType<typeof ChatSessionStore>;
   unmount: () => void;
 } {
@@ -85,6 +82,8 @@ function renderWithStore(): {
 
   function Capture(): ReactNode {
     captured = useChatSessionStore();
+    // Session close preparation starts only once every producer has settled.
+    useFlushOnClose(onSessionStage, { stage: 'session' });
     return null;
   }
 
@@ -192,6 +191,25 @@ describe('GlobalChatFlushGuard', () => {
 
     expect(persistenceSend).not.toHaveBeenCalled();
     expect(draftSend).not.toHaveBeenCalled();
+  });
+
+  it('should hold session preparation until every composer record has been written (R9)', async () => {
+    const sessionStage = vi.fn();
+    const { store } = renderWithStore(sessionStage);
+    const written = Promise.withResolvers<void>();
+    const flushComposerRecords = vi.spyOn(store, 'flushComposerRecords').mockReturnValue(written.promise);
+
+    dispatchVisibilityHidden();
+    await Promise.resolve();
+
+    expect(flushComposerRecords).toHaveBeenCalledOnce();
+    expect(sessionStage).not.toHaveBeenCalled();
+
+    written.resolve();
+
+    await vi.waitFor(() => {
+      expect(sessionStage).toHaveBeenCalledOnce();
+    });
   });
 
   it('does nothing when no sessions are live', () => {

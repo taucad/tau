@@ -617,73 +617,6 @@ describe('chat file store', () => {
     });
   });
 
-  describe('duplicateChat carries activeExecution + activeKernel', () => {
-    it('should copy activeExecution and activeKernel into the duplicated chat', async () => {
-      const store = createStore();
-      const original = await store.createChat('resource_test', {
-        name: 'Original',
-        messages: [],
-        activeExecution: { kind: 'tau', model: 'gpt-5.4-medium' },
-        activeKernel: 'manifold',
-      });
-      await sleep(2);
-
-      const copy = await store.duplicateChat(original.id);
-
-      expect(copy.id).not.toBe(original.id);
-      expect(copy.activeExecution).toEqual({ kind: 'tau', model: 'gpt-5.4-medium' });
-      expect(copy.activeKernel).toBe('manifold');
-      expect(copy.recencyAt).toBe(copy.createdAt);
-      expect(copy.recencyAt).toBeGreaterThan(original.recencyAt!);
-    });
-
-    it('should leave duplicate fields undefined when the source chat had none', async () => {
-      const store = createStore();
-      const original = await store.createChat('resource_test', {
-        name: 'Original',
-        messages: [],
-      });
-
-      const copy = await store.duplicateChat(original.id);
-
-      expect(copy.activeExecution).toBeUndefined();
-      expect(copy.activeKernel).toBeUndefined();
-    });
-
-    it('should not copy one-shot startup intent into the duplicated chat', async () => {
-      const store = createStore();
-      const message = userMessage('initial');
-      const original = await store.createChat('resource_test', {
-        name: 'Original',
-        messages: [message],
-        startupRequest: startupRequest(message.id),
-      });
-
-      const copy = await store.duplicateChat(original.id);
-
-      expect(copy.messages).toEqual(original.messages);
-      expect(copy.startupRequest).toBeUndefined();
-    });
-
-    it('should not copy one-shot startup intent when duplicating all resource chats', async () => {
-      const store = createStore();
-      const sourceProject = { projectId: nextProjectId() };
-      const targetProject = { projectId: nextProjectId() };
-      const message = userMessage('initial');
-      const original = await store.createChat(sourceProject.projectId, {
-        name: 'Original',
-        messages: [message],
-        startupRequest: startupRequest(message.id),
-      });
-
-      const mapping = await store.duplicateResourceChats(sourceProject.projectId, targetProject.projectId);
-      const copiedChat = await store.getChat(mapping[original.id]!);
-
-      expect(copiedChat?.messages).toEqual(original.messages);
-      expect(copiedChat?.startupRequest).toBeUndefined();
-    });
-  });
-
   describe('softDeleteChat', () => {
     it('should set deletedAt and bump updatedAt atomically', async () => {
       const store = createStore();
@@ -709,12 +642,11 @@ describe('chat file store', () => {
  * A chat is its record and its log; its composer is not (blueprint W8, D3, D4).
  *
  * `draft`, `messageEdits` and `hasUnreadTurn` moved to this device's composer
- * records, so the chat store neither holds nor hands them out, and a copy of a
- * chat starts with an empty composer.
+ * records, so the chat store neither holds nor hands them out. A chat is not
+ * duplicated (R4).
  */
 describe('chat file store — composer fields are not the chat’s (W8)', () => {
   const composerFields = ['draft', 'messageEdits', 'hasUnreadTurn'];
-  const composerRecord = (project: string, chatId: string): string => `/.tau/composers/chats/${project}/${chatId}.json`;
 
   it('creates, reads and lists chats with no composer field', async () => {
     const store = createStore();
@@ -727,34 +659,6 @@ describe('chat file store — composer fields are not the chat’s (W8)', () => 
         expect(chat).not.toHaveProperty(field);
       }
     }
-  });
-
-  it('duplicates a chat and its project’s chats without composer state or records (D4)', async () => {
-    const files = createStoreWithFiles();
-    const projectId = nextProjectId();
-    const targetProjectId = nextProjectId();
-    const original = await files.store.createChat(projectId, { name: 'Original', messages: [] });
-    await files.write(
-      composerRecord(projectId, original.id),
-      `${JSON.stringify({ version: 1, draft: draftMessage('mine alone') })}\n`,
-    );
-    /* A caller from before W8 that still names the old field. */
-    await files.store.updateChat(original.id, {
-      ...original,
-      draft: draftMessage('held in memory'),
-    } as unknown as Chat);
-
-    const copy = await files.store.duplicateChat(original.id);
-    const mapping = await files.store.duplicateResourceChats(projectId, targetProjectId);
-    const projectCopy = await files.store.getChat(mapping[original.id]!);
-
-    for (const chat of [copy, projectCopy]) {
-      for (const field of composerFields) {
-        expect(chat).not.toHaveProperty(field);
-      }
-    }
-    await expect(files.exists(composerRecord(projectId, copy.id))).resolves.toBe(false);
-    await expect(files.exists(composerRecord(targetProjectId, mapping[original.id]!))).resolves.toBe(false);
   });
 });
 

@@ -115,28 +115,6 @@ export const deferredRecordStore = (bound: Promise<ComposerBinding | undefined>)
 };
 
 /**
- * Stop a record actor once no write is on the wire, so a closing chat keeps
- * its last keystroke. A retrying write is abandoned; it is failing anyway.
- *
- * @param ref - The record actor to stop.
- */
-export const stopWhenWritesSettle = async (ref: ComposerRecordRef): Promise<void> => {
-  const settled = (snapshot: ReturnType<ComposerRecordRef['getSnapshot']>): boolean =>
-    snapshot.status !== 'active' || !snapshot.matches({ writes: 'persisting' });
-  if (!settled(ref.getSnapshot())) {
-    await new Promise<void>((resolve) => {
-      const subscription = ref.subscribe((snapshot) => {
-        if (settled(snapshot)) {
-          subscription.unsubscribe();
-          resolve();
-        }
-      });
-    });
-  }
-  ref.stop();
-};
-
-/**
  * Remove a record through its actor and wait for the actor to finish (D11).
  * `removed` is terminal, so the actor drops every patch sent afterwards.
  *

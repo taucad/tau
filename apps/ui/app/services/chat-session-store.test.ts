@@ -3529,7 +3529,6 @@ describe('ChatSessionStore — composer records (W7)', () => {
     expect(session.draftActorRef.getSnapshot().context.draftAttachments).toEqual(before);
     // The image copied before the PDF failed is taken back: nothing references it (G10).
     expect(client.namesUnder(chatAttachmentsDirectory(projectId, chatId))).toEqual([]);
-    expect(harness.created.at(-1)!.sendMessage).not.toHaveBeenCalled();
     store.release(chatId);
   });
 
@@ -3589,6 +3588,70 @@ describe('ChatSessionStore — composer records (W7)', () => {
     await settle();
 
     expect(client.json(composerPath(projectId, chatId))).toBeUndefined();
+  });
+
+  it('should resolve flushComposerRecords only once the record write on the wire has landed (R9)', async () => {
+    const client = createMemoryClient();
+    const { store } = openStore(client);
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.composerRecordRef.getSnapshot().matches({ lifecycle: 'usable' })).toBe(true);
+    });
+    const onWire = Promise.withResolvers<void>();
+    const write = client.writeFile.bind(client);
+    vi.spyOn(client, 'writeFile').mockImplementationOnce(async (path, data) => {
+      await onWire.promise;
+      await write(path, data);
+    });
+    session.draftActorRef.send({ type: 'setDraftText', text: 'typed before hiding' });
+
+    const flushing = store.flushComposerRecords();
+    const early = await Promise.race([flushing.then(() => 'flushed'), settle().then(() => 'pending')]);
+    expect(early).toBe('pending');
+
+    onWire.resolve();
+    await flushing;
+
+    expect(client.json(composerPath(projectId, chatId))).toMatchObject({
+      draft: { parts: [{ type: 'text', text: 'typed before hiding' }] },
+    });
+    store.release(chatId);
+  });
+
+  it('should write a record that is waiting out a retry when flushed (R9)', async () => {
+    const client = createMemoryClient();
+    const { store } = openStore(client);
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.composerRecordRef.getSnapshot().matches({ lifecycle: 'usable' })).toBe(true);
+    });
+    vi.spyOn(client, 'writeFile').mockRejectedValueOnce(Object.assign(new Error('EIO'), { code: 'EIO' }));
+    session.draftActorRef.send({ type: 'setDraftMode', mode: 'plan' });
+    await vi.waitFor(() => {
+      expect(session.composerRecordRef.getSnapshot().matches({ writes: 'retrying' })).toBe(true);
+    });
+
+    await store.flushComposerRecords();
+
+    expect(client.json(composerPath(projectId, chatId))).toEqual({ version: 1, mode: 'plan' });
+    store.release(chatId);
+  });
+
+  it('should report a failed unread write on the project unread record actor (G2)', async () => {
+    vi.stubGlobal('document', { visibilityState: 'hidden', hasFocus: () => false });
+    const client = createMemoryClient();
+    const { store } = openStore(client);
+    store.acquire(chatId, projectId);
+    const failed = vi.fn();
+    store.unreadRecordRef(projectId).on('writeFailed', failed);
+    vi.spyOn(client, 'writeFile').mockRejectedValueOnce(Object.assign(new Error('EACCES'), { code: 'EACCES' }));
+
+    harness.created.at(-1)!.finish();
+
+    await vi.waitFor(() => {
+      expect(failed).toHaveBeenCalledOnce();
+    });
+    store.release(chatId);
   });
 
   it('still opens the chat when its record cannot be read', async () => {

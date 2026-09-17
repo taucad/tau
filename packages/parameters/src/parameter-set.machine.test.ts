@@ -106,14 +106,14 @@ it('publishes only the latest overlapping load and keeps the last good snapshot 
   ).start();
   const loaded: string[] = [];
   actor.on('loaded', (event) => loaded.push(event.current.path));
-  actor.send({ type: 'resolve' });
+  actor.send({ type: 'resolve', resolution: { mode: 'declared-only' } });
   expect(loads).toHaveLength(2);
   loads[1]!.resolve({ ...fixture.snapshot, path: 'b' });
   await waitFor(actor, (state) => state.matches({ open: 'ready' }));
   loads[0]!.resolve({ ...fixture.snapshot, path: 'a' });
   await Promise.resolve();
   expect(loaded).toEqual(['b']);
-  actor.send({ type: 'resolve' });
+  actor.send({ type: 'resolve', resolution: { mode: 'default' } });
   loads[2]!.reject(Object.assign(new Error('Producer failed'), { code: 'RESOLUTION_FAILED' }));
   await waitFor(actor, (state) => state.matches({ open: 'disconnected' }));
   expect(actor.getSnapshot().context).toMatchObject({
@@ -311,13 +311,15 @@ it('coalesces queued edits, settles every superseded request, and preserves fina
   const transientB = harness.submit({ ...request, requestId: 'transient-b', pressure: 'transient' });
   const final = harness.submit({ ...request, requestId: 'final' });
   const late = harness.submit({ ...request, requestId: 'late', pressure: 'transient' });
-  expect(harness.actor.getSnapshot().context.pending?.requestId).toBe('final');
+  // Transients for the same operation displace each other; the final is never displaced and a later
+  // transient queues behind it instead of being refused.
+  expect(harness.actor.getSnapshot().context.pending.map(({ requestId }) => requestId)).toEqual(['final', 'late']);
   expect(await transientA).toMatchObject({ status: 'cancelled-before-apply', requestId: 'transient-a' });
   expect(await transientB).toMatchObject({ status: 'cancelled-before-apply', requestId: 'transient-b' });
-  expect(await late).toMatchObject({ status: 'rejected', requestId: 'late' });
   gate.resolve();
   expect(await active).toMatchObject({ status: 'committed' });
   expect(await final).toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+  expect(await late).toMatchObject({ status: 'rejected', requestId: 'late' });
   expect(harness.counts().writes).toBe(1);
   harness.actor.stop();
 });

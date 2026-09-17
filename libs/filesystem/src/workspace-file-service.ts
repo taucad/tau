@@ -650,6 +650,12 @@ export class WorkspaceFileService {
       const { resolution } = resolveLocal(path);
       return resolution.provider.stat(resolution.path);
     };
+    const readdirEntries = captured.provider.readdirEntries
+      ? async (path: string): Promise<DirectoryEntry[]> => {
+          const { resolution } = resolveLocal(path);
+          return resolution.provider.readdirEntries!(resolution.path);
+        }
+      : undefined;
     const getFileMode = captured.provider.getFileMode
       ? async (path: string) => {
           const { resolution } = resolveLocal(path);
@@ -799,6 +805,7 @@ export class WorkspaceFileService {
       writeFileChecked,
       appendFile,
       readdir,
+      readdirEntries,
       stat,
       getFileMode,
       setFileMode,

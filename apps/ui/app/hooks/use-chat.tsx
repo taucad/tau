@@ -50,7 +50,12 @@ import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import type { ChatSession } from '#services/chat-session-store.js';
 import type { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
-import type { DraftAttachment, DraftAttachmentModel, draftMachine } from '#hooks/draft.machine.js';
+import type {
+  DraftAttachment,
+  DraftAttachmentModel,
+  DraftAttachmentSource,
+  draftMachine,
+} from '#hooks/draft.machine.js';
 import type { AttachmentReference } from '#utils/attachment.utils.js';
 import type { ChatMode } from '#routes/w.$workspace.$project/chat-mode-selector.js';
 
@@ -417,6 +422,11 @@ export type DraftAttachmentOptions = {
   readonly preserveOriginal?: boolean;
 };
 
+const sourceFields = (
+  source: DraftAttachmentSource,
+): { dataUrl: string } | { bytes: Uint8Array<ArrayBuffer>; mediaType: string } =>
+  typeof source === 'string' ? { dataUrl: source } : source;
+
 export type DraftActions = {
   setDraftText: (text: string) => void;
   /**
@@ -429,7 +439,7 @@ export type DraftActions = {
    * emitted by the machine for one toast subscriber, so callers MUST NOT wrap
    * this in try/catch.
    */
-  addDraftAttachment: (dataUrl: string, options: DraftAttachmentOptions) => void;
+  addDraftAttachment: (source: DraftAttachmentSource, options: DraftAttachmentOptions) => void;
   removeDraftAttachment: (index: number) => void;
   setDraftToolChoice: (toolChoice: string | string[]) => void;
   setDraftMode: (mode: string) => void;
@@ -438,10 +448,10 @@ export type DraftActions = {
   exitEditMode: () => void;
   setEditDraftText: (text: string) => void;
   /**
-   * Add a raw data URL to the message-edit draft. Same contract as
+   * Add a raw data URL (or a document's bytes) to the message-edit draft. Same contract as
    * {@link DraftActions.addDraftAttachment}.
    */
-  addEditDraftAttachment: (dataUrl: string, options: DraftAttachmentOptions) => void;
+  addEditDraftAttachment: (source: DraftAttachmentSource, options: DraftAttachmentOptions) => void;
   removeEditDraftAttachment: (index: number) => void;
   clearMessageEdit: (messageId: string) => void;
 };
@@ -454,8 +464,8 @@ export function useDraftActions(): DraftActions {
       setDraftText(text: string) {
         draftActorRef.send({ type: 'setDraftText', text });
       },
-      addDraftAttachment(dataUrl: string, options: DraftAttachmentOptions) {
-        draftActorRef.send({ type: 'addDraftAttachment', dataUrl, ...options });
+      addDraftAttachment(source: DraftAttachmentSource, options: DraftAttachmentOptions) {
+        draftActorRef.send({ type: 'addDraftAttachment', ...sourceFields(source), ...options });
       },
       removeDraftAttachment(index: number) {
         draftActorRef.send({ type: 'removeDraftAttachment', index });
@@ -479,8 +489,8 @@ export function useDraftActions(): DraftActions {
       setEditDraftText(text: string) {
         draftActorRef.send({ type: 'setEditDraftText', text });
       },
-      addEditDraftAttachment(dataUrl: string, options: DraftAttachmentOptions) {
-        draftActorRef.send({ type: 'addEditDraftAttachment', dataUrl, ...options });
+      addEditDraftAttachment(source: DraftAttachmentSource, options: DraftAttachmentOptions) {
+        draftActorRef.send({ type: 'addEditDraftAttachment', ...sourceFields(source), ...options });
       },
       removeEditDraftAttachment(index: number) {
         draftActorRef.send({ type: 'removeEditDraftAttachment', index });

@@ -52,9 +52,6 @@ const harness = vi.hoisted(() => ({
   created: [] as FakeChat[],
   patchChat: vi.fn(),
   touchChatRecency: vi.fn(),
-  setChatUnreadState: vi.fn(),
-  setMessageEdit: vi.fn(),
-  clearMessageEdit: vi.fn(),
   getChat: vi.fn(),
   consumeChatStartupRequest: vi.fn(),
   commitCancelledDraftRestore: vi.fn(),
@@ -213,9 +210,6 @@ vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({
     patchChat: harness.patchChat,
     touchChatRecency: harness.touchChatRecency,
-    setChatUnreadState: harness.setChatUnreadState,
-    setMessageEdit: harness.setMessageEdit,
-    clearMessageEdit: harness.clearMessageEdit,
     getChat: harness.getChat,
     consumeChatStartupRequest: harness.consumeChatStartupRequest,
     commitCancelledDraftRestore: harness.commitCancelledDraftRestore,
@@ -367,9 +361,6 @@ describe('chat session lifecycle wiring (via ChatSessionStore)', () => {
     harness.getChat.mockReset().mockResolvedValue(undefined);
     harness.patchChat.mockReset().mockResolvedValue(undefined);
     harness.touchChatRecency.mockReset().mockResolvedValue(undefined);
-    harness.setChatUnreadState.mockReset().mockResolvedValue(undefined);
-    harness.setMessageEdit.mockReset().mockResolvedValue(undefined);
-    harness.clearMessageEdit.mockReset().mockResolvedValue(undefined);
     harness.consumeChatStartupRequest.mockReset().mockResolvedValue(undefined);
     harness.commitCancelledDraftRestore.mockReset().mockResolvedValue(undefined);
   });
@@ -1008,8 +999,6 @@ describe('hooks resolution rules', () => {
     harness.created = [];
     harness.getChat.mockReset().mockResolvedValue(undefined);
     harness.patchChat.mockReset().mockResolvedValue(undefined);
-    harness.setMessageEdit.mockReset().mockResolvedValue(undefined);
-    harness.clearMessageEdit.mockReset().mockResolvedValue(undefined);
     harness.consumeChatStartupRequest.mockReset().mockResolvedValue(undefined);
     harness.commitCancelledDraftRestore.mockReset().mockResolvedValue(undefined);
   });

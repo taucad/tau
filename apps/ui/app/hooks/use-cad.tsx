@@ -1,4 +1,4 @@
-import { createContext, useContext } from 'react';
+import { createContext, useCallback, useContext } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { cadMachine } from '#machines/cad.machine.js';
@@ -38,11 +38,20 @@ export function useCad(): CadActorRef | undefined {
  * Handles undefined cad actor gracefully by returning the provided default value.
  * Delegates to XState's useSelector for subscription management and re-render optimization.
  *
+ * The wrapper is memoized because `useSyncExternalStoreWithSelector` keys its
+ * memo on selector identity: a wrapper allocated per render makes every
+ * subscription re-run its selector on every render of the subscribing
+ * component, not only on emissions. Pass a module-level selector and a stable
+ * default so the memo holds (enforced by `tau-lint/stable-actor-selector`).
+ *
  * @example
- * const geometry = useCadSelector(state => state.context.geometry, undefined);
- * const status = useCadSelector(state => state.value, undefined);
+ * const geometry = useCadSelector(selectGeometry, undefined);
  */
 export function useCadSelector<T>(selector: (state: SnapshotFrom<typeof cadMachine>) => T, defaultValue: T): T {
   const cadRef = useCad();
-  return useSelector(cadRef, (state) => (state ? selector(state) : defaultValue));
+  const select = useCallback(
+    (state: SnapshotFrom<typeof cadMachine> | undefined) => (state ? selector(state) : defaultValue),
+    [selector, defaultValue],
+  );
+  return useSelector(cadRef, select);
 }

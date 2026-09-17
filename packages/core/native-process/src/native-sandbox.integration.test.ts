@@ -16,19 +16,58 @@ import { SandboxManager } from '@anthropic-ai/sandbox-runtime';
 import { createMockLogger } from '@taucad/runtime-testing';
 import { describe, expect, it } from 'vitest';
 
-import { NativeProcessSession } from '#index.js';
+import { launchInNativeSandbox, NativeProcessSession, nativeSandboxPolicy } from '#index.js';
+
+const writeRuleBlocks = /\((allow|deny) file-write\*\n((?:\s+\((?:subpath|literal) "[^"]*"\)\n)+)/g;
+
+/**
+ * Decide one path's write access against the emitted macOS sandbox profile, the way the kernel does.
+ *
+ * SBPL is last-match-wins, so a rule block's position decides the outcome. Reading the input
+ * configuration back would prove nothing: the runtime unions its own broad defaults into what the
+ * kernel is finally handed.
+ *
+ * @param profile - SBPL text extracted from the launch vector.
+ * @param path - Absolute path to decide.
+ * @returns The effect of the last matching block, or `unmatched` when no block names the path.
+ */
+const emittedWriteVerdict = (profile: string, path: string): 'allow' | 'deny' | 'unmatched' => {
+  let verdict: 'allow' | 'deny' | 'unmatched' = 'unmatched';
+  for (const [, effect, entries] of profile.matchAll(writeRuleBlocks)) {
+    for (const [, subject] of entries!.matchAll(/"([^"]*)"/g)) {
+      if (path === subject || path.startsWith(`${subject!}/`)) {
+        verdict = effect as 'allow' | 'deny';
+      }
+    }
+  }
+  return verdict;
+};
 
 const sandboxAvailable =
   (process.platform === 'darwin' || process.platform === 'linux') &&
   SandboxManager.checkDependencies().errors.length === 0;
 
 type Outcomes = Record<
-  'home_read' | 'temp_read' | 'outside_write' | 'home_write' | 'socket' | 'child_read' | 'artifact_write' | 'home',
+  | 'home_read'
+  | 'temp_read'
+  | 'outside_write'
+  | 'home_write'
+  | 'shared_temp_write'
+  | 'debug_log_write'
+  | 'socket'
+  | 'child_read'
+  | 'artifact_write'
+  | 'home',
   string
 >;
 const denied = ['EPERM', 'EACCES'];
 
-const worker = (paths: Record<'homeCanary' | 'tempCanary' | 'outsideEscape' | 'homeEscape', string>): string => `
+const worker = (
+  paths: Record<
+    'homeCanary' | 'tempCanary' | 'outsideEscape' | 'homeEscape' | 'sharedTempEscape' | 'debugLogEscape',
+    string
+  >,
+): string => `
 const fs = require('node:fs');
 const net = require('node:net');
 const { spawnSync } = require('node:child_process');
@@ -44,6 +83,8 @@ const outcomes = async () => ({
   temp_read: probe(() => fs.readFileSync(${JSON.stringify(paths.tempCanary)})),
   outside_write: probe(() => fs.writeFileSync(${JSON.stringify(paths.outsideEscape)}, 'escaped')),
   home_write: probe(() => fs.writeFileSync(${JSON.stringify(paths.homeEscape)}, 'escaped')),
+  shared_temp_write: probe(() => fs.writeFileSync(${JSON.stringify(paths.sharedTempEscape)}, 'escaped')),
+  debug_log_write: probe(() => fs.writeFileSync(${JSON.stringify(paths.debugLogEscape)}, 'escaped')),
   socket: await connect(),
   child_read: 'exit:' + String(spawnSync('/bin/cat', [${JSON.stringify(paths.homeCanary)}]).status),
   artifact_write: probe(() => fs.writeFileSync(process.env.TMPDIR + '/probe.txt', 'ok')),
@@ -72,7 +113,13 @@ describe.skipIf(!sandboxAvailable && process.env['CI'] === undefined)('native sa
       tempCanary: join(tmpdir(), `tau-sandbox-canary-${id}`),
       outsideEscape: `/tmp/tau-sandbox-escape-${id}`,
       homeEscape: join(homedir(), `tau-sandbox-escape-${id}`),
+      // The sandbox runtime grants these two by default; they must be denied back off. Their parents
+      // are created here so a missing directory cannot pass the probe as ENOENT instead of EPERM.
+      sharedTempEscape: join('/tmp/claude', `tau-sandbox-escape-${id}`),
+      debugLogEscape: join(homedir(), '.claude/debug', `tau-sandbox-escape-${id}`),
     };
+    mkdirSync(dirname(paths.sharedTempEscape), { recursive: true });
+    mkdirSync(dirname(paths.debugLogEscape), { recursive: true });
     writeFileSync(paths.homeCanary, 'secret');
     writeFileSync(paths.tempCanary, 'secret');
     const workerPath = join(workspacePath, 'worker.cjs');
@@ -105,6 +152,8 @@ describe.skipIf(!sandboxAvailable && process.env['CI'] === undefined)('native sa
       expect(denied, `temp_read ${outcome.temp_read}`).toContain(outcome.temp_read);
       expect(denied, `outside_write ${outcome.outside_write}`).toContain(outcome.outside_write);
       expect(denied, `home_write ${outcome.home_write}`).toContain(outcome.home_write);
+      expect(denied, `shared_temp_write ${outcome.shared_temp_write}`).toContain(outcome.shared_temp_write);
+      expect(denied, `debug_log_write ${outcome.debug_log_write}`).toContain(outcome.debug_log_write);
       expect(outcome.socket).not.toBe('allowed');
       expect(outcome.child_read).not.toBe('exit:0');
       expect(outcome.artifact_write).toBe('allowed');
@@ -112,6 +161,8 @@ describe.skipIf(!sandboxAvailable && process.env['CI'] === undefined)('native sa
       expect(existsSync(join(artifactPath, 'probe.txt'))).toBe(true);
       expect(existsSync(paths.outsideEscape)).toBe(false);
       expect(existsSync(paths.homeEscape)).toBe(false);
+      expect(existsSync(paths.sharedTempEscape)).toBe(false);
+      expect(existsSync(paths.debugLogEscape)).toBe(false);
     } finally {
       await session.cleanup();
       rmSync(root, { recursive: true, force: true });
@@ -120,4 +171,59 @@ describe.skipIf(!sandboxAvailable && process.env['CI'] === undefined)('native sa
       }
     }
   }, 60_000);
+
+  // The documented invariant is a property of the profile the kernel receives, not of the
+  // configuration Tau passes in: the runtime unions its own broad write defaults into the former.
+  it.runIf(process.platform === 'darwin')(
+    'should emit a profile whose only write grants are the launch root and the stdio devices',
+    async () => {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), 'tau-native-profile-')));
+      const workspacePath = join(root, 'workspace');
+      const artifactPath = join(root, 'artifacts');
+      mkdirSync(workspacePath);
+      mkdirSync(artifactPath);
+      try {
+        const argv = await launchInNativeSandbox({
+          executablePath: '/bin/echo',
+          arguments: ['probe'],
+          readablePaths: ['/opt/tau-runtime', workspacePath],
+          writablePath: artifactPath,
+          workingDirectory: workspacePath,
+          commandId: 'profile#1',
+        });
+        const profile = /sandbox-exec -p '([\S\s]*?)' \/bin\/sh -c/.exec(argv.join(' '))?.[1]?.replaceAll(`'"'"'`, "'");
+        expect(profile, `no sandbox-exec profile in ${argv.join(' ')}`).toBeDefined();
+
+        // Every default write root the runtime adds is denied back off after its own allow block.
+        // The runtime resolves each root before emitting it, so the probe follows the same symlinks.
+        const escapes = nativeSandboxPolicy().filesystem.denyWrite;
+        expect(escapes.length).toBeGreaterThan(0);
+        for (const root of escapes) {
+          const resolved = existsSync(root) ? realpathSync(root) : root;
+          expect(emittedWriteVerdict(profile!, join(resolved, 'escape.txt')), root).toBe('deny');
+        }
+        expect(emittedWriteVerdict(profile!, join(artifactPath, 'scene.tau-mesh'))).toBe('allow');
+        expect(emittedWriteVerdict(profile!, '/dev/stdout')).toBe('allow');
+        expect(emittedWriteVerdict(profile!, join(workspacePath, 'model.cs'))).not.toBe('allow');
+
+        // Nothing outside the artifact root survives as a write grant except the stdio devices.
+        const granted = [...profile!.matchAll(writeRuleBlocks)]
+          .filter(([, effect]) => effect === 'allow')
+          .flatMap((block) => [...block[2]!.matchAll(/"([^"]*)"/g)].map(([, subject]) => subject!))
+          .filter((subject) => !subject.startsWith('/dev/'))
+          .filter((subject) => emittedWriteVerdict(profile!, join(subject, 'escape.txt')) === 'allow');
+        expect(granted).toEqual([artifactPath]);
+
+        // Sockets are pinned to the runtime's loopback proxy; egress denial is the proxy's, not the
+        // kernel's, so this asserts the corrected claim rather than "network denied outright".
+        const outbound = [...profile!.matchAll(/\(allow network-outbound[^\n"]*"([^\n"]*)"/g)].map(([, host]) => host!);
+        expect(outbound.length).toBeGreaterThan(0);
+        expect(outbound.filter((host) => !/^localhost:\d+$/.test(host))).toEqual([]);
+        expect(profile).not.toContain('(allow network*)');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+    60_000,
+  );
 });

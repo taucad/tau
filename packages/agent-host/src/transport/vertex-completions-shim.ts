@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Vertex's OpenAI-compatible wire uses snake_case keys throughout this module. */
 import type { Context } from '@earendil-works/pi-ai';
+import { util as zodUtility } from 'zod';
 
 /**
  * Vertex AI's OpenAI-compatible Gemini wire carries two fields no OpenAI codec
@@ -28,9 +29,6 @@ interface ChoiceDelta {
   tool_calls?: ToolCallDelta[];
   extra_content?: { google?: { thought?: boolean } };
 }
-
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
  * Rewrite Vertex AI Gemini SSE bytes into the OpenAI-compatible shape pi's
@@ -111,12 +109,12 @@ export const createVertexResponseShim = (signatures: Map<string, string>): Trans
     } catch {
       return line;
     }
-    if (!isObject(chunk) || !Array.isArray(chunk['choices'])) {
+    if (!zodUtility.isObject(chunk) || !Array.isArray(chunk['choices'])) {
       return line;
     }
     let changed = false;
     for (const choice of chunk['choices']) {
-      if (!isObject(choice) || !isObject(choice['delta'])) {
+      if (!zodUtility.isObject(choice) || !zodUtility.isObject(choice['delta'])) {
         continue;
       }
       const delta = choice['delta'] as ChoiceDelta;
@@ -173,15 +171,15 @@ export const echoThoughtSignatures =
         }
       }
     }
-    if (byId.size === 0 || !isObject(payload) || !Array.isArray(payload['messages'])) {
+    if (byId.size === 0 || !zodUtility.isObject(payload) || !Array.isArray(payload['messages'])) {
       return undefined;
     }
     for (const message of payload['messages']) {
-      if (!isObject(message) || !Array.isArray(message['tool_calls'])) {
+      if (!zodUtility.isObject(message) || !Array.isArray(message['tool_calls'])) {
         continue;
       }
       for (const call of message['tool_calls']) {
-        if (!isObject(call) || typeof call['id'] !== 'string') {
+        if (!zodUtility.isObject(call) || typeof call['id'] !== 'string') {
           continue;
         }
         const signature = byId.get(call['id']);

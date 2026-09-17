@@ -95,6 +95,8 @@ export type CadContext = {
   lastSettledRenderId: number;
   /** Bounded, render-scoped progressive scene history. Terminal geometry remains authoritative. */
   sceneTimeline: SceneTimeline;
+  /** Last availability sent to the parent; the send is suppressed while it is unchanged. */
+  notifiedExportAvailability?: boolean;
 };
 
 type KernelConnectedEvent = {
@@ -243,6 +245,8 @@ type RenderModelInput = {
   client: AppRuntimeClient | undefined;
   entryPath: string | undefined;
   parameters: Record<string, unknown>;
+  /** Whether no newer UI render was requested since this one. */
+  isLatestRequest: () => boolean;
 };
 
 const sceneSnapshotReaderActor = fromCallback<SceneSnapshotReaderEvent>(({ sendBack, receive }) => {
@@ -705,12 +709,46 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input })
     throw new Error('No model file is selected');
   }
 
-  await input.client.render({
+  const request = {
     source: { path: input.entryPath },
     parameters: input.parameters,
     content: { includeEdges: true },
-  });
+  } as const;
+  const outcome = await input.client.render(request);
+  // Runtime state events usually stop this actor before the render settles, so ask the machine
+  // whether this is still the latest request. If so, the runtime's watched rerender won, and it
+  // drops a concurrent open of another file (a rename races the watcher reporting the old path
+  // gone). Re-assert this unit's file once.
+  // ponytail: one retry; loop only if a render can keep losing to repeated external edits.
+  if (outcome.superseded && input.isLatestRequest()) {
+    await input.client.render(request);
+  }
 });
+
+/** Traces retained for the telemetry pane. A root span closes its trace, so the cut is trace-aligned. */
+const maxTelemetryTraces = 20;
+/** Entry ceiling so one pathological trace cannot grow the retained window without bound. */
+const maxTelemetryEntries = 2000;
+
+/**
+ * Bound retained telemetry to the most recent traces. `RuntimeTracer` omits
+ * `parentSpanId` on a root span and ends a parent after its children, so
+ * counting roots backwards finds the boundary between whole traces.
+ */
+const boundTelemetryEntries = (entries: TelemetryEntry[]): TelemetryEntry[] => {
+  const windowed = entries.length > maxTelemetryEntries ? entries.slice(-maxTelemetryEntries) : entries;
+  let traces = 0;
+  for (let index = windowed.length - 1; index >= 0; index--) {
+    if (windowed[index]?.detail?.['parentSpanId'] !== undefined) {
+      continue;
+    }
+    traces++;
+    if (traces > maxTelemetryTraces) {
+      return windowed.slice(index + 1);
+    }
+  }
+  return windowed;
+};
 
 const hasExportAvailability = (context: CadContext): boolean =>
   context.latestGeometryOutcome === 'success' &&
@@ -770,10 +808,18 @@ export const cadMachine = setup({
         return;
       }
 
+      // The parent's handler is a no-op when nothing changed, but a handled
+      // event still mints a new snapshot for all of its subscribers.
+      const available = hasExportAvailability(context);
+      if (available === context.notifiedExportAvailability) {
+        return;
+      }
+
+      enqueue.assign({ notifiedExportAvailability: available });
       enqueue.sendTo(context.parentRef, {
         type: 'geometryUnit.exportAvailabilityChanged',
         actorId: self.id,
-        available: hasExportAvailability(context),
+        available,
       });
     }),
     trackProgress: assign({
@@ -785,7 +831,7 @@ export const cadMachine = setup({
     storeTelemetry: assign({
       telemetryEntries({ context, event }) {
         assertEvent(event, 'kernelTelemetry');
-        return [...context.telemetryEntries, ...event.entries];
+        return boundTelemetryEntries([...context.telemetryEntries, ...event.entries]);
       },
     }),
     setEntryPath: assign({
@@ -1320,10 +1366,11 @@ export const cadMachine = setup({
         submitting: {
           invoke: {
             src: 'renderModelActor',
-            input: ({ context }) => ({
+            input: ({ context, self }) => ({
               client: context.kernelClient,
               entryPath: context.entryPath,
               parameters: context.parameters,
+              isLatestRequest: () => self.getSnapshot().context.lastRequestedRenderId === context.lastRequestedRenderId,
             }),
             onDone: {
               target: '#cad.idle',
@@ -1487,6 +1534,12 @@ export const selectCadFailureIssues = (snapshot: CadSnapshot): readonly KernelIs
   return selectIssuesByPrecedence(snapshot.context, ['__connection__', snapshot.context.entryPath, '__render__']);
 };
 
+export const selectCadGeometry = (snapshot: CadSnapshot): Geometry | undefined => snapshot.context.geometry;
+export const selectCadUnits = (snapshot: CadSnapshot): CadContext['units'] => snapshot.context.units;
+export const selectCadKernelClient = (snapshot: CadSnapshot): AppRuntimeClient | undefined =>
+  snapshot.context.kernelClient;
+export const selectIsCadLoading = (snapshot: CadSnapshot): boolean => snapshot.hasTag('cad-loading');
+
 export const selectSceneTimeline = (snapshot: CadSnapshot): SceneTimeline => snapshot.context.sceneTimeline;
 export const selectSceneTimelineEntries = (snapshot: CadSnapshot): SceneTimeline['entries'] =>
   selectSceneTimeline(snapshot).entries;
@@ -1498,11 +1551,24 @@ export const selectSceneTimelineStreamState = (snapshot: CadSnapshot): SceneTime
   selectSceneTimeline(snapshot).streamState;
 export const selectSceneTimelineArtifactSave = (snapshot: CadSnapshot): SceneTimeline['artifactSave'] =>
   selectSceneTimeline(snapshot).artifactSave;
-export const selectCanSaveSelectedSceneStage = (snapshot: CadSnapshot): boolean =>
-  snapshot.context.sceneTimeline.artifactSave.status !== 'saving' &&
-  Boolean(snapshot.context.entryPath) &&
-  Boolean(snapshot.context.fileManagerRef) &&
-  Boolean(selectedPortableSceneStage(snapshot.context.sceneTimeline, snapshot.context.kernelClient));
+/**
+ * Save availability reads the selected entry's own fields. Materialising the
+ * stage stays in `saveSelectedSceneStage`, which already reports an
+ * unmaterialisable selection as a save failure, so a component subscribed to
+ * this selector never replays the timeline.
+ */
+export const selectCanSaveSelectedSceneStage = (snapshot: CadSnapshot): boolean => {
+  const timeline = snapshot.context.sceneTimeline;
+  const selected = timeline.entries.find((entry) => entry.sequence === timeline.selectedSequence);
+  return (
+    timeline.artifactSave.status !== 'saving' &&
+    Boolean(snapshot.context.entryPath) &&
+    Boolean(snapshot.context.fileManagerRef) &&
+    selected !== undefined &&
+    selected.availability !== 'rehydrating' &&
+    selected.availability !== 'unavailable'
+  );
+};
 
 export const selectProgressiveSceneCapability = (snapshot: CadSnapshot): ProgressiveSceneCapability | undefined => {
   const { activeKernelId, capabilities } = snapshot.context;

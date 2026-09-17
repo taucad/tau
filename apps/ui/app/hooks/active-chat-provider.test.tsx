@@ -33,9 +33,6 @@ const harness = vi.hoisted(() => ({
   created: [] as FakeChat[],
   patchChat: vi.fn(),
   touchChatRecency: vi.fn(),
-  setChatUnreadState: vi.fn(),
-  setMessageEdit: vi.fn(),
-  clearMessageEdit: vi.fn(),
   getChat: vi.fn(),
   consumeChatStartupRequest: vi.fn(),
   commitCancelledDraftRestore: vi.fn(),
@@ -133,9 +130,6 @@ vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => ({
     patchChat: harness.patchChat,
     touchChatRecency: harness.touchChatRecency,
-    setChatUnreadState: harness.setChatUnreadState,
-    setMessageEdit: harness.setMessageEdit,
-    clearMessageEdit: harness.clearMessageEdit,
     getChat: harness.getChat,
     consumeChatStartupRequest: harness.consumeChatStartupRequest,
     commitCancelledDraftRestore: harness.commitCancelledDraftRestore,
@@ -256,6 +250,7 @@ const {
   useChatComposer,
 } = await import('#hooks/active-chat-provider.js');
 const { ChatSessionStoreProvider } = await import('#hooks/chat-session-store-provider.js');
+const { UnloadProvider, useFlushOnClose } = await import('#hooks/use-flush-on-close.js');
 
 const testModel: DraftAttachmentModel = {
   name: 'Test Model',
@@ -298,7 +293,9 @@ function createHomeWrapper() {
   return function Wrapper({ children }: { readonly children: ReactNode }) {
     return (
       <StrictMode>
-        <HomeNewProjectComposerProvider>{children}</HomeNewProjectComposerProvider>
+        <UnloadProvider>
+          <HomeNewProjectComposerProvider>{children}</HomeNewProjectComposerProvider>
+        </UnloadProvider>
       </StrictMode>
     );
   };
@@ -308,9 +305,6 @@ beforeEach(() => {
   harness.created = [];
   harness.patchChat.mockReset().mockResolvedValue(undefined);
   harness.touchChatRecency.mockReset().mockResolvedValue(undefined);
-  harness.setChatUnreadState.mockReset().mockResolvedValue(undefined);
-  harness.setMessageEdit.mockReset().mockResolvedValue(undefined);
-  harness.clearMessageEdit.mockReset().mockResolvedValue(undefined);
   harness.getChat.mockReset().mockResolvedValue(undefined);
   harness.consumeChatStartupRequest.mockReset().mockResolvedValue(undefined);
   harness.commitCancelledDraftRestore.mockReset().mockResolvedValue(undefined);
@@ -631,9 +625,11 @@ describe('HomeNewProjectComposerProvider', () => {
     const texts: string[] = [];
     const view = render(
       <StrictMode>
-        <HomeNewProjectComposerProvider>
-          <HomeProbe onRender={(text) => texts.push(text)} />
-        </HomeNewProjectComposerProvider>
+        <UnloadProvider>
+          <HomeNewProjectComposerProvider>
+            <HomeProbe onRender={(text) => texts.push(text)} />
+          </HomeNewProjectComposerProvider>
+        </UnloadProvider>
       </StrictMode>,
     );
 
@@ -662,6 +658,53 @@ describe('HomeNewProjectComposerProvider', () => {
     });
     expect(result.current.execution.execution).toEqual({ kind: 'acp', hostId: 'origin', agentId: 'codex' });
     expect(harness.homeReadFile).toHaveBeenCalledWith(recordPath);
+  });
+
+  it('should keep a keystroke typed just before the Home composer unmounts (R9)', async () => {
+    const { result, unmount } = renderHook(() => useChatComposer(), { wrapper: createHomeWrapper() });
+    await waitFor(() => {
+      expect(harness.homeReadFile).toHaveBeenCalledWith(recordPath);
+    });
+
+    act(() => {
+      result.current.draftActorRef.send({ type: 'setDraftText', text: 'typed then navigated' });
+    });
+    unmount();
+
+    await waitFor(() => {
+      expect(readRecord()).toMatchObject({ draft: { parts: [{ type: 'text', text: 'typed then navigated' }] } });
+    });
+  });
+
+  it('should write the Home draft before session close preparation runs (R9)', async () => {
+    const seenBySession: unknown[] = [];
+    const { result } = renderHook(
+      () => {
+        useFlushOnClose(
+          () => {
+            seenBySession.push(readRecord());
+          },
+          { stage: 'session' },
+        );
+        return useChatComposer();
+      },
+      { wrapper: createHomeWrapper() },
+    );
+    await waitFor(() => {
+      expect(harness.homeReadFile).toHaveBeenCalledWith(recordPath);
+    });
+    act(() => {
+      result.current.draftActorRef.send({ type: 'setDraftText', text: 'typed then hidden' });
+    });
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    await waitFor(() => {
+      expect(seenBySession).toHaveLength(1);
+    });
+    expect(seenBySession[0]).toMatchObject({ draft: { parts: [{ type: 'text', text: 'typed then hidden' }] } });
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
   });
 
   it('should hydrate the Home mode and tool choice from its record (R2)', async () => {

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseLogEvent } from '@taucad/agent-host';
 import type { AgentLiveEvent, AgentLogEvent } from '@taucad/agent-host';
 import type { MyUIMessage } from '@taucad/chat';
+import { getReasoningEndedAtMs } from '@taucad/chat';
 import { readUIMessageStream } from 'ai';
 import type { ReasoningUIPart, UIMessageChunk } from 'ai';
 import { isRecord } from '@taucad/utils/schema';
@@ -1514,5 +1515,147 @@ describe('projectAgentHostUserMessage attachments', () => {
     });
 
     expect(message.parts).toEqual([{ type: 'text', text: 'Still readable.' }]);
+  });
+});
+
+describe('chat activity indicator closeout: projection seams', () => {
+  type AnyEvent = AgentLogEvent | AgentLiveEvent;
+  const external = { tauInternal: { origin: 'external', agentId: 'codex' } } as const;
+  const checkpoint = { tauInternal: { kind: 'stream-checkpoint', streamState: 'checkpoint' } } as const;
+
+  const reduce = async (events: readonly AnyEvent[]): Promise<{ message?: MyUIMessage; error?: unknown }> => {
+    const blocks = new Map();
+    const chunks = events.flatMap((event) =>
+      'leaderEpoch' in event ? projectAgentHostEvent(event, blocks) : projectAgentHostLiveEvent(event, blocks),
+    );
+    const stream = new ReadableStream<UIMessageChunk>({
+      start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(chunk);
+        }
+        controller.close();
+      },
+    });
+    let message: MyUIMessage | undefined;
+    let error: unknown;
+    for await (const next of readUIMessageStream<MyUIMessage>({
+      stream,
+      onError: (reason) => {
+        error ??= reason;
+      },
+    })) {
+      message = next;
+    }
+    return { message, error };
+  };
+
+  const live = (event: Record<string, unknown>): AgentLiveEvent =>
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- compact live-event fixtures
+    ({ chatId: 'chat', runId: base.runId, ...event }) as AgentLiveEvent;
+  const lifecycle = (state: 'admitted' | 'running' | 'paused'): AgentLogEvent => ({
+    ...base,
+    type: 'run.lifecycle',
+    state,
+  });
+  const interrupt = (phase: 'requested' | 'resolved'): AgentLogEvent =>
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- compact interrupt fixture
+    ({
+      ...base,
+      type: 'interrupt.recorded',
+      interruptId: 'int-1',
+      phase,
+      reason: phase === 'requested' ? 'Run npm test?' : 'approved',
+      payload:
+        phase === 'requested'
+          ? { kind: 'approval', prompt: 'Run npm test?', agentId: 'codex' }
+          : { outcome: 'approved' },
+    }) as AgentLogEvent;
+  const acpThought = (thinking: string, streamState: 'checkpoint' | 'final'): AgentLogEvent => ({
+    ...base,
+    type: 'message.appended',
+    message: {
+      id: 'thought-1',
+      role: 'assistant',
+      content: [{ type: 'thinking', thinking }],
+      metadata: { tauInternal: { ...external.tauInternal, streamState } },
+    },
+  });
+  const states = (message: MyUIMessage | undefined): string[] =>
+    (message?.parts ?? []).map((part) => `${part.type}:${String(Reflect.get(part, 'state') ?? '-')}`);
+
+  it('should resume a checkpointed ACP thought after an approval pause without a reducer error', async () => {
+    const thought = { messageId: 'thought-1', contentIndex: 0 };
+    const result = await reduce([
+      lifecycle('admitted'),
+      lifecycle('running'),
+      live({ ...thought, type: 'thinking-start' }),
+      live({ ...thought, type: 'thinking-delta', delta: 'Plan' }),
+      acpThought('Plan', 'checkpoint'),
+      interrupt('requested'),
+      lifecycle('paused'),
+      interrupt('resolved'),
+      lifecycle('running'),
+      live({ ...thought, type: 'thinking-delta', delta: ' more', offset: 4 }),
+      acpThought('Plan more', 'final'),
+    ]);
+
+    expect(result.error).toBeUndefined();
+    const reasoning = result.message?.parts.filter((part) => part.type === 'reasoning');
+    expect(reasoning?.map((part) => [part.text, part.state])).toEqual([['Plan more', 'done']]);
+  });
+
+  it('should keep a native thought open through a checkpoint prestart row and close it on its live end', async () => {
+    const thought = { messageId: 'run-1', contentIndex: 0 };
+    const result = await reduce([
+      lifecycle('admitted'),
+      lifecycle('running'),
+      live({ ...thought, type: 'thinking-start', timestamp: 1000 }),
+      live({ ...thought, type: 'thinking-delta', delta: 'Plan' }),
+      {
+        ...base,
+        type: 'message.appended',
+        message: {
+          id: 'run-1',
+          role: 'assistant',
+          content: [
+            { type: 'thinking', thinking: 'Plan' },
+            { type: 'toolCall', id: 'call-1', name: 'read_file', arguments: { path: 'a.ts' } },
+          ],
+          metadata: { ...checkpoint, reasoningTimings: [{ contentIndex: 0, startedAtMs: 1000 }] },
+        },
+      },
+      live({ ...thought, type: 'thinking-end', content: 'Plan', timestamp: 9000 }),
+    ]);
+
+    expect(result.error).toBeUndefined();
+    const reasoning = result.message?.parts.find((part) => part.type === 'reasoning');
+    expect(reasoning?.state).toBe('done');
+    expect(reasoning && getReasoningEndedAtMs(reasoning)).toBe(9000);
+    expect(states(result.message)).toContain('reasoning:done');
+  });
+
+  it('should keep later text of a checkpoint prestart row on reattach', async () => {
+    const assistant = (
+      text: string,
+      metadata?: typeof checkpoint,
+    ): Extract<AgentLogEvent, { type: 'message.appended' }>['message'] => ({
+      id: 'run-1',
+      role: 'assistant',
+      content: [
+        { type: 'text', text },
+        { type: 'toolCall', id: 'call-1', name: 'read_file', arguments: { path: 'a.ts' } },
+      ],
+      ...(metadata ? { metadata } : {}),
+    });
+    const result = await reduce([
+      lifecycle('admitted'),
+      lifecycle('running'),
+      { ...base, type: 'message.appended', message: assistant('Hello', checkpoint) },
+      live({ messageId: 'run-1', contentIndex: 0, type: 'text-delta', delta: ' world', offset: 5 }),
+      { ...base, type: 'message.envelope-replaced', messageId: 'run-1', replacement: assistant('Hello world') },
+    ]);
+
+    const text = result.message?.parts.find((part) => part.type === 'text');
+    expect(text?.type === 'text' ? [text.text, text.state] : undefined).toEqual(['Hello world', 'done']);
   });
 });

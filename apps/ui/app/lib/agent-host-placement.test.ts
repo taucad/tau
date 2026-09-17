@@ -13,6 +13,7 @@ import {
   shouldAutoOfferCloudPlacement,
 } from '#lib/agent-host-placement.js';
 import { RemoteHostApiError } from '#lib/remote-host-client.js';
+import { getComputeReuseMode, setComputeReuseMode } from '#lib/compute-reuse-preference.js';
 import type { DesktopBridge } from '#filesystem/desktop-bridge.js';
 
 const descriptor = { v: 1, agent: true, label: 'studio-mini', workspaceRoot: '/Users/x/tau-workspace/lamp' } as const;
@@ -443,21 +444,29 @@ describe('launcher 2', () => {
   it('claims the brokered port and wraps it before any command', async () => {
     const channel = new MessageChannel();
     const connect = vi.fn(async () => channel.port1);
+    // Charter D3: the daemon is handed the user's reuse preference, never a
+    // literal — so this asserts a selected mode, not the default.
+    const previousMode = getComputeReuseMode();
+    setComputeReuseMode('memory');
 
-    const client = await openAgentHostChannel('desktop', {
-      projectId: 'proj_widget',
-      workspaceRoot: '/Users/x/Library/Application Support/Tau/home/lamp',
-      bridge: () => ({ agentHost: { connect } }),
-    });
+    try {
+      const client = await openAgentHostChannel('desktop', {
+        projectId: 'proj_widget',
+        workspaceRoot: '/Users/x/Library/Application Support/Tau/home/lamp',
+        bridge: () => ({ agentHost: { connect } }),
+      });
 
-    expect(connect).toHaveBeenCalledWith(
-      '/Users/x/Library/Application Support/Tau/home/lamp',
-      'proj_widget',
-      'durable',
-    );
-    expect(typeof client.execute).toBe('function');
-    client.close();
-    channel.port2.close();
+      expect(connect).toHaveBeenCalledWith(
+        '/Users/x/Library/Application Support/Tau/home/lamp',
+        'proj_widget',
+        'memory',
+      );
+      expect(typeof client.execute).toBe('function');
+      client.close();
+      channel.port2.close();
+    } finally {
+      setComputeReuseMode(previousMode);
+    }
   });
 
   it('refuses an ungranted root after a bounded wait rather than hanging', async () => {

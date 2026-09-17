@@ -723,6 +723,11 @@ export function ExportSchemaForm({
             group: parameterService.snapshot(compiled.entryPath)?.entry.activeGroup ?? 'default',
             editorInstance: parameterEditorInstance,
             input: parameterService.input,
+            setValue: async (field) =>
+              parameterService.submitValue(compiled.target, compiled.manifest, {
+                group: parameterService.snapshot(compiled.entryPath)?.entry.activeGroup ?? 'default',
+                ...field,
+              }),
           },
         });
       } catch (error) {

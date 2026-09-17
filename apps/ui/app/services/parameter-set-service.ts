@@ -1,8 +1,14 @@
+import { Topic } from '@taucad/events';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import type { FileOperation, PreparedFileOperation } from '@taucad/fs-client/file-content-service';
 import { createActor, fromCallback, fromPromise, waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
-import { fileParameterEntrySchema, parameterEntryPath, parametersDirectory } from '@taucad/types';
+import {
+  fileParameterEntrySchema,
+  fileParameterRecordProfile,
+  parameterEntryPath,
+  parametersDirectory,
+} from '@taucad/types';
 import type { JSONValue } from '@taucad/types';
 import { loadParameterSnapshot, refreshParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
 import type { ParameterAuthority } from '@taucad/parameters/authority';
@@ -13,9 +19,10 @@ import type {
   ParameterInputMachineInput,
   ParameterInputMachineEmitted,
 } from '@taucad/parameters/input-machine';
-import { valueAtPointer } from '@taucad/parameters';
+import { serializeParameterRecord, valueAtPointer } from '@taucad/parameters';
 import type {
   ParameterManifest,
+  ParameterSnapshot,
   ParameterSetAuthoritySnapshot,
   ParameterSetIdentity,
   ParameterSetOperation,
@@ -37,6 +44,7 @@ type InputState = {
   handle: RetainedParameterInput;
   attachments: number;
   targetKey: string;
+  entry: string;
   label: string;
   unsubscribe: () => void;
 };
@@ -57,12 +65,33 @@ export type ParameterInputRequest = Omit<ParameterInputMachineInput, 'acknowledg
     acknowledgedRevision?: ParameterSetIdentity;
   }>;
 
+/** One editor draft that has not reached the authority. */
+export type UnsavedParameterDraft = Readonly<{
+  entry: string;
+  label: string;
+  /** `unsubmitted` holds a valid value never entered; `invalid` cannot be submitted as typed. */
+  reason: 'invalid' | 'unsubmitted';
+}>;
+
+/** A close or file operation the service refused because editors still hold unsaved drafts. */
+export type UnsavedParameterDraftsRefusal = Readonly<{
+  operation: 'close' | 'relocate';
+  drafts: readonly UnsavedParameterDraft[];
+}>;
+
 /** Project-lifetime facade over one native parameter actor per authority target. */
 export type ParameterSetService = Readonly<{
   target(filePath: string, authority?: string): ParameterSetTarget;
   snapshot(filePath: string): ParameterSetAuthoritySnapshot | undefined;
   /** The live set actor for an entry, once `resolve`/`resolveTarget` has created it. */
   actor(filePath: string): ActorRefFrom<typeof parameterSetMachine> | undefined;
+  /** Observe set actors being created or retired, for `useSyncExternalStore` readers of `actor`. */
+  subscribeActors(listener: () => void): () => void;
+  /**
+   * Replace an unreadable (invalid or unsupported) record with an empty current record, checked
+   * against the preserved bytes so a concurrent repair is never overwritten.
+   */
+  resetRecord(filePath: string): Promise<void>;
   input(input: ParameterInputRequest): RetainedParameterInput;
   resolve(filePath: string, manifest: ParameterManifest): Promise<ParameterSetAuthoritySnapshot>;
   resolveTarget(target: ParameterSetTarget, manifest: ParameterManifest): Promise<ParameterSetAuthoritySnapshot>;
@@ -86,6 +115,15 @@ export type ParameterSetService = Readonly<{
       expected?: ParameterSetAuthoritySnapshot['identity'];
     }>,
   ): Promise<void>;
+  /**
+   * Commit one field against the authority's current group values, so a form still holding a
+   * pre-commit value of another field never writes it back.
+   */
+  submitValue(
+    target: ParameterSetTarget,
+    manifest: ParameterManifest,
+    field: Readonly<{ group: string; pointer: string; value: JSONValue }>,
+  ): Promise<void>;
   selectGroup(filePath: string, manifest: ParameterManifest, group: string): Promise<void>;
   createGroup(
     filePath: string,
@@ -101,10 +139,13 @@ export type ParameterSetService = Readonly<{
     manifest: ParameterManifest,
     input: Readonly<{ group: string; nextGroup: string }>,
   ): Promise<void>;
-  movePath(oldPath: string, newPath: string, directory: boolean): Promise<void>;
-  deletePath(path: string, directory: boolean): Promise<void>;
+  /** Drafts that would be lost by closing or relocating, optionally for one entry and its descendants. */
+  unsavedDrafts(filePath?: string): readonly UnsavedParameterDraft[];
+  /** Discard every unsaved draft (optionally under one entry path) so a refused operation can proceed. */
+  discardDrafts(filePath?: string): void;
+  /** Observe refusals caused by unsaved drafts, so the UI can ask to discard or keep them. */
+  subscribeUnsavedDrafts(listener: (refusal: UnsavedParameterDraftsRefusal) => void): () => void;
   prepareFileOperation(operation: FileOperation): Promise<PreparedFileOperation>;
-  setBackupOwner(owner: (() => Promise<string>) | undefined): void;
   close(): Promise<void>;
 }>;
 
@@ -113,14 +154,56 @@ const operationError = (outcome: Exclude<ParameterSetOutcome, { status: 'committ
     code: 'code' in outcome ? outcome.code : outcome.status,
   });
 
-const digestBytes = async (bytes: Uint8Array<ArrayBuffer>): Promise<string> => {
-  const digest = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes));
-  return `sha256:${[...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+/** Immutably set one RFC 6901 pointer inside a group's values, creating intermediate objects. */
+const withPointerValue = (
+  values: Readonly<Record<string, JSONValue>>,
+  pointer: string,
+  value: JSONValue,
+): Readonly<Record<string, JSONValue>> => {
+  const [head, ...rest] = pointer
+    .split('/')
+    .slice(1)
+    .map((segment) => segment.replaceAll('~1', '/').replaceAll('~0', '~'));
+  if (head === undefined) {
+    return values;
+  }
+  const child = values[head];
+  const nested =
+    rest.length === 0
+      ? value
+      : withPointerValue(
+          typeof child === 'object' && child !== null && !Array.isArray(child) ? child : {},
+          `/${rest.map((segment) => segment.replaceAll('~', '~0').replaceAll('/', '~1')).join('/')}`,
+          value,
+        );
+  return { ...values, [head]: nested };
 };
 
-const staleManifest = (message: string): Error => Object.assign(new Error(message), { code: 'STALE_MANIFEST' });
+const sameIdentity = (left: ParameterSetIdentity, right: ParameterSetIdentity): boolean =>
+  left.sourceRevision === right.sourceRevision &&
+  left.manifestRevision === right.manifestRevision &&
+  left.valueRevision === right.valueRevision &&
+  left.dependencyRevision === right.dependencyRevision;
 
 /** Create the single browser parameter-set owner for a project. */
+/** A person-readable field name for a pointer, such as `/dimensions/cellSize` → `Dimensions › Cell size`. */
+const draftLabel = (group: string, pointer: string): string => {
+  const path = pointer
+    .split('/')
+    .slice(1)
+    .map((segment) => {
+      const words = segment
+        .replaceAll('~1', '/')
+        .replaceAll('~0', '~')
+        .replaceAll(/[_-]+/gu, ' ')
+        .replaceAll(/([a-z\d])([A-Z])/gu, '$1 $2')
+        .toLowerCase();
+      return words.charAt(0).toUpperCase() + words.slice(1);
+    })
+    .join(' › ');
+  return group === 'default' ? path : `${path} (${group})`;
+};
+
 export const createParameterSetService = (
   options: Readonly<{
     rootDirectory: string;
@@ -133,9 +216,13 @@ export const createParameterSetService = (
   }>,
 ): ParameterSetService => {
   let sequence = 0;
-  let backupOwner: (() => Promise<string>) | undefined;
   const clients = new Map<string, TargetState>();
   const inputs = new Map<string, InputState>();
+  const unsavedRefusals = new Topic<UnsavedParameterDraftsRefusal>({ name: 'unsaved-parameter-drafts' });
+  const actorChanges = new Topic<void>({ name: 'parameter-set-actors' });
+  const actorsChanged = (): void => {
+    actorChanges.emit();
+  };
   /** Editor submissions awaiting their set actor's `settled` emission, keyed by request ID. */
   const pendingSubmissions = new Map<
     string,
@@ -169,19 +256,19 @@ export const createParameterSetService = (
     [...clients.values()].find(({ target }) => target.entry === filePath)?.actor;
   const currentFor = (filePath: string): ParameterSetAuthoritySnapshot | undefined =>
     actorFor(filePath)?.getSnapshot().context.current;
-  const boundValue = (
-    current: ParameterSetAuthoritySnapshot,
-    binding: ParameterInputBinding,
-  ): number | string | undefined => {
-    const value = valueAtPointer(current.entry.groups[binding.group]?.values ?? {}, binding.pointer);
+  /** The value an editor shows: the stored group value, or the manifest default when none is stored. */
+  const boundValue = (current: ParameterSnapshot, binding: ParameterInputBinding): number | string | undefined => {
+    const value =
+      valueAtPointer(current.entry.groups[binding.group]?.values ?? {}, binding.pointer) ??
+      valueAtPointer(current.manifest.defaults as Readonly<Record<string, JSONValue>>, binding.pointer);
     return typeof value === 'number' || typeof value === 'string' ? value : undefined;
   };
   /**
-   * Authority changes reach editors actor-to-actor, and only where the editor's own field moved.
-   * A foreign edit therefore refreshes exactly one input instead of every bound field, and a stale
-   * revision on an untouched field is rebased by the planner from the request's `base`.
+   * Authority changes reach editors actor-to-actor. Every editor of the target hears every identity
+   * change: an unchanged value only adopts the new revision (a source or manifest edit, or another
+   * field's commit), so a retained row never submits against a revision the planner cannot rebase.
    */
-  const refreshInputs = (target: ParameterSetTarget, current: ParameterSetAuthoritySnapshot): void => {
+  const refreshInputs = (target: ParameterSetTarget, current: ParameterSnapshot): void => {
     const key = targetKey(target);
     for (const state of inputs.values()) {
       if (state.targetKey !== key) {
@@ -189,7 +276,10 @@ export const createParameterSetService = (
       }
       const { acknowledged } = state.actor.getSnapshot().context;
       const value = boundValue(current, acknowledged.binding);
-      if (value === undefined || Object.is(value, acknowledged.value)) {
+      if (
+        value === undefined ||
+        (Object.is(value, acknowledged.value) && sameIdentity(current.identity, acknowledged.revision))
+      ) {
         continue;
       }
       state.actor.send({
@@ -202,8 +292,9 @@ export const createParameterSetService = (
   };
   const pathMatches = (candidate: string, path: string): boolean =>
     candidate === path || candidate.startsWith(`${path}/`);
+  const isRelocating = (filePath: string): boolean => [...relocatingPaths].some((path) => pathMatches(filePath, path));
   const assertNotRelocating = (filePath: string): void => {
-    if ([...relocatingPaths].some((path) => pathMatches(filePath, path))) {
+    if (isRelocating(filePath)) {
       throw Object.assign(new Error(`Parameters for ${filePath} are being relocated.`), {
         code: 'PARAMETER_RELOCATING',
       });
@@ -215,35 +306,21 @@ export const createParameterSetService = (
     // oxlint-disable-next-line typescript/no-restricted-types -- null is the filesystem CAS contract for an absent file.
     expected: Uint8Array<ArrayBuffer> | null;
   }>;
+  const sourcePath = (file: string): string => joinPath(options.rootDirectory, file.replace(/^\/+/, ''));
+  /** Pin the manifest's source files as read now; the domain loader proves they match the manifest. */
   const sourcePreconditions = async (
     manifest: ParameterManifest,
     signal: AbortSignal,
-  ): Promise<readonly SourcePrecondition[]> => {
-    if (manifest.scope.kind !== 'source') {
-      return [];
-    }
-    const sourceFiles = Object.entries(manifest.identity.sourceFiles);
-    if (sourceFiles.length === 0) {
-      throw staleManifest('The parameter manifest has no source-file snapshot.');
-    }
-    return Promise.all(
-      sourceFiles.map(async ([filePath, expectedDigest]) => {
-        signal.throwIfAborted();
-        const path = joinPath(options.rootDirectory, filePath.replace(/^\/+/, ''));
-        if (!(await options.client.exists(path))) {
-          if (expectedDigest !== 'missing') {
-            throw staleManifest(`The parameter source ${filePath} no longer matches its manifest.`);
-          }
-          return { path, expected: null };
-        }
-        const bytes = await options.client.readFile(path);
-        if (expectedDigest === 'missing' || (await digestBytes(bytes)) !== expectedDigest) {
-          throw staleManifest(`The parameter source ${filePath} no longer matches its manifest.`);
-        }
-        return { path, expected: bytes };
-      }),
-    );
-  };
+  ): Promise<readonly SourcePrecondition[]> =>
+    manifest.scope.kind === 'source'
+      ? Promise.all(
+          Object.keys(manifest.identity.sourceFiles).map(async (file) => {
+            signal.throwIfAborted();
+            const path = sourcePath(file);
+            return { path, expected: (await options.client.exists(path)) ? await options.client.readFile(path) : null };
+          }),
+        )
+      : [];
 
   const stateFor = (filePath: string, manifest: ParameterManifest, target = targetFor(filePath)): TargetState => {
     if (closed || closing) {
@@ -273,12 +350,7 @@ export const createParameterSetService = (
         return options.client.writeFileChecked(write);
       },
       semanticPreconditions: async (_target, signal) => sourcePreconditions(manifestRef.current, signal),
-      backupLegacy: async () => {
-        if (backupOwner === undefined) {
-          throw Object.assign(new Error('Revision backup owner is unavailable.'), { code: 'LEGACY_READ_ONLY' });
-        }
-        return backupOwner();
-      },
+      sourcePath,
     };
     const actor = createActor(
       parameterSetMachine.provide({
@@ -288,10 +360,7 @@ export const createParameterSetService = (
               ? refreshParameterSnapshot({ current: input.current, authority, signal })
               : loadParameterSnapshot({
                   target,
-                  authority: {
-                    ...authority,
-                    backupLegacy: backupOwner === undefined ? undefined : authority.backupLegacy,
-                  },
+                  authority,
                   manifest: async () => manifestRef.current,
                   signal,
                   resolution: input.resolution,
@@ -317,7 +386,7 @@ export const createParameterSetService = (
       }),
       { input: { target, resolution: manifest.identity.resolution } },
     );
-    let last: ParameterSetAuthoritySnapshot | undefined;
+    let last: ParameterSnapshot | undefined;
     const subscription = actor.subscribe((snapshot) => {
       const { current } = snapshot.context;
       if (current !== undefined && current !== last) {
@@ -328,7 +397,7 @@ export const createParameterSetService = (
     // Settlement is forwarded actor-to-actor inside the emission, so the editing row is
     // acknowledged in the same synchronous turn as the checked write, ahead of any React work.
     const settlement = actor.on('settled', (event) => {
-      const requestId = event.request?.requestId ?? event.outcome.requestId;
+      const { requestId } = event.request;
       const pending = pendingSubmissions.get(requestId);
       if (pending === undefined) {
         return;
@@ -347,6 +416,7 @@ export const createParameterSetService = (
     };
     actor.start();
     clients.set(key, state);
+    actorsChanged();
     return state;
   };
 
@@ -396,6 +466,10 @@ export const createParameterSetService = (
       const resolveThenDispatch = async (event: ParameterInputMachineEmitted, state: TargetState): Promise<void> => {
         try {
           await resolveState(state.target.entry, state);
+          // The editor may have been disposed (retire, close) while the target resolved.
+          if (inputs.get(key)?.actor !== actor || closed || closing) {
+            return;
+          }
           dispatch(event, state);
         } catch (error) {
           settleLocally(event, {
@@ -452,7 +526,8 @@ export const createParameterSetService = (
         handle,
         attachments: 0,
         targetKey: targetKey(actorInput.binding.target),
-        label: `${actorInput.binding.group}:${actorInput.binding.pointer}`,
+        entry: actorInput.binding.target.entry,
+        label: draftLabel(actorInput.binding.group, actorInput.binding.pointer),
         unsubscribe: () => {
           submission.unsubscribe();
         },
@@ -466,10 +541,7 @@ export const createParameterSetService = (
   async function resolveState(_filePath: string, state: TargetState): Promise<ParameterSetAuthoritySnapshot> {
     const matches = (): boolean =>
       state.actor.getSnapshot().context.current?.manifest.revision === state.manifestRef.current.revision;
-    if (
-      (!matches() || (!state.actor.getSnapshot().context.current?.access.writeAllowed && backupOwner !== undefined)) &&
-      !state.actor.getSnapshot().matches({ open: 'loading' })
-    ) {
+    if (!matches() && !state.actor.getSnapshot().matches({ open: 'loading' })) {
       state.actor.send({ type: 'resolve', resolution: state.manifestRef.current.identity.resolution });
     }
     const snapshot = await waitFor(
@@ -494,12 +566,37 @@ export const createParameterSetService = (
     return snapshot.context.current;
   }
 
-  async function closeState(state: TargetState, invalidDrafts: readonly string[]): Promise<void> {
-    if (invalidDrafts.length > 0) {
-      throw Object.assign(new Error('Resolve or discard invalid parameter drafts before closing.'), {
-        code: 'INVALID_DRAFTS',
-      });
+  const draftsUnder = (
+    filePath: string | undefined,
+  ): Array<Readonly<{ key: string; state: InputState; draft: UnsavedParameterDraft }>> =>
+    [...inputs].flatMap(([key, state]) => {
+      const { draft, submission } = state.actor.getSnapshot().context;
+      const { entry } = state;
+      const inFlight = submission !== undefined && submission.outcome === undefined;
+      if (draft?.dirty !== true || inFlight || (filePath !== undefined && !pathMatches(entry, filePath))) {
+        return [];
+      }
+      const reason = draft.status === 'complete-valid' ? 'unsubmitted' : 'invalid';
+      return [{ key, state, draft: { entry, label: state.label, reason } }];
+    });
+  const refuseUnsaved = (operation: UnsavedParameterDraftsRefusal['operation'], filePath?: string): void => {
+    const drafts = draftsUnder(filePath).map(({ draft }) => draft);
+    if (drafts.length === 0) {
+      return;
     }
+    unsavedRefusals.emit({ operation, drafts });
+    const unsubmitted = drafts.filter(({ reason }) => reason === 'unsubmitted').length;
+    throw Object.assign(
+      new Error(
+        unsubmitted === drafts.length
+          ? 'Some parameter edits were typed but not entered. Enter or discard them first.'
+          : 'Some parameter edits are invalid or were not entered. Fix, enter or discard them first.',
+      ),
+      { code: 'UNSAVED_PARAMETER_DRAFTS', drafts },
+    );
+  };
+
+  async function closeState(state: TargetState): Promise<void> {
     state.actor.send({ type: 'close' });
     const snapshot = await waitFor(
       state.actor,
@@ -510,10 +607,17 @@ export const createParameterSetService = (
     }
   }
 
+  /** A reader that arrives mid-relocation waits for the file operation to settle instead of failing. */
   const resolveTarget = async (
     target: ParameterSetTarget,
     manifest: ParameterManifest,
-  ): Promise<ParameterSetAuthoritySnapshot> => resolveState(target.entry, stateFor(target.entry, manifest, target));
+  ): Promise<ParameterSetAuthoritySnapshot> => {
+    while (isRelocating(target.entry) && activeRelocations.size > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- each settled relocation can reveal a newer one.
+      await Promise.all(activeRelocations);
+    }
+    return resolveState(target.entry, stateFor(target.entry, manifest, target));
+  };
 
   const resolve = async (filePath: string, manifest: ParameterManifest): Promise<ParameterSetAuthoritySnapshot> =>
     resolveTarget(targetFor(filePath), manifest);
@@ -553,7 +657,6 @@ export const createParameterSetService = (
       request: {
         requestId,
         draftGeneration: sequence,
-        fingerprint: `${requestId}:${JSON.stringify(operation)}`,
         expected: input.expected ?? current.identity,
         pressure: 'final',
         operation,
@@ -567,6 +670,8 @@ export const createParameterSetService = (
 
   const valuesFor = (values: Readonly<Record<string, unknown>>): Readonly<Record<string, JSONValue>> =>
     fileParameterEntrySchema.parse({
+      recordVersion: 1,
+      profile: fileParameterRecordProfile,
       activeGroup: 'default',
       groups: { default: { values } },
     }).groups['default']!.values;
@@ -575,16 +680,10 @@ export const createParameterSetService = (
     const items = [...clients].filter(([, state]) => state.target.entry === filePath);
     await Promise.all(
       items.map(async ([key, state]) => {
-        const invalidDrafts = [...inputs.values()]
-          .filter(
-            (inputState) =>
-              inputState.targetKey === targetKey(state.target) &&
-              inputState.actor.getSnapshot().context.draft?.dirty === true,
-          )
-          .map(({ label }) => label);
-        await closeState(state, invalidDrafts);
+        await closeState(state);
         state.unsubscribe();
         clients.delete(key);
+        actorsChanged();
         for (const [inputKey, inputState] of inputs) {
           if (inputState.targetKey === targetKey(state.target)) {
             disposeInput(inputKey, inputState);
@@ -616,7 +715,7 @@ export const createParameterSetService = (
     if (closed || closing) {
       throw new DOMException('The parameter service is closed.', 'AbortError');
     }
-    const sourcePath = operation.kind === 'move' ? operation.oldPath : operation.path;
+    const operationPath = operation.kind === 'move' ? operation.oldPath : operation.path;
     const protectedPaths = operation.kind === 'move' ? [operation.oldPath, operation.newPath] : [operation.path];
     for (const path of protectedPaths) {
       relocatingPaths.add(path);
@@ -635,8 +734,9 @@ export const createParameterSetService = (
       activeRelocations.delete(settled.promise);
       settled.resolve();
     };
-    const matches = (candidate: string): boolean => pathMatches(candidate, sourcePath);
+    const matches = (candidate: string): boolean => pathMatches(candidate, operationPath);
     try {
+      refuseUnsaved('relocate', operationPath);
       await Promise.all(
         [...new Set([...clients.values()].map(({ target }) => target.entry))]
           .filter((candidate) => matches(candidate))
@@ -766,6 +866,20 @@ export const createParameterSetService = (
         ...(expected === undefined ? {} : { expected }),
       });
     },
+    submitValue: async (target, manifest, { group, pointer, value }) => {
+      const current = await resolveTarget(target, manifest);
+      await submitOperation({
+        filePath: target.entry,
+        manifest,
+        operation: {
+          kind: 'replace-group-values',
+          group,
+          values: withPointerValue(current.entry.groups[group]?.values ?? {}, pointer, value),
+        },
+        target,
+        expected: current.identity,
+      });
+    },
     selectGroup: async (filePath, manifest, group) => {
       await submitOperation({
         filePath,
@@ -798,28 +912,37 @@ export const createParameterSetService = (
         target: targetFor(filePath),
       });
     },
-    movePath: async (oldPath, newPath, _directory) => {
-      const prepared = await prepareFileOperation({ kind: 'move', oldPath, newPath });
-      try {
-        await prepared.commit();
-      } catch (error) {
-        await prepared.rollback();
-        throw error;
+    subscribeActors: (listener) => actorChanges.subscribe(listener),
+    resetRecord: async (filePath) => {
+      const path = absolutePath(filePath);
+      const preserved = (await options.client.exists(path)) ? await options.client.readFile(path) : null;
+      const result = await options.client.writeFileChecked({
+        path,
+        data: serializeParameterRecord(
+          fileParameterEntrySchema.parse({
+            recordVersion: 1,
+            profile: fileParameterRecordProfile,
+            activeGroup: 'default',
+            groups: { default: { values: {} } },
+          }),
+        ),
+        preconditions: [{ path, expected: preserved }],
+      });
+      if (result.status === 'conflict') {
+        throw Object.assign(new Error('The parameter record changed while it was being reset.'), {
+          code: 'STALE_MANIFEST',
+        });
+      }
+      actorFor(filePath)?.send({ type: 'watch.changed' });
+    },
+    unsavedDrafts: (filePath) => draftsUnder(filePath).map(({ draft }) => draft),
+    discardDrafts: (filePath) => {
+      for (const { state } of draftsUnder(filePath)) {
+        state.actor.send({ type: 'discard' });
       }
     },
-    deletePath: async (path, directory) => {
-      const prepared = await prepareFileOperation({ kind: 'delete', path, directory });
-      try {
-        await prepared.commit();
-      } catch (error) {
-        await prepared.rollback();
-        throw error;
-      }
-    },
+    subscribeUnsavedDrafts: (listener) => unsavedRefusals.subscribe(listener),
     prepareFileOperation,
-    setBackupOwner: (owner) => {
-      backupOwner = owner;
-    },
     close: async () => {
       if (closed) {
         return;
@@ -837,18 +960,9 @@ export const createParameterSetService = (
             code: 'PARAMETER_FILE_OPERATION_INCOMPLETE',
           });
         }
-        const invalidDrafts = new Map<string, string[]>();
-        for (const state of inputs.values()) {
-          if (state.actor.getSnapshot().context.draft?.dirty === true) {
-            const current = invalidDrafts.get(state.targetKey) ?? [];
-            current.push(state.label);
-            invalidDrafts.set(state.targetKey, current);
-          }
-        }
+        refuseUnsaved('close');
         const states = [...clients.values()];
-        await Promise.all(
-          states.map(async (state) => closeState(state, invalidDrafts.get(targetKey(state.target)) ?? [])),
-        );
+        await Promise.all(states.map(async (state) => closeState(state)));
         for (const [key, state] of inputs) {
           disposeInput(key, state);
         }
@@ -858,6 +972,7 @@ export const createParameterSetService = (
         clients.clear();
         pendingSubmissions.clear();
         closed = true;
+        actorsChanged();
       };
       closePromise = operation();
       try {

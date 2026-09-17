@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ProviderMessage } from '#log/event-types.js';
-import { chatAttachmentPath, documentSentinel, materializeAttachments } from '#harness/session-record.js';
+import {
+  absentAttachmentMarker,
+  chatAttachmentPath,
+  documentSentinel,
+  materializeAttachments,
+} from '#harness/session-record.js';
 
 const imageHash = 'a'.repeat(64);
 const pdfHash = 'b'.repeat(64);
@@ -87,8 +92,33 @@ describe('materializeAttachments', () => {
       reader({}),
     );
 
-    expect(outcome.messages[0]?.content).toEqual([]);
-    expect(outcome.absent).toEqual(['a malformed file-ref row']);
+    expect(outcome.messages[0]?.content).toEqual([{ type: 'text', text: absentAttachmentMarker }]);
+    expect(outcome.absent).toEqual([]);
+    expect(outcome.malformed).toBe(1);
+  });
+
+  it('should keep a user message whose only attachment is absent, as a marker the model can read (F10)', async () => {
+    const outcome = await materializeAttachments(
+      [{ id: 'user-only', role: 'user', content: [{ type: 'file-ref', path: imagePath, mimeType: 'image/png' }] }],
+      reader({}),
+    );
+
+    expect(outcome.messages[0]?.content).toEqual([{ type: 'text', text: absentAttachmentMarker }]);
+    expect(outcome.absent).toEqual([imagePath]);
+  });
+
+  it('should treat an attachment the reader cannot read as absent instead of rejecting (F11)', async () => {
+    const read = vi.fn(async (path: string): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+      if (path === imagePath) {
+        throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+      }
+      return pdfBytes;
+    });
+
+    const outcome = await materializeAttachments(history().slice(0, 1), read);
+
+    expect(outcome.absent).toEqual([imagePath]);
+    expect(outcome.documents.has(pdfHash)).toBe(true);
   });
 
   it('builds documents with the caller-supplied block', async () => {

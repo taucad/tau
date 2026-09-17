@@ -29,6 +29,9 @@ import {
 
 const noSubscription = (): (() => void) => () => undefined;
 
+/** Tucked under the user bubble, like a status strip attached to a composer (R11, R12). */
+const cardClassName = 'mx-2 -mt-3 rounded-b-lg border border-t-0 bg-muted/40 pt-3';
+
 const stateKey = (state: TurnRevisionState | undefined): string =>
   state === undefined
     ? ''
@@ -114,7 +117,7 @@ function ExpandableSection({
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen}>
       <CollapsibleTrigger asChild>
-        <Button variant='ghost' size='xs' className='justify-start'>
+        <Button variant='ghost' size='xs' className='-ml-2 justify-start'>
           <ChevronRight aria-hidden className={cn('size-3 transition-transform', isOpen && 'rotate-90')} />
           {label}
         </Button>
@@ -163,14 +166,14 @@ function SavedRevisionDetails({ revision }: { readonly revision: RevisionCard })
         />
       </div>
       <ExpandableSection label={`Files · ${String(changes.length)}`}>
-        <div aria-label='Changed files' className='-mx-3 flex flex-col'>
+        <div aria-label='Changed files' className='-mx-2 flex flex-col'>
           {changes.map((file) => (
             <FileRow key={file.path} file={file} revisionId={revision.revisionId} compareAgainst='parent' />
           ))}
         </div>
       </ExpandableSection>
       <ExpandableSection label='Engineering details'>
-        <dl className='grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 pl-3 text-xs'>
+        <dl className='grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs'>
           <dt className='text-muted-foreground'>Revision</dt>
           <dd className='font-mono break-all'>{revision.revisionId}</dd>
           {revision.createdAt > 0 ? (
@@ -191,8 +194,8 @@ function SavedRevisionDetails({ revision }: { readonly revision: RevisionCard })
 /**
  * One request's revision summary, directly after its user message.
  *
- * Quiet by default: one status line and a visible button. Pending, saved and
- * unconfirmed work update this line in place; a confirmed no-change request
+ * A card attached under the user message whose header is the disclosure.
+ * Pending, saved and unconfirmed work update this line in place; a confirmed no-change request
  * renders nothing. Earlier saved requests link to Revisions instead of
  * expanding in the conversation.
  */
@@ -237,28 +240,29 @@ export const ChatRevisionMarker = memo(function ({
   };
 
   const status = (
-    <span className='flex min-w-0 items-start gap-2 text-xs'>
+    <>
       <StatusIcon state={state} />
-      <span
-        role='status'
-        aria-live='polite'
-        aria-label='Turn revision status'
-        aria-busy={state.kind === 'working' || state.kind === 'saving'}
-        className='min-w-0 wrap-break-word'
-      >
-        {label}
+      <span className='min-w-0 flex-1 wrap-break-word'>
+        <span
+          role='status'
+          aria-live='polite'
+          aria-label='Turn revision status'
+          aria-busy={state.kind === 'working' || state.kind === 'saving'}
+        >
+          {label}
+        </span>
+        {fileSuffix === undefined ? null : <span>{fileSuffix}</span>}
       </span>
-      {fileSuffix === undefined ? null : <span className='shrink-0 text-muted-foreground'>{fileSuffix}</span>}
-    </span>
+    </>
   );
 
   if (savedRevision !== undefined && !isLatestTurn) {
     return (
-      <div aria-label='Turn revision' className='mx-4 flex flex-wrap items-center justify-between gap-2'>
-        {status}
+      <div aria-label='Turn revision' className={cn(cardClassName, 'flex items-center gap-2 pr-1 pl-2')}>
+        <span className='flex min-w-0 flex-1 items-start gap-2 py-1.5 text-xs text-muted-foreground'>{status}</span>
         <Button
           size='xs'
-          variant='outline'
+          variant='ghost'
           onClick={() => {
             openRevisions(savedRevision.revisionId);
           }}
@@ -269,26 +273,32 @@ export const ChatRevisionMarker = memo(function ({
     );
   }
 
+  /* The whole header is the disclosure (R11); Retry stays a separate button
+     because it is an action, not disclosure. */
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen} aria-label='Turn revision' className='mx-4'>
-      <div className='flex flex-wrap items-center justify-between gap-2'>
-        {status}
-        <span className='flex items-center gap-2'>
-          {state.kind === 'unconfirmed' ? (
-            <Button size='xs' variant='outline' onClick={continueChat}>
-              <RotateCcw aria-hidden className='size-3' />
-              Retry
-            </Button>
-          ) : null}
-          <CollapsibleTrigger asChild>
-            <Button size='xs' variant='outline' aria-label='View turn revision details'>
-              {isOpen ? 'Hide details' : savedRevision === undefined ? 'Details' : 'View changes'}
-              <ChevronDown aria-hidden className={cn('size-3 transition-transform', isOpen && 'rotate-180')} />
-            </Button>
-          </CollapsibleTrigger>
-        </span>
+    <Collapsible open={isOpen} onOpenChange={setIsOpen} aria-label='Turn revision' className={cardClassName}>
+      <div className='flex items-start'>
+        <CollapsibleTrigger asChild>
+          <button
+            type='button'
+            aria-label={`${label}${fileSuffix ?? ''} · revision details`}
+            className='group/revision flex min-w-0 flex-1 cursor-action items-start gap-2 rounded-b-lg px-2 py-1.5 text-left text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:focus-outline'
+          >
+            {status}
+            <ChevronDown
+              aria-hidden
+              className='mt-px size-3.5 shrink-0 transition-transform group-data-[state=open]/revision:rotate-180'
+            />
+          </button>
+        </CollapsibleTrigger>
+        {state.kind === 'unconfirmed' ? (
+          <Button size='xs' variant='ghost' className='mt-0.5 mr-1' onClick={continueChat}>
+            <RotateCcw aria-hidden className='size-3' />
+            Retry
+          </Button>
+        ) : null}
       </div>
-      <CollapsibleContent className='mt-3 border-l pl-4'>
+      <CollapsibleContent className='px-4 pb-3'>
         {savedRevision === undefined ? (
           <div className='flex flex-col items-start gap-2'>
             <p className='text-xs leading-relaxed text-muted-foreground'>{turnRevisionDetail(state)}</p>

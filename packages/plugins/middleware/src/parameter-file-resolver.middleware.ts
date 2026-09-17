@@ -4,21 +4,31 @@ import { getActiveGroupValues, parametersDirectory } from '@taucad/runtime/types
 import type { KernelIssue } from '@taucad/runtime/types';
 import { assertRootedPath, isNotFoundError } from '@taucad/runtime/kernel';
 import { defineMiddleware } from '@taucad/runtime/middleware';
-import { readParameterRecord } from '@taucad/parameters';
+import { requireParameterRecord } from '@taucad/parameters';
 
 const encoder = new TextEncoder();
 
-const recordFailure = (code: 'INVALID_RECORD' | 'UNSUPPORTED_RECORD', message: string): Error =>
-  Object.assign(new Error(message), {
-    issues: [
-      {
-        code,
-        message,
-        type: 'runtime',
-        severity: 'error',
-      } satisfies KernelIssue,
-    ],
-  });
+const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/** The kernel issue for a record `requireParameterRecord` refused. */
+const recordIssue = (error: unknown): KernelIssue => ({
+  code:
+    error instanceof Error && 'code' in error && error.code === 'UNSUPPORTED_RECORD'
+      ? 'UNSUPPORTED_RECORD'
+      : 'INVALID_RECORD',
+  message: errorMessage(error),
+  type: 'runtime',
+  severity: 'error',
+});
+
+/** Decode a stored record, reporting an unusable one as the typed kernel issue every reader shares. */
+const recordFrom = (content: string): ReturnType<typeof requireParameterRecord> => {
+  try {
+    return requireParameterRecord(encoder.encode(content));
+  } catch (error) {
+    throw Object.assign(new Error(errorMessage(error)), { issues: [recordIssue(error)] });
+  }
+};
 
 const resolveParameterFilePath = (entryPath: string, parametersDirectoryPath: string): string => {
   const localEntryPath = assertRootedPath(entryPath);
@@ -72,16 +82,7 @@ export const parameterFileResolver = defineMiddleware({
       throw error;
     }
 
-    const decoded = readParameterRecord(encoder.encode(content), {
-      migrationAvailable: false,
-    });
-    if (decoded.status === 'invalid-preserved') {
-      throw recordFailure('INVALID_RECORD', `Invalid parameter record: ${decoded.error}`);
-    }
-    if (decoded.status === 'unsupported-preserved') {
-      throw recordFailure('UNSUPPORTED_RECORD', 'Unsupported parameter record version or profile.');
-    }
-    const entry = decoded.record;
+    const entry = recordFrom(content);
 
     return handler({
       ...input,

@@ -2,6 +2,7 @@ import type { RuntimeFileSystem } from '@taucad/runtime/filesystem';
 import { assertRootedPath } from '@taucad/utils/path';
 import { mimeTypes } from '@taucad/types/constants';
 import { desktopKernelOptions } from '#constants/desktop-kernel-options.js';
+import { getComputeReuseMode } from '#lib/compute-reuse-preference.js';
 import { desktopBridge, nodeHomeRoot } from '#filesystem/desktop-bridge.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 
@@ -40,7 +41,7 @@ export const previewProjectFileInQuickLook = async (options: PreviewProjectFileO
 
   const [{ createRuntimeClient }, resolveOptions] = await Promise.all([
     import('@taucad/runtime/client'),
-    desktopKernelOptions(options.projectId)(),
+    desktopKernelOptions(options.projectId, undefined, getComputeReuseMode())(),
   ]);
   const client = createRuntimeClient(resolveOptions({ fileSystem: options.runtimeFileSystem }));
   try {

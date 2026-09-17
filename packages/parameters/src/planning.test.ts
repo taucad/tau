@@ -149,7 +149,7 @@ it('requires explicit source-unit confirmation before one record write', async (
         sourceRevision: admitted.source.revision,
         capability: 'change-source-unit:preserve-size:v1',
       },
-      dependencies: { 'main.ts': admitted.source.revision },
+      dependencies: admitted.identity.sourceFiles,
     },
   };
   const plan = await planParameterChange({ current, request });
@@ -188,7 +188,7 @@ it('requires explicit source-unit confirmation before one record write', async (
   const submission = submitParameterRequest(actor, request);
   await waitFor(actor, (snapshot) => snapshot.matches({ open: 'confirmation' }));
   expect(writes).toBe(0);
-  actor.send({ type: 'confirm', requestId: request.requestId, fingerprint: request.fingerprint });
+  actor.send({ type: 'confirm', requestId: request.requestId, fingerprint: `${request.requestId}:not-the-plan` });
   expect(actor.getSnapshot().matches({ open: 'confirmation' })).toBe(true);
   actor.send({ type: 'confirm', requestId: request.requestId, fingerprint: plan.confirmation.planFingerprint });
   await expect(submission).resolves.toMatchObject({ status: 'committed', write: 'applied' });
@@ -246,7 +246,8 @@ it('executes unknown numbers, array units, and affine text while refusing decima
     temperature: '32 °F',
   });
   expect(resolved).toMatchObject({ opaque: 3, samples: [10, 20] });
-  expect(resolved['temperature']).toBeCloseTo(0, 12);
+  // Affine conversion through absolute zero leaves one ulp of 273.15; the value is persisted as computed.
+  expect(resolved['temperature']).toBe(Number.EPSILON * 256);
   expect(() => resolveParameterInputValues(admitted, { exact: '0.1234567890123456789' })).toThrow(
     'Decimal parameter data is preserved but cannot be executed exactly.',
   );
@@ -399,7 +400,7 @@ it('uses the captured sidecar bytes if the caller mutates input during manifest 
   };
   const loading = resolveParameterSnapshot(input);
   Object.assign(input, { bytes: new TextEncoder().encode('invalid') });
-  await expect(loading).resolves.toMatchObject({ bytes: null, access: { status: 'current' } });
+  await expect(loading).resolves.toMatchObject({ bytes: null, entry: { recordVersion: 1 } });
 });
 
 const twoFieldManifest = async () =>
@@ -555,4 +556,177 @@ it('never rebases across a manifest revision change', async () => {
     }),
   });
   expect(stale).toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+});
+
+it('confines field-scoped rebase to a value edit of the same pointer in the active group', async () => {
+  const admitted = await twoFieldManifest();
+  const current = await resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null, preconditions: [] });
+  const first = await planParameterChange({
+    current,
+    request: fieldRequest(admitted, {
+      requestId: 'width:1',
+      pointer: '/width',
+      parameterId: 'width',
+      value: 101,
+      expected: current.identity,
+    }),
+  });
+  if (first.status !== 'prepared') {
+    throw new Error(JSON.stringify(first));
+  }
+  const stale = current.identity;
+  const heightBase = fieldBase('/height', 14);
+  const scoped: ReadonlyArray<readonly [string, ParameterSetRequest]> = [
+    [
+      'another pointer',
+      fieldRequest(admitted, {
+        requestId: 'cross',
+        pointer: '/width',
+        parameterId: 'width',
+        value: 5,
+        expected: stale,
+        base: heightBase,
+      }),
+    ],
+    [
+      'a batch',
+      {
+        requestId: 'batch',
+        draftGeneration: 1,
+        pressure: 'final',
+        expected: stale,
+        base: heightBase,
+        operation: {
+          kind: 'batch',
+          group: 'default',
+          edits: [
+            {
+              parameterId: 'height',
+              resource: admitted.bindings['/height']!.schema.resource,
+              pointer: '/height',
+              value: 1,
+            },
+          ],
+        },
+      } as unknown as ParameterSetRequest,
+    ],
+    [
+      'a group reset',
+      {
+        requestId: 'reset',
+        draftGeneration: 1,
+        pressure: 'final',
+        expected: stale,
+        base: heightBase,
+        operation: { kind: 'reset-group', group: 'default' },
+      } as unknown as ParameterSetRequest,
+    ],
+  ];
+  const plans = await Promise.all(
+    scoped.map(
+      async ([label, request]) => [label, await planParameterChange({ current: first.proposed, request })] as const,
+    ),
+  );
+  for (const [label, plan] of plans) {
+    expect(plan.status, label).toBe('rejected');
+  }
+
+  const inactive = await planParameterChange({
+    current: first.proposed,
+    request: {
+      ...fieldRequest(admitted, {
+        requestId: 'inactive',
+        pointer: '/height',
+        parameterId: 'height',
+        value: 15,
+        expected: stale,
+        base: heightBase,
+      }),
+      operation: {
+        kind: 'native-value',
+        group: 'other',
+        parameterId: 'height',
+        resource: admitted.bindings['/height']!.schema.resource,
+        pointer: '/height',
+        value: 15,
+      },
+    },
+  });
+  expect(inactive).toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+});
+
+it('keeps a source-unit choice across unrelated source edits and asks for rebind when its declaration changes', async () => {
+  const admitted = await manifest();
+  const current = await resolveParameterSnapshot({ target, manifest: admitted, path, bytes: null, preconditions: [] });
+  const plan = await planParameterChange({
+    current,
+    request: {
+      requestId: 'unit',
+      draftGeneration: 0,
+      pressure: 'final',
+      expected: current.identity,
+      operation: {
+        kind: 'source-unit',
+        mode: 'preserve-size',
+        group: 'default',
+        parameterId: 'width',
+        resource: admitted.bindings['/width']!.schema.resource,
+        pointer: '/width',
+        unit: 'cm',
+        producerCapability: {
+          producer: 'fixture',
+          sourceRevision: admitted.source.revision,
+          capability: 'change-source-unit:preserve-size:v1',
+        },
+      },
+    },
+  });
+  if (plan.status !== 'prepared') {
+    throw new Error(JSON.stringify(plan));
+  }
+  const bytes = typeof plan.write.data === 'string' ? new TextEncoder().encode(plan.write.data) : plan.write.data;
+  const edited = await manifest(true, contentDigest({ value: `sha256:${'2'.repeat(64)}` }));
+  const later = await resolveParameterSnapshot({ target, manifest: edited, path, bytes, preconditions: [] });
+  const edit = await planParameterChange({
+    current: later,
+    request: {
+      requestId: 'value',
+      draftGeneration: 1,
+      pressure: 'final',
+      expected: later.identity,
+      operation: {
+        kind: 'native-value',
+        group: 'default',
+        parameterId: 'width',
+        resource: edited.bindings['/width']!.schema.resource,
+        pointer: '/width',
+        value: 12,
+      },
+    },
+  });
+  expect(edit.status).toBe('prepared');
+
+  const undeclared = await manifest(false, contentDigest({ value: `sha256:${'3'.repeat(64)}` }));
+  const outcome = await resolveParameterSnapshot({ target, manifest: undeclared, path, bytes, preconditions: [] }).then(
+    async (snapshot) =>
+      planParameterChange({
+        current: snapshot,
+        request: {
+          requestId: 'value:rebind',
+          draftGeneration: 1,
+          pressure: 'final',
+          expected: snapshot.identity,
+          operation: {
+            kind: 'native-value',
+            group: 'default',
+            parameterId: 'width',
+            resource: undeclared.bindings['/width']!.schema.resource,
+            pointer: '/width',
+            value: 12,
+          },
+        },
+      }),
+    (error: unknown) => error,
+  );
+  expect(outcome).toMatchObject({ code: 'SOURCE_UNIT_REBIND_REQUIRED' });
 });

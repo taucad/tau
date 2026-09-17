@@ -77,35 +77,37 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
           )}
           onOpenChange={setGenericDetailsOpen}
         >
-          <div className='flex w-full items-center justify-between gap-2 transition-colors hover:bg-destructive/15'>
-            <CollapsibleTrigger className='flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left outline-none focus-visible:focus-outline'>
-              <ChevronRight className='size-4 shrink-0 transition-transform duration-300 ease-in-out group-data-[state=open]/collapsible:rotate-90' />
-              <div className='min-w-0 flex-1'>
-                <MarkdownViewer
-                  className={cn(
-                    'inline w-auto! text-sm text-foreground',
-                    // Inline-code styles for error messages
-                    '[&_code]:text-destructive',
-                    '[&_code]:border-destructive/30',
-                    '[&_code]:bg-background/80',
-                    'line-clamp-none',
-                  )}
-                >
-                  {parsedError.message || parsedError.title || 'Unable to send the message.'}
-                </MarkdownViewer>
-              </div>
-            </CollapsibleTrigger>
-            <Button
-              variant='outline'
-              className='mr-2 h-7 shrink-0 hover:border-neutral/50'
-              size='sm'
-              onClick={() => {
-                handleTryAgain();
-              }}
-            >
-              <RefreshCcw className='size-3.5' />
-              Try again
-            </Button>
+          <div className='@container'>
+            <div className='flex w-full flex-col transition-colors hover:bg-destructive/15 @xs:flex-row @xs:items-center @xs:gap-2'>
+              <CollapsibleTrigger className='flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left outline-none focus-visible:focus-outline'>
+                <ChevronRight className='size-4 shrink-0 transition-transform duration-300 ease-in-out group-data-[state=open]/collapsible:rotate-90' />
+                <div className='min-w-0 flex-1'>
+                  <MarkdownViewer
+                    className={cn(
+                      'inline w-auto! text-sm text-foreground',
+                      // Inline-code styles for error messages
+                      '[&_code]:text-destructive',
+                      '[&_code]:border-destructive/30',
+                      '[&_code]:bg-background/80',
+                      'line-clamp-none',
+                    )}
+                  >
+                    {parsedError.message || parsedError.title || 'Unable to send the message.'}
+                  </MarkdownViewer>
+                </div>
+              </CollapsibleTrigger>
+              <Button
+                variant='outline'
+                className='mx-2 mb-2 h-auto min-h-7 whitespace-normal hover:border-neutral/50 @xs:mb-0 @xs:ml-0'
+                size='sm'
+                onClick={() => {
+                  handleTryAgain();
+                }}
+              >
+                <RefreshCcw className='size-3.5' />
+                Try again
+              </Button>
+            </div>
           </div>
           <CollapsibleContent className='overflow-x-scroll px-2 pb-2'>
             <CodeViewer text={formattedError} language='json' className='text-xs whitespace-pre-wrap' />

@@ -18,6 +18,7 @@ import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
 import { PaneviewReact } from 'dockview-react';
 import { hasJsonSchemaObjectProperties } from '@taucad/utils/schema';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
+import { toast } from '#components/ui/sonner.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import {
   ContextMenu,
@@ -64,13 +65,13 @@ import {
 } from '#components/panes/paneview-header.js';
 import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
-import { useProject, useMainGraphics } from '#hooks/use-project.js';
+import { useProject, useMainGraphics, useParameterSetActor } from '#hooks/use-project.js';
 import { Parameters } from '#components/geometry/parameters/parameters.js';
-import type { ParameterEdit } from '#components/geometry/parameters/rjsf-context.js';
+import type { ParameterCommit, ParameterEdit } from '#components/geometry/parameters/rjsf-context.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { ParameterManifest } from '@taucad/parameters';
 import { getActiveGroupValues } from '@taucad/types';
-import type { CurrentFileParameterEntry, FileParameterEntry } from '@taucad/types';
+import type { FileParameterEntry } from '@taucad/types';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 import { createDefaultEntry } from '#utils/parameter-config.utils.js';
 import { sortGeometryUnitEntries } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
@@ -84,7 +85,7 @@ const toggleParametersKeyCombination = projectWorkspaceKeyCombinations.parameter
 
 type ParameterSetActor = NonNullable<ReturnType<ParameterSetService['actor']>>;
 type ParameterSetState = ReturnType<ParameterSetActor['getSnapshot']>;
-type ParameterGroupBindings = CurrentFileParameterEntry['groups'][string]['bindings'];
+type ParameterGroupBindings = FileParameterEntry['groups'][string]['bindings'];
 
 const currentEntryOf = (state: ParameterSetState | undefined): FileParameterEntry | undefined =>
   state?.context.current?.entry;
@@ -115,26 +116,81 @@ const sameManifestRevision = (left: ParameterManifest | undefined, right: Parame
   left === right || (left?.revision !== undefined && left.revision === right?.revision);
 
 /**
- * Ensure the entry's authority actor exists and publish it once. `resolve` is idempotent and
- * creates the actor synchronously, so every panel that needs it can ask independently.
+ * Ensure the entry's authority actor exists and follow it. `resolve` is idempotent; a retired actor
+ * (rename rollback, delete and recreate, retried close) leaves the store and is resolved again.
  */
 const useResolvedParameterActor = (
   entryPath: string,
   manifest: ParameterManifest | undefined,
 ): ParameterSetActor | undefined => {
-  const { parameterService, resolveParameterEntry } = useProject();
-  const [actor, setActor] = useState<ParameterSetActor>();
+  const { resolveParameterEntry } = useProject();
+  const actor = useParameterSetActor(entryPath);
+  // Resolve once per actor and manifest revision: a failed load stays on screen with its own retry,
+  // so re-rendering with an equal manifest must not reload it again.
+  const resolved = useRef<Readonly<{ actor: ParameterSetActor | undefined; revision: string }>>(undefined);
   useEffect(() => {
     if (manifest === undefined) {
       return;
     }
-    resolveParameterEntry(entryPath, manifest);
-    const resolved = parameterService.actor(entryPath);
-    // oxlint-disable-next-line react/set-state-in-effect -- Publishes the newly created actor once; identical actors bail out.
-    setActor((current) => (current === resolved ? current : resolved));
-  }, [entryPath, manifest, parameterService, resolveParameterEntry]);
+    const previous = resolved.current;
+    if (actor !== undefined && previous?.actor === actor && previous.revision === manifest.revision) {
+      return;
+    }
+    if (actor?.getSnapshot().context.current?.manifest.revision !== manifest.revision) {
+      resolveParameterEntry(entryPath, manifest);
+    }
+    resolved.current = { actor, revision: manifest.revision };
+  }, [actor, entryPath, manifest, resolveParameterEntry]);
   return actor;
 };
+
+const authorityFailureOf = (
+  state: ParameterSetState | undefined,
+): Readonly<{ code: string; message: string }> | undefined =>
+  state?.matches({ open: 'disconnected' }) === true ? state.context.diagnostic : undefined;
+
+const unreadableRecordCodes = new Set(['INVALID_RECORD', 'UNSUPPORTED_RECORD']);
+
+/** A typed load failure with the one recovery that fits it: reset an unreadable record, or retry. */
+function ParameterAuthorityFailure({
+  entryPath,
+  manifest,
+  actor,
+  failure,
+}: {
+  readonly entryPath: string;
+  readonly manifest: ParameterManifest;
+  readonly actor: ParameterSetActor;
+  readonly failure: Readonly<{ code: string; message: string }>;
+}): React.JSX.Element {
+  const { parameterService } = useProject();
+  const unreadable = unreadableRecordCodes.has(failure.code);
+  return (
+    <div role='alert' className='flex flex-col items-start gap-2 p-3 text-sm'>
+      <p className='text-destructive'>
+        {unreadable ? 'Saved parameter values for this model cannot be read.' : 'Parameters could not be loaded.'}
+      </p>
+      <p className='text-muted-foreground'>{failure.message}</p>
+      <Button
+        size='sm'
+        variant='outline'
+        onClick={async () => {
+          if (!unreadable) {
+            actor.send({ type: 'resolve', resolution: manifest.identity.resolution });
+            return;
+          }
+          try {
+            await parameterService.resetRecord(entryPath);
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : 'Parameters could not be reset.');
+          }
+        }}
+      >
+        {unreadable ? 'Reset to model defaults' : 'Retry'}
+      </Button>
+    </div>
+  );
+}
 
 type ParameterGroupItem = {
   name: string;
@@ -480,6 +536,7 @@ function GeometryUnitParameters({
   const jsonSchema =
     parameterManifest?.legacyProjection.status === 'usable' ? parameterManifest.legacyProjection.schema : undefined;
   const parameterActor = useResolvedParameterActor(entryPath, parameterManifest);
+  const authorityFailure = useSelector(parameterActor, authorityFailureOf);
   const activeGroup = useSelector(parameterActor, activeGroupOf);
   const parameters = useSelector(parameterActor, activeGroupValuesOf);
   const parameterBindings = useSelector(parameterActor, activeGroupBindingsOf, shallowEqualBindings);
@@ -493,6 +550,11 @@ function GeometryUnitParameters({
             group: activeGroup,
             editorInstance: parameterEditorInstance,
             input: parameterService.input,
+            setValue: async (field: Parameters<ParameterCommit['setValue']>[0]) =>
+              parameterService.submitValue(parameterService.target(entryPath), parameterManifest, {
+                group: activeGroup,
+                ...field,
+              }),
           },
     [activeGroup, entryPath, parameterEditorInstance, parameterManifest, parameterService],
   );
@@ -514,6 +576,16 @@ function GeometryUnitParameters({
     [setGeometryUnitParameters, entryPath, parameterManifest],
   );
 
+  if (parameterManifest !== undefined && parameterActor !== undefined && authorityFailure !== undefined) {
+    return (
+      <ParameterAuthorityFailure
+        entryPath={entryPath}
+        manifest={parameterManifest}
+        actor={parameterActor}
+        failure={authorityFailure}
+      />
+    );
+  }
   if (parameterManifest === undefined || parameterEdit === undefined) {
     return <div className='p-3 text-sm text-muted-foreground'>Loading parameter metadata…</div>;
   }

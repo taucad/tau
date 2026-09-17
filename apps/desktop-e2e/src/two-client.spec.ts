@@ -1,5 +1,6 @@
 /* oxlint-disable no-await-in-loop -- Every loop here drives one client, one `git` child or one database statement after another on purpose. */
 import { createHash } from 'node:crypto';
+import { existsSync, readdirSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -206,12 +207,30 @@ const openSyncRegion = async (client: PageClient): Promise<void> => {
   const { page } = client;
   await openRevisionsPane(client);
   /* D26/A29: the region replaces this button once a remote exists, so a
-   * re-open finds the region directly. */
-  const connect = page.getByRole('button', { name: /Back up to Tau Cloud/u }).first();
+   * re-open finds the region directly. The offer reads *Connect Tau Cloud*
+   * (`chat-revisions.tsx`); matching its old *Back up to Tau Cloud* wording
+   * silently skipped the click and every remote-less case timed out. */
+  const connect = page.getByRole('button', { name: 'Connect Tau Cloud', exact: true }).first();
   if (await connect.isVisible()) {
     await connect.click();
   }
   await page.getByRole('region', { name: 'Sync' }).first().waitFor({ state: 'visible', timeout: 60_000 });
+};
+
+/**
+ * Choose Tau Cloud and connect it, when the region still offers the choice.
+ *
+ * Selecting the radio only drafts the choice; *Connect backup* issues it
+ * (`revision-sync-region.tsx` `applyRemote`). A connected region shows no radio.
+ */
+const chooseTauCloud = async (client: PageClient): Promise<void> => {
+  const { page } = client;
+  const choice = page.getByRole('radio', { name: 'Tau Cloud' }).first();
+  if (!(await choice.isVisible())) {
+    return;
+  }
+  await choice.click();
+  await page.getByRole('button', { name: 'Connect backup', exact: true }).first().click();
 };
 
 /**
@@ -652,15 +671,16 @@ describe('a project on the browser client', () => {
     const accountOwner = required(owner, 'The account was not seeded.');
     await registerProjectOnRemote(accountOwner, projectId, 'W18 Two Client');
     await openSyncRegion(client);
-    await client.page.getByRole('radio', { name: 'Tau Cloud' }).first().click();
-    /* `revision-sync-region.tsx:342` prints the connected URL and a
-     * *Disconnect* beside it, and neither exists in any other phase. */
+    await chooseTauCloud(client);
+    /* The connected row (`revision-sync-region.tsx`) names the remote and
+     * offers *Change backup*, which no other phase renders; it no longer prints
+     * the URL or a bare *Disconnect*. */
     await expect
       .poll(async () => syncRegionText(client), {
         message: 'W11b (DEF-8): the connected Tau Cloud remote must reach the Sync region',
         timeout: 120_000,
       })
-      .toMatch(new RegExp(`${projectId}|Disconnect`, 'u'));
+      .toMatch(/Tau Cloud[\s\S]*Change backup/u);
   }, 900_000);
 
   /** P53's connected-session scheduler is observable now that W19-b fixed DEF-8. */
@@ -669,10 +689,7 @@ describe('a project on the browser client', () => {
     const accountOwner = required(owner, 'The account was not seeded.');
     await registerProjectOnRemote(accountOwner, projectId, 'W18 Two Client');
     await openSyncRegion(client);
-    const choice = client.page.getByRole('radio', { name: 'Tau Cloud' }).first();
-    if (await choice.isVisible()) {
-      await choice.click();
-    }
+    await chooseTauCloud(client);
     await expect
       .poll(async () => syncRegionText(client), {
         message: 'W11b/W13 (DEF-8): the connected-session scheduler must expose a Sync state',
@@ -697,7 +714,7 @@ describe('a project on the browser client', () => {
     const unregistered = await createProjectInBrowser(client, 'W18 Never Published');
     expect(unregistered, 'W11a/W11b (DEF-8): the never-published project must have a source slug').not.toBe('');
     await openSyncRegion(client);
-    await client.page.getByRole('radio', { name: 'Tau Cloud' }).first().click();
+    await chooseTauCloud(client);
     await expect
       .poll(async () => syncRegionText(client), {
         message: 'W11a/W11b (DEF-8): a never-published project must enter a Sync state',
@@ -722,10 +739,7 @@ describe('a project on the browser client', () => {
     await client.page.goto(projectUrl, { waitUntil: 'domcontentloaded' });
     await registerProjectOnRemote(accountOwner, projectId, 'W18 Two Client');
     await openSyncRegion(client);
-    const remoteChoice = client.page.getByRole('radio', { name: 'Tau Cloud' }).first();
-    if (await remoteChoice.isVisible()) {
-      await remoteChoice.click();
-    }
+    await chooseTauCloud(client);
     await expect.poll(async () => syncRegionText(client), { timeout: 120_000 }).toMatch(/Backed up/u);
     await leaveProjectStorageHeadroom(projectId, proLimitBytes, 1024);
     try {
@@ -772,7 +786,7 @@ describe('a project on the browser client', () => {
     );
     await registerProjectOnRemote(accountOwner, lfsProjectId, name);
     await openSyncRegion(source);
-    await source.page.getByRole('radio', { name: 'Tau Cloud' }).first().click();
+    await chooseTauCloud(source);
     await expect.poll(async () => syncRegionText(source), { timeout: 180_000 }).toMatch(/Backed up/u);
 
     const browserStep = new Uint8Array(fiveMiB).fill(0x41);
@@ -953,10 +967,7 @@ describe('a project on the browser client', () => {
     await client.page.goto(projectUrl, { waitUntil: 'domcontentloaded' });
     await registerProjectOnRemote(accountOwner, projectId, 'W18 Two Client');
     await openSyncRegion(client);
-    const remoteChoice = client.page.getByRole('radio', { name: 'Tau Cloud' }).first();
-    if (await remoteChoice.isVisible()) {
-      await remoteChoice.click();
-    }
+    await chooseTauCloud(client);
     await expect.poll(async () => syncRegionText(client), { timeout: 180_000 }).toMatch(/Backed up/u);
     const previousRemoteHead = await gitHead(tauRepository(projectId));
     const peer = await scratch('conflict-peer');
@@ -1013,7 +1024,8 @@ describe('a project on the browser client', () => {
       })
       .toBeGreaterThan(0);
     await client.page
-      .getByRole('button', { name: /^Keep mine in / })
+      /* `revision-branches.tsx` labels each side by its branch: *Keep main in <path>*. */
+      .getByRole('button', { name: /^Keep main in / })
       .first()
       .click();
     const finishResolution = client.page.getByRole('button', { name: /^Merge into / }).first();
@@ -1083,7 +1095,7 @@ describe('a project on the browser client', () => {
       );
       await registerProjectOnRemote(accountOwner, chatProjectId, 'W18 Chat Segments');
       await openSyncRegion(source);
-      await source.page.getByRole('radio', { name: 'Tau Cloud' }).first().click();
+      await chooseTauCloud(source);
       await selectChatModel(source.page, gatewayFixtureModelName);
       await sendPrompt(source.page, setupPrompt);
       const chatId = activeChatId(source.page);
@@ -1380,7 +1392,7 @@ describe('close and continue', () => {
         throw new Error(`${continuationOwner} ${direction}: source project id is absent`);
       }
       await openSyncRegion(source);
-      await source.page.getByRole('radio', { name: 'Tau Cloud' }).first().click();
+      await chooseTauCloud(source);
 
       fixture = await installGatewayFixture(source.page, {
         targetFile: 'main.scad',
@@ -1489,7 +1501,7 @@ describe('close and continue', () => {
       }
 
       await openSyncRegion(source);
-      await source.page.getByRole('radio', { name: 'Tau Cloud' }).first().click();
+      await chooseTauCloud(source);
       fixture = await installGatewayFixture(source.page, {
         targetFile: 'main.scad',
         content: 'cube([20, 20, 20]); // completed desktop chat\n',
@@ -1647,7 +1659,7 @@ describe('close and continue', () => {
     }
     await registerProjectOnRemote(accountOwner, offlineProjectId, 'W18 Offline Close');
     await openSyncRegion(client);
-    await client.page.getByRole('radio', { name: 'Tau Cloud' }).first().click();
+    await chooseTauCloud(client);
     await expect
       .poll(async () => syncRegionText(client), {
         message: `${continuationOwner} offline: source remote must be connected before the outage`,
@@ -1679,34 +1691,39 @@ describe('close and continue', () => {
      * file and stopping its listener would decide the outcome of every other
      * case in the run. */
     await client.context.route(`${desktopE2EApiUrl}/**`, async (route) => route.abort('connectionfailed'));
-    await editThenHide(client, {
-      slug,
-      contents: 'cube([34, 34, 34]); // edited while the API was down\n',
-      row: 'offline',
-    });
-    const queuedCloseRevisionId = await awaitCloseRevision(client, {
-      slug,
-      beforeClose,
-      row: 'offline',
-    });
+    /* Restored even when a step below fails: this is the suite's shared browser,
+     * and a left-over abort made every later case read the account as free. */
+    let queuedCloseRevisionId = '';
+    try {
+      await editThenHide(client, {
+        slug,
+        contents: 'cube([34, 34, 34]); // edited while the API was down\n',
+        row: 'offline',
+      });
+      queuedCloseRevisionId = await awaitCloseRevision(client, {
+        slug,
+        beforeClose,
+        row: 'offline',
+      });
 
-    /* The reopen, still offline: this is the window V18's sentence is about. */
-    await client.page.reload({ waitUntil: 'domcontentloaded' });
-    await openSyncRegion(client);
-    await expect
-      .poll(async () => syncRegionText(client), {
-        message: `${continuationOwner} offline: reopened source must expose one queued close revision`,
-        timeout: 120_000,
-      })
-      .toMatch(/Not backed up · 1 revision/u);
-    await expect
-      .poll(async () => browserHead(client, slug), {
-        message: `${continuationOwner} offline: reopen must preserve the queued close revisionId`,
-        timeout: 120_000,
-      })
-      .toBe(queuedCloseRevisionId);
-
-    await client.context.unroute(`${desktopE2EApiUrl}/**`);
+      /* The reopen, still offline: this is the window V18's sentence is about. */
+      await client.page.reload({ waitUntil: 'domcontentloaded' });
+      await openSyncRegion(client);
+      await expect
+        .poll(async () => syncRegionText(client), {
+          message: `${continuationOwner} offline: reopened source must expose one queued close revision`,
+          timeout: 120_000,
+        })
+        .toMatch(/Not backed up · 1 revision/u);
+      await expect
+        .poll(async () => browserHead(client, slug), {
+          message: `${continuationOwner} offline: reopen must preserve the queued close revisionId`,
+          timeout: 120_000,
+        })
+        .toBe(queuedCloseRevisionId);
+    } finally {
+      await client.context.unroute(`${desktopE2EApiUrl}/**`);
+    }
     await expect
       .poll(async () => syncRegionText(client), {
         message: `${continuationOwner} offline: queued close must complete without another gesture`,
@@ -1853,3 +1870,132 @@ describe('a git remote', () => {
 
 /** Kept for the git-remote cases that push with a Tau credential. */
 void basicAuthorization;
+
+/**
+ * W15: attachments across two devices (blueprint §Sync, D26, W12).
+ *
+ * The chat ref carries the bytes once. Device A sends an image and a PDF, the
+ * remote holds one blob per attachment under `attachments/<sha256>.<ext>` — plain
+ * git objects, never LFS pointers, which a closed chat tree could not resolve —
+ * and device B renders both after one fetch. A later turn in the same chat adds
+ * no attachment object at all, which is what "written once" means on the wire.
+ */
+describe('chat attachments across two clients', () => {
+  it('should carry an image and a PDF once and render them on the second device', async () => {
+    const accountOwner = required(owner, 'The account was not seeded.');
+    const fixturesRoot = resolve(import.meta.dirname, '../fixtures');
+    const photoPath = join(fixturesRoot, 'bracket-photo.jpg');
+    const specPath = join(fixturesRoot, 'bracket-spec.pdf');
+    const photoBytes = await readFile(photoPath);
+    const specBytes = await readFile(specPath);
+    const photoName = `${createHash('sha256').update(photoBytes).digest('hex')}.jpg`;
+    const specName = `${createHash('sha256').update(specBytes).digest('hex')}.pdf`;
+    const source = await launchBrowserClient({ oneTimeToken: await mintOneTimeToken(bearer) });
+    const destination = await launchDesktopApp({ token: bearer });
+    const fixture = await startGatewayFixture({ toolCalls: [] });
+    const firstPrompt = 'Read the attached specification and photo.';
+    const secondPrompt = 'Keep going from the same attachments.';
+
+    try {
+      await fixture.routeThrough(source.page);
+      await fixture.routeThrough(destination.page);
+      const sourceSlug = await createProjectInBrowser(source, 'W18 Chat Attachments');
+      const projectId = required(await browserProjectId(source, sourceSlug), 'The attachment project id is absent.');
+      await registerProjectOnRemote(accountOwner, projectId, 'W18 Chat Attachments');
+      await openSyncRegion(source);
+      await chooseTauCloud(source);
+      await selectChatModel(source.page, gatewayFixtureModelName);
+
+      await source.page
+        .locator('input[type="file"][accept*="application/pdf"]')
+        .first()
+        .setInputFiles([photoPath, specPath]);
+      await source.page
+        .getByText(/^PDF · /u)
+        .first()
+        .waitFor({ state: 'visible', timeout: 60_000 });
+      await sendPrompt(source.page, firstPrompt);
+      const chatId = activeChatId(source.page);
+      const chatRef = `refs/tau/chats/${chatId}`;
+      const repository = tauRepository(projectId);
+      await expect
+        .poll(async () => gitOutput(repository, ['rev-parse', chatRef]), {
+          message: 'the chat ref carrying the attachments must reach Tau Cloud',
+          timeout: 180_000,
+        })
+        .toBeDefined();
+      const firstHead = required(await gitOutput(repository, ['rev-parse', chatRef]), 'The chat ref is absent.');
+
+      /* One object per attachment, at its content-addressed name and its exact
+       * size: an LFS pointer would be 127 bytes and the wrong name (D26). */
+      await expect
+        .poll(
+          async () => {
+            const listing = await gitOutput(repository, ['ls-tree', '-r', '-l', chatRef]);
+            return (listing ?? '')
+              .split('\n')
+              .map((row) => row.trim().split(/\s+/u))
+              .map((columns) => ({ type: columns[1], size: columns[3], path: columns[4] }))
+              .filter(({ type, path }) => type === 'blob' && path?.startsWith('attachments/'))
+              .map(({ path, size }) => `${path!} ${size!}`)
+              .sort();
+          },
+          { message: 'the chat tree must carry both attachments as plain blobs', timeout: 180_000 },
+        )
+        .toEqual(
+          [
+            `attachments/${photoName} ${String(photoBytes.byteLength)}`,
+            `attachments/${specName} ${String(specBytes.byteLength)}`,
+          ].sort(),
+        );
+
+      const destinationSlug = await openTauCloudProject(destination.page, {
+        projectsUrl: 'app://tau/projects',
+        name: 'W18 Chat Attachments',
+        direction: 'chat attachments device A→device B',
+      });
+      await openBrowserChat(destination, chatId);
+      await expect
+        .poll(async () => destination.page.getByText(firstPrompt, { exact: true }).count(), { timeout: 180_000 })
+        .toBeGreaterThan(0);
+
+      /* Fetched once, written down beside the log, and rendered from there. */
+      const destinationAttachments = join(destination.homeRoot, destinationSlug, '.tau/chats', chatId, 'attachments');
+      await expect
+        .poll(() => (existsSync(destinationAttachments) ? readdirSync(destinationAttachments).sort() : []), {
+          message: 'device B must write both fetched attachment blobs down beside the log',
+          timeout: 180_000,
+        })
+        .toEqual([photoName, specName].sort());
+      await destination.page
+        .getByRole('link', { name: 'bracket-spec.pdf' })
+        .first()
+        .waitFor({ state: 'visible', timeout: 120_000 });
+      await destination.page
+        .getByRole('button', { name: /^Open image /u })
+        .first()
+        .waitFor({ state: 'visible', timeout: 120_000 });
+
+      // A later turn in the same chat re-references the same blobs: no new bytes.
+      await selectChatModel(destination.page, gatewayFixtureModelName);
+      await sendPrompt(destination.page, secondPrompt);
+      await expect
+        .poll(async () => gitOutput(repository, ['rev-parse', chatRef]), {
+          message: 'the second turn must publish a new chat head',
+          timeout: 180_000,
+        })
+        .not.toBe(firstHead);
+      const added = await gitOutput(repository, ['rev-list', '--objects', `${firstHead}..${chatRef}`]);
+      expect(
+        (added ?? '').split('\n').filter((row) => row.includes('attachments/')),
+        'the second turn transferred attachment bytes again',
+      ).toEqual([]);
+    } catch (error) {
+      await captureAndRethrow(error, 'two-client-chat-attachments', [source, destination]);
+    } finally {
+      await fixture.close();
+      await destination.close();
+      await source.close();
+    }
+  }, 900_000);
+});

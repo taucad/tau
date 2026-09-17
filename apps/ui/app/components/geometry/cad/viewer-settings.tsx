@@ -19,6 +19,7 @@ import { axesColors } from '#constants/color.constants.js';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import { useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
 import { useCad, useCadSelector } from '#hooks/use-cad.js';
+import { selectCadRenderTimeout } from '#machines/cad.machine.js';
 
 // Up direction options
 type UpDirection = 'x' | 'y' | 'z';
@@ -82,7 +83,7 @@ export function ViewerSettings({ className, overflowControls }: ViewerSettingsPr
   const is2dGeometry = useGraphicsSelector((state) => state.context.geometry?.format === 'svg');
 
   const cadRef = useCad();
-  const renderTimeout = useCadSelector((state) => state.context.renderTimeout, defaultRenderTimeout);
+  const renderTimeout = useCadSelector(selectCadRenderTimeout, defaultRenderTimeout);
 
   const handleMeshToggle = useCallback(
     (checked: boolean) => {

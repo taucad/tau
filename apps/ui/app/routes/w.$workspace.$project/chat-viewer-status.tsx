@@ -4,26 +4,12 @@ import { useProject } from '#hooks/use-project.js';
 import { useCad, useCadSelector } from '#hooks/use-cad.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { ZooUpgradeBanner } from '#cloud/zoo-upgrade-banner.js';
-import { selectCadFailureIssues } from '#machines/cad.machine.js';
+import { selectCadFailureIssues, selectCadLoadingPhase } from '#machines/cad.machine.js';
 
 export function ChatViewerStatus({ className, ...props }: React.HTMLAttributes<HTMLDivElement>): React.ReactNode {
   const { projectRef } = useProject();
   const cadRef = useCad();
-  const loadingState = useCadSelector((state) => {
-    if (!state.hasTag('cad-loading')) {
-      return undefined;
-    }
-    if (state.matches('connecting')) {
-      return 'connecting';
-    }
-    if (state.matches('buffering')) {
-      return 'buffering';
-    }
-    if (state.matches('rendering')) {
-      return 'rendering';
-    }
-    return undefined;
-  }, undefined);
+  const loadingState = useCadSelector(selectCadLoadingPhase, undefined);
   const projectState = useSelector(projectRef, (state) => state.value);
   const failureIssues = useCadSelector(selectCadFailureIssues, undefined);
   const failureMessage = failureIssues?.find((issue) => issue.severity === 'error')?.message;

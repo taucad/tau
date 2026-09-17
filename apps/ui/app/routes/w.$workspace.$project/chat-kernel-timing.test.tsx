@@ -110,8 +110,11 @@ const telemetryEntries = [
   }),
 ];
 
-function actor(renderPhase?: string): ActorRefFrom<typeof cadMachine> {
-  const snapshot = { context: { renderPhase, telemetryEntries } };
+function actor(
+  renderPhase?: string,
+  entries: TelemetrySpanRecord[] = telemetryEntries,
+): ActorRefFrom<typeof cadMachine> {
+  const snapshot = { context: { renderPhase, telemetryEntries: entries } };
   return {
     getSnapshot: () => snapshot,
     subscribe: () => ({ unsubscribe: vi.fn() }),
@@ -193,6 +196,23 @@ describe('GeometryUnitTiming', () => {
     const toolbar = screen.getByRole('button', { name: 'Filter spans' }).closest('.border-border');
     expect(toolbar).toHaveClass('border-b');
     expect(toolbar).not.toHaveClass('border-y');
+  });
+
+  it('keeps the trace the user pinned after the machine has evicted its spans', () => {
+    const view = renderTiming({ cadRef: actor(), query: '' });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Trace history' }), { target: { value: 'p1:render-1' } });
+    expect(getTotalMetric()).toHaveTextContent('100ms');
+
+    // D9: the bounded ring drops the oldest trace. A pane that only held its id would silently
+    // snap back to the newest one and lose what the user was reading.
+    view.rerender(
+      <TooltipProvider>
+        <GeometryUnitTiming cadRef={actor(undefined, telemetryEntries.slice(2))} query='' />
+      </TooltipProvider>,
+    );
+
+    expect(getTotalMetric()).toHaveTextContent('100ms');
+    expect(screen.getByRole('treeitem', { name: /old\.operation/u })).toBeInTheDocument();
   });
 
   it('exports every producer\u2019s spans as one JSONL trace', () => {

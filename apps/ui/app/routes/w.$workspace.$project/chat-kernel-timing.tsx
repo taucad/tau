@@ -188,15 +188,21 @@ export const GeometryUnitTiming = memo(function GeometryUnitTiming({
   const traces = useMemo(() => buildTelemetryTraces(telemetryEntries), [telemetryEntries]);
   const latestTrace = useMemo(() => getLatestLifecycleTrace(traces), [traces]);
 
-  const [selectedTraceId, setSelectedTraceId] = useState('latest');
+  /* D9: hold the trace itself, not just its id. The machine's telemetry ring evicts the oldest
+   * traces, and a pane that looked its selection up by id on every rebuild would silently snap back to the
+   * newest one — losing exactly the slow trace the user pinned to read. */
+  const [pinnedTrace, setPinnedTrace] = useState<TelemetryTrace>();
   const [selectedSpanId, setSelectedSpanId] = useState<string>();
   const [collapsedSpans, setCollapsedSpans] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<ViewMode>('trace');
   const [filters, setFilters] = useState<FilterCondition[]>([]);
   const [displaySettings, setDisplaySettings] = useState<DisplaySettings>(defaultDisplaySettings);
 
+  const selectedTraceId = pinnedTrace?.id ?? 'latest';
+  /* A pinned trace that is still in the ring is taken from the rebuilt list, so it keeps growing
+   * with its own late spans; once evicted, the held object stands in for it. */
   const selectedTrace =
-    selectedTraceId === 'latest' ? latestTrace : (traces.find(({ id }) => id === selectedTraceId) ?? latestTrace);
+    pinnedTrace === undefined ? latestTrace : (traces.find(({ id }) => id === pinnedTrace.id) ?? pinnedTrace);
   const sourceTree = useMemo(() => (selectedTrace ? [selectedTrace.root] : []), [selectedTrace]);
   const hasActiveStructuredFilters = filters.some(({ value }) => value !== '');
   const isFiltering = query.trim() !== '' || hasActiveStructuredFilters;
@@ -256,7 +262,13 @@ export const GeometryUnitTiming = memo(function GeometryUnitTiming({
   return (
     <div className='flex size-full min-h-0 flex-col overflow-hidden p-2' data-slot='telemetry-unit-content'>
       <div className='flex shrink-0 items-center justify-between gap-2'>
-        <TraceHistorySelector traces={traces} selectedId={selectedTraceId} onSelect={setSelectedTraceId} />
+        <TraceHistorySelector
+          traces={traces}
+          selectedId={selectedTraceId}
+          onSelect={(id) => {
+            setPinnedTrace(traces.find((trace) => trace.id === id));
+          }}
+        />
         <span
           role='status'
           aria-live='polite'

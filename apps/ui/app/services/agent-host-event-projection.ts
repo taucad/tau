@@ -4,6 +4,7 @@ import type { AgentLiveEvent, AgentLogEvent, ProviderMessageMetadata } from '@ta
 import type { AcpSessionData, BillingInvocationStatus, MyUIMessage } from '@taucad/chat';
 import { acpSessionDataSchema, billingInvocationStatusSchema } from '@taucad/chat';
 import { errorCategoryTitles, httpStatusToCategory } from '@taucad/chat/utils';
+import { errorCategory } from '@taucad/types/constants';
 import type { TurnConflictedEvent, TurnFailedEvent, TurnFinalizedEvent } from '@taucad/revisions/revision-effects';
 import { isRecord } from '@taucad/utils/schema';
 import { isAttachmentUrl } from '#utils/attachment.utils.js';
@@ -18,16 +19,25 @@ const errorText = (value: unknown, fallback: string): string => {
     return value;
   }
   if (isRecord(value) && typeof value['message'] === 'string') {
-    if (typeof value['code'] === 'string' && typeof value['status'] === 'number') {
+    const { code, status, details } = value;
+    // A coded refusal with a status or structured fields is a card, not prose:
+    // an external agent's stop carries `details` but no HTTP status.
+    if (typeof code === 'string' && (typeof status === 'number' || isRecord(details))) {
       // The gateway code is authoritative; the status is only a fallback for uncoded failures.
-      const category = value['code'] === 'INSUFFICIENT_CREDIT' ? 'credits' : httpStatusToCategory(value['status']);
-      const { details } = value;
+      const category =
+        code === 'INSUFFICIENT_CREDIT'
+          ? errorCategory.credits
+          : typeof status === 'number'
+            ? httpStatusToCategory(status)
+            : code === 'EXTERNAL_AGENT_LIMIT_REACHED'
+              ? errorCategory.rateLimit
+              : errorCategory.generic;
       return JSON.stringify({
         category,
         title: errorCategoryTitles[category],
         message: value['message'],
-        code: value['code'],
-        httpStatus: value['status'],
+        code,
+        ...(typeof status === 'number' ? { httpStatus: status } : {}),
         // A denial's structured fields (an `INSUFFICIENT_CREDIT` shortfall, say)
         // ride the same JSON so the card can name the amount it is short.
         ...(isRecord(details) ? { details } : {}),

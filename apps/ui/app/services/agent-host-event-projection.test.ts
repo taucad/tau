@@ -843,6 +843,40 @@ describe('projectAgentHostEvent', () => {
     });
   });
 
+  it("should carry an external agent's stop details through to the persisted ChatError without a status", () => {
+    const details = {
+      agentId: 'codex',
+      failure: { category: 'limit', title: "You've hit your usage limit.", actions: [] },
+    };
+    const [chunk] = projectAgentHostEvent({
+      ...base,
+      type: 'run.lifecycle',
+      state: 'failed',
+      detail: { code: 'EXTERNAL_AGENT_LIMIT_REACHED', message: "You've hit your usage limit.", details },
+    });
+    if (chunk?.type !== 'error') {
+      throw new Error('Expected an error projection');
+    }
+    expect(parseErrorForPersistence(new Error(chunk.errorText))).toEqual({
+      category: 'rate_limit',
+      title: 'Rate Limit Exceeded',
+      message: "You've hit your usage limit.",
+      code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+      details,
+    });
+  });
+
+  it('should keep a coded failure without a status or details as its plain message', () => {
+    expect(
+      projectAgentHostEvent({
+        ...base,
+        type: 'run.lifecycle',
+        state: 'failed',
+        detail: { code: 'EXTERNAL_AGENT_AUTH_REQUIRED', message: 'codex is not logged in.' },
+      }),
+    ).toEqual([{ type: 'error', errorText: 'codex is not logged in.' }]);
+  });
+
   it('falls back to the generic host failure only when the run recorded no reason', () => {
     expect(projectAgentHostEvent({ ...base, type: 'run.lifecycle', state: 'failed' })).toEqual([
       { type: 'error', errorText: 'Browser agent host failed.' },

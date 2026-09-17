@@ -286,9 +286,27 @@ describe('BillableModelInvocationService', () => {
     expect(ledger.issueCurrentPromotion).not.toHaveBeenCalled();
   });
 
-  it('does not record dispatch intent when the caller is already cancelled', async () => {
+  it('places no hold when the caller left before admission', async () => {
     const abort = new AbortController();
     abort.abort();
+    const ledger = {
+      getOperationForAttempt: vi.fn(async () => undefined),
+      issueCurrentPromotion: vi.fn(),
+      admitOperation: vi.fn(),
+    };
+    const service = new BillableModelInvocationService(
+      ledger as unknown as CreditLedgerService,
+      { resolve: qualification } satisfies BillableModelQualificationResolver,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+      new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+    );
+
+    await expect(service.invoke(intent(abort.signal))).rejects.toThrow();
+    expect(ledger.admitOperation).not.toHaveBeenCalled();
+  });
+
+  it('does not record dispatch intent when the caller cancels during admission', async () => {
+    const abort = new AbortController();
     const row = {
       id: 'operation',
       accountId: 'account',
@@ -303,7 +321,10 @@ describe('BillableModelInvocationService', () => {
         .mockResolvedValueOnce(undefined)
         .mockImplementation(async () => row),
       issueCurrentPromotion: vi.fn(),
-      admitOperation: vi.fn(async () => ({ status: 'admitted', operationId: 'operation', generation: 0n })),
+      admitOperation: vi.fn(async () => {
+        abort.abort();
+        return { status: 'admitted', operationId: 'operation', generation: 0n };
+      }),
       recordCancellation: vi.fn(),
       markDispatchIntent: vi.fn(),
     };

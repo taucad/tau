@@ -5,7 +5,6 @@ import type { ProjectLibraryState } from '#types/project.types.js';
 
 export type CommitCancelledDraftRestoreInput = {
   messages: Chat['messages'];
-  draft: NonNullable<Chat['draft']>;
   clearStartupRequestId?: string;
 };
 
@@ -65,14 +64,16 @@ export type StorageProvider = {
  * transaction:
  *  - `updateChat` merges and writes under one lock.
  *  - The field-scoped helpers (`patchChat`, `touchChatRecency`,
- *    `setChatUnreadState`, `setMessageEdit`, `clearMessageEdit`,
  *    `softDeleteChat`) mutate only the named slot.
+ *
+ * The composer — draft, message edits, unread — is not a chat field; it lives
+ * in this device's composer records (`#db/composer-record-store.js`).
  *  - Concurrent callers for the same id must not lose writes.
  */
 export type ChatStorage = {
   createChat(
     resourceId: string,
-    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt' | 'hasUnreadTurn'> & {
+    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt'> & {
       id?: string;
     },
   ): Promise<Chat>;
@@ -91,8 +92,6 @@ export type ChatStorage = {
   patchChat<K extends keyof Chat>(chatId: string, key: K, value: Chat[K]): Promise<Chat | undefined>;
   /** Advance user-action recency monotonically. */
   touchChatRecency(chatId: string, requestedAt: number): Promise<Chat | undefined>;
-  /** Set boolean unread state without changing row or product recency. */
-  setChatUnreadState(chatId: string, hasUnreadTurn: boolean): Promise<Chat | undefined>;
   /**
    * Atomic one-shot startup request consumption. Clears the startup request
    * only when the persisted id still matches `requestId`; returns undefined
@@ -100,24 +99,11 @@ export type ChatStorage = {
    */
   consumeChatStartupRequest(chatId: string, requestId: string): Promise<Chat | undefined>;
   /**
-   * Atomic empty-cancel restore. Replaces the transcript and composer draft
-   * together, optionally clearing the matching one-shot startup request in
-   * the same transaction.
+   * Atomic empty-cancel restore. Replaces the transcript, optionally clearing
+   * the matching one-shot startup request in the same transaction. The
+   * restored draft goes to the chat's composer record, not here.
    */
   commitCancelledDraftRestore(chatId: string, input: CommitCancelledDraftRestoreInput): Promise<Chat | undefined>;
-  /**
-   * Atomic insert/replace for a single message-edit draft entry.
-   */
-  setMessageEdit(
-    chatId: string,
-    messageId: string,
-    draft: NonNullable<Chat['messageEdits']>[string],
-  ): Promise<Chat | undefined>;
-  /**
-   * Atomic remove for a single message-edit draft entry. No-op (no
-   * `updatedAt` bump) if the entry does not exist.
-   */
-  clearMessageEdit(chatId: string, messageId: string): Promise<Chat | undefined>;
   /**
    * Atomic soft-delete: sets `deletedAt` and bumps `updatedAt` in one txn.
    */

@@ -4,7 +4,11 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import type { captureCadImages as captureCadImagesType } from '#services/headless-capture.js';
 
-const mockAddDraftImage = vi.fn();
+const mockAddDraftAttachment = vi.fn();
+const selectedModel = {
+  name: 'Vision Model',
+  model: { support: { modalities: { input: ['text', 'image'], output: ['text'] } } },
+};
 const mockTrigger = vi.fn();
 const mockGraphicsRef = { send: vi.fn(), id: 'graphics-actor' };
 const mockCadRef = { send: vi.fn(), id: 'cad-actor' };
@@ -17,7 +21,8 @@ vi.mock('#services/headless-capture.js', () => ({
 }));
 vi.mock('#hooks/use-graphics.js', () => ({ useGraphics: () => mockGraphicsRef }));
 vi.mock('#hooks/use-cad.js', () => ({ useCad: () => mockCadRef }));
-vi.mock('#hooks/use-chat.js', () => ({ useChatActions: () => ({ addDraftImage: mockAddDraftImage }) }));
+vi.mock('#hooks/use-chat.js', () => ({ useChatActions: () => ({ addDraftAttachment: mockAddDraftAttachment }) }));
+vi.mock('#hooks/active-chat-provider.js', () => ({ useChatComposer: () => ({ model: { model: selectedModel } }) }));
 vi.mock('#hooks/use-tick-animation.js', () => ({
   useTickAnimation: () => ({ ticked: false, trigger: mockTrigger }),
 }));
@@ -76,7 +81,10 @@ describe('CaptureViewControl', () => {
       imageService: mockImageService,
       recipe: { purpose: 'chat', mode: 'current' },
     });
-    expect(mockAddDraftImage).toHaveBeenCalledWith('data:image/webp;base64,AQID', { preserveOriginal: true });
+    expect(mockAddDraftAttachment).toHaveBeenCalledWith('data:image/webp;base64,AQID', {
+      preserveOriginal: true,
+      model: { name: 'Vision Model', support: selectedModel.model.support },
+    });
     expect(mockTrigger).toHaveBeenCalledOnce();
   });
 
@@ -90,7 +98,10 @@ describe('CaptureViewControl', () => {
     capture.resolve([{ name: 'capture.webp', mimeType: 'image/webp', bytes: new Uint8Array([1, 2, 3]) }]);
 
     await waitFor(() => {
-      expect(mockAddDraftImage).toHaveBeenCalledWith('data:image/webp;base64,AQID', { preserveOriginal: true });
+      expect(mockAddDraftAttachment).toHaveBeenCalledWith('data:image/webp;base64,AQID', {
+        preserveOriginal: true,
+        model: { name: 'Vision Model', support: selectedModel.model.support },
+      });
     });
   });
 });

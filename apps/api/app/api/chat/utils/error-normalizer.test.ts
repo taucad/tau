@@ -221,12 +221,12 @@ describe('normalizeError', () => {
       expect(result.httpStatus).toBe(401);
     });
 
-    it('should detect 403 status as credits', () => {
+    it('should keep a 403 refusal generic rather than a credit problem', () => {
       const error = Object.assign(new Error('Forbidden'), { status: 403 });
 
       const result = parseNormalizedError(normalizeError(error));
 
-      expect(result.category).toBe('credits');
+      expect(result.category).toBe('generic');
       expect(result.httpStatus).toBe(403);
     });
 

@@ -17,12 +17,12 @@ import { ChatTextareaBorderBeam } from '#components/chat/chat-textarea-border-be
 import { ChatTextareaMobileImages } from '#components/chat/chat-textarea-mobile-images.js';
 import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-button.js';
 import { focusTrapAttribute } from '#components/chat/chat-textarea-types.js';
-import type { ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
+import type { ChatAttachmentAddOptions, ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
+import type { DraftAttachment } from '#hooks/draft.machine.js';
 import type { ClipboardPasteEvent } from '#components/chat/chat-paste-handler.js';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from '@taucad/ui/components/drawer';
 import { Command, CommandGroup, CommandItem, CommandList } from '@taucad/ui/components/command';
 import type { ResolvedModel } from '#hooks/use-models.js';
-import type { DraftImageOptions } from '#hooks/use-chat.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 
 // Styled div that looks like CommandItem but works as a trigger for nested drawers.
@@ -33,7 +33,7 @@ const menuItemClassName = cn(
 );
 
 const dragOverlayCopy: Record<ChatTextareaDragKind, string> = {
-  image: 'Add image(s)',
+  image: 'Add files',
   viewer: 'Add screenshot',
   reference: 'Add reference',
 };
@@ -53,7 +53,11 @@ type ChatTextareaMobileProperties = {
   readonly selectedMenuIndex: number;
   readonly isSubmitting: boolean;
   readonly inputText: string;
-  readonly images: string[];
+  readonly attachments: readonly DraftAttachment[];
+  readonly attachmentDirectory: string;
+  readonly sendBlockReason: string | undefined;
+  readonly attachmentAccept: string;
+  readonly attachmentInputSupported: boolean;
   readonly selectedToolChoice: ToolSelection;
   readonly setDraftToolChoice: (choice: ToolSelection) => void;
   readonly status: string;
@@ -82,13 +86,13 @@ type ChatTextareaMobileProperties = {
   readonly handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   readonly handleTextChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
   readonly handleContextMenuSelect: (text: string) => void;
-  readonly handleContextImageAdd: (image: string, options?: DraftImageOptions) => void;
+  readonly handleContextImageAdd: (image: string, options?: ChatAttachmentAddOptions) => void;
   readonly handleAddText: (text: string) => void;
-  readonly handleAddImage: (image: string, options?: DraftImageOptions) => void;
+  readonly handleAddImage: (image: string, options?: ChatAttachmentAddOptions) => void;
   readonly handleTextareaBlur: () => void;
   readonly handlePointerDown: (event: React.MouseEvent<HTMLDivElement>) => void;
   readonly focusInput: () => void;
-  readonly removeImage: (index: number) => void;
+  readonly removeAttachment: (index: number) => void;
   readonly setShowContextMenu: (show: boolean) => void;
   readonly setAtSymbolPosition: (position: number) => void;
   readonly setContextSearchQuery: (query: string) => void;
@@ -135,7 +139,11 @@ export const ChatTextareaMobile = memo(function ({
   selectedMenuIndex,
   isSubmitting,
   inputText,
-  images,
+  attachments,
+  attachmentDirectory,
+  sendBlockReason,
+  attachmentAccept,
+  attachmentInputSupported,
   selectedToolChoice,
   setDraftToolChoice,
   status,
@@ -167,7 +175,7 @@ export const ChatTextareaMobile = memo(function ({
   handleTextareaBlur,
   handlePointerDown,
   focusInput,
-  removeImage,
+  removeAttachment,
   setShowContextMenu,
   setAtSymbolPosition,
   setContextSearchQuery,
@@ -192,7 +200,7 @@ export const ChatTextareaMobile = memo(function ({
     };
   }, [closeOptionsRef, focusInput]);
 
-  const handleDrawerAddImage = (image: string, options?: DraftImageOptions): void => {
+  const handleDrawerAddImage = (image: string, options?: ChatAttachmentAddOptions): void => {
     handleAddImage(image, options);
     setIsDrawerOpen(false);
   };
@@ -411,16 +419,16 @@ export const ChatTextareaMobile = memo(function ({
                   {/* Upload Image */}
                   <CommandItem
                     value='upload-image'
-                    aria-disabled={!imageInputSupported}
-                    className={cn(!imageInputSupported && 'opacity-50')}
+                    aria-disabled={!attachmentInputSupported}
+                    className={cn(!attachmentInputSupported && 'opacity-50')}
                     onSelect={handleDrawerFileSelect}
                   >
                     <span className='flex w-full items-center justify-between'>
                       <div className='flex items-center gap-2'>
                         <Paperclip className='size-4' />
                         <div className='flex flex-col items-start'>
-                          <span>Upload image</span>
-                          <span className='text-xs text-muted-foreground'>Attach an image to your message</span>
+                          <span>Upload file</span>
+                          <span className='text-xs text-muted-foreground'>Attach an image or PDF to your message</span>
                         </div>
                       </div>
                     </span>
@@ -455,7 +463,12 @@ export const ChatTextareaMobile = memo(function ({
           }}
           onPointerDown={handlePointerDown}
         >
-          <ChatTextareaMobileImages images={images} onRemoveImage={removeImage} />
+          <ChatTextareaMobileImages
+            attachments={attachments}
+            directory={attachmentDirectory}
+            blockReason={sendBlockReason}
+            onRemove={removeAttachment}
+          />
           {/*
            * Grid overlay technique for cross-browser textarea auto-resize.
            * Safari doesn't support `field-sizing: content`, so we stack a hidden div
@@ -532,7 +545,7 @@ export const ChatTextareaMobile = memo(function ({
           ref={fileInputReference}
           multiple
           type='file'
-          accept='image/*'
+          accept={attachmentAccept}
           className='hidden'
           onChange={handleFileChange}
         />
@@ -541,7 +554,11 @@ export const ChatTextareaMobile = memo(function ({
         <ChatTextareaSubmitButton
           status={status}
           isSubmitting={isSubmitting}
-          isDisabled={isSubmitDisabled || (inputText.trim().length === 0 && images.length === 0)}
+          isDisabled={
+            isSubmitDisabled ||
+            sendBlockReason !== undefined ||
+            (inputText.trim().length === 0 && attachments.length === 0)
+          }
           formattedCancelKeyCombination={formattedCancelKeyCombination}
           onSubmit={handleSubmit}
           onCancel={handleCancelClick}

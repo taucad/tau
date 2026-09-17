@@ -27,11 +27,11 @@ import { ChatTextareaBorderBeam } from '#components/chat/chat-textarea-border-be
 import { ChatTextareaDesktopImages } from '#components/chat/chat-textarea-desktop-images.js';
 import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-button.js';
 import { focusTrapAttribute } from '#components/chat/chat-textarea-types.js';
-import type { ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
+import type { ChatAttachmentAddOptions, ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
+import type { DraftAttachment } from '#hooks/draft.machine.js';
 import { useSelector } from '@xstate/react';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useDraftActions } from '#hooks/use-chat.js';
-import type { DraftImageOptions } from '#hooks/use-chat.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { useFeature } from '#flags/use-feature.js';
 import { ChatEditor } from '#components/chat/tiptap/chat-editor.js';
@@ -44,7 +44,7 @@ import { skillMetadataToSlashCommand, useSkillsCatalog } from '#hooks/use-skills
 import type { ChatContextReference } from '#components/chat/chat-context-insertion.js';
 
 const dragOverlayCopy: Record<ChatTextareaDragKind, string> = {
-  image: 'Add image(s)',
+  image: 'Add files',
   viewer: 'Add screenshot',
   reference: 'Add reference',
 };
@@ -61,7 +61,11 @@ type ChatTextareaDesktopProperties = {
   readonly dragKind: ChatTextareaDragKind | undefined;
   readonly isSubmitting: boolean;
   readonly inputText: string;
-  readonly images: string[];
+  readonly attachments: readonly DraftAttachment[];
+  readonly attachmentDirectory: string;
+  readonly sendBlockReason: string | undefined;
+  readonly attachmentAccept: string;
+  readonly attachmentInputSupported: boolean;
   readonly selectedToolChoice: ToolSelection;
   readonly status: string;
   readonly selectedModel: ResolvedModel;
@@ -96,11 +100,11 @@ type ChatTextareaDesktopProperties = {
   readonly handlePaste: (event: ClipboardPasteEvent) => boolean;
   readonly handleFileSelect: () => void;
   readonly handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
-  readonly handleAddImage: (image: string, options?: DraftImageOptions) => void;
+  readonly handleAddImage: (image: string, options?: ChatAttachmentAddOptions) => void;
   readonly onScreenshotAction: (item: ContextSuggestionItem) => void;
   readonly onEscapePressed?: () => void;
   readonly handleTextareaBlur: () => void;
-  readonly removeImage: (index: number) => void;
+  readonly removeAttachment: (index: number) => void;
   readonly setDraftToolChoice: (choice: ToolSelection) => void;
 };
 
@@ -146,11 +150,14 @@ export const ChatTextareaDesktop = memo(function ({
   dragKind,
   isSubmitting,
   inputText,
-  images,
+  attachments,
+  attachmentDirectory,
+  sendBlockReason,
+  attachmentAccept,
+  attachmentInputSupported,
   selectedToolChoice,
   status,
   selectedModel,
-  imageInputSupported,
   formattedCancelKeyCombination,
 
   // Context data
@@ -181,7 +188,7 @@ export const ChatTextareaDesktop = memo(function ({
   onScreenshotAction,
   onEscapePressed,
   handleTextareaBlur,
-  removeImage,
+  removeAttachment,
   setDraftToolChoice,
 }: ChatTextareaDesktopProperties): React.JSX.Element {
   const skillsCatalog = useSkillsCatalog();
@@ -336,7 +343,8 @@ export const ChatTextareaDesktop = memo(function ({
     }
   }, []);
 
-  const isDisabled = isSubmitDisabled || (inputText.trim().length === 0 && images.length === 0);
+  const isDisabled =
+    isSubmitDisabled || sendBlockReason !== undefined || (inputText.trim().length === 0 && attachments.length === 0);
 
   return (
     // Outer wrapper is purely a positioning context for the beam overlay
@@ -362,7 +370,12 @@ export const ChatTextareaDesktop = memo(function ({
         onDrop={handleDrop}
       >
         {/* Images */}
-        <ChatTextareaDesktopImages images={images} onRemoveImage={removeImage} />
+        <ChatTextareaDesktopImages
+          attachments={attachments}
+          directory={attachmentDirectory}
+          blockReason={sendBlockReason}
+          onRemove={removeAttachment}
+        />
 
         {/* Editor */}
         <div className={cn('flex min-h-0 min-w-0 flex-1 flex-col overflow-auto')} onClick={handleEditorAreaClick}>
@@ -394,6 +407,7 @@ export const ChatTextareaDesktop = memo(function ({
           focusEditor={focusEditor}
           setDraftToolChoice={setDraftToolChoice}
           fileInputReference={fileInputReference}
+          attachmentAccept={attachmentAccept}
           handleFileChange={handleFileChange}
           creationLocationControl={creationLocationControl}
           acpSessionData={acpSessionData}
@@ -405,7 +419,7 @@ export const ChatTextareaDesktop = memo(function ({
           enableContextActions={enableContextActions}
           handleAtButtonClick={handleAtButtonClick}
           handleFileSelect={handleFileSelect}
-          imageInputSupported={imageInputSupported}
+          attachmentInputSupported={attachmentInputSupported}
           status={status}
           isSubmitting={isSubmitting}
           isDisabled={isDisabled}
@@ -436,6 +450,7 @@ export const ChatTextareaLeftControls = memo(function ({
   focusEditor,
   setDraftToolChoice,
   fileInputReference,
+  attachmentAccept,
   handleFileChange,
   creationLocationControl,
   acpSessionData,
@@ -448,6 +463,7 @@ export const ChatTextareaLeftControls = memo(function ({
   readonly setDraftToolChoice: (choice: ToolSelection) => void;
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object
   readonly fileInputReference: React.RefObject<HTMLInputElement | null>;
+  readonly attachmentAccept: string;
   readonly handleFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
   readonly creationLocationControl?: React.ReactNode;
   readonly acpSessionData?: AcpSessionData;
@@ -653,7 +669,7 @@ export const ChatTextareaLeftControls = memo(function ({
         ref={fileInputReference}
         multiple
         type='file'
-        accept='image/*'
+        accept={attachmentAccept}
         className='hidden'
         onChange={handleFileChange}
       />
@@ -803,7 +819,7 @@ const ChatTextareaRightControls = memo(function ({
   enableContextActions,
   handleAtButtonClick,
   handleFileSelect,
-  imageInputSupported,
+  attachmentInputSupported,
   status,
   isSubmitting,
   isDisabled,
@@ -814,7 +830,7 @@ const ChatTextareaRightControls = memo(function ({
   readonly enableContextActions: boolean;
   readonly handleAtButtonClick: () => void;
   readonly handleFileSelect: () => void;
-  readonly imageInputSupported: boolean;
+  readonly attachmentInputSupported: boolean;
   readonly status: string;
   readonly isSubmitting: boolean;
   readonly isDisabled: boolean;
@@ -851,19 +867,20 @@ const ChatTextareaRightControls = memo(function ({
           <Button
             variant='outline'
             size='icon'
-            aria-disabled={!imageInputSupported}
+            aria-disabled={!attachmentInputSupported}
+            aria-label='Add image or PDF'
             className={cn(
               'size-6 rounded-full text-muted-foreground hover:text-foreground',
-              !imageInputSupported && 'opacity-50',
+              !attachmentInputSupported && 'opacity-50',
             )}
-            title='Add image'
+            title='Add image or PDF'
             onClick={handleFileSelect}
           >
             <Paperclip className='size-3.5' />
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          <p>{imageInputSupported ? 'Upload an image' : 'Selected model cannot read images'}</p>
+          <p>{attachmentInputSupported ? 'Upload an image or PDF' : 'Selected model cannot read images or PDFs'}</p>
         </TooltipContent>
       </Tooltip>
 

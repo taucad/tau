@@ -38,18 +38,15 @@ import { getChatRecencyAt } from '#utils/chat-recency.utils.js';
  *   order the upgrade is a Web Lock keyed on the chat id, as the revision port
  *   already does for refs.
  *
- * Four {@link Chat} fields never reach `chat.json` (P26), and this module is
- * where they come from instead:
+ * `messages` never reaches `chat.json` (P26): it is *derived*. The session log
+ * beside the record is the chat's history, so the transcript is rebuilt from its
+ * segments on open — through `deriveChatTranscript`, the same derivation the
+ * reattach path runs, never a second reducer. A copy in the record would be a
+ * second history over the one path two devices both claim.
  *
- * - **`messages`** is *derived*. The session log beside the record is the
- *   chat's history, so the transcript is rebuilt from its segments on open —
- *   through `deriveChatTranscript`, the same derivation the reattach path runs,
- *   never a second reducer. A copy in the record would be a second history over
- *   the one path two devices both claim.
- * - **`draft`**, **`messageEdits`** and **`hasUnreadTurn`** are this device's:
- *   a half-written message and an unread badge are not the chat's, so they are
- *   held in memory here and reset by a reload (A36/I26), which is what a
- *   per-client record does until W19 gives them a durable one.
+ * The composer — draft, message edits, unread — is not the chat's at all: it is
+ * this device's composer records (blueprint D3, W8), and this module only
+ * removes a deleted chat's record.
  */
 
 const defaultNavigationChatName = 'New chat';
@@ -70,7 +67,6 @@ const placeholderRecord = (projectId: string, chatId: string): Chat => ({
   messages: [],
   createdAt: 0,
   updatedAt: 0,
-  hasUnreadTurn: false,
 });
 
 /**
@@ -92,12 +88,9 @@ export type ChatStoreClient = {
   rmdir: (path: string, options?: { recursive?: boolean }) => Promise<void>;
 };
 
-/** The {@link Chat} fields this client holds rather than the file. */
+/** The {@link Chat} field this client holds rather than the file. */
 type ClientChatState = {
   messages: readonly MyUIMessage[];
-  draft?: Chat['draft'];
-  messageEdits?: Chat['messageEdits'];
-  hasUnreadTurn: boolean;
 };
 
 /** How the chat store finds the projects a chat could be in. @internal */
@@ -133,7 +126,7 @@ export function createChatFileStore(
   const mutex = new KeyedMutex<string>();
   /** `chatId -> projectId`, filled by every read and every create. */
   const located = new Map<string, string>();
-  /** The fields the record does not carry, per chat (P26, A36/I26). */
+  /** The transcript the record does not carry, per chat (P26). */
   const client = new Map<string, ClientChatState>();
   const staleLogs = new Set<string>();
   const encoder = new TextEncoder();
@@ -189,35 +182,19 @@ export function createChatFileStore(
     if (held !== undefined && !staleLogs.delete(chatId)) {
       return held;
     }
-    const derived: ClientChatState = {
-      ...held,
-      messages: await deriveMessages(projectId, chatId),
-      hasUnreadTurn: held?.hasUnreadTurn ?? false,
-    };
+    const derived: ClientChatState = { messages: await deriveMessages(projectId, chatId) };
     client.set(chatId, derived);
     return derived;
   };
 
   const hydrate = async (projectId: string, record: ChatRecord): Promise<Chat> => {
     const state = await clientState(projectId, record.id);
-    const chat: Chat = {
-      ...record,
-      messages: [...state.messages],
-      ...(state.draft === undefined ? {} : { draft: state.draft }),
-      ...(state.messageEdits === undefined ? {} : { messageEdits: state.messageEdits }),
-      hasUnreadTurn: state.hasUnreadTurn,
-    };
-    return chat;
+    return { ...record, messages: [...state.messages] };
   };
 
-  /** Keep what the file will not carry, so this session goes on seeing it. */
-  const holdClientFields = (chat: Chat): void => {
-    client.set(chat.id, {
-      messages: chat.messages,
-      draft: chat.draft,
-      messageEdits: chat.messageEdits,
-      hasUnreadTurn: chat.hasUnreadTurn ?? false,
-    });
+  /** Keep the transcript the file will not carry, so this session goes on seeing it. */
+  const holdTranscript = (chat: Chat): void => {
+    client.set(chat.id, { messages: chat.messages });
   };
 
   const readRecord = async (projectId: string, chatId: string): Promise<Chat | undefined> => {
@@ -233,7 +210,7 @@ export function createChatFileStore(
   const writeRecord = async (projectId: string, chat: Chat): Promise<void> => {
     await options.client.writeFile(recordPath(projectId, chat.id), serializeChatRecord(chat));
     located.set(chat.id, projectId);
-    holdClientFields(chat);
+    holdTranscript(chat);
   };
 
   /**
@@ -253,7 +230,7 @@ export function createChatFileStore(
     /* Derived without caching first: `locate` asks every known project about a
      * chat, and caching the empty answer from the wrong one would hide the
      * chat's real transcript for the rest of the session. */
-    const state = client.get(chatId) ?? { messages: await deriveMessages(projectId, chatId), hasUnreadTurn: false };
+    const state = client.get(chatId) ?? { messages: await deriveMessages(projectId, chatId) };
     if (state.messages.length === 0) {
       return undefined;
     }
@@ -334,7 +311,7 @@ export function createChatFileStore(
 
   const create = async (
     resourceId: string,
-    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt' | 'hasUnreadTurn'> & {
+    chat: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt'> & {
       id?: string;
     },
   ): Promise<Chat> => {
@@ -347,7 +324,6 @@ export function createChatFileStore(
       createdAt: timestamp,
       updatedAt: timestamp,
       recencyAt: timestamp,
-      hasUnreadTurn: false,
     };
     await writeRecord(resourceId, created);
     return created;
@@ -364,6 +340,26 @@ export function createChatFileStore(
    */
   const removeComposerRecord = async (projectId: string, chatId: string): Promise<void> =>
     createComposerRecordStore(options.client, composerRecordPaths.chat(projectId, chatId)).remove();
+
+  /**
+   * Tombstone a chat and reclaim its composer record. The record goes even when
+   * the chat was already tombstoned — by another device, or a repeated delete —
+   * because this device's record travels nowhere and nothing else removes it.
+   */
+  const tombstone = async (chatId: string): Promise<Chat | undefined> => {
+    const deleted = await patch(chatId, (chat) => {
+      if (isDeleted(chat)) {
+        return false;
+      }
+      chat.deletedAt = Date.now();
+      return true;
+    });
+    const projectId = deleted?.resourceId ?? (await locate(chatId));
+    if (projectId !== undefined) {
+      await removeComposerRecord(projectId, chatId);
+    }
+    return deleted;
+  };
 
   return {
     invalidateLog: (chatId) => {
@@ -412,21 +408,6 @@ export function createChatFileStore(
         return true;
       }),
 
-    /* Never a file write: unread is this client's, and a record that carried it
-     * would clear device B's badge because device A read the turn (A36/I26). */
-    setChatUnreadState: async (chatId, hasUnreadTurn) => {
-      const projectId = await locate(chatId);
-      if (projectId === undefined) {
-        return undefined;
-      }
-      const state = await clientState(projectId, chatId);
-      if (state.hasUnreadTurn === hasUnreadTurn) {
-        return undefined;
-      }
-      client.set(chatId, { ...state, hasUnreadTurn });
-      return readChatDirectory(projectId, chatId);
-    },
-
     consumeChatStartupRequest: async (chatId, requestId) =>
       patch(chatId, (chat) => {
         if (chat.startupRequest?.id !== requestId) {
@@ -443,10 +424,6 @@ export function createChatFileStore(
           chat.messages = input.messages;
           changed = true;
         }
-        if (!valuesEqual(chat.draft, input.draft)) {
-          chat.draft = input.draft;
-          changed = true;
-        }
         if (input.clearStartupRequestId !== undefined && chat.startupRequest?.id === input.clearStartupRequestId) {
           delete chat.startupRequest;
           changed = true;
@@ -454,56 +431,14 @@ export function createChatFileStore(
         return changed;
       }),
 
-    setMessageEdit: async (chatId, messageId, draft) =>
-      patch(chatId, (chat) => {
-        if (valuesEqual(chat.messageEdits?.[messageId], draft)) {
-          return false;
-        }
-        chat.messageEdits = { ...chat.messageEdits, [messageId]: draft };
-        return true;
-      }),
-
-    clearMessageEdit: async (chatId, messageId) =>
-      patch(chatId, (chat) => {
-        if (chat.messageEdits === undefined || !(messageId in chat.messageEdits)) {
-          return false;
-        }
-        const remaining = { ...chat.messageEdits };
-        // oxlint-disable-next-line typescript-eslint/no-dynamic-delete -- messageId is a runtime key.
-        delete remaining[messageId];
-        chat.messageEdits = remaining;
-        return true;
-      }),
-
-    softDeleteChat: async (chatId) => {
-      const deleted = await patch(chatId, (chat) => {
-        if (isDeleted(chat)) {
-          return false;
-        }
-        chat.deletedAt = Date.now();
-        return true;
-      });
-      if (deleted !== undefined) {
-        await removeComposerRecord(deleted.resourceId, chatId);
-      }
-      return deleted;
-    },
+    softDeleteChat: async (chatId) => tombstone(chatId),
 
     /* A tombstone, not an erasure: `deletedAt` in the record is what travels to
      * the other device, where an absent file would just look like a chat that
      * had not arrived yet (S39, S43). The composer record is the exception —
      * it is this device's alone and travels nowhere, so it goes (D11). */
     deleteChat: async (chatId) => {
-      const deleted = await patch(chatId, (chat) => {
-        if (isDeleted(chat)) {
-          return false;
-        }
-        chat.deletedAt = Date.now();
-        return true;
-      });
-      if (deleted !== undefined) {
-        await removeComposerRecord(deleted.resourceId, chatId);
-      }
+      await tombstone(chatId);
     },
 
     getChat: async (chatId) => {
@@ -532,8 +467,6 @@ export function createChatFileStore(
       return create(chat.resourceId, {
         name: `${chat.name} (Copy)`,
         messages: chat.messages,
-        draft: chat.draft,
-        messageEdits: chat.messageEdits,
         activeExecution: chat.activeExecution,
         activeKernel: chat.activeKernel,
       });
@@ -547,8 +480,6 @@ export function createChatFileStore(
           const copy = await create(targetResourceId, {
             name: chat.name,
             messages: chat.messages,
-            draft: chat.draft,
-            messageEdits: chat.messageEdits,
             activeExecution: chat.activeExecution,
             activeKernel: chat.activeKernel,
           });

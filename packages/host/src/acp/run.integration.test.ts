@@ -832,6 +832,95 @@ describe('the external agent run kind', () => {
     expect(lifecycleOf(events)).not.toContain('completed');
   }, 90_000);
 
+  /* A usage limit is the person's own account, not a crash: it is recorded once,
+   * typed, in the provider's words, with no duplicate prose and no stack. */
+  it('should record a provider usage limit as one typed stop without a stack trace', async () => {
+    const harness = await startHarness();
+    const chatId = 'chat-external-quota';
+
+    await runTurn(harness, { chatId, runId: 'run-external-quota', text: 'fail:quota' });
+
+    const initialize = harness.frames.find(
+      ({ direction, frame }) => direction === 'client->agent' && frame.includes('"method":"initialize"'),
+    );
+    expect(JSON.parse(initialize?.frame ?? '{}')).toMatchObject({
+      params: {
+        clientCapabilities: { _meta: { jetbrains: { air: { version: 1, capabilities: ['sessionFailure'] } } } },
+      },
+    });
+    const events = await readLog(harness.workspaceRoot, chatId);
+    const title =
+      "You've hit your usage limit. Visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at Sep 20th, 2026 4:07 PM.";
+    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({
+      state: 'failed',
+      detail: {
+        code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+        message: title,
+        details: { agentId: 'codex', failure: { category: 'limit', title, actions: [] } },
+      },
+    });
+    expect(messagesOf(events).filter((message) => textOfMessage(message).includes('usage limit'))).toEqual([]);
+    expect(JSON.stringify(events)).not.toContain('SYSTEM_ERROR');
+    expect(lifecycleOf(events)).not.toContain('completed');
+  }, 90_000);
+
+  it('should keep the retry action the agent offered for a rate limit', async () => {
+    const harness = await startHarness();
+    const chatId = 'chat-external-rate';
+
+    await runTurn(harness, { chatId, runId: 'run-external-rate', text: 'fail:rate' });
+
+    const events = await readLog(harness.workspaceRoot, chatId);
+    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({
+      state: 'failed',
+      detail: {
+        code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+        message: 'Codex is temporarily rate limited.',
+        details: { failure: { category: 'limit', actions: ['retry'] } },
+      },
+    });
+  }, 90_000);
+
+  it('should record the sentence inside a provider error body rather than its JSON', async () => {
+    const harness = await startHarness();
+    const chatId = 'chat-external-model';
+
+    await runTurn(harness, { chatId, runId: 'run-external-model', text: 'fail:model' });
+
+    const events = await readLog(harness.workspaceRoot, chatId);
+    const message = 'The requested model is not supported for this account.';
+    expect(events.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({
+      state: 'failed',
+      detail: {
+        code: 'EXTERNAL_AGENT_FAILED',
+        message,
+        details: { agentId: 'codex', failure: { category: 'service', title: message, actions: ['retry'] } },
+      },
+    });
+  }, 90_000);
+
+  it("should carry an unclassified failure's stderr as diagnostics, not as its message", async () => {
+    const harness = await startHarness();
+    const chatId = 'chat-external-crash';
+
+    await runTurn(harness, { chatId, runId: 'run-external-crash', text: 'crash' });
+
+    const events = await readLog(harness.workspaceRoot, chatId);
+    const terminal = events.findLast((event) => event.type === 'run.lifecycle');
+    expect(terminal).toMatchObject({
+      state: 'failed',
+      detail: {
+        code: 'EXTERNAL_AGENT_FAILED',
+        message: 'Codex stopped unexpectedly: Internal error',
+        details: {
+          agentId: 'codex',
+          failure: { category: 'internal', title: 'Internal error', actions: ['retry'] },
+          diagnostics: expect.stringContaining('[SYSTEM_ERROR] Prompt for session') as unknown as string,
+        },
+      },
+    });
+  }, 90_000);
+
   /* Every ACP counter is a session total ("Total input tokens across all
    * turns"), and `metadata.usage` is a per-turn figure Tau's readers sum. Turn 2
    * must therefore report turn 2, not the session. */

@@ -53,6 +53,12 @@ vi.mock('#hooks/use-models.js', () => ({
   useModels: () => ({ resolveModel: (id: string) => ({ id, name: id }) }),
 }));
 
+vi.mock('#routes/w.$workspace.$project/chat-error-agent-stop.js', () => ({
+  ChatErrorAgentStop: ({ stop }: { readonly stop: { readonly failure: { readonly title: string } } }) => (
+    <section aria-label='External agent stop'>{stop.failure.title}</section>
+  ),
+}));
+
 vi.mock('#components/code/code-viewer.js', () => ({
   CodeViewer: ({ text }: { readonly text: string }) => <pre data-testid='code-viewer'>{text}</pre>,
 }));
@@ -61,6 +67,65 @@ describe('ChatError', () => {
   beforeEach(() => {
     mockRetryAttempt = 0;
     vi.clearAllMocks();
+  });
+
+  it('tells the customer when a rate-limited request can be retried', () => {
+    const rateLimited: ChatErrorPayload = {
+      category: errorCategory.rateLimit,
+      title: 'Rate Limit Exceeded',
+      message: 'The funded-operation failsafe is active.',
+      code: 'FUNDED_OPERATION_LIMIT',
+      httpStatus: 429,
+      details: { retryAfterSeconds: 30 },
+    };
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({ error: undefined, persistedError: rateLimited } as unknown as CombinedChatState),
+    );
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Try again in 30 seconds.')).toBeInTheDocument();
+  });
+
+  it("should route an external agent's usage limit to its stop notice instead of the generic block", () => {
+    const quota: ChatErrorPayload = {
+      category: errorCategory.rateLimit,
+      title: 'Rate Limit Exceeded',
+      message: "You've hit your usage limit.",
+      code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+      details: {
+        agentId: 'codex',
+        failure: { category: 'limit', title: "You've hit your usage limit.", actions: [] },
+      },
+    };
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({ error: undefined, persistedError: quota } as unknown as CombinedChatState),
+    );
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByRole('region', { name: 'External agent stop' })).toHaveTextContent(
+      "You've hit your usage limit.",
+    );
+    expect(screen.queryByText('Rate Limit Exceeded')).not.toBeInTheDocument();
+  });
+
+  it('should keep the generic fallback for an external failure whose details do not match the stop schema', () => {
+    const malformed: ChatErrorPayload = {
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'codex stopped unexpectedly: Internal error',
+      code: 'EXTERNAL_AGENT_FAILED',
+      details: { agentId: 'codex' },
+    };
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({ error: undefined, persistedError: malformed } as unknown as CombinedChatState),
+    );
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.queryByRole('region', { name: 'External agent stop' })).not.toBeInTheDocument();
+    expect(screen.getByText('codex stopped unexpectedly: Internal error')).toBeInTheDocument();
   });
 
   it('T23: renders null when retryAttempt > 0 even with a persisted resumable error', () => {

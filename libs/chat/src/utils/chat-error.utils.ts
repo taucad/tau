@@ -16,14 +16,9 @@ export function httpStatusToCategory(status: number): ErrorCategory {
       return errorCategory.auth;
     }
 
-    // 402 Payment Required is the first-party ledger's status
-    // (InsufficientCreditsError and friends); 403 stays mapped for
-    // provider-passthrough credit errors.
+    // 402 Payment Required is the first-party ledger's status (InsufficientCreditsError
+    // and friends). 403 is a refusal, not a balance problem, so it stays generic.
     case 402: {
-      return errorCategory.credits;
-    }
-
-    case 403: {
       return errorCategory.credits;
     }
 

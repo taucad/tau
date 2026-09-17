@@ -25,8 +25,9 @@
  *
  * The composer is interactive before its record is read. `hydrateDraft`
  * applies the record to every field the user has not touched since the
- * machine started — all of them while the composer is pristine — and writes
- * the touched fields back so the record converges on what the user sees.
+ * machine started — all of them while the composer is pristine. It writes
+ * nothing: every touched field was already patched when it was touched, and
+ * the record merges those patches over what it read (R5).
  */
 
 import { setup, assign, emit, enqueueActions } from 'xstate';
@@ -37,7 +38,7 @@ import type { ChatMode } from '@taucad/chat/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 import { base64ToUint8Array } from 'uint8array-extras';
-import { attachmentKind, attachmentUrl, isAttachmentUrl } from '#utils/attachment.utils.js';
+import { attachmentKind, attachmentReferenceOf, attachmentUrl } from '#utils/attachment.utils.js';
 import type { Attachment, AttachmentKind } from '#utils/attachment.utils.js';
 
 /**
@@ -246,14 +247,11 @@ type LoadedDraft = { text: string; attachments: DraftAttachment[]; legacy: strin
 const loadMessage = (message: MyUIMessage | undefined): LoadedDraft => {
   const loaded: LoadedDraft = { text: '', attachments: [], legacy: [] };
   for (const part of message?.parts ?? []) {
+    const reference = part.type === 'file' ? attachmentReferenceOf(part) : undefined;
     if (part.type === 'text' && loaded.text === '') {
       loaded.text = part.text;
-    } else if (part.type === 'file' && isAttachmentUrl(part.url)) {
-      loaded.attachments.push({
-        hash: part.url.slice('attachments/'.length, 'attachments/'.length + 64),
-        mediaType: part.mediaType,
-        ...(part.filename === undefined ? {} : { filename: part.filename }),
-      });
+    } else if (reference !== undefined) {
+      loaded.attachments.push(reference);
     } else if (part.type === 'file' && part.url.startsWith('data:')) {
       loaded.legacy.push(part.url);
     }
@@ -427,14 +425,6 @@ export const draftMachine = setup({
         return;
       }
       const target: DraftTarget = event.type === 'addDraftAttachment' ? 'main' : 'edit';
-      enqueue.assign({
-        touched: touch(
-          context.touched,
-          target === 'main' ? { draft: true } : {},
-          target === 'edit' ? context.activeEditMessageId : undefined,
-        ),
-      });
-
       const result = queueEntryFor(event.dataUrl, {
         target,
         editMessageId: target === 'edit' ? context.activeEditMessageId : undefined,
@@ -480,11 +470,22 @@ export const draftMachine = setup({
         return {};
       }
       const [, ...rest] = context.attachmentQueue;
+      // Only an attachment that lands touches its draft: a refused or failed one changes
+      // nothing, so a late hydration still applies the stored draft (D7), and one that
+      // lands after a hydration appends to the draft it brought.
       if (headAddresses(context, 'main')) {
-        return { draftAttachments: [...context.draftAttachments, event.attachment], attachmentQueue: rest };
+        return {
+          draftAttachments: [...context.draftAttachments, event.attachment],
+          attachmentQueue: rest,
+          touched: touch(context.touched, { draft: true }),
+        };
       }
       if (headAddresses(context, 'edit')) {
-        return { editDraftAttachments: [...context.editDraftAttachments, event.attachment], attachmentQueue: rest };
+        return {
+          editDraftAttachments: [...context.editDraftAttachments, event.attachment],
+          attachmentQueue: rest,
+          touched: touch(context.touched, {}, context.activeEditMessageId),
+        };
       }
       return { attachmentQueue: rest };
     }),
@@ -503,8 +504,6 @@ export const draftMachine = setup({
     headIsEdit: ({ context }) => context.attachmentQueue[0]?.target === 'edit',
     storedForMain: ({ context }) => headAddresses(context, 'main'),
     storedForOpenEdit: ({ context }) => headAddresses(context, 'edit'),
-    draftTouched: ({ context }) => context.touched.draft,
-    selectionTouched: ({ context }) => context.touched.toolChoice || context.touched.mode,
   },
   delays: {
     saveDebounce: 200,
@@ -701,8 +700,6 @@ export const draftMachine = setup({
             clearDraft: {
               target: 'persisting',
             },
-            // Write typed state back over a record read that arrived late.
-            hydrateDraft: { target: 'persisting', guard: 'draftTouched' },
           },
         },
         pending: {
@@ -732,7 +729,6 @@ export const draftMachine = setup({
             clearDraft: {
               target: 'persisting',
             },
-            hydrateDraft: { target: 'persisting', guard: 'draftTouched' },
           },
         },
         persisting: {
@@ -846,7 +842,6 @@ export const draftMachine = setup({
             setDraftToolChoice: 'persisting',
             setDraftMode: 'persisting',
             clearDraft: 'persisting',
-            hydrateDraft: { target: 'persisting', guard: 'selectionTouched' },
           },
         },
         persisting: {
@@ -865,7 +860,6 @@ export const draftMachine = setup({
             setDraftToolChoice: { target: 'persisting', reenter: true },
             setDraftMode: { target: 'persisting', reenter: true },
             clearDraft: { target: 'persisting', reenter: true },
-            hydrateDraft: { target: 'persisting', reenter: true, guard: 'selectionTouched' },
           },
         },
       },

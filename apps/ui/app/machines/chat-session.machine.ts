@@ -1,4 +1,4 @@
-import { assign, emit, setup } from 'xstate';
+import { assign, emit, enqueueActions, setup } from 'xstate';
 import type { ActorRefFrom, AnyActorRef } from 'xstate';
 
 /**
@@ -83,6 +83,10 @@ export type ChatSessionMachineEvent =
   | { readonly type: 'requestLifecycle'; readonly phase: ChatRequestLifecycle }
   | { readonly type: 'durableRunState'; readonly state: ChatDurableRunState }
   | { readonly type: 'viewed' }
+  /** The project's unread record says this chat is unread on this device (D9). */
+  | { readonly type: 'unreadRestored' }
+  /** Raised by the machine itself when an approval becomes pending; not sent from outside. */
+  | { readonly type: 'approvalPending' }
   | { readonly type: 'close' }
   | { readonly type: 'turnFinalized'; readonly branch: string }
   | ChatTurnSettlementObservation
@@ -163,6 +167,18 @@ export const chatSessionMachine = setup({
           : undefined,
     }),
     clearPendingSettlement: assign({ pendingSettlement: undefined }),
+    /* Listed before the count's `assign`, so the check reads the old count. The
+     * `read` region cannot take `toolParts` itself: its transition would
+     * pre-empt the root's, and the count would never move. */
+    raiseApprovalPending: enqueueActions(({ context, event, enqueue }) => {
+      /* The store's second unread trigger (D9): an approval that was not pending a moment ago. */
+      const requested =
+        (event.type === 'toolParts' && event.approvals > 0) ||
+        (event.type === 'interruptRecorded' && event.state === 'requested');
+      if (requested && context.pendingApprovalCount === 0) {
+        enqueue.raise({ type: 'approvalPending' });
+      }
+    }),
     recordPendingFailure: assign({
       failureReason: ({ context }) =>
         context.pendingSettlement?.type === 'turnFailedObserved'
@@ -190,6 +206,7 @@ export const chatSessionMachine = setup({
      * picture, so a fifty-part turn is one transition. */
     toolParts: {
       actions: [
+        'raiseApprovalPending',
         assign({
           toolsInFlight: ({ event }) => event.inFlight,
           pendingApprovalCount: ({ event }) => event.approvals,
@@ -200,6 +217,7 @@ export const chatSessionMachine = setup({
     },
     interruptRecorded: {
       actions: [
+        'raiseApprovalPending',
         assign({
           pendingApprovalCount: ({ event, context }) =>
             event.count ?? (event.state === 'requested' ? Math.max(context.pendingApprovalCount, 1) : 0),
@@ -272,6 +290,7 @@ export const chatSessionMachine = setup({
               guard: 'isApprovalRequested',
               target: '.waiting.approval',
               actions: [
+                'raiseApprovalPending',
                 assign({
                   pendingApprovalCount: ({ event, context }) =>
                     event.count ?? Math.max(context.pendingApprovalCount, 1),
@@ -396,6 +415,8 @@ export const chatSessionMachine = setup({
               target: 'unread',
               actions: 'announce',
             },
+            unreadRestored: { target: 'unread', actions: 'announce' },
+            approvalPending: { target: 'unread', actions: 'announce' },
           },
         },
         unread: { on: { viewed: { target: 'read', actions: 'announce' } } },

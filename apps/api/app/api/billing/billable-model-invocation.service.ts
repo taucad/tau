@@ -266,9 +266,12 @@ export class BillableModelInvocationService {
         })),
       },
     };
+    // A caller that already left must not place a hold that only the recovery sweep releases.
+    intent.signal.throwIfAborted();
     let admission = await this.ledger.admitOperation(admissionInput);
     if (admission.status === 'denied' && admission.reason === 'concurrency_unavailable' && !recoveryAttempted) {
       await this.recoverCapacity(intent);
+      intent.signal.throwIfAborted();
       admission = await this.ledger.admitOperation(admissionInput);
     }
     if (admission.status === 'denied') {

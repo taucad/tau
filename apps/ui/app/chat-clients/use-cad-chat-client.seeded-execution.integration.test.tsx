@@ -66,6 +66,17 @@ const harness = vi.hoisted(() => {
       setSelectedModelId: noop,
     },
     actions: { sendMessage: vi.fn(), regenerate: vi.fn(), retryMessage: vi.fn(), stop: vi.fn() },
+    /** An empty worker filesystem: every composer record reads as absent. */
+    client: {
+      readFile: async (path: string): Promise<Uint8Array<ArrayBuffer>> => {
+        throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
+      },
+      writeFile: async () => undefined,
+      exists: async () => false,
+      readdir: async (): Promise<string[]> => [],
+      unlink: async () => undefined,
+      rmdir: async () => undefined,
+    },
     /** Browser workspace claim — present so the client publishes its factory. */
     workspaceExecution: {
       hostId: 'host_seeded',
@@ -105,6 +116,9 @@ vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
   registerAgentHostRunReset: () => () => undefined,
   getBrowserAgentHostRun: () => undefined,
   resolveBrowserAgentHostInterrupt: async () => undefined,
+  // Read when the loaded row rebinds the chat to its project; no settlement was recorded.
+  getHostTurnSettlement: () => undefined,
+  subscribeHostTurnSettlements: () => () => undefined,
 }));
 vi.mock('#machines/inspector.js', () => ({ inspect: undefined }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({ useChatSessionStore: () => harness.store }));
@@ -124,7 +138,10 @@ vi.mock('#hooks/use-project.js', () => ({
 }));
 // Absent file manager: the browser-host registration effect returns early, so
 // this scope never builds a worker-backed host client.
-vi.mock('#hooks/use-file-manager.js', () => ({ useOptionalFileManager: () => undefined }));
+vi.mock('#hooks/use-file-manager.js', () => ({
+  useOptionalFileManager: () => undefined,
+  useFileManager: () => ({ client: harness.client }),
+}));
 /* The turn-start pre-flight (R9) is proved in `use-credit-preflight.test.tsx` and
  * `use-cad-chat-client.test.tsx`; this scope funds every turn. */
 vi.mock('#hooks/use-credit-preflight.js', () => ({ useCreditPreflight: () => () => undefined }));
@@ -195,11 +212,9 @@ const dispatchSeededTurn = async (activeExecution: CadAgentExecution): Promise<R
     getChat: async () => row,
     patchChat: async () => undefined,
     touchChatRecency: async () => undefined,
-    setChatUnreadState: async () => undefined,
     consumeChatStartupRequest: async () => ({ ...row, startupRequest: undefined }),
     commitCancelledDraftRestore: async () => undefined,
-    setMessageEdit: async () => undefined,
-    clearMessageEdit: async () => undefined,
+    client: harness.client,
   });
 
   function Client(): React.JSX.Element {
@@ -283,7 +298,7 @@ describe('seeded first turn execution', () => {
       return <span />;
     }
     render(
-      <ChatComposerProvider>
+      <ChatComposerProvider surface='marketing'>
         <Composer />
       </ChatComposerProvider>,
     );

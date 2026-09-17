@@ -161,9 +161,9 @@ export const buildAgentProjection = (input: AgentProjectionInput): AgentProjecti
     branch: metadata?.branch ?? status?.branch ?? 'main',
     pendingApprovalCount: status?.pendingApprovalCount ?? 0,
     operationIds: usageOperationIds(messages),
-    /* The machine's `read` region when there is one, the per-client record
-     * otherwise — never a third answer (I26). */
-    unread: chat.id !== focusedChatId && (status?.unread ?? chat.hasUnreadTurn === true),
+    /* The machine's `read` region, which the store restores from the
+     * project's unread record (D9) — never a second answer (I26). */
+    unread: chat.id !== focusedChatId && status?.unread === true,
     ...(detail === undefined ? {} : { detail }),
   };
 };

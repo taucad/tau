@@ -28,8 +28,6 @@ export type Chat = {
   resourceId: string; // Links chat to a resource (e.g., build)
   name: string;
   messages: MyUIMessage[];
-  draft?: MyUIMessage; // Main draft
-  messageEdits?: Record<string, MyUIMessage>; // Edit drafts by messageId
   error?: ChatError; // Persisted error for display after page reload
   startupRequest?: ChatStartupRequest;
   /** Chat-scoped execution target; opaque ids only, never credentials. */
@@ -44,8 +42,6 @@ export type Chat = {
   checkoutId?: string;
   /** Product recency for chat ordering, in Unix epoch milliseconds. */
   recencyAt?: number;
-  /** Whether this browser profile has an unattended turn requiring review. */
-  hasUnreadTurn?: boolean;
   createdAt: number;
   updatedAt: number;
   deletedAt?: number; // Soft delete support

@@ -281,6 +281,35 @@ export class BillingAccountClosureService {
     return applied && !pending ? 'processed' : 'pending';
   }
 
+  /**
+   * Scheduled driver for `reconcile`: cancels the Stripe subscriptions of closing accounts and closes
+   * accounts whose auth user is gone. Without it a deleted customer would keep being invoiced.
+   * Closures in `attention` wait for an operator; each row is retried at most once a minute.
+   */
+  public async reconcileDue(input: { readonly limit: number }): Promise<{
+    readonly processed: number;
+    readonly pending: number;
+    readonly attention: number;
+  }> {
+    const due = await this.databaseService.database.execute<{ id: string; account_id: string }>(sql`
+      select c.id, c.account_id from billing.billing_account_closure c
+      where c.environment = ${this.environment}
+        and c.state in ('closing', 'cancellation_pending', 'ready_for_auth_deletion')
+        and (c.lease_until is null or c.lease_until <= clock_timestamp())
+        and c.updated_at <= clock_timestamp() - interval '1 minute'
+        and (c.auth_deleted_at is not null or exists (
+          select 1 from public.subscription s
+          where s.account_id = c.account_id and s.slot_state in ('pending', 'current', 'attention')))
+      order by c.updated_at
+      limit ${input.limit}`);
+    const outcomes = { processed: 0, pending: 0, attention: 0 };
+    for (const row of due) {
+      // Closures serialize on their account locks.
+      outcomes[await this.reconcile({ closureId: row.id, accountId: row.account_id })] += 1;
+    }
+    return outcomes;
+  }
+
   private async findRetainedBinding(authUserId: string) {
     return this.databaseService.database.query.billingOwnerBinding.findFirst({
       where: and(eq(billingOwnerBinding.environment, this.environment), eq(billingOwnerBinding.authUserId, authUserId)),

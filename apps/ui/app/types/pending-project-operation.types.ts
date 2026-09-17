@@ -34,6 +34,12 @@ export type PendingCreateProjectOperation = PendingProjectStorage & {
   readonly files: Record<string, { readonly content: Uint8Array<ArrayBuffer>; readonly mode?: '100644' | '100755' }>;
   /** Absent when the project is created without one (W18 DEF-2, review R5). */
   readonly chat?: Chat;
+  /**
+   * The composer directory the chat's attachment references are copied from
+   * on resume. Absent means the Home composer's, which is what every
+   * operation persisted before this field existed referenced.
+   */
+  readonly attachmentSource?: string;
   readonly editorState: EditorState;
 };
 

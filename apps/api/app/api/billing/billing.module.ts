@@ -13,6 +13,8 @@ import { MetricsService } from '#telemetry/metrics.js';
 import { BillingPaymentsService } from '#api/billing/billing-payments.service.js';
 import { BillingRecoveryNoticeEmailTransport } from '#api/billing/billing-recovery-notice.transport.js';
 import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
+import { resolveBillingCollection } from '#api/billing/billing-collection.js';
+import { fundedGatewayProviderIds, isGatewayProviderConfigured } from '#api/providers/provider-gateway.js';
 import { DatabaseModule } from '#database/database.module.js';
 import { EmailModule } from '#email/email.module.js';
 import { EmailService } from '#email/email.service.js';
@@ -215,14 +217,14 @@ const providerUpstreamFetch =
               environment.success && accountId && livemode !== undefined
                 ? config.get('STRIPE_WEBHOOK_SECRET', { infer: true })
                 : '',
-            collection:
-              environment.success && accountId && livemode === false
-                ? {
-                    kind: 'stripe_test',
-                    monthlyPriceId: config.get('STRIPE_PRICE_ID_PRO_MONTHLY', { infer: true }),
-                    topupProductId: config.get('STRIPE_PRODUCT_ID_CREDIT_PACK', { infer: true }),
-                  }
-                : null,
+            collection: resolveBillingCollection({
+              environment: environment.success ? environment.data : undefined,
+              stripeAccountId: accountId,
+              livemode,
+              liveCollectionEnabled: config.get('BILLING_LIVE_COLLECTION_ENABLED', { infer: true }),
+              monthlyPriceId: config.get('STRIPE_PRICE_ID_PRO_MONTHLY', { infer: true }),
+              topupProductId: config.get('STRIPE_PRODUCT_ID_CREDIT_PACK', { infer: true }),
+            }),
           },
           policy,
           ledger,
@@ -244,6 +246,16 @@ const providerUpstreamFetch =
         registerBillableModelMeterContracts();
         const accounts = config.get('BILLING_PROVIDER_ACCOUNTS', { infer: true });
         const credentialAccounts = new Map(Object.entries(accounts));
+        // A funded route with a provider key but no billing account can never settle; refuse to start
+        // rather than advertise its models and answer every call with an error.
+        const unaccounted = fundedGatewayProviderIds.filter(
+          (provider) => isGatewayProviderConfigured(config, provider) && !credentialAccounts.has(provider),
+        );
+        if (unaccounted.length > 0) {
+          throw new Error(
+            `BILLING_PROVIDER_ACCOUNTS has no entry for configured provider(s): ${unaccounted.join(', ')}`,
+          );
+        }
         const upstream = config.get('TAU_LLM_PROVIDER_UPSTREAM_URL', { infer: true });
         const environment = financialEnvironmentSchema.safeParse(config.get('BILLING_ENVIRONMENT', { infer: true }));
         return new CodeOwnedBillableModelQualificationResolver({

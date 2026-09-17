@@ -1,4 +1,4 @@
-import { Fragment, forwardRef, memo, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { ScrollerProps, VirtuosoHandle } from 'react-virtuoso';
 import { useLocation } from 'react-router';
@@ -28,6 +28,7 @@ import type { KeyCombination } from '#utils/keys.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { ChatHistoryEmpty } from '#routes/w.$workspace.$project/chat-history-empty.js';
 import { AtReferenceProvider } from '#components/chat/at-reference-context.js';
+import { ChatAttachmentDirectoriesContext, chatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useChats } from '#hooks/use-chats.js';
 import { useProject } from '#hooks/use-project.js';
@@ -134,7 +135,11 @@ export const ChatHistory = memo(function (props: {
   const { treeService } = useFileManager();
   const { projectId } = useProject();
   const { chats } = useChats(projectId);
-  const { persistenceActorRef } = useChatContext();
+  const { activeChatId, persistenceActorRef } = useChatContext();
+  const attachmentDirectories = useMemo(
+    () => chatAttachmentDirectories(projectId, activeChatId),
+    [activeChatId, projectId],
+  );
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const chatTextareaRef = useRef<ChatTextareaHandle>(null);
   const location = useLocation();
@@ -185,8 +190,8 @@ export const ChatHistory = memo(function (props: {
   // re-renders on every editor-state tick.
   const submitChat = cadChat.submit;
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
-    async ({ content, imageUrls }) => {
-      submitChat({ text: content, imageUrls });
+    async ({ content, attachments }) => {
+      submitChat({ text: content, attachments });
     },
     [submitChat],
   );
@@ -258,55 +263,60 @@ export const ChatHistory = memo(function (props: {
   }, []);
 
   return (
-    <FloatingPanel isOpen={isExpanded} side='right' className={className} onOpenChange={setIsExpanded}>
-      <FloatingPanelContent
-        // `ph-no-capture`: session replay never records chat transcripts.
-        className={cn('ph-no-capture', !isExpanded && 'hidden')}
-        errorFallback={(errorProps) => (
-          <FloatingPanelErrorContent
-            {...errorProps}
-            title='Chat Unavailable'
-            description='Something went wrong while loading the chat.'
-          />
-        )}
-      >
-        {/* Chat-restore time-travel: wire the store seams + surface a fork marker. */}
-        {/* Header with chat selector */}
-        <FloatingPanelContentHeader>
-          <ChatTitleBar
-            closeButton={
-              <FloatingPanelClose
-                icon={XIcon}
-                tooltipContent={(isOpen) => (
-                  <div className='flex items-center gap-2'>
-                    {isOpen ? 'Close' : 'Open'} Chat
-                    <KeyShortcut variant='tooltip'>{formattedKeyCombination}</KeyShortcut>
-                  </div>
-                )}
-              />
-            }
-          />
-        </FloatingPanelContentHeader>
+    <ChatAttachmentDirectoriesContext.Provider value={attachmentDirectories}>
+      <FloatingPanel isOpen={isExpanded} side='right' className={className} onOpenChange={setIsExpanded}>
+        <FloatingPanelContent
+          // `ph-no-capture`: session replay never records chat transcripts.
+          className={cn('ph-no-capture', !isExpanded && 'hidden')}
+          errorFallback={(errorProps) => (
+            <FloatingPanelErrorContent
+              {...errorProps}
+              title='Chat Unavailable'
+              description='Something went wrong while loading the chat.'
+            />
+          )}
+        >
+          {/* Chat-restore time-travel: wire the store seams + surface a fork marker. */}
+          {/* Header with chat selector */}
+          <FloatingPanelContentHeader>
+            <ChatTitleBar
+              closeButton={
+                <FloatingPanelClose
+                  icon={XIcon}
+                  tooltipContent={(isOpen) => (
+                    <div className='flex items-center gap-2'>
+                      {isOpen ? 'Close' : 'Open'} Chat
+                      <KeyShortcut variant='tooltip'>{formattedKeyCombination}</KeyShortcut>
+                    </div>
+                  )}
+                />
+              }
+            />
+          </FloatingPanelContentHeader>
 
-        {/* Sticky status bar - last activity, model, cost */}
-        <ChatHistoryStatus />
+          {/* Sticky status bar - last activity, model, cost */}
+          <ChatHistoryStatus />
 
-        {/* Main chat content area */}
-        <AtReferenceProvider treeService={treeService} chats={chats}>
-          <Virtuoso
-            ref={virtuosoRef}
-            data={groups}
-            itemContent={renderItem}
-            computeItemKey={computeItemKey}
-            followOutput={followOutput}
-            className='mt-1 min-h-0 min-w-0 flex-1'
-            atBottomStateChange={handleAtBottomStateChange}
-            components={virtuosoComponents}
+          {/* Main chat content area */}
+          <AtReferenceProvider treeService={treeService} chats={chats}>
+            <Virtuoso
+              ref={virtuosoRef}
+              data={groups}
+              itemContent={renderItem}
+              computeItemKey={computeItemKey}
+              followOutput={followOutput}
+              className='mt-1 min-h-0 min-w-0 flex-1'
+              atBottomStateChange={handleAtBottomStateChange}
+              components={virtuosoComponents}
+            />
+          </AtReferenceProvider>
+          <ScrollDownButton
+            hasContent={messageIds.length > 0}
+            isVisible={!atBottom}
+            onScrollToBottom={scrollToBottom}
           />
-        </AtReferenceProvider>
-        <ScrollDownButton hasContent={messageIds.length > 0} isVisible={!atBottom} onScrollToBottom={scrollToBottom} />
 
-        {/*
+          {/*
           A refusal on an empty chat has to land somewhere (I12, W19-b).
 
           `ChatError` rides the last `TurnGroup`, and a submit that fails before
@@ -315,12 +325,13 @@ export const ChatHistory = memo(function (props: {
           all: their text still in the composer, no row, no banner. One banner
           at a time: while there are turns, the group above owns it.
         */}
-        {groups.length === 0 ? <ChatError className='mx-4 mb-1 shrink-0' /> : null}
-        {/* Chat input area */}
-        <div className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
-          <ChatTextarea ref={chatTextareaRef} mode='main' enableAutoFocus={false} onSubmit={onSubmit} />
-        </div>
-      </FloatingPanelContent>
-    </FloatingPanel>
+          {groups.length === 0 ? <ChatError className='mx-4 mb-1 shrink-0' /> : null}
+          {/* Chat input area */}
+          <div className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'>
+            <ChatTextarea ref={chatTextareaRef} mode='main' enableAutoFocus={false} onSubmit={onSubmit} />
+          </div>
+        </FloatingPanelContent>
+      </FloatingPanel>
+    </ChatAttachmentDirectoriesContext.Provider>
   );
 });

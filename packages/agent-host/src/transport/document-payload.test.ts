@@ -1,12 +1,13 @@
 /* eslint-disable @typescript-eslint/naming-convention -- provider wire keys use native snake_case. */
 import { describe, expect, it, vi } from 'vitest';
+import type { Context } from '@earendil-works/pi-ai';
 import { z } from 'zod';
 import type { AgentLogEvent, ProviderMessage } from '#log/event-types.js';
 import type { MaterializedDocument, ModelStreamEvent, ModelStreamRequest } from '#waist/ports.js';
 import { documentSentinel } from '#harness/session-record.js';
 import { createMemoryEventLog } from '#harness/harness.fixture.js';
 import { createAgentSession } from '#harness/session.js';
-import { rewriteDocuments } from '#transport/document-payload.js';
+import { attachmentBudgetCharacters, fitAttachmentBudget, rewriteDocuments } from '#transport/document-payload.js';
 import { GatewayModelTransportError } from '#transport/gateway-model-transport.js';
 import { createTauCloudGatewayModelTransport } from '#transport/tau-cloud-gateway-model-transport.js';
 import { authoritativeGatewayWireFixtures } from '#transport/gateway-wire.fixture.js';
@@ -222,6 +223,70 @@ describe('rewriteDocuments', () => {
   });
 });
 
+describe('fitAttachmentBudget', () => {
+  const otherHash = 'b'.repeat(64);
+  const context = (): Context => ({
+    systemPrompt: 'CAD',
+    messages: [
+      {
+        role: 'user',
+        content: [
+          { type: 'image', mimeType: 'image/png', data: 'AAAAAAAA' },
+          { type: 'text', text: documentSentinel(otherHash) },
+        ],
+        timestamp: 1,
+      },
+      {
+        role: 'toolResult',
+        toolCallId: 'c',
+        toolName: 'screenshot',
+        content: [{ type: 'image', mimeType: 'image/png', data: 'AAAA' }],
+        isError: false,
+        timestamp: 2,
+      },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'again' },
+          { type: 'text', text: sentinel },
+        ],
+        timestamp: 3,
+      },
+    ],
+    tools: [],
+  });
+  const documents = new Map<string, MaterializedDocument>([
+    [hash, { ...pdf, data: 'AAAAAAAA' }],
+    [otherHash, { data: 'AAAAAAAA', mediaType: 'application/pdf', filename: 'old-spec.pdf' }],
+  ]);
+
+  it('should return the same context when every attachment fits', () => {
+    const input = context();
+    expect(fitAttachmentBudget(input, documents, 28)).toEqual({ context: input, omitted: 0 });
+  });
+
+  it('should keep the newest attachments and name the ones past the budget', () => {
+    const input = context();
+    const before = structuredClone(input);
+
+    const fitted = fitAttachmentBudget(input, documents, 12);
+
+    expect(fitted.omitted).toBe(2);
+    expect(fitted.context.messages.map((message) => message.content)).toEqual([
+      [
+        { type: 'text', text: '[attachment omitted]' },
+        { type: 'text', text: '[attachment omitted: old-spec.pdf]' },
+      ],
+      [{ type: 'image', mimeType: 'image/png', data: 'AAAA' }],
+      [
+        { type: 'text', text: 'again' },
+        { type: 'text', text: sentinel },
+      ],
+    ]);
+    expect(input).toEqual(before);
+  });
+});
+
 describe('gateway transport document rewrite (D21, D22)', () => {
   it.each(wires)(
     'posts the $wire native document block with the PDF bytes, in the sentinel position and with no sentinel',
@@ -364,6 +429,36 @@ describe('gateway transport document rewrite (D21, D22)', () => {
     expect(assistant?.['tool_calls']).toMatchObject([
       { id: 'call-signed', extra_content: { google: { thought_signature: signature } } },
     ]);
+  });
+
+  it('should post only the newest PDF when two exceed the request budget (R1)', async () => {
+    const olderHash = 'c'.repeat(64);
+    const large = 'A'.repeat(Math.ceil(attachmentBudgetCharacters / 2) + 4);
+    const { transport, bodies } = capturingTransport('openai-responses');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await drain(
+      transport.stream(
+        request({
+          providerKind: 'openai',
+          messages: [
+            { id: 'user-0', role: 'user', content: [{ type: 'text', text: documentSentinel(olderHash) }] },
+            { id: 'user-1', role: 'user', content: [{ type: 'text', text: sentinel }] },
+          ],
+          documents: new Map([
+            [olderHash, { data: large, mediaType: 'application/pdf', filename: 'older.pdf' }],
+            [hash, { ...pdf, data: large }],
+          ]),
+        }),
+      ),
+    );
+
+    const input = bodies[0]!['input'] as Array<{ role: string; content: Array<Record<string, unknown>> }>;
+    const users = input.filter((message) => message.role === 'user');
+    expect(users[0]!.content).toEqual([{ type: 'input_text', text: '[attachment omitted: older.pdf]' }]);
+    expect(users[1]!.content[0]).toMatchObject({ type: 'input_file', filename: 'bracket-spec.pdf' });
+    expect(warn).toHaveBeenCalledOnce();
+    warn.mockRestore();
   });
 
   it('compacts history holding a PDF through the real summariser, with a marker and no sentinel on the wire (P32)', async () => {

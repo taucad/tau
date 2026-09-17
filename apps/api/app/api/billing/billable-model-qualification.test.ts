@@ -11,6 +11,7 @@ import type {
   BillableProviderWire,
   QualifiedBillableInvocation,
 } from '#api/billing/billable-model-invocation.types.js';
+import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 import { isModelListEntryEnabled, modelList } from '#api/models/model.constants.js';
 
 const adapter = mock<BillableModelProviderAdapter>();
@@ -52,6 +53,25 @@ describe('CodeOwnedBillableModelQualificationResolver', () => {
     expect(new Set(billableModelRouteIds).size).toBe(20);
     expect(billableModelRouteIds).toContain('google-gemini-3.1-pro');
     expect(billableModelRouteIds).toContain('morph-minimax-m2.7');
+  });
+
+  it('should answer a route without a billing account as a 503 provider outage, not a client fault', () => {
+    const unaccounted = new CodeOwnedBillableModelQualificationResolver({
+      adapters: new Map([['openai-gpt-5.6-luna', adapter]]),
+      credentialAccounts: new Map(),
+      executionTimeout: 30_000,
+    });
+    let caught: unknown;
+    try {
+      unaccounted.resolve(
+        intent({ model: 'openai-gpt-5.6-luna', input: 'hello', max_output_tokens: 16, stream: true }),
+      );
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(LlmGatewayError);
+    expect((caught as LlmGatewayError).getStatus()).toBe(503);
+    expect((caught as LlmGatewayError).getResponse()).toMatchObject({ error: { type: 'PROVIDER_UNAVAILABLE' } });
   });
 
   it('should emit the exact Vertex OpenAI compatibility model name', () => {

@@ -3,6 +3,7 @@ import { useCallback } from 'react';
 import type { PartialDeep } from 'type-fest';
 import type { Chat } from '@taucad/chat';
 import { useProjectManager } from '#hooks/use-project-manager.js';
+import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 
 // oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- let types be inferred
 export function useChats(resourceId: string, options?: { includeDeleted?: boolean }) {
@@ -15,13 +16,12 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
     updateChat: updateChatInManager,
     applyGeneratedChatName: applyGeneratedChatNameInManager,
     patchChat: patchChatInManager,
-    setMessageEdit: setMessageEditInManager,
-    clearMessageEdit: clearMessageEditInManager,
     softDeleteChat: softDeleteChatInManager,
     deleteChat: deleteChatInManager,
     duplicateChat: duplicateChatInManager,
     isLoading: isWorkerLoading,
   } = useProjectManager();
+  const chatSessions = useChatSessionStore();
 
   const {
     data: chats = [],
@@ -37,9 +37,7 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
   });
 
   const createChat = useCallback(
-    async (
-      chatData: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt' | 'hasUnreadTurn'>,
-    ): Promise<Chat> => {
+    async (chatData: Omit<Chat, 'id' | 'resourceId' | 'createdAt' | 'updatedAt' | 'recencyAt'>): Promise<Chat> => {
       const newChat = await createChatInManager(resourceId, chatData);
       void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
       void queryClient.invalidateQueries({ queryKey: ['all-chats'] });
@@ -63,12 +61,14 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
 
   const deleteChat = useCallback(
     async (chatId: string): Promise<void> => {
+      // A live composer must stop writing before its record is removed, or it writes the record back (D11).
+      await chatSessions.removeChat(chatId);
       await deleteChatInManager(chatId);
       void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
       void queryClient.invalidateQueries({ queryKey: ['all-chats'] });
       void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
     },
-    [deleteChatInManager, resourceId, queryClient],
+    [chatSessions, deleteChatInManager, resourceId, queryClient],
   );
 
   const duplicateChat = useCallback(
@@ -120,45 +120,16 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
     [patchChatInManager, resourceId, queryClient],
   );
 
-  const setMessageEdit = useCallback(
-    async (
-      chatId: string,
-      messageId: string,
-      draft: NonNullable<Chat['messageEdits']>[string],
-    ): Promise<Chat | undefined> => {
-      const updatedChat = await setMessageEditInManager(chatId, messageId, draft);
-      if (updatedChat) {
-        void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
-        void queryClient.invalidateQueries({ queryKey: ['all-chats'] });
-        void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
-      }
-      return updatedChat;
-    },
-    [setMessageEditInManager, resourceId, queryClient],
-  );
-
-  const clearMessageEdit = useCallback(
-    async (chatId: string, messageId: string): Promise<Chat | undefined> => {
-      const updatedChat = await clearMessageEditInManager(chatId, messageId);
-      if (updatedChat) {
-        void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
-        void queryClient.invalidateQueries({ queryKey: ['all-chats'] });
-        void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
-      }
-      return updatedChat;
-    },
-    [clearMessageEditInManager, resourceId, queryClient],
-  );
-
   const softDeleteChat = useCallback(
     async (chatId: string): Promise<Chat | undefined> => {
+      await chatSessions.removeChat(chatId);
       const updatedChat = await softDeleteChatInManager(chatId);
       void queryClient.invalidateQueries({ queryKey: ['chats', resourceId] });
       void queryClient.invalidateQueries({ queryKey: ['all-chats'] });
       void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
       return updatedChat;
     },
-    [softDeleteChatInManager, resourceId, queryClient],
+    [chatSessions, softDeleteChatInManager, resourceId, queryClient],
   );
 
   return {
@@ -171,8 +142,6 @@ export function useChats(resourceId: string, options?: { includeDeleted?: boolea
     updateChat,
     patchChat,
     applyGeneratedChatName,
-    setMessageEdit,
-    clearMessageEdit,
     softDeleteChat,
     deleteChat,
     duplicateChat,

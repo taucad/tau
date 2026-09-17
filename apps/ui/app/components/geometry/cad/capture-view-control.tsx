@@ -6,6 +6,7 @@ import { DropdownMenuItem } from '@taucad/ui/components/dropdown-menu';
 import { useGraphics } from '#hooks/use-graphics.js';
 import { useCad } from '#hooks/use-cad.js';
 import { useChatActions } from '#hooks/use-chat.js';
+import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useTickAnimation } from '#hooks/use-tick-animation.js';
 import { toast } from '#components/ui/sonner.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
@@ -15,7 +16,10 @@ import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';
 const useCaptureCurrentViewToChat = (onSuccess?: () => void): (() => Promise<void>) => {
   const graphicsRef = useGraphics();
   const cadRef = useCad();
-  const { addDraftImage } = useChatActions();
+  const { addDraftAttachment } = useChatActions();
+  const {
+    model: { model: selectedModel },
+  } = useChatComposer();
   const imageService = useHeadlessImageService();
 
   return useCallback(async () => {
@@ -32,14 +36,17 @@ const useCaptureCurrentViewToChat = (onSuccess?: () => void): (() => Promise<voi
         recipe: { purpose: 'chat', mode: 'current' },
       });
       const publishStartedAt = performance.now();
-      addDraftImage(captureFilesToDataUrls(files)[0]!, { preserveOriginal: true });
+      addDraftAttachment(captureFilesToDataUrls(files)[0]!, {
+        preserveOriginal: true,
+        model: { name: selectedModel.name, support: selectedModel.model?.support },
+      });
       recordHeadlessImageTiming('capture.publish-draft', publishStartedAt, { count: 1 });
       onSuccess?.();
       recordHeadlessImageTiming('capture.click-to-draft', clickStartedAt);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to capture view');
     }
-  }, [addDraftImage, cadRef, graphicsRef, imageService, onSuccess]);
+  }, [addDraftAttachment, cadRef, graphicsRef, imageService, onSuccess, selectedModel]);
 };
 
 /**

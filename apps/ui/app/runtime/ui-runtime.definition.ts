@@ -18,6 +18,7 @@ import { opencascade } from '@taucad/opencascade';
 import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
 import { zoo } from '@taucad/zoo';
+import { zooCloseErrors } from '#cloud/zoo-close-errors.js';
 import { observabilityMiddleware } from '#runtime/observability/observability.middleware.js';
 import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
 import type { UiRuntimeConfig } from '#runtime/ui-runtime.schema.js';
@@ -53,15 +54,8 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
       kernels: {
         default: {
           baseUrl: `${config.tauWebSocketUrl}/v1/kernels/zoo`,
-          // Must match apps/api billing.constants.ts `zooCloseCodes`.
-          /* eslint-disable @typescript-eslint/naming-convention -- WebSocket close-code keys are numeric protocol values. */
-          closeErrors: {
-            1013: 'Zoo execution is temporarily unavailable. Your project is safe; try again later.',
-            4401: 'Sign in to Tau to use the Zoo kernel.',
-            4402: 'This Zoo run needs more credits. Add credits, then retry.',
-            4403: 'Zoo execution requires Pro. Upgrade to Pro, then retry.',
-          },
-          /* eslint-enable @typescript-eslint/naming-convention -- End numeric WebSocket close-code keys. */
+          // Billing copy lives behind the cloud boundary so self-host builds never ship it.
+          closeErrors: zooCloseErrors,
         },
       },
     }),

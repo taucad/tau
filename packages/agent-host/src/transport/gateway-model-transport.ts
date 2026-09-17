@@ -14,7 +14,7 @@ import type {
 } from '@earendil-works/pi-ai';
 import { util as zodUtility } from 'zod';
 import { MessageIdentities, providerMessageToPi } from '#harness/session-record.js';
-import { rewriteDocuments } from '#transport/document-payload.js';
+import { fitAttachmentBudget, rewriteDocuments } from '#transport/document-payload.js';
 import { createVertexResponseShim, echoThoughtSignatures } from '#transport/vertex-completions-shim.js';
 import type { JsonObject, ModelProviderKind, ModelSystemPromptBlock } from '#log/event-types.js';
 import type { ModelInvocationBinding, ModelStreamEvent, ModelStreamRequest, ModelTransport } from '#waist/ports.js';
@@ -290,6 +290,17 @@ export const gatewayResponseError = async (response: Response): Promise<GatewayM
   if (zodUtility.isObject(payload)) {
     const parsed =
       gatewayEnvelopeError(payload, response.status, fallback) ?? flattenedGatewayError(payload, response.status);
+    const retryAfterSeconds = Number(response.headers.get('retry-after') ?? Number.NaN);
+    if (parsed && Number.isInteger(retryAfterSeconds) && retryAfterSeconds >= 0) {
+      // The card tells the customer when to try again instead of guessing.
+      return new GatewayModelTransportError({
+        code: parsed.code,
+        message: parsed.message,
+        status: parsed.status,
+        rawType: parsed.rawType,
+        details: { ...parsed.details, retryAfterSeconds },
+      });
+    }
     if (parsed) {
       return parsed;
     }
@@ -530,6 +541,24 @@ const piContextFor = (request: ModelStreamRequest, model: PiGatewayModel): Conte
   return { systemPrompt: request.systemPrompt, messages, tools };
 };
 
+/**
+ * The request's pi context, holding no more attachment bytes than one request may carry (R1).
+ *
+ * @param request - The model stream request.
+ * @param model - The pi model the context is built for.
+ * @returns The fitted context.
+ */
+const budgetedContextFor = (request: ModelStreamRequest, model: PiGatewayModel): Context => {
+  const fitted = fitAttachmentBudget(piContextFor(request, model), request.documents);
+  if (fitted.omitted > 0) {
+    // Ponytail: warned per request, since the transport keeps no session state.
+    console.warn(
+      `Tau model gateway: ${fitted.omitted} older attachment(s) exceed this request's budget and were omitted.`,
+    );
+  }
+  return fitted.context;
+};
+
 const metadataFor = (message: AssistantMessage): JsonObject | undefined => {
   const metadata: JsonObject = {
     ...(message.responseId ? { responseId: message.responseId } : {}),
@@ -712,7 +741,7 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
     }
     const model = piModelFor({ request, transport: options });
     const state: GatewayFetchState = {};
-    const context = piContextFor(request, model);
+    const context = budgetedContextFor(request, model);
     const thoughtSignatures = new Map<string, string>();
     const rewrite = rewriteDocuments(request.documents, model.api);
     const echo = request.providerKind === 'vertexai' ? echoThoughtSignatures(context) : undefined;

@@ -3,7 +3,7 @@ title: 'npm Publishing Policy'
 description: 'Per-package rules for preparing @taucad/* libraries for npm publication: tsdown shape, dependency hygiene, exports map discipline, validation gates, README requirements.'
 status: active
 created: '2026-05-22'
-updated: '2026-09-13'
+updated: '2026-09-17'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/release-policy.md
@@ -115,6 +115,8 @@ Plugin and core packages have additional dependency rules:
 | Internal `type:lib` / `type:app-lib` project | Never declares an identity-singleton dependency named by the workspace peer-rule registry (today `zod`) in `dependencies` or `optionalDependencies`; the published bundle owner or leaf application satisfies that peer. A buildable internal library explicitly externalises that singleton in its build config so its private `dist` cannot vendor a second copy. Ordinary third-party runtime dependencies remain declared because they record what the bundle owner must externalise.                                                                                                                                       |
 
 **Why**: Tree shaking removes code from bundles; it does not remove packages from `node_modules`. Payload isolation must be represented in the package graph.
+
+A publishable package must not depend on a workspace `patchedDependencies` entry for its behavior. A pnpm patch changes only this workspace's install and never reaches a consumer. Extend the dependency on its own public seams instead. `@taucad/agent-host` extends `@earendil-works/pi-ai` through the `fetch` and `onPayload` options it passes to every adapter, and carries no pi-ai patch. The Vertex AI Gemini thought and thought-signature mapping lives in `packages/agent-host/src/transport/vertex-completions-shim.ts`, and PDF document blocks are produced in `packages/agent-host/src/transport/document-payload.ts`. Before any new patch is considered, record a need that neither seam can express in the owning research document ([project chat draft persistence blueprint](../research/project-chat-draft-persistence-blueprint.md) D22). Prefer an upstream fix through the `repos` and `submit-pr` skills.
 
 ### 2. No `file:` or Tarball Dependencies in Publishable Packages
 

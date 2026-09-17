@@ -32,7 +32,16 @@ export const composerRecordPaths = {
   unread: (projectId: string): string => `${composersRoot}/chats/${projectId}/unread.json`,
   /** The directory removed when a project is deleted. */
   project: (projectId: string): string => `${composersRoot}/chats/${projectId}`,
+  /**
+   * Draft-stage bytes of a pre-project composer that keeps no record. One
+   * directory per surface, so releasing one surface's copies never touches
+   * another's open draft.
+   */
+  surfaceAttachments: (surface: 'marketing' | 'library'): string => `${composersRoot}/${surface}/attachments`,
 } as const;
+
+/** The draft-stage attachment directory beside a composer record: `<record>/attachments`. */
+export const recordAttachmentsPath = (recordPath: string): string => `${recordPath.replace(/\.json$/, '')}/attachments`;
 
 /** One composer record. Every field except `version` is optional and omitted when empty (D8). */
 export type ComposerRecord = {
@@ -316,7 +325,7 @@ const serializeRecord = (record: ComposerRecord): Uint8Array<ArrayBuffer> => {
  * @returns Read, patch, remove and the record's own attachment store.
  */
 export function createComposerRecordStore(client: ComposerRecordClient, path: string): ComposerRecordStore {
-  const attachments = createAttachmentStore(client, `${path.replace(/\.json$/, '')}/attachments`);
+  const attachments = createAttachmentStore(client, recordAttachmentsPath(path));
 
   const read = async (): Promise<ComposerRecordReadResult> => {
     try {

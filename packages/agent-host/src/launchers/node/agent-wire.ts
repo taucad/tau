@@ -162,6 +162,50 @@ export const externalAgentLoginSchema = z.strictObject({
 /** The login facts a surface renders; see {@link externalAgentLoginSchema}. @public */
 export type ExternalAgentLogin = z.infer<typeof externalAgentLoginSchema>;
 
+/**
+ * Codes an external-agent turn that *started* and then stopped short records.
+ *
+ * Unlike {@link externalAgentRefusalCodes}, these are not facts about whether
+ * the agent can run: the turn ran and its provider stopped it.
+ * `EXTERNAL_AGENT_LIMIT_REACHED` is the person's own account at a usage, rate
+ * or session limit — an ordinary state, not a crash. `EXTERNAL_AGENT_FAILED` is
+ * everything else. Both carry an {@link externalAgentStopSchema} as
+ * `run.lifecycle.detail.details`.
+ *
+ * @public
+ */
+export const externalAgentStopCodes = ['EXTERNAL_AGENT_LIMIT_REACHED', 'EXTERNAL_AGENT_FAILED'] as const;
+
+/** One {@link externalAgentStopCodes} value. @public */
+export type ExternalAgentStopCode = (typeof externalAgentStopCodes)[number];
+
+/**
+ * Why an external-agent turn stopped, as the agent itself classified it.
+ *
+ * `failure` mirrors the ACP AIR `sessionFailure` object both pinned adapters
+ * send: `title` is the provider's own sentence, verbatim (its link and reset
+ * time included — neither adapter sends a structured reset), and `actions` is
+ * the agent's word on what can help, so an empty list means retrying cannot.
+ * `diagnostics` is the adapter's log tail, present only for a failure the agent
+ * could not classify; a surface shows it on request, never as the message.
+ *
+ * @public
+ */
+export const externalAgentStopSchema = z.object({
+  agentId: nonEmptyString,
+  failure: z.object({
+    /** `limit`, `service`, `connection`, `access`, `request` or a later category. */
+    category: z.string(),
+    title: z.string(),
+    /** `retry`, `new_session`, `login` or a later action. */
+    actions: z.array(z.string()),
+  }),
+  diagnostics: z.string().optional(),
+});
+
+/** The stop facts a surface renders; see {@link externalAgentStopSchema}. @public */
+export type ExternalAgentStop = z.infer<typeof externalAgentStopSchema>;
+
 /** One cache-aware system-prompt block accepted at admission. @public */
 export const agentChannelSystemPromptBlockSchema = z.strictObject({
   type: z.literal('text'),

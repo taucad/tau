@@ -8,6 +8,7 @@
  * repeated ingest is free.
  */
 
+import { chatRecordsPath } from '@taucad/revisions';
 import { getErrno } from '@taucad/utils/error';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { KeyedMutex } from '#db/keyed-mutex.js';
@@ -17,8 +18,8 @@ import {
   attachmentKind,
   isAttachmentUrl,
   isSupportedAttachmentMediaType,
-  type Attachment,
 } from '#utils/attachment.utils.js';
+import type { Attachment, AttachmentReference } from '#utils/attachment.utils.js';
 
 /** The filesystem surface an attachment store needs, so tests and hosts can supply anything shaped like it. */
 type AttachmentClient = {
@@ -30,15 +31,17 @@ type AttachmentClient = {
   rmdir: (path: string, options?: { recursive?: boolean }) => Promise<void>;
 };
 
-/** An attachment reference: the stored attachment itself, or its `attachments/<hash>.<ext>` URL. */
-export type AttachmentRef = Attachment | string;
+/** An attachment reference: its name, or its `attachments/<hash>.<ext>` URL. */
+export type AttachmentRef = AttachmentReference | string;
 
 /** The attachment store rooted at one directory. */
 export type AttachmentStore = {
   put: (bytes: Uint8Array<ArrayBuffer>, mediaType: string, filename?: string) => Promise<Attachment>;
   read: (ref: AttachmentRef) => Promise<Uint8Array<ArrayBuffer> | undefined>;
   has: (ref: AttachmentRef) => Promise<boolean>;
-  copyTo: (target: AttachmentStore, attachment: Attachment) => Promise<void>;
+  copyTo: (target: AttachmentStore, attachment: AttachmentReference) => Promise<void>;
+  /** Unlink one attachment; an absent one is already removed. */
+  remove: (ref: AttachmentRef) => Promise<void>;
   retainOnly: (referenced: Iterable<AttachmentRef>) => Promise<void>;
   removeAll: () => Promise<void>;
 };
@@ -132,6 +135,19 @@ export function createAttachmentStore(client: AttachmentClient, directory: strin
       }
       await target.put(bytes, attachment.mediaType, attachment.filename);
     },
+    remove: async (ref) => {
+      const path = pathOf(ref);
+      if (path === undefined) {
+        return;
+      }
+      try {
+        await client.unlink(path);
+      } catch (error) {
+        if (!isNotFound(error)) {
+          throw error;
+        }
+      }
+    },
     retainOnly: async (referenced) => {
       const keep = new Set<string>();
       for (const ref of referenced) {
@@ -149,7 +165,9 @@ export function createAttachmentStore(client: AttachmentClient, directory: strin
         }
         throw error;
       }
-      await Promise.all(names.filter((name) => !keep.has(name)).map((name) => client.unlink(`${directory}/${name}`)));
+      await Promise.all(
+        names.filter((name) => !keep.has(name)).map(async (name) => client.unlink(`${directory}/${name}`)),
+      );
     },
     removeAll: async () => {
       try {
@@ -162,3 +180,19 @@ export function createAttachmentStore(client: AttachmentClient, directory: strin
     },
   };
 }
+
+/**
+ * The attachment store of one project chat: `attachments/` beside that chat's
+ * record, which is the directory the chat ref carries between devices (D26).
+ */
+export function createChatAttachmentStore(
+  client: AttachmentClient,
+  projectId: string,
+  chatId: string,
+): AttachmentStore {
+  return createAttachmentStore(client, chatAttachmentsPath(projectId, chatId));
+}
+
+/** The directory `createChatAttachmentStore` roots at, for readers that resolve references without a store. */
+export const chatAttachmentsPath = (projectId: string, chatId: string): string =>
+  `/projects/${projectId}/${chatRecordsPath(chatId)}/attachments`;

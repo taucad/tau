@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import StripeClient from 'stripe';
 import type { Stripe } from 'stripe';
 import { z } from 'zod';
+import { topupPrincipalBoundsMinor } from '@taucad/billing';
 
 export const stripeApiVersion = '2026-07-29.dahlia';
 const maximumWebhookBytes = 1024 * 1024;
@@ -91,7 +92,13 @@ export type StripeRecoveryQuery =
       readonly metadataKey: string;
       readonly metadataValue: string;
     }
-  | { readonly kind: 'checkout'; readonly providerObjectId?: string; readonly clientReferenceId: string }
+  | {
+      readonly kind: 'checkout';
+      readonly providerObjectId?: string;
+      readonly clientReferenceId: string;
+      /** Scopes the listing to the owning Customer, so another account's sessions never crowd it out. */
+      readonly customerId?: string;
+    }
   | {
       readonly kind: 'payment_intent';
       readonly providerObjectId?: string;
@@ -162,7 +169,7 @@ const checkoutContractSchema = z.discriminatedUnion('kind', [
     .object({
       kind: z.literal('top_up'),
       productId: z.string().min(1),
-      principalMinor: z.number().int().min(500).max(500_000),
+      principalMinor: z.number().int().min(topupPrincipalBoundsMinor.minimum).max(topupPrincipalBoundsMinor.maximum),
     })
     .strict(),
   z.object({ kind: z.literal('subscription'), priceId: z.string().min(1) }).strict(),
@@ -185,7 +192,11 @@ const checkoutRequestSchema = z
                   currency: z.literal('usd'),
                   product: z.string().min(1),
                   tax_behavior: z.literal('exclusive'),
-                  unit_amount: z.number().int().min(500).max(500_000),
+                  unit_amount: z
+                    .number()
+                    .int()
+                    .min(topupPrincipalBoundsMinor.minimum)
+                    .max(topupPrincipalBoundsMinor.maximum),
                 })
                 .strict(),
               quantity: z.literal(1),
@@ -247,6 +258,8 @@ export function parseStripeCreateLeg(input: unknown): StripeCreateLeg {
               currency: z.literal('usd'),
               customer: z.string().min(1),
               payment_method: z.string().min(1),
+              // Persisted with the request so the stored leg is exactly what was dispatched.
+              payment_method_types: z.tuple([z.literal('card')]).optional(),
               confirm: z.literal(true),
               capture_method: z.literal('automatic').optional(),
               setup_future_usage: z.literal('on_session').optional(),
@@ -433,7 +446,10 @@ export async function recoverStripeLegSource(
     });
     return selectRecovery(result.data, (object) => ({ kind: query.kind, object }));
   }
-  const result = await stripe.checkout.sessions.list({ limit: 100 });
+  const result = await stripe.checkout.sessions.list({
+    limit: 100,
+    ...(query.customerId === undefined ? {} : { customer: query.customerId }),
+  });
   const matches = result.data.filter((session) => session.client_reference_id === query.clientReferenceId);
   if (result.has_more && matches.length <= 1) {
     return { status: 'ambiguous' };
@@ -636,7 +652,11 @@ export async function createStripeReloadTaxCalculationOnce(
   },
 ): Promise<Stripe.Tax.Calculation> {
   assertIdempotencyKey(input.idempotencyKey);
-  if (!Number.isSafeInteger(input.principalMinor) || input.principalMinor < 500 || input.principalMinor > 500_000) {
+  if (
+    !Number.isSafeInteger(input.principalMinor) ||
+    input.principalMinor < topupPrincipalBoundsMinor.minimum ||
+    input.principalMinor > topupPrincipalBoundsMinor.maximum
+  ) {
     throw new Error('Tax calculation principal must be within the supported USD top-up bounds');
   }
   if (input.customerId.length === 0 || input.productId.length === 0 || input.reference.length === 0) {
@@ -862,6 +882,7 @@ function assertClosedCreateRequest(leg: StripeCreateLeg): void {
             'metadata',
             'off_session',
             'payment_method',
+            'payment_method_types',
             'return_url',
             'setup_future_usage',
           ]
@@ -937,8 +958,8 @@ function assertCheckoutLineItem(
     const priceData = item.price_data;
     if (
       !Number.isSafeInteger(principalMinor) ||
-      principalMinor < 500 ||
-      principalMinor > 500_000 ||
+      principalMinor < topupPrincipalBoundsMinor.minimum ||
+      principalMinor > topupPrincipalBoundsMinor.maximum ||
       item.price !== undefined ||
       priceData?.currency !== 'usd' ||
       priceData.product !== productId ||

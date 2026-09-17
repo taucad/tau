@@ -9,11 +9,18 @@ const harness = vi.hoisted(() => ({
     getChat: vi.fn().mockResolvedValue(undefined),
     patchChat: vi.fn().mockResolvedValue(undefined),
     touchChatRecency: vi.fn().mockResolvedValue(undefined),
-    setChatUnreadState: vi.fn().mockResolvedValue(undefined),
-    setMessageEdit: vi.fn().mockResolvedValue(undefined),
-    clearMessageEdit: vi.fn().mockResolvedValue(undefined),
     consumeChatStartupRequest: vi.fn().mockResolvedValue(undefined),
     commitCancelledDraftRestore: vi.fn().mockResolvedValue(undefined),
+  },
+  client: {
+    readFile: vi.fn(async (path: string): Promise<Uint8Array<ArrayBuffer>> => {
+      throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
+    }),
+    writeFile: vi.fn(async () => undefined),
+    exists: vi.fn(async () => false),
+    readdir: vi.fn(async () => []),
+    unlink: vi.fn(async () => undefined),
+    rmdir: vi.fn(async () => undefined),
   },
 }));
 
@@ -59,6 +66,10 @@ vi.mock('#hooks/use-project-manager.js', () => ({
   useProjectManager: () => harness.projectManager,
 }));
 
+vi.mock('#hooks/use-file-manager.js', () => ({
+  useFileManager: () => ({ client: harness.client }),
+}));
+
 const { ChatSessionStore } = await import('#services/chat-session-store.js');
 const { ChatSessionStoreProvider, useChatSessionStore } = await import('#hooks/chat-session-store-provider.js');
 
@@ -73,9 +84,6 @@ describe('ChatSessionStoreProvider', () => {
     harness.projectManager.getChat.mockReset().mockResolvedValue(undefined);
     harness.projectManager.patchChat.mockReset().mockResolvedValue(undefined);
     harness.projectManager.touchChatRecency.mockReset().mockResolvedValue(undefined);
-    harness.projectManager.setChatUnreadState.mockReset().mockResolvedValue(undefined);
-    harness.projectManager.setMessageEdit.mockReset().mockResolvedValue(undefined);
-    harness.projectManager.clearMessageEdit.mockReset().mockResolvedValue(undefined);
     harness.projectManager.consumeChatStartupRequest.mockReset().mockResolvedValue(undefined);
     harness.projectManager.commitCancelledDraftRestore.mockReset().mockResolvedValue(undefined);
   });
@@ -123,7 +131,15 @@ describe('ChatSessionStoreProvider', () => {
     expect(captured[1]).toBe(captured[2]);
   });
 
-  it('mirrors useProjectManager() closures into the store via setDependencies', async () => {
+  it('mirrors useProjectManager() closures and the file client into the store via setDependencies', async () => {
+    harness.projectManager.getChat.mockResolvedValue({
+      id: 'chat_a',
+      resourceId: 'proj_a',
+      name: '',
+      messages: [],
+      createdAt: 0,
+      updatedAt: 0,
+    });
     const { result } = renderHook(() => useChatSessionStore(), { wrapper: createWrapper() });
     const store = result.current;
 
@@ -136,6 +152,10 @@ describe('ChatSessionStoreProvider', () => {
     await Promise.resolve();
 
     expect(harness.projectManager.getChat).toHaveBeenCalledWith('chat_a');
+    // The chat's composer record is read through the file manager's client.
+    await vi.waitFor(() => {
+      expect(harness.client.readFile).toHaveBeenCalledWith('/.tau/composers/chats/proj_a/chat_a.json');
+    });
 
     await store.touchChatRecency('chat_a', 123);
     expect(harness.projectManager.touchChatRecency).toHaveBeenCalledWith('chat_a', 123);

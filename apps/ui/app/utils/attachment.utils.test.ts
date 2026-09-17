@@ -3,12 +3,13 @@ import {
   attachmentCapBytes,
   attachmentFileName,
   attachmentKind,
+  attachmentReferenceOf,
   attachmentUrl,
   isAttachmentUrl,
   isSupportedAttachmentMediaType,
   supportedAttachmentMediaTypes,
-  type Attachment,
 } from '#utils/attachment.utils.js';
+import type { Attachment } from '#utils/attachment.utils.js';
 
 const hash = 'a'.repeat(64);
 
@@ -59,8 +60,18 @@ describe('attachment identity', () => {
     expect(isAttachmentUrl(url)).toBe(false);
   });
 
-  it('should cap images at 4 MiB and documents at 20 MiB', () => {
+  it('should cap images at 4 MiB and documents at 16 MiB', () => {
     expect(attachmentCapBytes('image')).toBe(4 * 1024 * 1024);
-    expect(attachmentCapBytes('document')).toBe(20 * 1024 * 1024);
+    expect(attachmentCapBytes('document')).toBe(16 * 1024 * 1024);
+  });
+
+  it('should read the reference a file part names back into the attachment it came from', () => {
+    const url = attachmentUrl(attachment('application/pdf'));
+    expect(attachmentReferenceOf({ url, mediaType: 'application/pdf', filename: 'spec.pdf' })).toEqual({
+      hash,
+      mediaType: 'application/pdf',
+      filename: 'spec.pdf',
+    });
+    expect(attachmentReferenceOf({ url: 'data:image/png;base64,AA==', mediaType: 'image/png' })).toBeUndefined();
   });
 });

@@ -2,22 +2,33 @@
 import { z } from 'zod';
 import type { BillableProviderWire } from '#api/billing/billable-model-invocation.types.js';
 
-const maximumBytes = 4_000_000;
+/* R1: a request may carry one maximal PDF (16 MiB, 22,369,624 base64 characters)
+ * plus its turn. The agent host evicts older attachments past 24,000,000 base64
+ * characters, and 32 MB is the request size the largest provider documents. */
+const maximumBytes = 32_000_000;
 const maximumDepth = 64;
-const boundedString = z.string().max(maximumBytes);
+/* Text, signatures and identifiers stay bounded per string; attachment bytes carry their own bounds. */
+const maximumStringLength = 4_000_000;
+const boundedString = z.string().max(maximumStringLength);
 const cacheControlSchema = z.object({ type: z.literal('ephemeral'), ttl: z.literal('5m').optional() }).strict();
-const isBase64 = (value: string): boolean =>
-  value.length % 4 === 0 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value);
-const base64Schema = boundedString.refine(isBase64, 'Invalid base64 image data');
+/* Linear on purpose: a backtracking group per quadruple overflows V8's regexp stack
+ * on a multi-megabyte attachment. Length and padding position are checked apart. */
+const isBase64 = (value: string): boolean => value.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/u.test(value);
+/* Base64 spends four characters on every three bytes, with the final group padded out. */
+const base64Length = (bytes: number): number => 4 * Math.ceil(bytes / 3);
+/* D17: an image is capped at 4 MiB of raw bytes, captures included. */
+const maximumImageBase64Length = base64Length(4 * 1024 * 1024);
+const base64Schema = z.string().max(maximumImageBase64Length).refine(isBase64, 'Invalid base64 image data');
 const imageMediaTypeSchema = z.enum(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
-const dataImageUrlSchema = boundedString.refine((value) => {
-  const match = /^data:(image\/(?:jpeg|png|gif|webp));base64,(.*)$/u.exec(value);
-  return match !== null && base64Schema.safeParse(match[2]).success;
-}, 'Invalid image data URL');
-/* D24: a PDF attachment is capped at 20 MiB of raw bytes, and base64 spends four
- * characters on every three bytes with the final group padded out. */
-const maximumDocumentBytes = 20 * 1024 * 1024;
-const maximumDocumentBase64Length = 4 * Math.ceil(maximumDocumentBytes / 3);
+const dataImageUrlSchema = z
+  .string()
+  .max('data:image/jpeg;base64,'.length + maximumImageBase64Length)
+  .refine((value) => {
+    const match = /^data:(image\/(?:jpeg|png|gif|webp));base64,(.*)$/u.exec(value);
+    return match !== null && base64Schema.safeParse(match[2]).success;
+  }, 'Invalid image data URL');
+/* D24 (amended R1): a PDF attachment is capped at 16 MiB of raw bytes. */
+const maximumDocumentBase64Length = base64Length(16 * 1024 * 1024);
 const pdfDataUrlPrefix = 'data:application/pdf;base64,';
 const documentBase64Schema = z
   .string()

@@ -60,7 +60,10 @@ export class BillingController {
   @Get('entitlements')
   @Header('Cache-Control', 'private, no-store')
   public async getEntitlements(@User() user: AuthUser): Promise<WireEntitlements> {
-    return serializeEntitlements(await this.billingService.getEntitlements(user.id));
+    return serializeEntitlements({
+      ...(await this.billingService.getEntitlements(user.id)),
+      paymentCollectionAvailable: this.paymentsService.collectionAvailable,
+    });
   }
 
   @Get('credits')

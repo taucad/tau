@@ -9,10 +9,13 @@ export const ChatErrorRateLimit = memo(function ({
   className,
   title = 'Rate Limit Exceeded',
   description = 'Too many requests. Please wait a moment before trying again.',
+  retryAfterSeconds,
 }: {
   readonly className?: string;
   readonly title?: string;
   readonly description?: string;
+  /** Seconds the gateway asked the client to wait, from its Retry-After header. */
+  readonly retryAfterSeconds?: number;
 }): React.JSX.Element {
   const { continueChat } = useChatActions();
 
@@ -23,6 +26,11 @@ export const ChatErrorRateLimit = memo(function ({
         <p className='font-medium text-foreground'>{title}</p>
       </div>
       <p className='text-xs text-muted-foreground'>{description}</p>
+      {retryAfterSeconds === undefined ? undefined : (
+        <p className='text-xs text-muted-foreground'>
+          Try again in {retryAfterSeconds} {retryAfterSeconds === 1 ? 'second' : 'seconds'}.
+        </p>
+      )}
       <div className='flex justify-end'>
         <Button
           variant='outline'

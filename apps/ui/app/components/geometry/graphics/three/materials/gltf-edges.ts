@@ -101,11 +101,14 @@ function extractFromInterleavedNonIndexed(positionAttribute: InterleavedBufferAt
 /**
  * Extract positions from indexed geometry with regular BufferAttribute.
  *
+ * Exported for the in-place update path, which re-runs the same de-index when a result with an
+ * unchanged LINES index buffer replaces the presented vertices.
+ *
  * @param array - Tightly-packed `[x, y, z, x, y, z, ...]` POSITION storage.
  * @param indices - Vertex index buffer for the source geometry.
  * @returns Flat `[x1, y1, z1, x2, ...]` typed-array of the referenced vertices.
  */
-function extractFromRegularIndexed(array: Float32Array, indices: Uint32Array | Uint16Array): Float32Array {
+export function deindexPositions(array: Float32Array, indices: Uint32Array | Uint16Array): Float32Array {
   const out = new Float32Array(indices.length * 3);
   let writeOffset = 0;
   for (const indexValue of indices) {
@@ -152,7 +155,7 @@ function extractPositions(lineSegments: LineSegments): Float32Array | undefined 
   const array = positionAttribute.array as Float32Array;
 
   if (indices) {
-    return extractFromRegularIndexed(array, indices);
+    return deindexPositions(array, indices);
   }
 
   // Non-indexed regular buffer — clone into a fresh Float32Array so downstream mutation
@@ -313,8 +316,21 @@ type ApplyFatLineSegmentsOptions = Readonly<{
   edgeColor?: number;
 }>;
 
+/**
+ * The LINES index buffer each presented fat line was de-indexed with. The source `LineSegments` is
+ * dropped from the scene, so this is the only surviving record of the topology behind the de-indexed
+ * copy — the in-place update path compares a new result's LINES indices against it.
+ */
+const fatLineSourceIndices = new WeakMap<Object3D, Uint32Array | Uint16Array>();
+
+/** The LINES index buffer `object` was de-indexed from, when `object` is a fat line. */
+export function getFatLineSourceIndices(object: Object3D): Uint32Array | Uint16Array | undefined {
+  return fatLineSourceIndices.get(object);
+}
+
 export function applyFatLineSegments(gltf: GLTF, options: ApplyFatLineSegmentsOptions): void {
   const { resolution, backend, edgeColor = gltfEdgeColorLightMode } = options;
+  const associations = gltf.parser.associations as Map<Object3D, unknown> | undefined;
   const sources: Array<{ parent: Group; lineSegments: LineSegments }> = [];
 
   gltf.scene.traverse((object) => {
@@ -342,6 +358,18 @@ export function applyFatLineSegments(gltf: GLTF, options: ApplyFatLineSegmentsOp
 
     parent.remove(lineSegments);
     parent.add(fatLine);
+
+    const sourceIndices = lineSegments.geometry.index?.array;
+    if (sourceIndices instanceof Uint32Array || sourceIndices instanceof Uint16Array) {
+      fatLineSourceIndices.set(fatLine, sourceIndices);
+    }
+    // The replacement inherits the source's glTF identity, so consumers keyed on the loader's
+    // associations (component annotation, in-place updates) still resolve the primitive.
+    const association = associations?.get(lineSegments);
+    if (association !== undefined) {
+      associations?.delete(lineSegments);
+      associations?.set(fatLine, association);
+    }
 
     lineSegments.geometry.dispose();
     if (Array.isArray(lineSegments.material)) {

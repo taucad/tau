@@ -38,6 +38,8 @@ export type GltfPresentationTelemetry = Readonly<{
     Partial<
       Record<
         | 'parse'
+        /** Present only when the result was written into the presented buffers in place (D22). */
+        | 'inPlace'
         | 'manifest'
         | 'annotation'
         | 'topologySubmit'

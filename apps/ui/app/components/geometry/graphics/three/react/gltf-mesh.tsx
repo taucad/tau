@@ -44,6 +44,11 @@ import {
   hasComponentOrDescendant,
   isModelComponentVisible,
 } from '#components/geometry/graphics/metadata/gltf-component-visibility.js';
+import {
+  applyInPlaceGeometryUpdate,
+  captureInPlaceGeometryTargets,
+} from '#components/geometry/graphics/three/utils/in-place-geometry-update.js';
+import type { InPlaceGeometryTargets } from '#components/geometry/graphics/three/utils/in-place-geometry-update.js';
 import { hasSceneTagInHierarchy, sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
 import type { SceneTagKey } from '#components/geometry/graphics/three/utils/scene-tags.js';
 import {
@@ -334,6 +339,8 @@ type PreparedGltfPresentation = {
   readonly manifest: GeometryComponentManifest;
   readonly parser: SectionTopologyGltfParser;
   readonly originalMaterials: Map<number, Material | Material[]>;
+  /** D22: the buffers a same-topology result may be written into, absent when the scene cannot take one. */
+  readonly inPlace?: InPlaceGeometryTargets;
   readonly receivedAt: number;
   readonly timings: GltfPresentationTimings;
   barrier: GltfPresentationBarrier;
@@ -1245,6 +1252,75 @@ export function GltfMesh({
       key: geometryHash ?? '',
     });
 
+    /* D22: a result whose topology, accessor layout and materials are unchanged is written straight into
+     * the presented buffers — no reparse, no fat-line rebuild, no material recompile, no new scene graph.
+     * It is refused while a section view is armed or while the presented scene carries section topology
+     * (I11: exact-section semantics on updated buffers are unproven), and whenever any primitive fails to
+     * validate, in which case nothing has been mutated and the full path below presents the result. */
+    const presentInPlace = (): boolean => {
+      const committed = committedPresentationRef.current;
+      if (
+        !committed ||
+        committed.disposed ||
+        !committed.inPlace ||
+        candidatePresentationRef.current !== undefined ||
+        committed.sectionStatus !== 'pending' ||
+        sectionBarrierRef.current !== 'display-ready'
+      ) {
+        return false;
+      }
+
+      const inPlaceStartedAt = performance.now();
+      if (!applyInPlaceGeometryUpdate(committed.inPlace, gltfFile)) {
+        return false;
+      }
+      timings.inPlace = performance.now() - inPlaceStartedAt;
+
+      const manifestStartedAt = performance.now();
+      const manifest = buildGltfComponentManifest(gltfFile, { sourceFile, geometryHash });
+      timings.manifest = performance.now() - manifestStartedAt;
+      const annotationStartedAt = performance.now();
+      // Component ids are unchanged with the topology, so this only re-keys them to the new unit.
+      annotateSceneComponents(committed.scene, manifest, { unitId: requestedUnitId });
+      timings.annotation = performance.now() - annotationStartedAt;
+
+      const bundle: PreparedGltfPresentation = {
+        ...committed,
+        revision: presentationRevision,
+        key: geometryHash ?? '',
+        unitId: requestedUnitId,
+        manifest,
+        receivedAt,
+        timings,
+        barrier: 'display-ready',
+        sectionStatus: 'pending',
+        analysisPromise: undefined,
+        committedAt: performance.now(),
+        firstFrameAt: undefined,
+        modelEmptyFrames: 0,
+        telemetrySent: false,
+      };
+      // Both bundles describe one scene: ownership of its resources moves to the live bundle so the
+      // retirement effect cannot dispose the geometry that is still on screen.
+      const disposeResources = committed.dispose;
+      committed.dispose = () => undefined;
+      bundle.dispose = () => {
+        bundle.disposed = true;
+        disposeResources();
+      };
+      materialSignaturesRef.current.set(bundle, materialSignaturesRef.current.get(committed) ?? '');
+      committedPresentationRef.current = bundle;
+      graphicsActor.send({
+        type: 'gltfDisplayReady',
+        revision: bundle.revision,
+        key: bundle.key,
+        barrier: bundle.barrier,
+      });
+      setPresentation(bundle);
+      invalidate();
+      return true;
+    };
+
     const loadGltf = async (): Promise<void> => {
       let unpreparedDispose: (() => void) | undefined;
       try {
@@ -1299,6 +1375,11 @@ export function GltfMesh({
           manifest,
           parser: gltf.parser as unknown as SectionTopologyGltfParser,
           originalMaterials,
+          inPlace: captureInPlaceGeometryTargets({
+            scene: gltf.scene,
+            associations: gltf.parser.associations as ReadonlyMap<Object3D, GltfLoaderAssociation>,
+            bytes: gltfFile,
+          }),
           receivedAt,
           timings,
           barrier: sectionBarrierRef.current,
@@ -1436,7 +1517,9 @@ export function GltfMesh({
       }
     };
 
-    void loadGltf();
+    if (!presentInPlace()) {
+      void loadGltf();
+    }
 
     return () => {
       cancellation.cancelled = true;

@@ -29,10 +29,13 @@ type GltfBufferView = {
   byteStride?: number;
 };
 
-type GltfPrimitive = {
+/** One glTF mesh primitive as the manifest and the in-place update path read it. @public */
+export type GltfPrimitive = {
   attributes?: Record<string, number>;
   indices?: number;
   material?: number;
+  /** GlTF primitive mode; 4 (TRIANGLES) when absent, 1 for LINES. */
+  mode?: number;
   extras?: JsonObject;
 };
 
@@ -52,7 +55,8 @@ type GltfScene = {
   nodes?: number[];
 };
 
-type GltfJson = {
+/** The glTF JSON chunk, narrowed to what the manifest and the in-place update path read. @public */
+export type GltfJson = {
   scene?: number;
   scenes?: GltfScene[];
   nodes?: GltfNode[];
@@ -72,7 +76,8 @@ type GltfMaterial = {
 
 type TopologyComponent = Partial<TauCadTopologyComponent> & { readonly kind?: GeometryComponentKind };
 
-type ParsedGltf = {
+/** A GLB split into its JSON chunk and a view over its BIN chunk. @public */
+export type ParsedGltf = {
   json: GltfJson;
   bin: Uint8Array<ArrayBuffer>;
 };
@@ -86,7 +91,12 @@ function alignTo4(value: number): number {
   return remainder === 0 ? value : value + (4 - remainder);
 }
 
-function parseGltfBytes(content: Uint8Array<ArrayBuffer>): ParsedGltf {
+/**
+ * Split GLB (or glTF JSON) bytes into the parsed JSON chunk and a view over the BIN chunk.
+ *
+ * The BIN chunk is a `subarray`, not a copy: callers read accessor windows out of it.
+ */
+export function parseGltfBytes(content: Uint8Array<ArrayBuffer>): ParsedGltf {
   const firstNonWhitespace = content.find((byte) => byte > 0x20);
   if (firstNonWhitespace === 0x7b) {
     return {
@@ -109,8 +119,8 @@ function parseGltfBytes(content: Uint8Array<ArrayBuffer>): ParsedGltf {
   const binStart = binHeaderStart + 8;
 
   return {
-    json: JSON.parse(new TextDecoder().decode(content.slice(jsonStart, jsonEnd)).trim()) as GltfJson,
-    bin: binChunkLength > 0 ? content.slice(binStart, binStart + binChunkLength) : new Uint8Array(),
+    json: JSON.parse(new TextDecoder().decode(content.subarray(jsonStart, jsonEnd)).trim()) as GltfJson,
+    bin: binChunkLength > 0 ? content.subarray(binStart, binStart + binChunkLength) : new Uint8Array(),
   };
 }
 

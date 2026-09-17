@@ -171,6 +171,56 @@ describe('transformVectorArrayChecked', () => {
     expect([...directions]).toEqual([...transformNormalArray([0, 1, 0])]);
   });
 
+  it('matches the unchecked helpers bit for bit on signed zero, denormals and both units', () => {
+    // RV3 Q2: the fused pass may not change a single output bit. Signed zero and denormals are the
+    // two places a rewritten loop drifts, and the mm -> m scale is the only arithmetic it adds.
+    const edgeCases = [
+      0,
+      -0,
+      1,
+      -1,
+      Number.MIN_VALUE,
+      -Number.MIN_VALUE,
+      5e-324,
+      1.175e-38,
+      -1.175e-38,
+      1000,
+      -1000,
+      0.1,
+      -0.1,
+      Number.MAX_SAFE_INTEGER,
+      -Number.MAX_SAFE_INTEGER,
+    ];
+
+    for (const options of [
+      {},
+      { coordinateSystem: 'z-up' } as const,
+      { unit: { length: 'millimeter' } } as const,
+      { coordinateSystem: 'z-up', unit: { length: 'meter' } } as const,
+    ]) {
+      const positions = transformVectorArrayChecked({
+        vectors: edgeCases,
+        kind: 'position',
+        options,
+        invalidMessage: 'bad mesh',
+      });
+      const directions = transformVectorArrayChecked({
+        vectors: edgeCases,
+        kind: 'direction',
+        options,
+        invalidMessage: 'bad mesh',
+      });
+
+      // Compared as bytes: `toEqual` on numbers would let a -0 through.
+      expect([...new Uint8Array(positions.buffer)]).toEqual([
+        ...new Uint8Array(transformVertexArray(edgeCases, options).buffer),
+      ]);
+      expect([...new Uint8Array(directions.buffer)]).toEqual([
+        ...new Uint8Array(transformNormalArray(edgeCases, options).buffer),
+      ]);
+    }
+  });
+
   it('rejects a non-finite component with the caller\u2019s own message', () => {
     expect(() =>
       transformVectorArrayChecked({

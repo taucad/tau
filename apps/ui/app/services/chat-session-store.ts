@@ -44,7 +44,7 @@ import type { ProjectSessionActorRef } from '#machines/project-session.machine.j
 import { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
 import type { ChatRequest } from '#hooks/chat-persistence.machine.js';
 import { buildDraftMessage, draftMachine } from '#hooks/draft.machine.js';
-import { createComposerRecordActor, draftPersistenceFor } from '#hooks/composer-record.js';
+import { createComposerRecordActor, draftHydrationOf, draftPersistenceFor } from '#hooks/composer-record.js';
 import type { ComposerRecordRef } from '#hooks/composer-record.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
 import type { ComposerRecordClient } from '#db/composer-record-store.js';
@@ -1289,14 +1289,7 @@ export class ChatSessionStore {
 
     // Subscribed before the record actor starts, so its read cannot resolve unheard (D7).
     const recordLoadedSubscription = composerRecordRef.on('recordLoaded', ({ record }) => {
-      const { draft, messageEdits, toolChoice, mode } = record === 'absent' ? {} : record;
-      draftActorRef.send({
-        type: 'hydrateDraft',
-        ...(draft === undefined ? {} : { draft }),
-        ...(messageEdits === undefined ? {} : { messageEdits }),
-        ...(toolChoice === undefined ? {} : { toolChoice }),
-        ...(mode === undefined ? {} : { mode }),
-      });
+      draftActorRef.send({ type: 'hydrateDraft', ...draftHydrationOf(record) });
     });
 
     const chat = createChatInstance({

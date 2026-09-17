@@ -23,12 +23,11 @@ const manifest = await compileParameterManifest({
   dependency: digest,
   middleware: digest,
 });
-const initial = await resolveParameterSnapshot({
+const initial = resolveParameterSnapshot({
   target,
   manifest,
   path: '.tau/parameters/main.ts.json',
   bytes: null,
-  preconditions: [],
 });
 const request = (requestId: string): ParameterSetRequest => ({
   requestId,

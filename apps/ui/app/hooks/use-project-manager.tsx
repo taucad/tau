@@ -258,7 +258,6 @@ type ProjectManagerContextType = {
   consumeChatStartupRequest: (chatId: string, requestId: string) => Promise<Chat | undefined>;
   commitCancelledDraftRestore: (chatId: string, input: CommitCancelledDraftRestoreInput) => Promise<Chat | undefined>;
   softDeleteChat: (chatId: string) => Promise<Chat | undefined>;
-  duplicateChat: (chatId: string) => Promise<Chat>;
   getAllChats: (options?: { includeDeleted?: boolean }) => Promise<Chat[]>;
   getChatsForResource: (resourceId: string, options?: { includeDeleted?: boolean }) => Promise<Chat[]>;
   getChat: (chatId: string) => Promise<Chat | undefined>;
@@ -2213,16 +2212,6 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [chatStore, invalidateProjectsList, touchProject],
   );
 
-  const duplicateChat = useCallback(
-    async (chatId: string): Promise<Chat> => {
-      const chat = await chatStore.duplicateChat(chatId);
-      await touchProject(chat.resourceId);
-      invalidateProjectsList();
-      return chat;
-    },
-    [chatStore, invalidateProjectsList, touchProject],
-  );
-
   const getChatsForResource = useCallback(
     async (resourceId: string, options?: { includeDeleted?: boolean }): Promise<Chat[]> => {
       return chatStore.getChatsForResource(resourceId, options);
@@ -2294,7 +2283,6 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       consumeChatStartupRequest,
       commitCancelledDraftRestore,
       softDeleteChat,
-      duplicateChat,
       getAllChats,
       getChatsForResource,
       getChat,
@@ -2338,7 +2326,6 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     consumeChatStartupRequest,
     commitCancelledDraftRestore,
     softDeleteChat,
-    duplicateChat,
     getAllChats,
     getChatsForResource,
     getChat,

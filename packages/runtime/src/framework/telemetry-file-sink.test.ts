@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { openTelemetryFileSink, telemetryDirectory } from '#framework/telemetry-file-sink.js';
+import { openTelemetryFileSink, telemetryDirectory, telemetryFormat } from '#framework/telemetry-file-sink.js';
 import type { TelemetryBatch } from '#types/runtime-protocol.types.js';
 
 const batch = (name: string, size = 1): TelemetryBatch => ({
@@ -36,7 +36,8 @@ describe('telemetryDirectory', () => {
     process.env['TAU_TELEMETRY'] = saved['TAU_TELEMETRY'];
     process.env['TAU_TELEMETRY_DIR'] = saved['TAU_TELEMETRY_DIR'];
     process.env['TAU_DESKTOP_LOG_DIR'] = saved['TAU_DESKTOP_LOG_DIR'];
-    for (const key of ['TAU_TELEMETRY', 'TAU_TELEMETRY_DIR', 'TAU_DESKTOP_LOG_DIR']) {
+    process.env['TAU_TELEMETRY_FORMAT'] = saved['TAU_TELEMETRY_FORMAT'];
+    for (const key of ['TAU_TELEMETRY', 'TAU_TELEMETRY_DIR', 'TAU_DESKTOP_LOG_DIR', 'TAU_TELEMETRY_FORMAT']) {
       if (saved[key] === undefined) {
         Reflect.deleteProperty(process.env, key);
       }
@@ -58,6 +59,13 @@ describe('telemetryDirectory', () => {
 
     process.env['TAU_TELEMETRY'] = '0';
     expect(telemetryDirectory()).toBeUndefined();
+  });
+
+  it('emits OTLP JSON only where the operator asked for it', () => {
+    Reflect.deleteProperty(process.env, 'TAU_TELEMETRY_FORMAT');
+    expect(telemetryFormat()).toBe('jsonl');
+    process.env['TAU_TELEMETRY_FORMAT'] = 'otlp';
+    expect(telemetryFormat()).toBe('otlp');
   });
 
   it('is off where no directory is named', () => {
@@ -95,6 +103,25 @@ describe('openTelemetryFileSink', () => {
       origin: { label: 'utility', instance: 'instance-a' },
       epoch: 1_700_000_000_000,
     });
+    sink!.close();
+  });
+
+  it('writes one OTLP payload per batch when the sink is asked for the collector shape', async () => {
+    const sink = await openTelemetryFileSink({ directory, fileName: 'utility-otlp.jsonl', format: 'otlp' });
+
+    sink!.write(batch('kernel.render', 2));
+    const lines = await readLines(join(directory, 'utility-otlp.jsonl'), 1);
+
+    // D8: the collector's `otlpjsonfile` receiver reads one OTLP payload per line, and no SDK runs
+    // in the emitting process — the translation happens here, after the render turn has returned.
+    expect(lines).toHaveLength(1);
+    const payload = JSON.parse(lines[0]!) as {
+      resourceSpans: Array<{ scopeSpans: Array<{ spans: Array<{ name: string }> }> }>;
+    };
+    expect(payload.resourceSpans[0]!.scopeSpans[0]!.spans.map(({ name }) => name)).toEqual([
+      'kernel.render',
+      'kernel.render',
+    ]);
     sink!.close();
   });
 

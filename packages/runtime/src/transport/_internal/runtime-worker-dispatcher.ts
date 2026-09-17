@@ -61,7 +61,7 @@ import { createErrorTrap } from '#framework/worker-error-trap.js';
 import { createTelemetryOrigin, telemetryEpoch } from '#framework/worker-telemetry.js';
 import type { TelemetryExporter } from '#framework/telemetry-file-sink.js';
 import type { TelemetryBatch } from '#types/runtime-protocol.types.js';
-import { openTelemetryFileSink, telemetryDirectory } from '#framework/telemetry-file-sink.js';
+import { openTelemetryFileSink, telemetryDirectory, telemetryFormat } from '#framework/telemetry-file-sink.js';
 import { packageVersion } from '#utils/package-info.js';
 import { protocolVersion } from '#types/protocol-header.types.js';
 import type {
@@ -326,6 +326,7 @@ export function createWorkerDispatcher(
     const openedSink = openTelemetryFileSink({
       directory: telemetryTraceDirectory,
       fileName: `${telemetryOrigin.label}-${telemetryOrigin.instance}.jsonl`,
+      format: telemetryFormat(),
     });
     // async-iife: bootstrap — the dispatcher factory is synchronous and nothing downstream waits on the sink.
     // oxlint-disable-next-line promise/prefer-await-to-then -- the sink attaches when its node:fs import resolves.

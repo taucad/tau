@@ -418,6 +418,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   /** Native render content declarations keyed by kernel ID. */
   protected readonly kernelRenderContentMap = new Map<string, readonly RuntimeContentKey[]>();
+  /** Kernels that declared they can serve the transient drag lane (D2). */
+  protected readonly kernelLiveEditMap = new Map<string, boolean>();
 
   /** Validated init options and verified assets for selected-participant identity. */
   protected readonly kernelInitOptionsMap = new Map<string, Record<string, unknown>>();
@@ -560,6 +562,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private readonly bundleResultCache = new Map<string, BundleResult>();
 
   /** Paths which may schedule the current autonomous preview. */
+  /** A transient render displays its result without publishing it as the artifact (D2). */
+  private currentRenderTransient = false;
   private currentPreviewWatchPaths = new Map<string, number>();
 
   /** Middleware declarations owned by the current preview, retained for diagnostics/tests. */
@@ -871,6 +875,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         record,
         file,
         parameters: request.parameters,
+        transient: request.transient,
         operation: { options: request.options, content: request.content },
       }),
     );
@@ -927,6 +932,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     readonly record: RenderCancellationRecord;
     readonly file: RuntimeFileLocator;
     readonly parameters?: Record<string, unknown>;
+    readonly transient?: boolean;
     readonly operation?: { readonly options?: Record<string, unknown>; readonly content?: RuntimeContentInput };
   }): Promise<void> {
     const { record, file, parameters, operation } = input;
@@ -941,6 +947,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.currentParameters = parameters ?? {};
     this.currentRenderOptions = operation?.options;
     this.currentRenderContent = operation?.content;
+    this.currentRenderTransient = input.transient === true;
     this.clearScheduledRender();
 
     this.setActiveFile(canonicalFile);
@@ -1593,14 +1600,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       options?: Record<string, unknown>;
       content?: RuntimeContentInput;
     },
-    dependencyContext?: DependencyResolutionContext,
-    owner?: OperationOwner,
+    lane: { dependencyContext?: DependencyResolutionContext; owner?: OperationOwner; publish?: boolean } = {},
   ): Promise<HashedGeometryResult> {
+    const { dependencyContext, owner, publish = true } = lane;
     const { artifact } = await this.materializeRender(entry, {
       dependencyContext,
       owner,
       display: true,
-      publish: true,
+      publish,
     });
     const { result } = artifact;
     if (!result.success) {
@@ -4393,8 +4400,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             options: this.currentRenderOptions,
             content: contentResult.content,
           },
-          dependencyContext,
-          owner,
+          { dependencyContext, owner, publish: !this.currentRenderTransient },
         );
 
         if (this.isAborted(record)) {
@@ -4971,6 +4977,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       {
         renderOptions: { schema: JSONSchema7; defaults: Record<string, unknown> };
         content?: { schema: JSONSchema7; defaults: RuntimeContentInput };
+        liveEdit?: boolean;
       }
     > = {};
     for (const kernelId of this.kernelRenderContentMap.keys()) {
@@ -4987,7 +4994,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         }
       }
       const content = this.buildContentCapability('render', [...keys]);
-      renderCapabilities[kernelId] = { renderOptions, ...(content ? { content } : {}) };
+      renderCapabilities[kernelId] = {
+        renderOptions,
+        ...(content ? { content } : {}),
+        ...(this.kernelLiveEditMap.get(kernelId) === true ? { liveEdit: true } : {}),
+      };
     }
 
     const registrations: CapabilitiesManifest['registrations'] = [

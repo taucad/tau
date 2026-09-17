@@ -71,8 +71,9 @@ import type { ParameterCommit, ParameterEdit } from '#components/geometry/parame
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { ParameterManifest } from '@taucad/parameters';
 import { getActiveGroupValues } from '@taucad/types';
-import type { FileParameterEntry } from '@taucad/types';
+import type { FileParameterEntry, JSONValue } from '@taucad/types';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
+import { withPointerValue } from '#services/parameter-set-service.js';
 import { createDefaultEntry } from '#utils/parameter-config.utils.js';
 import { sortGeometryUnitEntries } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import {
@@ -511,6 +512,65 @@ function ParameterGroupSelector({
   );
 }
 
+/**
+ * Drag-time dispatch for one geometry unit (D2).
+ *
+ * The pump holds the newest sample and hands it to the unit on an animation frame, but only while
+ * no render is in flight: a sample per frame regardless of render cost starves the lane, because
+ * every dispatch supersedes the render before it can settle (S2). Samples in between are dropped,
+ * which is what latest-wins means. Nothing here is persisted; the released value is committed
+ * through the ordinary checked write.
+ *
+ * Returns nothing when the active kernel did not declare {@link liveEdit}, which leaves
+ * `ParameterCommit.scrub` absent and the row previewing the value on its own.
+ */
+function useScrubDispatch(
+  cadRef: ActorRefFrom<typeof cadMachine>,
+  parameterActor: ReturnType<typeof useResolvedParameterActor>,
+): Pick<ParameterCommit, 'scrub' | 'endScrub'> {
+  const liveEdit = useSelector(cadRef, (state) => {
+    const kernelId = state.context.activeKernelId;
+    return kernelId !== undefined && state.context.capabilities?.renderCapabilities[kernelId]?.liveEdit === true;
+  });
+
+  const pending = useRef<Record<string, unknown> | undefined>(undefined);
+  const frame = useRef<number | undefined>(undefined);
+
+  const lane = useMemo(() => {
+    function pump(): void {
+      frame.current = undefined;
+      if (pending.current === undefined) {
+        return;
+      }
+      if (cadRef.getSnapshot().hasTag('cad-loading')) {
+        frame.current = requestAnimationFrame(pump);
+        return;
+      }
+      const next = pending.current;
+      pending.current = undefined;
+      cadRef.send({ type: 'setParameters', parameters: next, transient: true });
+    }
+    return {
+      scrub(field: Readonly<{ pointer: string; value: JSONValue }>): void {
+        const values = activeGroupValuesOf(parameterActor?.getSnapshot()) as Readonly<Record<string, JSONValue>>;
+        pending.current = withPointerValue(values, field.pointer, field.value);
+        frame.current ??= requestAnimationFrame(pump);
+      },
+      stop(): void {
+        pending.current = undefined;
+        if (frame.current !== undefined) {
+          cancelAnimationFrame(frame.current);
+          frame.current = undefined;
+        }
+      },
+    };
+  }, [cadRef, parameterActor]);
+
+  useEffect(() => lane.stop, [lane]);
+
+  return useMemo(() => (liveEdit ? { scrub: lane.scrub, endScrub: lane.stop } : {}), [lane, liveEdit]);
+}
+
 // ---------------------------------------------------------------------------
 // geometry unit parameters panel body (used in both flat and paneview modes)
 // ---------------------------------------------------------------------------
@@ -541,6 +601,7 @@ function GeometryUnitParameters({
   const parameters = useSelector(parameterActor, activeGroupValuesOf);
   const parameterBindings = useSelector(parameterActor, activeGroupBindingsOf, shallowEqualBindings);
   const parameterEditorInstance = useId();
+  const scrub = useScrubDispatch(cadRef, parameterActor);
   const parameterCommit = useMemo(
     () =>
       parameterManifest === undefined || activeGroup === undefined
@@ -555,8 +616,9 @@ function GeometryUnitParameters({
                 group: activeGroup,
                 ...field,
               }),
+            ...scrub,
           },
-    [activeGroup, entryPath, parameterEditorInstance, parameterManifest, parameterService],
+    [activeGroup, entryPath, parameterEditorInstance, parameterManifest, parameterService, scrub],
   );
   const displaySymbol = useSelector(graphicsActor, (state) => state?.context.displayUnits.length.symbol) ?? 'mm';
   // `units` and `parameterEdit` feed the RJSF form context; rebuilding either per render would

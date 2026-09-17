@@ -471,6 +471,13 @@ export type KernelDefinition<
   /** Render options and natively fulfilled framework content. Omit when neither is declared. */
   render?: Render;
 
+  /**
+   * Whether this kernel may serve the transient drag lane (D2). Declaring it asserts that an
+   * in-flight render can be cancelled cooperatively — without killing the process that serves it.
+   * Consumers read it from `CapabilitiesManifest.renderCapabilities[kernelId].liveEdit`.
+   */
+  liveEdit?: boolean;
+
   /** Native export formats, their options, and natively fulfilled framework content. */
   exportFormats: ExportFormats;
 
@@ -572,6 +579,8 @@ type KernelDefinitionConfig<
     createOptionsSchema?: CreateSchema;
     /** Render options and natively fulfilled framework content. */
     render?: Render;
+    /** Whether this kernel may serve the transient drag lane; see {@link KernelDefinition.liveEdit}. */
+    liveEdit?: boolean;
     /** Native export formats and natively fulfilled framework content. */
     exportFormats: ExportFormats;
     /** Selected implementation assets. */

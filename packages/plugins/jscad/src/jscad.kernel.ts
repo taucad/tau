@@ -276,6 +276,8 @@ export const jscadKernel = defineKernel({
   name: 'JscadKernel',
   version: '1.0.0',
   render: { content: ['includeEdges'] },
+  // D2: in-worker CSG yields cooperatively, so a superseded drag render is abandoned, not killed.
+  liveEdit: true,
   exportFormats: {
     glb: { optionsSchema: jscadExportSchemas.glb, content: ['includeEdges'] },
   },

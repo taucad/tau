@@ -192,6 +192,12 @@ export type RuntimeRenderInput<
    * that persists the same bytes in parallel does not also trigger a watched re-render.
    */
   readonly stage?: Readonly<Record<string, Uint8Array<ArrayBuffer> | string>>;
+  /**
+   * Render this value for display only. The result reaches the `geometry` event, but it never
+   * becomes the published artifact: exports and retained handles keep answering the last committed
+   * render, and nothing is persisted. Drag lanes use this; a committed edit never does.
+   */
+  readonly transient?: boolean;
 } & ContentRequestFor<RenderContentFor<Kernels, Middleware>>;
 
 /** Request-scoped model evaluation input with exact render-schema inference. @public */
@@ -2112,6 +2118,9 @@ export function createRuntimeClient(
       assertRecordInput('render', 'renderOptions', input.renderOptions);
       assertRecordInput('render', 'content', input.content);
       const normalized = withStagedFiles(normalizeRuntimeSource(input.source), input.stage);
+      if (input.transient === true && normalized.stage !== undefined) {
+        throw new TypeError('A transient render is never persisted, so it cannot stage bytes.');
+      }
       const parameters = input.parameters ?? {};
       const { renderOptions, content } = input;
       const admissionClient = getWorkerClient();
@@ -2133,7 +2142,11 @@ export function createRuntimeClient(
             admission,
           );
         } else {
-          client.openFile(normalized.file, { parameters, options: renderOptions, content }, admission);
+          client.openFile(
+            normalized.file,
+            { parameters, options: renderOptions, content, ...(input.transient === true ? { transient: true } : {}) },
+            admission,
+          );
         }
       } catch (error) {
         admissionClient.settleSelectedPreview(admission.renderId);

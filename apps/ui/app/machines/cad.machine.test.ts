@@ -466,6 +466,29 @@ describe('cadMachine', () => {
       actor.stop();
     });
 
+    it('should dispatch a drag sample as a transient render that stages nothing', async () => {
+      const { actor, mockClient } = await startAndConnect();
+      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
+      actor.send({
+        type: 'setParameters',
+        parameters: { height: 20 },
+        stage: { '.tau/parameters/main.ts.json': new Uint8Array([1, 2, 3]) },
+      });
+      vi.mocked(mockClient.render).mockClear();
+
+      actor.send({ type: 'setParameters', parameters: { height: 21 }, transient: true });
+
+      // D2: a drag sample is never persisted, so it carries no sidecar bytes even though the
+      // committed edit before it did.
+      expect(mockClient.render).toHaveBeenCalledWith({
+        source: { path: stubEntryPath },
+        parameters: { height: 21 },
+        content: { includeEdges: true },
+        transient: true,
+      });
+      actor.stop();
+    });
+
     it('should forward initializeModel as render with parameters', async () => {
       const { actor, mockClient } = await startAndConnect();
 

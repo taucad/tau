@@ -9,7 +9,7 @@ import { geometryCache, parameterFileResolver } from '@taucad/middleware';
 import { serializeParameterRecord } from '@taucad/parameters';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fileParameterEntrySchema, parametersDirectory } from '@taucad/runtime/types';
-import type { GetParametersResult, WorkerState } from '@taucad/runtime/types';
+import type { GetParametersResult, HashedGeometryResult, WorkerState } from '@taucad/runtime/types';
 import { defineRuntime } from '@taucad/runtime/worker';
 
 const mainSource = `
@@ -164,6 +164,62 @@ describe('autonomous preview invalidation', () => {
     } finally {
       stopParameters();
       stopStates();
+      await client.shutdown({ drain: true });
+      client.terminate();
+      dispose();
+    }
+  }, 60_000);
+});
+
+describe('transient drag lane', () => {
+  /* D2: a transient render shows the drag value but never becomes the published artifact, so an
+   * export mid-drag still answers with the last committed geometry and nothing is persisted. */
+  it('should render a transient parameter change without publishing it as the artifact', async () => {
+    const { service, fileSystem, dispose } = await createProjectWorkspace('transient-drag');
+    const runtime = defineRuntime({
+      plugins: [replicad(), esbuild()],
+      middleware: [parameterFileResolver(), geometryCache()],
+    });
+    const client = createRuntimeClient({
+      transport: inProcessTransport({ runtime, fileSystem }),
+    });
+    const geometries: HashedGeometryResult[] = [];
+    const stopGeometry = client.on('geometry', (result) => geometries.push(result));
+    const source = { path: 'main.ts' } as const;
+
+    try {
+      const committed = await client.render({ source, parameters: { width: 10 } });
+      if (committed.superseded || !committed.geometry.success) {
+        throw new Error('Expected the committed render to succeed');
+      }
+      // D2 gates the lane on a kernel declaring it; Replicad aborts cooperatively, so it qualifies.
+      expect(client.capabilities?.renderCapabilities['replicad']?.liveEdit).toBe(true);
+      const committedExport = await client.export('glb');
+      if (!committedExport.success) {
+        throw new Error('Expected the committed export to succeed');
+      }
+
+      geometries.length = 0;
+      const transient = await client.render({ source, parameters: { width: 40 }, transient: true });
+      if (transient.superseded || !transient.geometry.success) {
+        throw new Error('Expected the transient render to succeed');
+      }
+      // The drag frame reaches the viewer.
+      expect(geometries).toHaveLength(1);
+      expect(transient.geometry.data?.hash).not.toBe(committed.geometry.data?.hash);
+
+      // ...but it never became the artifact, so the export still answers the committed width.
+      const afterTransient = await client.export('glb');
+      if (!afterTransient.success) {
+        throw new Error('Expected the export after the transient render to succeed');
+      }
+      // A box's GLB has the same byte length at every size, so the bytes themselves are the check.
+      expect(afterTransient.data[0]?.bytes).toStrictEqual(committedExport.data[0]?.bytes);
+
+      // Nothing was persisted for the transient value.
+      await expect(service.exists(`/projects/${projectId}/${parametersDirectory}/main.ts.json`)).resolves.toBe(false);
+    } finally {
+      stopGeometry();
       await client.shutdown({ drain: true });
       client.terminate();
       dispose();

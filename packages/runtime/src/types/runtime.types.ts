@@ -408,6 +408,8 @@ export type RenderCapability<
   };
   /** Framework content supported by this kernel's composed render route. */
   content?: ContentCapability<RenderContentFor<Kernels, Middleware, Kernel>>;
+  /** Whether this kernel may serve the transient drag lane (D2). */
+  liveEdit?: boolean;
 };
 // oxlint-enable @typescript-eslint/no-explicit-any
 
@@ -449,6 +451,8 @@ export type CapabilitiesManifest<
         defaults: RenderOptionsFor<Kernels, K>;
       };
       content?: ContentCapability<RenderContentFor<Kernels, Middleware, K>>;
+      /** Whether this kernel may serve the transient drag lane (D2). */
+      liveEdit?: boolean;
     };
   };
 };

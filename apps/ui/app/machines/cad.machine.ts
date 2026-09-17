@@ -36,6 +36,8 @@ export type CadContext = {
   parameters: Record<string, unknown>;
   /** Committed parameter-sidecar bytes staged with every render of this entry. */
   parameterStage: Record<string, Uint8Array<ArrayBuffer>> | undefined;
+  /** Whether the pending render is a drag sample rather than a committed value. */
+  parameterTransient: boolean;
   units: { length: LengthSymbol };
   /** Outcome of the latest selected runtime geometry event. */
   latestGeometryOutcome: LatestGeometryOutcome;
@@ -97,6 +99,8 @@ type CadEvent =
       parameters: Record<string, unknown>;
       /** The parameter sidecar's committed bytes, carried so the runtime sees them without a watch. */
       stage?: Record<string, Uint8Array<ArrayBuffer>>;
+      /** A drag sample: rendered for display, never persisted and never published (D2). */
+      transient?: boolean;
     }
   | { type: 'setCodeIssues'; errors: CadContext['codeIssues'] }
   | { type: 'geometryComputed'; geometry: Geometry; issues: KernelIssue[] }
@@ -161,6 +165,7 @@ type RenderModelInput = {
   entryPath: string | undefined;
   parameters: Record<string, unknown>;
   stage: Record<string, Uint8Array<ArrayBuffer>> | undefined;
+  transient: boolean;
   /** Whether no newer UI render was requested since this one. */
   isLatestRequest: () => boolean;
 };
@@ -349,19 +354,29 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input })
     throw new Error('No model file is selected');
   }
 
-  const request = {
-    source: { path: input.entryPath },
-    parameters: input.parameters,
-    content: { includeEdges: true },
-    ...(input.stage === undefined ? {} : { stage: input.stage }),
-  } as const;
+  /* A transient render is never persisted, so it stages nothing: the sidecar still holds the last
+   * committed value and the runtime must keep reading it. */
+  const request = input.transient
+    ? ({
+        source: { path: input.entryPath },
+        parameters: input.parameters,
+        content: { includeEdges: true },
+        transient: true,
+      } as const)
+    : ({
+        source: { path: input.entryPath },
+        parameters: input.parameters,
+        content: { includeEdges: true },
+        ...(input.stage === undefined ? {} : { stage: input.stage }),
+      } as const);
   const outcome = await input.client.render(request);
   // Runtime state events usually stop this actor before the render settles, so ask the machine
   // whether this is still the latest request. If so, the runtime's watched rerender won, and it
   // drops a concurrent open of another file (a rename races the watcher reporting the old path
   // gone). Re-assert this unit's file once.
   // ponytail: one retry; loop only if a render can keep losing to repeated external edits.
-  if (outcome.superseded && input.isLatestRequest()) {
+  // A superseded drag sample is simply stale; only a committed render re-asserts itself.
+  if (outcome.superseded && !input.transient && input.isLatestRequest()) {
     await input.client.render(request);
   }
 });
@@ -480,6 +495,7 @@ export const cadMachine = setup({
       },
       // The staged bytes belong to the entry that was open; the new entry re-supplies its own.
       parameterStage: () => undefined,
+      parameterTransient: () => false,
       latestGeometryOutcome: () => undefined,
       codeIssues: () => [],
       kernelIssues({ context, event }) {
@@ -499,6 +515,10 @@ export const cadMachine = setup({
       parameterStage({ event, context }) {
         assertEvent(event, 'setParameters');
         return event.stage ?? context.parameterStage;
+      },
+      parameterTransient({ event }) {
+        assertEvent(event, 'setParameters');
+        return event.transient === true;
       },
       latestGeometryOutcome: () => undefined,
     }),
@@ -627,6 +647,7 @@ export const cadMachine = setup({
     units: { length: 'mm' },
     parameters: {},
     parameterStage: undefined,
+    parameterTransient: false,
     latestGeometryOutcome: undefined,
     geometry: undefined,
     kernelIssues: new Map(),
@@ -835,6 +856,7 @@ export const cadMachine = setup({
               entryPath: context.entryPath,
               parameters: context.parameters,
               stage: context.parameterStage,
+              transient: context.parameterTransient,
               isLatestRequest: () => self.getSnapshot().context.lastRequestedRenderId === context.lastRequestedRenderId,
             }),
             onDone: {

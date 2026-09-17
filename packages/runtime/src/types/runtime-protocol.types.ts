@@ -357,6 +357,11 @@ export type RuntimeOpenFileArgs = RuntimePreviewIdentity & {
   readonly parameters: Record<string, unknown>;
   readonly options?: Record<string, unknown>;
   readonly content?: RuntimeContentInput;
+  /**
+   * Render for display only: the result reaches the geometry event but never becomes the published
+   * artifact, so exports and retained handles keep answering the last committed render (D2).
+   */
+  readonly transient?: boolean;
 };
 
 /**

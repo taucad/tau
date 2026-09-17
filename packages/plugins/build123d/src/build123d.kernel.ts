@@ -111,6 +111,8 @@ export const build123dKernel = defineKernel({
   version: '0.11.1+python3.13.ocp7.9.3.1.1.protocol1.topology1',
   optionsSchema: build123dOptionsSchema,
   render: { optionsSchema: build123dRenderSchema },
+  // D2: the Python worker answers `cancelMethod: 'cancel'` itself and keeps its resident prefix.
+  liveEdit: true,
   exportFormats: {
     glb: { optionsSchema: build123dExportSchemas.glb },
     step: { optionsSchema: build123dExportSchemas.step },

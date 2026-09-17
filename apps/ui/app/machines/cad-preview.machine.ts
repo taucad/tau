@@ -90,18 +90,13 @@ export const cadPreviewMachine = setup({
   },
   actions: {
     initializeCadModel: enqueueActions(({ enqueue, context }) => {
-      enqueue.sendTo(context.cadRef, {
-        type: 'initializeModel',
-        entryPath: context.mainFile,
-        parameters: context.parameters,
-      });
+      enqueue.sendTo(context.cadRef, { type: 'initializeModel', entryPath: context.mainFile });
     }),
+    /* A preview has no parameter record, so its values go straight to the kernel. This machine is
+     * the only owner of them; the CAD machine keeps no second copy to fall out of step. */
     forwardSetParameters: enqueueActions(({ enqueue, context, event }) => {
       if (event.type === 'setParameters') {
-        enqueue.sendTo(context.cadRef, {
-          type: 'setParameters',
-          parameters: event.parameters,
-        });
+        enqueue.assign({ parameters: event.parameters });
         const { kernelClient } = context.cadRef.getSnapshot().context;
         void kernelClient?.updateParameters(event.parameters);
       }

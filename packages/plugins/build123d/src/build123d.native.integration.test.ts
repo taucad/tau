@@ -338,7 +338,6 @@ describe('Build123d native kernel', () => {
           recordBytes = typeof input.data === 'string' ? encoder.encode(input.data) : Uint8Array.from(input.data);
           return { status, content: Uint8Array.from(recordBytes) };
         },
-        semanticPreconditions: async () => [{ path: 'main.py', expected: Uint8Array.from(sourceBytes) }],
       };
       const target = { authority: 'memory', root: '/project', entry: 'main.py' };
       const actor = createActor(
@@ -434,9 +433,11 @@ describe('Build123d native kernel', () => {
       if (decoded.status !== 'current') {
         throw new Error('Expected a current parameter record');
       }
-      expect(decoded.record.groups['default']).toMatchObject({
+      // The record carries only the authored claim; the producer to convert back for is the live manifest's.
+      expect(decoded.record.groups['default']).toEqual({
         values: { width: 4 },
-        bindings: { '/width': { unit: 'cm', sourceUnit: { producer: 'build123d', producerUnit: 'mm' } } },
+        units: { '/width': 'cm' },
+        sourceUnits: { '/width': 'cm' },
       });
       const converted = await client.render({
         source: {

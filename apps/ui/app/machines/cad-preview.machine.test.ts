@@ -83,7 +83,6 @@ describe('cadPreviewMachine + cadMachine integration', () => {
 
     expect(mockClient.render).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
-      parameters: { width: 42 },
       content: { includeEdges: true },
     });
     expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
@@ -169,7 +168,6 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     expect(cadSnapshot.context.entryPath).toBe('main.ts');
     expect(mockClient.render).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
-      parameters: { width: 42 },
       content: { includeEdges: true },
     });
     expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
@@ -251,7 +249,6 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     // InitializeModel should have been sent to cadRef (now in idle)
     expect(mockClient.render).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
-      parameters: {},
       content: { includeEdges: true },
     });
 
@@ -347,7 +344,6 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     expect(cadSnapshot.context.entryPath).toBe('main.ts');
     expect(mockClient.render).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
-      parameters: { width: 42 },
       content: { includeEdges: true },
     });
     expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });
@@ -479,7 +475,6 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     expect(cadRef.getSnapshot().context.entryPath).toBe('main.ts');
     expect(mockClient.render).toHaveBeenCalledWith({
       source: { path: 'main.ts' },
-      parameters: { width: 42 },
       content: { includeEdges: true },
     });
     expect(mockClient.updateParameters).toHaveBeenCalledWith({ width: 42 });

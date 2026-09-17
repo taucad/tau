@@ -94,8 +94,6 @@ describe('ProjectShareAction', () => {
     parameterService.readSettled.mockResolvedValue(
       new TextEncoder().encode(
         JSON.stringify({
-          recordVersion: 2,
-          profile: 'future',
           activeGroup: 'alternate',
           groups: { alternate: { values: { width: '12.5' } } },
         }),
@@ -225,7 +223,7 @@ describe('ProjectShareWorkbenchPanel', () => {
       '.tau/parameters/main.ts.json',
     ]);
     expect(parameterService.readSettled).toHaveBeenCalledExactlyOnceWith('main.ts');
-    expect(new TextDecoder().decode(snapshot.files.at(-1)?.content)).toContain('"profile":"future"');
+    expect(new TextDecoder().decode(snapshot.files.at(-1)?.content)).toContain('"width":"12.5"');
     const manifestFile = snapshot.files.find(({ path }) => path === 'tau.json');
     expect(manifestFile?.role).toBe('project-metadata');
     expect(manifestFile?.sha256).toMatch(/^[\da-f]{64}$/u);

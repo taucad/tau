@@ -4,7 +4,7 @@ import type { FileMap } from '#utils/file-reader.utils.js';
 
 const bytes = (value: number): Uint8Array<ArrayBuffer> => new Uint8Array([value]);
 const parameterRecordBytes = new TextEncoder().encode(
-  '{"recordVersion":2,"profile":"future","groups":{"default":{"values":{"exact":"1.2300"}}}}',
+  '{"activeGroup":"default","groups":{"default":{"values":{"exact":"1.2300"}}}}',
 );
 
 const createFiles = (): FileMap =>

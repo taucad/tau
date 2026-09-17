@@ -91,10 +91,7 @@ const recordFrom = (bytes: Uint8Array<ArrayBuffer>, fileName: string): ReturnTyp
     throw new Build123dKernelError([
       {
         message: error instanceof Error ? error.message : String(error),
-        code:
-          error instanceof Error && 'code' in error && error.code === 'UNSUPPORTED_RECORD'
-            ? 'UNSUPPORTED_RECORD'
-            : 'INVALID_RECORD',
+        code: 'INVALID_RECORD',
         type: 'runtime',
         severity: 'error',
         location: { fileName, startLineNumber: 1, startColumn: 1 },

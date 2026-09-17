@@ -264,12 +264,7 @@ function FieldTemplate(props: FieldTemplateProps<Record<string, unknown>, RJSFSc
   const fieldProjection =
     instancePointer === undefined
       ? undefined
-      : projectParameterField(
-          formContext.parameterManifest,
-          instancePointer,
-          {},
-          formContext.parameterBindings?.[instancePointer],
-        );
+      : projectParameterField(formContext.parameterManifest, instancePointer, {}, formContext.parameterGroup);
   const inferredHint =
     fieldProjection?.guessed === true
       ? fieldProjection.inferredFields?.includes('unit') === true

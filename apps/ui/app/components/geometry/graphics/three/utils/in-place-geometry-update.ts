@@ -24,7 +24,7 @@ const componentBytes: Record<number, number> = {
   [componentTypeUnsignedByte]: 1,
 };
 
-type IndexArray = Uint32Array<ArrayBuffer> | Uint16Array<ArrayBuffer> | Uint8Array<ArrayBuffer>;
+type IndexArray = Uint32Array<ArrayBufferLike> | Uint16Array<ArrayBufferLike> | Uint8Array<ArrayBuffer>;
 type AccessorArray = Float32Array<ArrayBuffer> | IndexArray;
 
 /**
@@ -252,8 +252,13 @@ export function captureInPlaceGeometryTargets({
         return undefined;
       }
       const isLine = primitive.mode === linesMode;
+      // A fat line's own index belongs to the instanced quad, never to the source segments, so the
+      // de-indexed replacement is the only admissible source there.
+      const isFatLine = 'instanceStart' in geometry.attributes;
       const sourceIndices = isLine
-        ? (getFatLineSourceIndices(object) ?? (geometry.index?.array as IndexArray | undefined))
+        ? isFatLine
+          ? getFatLineSourceIndices(object)
+          : (geometry.index?.array as IndexArray | undefined)
         : undefined;
       if (isLine && primitive.indices !== undefined && !sourceIndices) {
         return undefined;

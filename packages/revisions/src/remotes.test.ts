@@ -233,6 +233,43 @@ describe('remoteTransportError', () => {
     expect(refusal.message).toBe('Tau: refused refs/tau/chats/abc — it does not fast-forward 1a2b3c4d');
   });
 
+  /* Rule 19: a browser request always sends `Origin`, so the API answers with
+   * its JSON envelope, whose sentence is `error` (`HttpExceptionFilter`); only
+   * git-lfs's batch body names it `message`. Reading `message` alone rendered
+   * the generic class sentence for every browser refusal but the one whose
+   * copy happens to coincide. */
+  it('surfaces the server’s sentence from the API envelope’s `error` field', () => {
+    const sentence = 'You have reached the 3-project limit of your plan.';
+    const thrown = Object.assign(new Error('HTTP Error: 403 Forbidden'), {
+      data: {
+        statusCode: 403,
+        response: JSON.stringify({
+          error: sentence,
+          code: 'PROJECT_LIMIT_REACHED',
+          statusCode: 403,
+          path: '/v1/git/p1.git/git-receive-pack',
+          requestId: 'r1',
+        }),
+      },
+    });
+
+    const refusal = remoteTransportError(thrown, { remote: tauRemoteName });
+
+    expect(refusal.code).toBe('REMOTE_FORBIDDEN');
+    expect(refusal.message).toBe(sentence);
+  });
+
+  it('still prefers `message` where a body carries one, as git-lfs batch refusals do', () => {
+    const thrown = Object.assign(new Error('HTTP Error: 413'), {
+      data: {
+        statusCode: 413,
+        response: JSON.stringify({ code: 'GIT_QUOTA_EXCEEDED', message: 'Tau Cloud storage is full.', error: 'x' }),
+      },
+    });
+
+    expect(remoteTransportError(thrown, { remote: tauRemoteName }).message).toBe('Tau Cloud storage is full.');
+  });
+
   it('still reads a failure with neither a status nor a server sentence as unreachable', () => {
     const stderr = "fatal: unable to access 'https://api.tau.build/v1/git/p1.git/': Could not resolve host";
 

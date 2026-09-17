@@ -33,8 +33,12 @@ import { cn } from '@taucad/ui/utils/cn';
 import { ArButton } from '#components/cad/ar-button.js';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import {
+  selectCadGeometry,
+  selectCadKernelClient,
+  selectCadUnits,
   selectCanSaveSelectedSceneStage,
   selectCadFailureIssues,
+  selectIsCadLoading,
   selectProgressiveSceneCapability,
   selectSceneTimelineArtifactSave,
   selectSceneTimelineEntries,
@@ -42,6 +46,7 @@ import {
   selectSceneTimelineSelection,
   selectSceneTimelineStreamState,
 } from '#machines/cad.machine.js';
+import type { SceneTimeline } from '#machines/scene-timeline.js';
 import { selectProgressiveSceneSnapshot } from '#machines/graphics.machine.js';
 import {
   attachViewerSecondaryGestureTarget,
@@ -62,12 +67,9 @@ const bottomControlsGutterPx = 16;
 const componentNameBadgeRightEdgeThresholdPx = 220;
 const componentNameBadgeBottomEdgeThresholdPx = 56;
 
-type ViewerPointerPosition = {
-  readonly x: number;
-  readonly y: number;
-  readonly horizontal: 'left' | 'right';
-  readonly vertical: 'above' | 'below';
-};
+/** Stable `useCadSelector` defaults: a fresh literal per render invalidates the selector memo. */
+const emptyTimelineEntries: SceneTimeline['entries'] = [];
+const idleArtifactSave: SceneTimeline['artifactSave'] = { status: 'idle' };
 
 const getViewerSecondaryGesturePoint = (event: React.PointerEvent<HTMLDivElement>): ViewerSecondaryGesturePoint => ({
   clientX: event.clientX,
@@ -308,16 +310,16 @@ const ViewerContent = memo(function ({
 }): React.JSX.Element {
   const { editorRef, projectRef } = useProject();
   const cadRef = useCad();
-  const geometry = useCadSelector((state) => state.context.geometry, undefined);
+  const geometry = useCadSelector(selectCadGeometry, undefined);
   const failureIssues = useCadSelector(selectCadFailureIssues, undefined);
-  const isCadLoading = useCadSelector((state) => state.hasTag('cad-loading'), false);
-  const units = useCadSelector((state) => state.context.units, undefined);
-  const kernelClient = useCadSelector((state) => state.context.kernelClient, undefined);
-  const timelineEntries = useCadSelector(selectSceneTimelineEntries, []);
+  const isCadLoading = useCadSelector(selectIsCadLoading, false);
+  const units = useCadSelector(selectCadUnits, undefined);
+  const kernelClient = useCadSelector(selectCadKernelClient, undefined);
+  const timelineEntries = useCadSelector(selectSceneTimelineEntries, emptyTimelineEntries);
   const selectedSceneSequence = useCadSelector(selectSceneTimelineSelection, undefined);
   const followLiveScene = useCadSelector(selectSceneTimelineFollowLive, true);
   const sceneTimelineStreamState = useCadSelector(selectSceneTimelineStreamState, 'idle');
-  const sceneTimelineArtifactSave = useCadSelector(selectSceneTimelineArtifactSave, { status: 'idle' });
+  const sceneTimelineArtifactSave = useCadSelector(selectSceneTimelineArtifactSave, idleArtifactSave);
   const canSaveSelectedSceneStage = useCadSelector(selectCanSaveSelectedSceneStage, false);
   const progressiveSceneCapability = useCadSelector(selectProgressiveSceneCapability, undefined);
   const failureMessage =
@@ -411,7 +413,7 @@ const ViewerContent = memo(function ({
   const { width: viewerLayoutWidth } = useResizeObserver({ ref: viewerLayoutRef });
   const toolbarAvailableWidth =
     viewerLayoutWidth === undefined ? undefined : Math.max(0, viewerLayoutWidth - bottomControlsGutterPx);
-  const [viewerPointerPosition, setViewerPointerPosition] = useState<ViewerPointerPosition | undefined>(undefined);
+  const [isPointerOverViewer, setIsPointerOverViewer] = useState(false);
   const [viewerActionMenu, setViewerActionMenu] = useState<ViewerSecondaryGestureMenu | undefined>(undefined);
   const secondaryGestureRef = useRef<ViewerSecondaryGestureState>(idleViewerSecondaryGestureState);
   const modelInteractionUnitId = useMemo(() => deriveModelInteractionUnitId({ sourceFile: entryPath }), [entryPath]);
@@ -449,25 +451,35 @@ const ViewerContent = memo(function ({
     };
   });
 
+  // Pointer moves arrive at display rate, including throughout a camera orbit.
+  // The hover badge is placed from custom properties written straight to the
+  // layout element so a move never re-renders this subtree; only pointer
+  // entry/exit is React state.
   const updateViewerPointerPosition = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
-    const viewerBounds = viewerLayoutRef.current?.getBoundingClientRect();
-    if (!viewerBounds) {
-      setViewerPointerPosition(undefined);
+    const layout = viewerLayoutRef.current;
+    const viewerBounds = layout?.getBoundingClientRect();
+    if (!layout || !viewerBounds) {
+      setIsPointerOverViewer(false);
       return;
     }
 
     const x = Math.max(0, Math.min(event.clientX - viewerBounds.left, viewerBounds.width));
     const y = Math.max(0, Math.min(event.clientY - viewerBounds.top, viewerBounds.height));
-    setViewerPointerPosition({
-      x,
-      y,
-      horizontal: x > viewerBounds.width - componentNameBadgeRightEdgeThresholdPx ? 'right' : 'left',
-      vertical: y > viewerBounds.height - componentNameBadgeBottomEdgeThresholdPx ? 'above' : 'below',
-    });
+    layout.style.setProperty('--viewer-hover-label-x', `${x}px`);
+    layout.style.setProperty('--viewer-hover-label-y', `${y}px`);
+    layout.style.setProperty(
+      '--viewer-hover-label-translate-x',
+      x > viewerBounds.width - componentNameBadgeRightEdgeThresholdPx ? 'calc(-100% - 8px)' : '8px',
+    );
+    layout.style.setProperty(
+      '--viewer-hover-label-translate-y',
+      y > viewerBounds.height - componentNameBadgeBottomEdgeThresholdPx ? 'calc(-100% - 10px)' : '10px',
+    );
+    setIsPointerOverViewer(true);
   }, []);
 
   const clearViewerPointerPosition = useCallback((): void => {
-    setViewerPointerPosition(undefined);
+    setIsPointerOverViewer(false);
   }, []);
 
   const handleModelComponentSecondaryPointerCandidate = useCallback(
@@ -526,7 +538,7 @@ const ViewerContent = memo(function ({
   const handleCanvasRegionPointerCancelCapture = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
     secondaryGestureRef.current = cancelViewerSecondaryGesture(secondaryGestureRef.current, event.pointerId);
     releaseViewerPointerCapture({ element: event.currentTarget, pointerId: event.pointerId });
-    setViewerPointerPosition(undefined);
+    setIsPointerOverViewer(false);
   }, []);
 
   const handleCanvasRegionLostPointerCapture = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
@@ -547,7 +559,7 @@ const ViewerContent = memo(function ({
   useEffect(() => {
     if (isGeometryUnitClosed) {
       queueMicrotask(() => {
-        setViewerPointerPosition(undefined);
+        setIsPointerOverViewer(false);
         setViewerActionMenu(undefined);
       });
       secondaryGestureRef.current = idleViewerSecondaryGestureState;
@@ -555,7 +567,7 @@ const ViewerContent = memo(function ({
   }, [isGeometryUnitClosed]);
 
   return (
-    <div ref={viewerLayoutRef} className='group/viewer relative flex h-full flex-col'>
+    <div ref={viewerLayoutRef} data-testid='chat-viewer-layout' className='group/viewer relative flex h-full flex-col'>
       {/* Status overlays */}
       <div className='absolute top-[10%] right-2 left-2 z-10 mx-auto flex w-fit max-w-full flex-col gap-2'>
         <ChatInterfaceStatus />
@@ -626,8 +638,8 @@ const ViewerContent = memo(function ({
         onOpenChange={handleViewerActionMenuOpenChange}
       />
 
-      {!isGeometryUnitClosed && viewerPointerPosition && componentNameForPointer ? (
-        <ModelComponentNameBadge componentName={componentNameForPointer} position={viewerPointerPosition} />
+      {!isGeometryUnitClosed && isPointerOverViewer && componentNameForPointer ? (
+        <ModelComponentNameBadge componentName={componentNameForPointer} />
       ) : undefined}
 
       {/* Reopen-renderer overlay — shown when the geometry unit was closed */}
@@ -681,13 +693,7 @@ const ViewerContent = memo(function ({
   );
 });
 
-function ModelComponentNameBadge({
-  componentName,
-  position,
-}: {
-  readonly componentName: string;
-  readonly position: ViewerPointerPosition;
-}): React.JSX.Element {
+function ModelComponentNameBadge({ componentName }: { readonly componentName: string }): React.JSX.Element {
   return (
     <div
       aria-hidden='true'
@@ -695,17 +701,12 @@ function ModelComponentNameBadge({
       className={cn(
         popoverSurfaceVariants(),
         'pointer-events-none absolute z-20 max-w-[min(18rem,calc(100%-1rem))] truncate px-2 py-1 text-xs font-medium',
-        position.horizontal === 'right' ? '-translate-x-[calc(100%+8px)]' : 'translate-x-2',
-        position.vertical === 'above' ? '-translate-y-[calc(100%+10px)]' : 'translate-y-2.5',
       )}
-      style={
-        {
-          left: `${position.x}px`,
-          top: `${position.y}px`,
-          '--viewer-hover-label-x': `${position.x}px`,
-          '--viewer-hover-label-y': `${position.y}px`,
-        } as React.CSSProperties
-      }
+      style={{
+        left: 'var(--viewer-hover-label-x, 0px)',
+        top: 'var(--viewer-hover-label-y, 0px)',
+        translate: 'var(--viewer-hover-label-translate-x, 8px) var(--viewer-hover-label-translate-y, 10px)',
+      }}
     >
       {componentName}
     </div>

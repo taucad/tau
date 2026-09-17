@@ -50,6 +50,10 @@ import type { Page } from 'playwright';
 import { budgetVerdict, readContention, rendererAngle } from '../../../runtime-e2e/src/benchmarks/measurement-tags.ts';
 // oxlint-disable-next-line no-restricted-imports -- same owner, type only.
 import type { MeasurementTags } from '../../../runtime-e2e/src/benchmarks/measurement-tags.ts';
+// oxlint-disable-next-line no-restricted-imports -- same owner: the trace both harnesses name in their tags.
+import { mergeRuntimeTrace } from '../../../runtime-e2e/src/benchmarks/runtime-trace.ts';
+// oxlint-disable-next-line no-restricted-imports -- same owner, type only.
+import type { RuntimeTraceSummary } from '../../../runtime-e2e/src/benchmarks/runtime-trace.ts';
 // oxlint-disable-next-line no-restricted-imports -- executable driver: no package alias before install.
 import { classifyWebGpuAdapter } from './webgpu-profile.ts';
 
@@ -307,9 +311,13 @@ const observedEngine = (mainProcessLog: readonly string[] | undefined): string |
   return engine === undefined ? undefined : `${engine}:${backend ?? 'unknown'}`;
 };
 
-const tagsFor = (page: PageTimeline, kernelPid: number | undefined, engine: string | undefined): MeasurementTags => ({
+const tagsFor = (
+  page: PageTimeline,
+  kernelPid: number | undefined,
+  observed: { readonly engine: string | undefined; readonly trace: RuntimeTraceSummary | undefined },
+): MeasurementTags => ({
   build: process.env['TAU_MEASUREMENT_BUILD'] === 'development' ? 'development' : 'production',
-  wasmVariant: engine ?? `${kernelId}:unobserved`,
+  wasmVariant: observed.engine ?? `${kernelId}:unobserved`,
   adapter: {
     api: page.backend === 'webgpu' ? 'webgpu' : 'webgl',
     angle: rendererAngle(launchArguments),
@@ -322,9 +330,11 @@ const tagsFor = (page: PageTimeline, kernelPid: number | undefined, engine: stri
       vendor: '',
     }),
   },
+  ...(observed.trace === undefined ? {} : { runtimeTraceJsonl: observed.trace.file }),
   /*
    * The pid is the Electron main process that forks the kernel; the fork's own
-   * identity arrives with the D8 runtime JSONL exporter (see `runtimeTraceJsonl`).
+   * identity is in the trace, one producer per file, merged into
+   * `runtimeTraceJsonl` above.
    */
   kernelProcess:
     host === 'desktop'
@@ -531,6 +541,15 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
   const clientDigestAfter = clientRoot === undefined ? undefined : await digestOf(clientRoot).catch(() => 'unreadable');
   await application?.close().catch(() => undefined);
   await browser?.close().catch(() => undefined);
+  /* Read after the host exits, so every producer's stream has flushed, and before the user-data dir
+   * is removed with it. The wall clock says how long the open took; this says where it went. */
+  const trace =
+    host === 'desktop'
+      ? await mergeRuntimeTrace({
+          directory: join(userData, 'logs/traces'),
+          destination: join(outputDirectory, `open-to-frame-${host}-${kernelId}-${String(iteration)}.trace.jsonl`),
+        }).catch(() => undefined)
+      : undefined;
   /* Each cold sample fills an OPFS `/node_modules` under its own user-data dir. */
   await rm(userData, { recursive: true, force: true }).catch(() => undefined);
   await rm(picked, { recursive: true, force: true }).catch(() => undefined);
@@ -557,7 +576,9 @@ const runSample = async (iteration: number): Promise<Record<string, unknown>> =>
     valid: invalidReason === undefined,
     invalidReason,
     engine,
-    measurement: timeline ? tagsFor(timeline, kernelPid, engine) : undefined,
+    /** Total milliseconds per span name for this sample's ten heaviest spans. */
+    runtimeSpans: trace?.totals,
+    measurement: timeline ? tagsFor(timeline, kernelPid, { engine, trace }) : undefined,
   };
 };
 

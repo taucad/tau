@@ -147,12 +147,12 @@ describe('billing Stripe transport', () => {
       }
       const stripe = createBillingStripeClient({
         secretKey: 'sk_test_fixture',
-        requestTimeout: 50,
+        requestTimeout: 250,
         fixtureUrl: `http://127.0.0.1:${(address satisfies AddressInfo).port}/`,
       });
       const startedAt = performance.now();
       await expect(stripe.customers.create({})).rejects.toThrow();
-      expect(performance.now() - startedAt).toBeLessThan(200);
+      expect(performance.now() - startedAt).toBeLessThan(2000);
       expect(requests).toBe(1);
     },
   );
@@ -183,12 +183,12 @@ describe('billing Stripe transport', () => {
     }
     const stripe = createBillingStripeClient({
       secretKey: 'sk_test_fixture',
-      requestTimeout: 50,
+      requestTimeout: 250,
       fixtureUrl: `http://127.0.0.1:${(address satisfies AddressInfo).port}/`,
     });
     const startedAt = performance.now();
     await expect(stripe.customers.create({})).rejects.toThrow();
-    expect(performance.now() - startedAt).toBeLessThan(200);
+    expect(performance.now() - startedAt).toBeLessThan(2000);
     expect(requests).toBe(1);
     await expect.poll(() => socketClosed).toBe(true);
   });

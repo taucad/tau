@@ -15,6 +15,7 @@ import { BillingPurchaseReconciliationService } from '#api/billing/billing-purch
 import { BillingAccountClosureService } from '#api/billing/billing-account-closure.service.js';
 import { recoverAndCancelStripeClosure } from '#api/billing/billing-account-closure-stripe.js';
 import { BillingTaxService } from '#api/billing/billing-tax.service.js';
+import type { BillingCollection } from '#api/billing/billing-collection.js';
 
 const id = financialIdentitySchema;
 const money = z.string().regex(/^(0|[1-9][0-9]*)$/u);
@@ -55,6 +56,17 @@ const requestSchema = z.discriminatedUnion('operation', [
     .strict(),
   z.object({ operation: z.literal('execute-refund'), environment, intentId: id, reviewActorId: id }).strict(),
   z.object({ operation: z.literal('recover-refund'), environment, intentId: id, maximumPages: limit }).strict(),
+  z.object({ operation: z.literal('requalify-charge'), environment, chargeId: id, maximumRefundPages: limit }).strict(),
+  z
+    .object({
+      operation: z.literal('resolve-case'),
+      environment,
+      caseId: id,
+      disposition: z.enum(['resolved', 'rescoped']),
+      reviewActorId: id,
+      reason: z.string().min(1).max(2000),
+    })
+    .strict(),
   z
     .object({
       operation: z.literal('create-cash-scan'),
@@ -92,7 +104,10 @@ const requestSchema = z.discriminatedUnion('operation', [
     .strict(),
 ]);
 
-/** Strict protected-job composition; provider mutations remain restricted to an isolated local fixture. */
+/**
+ * Strict protected-job composition. Provider mutations need the write key together with either the
+ * isolated local fixture or a collection the deployment is allowed to perform.
+ */
 export async function runBillingLifecycleCommand(input: {
   database: Pick<DatabaseService, 'database'>;
   sourceStripe: Stripe;
@@ -101,6 +116,7 @@ export async function runBillingLifecycleCommand(input: {
   stripeAccountId: string;
   livemode: boolean;
   fixture?: { monthlyPriceId: string; topupProductId: string };
+  collection?: BillingCollection;
   request: unknown;
 }): Promise<unknown> {
   const request = requestSchema.parse(input.request);
@@ -109,8 +125,9 @@ export async function runBillingLifecycleCommand(input: {
   }
   const writeOperation = ['reload-work', 'expire-reload', 'prepare-renewal', 'recover-renewals', 'execute-refund'];
   const fixture = input.environment === 'development' && !input.livemode ? input.fixture : undefined;
-  if (writeOperation.includes(request.operation) && (!fixture || !input.protectedStripe)) {
-    throw new Error('Lifecycle provider mutations require an isolated development fixture');
+  const collection = fixture ? ({ kind: 'local_fixture', ...fixture } as const) : input.collection;
+  if (writeOperation.includes(request.operation) && (!collection || !input.protectedStripe)) {
+    throw new Error('Lifecycle provider mutations require a write key and an enabled collection');
   }
   const config = { environment: input.environment, stripeAccountId: input.stripeAccountId, livemode: input.livemode };
   const policy = new BillingPolicyService(input.database);
@@ -130,7 +147,7 @@ export async function runBillingLifecycleCommand(input: {
       ...config,
       uiOrigin: 'http://127.0.0.1',
       webhookSecret: '',
-      collection: fixture ? { kind: 'local_fixture', ...fixture } : null,
+      collection: collection ?? null,
     },
     policy,
     ledger,
@@ -159,15 +176,21 @@ export async function runBillingLifecycleCommand(input: {
       return cash.executeReviewedRefund({
         ...request,
         capability: {
-          qualification: 'controlled-local-protected-refund',
-          environment: 'development',
+          qualification: 'protected-refund',
+          environment: input.environment,
           stripeAccountId: input.stripeAccountId,
-          livemode: false,
+          livemode: input.livemode,
         },
       });
     }
     case 'recover-refund': {
       return cash.recoverRefundIntent(request);
+    }
+    case 'requalify-charge': {
+      return cash.reconcileCharge(request);
+    }
+    case 'resolve-case': {
+      return reconciliation.resolveCaseByOperator(request);
     }
     case 'create-cash-scan': {
       return reconciliation.createScan(request);
@@ -197,7 +220,7 @@ export async function runBillingLifecycleCommand(input: {
                 ...config,
                 database: input.database.database,
                 sourceStripe: input.sourceStripe,
-                ...(fixture && input.protectedStripe ? { protectedStripe: input.protectedStripe } : {}),
+                ...(collection && input.protectedStripe ? { protectedStripe: input.protectedStripe } : {}),
               },
               obligation,
             ),

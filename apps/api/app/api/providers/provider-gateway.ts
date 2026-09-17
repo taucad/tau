@@ -53,10 +53,18 @@ export type GatewayModelRoute = {
 };
 
 const gatewayProviderIds = new Set<string>(Object.keys(providerTargets));
-const fundedGatewayProviderIds = new Set<string>(['anthropic', 'morph', 'openai', 'together', 'vertexai', 'xai']);
+export const fundedGatewayProviderIds: readonly FundedGatewayProviderId[] = [
+  'anthropic',
+  'morph',
+  'openai',
+  'together',
+  'vertexai',
+  'xai',
+];
+const fundedGatewayProviderIdSet = new Set<string>(fundedGatewayProviderIds);
 export const isGatewayProviderId = (value: string): value is GatewayProviderId => gatewayProviderIds.has(value);
 export const isFundedGatewayProviderId = (value: string): value is FundedGatewayProviderId =>
-  fundedGatewayProviderIds.has(value);
+  fundedGatewayProviderIdSet.has(value);
 const routes = new Map<string, GatewayModelRoute>(
   Object.values(modelList)
     .flatMap((modelsBySlug) => Object.values(modelsBySlug))

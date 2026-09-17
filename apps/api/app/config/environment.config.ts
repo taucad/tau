@@ -126,6 +126,9 @@ const environmentSchemaBase = z.object({
   // dev works without keys; billing endpoints fail closed on the empty value, and production
   // requires explicit financial scope and all configured credentials (see superRefine below).
   BILLING_ENVIRONMENT: z.enum(['development', 'staging', 'prod-us', 'prod-eu']).optional(),
+  BILLING_LIVE_COLLECTION_ENABLED: strictEnvironmentBoolean(false).describe(
+    'Take real payments with live Stripe keys in a prod-* environment. Off by default: live keys alone never collect.',
+  ),
   BILLING_USAGE_CURSOR_SECRET: z.string().min(32).optional(),
   BILLING_REQUEST_DIGEST_SECRET: z.string().min(32).optional(),
   BILLING_PROVIDER_ACCOUNTS: jsonCodec(
@@ -327,6 +330,23 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
       if (value && !prefixes.some((prefix) => value.startsWith(prefix))) {
         context.addIssue({ code: 'custom', message: `${key} does not match Stripe ${stripeMode} mode`, path: [key] });
       }
+    }
+    // Live keys belong only to production and test keys never to production, so a deployment can
+    // neither charge real cards from staging nor silently run production on the sandbox.
+    const production = data.BILLING_ENVIRONMENT?.startsWith('prod-') ?? false;
+    if (data.STRIPE_LIVEMODE !== undefined && data.STRIPE_LIVEMODE !== production) {
+      context.addIssue({
+        code: 'custom',
+        message: `STRIPE_LIVEMODE=${String(data.STRIPE_LIVEMODE)} does not match BILLING_ENVIRONMENT=${data.BILLING_ENVIRONMENT ?? ''}`,
+        path: ['STRIPE_LIVEMODE'],
+      });
+    }
+    if (data.BILLING_LIVE_COLLECTION_ENABLED && data.STRIPE_LIVEMODE !== true) {
+      context.addIssue({
+        code: 'custom',
+        message: 'BILLING_LIVE_COLLECTION_ENABLED requires STRIPE_LIVEMODE=true',
+        path: ['BILLING_LIVE_COLLECTION_ENABLED'],
+      });
     }
     if (data.STRIPE_SECRET_KEY && data.STRIPE_SECRET_KEY === data.STRIPE_READ_SECRET_KEY) {
       context.addIssue({

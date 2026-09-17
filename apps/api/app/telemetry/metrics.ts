@@ -285,6 +285,11 @@ export class MetricsService {
     unit: TauMetrics.billingDriftedAccounts.unit,
   });
 
+  public readonly billingOpenFinancialCases = this.apiMeter.createGauge(TauMetrics.billingOpenFinancialCases.name, {
+    description: TauMetrics.billingOpenFinancialCases.description,
+    unit: TauMetrics.billingOpenFinancialCases.unit,
+  });
+
   public readonly billingNegativeBalanceAccounts = this.apiMeter.createGauge(
     TauMetrics.billingNegativeBalanceAccounts.name,
     {

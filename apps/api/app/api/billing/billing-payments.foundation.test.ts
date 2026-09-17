@@ -6,7 +6,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { ConflictException } from '@nestjs/common';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '#database/schema.js';
@@ -73,7 +73,15 @@ let taxTransaction:
 let paymentFixture:
   | { purchaseId: string; providerLegId: string; customerBindingId: string; customerId: string }
   | undefined;
-let paymentStatus: 'requires_action' | 'succeeded' = 'succeeded';
+let paymentStatus: 'requires_action' | 'succeeded' | 'requires_payment_method' | 'canceled' = 'succeeded';
+let paymentCancelPosts = 0;
+let failNextTaxTransaction = false;
+/** Hosted Checkout Sessions the fixture created, keyed by id. */
+const checkoutSessions = new Map<string, Record<string, unknown>>();
+let checkoutExpirePosts = 0;
+let paymentCreatePosts = 0;
+let rejectPaymentCreate = false;
+let taxTransactionPosts = 0;
 let paymentIntentFixtureId = 'pi_foundation_paid';
 let paymentChargeFixtureId = 'ch_foundation_paid';
 let ambiguousCustomerSearch = false;
@@ -99,6 +107,51 @@ let invoiceFixture:
 const server = createServer((request, response) => {
   const url = new URL(request.url ?? '/', 'http://127.0.0.1');
   requests.push(`${request.method ?? ''} ${url.pathname}`);
+  const sessionReply = (body: unknown): void => {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify(body));
+  };
+  if (request.method === 'POST' && url.pathname === '/v1/checkout/sessions') {
+    const chunks: string[] = [];
+    request.setEncoding('utf8');
+    request.on('data', (chunk: string) => chunks.push(chunk));
+    request.on('end', () => {
+      const form = new URLSearchParams(chunks.join(''));
+      const id = `cs_foundation_${randomUUID().replaceAll('-', '')}`;
+      const session = {
+        id,
+        object: 'checkout.session',
+        client_reference_id: form.get('client_reference_id'),
+        customer: form.get('customer'),
+        expires_at: 2_000_000_000,
+        livemode: false,
+        metadata: {},
+        mode: form.get('mode'),
+        payment_intent: null,
+        payment_status: 'unpaid',
+        status: 'open',
+        subscription: null,
+        url: `http://127.0.0.1:3000/checkout/${id}`,
+      };
+      checkoutSessions.set(id, session);
+      sessionReply(session);
+    });
+    return;
+  }
+  const expiring = /^\/v1\/checkout\/sessions\/(?<id>cs_foundation_\w+)\/expire$/u.exec(url.pathname)?.groups?.['id'];
+  if (request.method === 'POST' && expiring !== undefined && checkoutSessions.has(expiring)) {
+    request.resume();
+    checkoutExpirePosts += 1;
+    const session = checkoutSessions.get(expiring) ?? {};
+    session['status'] = 'expired';
+    sessionReply(session);
+    return;
+  }
+  const sessionId = /^\/v1\/checkout\/sessions\/(?<id>cs_foundation_\w+)$/u.exec(url.pathname)?.groups?.['id'];
+  if (request.method === 'GET' && sessionId !== undefined && checkoutSessions.has(sessionId)) {
+    sessionReply(checkoutSessions.get(sessionId));
+    return;
+  }
   if (request.method === 'GET' && ['/v1/refunds', '/v1/disputes'].includes(url.pathname)) {
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify({ object: 'list', data: [], has_more: false, url: url.pathname }));
@@ -159,6 +212,14 @@ const server = createServer((request, response) => {
     return;
   }
   if (url.pathname === '/v1/tax/transactions/create_from_calculation' && request.method === 'POST') {
+    taxTransactionPosts += 1;
+    if (failNextTaxTransaction) {
+      failNextTaxTransaction = false;
+      request.resume();
+      response.writeHead(500, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ error: { type: 'api_error', message: 'fixture outage' } }));
+      return;
+    }
     const chunks: string[] = [];
     request.setEncoding('utf8');
     request.on('data', (chunk: string) => chunks.push(chunk));
@@ -206,9 +267,59 @@ const server = createServer((request, response) => {
             tau_provider_leg_id: paymentFixture.providerLegId,
             tau_customer_binding_id: paymentFixture.customerBindingId,
           },
-          payment_method: 'pm_foundation',
+          // A declined attempt detaches its method and records the decline.
+          payment_method: paymentStatus === 'requires_payment_method' ? null : 'pm_foundation',
+          last_payment_error:
+            paymentStatus === 'requires_payment_method'
+              ? { type: 'card_error', code: 'card_declined', payment_method: { id: 'pm_foundation' } }
+              : null,
           status: paymentStatus,
         };
+  if (request.method === 'GET' && url.pathname === '/v1/payment_intents/search') {
+    // Search is eventually consistent; a create that just landed is not yet visible.
+    sessionReply({ object: 'search_result', data: [], has_more: false, url: url.pathname });
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/v1/payment_intents') {
+    paymentCreatePosts += 1;
+  }
+  if (request.method === 'POST' && url.pathname === '/v1/payment_intents' && rejectPaymentCreate) {
+    request.resume();
+    response.writeHead(400, { 'content-type': 'application/json' });
+    response.end(
+      JSON.stringify({
+        error: { type: 'invalid_request_error', code: 'resource_missing', message: 'No such PaymentMethod' },
+      }),
+    );
+    return;
+  }
+  if (
+    request.method === 'POST' &&
+    url.pathname === '/v1/payment_intents' &&
+    paymentIntent !== undefined &&
+    paymentStatus === 'requires_payment_method'
+  ) {
+    request.resume();
+    response.writeHead(402, { 'content-type': 'application/json' });
+    response.end(
+      JSON.stringify({
+        error: { type: 'card_error', code: 'card_declined', message: 'Declined', payment_intent: paymentIntent },
+      }),
+    );
+    return;
+  }
+  if (
+    request.method === 'POST' &&
+    url.pathname === `/v1/payment_intents/${paymentIntentFixtureId}/cancel` &&
+    paymentIntent !== undefined
+  ) {
+    request.resume();
+    paymentCancelPosts += 1;
+    paymentStatus = 'canceled';
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ ...paymentIntent, status: 'canceled' }));
+    return;
+  }
   const invoice = invoiceFixture;
   const invoicePaymentIntentId = invoice === undefined ? '' : `pi_${invoice.invoiceId}`;
   const invoiceChargeId = invoice === undefined ? '' : `ch_${invoice.invoiceId}`;
@@ -617,8 +728,9 @@ describe('billing payments PostgreSQL foundation', () => {
     await payments.recoverPayments({ environment: 'development', limit: 1 });
     const [source] = await database.select().from(billingStripeSource).where(eq(billingStripeSource.id, sourceId));
     const [inbox] = await database.select().from(stripeEventInbox).where(eq(stripeEventInbox.id, inboxId));
-    expect(source).toMatchObject({ generation: 8n, state: 'pending', errorCode: 'source_pending' });
-    expect(inbox).toMatchObject({ claimGeneration: 5n, state: 'pending', errorCode: 'source_pending' });
+    // A source type with no fulfilment action is reclaimed under a new generation and finished, not re-queued.
+    expect(source).toMatchObject({ generation: 8n, state: 'done', errorCode: null });
+    expect(inbox).toMatchObject({ claimGeneration: 5n, state: 'done' });
     const stale = await database
       .update(billingStripeSource)
       .set({ state: 'done' })
@@ -631,6 +743,33 @@ describe('billing payments PostgreSQL foundation', () => {
       )
       .returning({ id: billingStripeSource.id });
     expect(stale).toHaveLength(0);
+  });
+
+  it('routes refund-family sources to charge reconciliation and retries an unreadable refund', async () => {
+    const chargeSource = randomUUID();
+    const refundSource = randomUUID();
+    const due = {
+      environment: 'development',
+      stripeAccountId,
+      livemode: false,
+      state: 'pending',
+      nextAttemptAt: sql`transaction_timestamp() - interval '1 second'`,
+    } as const;
+    await database.insert(billingStripeSource).values([
+      // A charge with no fulfilled cause: its purchase's own qualification applies any refund later.
+      { id: chargeSource, sourceType: 'charge', sourceId: `ch_unowned_${chargeSource}`, ...due },
+      // The fixture cannot read this refund, so the source must stay queued rather than finish unapplied.
+      { id: refundSource, sourceType: 'refund', sourceId: `re_unreadable_${refundSource}`, ...due },
+    ]);
+    const result = await payments.recoverPayments({ environment: 'development', limit: 100 });
+    expect(result.processed).toContain(chargeSource);
+    expect(result.failed).toContain(refundSource);
+    const rows = await database
+      .select()
+      .from(billingStripeSource)
+      .where(inArray(billingStripeSource.id, [chargeSource, refundSource]));
+    expect(rows.find((row) => row.id === chargeSource)).toMatchObject({ state: 'done' });
+    expect(rows.find((row) => row.id === refundSource)).toMatchObject({ state: 'pending' });
   });
 
   it('retains an ambiguous Customer intent for attention without another provider POST', async () => {
@@ -842,6 +981,325 @@ describe('billing payments PostgreSQL foundation', () => {
     ).toHaveLength(1);
     paymentIntentFixtureId = 'pi_foundation_paid';
     paymentChargeFixtureId = 'ch_foundation_paid';
+  });
+
+  it('fails a declined saved-card top-up once, cancels its PaymentIntent, and lets the customer buy again', async () => {
+    const userId = randomUUID();
+    await database
+      .insert(user)
+      .values({ id: userId, name: 'Declined Card', email: `${userId}@test.invalid`, emailVerified: true });
+    const prepared = await payments.prepareTopup(userId, {
+      requestId: randomUUID(),
+      returnPath: '/settings/billing',
+      amountMinor: '537',
+      method: 'saved_card',
+    });
+    const [leg] = await database
+      .select()
+      .from(billingProviderLeg)
+      .where(eq(billingProviderLeg.purchaseId, prepared.actionId));
+    const [binding] = await database
+      .select()
+      .from(billingStripeCustomer)
+      .where(eq(billingStripeCustomer.id, leg?.customerBindingId ?? ''));
+    if (leg === undefined || binding?.stripeCustomerId === null || binding?.stripeCustomerId === undefined) {
+      throw new Error('Decline fixture is incomplete');
+    }
+    paymentFixture = {
+      purchaseId: prepared.actionId,
+      providerLegId: leg.id,
+      customerBindingId: leg.customerBindingId,
+      customerId: binding.stripeCustomerId,
+    };
+    paymentIntentFixtureId = `pi_declined_${randomUUID().replaceAll('-', '')}`;
+    paymentStatus = 'requires_payment_method';
+    paymentCancelPosts = 0;
+    try {
+      await expect(payments.confirmAction(userId, prepared.actionId)).resolves.toMatchObject({ state: 'failed' });
+      expect(paymentCancelPosts).toBe(1);
+      const [closed] = await database.select().from(billingProviderLeg).where(eq(billingProviderLeg.id, leg.id));
+      expect(closed).toMatchObject({
+        state: 'no_charge',
+        providerObjectId: paymentIntentFixtureId,
+        noChargeEvidence: { status: 'canceled', amountReceived: '0' },
+      });
+      // The failed attempt no longer holds the account's single active purchase.
+      await expect(
+        payments.prepareTopup(userId, {
+          requestId: randomUUID(),
+          returnPath: '/settings/billing',
+          amountMinor: '537',
+          method: 'saved_card',
+        }),
+      ).resolves.toMatchObject({ state: 'prepared' });
+    } finally {
+      paymentStatus = 'succeeded';
+      paymentIntentFixtureId = 'pi_foundation_paid';
+    }
+  });
+
+  it('commits the Tax Transaction when a paid top-up is recovered after failing before tax', async () => {
+    const userId = randomUUID();
+    await database
+      .insert(user)
+      .values({ id: userId, name: 'Tax Recovery', email: `${userId}@test.invalid`, emailVerified: true });
+    const prepared = await payments.prepareTopup(userId, {
+      requestId: randomUUID(),
+      returnPath: '/settings/billing',
+      amountMinor: '537',
+      method: 'saved_card',
+    });
+    const [leg] = await database
+      .select()
+      .from(billingProviderLeg)
+      .where(eq(billingProviderLeg.purchaseId, prepared.actionId));
+    const [binding] = await database
+      .select()
+      .from(billingStripeCustomer)
+      .where(eq(billingStripeCustomer.id, leg?.customerBindingId ?? ''));
+    if (leg === undefined || binding?.stripeCustomerId === null || binding?.stripeCustomerId === undefined) {
+      throw new Error('Tax recovery fixture is incomplete');
+    }
+    const suffix = randomUUID().replaceAll('-', '');
+    paymentFixture = {
+      purchaseId: prepared.actionId,
+      providerLegId: leg.id,
+      customerBindingId: leg.customerBindingId,
+      customerId: binding.stripeCustomerId,
+    };
+    paymentIntentFixtureId = `pi_tax_${suffix}`;
+    paymentChargeFixtureId = `ch_tax_${suffix}`;
+    paymentStatus = 'succeeded';
+    try {
+      await payments.confirmAction(userId, prepared.actionId);
+      // Only this source is due, so each bounded pass works on it alone.
+      await database
+        .update(billingStripeSource)
+        .set({ nextAttemptAt: new Date('9999-12-31T00:00:00Z') })
+        .where(eq(billingStripeSource.stripeAccountId, stripeAccountId));
+      await database
+        .update(billingProviderLeg)
+        .set({ nextAttemptAt: new Date('9999-12-31T00:00:00Z') })
+        .where(eq(billingProviderLeg.environment, 'development'));
+      const sourceId = randomUUID();
+      await database.insert(billingStripeSource).values({
+        id: sourceId,
+        environment: 'development',
+        stripeAccountId,
+        livemode: false,
+        sourceType: 'payment_intent',
+        sourceId: paymentIntentFixtureId,
+      });
+      await database.insert(stripeEventInbox).values({
+        id: randomUUID(),
+        eventId: `evt_${suffix}`,
+        environment: 'development',
+        stripeAccountId,
+        livemode: false,
+        apiVersion: '2026-07-29.dahlia',
+        eventType: 'payment_intent.succeeded',
+        sourceType: 'payment_intent',
+        sourceId: paymentIntentFixtureId,
+        eventCreatedAt: new Date('2026-09-06T00:02:00.000Z'),
+        payloadDigest: 'd'.repeat(64),
+        evidence: {},
+      });
+      const posts = taxTransactionPosts;
+      failNextTaxTransaction = true;
+      const recovery = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      expect(recovery.failed).toContain(sourceId);
+      const [retained] = await database.select().from(billingPurchase).where(eq(billingPurchase.id, prepared.actionId));
+      expect(retained?.state).toBe('paid_unfulfilled');
+      await database
+        .update(billingStripeSource)
+        .set({ nextAttemptAt: sql`transaction_timestamp() - interval '1 second'` })
+        .where(eq(billingStripeSource.id, sourceId));
+      await database
+        .update(stripeEventInbox)
+        .set({ nextAttemptAt: sql`transaction_timestamp() - interval '1 second'` })
+        .where(eq(stripeEventInbox.sourceId, paymentIntentFixtureId));
+      await payments.recoverPayments({ environment: 'development', limit: 1 });
+      const [fulfilled] = await database
+        .select()
+        .from(billingPurchase)
+        .where(eq(billingPurchase.id, prepared.actionId));
+      expect(fulfilled?.state).toBe('fulfilled');
+      expect(taxTransactionPosts).toBe(posts + 2);
+      // The retry recorded the committed Tax Transaction, never a permanent incomplete-source gap.
+      const gaps = await database
+        .select()
+        .from(schema.billingFinancialCase)
+        .where(
+          and(
+            eq(schema.billingFinancialCase.kind, 'tax_incomplete_source'),
+            eq(schema.billingFinancialCase.sourceId, paymentChargeFixtureId),
+          ),
+        );
+      expect(gaps).toEqual([]);
+    } finally {
+      paymentIntentFixtureId = 'pi_foundation_paid';
+      paymentChargeFixtureId = 'ch_foundation_paid';
+    }
+  });
+
+  it('lets a customer cancel an abandoned Pro Checkout and subscribe again', async () => {
+    const userId = randomUUID();
+    await database
+      .insert(user)
+      .values({ id: userId, name: 'Abandoned Pro', email: `${userId}@test.invalid`, emailVerified: true });
+    const request = () => ({ requestId: randomUUID(), returnPath: '/settings/billing' });
+    const first = await payments.prepareSubscription(userId, request());
+    expect(first).toMatchObject({ state: 'redirect_required' });
+    await expect(payments.prepareSubscription(userId, request())).rejects.toMatchObject({
+      response: { code: 'action_already_pending' },
+    });
+    const posts = checkoutExpirePosts;
+    await expect(payments.cancelAction(userId, first.actionId)).resolves.toMatchObject({
+      state: 'canceled',
+      redirectUrl: null,
+    });
+    expect(checkoutExpirePosts).toBe(posts + 1);
+    const [closed] = await database
+      .select()
+      .from(billingProviderLeg)
+      .where(eq(billingProviderLeg.subscriptionId, first.actionId));
+    expect(closed).toMatchObject({
+      state: 'expired',
+      terminalEvidence: { version: 'stripe-subscription-checkout-expired-v1' },
+    });
+    // Cancelling again is a replay, not a second Stripe write.
+    await expect(payments.cancelAction(userId, first.actionId)).resolves.toMatchObject({ state: 'canceled' });
+    expect(checkoutExpirePosts).toBe(posts + 1);
+    const second = await payments.prepareSubscription(userId, request());
+    expect(second).toMatchObject({ state: 'redirect_required' });
+    expect(second.actionId).not.toBe(first.actionId);
+  });
+
+  it('fails a hosted top-up whose Checkout expired and lets the customer buy again', async () => {
+    const userId = randomUUID();
+    await database
+      .insert(user)
+      .values({ id: userId, name: 'Expired Checkout', email: `${userId}@test.invalid`, emailVerified: true });
+    const topup = (): { requestId: string; returnPath: string; amountMinor: string; method: 'checkout' } => ({
+      requestId: randomUUID(),
+      returnPath: '/settings/billing',
+      amountMinor: '1000',
+      method: 'checkout',
+    });
+    const prepared = await payments.prepareTopup(userId, topup());
+    await expect(payments.confirmAction(userId, prepared.actionId)).resolves.toMatchObject({
+      state: 'redirect_required',
+    });
+    const [leg] = await database
+      .select()
+      .from(billingProviderLeg)
+      .where(eq(billingProviderLeg.purchaseId, prepared.actionId));
+    const session = checkoutSessions.get(leg?.providerObjectId ?? '');
+    if (leg === undefined || session === undefined) {
+      throw new Error('Checkout fixture is incomplete');
+    }
+    // Stripe expired the Session after 24 hours; its `checkout.session.expired` event is the source.
+    session['status'] = 'expired';
+    await database
+      .update(billingStripeSource)
+      .set({ nextAttemptAt: new Date('9999-12-31T00:00:00Z') })
+      .where(eq(billingStripeSource.stripeAccountId, stripeAccountId));
+    await database
+      .update(billingProviderLeg)
+      .set({ nextAttemptAt: new Date('9999-12-31T00:00:00Z') })
+      .where(eq(billingProviderLeg.environment, 'development'));
+    const sourceId = randomUUID();
+    await database.insert(billingStripeSource).values({
+      id: sourceId,
+      environment: 'development',
+      stripeAccountId,
+      livemode: false,
+      sourceType: 'checkout.session',
+      sourceId: String(session['id']),
+    });
+    const recovery = await payments.recoverPayments({ environment: 'development', limit: 1 });
+    const [sourceRow] = await database.select().from(billingStripeSource).where(eq(billingStripeSource.id, sourceId));
+    expect(recovery.processed, JSON.stringify({ recovery, error: sourceRow?.errorCode })).toContain(sourceId);
+    await expect(payments.getAction(userId, prepared.actionId)).resolves.toMatchObject({
+      state: 'failed',
+      redirectUrl: null,
+    });
+    const [closed] = await database.select().from(billingProviderLeg).where(eq(billingProviderLeg.id, leg.id));
+    expect(closed).toMatchObject({
+      state: 'expired',
+      terminalEvidence: { version: 'stripe-payment-checkout-expired-v1', amountReceived: '0' },
+    });
+    await expect(payments.listActions(userId, 'manual_topup')).resolves.toEqual([]);
+    await expect(payments.prepareTopup(userId, topup())).resolves.toMatchObject({ state: 'prepared' });
+  });
+
+  it.each([
+    // A replay returns the original PaymentIntent, here awaiting authentication.
+    ['replays a lost saved-card create once under its key', false, { leg: 'attention', purchase: 'attention' }],
+    ['fails a saved-card create Stripe rejected outright', true, { leg: 'no_charge', purchase: 'failed' }],
+  ])('%s', async (_name, rejected, expected) => {
+    const userId = randomUUID();
+    await database
+      .insert(user)
+      .values({ id: userId, name: 'Lost Dispatch', email: `${userId}@test.invalid`, emailVerified: true });
+    const prepared = await payments.prepareTopup(userId, {
+      requestId: randomUUID(),
+      returnPath: '/settings/billing',
+      amountMinor: '537',
+      method: 'saved_card',
+    });
+    const [leg] = await database
+      .select()
+      .from(billingProviderLeg)
+      .where(eq(billingProviderLeg.purchaseId, prepared.actionId));
+    const [binding] = await database
+      .select()
+      .from(billingStripeCustomer)
+      .where(eq(billingStripeCustomer.id, leg?.customerBindingId ?? ''));
+    if (leg === undefined || binding?.stripeCustomerId === null || binding?.stripeCustomerId === undefined) {
+      throw new Error('Lost dispatch fixture is incomplete');
+    }
+    paymentFixture = {
+      purchaseId: prepared.actionId,
+      providerLegId: leg.id,
+      customerBindingId: leg.customerBindingId,
+      customerId: binding.stripeCustomerId,
+    };
+    paymentIntentFixtureId = `pi_lost_${randomUUID().replaceAll('-', '')}`;
+    paymentStatus = 'requires_action';
+    // The process died after claiming the dispatch and before Stripe's answer was stored.
+    await database.update(billingPurchase).set({ state: 'creating' }).where(eq(billingPurchase.id, prepared.actionId));
+    await database
+      .update(billingProviderLeg)
+      .set({ nextAttemptAt: new Date('9999-12-31T00:00:00Z') })
+      .where(eq(billingProviderLeg.environment, 'development'));
+    await database
+      .update(billingStripeSource)
+      .set({ nextAttemptAt: new Date('9999-12-31T00:00:00Z') })
+      .where(eq(billingStripeSource.stripeAccountId, stripeAccountId));
+    await database
+      .update(billingProviderLeg)
+      .set({ state: 'dispatched', dispatchStartedAt: new Date(), nextAttemptAt: new Date(Date.now() - 1000) })
+      .where(eq(billingProviderLeg.id, leg.id));
+    rejectPaymentCreate = rejected;
+    const posts = paymentCreatePosts;
+    try {
+      const recovery = await payments.recoverPayments({ environment: 'development', limit: 1 });
+      expect(recovery.processed).toContain(leg.id);
+      expect(paymentCreatePosts).toBe(posts + 1);
+      const [recoveredLeg] = await database.select().from(billingProviderLeg).where(eq(billingProviderLeg.id, leg.id));
+      const [purchase] = await database.select().from(billingPurchase).where(eq(billingPurchase.id, prepared.actionId));
+      expect({ leg: recoveredLeg?.state, purchase: purchase?.state }).toEqual(expected);
+      if (rejected) {
+        expect(recoveredLeg?.terminalEvidence).toMatchObject({ version: 'stripe-request-rejected-v1' });
+      } else {
+        expect(recoveredLeg?.providerObjectId).toBe(paymentIntentFixtureId);
+      }
+    } finally {
+      rejectPaymentCreate = false;
+      paymentStatus = 'succeeded';
+      paymentIntentFixtureId = 'pi_foundation_paid';
+    }
   });
 
   it('offers hosted continuation only for a source-qualified saved-card authentication requirement', async () => {

@@ -50,6 +50,8 @@ let refundFixture:
 let refundPosts = 0;
 let serveRefund = false;
 let refundStatus: 'succeeded' | 'failed' = 'succeeded';
+/** Serves the refund as a dashboard refund: no Tau metadata. */
+let externalRefund = false;
 let refundCreated: number | undefined;
 let serveDispute = false;
 let disputeReturned = false;
@@ -81,7 +83,9 @@ const server = createServer((request, response) => {
     currency: 'usd',
     created: refundCreated ?? Math.floor(Date.now() / 1000),
     customer: value.customerId,
-    metadata: { tau_refund_intent_id: value.intentId, tau_reversal_case_id: value.reversalCaseId },
+    metadata: externalRefund
+      ? {}
+      : { tau_refund_intent_id: value.intentId, tau_reversal_case_id: value.reversalCaseId },
     payment_intent: value.paymentIntentId,
     status: refundStatus,
   };
@@ -844,7 +848,7 @@ describe('cash disposition foundation', () => {
         intentId: prepared.intentId,
         reviewActorId: 'operator_fixture',
         capability: {
-          qualification: 'controlled-local-protected-refund',
+          qualification: 'protected-refund',
           environment: 'development',
           stripeAccountId: cashStripeAccountId,
           livemode: false,
@@ -898,6 +902,62 @@ describe('cash disposition foundation', () => {
     expect(intent).toMatchObject({ state: 'succeeded', holdState: 'applied' });
   });
 
+  it('applies an external dashboard refund as a conserved pro-rata reversal and replays it', async () => {
+    const value = await fixture();
+    await apply(value, evidence(value, '0'));
+    await database
+      .update(schema.billingStripeSource)
+      .set({ state: 'done', leaseUntil: null })
+      .where(eq(schema.billingStripeSource.id, value.claimId));
+    const cashCase = await reversalCaseOf(value);
+    const refundId = `re_external_${randomUUID()}`;
+    refundFixture = {
+      customerId: value.purchase.proof.paidEvidence.customerId,
+      paymentIntentId: value.purchase.proof.paymentIntentId,
+      chargeId: value.purchase.proof.chargeId,
+      refundId,
+      intentId: '',
+      reversalCaseId: cashCase.id,
+    };
+    externalRefund = true;
+    serveRefund = true;
+    refundStatus = 'succeeded';
+    refundCreated = Math.floor(Date.now() / 1000) - 60;
+    const cash = cashService('sk_test_cash_external');
+    try {
+      const request = {
+        environment: 'development',
+        chargeId: value.purchase.proof.chargeId,
+        maximumRefundPages: 3,
+      } as const;
+      await expect(cash.reconcileCharge(request)).resolves.toEqual({ status: 'applied', accountId: value.accountId });
+      const [account] = await database
+        .select()
+        .from(schema.creditAccount)
+        .where(eq(schema.creditAccount.id, value.accountId));
+      // Half the 500 minor principal came back, so half the 1000 granted atoms are reversed.
+      expect(account).toMatchObject({ purchasedAtoms: 500n, purchasedHeldAtoms: 0n });
+      const applied = await reversalCaseOf(value);
+      expect(applied).toMatchObject({ cumulativePrincipalLossMinor: 250n, cumulativeGrossLossMinor: 250n });
+      expect(applied.projectionEvidence).toMatchObject({ refundIds: [refundId] });
+      // Replaying the same Stripe state changes nothing.
+      await expect(cash.reconcileCharge(request)).resolves.toEqual({ status: 'applied', accountId: value.accountId });
+      const [replayed] = await database
+        .select()
+        .from(schema.creditAccount)
+        .where(eq(schema.creditAccount.id, value.accountId));
+      expect(replayed?.purchasedAtoms).toBe(500n);
+      // A charge with no fulfilled cause is left to the purchase's own first qualification.
+      await expect(cash.reconcileCharge({ ...request, chargeId: `ch_unknown_${randomUUID()}` })).resolves.toEqual({
+        status: 'no_cause',
+      });
+    } finally {
+      externalRefund = false;
+      serveRefund = false;
+      refundCreated = undefined;
+    }
+  });
+
   it('should date a zero-loss reviewed refund at the provider refund time', async () => {
     const value = await fixture();
     await apply(value, evidence(value, '0'));
@@ -938,7 +998,7 @@ describe('cash disposition foundation', () => {
           intentId: prepared.intentId,
           reviewActorId: 'operator_fixture',
           capability: {
-            qualification: 'controlled-local-protected-refund',
+            qualification: 'protected-refund',
             environment: 'development',
             stripeAccountId: cashStripeAccountId,
             livemode: false,
@@ -1109,7 +1169,8 @@ describe('cash disposition foundation', () => {
     expect(cases).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ kind: 'paid_unfulfilled_recovery', accountId: value.accountId, state: 'open' }),
-        expect.objectContaining({ kind: 'gross_fee_net_mismatch', accountId: null, state: 'open' }),
+        // The balance transaction's source charge names the purchase, so the case restricts only its owner.
+        expect.objectContaining({ kind: 'gross_fee_net_mismatch', accountId: value.accountId, state: 'open' }),
       ]),
     );
     const cash = new BillingCashService({ database: runtimeDatabase }, stripe, stripe, ledger, {

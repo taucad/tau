@@ -289,3 +289,30 @@ export const subscriptionCheckoutExpiryEvidenceSchema = z
   })
   .strict();
 export type SubscriptionCheckoutExpiryEvidence = z.infer<typeof subscriptionCheckoutExpiryEvidenceSchema>;
+
+/** An expired payment Checkout proves no funds moved; any PaymentIntent it opened was canceled empty. */
+export const paymentCheckoutExpiryEvidenceSchema = z
+  .object({
+    version: z.literal('stripe-payment-checkout-expired-v1'),
+    checkoutSessionId: z.string().min(1).max(255),
+    customerId: z.string().min(1).max(255),
+    stripeAccountId: z.string().min(1).max(255),
+    livemode: z.boolean(),
+    status: z.literal('expired'),
+    mode: z.literal('payment'),
+    paymentIntentId: z.string().min(1).max(255).nullable(),
+    paymentStatus: z.literal('unpaid'),
+    amountReceived: z.literal('0'),
+    sourceDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+    observedAt: z.iso.datetime({ offset: true }),
+  })
+  .strict();
+export type PaymentCheckoutExpiryEvidence = z.infer<typeof paymentCheckoutExpiryEvidenceSchema>;
+
+/** Stripe refused a PaymentIntent create outright, so a replay under the same key can never charge. */
+export type RequestRejectedEvidence = {
+  readonly version: 'stripe-request-rejected-v1';
+  readonly idempotencyKey: string;
+  readonly errorType: string;
+  readonly observedAt: string;
+};

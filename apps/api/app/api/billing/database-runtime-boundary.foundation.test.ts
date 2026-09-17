@@ -210,6 +210,40 @@ describe('database runtime boundary', () => {
       expect(first.applied).toBe(head.count);
       await expect(assertSchemaCompatibility(scratch)).resolves.toBeUndefined();
 
+      // The release command alone must leave a database every hosted process can boot against.
+      const asRole = (role: string): postgres.Sql =>
+        postgres(target.toString(), {
+          max: 1,
+          prepare: false,
+          connection: { role },
+          onnotice() {
+            /* Notices are not diagnostics here. */
+          },
+        });
+      const apiRuntime = asRole('tau_api_runtime');
+      const billingRuntime = asRole('tau_billing_runtime');
+      try {
+        await expect(assertSchemaCompatibility(apiRuntime)).resolves.toBeUndefined();
+        await expect(billingRuntime`SELECT count(*)::int AS n FROM billing.credit_account`).resolves.toEqual([
+          { n: 0 },
+        ]);
+      } finally {
+        await apiRuntime.end();
+        await billingRuntime.end();
+      }
+      const triggers = await scratch<Array<{ name: string }>>`
+        SELECT DISTINCT tgname AS name FROM pg_trigger
+        WHERE tgname IN ('require_paid_receipt', 'require_cash_conservation', 'protect_payment_identity')
+        ORDER BY name`;
+      expect(triggers.map(({ name }) => name)).toEqual([
+        'protect_payment_identity',
+        'require_cash_conservation',
+        'require_paid_receipt',
+      ]);
+      await expect(
+        scratch`SELECT count(*)::int AS n FROM pg_roles WHERE rolname = 'tau_billing_policy_publisher'`,
+      ).resolves.toEqual([{ n: 1 }]);
+
       const second = await runMigrationJob(target.toString());
       const applied = await readAppliedMigrations(scratch);
 

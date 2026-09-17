@@ -560,6 +560,14 @@ export const TauMetrics = {
     attributes: z.object({}),
   }),
 
+  billingOpenFinancialCases: defineGauge({
+    name: 'tau.billing.open_financial_cases',
+    unit: '{case}',
+    description:
+      'Open or attention financial cases by kind after each hourly reconciliation (alert on unfulfilled_purchase_obligation > 0)',
+    attributes: z.object({ kind: z.string() }),
+  }),
+
   billingNegativeBalanceAccounts: defineGauge({
     name: 'tau.billing.negative_balance_accounts',
     unit: '{account}',

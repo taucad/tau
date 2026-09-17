@@ -67,6 +67,29 @@ describe('Stripe cash source qualification', () => {
     });
   });
 
+  it('allocates external refunds pro rata on their cumulative total and returns a full refund exactly', () => {
+    const partial = [
+      refund({ id: 're_b', amount: 1, status: 'succeeded', created: 2 }),
+      refund({ id: 're_a', amount: 1, status: 'succeeded', created: 1 }),
+    ];
+    // 2 of 2200 gross: floor(2 * 2000 / 2200) = 1 principal, so rounding never drifts into extra tax.
+    expect(qualifyStripeCashProjection({ ...base, refunds: partial, refundAllocations: {} })).toMatchObject({
+      status: 'qualified',
+      evidence: { principalLossMinor: '1', taxLossMinor: '1', grossLossMinor: '2' },
+    });
+    const full = [...partial, refund({ id: 're_c', amount: 2198, status: 'succeeded', created: 3 })];
+    expect(qualifyStripeCashProjection({ ...base, refunds: full, refundAllocations: {} })).toMatchObject({
+      status: 'qualified',
+      evidence: { principalLossMinor: '2000', taxLossMinor: '200', grossLossMinor: '2200' },
+    });
+    // A refund Tau issued never takes the default: its reviewed split is required.
+    const issued = refund({ id: 're_t', amount: 5, status: 'succeeded', metadata: { tau_refund_intent_id: 'ri_1' } });
+    expect(qualifyStripeCashProjection({ ...base, refunds: [issued], refundAllocations: {} })).toEqual({
+      status: 'attention',
+      reason: 'refund_allocation_incomplete',
+    });
+  });
+
   it('keeps incomplete and pending refunds non-authoritative', () => {
     expect(
       qualifyStripeCashProjection({ ...base, refunds: [], refundPagesComplete: false, refundAllocations: {} }),

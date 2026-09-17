@@ -108,4 +108,19 @@ describe('ChatExceptionFilter unknown-error disclosure', () => {
       requestId: 'req_test_123',
     });
   });
+
+  it('tells the client when to retry a funded limit and keeps a credit denial shortfall', () => {
+    const limited = createMockArgumentsHost();
+    new ChatExceptionFilter().catch(new LlmGatewayError(429, 'FUNDED_OPERATION_LIMIT', 'Busy.'), limited.host);
+    expect(limited.response.header).toHaveBeenCalledWith('retry-after', '30');
+    expect(sentError(limited.response)).toMatchObject({ details: { retryAfterSeconds: 30 } });
+
+    const details = { requiredCreditAtoms: '10', availableCreditAtoms: '1', routeId: 'route' };
+    const denied = createMockArgumentsHost();
+    new ChatExceptionFilter().catch(
+      new LlmGatewayError(402, 'INSUFFICIENT_CREDIT', 'Insufficient Tau credit.', details),
+      denied.host,
+    );
+    expect(sentError(denied.response)).toMatchObject({ category: 'credits', code: 'INSUFFICIENT_CREDIT', details });
+  });
 });

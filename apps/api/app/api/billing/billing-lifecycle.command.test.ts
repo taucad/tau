@@ -5,7 +5,7 @@ import { createBillingStripeClient } from '#api/billing/billing-stripe.js';
 import { runBillingLifecycleCommand } from '#api/billing/billing-lifecycle.command.js';
 
 describe('protected lifecycle command boundary', () => {
-  it('rejects production collection and malformed requests before database or provider work', async () => {
+  it('rejects uncollecting mutations and malformed requests before database or provider work', async () => {
     const database = mockDeep<DatabaseService>();
     const sourceStripe = createBillingStripeClient({ secretKey: 'rk_test_unconfigured' });
     const input = {
@@ -24,7 +24,15 @@ describe('protected lifecycle command boundary', () => {
           limit: 1,
         },
       }),
-    ).rejects.toThrow('isolated development fixture');
+    ).rejects.toThrow('write key and an enabled collection');
+    // A write key without an enabled collection is still refused.
+    await expect(
+      runBillingLifecycleCommand({
+        ...input,
+        protectedStripe: createBillingStripeClient({ secretKey: 'sk_live_unconfigured' }),
+        request: { operation: 'execute-refund', environment: 'prod-us', intentId: 'ri_1', reviewActorId: 'op' },
+      }),
+    ).rejects.toThrow('write key and an enabled collection');
     await expect(
       runBillingLifecycleCommand({
         ...input,

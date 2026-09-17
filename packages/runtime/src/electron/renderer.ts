@@ -147,7 +147,9 @@ export const getElectronRuntimeBridge = (globalName = 'taucad'): ElectronRuntime
  * @param match - Predicate over the relay payload; the caller's correlation
  * check (a request id, a host lease, a concern name).
  * @param target - Renderer message target.
- * @returns A promise resolving with the first port whose relay matches.
+ * @returns A promise resolving with the first port whose relay matches, and
+ * rejecting when the shell answers that request with an `error` instead of a
+ * port — a refusal the caller would otherwise wait out forever.
  * @public
  *
  * @example <caption>Correlate a shell's service port by request id</caption>
@@ -165,10 +167,19 @@ export const awaitElectronRelayedPort = async (
   match: (payload: Record<string, unknown>) => boolean,
   target: ElectronRuntimeMessageTarget = globalThis,
 ): Promise<MessagePort> =>
-  new Promise<MessagePort>((resolve) => {
+  new Promise<MessagePort>((resolve, reject) => {
     const handler = (event: MessageEvent): void => {
       const data = event.data as Record<string, unknown> | undefined;
       if (!data || data['taucadRelay'] !== tag || !isSameWindowRelay(event) || !match(data)) {
+        return;
+      }
+      /* The shell answers a request it will not serve with a reason instead of
+       * a port. Without this the caller — `nodeFs`, an agent host — waits on a
+       * hand-off that is never coming. */
+      const refusal = data['error'];
+      if (typeof refusal === 'string') {
+        target.removeEventListener('message', handler);
+        reject(new Error(`Electron main refused the ${tag} request: ${refusal}`));
         return;
       }
       const port = event.ports[0];

@@ -415,6 +415,16 @@ describe('Electron renderer runtime helpers', () => {
       await expect(pending).resolves.toBe(port);
     });
 
+    it('should reject a relayed port request that main refuses', async () => {
+      const { deliver, target } = relayTarget();
+      const pending = awaitElectronRelayedPort(servicesTag, (payload) => payload['requestId'] === 'req-1', target);
+
+      deliver(relayEvent({ taucadRelay: servicesTag, requestId: 'req-1', error: 'services.untrusted-root' }));
+
+      await expect(pending).rejects.toThrow('services.untrusted-root');
+      expect(target.removeEventListener).toHaveBeenCalledWith('message', expect.any(Function));
+    });
+
     it('ignores a foreign source, a foreign tag, and a payload the matcher rejects', async () => {
       const { deliver, target } = relayTarget();
       const mine = new MessageChannel().port1;

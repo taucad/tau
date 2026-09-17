@@ -28,6 +28,7 @@ const state = vi.hoisted(() => ({
   /* The quit hold's two halves, in the order main runs them (R9, D31). */
   shutdownOrder: [] as string[],
   servicesConnect: vi.fn(() => ({ id: 'services-port' })),
+  runtimePrewarm: vi.fn(),
   servicesQuiesce: vi.fn(
     async (): Promise<
       { status: 'quiesced' } | { status: 'failed'; message: string } | { status: 'timeout' } | { status: 'no-utility' }
@@ -39,6 +40,8 @@ const state = vi.hoisted(() => ({
   /* A renderer that closes its sessions at once, which is what every case but
    * the ordering pin is about. */
   autoQuiesce: true,
+  /* Lets a case hold ACP discovery open while the window boots (D17). */
+  acpDiscovery: undefined as Promise<{ agents: never[]; refused: never[] }> | undefined,
   log: vi.fn(),
 }));
 
@@ -150,12 +153,12 @@ vi.mock('@taucad/runtime/electron/main', () => ({
   installElectronRuntimeHeaders: vi.fn(),
   registerElectronRuntimeMain: vi.fn((options: { resolveFork?: typeof state.resolveFork }) => {
     state.resolveFork = options.resolveFork;
-    return { connect: vi.fn(), dispose: vi.fn() };
+    return { connect: vi.fn(), dispose: vi.fn(), prewarm: state.runtimePrewarm };
   }),
 }));
 vi.mock('@taucad/host', () => ({
   defaultConfigDirectory: vi.fn(() => join(state.userData, 'config')),
-  discoverAcpAgents: vi.fn(async () => ({ agents: [], refused: [] })),
+  discoverAcpAgents: vi.fn(async () => state.acpDiscovery ?? { agents: [], refused: [] }),
   externalAgentDescriptors: vi.fn(() => []),
 }));
 vi.mock('#tau/kernel-host.entry?modulePath', () => ({ default: '/kernel-host.entry.js' }));
@@ -247,8 +250,10 @@ afterEach(async () => {
   state.ipcListeners.clear();
   state.sentToRenderer.length = 0;
   state.autoQuiesce = true;
+  state.acpDiscovery = undefined;
   state.resolveFork = undefined;
   state.servicesConnect.mockClear();
+  state.runtimePrewarm.mockClear();
   state.utilityEnvironmentAdditions.length = 0;
   // Each case bootstraps main afresh; the cached module would otherwise register nothing.
   vi.resetModules();
@@ -282,6 +287,48 @@ describe('desktop main compute owner', () => {
     });
     return resolve(join(state.userData, 'home', 'project'));
   };
+
+  /* AF-L03-1: the descriptors used to be frozen into the window's
+   * `additionalArguments`, so a vendor model probe on a 5 s clock was a
+   * prerequisite of the window's existence (D17). */
+  it(
+    'creates and loads the window while agent discovery is still running',
+    async () => {
+      const discovery = Promise.withResolvers<{ agents: never[]; refused: never[] }>();
+      state.acpDiscovery = discovery.promise;
+
+      await bootstrap();
+
+      expect(fakeWindow.loadURL).toHaveBeenCalledOnce();
+      const answer = state.handlers.get('tau:external-agents')!({ senderFrame: {} });
+      discovery.resolve({ agents: [], refused: [] });
+      await expect(answer).resolves.toEqual([]);
+    },
+    bootMilliseconds,
+  );
+
+  /* W-L03-4: a spare is only adoptable when the fork it would serve is
+   * configured identically, so every project open has to resolve to one
+   * environment. The root the renderer asked for reaches the utility on its
+   * rooted filesystem port, not through the process environment. */
+  it(
+    'warms one kernel utility at boot and forks every project root with the same environment',
+    async () => {
+      const projectRoot = await bootstrap();
+
+      expect(state.runtimePrewarm).toHaveBeenCalledOnce();
+      const home = state.resolveFork!({ projectRoot, computeMode: 'memory' });
+      const checkout = state.resolveFork!({
+        projectRoot: join(projectRoot, '.tau/checkouts/run'),
+        computeMode: 'memory',
+      });
+      expect(home.env).toEqual(checkout.env);
+      expect(state.servicesConnect).toHaveBeenLastCalledWith('runtimeFileSystem', {
+        workspaceRoot: join(projectRoot, '.tau/checkouts/run'),
+      });
+    },
+    bootMilliseconds,
+  );
 
   it(
     'invalidates a worker immediately on error and restarts through the owner resolver',
@@ -324,7 +371,6 @@ describe('desktop main compute owner', () => {
         computeMode: 'durable',
       });
       expect((candidate.compute as { store: unknown }).store).toBe((direct.compute as { store: unknown }).store);
-      expect(candidate.env?.['TAU_PROJECT_ROOT']).toBe(join(projectRoot, '.tau/checkouts/run'));
       expect(state.servicesConnect).toHaveBeenCalledWith('runtimeFileSystem', {
         workspaceRoot: join(projectRoot, '.tau/checkouts/run'),
       });

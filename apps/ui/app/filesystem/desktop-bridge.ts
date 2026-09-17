@@ -27,7 +27,7 @@ type DesktopShell = {
   readonly relayTag: string;
   readonly nodeFs: { readonly homeRoot: string };
   readonly runtimeKernelIds?: readonly string[];
-  readonly externalAgents?: readonly ExternalAgentDescriptor[];
+  readonly externalAgents?: () => Promise<unknown>;
   readonly compute?: DesktopBridge['compute'];
   readonly appIcon: { setTheme(theme: 'light' | 'dark'): void };
   /** The quit hold's renderer half (D31, P49). */
@@ -94,14 +94,6 @@ export const reportDesktopQuiesced = (forced: boolean): void => {
  */
 export type DesktopBridge = {
   readonly runtimeKernelIds: readonly string[];
-  /**
-   * External ACP agents launcher 2 knows about (W4-ACP), as the one canonical
-   * descriptor (VSC1), which the execution selector draws one row each from.
-   * Main resolved, CLI-probed and model-probed them before this window existed,
-   * so it is a plain value beside `runtimeKernelIds` rather than a probe the
-   * page repeats; empty means Tau's own runs only.
-   */
-  readonly externalAgents: readonly ExternalAgentDescriptor[];
   readonly nodeFs: {
     /**
      * Absolute host directory backing the node Home workspace
@@ -155,6 +147,14 @@ export type DesktopBridge = {
     consume(): Promise<ReadonlyArray<{ readonly bytes: Uint8Array<ArrayBuffer>; readonly name: string }>>;
   };
   readonly quickLook: DesktopShell['quickLook'];
+  /**
+   * External ACP agents launcher 2 knows about (W4-ACP), as the one canonical
+   * descriptor (VSC1), which the execution selector draws one row each from.
+   * Main CLI-probes and model-probes them; asked for rather than read off the
+   * launch bootstrap, because that made the window wait on a 5 s vendor probe
+   * (D17). Empty means Tau's own runs only.
+   */
+  externalAgents(): Promise<readonly ExternalAgentDescriptor[]>;
 };
 
 /**
@@ -206,11 +206,11 @@ export const desktopBridge = (): DesktopBridge | undefined => {
     runtimeKernelIds: shell.runtimeKernelIds ?? [],
     /* Parsed, not trusted: the names and model ids main put here came out of a
      * vendor adapter's own config options, and this page renders them. */
-    externalAgents:
+    externalAgents: async () =>
       z
         .array(externalAgentDescriptorSchema)
         .max(16)
-        .safeParse(shell.externalAgents ?? []).data ?? [],
+        .safeParse(await (shell.externalAgents?.() ?? [])).data ?? [],
     nodeFs: {
       homeRoot: shell.nodeFs.homeRoot,
       connect: async () => connectServices('nodeFs'),

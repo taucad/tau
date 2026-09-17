@@ -270,11 +270,19 @@ test('client navigation keeps every project-scoped resource on one logical proje
   });
 
   await target.navigate('/__e2e/project-navigation');
-  await target.delay(5000);
-  const initialState = await target.evaluate(() => ({ href: location.href, text: document.body.textContent }));
-  if (!/\/w\/[^/]+\/[^/]+$/u.test(new URL(initialState.href).pathname)) {
+  /* The seed creates two projects through the file-manager worker before it
+   * navigates, and the worker's own OPFS mount alone costs seconds on a loaded
+   * machine — the two rows below already wait for this URL with a 60 s poll. A
+   * fixed wait raced it; the diagnostics are kept for a seed that truly never
+   * opens. */
+  try {
+    await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
+  } catch (error) {
+    const initialState = await target.evaluate(() => ({ href: location.href, text: document.body.textContent }));
     const diagnostics = await target.events();
-    throw new Error(`Project-navigation seed did not open: ${JSON.stringify({ ...initialState, diagnostics })}`);
+    throw new Error(`Project-navigation seed did not open: ${JSON.stringify({ ...initialState, diagnostics })}`, {
+      cause: error,
+    });
   }
   const documentIdentity = await target.evaluate(
     () => (globalThis as typeof globalThis & { __tauDocumentIdentity?: string }).__tauDocumentIdentity,
@@ -521,6 +529,7 @@ test('project and chat rows reveal their actions over a dissolving name', async 
     const tabStyle = getComputedStyle(tab);
     return {
       background: getComputedStyle(element).backgroundColor,
+      tabBackground: tabStyle.backgroundColor,
       flex: [tabStyle.flexGrow, tabStyle.flexShrink, tabStyle.minWidth, tabStyle.maxWidth],
       inset: [
         closeBounds.top - tabBounds.top,
@@ -529,12 +538,18 @@ test('project and chat rows reveal their actions over a dissolving name', async 
       ],
     };
   });
-  expect(closeMetrics.background).toBe('rgba(0, 0, 0, 0)');
+  /* An unhovered close action carries the tab's own fill so it masks the title
+   * dissolving beneath it rather than showing a second pill: `dockview.tsx:166`
+   * (`.dv-tab.dv-active-tab … .dv-default-tab-action:not(:hover)` → `!bg-accent`,
+   * committed in `c23b6ed7c`). `dockview-tabs.spec.ts:156` pins the same fact.
+   * The row could not read this until `2cfd558fd` repaired the lookups above. */
+  expect(closeMetrics.background).toBe(closeMetrics.tabBackground);
+  expect(closeMetrics.background).not.toBe('rgba(0, 0, 0, 0)');
   expect(closeMetrics.flex).toEqual(['1', '1', '112px', '160px']);
   expect(Math.max(...closeMetrics.inset) - Math.min(...closeMetrics.inset)).toBeLessThanOrEqual(1);
   await target.hover(closeButton);
   expect(await target.evaluateLocator(closeButton, (element) => getComputedStyle(element).backgroundColor)).not.toBe(
-    'rgba(0, 0, 0, 0)',
+    closeMetrics.background,
   );
 
   /* Sidebar v2 (D7, D13, D15): actions take no width at rest, appear over the

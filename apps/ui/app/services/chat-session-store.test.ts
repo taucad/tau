@@ -1587,6 +1587,61 @@ describe('ChatSessionStore', () => {
     });
 
     /*
+     * The same reattached chat, now running a turn of its own. The run's hold
+     * is released the instant persistence reports idle — before the SDK's
+     * `ready` reaches the store — so the *settlement* names no run either. The
+     * "no run identity" suppression is about a run nobody can ever settle
+     * being OPENED; applied to a run already reported open it dropped the
+     * `completed`, leaving the sidebar row running and *Close* still asking
+     * (R3-F2).
+     */
+    it("should settle a reattached chat's run whose identity cleared before the final status", async () => {
+      const store = new ChatSessionStore();
+      const deps = createStubDeps();
+      const chatId = 'chat_reattach_settles';
+      deps.getChat.mockResolvedValue(chatRow(chatId, 'project_reattach', { name: 'Reattached chat' }));
+      store.setDependencies(deps);
+      const actor = createActor(chatSessionMachine, {
+        input: { chatId, projectId: 'project_reattach' },
+      }).start();
+      const heard: string[] = [];
+      const projectRef = {
+        send: (event: { type: string }) => {
+          heard.push(event.type);
+        },
+        getSnapshot: () => ({ context: { chatRefs: { [chatId]: actor } } }),
+      } as unknown as ProjectSessionActorRef;
+
+      try {
+        store.setFocusedProject('project_reattach');
+        store.setProjectSession('project_reattach', projectRef);
+        const session = store.acquire(chatId);
+        await vi.waitFor(() => {
+          expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+        });
+
+        store.reattachHostChat({ chatId, hostId: 'origin' });
+        const fake = harness.created.findLast((entry) => entry.id === chatId)!;
+        store.startRun(chatId, { chatId, projectId: 'project_reattach' });
+        fake.status = 'streaming';
+        fake.emitStatusChange();
+        expect(heard).toContain('runStarted');
+
+        // The release clears the active body before the SDK reports `ready`.
+        store.endRun(chatId);
+        fake.status = 'ready';
+        fake.emitStatusChange();
+
+        expect(heard).toContain('runSettled');
+        expect(actor.getSnapshot().matches({ run: 'finishing' })).toBe(true);
+      } finally {
+        store.release(chatId);
+        store.setProjectSession('project_reattach', undefined);
+        actor.stop();
+      }
+    });
+
+    /*
      * The transcript this store restored from local persistence already holds
      * the run the host is about to replay from cursor 0, and the AI SDK
      * *continues* a trailing assistant message on a resume — so the replay used

@@ -1,27 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { RefCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import { cn } from '@taucad/ui/utils/cn';
-import {
-  probeWebGpuSupport,
-  readGraphicsBackendQueryOverride,
-  resolveGraphicsBackendPreference,
-} from '#components/geometry/graphics/graphics-backend.js';
 import { createMetalMorphLoader } from '#components/geometry/loader/metal-morph-controller.js';
-import {
-  useDocumentHidden,
-  useIsIntersecting,
-  useReducedMotion,
-} from '#components/geometry/loader/metal-morph-playback-gates.js';
 import type {
   MetalMorphLoaderController,
   MetalMorphLoaderQuality,
   MetalMorphSequenceState,
 } from '#components/geometry/loader/metal-morph-controller.js';
 import type { MetalMorphShapeId } from '#components/geometry/loader/metal-morph-shapes.js';
+import {
+  defaultShowcaseMaxPixelRatio,
+  useLatestRef,
+  useShowcaseLoader,
+} from '#components/geometry/loader/showcase-loader.js';
+import type { ShowcaseLoaderInput, ShowcaseLoaderStatus } from '#components/geometry/loader/showcase-loader.js';
 import { Loader } from '#components/ui/loader.js';
-import { useTheme } from '#hooks/use-theme.js';
 
-export type MetalMorphLoaderStatus = 'pending' | 'ready' | 'failed';
+export type MetalMorphLoaderStatus = ShowcaseLoaderStatus;
 
 export type MetalMorphLoaderProperties = Readonly<{
   className?: string;
@@ -47,7 +41,6 @@ export type MetalMorphLoaderProperties = Readonly<{
 }>;
 
 const defaultLabel = 'Loading';
-const defaultMaxPixelRatio = 2;
 
 /**
  * A liquid-metal surface with a renderer of its own: one chrome body that flows between five geometric forms,
@@ -67,151 +60,42 @@ export function MetalMorphLoader({
   speed = 1,
   initialShape,
   isPaused = false,
-  maxPixelRatio = defaultMaxPixelRatio,
+  maxPixelRatio = defaultShowcaseMaxPixelRatio,
   onSequenceChange,
   onReady,
   onStatusChange,
 }: MetalMorphLoaderProperties): React.JSX.Element {
-  const rootRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const controllerRef = useRef<MetalMorphLoaderController | undefined>(undefined);
-  const onSequenceChangeRef = useRef(onSequenceChange);
-  const onReadyRef = useRef(onReady);
-  const onStatusChangeRef = useRef(onStatusChange);
-  const [status, setStatus] = useState<MetalMorphLoaderStatus>('pending');
-  const { theme } = useTheme();
-  const reducedMotion = useReducedMotion();
-  const isDocumentHidden = useDocumentHidden();
-  const [rootNode, setRootNode] = useState<HTMLDivElement>();
-  const isVisible = useIsIntersecting(rootNode);
+  const onSequenceChangeRef = useLatestRef(onSequenceChange);
+  // Speed only seeds the controller; later changes reach it through `setSpeed` without a rebuild.
+  const initialSpeedRef = useRef(speed);
 
-  useEffect(() => {
-    onSequenceChangeRef.current = onSequenceChange;
-    onReadyRef.current = onReady;
-    onStatusChangeRef.current = onStatusChange;
-  }, [onReady, onSequenceChange, onStatusChange]);
-
-  // A callback ref as well as the ref object: the observer hooks need the element on the commit that made it.
-  const attachRoot = useCallback<RefCallback<HTMLDivElement>>((node) => {
-    rootRef.current = node;
-    setRootNode(node ?? undefined);
-  }, []);
-
-  const publishStatus = useCallback((next: MetalMorphLoaderStatus): void => {
-    setStatus(next);
-    onStatusChangeRef.current?.(next);
-  }, []);
-
-  useEffect(() => {
-    const root = rootRef.current;
-    const canvas = canvasRef.current;
-    if (!root || !canvas) {
-      return;
-    }
-    // Read through a function so a cleanup that ran during an `await` is observed rather than narrowed away.
-    const lifecycle = { cancelled: false };
-    const isCancelled = (): boolean => lifecycle.cancelled;
-    let controller: MetalMorphLoaderController | undefined;
-
-    const readSize = (): { width: number; height: number; pixelRatio: number } => {
-      const rect = root.getBoundingClientRect();
-      return {
-        width: Math.max(1, Math.round(rect.width)),
-        height: Math.max(1, Math.round(rect.height)),
-        pixelRatio: Math.min(globalThis.devicePixelRatio || 1, maxPixelRatio),
-      };
-    };
-
-    const boot = async (): Promise<void> => {
-      try {
-        await start();
-      } catch (error) {
-        console.error('Metal morph loader failed to initialise', { error });
-        if (!isCancelled()) {
-          publishStatus('failed');
-        }
-      }
-    };
-
-    const start = async (): Promise<void> => {
-      const override = readGraphicsBackendQueryOverride();
-      const gpuAvailable = await probeWebGpuSupport();
-      if (isCancelled()) {
-        return;
-      }
-      // The loader is a showcase surface on the node renderer: WebGPU whenever an adapter exists, otherwise
-      // Three's WebGL 2 backend. The public viewport keeps its own WebGL baseline; see the graphics policy.
-      const backend =
-        override === undefined
-          ? resolveGraphicsBackendPreference('webgpu', gpuAvailable)
-          : resolveGraphicsBackendPreference(override, gpuAvailable);
-      controller = createMetalMorphLoader({
+  // Only identity inputs rebuild the renderer; theme, speed and playback are steered through the controller.
+  const create = useCallback(
+    ({ canvas, backend, theme }: ShowcaseLoaderInput): MetalMorphLoaderController =>
+      createMetalMorphLoader({
         canvas,
         backend,
-        theme: theme === 'dark' ? 'dark' : 'light',
+        theme,
         quality,
         seed,
-        speed,
+        speed: initialSpeedRef.current,
         initialShape,
         onSequenceChange: (state) => {
           onSequenceChangeRef.current?.(state);
         },
-      });
-      controllerRef.current = controller;
-      controller.setSize(readSize());
-      await controller.ready;
-      if (isCancelled()) {
-        return;
-      }
-      publishStatus('ready');
-      onReadyRef.current?.(controller);
-    };
+      }),
+    [initialShape, onSequenceChangeRef, quality, seed],
+  );
 
-    const observer = new ResizeObserver(() => {
-      controller?.setSize(readSize());
-    });
-    observer.observe(root);
-
-    void boot();
-
-    return () => {
-      lifecycle.cancelled = true;
-      observer.disconnect();
-      controllerRef.current = undefined;
-      controller?.dispose();
-    };
-    // Theme, speed and playback are steered through the controller by the effects below; only identity inputs
-    // rebuild the renderer.
-  }, [initialShape, maxPixelRatio, publishStatus, quality, seed]);
-
-  useEffect(() => {
-    if (status !== 'ready') {
-      return;
-    }
-    controllerRef.current?.setTheme(theme === 'dark' ? 'dark' : 'light');
-  }, [status, theme]);
-
-  useEffect(() => {
-    if (status !== 'ready') {
-      return;
-    }
-    controllerRef.current?.setSpeed(speed);
-  }, [speed, status]);
-
-  const shouldPlay = status === 'ready' && isVisible && !isDocumentHidden && !isPaused && !reducedMotion;
-
-  useEffect(() => {
-    const controller = controllerRef.current;
-    if (!controller || status !== 'ready') {
-      return;
-    }
-    if (shouldPlay) {
-      controller.play();
-      return;
-    }
-    controller.pause();
-    controller.renderOnce();
-  }, [shouldPlay, status]);
+  const { status, shouldPlay, attachRoot, canvasRef } = useShowcaseLoader({
+    create,
+    name: 'Metal morph loader',
+    speed,
+    isPaused,
+    maxPixelRatio,
+    onReady,
+    onStatusChange,
+  });
 
   return (
     <div

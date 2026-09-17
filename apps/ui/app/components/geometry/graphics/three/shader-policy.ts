@@ -85,7 +85,8 @@ export const shaderSites = [
     id: 'metal-morph-loader',
     modules: [
       '#components/geometry/loader/metal-morph-material.node.ts',
-      '#components/geometry/loader/metal-morph-controller.ts',
+      // The bloom and capture pipelines both loaders draw through; registered once, under the first site.
+      '#components/geometry/loader/showcase-post.ts',
     ],
     authoring: ['tsl', 'render-pipeline'],
     backends: ['webgl', 'webgpu'],

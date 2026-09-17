@@ -283,7 +283,11 @@ type EditorStateEvent =
   | { type: 'closeAll' }
   // Chat operations
   | { type: 'setRequestedChatId'; chatId: string | undefined }
-  | { type: 'focusCreatedChat'; chatId: string }
+  /* A chat the caller already knows exists (freshly created, or listed in the
+   * loaded chat list). Focused synchronously — routing it through
+   * `setRequestedChatId` would re-enter `ensuringFocusedChat` and flash the
+   * chat pane's skeleton on every switch. */
+  | { type: 'focusKnownChat'; chatId: string }
   | { type: 'setFocusedChatId'; chatId: string | undefined }
   // Panel operations
   | { type: 'setPanelState'; panelState: PartialDeep<PanelState> }
@@ -765,8 +769,8 @@ export const editorMachine = setup({
       return { requestedChatId: event.chatId };
     }),
 
-    focusCreatedChatInContext: assign(({ event }) => {
-      assertEvent(event, 'focusCreatedChat');
+    focusKnownChatInContext: assign(({ event }) => {
+      assertEvent(event, 'focusKnownChat');
       return {
         requestedChatId: event.chatId,
         focusedChatId: event.chatId,
@@ -913,6 +917,13 @@ export const editorMachine = setup({
     focusedChatIdIsUndefined({ context }) {
       return context.focusedChatId === undefined;
     },
+    /* A bare project URL (no `?chat=`) names no chat, so a chat already focused
+     * still satisfies it — revalidating would enter `ensuringFocusedChat` and
+     * flash the chat pane's skeleton before the route rewrites the URL. */
+    focusedChatAlreadySatisfiesRequest({ context, event }) {
+      assertEvent(event, 'setRequestedChatId');
+      return event.chatId === undefined && context.focusedChatId !== undefined;
+    },
   },
   delays: {
     storeDebounce: 500,
@@ -944,6 +955,12 @@ export const editorMachine = setup({
   on: {
     setRequestedChatId: {
       actions: 'setRequestedChatIdInContext',
+    },
+    /* Fallback for the pre-`ready` window: record the request so the cold-start
+     * ensure resolves to it. The `ready.operation` handler overrides this one
+     * and also persists. */
+    focusKnownChat: {
+      actions: 'focusKnownChatInContext',
     },
   },
   states: {
@@ -1068,14 +1085,20 @@ export const editorMachine = setup({
             },
           },
           on: {
-            focusCreatedChat: {
+            focusKnownChat: {
               target: '.idle',
-              actions: ['focusCreatedChatInContext', 'raiseSetFocusedChatId'],
+              actions: ['focusKnownChatInContext', 'raiseSetFocusedChatId'],
             },
-            setRequestedChatId: {
-              target: '.ensuringFocusedChat',
-              actions: 'setRequestedChatIdInContext',
-            },
+            setRequestedChatId: [
+              {
+                guard: 'focusedChatAlreadySatisfiesRequest',
+                actions: 'setRequestedChatIdInContext',
+              },
+              {
+                target: '.ensuringFocusedChat',
+                actions: 'setRequestedChatIdInContext',
+              },
+            ],
             registerMaterialiseModel: {
               actions: 'setMaterialiseModel',
             },

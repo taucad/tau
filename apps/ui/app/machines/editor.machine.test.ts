@@ -1129,10 +1129,35 @@ describe('ready.operation.ensuringFocusedChat', () => {
     });
     expect(ensureInvocationCount).toBe(1);
 
-    actor.send({ type: 'focusCreatedChat', chatId: 'chat-created' });
+    actor.send({ type: 'focusKnownChat', chatId: 'chat-created' });
 
     expect(actor.getSnapshot().context.requestedChatId).toBe('chat-created');
     expect(actor.getSnapshot().context.focusedChatId).toBe('chat-created');
+    expect(actor.getSnapshot().matches({ ready: { operation: 'idle' } })).toBe(true);
+    expect(ensureInvocationCount).toBe(1);
+    actor.stop();
+  });
+
+  it('keeps the focused chat for a bare project URL instead of revalidating it', async () => {
+    let ensureInvocationCount = 0;
+    const actor = await startAndLoad({
+      loadResult: stubEditorState,
+      ensureResult: async (input) => {
+        ensureInvocationCount += 1;
+        return {
+          type: 'focusedChatEnsured',
+          focusedChatId: input.requestedChatId ?? input.persistedChatId ?? 'chat-recovered',
+        };
+      },
+    });
+    expect(ensureInvocationCount).toBe(1);
+    const focusedChatId = actor.getSnapshot().context.focusedChatId;
+
+    actor.send({ type: 'setRequestedChatId', chatId: undefined });
+
+    // The route reads `requestedChatId` back to know the bare URL was consumed.
+    expect(actor.getSnapshot().context.requestedChatId).toBeUndefined();
+    expect(actor.getSnapshot().context.focusedChatId).toBe(focusedChatId);
     expect(actor.getSnapshot().matches({ ready: { operation: 'idle' } })).toBe(true);
     expect(ensureInvocationCount).toBe(1);
     actor.stop();

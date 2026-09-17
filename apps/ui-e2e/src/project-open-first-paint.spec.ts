@@ -12,11 +12,16 @@ import { dismissCookies } from '#support/chat-attachments.js';
  *   loading state a code pane owns is its placeholder.
  * - I1: Monaco is never fetched from the loader's CDN default.
  * - I4: once the workspace container exists it is never an empty frame.
+ * - R3: once anything has painted on a project URL, the window never goes back
+ *   to nothing — every gate before the live workspace shows the skeleton.
  */
 
 type FirstPaintSample = Readonly<{
+  path: string;
   splashOutsidePlaceholder: boolean;
   emptyWorkspace: boolean;
+  /** Nothing of the app on screen: no shell, no skeleton, no notice, no editor. */
+  blank: boolean;
   skeleton: boolean;
   placeholder: boolean;
   editor: boolean;
@@ -43,12 +48,20 @@ const recordFirstPaint = (): void => {
         element.textContent.includes('Loading editor…') &&
         element.closest('[data-slot="editor-pane-placeholder"]') === null,
     );
+    const skeleton = document.querySelector('[data-testid="workspace-skeleton"]') !== null;
+    const editor = document.querySelector('.monaco-editor .view-lines') !== null;
     const next: FirstPaintSample = {
+      path: location.pathname,
       splashOutsidePlaceholder,
       emptyWorkspace: workspace?.childElementCount === 0,
-      skeleton: document.querySelector('[data-testid="workspace-skeleton"]') !== null,
+      blank:
+        !skeleton &&
+        !editor &&
+        document.querySelector('[data-slot="application-shell"]') === null &&
+        document.querySelector('[data-slot="project-route-notice"]') === null,
+      skeleton,
       placeholder: document.querySelector('[data-slot="editor-pane-placeholder"]') !== null,
-      editor: document.querySelector('.monaco-editor .view-lines') !== null,
+      editor,
     };
     const key = JSON.stringify(next);
     if (key !== lastKey) {
@@ -105,6 +118,12 @@ test('opens a project without a page-wide editor splash, a blank workspace, or C
   expect(samples.length).toBeGreaterThan(0);
   expect(samples.filter((sample) => sample.splashOutsidePlaceholder)).toEqual([]);
   expect(samples.filter((sample) => sample.emptyWorkspace)).toEqual([]);
+  /* From the first thing that paints on the project URL onwards, something is always on screen:
+   * the gates above the workspace own the skeleton, not a blank window (R3). */
+  const projectSamples = samples.filter((sample) => sample.path.startsWith('/w/'));
+  const firstPainted = projectSamples.findIndex((sample) => !sample.blank);
+  expect(firstPainted).toBeGreaterThanOrEqual(0);
+  expect(projectSamples.slice(firstPainted).filter((sample) => sample.blank)).toEqual([]);
   expect(cdnRequests).toEqual([]);
   expect(samples.at(-1)).toMatchObject({ editor: true, placeholder: false, skeleton: false });
   await target.expectHidden(selectors.getByRole('status', { name: 'Opening project' }));

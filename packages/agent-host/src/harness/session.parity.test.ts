@@ -462,6 +462,72 @@ describe('pi full-turn parity fixture', () => {
     await session.close();
   });
 
+  it('commits the eager-dispatch assistant row as a checkpoint and the message end as final', async () => {
+    const log = await createMemoryEventLog();
+    let calls = 0;
+    const session = await createAgentSession({
+      chatId: 'prestart-checkpoint',
+      runId: 'prestart-checkpoint',
+      leaderEpoch: 'prestart-checkpoint',
+      systemPrompt: 'system',
+      model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
+      modelTransport: {
+        async *stream() {
+          calls++;
+          if (calls === 1) {
+            yield { type: 'text-delta', text: 'Reading.' } as const;
+            yield {
+              type: 'tool-input',
+              toolCallId: 'eager-call',
+              toolName: 'read_file',
+              input: { targetFile: 'main.ts' },
+            } as const;
+            yield { type: 'completed', stopReason: 'toolUse' } as const;
+            return;
+          }
+          yield { type: 'completed', stopReason: 'stop' } as const;
+        },
+      },
+      toolRegistry: {
+        list: () => [
+          {
+            name: 'read_file',
+            description: 'Read a file.',
+            inputSchema: {
+              type: 'object',
+              properties: { targetFile: { type: 'string' } },
+              required: ['targetFile'],
+              additionalProperties: false,
+            },
+          },
+        ],
+        invoke: async () => ({ content: 'source', isError: false }),
+      },
+      eventLog: log,
+    });
+    await session.prompt({ id: 'prestart-user', role: 'user', content: 'read' });
+    const events = await log.read();
+    await session.close();
+
+    const rows = events.flatMap((event) => {
+      if (event.type === 'message.appended' && event.message.role === 'assistant') {
+        return [event.message];
+      }
+      return event.type === 'message.envelope-replaced' && event.replacement.role === 'assistant'
+        ? [event.replacement]
+        : [];
+    });
+    const eager = rows.filter((row) => JSON.stringify(row.content).includes('eager-call'));
+    const streamState = (row: ProviderMessage): unknown => {
+      const marker = row.metadata?.tauInternal;
+      return marker !== undefined && typeof marker === 'object' && !Array.isArray(marker)
+        ? marker['streamState']
+        : undefined;
+    };
+    // The early row lets the tool start before the block ends; the message end closes it.
+    expect(eager.map((row) => streamState(row))).toEqual(['checkpoint', undefined]);
+  });
+
   it('never eagerly invokes invalid arguments or work whose durable input append failed', async () => {
     const definition = {
       name: 'read_file',

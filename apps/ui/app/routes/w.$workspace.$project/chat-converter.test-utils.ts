@@ -68,7 +68,7 @@ export const createConfigurationParameterOwner = (): Readonly<{
       _manifest: unknown,
       field: { pointer: string; value: JSONValue },
     ) => {
-      const values = { ...(snapshots.get(target.entry)?.entry.groups['default']?.values ?? {}) };
+      const values: Record<string, JSONValue> = { ...snapshots.get(target.entry)?.entry.groups['default']?.values };
       values[field.pointer.slice(1)] = field.value;
       store(target.entry, values);
       return { status: 'committed', requestId: 'test', write: 'applied', revision: identity };

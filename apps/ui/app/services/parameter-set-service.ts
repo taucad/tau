@@ -350,7 +350,7 @@ export const createParameterSetService = (
 
   const draftsUnder = (filePath: string | undefined): Array<Readonly<{ key: string; draft: UnsavedParameterDraft }>> =>
     [...drafts].flatMap(([key, retained]) => {
-      const entry = retained.key.target.entry;
+      const { entry } = retained.key.target;
       if (filePath !== undefined && !pathMatches(entry, filePath)) {
         return [];
       }

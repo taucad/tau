@@ -143,10 +143,10 @@ export function ParametersNumber({
     setBase({ value: authorityValue, binding });
   }, [authorityValue, binding, displayUnit, draftText]);
 
-  /* The blur handler runs inside the same event as Enter, whose state update has not landed yet;
-   * the ref is what keeps a committed draft from being committed a second time. */
+  /* The blur handler runs inside the same event as Enter, whose state update has not landed yet, so
+   * every writer of `draftText` mirrors it here; the ref is what keeps a committed draft from being
+   * committed a second time. */
   const draftRef = React.useRef(draftText);
-  draftRef.current = draftText;
   const retainDraft = (text: string, valid: boolean): void => {
     draftRef.current = text;
     setDraftText(text);
@@ -159,6 +159,7 @@ export function ParametersNumber({
     () =>
       commit?.subscribeDrafts(() => {
         if (commit.draft(instancePointer) === undefined) {
+          draftRef.current = '';
           setDraftText('');
         }
       }),

@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import type { MetalMorphLoaderController } from '#components/geometry/loader/metal-morph-controller.js';
 import type { MetalMorphSpinnerTarget } from '#components/geometry/loader/metal-morph-spinner-service.js';
 
 const hoisted = vi.hoisted(() => ({
   controllers: [] as MetalMorphLoaderController[],
-  createOptions: [] as Array<{ onFrame?: () => void; theme?: string; quality?: string }>,
+  createOptions: [] as Array<{ canvas?: HTMLCanvasElement; onFrame?: () => void; theme?: string; quality?: string }>,
   probeResult: false,
 }));
 
@@ -41,7 +42,7 @@ const { createMetalMorphSpinnerService } = await import('#components/geometry/lo
 
 type FakeContext = {
   clearRect: ReturnType<typeof vi.fn>;
-  drawImage: ReturnType<typeof vi.fn>;
+  drawImage: Mock<(source: CanvasImageSource, ...box: number[]) => void>;
   imageSmoothingEnabled: boolean;
   imageSmoothingQuality: string;
 };
@@ -52,10 +53,14 @@ type FakeTarget = MetalMorphSpinnerTarget & {
 };
 
 /** A spinner canvas without jsdom's 2D context, which the service only ever clears and copies into. */
-const createTarget = (options: { isIntersecting?: boolean; size?: number } = {}): FakeTarget => {
+const createTarget = (options: { isIntersecting?: boolean; size?: number; paintFails?: boolean } = {}): FakeTarget => {
   const context: FakeContext = {
     clearRect: vi.fn(),
-    drawImage: vi.fn(),
+    drawImage: vi.fn(() => {
+      if (options.paintFails) {
+        throw new DOMException('The canvas backing store is gone.', 'InvalidStateError');
+      }
+    }),
     imageSmoothingEnabled: false,
     imageSmoothingQuality: 'low',
   };
@@ -282,6 +287,80 @@ describe('metalMorphSpinnerService', () => {
     hoisted.createOptions[0]?.onFrame?.();
 
     expect(target.context.drawImage).not.toHaveBeenCalled();
+  });
+
+  it('should keep painting every other spinner in the frame when one canvas throws', async () => {
+    const service = createMetalMorphSpinnerService();
+    const before = createTarget();
+    const broken = createTarget({ paintFails: true });
+    const after = createTarget();
+    service.subscribe(before);
+    service.subscribe(broken);
+    service.subscribe(after);
+    await settle();
+
+    hoisted.createOptions[0]?.onFrame?.();
+
+    // One canvas losing its backing store is that canvas's problem: the frame still reaches the others.
+    expect(before.context.drawImage).toHaveBeenCalledTimes(1);
+    expect(after.context.drawImage).toHaveBeenCalledTimes(1);
+    expect(after.firstFrames).toBe(1);
+    expect(service.getDiagnostics()).toMatchObject({ missedFrameCount: 1, paintFailureCount: 1 });
+  });
+
+  it('should fan each frame out from one snapshot of the source rather than reading the renderer per spinner', async () => {
+    const snapshotContext: FakeContext = {
+      clearRect: vi.fn(),
+      drawImage: vi.fn(),
+      imageSmoothingEnabled: false,
+      imageSmoothingQuality: 'low',
+    };
+    // The service's own snapshot canvas is the only one that reaches jsdom's `getContext`.
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockImplementation(() => snapshotContext as unknown as CanvasRenderingContext2D);
+    try {
+      const service = createMetalMorphSpinnerService();
+      const targets = [createTarget(), createTarget(), createTarget()];
+      for (const target of targets) {
+        service.subscribe(target);
+      }
+      await settle();
+
+      hoisted.createOptions[0]?.onFrame?.();
+
+      // The renderer's drawing buffer is read once per frame, into the snapshot; the spinners copy that.
+      expect(snapshotContext.drawImage).toHaveBeenCalledTimes(1);
+      const [snapshotSource] = snapshotContext.drawImage.mock.calls[0] ?? [];
+      expect(snapshotSource).toBe(hoisted.createOptions[0]?.canvas);
+      for (const target of targets) {
+        const [copied] = target.context.drawImage.mock.calls[0] ?? [];
+        expect(copied).toBeInstanceOf(HTMLCanvasElement);
+        expect(copied).not.toBe(snapshotSource);
+      }
+      expect(service.getDiagnostics()).toMatchObject({ missedFrameCount: 0, paintFailureCount: 0 });
+    } finally {
+      getContext.mockRestore();
+    }
+  });
+
+  it('should report every spinner on screen as painted by the latest frame', async () => {
+    const service = createMetalMorphSpinnerService();
+    const visible = [createTarget(), createTarget()];
+    const offscreen = createTarget({ isIntersecting: false });
+    for (const target of [...visible, offscreen]) {
+      service.subscribe(target);
+    }
+    await settle();
+
+    hoisted.createOptions[0]?.onFrame?.();
+    hoisted.createOptions[0]?.onFrame?.();
+
+    // Two frames drawn, both copied to both spinners on screen; the one offscreen is not counted as missed.
+    for (const target of visible) {
+      expect(target.context.drawImage).toHaveBeenCalledTimes(2);
+    }
+    expect(service.getDiagnostics()).toMatchObject({ frameCount: 2, missedFrameCount: 0 });
   });
 
   it('should not open a context when every spinner leaves while the adapter is being probed', async () => {

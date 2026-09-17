@@ -45,6 +45,15 @@ export type MetalMorphSpinnerDiagnostics = Readonly<{
   /** Side length, in device pixels, of the shared source canvas. */
   sourceSize: number;
   backend: MetalMorphBackendInUse | undefined;
+  /** Frames the renderer has drawn since the service opened it. */
+  frameCount: number;
+  /**
+   * Spinners that were due the latest frame and did not receive it. Zero is the unison the service exists
+   * for; anything else names a canvas whose paint failed.
+   */
+  missedFrameCount: number;
+  /** Paints that threw since the service opened its renderer; each one dropped that canvas's context for a retry. */
+  paintFailureCount: number;
 }>;
 
 export type MetalMorphSpinnerService = Readonly<{
@@ -80,6 +89,8 @@ type Registration = {
   target: MetalMorphSpinnerTarget;
   context: CanvasRenderingContext2D | undefined;
   hasFrame: boolean;
+  /** The frame this canvas last received; compared with the frame count to find a spinner that fell behind. */
+  lastFrame: number;
 };
 
 /**
@@ -89,6 +100,16 @@ type Registration = {
 export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
   const registrations = new Set<Registration>();
   let source: HTMLCanvasElement | undefined;
+  /**
+   * One 2D copy of the renderer's drawing buffer per frame, which every spinner then copies. Reading the
+   * WebGL canvas once keeps the fan-out on the plain canvas-to-canvas path, rather than asking the browser
+   * for a fresh snapshot of a GPU surface per spinner, which some engines serve stale under load.
+   */
+  let snapshot: { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D } | undefined;
+  let hasTriedSnapshot = false;
+  let frameCount = 0;
+  let missedFrameCount = 0;
+  let paintFailureCount = 0;
   let controller: MetalMorphLoaderController | undefined;
   let creation: Promise<void> | undefined;
   let theme: MetalMorphLoaderTheme = 'dark';
@@ -110,21 +131,35 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
 
   const shouldPlay = (): boolean => isMotionAllowed && !isDocumentHidden && activeCount() > 0;
 
-  const blit = (): void => {
-    if (!source) {
-      return;
-    }
-    // Under reduced motion every spinner takes the still frame, even offscreen, so scrolling one into view
-    // never reveals an empty canvas that no later frame will fill.
-    const paintsOffscreenSpinners = !isMotionAllowed;
-    for (const registration of registrations) {
-      if (!paintsOffscreenSpinners && !registration.target.isIntersecting()) {
-        continue;
+  /** The frame every spinner copies: the renderer's buffer read once, or the buffer itself where 2D is unavailable. */
+  const takeSnapshot = (rendered: HTMLCanvasElement): HTMLCanvasElement => {
+    if (snapshot === undefined && !hasTriedSnapshot) {
+      hasTriedSnapshot = true;
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d') ?? undefined;
+      if (context) {
+        snapshot = { canvas, context };
       }
+    }
+    if (snapshot === undefined) {
+      return rendered;
+    }
+    if (snapshot.canvas.width !== rendered.width || snapshot.canvas.height !== rendered.height) {
+      snapshot.canvas.width = rendered.width;
+      snapshot.canvas.height = rendered.height;
+    }
+    snapshot.context.clearRect(0, 0, rendered.width, rendered.height);
+    snapshot.context.drawImage(rendered, 0, 0);
+    return snapshot.canvas;
+  };
+
+  /** Copy `frame` into one spinner's canvas; false when the paint threw, in which case its context is dropped for a retry. */
+  const paint = (registration: Registration, frame: HTMLCanvasElement): boolean => {
+    try {
       registration.context ??= registration.target.canvas.getContext('2d') ?? undefined;
       const { context } = registration;
       if (!context) {
-        continue;
+        return false;
       }
       const { canvas } = registration.target;
       const { width, height, pixelRatio } = registration.target.getSize();
@@ -138,12 +173,42 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
       context.imageSmoothingEnabled = true;
       context.imageSmoothingQuality = 'high';
       context.clearRect(0, 0, deviceWidth, deviceHeight);
-      context.drawImage(source, 0, 0, deviceWidth, deviceHeight);
+      context.drawImage(frame, 0, 0, deviceWidth, deviceHeight);
+      return true;
+    } catch {
+      // A canvas whose backing store is gone is that canvas's problem: drop its context so the next frame
+      // asks for a fresh one, and let the frame reach every other spinner.
+      registration.context = undefined;
+      paintFailureCount += 1;
+      return false;
+    }
+  };
+
+  const blit = (): void => {
+    if (!source) {
+      return;
+    }
+    frameCount += 1;
+    const frame = takeSnapshot(source);
+    // Under reduced motion every spinner takes the still frame, even offscreen, so scrolling one into view
+    // never reveals an empty canvas that no later frame will fill.
+    const paintsOffscreenSpinners = !isMotionAllowed;
+    let missed = 0;
+    for (const registration of registrations) {
+      if (!paintsOffscreenSpinners && !registration.target.isIntersecting()) {
+        continue;
+      }
+      if (!paint(registration, frame)) {
+        missed += 1;
+        continue;
+      }
+      registration.lastFrame = frameCount;
       if (!registration.hasFrame) {
         registration.hasFrame = true;
         registration.target.onFirstFrame?.();
       }
     }
+    missedFrameCount = missed;
   };
 
   const applySourceSize = (): void => {
@@ -176,6 +241,11 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
     creation = undefined;
     isLooping = false;
     source = undefined;
+    snapshot = undefined;
+    hasTriedSnapshot = false;
+    frameCount = 0;
+    missedFrameCount = 0;
+    paintFailureCount = 0;
   };
 
   const ensureController = async (): Promise<void> => {
@@ -233,7 +303,7 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
 
   return {
     subscribe: (target) => {
-      const registration: Registration = { target, context: undefined, hasFrame: false };
+      const registration: Registration = { target, context: undefined, hasFrame: false, lastFrame: 0 };
       registrations.add(registration);
       clearIdleTimer();
       if (controller) {
@@ -287,6 +357,9 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
       isLooping,
       sourceSize,
       backend: controller?.getStatistics().backend,
+      frameCount,
+      missedFrameCount,
+      paintFailureCount,
     }),
   };
 };

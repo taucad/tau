@@ -137,6 +137,9 @@ export default function LoaderShowcase(): React.JSX.Element {
     isLooping: false,
     sourceSize: 0,
     backend: undefined,
+    frameCount: 0,
+    missedFrameCount: 0,
+    paintFailureCount: 0,
   });
   const [isPaused, setIsPaused] = useState(false);
   const [speed, setSpeed] = useState<PlaybackSpeed>('1');
@@ -370,6 +373,14 @@ export default function LoaderShowcase(): React.JSX.Element {
                 {spinnerDiagnostics.subscriberCount === 0
                   ? 'None mounted'
                   : `${spinnerDiagnostics.subscriberCount} sharing ${spinnerDiagnostics.rendererCount} context`}
+              </dd>
+              <dt className='text-muted-foreground'>Spinners in unison</dt>
+              <dd className='tabular-nums'>
+                {spinnerDiagnostics.frameCount === 0
+                  ? '—'
+                  : spinnerDiagnostics.missedFrameCount === 0
+                    ? `All, over ${spinnerDiagnostics.frameCount.toLocaleString()} frames`
+                    : `${spinnerDiagnostics.missedFrameCount} missed the latest frame`}
               </dd>
               <dt className='text-muted-foreground'>Status</dt>
               <dd>{status}</dd>

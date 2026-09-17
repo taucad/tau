@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react';
 import type { LengthSymbol } from '#constants/length-units.js';
-import type { CurrentFileParameterEntry } from '@taucad/types';
+import type { FileParameterEntry, JSONValue } from '@taucad/types';
 import type { ParameterManifest, ParameterSetTarget } from '@taucad/parameters';
 import type { ParameterInputRequest, RetainedParameterInput } from '#services/parameter-set-service.js';
 
@@ -24,6 +24,8 @@ export type ParameterCommit = Readonly<{
   group: string;
   editorInstance: string;
   input(input: ParameterInputRequest): RetainedParameterInput;
+  /** Commit one field of the active group; non-numeric widgets never rewrite the whole group. */
+  setValue(field: Readonly<{ pointer: string; value: JSONValue }>): Promise<void>;
 }>;
 
 export type ParameterEdit =
@@ -41,7 +43,7 @@ export type RJSFContext = {
   defaultParameters?: Record<string, unknown>;
   units: Units;
   parameterManifest: ParameterManifest;
-  parameterBindings?: CurrentFileParameterEntry['groups'][string]['bindings'];
+  parameterBindings?: FileParameterEntry['groups'][string]['bindings'];
   parameterEdit: ParameterEdit;
 };
 

@@ -8,7 +8,7 @@ import { Loader } from '#components/ui/loader.js';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from '@taucad/ui/components/drawer';
 import { ChatContextInsertionProvider } from '#components/chat/chat-context-insertion.js';
 import { FileManagerProvider, useFileManager } from '#hooks/use-file-manager.js';
-import { ProjectProvider, useProject } from '#hooks/use-project.js';
+import { ProjectProvider, useParameterSetActor } from '#hooks/use-project.js';
 import { MonacoModelServiceProvider } from '#hooks/use-monaco-model-service.js';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { WebglContextTrackerProvider } from '#hooks/use-webgl-context-tracker.js';
@@ -99,8 +99,8 @@ const SharedProjectTopbar = ({
   readonly sourceLabel?: string;
   readonly managementActions?: React.ReactNode;
 }): React.JSX.Element => {
-  const { parameterService } = useProject();
-  const entry = useSelector(parameterService.actor(publication.entryPath), (state) => state?.context.current?.entry);
+  const parameterActor = useParameterSetActor(publication.entryPath);
+  const entry = useSelector(parameterActor, (state) => state?.context.current?.entry);
   const parameters = entry ? getActiveGroupValues(entry) : {};
 
   return (

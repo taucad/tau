@@ -503,12 +503,17 @@ export const projectSessionMachine = setup({
             onError: { target: '#project-session.failed', actions: 'recordCloseFailure' },
           },
         },
+        /* A producer refusal (unsaved parameter drafts, an uncertain write) leaves every resource
+         * intact, so the project stays live with the reason recorded and the close can be retried. */
         flushingProducers: {
           invoke: {
             src: 'flushProducers',
             input: ({ context }) => ({ projectId: context.projectId }),
             onDone: 'flushing',
-            onError: { target: '#project-session.failed', actions: 'recordCloseFailure' },
+            onError: {
+              target: '#project-session.live',
+              actions: ['recordCloseFailure', assign({ closeReason: undefined })],
+            },
           },
         },
         /* W13's seam, called and never reimplemented: `close` → `pushSettled`

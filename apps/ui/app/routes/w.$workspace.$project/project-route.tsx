@@ -53,6 +53,7 @@ import { stringParameter } from '#utils/search-parameter.codecs.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
+import { UnsavedParameterDraftsDialog } from '#routes/w.$workspace.$project/unsaved-parameter-drafts-dialog.js';
 
 /* Module scope: the setter is memoised on the codec's identity. */
 const cloudOpenParameter = stringParameter();
@@ -219,49 +220,6 @@ function ProjectSessionBinding({
   }, [session, status]);
 
   useEffect(() => {
-    parameterService.setBackupOwner(async () => {
-      if (client === undefined) {
-        throw new Error('Revision backup owner is unavailable.');
-      }
-      const current = client.status();
-      if (current?.dirty === false && !current.minting && current.headRevisionId !== undefined) {
-        return current.headRevisionId;
-      }
-      client.send({ command: 'saveRevision', trigger: 'save' });
-      return new Promise<string>((resolve, reject) => {
-        const signal = AbortSignal.timeout(editorFlushTimeoutMilliseconds);
-        let unsubscribe = (): void => undefined;
-        const finish = (revisionId: string | undefined): void => {
-          if (revisionId === undefined) {
-            return;
-          }
-          unsubscribe();
-          signal.removeEventListener('abort', onAbort);
-          resolve(revisionId);
-        };
-        const onAbort = (): void => {
-          unsubscribe();
-          reject(new DOMException('Timed out while creating the parameter migration backup.', 'TimeoutError'));
-        };
-        unsubscribe = client.subscribe(() => {
-          const status = client.status();
-          if (status?.dirty === false && !status.minting) {
-            finish(status.headRevisionId);
-          }
-        });
-        signal.addEventListener('abort', onAbort, { once: true });
-        const status = client.status();
-        if (status?.dirty === false && !status.minting) {
-          finish(status.headRevisionId);
-        }
-      });
-    });
-    return () => {
-      parameterService.setBackupOwner(undefined);
-    };
-  }, [client, parameterService]);
-
-  useEffect(() => {
     return registerProjectSessionServices(projectId, {
       flushProducers: async () =>
         flushProjectSessionPersistence({
@@ -343,8 +301,7 @@ function ProjectSessionBinding({
     [projectId],
   );
 
-  // oxlint-disable-next-line react/jsx-no-useless-fragment -- Headless component
-  return <></>;
+  return <UnsavedParameterDraftsDialog projectId={projectId} />;
 }
 
 function ProjectSession({

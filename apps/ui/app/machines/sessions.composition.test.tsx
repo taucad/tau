@@ -209,11 +209,11 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   useOptionalFileManager: () => undefined,
 }));
 
-/* Module scope: the route's backup-owner effect is keyed on this identity, so a
+/* Module scope: the route's session effect is keyed on this identity, so a
  * fresh object per render would re-run it forever. */
 const parameterService = {
-  setBackupOwner: () => undefined,
   close: async () => undefined,
+  subscribeUnsavedDrafts: () => () => undefined,
 };
 
 vi.mock('#hooks/use-project.js', () => ({

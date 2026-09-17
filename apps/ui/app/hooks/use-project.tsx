@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { createContext, useContext, useMemo, useCallback, useEffect, useRef } from 'react';
+import { createContext, useContext, useMemo, useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -223,6 +223,24 @@ export function ProjectProvider({
       }),
     [fileManager.client, fileManager.contentService, fileSystemRoot],
   );
+  /* A re-memoed service replaces the previous one; close the one it replaced. Never close on unmount:
+   * the project session owns the final close and Strict Mode would close a live service. */
+  const previousParameterService = useRef(parameterService);
+  useEffect(() => {
+    const previous = previousParameterService.current;
+    previousParameterService.current = parameterService;
+    if (previous === parameterService) {
+      return;
+    }
+    // async-iife: bootstrap -- an effect cannot await the replaced service's close.
+    void (async () => {
+      try {
+        await previous.close();
+      } catch (error) {
+        toast.error(errorMessage(error));
+      }
+    })();
+  }, [parameterService]);
 
   const actorRef = useActorRef(
     projectMachine.provide({
@@ -363,7 +381,9 @@ export function ProjectProvider({
   );
   const logRef = useSelector(actorRef, (state) => state.context.logRef);
   const appliedParameterValues = useRef(new Map<string, string>());
-  const parameterObservers = useRef(new Map<string, () => void>());
+  /* Keyed by entry path but bound to one actor: a retired and re-created set actor at the same path
+   * (move rollback, delete and recreate, retried close) gets a fresh subscription. */
+  const parameterObservers = useRef(new Map<string, Readonly<{ actor: unknown; unsubscribe: () => void }>>());
 
   /* The kernel learns a committed value from the set actor's own notification, which runs in the
    * same synchronous turn as the checked write — ahead of React's render of this provider. */
@@ -389,9 +409,11 @@ export function ProjectProvider({
   const observeParameters = useCallback(
     (entryPath: string): void => {
       const actor = parameterService.actor(entryPath);
-      if (actor === undefined || parameterObservers.current.has(entryPath)) {
+      const existing = parameterObservers.current.get(entryPath);
+      if (actor === undefined || existing?.actor === actor) {
         return;
       }
+      existing?.unsubscribe();
       let last: unknown;
       const subscription = actor.subscribe((snapshot) => {
         const { current } = snapshot.context;
@@ -400,8 +422,11 @@ export function ProjectProvider({
           dispatchParameters(entryPath);
         }
       });
-      parameterObservers.current.set(entryPath, () => {
-        subscription.unsubscribe();
+      parameterObservers.current.set(entryPath, {
+        actor,
+        unsubscribe: () => {
+          subscription.unsubscribe();
+        },
       });
       dispatchParameters(entryPath);
     },
@@ -410,10 +435,14 @@ export function ProjectProvider({
 
   useEffect(() => {
     const observers = parameterObservers.current;
-    for (const entryPath of geometryUnits.keys()) {
-      observeParameters(entryPath);
-    }
-    for (const [entryPath, unsubscribe] of observers) {
+    const observeAll = (): void => {
+      for (const entryPath of geometryUnits.keys()) {
+        observeParameters(entryPath);
+      }
+    };
+    observeAll();
+    const unsubscribeActors = parameterService.subscribeActors(observeAll);
+    for (const [entryPath, { unsubscribe }] of observers) {
       if (!geometryUnits.has(entryPath)) {
         unsubscribe();
         observers.delete(entryPath);
@@ -421,12 +450,13 @@ export function ProjectProvider({
       }
     }
     return () => {
-      for (const unsubscribe of observers.values()) {
+      unsubscribeActors();
+      for (const { unsubscribe } of observers.values()) {
         unsubscribe();
       }
       observers.clear();
     };
-  }, [geometryUnits, observeParameters]);
+  }, [geometryUnits, observeParameters, parameterService]);
   const focusedChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
   const resolvedRequestedChatId = useSelector(editorRef, (state) => state.context.requestedChatId);
   const focusedChatResolved = useSelector(editorRef, (state) => state.matches({ ready: { operation: 'idle' } }));
@@ -550,9 +580,18 @@ export function ProjectProvider({
       // the load settles and will dispatch the first loaded snapshot.
       const operation = parameterService.resolve(filePath, manifest);
       observeParameters(filePath);
-      reportParameterOperation(operation);
+      // A failed load is shown in the panel with its recovery action, so it is not also a toast.
+      const settle = async (): Promise<void> => {
+        try {
+          await operation;
+        } catch {
+          // The set actor holds the typed diagnostic.
+        }
+      };
+      // async-iife: bootstrap -- resolution is observed through the set actor, not this promise.
+      void settle();
     },
-    [observeParameters, parameterService, reportParameterOperation],
+    [observeParameters, parameterService],
   );
 
   const setGeometryUnitParameters = useCallback(
@@ -732,6 +771,22 @@ export function useMainGraphics(): ActorRefFrom<typeof graphicsMachine> | undefi
   }
 
   return undefined;
+}
+
+/**
+ * The live parameter-set actor for an entry, re-read whenever the service creates or retires one.
+ * @param entryPath - The geometry entry whose parameters the actor owns.
+ * @returns The actor, or `undefined` before the entry has been resolved.
+ */
+export function useParameterSetActor(
+  entryPath: string | undefined,
+): ReturnType<ProjectContextType['parameterService']['actor']> {
+  const { parameterService } = useProject();
+  return useSyncExternalStore(
+    parameterService.subscribeActors,
+    () => (entryPath === undefined ? undefined : parameterService.actor(entryPath)),
+    () => undefined,
+  );
 }
 
 export function useProject<T extends ProjectContextType = ProjectContextType>(options?: {

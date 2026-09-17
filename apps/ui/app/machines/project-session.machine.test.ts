@@ -298,7 +298,29 @@ describe('projectSessionMachine', () => {
     actor.stop();
   });
 
-  it.each(['cancelRuns', 'flushProducers', 'flushSync', 'releaseLeases', 'releaseAgentHost'] as const)(
+  it('stays live with a retryable close when a producer refuses to flush', async () => {
+    const parent = recordingParent();
+    const { actor, live, order } = harness({ parentRef: parent.ref, failCloseStep: 'flushProducers' });
+    await settle();
+    actor.send({ type: 'close', reason: 'quit' });
+    await settle();
+    await settle();
+
+    expect(actor.getSnapshot().matches('live')).toBe(true);
+    expect(actor.getSnapshot().context).toMatchObject({
+      closeReason: undefined,
+      failures: { close: 'flushProducers failed' },
+    });
+    expect(live.size).toBe(4);
+    actor.send({ type: 'close', reason: 'quit' });
+    await settle();
+    await settle();
+    expect(order.filter((entry) => entry === 'flushProducers')).toHaveLength(2);
+    expect(parent.received.some((event) => event.type === 'sessionClosed')).toBe(false);
+    actor.stop();
+  });
+
+  it.each(['cancelRuns', 'flushSync', 'releaseLeases', 'releaseAgentHost'] as const)(
     'keeps resources live and reports failure when %s fails',
     async (failCloseStep) => {
       const parent = recordingParent();

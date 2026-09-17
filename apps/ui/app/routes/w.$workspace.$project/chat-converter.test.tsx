@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import type { ActorRefFrom } from 'xstate';
 import type { CapabilitiesManifest, ExportRoute } from '@taucad/runtime';
+import { fileParameterRecordProfile } from '@taucad/types';
 import type { FileExtension, FileParameterEntry, JSONValue } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import { admitParameterManifest } from '@taucad/parameters';
@@ -121,20 +122,29 @@ const mockParameterService = {
   readSettled: vi.fn(async () => undefined),
   resolveTarget: vi.fn(async (target: { entry: string }) => {
     const { entry } = target;
-    const record: FileParameterEntry = { activeGroup: 'default', groups: { default: { values: {} } } };
-    const snapshot = { entry: record, identity: parameterIdentity, access: { status: 'current', writeAllowed: true } };
+    const record: FileParameterEntry = {
+      recordVersion: 1,
+      profile: fileParameterRecordProfile,
+      activeGroup: 'default',
+      groups: { default: { values: {} } },
+    };
+    const snapshot = { entry: record, identity: parameterIdentity };
     mockParameterEntries.set(entry, record);
     mockParameterSnapshots.set(entry, snapshot);
     return snapshot;
   }),
   replaceTargetValues: vi.fn(
     async (target: { entry: string }, _manifest: unknown, { values }: { values: Record<string, JSONValue> }) => {
-      const record: FileParameterEntry = { activeGroup: 'default', groups: { default: { values } } };
+      const record: FileParameterEntry = {
+        recordVersion: 1,
+        profile: fileParameterRecordProfile,
+        activeGroup: 'default',
+        groups: { default: { values } },
+      };
       mockParameterEntries.set(target.entry, record);
       mockParameterSnapshots.set(target.entry, {
         entry: record,
         identity: parameterIdentity,
-        access: { status: 'current', writeAllowed: true },
       });
     },
   ),
@@ -788,6 +798,37 @@ describe('ChatConverter', () => {
     await vi.waitFor(() => {
       expect(mockKernelClient.export).toHaveBeenCalledWith('glb', { exportOptions: {} });
     });
+  });
+
+  it('exports the checked configuration record, not the stale preference mirror', async () => {
+    const resolveTarget = mockParameterService.resolveTarget.getMockImplementation()!;
+    mockParameterService.resolveTarget.mockImplementation(async (target: { entry: string }) => {
+      const snapshot = await resolveTarget(target);
+      if (!target.entry.includes('export_stl_options')) {
+        return snapshot;
+      }
+      // Another client changed the record while this converter was closed.
+      const record: FileParameterEntry = {
+        recordVersion: 1,
+        profile: fileParameterRecordProfile,
+        activeGroup: 'default',
+        groups: { default: { values: { binary: false } } },
+      };
+      const changed = { entry: record, identity: parameterIdentity };
+      mockParameterEntries.set(target.entry, record);
+      mockParameterSnapshots.set(target.entry, changed);
+      return changed;
+    });
+    try {
+      render(<ChatConverter isExpanded />);
+      fireEvent.click(screen.getByRole('button', { name: /stl/i }));
+      fireEvent.click(screen.getByRole('button', { name: /export stl/i }));
+      await vi.waitFor(() => {
+        expect(mockKernelClient.export).toHaveBeenCalledWith('stl', { exportOptions: { binary: false } });
+      });
+    } finally {
+      mockParameterService.resolveTarget.mockImplementation(resolveTarget);
+    }
   });
 
   it('should persist every dependent artifact when saving one format to the project', async () => {

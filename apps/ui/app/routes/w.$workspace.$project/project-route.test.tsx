@@ -87,8 +87,8 @@ const projectRef = {
   subscribe: () => ({ unsubscribe: () => undefined }),
 };
 const parameterService = {
-  setBackupOwner: vi.fn(),
   close: vi.fn(async () => undefined),
+  subscribeUnsavedDrafts: () => () => undefined,
 };
 
 vi.mock('#hooks/use-project-manager.js', () => ({

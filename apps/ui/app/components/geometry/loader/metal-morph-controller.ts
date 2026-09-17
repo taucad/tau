@@ -101,6 +101,12 @@ export type MetalMorphLoaderOptions = Readonly<{
   speed?: number;
   timing?: MorphTimingConfig;
   onSequenceChange?: (state: MetalMorphSequenceState) => void;
+  /**
+   * Called synchronously after every completed frame, with the loop clock and the canvas the frame landed
+   * on, so a shared surface can copy the pixels out before anything else touches the drawing buffer. Ticks
+   * the frame cap skips never call it, and neither does a readback capture or a disposed controller.
+   */
+  onFrame?: (frame: { readonly time: number; readonly canvas: HTMLCanvasElement }) => void;
 }>;
 
 export type MetalMorphLoaderController = Readonly<{
@@ -447,7 +453,7 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
   };
 
   const draw = (): void => {
-    if (!renderer) {
+    if (!renderer || isDisposed()) {
       return;
     }
     if (pipeline) {
@@ -455,6 +461,8 @@ export const createMetalMorphLoader = (options: MetalMorphLoaderOptions): MetalM
     } else {
       renderer.render(scene, camera);
     }
+    // Same task as the draw, so the drawing buffer still holds this frame for a subscriber to copy.
+    options.onFrame?.({ time: elapsed, canvas: options.canvas });
   };
 
   const effectiveFrameRate = (): number =>

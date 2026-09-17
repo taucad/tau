@@ -12,6 +12,10 @@
     "**/dist/**",
     "**/dist-*/**",
     "**/generated/**",
+    // `@taucad/api-extractor` output: eight kernels emit `agent/resources.{js,d.ts}` verbatim from
+    // their published API, and a generator is not edited to satisfy a style rule.
+    "**/agent/resources.js",
+    "**/agent/resources.d.ts",
     "**/native/opencascade/geospec_opencascade_single.*",
     "**/wasm/**",
     "**/out-tsc/**",

@@ -711,6 +711,33 @@ describe('exposeFileSystem coalesced delivery', () => {
     channel.port1.close();
   });
 
+  it('should carry the whole-project export filter and its archive across the wire', async () => {
+    /* The archive is the one workspace call whose result is a `Blob` and whose
+     * options bag is read by the authority, not by the proxy: a transport that
+     * dropped either would leave the palette's export silently wrong rather
+     * than failing. */
+    const getZippedDirectory = vi.fn(async () => new Blob(['PK\u0003\u0004'], { type: 'application/zip' }));
+    const handle = exposeFileSystem({ getZippedDirectory });
+    const channel = new MessageChannel();
+    messageHandlers[0]!(
+      new MessageEvent('message', {
+        data: { v: 1, type: filesystemBridgeConnectMessageType, port: channel.port1 },
+      }),
+    );
+    const proxy = createTransferredFileSystemBridgeProxy(channel.port2);
+
+    await proxy.ready;
+    const archive = await proxy.getZippedDirectory('/projects/proj_a', { versionedOnly: true });
+
+    expect(getZippedDirectory).toHaveBeenCalledWith('/projects/proj_a', { versionedOnly: true });
+    expect(archive).toBeInstanceOf(Blob);
+    await expect(archive.text()).resolves.toBe('PK\u0003\u0004');
+
+    proxy.dispose();
+    handle.cleanup();
+    channel.port1.close();
+  });
+
   it('rejects a mismatched connect envelope with a typed protocol error', async () => {
     const handle = exposeFileSystem({});
     const channel = new MessageChannel();

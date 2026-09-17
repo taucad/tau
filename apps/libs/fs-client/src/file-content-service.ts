@@ -847,13 +847,19 @@ export class FileContentService {
 
   /**
    * Get a zipped archive of a directory.
-   * @param path - Workspace-relative directory path.
+   *
+   * `''` is the workspace root, which is what a whole-project export asks for:
+   * an absolute spelling of the same directory is a scope violation, not an
+   * alias, because this facade speaks workspace-relative keys.
+   *
+   * @param path - Workspace-relative directory path, `''` for the workspace root.
+   * @param options - Optional `{ versionedOnly }` to archive only the bytes the path registry counts as the project.
    * @returns Blob containing the archive bytes from the worker.
    * @throws {WorkspaceScopeViolationError} When `path` escapes the workspace root.
    */
-  public async getZippedDirectory(path: string): Promise<Blob> {
+  public async getZippedDirectory(path: string, options?: { versionedOnly?: boolean }): Promise<Blob> {
     const key = this.paths.toWorkspaceRelativeKey('getZippedDirectory', path);
-    return this.proxy.getZippedDirectory(this.paths.toAbsolutePath(key));
+    return this.proxy.getZippedDirectory(this.paths.toAbsolutePath(key), options);
   }
 
   /**

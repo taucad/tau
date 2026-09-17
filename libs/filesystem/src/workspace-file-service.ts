@@ -70,6 +70,7 @@ import {
 import { MissingWorkspaceHandleError, RootedFileSystemError, WorkspaceMutationError } from '#workspace-errors.js';
 import { fileMetadataFields, getFileContentMetadata } from '#content-metadata.js';
 import { readDirectoryEntries } from '#backend/directory-entries.js';
+import { classify } from '#path-registry.js';
 
 /** Milliseconds. */
 const kernelCoalescingWindow = 75;
@@ -97,6 +98,47 @@ const maxLocalizedExternalChanges = 64;
 const missingExternalSnapshot = '<missing>';
 const maximumCheckedWritePreconditions = 32;
 const maximumCheckedWriteBytes = 8 * 1024 * 1024;
+
+/**
+ * Which archived paths the path registry admits, or `undefined` when no
+ * registry answer applies.
+ *
+ * Classification is relative to the mount that admitted the zip root, which is
+ * the project route (`/projects/<id>` or `/checkouts/<id>`) for every archive a
+ * person asks for — so the registry answers about the same project-relative
+ * spellings it answers about everywhere else. A `{ scope }` zip addresses a
+ * physical provider directly and has no mount, so it keeps the raw walk.
+ *
+ * Directories are refused only when they are hidden: a whole subtree the
+ * composed view never shows costs one refusal instead of a walk. `versioned` is
+ * asked of files alone, because an unversioned-looking directory can hold
+ * versioned bytes — `.tau` is exactly that, and `.tau/parameters` is the
+ * project's.
+ *
+ * @param path          - Absolute zip root as the caller spelled it.
+ * @param entry         - Mount that admitted the zip root, when the mount table routed it.
+ * @param versionedOnly - Whether to keep only the bytes the registry marks as the project itself.
+ * @returns Predicate over paths relative to the zip root, or `undefined` to collect everything.
+ */
+const archiveAdmits = (
+  path: string,
+  entry: MountEntry | undefined,
+  versionedOnly: boolean,
+): ((relativePath: string, kind: 'file' | 'dir') => boolean) | undefined => {
+  if (entry === undefined) {
+    return undefined;
+  }
+  const normalized = resolveAuthorityPath(path);
+  /* `''` at the mount itself, which is what a whole-project archive zips. */
+  const root = entry.prefix === '/' ? normalized.slice(1) : normalized.slice(entry.prefix.length + 1);
+  return (relativePath, kind) => {
+    const { agentAccess, versioned } = classify(root === '' ? relativePath : joinRelativePath(root, relativePath));
+    if (agentAccess === 'hidden') {
+      return false;
+    }
+    return kind === 'dir' || !versionedOnly || versioned;
+  };
+};
 
 const asBytes = (value: Uint8Array<ArrayBuffer> | string): Uint8Array<ArrayBuffer> =>
   typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value);
@@ -1602,20 +1644,30 @@ export class WorkspaceFileService {
   }
 
   /**
-   * Package a directory's contents into a ZIP blob. Pass `{ scope }` to
-   * zip from the standalone provider for an explicit workspace scope
-   * instead of the mount table.
+   * Package a directory's contents into a ZIP blob, minus whatever the path
+   * registry hides. Pass `{ scope }` to zip from the standalone provider for
+   * an explicit workspace scope instead of the mount table, or
+   * `{ versionedOnly }` for a whole-project export: the registry's `versioned`
+   * rows are the bytes that are the project, so records, caches and generated
+   * output stay out of an archive a person shares.
    *
    * @param path    - Absolute directory path.
-   * @param options - Optional `{ scope }` discriminator.
+   * @param options - Optional `{ scope }` discriminator and `{ versionedOnly }` export filter.
    * @returns ZIP archive as a `Blob`.
    */
-  public async getZippedDirectory(path: string, options?: { scope?: WorkspaceScope }): Promise<Blob> {
+  public async getZippedDirectory(
+    path: string,
+    options?: { scope?: WorkspaceScope; versionedOnly?: boolean },
+  ): Promise<Blob> {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- JSZip is the library's class name
     const { default: JSZip } = await import('jszip');
     const zip = new JSZip();
-    const { provider, path: resolvedPath } = await this._resolve(path, options);
-    const { files } = await this._getDirectoryContentsInternal(provider, resolvedPath);
+    const { provider, path: resolvedPath, entry } = await this._resolve(path, options);
+    const { files } = await this._getDirectoryContentsInternal(
+      provider,
+      resolvedPath,
+      archiveAdmits(path, entry, options?.versionedOnly === true),
+    );
     for (const [relativePath, content] of Object.entries(files)) {
       zip.file(relativePath, content);
     }
@@ -4349,7 +4401,7 @@ export class WorkspaceFileService {
   private async _resolve(
     path: string,
     options?: { scope?: WorkspaceScope },
-  ): Promise<{ provider: FileSystemProvider; path: string; backend: FileSystemBackend }> {
+  ): Promise<{ provider: FileSystemProvider; path: string; backend: FileSystemBackend; entry?: MountEntry }> {
     if (options?.scope !== undefined) {
       const provider = await this._registry.getProvider(options.scope);
       const authorityPath = resolveAuthorityPath(path);
@@ -4361,7 +4413,12 @@ export class WorkspaceFileService {
     }
     this._assertBoundProjectRoute(path);
     const resolution = this._mountTable.resolve(path);
-    return { provider: resolution.provider, path: resolution.path, backend: resolution.backend };
+    return {
+      provider: resolution.provider,
+      path: resolution.path,
+      backend: resolution.backend,
+      ...(resolution.entry === undefined ? {} : { entry: resolution.entry }),
+    };
   }
 
   private _validatePendingProjectCommit(input: CommitPendingProjectDirectoryInput): {
@@ -4679,6 +4736,14 @@ export class WorkspaceFileService {
     }
   }
 
+  /**
+   * Walk a directory into its files and directories, keyed relative to it.
+   *
+   * @param provider - Provider to enumerate and read through.
+   * @param path     - Provider-relative directory path.
+   * @param admits   - Optional predicate on each path relative to `path`; a refused directory is not descended into and a refused file is never read. Every entry is collected when omitted.
+   * @returns File bytes keyed by relative path, and the relative directories walked.
+   */
   private async _getDirectoryContentsInternal(
     provider: {
       readdir(path: string): Promise<string[]>;
@@ -4687,6 +4752,7 @@ export class WorkspaceFileService {
       readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
     },
     path: string,
+    admits?: (relativePath: string, kind: 'file' | 'dir') => boolean,
   ): Promise<{
     files: Record<string, Uint8Array<ArrayBuffer>>;
     directories: string[];
@@ -4698,12 +4764,17 @@ export class WorkspaceFileService {
       const entries = await readDirectoryEntries(provider, currentPath);
       for (const entry of entries) {
         const fullPath = joinRelativePath(currentPath, entry.name);
+        const relativePath = basePath === '' ? fullPath : fullPath.slice(basePath.length + 1);
+        /* Asked before the read and before the descent, so a refused directory
+         * costs one `readdir` at its parent and nothing else. */
+        if (admits !== undefined && !admits(relativePath, entry.kind)) {
+          continue;
+        }
         if (entry.kind === 'file') {
-          const relativePath = basePath === '' ? fullPath : fullPath.slice(basePath.length + 1);
           // oxlint-disable-next-line no-await-in-loop -- Sequential reads required for recursive collection
           files[relativePath] = await provider.readFile(fullPath);
         } else {
-          directories.push(basePath === '' ? fullPath : fullPath.slice(basePath.length + 1));
+          directories.push(relativePath);
           // oxlint-disable-next-line no-await-in-loop -- Sequential traversal required for recursive collection
           await collect(fullPath, basePath);
         }

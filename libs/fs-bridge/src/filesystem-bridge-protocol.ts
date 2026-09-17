@@ -492,6 +492,11 @@ const voidResult: z.ZodType<void> = z.union([z.undefined(), z.null()]).transform
 const booleanResult = z.boolean();
 const recursiveOptionsSchema = z.looseObject({ recursive: z.boolean().optional() });
 const scopedOptionsSchema = z.looseObject({ scope: workspaceScopeSchema.optional() });
+/** `getZippedDirectory` also takes the whole-project export filter. */
+const zipOptionsSchema = z.looseObject({
+  scope: workspaceScopeSchema.optional(),
+  versionedOnly: z.boolean().optional(),
+});
 
 const helloVersionProbeSchema = z.looseObject({ v: z.unknown().optional() });
 const fileSystemBridgeHelloValidator: z.ZodType<FileSystemBridgeHello> = z.preprocess(
@@ -603,7 +608,7 @@ const callSchemas = {
   getDirectoryContents: { args: oneStringArgument, result: directoryContentsSchema },
   duplicateFile: { args: twoStringArgs, result: voidResult },
   copyDirectory: { args: twoStringArgs, result: voidResult },
-  getZippedDirectory: { args: z.tuple([z.string(), scopedOptionsSchema.optional()]), result: z.instanceof(Blob) },
+  getZippedDirectory: { args: z.tuple([z.string(), zipOptionsSchema.optional()]), result: z.instanceof(Blob) },
   mount: { args: z.tuple([z.string(), mountConfigSchema]), result: voidResult },
   unmount: { args: oneStringArgument, result: voidResult },
   configureProjectRoots: { args: z.tuple([projectRootConfigurationSchema]), result: voidResult },

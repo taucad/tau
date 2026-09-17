@@ -614,7 +614,7 @@ describe('FileContentService', () => {
 
     const result = await service.getZippedDirectory('');
 
-    expect(proxy.getZippedDirectory).toHaveBeenCalledWith('/project');
+    expect(proxy.getZippedDirectory).toHaveBeenCalledWith('/project', undefined);
     expect(result).toBe(blob);
   });
 
@@ -1692,6 +1692,27 @@ describe('FileContentService', () => {
     });
   });
 
+  describe('getZippedDirectory', () => {
+    it('should forward the export options bag to the authority', async () => {
+      const harness = createHarness({ workspaceRoot: '/projects/p1' });
+
+      await harness.service.getZippedDirectory('', { versionedOnly: true });
+
+      expect(harness.proxy.getZippedDirectory).toHaveBeenCalledWith('/projects/p1', { versionedOnly: true });
+      harness.disposeChannel();
+    });
+
+    it('should reject an absolute alias of its own root before touching the proxy', async () => {
+      const harness = createHarness({ workspaceRoot: '/projects/p1' });
+
+      await expect(harness.service.getZippedDirectory('/projects/p1')).rejects.toBeInstanceOf(
+        WorkspaceScopeViolationError,
+      );
+      expect(harness.proxy.getZippedDirectory).not.toHaveBeenCalled();
+      harness.disposeChannel();
+    });
+  });
+
   describe('workspace scope contract', () => {
     it('write rejects foreign-absolute keys with WorkspaceScopeViolationError before touching the proxy', async () => {
       const harness = createHarness({ workspaceRoot: '/' });
@@ -1848,7 +1869,7 @@ describe('FileContentService', () => {
       const result = await harness.service.getZippedDirectory('src/assets');
 
       expect(result).toBe(blob);
-      expect(harness.proxy.getZippedDirectory).toHaveBeenCalledWith('/projects/abc/src/assets');
+      expect(harness.proxy.getZippedDirectory).toHaveBeenCalledWith('/projects/abc/src/assets', undefined);
       harness.disposeChannel();
     });
 

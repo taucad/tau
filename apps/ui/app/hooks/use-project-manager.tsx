@@ -293,7 +293,21 @@ export type ProjectRouteAccess =
     }
   | { readonly status: 'conflict' | 'unavailable' | 'missing' };
 
-const ProjectManagerContext = createContext<ProjectManagerContextType | undefined>(undefined);
+/* This module exports a hook as well as a provider, so React Refresh refuses it
+ * as a boundary (`isLikelyComponentType` wants a capitalised name) and the
+ * update is re-imported by whichever accepting importer is above it. A second
+ * `createContext` would put the provider and its consumers on different
+ * contexts, and `useProjectManager` would then throw through the root boundary
+ * — which re-renders the same tree, in a loop that floods the log. `hot.data`
+ * is keyed by module path, so the first context outlives every update. */
+const hotContexts = import.meta.hot?.data as
+  | { projectManagerContext?: React.Context<ProjectManagerContextType | undefined> }
+  | undefined;
+const ProjectManagerContext =
+  hotContexts?.projectManagerContext ?? createContext<ProjectManagerContextType | undefined>(undefined);
+if (hotContexts) {
+  hotContexts.projectManagerContext = ProjectManagerContext;
+}
 
 /**
  * Milliseconds. A single mutation fans out across seven worker event channels,

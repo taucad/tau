@@ -14,9 +14,10 @@ const desktopLayout = {
   workbenchWidth: 420,
   compactAuxiliary: 'chat' as 'chat' | 'workbench',
 };
+const editorState = { isReady: true };
 const snapshot = {
   context: { panelState: { desktopLayout } },
-  matches: () => true,
+  matches: () => editorState.isReady,
 };
 
 vi.mock('@xstate/react', () => ({
@@ -35,6 +36,7 @@ vi.mock('#routes/w.$workspace.$project/chat-history.js', () => ({
 vi.mock('#routes/w.$workspace.$project/focused-chat-gate.js', () => ({
   ChatHistoryGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   ChatInterfaceSessionGate: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  ChatPaneSkeleton: () => <div data-testid='chat-skeleton' />,
 }));
 vi.mock('#routes/w.$workspace.$project/chat-viewer-dockview.js', () => ({
   ViewerDockview: () => <div data-testid='viewer-lane' />,
@@ -117,6 +119,7 @@ describe('ChatInterfaceDesktop', () => {
     desktopLayout.chatOpen = true;
     desktopLayout.workbenchOpen = true;
     desktopLayout.compactAuxiliary = 'chat';
+    editorState.isReady = true;
     sidebar.open = true;
     vi.clearAllMocks();
     vi.stubGlobal('ResizeObserver', ResizeObserverMock);
@@ -140,6 +143,22 @@ describe('ChatInterfaceDesktop', () => {
     expect(screen.getByTestId('workbench-lane').closest('[data-pane]')).toHaveAttribute('data-visible', 'true');
     expect(screen.getByTestId('viewer-lane')).toBe(viewer);
     expect(document.querySelectorAll('[data-pane]')).toHaveLength(3);
+  });
+
+  /* The editor state loads from storage before the lanes can take their
+   * persisted widths; the lanes stand in at their defaults, never a blank. */
+  it('shows the workspace skeleton instead of a blank while the editor state loads', async () => {
+    editorState.isReady = false;
+    renderDesktop();
+
+    const skeleton = await screen.findByRole('status', { name: 'Opening project' });
+    expect(skeleton).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByTestId('chat-skeleton')).toBeInTheDocument();
+    expect(screen.queryByTestId('allotment')).not.toBeInTheDocument();
+    expect(skeleton.querySelectorAll('.border-l')).toHaveLength(1);
+
+    resizeTo(compactWorkspaceWidth - 1);
+    expect(screen.getByRole('status', { name: 'Opening project' }).querySelectorAll('.border-l')).toHaveLength(0);
   });
 
   it('reserves fixed-control space inside the chat header without shifting its border', async () => {

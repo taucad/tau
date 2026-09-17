@@ -58,7 +58,7 @@ describe('ensureBundledTypesMount against the real WorkspaceFileService', () => 
   });
 
   it('stamps the mount through the service mutation boundary', async () => {
-    await expect(ensureBundledTypesMount(service, payload, populate)).resolves.toBe('populated');
+    await expect(ensureBundledTypesMount(service, payload, { populate })).resolves.toBe('populated');
 
     await expect(readText(service, '/node_modules/replicad/index.d.ts')).resolves.toBe('export declare const a: 1;');
     await expect(readText(service, '/node_modules/@jscad/modeling/index.d.ts')).resolves.toBe(
@@ -68,21 +68,23 @@ describe('ensureBundledTypesMount against the real WorkspaceFileService', () => 
   });
 
   it('skips a second boot with the same payload', async () => {
-    await ensureBundledTypesMount(service, payload, populate);
+    await ensureBundledTypesMount(service, payload, { populate });
     populate.mockClear();
 
-    await expect(ensureBundledTypesMount(service, payload, populate)).resolves.toBe('skipped');
+    await expect(ensureBundledTypesMount(service, payload, { populate })).resolves.toBe('skipped');
     expect(populate).not.toHaveBeenCalled();
   });
 
   it('repopulates after the payload changes', async () => {
-    await ensureBundledTypesMount(service, payload, populate);
+    await ensureBundledTypesMount(service, payload, { populate });
 
     await expect(
-      ensureBundledTypesMount(service, [{ packageName: 'replicad', content: 'export declare const a: 2;' }], populate),
+      ensureBundledTypesMount(service, [{ packageName: 'replicad', content: 'export declare const a: 2;' }], {
+        populate,
+      }),
     ).resolves.toBe('populated');
     await expect(readText(service, '/node_modules/replicad/index.d.ts')).resolves.toBe('export declare const a: 2;');
-    await expect(ensureBundledTypesMount(service, payload, populate)).resolves.toBe('populated');
+    await expect(ensureBundledTypesMount(service, payload, { populate })).resolves.toBe('populated');
   });
 
   it('stamps a /node_modules sub-mount that has its own provider base path', async () => {
@@ -91,10 +93,10 @@ describe('ensureBundledTypesMount against the real WorkspaceFileService', () => 
     service.dispose();
     service = await createService('tau-node-modules');
 
-    await expect(ensureBundledTypesMount(service, payload, populate)).resolves.toBe('populated');
+    await expect(ensureBundledTypesMount(service, payload, { populate })).resolves.toBe('populated');
     await expect(readText(service, '/node_modules/replicad/index.d.ts')).resolves.toBe('export declare const a: 1;');
     await expect(readText(service, bundledTypesSentinelPath)).resolves.toBeTypeOf('string');
-    await expect(ensureBundledTypesMount(service, payload, populate)).resolves.toBe('skipped');
+    await expect(ensureBundledTypesMount(service, payload, { populate })).resolves.toBe('skipped');
   });
 
   it('still delivers the declarations when the stamp itself cannot be written', async () => {
@@ -107,8 +109,8 @@ describe('ensureBundledTypesMount against the real WorkspaceFileService', () => 
       await populateBundledTypesMount(service, entries);
     });
 
-    await expect(ensureBundledTypesMount(service, payload, rejectStamp)).resolves.toBe('populated');
+    await expect(ensureBundledTypesMount(service, payload, { populate: rejectStamp })).resolves.toBe('populated');
     await expect(readText(service, '/node_modules/replicad/index.d.ts')).resolves.toBe('export declare const a: 1;');
-    await expect(ensureBundledTypesMount(service, payload, rejectStamp)).resolves.toBe('populated');
+    await expect(ensureBundledTypesMount(service, payload, { populate: rejectStamp })).resolves.toBe('populated');
   });
 });

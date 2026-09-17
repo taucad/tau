@@ -232,7 +232,9 @@ test('builds an openrscad model on disk from the project chat', async () => {
     };
     await expect.poll(lastLabel, { timeout: 120_000 }).toMatch(/^Rev \d+ saved/u);
     const labels = await markerLabels();
-    const working = labels.findLastIndex((label) => label.endsWith('Working'));
+    /* `turnRevisionLabel`'s working copy: "New revision", or "Starting …" once a
+     * base revision has a name. */
+    const working = labels.findLastIndex((label) => label === 'New revision' || label.startsWith('Starting '));
     const saving = labels.lastIndexOf('Saving revision');
     console.info(`[desktop-e2e] in-project turn marker: ${JSON.stringify(labels)}`);
     expect(working, `marker never said Working: ${JSON.stringify(labels)}`).toBeGreaterThanOrEqual(0);

@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
-import { LoaderCircle } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
+import { ChatActivitySpinner } from '#components/chat/chat-activity-spinner.js';
 import { cn } from '@taucad/ui/utils/cn';
 
 type ChatToolInlineStatus = 'loading' | 'success' | 'error';
@@ -56,7 +56,7 @@ export function ChatToolInline({
     >
       {isLoading ? (
         <>
-          <LoaderCircle className='size-3 shrink-0 animate-spin text-inherit' />
+          <ChatActivitySpinner className='text-inherit' />
           <AnimatedShinyText className='min-w-0 truncate'>{children}</AnimatedShinyText>
         </>
       ) : (

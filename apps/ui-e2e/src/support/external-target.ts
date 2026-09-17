@@ -183,7 +183,7 @@ export type UiBrowserCommands = {
     readonly pageErrors: readonly string[];
   }>;
   uiReloadTarget(surface?: TargetSurface): Promise<void>;
-  uiScreenshotTarget(selector?: string, artifactName?: string, surface?: TargetSurface): Promise<string>;
+  uiScreenshotTarget(selector?: string | null, artifactName?: string, surface?: TargetSurface): Promise<string>;
   uiSampleCameraDuringClick(selector: string, frameCount: number): Promise<unknown[]>;
   uiScrollTarget(selector: string, surface?: TargetSurface): Promise<void>;
   uiSetTargetOffline(offline: boolean): Promise<void>;
@@ -294,7 +294,14 @@ export const waitFor = <Argument>(
   callback: (argument: Argument) => unknown,
   argument?: Argument,
   options?: { readonly surface?: TargetSurface; readonly timeout?: number },
-): Promise<void> => server.commands.uiWaitForTarget(callback.toString(), argument, options?.timeout, options?.surface);
+): Promise<void> =>
+  server.commands.uiWaitForTarget(
+    callback.toString(),
+    // The command transport drops `undefined` positions, so a later option needs a `null` placeholder.
+    argument ?? (options?.timeout === undefined && !options?.surface ? undefined : null),
+    options?.timeout,
+    options?.surface,
+  );
 export const keyboardPress = (key: string, surface?: TargetSurface): Promise<void> =>
   server.commands.uiKeyboardPress(key, surface);
 export const mouseMove = (x: number, y: number, options?: TargetMouseOptions, surface?: TargetSurface): Promise<void> =>
@@ -319,7 +326,8 @@ export const screenshot = (
   surface?: TargetSurface,
 ): Promise<string> =>
   server.commands.uiScreenshotTarget(
-    selector && selectorFor(selector),
+    // The command transport drops `undefined` positions, so a page screenshot with a name sends `null`.
+    selector ? selectorFor(selector) : artifactName === undefined && surface === undefined ? undefined : null,
     artifactName ?? (surface ? '' : undefined),
     surface,
   );

@@ -57,7 +57,6 @@ type CadTag = 'cad-loading' | 'cad-runtime-error';
 export type CadContext = {
   entryPath: string | undefined;
   screenshot: string | undefined;
-  parameters: Record<string, unknown>;
   units: { length: LengthSymbol };
   /** Outcome of the latest selected runtime geometry event. */
   latestGeometryOutcome: LatestGeometryOutcome;
@@ -81,8 +80,8 @@ export type CadContext = {
   eventCleanups: Array<() => void>;
   /**
    * Monotonically increasing render identifier. Bumped whenever the UI
-   * issues a render-triggering event (`setEntryPath`, `setParameters`,
-   * `initializeModel`). Consumed by `awaitFreshRender` to detect when a
+   * issues a render-triggering event (`setEntryPath`, `initializeModel`).
+   * Consumed by `awaitFreshRender` to detect when a
    * settled geometry result corresponds to a request issued at-or-after a
    * given baseline.
    */
@@ -170,13 +169,8 @@ type SceneStageWriterEvent =
     };
 
 type CadEvent =
-  | {
-      type: 'initializeModel';
-      entryPath: string;
-      parameters?: Record<string, unknown>;
-    }
+  | { type: 'initializeModel'; entryPath: string }
   | { type: 'setEntryPath'; entryPath: string }
-  | { type: 'setParameters'; parameters: Record<string, unknown> }
   | { type: 'setCodeIssues'; errors: CadContext['codeIssues'] }
   | { type: 'geometryComputed'; geometry: Geometry; issues: KernelIssue[] }
   | { type: 'geometryFailed'; issues: KernelIssue[] }
@@ -244,7 +238,6 @@ type ConnectKernelInput = {
 type RenderModelInput = {
   client: AppRuntimeClient | undefined;
   entryPath: string | undefined;
-  parameters: Record<string, unknown>;
   /** Whether no newer UI render was requested since this one. */
   isLatestRequest: () => boolean;
 };
@@ -709,11 +702,9 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input })
     throw new Error('No model file is selected');
   }
 
-  const request = {
-    source: { path: input.entryPath },
-    parameters: input.parameters,
-    content: { includeEdges: true },
-  } as const;
+  /* Stored values reach the kernel through the watched sidecar, never through this request:
+   * one render trigger, and no second copy of the values to keep in step. */
+  const request = { source: { path: input.entryPath }, content: { includeEdges: true } } as const;
   const outcome = await input.client.render(request);
   // Runtime state events usually stop this actor before the render settles, so ask the machine
   // whether this is still the latest request. If so, the runtime's watched rerender won, and it
@@ -848,13 +839,6 @@ export const cadMachine = setup({
         return newErrorsMap;
       },
     }),
-    setParameters: assign({
-      parameters({ event }) {
-        assertEvent(event, 'setParameters');
-        return event.parameters;
-      },
-      latestGeometryOutcome: () => undefined,
-    }),
     setGeometry: enqueueActions(({ enqueue, event, context }) => {
       assertEvent(event, 'geometryComputed');
       const currentEntryPath = context.entryPath;
@@ -919,7 +903,6 @@ export const cadMachine = setup({
       assertEvent(event, 'initializeModel');
       enqueue.assign({
         entryPath: event.entryPath,
-        parameters: event.parameters ?? {},
         codeIssues: [],
         latestGeometryOutcome: undefined,
         parameterManifest: undefined,
@@ -1126,7 +1109,6 @@ export const cadMachine = setup({
     entryPath: undefined,
     screenshot: undefined,
     units: { length: 'mm' },
-    parameters: {},
     latestGeometryOutcome: undefined,
     geometry: undefined,
     kernelIssues: new Map(),
@@ -1252,9 +1234,6 @@ export const cadMachine = setup({
         setEntryPath: {
           actions: ['bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
         },
-        setParameters: {
-          actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'],
-        },
         kernelLog: { actions: 'sendKernelLogs' },
         kernelProgress: { actions: 'trackProgress' },
         kernelTelemetry: { actions: 'storeTelemetry' },
@@ -1276,9 +1255,6 @@ export const cadMachine = setup({
         setEntryPath: {
           target: '#cad.rendering.submitting',
           actions: ['bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
-        },
-        setParameters: {
-          actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'],
         },
         setCodeIssues: { actions: 'setCodeIssues' },
         geometryComputed: {
@@ -1323,9 +1299,6 @@ export const cadMachine = setup({
           target: '#cad.rendering.submitting',
           actions: ['bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
         },
-        setParameters: {
-          actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'],
-        },
         setCodeIssues: { actions: 'setCodeIssues' },
         geometryComputed: {
           actions: ['setGeometry', 'setSettledRenderId', 'notifyExportAvailability'],
@@ -1369,7 +1342,6 @@ export const cadMachine = setup({
             input: ({ context, self }) => ({
               client: context.kernelClient,
               entryPath: context.entryPath,
-              parameters: context.parameters,
               isLatestRequest: () => self.getSnapshot().context.lastRequestedRenderId === context.lastRequestedRenderId,
             }),
             onDone: {
@@ -1440,9 +1412,6 @@ export const cadMachine = setup({
           reenter: true,
           actions: ['bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
         },
-        setParameters: {
-          actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'],
-        },
         setCodeIssues: { actions: 'setCodeIssues' },
         geometryComputed: {
           actions: ['setGeometry', 'setSettledRenderId', 'notifyExportAvailability'],
@@ -1483,9 +1452,6 @@ export const cadMachine = setup({
         setEntryPath: {
           target: 'connecting',
           actions: ['destroyKernel', 'bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
-        },
-        setParameters: {
-          actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'],
         },
         setCodeIssues: { actions: 'setCodeIssues' },
         geometryComputed: {

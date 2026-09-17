@@ -3,6 +3,7 @@
 /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- vitest asymmetric matchers return any */
 /* eslint-disable @typescript-eslint/naming-convention -- File names use extensions like 'box.ts' */
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { NodeIO } from '@gltf-transform/core';
 import type { Document } from '@gltf-transform/core';
 import { Window } from 'happy-dom';
@@ -17,9 +18,12 @@ import type { ParameterManifest } from '@taucad/parameters';
 import type { ExportResult } from '@taucad/runtime';
 
 import { replicadKernel } from '#replicad.kernel.js';
+import { normalizeRenderShapes } from '#utils/render-output.js';
+import type { NativeHandleEntry } from '#interface-resolution.js';
 import {
   assertFailure,
   assertSuccess,
+  createMockKernelRuntime,
   createGeometryFile,
   createGeometryTestHelpers,
   createTestGeometry,
@@ -4208,30 +4212,44 @@ describe('Normal consistency', () => {
 // serializeNativeHandle / deserializeNativeHandle
 // =============================================================================
 
+// A display render no longer carries the durable snapshot (charter D12/W6b), so these tests call the
+// kernel's serializer the way the framework does: on the native handle `createGeometry` produces.
+type ReplicadKernelContext = Parameters<typeof replicadDefinition.serializeNativeHandle>[2];
+
+const serializeHandle = (nativeHandle: NativeHandleEntry[]): unknown =>
+  replicadDefinition.serializeNativeHandle({ nativeHandle }, createMockKernelRuntime(), mock<ReplicadKernelContext>());
+
 describe('serializeNativeHandle', () => {
+  // The `replicad` library binds its OpenCASCADE instance process-globally through `setOC`, so one render
+  // installs the kernel's instance and the handles below are built with the very library the kernel used.
+  beforeAll(async () => {
+    replicadDefinition = await resolveReplicadDefinition();
+    assertSuccess(
+      await createGeometry({
+        files: {
+          'bootstrap.ts': `
+            import { makeBox } from 'replicad';
+            export default function main() {
+              return makeBox([0, 0, 0], [1, 1, 1]);
+            }
+          `,
+        },
+        mainFile: 'bootstrap.ts',
+      }),
+    );
+  }, 60_000);
+
   it('should serialize nativeHandle to BRep strings with metadata', async () => {
-    const result = await createGeometry({
-      files: {
-        'box.ts': `
-          import { drawRoundedRectangle } from 'replicad';
-          export default function main() {
-            return {
-              shape: drawRoundedRectangle(50, 30).sketchOnPlane().extrude(10),
-              name: 'TestBox',
-              color: '#ff0000',
-              metalness: 0.8,
-              roughness: 0.3,
-            };
-          }
-        `,
-      },
-      mainFile: 'box.ts',
-    });
-
-    assertSuccess(result);
-    expect(result.serializedNativeHandle).toBeDefined();
-
-    const serialized = result.serializedNativeHandle as Array<{
+    const { drawRoundedRectangle } = await import('replicad');
+    const serialized = serializeHandle(
+      normalizeRenderShapes({
+        shape: drawRoundedRectangle(50, 30).sketchOnPlane().extrude(10),
+        name: 'TestBox',
+        color: '#ff0000',
+        metalness: 0.8,
+        roughness: 0.3,
+      }),
+    ) as Array<{
       brep: string;
       metadata: Record<string, unknown>;
     }>;
@@ -4246,25 +4264,18 @@ describe('serializeNativeHandle', () => {
   });
 
   it('should round-trip serialize/deserialize preserving shape geometry', async () => {
-    const result = await createGeometry({
-      files: {
-        'box.ts': `
-          import { drawRoundedRectangle, drawCircle } from 'replicad';
-          export default function main() {
-            return [
-              { shape: drawRoundedRectangle(50, 30).sketchOnPlane().extrude(10), name: 'Box', color: '#ff0000' },
-              { shape: drawCircle(10).sketchOnPlane().extrude(20).translate([0, 0, 10]), name: 'Cylinder', color: '#0000ff', opacity: 0.7 },
-            ];
-          }
-        `,
-      },
-      mainFile: 'box.ts',
-    });
-
-    assertSuccess(result);
-    expect(result.serializedNativeHandle).toBeDefined();
-
-    const serialized = result.serializedNativeHandle as Array<{
+    const { drawRoundedRectangle, drawCircle } = await import('replicad');
+    const serialized = serializeHandle(
+      normalizeRenderShapes([
+        { shape: drawRoundedRectangle(50, 30).sketchOnPlane().extrude(10), name: 'Box', color: '#ff0000' },
+        {
+          shape: drawCircle(10).sketchOnPlane().extrude(20).translate([0, 0, 10]),
+          name: 'Cylinder',
+          color: '#0000ff',
+          opacity: 0.7,
+        },
+      ]),
+    ) as Array<{
       brep: string;
       metadata: { name: string; color?: string; opacity?: number };
     }>;

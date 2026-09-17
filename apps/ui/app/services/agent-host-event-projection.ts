@@ -666,8 +666,20 @@ export const projectAgentHostLiveEvent = (
   return chunks;
 };
 
+/** Whether this run left a checkpointed block open, so its next delta continues the same part. */
+const hasOpenBlock = (runId: string, streamedBlocks: AgentHostLiveBlocks | undefined): boolean => {
+  const prefix = `[${JSON.stringify(runId)},`;
+  for (const [key, block] of streamedBlocks ?? []) {
+    if (!block.closed && key.startsWith(prefix)) {
+      return true;
+    }
+  }
+  return false;
+};
+
 const lifecycleChunks = (
   event: Extract<AgentLogEvent, { readonly type: 'run.lifecycle' }>,
+  streamedBlocks: AgentHostLiveBlocks | undefined,
 ): readonly UIMessageChunk[] => {
   const { state } = event;
   switch (state) {
@@ -684,7 +696,10 @@ const lifecycleChunks = (
       return [{ type: 'start-step' }];
     }
     case 'paused': {
-      return [{ type: 'finish-step' }];
+      /* The reducer forgets its active parts on `finish-step` without closing
+       * them, so a resumed checkpoint block would throw on its next delta
+       * (chat activity indicator closeout R5). The step stays open instead. */
+      return hasOpenBlock(event.runId, streamedBlocks) ? [] : [{ type: 'finish-step' }];
     }
     case 'completed': {
       return [{ type: 'finish', finishReason: 'stop', messageMetadata: { status: 'success' } }];
@@ -917,7 +932,7 @@ export const projectAgentHostEvent = (
       return messageChunks(event.message, event.runId, streamedBlocks);
     }
     case 'run.lifecycle': {
-      return lifecycleChunks(event);
+      return lifecycleChunks(event, streamedBlocks);
     }
     case 'message.envelope-replaced': {
       return messageChunks(event.replacement, event.runId, streamedBlocks);

@@ -93,6 +93,16 @@ const admissionEnvelopeSchema = z.strictObject({
  * object so `setDependencies` is one atomic swap (no torn reads if a render
  * mid-acquire updates one closure at a time).
  */
+/**
+ * Whether the person can see the page: visible and focused. A host with no
+ * document (a test, a daemon) counts as active. The one attention predicate
+ * the store and the focused-chat hook share (R3).
+ *
+ * @returns `true` when the document is visible and focused, or absent.
+ */
+export const isDocumentActive = (): boolean =>
+  typeof document === 'undefined' || (document.visibilityState === 'visible' && document.hasFocus());
+
 export type ChatSessionDeps = {
   getChat: (chatId: string) => Promise<ChatEntity | undefined>;
   patchChat: <K extends keyof ChatEntity>(
@@ -404,6 +414,8 @@ export class ChatSessionStore {
   #settlementUnsubscribe: (() => void) | undefined;
   /** The project whose chats are being acquired right now. */
   #focusedProjectId: string | undefined;
+  /** The chat the person has in front of them (R3); only it counts as attended. */
+  #focusedChatId: string | undefined;
   readonly #membershipTopic = new Topic<void>({ name: 'ChatSessionStore.membership' });
   readonly #chatTopics = new Map<string, Topic<void>>();
   readonly #statusTopics = new Map<string, Topic<void>>();
@@ -831,6 +843,30 @@ export class ChatSessionStore {
     this.setProjectSession(projectId, this.#projectSessions.get(projectId));
   }
 
+  /**
+   * Say which chat the person has in front of them (R3). Every sidebar row holds
+   * a view of its chat, so a view is not attention: only the focused chat, in an
+   * active document, is attended when a turn ends.
+   *
+   * @param chatId - The focused chat.
+   * @public
+   */
+  public focusChat(chatId: string): void {
+    this.#focusedChatId = chatId;
+  }
+
+  /**
+   * Stop treating a chat as focused, unless another chat has taken focus since.
+   *
+   * @param chatId - The chat that lost focus.
+   * @public
+   */
+  public blurChat(chatId: string): void {
+    if (this.#focusedChatId === chatId) {
+      this.#focusedChatId = undefined;
+    }
+  }
+
   /** Tell a chat the person is looking at it, so `unread` clears (S45) — in its machine and its record (D9). @public */
   public markViewed(chatId: string): void {
     const session = this.#sessions.get(chatId);
@@ -881,6 +917,8 @@ export class ChatSessionStore {
    * @public
    */
   public async removeChat(chatId: string): Promise<void> {
+    // A released chat's record may still be landing its last write; removing under it would bring the file back.
+    await this.#composerDrains.get(chatId);
     const session = this.#sessions.get(chatId);
     if (session === undefined) {
       return;
@@ -898,6 +936,8 @@ export class ChatSessionStore {
    * @public
    */
   public async removeProject(projectId: string): Promise<void> {
+    // Ponytail: waits on every released chat's drain, not only this project's; drains are one write long.
+    await Promise.all(this.#composerDrains.values());
     const sessions = [...this.#sessions.values()].filter((session) => session.projectId === projectId);
     await Promise.all([
       ...sessions.map(async (session) => removeRecord(session.composerRecordRef)),
@@ -928,8 +968,25 @@ export class ChatSessionStore {
       throw new Error(`Chat ${chatId} belongs to no project, so its attachments cannot be sent.`);
     }
     const { record, chatAttachments } = binding;
-    // `copyTo` skips a blob the chat already holds, so an edit re-referencing a sent attachment moves nothing.
-    await Promise.all(attachments.map(async (attachment) => record.attachments.copyTo(chatAttachments, attachment)));
+    const copies = await Promise.allSettled(
+      attachments.map(async (attachment) => {
+        // A blob the chat already holds is skipped, so an edit re-referencing a sent attachment moves nothing.
+        if (await chatAttachments.has(attachment)) {
+          return undefined;
+        }
+        await record.attachments.copyTo(chatAttachments, attachment);
+        return attachment;
+      }),
+    );
+    const failure = copies.find((copy) => copy.status === 'rejected');
+    if (failure !== undefined) {
+      // Nothing was sent, so nothing references what this send copied; the chat ref would otherwise carry it.
+      const copied = copies.flatMap((copy) => (copy.status === 'fulfilled' && copy.value ? [copy.value] : []));
+      await Promise.allSettled(copied.map(async (attachment) => chatAttachments.remove(attachment)));
+      throw failure.reason instanceof Error
+        ? failure.reason
+        : new Error('Attachment promotion failed.', { cause: failure.reason });
+    }
   }
 
   /**
@@ -1093,19 +1150,28 @@ export class ChatSessionStore {
     const composerRecordRef = createComposerRecordActor(recordStore);
 
     const markUnreadIfUnattended = (): void => {
-      const documentIsActive =
-        typeof document === 'undefined' || (document.visibilityState === 'visible' && document.hasFocus());
-      if (session.viewRefcount > 0 && documentIsActive) {
+      if (this.#focusedChatId === chatId && isDocumentActive()) {
         return;
       }
       void this.#setUnreadWhenBound(composer.promise, chatId, true);
+    };
+
+    const readChatRow = async (id: string): Promise<ChatEntity | undefined> => {
+      try {
+        return await depsRef().getChat(id);
+      } catch (error) {
+        // An unreadable row still has a composer: bind it where the chat was opened, so its writes,
+        // promotion and deletion do not wait forever on a binding nothing else will settle.
+        bindComposer(session.projectId);
+        throw error;
+      }
     };
 
     const persistenceActorRef = createActor(
       chatPersistenceMachine.provide({
         actors: {
           loadChatActor: fromSafeAsync(async ({ input, signal }) => {
-            const loadedChat = await depsRef().getChat(input.chatId);
+            const loadedChat = await readChatRow(input.chatId);
             signal.throwIfAborted();
             if (this.#sessions.get(input.chatId) !== session) {
               return { type: 'chatRetrieved', chat: undefined };
@@ -1907,7 +1973,8 @@ export class ChatSessionStore {
     // A debounced keystroke is handed to the record before the draft stops, and the record outlives it until written.
     session.draftActorRef.send({ type: 'flushNow' });
     session.draftActorRef.stop();
-    session.bindComposer(undefined);
+    // A chat released before its row loaded still belongs to the project it was opened in; its flush lands there.
+    session.bindComposer(session.projectId);
     const drained = Promise.withResolvers<void>();
     this.#composerDrains.set(session.chatId, drained.promise);
     void this.#drainComposer(session, drained);

@@ -98,6 +98,10 @@ export const deferredRecordStore = (bound: Promise<ComposerBinding | undefined>)
         const store = await attachments();
         return store.copyTo(target, attachment);
       },
+      async remove(ref) {
+        const store = await attachments();
+        return store.remove(ref);
+      },
       async retainOnly(referenced) {
         const store = await attachments();
         return store.retainOnly(referenced);

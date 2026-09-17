@@ -1170,6 +1170,7 @@ describe('ChatSessionStore', () => {
     it('does not mark terminal or approval events viewed in an active document', async () => {
       const { store, deps } = storeInProject();
       store.acquire('chat_active');
+      store.focusChat('chat_active');
       const chat = harness.created[0]!;
       chat.messages = [
         {
@@ -1196,6 +1197,35 @@ describe('ChatSessionStore', () => {
       await settle();
       expect(deps.client.json(unreadPath)).toBeUndefined();
       expect(store.isUnread('chat_active')).toBe(false);
+    });
+
+    /* R3: every sidebar row holds a view of its chat, so a view alone is not the person reading it. */
+    it('should mark a chat that finishes while another chat is focused in an active document', async () => {
+      const { store, deps } = storeInProject();
+      store.acquire('chat_listed');
+      store.acquire('chat_focused');
+      store.focusChat('chat_focused');
+
+      harness.created[0]!.finish();
+
+      await vi.waitFor(() => {
+        expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_listed: true } });
+      });
+      expect(store.isUnread('chat_listed')).toBe(true);
+    });
+
+    it('should mark the focused chat once focus has moved away from it', async () => {
+      const { store, deps } = storeInProject();
+      store.acquire('chat_left');
+      store.focusChat('chat_left');
+      store.focusChat('chat_next');
+      store.blurChat('chat_left');
+
+      harness.created[0]!.finish();
+
+      await vi.waitFor(() => {
+        expect(deps.client.json(unreadPath)).toEqual({ version: 1, unread: { chat_left: true } });
+      });
     });
 
     it('marks a terminal event when its mounted view is hidden', async () => {
@@ -3497,9 +3527,68 @@ describe('ChatSessionStore — composer records (W7)', () => {
     await expect(store.promoteDraftAttachments(chatId, before)).rejects.toThrow(/missing/u);
 
     expect(session.draftActorRef.getSnapshot().context.draftAttachments).toEqual(before);
-    expect(client.files.has(`${chatAttachmentsDirectory(projectId, chatId)}/${pdfHash}.pdf`)).toBe(false);
+    // The image copied before the PDF failed is taken back: nothing references it (G10).
+    expect(client.namesUnder(chatAttachmentsDirectory(projectId, chatId))).toEqual([]);
     expect(harness.created.at(-1)!.sendMessage).not.toHaveBeenCalled();
     store.release(chatId);
+  });
+
+  it('should keep a blob an earlier message holds when a later promotion fails (G10)', async () => {
+    const client = createMemoryClient();
+    const { store } = openStore(client);
+    const session = store.acquire(chatId);
+    await attachBoth(session);
+    const before = session.draftActorRef.getSnapshot().context.draftAttachments;
+    await store.promoteDraftAttachments(chatId, before.slice(0, 1));
+    client.files.delete(`${draftAttachmentsDirectory(projectId, chatId)}/${pdfHash}.pdf`);
+
+    await expect(store.promoteDraftAttachments(chatId, before)).rejects.toThrow(/missing/u);
+
+    expect(client.namesUnder(chatAttachmentsDirectory(projectId, chatId))).toEqual([`${pngHash}.png`]);
+    store.release(chatId);
+  });
+
+  it('should let a chat whose row cannot be read still be deleted (F7)', async () => {
+    const client = createMemoryClient();
+    const { store, deps } = openStore(client);
+    deps.getChat.mockRejectedValue(new Error('row unreadable'));
+    store.acquire(chatId, projectId);
+    await settle();
+
+    await expect(store.removeChat(chatId)).resolves.toBeUndefined();
+    store.release(chatId);
+  });
+
+  it('should flush a chat released before its row loaded into the project it was opened in (F8)', async () => {
+    const client = createMemoryClient();
+    const { store, deps } = openStore(client);
+    deps.getChat.mockReturnValue(Promise.withResolvers<never>().promise);
+    const session = store.acquire(chatId, projectId);
+    session.draftActorRef.send({ type: 'setDraftMode', mode: 'plan' });
+
+    store.release(chatId);
+
+    await vi.waitFor(() => {
+      expect(client.json(composerPath(projectId, chatId))).toEqual({ version: 1, mode: 'plan' });
+    });
+  });
+
+  it('should leave no record behind when a chat is deleted straight after release (F9)', async () => {
+    const client = createMemoryClient();
+    const { store } = openStore(client);
+    const session = store.acquire(chatId, projectId);
+    await vi.waitFor(() => {
+      expect(session.composerRecordRef.getSnapshot().matches({ lifecycle: 'usable' })).toBe(true);
+    });
+    session.draftActorRef.send({ type: 'setDraftText', text: 'typed then deleted' });
+
+    store.release(chatId);
+    await store.removeChat(chatId);
+    // What the chat store does once the live composer has let go.
+    client.files.delete(composerPath(projectId, chatId));
+    await settle();
+
+    expect(client.json(composerPath(projectId, chatId))).toBeUndefined();
   });
 
   it('still opens the chat when its record cannot be read', async () => {

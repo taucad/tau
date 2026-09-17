@@ -233,6 +233,25 @@ describe('GeometryUnitTiming', () => {
     clearRendererSpans();
   });
 
+  it('exports the pinned trace the ring has already evicted', () => {
+    clearRendererSpans();
+    const view = renderTiming({ cadRef: actor(), query: '' });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Trace history' }), { target: { value: 'p1:render-1' } });
+
+    const survivors = telemetryEntries.slice(2);
+    view.rerender(
+      <TooltipProvider>
+        <GeometryUnitTiming cadRef={actor(undefined, survivors)} query='' />
+      </TooltipProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Export trace' }));
+
+    /* D9 keeps the evicted trace on screen; exporting only the machine's buffer would hand over a
+     * file missing exactly the trace being read. Byte count stands in for the body (jsdom Blob). */
+    const [blob] = downloadBlob.mock.calls.at(-1)! as [Blob, string];
+    expect(blob.size).toBe(telemetryJsonl([...survivors, ...telemetryEntries.slice(0, 2)]).length);
+  });
+
   it('exposes tree metadata and keyboard focus while preserving collapse through filtering', async () => {
     const cadRef = actor();
     const view = renderTiming({ cadRef, query: '' });

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { forwardRef, useImperativeHandle } from 'react';
+import { forwardRef, useEffect, useImperativeHandle } from 'react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ResolvedAuth } from '#hooks/use-resolved-auth.js';
@@ -14,6 +14,8 @@ const state = vi.hoisted(() => ({
   isMobile: false,
   sidebarOpen: true,
   allotmentResize: vi.fn(),
+  providers: [] as Array<{ handle: { providers: () => React.JSXElementConstructor<React.PropsWithChildren> } }>,
+  sidebarMounts: 0,
 }));
 
 vi.mock('react-router', () => ({
@@ -57,12 +59,19 @@ vi.mock('#hooks/use-typed-matches.js', () => ({
       enablePageHeader:
         state.enablePageHeader === undefined ? [] : [{ handle: { enablePageHeader: state.enablePageHeader } }],
       enableOverflowY: [],
-      providers: [],
+      providers: state.providers,
       enablePageFooter: [],
     }),
 }));
 vi.mock('#components/layout/app-sidebar.js', () => ({
-  AppSidebar: () => <aside aria-label='Application sidebar'>Sidebar</aside>,
+  AppSidebar: () => {
+    /* The probe is the sidebar's mount, because that is what a person loses
+     * when the shell is re-created below a new provider (Finding 5b). */
+    useEffect(() => {
+      state.sidebarMounts += 1;
+    }, []);
+    return <aside aria-label='Application sidebar'>Sidebar</aside>;
+  },
 }));
 vi.mock('#components/layout/desktop-titlebar-controls.js', () => ({
   DesktopTitlebarControls: () => <div data-slot='desktop-titlebar-controls' />,
@@ -104,9 +113,6 @@ vi.mock('@taucad/ui/components/breadcrumb', () => ({
   BreadcrumbSeparator: () => <span>/</span>,
 }));
 vi.mock('@taucad/ui/components/separator', () => ({ Separator: () => <span /> }));
-vi.mock('#components/ui/utils/compose.js', () => ({
-  Compose: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
-}));
 vi.mock('#components/layout/page-footer.js', () => ({ PageFooter: () => <footer /> }));
 vi.mock('#components/icons/tau-wordmark.js', () => ({
   TauWordmark: (properties: React.ComponentProps<'svg'>) => <svg {...properties} />,
@@ -124,8 +130,15 @@ beforeEach(() => {
   state.isMobile = false;
   state.sidebarOpen = true;
   state.allotmentResize.mockReset();
+  state.providers = [];
+  state.sidebarMounts = 0;
   vi.unstubAllEnvs();
 });
+
+/** What a route handle contributes: a component wrapped around the page. */
+function RouteProvider({ children }: React.PropsWithChildren): React.JSX.Element {
+  return <div data-slot='route-provider'>{children}</div>;
+}
 
 describe('Page application shell', () => {
   it('renders stable sidebar and main Allotment panes', () => {
@@ -157,6 +170,19 @@ describe('Page application shell', () => {
         name: 'Toggle Sidebar',
       }),
     ).toBe(sidebarTrigger);
+  });
+
+  it('should keep the sidebar mounted when the matched routes start contributing providers', () => {
+    const { rerender } = render(<Page />);
+    expect(state.sidebarMounts).toBe(1);
+
+    /* Home → project: the project route contributes one provider, so the
+     * composed list grows. The shell must not be re-created below it. */
+    state.providers = [{ handle: { providers: () => RouteProvider } }];
+    rerender(<Page />);
+
+    expect(screen.getByText('Page content').closest('[data-slot=route-provider]')).not.toBeNull();
+    expect(state.sidebarMounts).toBe(1);
   });
 
   it('hides the outer sidebar pane on mobile while keeping main content mounted', () => {

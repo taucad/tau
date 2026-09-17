@@ -1,8 +1,10 @@
-import { LoaderCircle } from 'lucide-react';
+import { useEffect } from 'react';
 import type { MyMessagePart } from '@taucad/chat';
 import { messageRole } from '@taucad/chat/constants';
 import { cn } from '@taucad/ui/utils/cn';
+import { ChatActivitySpinner, warmChatActivitySpinner } from '#components/chat/chat-activity-spinner.js';
 import { useChatContext, useChatRetrySnapshot, useChatSelector } from '#hooks/use-chat.js';
+import { Theme, useTheme } from '#hooks/use-theme.js';
 import { useProject } from '#hooks/use-project.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
 import { selectChatActivityCue } from '#utils/chat-activity-cue.js';
@@ -72,6 +74,17 @@ export function ChatMessagePlanning({
     };
   });
   const cue = selectChatActivityCue({ runState: run?.state, chatStatus, retryAttempt, retryMaxAttempts });
+  const { theme } = useTheme();
+  // The cue is suppressed while another surface shows the work (R3), so a live turn is the earliest honest
+  // moment to build the spinner's renderer: by the time the parts settle and this row appears, it is warm.
+  const isTurnLive = cue !== undefined || chatStatus === 'submitted' || chatStatus === 'streaming';
+
+  useEffect(() => {
+    if (!isTurnLive) {
+      return;
+    }
+    void warmChatActivitySpinner(theme === Theme.DARK ? 'dark' : 'light');
+  }, [isTurnLive, theme]);
 
   if (!cue || !trailing) {
     return undefined;
@@ -91,7 +104,7 @@ export function ChatMessagePlanning({
         className,
       )}
     >
-      <LoaderCircle aria-hidden='true' className='size-3 shrink-0 animate-spin motion-reduce:animate-none' />
+      <ChatActivitySpinner />
       <span className='min-w-0 truncate'>{cue.sentence}</span>
     </div>
   );

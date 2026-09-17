@@ -397,6 +397,52 @@ describe('Electron main runtime helpers', () => {
     liveUtilities.length = 0;
   });
 
+  it('should restore the warm spare after an ephemeral request spent it', async () => {
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    liveUtilities.length = 0;
+    const handle = registerElectronRuntimeMain({
+      utilityEntry: '/dist/main/kernel-host.js',
+      forkEnvAllowlist: [tauElectronDebugEnvName],
+      resolveFork: (context) => (context['ephemeral'] === '1' ? { env: { [tauElectronDebugEnvName]: '1' } } : {}),
+    });
+
+    handle.prewarm();
+    /* A thumbnail resolves its own environment, so the spare it cannot serve is
+     * killed and the request forks cold. */
+    handle.connect({ purpose: 'main-process-client', context: { ephemeral: '1' } });
+    expect(liveUtilities[0]?.kill).toHaveBeenCalledOnce();
+    expect(liveUtilities[1]?.postMessage).toHaveBeenCalledOnce();
+
+    /* The pool the application asked for outlives that request: the next project
+     * open is still served warm. */
+    expect(liveUtilities).toHaveLength(3);
+    handle.connect({ purpose: 'main-process-client' });
+    expect(liveUtilities[2]?.postMessage).toHaveBeenCalledOnce();
+
+    handle.dispose();
+    liveUtilities.length = 0;
+  });
+
+  it('should report a spare that exits before adoption', async () => {
+    const { registerElectronRuntimeMain } = await import('#electron/main.js');
+    liveUtilities.length = 0;
+    const onError = vi.fn<(error: Error) => void>();
+    const handle = registerElectronRuntimeMain({ utilityEntry: '/dist/main/kernel-host.js', onError });
+
+    handle.prewarm();
+    await exitLastUtility(9, 'kernel host failed to boot\n');
+
+    expect(onError).toHaveBeenCalledOnce();
+    const [reported] = onError.mock.calls[0] ?? [];
+    expect(reported?.name).toBe('Error');
+    expect(reported?.message).toMatch(
+      /pooled spare exited with code 9 before any request adopted it: kernel host failed to boot/u,
+    );
+
+    handle.dispose();
+    liveUtilities.length = 0;
+  });
+
   it('refuses a fork past the utility cap with a named error', async () => {
     const { registerElectronRuntimeMain } = await import('#electron/main.js');
     liveUtilities.length = 0;

@@ -477,6 +477,9 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
   const liveUtilities = new Map<string, LiveUtility>();
   const maxUtilities = options.maxUtilities ?? defaultMaxUtilities;
   let spare: LiveUtility | undefined;
+  /* What `prewarm` asked to keep warm, so a request that resolved to a different
+   * environment — a thumbnail's ephemeral fork — does not spend the pool for good. */
+  let spareFork: { readonly entry: string; readonly env: ForkOptions['env']; readonly key: string } | undefined;
   let disposed = false;
 
   const reportError = (error: unknown): void => {
@@ -529,19 +532,33 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
       options.onUtilityExit?.({ hostId, ...exit });
       record.onExit?.(exit);
     };
+    /* A spare that died before adoption leases nothing, so there is no host to
+     * report it against — but a boot death nobody asked for is exactly the
+     * silence this broker reports, and the next fork would hit it too. */
+    const reportSpareExit = async (code: number): Promise<void> => {
+      await drainStream(spawnedUtility.stderr);
+      reportError(
+        new Error(
+          `registerElectronRuntimeMain: pooled spare exited with code ${String(code)} before any request adopted it${
+            record.stderrTail === '' ? '' : `: ${record.stderrTail}`
+          }`,
+        ),
+      );
+    };
     spawnedUtility.on('exit', (code: number) => {
       /* Synchronous, so a re-fork racing the drain never sees the dead record. */
       if (spare === record) {
         spare = undefined;
       }
       const { hostId } = record;
-      /* A spare that died before adoption leases nothing and owes no report:
-       * whatever killed it kills the next fork of the same entry too, and that
-       * one has a host to report against. */
-      if (hostId !== undefined) {
-        liveUtilities.delete(hostId);
-        void reportExit(hostId, code);
+      if (hostId === undefined) {
+        if (!record.released) {
+          void reportSpareExit(code);
+        }
+        return;
       }
+      liveUtilities.delete(hostId);
+      void reportExit(hostId, code);
     });
     return record;
   };
@@ -596,6 +613,7 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
   const ensureSpare = (utilityEntry: string, env: ForkOptions['env'], key: string): void => {
     /* The spare is inside the cap, never above it: the pool trades a process
      * the application would have forked anyway for latency, not more memory. */
+    spareFork = { entry: utilityEntry, env, key };
     if (disposed || spare !== undefined || liveUtilities.size >= maxUtilities) {
       return;
     }
@@ -650,7 +668,6 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
     const utilityEntry = resolvedEntry instanceof URL ? fileURLToPath(resolvedEntry) : resolvedEntry;
     const env = resolved.env === undefined ? options.env : { ...options.env, ...resolved.env };
     const key = forkKey(utilityEntry, env);
-    const adopted = spare?.key === key;
     let record: LiveUtility;
     try {
       record = acquireUtility(utilityEntry, env, key);
@@ -710,11 +727,11 @@ export const registerElectronRuntimeMain = (options: RegisterElectronRuntimeMain
         },
         transferred,
       );
-      /* Only after an adoption: a broker that never prewarmed asked for no
-       * pool, and the day it does ask, the spare it just spent is replaced so
-       * the *next* open is warm too. */
-      if (adopted) {
-        ensureSpare(utilityEntry, env, key);
+      /* Only where a pool was asked for: a broker that never prewarmed wants no
+       * spare, and one that did gets its spare back whether this request adopted
+       * it or resolved to an environment that could not use it. */
+      if (spareFork !== undefined) {
+        ensureSpare(spareFork.entry, spareFork.env, spareFork.key);
       }
       return { hostId, port: ports.port1 };
     } catch (error) {

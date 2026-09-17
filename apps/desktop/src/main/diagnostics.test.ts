@@ -166,6 +166,44 @@ describe('forwarders', () => {
     expect(recover).toHaveBeenCalledOnce();
   });
 
+  it('should collapse a renderer console message repeated back-to-back', () => {
+    const handlers = new Map<string, (...args: unknown[]) => void>();
+    const log = { filePath: '', log: vi.fn() };
+    forwardRendererDiagnostics(
+      {
+        on: (event: string, listener: (...args: unknown[]) => void) => {
+          handlers.set(event, listener);
+        },
+      },
+      log,
+    );
+    const looping = {
+      level: 'error',
+      message: 'useProjectManager must be used within a ProjectManagerProvider',
+      sourceId: 'http://localhost:3001/app/hooks/use-project-manager.tsx',
+      lineNumber: 2335,
+    };
+
+    for (let repeat = 0; repeat < 100; repeat += 1) {
+      handlers.get('console-message')?.(looping);
+    }
+    handlers.get('console-message')?.({ ...looping, message: 'another failure' });
+
+    expect(log.log.mock.calls).toEqual([
+      [
+        'error',
+        'renderer.console',
+        {
+          message: looping.message,
+          source: looping.sourceId,
+          line: looping.lineNumber,
+        },
+      ],
+      ['error', 'renderer.console', { message: '↳ repeated ×99' }],
+      ['error', 'renderer.console', { message: 'another failure', source: looping.sourceId, line: looping.lineNumber }],
+    ]);
+  });
+
   it('forwards a utility exit code and marks a non-zero one as an error', () => {
     const handlers = new Map<string, (...args: unknown[]) => void>();
     const log = { filePath: '', log: vi.fn() };

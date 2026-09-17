@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { ChatAttachmentDirectoriesContext, chatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import {
@@ -594,6 +595,38 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
     ]);
     expect(toastErrorMock).toHaveBeenCalledTimes(1);
     expect(toastErrorMock).toHaveBeenCalledWith('Only images and PDFs are supported');
+  });
+
+  it('should resolve a project chat rail against its composer directory, then its transcript (F5)', () => {
+    const directories = chatAttachmentDirectories('p1', 'c1');
+    const { result } = renderHook(
+      () => useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+      {
+        wrapper: ({ children }: { readonly children: React.ReactNode }) => (
+          <ChatAttachmentDirectoriesContext.Provider value={directories}>
+            {children}
+          </ChatAttachmentDirectoriesContext.Provider>
+        ),
+      },
+    );
+
+    expect(result.current.attachmentDirectory).toEqual([directories.composer, directories.transcript]);
+  });
+
+  it('should add the PDF of a mixed drop on a model that reads no images (S13)', async () => {
+    mockActiveModel = makeResolvedModel('pdf-reader', ['text', 'pdf']);
+    const { result } = renderHook(() =>
+      useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+    );
+
+    await act(async () => {
+      await result.current.handleDrop(buildDragEvent([makeFile('A.png'), makeFile('doc.pdf', 'application/pdf')]));
+    });
+
+    // The image is refused on its own; the PDF still lands.
+    expect(chatActionsMock.addDraftAttachment.mock.calls.map(([dataUrl]) => dataUrl)).toEqual([
+      'data:application/pdf;base64,RAW_doc.pdf',
+    ]);
   });
 
   it('should hand a picked PDF to the draft machine, which owns the refusal for a model without PDF input', async () => {

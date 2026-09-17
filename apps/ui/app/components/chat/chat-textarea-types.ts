@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useImperativeHandle, useMemo } from 'react';
+import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { modelSupportsInput } from '@taucad/chat';
 import type { ToolSelection } from '@taucad/chat';
 import { tauEditorPanelDragMime, tauFileDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
@@ -213,7 +214,7 @@ export function useChatTextareaLogic({
   /** The caller's `isSubmitDisabled`, or an attachment still on its way (F4). */
   isSubmitDisabled: boolean;
   /** The directory the draft's attachment references resolve against. */
-  attachmentDirectory: string;
+  attachmentDirectory: AttachmentDirectories;
   /** The picker's `accept` list: the attachment types the selected model can read. */
   attachmentAccept: string;
   selectedToolChoice: ToolSelection;
@@ -290,9 +291,16 @@ export function useChatTextareaLogic({
         .join(','),
     [support],
   );
-  // A project chat's draft lives beside its composer record; a pre-project composer names its own directory.
-  const attachmentDirectory =
-    useChatAttachmentDirectories()?.composer ?? attachmentSource ?? homeComposerAttachmentDirectory;
+  /* A project chat's draft lives beside its composer record, and an open edit's sent attachments stay in the
+   * chat's own directory (F5); a pre-project composer names its own directory. */
+  const chatDirectories = useChatAttachmentDirectories();
+  const attachmentDirectory = useMemo(
+    () =>
+      chatDirectories === undefined
+        ? (attachmentSource ?? homeComposerAttachmentDirectory)
+        : [chatDirectories.composer, chatDirectories.transcript],
+    [attachmentSource, chatDirectories],
+  );
 
   // Read draft state from machine based on mode
   const inputText = useDraftSelector((state) => (mode === 'main' ? state.draftText : state.editDraftText));
@@ -548,17 +556,12 @@ export function useChatTextareaLogic({
       // their toasts are owned by the `attachmentProcessing` chokepoint inside
       // `draftMachine`; the only failure class we still own here is the
       // file-read step itself.
+      // A mixed drop is judged per file there too, so a PDF still lands when the model reads no images (S13).
       if (dataTransfer.files.length > 0) {
-        const hasImageFile = [...dataTransfer.files].some((file) => file.type.startsWith('image/'));
-        if (hasImageFile && !imageInputSupported) {
-          rejectUnsupportedImageInput();
-          return;
-        }
-
         await addFiles(dataTransfer.files);
       }
     },
-    [addFiles, imageInputSupported, onViewerScreenshotDrop, onAddContextChips, rejectUnsupportedImageInput],
+    [addFiles, onViewerScreenshotDrop, onAddContextChips],
   );
 
   const handleFileSelect = useCallback((): void => {

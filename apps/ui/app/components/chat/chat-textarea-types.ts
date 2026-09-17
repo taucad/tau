@@ -208,6 +208,10 @@ export function useChatTextareaLogic({
   attachments: readonly DraftAttachment[];
   /** Why Send is disabled for the current attachments and model, shown beside them (D20). */
   sendBlockReason: string | undefined;
+  /** An attachment is still being resized or stored; sending now would leave it behind. */
+  isAttaching: boolean;
+  /** The caller's `isSubmitDisabled`, or an attachment still on its way (F4). */
+  isSubmitDisabled: boolean;
   /** The directory the draft's attachment references resolve against. */
   attachmentDirectory: string;
   /** The picker's `accept` list: the attachment types the selected model can read. */
@@ -296,6 +300,7 @@ export function useChatTextareaLogic({
     mode === 'main' ? state.draftAttachments : state.editDraftAttachments,
   );
   const sendBlockReason = attachmentSendBlockReason(attachments, attachmentModel);
+  const isAttaching = useDraftSelector((state) => (mode === 'main' ? state.attachingMain : state.attachingEdit));
   const selectedToolChoice = useDraftSelector((state) =>
     mode === 'main' ? (state.draftToolChoice as ToolSelection) : 'auto',
   );
@@ -388,6 +393,7 @@ export function useChatTextareaLogic({
   const inputTextRef = useRef(inputText);
   const attachmentsRef = useRef(attachments);
   const sendBlockReasonRef = useRef(sendBlockReason);
+  const isAttachingRef = useRef(isAttaching);
   const isSubmittingRef = useRef(isSubmitting);
   const submitInFlightRef = useRef(false);
   const isSubmitDisabledRef = useRef(isSubmitDisabled);
@@ -396,10 +402,11 @@ export function useChatTextareaLogic({
     inputTextRef.current = inputText;
     attachmentsRef.current = attachments;
     sendBlockReasonRef.current = sendBlockReason;
+    isAttachingRef.current = isAttaching;
     isSubmittingRef.current = isSubmitting;
     isSubmitDisabledRef.current = isSubmitDisabled;
     onSubmitRef.current = onSubmit;
-  }, [attachments, inputText, isSubmitDisabled, isSubmitting, onSubmit, sendBlockReason]);
+  }, [attachments, inputText, isAttaching, isSubmitDisabled, isSubmitting, onSubmit, sendBlockReason]);
 
   const handleSubmit = useCallback(async (): Promise<void> => {
     if (
@@ -407,7 +414,8 @@ export function useChatTextareaLogic({
       isSubmittingRef.current ||
       submitInFlightRef.current ||
       isSubmitDisabledRef.current ||
-      sendBlockReasonRef.current !== undefined
+      sendBlockReasonRef.current !== undefined ||
+      isAttachingRef.current
     ) {
       return;
     }
@@ -802,6 +810,8 @@ export function useChatTextareaLogic({
     inputText,
     attachments,
     sendBlockReason,
+    isAttaching,
+    isSubmitDisabled: isSubmitDisabled || isAttaching,
     attachmentDirectory,
     attachmentAccept,
     selectedToolChoice,

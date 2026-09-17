@@ -376,7 +376,7 @@ export const ChatTextarea = memo(function ({
           enableContextActions={enableContextActions}
           enableKernelSelector={enableKernelSelector}
           creationLocationControl={creationLocationControls?.field}
-          isSubmitDisabled={isSubmitDisabled}
+          isSubmitDisabled={logic.isSubmitDisabled}
           // State
           dragKind={logic.dragKind}
           showContextMenu={logic.showContextMenu}
@@ -437,7 +437,7 @@ export const ChatTextarea = memo(function ({
         enableContextActions={enableContextActions}
         enableKernelSelector={enableKernelSelector}
         creationLocationControl={creationLocationControls?.toolbar}
-        isSubmitDisabled={isSubmitDisabled}
+        isSubmitDisabled={logic.isSubmitDisabled}
         // State
         dragKind={logic.dragKind}
         isSubmitting={logic.isSubmitting}

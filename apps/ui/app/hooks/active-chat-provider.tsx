@@ -54,7 +54,7 @@ import { useKernel } from '#hooks/use-kernel.js';
 import { withTauExecutionModel } from '#utils/chat-execution.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
-import { draftPersistenceFor, useComposerRecord } from '#hooks/composer-record.js';
+import { draftHydrationOf, draftPersistenceFor, useComposerRecord } from '#hooks/composer-record.js';
 import type { ComposerRecordRef } from '#hooks/composer-record.js';
 import { createAttachmentStore } from '#db/attachment-store.js';
 import type { AttachmentStore } from '#db/attachment-store.js';
@@ -306,10 +306,9 @@ export function HomeNewProjectComposerProvider({
   useDraftImageErrorToast(draftActorRef);
 
   useEffect(() => {
+    // R2: Home keeps the selectors it renders (tool choice, mode) as a chat record does.
     const subscription = recordRef.on('recordLoaded', ({ record }) => {
-      if (record !== 'absent') {
-        draftActorRef.send({ type: 'hydrateDraft', draft: record.draft });
-      }
+      draftActorRef.send({ type: 'hydrateDraft', ...draftHydrationOf(record) });
     });
     return () => {
       subscription.unsubscribe();

@@ -369,6 +369,10 @@ export type DraftState = {
   activeEditMessageId: string | undefined;
   editDraftText: string;
   editDraftAttachments: readonly DraftAttachment[];
+  /** An attachment for the main draft is still resizing or storing, so it is not in `draftAttachments` yet. */
+  attachingMain: boolean;
+  /** The same for the open edit. */
+  attachingEdit: boolean;
 };
 
 /**
@@ -390,6 +394,8 @@ export function useDraftSelector<T>(selector: (state: DraftState) => T): T {
       activeEditMessageId: draftContext.activeEditMessageId,
       editDraftText: draftContext.editDraftText,
       editDraftAttachments: draftContext.editDraftAttachments,
+      attachingMain: draftContext.attachmentQueue.some((entry) => entry.target === 'main'),
+      attachingEdit: draftContext.attachmentQueue.some((entry) => entry.target === 'edit'),
     }),
     [draftContext],
   );

@@ -66,6 +66,8 @@ const defaultDraftState = {
   draftMode: 'agent',
   editDraftText: '',
   editDraftAttachments: [] as DraftAttachment[],
+  attachingMain: false,
+  attachingEdit: false,
 };
 
 let draftState = defaultDraftState;
@@ -232,6 +234,16 @@ describe('useChatTextareaLogic — onSubmit surface', () => {
     expect(result.current.sendBlockReason).toBe(
       "chat-scoped-model can't read PDFs. Remove the PDF or pick another model.",
     );
+    await act(async () => result.current.handleSubmit());
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('should hold Send while an attachment is still being stored, so it is not left behind (F4)', async () => {
+    draftState = { ...defaultDraftState, attachingMain: true };
+    const onSubmit = vi.fn(async () => undefined);
+    const { result } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit }));
+
+    expect(result.current.isAttaching).toBe(true);
     await act(async () => result.current.handleSubmit());
     expect(onSubmit).not.toHaveBeenCalled();
   });

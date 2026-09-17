@@ -20,8 +20,9 @@ import { createActor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { MyUIMessage } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';
-import type { ComposerRecordStore } from '#db/composer-record-store.js';
+import type { ComposerRecord, ComposerRecordStore } from '#db/composer-record-store.js';
 import { createEmptyDraftMessage } from '#hooks/draft.machine.js';
+import type { DraftHydration } from '#hooks/draft.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { composerRecordActors, composerRecordMachine } from '#machines/composer-record.machine.js';
 import type { Attachment } from '#utils/attachment.utils.js';
@@ -69,6 +70,26 @@ const storeAttachmentActorFor = (store: ComposerRecordStore) =>
     type: 'attachmentStored',
     attachment: await store.attachments.put(input.bytes, input.mediaType, input.filename),
   }));
+
+/**
+ * The `hydrateDraft` fields a loaded record carries: every composer field it
+ * holds, and nothing for an absent one.
+ *
+ * @param record - What `recordLoaded` delivered.
+ * @returns The fields to hydrate the draft with.
+ */
+export function draftHydrationOf(record: ComposerRecord | 'absent'): DraftHydration {
+  if (record === 'absent') {
+    return {};
+  }
+  const { draft, messageEdits, toolChoice, mode } = record;
+  return {
+    ...(draft === undefined ? {} : { draft }),
+    ...(messageEdits === undefined ? {} : { messageEdits }),
+    ...(toolChoice === undefined ? {} : { toolChoice }),
+    ...(mode === undefined ? {} : { mode }),
+  };
+}
 
 /**
  * Mount a record actor for the lifetime of the calling component.

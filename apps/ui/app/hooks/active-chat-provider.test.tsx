@@ -664,7 +664,18 @@ describe('HomeNewProjectComposerProvider', () => {
     expect(harness.homeReadFile).toHaveBeenCalledWith(recordPath);
   });
 
-  // New (W6, D7): a late read applies only to what the user has not touched, and the touched state is written back.
+  it('should hydrate the Home mode and tool choice from its record (R2)', async () => {
+    writeRecord({ version: 1, toolChoice: 'none', mode: 'plan' });
+    const { result } = renderHook(() => useChatComposer(), { wrapper: createHomeWrapper() });
+    await waitFor(() => {
+      expect(result.current.draftActorRef.getSnapshot().context).toMatchObject({
+        draftMode: 'plan',
+        draftToolChoice: 'none',
+      });
+    });
+  });
+
+  // New (W6, D7): a late read applies only to what the user has not touched; what was typed reaches the record on its own.
   it('never overwrites typing or an execution chosen before the record resolves', async () => {
     const release = deferRecordRead();
     writeRecord({

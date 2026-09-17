@@ -73,7 +73,7 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
         <Collapsible
           open={genericDetailsOpen}
           className={cn(
-            'group/collapsible flex flex-col justify-center rounded-md border border-destructive/20 bg-destructive/10 text-sm',
+            'group/collapsible flex flex-col justify-center overflow-hidden rounded-md border border-destructive/20 bg-destructive/10 text-sm',
           )}
           onOpenChange={setGenericDetailsOpen}
         >

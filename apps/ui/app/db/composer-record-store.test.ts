@@ -199,6 +199,19 @@ describe('composer record store', () => {
           ]),
         }),
       ],
+      [
+        'an attachment whose extension contradicts its media type (S9)',
+        JSON.stringify({
+          version: 1,
+          draft: userMessage([
+            {
+              type: 'file',
+              url: `attachments/${documentHash}.pdf`,
+              mediaType: 'image/png',
+            },
+          ]),
+        }),
+      ],
       ['an invalid execution', JSON.stringify({ version: 1, execution: { kind: 'tau', model: '' } })],
       ['an unknown mode', JSON.stringify({ version: 1, mode: 'wander' })],
       ['an unknown key', JSON.stringify({ version: 1, token: 'secret' })],

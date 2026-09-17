@@ -1993,6 +1993,35 @@ describe('BrowserPlacementChatTransport attachments', () => {
     unregister();
   });
 
+  it('should refuse a legacy data URL that is not an image rather than record it as one (G8)', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-attachment-legacy-pdf';
+    const runId = `run-${chatId}`;
+    const transport = new BrowserPlacementChatTransport();
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({ projectId: `project-${chatId}`, backend: 'opfs', providerBasePath: chatId }),
+      markRunId: async () => undefined,
+      createClient: async () => clientFor(chatId, runId),
+    });
+    const stream = await transport.sendMessages({
+      chatId,
+      trigger: 'submit-message',
+      messageId: undefined,
+      messages: [
+        {
+          id: 'user-legacy-pdf',
+          role: 'user',
+          parts: [{ type: 'file', mediaType: 'application/pdf', url: 'data:application/pdf;base64,JVBERg==' }],
+        },
+      ],
+      abortSignal: undefined,
+      body: browserBody({ runId, trigger: 'submit' }),
+    });
+
+    await expect(drain(stream.getReader())).rejects.toThrow('data:application/pdf;base64,JVBERg==');
+    unregister();
+  });
+
   /* P29: a draft hydrated from a record carries a file part with no size — the
      reload-then-send path. The reference is still recorded; only the optional
      field is absent. */

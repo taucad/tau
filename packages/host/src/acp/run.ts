@@ -549,6 +549,11 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
         );
       }
     }
+    if (outcome.malformed > 0) {
+      console.warn(
+        `Chat ${turn.chatId}: ${String(outcome.malformed)} malformed attachment row(s) omitted; the agent will not see them.`,
+      );
+    }
     const [message] = outcome.messages;
     return message === turn.message || message?.role !== 'user' ? turn : { ...turn, message };
   };

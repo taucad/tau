@@ -58,6 +58,8 @@ export const picogkKernel = defineKernel({
   name: 'PicogkKernel',
   version: '2.3.0+dotnet10.roslyn5.9.host2.protocol4.topology1',
   optionsSchema: picogkOptionsSchema,
+  // D2: `cancel` stops an in-flight build at the model's next viewer call and keeps the worker warm.
+  liveEdit: true,
   exportFormats: { glb: { optionsSchema: picogkExportSchemas.glb } },
 
   async initialize(options, runtime) {
@@ -121,6 +123,8 @@ export const picogkKernel = defineKernel({
         params: { entryPath, parameters },
         schema: picogkBuildSchema,
         signal: runtime.signal,
+        // W17: an abort stops the build cooperatively rather than ending the worker generation.
+        cancelMethod: 'cancel',
       });
       try {
         const readStarted = performance.now();

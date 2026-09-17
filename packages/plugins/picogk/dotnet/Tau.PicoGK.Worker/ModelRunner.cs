@@ -53,7 +53,8 @@ internal static class ModelRunner
     internal static ModelExecutionResult Execute(
         CompiledModel compiled,
         string artifactRoot,
-        JsonElement? parameters = null)
+        JsonElement? parameters = null,
+        CancellationToken cancellation = default)
     {
         var values = CompilationService.BindParameters(
             compiled,
@@ -67,7 +68,7 @@ internal static class ModelRunner
         unload.Stop();
         var assembly = Retain(compiled);
         var invoke = Stopwatch.StartNew();
-        var execution = RunAndExtract(assembly, artifactRoot, values);
+        var execution = RunAndExtract(assembly, artifactRoot, values, cancellation);
         invoke.Stop();
         return execution with
         {
@@ -123,9 +124,10 @@ internal static class ModelRunner
     private static ModelExecutionResult RunAndExtract(
         Assembly assembly,
         string artifactRoot,
-        IReadOnlyDictionary<string, object?> values)
+        IReadOnlyDictionary<string, object?> values,
+        CancellationToken cancellation)
     {
-        using var host = new HostedLibraryHost(artifactRoot);
+        using var host = new HostedLibraryHost(artifactRoot, cancellation);
         using (Library.UseHost(host))
         {
             ApplyParameters(assembly, values);

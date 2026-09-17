@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
@@ -46,8 +47,18 @@ internal static class Program
                 picogkVersion = typeof(Library).Assembly.GetName().Version!.ToString(),
             });
 
-            string? line;
-            while ((line = input.ReadLine()) is not null)
+            /* W17: frames are read on their own thread so a cancel arriving while a build runs is seen
+             * while it can still stop it. The reader pairs each request with the token it can be
+             * cancelled through; the lane is serialized, so a cancel can only mean the request whose
+             * frame was read last. */
+            var frames = new BlockingCollection<(string Line, CancellationTokenSource Cancellation)>();
+            var reader = new Thread(() => ReadFrames(input, frames))
+            {
+                IsBackground = true,
+                Name = "Tau protocol reader",
+            };
+            reader.Start();
+            foreach (var (line, cancellation) in frames.GetConsumingEnumerable())
             {
                 if (line.Length > MaximumRequestCharacters) return 2;
                 Request request;
@@ -64,12 +75,21 @@ internal static class Program
                 if (request.ProtocolVersion != ProtocolVersion) return 2;
                 try
                 {
-                    var shouldStop = Dispatch(request, arguments);
+                    var shouldStop = Dispatch(request, arguments, cancellation.Token);
                     if (shouldStop) return 0;
                 }
                 catch (WorkerException exception)
                 {
                     Write(new { protocolVersion = ProtocolVersion, requestId = request.RequestId, error = new { issues = exception.Issues } });
+                }
+                catch (OperationCanceledException)
+                {
+                    Write(new
+                    {
+                        protocolVersion = ProtocolVersion,
+                        requestId = request.RequestId,
+                        error = new { issues = new[] { new Issue("The PicoGK build was cancelled.", "CS_TAU_CANCELLED", "runtime", "error") } },
+                    });
                 }
                 catch (Exception exception)
                 {
@@ -89,7 +109,38 @@ internal static class Program
         }
     }
 
-    private static bool Dispatch(Request request, Arguments arguments)
+    private static void ReadFrames(TextReader input, BlockingCollection<(string, CancellationTokenSource)> frames)
+    {
+        CancellationTokenSource? active = null;
+        string? line;
+        while ((line = input.ReadLine()) is not null)
+        {
+            if (IsCancelFrame(line))
+            {
+                active?.Cancel();
+                continue;
+            }
+            active = new CancellationTokenSource();
+            frames.Add((line, active));
+        }
+        frames.CompleteAdding();
+    }
+
+    private static bool IsCancelFrame(string line)
+    {
+        // An oversized or malformed frame is not a cancel; the request loop owns its rejection.
+        if (line.Length > MaximumRequestCharacters) return false;
+        try
+        {
+            return JsonSerializer.Deserialize<Request>(line, JsonOptions)?.Method == "cancel";
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool Dispatch(Request request, Arguments arguments, CancellationToken cancellation)
     {
         switch (request.Method)
         {
@@ -114,8 +165,10 @@ internal static class Program
             {
                 ValidateEntryPath(request.Params, arguments.Workspace);
                 var parameters = request.Params.GetProperty("parameters");
+                // A build superseded before it started pays nothing beyond its own frame.
+                cancellation.ThrowIfCancellationRequested();
                 var compiled = CompilationService.Compile(arguments.Workspace);
-                var execution = ModelRunner.Execute(compiled, arguments.Artifacts, parameters);
+                var execution = ModelRunner.Execute(compiled, arguments.Artifacts, parameters, cancellation);
                 var result = MeshArtifactWriter.Write(
                     arguments.Artifacts,
                     execution,

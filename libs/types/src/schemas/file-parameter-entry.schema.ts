@@ -83,125 +83,27 @@ export const parametersDirectory = '.tau/parameters';
 
 const parameterGroupNameSchema = z.string().min(1);
 
-const identityTokenSchema = z
+const unitTokenSchema = z
   .string()
   .min(1)
   .refine((value) => value.trim().length > 0);
-const parameterClaimFieldSchema = z.enum(['unit', 'quantityKind', 'space', 'reference']);
-const parameterClaimProvenanceSchema = z
-  .object({
-    origin: z.enum(['declared', 'project', 'inferred', 'derived']),
-    producer: identityTokenSchema,
-    sourceRevision: identityTokenSchema,
-    profile: identityTokenSchema.optional(),
-    rule: identityTokenSchema.optional(),
-    evidence: identityTokenSchema.optional(),
-  })
-  .strict()
-  .superRefine((provenance, context) => {
-    if (provenance.origin === 'inferred') {
-      for (const field of ['profile', 'rule', 'evidence'] as const) {
-        if (provenance[field] === undefined) {
-          context.addIssue({
-            code: 'custom',
-            path: [field],
-            message: `Inferred provenance requires ${field}`,
-          });
-        }
-      }
-    }
-    if (provenance.origin === 'project' && provenance.evidence === undefined) {
-      context.addIssue({
-        code: 'custom',
-        path: ['evidence'],
-        message: 'Project provenance requires evidence',
-      });
-    }
-  });
-
-const sourceUnitContextSchema = z
-  .object({
-    producer: identityTokenSchema,
-    sourceRevision: identityTokenSchema,
-    capability: identityTokenSchema,
-    producerUnit: identityTokenSchema,
-  })
-  .strict();
-
-const persistedParameterBindingSchema = z
-  .object({
-    parameter: z
-      .object({
-        value: identityTokenSchema,
-        stability: z.enum(['stable', 'revision-scoped']),
-      })
-      .strict(),
-    schema: z.object({ resource: identityTokenSchema, pointer: z.string() }).strict(),
-    unit: identityTokenSchema.optional(),
-    quantityKind: identityTokenSchema.optional(),
-    space: z.enum(['linear', 'difference', 'point']).optional(),
-    reference: identityTokenSchema.optional(),
-    representation: z.enum(['binary64', 'safe-integer', 'decimal']).optional(),
-    constraints: z.record(z.string(), z.json()).optional(),
-    sourceUnit: sourceUnitContextSchema.optional(),
-    provenance: z.partialRecord(parameterClaimFieldSchema, parameterClaimProvenanceSchema).optional(),
-  })
-  .strict()
-  .superRefine((binding, context) => {
-    for (const field of parameterClaimFieldSchema.options) {
-      if (binding.provenance?.[field] !== undefined && binding[field] === undefined) {
-        context.addIssue({
-          code: 'custom',
-          path: ['provenance', field],
-          message: `Provenance for ${field} requires the corresponding binding value`,
-        });
-      }
-    }
-  });
-
-const parameterRecordIdentitySchema = z
-  .object({
-    sourceRevision: identityTokenSchema,
-    manifestRevision: identityTokenSchema,
-    valueRevision: identityTokenSchema,
-    dependencyRevision: identityTokenSchema,
-  })
-  .strict();
-
-const parameterOperationEvidenceSchema = z
-  .object({
-    requestId: identityTokenSchema,
-    fingerprint: identityTokenSchema,
-    outcome: z.literal('committed'),
-    sourceRevision: identityTokenSchema,
-    manifestRevision: identityTokenSchema,
-    valueRevision: identityTokenSchema,
-    dependencyRevision: identityTokenSchema,
-  })
-  .strict();
+/** RFC 6901 instance pointer keying one field's user-authored claim. */
+const pointerKeySchema = z.string().startsWith('/');
 
 const parameterGroupSchema = z
   .object({
     values: jsonObjectSchema,
-    bindings: z.record(z.string(), persistedParameterBindingSchema).optional(),
+    /** Display and input unit the person chose for a field; its presence is the "project" provenance. */
+    units: z.record(pointerKeySchema, unitTokenSchema).optional(),
+    /** Unit a source-unit-capable producer must convert the stored value back from. */
+    sourceUnits: z.record(pointerKeySchema, unitTokenSchema).optional(),
   })
   .strict();
-
-const parameterEntryShape = {
-  activeGroup: parameterGroupNameSchema,
-  order: z.array(parameterGroupNameSchema).optional(),
-  groups: z.record(parameterGroupNameSchema, parameterGroupSchema),
-  identity: parameterRecordIdentitySchema.optional(),
-  lastOperation: parameterOperationEvidenceSchema.optional(),
-} as const;
 
 const refineParameterEntry = (
   entry: {
     activeGroup: string;
-    order?: string[];
     groups: Record<string, z.infer<typeof parameterGroupSchema>>;
-    identity?: z.infer<typeof parameterRecordIdentitySchema>;
-    lastOperation?: z.infer<typeof parameterOperationEvidenceSchema>;
   },
   context: z.RefinementCtx,
 ): void => {
@@ -221,43 +123,29 @@ const refineParameterEntry = (
     });
   }
 
-  const orderedGroups = new Set<string>();
-  for (const [index, groupName] of (entry.order ?? []).entries()) {
-    if (orderedGroups.has(groupName)) {
-      context.addIssue({
-        code: 'custom',
-        path: ['order', index],
-        message: 'Parameter group order must be unique',
-      });
+  for (const [name, group] of Object.entries(entry.groups)) {
+    for (const pointer of Object.keys(group.sourceUnits ?? {})) {
+      if (group.units?.[pointer] === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['groups', name, 'sourceUnits', pointer],
+          message: 'A source unit requires the chosen unit for the same pointer',
+        });
+      }
     }
-    if (!Object.hasOwn(entry.groups, groupName)) {
-      context.addIssue({
-        code: 'custom',
-        path: ['order', index],
-        message: 'Ordered parameter group does not exist',
-      });
-    }
-    orderedGroups.add(groupName);
-  }
-
-  if (entry.lastOperation !== undefined && entry.identity === undefined) {
-    context.addIssue({
-      code: 'custom',
-      path: ['lastOperation'],
-      message: 'Last-operation evidence requires the current record identity',
-    });
   }
 };
 
-/** Immutable identifier for the first-class parameter record profile. @public */
-export const fileParameterRecordProfile = 'tau-json-structure-units-03-v1';
-
-/** Exact schema for a stored parameter record. @public */
+/**
+ * Exact schema for a stored parameter record. The record is unversioned by design: it carries only
+ * what a person or agent authors, and this strict schema refuses anything else. Manifest-derived
+ * facts (kind, space, constraints, provenance, parameter identity) and write-protocol evidence
+ * (revisions, receipts) are never stored. @public
+ */
 export const fileParameterEntrySchema = z
   .object({
-    recordVersion: z.literal(1),
-    profile: z.literal(fileParameterRecordProfile),
-    ...parameterEntryShape,
+    activeGroup: parameterGroupNameSchema,
+    groups: z.record(parameterGroupNameSchema, parameterGroupSchema),
   })
   .strict()
   .superRefine(refineParameterEntry);

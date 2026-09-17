@@ -44,7 +44,6 @@ export {
 export type { WorkspaceMarker } from '#schemas/workspace-marker.schema.js';
 export {
   fileParameterEntrySchema,
-  fileParameterRecordProfile,
   getActiveGroupValues,
   parameterEntryPath,
   parametersDirectory,

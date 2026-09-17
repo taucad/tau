@@ -1,33 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { fileParameterRecordProfile } from '@taucad/types';
-import { readParameterRecord, serializeParameterRecord } from '#record.js';
+import { readParameterRecord, requireParameterRecord, sameRecordBytes, serializeParameterRecord } from '#record.js';
 
 const encoder = new TextEncoder();
-const unversioned = {
+const record = {
   activeGroup: 'default',
   groups: { default: { values: { width: 10 } } },
-};
+} as const;
 
 describe('parameter record persistence', () => {
-  it('classifies current, unsupported, and invalid bytes without changing them', () => {
+  it('classifies current and invalid bytes without changing them', () => {
     const cases = [
+      { bytes: encoder.encode(JSON.stringify(record)), status: 'current' },
+      // The pre-simplification format is refused like any other unreadable record; its bytes stay.
       {
         bytes: encoder.encode(
-          JSON.stringify({
-            recordVersion: 1,
-            profile: fileParameterRecordProfile,
-            ...unversioned,
-          }),
+          JSON.stringify({ recordVersion: 1, profile: 'tau-json-structure-units-03-v1', ...record }),
         ),
-        status: 'current',
-      },
-      {
-        bytes: encoder.encode(JSON.stringify(unversioned)),
         status: 'invalid-preserved',
-      },
-      {
-        bytes: encoder.encode(JSON.stringify({ recordVersion: 2, profile: 'future', ...unversioned })),
-        status: 'unsupported-preserved',
       },
       { bytes: encoder.encode('{'), status: 'invalid-preserved' },
     ] as const;
@@ -40,46 +29,65 @@ describe('parameter record persistence', () => {
     }
   });
 
-  it('round-trips a serialized record byte for byte', () => {
-    const record = { recordVersion: 1, profile: fileParameterRecordProfile, ...unversioned } as const;
-    const bytes = serializeParameterRecord(record);
-    expect(readParameterRecord(bytes)).toEqual({ status: 'current', bytes, record });
+  it('refuses an old-format record as INVALID_RECORD without overwriting it', () => {
+    const bytes = encoder.encode(
+      JSON.stringify({
+        recordVersion: 1,
+        profile: 'tau-json-structure-units-03-v1',
+        activeGroup: 'default',
+        order: ['default'],
+        groups: { default: { values: {}, bindings: { '/width': { unit: 'mm' } } } },
+        identity: { sourceRevision: 'a', manifestRevision: 'b', valueRevision: 'c', dependencyRevision: 'd' },
+      }),
+    );
+    expect(() => requireParameterRecord(bytes)).toThrow(
+      expect.objectContaining({ code: 'INVALID_RECORD', applicationState: 'known-not-applied' }),
+    );
+    expect(readParameterRecord(bytes).bytes).toEqual(bytes);
   });
 
-  it('serializes permuted value and binding keys to identical canonical bytes', () => {
-    const binding = {
-      parameter: { value: 'width', stability: 'stable' },
-      schema: { resource: 'urn:taucad:parameter-schema:root', pointer: '/width' },
-      unit: 'mm',
-      representation: 'binary64',
-    } as const;
-    const permuted = {
-      representation: 'binary64',
-      unit: 'mm',
-      schema: { pointer: '/width', resource: 'urn:taucad:parameter-schema:root' },
-      parameter: { stability: 'stable', value: 'width' },
-    } as const;
+  it('round-trips a serialized record byte for byte', () => {
+    const bytes = serializeParameterRecord(record);
+    expect(readParameterRecord(bytes)).toEqual({ status: 'current', bytes, record });
+    expect(new TextDecoder().decode(bytes)).toBe(
+      '{\n  "activeGroup": "default",\n  "groups": {\n    "default": {\n      "values": {\n        "width": 10\n      }\n    }\n  }\n}\n',
+    );
+  });
+
+  it('serializes permuted value and unit keys to identical canonical bytes', () => {
     const left = {
-      recordVersion: 1,
-      profile: fileParameterRecordProfile,
       activeGroup: 'default',
       groups: {
-        default: { values: { width: 1, height: 2 }, bindings: { '/width': binding, '/height': binding } },
+        default: {
+          values: { width: 1, height: 2 },
+          units: { '/width': 'in', '/height': 'cm' },
+          sourceUnits: { '/width': 'in' },
+        },
       },
     } as const;
     const right = {
       groups: {
-        default: { bindings: { '/height': permuted, '/width': permuted }, values: { height: 2, width: 1 } },
+        default: {
+          sourceUnits: { '/width': 'in' },
+          units: { '/height': 'cm', '/width': 'in' },
+          values: { height: 2, width: 1 },
+        },
       },
       activeGroup: 'default',
-      profile: fileParameterRecordProfile,
-      recordVersion: 1,
     } as const;
     const bytes = serializeParameterRecord(left);
     expect(serializeParameterRecord(right)).toEqual(bytes);
-    const lines = new TextDecoder().decode(bytes).split('\n');
-    expect(lines[1]).toContain('"recordVersion": 1');
-    expect(lines[2]).toContain('"profile"');
+    expect(new TextDecoder().decode(bytes).split('\n')[1]).toContain('"activeGroup": "default"');
+  });
+
+  it('omits empty claim maps and compares bytes exactly', () => {
+    const bare = serializeParameterRecord({ activeGroup: 'default', groups: { default: { values: {}, units: {} } } });
+    expect(new TextDecoder().decode(bare)).not.toContain('units');
+    expect(
+      sameRecordBytes(bare, serializeParameterRecord({ activeGroup: 'default', groups: { default: { values: {} } } })),
+    ).toBe(true);
+    expect(sameRecordBytes(bare, null)).toBe(false);
+    expect(sameRecordBytes(null, null)).toBe(true);
   });
 
   it('preserves records that exceed byte or structural admission limits', () => {

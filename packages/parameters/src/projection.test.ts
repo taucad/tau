@@ -74,34 +74,11 @@ describe('projectParameterField', () => {
       unitOrigin: 'inferred',
       guessed: true,
     });
-    const inferredBinding = inferred.bindings['/value']!;
-    expect(
-      projectParameterField(
-        inferred,
-        '/value',
-        {},
-        {
-          parameter: inferredBinding.parameter,
-          schema: inferredBinding.schema,
-          representation: inferredBinding.representation,
-          unit: 'rad',
-          quantityKind: inferredBinding.quantityKind,
-          space: inferredBinding.space,
-          constraints: { default: Math.PI / 6 },
-          provenance: {
-            unit: {
-              origin: 'project',
-              producer: 'fixture',
-              sourceRevision: 'revision',
-              evidence: 'source-unit:/value',
-            },
-          },
-        },
-      ),
-    ).toMatchObject({
+    // A unit the person authored for the field beats the manifest's guess; its presence is the
+    // whole "project" provenance, and the record carries nothing else about the field.
+    expect(projectParameterField(inferred, '/value', {}, { values: {}, units: { '/value': 'rad' } })).toMatchObject({
       nativeUnit: 'rad',
       adornment: 'rad',
-      constraints: {},
       unitOrigin: 'project',
       guessed: false,
     });
@@ -132,30 +109,8 @@ describe('projectParameterField', () => {
       quantityKind: 'http://qudt.org/vocab/quantitykind/PlaneAngle',
       space: 'linear',
     });
-    const explicitBinding = explicit.bindings['/value']!;
-    expect(
-      projectParameterField(
-        explicit,
-        '/value',
-        {},
-        {
-          parameter: explicitBinding.parameter,
-          schema: explicitBinding.schema,
-          representation: explicitBinding.representation,
-          unit: 'deg',
-          quantityKind: explicitBinding.quantityKind,
-          space: explicitBinding.space,
-          provenance: {
-            unit: {
-              origin: 'project',
-              producer: 'old-project',
-              sourceRevision: 'old',
-              evidence: 'old-binding',
-            },
-          },
-        },
-      ),
-    ).toMatchObject({
+    // An explicitly declared unit outranks an authored one the producer never sanctioned.
+    expect(projectParameterField(explicit, '/value', {}, { values: {}, units: { '/value': 'deg' } })).toMatchObject({
       nativeUnit: 'rad',
       adornment: 'rad',
       unitOrigin: 'declared',

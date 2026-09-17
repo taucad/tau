@@ -9,12 +9,6 @@ import type {
   ParameterSetAuthoritySnapshot,
 } from '#types.js';
 const hasText = (value: string | undefined): value is string => value !== undefined && value.trim().length > 0;
-/** Whether two parameter identities name the same revisions. @internal */
-export const sameIdentity = (left: ParameterSetIdentity, right: ParameterSetIdentity): boolean =>
-  left.sourceRevision === right.sourceRevision &&
-  left.manifestRevision === right.manifestRevision &&
-  left.valueRevision === right.valueRevision &&
-  left.dependencyRevision === right.dependencyRevision;
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -68,11 +62,7 @@ const sameJsonValue = (left: unknown, right: unknown): boolean => {
 };
 
 const isIdentity = (value: unknown): value is ParameterSetIdentity =>
-  isRecord(value) &&
-  hasText(typeof value['sourceRevision'] === 'string' ? value['sourceRevision'] : undefined) &&
-  hasText(typeof value['manifestRevision'] === 'string' ? value['manifestRevision'] : undefined) &&
-  hasText(typeof value['valueRevision'] === 'string' ? value['valueRevision'] : undefined) &&
-  hasText(typeof value['dependencyRevision'] === 'string' ? value['dependencyRevision'] : undefined);
+  isRecord(value) && hasText(typeof value['manifestRevision'] === 'string' ? value['manifestRevision'] : undefined);
 
 const hasOperationText = (operation: Readonly<Record<string, unknown>>, ...fields: readonly string[]): boolean =>
   fields.every((field) => hasText(typeof operation[field] === 'string' ? operation[field] : undefined));
@@ -97,15 +87,11 @@ const validBatchOperation = (operation: Readonly<Record<string, unknown>>): bool
 
 const validSourceUnitOperation = (operation: Readonly<Record<string, unknown>>): boolean => {
   const capability = sourceUnitCapability(operation['producerCapability']);
-  const dependencies = stringRecord(operation['dependencies']);
   return (
     (operation['mode'] === 'preserve-size' || operation['mode'] === 'reinterpret') &&
     hasOperationText(operation, 'group', 'parameterId', 'resource', 'pointer', 'unit') &&
     capability !== undefined &&
-    hasOperationText(capability, 'producer', 'sourceRevision', 'capability') &&
-    (operation['dependencies'] === undefined ||
-      (dependencies !== undefined &&
-        Object.entries(dependencies).every(([key, item]) => hasText(key) && hasText(item))))
+    hasOperationText(capability, 'producer', 'sourceRevision', 'capability')
   );
 };
 
@@ -143,29 +129,6 @@ const validOperation = (value: unknown): value is ParameterSetOperation => {
     }
     case 'rename-group': {
       return hasOperationText(value, 'group', 'nextGroup');
-    }
-    case 'confirm-inference': {
-      return hasOperationText(value, 'group', 'parameterId', 'resource', 'pointer');
-    }
-    case 'bind-parameter': {
-      if (!hasOperationText(value, 'group', 'parameterId', 'resource', 'pointer') || !isRecord(value['binding'])) {
-        return false;
-      }
-      const { binding } = value;
-      const keys = Object.keys(binding);
-      return (
-        keys.length > 0 &&
-        keys.every((key) => ['unit', 'quantityKind', 'space', 'reference'].includes(key)) &&
-        (binding['unit'] === undefined || hasText(typeof binding['unit'] === 'string' ? binding['unit'] : undefined)) &&
-        (binding['quantityKind'] === undefined ||
-          hasText(typeof binding['quantityKind'] === 'string' ? binding['quantityKind'] : undefined)) &&
-        (binding['reference'] === undefined ||
-          hasText(typeof binding['reference'] === 'string' ? binding['reference'] : undefined)) &&
-        (binding['space'] === undefined ||
-          binding['space'] === 'linear' ||
-          binding['space'] === 'difference' ||
-          binding['space'] === 'point')
-      );
     }
     case 'source-unit': {
       return validSourceUnitOperation(value);
@@ -255,23 +218,12 @@ const sourceUnitCapability = (value: unknown): ParameterSourceUnitCapability | u
   };
 };
 
-const stringRecord = (value: unknown): Readonly<Record<string, string>> | undefined => {
-  if (!isRecord(value) || !Object.values(value).every((item) => typeof item === 'string')) {
-    return undefined;
-  }
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, String(item)]));
-};
-
-const validRequest = (
-  request: ParameterSetRequest | undefined,
-  current: ParameterSetAuthoritySnapshot | undefined,
-): boolean => validRequestShape(request) && current !== undefined && sameIdentity(request.expected, current.identity);
-/** Reject a group operation that is malformed or planned against a stale identity. @internal */
+/** Reject a group operation the current record cannot satisfy. @internal */
 export const groupOperationRejection = (
   request: ParameterSetRequest | undefined,
   current: ParameterSetAuthoritySnapshot | undefined,
 ): Readonly<{ code: string; message: string }> | undefined => {
-  if (request === undefined || current === undefined || !validRequest(request, current)) {
+  if (request === undefined || current === undefined || !validRequestShape(request)) {
     return undefined;
   }
   const { operation } = request;

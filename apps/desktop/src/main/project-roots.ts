@@ -45,7 +45,18 @@ export type ProjectRootRegistryOptions = {
   readonly storePath?: string;
 };
 
-const canonicalPath = (directory: string): string => {
+/**
+ * Physical spelling of a path, resolving every symlink it can.
+ *
+ * Shared with the services host, which must admit a root under the same name
+ * main registers it by: main names a project by its realpath
+ * (`services-broker.ts`), while the grant holds the spelling the person picked,
+ * and under `$TMPDIR` on macOS those differ.
+ *
+ * @param directory - Absolute or relative path to canonicalise.
+ * @returns The realpath of the deepest existing ancestor plus the rest.
+ */
+export const canonicalPath = (directory: string): string => {
   const resolved = resolve(directory);
   const suffix: string[] = [];
   let ancestor = resolved;

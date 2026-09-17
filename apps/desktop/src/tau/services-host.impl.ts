@@ -49,6 +49,7 @@ import { electronUtilityMainTransport } from '@taucad/runtime/electron/renderer'
 import { serveElectronFileSystemBridgePort } from '@taucad/runtime/electron/utility';
 import { systemSkillBundles } from '@taucad/skills/resources';
 
+import { canonicalPath } from '#main/project-roots.js';
 import type { createDesktopRuntime } from '#tau/desktop-runtime.factory.js';
 
 /**
@@ -164,8 +165,12 @@ export type AgentHostConfig = {
 export type ServicesHostOptions = {
   /** Host-owned authority metadata directory, outside every authored root. */
   readonly authorityDirectory?: string;
-  /** Diagnostics sink; defaults to stdout, which main forwards to `userData/logs`. */
-  readonly log?: (event: string, detail?: unknown) => void;
+  /**
+   * Diagnostics sink; defaults to stdout, which main forwards to
+   * `userData/logs`. `level` is omitted for the ordinary informational trace
+   * and named only where a line is a refusal an operator has to find.
+   */
+  readonly log?: (event: string, detail?: unknown, level?: 'info' | 'warn') => void;
   /** Injected for tests. */
   readonly serve?: typeof serveNodeFsProvider;
   /** Injected rooted Electron filesystem bridge server for tests. */
@@ -247,9 +252,11 @@ export type ServicesHost = {
 export const createServicesHost = (options: ServicesHostOptions = {}): ServicesHost => {
   const log =
     options.log ??
-    ((event: string, detail?: unknown): void => {
+    ((event: string, detail?: unknown, level?: 'info' | 'warn'): void => {
       // oxlint-disable-next-line no-console -- forwarded to userData/logs through main's stdio
-      console.log(`[services] ${event}${detail === undefined ? '' : ` ${JSON.stringify(detail)}`}`);
+      console.log(
+        `[services] ${level === undefined ? '' : `${level} `}${event}${detail === undefined ? '' : ` ${JSON.stringify(detail)}`}`,
+      );
     });
   const {
     agentHostReleased,
@@ -376,11 +383,15 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     };
   };
 
+  /* Physical spellings on both sides, the comparison main's own registry makes
+   * (`project-roots.ts`). Main names a project by its realpath when it mints
+   * the kernel's filesystem port while the grant holds the spelling the person
+   * picked, and under `$TMPDIR` those differ by `/private`. */
   const isTrustedRoot = (root: string): boolean => {
     if (!isAbsolute(root)) {
       return false;
     }
-    const candidate = resolve(root);
+    const candidate = canonicalPath(root);
     /* Descendants are admitted because projects live inside Home
      * (`userData/home/<project>`); the `sep` suffix keeps `…/home-evil` from
      * matching `…/home`. */
@@ -391,8 +402,13 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     if (isTrustedRoot(root)) {
       return true;
     }
-    const candidate = resolve(root);
-    return [...candidateRoots].some(([admitted]) => candidate === admitted || candidate.startsWith(admitted + sep));
+    const candidate = canonicalPath(root);
+    /* Candidate checkouts are recorded by `resolve()` below, so they are
+     * canonicalised here rather than at admission. */
+    return [...candidateRoots].some(([admitted]) => {
+      const trusted = canonicalPath(admitted);
+      return candidate === trusted || candidate.startsWith(trusted + sep);
+    });
   };
 
   const internalPorts = authority === undefined ? undefined : new MessageChannel();
@@ -469,7 +485,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       case 'allowRoots': {
         trustedRoots.clear();
         for (const root of (frame['roots'] as readonly string[] | undefined) ?? []) {
-          trustedRoots.add(resolve(root));
+          trustedRoots.add(canonicalPath(root));
         }
         log('roots-updated', { count: trustedRoots.size });
         return;
@@ -582,7 +598,17 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     const runtimeClient = async (root: string): Promise<DesktopClient> => {
       const existingClient = runtimeClients.get(root);
       if (existingClient) {
-        return existingClient;
+        const cached = await existingClient;
+        if (cached.lifecycleState !== 'terminated') {
+          return cached;
+        }
+        /* A client can die without its port closing — a render timeout shuts
+         * the wire from this side — and a cached corpse answers every later
+         * call with the same terminal sentence. */
+        if (runtimeClients.get(root) === existingClient) {
+          runtimeClients.delete(root);
+          connectedRuntimeClients.delete(root);
+        }
       }
       if (!requestRuntimePort) {
         throw new Error('The desktop services host has no main runtime-port broker.');
@@ -601,19 +627,15 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
             tauWebSocketUrl: agentHostConfig!.tauWebSocketUrl,
           },
         });
+        /* Evict only. The transport is watching this same port, and it holds
+         * the close for main's exit relay so the client can report the exit
+         * code and stderr; terminating here would win that race and turn every
+         * kernel-utility death into "RuntimeClient has been terminated." It
+         * releases the lease on its own way out, so no utility leaks. */
         runtimePort.on('close', () => {
           if (runtimeClients.get(root) === pending) {
             runtimeClients.delete(root);
             connectedRuntimeClients.delete(root);
-            // async-iife: bootstrap -- MessagePort close callbacks cannot return client termination.
-            void (async () => {
-              try {
-                const staleClient = await pending;
-                staleClient.terminate();
-              } catch {
-                /* A failed connection has no client left to terminate. */
-              }
-            })();
           }
         });
         return client;
@@ -625,7 +647,12 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
           connected.terminate();
           throw new Error('The desktop services host was disposed while its runtime connected.');
         }
-        connectedRuntimeClients.set(root, connected);
+        /* Only while this is still the cached attempt: a settlement that landed
+         * mid-connect already evicted and terminated it, and recording it now
+         * would leave an orphan nothing can reach. */
+        if (runtimeClients.get(root) === pending) {
+          connectedRuntimeClients.set(root, connected);
+        }
         return connected;
       } catch (error) {
         if (runtimeClients.get(root) === pending) {
@@ -653,22 +680,47 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
 
       public override delete(runId: string): boolean {
         const checkout = this.get(runId);
-        if (checkout?.mode === 'candidate') {
-          const candidateRoot = resolve(checkout.cwd);
-          const remaining = (candidateRoots.get(candidateRoot) ?? 1) - 1;
-          if (remaining === 0) {
-            candidateRoots.delete(candidateRoot);
-          } else {
-            candidateRoots.set(candidateRoot, remaining);
-          }
-          runtimeContext?.('release', checkout.cwd, workspaceRoot);
-          /* The tree is about to be destroyed; a runtime still rooted in it
-           * would answer the next turn from a directory that no longer exists. */
-          connectedRuntimeClients.get(checkout.cwd)?.terminate();
-          runtimeClients.delete(checkout.cwd);
-          connectedRuntimeClients.delete(checkout.cwd);
+        const deleted = super.delete(runId);
+        if (!deleted || checkout?.mode !== 'candidate') {
+          return deleted;
         }
-        return super.delete(runId);
+        const candidateRoot = resolve(checkout.cwd);
+        const remaining = (candidateRoots.get(candidateRoot) ?? 1) - 1;
+        if (remaining === 0) {
+          candidateRoots.delete(candidateRoot);
+        } else {
+          candidateRoots.set(candidateRoot, remaining);
+        }
+        /* One checkout serves every turn on its branch, and main refcounts
+         * nothing: releasing the grant while another run still holds this cwd
+         * would disarm that run's next runtime request. The daemon's own guard
+         * (`host-daemon.ts`), not `remaining === 0` — `candidateRoots` also
+         * counts revision-filesystem admissions, so a settlement capture in
+         * flight would skip the teardown forever. */
+        if ([...this.values()].some((held) => held.mode === 'candidate' && held.cwd === checkout.cwd)) {
+          return deleted;
+        }
+        /* The last run has left. The tree itself survives — only `discard`
+         * removes a checkout — but nothing holds its runtime any more. */
+        runtimeContext?.('release', checkout.cwd, workspaceRoot);
+        const pending = runtimeClients.get(checkout.cwd);
+        runtimeClients.delete(checkout.cwd);
+        connectedRuntimeClients.delete(checkout.cwd);
+        if (pending !== undefined) {
+          /* Through the promise, not `connectedRuntimeClients`: a client still
+           * connecting at settlement is recorded nowhere and would outlive
+           * every reference to it. */
+          // async-iife: bootstrap -- a checkout settlement cannot await the client it evicts.
+          void (async () => {
+            try {
+              const evicted = await pending;
+              evicted.terminate();
+            } catch {
+              /* A failed connection has no client left to terminate. */
+            }
+          })();
+        }
+        return deleted;
       }
     })();
     const useRevisionFileSystem = async <Result>(
@@ -1035,7 +1087,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
         case 'runtimeFileSystem': {
           const requested = context?.['workspaceRoot'];
           if (typeof requested !== 'string' || !isInternalRoot(requested) || internalChannel === undefined) {
-            log('runtime-fs.untrusted-root', { workspaceRoot: requested });
+            /* Warn, not info: the kernel utility answers a refused filesystem
+             * handshake by closing every port it received, and all the agent
+             * ever reads is that its runtime died. */
+            log('runtime-fs.untrusted-root', { workspaceRoot: requested }, 'warn');
             port.close();
             return;
           }

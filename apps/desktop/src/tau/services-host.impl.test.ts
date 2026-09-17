@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { existsSync, realpathSync } from 'node:fs';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
@@ -116,6 +116,21 @@ describe('createServicesHost — root admission', () => {
     expect(host.isTrustedRoot(homeRoot)).toBe(false);
     expect(host.isTrustedRoot('/tmp/picked')).toBe(true);
   });
+
+  it('should still refuse a sibling whose name extends a trusted root', async () => {
+    /* Canonicalising both sides must not turn the `sep` guard into a prefix
+     * match: `…-evil` stays out under either spelling. */
+    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-sibling-root-'));
+    const { host } = hostHarness();
+
+    try {
+      host.handleMessage(frame({ type: 'allowRoots', roots: [sandbox] }));
+      expect(host.isTrustedRoot(`${sandbox}-evil`)).toBe(false);
+      expect(host.isTrustedRoot(`${realpathSync.native(sandbox)}-evil`)).toBe(false);
+    } finally {
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('createServicesHost — concern ports', () => {
@@ -157,6 +172,51 @@ describe('createServicesHost — concern ports', () => {
     await host.quiesce();
     expect(bridge.dispose).toHaveBeenCalledOnce();
     host.dispose();
+  });
+
+  it('should serve the runtime filesystem when main names a trusted root by its physical path', async () => {
+    const sandbox = await mkdtemp(join(tmpdir(), 'tau-desktop-physical-root-'));
+    const alias = `${sandbox}-alias`;
+    await symlink(sandbox, alias);
+    /* Main admits the spelling the person granted and names the project by its
+     * realpath when it mints the kernel's filesystem port. */
+    const physical = realpathSync.native(alias);
+    const bridge = { emit: vi.fn(), dispose: vi.fn() };
+    const { host, log } = hostHarness({
+      authorityDirectory: join(sandbox, 'authority'),
+      serveRuntimeFileSystem: (() => bridge) as ServicesHostOptions['serveRuntimeFileSystem'],
+    });
+    const port = stubPort();
+
+    try {
+      host.handleMessage(frame({ type: 'allowRoots', roots: [alias] }));
+      host.handleMessage(
+        frame({ type: 'concern', concern: 'runtimeFileSystem', context: { workspaceRoot: physical } }, [port]),
+      );
+
+      expect(log).toHaveBeenCalledWith('runtime-fs-served', { workspaceRoot: physical });
+      expect(port.close).not.toHaveBeenCalled();
+    } finally {
+      host.dispose();
+      /* The link before its target: `rm` follows a directory symlink and
+       * refuses it, and only a dangling one is removable that way. */
+      await unlink(alias);
+      await rm(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it('should warn when it refuses a runtime filesystem root', () => {
+    const { host, log } = hostHarness();
+    const port = stubPort();
+
+    host.handleMessage(
+      frame({ type: 'concern', concern: 'runtimeFileSystem', context: { workspaceRoot: '/etc' } }, [port]),
+    );
+
+    /* An info line is how Finding 1 stayed invisible for two lanes: the agent
+     * only ever saw "RuntimeClient has been terminated." */
+    expect(log).toHaveBeenCalledWith('runtime-fs.untrusted-root', { workspaceRoot: '/etc' }, 'warn');
+    expect(port.close).toHaveBeenCalled();
   });
 
   it('closes a port for a concern it does not serve', () => {
@@ -697,39 +757,200 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     });
   });
 
-  it('terminates a connected runtime client when its main-owned port closes', async () => {
-    let closePort: (() => void) | undefined;
-    const terminate = vi.fn();
-    const runtimePort = {
+  /**
+   * One main-minted runtime port.
+   *
+   * Every `close` listener is kept, not only the last: the transport wraps the
+   * port before this host adds its own, and firing both is what the real
+   * disentanglement does.
+   */
+  const fakeRuntimePort = () => {
+    const closeListeners: Array<() => void> = [];
+    return {
+      closeListeners,
+      postMessage: vi.fn(),
       on: vi.fn((event: string, listener: () => void) => {
         if (event === 'close') {
-          closePort = listener;
+          closeListeners.push(listener);
         }
       }),
       off: vi.fn(),
       start: vi.fn(),
       close: vi.fn(),
-      postMessage: vi.fn(),
     };
-    const { host, workspaceRoot } = await configuredHost(
+  };
+
+  /** Main's runtime-port broker, one fresh port per lease. */
+  const runtimePortBroker = () => {
+    const ports: Array<ReturnType<typeof fakeRuntimePort>> = [];
+    const releases: Array<ReturnType<typeof vi.fn>> = [];
+    return {
+      ports,
+      releases,
+      requestRuntimePort: vi.fn(async () => {
+        const port = fakeRuntimePort();
+        const release = vi.fn();
+        ports.push(port);
+        releases.push(release);
+        return { port, release };
+      }),
+    };
+  };
+
+  /** The checkout map the revision tree publishes, driven directly. */
+  const turnCheckouts = (): Map<string, TauHost.TurnCheckout> =>
+    toolRegistryCalls.at(-1)!.checkouts as Map<string, TauHost.TurnCheckout>;
+
+  const candidateCheckout = (cwd: string): TauHost.TurnCheckout => ({ cwd, mode: 'candidate', baseRevisionId: '' });
+
+  it('should report a closed runtime port as a host exit, not an explicit terminate', async () => {
+    const broker = runtimePortBroker();
+    const { host, workspaceRoot } = await configuredHost({}, { requestRuntimePort: broker.requestRuntimePort });
+    connect(host, workspaceRoot);
+    const registry = toolRegistryCalls.at(-1)!;
+    const client = await registry.runtimeClient!(workspaceRoot);
+
+    for (const closePort of broker.ports[0]!.closeListeners) {
+      closePort();
+    }
+
+    /* The transport, not this host, decides what killed the utility: an
+     * explicit terminate here beats its host-exit relay window, so the exit
+     * code and stderr never reach the agent. */
+    await vi.waitFor(() => {
+      expect(runtimeClientCalls[0]!.lifecycleState).toBe('terminated');
+    });
+    await expect(client.evaluate({ source: { files: { 'main.ts': 'model' } } })).rejects.toMatchObject({
+      code: 'RUNTIME_TERMINATED',
+      causeKind: 'transport-closed',
+    });
+    expect(runtimeClientCalls[0]!.terminate).not.toHaveBeenCalled();
+    /* The lease still goes back to main, so no kernel utility outlives it. */
+    expect(broker.releases[0]).toHaveBeenCalled();
+  });
+
+  it('should admit a candidate checkout named by its physical path', async () => {
+    const authorityDirectory = await mkdtemp(join(tmpdir(), 'tau-desktop-candidate-authority-'));
+    workspaces.push(authorityDirectory);
+    const bridge = { emit: vi.fn(), dispose: vi.fn() };
+    const { host, log, workspaceRoot } = await configuredHost(
       {},
       {
-        requestRuntimePort: vi.fn(async () => ({
-          port: runtimePort,
-          release: vi.fn(),
-        })),
+        authorityDirectory,
+        serveRuntimeFileSystem: (() => bridge) as ServicesHostOptions['serveRuntimeFileSystem'],
       },
     );
     connect(host, workspaceRoot);
-    const registry = toolRegistryCalls.at(-1)!;
-    await registry.runtimeClient!(workspaceRoot);
-    vi.mocked(runtimeClientCalls[0]!.terminate).mockImplementation(terminate);
+    const cwd = join(dirname(workspaceRoot), '.tau', 'checkouts', 'proj_test', 'b1');
+    turnCheckouts().set('run-1', candidateCheckout(cwd));
+    const physical = join(realpathSync.native(dirname(workspaceRoot)), '.tau', 'checkouts', 'proj_test', 'b1');
+    const port = stubPort();
 
-    closePort!();
+    host.handleMessage(
+      frame({ type: 'concern', concern: 'runtimeFileSystem', context: { workspaceRoot: physical } }, [port]),
+    );
+
+    expect(log).toHaveBeenCalledWith('runtime-fs-served', { workspaceRoot: physical });
+    expect(port.close).not.toHaveBeenCalled();
+  });
+
+  it("should keep the runtime client and main's grant while another run holds the checkout", async () => {
+    const runtimeContext = vi.fn();
+    const broker = runtimePortBroker();
+    const { host, workspaceRoot } = await configuredHost(
+      {},
+      { requestRuntimePort: broker.requestRuntimePort, runtimeContext },
+    );
+    connect(host, workspaceRoot);
+    const registry = toolRegistryCalls.at(-1)!;
+    const cwd = join(dirname(workspaceRoot), '.tau', 'checkouts', 'proj_test', 'b1');
+    const checkouts = turnCheckouts();
+    checkouts.set('run-1', candidateCheckout(cwd));
+    checkouts.set('run-2', candidateCheckout(cwd));
+    const client = await registry.runtimeClient!(cwd);
+
+    checkouts.delete('run-1');
+
+    expect(runtimeClientCalls[0]!.terminate).not.toHaveBeenCalled();
+    expect(runtimeContext).not.toHaveBeenCalledWith('release', cwd, workspaceRoot);
+    await expect(registry.runtimeClient!(cwd)).resolves.toBe(client);
+  });
+
+  it("should release main's grant and terminate the client when the last run leaves", async () => {
+    const runtimeContext = vi.fn();
+    const broker = runtimePortBroker();
+    const { host, workspaceRoot } = await configuredHost(
+      {},
+      { requestRuntimePort: broker.requestRuntimePort, runtimeContext },
+    );
+    connect(host, workspaceRoot);
+    const registry = toolRegistryCalls.at(-1)!;
+    const cwd = join(dirname(workspaceRoot), '.tau', 'checkouts', 'proj_test', 'b1');
+    const checkouts = turnCheckouts();
+    checkouts.set('run-1', candidateCheckout(cwd));
+    checkouts.set('run-2', candidateCheckout(cwd));
+    await registry.runtimeClient!(cwd);
+
+    checkouts.delete('run-1');
+    checkouts.delete('run-2');
 
     await vi.waitFor(() => {
-      expect(terminate).toHaveBeenCalledOnce();
+      expect(runtimeClientCalls[0]!.terminate).toHaveBeenCalledOnce();
     });
+    expect(runtimeContext.mock.calls.filter(([action]) => action === 'release')).toEqual([
+      ['release', cwd, workspaceRoot],
+    ]);
+  });
+
+  it('should terminate a client that was still connecting when its last run settled', async () => {
+    type RuntimeLease = Awaited<ReturnType<NonNullable<ServicesHostOptions['requestRuntimePort']>>>;
+    const leases: Array<ReturnType<typeof Promise.withResolvers<RuntimeLease>>> = [];
+    const requestRuntimePort = vi.fn(async () => {
+      const lease = Promise.withResolvers<RuntimeLease>();
+      leases.push(lease);
+      return lease.promise;
+    });
+    const { host, workspaceRoot } = await configuredHost({}, { requestRuntimePort });
+    connect(host, workspaceRoot);
+    const registry = toolRegistryCalls.at(-1)!;
+    const cwd = join(dirname(workspaceRoot), '.tau', 'checkouts', 'proj_test', 'b1');
+    const checkouts = turnCheckouts();
+    checkouts.set('run-1', candidateCheckout(cwd));
+    const connecting = registry.runtimeClient!(cwd);
+    await vi.waitFor(() => {
+      expect(requestRuntimePort).toHaveBeenCalledOnce();
+    });
+
+    checkouts.delete('run-1');
+    leases[0]!.resolve({ port: fakeRuntimePort(), release: vi.fn() });
+    await connecting;
+
+    await vi.waitFor(() => {
+      expect(runtimeClientCalls[0]!.terminate).toHaveBeenCalledOnce();
+    });
+    checkouts.set('run-2', candidateCheckout(cwd));
+    const reconnected = registry.runtimeClient!(cwd);
+    await vi.waitFor(() => {
+      expect(requestRuntimePort).toHaveBeenCalledTimes(2);
+    });
+    leases[1]!.resolve({ port: fakeRuntimePort(), release: vi.fn() });
+    expect(await reconnected).toBe(runtimeClientCalls[1]);
+  });
+
+  it('should never serve a terminated client from the cache', async () => {
+    const broker = runtimePortBroker();
+    const { host, workspaceRoot } = await configuredHost({}, { requestRuntimePort: broker.requestRuntimePort });
+    connect(host, workspaceRoot);
+    const registry = toolRegistryCalls.at(-1)!;
+    const first = await registry.runtimeClient!(workspaceRoot);
+
+    /* A render timeout terminates the client locally; Electron reports no
+     * `close` for a port this side shut, so nothing evicts it. */
+    runtimeClientCalls[0]!.terminate();
+
+    await expect(registry.runtimeClient!(workspaceRoot)).resolves.not.toBe(first);
+    expect(runtimeClientCalls).toHaveLength(2);
+    expect(runtimeClientCalls[1]!.lifecycleState).not.toBe('terminated');
   });
 
   it('keeps one always-on launcher per root across connections', async () => {

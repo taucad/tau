@@ -19,7 +19,6 @@ import {
   expectNativeKernelEngine,
   expectSignedIn,
   expectVisible,
-  geometryCacheSnapshot,
   selectChatModel,
   selectKernel,
   sendPrompt,
@@ -209,14 +208,13 @@ test('renders an external write through the native kernel utility', async () => 
     const sourcePath = join(location === 'picked' ? session.pickedDirectory : session.homeRoot, slug, 'main.scad');
     await expect.poll(() => existsSync(sourcePath), { timeout: 120_000 }).toBe(true);
 
-    const before = geometryCacheSnapshot(sourcePath);
     const renderStart = Date.now();
     writeFileSync(
       sourcePath,
       'tauSmokeDepth = 7;\ndifference() {\n  cube([20, 20, tauSmokeDepth], center = true);\n  cylinder(h = 40, r = 3, center = true, $fn = 64);\n}\n',
       'utf8',
     );
-    await expectKernelReparsed(sourcePath, 'tauSmokeDepth', before);
+    await expectKernelReparsed(page, 'Tau Smoke Depth');
     await expectGeometryFramed(page);
     // O9 (G23): the desktop render-to-frame baseline. In-process native bench
     // figures do not transfer — this crosses the copy-only utility wire.
@@ -274,7 +272,16 @@ test('renders and replays a legacy log that inlines base64 image bytes', async (
           type?: string;
           message?: { role?: string; content?: unknown };
         };
-        if (!inlined && event.type === 'message.appended' && event.message?.role === 'user') {
+        /* Both shapes carry the user turn on `message`, and a Tau run's log now
+         * only writes the second: `session.ts:1423-1428` commits the prompt as
+         * `turn.history-projection-committed`, while `message.appended` remains
+         * the row an ACP/external launcher writes. Matching only the old one
+         * left nothing to rewrite. */
+        if (
+          !inlined &&
+          (event.type === 'message.appended' || event.type === 'turn.history-projection-committed') &&
+          event.message?.role === 'user'
+        ) {
           const { content } = event.message;
           const legacyBlock = { type: 'image', mimeType: 'image/jpeg', data: imageBase64 };
           const blocks = Array.isArray(content) ? [...(content as unknown[])] : [{ type: 'text', text: content }];

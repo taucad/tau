@@ -143,9 +143,18 @@ test('builds an openrscad model on disk from the project chat', async () => {
    * is the only deterministic row that makes the services utility ask the
    * services host for the project's filesystem, which is where a refused root
    * shows up. */
+  /* Scripted **per turn**, because this row runs two of them in one chat. The
+   * same bytes twice would settle the second turn as `turn.finalized` with no
+   * changed paths — nothing to save, so no `Rev n saved` marker — and the two
+   * identical `create_file`/`get_kernel_result` pairs are the exact alternation
+   * the host's `ping_pong` safeguard nudges on, which re-enters the script and
+   * writes `main.scad` a third time. */
   fixture = await startGatewayFixture({
-    toolCalls: [
-      { name: 'create_file', input: { targetFile: 'main.scad', content: gatewayFixtureScadSource } },
+    toolCalls: (turn) => [
+      {
+        name: 'create_file',
+        input: { targetFile: 'main.scad', content: `${gatewayFixtureScadSource}// turn ${String(turn)}\n` },
+      },
       { name: 'get_kernel_result', input: { targetFile: 'main.scad' } },
     ],
   });
@@ -172,16 +181,19 @@ test('builds an openrscad model on disk from the project chat', async () => {
      * and a wedged assertion. Three gateway requests is the turn's own
      * completion signal — one per scripted tool call plus the closing message —
      * so waiting on it is exact where the UI affordance is not. `cancelRun`
-     * keeps its coverage in the external-write test. */
+     * keeps its coverage in the external-write test.
+     *
+     * Re-derived from the script above: `create_file`, then `get_kernel_result`,
+     * then the round that finds no third call and closes the turn. */
     const scriptedRequestsPerTurn = 3;
     await expect
       .poll(() => fixture!.gatewayRequests.length, { timeout: 120_000 })
       .toBeGreaterThanOrEqual(scriptedRequestsPerTurn);
 
     const root = location === 'picked' ? session.pickedDirectory : session.homeRoot;
-    /* The seeding turn runs the same scripted `create_file`, so a `main.scad`
-     * with content proves nothing about the turn under test: the wait below is
-     * gated on the seed's mtime, which is also what keeps the timing honest.
+    /* The seeding turn already wrote `main.scad`, so a `main.scad` with content
+     * proves nothing about the turn under test: the wait below is gated on the
+     * seed's mtime, which is also what keeps the timing honest.
      * Never truncate the seed instead — a harness write into the workspace is
      * captured faithfully as an empty base revision and reads as a Tau defect
      * (FIX-REVGRAPH § B in `chat-revision-mode-local-default-blueprint.md`). */

@@ -331,28 +331,32 @@ export const findLastMeaningfulPartIndex = (parts: readonly MyMessagePart[]): nu
   return -1;
 };
 
-/** Group adjacent reasoning and adjacent tool activity while preserving order. */
+/**
+ * Group adjacent reasoning and tool activity while preserving order.
+ *
+ * Reasoning between or beside tool calls belongs to that activity group, so a
+ * thought never splits one semantic summary. A run with no tool call stays a
+ * standalone reasoning group.
+ */
 export const groupAssistantParts = (parts: readonly MyMessagePart[]): ActivityGroup[] => {
   const groups: ActivityGroup[] = [];
-  let pendingCategory: 'reasoning' | 'research' | undefined;
   let pendingParts: MyMessagePart[] = [];
   let pendingIndices: number[] = [];
 
   const flush = (): void => {
-    if (!pendingCategory || pendingParts.length === 0) {
+    if (pendingParts.length === 0) {
       return;
     }
-    const families =
-      pendingCategory === 'research' ? [...new Set(pendingParts.map((part) => activityFamily(part)))] : [];
+    const toolParts = pendingParts.filter((part) => classifyActivityPart(part) === 'research');
+    const isReasoning = toolParts.length === 0;
     groups.push({
       kind: 'aggregated',
-      category: pendingCategory,
+      category: isReasoning ? 'reasoning' : 'research',
       parts: pendingParts,
       partIndices: pendingIndices,
-      summary: pendingCategory === 'research' ? describeActivity(pendingParts) : '',
-      families,
+      summary: isReasoning ? '' : describeActivity(toolParts),
+      families: [...new Set(toolParts.map((part) => activityFamily(part)))],
     });
-    pendingCategory = undefined;
     pendingParts = [];
     pendingIndices = [];
   };
@@ -363,10 +367,6 @@ export const groupAssistantParts = (parts: readonly MyMessagePart[]): ActivityGr
       continue;
     }
     if (category === 'reasoning' || category === 'research') {
-      if (pendingCategory !== category) {
-        flush();
-        pendingCategory = category;
-      }
       pendingParts.push(part);
       pendingIndices.push(partIndex);
       continue;

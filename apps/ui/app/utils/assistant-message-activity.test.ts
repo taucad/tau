@@ -50,20 +50,37 @@ describe('assistant message activity', () => {
     expect(findLastMeaningfulPartIndex(parts)).toBe(4);
   });
 
-  it('keeps an adjacent reasoning sequence in one disclosure without deduplicating equal text', () => {
+  it('keeps reasoning beside tool calls inside one activity group without deduplicating equal text', () => {
     const first = reasoning('Check the result');
     const second = reasoning('Check the result');
-    const groups = groupAssistantParts([first, second, tool('tool-read_file'), reasoning('Continue')]);
+    const groups = groupAssistantParts([
+      first,
+      second,
+      tool('tool-read_file'),
+      reasoning('Continue'),
+      dynamic({ kind: 'execute' }),
+    ]);
 
-    expect(groups).toHaveLength(3);
+    expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({
       kind: 'aggregated',
-      category: 'reasoning',
-      parts: [first, second],
-      partIndices: [0, 1],
+      category: 'research',
+      partIndices: [0, 1, 2, 3, 4],
+      summary: 'Read files, ran commands',
+      families: ['read', 'execute'],
     });
-    expect(groups[1]).toMatchObject({ kind: 'aggregated', category: 'research', summary: 'Read files' });
-    expect(groups[2]).toMatchObject({ kind: 'aggregated', category: 'reasoning', parts: [expect.anything()] });
+    expect(groups[0]?.kind === 'aggregated' && groups[0].parts.slice(0, 2)).toEqual([first, second]);
+  });
+
+  it('keeps reasoning without tool calls as a standalone thought', () => {
+    const groups = groupAssistantParts([reasoning('Plan'), text('Answer'), reasoning('Reflect')]);
+
+    expect(groups.map((group) => (group.kind === 'aggregated' ? group.category : group.kind))).toEqual([
+      'reasoning',
+      'singleton',
+      'reasoning',
+    ]);
+    expect(groups[0]).toMatchObject({ summary: '', families: [] });
   });
 
   it('groups adjacent tool families and treats prose as the only visible barrier', () => {

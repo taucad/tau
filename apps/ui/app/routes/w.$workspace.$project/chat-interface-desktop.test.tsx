@@ -155,10 +155,11 @@ describe('ChatInterfaceDesktop', () => {
     expect(skeleton).toHaveAttribute('aria-busy', 'true');
     expect(screen.getByTestId('chat-skeleton')).toBeInTheDocument();
     expect(screen.queryByTestId('allotment')).not.toBeInTheDocument();
-    expect(skeleton.querySelectorAll('.border-l')).toHaveLength(1);
-
-    resizeTo(compactWorkspaceWidth - 1);
-    expect(screen.getByRole('status', { name: 'Opening project' }).querySelectorAll('.border-l')).toHaveLength(0);
+    /* The workbench lane drops at the compact width through the skeleton's own container query,
+     * which jsdom does not evaluate: the class is the assertion, the width is checked in a browser. */
+    const workbenchLane = skeleton.querySelector('.border-l');
+    expect(workbenchLane).toHaveClass('@min-[1120px]:flex');
+    expect(compactWorkspaceWidth).toBe(1120);
   });
 
   it('reserves fixed-control space inside the chat header without shifting its border', async () => {

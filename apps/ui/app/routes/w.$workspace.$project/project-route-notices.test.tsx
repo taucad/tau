@@ -175,10 +175,14 @@ describe('ProjectRouteNotice', () => {
     expect(describeProjectRouteNotice({ kind: 'editor', projectId, project })).toBeUndefined();
   });
 
-  it('should label the loader while access resolves', () => {
+  /* Nothing to say yet is the workspace arriving: the same skeleton the session gate shows next. */
+  it('should stand the workspace in while access resolves', () => {
     render(<ProjectRouteNotice state={{ kind: 'resolving' }} />);
 
-    expect(screen.getByRole('status')).toHaveAccessibleName('Opening project');
+    const skeleton = screen.getByRole('status');
+    expect(skeleton).toHaveAccessibleName('Opening project');
+    expect(skeleton).toHaveAttribute('data-testid', 'workspace-skeleton');
+    expect(screen.queryByRole('button', { name: 'Toggle Sidebar' })).not.toBeInTheDocument();
   });
 
   it.each(closeReasons)('should describe a %s close', (reason, description) => {

@@ -73,7 +73,7 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
         ) : null}
         {/* Until the editor state has loaded and the focused chat exists, the
             lanes stand in at their default widths rather than a blank page. */}
-        <ChatInterfaceSessionGate fallback={<WorkspaceSkeleton isCompact={isCompact} />}>
+        <ChatInterfaceSessionGate fallback={<WorkspaceSkeleton />}>
           {isClient && isEditorReady ? (
             <Allotment
               separator={false}
@@ -125,7 +125,7 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
               </Allotment.Pane>
             </Allotment>
           ) : (
-            <WorkspaceSkeleton isCompact={isCompact} />
+            <WorkspaceSkeleton />
           )}
         </ChatInterfaceSessionGate>
       </div>

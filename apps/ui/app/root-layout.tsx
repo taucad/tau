@@ -1,5 +1,5 @@
 import type { ComponentType, ReactNode } from 'react';
-import { Links, Meta, Scripts, ScrollRestoration, useRouteLoaderData } from 'react-router';
+import { Links, Meta, Scripts, ScrollRestoration, useMatch, useRouteLoaderData } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { authQueryKeys } from '@better-auth-ui/core';
 import { Fragment, useEffect, useMemo } from 'react';
@@ -24,7 +24,8 @@ import { UnloadProvider } from '#hooks/use-flush-on-close.js';
 import { RevisionActorIdentity } from '#components/revision-actor-identity.js';
 import { ChatSessionStoreProvider } from '#hooks/chat-session-store-provider.js';
 import { SessionsProvider } from '#hooks/use-sessions.js';
-import { ProjectSessionsHost } from '#routes/w.$workspace.$project/project-route.js';
+import { ProjectSessionsHost, projectRoutePath } from '#routes/w.$workspace.$project/project-route.js';
+import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
 import { GlobalChatFlushGuard } from '#components/global-chat-flush-guard.js';
 import { SvgSpriteMount } from '#components/icons/svg-sprite-mount.js';
 import { HeadlessImageProvider } from '#providers/headless-image-provider.js';
@@ -106,6 +107,7 @@ export function RootLayout({
   const data = useRouteLoaderData<RootLoaderData>('root');
   // Preserve null so the theme provider can resolve the system preference before hydration.
   const ssrTheme = data?.theme ?? null;
+  const isProjectRoute = useMatch({ path: projectRoutePath, end: true }) !== null;
   const queryClient = useMemo(() => {
     const client = new QueryClient({
       defaultOptions: {
@@ -156,7 +158,13 @@ export function RootLayout({
     data?.env.TAU_DEBUG && data.pathname === '/__e2e/remote-host' ? (
       children
     ) : (
-      <HomeFileManagerProvider rootDirectory='/'>{managedChildren}</HomeFileManagerProvider>
+      <HomeFileManagerProvider
+        rootDirectory='/'
+        /* This mount gates every route, so on a project URL its wait is part of opening that project. */
+        placeholder={isProjectRoute ? <WorkspaceSkeleton withShellFrame /> : undefined}
+      >
+        {managedChildren}
+      </HomeFileManagerProvider>
     );
 
   /*

@@ -320,6 +320,38 @@ describe('SharedWorkerGate', () => {
     expect(screen.queryByText('subtree')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
+
+  /* Connecting is progress, and a route that knows what it is opening says so instead of a blank. */
+  it('shows the caller\u2019s placeholder while the worker connects', async () => {
+    /* `Once`, so a pending promise does not leak into the suites below (`clearAllMocks` keeps implementations). */
+    mockWaitForWorkerReady.mockReturnValueOnce(new Promise(() => undefined));
+
+    render(
+      <HomeFileManagerProvider rootDirectory='/'>
+        <SharedWorkerGate placeholder={<div>opening</div>}>
+          <div>subtree</div>
+        </SharedWorkerGate>
+      </HomeFileManagerProvider>,
+    );
+
+    expect(await screen.findByText('opening')).toBeInTheDocument();
+    expect(screen.queryByText('subtree')).not.toBeInTheDocument();
+  });
+
+  /* Home's own wait gates the whole app, so it takes the same placeholder. */
+  it('shows the placeholder while Home\u2019s storage engine resolves', async () => {
+    mockGetHomeStorageBackend.mockReturnValueOnce(new Promise(() => undefined));
+
+    render(
+      <HomeFileManagerProvider rootDirectory='/' placeholder={<div>opening</div>}>
+        <div>subtree</div>
+      </HomeFileManagerProvider>,
+    );
+
+    expect(await screen.findByText('opening')).toBeInTheDocument();
+    expect(screen.queryByRole('status', { name: 'Opening Home' })).not.toBeInTheDocument();
+    expect(screen.queryByText('subtree')).not.toBeInTheDocument();
+  });
 });
 
 describe('FileManagerProvider — bindProjectToWorkspace', () => {

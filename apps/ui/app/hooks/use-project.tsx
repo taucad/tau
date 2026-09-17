@@ -5,6 +5,7 @@ import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { Remote } from 'comlink';
 import { useQueryClient } from '@tanstack/react-query';
+import type { QueryClient } from '@tanstack/react-query';
 import {
   getActiveGroupValues,
   parameterEntryPath,
@@ -30,6 +31,7 @@ import { serializeModelComponentDisplayState } from '#machines/model-interaction
 import { inspect } from '#machines/inspector.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
+import type { Chat } from '@taucad/chat';
 import type { ChatStorage } from '#types/storage.types.js';
 import { localKernelOptions } from '#constants/local-kernel-options.js';
 import { useComputeReuseMode } from '#lib/compute-reuse-preference.js';
@@ -121,6 +123,32 @@ export async function ensureFocusedChatForProject({
   const created = await worker.createNavigationRepairChat(projectId);
   onCreatedChat?.();
   return { type: 'focusedChatEnsured', focusedChatId: created.id };
+}
+
+/**
+ * Whether `chatId` is a chat the client already holds — freshly created here, or
+ * present in a cached `['chats', projectId, …]` list. Such a chat needs no async
+ * ensure round trip, so the editor can focus it synchronously.
+ *
+ * @returns True when the chat is already known.
+ */
+export function isKnownChatId({
+  chatId,
+  createdChatId,
+  projectId,
+  queryClient,
+}: {
+  readonly chatId: string;
+  readonly createdChatId: string | undefined;
+  readonly projectId: string;
+  readonly queryClient: QueryClient;
+}): boolean {
+  if (chatId === createdChatId) {
+    return true;
+  }
+  return queryClient
+    .getQueriesData<Chat[]>({ queryKey: ['chats', projectId] })
+    .some(([, chats]) => chats?.some((chat) => chat.id === chatId));
 }
 
 export const createProjectManifestChangeObserver = ({
@@ -368,13 +396,17 @@ export function ProjectProvider({
     },
   );
 
+  /* A chat we already hold is focused synchronously. `setRequestedChatId` re-enters
+   * `ensuringFocusedChat` for an async chat-list round trip, which flashes the chat
+   * pane's skeleton — correct for an unknown/absent id, a visible flicker for every
+   * switch between chats the sidebar just listed. */
   useEffect(() => {
     editorRef.send(
-      createdChatId === requestedChatId && createdChatId !== undefined
-        ? { type: 'focusCreatedChat', chatId: createdChatId }
+      requestedChatId !== undefined && isKnownChatId({ chatId: requestedChatId, createdChatId, projectId, queryClient })
+        ? { type: 'focusKnownChat', chatId: requestedChatId }
         : { type: 'setRequestedChatId', chatId: requestedChatId },
     );
-  }, [createdChatId, editorRef, requestedChatId]);
+  }, [createdChatId, editorRef, projectId, queryClient, requestedChatId]);
 
   // Select state from the machine
   const viewGraphics = useSelector(actorRef, (state) => state.context.viewGraphics);

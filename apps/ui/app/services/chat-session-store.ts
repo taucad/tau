@@ -376,6 +376,9 @@ type ChatSessionLivenessDebugGlobal = typeof globalThis & {
   __TAU_CHAT_SESSION_LIVENESS__?: () => ChatSessionLivenessSnapshot;
 };
 
+/** The two phases that OPEN a run; every other phase settles one. */
+const opensRun = (phase: ChatRunPhase): boolean => phase === 'admitted' || phase === 'running';
+
 const runPhaseOf = (status: ChatStatus): Exclude<ChatRunPhase, 'cancelled'> | undefined => {
   switch (status) {
     case 'submitted': {
@@ -1999,23 +2002,23 @@ export class ChatSessionStore {
       ? admission.data.idempotencyKey
       : (getBoundDurableChatRunId(session.chatId) ?? session.durableRunId);
     /* A reattach that found nothing to resume still drives the SDK through
-     * `submitted → ready`. Opening a run on that left the chat's machine in
+     * `submitted → ready`. OPENING a run on that left the chat's machine in
      * `run.finishing` waiting for a settlement no run can send — the sidebar's
      * permanent "Finishing…" (F4b). A run phase has to name a run, so a chat
-     * that reattached with no run identity reports none and stays idle —
-     * except for `failed`, which is the reattach itself refusing (R1-F1): it
-     * names no run because none ever bound, and suppressing it left the row
-     * idle about a chat that cannot stream. A run the person starts is
-     * unaffected: `startRun` stamps its admission key before the SDK leaves
-     * `ready`, so `runId` is bound by the time any phase of it is reported. */
-    if (runId === undefined && next !== 'failed' && session.reattachedHostId !== undefined) {
+     * that reattached with no run identity opens none and stays idle. Only the
+     * opening: a settlement always reports, because the run it settles was
+     * already reported open and its identity is gone by then — `startRun`
+     * stamps an admission key the release clears before the SDK's `ready`
+     * arrives (R3-F2) — and because a reattach that refuses outright settles
+     * as `failed` about a chat that cannot stream (R1-F1). */
+    if (runId === undefined && session.reattachedHostId !== undefined && opensRun(next)) {
       return;
     }
     lastState.phase = next;
     /* The session counts runs so *Close* knows to ask (A35, I24). The run
      * reports to the chat's OWN project, wherever the person is now. */
     this.#sessionOwner(session)?.send({
-      type: next === 'admitted' || next === 'running' ? 'runStarted' : 'runSettled',
+      type: opensRun(next) ? 'runStarted' : 'runSettled',
       chatId: session.chatId,
     });
     session.stateActorRef?.send({

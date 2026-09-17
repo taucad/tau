@@ -69,6 +69,7 @@ import {
   recoverAttachedRun,
 } from '#workers/agent-host-leader.js';
 import type { AgentHostLockRequest, ChatLeaderLease } from '#workers/agent-host-leader.js';
+import { replayedStartOutcome } from '#workers/agent-host-replay.js';
 import { createGeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
 import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 import type { GeoSpecWorkerRpcClient } from '#workers/geospec-runner.client.js';
@@ -278,6 +279,9 @@ const createRelayedFileSystemProvider = (proxy: ProjectFileSystemBridge): FileSy
     dispose: () => undefined,
   };
 };
+
+/** Read every event of one chat in a single batch; the log slices to its own length. */
+const wholeLogLimit = Number.MAX_SAFE_INTEGER;
 
 const channels = new Map<string, BroadcastChannel>();
 const leadership = new Map<string, LeadershipState>();
@@ -720,9 +724,13 @@ const executeCommand = async (
   }
   if (replay && command.type === 'start') {
     try {
-      const prior = await active.host.snapshot(command.chatId);
-      if (prior.runId === command.runId) {
-        if (prior.state !== 'completed' && prior.state !== 'failed' && prior.state !== 'cancelled') {
+      /* The whole log, because the fact that decides this is a record anywhere
+       * in it — the run's committed turn — not the state of its tail. Replay
+       * only happens when leadership changes hands mid-dispatch. */
+      const batch = await active.host.readEvents({ chatId: command.chatId, cursor: 0, limit: wholeLogLimit });
+      const outcome = replayedStartOutcome({ events: batch.events, runId: command.runId });
+      if (outcome !== 'admit') {
+        if (outcome === 'resume') {
           await acknowledgeRun(active, command.chatId, active.host.resume(command.chatId));
         }
         return {

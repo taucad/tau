@@ -1274,7 +1274,25 @@ export class ChatSessionStore {
                  * is freed by `#scheduleRunReleaseIfTerminal` once the request
                  * settles — including the compose failure below (F4a). */
                 session.runHeld = true;
-                const consumedChat = await depsRef().consumeChatStartupRequest(input.chatId, startupRequest.id);
+                /* Nothing else can give this hold back: the request was never
+                 * started, so the lifecycle release never runs. A rejected
+                 * consume — it is a filesystem patch — left the session held
+                 * forever, undisposable and undrained (R1-F2). `retainDurableRun`
+                 * may have taken its own hold during the await; it is the only
+                 * other writer and it always sets `durableRunId` with it, so
+                 * that field tells this path's hold from theirs (R1-F5). */
+                const releaseSeedHold = (): void => {
+                  if (session.durableRunId === undefined) {
+                    session.runHeld = false;
+                  }
+                  this.#disposeIfUnreferenced(session);
+                };
+                const consumedChat = await depsRef()
+                  .consumeChatStartupRequest(input.chatId, startupRequest.id)
+                  .catch((error: unknown) => {
+                    releaseSeedHold();
+                    throw error;
+                  });
                 if (consumedChat) {
                   session.draftActorRef.send({ type: 'initializeFromChat' });
                   session.chat.messages = consumedChat.messages;
@@ -1299,8 +1317,7 @@ export class ChatSessionStore {
 
                   return { type: 'chatRetrieved', chat: { ...consumedChat, error: undefined } };
                 }
-                session.runHeld = false;
-                this.#disposeIfUnreferenced(session);
+                releaseSeedHold();
               }
             }
 
@@ -1985,8 +2002,13 @@ export class ChatSessionStore {
      * `submitted → ready`. Opening a run on that left the chat's machine in
      * `run.finishing` waiting for a settlement no run can send — the sidebar's
      * permanent "Finishing…" (F4b). A run phase has to name a run, so a chat
-     * that reattached with no run identity reports none and stays idle. */
-    if (runId === undefined && lastState.phase === undefined && session.reattachedHostId !== undefined) {
+     * that reattached with no run identity reports none and stays idle —
+     * except for `failed`, which is the reattach itself refusing (R1-F1): it
+     * names no run because none ever bound, and suppressing it left the row
+     * idle about a chat that cannot stream. A run the person starts is
+     * unaffected: `startRun` stamps its admission key before the SDK leaves
+     * `ready`, so `runId` is bound by the time any phase of it is reported. */
+    if (runId === undefined && next !== 'failed' && session.reattachedHostId !== undefined) {
       return;
     }
     lastState.phase = next;

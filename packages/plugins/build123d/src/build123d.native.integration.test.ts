@@ -338,7 +338,6 @@ describe('Build123d native kernel', () => {
           recordBytes = typeof input.data === 'string' ? encoder.encode(input.data) : Uint8Array.from(input.data);
           return { status, content: Uint8Array.from(recordBytes) };
         },
-        semanticPreconditions: async () => [{ path: 'main.py', expected: Uint8Array.from(sourceBytes) }],
       };
       const target = { authority: 'memory', root: '/project', entry: 'main.py' };
       const actor = createActor(

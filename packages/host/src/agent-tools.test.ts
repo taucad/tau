@@ -377,12 +377,7 @@ describe('createHostToolRegistry', () => {
     const rejected = await invoke(registry, 'apply_parameter_operation', {
       targetFile: 'main.ts',
       requestId: 'request-1',
-      expected: {
-        sourceRevision: 'source',
-        manifestRevision: 'manifest',
-        valueRevision: 'value',
-        dependencyRevision: 'dependency',
-      },
+      expected: { manifestRevision: 'manifest' },
       pressure: 'final',
       operation: { kind: 'reset-group', group: 'default' },
     });

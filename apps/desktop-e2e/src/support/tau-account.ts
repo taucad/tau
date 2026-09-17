@@ -121,24 +121,26 @@ const executeTauDatabase = async (statement: string): Promise<void> => {
 };
 
 /**
- * Sign in, waiting out better-auth's per-route limit.
+ * Post to a better-auth email route, waiting out its per-route limit.
  *
- * Its default rule for `/sign-in/email` is three attempts per ten seconds per
- * address, and the suite's specs sign in back to back from one address, so a
- * spec that starts within ten seconds of the previous one is refused with 429.
- * The limit is a production protection the suite must not weaken; waiting the
- * window out is the honest alternative.
+ * Its default rule for `/sign-in/email` and `/sign-up/email` is three attempts
+ * per ten seconds per address, and the suite's specs seed back to back from one
+ * address, so a spec that starts within ten seconds of the previous one is
+ * refused with 429. The limit is a production protection the suite must not
+ * weaken; waiting the window out is the honest alternative.
  *
+ * @param route - `sign-in` or `sign-up`.
  * @param headers - The seeding request headers.
- * @param account - The credentials to sign in with.
- * @returns The final sign-in response, refused or not.
+ * @param body - The JSON request body.
+ * @returns The final response, refused or not.
  */
-const signInWithBackoff = async (
+const postAuthWithBackoff = async (
+  route: 'sign-in' | 'sign-up',
   headers: Record<string, string>,
-  account: Pick<TauTestAccount, 'email' | 'password'>,
+  body: string,
 ): Promise<Response> => {
-  const body = JSON.stringify({ email: account.email, password: account.password });
-  let response = await fetch(`${desktopE2EApiUrl}/v1/auth/sign-in/email`, { method: 'POST', headers, body });
+  const url = `${desktopE2EApiUrl}/v1/auth/${route}/email`;
+  let response = await fetch(url, { method: 'POST', headers, body });
   // oxlint-disable-next-line eslint/no-await-in-loop -- sequential by design: each retry waits out the window the previous refusal named
   for (let attempt = 0; response.status === 429 && attempt < 3; attempt += 1) {
     const retryAfter = Number(response.headers.get('retry-after'));
@@ -147,7 +149,7 @@ const signInWithBackoff = async (
       setTimeout(_resolve, (Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 10) * 1000);
     });
     // oxlint-disable-next-line eslint/no-await-in-loop -- see above
-    response = await fetch(`${desktopE2EApiUrl}/v1/auth/sign-in/email`, { method: 'POST', headers, body });
+    response = await fetch(url, { method: 'POST', headers, body });
   }
   return response;
 };
@@ -175,18 +177,18 @@ export const seedTauTestUser = async (account: TauTestAccount): Promise<string> 
    * frontend origin, not the shell's `app://tau`. */
   const headers = { 'content-type': 'application/json', origin: desktopE2EFrontendUrl };
 
-  const signUp = await fetch(`${desktopE2EApiUrl}/v1/auth/sign-up/email`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(account),
-  });
+  const signUp = await postAuthWithBackoff('sign-up', headers, JSON.stringify(account));
   if (!signUp.ok) {
     throw new Error(`Tau test-account sign-up failed with HTTP ${String(signUp.status)}: ${await signUp.text()}`);
   }
 
   await executeTauDatabase(`UPDATE "user" SET email_verified = true WHERE email = '${account.email}';`);
 
-  const signIn = await signInWithBackoff(headers, account);
+  const signIn = await postAuthWithBackoff(
+    'sign-in',
+    headers,
+    JSON.stringify({ email: account.email, password: account.password }),
+  );
   if (!signIn.ok) {
     throw new Error(`Tau test-account sign-in failed with HTTP ${String(signIn.status)}: ${await signIn.text()}`);
   }

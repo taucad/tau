@@ -34,7 +34,6 @@ import type { KernelRuntime } from '@taucad/runtime/kernel';
 import { jscadExportSchemas } from '#jscad.schemas.js';
 
 import { jscadToGltf } from '#jscad-to-gltf.js';
-import { collectJscadPartIssues } from '#jscad-diagnostics.js';
 import { resolveJscadModeling } from '#jscad-modeling.js';
 import type { JscadModeling } from '#jscad-modeling.js';
 import { assignJscadPartName, isRenderableJscadPart, normalizeJscadParts } from '#jscad-parts.js';
@@ -390,21 +389,19 @@ export const jscadKernel = defineKernel({
       return { nativeHandle: [] };
     }
 
-    const parts = normalizeJscadParts(shapes, context.modeling);
-    const issues = collectJscadPartIssues(parts, context.modeling);
-
-    return { nativeHandle: parts, issues };
+    return { nativeHandle: normalizeJscadParts(shapes, context.modeling) };
   },
 
   async meshGeometry({ nativeHandle, content }, runtime, context) {
     const artifacts: GeometryResponse[] = [];
-    const renderableParts = nativeHandle.filter((part) => isRenderableJscadPart(part, context.modeling));
-    if (renderableParts.length > 0) {
+    const issues: KernelIssue[] = [];
+    if (nativeHandle.some((part) => isRenderableJscadPart(part, context.modeling))) {
       try {
-        artifacts.push({
-          format: 'gltf',
-          content: jscadToGltf(renderableParts, { includeEdges: content?.includeEdges === true }, context.modeling),
-        });
+        // The GLB packer owns the single normalization, so it also owns the
+        // topology verdict derived from it.
+        const gltf = jscadToGltf(nativeHandle, { includeEdges: content?.includeEdges === true }, context.modeling);
+        artifacts.push({ format: 'gltf', content: gltf.content });
+        issues.push(...gltf.issues);
       } catch (error) {
         runtime.logger.warn('Failed to convert JSCAD assembly to GLTF', {
           data: error,
@@ -414,7 +411,7 @@ export const jscadKernel = defineKernel({
       artifacts.push(createEmptyGltfGeometry());
     }
 
-    return finalizeMeshOutput({ artifacts });
+    return finalizeMeshOutput({ artifacts, issues });
   },
 
   serializeNativeHandle({ nativeHandle }, _runtime, context) {
@@ -503,14 +500,12 @@ export const jscadKernel = defineKernel({
         }
 
         const { coordinateSystem, unit } = options;
-        const renderableParts = nativeHandle.filter((part) => isRenderableJscadPart(part, context.modeling));
-        const issues = collectJscadPartIssues(nativeHandle, context.modeling);
-        if (renderableParts.length === 0) {
-          return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(createEmptyGlb()))], issues);
+        if (!nativeHandle.some((part) => isRenderableJscadPart(part, context.modeling))) {
+          return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(createEmptyGlb()))]);
         }
 
-        const gltfData = jscadToGltf(
-          renderableParts,
+        const gltf = jscadToGltf(
+          nativeHandle,
           {
             coordinateSystem,
             unit,
@@ -518,7 +513,7 @@ export const jscadKernel = defineKernel({
           },
           context.modeling,
         );
-        return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(gltfData))], issues);
+        return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(gltf.content))], gltf.issues);
       }
 
       default: {

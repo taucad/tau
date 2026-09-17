@@ -6,7 +6,6 @@ import { dirname, join, resolve } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
 import type { Locator, Page } from 'playwright';
 import { getBoundingBoxFromInspect, getInspectReport, validateGlbData } from '@taucad/runtime-testing';
-import type { TauSceneManifest } from '@taucad/runtime/types';
 
 import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
@@ -164,7 +163,7 @@ Library.Go(1f, () =>
 });
 `;
 
-const progressivePicogkSource = `using System.Numerics;
+const multiStepPicogkSource = `using System.Numerics;
 using System.Threading;
 using PicoGK;
 Library.Go(1f, () =>
@@ -635,7 +634,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     await sphere.click();
     await expect.poll(async () => sphere.getAttribute('aria-pressed')).toBe('true');
 
-    const beforeProgressive = geometryCacheSnapshot(sourcePath);
+    const beforeMultiStep = geometryCacheSnapshot(sourcePath);
     await page.evaluate(() => {
       const target = globalThis as typeof globalThis & {
         __tauPicoGkStates?: string[];
@@ -661,24 +660,9 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
       target.__tauPicoGkObserver.observe(document.body, { childList: true, characterData: true, subtree: true });
       capture();
     });
-    writeFileSync(sourcePath, progressivePicogkSource, 'utf8');
-    const sceneTimeline = page.getByRole('slider', { name: 'Scene timeline' });
-    // One frame has nothing to scrub; the control appears when the second frame arrives.
-    await expectCount(sceneTimeline, 0, 30_000);
-    await expectVisible(sceneTimeline, 120_000);
-    await expect.poll(async () => sceneTimeline.getAttribute('aria-valuetext')).toBe('Frame 2 of 2: Frame 2. Live.');
-    expect(geometryCacheSnapshot(sourcePath)).toEqual(beforeProgressive);
-
-    const beforeScrub = geometryCacheSnapshot(sourcePath);
-    await sceneTimeline.focus();
-    await sceneTimeline.press('Home');
-    await expect.poll(async () => sceneTimeline.getAttribute('aria-valuetext')).toMatch(/^Frame 1 of 2:/u);
-    await page.getByRole('button', { name: 'Return to live scene' }).click();
-    await expect.poll(async () => sceneTimeline.getAttribute('aria-valuetext')).toMatch(/^Frame 2 of 2:/u);
-    expect(geometryCacheSnapshot(sourcePath)).toEqual(beforeScrub);
-
-    await assertOneNewSettledGeometry(sourcePath, beforeProgressive);
-    const progressiveStates = await page.evaluate(() => {
+    writeFileSync(sourcePath, multiStepPicogkSource, 'utf8');
+    await assertOneNewSettledGeometry(sourcePath, beforeMultiStep);
+    const multiStepStates = await page.evaluate(() => {
       const target = globalThis as typeof globalThis & {
         __tauPicoGkStates?: string[];
         __tauPicoGkObserver?: MutationObserver;
@@ -686,26 +670,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
       target.__tauPicoGkObserver?.disconnect();
       return target.__tauPicoGkStates ?? [];
     });
-    expect(progressiveStates).toEqual(['buffering...', 'rendering...', 'idle']);
-
-    const beforeStageSave = geometryCacheSnapshot(sourcePath);
-    await page.getByRole('button', { name: 'Save selected preview stage to project' }).click();
-    // Sequence zero is the empty reset, so visible frame two is protocol stage three.
-    const stageRoot = join(projectRoot, 'stages', 'main-stage-3');
-    const stagePath = join(stageRoot, 'scene.json');
-    await expect.poll(() => existsSync(stagePath), { timeout: 30_000 }).toBe(true);
-    const savedStage = JSON.parse(readFileSync(stagePath, 'utf8')) as TauSceneManifest;
-    const stageGeometry = Object.values(savedStage.nodes).flatMap((node) => (node.geometry ? [node.geometry] : []));
-    expect(stageGeometry).toHaveLength(2);
-    for (const asset of stageGeometry) {
-      const bytes = readFileSync(join(stageRoot, `${encodeURIComponent(asset.contentDigest)}.glb`));
-      validateGlbData(Uint8Array.from(bytes));
-      expect(bytes.byteLength).toBe(asset.byteLength);
-      expect(`sha256:${createHash('sha256').update(bytes).digest('hex')}`).toBe(asset.contentDigest);
-    }
-    await expectVisible(page.getByText('Saved preview stage as stages/main-stage-3/scene.json', { exact: true }));
-    await page.waitForTimeout(1500);
-    expect(geometryCacheSnapshot(sourcePath)).toEqual(beforeStageSave);
+    expect(multiStepStates).toEqual(['buffering...', 'rendering...', 'idle']);
 
     // Observe a fresh lifecycle before restoring bytes: the previous scene is
     // already idle, and its material remains visible while native work runs.

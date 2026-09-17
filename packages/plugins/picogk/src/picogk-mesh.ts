@@ -10,13 +10,6 @@ const scalarBytes = 4;
 type PicogkComponent = PicogkBuild['components'][number];
 type PicogkMeshArtifact = Pick<PicogkBuild, 'artifactPath' | 'byteLength' | 'sha256' | 'components'>;
 
-/** One stable PicoGK component encoded as an independently transferable GLB asset. */
-export type PicogkComponentGlb = {
-  readonly id: string;
-  readonly name: string;
-  readonly content: Uint8Array<ArrayBuffer>;
-};
-
 const viewFloat32 = (bytes: Uint8Array<ArrayBuffer>, offset: number, count: number): Float32Array<ArrayBuffer> => {
   if (offset % scalarBytes !== 0 || offset + count * scalarBytes > bytes.byteLength) {
     throw new Error('PicoGK worker returned an invalid Float32 artifact range.');
@@ -205,22 +198,4 @@ export const picogkArtifactToGlb = (
 ): Uint8Array<ArrayBuffer> => {
   assertArtifactIntegrity(bytes, result);
   return componentsToGlb(bytes, result.components);
-};
-
-/**
- * Split one dirty-component artifact batch into independently transferable immutable GLBs.
- * @param bytes Confined artifact bytes read from the worker.
- * @param result Validated artifact descriptor containing only dirty components.
- * @returns One GLB asset for each stable component id in worker order.
- */
-export const picogkArtifactToComponentGlbs = (
-  bytes: Uint8Array<ArrayBuffer>,
-  result: PicogkMeshArtifact,
-): readonly PicogkComponentGlb[] => {
-  assertArtifactIntegrity(bytes, result);
-  return result.components.map((component) => ({
-    id: component.id,
-    name: component.name,
-    content: componentsToGlb(bytes, [component]),
-  }));
 };

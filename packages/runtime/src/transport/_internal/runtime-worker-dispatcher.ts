@@ -49,15 +49,11 @@ import type { RuntimeSourceSnapshotResult } from '#types/runtime-source-snapshot
 import type {
   GeometryTransport,
   HashedGeometryResultTransport,
-  ProgressiveSceneUpdateTransport,
-  ResolvedSceneAssetTransport,
-  ResolvedSceneSnapshotTransport,
   RuntimeHelloPayload,
   RuntimeProtocol,
   RuntimeGeometryComputedArgs,
   TelemetryEntry,
 } from '#types/runtime-protocol.types.js';
-import type { ProgressiveSceneUpdate, ResolvedSceneAsset, ResolvedSceneSnapshot } from '#types/runtime-scene.types.js';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 import { logFlushDebounce } from '#framework/runtime-framework.constants.js';
@@ -183,142 +179,6 @@ function prepareSourceSnapshotTransfer(
   return { ...result, data: { ...result.data, files }, issues };
 }
 
-function prepareSceneAssetTransfer(
-  asset: ResolvedSceneAsset,
-  context: {
-    readonly encode: GeometryEncoder;
-    readonly transferables: Transferable[];
-    readonly sentContentDigests?: Set<ResolvedSceneAsset['contentDigest']>;
-  },
-): ResolvedSceneAssetTransport {
-  if (context.sentContentDigests?.has(asset.contentDigest)) {
-    return {
-      delivery: 'reference',
-      contentDigest: asset.contentDigest,
-      mediaType: asset.mediaType,
-      byteLength: asset.byteLength,
-    };
-  }
-  const geometry = applyGeometryEncoder(
-    { ...asset.geometry, hash: asset.contentDigest },
-    context.encode,
-    context.transferables,
-  );
-  context.sentContentDigests?.add(asset.contentDigest);
-  return { ...asset, delivery: 'inline', geometry };
-}
-
-function prepareSceneSnapshotTransfer(
-  snapshot: ResolvedSceneSnapshot,
-  context: Parameters<typeof prepareSceneAssetTransfer>[1],
-): ResolvedSceneSnapshotTransport {
-  return {
-    manifest: snapshot.manifest,
-    assets: snapshot.assets.map((asset) => prepareSceneAssetTransfer(asset, context)),
-  };
-}
-
-function prepareSceneUpdateTransfer(
-  update: ProgressiveSceneUpdate,
-  context: Parameters<typeof prepareSceneAssetTransfer>[1],
-): ProgressiveSceneUpdateTransport {
-  switch (update.type) {
-    case 'reset': {
-      return {
-        ...update,
-        snapshot: prepareSceneSnapshotTransfer(update.snapshot, context),
-      };
-    }
-    case 'delta': {
-      return {
-        ...update,
-        assets: update.assets.map((asset) => prepareSceneAssetTransfer(asset, context)),
-      };
-    }
-    case 'refinement': {
-      return {
-        ...update,
-        replacements: update.replacements.map((replacement) => ({
-          ...replacement,
-          replacement: prepareSceneAssetTransfer(replacement.replacement, context),
-        })),
-      };
-    }
-    case 'bookmark': {
-      return update;
-    }
-  }
-}
-
-const sceneQueueClosed = Symbol('sceneQueueClosed');
-
-/** One-slot rendezvous: the kernel cannot outrun a paused RPC consumer. */
-class SceneUpdateQueue {
-  private pending:
-    | { readonly update: ProgressiveSceneUpdate; readonly consumed: ReturnType<typeof Promise.withResolvers<void>> }
-    | undefined;
-  private waiter:
-    | ReturnType<typeof Promise.withResolvers<ProgressiveSceneUpdate | typeof sceneQueueClosed>>
-    | undefined;
-  private closed = false;
-
-  public async push(update: ProgressiveSceneUpdate): Promise<void> {
-    if (this.closed) {
-      return;
-    }
-    if (this.waiter) {
-      const { waiter } = this;
-      this.waiter = undefined;
-      waiter.resolve(update);
-      return;
-    }
-    if (this.pending) {
-      await this.pending.consumed.promise;
-      return this.push(update);
-    }
-    const consumed = Promise.withResolvers<void>();
-    this.pending = { update, consumed };
-    await consumed.promise;
-  }
-
-  public async shift(signal: AbortSignal): Promise<ProgressiveSceneUpdate | typeof sceneQueueClosed> {
-    if (this.pending) {
-      const { pending } = this;
-      this.pending = undefined;
-      pending.consumed.resolve();
-      return pending.update;
-    }
-    if (this.closed || signal.aborted) {
-      return sceneQueueClosed;
-    }
-    const waiter = Promise.withResolvers<ProgressiveSceneUpdate | typeof sceneQueueClosed>();
-    this.waiter = waiter;
-    const abort = (): void => {
-      waiter.resolve(sceneQueueClosed);
-    };
-    signal.addEventListener('abort', abort, { once: true });
-    try {
-      return await waiter.promise;
-    } finally {
-      signal.removeEventListener('abort', abort);
-      if (this.waiter === waiter) {
-        this.waiter = undefined;
-      }
-    }
-  }
-
-  public close(): void {
-    if (this.closed) {
-      return;
-    }
-    this.closed = true;
-    this.pending?.consumed.resolve();
-    this.pending = undefined;
-    this.waiter?.resolve(sceneQueueClosed);
-    this.waiter = undefined;
-  }
-}
-
 /**
  * Options accepted by {@link createWorkerDispatcher}. The
  * `inlineFileSystem` field is the local-disk fast-path seam (TR16):
@@ -425,7 +285,6 @@ export function createWorkerDispatcher(
   let encodeBinary: BinaryEncoder = dispatcherOptions?.encodeBinary ?? inlineBinaryEncoder;
   let acknowledgeBinary = dispatcherOptions?.acknowledgeBinary ?? (() => undefined);
   let exportPublicationId = 0;
-  const sceneSubscribers = new Set<SceneUpdateQueue>();
 
   const pendingLogs: LogEntry[] = [];
   let logFlushTimer: ReturnType<typeof setTimeout> | undefined;
@@ -515,14 +374,6 @@ export function createWorkerDispatcher(
         transferables,
       };
       notify('geometryComputed', args);
-    };
-
-    worker.onSceneUpdate = async (event) => {
-      await Promise.all(
-        [...sceneSubscribers].map(async (subscriber) => {
-          await subscriber.push(event);
-        }),
-      );
     };
 
     worker.onParametersResolved = (event) => {
@@ -760,26 +611,6 @@ export function createWorkerDispatcher(
           const value = prepareSourceSnapshotTransfer(result, transferables);
           return { value, transferables } as unknown as CallResult;
         }
-        case 'readSceneSnapshot': {
-          const result = await worker.readSceneSnapshot(
-            args as RuntimeProtocol['calls']['readSceneSnapshot']['args'],
-            signal,
-          );
-          if (result.type === 'missing') {
-            return result as unknown as CallResult;
-          }
-          const transferables: Transferable[] = [];
-          const value = {
-            type: 'found',
-            snapshot: prepareSceneSnapshotTransfer(result.snapshot, { encode: encodeGeometry, transferables }),
-          } as const;
-          return { value, transferables } as unknown as CallResult;
-        }
-        case 'listSceneBookmarks': {
-          return worker.listSceneBookmarks(
-            args as RuntimeProtocol['calls']['listSceneBookmarks']['args'],
-          ) as unknown as CallResult;
-        }
         case 'transcode': {
           const result = await handleTranscode(args as RuntimeProtocol['calls']['transcode']['args'], signal);
           const transferables: Transferable[] = [];
@@ -884,39 +715,10 @@ export function createWorkerDispatcher(
       }
     },
 
-    // eslint-disable-next-line max-params -- typed RPC listener signature is fixed by ChannelServer.
-    async *listen(_context, _event, args, signal) {
-      const queue = new SceneUpdateQueue();
-      const sentContentDigests = new Set<ResolvedSceneAsset['contentDigest']>();
-      const afterSequence = args.afterSequence ?? -1;
-      sceneSubscribers.add(queue);
-      worker.setProgressiveSceneRequested(true);
-      try {
-        while (!signal.aborted) {
-          // eslint-disable-next-line no-await-in-loop -- each item is delivered only after downstream demand.
-          const update = await queue.shift(signal);
-          if (update === sceneQueueClosed) {
-            return;
-          }
-          if (update.sequence <= afterSequence) {
-            continue;
-          }
-          if (update.type === 'reset' && update.skippedBefore > 0) {
-            sentContentDigests.clear();
-          }
-          const transferables: Transferable[] = [];
-          const value = prepareSceneUpdateTransfer(update, {
-            encode: encodeGeometry,
-            transferables,
-            sentContentDigests,
-          });
-          yield { value, transferables } as unknown as WithTransferables<ProgressiveSceneUpdate>;
-        }
-      } finally {
-        queue.close();
-        sceneSubscribers.delete(queue);
-        worker.setProgressiveSceneRequested(sceneSubscribers.size > 0);
-      }
+    // The runtime protocol declares no listens; `ChannelServer` still requires the member.
+    // eslint-disable-next-line require-yield -- an unreachable generator yields nothing.
+    async *listen(): AsyncGenerator<never> {
+      throw new Error('The kernel runtime worker protocol declares no listen streams.');
     },
   };
 

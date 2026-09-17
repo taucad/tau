@@ -6,4 +6,4 @@ export { picogkKernel } from '#picogk.kernel.js';
 export type { PicogkNativeHandle } from '#picogk.kernel.js';
 export { loadPicogkKernelOptions, picogkRuntimeManifestSchema } from '#picogk-resources.js';
 export type { PicogkKernelOptions, PicogkRuntimeManifest } from '#picogk-resources.js';
-export { picogkExportSchemas, picogkOptionsSchema, picogkRenderSchema } from '#picogk.schemas.js';
+export { picogkExportSchemas, picogkOptionsSchema } from '#picogk.schemas.js';

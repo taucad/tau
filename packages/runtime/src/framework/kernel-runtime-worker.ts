@@ -646,13 +646,6 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       ),
     );
     this.kernelRenderContentMap.set(config.id, definition.render?.content ?? []);
-    this.kernelProgressiveSceneCapabilityMap.set(
-      config.id,
-      definition.render?.progressiveScene ?? {
-        type: 'unsupported',
-        reason: 'Kernel does not publish progressive scene updates.',
-      },
-    );
     this.kernelInitOptionsMap.set(config.id, validatedOptions);
     this.kernelImplementationAssetsMap.set(config.id, implementationAssets);
     if (definition.render?.optionsSchema) {

@@ -28,32 +28,21 @@ internal sealed record ModelTimings(
 
 internal sealed record ModelExecutionResult(
     IReadOnlyList<ExtractedComponent> Components,
-    IReadOnlyList<SceneCheckpoint> Checkpoints,
     long PicoGkNativeBytes,
     bool RecycleAfterResponse,
-    ModelTimings Timings,
-    IReadOnlyList<ComputeSnapshotPublication>? ComputePublications = null);
+    ModelTimings Timings);
 
 internal static class ModelRunner
 {
     internal static ModelExecutionResult Execute(
         CompiledModel compiled,
         string artifactRoot,
-        JsonElement? parameters = null,
-        SceneCaptureOptions? capture = null,
-        Action<SceneProgress>? onProgress = null,
-        ComputeMaterializationCache? compute = null)
+        JsonElement? parameters = null)
     {
         var values = CompilationService.BindParameters(
             compiled,
             parameters ?? JsonSerializer.SerializeToElement(new Dictionary<string, object?>()));
-        var (execution, context, entryPointInvoke) = LoadRunAndExtract(
-            compiled,
-            artifactRoot,
-            values,
-            capture,
-            onProgress,
-            compute);
+        var (execution, context, entryPointInvoke) = LoadRunAndExtract(compiled, artifactRoot, values);
         var unload = Stopwatch.StartNew();
         for (var attempt = 0; attempt < 8 && context.IsAlive; attempt++)
         {
@@ -77,10 +66,7 @@ internal static class ModelRunner
     private static (ModelExecutionResult, WeakReference, double) LoadRunAndExtract(
         CompiledModel compiled,
         string artifactRoot,
-        IReadOnlyDictionary<string, object?> values,
-        SceneCaptureOptions? capture,
-        Action<SceneProgress>? onProgress,
-        ComputeMaterializationCache? compute)
+        IReadOnlyDictionary<string, object?> values)
     {
         var context = new AssemblyLoadContext($"PicoGkProgram_{Guid.NewGuid():N}", isCollectible: true);
         ModelExecutionResult execution;
@@ -91,7 +77,7 @@ internal static class ModelRunner
             using var pdbStream = new MemoryStream(compiled.Pdb, writable: false);
             var assembly = context.LoadFromStream(assemblyStream, pdbStream);
             var entryPoint = assembly.EntryPoint!;
-            using var host = new HostedLibraryHost(artifactRoot, capture, onProgress, compute);
+            using var host = new HostedLibraryHost(artifactRoot);
             using (Library.UseHost(host))
             {
                 ApplyParameters(assembly, values);

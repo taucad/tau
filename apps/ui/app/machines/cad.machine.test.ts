@@ -3,25 +3,13 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { assign, createActor, setup, waitFor } from 'xstate';
 import { RenderTimeoutError } from '@taucad/runtime/client';
-import type {
-  CapabilitiesManifest,
-  KernelIssue,
-  RenderOutcome,
-  ProgressiveSceneUpdate,
-  SceneNodeId,
-  TelemetryEntry,
-} from '@taucad/runtime';
+import type { CapabilitiesManifest, KernelIssue, RenderOutcome, TelemetryEntry } from '@taucad/runtime';
 import { createMockRuntimeClient } from '@taucad/runtime-testing';
 import type { ParameterManifest } from '@taucad/parameters';
 import type { Geometry } from '@taucad/types';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
-import {
-  cadMachine,
-  disposeCadRuntime,
-  selectCadFailureIssues,
-  selectCanSaveSelectedSceneStage,
-} from '#machines/cad.machine.js';
+import { cadMachine, disposeCadRuntime, selectCadFailureIssues } from '#machines/cad.machine.js';
 import type { CadContext } from '#machines/cad.machine.js';
 import { logMachine } from '#machines/logs.machine.js';
 import type { AppRuntimeClient, KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
@@ -875,65 +863,6 @@ describe('cadMachine', () => {
       expect(parentRef.getSnapshot().context.events).toHaveLength(notifications);
       actor.stop();
       parentRef.stop();
-    });
-  });
-
-  describe('scene stage availability', () => {
-    /** A frame whose only node references an asset the update never carried. */
-    const unresolvableReset: ProgressiveSceneUpdate = {
-      type: 'reset',
-      renderId: 'render-stage',
-      sequence: 0,
-      revision: 0,
-      sceneDigest: 'scene-stage-0' as Extract<ProgressiveSceneUpdate, { type: 'reset' }>['sceneDigest'],
-      skippedBefore: 0,
-      snapshot: {
-        manifest: {
-          schemaVersion: 1,
-          rootNodeIds: ['root' as SceneNodeId],
-          nodes: {
-            root: {
-              id: 'root' as SceneNodeId,
-              childIds: [],
-              transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
-              visible: true,
-              geometry: {
-                contentDigest: 'asset-missing' as Extract<
-                  ProgressiveSceneUpdate,
-                  { type: 'reset' }
-                >['snapshot']['assets'][number]['contentDigest'],
-                mediaType: 'model/gltf-binary',
-                byteLength: 4,
-              },
-            },
-          },
-          presentation: {},
-        },
-        assets: [],
-      },
-    };
-
-    it('should answer save availability from the selected entry and fail loudly on an unmaterialisable stage', async () => {
-      const fileManagerRef = mock<NonNullable<CadContext['fileManagerRef']>>();
-      const { actor } = await startAndConnect({ fileManagerRef });
-
-      actor.send({ type: 'setEntryPath', entryPath: stubEntryPath });
-      actor.send({ type: 'sceneUpdate', update: unresolvableReset });
-
-      // Reading the selector must not replay/materialise the timeline: the
-      // selected entry is in memory, so the action is offered.
-      expect(selectCanSaveSelectedSceneStage(actor.getSnapshot())).toBe(true);
-
-      // The save path -- not the selector -- owns materialisation and reports
-      // the unresolvable reference.
-      actor.send({ type: 'saveSelectedSceneStage' });
-      expect(actor.getSnapshot().context.sceneTimeline.artifactSave).toEqual({
-        status: 'failed',
-        sequence: 0,
-        message: 'The selected preview stage is not available as a complete scene reference',
-      });
-
-      actor.stop();
     });
   });
 

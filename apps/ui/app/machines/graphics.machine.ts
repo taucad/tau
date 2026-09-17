@@ -1,7 +1,6 @@
 import { assign, assertEvent, setup, emit, enqueueActions, fromPromise, sendTo } from 'xstate';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { GeometryComponentManifest, GridSizes, Geometry } from '@taucad/types';
-import type { ProgressiveSceneUpdate, ResolvedSceneSnapshot } from '@taucad/runtime';
 import { idPrefix } from '@taucad/types/constants';
 import { getLengthUnit, metersPerLengthUnit } from '#constants/length-units.js';
 import type { LengthSymbol, UnitSystem } from '#constants/length-units.js';
@@ -17,13 +16,6 @@ import {
 } from '#components/geometry/graphics/graphics-backend.js';
 import { deriveModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import type { ModelInteractionSource, ViewerHoverSuppressionReason } from '#machines/model-interaction.machine.js';
-import {
-  applyProgressiveSceneUpdate,
-  clearProgressiveSceneProjection,
-  createProgressiveSceneProjection,
-  selectProgressiveSceneSequence,
-} from '#machines/progressive-scene-projection.js';
-import type { ProgressiveSceneProjection } from '#machines/progressive-scene-projection.js';
 
 export type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
 
@@ -200,8 +192,6 @@ export type GraphicsContext = {
   geometryKey: string;
   /** Requested-versus-presented GLTF identity and bounded renderer handoff measurements. */
   gltfPresentation: GltfPresentationProjection;
-  /** Resolved transient scenes keyed by timeline sequence; final geometry remains separate. */
-  progressiveScene: ProgressiveSceneProjection;
 };
 
 // Event types
@@ -293,12 +283,6 @@ export type GraphicsEvent =
     }
   | { type: 'gltfPresentationFailed'; revision: number; key: string }
   | { type: 'gltfPresentationMeasured'; telemetry: GltfPresentationTelemetry }
-  | {
-      type: 'syncProgressiveScene';
-      updates: readonly ProgressiveSceneUpdate[];
-      selectedSequence?: number;
-    }
-  | { type: 'clearProgressiveScene' }
   // Model/component interaction events
   | {
       type: 'loadModelComponentManifest';
@@ -941,25 +925,6 @@ export const graphicsMachine = setup({
           ),
         };
       },
-    }),
-
-    syncProgressiveScene: assign({
-      progressiveScene({ context, event }) {
-        assertEvent(event, 'syncProgressiveScene');
-        let projection = context.progressiveScene;
-        for (const update of event.updates) {
-          projection = applyProgressiveSceneUpdate(projection, update);
-        }
-        return event.selectedSequence === undefined
-          ? projection
-          : selectProgressiveSceneSequence(projection, event.selectedSequence);
-      },
-      pickableMeshesVersion: ({ context }) => context.pickableMeshesVersion + 1,
-    }),
-
-    clearProgressiveScene: assign({
-      progressiveScene: () => clearProgressiveSceneProjection(),
-      pickableMeshesVersion: ({ context }) => context.pickableMeshesVersion + 1,
     }),
 
     updateSceneRadius: enqueueActions(({ enqueue, event }) => {
@@ -1640,7 +1605,6 @@ export const graphicsMachine = setup({
         phase: 'idle',
         recentTelemetry: [],
       },
-      progressiveScene: createProgressiveSceneProjection(),
     };
   },
   exit: 'stopOwnedModelInteraction',
@@ -1749,12 +1713,6 @@ export const graphicsMachine = setup({
         },
         gltfPresentationMeasured: {
           actions: 'recordGltfPresentationTelemetry',
-        },
-        syncProgressiveScene: {
-          actions: 'syncProgressiveScene',
-        },
-        clearProgressiveScene: {
-          actions: 'clearProgressiveScene',
         },
         sceneRadiusUpdated: {
           actions: 'updateSceneRadius',
@@ -2021,14 +1979,6 @@ export const graphicsMachine = setup({
     },
   },
 });
-
-export const selectProgressiveSceneSnapshot = (snapshot: GraphicsSnapshot): ResolvedSceneSnapshot | undefined => {
-  const projection = snapshot.context.progressiveScene;
-  return projection.frames.find((frame) => frame.sequence === projection.selectedSequence)?.snapshot;
-};
-
-export const selectProgressiveSceneStatus = (snapshot: GraphicsSnapshot): ProgressiveSceneProjection['status'] =>
-  snapshot.context.progressiveScene.status;
 
 export const selectRequestedGltfRevision = (snapshot: GraphicsSnapshot): number =>
   snapshot.context.gltfPresentation.requestedRevision;

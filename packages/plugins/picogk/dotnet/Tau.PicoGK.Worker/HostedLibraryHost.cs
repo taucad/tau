@@ -14,51 +14,15 @@ using PicoGK.Numerics;
 
 namespace Tau.PicoGK.Worker;
 
-internal enum SceneCaptureMode { Explicit, Update, Operation }
-
-internal sealed record SceneCaptureOptions(
-    SceneCaptureMode Mode,
-    int MinimumIntervalMilliseconds,
-    int MaximumPendingCommands)
-{
-    internal static readonly SceneCaptureOptions Default = new(SceneCaptureMode.Update, 16, 256);
-}
-
-internal sealed record ScenePresentation(
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] float[]? Background = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] float? FieldOfViewDegrees = null);
-
-internal enum SceneProgressOperation { Reset, Delta }
-
-internal sealed record SceneProgress(
-    SceneCaptureMode Mode,
-    SceneProgressOperation Operation,
-    int? BaseSceneGeneration,
-    int SceneGeneration,
-    IReadOnlyList<ExtractedComponent> Upserts,
-    IReadOnlyList<string> RemovedComponentIds,
-    ScenePresentation? Presentation,
-    SceneCheckpoint? Bookmark = null);
-
 internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
 {
     private readonly string artifactRoot;
-    private readonly SceneCaptureOptions capture;
-    private readonly Action<SceneProgress>? onProgress;
-    private readonly ComputeMaterializationCache? compute;
     private ModelExecutionResult? result;
     private bool disposed;
 
-    internal HostedLibraryHost(
-        string artifactRoot,
-        SceneCaptureOptions? capture = null,
-        Action<SceneProgress>? onProgress = null,
-        ComputeMaterializationCache? compute = null)
+    internal HostedLibraryHost(string artifactRoot)
     {
         this.artifactRoot = Path.GetFullPath(artifactRoot);
-        this.capture = capture ?? SceneCaptureOptions.Default;
-        this.onProgress = onProgress;
-        this.compute = compute;
         Directory.CreateDirectory(this.artifactRoot);
     }
 
@@ -85,7 +49,7 @@ internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
         var initialize = Stopwatch.StartNew();
         Library? library = null;
         Viewer? viewer = null;
-        using var backend = new CaptureViewerBackend(artifactRoot, capture, onProgress, compute);
+        using var backend = new CaptureViewerBackend(artifactRoot);
         var log = new LogConsole();
         try
         {
@@ -109,7 +73,6 @@ internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
             var captured = backend.Extract();
             result = new ModelExecutionResult(
                 captured.Components,
-                captured.Checkpoints,
                 library.nTotalMemUsage(),
                 false,
                 new ModelTimings(
@@ -118,8 +81,7 @@ internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
                     captured.MeshConstruction,
                     captured.MeshExtraction,
                     captured.NormalGeneration,
-                    0),
-                compute?.Publications ?? []);
+                    0));
         }
         finally
         {
@@ -143,72 +105,11 @@ internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
 
 internal sealed record CapturedScene(
     IReadOnlyList<ExtractedComponent> Components,
-    IReadOnlyList<SceneCheckpoint> Checkpoints,
     double MeshConstruction,
     double MeshExtraction,
     double NormalGeneration);
 
-internal sealed record SceneCheckpoint(string Path, int SceneGeneration);
-
 internal sealed record GeometrySnapshot(string Kind, float[] Positions, uint[] Indices, ColorFloat? LineColor);
-internal sealed record ComputeSnapshotPublication(string CacheKey, GeometrySnapshot Snapshot);
-
-internal sealed class ComputeMaterializationCache
-{
-    private readonly Dictionary<string, GeometrySnapshot> prepared;
-    private readonly List<ComputeSnapshotPublication> publications = [];
-
-    internal ComputeMaterializationCache(IEnumerable<(string CacheKey, GeometrySnapshot Snapshot)> prepared) =>
-        this.prepared = prepared.ToDictionary(item => item.CacheKey, item => Clone(item.Snapshot), StringComparer.Ordinal);
-
-    internal IReadOnlyList<ComputeSnapshotPublication> Publications => publications;
-
-    internal bool TryGet(string key, out GeometrySnapshot snapshot)
-    {
-        if (!prepared.TryGetValue(key, out var found))
-        {
-            snapshot = null!;
-            return false;
-        }
-        snapshot = Clone(found);
-        return true;
-    }
-
-    internal void Record(string key, GeometrySnapshot snapshot)
-    {
-        prepared.Add(key, Clone(snapshot));
-        publications.Add(new ComputeSnapshotPublication(key, Clone(snapshot)));
-    }
-
-    internal static string MeshKey(GeometrySnapshot snapshot)
-    {
-        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        hash.AppendData(MemoryMarshal.AsBytes(new[] { snapshot.Positions.Length, snapshot.Indices.Length }.AsSpan()));
-        hash.AppendData(MemoryMarshal.AsBytes(snapshot.Positions.AsSpan()));
-        hash.AppendData(MemoryMarshal.AsBytes(snapshot.Indices.AsSpan()));
-        return $"mesh:sha256:{Convert.ToHexStringLower(hash.GetHashAndReset())}";
-    }
-
-    internal static string? VdbKey(Stream stream)
-    {
-        // OpenVDB Archive::writeHeader format 225: only bytes [21,57) are the random file UUID.
-        // Keep the complete grid, transform, background, topology and full-precision values.
-        Span<byte> header = stackalloc byte[57];
-        if (stream.Read(header) != header.Length ||
-            BinaryPrimitives.ReadInt64LittleEndian(header) != 0x56444220 ||
-            BinaryPrimitives.ReadUInt32LittleEndian(header[8..]) != 225 ||
-            header[20] != 1 ||
-            !Guid.TryParseExact(Encoding.ASCII.GetString(header[21..]), "D", out _)) return null;
-        header[21..].Clear();
-        stream.Position = 0;
-        stream.Write(header);
-        stream.Position = 0;
-        return $"voxels:sha256:{Convert.ToHexStringLower(SHA256.HashData(stream))}";
-    }
-
-    private static GeometrySnapshot Clone(GeometrySnapshot snapshot) =>
-        snapshot with { Positions = [.. snapshot.Positions], Indices = [.. snapshot.Indices] };
-}
 
 /// <summary>
 /// Applies hosted viewer calls on a bounded pump. One drained batch is one native-style poll update;
@@ -219,48 +120,31 @@ internal sealed class CaptureViewerBackend : IViewerBackend
     private static readonly Material DefaultMaterial = new(new ColorFloat("B8BCC4"), 0f, 0.7f);
     private readonly object gate = new();
     private readonly string artifactRoot;
-    private readonly SceneCaptureOptions capture;
-    private readonly Action<SceneProgress>? onProgress;
-    private readonly ComputeMaterializationCache? compute;
     private readonly BlockingCollection<ViewerCommand> commands;
     private readonly Task pump;
     private readonly List<SceneObject> objects = [];
     private readonly Dictionary<object, SceneObject> objectIndex = new(ReferenceEqualityComparer.Instance);
     private readonly ConditionalWeakTable<object, ComponentIdentity> componentIdentities = new();
     private readonly Dictionary<object, MaterializedComponent> materialized = new(ReferenceEqualityComparer.Instance);
-    private readonly Dictionary<string, ExtractedComponent> publishedComponents = new(StringComparer.Ordinal);
     private readonly Dictionary<int, Material> materials = [];
     private readonly Dictionary<int, Matrix4x4> groupMatrices = [];
     private readonly HashSet<int> hiddenGroups = [];
-    private readonly List<SceneCheckpoint> checkpoints = [];
-    private readonly Stopwatch progressClock = Stopwatch.StartNew();
     private ExceptionDispatchInfo? pumpError;
-    private long lastProgressMilliseconds = long.MinValue;
-    private bool pendingProgress;
-    private int sceneGeneration;
     private bool completed;
     private bool disposed;
     private double meshConstruction;
     private double meshExtraction;
     private double normalGeneration;
     private int nextComponentOrdinal;
-    private int? publishedSceneGeneration;
-    private ScenePresentation? publishedPresentation;
-    private float[]? background;
-    private float? fieldOfViewDegrees;
 
-    internal CaptureViewerBackend(
-        string artifactRoot,
-        SceneCaptureOptions? capture = null,
-        Action<SceneProgress>? onProgress = null,
-        ComputeMaterializationCache? compute = null)
+    // ponytail: a fixed bound replaces the removed per-render capture knob; it is producer backpressure only.
+    private const int MaximumPendingCommands = 256;
+
+    internal CaptureViewerBackend(string artifactRoot)
     {
         this.artifactRoot = Path.GetFullPath(artifactRoot);
-        this.capture = capture ?? SceneCaptureOptions.Default;
-        this.onProgress = onProgress;
-        this.compute = compute;
         Directory.CreateDirectory(this.artifactRoot);
-        commands = new BlockingCollection<ViewerCommand>(this.capture.MaximumPendingCommands);
+        commands = new BlockingCollection<ViewerCommand>(MaximumPendingCommands);
         pump = Task.Run(Pump);
     }
 
@@ -268,16 +152,13 @@ internal sealed class CaptureViewerBackend : IViewerBackend
 
     public bool Poll() { Flush(); return false; }
 
-    public void RequestUpdate() => Enqueue(new ViewerCommand(false, false, () => { }));
+    public void RequestUpdate() => Enqueue(new ViewerCommand(() => { }));
 
     public void LoadLightSetup(byte[] abyDiffuseDds, byte[] abySpecularDds) =>
         throw UnsupportedCapability("environment lighting");
 
-    public void SetBackgroundColor(ColorFloat color) => Enqueue(new ViewerCommand(true, false, () =>
-    {
-        background = ColorValues(color);
-        sceneGeneration++;
-    }));
+    // Presentation state reached the renderer only through the removed progressive scene; the call stays accepted.
+    public void SetBackgroundColor(ColorFloat color) => Enqueue(new ViewerCommand(() => { }));
 
     public void SetFieldOfView(float radians)
     {
@@ -289,11 +170,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
                 "validation",
                 "error"));
         }
-        Enqueue(new ViewerCommand(true, false, () =>
-        {
-            fieldOfViewDegrees = radians * 180f / float.Pi;
-            sceneGeneration++;
-        }));
+        Enqueue(new ViewerCommand(() => { }));
     }
 
     public void ZoomToFit() => throw UnsupportedCapability("zoom-to-fit camera control");
@@ -304,49 +181,43 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         set => throw UnsupportedCapability("camera orientation");
     }
 
-    public void Add(Voxels vox, int nGroupID) => Enqueue(new ViewerCommand(true, false, () => AddObject(vox, nGroupID)));
-    public void Remove(Voxels vox) => Enqueue(new ViewerCommand(true, false, () => RemoveObject(vox)));
-    public void SetObjectMatrix(Voxels vox, Matrix4x4 mat) => Enqueue(new ViewerCommand(true, false, () => SetMatrix(vox, mat)));
-    public void Add(Mesh msh, int nGroupID) => Enqueue(new ViewerCommand(true, false, () => AddObject(msh, nGroupID)));
-    public void Remove(Mesh msh) => Enqueue(new ViewerCommand(true, false, () => RemoveObject(msh)));
-    public void SetObjectMatrix(Mesh msh, Matrix4x4 mat) => Enqueue(new ViewerCommand(true, false, () => SetMatrix(msh, mat)));
-    public void Add(PolyLine poly, int nGroupID) => Enqueue(new ViewerCommand(true, false, () => AddObject(poly, nGroupID)));
-    public void Remove(PolyLine poly) => Enqueue(new ViewerCommand(true, false, () => RemoveObject(poly)));
-    public void SetObjectMatrix(PolyLine poly, Matrix4x4 mat) => Enqueue(new ViewerCommand(true, false, () => SetMatrix(poly, mat)));
+    public void Add(Voxels vox, int nGroupID) => Enqueue(new ViewerCommand(() => AddObject(vox, nGroupID)));
+    public void Remove(Voxels vox) => Enqueue(new ViewerCommand(() => RemoveObject(vox)));
+    public void SetObjectMatrix(Voxels vox, Matrix4x4 mat) => Enqueue(new ViewerCommand(() => SetMatrix(vox, mat)));
+    public void Add(Mesh msh, int nGroupID) => Enqueue(new ViewerCommand(() => AddObject(msh, nGroupID)));
+    public void Remove(Mesh msh) => Enqueue(new ViewerCommand(() => RemoveObject(msh)));
+    public void SetObjectMatrix(Mesh msh, Matrix4x4 mat) => Enqueue(new ViewerCommand(() => SetMatrix(msh, mat)));
+    public void Add(PolyLine poly, int nGroupID) => Enqueue(new ViewerCommand(() => AddObject(poly, nGroupID)));
+    public void Remove(PolyLine poly) => Enqueue(new ViewerCommand(() => RemoveObject(poly)));
+    public void SetObjectMatrix(PolyLine poly, Matrix4x4 mat) => Enqueue(new ViewerCommand(() => SetMatrix(poly, mat)));
 
-    public void RemoveAllObjects() => Enqueue(new ViewerCommand(true, false, () =>
+    public void RemoveAllObjects() => Enqueue(new ViewerCommand(() =>
     {
         objects.Clear();
         objectIndex.Clear();
         materialized.Clear();
-        sceneGeneration++;
     }));
 
-    public void RequestScreenShot(string strScreenShotPath)
-    {
-        var relative = ConfinedRelativePath(strScreenShotPath);
-        Enqueue(new ViewerCommand(false, true, () => checkpoints.Add(new SceneCheckpoint(relative, sceneGeneration))));
-    }
+    // Screenshots existed only to mark scene bookmarks, which Tau no longer delivers; the model keeps running.
+    public void RequestScreenShot(string strScreenShotPath) => Enqueue(new ViewerCommand(() => { }));
 
     public void EnableExperimental(bool bEnable) => throw UnsupportedCapability("experimental viewer rendering");
 
-    public void SetGroupVisible(int nGroupID, bool bVisible) => Enqueue(new ViewerCommand(true, false, () =>
+    public void SetGroupVisible(int nGroupID, bool bVisible) => Enqueue(new ViewerCommand(() =>
     {
-        var changed = bVisible ? hiddenGroups.Remove(nGroupID) : hiddenGroups.Add(nGroupID);
-        if (changed) sceneGeneration++;
+        if (bVisible) hiddenGroups.Remove(nGroupID);
+        else hiddenGroups.Add(nGroupID);
     }));
 
     public void SetGroupMaterial(int nGroupID, ColorFloat clr, float fMetallic, float fRoughness) =>
-        Enqueue(new ViewerCommand(true, false, () =>
+        Enqueue(new ViewerCommand(() =>
         {
             materials[nGroupID] = new Material(clr, fMetallic, fRoughness);
-            sceneGeneration++;
         }));
 
-    public void SetGroupMatrix(int nGroupID, Matrix4x4 mat) => Enqueue(new ViewerCommand(true, false, () =>
+    public void SetGroupMatrix(int nGroupID, Matrix4x4 mat) => Enqueue(new ViewerCommand(() =>
     {
         groupMatrices[nGroupID] = mat;
-        sceneGeneration++;
     }));
 
     public void EnableOverhangWarning(int nGroupID, Overhang uWarning, Overhang uError) =>
@@ -397,7 +268,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
                     "validation",
                     "error"));
             }
-            return new CapturedScene(components, checkpoints.ToArray(), meshConstruction, meshExtraction, normalGeneration);
+            return new CapturedScene(components, meshConstruction, meshExtraction, normalGeneration);
         }
     }
 
@@ -415,13 +286,9 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             objectIndex.Clear();
             componentIdentities.Clear();
             materialized.Clear();
-            publishedComponents.Clear();
             materials.Clear();
             groupMatrices.Clear();
             hiddenGroups.Clear();
-            checkpoints.Clear();
-            background = null;
-            fieldOfViewDegrees = null;
         }
         commands.Dispose();
     }
@@ -437,10 +304,6 @@ internal sealed class CaptureViewerBackend : IViewerBackend
                 while (commands.TryTake(out var next)) batch.Add(next);
                 ApplyBatch(batch);
             }
-            lock (gate)
-            {
-                if (pendingProgress && capture.Mode != SceneCaptureMode.Explicit) PublishProgress(null);
-            }
         }
         catch (Exception error)
         {
@@ -454,80 +317,18 @@ internal sealed class CaptureViewerBackend : IViewerBackend
     {
         lock (gate)
         {
-            var batchChanged = false;
             foreach (var command in batch)
             {
-                var generationBefore = sceneGeneration;
                 command.Apply();
-                var changed = sceneGeneration != generationBefore;
-                batchChanged |= changed;
-                pendingProgress |= changed;
-                if (command.Bookmark) PublishProgress(checkpoints[^1]);
-                else if (changed && capture.Mode == SceneCaptureMode.Operation) PublishIfDue();
                 command.Completion?.Set();
             }
-            if (batchChanged && capture.Mode == SceneCaptureMode.Update) PublishIfDue();
         }
-    }
-
-    private void PublishIfDue()
-    {
-        if (onProgress is null) return;
-        var elapsed = progressClock.ElapsedMilliseconds;
-        if (lastProgressMilliseconds != long.MinValue && elapsed - lastProgressMilliseconds < capture.MinimumIntervalMilliseconds) return;
-        PublishProgress(null);
-    }
-
-    private void PublishProgress(SceneCheckpoint? bookmark)
-    {
-        if (onProgress is null) return;
-        var components = MaterializeComponents();
-        var operation = publishedSceneGeneration is null ? SceneProgressOperation.Reset : SceneProgressOperation.Delta;
-        IReadOnlyList<ExtractedComponent> upserts = operation == SceneProgressOperation.Reset
-            ? components
-            : components.Where(component =>
-                !publishedComponents.TryGetValue(component.Id, out var previous) || !ReferenceEquals(previous, component)).ToArray();
-        var currentIds = components.Select(component => component.Id).ToHashSet(StringComparer.Ordinal);
-        IReadOnlyList<string> removed = operation == SceneProgressOperation.Reset
-            ? Array.Empty<string>()
-            : publishedComponents.Keys.Where(id => !currentIds.Contains(id)).ToArray();
-        var presentation = new ScenePresentation(background is null ? null : [.. background], fieldOfViewDegrees);
-        var presentationChanged = operation == SceneProgressOperation.Reset || !PresentationEquals(publishedPresentation, presentation);
-        var hasSceneMutation =
-            operation == SceneProgressOperation.Reset ||
-            upserts.Count > 0 ||
-            removed.Count > 0 ||
-            presentationChanged;
-        if (!hasSceneMutation && bookmark is null)
-        {
-            lastProgressMilliseconds = progressClock.ElapsedMilliseconds;
-            pendingProgress = false;
-            return;
-        }
-        onProgress(new SceneProgress(
-            capture.Mode,
-            operation,
-            publishedSceneGeneration,
-            sceneGeneration,
-            upserts,
-            removed,
-            presentationChanged ? presentation : null,
-            bookmark));
-        if (hasSceneMutation)
-        {
-            publishedComponents.Clear();
-            foreach (var component in components) publishedComponents.Add(component.Id, component);
-            publishedSceneGeneration = sceneGeneration;
-            publishedPresentation = presentation;
-        }
-        lastProgressMilliseconds = progressClock.ElapsedMilliseconds;
-        pendingProgress = false;
     }
 
     private void Flush()
     {
         using var completion = new ManualResetEventSlim();
-        Enqueue(new ViewerCommand(false, false, () => { }, completion));
+        Enqueue(new ViewerCommand(() => { }, completion));
         completion.Wait();
         RethrowPumpError();
     }
@@ -562,21 +363,9 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             objectIndex.Remove(identity);
             materialized.Remove(identity);
         }
-        // A model may keep mutating the queued object. Key and result must read the same owned field.
+        // A model may keep mutating the queued object. The snapshot must read an owned copy.
         using var ownedVoxels = (identity as Voxels)?.voxDuplicate();
-        var geometry = (object?)ownedVoxels ?? identity;
-        GeometrySnapshot? snapshot = ownedVoxels is not null ? null : SnapshotGeometry(geometry);
-        var cacheKey = compute is null || identity is PolyLine ? null :
-            ownedVoxels is not null ? VoxelContentKey(ownedVoxels) : ComputeMaterializationCache.MeshKey(snapshot!);
-        if (cacheKey is not null && compute!.TryGet(cacheKey, out var cached))
-        {
-            snapshot = cached;
-        }
-        else
-        {
-            snapshot ??= SnapshotGeometry(geometry);
-            if (cacheKey is not null) compute!.Record(cacheKey, snapshot);
-        }
+        var snapshot = SnapshotGeometry((object?)ownedVoxels ?? identity);
         var item = new SceneObject(
             identity,
             componentIdentity.Id,
@@ -586,28 +375,6 @@ internal sealed class CaptureViewerBackend : IViewerBackend
             Matrix4x4.Identity);
         objects.Add(item);
         objectIndex.Add(identity, item);
-        sceneGeneration++;
-    }
-
-    private string? VoxelContentKey(Voxels voxels)
-    {
-        var path = Path.Combine(artifactRoot, "compute-input.vdb");
-        try
-        {
-            using var file = new OpenVdbFile(voxels.lib);
-            file.nAdd(voxels, "geometry");
-            using var copy = file.voxGet(0);
-            // Imported VDBs may request lossy half-float storage. Only mutate the temporary copy.
-            copy.oMetaData().RemoveValue("is_saved_as_half_float");
-            file.SaveToFile(path);
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None,
-                bufferSize: 4096, FileOptions.DeleteOnClose);
-            return ComputeMaterializationCache.VdbKey(stream);
-        }
-        catch (IOException)
-        {
-            return null;
-        }
     }
 
     private void RemoveObject(object identity)
@@ -615,7 +382,6 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         if (!objectIndex.Remove(identity, out var item)) return;
         objects.Remove(item);
         materialized.Remove(identity);
-        sceneGeneration++;
     }
 
     private void SetMatrix(object identity, Matrix4x4 matrix)
@@ -625,7 +391,6 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         objects[objects.IndexOf(item)] = replacement;
         objectIndex[identity] = replacement;
         materialized.Remove(identity);
-        sceneGeneration++;
     }
 
     private GeometrySnapshot SnapshotGeometry(object geometry)
@@ -720,21 +485,6 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         return item.Geometry.LineColor is { } color ? DefaultMaterial with { Color = color } : DefaultMaterial;
     }
 
-    private string ConfinedRelativePath(string requestedPath)
-    {
-        var path = Path.GetFullPath(requestedPath);
-        var relative = Path.GetRelativePath(artifactRoot, path);
-        if (Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
-        {
-            throw new WorkerException(new Issue(
-                "PicoGK screenshot checkpoint paths must remain inside the private artifact directory.",
-                "CS_TAU_ARTIFACT_PATH",
-                "validation",
-                "error"));
-        }
-        return relative.Replace(Path.DirectorySeparatorChar, '/');
-    }
-
     private static float[] TransformPositions(float[] source, Matrix4x4 matrix)
     {
         var positions = new float[source.Length];
@@ -774,11 +524,6 @@ internal sealed class CaptureViewerBackend : IViewerBackend
     }
 
     private static float[] ColorValues(ColorFloat color) => [color.R, color.G, color.B, color.A];
-    internal static bool PresentationEquals(ScenePresentation? left, ScenePresentation right) =>
-        left is not null &&
-        left.FieldOfViewDegrees == right.FieldOfViewDegrees &&
-        (ReferenceEquals(left.Background, right.Background) ||
-         left.Background is not null && right.Background is not null && left.Background.SequenceEqual(right.Background));
     private static WorkerException UnsupportedCapability(string capability) => new(new Issue(
         $"The hosted PicoGK viewer does not support {capability}.",
         "CS_TAU_VIEWER_CAPABILITY",
@@ -786,7 +531,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         "error"));
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(disposed, this);
 
-    private sealed record ViewerCommand(bool MutatesScene, bool Bookmark, Action Apply, ManualResetEventSlim? Completion = null);
+    private sealed record ViewerCommand(Action Apply, ManualResetEventSlim? Completion = null);
     private sealed record ComponentIdentity(string Id, int Ordinal);
     private sealed record SceneObject(
         object Identity,

@@ -16,7 +16,7 @@ import { NodeFsAuthorityHost, serveNodeFsProvider, toNodeFsPort } from '@taucad/
 import { createRuntimeClient } from '@taucad/runtime';
 import { admitParameterManifest } from '@taucad/parameters';
 import type { ParameterManifest, ParameterResolutionOptions, ParameterSetTarget } from '@taucad/parameters';
-import { loadParameterSnapshot, refreshParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
+import { loadParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
 import type { ParameterAuthority } from '@taucad/parameters/authority';
 import { createActor, fromCallback, fromPromise, waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -709,11 +709,16 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       const actor = createActor(
         parameterSetMachine.provide({
           actors: {
-            // A sidecar change re-reads only the sidecar; a resolve re-resolves the producer.
+            /* An agent edits the source between reads, so every load re-resolves; the manifest is
+             * admitted only once per revision, and the sidecar bytes decide what changed. */
             loadParameterSet: fromPromise(async ({ input, signal }) =>
-              input.current === undefined
-                ? loadParameterSnapshot({ target, authority, manifest, resolution: input.resolution, signal })
-                : refreshParameterSnapshot({ current: input.current, authority, signal }),
+              loadParameterSnapshot({
+                target,
+                authority,
+                manifest,
+                ...(input.resolution === undefined ? {} : { resolution: input.resolution }),
+                signal,
+              }),
             ),
             commitParameterSet: fromPromise(async ({ input: change, signal }) =>
               commitParameterChange({ change, authority, signal }),

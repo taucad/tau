@@ -78,7 +78,7 @@ const webgpuValidationPatterns: readonly RegExp[] = [
 
 const stageName = /liquid metal loader showcase/i;
 /** Icosphere at detail 5: `10 * 4^5 + 2`. */
-const expectedVertexCount = 10_242;
+const expectedVertexCount = 40_962;
 
 const readState = async (): Promise<LoaderState | undefined> =>
   target.evaluate(() => (globalThis as LoaderWindow).__TAU_METAL_MORPH__?.getState());
@@ -345,7 +345,7 @@ test.describe('metal morph loader', () => {
     });
   }
 
-  test('renders one body of 10,242 vertices with the bloom chain enabled', async () => {
+  test('renders one body of 40,962 vertices with the bloom chain enabled', async () => {
     await target.navigate('/loader?graphicsBackend=webgpu');
     const state = await waitForReady();
     expect(state.vertexCount).toBe(expectedVertexCount);

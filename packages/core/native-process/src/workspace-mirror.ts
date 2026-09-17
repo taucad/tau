@@ -13,6 +13,7 @@ const maxEntries = 10_000;
 const maxFileBytes = 32 * 1024 * 1024;
 const maxWorkspaceBytes = 512 * 1024 * 1024;
 const defaultExcludedDirectories = ['.git', '.hg', '.svn', '.tau', 'node_modules'];
+const encoder = new TextEncoder();
 
 /** Configuration for one bounded native workspace projection. @public */
 export type WorkspaceMirrorOptions = {
@@ -29,7 +30,18 @@ export type WorkspaceMirror = {
   readonly rootPath: string;
   readonly workspacePath: string;
   readonly artifactPath: string;
-  sync(filesystem: KernelFileSystem): Promise<readonly string[]>;
+  /**
+   * Project the rooted filesystem into the mirror and return the mirrored paths.
+   *
+   * `contents` is the runtime's own file-content cache (`KernelRuntime.fileContentCache`). Bytes the
+   * runtime already read for this operation are taken from it instead of being read again, which also
+   * keeps the mirror byte-identical to what the render was computed from. A cached entry whose length
+   * disagrees with the stat is ignored and the file is read.
+   */
+  sync(
+    filesystem: KernelFileSystem,
+    contents?: ReadonlyMap<string, Uint8Array<ArrayBuffer> | string>,
+  ): Promise<readonly string[]>;
   cleanup(): Promise<void>;
 };
 
@@ -58,7 +70,10 @@ export const createWorkspaceMirror = async (options: WorkspaceMirrorOptions): Pr
   const excludedDirectories = new Set([...defaultExcludedDirectories, ...(options.excludedDirectories ?? [])]);
   const excludedFileSuffixes = options.excludedFileSuffixes ?? [];
 
-  const sync = async (filesystem: KernelFileSystem): Promise<readonly string[]> => {
+  const sync = async (
+    filesystem: KernelFileSystem,
+    contents?: ReadonlyMap<string, Uint8Array<ArrayBuffer> | string>,
+  ): Promise<readonly string[]> => {
     const started = Date.now();
     const files: Array<{ readonly path: string; readonly size: number; readonly mtimeMs: number }> = [];
     const folded = new Map<string, string>();
@@ -111,7 +126,9 @@ export const createWorkspaceMirror = async (options: WorkspaceMirrorOptions): Pr
       ) {
         continue;
       }
-      const bytes = await filesystem.readFile(file.path);
+      const seeded = contents?.get(file.path);
+      const cached = typeof seeded === 'string' ? encoder.encode(seeded) : seeded;
+      const bytes = cached?.byteLength === file.size ? cached : await filesystem.readFile(file.path);
       if (bytes.byteLength !== file.size) {
         throw new Error(`${options.displayName} workspace changed while mirroring: ${file.path}.`);
       }

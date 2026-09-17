@@ -146,7 +146,7 @@ export const build123dKernel = defineKernel({
   },
 
   async getDependencies({ entryPath }, runtime, context) {
-    await context.mirror.sync(runtime.filesystem);
+    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
     try {
       const analysis = await context.session.request({
         method: 'analyze',
@@ -164,7 +164,7 @@ export const build123dKernel = defineKernel({
   },
 
   async getParameters({ entryPath }, runtime, context) {
-    await context.mirror.sync(runtime.filesystem);
+    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
     try {
       const analysis = await context.session.request({
         method: 'analyze',
@@ -185,7 +185,7 @@ export const build123dKernel = defineKernel({
   },
 
   async createGeometry({ entryPath, parameters }, runtime, context) {
-    await context.mirror.sync(runtime.filesystem);
+    await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
     let executionParameters = parameters;
     try {
       const parameterPath = assertRootedPath(`${parametersDirectory}/${entryPath}.json`);

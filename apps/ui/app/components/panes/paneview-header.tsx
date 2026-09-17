@@ -184,9 +184,9 @@ export function PaneviewHeaderControls({
       className={cn(
         'ml-auto flex items-center gap-1',
         '[&_button]:rounded-md [&_button]:text-muted-foreground [&_button]:transition-colors [&_button]:duration-150 [&_button]:outline-none',
-        '[&_button:hover]:bg-muted-foreground/10 [&_button:hover]:text-foreground',
-        '[&_button:focus-visible]:bg-muted-foreground/10 [&_button:focus-visible]:text-foreground [&_button:focus-visible]:focus-outline',
-        '[&_button[data-state=open]]:bg-muted-foreground/10 [&_button[data-state=open]]:text-foreground',
+        '[&_button:hover]:bg-accent [&_button:hover]:text-foreground',
+        '[&_button:focus-visible]:bg-accent [&_button:focus-visible]:text-foreground [&_button:focus-visible]:focus-outline',
+        '[&_button[data-state=open]]:bg-accent [&_button[data-state=open]]:text-foreground',
         'motion-reduce:[&_button]:transition-none',
         className,
       )}
@@ -249,7 +249,7 @@ export function PaneviewHeaderAction({
       className={cn(
         'flex size-6 items-center justify-center rounded-md',
         'text-muted-foreground transition-colors duration-150 motion-reduce:transition-none',
-        'hover:bg-muted-foreground/10 hover:text-foreground',
+        'hover:bg-accent hover:text-foreground',
         'outline-none focus-visible:focus-outline',
         'disabled:pointer-events-none disabled:opacity-50',
         "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",

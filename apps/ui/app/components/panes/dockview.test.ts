@@ -477,7 +477,7 @@ describe('dockviewStyleOverrides', () => {
       '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button]:!bg-transparent',
     );
     expect(dockviewStyleOverrides).toContain(
-      '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button:hover]:!bg-nested-action-hover',
+      '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button:hover]:!bg-accent',
     );
   });
 

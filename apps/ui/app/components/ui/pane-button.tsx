@@ -3,16 +3,15 @@ import { Slot as SlotPrimitive } from 'radix-ui';
 import { cva } from 'class-variance-authority';
 import type { VariantProps } from 'class-variance-authority';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 
 type TooltipSide = 'left' | 'right' | 'top' | 'bottom';
 
 const paneButtonVariants = cva(
   [
-    nestedActionVariants(),
     'flex shrink-0 select-none items-center justify-center rounded-sm',
     'text-muted-foreground transition-colors',
-    'aria-pressed:bg-nested-action-hover',
+    // Top-level header actions share the tab's resting fill; nested-action-hover is for actions inside a hovered surface.
+    'hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground aria-pressed:bg-accent',
     'outline-none focus-visible:focus-outline',
     'disabled:pointer-events-none disabled:opacity-50',
     "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",

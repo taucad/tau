@@ -159,9 +159,9 @@ export function Parameters({
     () => mergeFormDefaults(jsonSchema ?? {}, defaultParameters, parameters),
     [jsonSchema, defaultParameters, parameters],
   );
-  /* Authoritative number rows read their own value from their input actor, so the form's own
-   * re-render is never what acknowledges an edit; deferring it keeps the whole RJSF tree off the
-   * urgent path while non-number widgets still see the committed data. */
+  /* A number row shows its own draft while it is being edited, so the form's re-render is never what
+   * acknowledges an edit; deferring it keeps the whole RJSF tree off the urgent path while every
+   * widget still settles on the committed data. */
   const deferredData = useDeferredValue(mergedData);
   const hasParameters = jsonSchema && Object.keys(jsonSchema.properties ?? {}).length > 0;
 

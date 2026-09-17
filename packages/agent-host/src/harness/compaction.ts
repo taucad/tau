@@ -17,7 +17,7 @@ import type {
 import { createAssistantMessageEventStream, isContextOverflow } from '@earendil-works/pi-ai';
 import type { Api, AssistantMessage, Model, Models, UserMessage } from '@earendil-works/pi-ai';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
-import { piMessageToProvider } from '#harness/session-record.js';
+import { createTransportFailureDiagnostic, piMessageToProvider } from '#harness/session-record.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import type { SessionRecord } from '#harness/session-record.js';
 
@@ -82,6 +82,7 @@ type ClearedToolResult = {
 
 const failureStream = (model: Model<Api>, error: HostCompactionError, timestamp: number) => {
   const output = createAssistantMessageEventStream();
+  const diagnostic = createTransportFailureDiagnostic(error, timestamp);
   const message: AssistantMessage = {
     role: 'assistant',
     content: [{ type: 'text', text: `Compaction failed: ${error.message}` }],
@@ -98,6 +99,9 @@ const failureStream = (model: Model<Api>, error: HostCompactionError, timestamp:
     },
     stopReason: 'error',
     errorMessage: error.message,
+    // Without the diagnostic the terminal record keeps only the prose, and the
+    // surfaces that route on a failure code see an uncoded host failure.
+    ...(diagnostic ? { diagnostics: [diagnostic] } : {}),
     timestamp,
   };
   output.push({ type: 'start', partial: message });
@@ -228,7 +232,15 @@ const tokenBudgetCutoff = (messages: readonly AgentMessage[], settings: Compacti
     return cut.firstKeptEntryIndex;
   }
   const turnStart = findTurnStartIndex(entries, cut.firstKeptEntryIndex, 0);
-  return turnStart < 0 ? cut.firstKeptEntryIndex : turnStart;
+  /*
+   * A chat whose whole history is one oversized turn starts that turn at index
+   * 0, so rolling the cut back to the turn start leaves nothing to evict and
+   * the turn is refused for good. Cut inside the turn instead and summarise its
+   * head, the way pi's own `prepareCompaction` handles a split turn. pi never
+   * offers a tool result as a cut point, so the retained tail still opens on the
+   * assistant message that made the call.
+   */
+  return turnStart > 0 ? turnStart : cut.firstKeptEntryIndex;
 };
 
 const userText = (message: AgentMessage): string => {
@@ -500,12 +512,27 @@ export const installCompaction = (
 
   const prepareTurn = async (messages: AgentMessage[], signal?: AbortSignal): Promise<AgentMessage[]> => {
     memo = undefined;
-    const outcome = await compact({ input: messages, durable: true, signal });
-    pendingFailure = undefined;
-    if (outcome.tier) {
-      agent.state.messages = outcome.messages;
+    try {
+      const outcome = await compact({ input: messages, durable: true, signal });
+      pendingFailure = undefined;
+      if (outcome.tier) {
+        agent.state.messages = outcome.messages;
+      }
+      return outcome.messages;
+    } catch (error) {
+      /*
+       * Fail the turn, not the chat. Escaping here left the run stranded on
+       * `admitted` with nothing committed, so a chat whose history cannot be
+       * compacted could never take another turn. The failure rides the same
+       * seam the ephemeral and between-turn legs use: the stream wrapper turns
+       * it into this turn's coded error message.
+       */
+      if (!(error instanceof HostCompactionError)) {
+        throw error;
+      }
+      pendingFailure = error;
+      return messages;
     }
-    return outcome.messages;
   };
 
   agent.prepareNextTurn = async (signal) => {

@@ -177,3 +177,69 @@ describe('attachment materialisation in the session (D15)', () => {
     expect(transport.requests[0]?.documents).toBeUndefined();
   });
 });
+
+describe('start-of-turn compaction refusal', () => {
+  /*
+   * A chat whose durable history is one message too large to evict cannot be
+   * compacted at all. That refusal has to end the turn the way every other
+   * coded refusal does — a terminal `failed` record carrying the code — instead
+   * of escaping `prompt` mid-admission and leaving the chat with no way to take
+   * another turn.
+   */
+  it('should admit the next turn after a start-of-turn compaction refusal', async () => {
+    const file = createMemoryEventLogFile();
+    const seedLog = await file.open();
+    await seedLog.append({
+      version: 1,
+      leaderEpoch: 'seed-epoch',
+      sequence: 0,
+      recordedAt: '2026-09-01T00:00:00.000Z',
+      runId: 'seed-run',
+      type: 'message.appended',
+      message: { id: 'user-oversized', role: 'user', content: 'p'.repeat(60_000) },
+    });
+    await seedLog.close();
+
+    let generatedId = 0;
+    const refusedSession = async (runId: string, transport: RecordingTransport) =>
+      createAgentSession({
+        chatId: 'chat-oversized',
+        runId,
+        leaderEpoch: `${runId}-epoch`,
+        systemPrompt: 'system',
+        model: { id: 'stub', contextWindow: 8192 },
+        modelTransport: transport,
+        toolRegistry: { list: () => [], invoke: vi.fn() },
+        eventLog: await file.open(),
+        summarize: async () => 'never reached',
+        createId: () => `generated-${generatedId++}`,
+        now: () => new Date('2026-09-01T00:00:00.000Z'),
+      });
+
+    const firstTransport = new RecordingTransport();
+    const first = await refusedSession('run-refused', firstTransport);
+    await first.prompt({ id: 'user-after-oversized', role: 'user', content: 'continue' });
+    await first.close();
+
+    const secondTransport = new RecordingTransport();
+    const second = await refusedSession('run-next', secondTransport);
+    await second.prompt({ id: 'user-next', role: 'user', content: 'still there?' });
+    await second.close();
+
+    const log = await file.open();
+    const events = await log.read();
+    const failures = events.flatMap((event) =>
+      event.type === 'run.lifecycle' && event.state === 'failed' ? [event.detail?.code] : [],
+    );
+
+    expect(failures).toEqual(['NO_EVICTABLE_HISTORY', 'NO_EVICTABLE_HISTORY']);
+    // The refusal never escalates to the circuit breaker, and both turns are
+    // committed, so the chat keeps taking turns.
+    expect(JSON.stringify(events)).not.toContain('CIRCUIT_BREAKER_OPEN');
+    expect(
+      events.flatMap((event) => (event.type === 'turn.history-projection-committed' ? [event.message.id] : [])),
+    ).toEqual(['user-after-oversized', 'user-next']);
+    expect(firstTransport.requests).toEqual([]);
+    await log.close();
+  });
+});

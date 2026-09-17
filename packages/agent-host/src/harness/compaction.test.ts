@@ -4,7 +4,7 @@ import type { AgentMessage } from '@earendil-works/pi-agent-core';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import type { AssistantMessage, Context, Models, UserMessage } from '@earendil-works/pi-ai';
 import { installCompaction } from '#harness/compaction.js';
-import type { CompactionSummarizer } from '#harness/compaction.js';
+import type { CompactionOutcome, CompactionSummarizer } from '#harness/compaction.js';
 import { createAgentSession } from '#harness/session.js';
 import { createMemoryEventLogFile, stubModel } from '#harness/harness.fixture.js';
 import { MessageIdentities } from '#harness/session-record.js';
@@ -719,5 +719,89 @@ describe('Compaction', () => {
     expect(result.stopReason).toBe('stop');
     expect(base).toHaveBeenCalledTimes(2);
     expect(append).toHaveBeenCalledWith(expect.objectContaining({ type: 'history.compacted' }));
+  });
+
+  /*
+   * A chat whose whole history is one oversized turn has no earlier turn to
+   * evict, so rolling pi's cut back to the turn start leaves an empty prefix
+   * and the turn was refused. Summarise the turn's head instead — pi's
+   * `prepareCompaction` splits a turn the same way — and keep every retained
+   * tool result paired with the call that produced it.
+   */
+  it('should evict the head of a single oversized turn instead of refusing', async () => {
+    const messages: AgentMessage[] = [{ role: 'user', content: 'model the bracket', timestamp: 0 }];
+    for (let index = 0; index < 6; index++) {
+      messages.push(
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'toolCall',
+              id: `call-${index}`,
+              name: 'edit_file',
+              arguments: { targetFile: 'main.ts', oldString: 'x'.repeat(4000), newString: String(index) },
+            },
+          ],
+          api: stubModel.api,
+          provider: stubModel.provider,
+          model: stubModel.id,
+          usage: {
+            input: 1400 * (index + 1),
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 1400 * (index + 1),
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: 'toolUse',
+          timestamp: index * 2 + 1,
+        },
+        {
+          role: 'toolResult',
+          toolCallId: `call-${index}`,
+          toolName: 'edit_file',
+          content: [{ type: 'text', text: 'y'.repeat(2000) }],
+          isError: false,
+          timestamp: index * 2 + 2,
+        },
+      );
+    }
+    const identities = new MessageIdentities(() => 'single-turn-summary');
+    for (const [index, message] of messages.entries()) {
+      identities.set(message, `single-turn-${index}`);
+    }
+    const agent = new Agent({
+      streamFn: () => createAssistantMessageEventStream(),
+      initialState: { model: stubModel, messages },
+    });
+    const outcomes: CompactionOutcome[] = [];
+    const compaction = installCompaction({
+      agent,
+      record: { messages: identities, append: async () => undefined, events: async () => [], history: async () => [] },
+      contextWindow: 8192,
+      summarize: async () => 'Head of the oversized turn.',
+      onCompaction: (outcome) => outcomes.push(outcome),
+    });
+
+    const prepared = await compaction.prepareTurn(messages);
+
+    expect(outcomes[0]?.tier).toBe('summarization');
+    expect(outcomes[0]?.evicted).toBeGreaterThan(0);
+    expect(JSON.stringify(prepared[0])).toContain('<summary>');
+    const keptCallIds = new Set(
+      prepared.flatMap((message) =>
+        message.role === 'assistant'
+          ? message.content.flatMap((block) => (block.type === 'toolCall' ? [block.id] : []))
+          : [],
+      ),
+    );
+    expect(
+      prepared.filter((message) => message.role === 'toolResult').map((message) => message.toolCallId),
+    ).not.toEqual([]);
+    for (const message of prepared) {
+      if (message.role === 'toolResult') {
+        expect(keptCallIds).toContain(message.toolCallId);
+      }
+    }
   });
 });

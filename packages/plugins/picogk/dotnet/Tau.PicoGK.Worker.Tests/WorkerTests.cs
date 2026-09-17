@@ -186,6 +186,40 @@ public static class Params
     }
 
     [Fact]
+    public void ARepeatedBuildOfOneCompilationReusesTheLoadedAssembly()
+    {
+        Write("main.cs", """
+using System.ComponentModel.DataAnnotations;
+using System.Numerics;
+using PicoGK;
+
+Edits.Count++;
+Library.Go(1f, () =>
+{
+    Library.oViewer().Add(Utils.mshCreateCube(new Vector3(Edits.Count, Params.WidthMm, 2f)));
+});
+
+public static class Edits { public static int Count; }
+public static class Params
+{
+    [Range(1, 20)] public static int WidthMm { get; set; } = 3;
+}
+""");
+        var compiled = CompilationService.Compile(root);
+
+        var first = ModelRunner.Execute(compiled, Path.Combine(root, "retain-artifacts"), Json("""{"WidthMm":4}"""));
+        var second = ModelRunner.Execute(compiled, Path.Combine(root, "retain-artifacts"), Json("""{"WidthMm":5}"""));
+
+        // D25: a parameter edit reloads nothing, so the model's own static counts up across the two
+        // builds, while its declared parameter is rebound from the request every time.
+        Assert.InRange(AxisExtent(Assert.Single(first.Components).Positions, 0), 0.99f, 1.01f);
+        Assert.InRange(AxisExtent(Assert.Single(first.Components).Positions, 1), 3.99f, 4.01f);
+        Assert.InRange(AxisExtent(Assert.Single(second.Components).Positions, 0), 1.99f, 2.01f);
+        Assert.InRange(AxisExtent(Assert.Single(second.Components).Positions, 1), 4.99f, 5.01f);
+        Assert.False(second.RecycleAfterResponse);
+    }
+
+    [Fact]
     public void InvalidOptInParameterContractsFailAtTheirSource()
     {
         foreach (var (property, expected) in new[]

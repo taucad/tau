@@ -34,6 +34,22 @@ internal sealed record ModelExecutionResult(
 
 internal static class ModelRunner
 {
+    /*
+     * D25: the collectible load context is retained across builds and reloaded only when the
+     * compilation changed. `CompilationService` caches by source hash and hands back the same
+     * assembly bytes for an unchanged project, so reference identity on those bytes is the reload
+     * signal. A parameter edit therefore pays no assembly load, no unload and no collection drain.
+     *
+     * The trade is that the user's own statics survive a parameter edit. `Params` does not: every
+     * declared parameter is rewritten from `BindParameters`, which fills unsupplied ones with their
+     * defaults.
+     */
+    // Held apart rather than in one tuple: reading a field of a tuple copies the whole thing into
+    // the reading frame, which would root the very context the reload is about to collect.
+    private static byte[]? retainedAssemblyBytes;
+    private static AssemblyLoadContext? retainedContext;
+    private static Assembly? retainedAssembly;
+
     internal static ModelExecutionResult Execute(
         CompiledModel compiled,
         string artifactRoot,
@@ -42,55 +58,80 @@ internal static class ModelRunner
         var values = CompilationService.BindParameters(
             compiled,
             parameters ?? JsonSerializer.SerializeToElement(new Dictionary<string, object?>()));
-        var (execution, context, entryPointInvoke) = LoadRunAndExtract(compiled, artifactRoot, values);
         var unload = Stopwatch.StartNew();
+        var recycleAfterResponse = false;
+        if (retainedAssemblyBytes is not null && !ReferenceEquals(retainedAssemblyBytes, compiled.Assembly))
+        {
+            recycleAfterResponse = Collect(ReleaseRetained());
+        }
+        unload.Stop();
+        var assembly = Retain(compiled);
+        var invoke = Stopwatch.StartNew();
+        var execution = RunAndExtract(assembly, artifactRoot, values);
+        invoke.Stop();
+        return execution with
+        {
+            RecycleAfterResponse = recycleAfterResponse,
+            Timings = execution.Timings with
+            {
+                EntryPointInvoke = invoke.Elapsed.TotalMilliseconds,
+                Unload = unload.Elapsed.TotalMilliseconds,
+            },
+        };
+    }
+
+    private static Assembly Retain(CompiledModel compiled)
+    {
+        if (retainedAssembly is not null)
+        {
+            return retainedAssembly;
+        }
+        var context = new AssemblyLoadContext($"PicoGkProgram_{Guid.NewGuid():N}", isCollectible: true);
+        using var assemblyStream = new MemoryStream(compiled.Assembly, writable: false);
+        using var pdbStream = new MemoryStream(compiled.Pdb, writable: false);
+        retainedAssembly = context.LoadFromStream(assemblyStream, pdbStream);
+        retainedContext = context;
+        retainedAssemblyBytes = compiled.Assembly;
+        return retainedAssembly;
+    }
+
+    // The context must not survive in any live frame while it is collected, so the only strong
+    // references — the static and this frame's copy — are dropped before the caller collects.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference ReleaseRetained()
+    {
+        var context = retainedContext!;
+        retainedContext = null;
+        retainedAssembly = null;
+        retainedAssemblyBytes = null;
+        var weak = new WeakReference(context);
+        context.Unload();
+        return weak;
+    }
+
+    private static bool Collect(WeakReference context)
+    {
         for (var attempt = 0; attempt < 8 && context.IsAlive; attempt++)
         {
             GC.Collect();
             GC.WaitForPendingFinalizers();
             GC.Collect();
         }
-        unload.Stop();
-        return execution with
-        {
-            RecycleAfterResponse = context.IsAlive,
-            Timings = execution.Timings with
-            {
-                EntryPointInvoke = entryPointInvoke,
-                Unload = unload.Elapsed.TotalMilliseconds,
-            },
-        };
+        return context.IsAlive;
     }
 
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private static (ModelExecutionResult, WeakReference, double) LoadRunAndExtract(
-        CompiledModel compiled,
+    private static ModelExecutionResult RunAndExtract(
+        Assembly assembly,
         string artifactRoot,
         IReadOnlyDictionary<string, object?> values)
     {
-        var context = new AssemblyLoadContext($"PicoGkProgram_{Guid.NewGuid():N}", isCollectible: true);
-        ModelExecutionResult execution;
-        var invoke = Stopwatch.StartNew();
-        try
+        using var host = new HostedLibraryHost(artifactRoot);
+        using (Library.UseHost(host))
         {
-            using var assemblyStream = new MemoryStream(compiled.Assembly, writable: false);
-            using var pdbStream = new MemoryStream(compiled.Pdb, writable: false);
-            var assembly = context.LoadFromStream(assemblyStream, pdbStream);
-            var entryPoint = assembly.EntryPoint!;
-            using var host = new HostedLibraryHost(artifactRoot);
-            using (Library.UseHost(host))
-            {
-                ApplyParameters(assembly, values);
-                InvokeEntryPoint(entryPoint);
-            }
-            execution = host.TakeResult();
+            ApplyParameters(assembly, values);
+            InvokeEntryPoint(assembly.EntryPoint!);
         }
-        finally
-        {
-            invoke.Stop();
-            context.Unload();
-        }
-        return (execution, new WeakReference(context), invoke.Elapsed.TotalMilliseconds);
+        return host.TakeResult();
     }
 
     private static void ApplyParameters(Assembly assembly, IReadOnlyDictionary<string, object?> values)

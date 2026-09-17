@@ -742,6 +742,61 @@ Library.Go(2f, () =>
     }
 
     [Fact]
+    public void ACancelFrameStopsTheBuildInFlightAndLeavesTheWorkerWarm()
+    {
+        Write("main.cs", """
+using System.ComponentModel.DataAnnotations;
+using System.IO;
+using System.Numerics;
+using System.Threading;
+using PicoGK;
+
+Library.Go(2f, () =>
+{
+    var viewer = Library.oViewer();
+    viewer.Add(Utils.mshCreateCube(new Vector3(3, 4, 5)));
+    for (var index = 0; index < Params.Iterations; index++)
+    {
+        File.WriteAllText(Params.SentinelPath, "running");
+        viewer.SetGroupMaterial(0, "4f7dd9", 0.2f, 0.7f);
+        Thread.Sleep(50);
+    }
+});
+
+public static class Params
+{
+    [Range(0, 1000)] public static int Iterations { get; set; } = 0;
+    public static string SentinelPath { get; set; } = "";
+}
+""");
+        var sentinel = JsonSerializer.Serialize(Path.Combine(root, "running.txt"));
+        var arguments = new[] { "--workspace", root, "--artifacts", Path.Combine(root, "cancel-artifacts"), "--parent-pid", Environment.ProcessId.ToString() };
+        var output = new StringWriter();
+        var frames = new[]
+        {
+            // A cancel with nothing in flight has nothing to stop.
+            """{"protocolVersion":4,"requestId":"0","method":"cancel"}""",
+            """{"protocolVersion":4,"requestId":"1","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":100,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
+            """{"protocolVersion":4,"requestId":"1","method":"cancel"}""",
+            """{"protocolVersion":4,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":0,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
+            """{"protocolVersion":4,"requestId":"3","method":"shutdown","params":{}}""",
+        };
+
+        // The cancel is held back until the model is demonstrably running, so it stops a build in flight.
+        Assert.Equal(0, Program.Run(arguments, new GatedReader(frames, 2, JsonSerializer.Deserialize<string>(sentinel)!), output, new StringWriter()));
+
+        var responses = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        foreach (var line in output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var response = JsonDocument.Parse(line).RootElement.Clone();
+            if (response.TryGetProperty("requestId", out var requestId)) responses[requestId.GetString()!] = response;
+        }
+        Assert.Equal("CS_TAU_CANCELLED", responses["1"].GetProperty("error").GetProperty("issues")[0].GetProperty("code").GetString());
+        Assert.True(responses["2"].GetProperty("result").GetProperty("byteLength").GetInt32() > 0);
+        Assert.True(responses["3"].GetProperty("result").GetProperty("shutdown").GetBoolean());
+    }
+
+    [Fact]
     public void HostScopesWatchdogAndCleanupRestoreProcessState()
     {
         var first = new FakeHost(root);
@@ -840,6 +895,23 @@ Library.Go(2f, () =>
     {
         var values = positions.Where((_, index) => index % 3 == axis);
         return values.Max() - values.Min();
+    }
+
+    /// <summary>Holds one frame back until the running model has written its sentinel.</summary>
+    private sealed class GatedReader(string[] lines, int gatedIndex, string sentinel) : TextReader
+    {
+        private int index;
+
+        public override string? ReadLine()
+        {
+            if (index >= lines.Length) return null;
+            if (index == gatedIndex)
+            {
+                var deadline = DateTime.UtcNow.AddSeconds(10);
+                while (!File.Exists(sentinel) && DateTime.UtcNow < deadline) Thread.Sleep(5);
+            }
+            return lines[index++];
+        }
     }
 
     private sealed class FakeHost(string root) : ILibraryHost

@@ -38,6 +38,8 @@ type PicogkRequest<Result> = {
   readonly params: Record<string, unknown>;
   readonly schema: z.ZodType<Result>;
   readonly signal: AbortSignal;
+  /** Worker method that stops this request cooperatively instead of ending the worker generation. */
+  readonly cancelMethod?: string;
 };
 
 /** Structured user-code issues returned by the PicoGK worker. @public */

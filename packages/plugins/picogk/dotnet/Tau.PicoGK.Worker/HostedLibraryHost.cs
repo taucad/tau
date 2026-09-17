@@ -20,12 +20,14 @@ internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
     private const int ViewerPollIntervalMilliseconds = 5;
 
     private readonly string artifactRoot;
+    private readonly CancellationToken cancellation;
     private ModelExecutionResult? result;
     private bool disposed;
 
-    internal HostedLibraryHost(string artifactRoot)
+    internal HostedLibraryHost(string artifactRoot, CancellationToken cancellation = default)
     {
         this.artifactRoot = Path.GetFullPath(artifactRoot);
+        this.cancellation = cancellation;
         Directory.CreateDirectory(this.artifactRoot);
     }
 
@@ -63,13 +65,24 @@ internal sealed class HostedLibraryHost : ILibraryHost, IDisposable
             Library.RegisterGlobalViewer(viewer);
             initialize.Stop();
 
+            // W17: a cancelled build fails the model's next viewer call, which unwinds it at a
+            // boundary the host owns. A model that makes no further viewer call runs to its end.
+            using var registration = cancellation.Register(backend.Cancel);
             var task = Task.Run(fnTask.Invoke);
             // D25: the model's completion wakes this thread. Sleeping the poll interval instead
             // paid up to a whole interval after the model had already finished, on every render.
             var completed = ((IAsyncResult)task).AsyncWaitHandle;
             while (!completed.WaitOne(ViewerPollIntervalMilliseconds))
             {
-                viewer.bPoll();
+                // A cancelled build stops polling — the poll itself is a viewer call, and the model
+                // is still unwinding, so the teardown below must wait for it either way.
+                if (!cancellation.IsCancellationRequested) viewer.bPoll();
+            }
+            if (cancellation.IsCancellationRequested)
+            {
+                // The model already unwound; observe that fault and answer the cancellation instead.
+                _ = task.Exception;
+                cancellation.ThrowIfCancellationRequested();
             }
             viewer.bPoll();
             backend.Complete();
@@ -135,6 +148,7 @@ internal sealed class CaptureViewerBackend : IViewerBackend
     private readonly Dictionary<int, Matrix4x4> groupMatrices = [];
     private readonly HashSet<int> hiddenGroups = [];
     private ExceptionDispatchInfo? pumpError;
+    private volatile bool cancelled;
     private bool completed;
     private bool disposed;
     private double meshConstruction;
@@ -338,9 +352,13 @@ internal sealed class CaptureViewerBackend : IViewerBackend
         RethrowPumpError();
     }
 
+    /// <summary>Fail every viewer call from here on, so a cancelled model stops at its next one.</summary>
+    internal void Cancel() => cancelled = true;
+
     private void Enqueue(ViewerCommand command)
     {
         RethrowPumpError();
+        if (cancelled) throw new OperationCanceledException("The PicoGK build was cancelled.");
         lock (gate)
         {
             ThrowIfDisposed();

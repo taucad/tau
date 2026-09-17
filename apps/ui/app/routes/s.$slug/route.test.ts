@@ -121,7 +121,6 @@ describe('/s provider dispatch', () => {
 describe('portable parameter records', () => {
   it('reads a current record without rewriting the archived bytes', () => {
     const artifact = portableArtifact({
-      recordVersion: 1,
       profile: 'tau-json-structure-units-03-v1',
       activeGroup: 'default',
       groups: { default: { values: { width: 12 } } },

@@ -10,7 +10,7 @@ import { toUcumLengthCode } from '#constants/length-units.js';
 import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
 import { toInstancePointer, useRenderedFieldPath } from '#components/geometry/parameters/rjsf-field-path.js';
 import { Input } from '@taucad/ui/components/input';
-import { validateParameterInputValue } from '@taucad/parameters/input-machine';
+import { validateParameterInputValue } from '#components/geometry/parameters/parameter-field.js';
 import { toast } from '#components/ui/sonner.js';
 
 const numericConstraint = (
@@ -116,7 +116,7 @@ export function ParametersWidget(
           unit: requestedUnit,
           locale: globalThis.navigator.language,
         },
-        formContext.parameterBindings?.[instancePointer],
+        formContext.parameterGroup,
       );
       const constraints = fieldProjection.schema === undefined ? schema : fieldProjection.constraints;
       const effectiveDefault = numericConstraint(constraints, 'default') ?? defaultNumericValue;
@@ -150,11 +150,6 @@ export function ParametersWidget(
               // The raw fallback input admits values through the same rules as the numeric editor.
               const diagnostic = validateParameterInputValue(
                 {
-                  target: { authority: 'form', root: '/', entry: name },
-                  group: 'default',
-                  parameterId: name,
-                  resource: fieldProjection.schema?.resource ?? 'urn:taucad:ui:parameter',
-                  pointer: instancePointer,
                   representation: fieldProjection.representation ?? 'binary64',
                   constraints: {
                     ...(min === undefined ? {} : { minimum: min }),

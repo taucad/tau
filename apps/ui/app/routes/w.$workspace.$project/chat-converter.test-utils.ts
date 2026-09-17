@@ -1,27 +1,15 @@
-import { createActor } from 'xstate';
 import { Topic } from '@taucad/events';
-import { fileParameterRecordProfile } from '@taucad/types';
 import type { FileParameterEntry, JSONValue } from '@taucad/types';
-import { parameterInputMachine } from '@taucad/parameters/input-machine';
-import type { ParameterInputMachineInput } from '@taucad/parameters/input-machine';
-import type {
-  ParameterInputRequest,
-  ParameterSetService,
-  RetainedParameterInput,
-} from '#services/parameter-set-service.js';
+import type { ParameterDraft, ParameterDraftKey, ParameterSetService } from '#services/parameter-set-service.js';
 
-const identity = {
-  sourceRevision: 'source',
-  manifestRevision: 'manifest',
-  valueRevision: 'value',
-  dependencyRevision: 'dependency',
-};
+const identity = { manifestRevision: 'manifest' };
 
 export const createConfigurationParameterOwner = (): Readonly<{
   parameterService: ParameterSetService;
 }> => {
   const snapshots = new Map<string, ReturnType<ParameterSetService['snapshot']>>();
-  const inputs = new Map<string, RetainedParameterInput>();
+  const drafts = new Map<string, ParameterDraft>();
+  const draftChanges = new Topic<void>({ name: 'ConfigurationParameterOwner.drafts' });
   /** Readers select from the authority actor, so the fake notifies its subscribers like one. */
   const changes = new Map<string, Topic<void>>();
   const changesFor = (entry: string): Topic<void> => {
@@ -34,8 +22,6 @@ export const createConfigurationParameterOwner = (): Readonly<{
   };
   const store = (entry: string, values: Readonly<Record<string, JSONValue>>) => {
     const record: FileParameterEntry = {
-      recordVersion: 1,
-      profile: fileParameterRecordProfile,
       activeGroup: 'default',
       groups: { default: { values } },
     };
@@ -66,27 +52,32 @@ export const createConfigurationParameterOwner = (): Readonly<{
     ) => {
       store(target.entry, values);
     },
-    input: (request: ParameterInputRequest) => {
-      const key = JSON.stringify([request.binding.pointer, request.editorInstance]);
-      let retained = inputs.get(key);
-      if (retained === undefined) {
-        const input: ParameterInputMachineInput = {
-          ...request,
-          acknowledgedValue: request.acknowledgedValue ?? 0,
-          acknowledgedRevision: request.acknowledgedRevision ?? identity,
-        };
-        const actor = createActor(parameterInputMachine, { input });
-        actor.start();
-        retained = { actor, attach: () => () => undefined };
-        inputs.set(key, retained);
+    draft: (key: ParameterDraftKey) => drafts.get(JSON.stringify([key.target.entry, key.editorInstance, key.pointer])),
+    setDraft: (key: ParameterDraftKey, draft: ParameterDraft | undefined) => {
+      const mapKey = JSON.stringify([key.target.entry, key.editorInstance, key.pointer]);
+      if (draft === undefined) {
+        drafts.delete(mapKey);
+      } else {
+        drafts.set(mapKey, draft);
       }
-      return retained;
+      draftChanges.emit();
+    },
+    subscribeDrafts: (listener: () => void) => draftChanges.subscribe(listener),
+    commitValue: async (
+      target: { entry: string },
+      _manifest: unknown,
+      field: { pointer: string; value: JSONValue },
+    ) => {
+      const values = { ...(snapshots.get(target.entry)?.entry.groups['default']?.values ?? {}) };
+      values[field.pointer.slice(1)] = field.value;
+      store(target.entry, values);
+      return { status: 'committed', requestId: 'test', write: 'applied', revision: identity };
     },
     submitTarget: async (_target: unknown, _manifest: unknown, request: { requestId: string }) => ({
       status: 'committed',
       requestId: request.requestId,
       write: 'applied',
-      revision: { ...identity, valueRevision: 'next' },
+      revision: identity,
     }),
   } as unknown as ParameterSetService;
   return { parameterService };

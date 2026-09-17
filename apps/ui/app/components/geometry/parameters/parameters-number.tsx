@@ -190,8 +190,9 @@ export function ParametersNumber({
       return;
     }
     // The sidecar write is what re-renders the model, so an authoritative row reports no value here.
-    // It does report a refusal: a transient value is superseded by design, but a final one that the
-    // authority did not take must not look entered.
+    // It does report a refusal: a transient value is superseded by design, and so is a final one a
+    // newer edit displaced before it was applied, but anything else the authority refused must not
+    // look entered.
     const settle = async (): Promise<void> => {
       try {
         const outcome = await commit.commit({
@@ -210,7 +211,12 @@ export function ParametersNumber({
             },
           },
         });
-        if (pressure === 'final' && outcome !== undefined && outcome.status !== 'committed') {
+        if (
+          pressure === 'final' &&
+          outcome !== undefined &&
+          outcome.status !== 'committed' &&
+          outcome.status !== 'cancelled-before-apply'
+        ) {
           setInputDiagnostic('message' in outcome ? outcome.message : 'The parameter could not be saved.');
         }
       } catch (error) {

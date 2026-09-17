@@ -763,6 +763,36 @@ describe('ParametersNumber', () => {
       expect(await screen.findByText('The field changed since this edit began.')).toBeVisible();
     });
 
+    it('stays silent when a newer edit displaced this one before it was applied', async () => {
+      const user = userEvent.setup();
+      const parameterCommit = createParameterCommit(() => ({
+        status: 'cancelled-before-apply',
+        requestId: 'displaced',
+      }));
+      render(
+        <TestWrapper>
+          <ParametersNumber
+            value={10}
+            defaultValue={10}
+            fieldProjection={{ ...testProjection('length', defaultUnits), instancePointer: '/width' }}
+            parameterCommit={parameterCommit}
+            onChange={vi.fn()}
+            aria-label='Displaced width'
+          />
+        </TestWrapper>,
+      );
+      const field = screen.getByRole('textbox', { name: 'Displaced width' });
+      await user.click(field);
+      await user.clear(field);
+      await user.type(field, '12');
+      await user.keyboard('{Enter}');
+      await waitFor(() => {
+        expect(parameterCommit.calls).toHaveLength(1);
+      });
+
+      expect(screen.queryByText('The parameter could not be saved.')).not.toBeInTheDocument();
+    });
+
     it('restores retained invalid text into the visible input after remount', async () => {
       const user = userEvent.setup();
       const parameterCommit = createParameterCommit();

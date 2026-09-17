@@ -25,7 +25,7 @@ describe('ChatErrorTool', () => {
       />,
     );
 
-    expect(screen.getByText('Processing Error')).toBeInTheDocument();
+    expect(screen.getByText('Processing error')).toBeInTheDocument();
     expect(screen.getByText('Tool call failed after a partial response.')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /learn more/i })).toHaveAttribute('href', 'https://docs.example.test/tool');
     expect(screen.queryByRole('button', { name: /^retry$/i })).not.toBeInTheDocument();

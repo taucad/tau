@@ -11,6 +11,7 @@ import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { ChatExecutionSelector, useChatAgentSelection } from '#components/chat/chat-execution-selector.js';
 import { externalAgentDisplayName } from '#lib/agent-host-placement.js';
 import { useOpenNewChat } from '#routes/w.$workspace.$project/use-open-new-chat.js';
+import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
 
 type StopNotice = {
   readonly icon: LucideIcon;
@@ -122,65 +123,62 @@ export const ChatErrorAgentStop = memo(function ({
   const { openNewChat, isReady: canOpenNewChat } = useOpenNewChat();
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const notice = describeAgentStop(stop);
-  const Icon = notice.icon;
   const showSwitchAgent = notice.canSwitchAgent && isAgentSelectorOffered;
 
+  const actions =
+    showSwitchAgent || notice.primary ? (
+      <>
+        {notice.primary === 'retry' ? (
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={() => {
+              continueChat();
+            }}
+          >
+            <RefreshCcw className='size-3.5' />
+            Try again
+          </Button>
+        ) : null}
+        {notice.primary === 'new-chat' ? (
+          <Button
+            variant='outline'
+            size='sm'
+            disabled={!canOpenNewChat}
+            onClick={() => {
+              void openNewChat({ activeExecution: execution });
+            }}
+          >
+            <MessageSquarePlus className='size-3.5' />
+            New chat
+          </Button>
+        ) : null}
+        {showSwitchAgent ? (
+          /* The composer's picker is the owner, opened here as the credits card
+           * opens the model picker. */
+          <ChatExecutionSelector popoverProperties={{ align: 'end' }}>
+            {() => (
+              <Button variant='outline' size='sm'>
+                <Repeat className='size-3.5' />
+                Switch agent
+              </Button>
+            )}
+          </ChatExecutionSelector>
+        ) : null}
+      </>
+    ) : undefined;
+
   return (
-    <section
+    <ChatErrorCard
       role={notice.live}
       aria-label={notice.heading}
-      className={cn('flex min-w-0 flex-col gap-2 rounded-md border bg-background p-3 text-sm', className)}
+      tone='notice'
+      icon={notice.icon}
+      className={className}
+      title={notice.heading}
+      description={<ProviderSentence text={stop.failure.title} />}
+      actions={actions}
     >
-      <div className='flex min-w-0 items-start gap-2'>
-        <Icon aria-hidden className='mt-0.5 size-4 shrink-0 text-feature' />
-        <div className='min-w-0 flex-1 space-y-1'>
-          <p className='font-medium text-foreground'>{notice.heading}</p>
-          <p className='text-xs break-words text-muted-foreground'>
-            <ProviderSentence text={stop.failure.title} />
-          </p>
-        </div>
-      </div>
-      {showSwitchAgent || notice.primary ? (
-        <div className='flex flex-wrap justify-end gap-2'>
-          {showSwitchAgent ? (
-            /* The composer's picker is the owner, opened here as the credits card
-             * opens the model picker. */
-            <ChatExecutionSelector popoverProperties={{ align: 'end' }}>
-              {() => (
-                <Button variant='outline' size='sm'>
-                  <Repeat className='size-3.5' />
-                  Switch agent
-                </Button>
-              )}
-            </ChatExecutionSelector>
-          ) : null}
-          {notice.primary === 'retry' ? (
-            <Button
-              variant='outline'
-              size='sm'
-              onClick={() => {
-                continueChat();
-              }}
-            >
-              <RefreshCcw className='size-3.5' />
-              Try again
-            </Button>
-          ) : null}
-          {notice.primary === 'new-chat' ? (
-            <Button
-              variant='outline'
-              size='sm'
-              disabled={!canOpenNewChat}
-              onClick={() => {
-                void openNewChat({ activeExecution: execution });
-              }}
-            >
-              <MessageSquarePlus className='size-3.5' />
-              New chat
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
       {stop.diagnostics === undefined ? null : (
         <Collapsible open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
           <CollapsibleTrigger asChild>
@@ -196,6 +194,6 @@ export const ChatErrorAgentStop = memo(function ({
           </CollapsibleContent>
         </Collapsible>
       )}
-    </section>
+    </ChatErrorCard>
   );
 });

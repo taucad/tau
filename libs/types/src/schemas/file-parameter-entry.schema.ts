@@ -252,52 +252,18 @@ const refineParameterEntry = (
 /** Immutable identifier for the first-class parameter record profile. @public */
 export const fileParameterRecordProfile = 'tau-json-structure-units-03-v1';
 
-/** Exact schema for pre-versioned parameter records. Migration code uses this before applying defaults. @public */
-export const legacyFileParameterEntrySchema = z.object(parameterEntryShape).strict().superRefine(refineParameterEntry);
-
-/** Exact schema for current versioned parameter records. @public */
-export const currentFileParameterEntrySchema = z
+/** Exact schema for a stored parameter record. @public */
+export const fileParameterEntrySchema = z
   .object({
     recordVersion: z.literal(1),
     profile: z.literal(fileParameterRecordProfile),
     ...parameterEntryShape,
-    migration: z
-      .object({
-        sourceDigest: identityTokenSchema,
-        backupRevision: identityTokenSchema,
-      })
-      .strict()
-      .optional(),
-  })
-  .strict()
-  .superRefine(refineParameterEntry);
-
-/**
- * Compatibility parser for callers that only need a usable in-memory entry.
- * Exact storage classification must use the legacy/current schemas above.
- * @public
- */
-export const fileParameterEntrySchema = z
-  .object({
-    recordVersion: z.literal(1).default(1),
-    profile: z.literal(fileParameterRecordProfile).default(fileParameterRecordProfile),
-    ...parameterEntryShape,
-    migration: z
-      .object({
-        sourceDigest: identityTokenSchema,
-        backupRevision: identityTokenSchema,
-      })
-      .strict()
-      .optional(),
   })
   .strict()
   .superRefine(refineParameterEntry);
 
 /** Validated parameter configuration stored for one geometry entry. @public */
-export type FileParameterEntry = z.input<typeof fileParameterEntrySchema>;
-
-/** Validated current version of a parameter configuration. @public */
-export type CurrentFileParameterEntry = z.output<typeof fileParameterEntrySchema>;
+export type FileParameterEntry = z.output<typeof fileParameterEntrySchema>;
 
 /** One named collection of JSON-compatible parameter overrides. @public */
 export type ParameterGroup = FileParameterEntry['groups'][string];

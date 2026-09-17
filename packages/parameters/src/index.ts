@@ -21,7 +21,7 @@ export {
   resolveProducerParameterValues,
   valueAtPointer,
 } from '#values.js';
-export { planParameterRecordMigration, readParameterRecord, serializeParameterRecord } from '#record.js';
+export { readParameterRecord, requireParameterRecord, serializeParameterRecord } from '#record.js';
 export type { Draft7ParameterDeclarationInput } from '#json-schema-adapter.js';
 export type { ParameterFieldDisplay, ParameterFieldAuthorityBinding, ParameterFieldProjection } from '#projection.js';
 export type { ParameterRecordRead } from '#record.js';
@@ -52,6 +52,9 @@ export type {
   ParameterSetRequest,
   ParameterSetOutcome,
   ParameterSetPlanResult,
+  ParameterSetApplyResult,
+  ParameterSetRequestBase,
+  ParameterSourceUnitCapability,
 } from '#types.js';
 export { classifyParameterReceipt } from '#receipt.js';
 export type { ParameterReceipt } from '#receipt.js';

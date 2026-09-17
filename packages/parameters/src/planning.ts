@@ -1,7 +1,7 @@
 import { canonicalizeCacheValue, digestContent } from '@taucad/cache-core';
 import type { CacheValue } from '@taucad/cache-core';
 import type { CheckedFileWrite, JSONValue } from '@taucad/types';
-import { currentFileParameterEntrySchema } from '@taucad/types';
+import { fileParameterEntrySchema } from '@taucad/types';
 import { serializeParameterRecord } from '#record.js';
 import { validRequestShape } from '#request.js';
 import { resolveParameterBinding } from '#manifest.js';
@@ -56,9 +56,13 @@ const rebasedExpectation = (
   request: ParameterSetRequest,
   current: ParameterSnapshot,
 ): ParameterSetIdentity | undefined => {
-  const { base, expected } = request;
+  const { base, expected, operation } = request;
+  // Only a single-field edit of the active group may rebase, and only onto the field it names.
   if (
     base === undefined ||
+    (operation.kind !== 'native-value' && operation.kind !== 'unit-value') ||
+    operation.pointer !== base.pointer ||
+    operation.group !== current.entry.activeGroup ||
     expected.sourceRevision !== current.identity.sourceRevision ||
     expected.manifestRevision !== current.identity.manifestRevision ||
     expected.dependencyRevision !== current.identity.dependencyRevision ||
@@ -66,11 +70,14 @@ const rebasedExpectation = (
   ) {
     return undefined;
   }
-  const group = current.entry.groups[current.entry.activeGroup];
+  const group = current.entry.groups[operation.group];
   const stored = valueAtPointer(group?.values ?? {}, base.pointer);
-  // An untouched field is absent from the record and still reads as its manifest default.
+  // An untouched field is absent from the record and still reads as its manifest default; a stored
+  // `null` is an explicit value, not an absence.
   const effective =
-    stored ?? valueAtPointer(current.manifest.defaults as Readonly<Record<string, JSONValue>>, base.pointer);
+    stored === undefined
+      ? valueAtPointer(current.manifest.defaults as Readonly<Record<string, JSONValue>>, base.pointer)
+      : stored;
   return Object.is(effective, base.value) && sameBaseBinding(base, current) ? current.identity : undefined;
 };
 
@@ -131,7 +138,7 @@ export const planParameterChange = async (
       message: 'The receipt belongs to an earlier parameter state.',
     };
   }
-  const request = { ...input.request, fingerprint };
+  const request = { ...input.request, fingerprint } as const;
   const result = await planParameterRecord({ current, request });
   if (result.status === 'rejected') {
     return result;
@@ -139,7 +146,7 @@ export const planParameterChange = async (
   if (result.status === 'ready' && result.proposed.identity.valueRevision === current.identity.valueRevision) {
     return { status: 'unchanged', current };
   }
-  const bytes = serializeParameterRecord(currentFileParameterEntrySchema.parse(result.proposed.entry));
+  const bytes = serializeParameterRecord(fileParameterEntrySchema.parse(result.proposed.entry));
   return {
     status: 'prepared',
     fingerprint,

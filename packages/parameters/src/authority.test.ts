@@ -1,8 +1,13 @@
 /* oxlint-disable typescript/no-restricted-types -- The checked-file test authority uses null for absent bytes. */
-import { contentDigest } from '@taucad/cache-core';
-import { expect, it } from 'vitest';
+import { contentDigest, digestContent } from '@taucad/cache-core';
+import { expect, it, vi } from 'vitest';
 import { createActor, fromPromise, waitFor } from 'xstate';
-import { commitParameterChange, loadParameterSnapshot, refreshParameterSnapshot } from '#authority.js';
+import {
+  commitParameterChange,
+  loadParameterSnapshot,
+  refreshParameterSnapshot,
+  reloadParameterSnapshot,
+} from '#authority.js';
 import type { ParameterAuthority } from '#authority.js';
 import { compileParameterManifest } from '#manifest.js';
 import type { ParameterManifest } from '#manifest.js';
@@ -100,11 +105,12 @@ const recordPath = '.tau/parameters/main.ts.json';
 const digest = contentDigest({ value: `sha256:${'1'.repeat(64)}` });
 const encoder = new TextEncoder();
 const { signal } = new AbortController();
-const legacyRecord = JSON.stringify({ activeGroup: 'default', groups: { default: { values: { width: 100 } } } });
+const unversionedRecord = JSON.stringify({ activeGroup: 'default', groups: { default: { values: { width: 100 } } } });
 
 const widthManifest = async (
   binding: 'declared' | 'undeclared-unit' | 'none' = 'declared',
   revision = digest,
+  sourceText = 'source:1',
 ): Promise<ParameterManifest> =>
   compileParameterManifest({
     declaration: {
@@ -136,6 +142,7 @@ const widthManifest = async (
     source: { id: 'fixture', version: '1', revision, capability: 'json-structure' },
     dependency: revision,
     middleware: digest,
+    sourceFiles: { 'main.ts': await digestContent({ bytes: encoder.encode(sourceText) }) },
   });
 
 const sameBytes = (left: Uint8Array<ArrayBuffer> | string | null, right: Uint8Array<ArrayBuffer> | null): boolean => {
@@ -148,17 +155,15 @@ const sameBytes = (left: Uint8Array<ArrayBuffer> | string | null, right: Uint8Ar
 /** A checked in-memory writer that enforces every precondition like the workspace authority. */
 const memoryAuthority = (
   initial: string | null,
-  options: Readonly<{ backup?: boolean }> = {},
 ): {
   authority: ParameterAuthority;
   bytes(): Uint8Array<ArrayBuffer> | null;
   setSource(next: string): void;
-  counts(): { writes: number; backups: number };
+  counts(): { writes: number };
 } => {
   let source = encoder.encode('source:1');
   let bytes: Uint8Array<ArrayBuffer> | null = initial === null ? null : encoder.encode(initial);
   let writes = 0;
-  let backups = 0;
   const authority: ParameterAuthority = {
     path: () => recordPath,
     read: async () => (bytes === null ? null : Uint8Array.from(bytes)),
@@ -175,14 +180,6 @@ const memoryAuthority = (
       writes += 1;
       return { status: 'applied', content: Uint8Array.from(bytes) };
     },
-    ...(options.backup === true
-      ? {
-          backupLegacy: async () => {
-            backups += 1;
-            return 'revision:before-migration';
-          },
-        }
-      : {}),
   };
   return {
     authority,
@@ -190,7 +187,7 @@ const memoryAuthority = (
     setSource: (next) => {
       source = encoder.encode(next);
     },
-    counts: () => ({ writes, backups }),
+    counts: () => ({ writes }),
   };
 };
 
@@ -238,39 +235,31 @@ const currentRecord = (bytes: Uint8Array<ArrayBuffer> | null) => {
   return decoded.record;
 };
 
-it('backs up and migrates legacy bytes during load, then commits one checked unit-bearing edit', async () => {
-  const memory = memoryAuthority(legacyRecord, { backup: true });
-  const current = await load(memory, await widthManifest());
-  expect(memory.counts()).toEqual({ writes: 1, backups: 1 });
-  expect(current).toMatchObject({
-    access: { status: 'current', writeAllowed: true },
-    entry: { recordVersion: 1, migration: { backupRevision: 'revision:before-migration' } },
+it('refuses an unversioned record at load without rewriting it', async () => {
+  const memory = memoryAuthority(unversionedRecord);
+  await expect(load(memory, await widthManifest())).rejects.toMatchObject({
+    code: 'INVALID_RECORD',
+    applicationState: 'known-not-applied',
   });
+  expect(memory.counts()).toEqual({ writes: 0 });
+  expect(new TextDecoder().decode(memory.bytes()!)).toBe(unversionedRecord);
+});
+
+it('commits one checked unit-bearing edit onto an absent record', async () => {
+  const memory = memoryAuthority(null);
+  const current = await load(memory, await widthManifest());
   const change = prepared(
     await planParameterChange({ current, request: request('edit', current.identity, unitEdit('12')) }),
   );
   await expect(commitParameterChange({ change, authority: memory.authority, signal })).resolves.toMatchObject({
     status: 'applied',
   });
-  expect(memory.counts()).toEqual({ writes: 2, backups: 1 });
+  expect(memory.counts()).toEqual({ writes: 1 });
   expect(currentRecord(memory.bytes())).toMatchObject({
+    recordVersion: 1,
     groups: { default: { values: { width: 120 }, bindings: { '/width': { representation: 'binary64', unit: 'mm' } } } },
     lastOperation: { requestId: 'edit' },
   });
-});
-
-it('reads legacy values without rewriting when no durable backup owner exists', async () => {
-  const memory = memoryAuthority(legacyRecord);
-  const current = await load(memory, await widthManifest());
-  expect(current).toMatchObject({
-    access: { status: 'legacy-readable', writeAllowed: false },
-    entry: { groups: { default: { values: { width: 100 } } } },
-  });
-  await expect(
-    planParameterChange({ current, request: request('legacy-edit', current.identity, unitEdit('12')) }),
-  ).resolves.toMatchObject({ status: 'rejected', code: 'LEGACY_READ_ONLY' });
-  expect(memory.counts()).toEqual({ writes: 0, backups: 0 });
-  expect(new TextDecoder().decode(memory.bytes()!)).toBe(legacyRecord);
 });
 
 it('refuses a prepared change with zero writes when source bytes change after planning', async () => {
@@ -286,6 +275,24 @@ it('refuses a prepared change with zero writes when source bytes change after pl
   });
   expect(memory.counts().writes).toBe(0);
   expect(memory.bytes()).toBeNull();
+});
+
+it('reloads the manifest only when the pinned source bytes changed', async () => {
+  const memory = memoryAuthority(null);
+  const manifests = { current: await widthManifest() };
+  const resolve = vi.fn(async () => manifests.current);
+  const reload = async (current?: ParameterSnapshot) =>
+    reloadParameterSnapshot({ target, authority: memory.authority, signal, manifest: resolve, current });
+  const held = await reload();
+  expect(resolve).toHaveBeenCalledOnce();
+  await expect(reload(held)).resolves.toMatchObject({ identity: held.identity });
+  expect(resolve).toHaveBeenCalledOnce();
+  memory.setSource('source:2');
+  manifests.current = await widthManifest('declared', digest, 'source:2');
+  const reloaded = await reload(held);
+  expect(resolve).toHaveBeenCalledTimes(2);
+  expect(reloaded.manifest.identity.sourceFiles).toEqual(manifests.current.identity.sourceFiles);
+  expect(reloaded.manifest.revision).not.toBe(held.manifest.revision);
 });
 
 it('admits one of two stale actors, conflicts the other, and refreshes the loser to the winning record', async () => {
@@ -338,9 +345,10 @@ it('keeps historical receipts readable across source refresh and consecutive edi
     await planParameterChange({ current: initial, request: request('first', initial.identity, unitEdit('12')) }),
   );
   await commitParameterChange({ change: first, authority: memory.authority, signal });
+  memory.setSource('source:2');
   const refreshed = await load(
     memory,
-    await widthManifest('declared', contentDigest({ value: `sha256:${'2'.repeat(64)}` })),
+    await widthManifest('declared', contentDigest({ value: `sha256:${'2'.repeat(64)}` }), 'source:2'),
   );
   expect(refreshed.entry.lastOperation).toMatchObject({ requestId: 'first' });
   expect(refreshed.entry.identity).toEqual(refreshed.identity);
@@ -434,10 +442,73 @@ it('rejects conflicting project metadata and undeclared source-unit relabeling w
           sourceRevision: manifest.source.revision,
           capability: 'change-source-unit:preserve-size:v1',
         },
-        dependencies: { 'main.ts': manifest.source.revision },
+        dependencies: manifest.identity.sourceFiles,
       }),
     }),
   ).resolves.toMatchObject({ status: 'rejected', code: 'SOURCE_UNIT_UNAVAILABLE' });
   expect(memory.counts().writes).toBe(0);
 });
 /* oxlint-enable typescript/no-restricted-types -- Resume the workspace default. */
+
+it('refuses a manifest whose pinned source digest no longer matches the current source bytes', async () => {
+  const memory = memoryAuthority(null);
+  let reads = 0;
+  const authority: ParameterAuthority = {
+    ...memory.authority,
+    read: async (...args) => {
+      reads += 1;
+      return memory.authority.read(...args);
+    },
+  };
+  memory.setSource('source:2');
+  const manifest = await widthManifest();
+  await expect(
+    loadParameterSnapshot({ target, authority, signal, manifest: async () => manifest }),
+  ).rejects.toMatchObject({
+    code: 'STALE_MANIFEST',
+    applicationState: 'known-not-applied',
+  });
+  expect(reads).toBe(0);
+  expect(memory.counts()).toEqual({ writes: 0 });
+});
+
+it('pins a source file the manifest recorded as missing and refuses it once the file appears', async () => {
+  const compile = async () =>
+    compileParameterManifest({
+      declaration: {
+        schema: {
+          $schema: 'https://json-structure.org/meta/extended/v0/#',
+          $id: 'urn:test:parameters',
+          $uses: ['JSONSchemaUnits'],
+          name: 'Parameters',
+          type: 'object',
+          properties: { width: { type: 'double' } },
+        },
+        defaults: { width: 1 },
+      },
+      scope: { kind: 'source', ...target },
+      source: { id: 'fixture', version: '1', revision: digest, capability: 'json-structure' },
+      dependency: digest,
+      middleware: digest,
+      sourceFiles: {
+        'main.ts': await digestContent({ bytes: encoder.encode('source:1') }),
+        'lib.ts': 'missing',
+      },
+    });
+  const files: { lib?: Uint8Array<ArrayBuffer> } = {};
+  const memory = memoryAuthority(null);
+  const authority: ParameterAuthority = {
+    ...memory.authority,
+    semanticPreconditions: async () => [
+      { path: 'main.ts', expected: encoder.encode('source:1') },
+      ...(files.lib === undefined ? [] : [{ path: 'lib.ts', expected: files.lib }]),
+    ],
+  };
+  const manifest = await compile();
+  const snapshot = await loadParameterSnapshot({ target, authority, signal, manifest: async () => manifest });
+  expect(snapshot.preconditions).toContainEqual({ path: 'lib.ts', expected: null });
+  files.lib = encoder.encode('export {}');
+  await expect(
+    loadParameterSnapshot({ target, authority, signal, manifest: async () => manifest }),
+  ).rejects.toMatchObject({ code: 'STALE_MANIFEST' });
+});

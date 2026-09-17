@@ -20,10 +20,6 @@ export type ParameterSetIdentity = Readonly<{
 export type ParameterSetAuthoritySnapshot = Readonly<{
   entry: FileParameterEntry;
   identity: ParameterSetIdentity;
-  access: Readonly<{
-    status: 'current' | 'legacy-readable';
-    writeAllowed: boolean;
-  }>;
 }>;
 
 /** One declaration-owner capability required for a source-unit transaction. @public */
@@ -108,7 +104,12 @@ export type ParameterSetOperation =
       pointer: string;
       unit: string;
       producerCapability: ParameterSourceUnitCapability;
-      dependencies: Readonly<Record<string, string>>;
+      /**
+       * Optional source-file digests the caller observed, keyed like `manifest.identity.sourceFiles`.
+       * Each named file must match the admitted manifest; the confirmation always echoes the
+       * manifest's own source snapshot.
+       */
+      dependencies?: Readonly<Record<string, string>>;
     }>
   | Readonly<{ kind: 'display-preference'; parameterId: string; unit: string }>;
 
@@ -133,7 +134,11 @@ export type ParameterSetRequestBase = Readonly<{
 export type ParameterSetRequest = Readonly<{
   requestId: string;
   draftGeneration: number;
-  fingerprint: string;
+  /**
+   * Caller correlation label. The planner always derives the authoritative operation fingerprint
+   * from the target, expectation and operation, so this value never reaches the record.
+   */
+  fingerprint?: string;
   expected: ParameterSetIdentity;
   /**
    * When present and only `valueRevision` has moved, the planner rebases `expected` onto the

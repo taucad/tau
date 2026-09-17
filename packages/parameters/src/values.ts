@@ -4,8 +4,8 @@ import { snapshotFor } from '#snapshot.js';
 import { groupOperationRejection, validRequestShape, sameIdentity } from '#request.js';
 import { canonicalizeCacheValue } from '@taucad/cache-core';
 import type { CacheValue } from '@taucad/cache-core';
-import { currentFileParameterEntrySchema } from '@taucad/types';
-import type { CurrentFileParameterEntry, JSONValue } from '@taucad/types';
+import { fileParameterEntrySchema } from '@taucad/types';
+import type { FileParameterEntry, JSONValue } from '@taucad/types';
 import { parseInput } from '@taucad/units/input';
 import { convert, createQuantity } from '@taucad/units/quantity';
 import { admitUnit } from '@taucad/units/unit';
@@ -16,7 +16,7 @@ const failure = (code: string, message: string, applicationState?: string): Erro
   Object.assign(new Error(message), { code, applicationState });
 
 const escapePointer = (value: string): string => value.replaceAll('~', '~0').replaceAll('/', '~1');
-type PersistedParameterBinding = NonNullable<CurrentFileParameterEntry['groups'][string]['bindings']>[string];
+type PersistedParameterBinding = NonNullable<FileParameterEntry['groups'][string]['bindings']>[string];
 
 /** Resolve the provenance for one field of the effective parameter binding. @public */
 // oxlint-disable-next-line max-params -- Provenance lookup needs the admitted manifest, pointer, binding, and one field.
@@ -307,6 +307,9 @@ const nativeUnitValue = (binding: ParameterBinding, value: string | JSONValue, i
   if (binding.representation === 'safe-integer' && !Number.isSafeInteger(converted.value.value)) {
     throw failure('REPRESENTATION_UNSUPPORTED', 'The converted value does not preserve a safe integer.');
   }
+  // Ponytail: affine (point-space) conversions go through the absolute reference in binary64, so a
+  // representable target such as 0 °C from 32 °F can persist a one-ulp residue (5.684e-14 = ulp(273.15)).
+  // The residue is stored as computed rather than snapped; snap per declared rounding policy if one lands.
   return converted.value.value;
 };
 
@@ -329,9 +332,28 @@ const convertedConstraints = (
     }),
   );
 
+/**
+ * A persisted source-unit context stays valid while the same producer still advertises the same
+ * capability for the same authored unit; an unrelated source edit does not invalidate it.
+ */
+const sourceUnitContextMatches = (
+  context: NonNullable<PersistedParameterBinding['sourceUnit']>,
+  producer: Readonly<{ id: string; capability?: string; unit?: string }>,
+): boolean =>
+  context.producer === producer.id &&
+  context.capability === producer.capability &&
+  context.producerUnit === producer.unit;
+
+const sourceUnitRebindRequired = (): Error =>
+  failure(
+    'SOURCE_UNIT_REBIND_REQUIRED',
+    'The saved source unit no longer matches its declaration owner; reset the group or choose the source unit again.',
+    'known-not-applied',
+  );
+
 const producerNativeValues = (
   manifest: ParameterManifest,
-  group: CurrentFileParameterEntry['groups'][string],
+  group: FileParameterEntry['groups'][string],
   values: Readonly<Record<string, JSONValue>>,
 ): Readonly<Record<string, JSONValue>> => {
   let resolved = structuredClone(values);
@@ -343,31 +365,23 @@ const producerNativeValues = (
     const binding = resolveParameterBinding(manifest, pointer);
     if (
       binding === undefined ||
-      binding.sourceUnitCapability !== context.capability ||
-      manifest.source.id !== context.producer ||
-      manifest.source.revision !== context.sourceRevision
+      !sourceUnitContextMatches(context, {
+        id: manifest.source.id,
+        ...(binding.sourceUnitCapability === undefined ? {} : { capability: binding.sourceUnitCapability }),
+        ...(binding.unit === undefined ? {} : { unit: binding.unit }),
+      })
     ) {
-      throw failure('STALE_MANIFEST', 'The persisted source-unit context no longer matches its declaration owner.');
+      throw sourceUnitRebindRequired();
     }
     const value = valueAtPointer(resolved, pointer);
     if (value === undefined || persisted.unit === undefined) {
       continue;
     }
+    const effective = resolveEffectiveParameterBinding(manifest, pointer, binding, persisted);
     resolved = setPointer(
       resolved,
       pointer,
-      nativeUnitValue(
-        {
-          ...binding,
-          unit: context.producerUnit,
-          representation: persisted.representation ?? binding.representation,
-          quantityKind: persisted.quantityKind ?? binding.quantityKind,
-          space: persisted.space ?? binding.space,
-          reference: persisted.reference ?? binding.reference,
-        },
-        value,
-        persisted.unit,
-      ),
+      nativeUnitValue({ ...effective, unit: context.producerUnit }, value, persisted.unit),
     );
   }
   return resolved;
@@ -375,7 +389,7 @@ const producerNativeValues = (
 
 const admitGroupValues = (
   manifest: ParameterManifest,
-  group: CurrentFileParameterEntry['groups'][string],
+  group: FileParameterEntry['groups'][string],
   values: Readonly<Record<string, JSONValue>>,
 ): void => {
   admitParameterValues(manifest, producerNativeValues(manifest, group, values));
@@ -453,7 +467,7 @@ export const resolveProducerParameterValues = (
   input: Readonly<{
     producer: string;
     declaration: ParameterDeclaration;
-    entry: CurrentFileParameterEntry;
+    entry: FileParameterEntry;
     values: Readonly<Record<string, unknown>>;
   }>,
 ): Readonly<Record<string, JSONValue>> => {
@@ -469,13 +483,16 @@ export const resolveProducerParameterValues = (
     }
     const declared = input.declaration.bindings?.[pointer];
     if (
-      context.producer !== input.producer ||
-      declared?.sourceUnitCapability !== context.capability ||
-      declared.unit !== context.producerUnit ||
+      declared === undefined ||
+      !sourceUnitContextMatches(context, {
+        id: input.producer,
+        ...(declared.sourceUnitCapability === undefined ? {} : { capability: declared.sourceUnitCapability }),
+        ...(declared.unit === undefined ? {} : { unit: declared.unit }),
+      }) ||
       persisted.unit === undefined ||
       persisted.representation === undefined
     ) {
-      throw failure('SOURCE_UNIT_UNAVAILABLE', 'The source-unit record does not match this producer declaration.');
+      throw sourceUnitRebindRequired();
     }
     const value = valueAtPointer(resolved, pointer);
     if (value === undefined) {
@@ -492,9 +509,9 @@ export const resolveProducerParameterValues = (
           optional: false,
           nullable: false,
           unit: context.producerUnit,
-          quantityKind: persisted.quantityKind,
-          space: persisted.space,
-          reference: persisted.reference,
+          quantityKind: declared.quantityKind ?? persisted.quantityKind,
+          space: declared.space ?? persisted.space,
+          reference: declared.reference ?? persisted.reference,
           constraints: persisted.constraints ?? {},
         },
         value,
@@ -505,17 +522,10 @@ export const resolveProducerParameterValues = (
   return resolved;
 };
 
-/** Compute a record transition from one admitted semantic snapshot. @public */
+/** Compute a record transition from one admitted semantic snapshot. @internal */
 export const planParameterRecord = async (
-  input: Readonly<{ current: ParameterSnapshot; request: ParameterSetRequest }>,
+  input: Readonly<{ current: ParameterSnapshot; request: ParameterSetRequest & Readonly<{ fingerprint: string }> }>,
 ): Promise<ParameterSetPlanResult> => {
-  if (!input.current.access.writeAllowed) {
-    return {
-      status: 'rejected',
-      code: 'LEGACY_READ_ONLY',
-      message: 'Legacy parameters require a durable backup before modification.',
-    };
-  }
   if (!validRequestShape(input.request)) {
     return { status: 'rejected', code: 'INVALID_REQUEST', message: 'Invalid parameter request.' };
   }
@@ -528,7 +538,7 @@ export const planParameterRecord = async (
   }
   const { manifest } = input.current;
   try {
-    const entry = currentFileParameterEntrySchema.parse(structuredClone(input.current.entry));
+    const entry = fileParameterEntrySchema.parse(structuredClone(input.current.entry));
     const { operation } = input.request;
     let changed = true;
     switch (operation.kind) {
@@ -765,6 +775,15 @@ export const planParameterRecord = async (
             'The declaration owner does not support this source-unit transaction.',
           );
         }
+        for (const [file, digest] of Object.entries(operation.dependencies ?? {})) {
+          if (manifest.identity.sourceFiles[file] !== digest) {
+            throw failure(
+              'STALE_MANIFEST',
+              `The source-unit request observed ${file} at a different revision than the admitted manifest.`,
+              'known-not-applied',
+            );
+          }
+        }
         const group = entry.groups[operation.group]!;
         const previous = group.bindings?.[operation.pointer];
         const fromUnit = previous?.sourceUnit ? previous.unit : binding.unit;
@@ -793,7 +812,7 @@ export const planParameterRecord = async (
               }),
           ...sourceBinding.constraints,
         };
-        const nextBinding: NonNullable<CurrentFileParameterEntry['groups'][string]['bindings']>[string] = {
+        const nextBinding: NonNullable<FileParameterEntry['groups'][string]['bindings']>[string] = {
           ...persistedBinding(
             manifest,
             operation.pointer,
@@ -846,11 +865,11 @@ export const planParameterRecord = async (
           status: 'confirmation-required',
           proposed: {
             ...proposed,
-            entry: currentFileParameterEntrySchema.parse(proposed.entry),
+            entry: fileParameterEntrySchema.parse(proposed.entry),
           },
           planFingerprint: input.request.fingerprint,
           producerCapability: operation.producerCapability,
-          dependencies: operation.dependencies,
+          dependencies: manifest.identity.sourceFiles,
         };
       }
     }
@@ -868,7 +887,7 @@ export const planParameterRecord = async (
       status: 'ready',
       proposed: {
         ...proposed,
-        entry: currentFileParameterEntrySchema.parse(proposed.entry),
+        entry: fileParameterEntrySchema.parse(proposed.entry),
       },
     };
   } catch (error) {

@@ -57,10 +57,10 @@ describe('ChatErrorCredits', () => {
 
     const { container } = render(<ChatErrorCredits description={description} />);
 
-    expect(screen.getByText('Credit Limit Reached')).toBeInTheDocument();
+    expect(screen.getByText('Credit limit reached')).toBeInTheDocument();
     expect(screen.getByText(description)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /resume/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /plans & billing/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^billing$/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /try again/i })).not.toBeInTheDocument();
 
@@ -85,11 +85,11 @@ describe('ChatErrorCredits', () => {
     expect(regenerate).not.toHaveBeenCalled();
   });
 
-  it('should open billing settings when Plans & Billing is clicked', async () => {
+  it('should open billing settings when Billing is clicked', async () => {
     const user = userEvent.setup();
     render(<ChatErrorCredits />);
 
-    await user.click(screen.getByRole('button', { name: /plans & billing/i }));
+    await user.click(screen.getByRole('button', { name: /^billing$/i }));
 
     expect(openSettingsDialog).toHaveBeenCalledTimes(1);
     expect(openSettingsDialog).toHaveBeenCalledWith('billing');
@@ -100,7 +100,7 @@ describe('ChatErrorCredits', () => {
     const user = userEvent.setup();
     render(<ChatErrorCredits />);
 
-    expect(screen.queryByRole('button', { name: /plans & billing/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^billing$/i })).not.toBeInTheDocument();
     expect(screen.getByTestId('topup-modal')).toHaveAttribute('data-open', 'false');
 
     await user.click(screen.getByRole('button', { name: /add credits/i }));
@@ -154,7 +154,7 @@ describe('ChatErrorCredits', () => {
   it('should keep flow B (settings route) without a payment method and never mount the modal', () => {
     render(<ChatErrorCredits />);
 
-    expect(screen.getByRole('button', { name: /plans & billing/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^billing$/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /add credits/i })).not.toBeInTheDocument();
     expect(screen.queryByTestId('topup-modal')).not.toBeInTheDocument();
   });

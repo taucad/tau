@@ -4,13 +4,13 @@ import { CreditCard, Play, Repeat } from 'lucide-react';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party chat surface owns the direct billing client contract
 import { creditAtomsPerCredit } from '@taucad/billing';
 import { Button } from '@taucad/ui/components/button';
-import { cn } from '@taucad/ui/utils/cn';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { useChatActions } from '#hooks/use-chat.js';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import { TopupModal } from '#components/billing/topup-modal.js';
 import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
 import { useModels } from '#hooks/use-models.js';
+import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
 
 type ChatErrorCreditsProps = {
   readonly className?: string;
@@ -65,64 +65,63 @@ export const ChatErrorCredits = memo(function ({
       : `Tau paused this turn: ${shortfall} more ${shortfall === 1n ? 'credit' : 'credits'} needed for ${resolveModel(routeId).name}.`;
 
   return (
-    <div
-      className={cn(
-        'flex min-w-0 flex-col gap-2 rounded-md border border-warning/20 bg-warning/10 p-3 text-sm',
-        className,
-      )}
-    >
-      <div className='flex items-center gap-2'>
-        <CreditCard className='size-4 shrink-0 text-warning' />
-        <p className='font-medium text-foreground'>Credit Limit Reached</p>
-      </div>
-      <p className='min-w-0 text-xs break-words text-muted-foreground'>{resolvedDescription}</p>
-      <div className='flex flex-wrap items-center justify-end gap-2'>
-        {entitlements.hasPaymentMethod ? (
-          // Flow A (U7): a card is on file — top up in place, no settings detour.
-          <Button
-            variant='ghost'
-            size='sm'
-            onClick={() => {
-              setIsTopupOpen(true);
-            }}
-          >
-            <CreditCard className='size-3.5' />
-            Add credits
-          </Button>
-        ) : (
-          // Flow B: no payment method yet — route through Plans & Billing.
-          <Button
-            variant='ghost'
-            size='sm'
-            onClick={() => {
-              openSettings('billing');
-            }}
-          >
-            <CreditCard className='size-3.5' />
-            Plans & Billing
-          </Button>
-        )}
-        {/* A cheaper tier is the other fix for a shortfall (P4); the composer's
-         * picker is the owner, opened here without claiming its shortcut. */}
-        <ChatModelSelector enableShortcut={false} popoverProperties={{ align: 'end' }}>
-          {() => (
-            <Button variant='ghost' size='sm'>
-              <Repeat className='size-3.5' />
-              Switch Model
+    <ChatErrorCard
+      tone='warning'
+      icon={CreditCard}
+      className={className}
+      title='Credit limit reached'
+      description={resolvedDescription}
+      actionsRowFrom='sm'
+      actions={
+        <>
+          {entitlements.hasPaymentMethod ? (
+            // Flow A (U7): a card is on file — top up in place, no settings detour.
+            <Button
+              variant='outline'
+              size='sm'
+              onClick={() => {
+                setIsTopupOpen(true);
+              }}
+            >
+              <CreditCard className='size-3.5' />
+              Add credits
+            </Button>
+          ) : (
+            // Flow B: no payment method yet — route through the Billing settings tab.
+            <Button
+              variant='outline'
+              size='sm'
+              onClick={() => {
+                openSettings('billing');
+              }}
+            >
+              <CreditCard className='size-3.5' />
+              Billing
             </Button>
           )}
-        </ChatModelSelector>
-        <Button
-          variant='outline'
-          size='sm'
-          onClick={() => {
-            continueChat();
-          }}
-        >
-          <Play className='size-3.5' />
-          Resume
-        </Button>
-      </div>
+          {/* A cheaper tier is the other fix for a shortfall (P4); the composer's
+           * picker is the owner, opened here without claiming its shortcut. */}
+          <ChatModelSelector enableShortcut={false} popoverProperties={{ align: 'end' }}>
+            {() => (
+              <Button variant='outline' size='sm'>
+                <Repeat className='size-3.5' />
+                Switch model
+              </Button>
+            )}
+          </ChatModelSelector>
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={() => {
+              continueChat();
+            }}
+          >
+            <Play className='size-3.5' />
+            Resume
+          </Button>
+        </>
+      }
+    >
       {entitlements.hasPaymentMethod ? (
         <TopupModal
           isOpen={isTopupOpen}
@@ -130,6 +129,6 @@ export const ChatErrorCredits = memo(function ({
           defaultAmountCents={chatErrorDefaultTopupCents}
         />
       ) : undefined}
-    </div>
+    </ChatErrorCard>
   );
 });

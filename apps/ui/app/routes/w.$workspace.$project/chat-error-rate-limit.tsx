@@ -2,12 +2,12 @@ import { memo } from 'react';
 import type React from 'react';
 import { Clock, RefreshCcw } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
-import { cn } from '@taucad/ui/utils/cn';
 import { useChatActions } from '#hooks/use-chat.js';
+import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
 
 export const ChatErrorRateLimit = memo(function ({
   className,
-  title = 'Rate Limit Exceeded',
+  title = 'Rate limit exceeded',
   description = 'Too many requests. Please wait a moment before trying again.',
   retryAfterSeconds,
 }: {
@@ -20,18 +20,22 @@ export const ChatErrorRateLimit = memo(function ({
   const { continueChat } = useChatActions();
 
   return (
-    <div className={cn('flex flex-col gap-2 rounded-md border border-warning/20 bg-warning/10 p-3 text-sm', className)}>
-      <div className='flex items-center gap-2'>
-        <Clock className='size-4 shrink-0 text-warning' />
-        <p className='font-medium text-foreground'>{title}</p>
-      </div>
-      <p className='text-xs text-muted-foreground'>{description}</p>
-      {retryAfterSeconds === undefined ? undefined : (
-        <p className='text-xs text-muted-foreground'>
-          Try again in {retryAfterSeconds} {retryAfterSeconds === 1 ? 'second' : 'seconds'}.
-        </p>
-      )}
-      <div className='flex justify-end'>
+    <ChatErrorCard
+      tone='warning'
+      icon={Clock}
+      className={className}
+      title={title}
+      description={
+        <>
+          <p>{description}</p>
+          {retryAfterSeconds === undefined ? undefined : (
+            <p>
+              Try again in {retryAfterSeconds} {retryAfterSeconds === 1 ? 'second' : 'seconds'}.
+            </p>
+          )}
+        </>
+      }
+      actions={
         <Button
           variant='outline'
           size='sm'
@@ -42,7 +46,7 @@ export const ChatErrorRateLimit = memo(function ({
           <RefreshCcw className='size-3.5' />
           Try again
         </Button>
-      </div>
-    </div>
+      }
+    />
   );
 });

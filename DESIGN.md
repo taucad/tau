@@ -165,6 +165,10 @@ decorative numbering or sharp-cornered theme to signal that direction.
   have a persistent label, icon/shape or boundary at rest. Use shared Button
   variants, clear action labels and visible neutral hover feedback. Keep enabled
   action text legible; muted metadata must not make it look disabled.
+- Size a pane's content by the pane, not the window. Chat notices use the
+  shared chat error card: actions stack at full width until the card is wide
+  enough, then share one row at equal widths. The action that resolves the stop
+  comes first, and every action has a visible body.
 - Put infrequent row actions in a persistently reachable, named overflow menu.
   Fine-pointer hover may reveal shortcuts only when a visible route provides
   the same action. Include focus-within parity and coarse-pointer access. Hover,

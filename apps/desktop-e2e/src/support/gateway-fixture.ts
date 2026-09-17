@@ -96,8 +96,17 @@ export type GatewayFixture = {
   readonly apiChatRequests: readonly string[];
   /** Record one renderer's API chat calls. Nothing is redirected any more. */
   readonly routeThrough: (page: Page) => Promise<void>;
+  /**
+   * Answer every later provider request with a coded refusal, or restore the
+   * script with `undefined` — the desktop twin of ui-e2e's
+   * `uiSetAgentHostGatewayFailure`, one hop further out.
+   */
+  readonly setFailure: (failure: GatewayFixtureFailure | undefined) => void;
   readonly close: () => Promise<void>;
 };
+
+/** A provider refusal, in Anthropic's own error shape. */
+export type GatewayFixtureFailure = Readonly<{ status: number; message: string }>;
 
 type WireMessage = { readonly content?: unknown; readonly role?: unknown };
 
@@ -161,6 +170,7 @@ export const startGatewayFixture = async (
   const supplierBetas: Array<string | undefined> = [];
   const apiChatRequests: string[] = [];
   let requestIndex = 0;
+  let failure: GatewayFixtureFailure | undefined;
 
   const server = createServer((request, response) => {
     // async-iife: bootstrap
@@ -205,6 +215,11 @@ export const startGatewayFixture = async (
         supplierModels.push(body.model);
         const beta = request.headers['anthropic-beta'];
         supplierBetas.push(Array.isArray(beta) ? beta.join(',') : beta);
+        if (failure !== undefined) {
+          response.writeHead(failure.status, { 'content-type': 'application/json' });
+          response.end(JSON.stringify({ type: 'error', error: { type: 'api_error', message: failure.message } }));
+          return;
+        }
 
         const index = requestIndex++;
         const completedCalls = completedToolCallCount(body);
@@ -318,6 +333,9 @@ export const startGatewayFixture = async (
     supplierModels,
     supplierBetas,
     routeThrough,
+    setFailure: (next) => {
+      failure = next;
+    },
     close: async () =>
       new Promise<void>((resolve) => {
         server.close(() => {

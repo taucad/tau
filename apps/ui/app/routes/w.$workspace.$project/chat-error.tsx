@@ -141,6 +141,11 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
           className={cn('min-w-0', className)}
           title={parsedError.code === 'FUNDED_OPERATION_LIMIT' ? 'Funded operation limit reached' : undefined}
           description={parsedError.message}
+          retryAfterSeconds={
+            typeof parsedError.details?.['retryAfterSeconds'] === 'number'
+              ? parsedError.details['retryAfterSeconds']
+              : undefined
+          }
         />
       );
     }

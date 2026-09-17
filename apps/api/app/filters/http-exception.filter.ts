@@ -20,7 +20,7 @@ import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
  * funded operation has reached terminal; 60 seconds is the recovery claim lease
  * (`credit-ledger.service.ts:1069`), after which another claimant's lease expires.
  */
-const fundedRetryAfterSeconds = new Map<string, number>([
+export const fundedRetryAfterSeconds: ReadonlyMap<string, number> = new Map<string, number>([
   ['FUNDED_OPERATION_LIMIT', 30],
   ['FUNDED_HELPER_LIMIT', 30],
   ['BILLING_RECOVERY_UNAVAILABLE', 60],

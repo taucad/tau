@@ -499,9 +499,7 @@ describe('BillableModelInvocationService process recovery', () => {
           attemptKey: `cancelled-${randomUUID()}`,
           signal: cancelled.signal,
         }),
-      ).resolves.toMatchObject({
-        state: 'pending',
-      });
+      ).rejects.toMatchObject({ name: 'AbortError' });
       expect(requests).toBe(1);
 
       rejectProvider = true;
@@ -1625,7 +1623,7 @@ it('bounds selected count I/O, denies ineligible owners, fences contention and r
     ).rejects.toThrow();
     const cancelled = new AbortController();
     cancelled.abort();
-    await expect(call(randomUUID(), cancelled.signal)).rejects.toThrow();
+    await expect(call(randomUUID(), cancelled.signal)).rejects.toMatchObject({ name: 'AbortError' });
     expect(counts).toBe(0);
     for (const malformed of [
       '{}',
@@ -1677,7 +1675,7 @@ it('bounds selected count I/O, denies ineligible owners, fences contention and r
     const cancelling = call(cancelledAttempt, duringCount.signal);
     await expect.poll(() => counts).toBe(beforeCancel + 1);
     duringCount.abort();
-    await expect(cancelling).rejects.toThrow();
+    await expect(cancelling).rejects.toMatchObject({ name: 'AbortError' });
     expect(await lookup(cancelledAttempt)).toBeUndefined();
     await expect.poll(() => activeCounts).toBe(0);
     expect(generations).toBe(1);
@@ -1754,11 +1752,16 @@ it('bounds selected count I/O, denies ineligible owners, fences contention and r
     }
     const uncountedOwner = createOwner(url);
     for (let index = 0; index < 64; index++) {
+      // The caller leaves once admitted, so the hold stays open for the recovery sweep.
+      const leaving = new AbortController();
       await invoke({
         owner: uncountedOwner,
         authUserId: busy.authUserId,
         attemptKey: `busy-${index}-${randomUUID()}`,
-        signal: cancelled.signal,
+        signal: leaving.signal,
+        onAdmitted: () => {
+          leaving.abort();
+        },
       });
     }
     await expect(invoke({ owner, authUserId: busy.authUserId, attemptKey: randomUUID() })).rejects.toSatisfy(

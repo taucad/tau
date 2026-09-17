@@ -12,7 +12,7 @@ import { calculatePreliminarySupplierCost } from '#api/billing/billable-model-co
 import { routeSkuFamily } from '#api/billing/billable-model-qualification.js';
 import { resolvePolicyRoute, validateCommercialPolicy } from '#api/billing/billing-policy.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { ConflictException, Inject, Injectable } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, gt, inArray, lt, ne, notInArray, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
@@ -36,6 +36,7 @@ import {
   billingPolicy,
   billingPromotionIssuance,
   billingPurchase,
+  billingReloadConsent,
   billingReloadWork,
   billingStripeCustomer,
   billingStripeSource,
@@ -292,6 +293,9 @@ export type AdmissionDenied = {
 };
 
 /** Applies incoming credit to explicit debt before creating a spendable asset. */
+const min = (left: bigint, right: bigint): bigint => (left < right ? left : right);
+const max0 = (value: bigint): bigint => (value > 0n ? value : 0n);
+
 export const creditDebtFirst = (debtAtoms: bigint, atoms: bigint): { debtDeltaAtoms: bigint; assetAtoms: bigint } => {
   if (debtAtoms < 0n || atoms < 0n) {
     throw new RangeError('Credit atoms must be nonnegative');
@@ -397,7 +401,11 @@ export class CreditLedgerService {
           );
         if (found) {
           if (found.revokedAt !== null || found.status !== 'open') {
-            throw new Error('Financial owner is revoked or closed');
+            // A closed account is a refusal the client can act on, not a server fault.
+            throw new ForbiddenException({
+              code: 'billing_account_closed',
+              message: 'Financial owner is revoked or closed',
+            });
           }
           return found.accountId;
         }
@@ -857,13 +865,9 @@ export class CreditLedgerService {
               eq(billingFinancialCase.environment, input.environment),
               inArray(billingFinancialCase.kind, cashBlockingFinancialCaseKinds),
               inArray(billingFinancialCase.state, ['open', 'attention']),
-              sql`(${billingFinancialCase.accountId} = ${accountId} OR (
-              ${billingFinancialCase.accountId} IS NULL AND EXISTS (
-                SELECT 1 FROM billing.billing_stripe_customer c
-                WHERE c.account_id = ${accountId} AND c.environment = ${input.environment}
-                  AND c.stripe_account_id = ${billingFinancialCase.stripeAccountId}
-                  AND c.livemode = ${billingFinancialCase.livemode}
-              )))`,
+              // Spending already-collected credit stops only for the account a case names; an
+              // unattributed case pauses new collection instead (`assertNewCollectionCashScope`).
+              eq(billingFinancialCase.accountId, accountId),
             ),
           )
           .limit(1);
@@ -2016,6 +2020,8 @@ export class CreditLedgerService {
       const [sum] = await tx
         .select({
           total: sql`coalesce(sum(${creditTransaction.accountDeltaAtoms}), 0)`.mapWith(BigInt),
+          promo: sql`coalesce(sum(${creditTransaction.promoDeltaAtoms}), 0)`.mapWith(BigInt),
+          plan: sql`coalesce(sum(${creditTransaction.planDeltaAtoms}), 0)`.mapWith(BigInt),
         })
         .from(creditTransaction)
         .where(and(eq(creditTransaction.kind, 'compensation'), eq(creditTransaction.correctionOf, original.id)));
@@ -2024,11 +2030,20 @@ export class CreditLedgerService {
         throw new RangeError('Cumulative compensation exceeds original charge');
       }
       const value = creditDebtFirst(account.debtAtoms, input.atoms);
+      // Credit returns to the bucket it was spent from, so compensating promotional or plan usage never
+      // manufactures cash-backed purchased credit. Promo and plan refill first, up to what the charge took.
+      const promoRoom = max0(-original.promoDeltaAtoms - (sum?.promo ?? 0n));
+      const promoAtoms = min(value.assetAtoms, promoRoom);
+      const planRoom = max0(-original.planDeltaAtoms - (sum?.plan ?? 0n));
+      const planAtoms = min(value.assetAtoms - promoAtoms, planRoom);
+      const purchasedAtoms = value.assetAtoms - promoAtoms - planAtoms;
       const revision = account.revision + 1n;
       await tx
         .update(creditAccount)
         .set({
-          purchasedAtoms: account.purchasedAtoms + value.assetAtoms,
+          promoAtoms: account.promoAtoms + promoAtoms,
+          planAtoms: account.planAtoms + planAtoms,
+          purchasedAtoms: account.purchasedAtoms + purchasedAtoms,
           debtAtoms: account.debtAtoms + value.debtDeltaAtoms,
           revision,
         })
@@ -2039,9 +2054,9 @@ export class CreditLedgerService {
         revision,
         kind: 'compensation',
         correctionOf: original.id,
-        promoDeltaAtoms: 0n,
-        planDeltaAtoms: 0n,
-        purchasedDeltaAtoms: value.assetAtoms,
+        promoDeltaAtoms: promoAtoms,
+        planDeltaAtoms: planAtoms,
+        purchasedDeltaAtoms: purchasedAtoms,
         debtDeltaAtoms: value.debtDeltaAtoms,
         accountDeltaAtoms: input.atoms,
         balanceAfterAtoms:
@@ -2749,6 +2764,15 @@ export class CreditLedgerService {
     },
   ): Promise<void> {
     const { reasonKind, reasonOperationId, reasonAttemptKey, reasonRequestDigest } = work;
+    // Only an enabled consent can act on a wake; every other account would just churn the row.
+    const [consent] = await tx
+      .select({ id: billingReloadConsent.id })
+      .from(billingReloadConsent)
+      .where(and(eq(billingReloadConsent.accountId, account.id), eq(billingReloadConsent.state, 'enabled')))
+      .limit(1);
+    if (consent === undefined) {
+      return;
+    }
     await tx
       .insert(billingReloadWork)
       .values({

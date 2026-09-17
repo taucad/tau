@@ -88,6 +88,7 @@ const cloudBoundarySpecifiers = new Set([
   '#cloud/kernel-commerce.js',
   '#cloud/root-billing.js',
   '#cloud/settings-billing.js',
+  '#cloud/zoo-close-errors.js',
   '#cloud/zoo-upgrade-banner.js',
 ]);
 

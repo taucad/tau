@@ -194,6 +194,7 @@ const sessions = new Map<string, { metadata: Record<string, string>; customerId:
 const calculations = new Map<string, { reference: string; customerId: string }>();
 const paymentIntents = new Map<string, Record<string, unknown>>();
 let payments: BillingPaymentsService;
+let ledger: CreditLedgerService;
 let sequence = 0;
 let taxPostCount = 0;
 let setupPostCount = 0;
@@ -202,6 +203,11 @@ let checkoutPaymentPostCount = 0;
 let dropTaxResponse = false;
 let taxHook: { readonly customerId: string; readonly run: () => Promise<void> } | undefined;
 let paymentStatus: 'requires_action' | 'canceled' = 'requires_action';
+/** The next setup Session is created open and already past its expiry; `expire` then closes it. */
+let nextSetupOpenAndExpired = false;
+const openSetupSessions = new Map<string, { status: 'open' | 'expired'; expiresAt: number }>();
+let expirePostCount = 0;
+let failExpire = false;
 
 const stripeServer = createServer((request, response) => {
   const url = new URL(request.url ?? '/', 'http://127.0.0.1');
@@ -280,6 +286,10 @@ const stripeServer = createServer((request, response) => {
       }
       setupPostCount += 1;
       const id = `cs_reload_${sequence}`;
+      if (nextSetupOpenAndExpired) {
+        nextSetupOpenAndExpired = false;
+        openSetupSessions.set(id, { status: 'open', expiresAt: Math.floor(Date.now() / 1000) - 60 });
+      }
       sessions.set(id, {
         customerId,
         metadata: {
@@ -333,6 +343,20 @@ const stripeServer = createServer((request, response) => {
       intent['amount_capturable'] = 0;
     }
     send(intent ?? { error: { type: 'invalid_request_error', message: cancelled } });
+    return;
+  }
+  const expiring = /^\/v1\/checkout\/sessions\/(?<id>cs_reload_\d+)\/expire$/u.exec(url.pathname)?.groups?.['id'];
+  if (request.method === 'POST' && expiring !== undefined) {
+    expirePostCount += 1;
+    const open = openSetupSessions.get(expiring);
+    if (failExpire || open === undefined) {
+      failExpire = false;
+      response.writeHead(500, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ error: { type: 'api_error', message: 'expire fixture failure' } }));
+      return;
+    }
+    open.status = 'expired';
+    send(setupSession(expiring));
     return;
   }
   const sessionId = /^\/v1\/checkout\/sessions\/(?<id>cs_reload_\d+)$/u.exec(url.pathname)?.groups?.['id'];
@@ -416,8 +440,8 @@ function setupSession(id: string) {
     metadata: stored?.metadata,
     mode: 'setup',
     setup_intent: id.replace('cs_', 'seti_'),
-    status: 'complete',
-    expires_at: 2_000_000_000,
+    status: openSetupSessions.get(id)?.status ?? 'complete',
+    expires_at: openSetupSessions.get(id)?.expiresAt ?? 2_000_000_000,
     url: 'http://127.0.0.1:3000/settings/billing',
   };
 }
@@ -450,7 +474,7 @@ describe('billing reload native service foundation', { concurrent: false }, () =
       fixtureUrl: `http://127.0.0.1:${(bound satisfies AddressInfo).port}/`,
     });
     const policy = new BillingPolicyService({ database: runtimeDatabase });
-    const ledger = new CreditLedgerService({ database: runtimeDatabase }, policy);
+    ledger = new CreditLedgerService({ database: runtimeDatabase }, policy);
     const cash = new BillingCashService({ database: runtimeDatabase }, stripe, stripe, ledger, {
       environment: 'development',
       stripeAccountId,
@@ -513,13 +537,15 @@ describe('billing reload native service foundation', { concurrent: false }, () =
       payments.confirmAction(userId, prepared.actionId),
       payments.confirmAction(userId, prepared.actionId),
     ]);
-    expect(confirmed.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
-    expect(confirmed.find((result) => result.status === 'fulfilled')).toMatchObject({
-      value: { state: 'redirect_required' },
-    });
-    expect(confirmed.find((result) => result.status === 'rejected')).toMatchObject({
-      reason: { response: { code: 'reload_setup_outcome_unknown' } },
-    });
+    // The loser either overlaps the dispatch (outcome unknown) or arrives after the link and replays it.
+    for (const result of confirmed) {
+      if (result.status === 'fulfilled') {
+        expect(result.value).toMatchObject({ state: 'redirect_required' });
+      } else {
+        expect(result.reason).toMatchObject({ response: { code: 'reload_setup_outcome_unknown' } });
+      }
+    }
+    expect(confirmed.some((result) => result.status === 'fulfilled')).toBe(true);
     expect(setupPostCount).toBe(posts + 1);
 
     await payments.recoverPayments({ environment: 'development', limit: 50 });
@@ -542,6 +568,60 @@ describe('billing reload native service foundation', { concurrent: false }, () =
     await expect(
       runtimeClient`update billing.billing_provider_leg set expires_at=${new Date(setupLeg.expiresAt.getTime() + 1000).toISOString()}::timestamptz where id=${setupLeg.id}`,
     ).rejects.toMatchObject({ code: '23514' });
+  });
+
+  it('expires an abandoned setup Session once and retries a failed expiry only after its pacing', async () => {
+    const userId = await seedUser();
+    const prepared = await payments.prepareReloadConsent(userId, {
+      requestId: randomUUID(),
+      returnPath: '/settings/billing',
+    });
+    nextSetupOpenAndExpired = true;
+    await payments.confirmAction(userId, prepared.actionId);
+    const legFor = async () =>
+      database.query.billingProviderLeg.findFirst({
+        where: eq(billingProviderLeg.reloadConsentId, prepared.actionId),
+      });
+    const leg = await legFor();
+    expect(leg).toMatchObject({ state: 'known', kind: 'checkout_setup' });
+    if (leg === undefined) {
+      throw new Error('Setup leg missing');
+    }
+
+    failExpire = true;
+    const expirePostsBefore = expirePostCount;
+    const first = await payments.expireReloadRecoveries({ environment: 'development', limit: 100 });
+    expect(first.failed).toContain(leg.id);
+    expect(expirePostCount).toBe(expirePostsBefore + 1);
+    const paced = await legFor();
+    expect(paced).toMatchObject({ state: 'known', expirationRequestedAt: expect.any(Date) });
+    expect(paced?.nextAttemptAt.getTime()).toBeGreaterThan(Date.now());
+
+    // Not yet due: the failed leg is not re-claimed in a busy loop.
+    const skipped = await payments.expireReloadRecoveries({ environment: 'development', limit: 100 });
+    expect([...skipped.processed, ...skipped.failed, ...skipped.pending]).not.toContain(leg.id);
+
+    await database
+      .update(billingProviderLeg)
+      .set({ nextAttemptAt: new Date(Date.now() - 1000) })
+      .where(eq(billingProviderLeg.id, leg.id));
+    const retried = await payments.expireReloadRecoveries({ environment: 'development', limit: 100 });
+    expect(retried.processed).toContain(leg.id);
+    expect(expirePostCount).toBe(expirePostsBefore + 2);
+    expect(await legFor()).toMatchObject({
+      state: 'expired',
+      expirationRequestedAt: paced?.expirationRequestedAt,
+      terminalEvidence: expect.objectContaining({ status: 'expired', mode: 'setup' }),
+    });
+    // The abandoned consent is retired, never offered as a live redirect, and the account can set up again.
+    expect(await consentRow(prepared.actionId)).toMatchObject({ state: 'revoked' });
+    await expect(payments.getReloadConsent(userId)).resolves.toMatchObject({
+      state: 'revoked',
+      setupAction: { state: 'canceled', redirectUrl: null },
+    });
+    await expect(
+      payments.prepareReloadConsent(userId, { requestId: randomUUID(), returnPath: '/settings/billing' }),
+    ).resolves.toMatchObject({ state: 'prepared' });
   });
 
   it('never repeats the consent Tax Calculation after a lost response and recovers the known quote', async () => {
@@ -659,6 +739,47 @@ describe('billing reload native service foundation', { concurrent: false }, () =
     expect(await automaticPurchases(accountId)).toHaveLength(1);
   });
 
+  it('still charges a wake that waited in the queue longer than fifteen minutes', async () => {
+    const { accountId } = await enableConsent();
+    await queueReloadWork(accountId);
+    await database
+      .update(billingReloadWork)
+      .set({ updatedAt: new Date(Date.now() - 20 * 60_000) })
+      .where(eq(billingReloadWork.accountId, accountId));
+    expect(await reloadOutcome(accountId)).toEqual(created);
+    expect(await automaticPurchases(accountId)).toHaveLength(1);
+  });
+
+  it('queues a funded-work wake only for an account with an enabled consent', async () => {
+    const denial = (
+      authUserId: string,
+    ): { environment: 'development'; authUserId: string; attemptKey: string; requestDigest: string } => ({
+      environment: 'development',
+      authUserId,
+      attemptKey: randomUUID(),
+      requestDigest: 'a'.repeat(64),
+    });
+    const unconsentedUser = await seedUser();
+    const unconsentedAccountId = await ledger.ensureAccountBinding({
+      authUserId: unconsentedUser,
+      environment: 'development',
+    });
+    await ledger.recordFundedWorkDenial(denial(unconsentedUser));
+    await expect(
+      database.query.billingReloadWork.findFirst({ where: eq(billingReloadWork.accountId, unconsentedAccountId) }),
+    ).resolves.toBeUndefined();
+
+    const consented = await enableConsent();
+    await ledger.recordFundedWorkDenial(denial(consented.userId));
+    await expect(
+      database.query.billingReloadWork.findFirst({ where: eq(billingReloadWork.accountId, consented.accountId) }),
+    ).resolves.toMatchObject({ state: 'pending', reasonKind: 'insufficient_funds' });
+    await database
+      .update(billingReloadWork)
+      .set({ state: 'done', leaseUntil: null, nextAttemptAt: new Date('9999-12-31T00:00:00Z') })
+      .where(eq(billingReloadWork.accountId, consented.accountId));
+  });
+
   it('revalidates balance, consent and work generation at the locked dispatch boundary', async () => {
     // The hook runs while the quote is in flight: after the pre-lock eligibility read, before the locked dispatch.
     const replenished = await enableConsent();
@@ -730,8 +851,11 @@ describe('billing reload native service foundation', { concurrent: false }, () =
       acceptedAt: new Date(),
     });
     await queueReloadWork(capped.accountId);
+    const taxPosts = taxPostCount;
     expect(await reloadOutcome(capped.accountId)).toEqual(declined);
     expect(await automaticPurchases(capped.accountId)).toHaveLength(0);
+    // The cap is decided before any Stripe Tax quote, so a capped wake costs no provider call.
+    expect(taxPostCount).toBe(taxPosts);
 
     const carried = await enableConsent();
     const lastMonth = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1) - 86_400_000);

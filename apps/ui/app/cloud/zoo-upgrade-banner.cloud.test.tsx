@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { zooCloseMessages } from '#cloud/zoo-close-errors.cloud.js';
 
 const openSettingsDialog = vi.hoisted(() => vi.fn());
 vi.mock('#hooks/use-settings-dialog.js', () => ({
@@ -12,7 +13,7 @@ const { ZooUpgradeBanner } = await import('#cloud/zoo-upgrade-banner.cloud.js');
 describe('ZooUpgradeBanner', () => {
   it('should keep a Free Zoo project open and expose upgrade plus explicit retry', () => {
     const retry = vi.fn();
-    render(<ZooUpgradeBanner message='Zoo execution requires Pro. Upgrade to Pro, then retry.' onRetry={retry} />);
+    render(<ZooUpgradeBanner message={zooCloseMessages.pro} onRetry={retry} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Upgrade to Pro' }));
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
@@ -23,9 +24,9 @@ describe('ZooUpgradeBanner', () => {
 
   it('should show a truthful service error with retry and no billing action', () => {
     const retry = vi.fn();
-    render(<ZooUpgradeBanner message='Zoo execution is temporarily unavailable.' onRetry={retry} />);
+    render(<ZooUpgradeBanner message={zooCloseMessages.unavailable} onRetry={retry} />);
 
-    expect(screen.getByText('Zoo execution is temporarily unavailable.')).toBeInTheDocument();
+    expect(screen.getByText(zooCloseMessages.unavailable)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Upgrade to Pro' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add credits' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));

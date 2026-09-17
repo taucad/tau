@@ -4,8 +4,11 @@ import { Link } from 'react-router';
 import type { BillingTier, PlanCatalogEntry } from '@taucad/billing';
 import { tauPlanCatalog } from '@taucad/billing';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
+import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import {
+  BillingCollectionUnavailable,
   BillingPaymentConflict,
+  purchasesUnavailableMessage,
   createPaymentRequestId,
   createSubscriptionAction,
   followPaymentRedirect,
@@ -20,6 +23,8 @@ const enterpriseMailto = 'mailto:enterprise@tau.new';
 function SubscribeButton({ label }: { readonly label: string }): React.JSX.Element {
   const { apiBaseUrl, environment, userId } = useBillingSession();
   const binding = apiBaseUrl && environment && userId ? { apiBaseUrl, environment, ownerId: userId } : undefined;
+  const { isResolved, paymentCollectionAvailable } = useEntitlements();
+  const isUnavailable = binding !== undefined && (!isResolved || !paymentCollectionAvailable);
   const generation = `${apiBaseUrl ?? ''}|${environment ?? ''}|${userId ?? ''}`;
   /* oxlint-disable react/refs -- monotonic generation refs synchronously fence stale A→B→A render state */
   const scopeRef = useRef({ key: generation, value: 0 });
@@ -62,7 +67,11 @@ function SubscribeButton({ label }: { readonly label: string }): React.JSX.Eleme
         return;
       }
       requestIdRef.current = undefined;
-      setErrorMessage('Could not start checkout. Try again.');
+      setErrorMessage(
+        error instanceof BillingCollectionUnavailable
+          ? purchasesUnavailableMessage
+          : 'Could not start checkout. Try again.',
+      );
     } finally {
       if (scopeRef.current.value === startedGeneration) {
         setIsStarting(false);
@@ -74,7 +83,8 @@ function SubscribeButton({ label }: { readonly label: string }): React.JSX.Eleme
     <div className='flex flex-col gap-1'>
       <Button
         className='w-full'
-        disabled={stateIsCurrent && (isStarting || isPending)}
+        disabled={isUnavailable || (stateIsCurrent && (isStarting || isPending))}
+        aria-busy={stateIsCurrent && isStarting}
         onClick={async () => {
           await start();
         }}
@@ -82,7 +92,15 @@ function SubscribeButton({ label }: { readonly label: string }): React.JSX.Eleme
         <Sparkles className='size-4' />
         {stateIsCurrent && isStarting ? 'Starting checkout…' : isPending ? 'Checkout pending' : label}
       </Button>
-      {stateIsCurrent && errorMessage ? <p className='text-xs text-warning'>{errorMessage}</p> : undefined}
+      {isResolved && !paymentCollectionAvailable && binding !== undefined ? (
+        <p className='text-xs text-muted-foreground' role='status'>
+          {purchasesUnavailableMessage}
+        </p>
+      ) : stateIsCurrent && errorMessage ? (
+        <p className='text-xs text-warning' role='alert'>
+          {errorMessage}
+        </p>
+      ) : undefined}
     </div>
   );
 }

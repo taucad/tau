@@ -63,6 +63,24 @@ describe('ChatError', () => {
     vi.clearAllMocks();
   });
 
+  it('tells the customer when a rate-limited request can be retried', () => {
+    const rateLimited: ChatErrorPayload = {
+      category: errorCategory.rateLimit,
+      title: 'Rate Limit Exceeded',
+      message: 'The funded-operation failsafe is active.',
+      code: 'FUNDED_OPERATION_LIMIT',
+      httpStatus: 429,
+      details: { retryAfterSeconds: 30 },
+    };
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({ error: undefined, persistedError: rateLimited } as unknown as CombinedChatState),
+    );
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Try again in 30 seconds.')).toBeInTheDocument();
+  });
+
   it('T23: renders null when retryAttempt > 0 even with a persisted resumable error', () => {
     const networkError: ChatErrorPayload = {
       category: errorCategory.network,

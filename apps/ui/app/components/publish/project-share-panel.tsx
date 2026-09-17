@@ -680,7 +680,7 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
   const [loadingEnvelope, setLoadingEnvelope] = useState(false);
   const [envelopeError, setEnvelopeError] = useState<string | undefined>();
   const [visibility, setVisibility] = useState<PublishVisibility>('private');
-  const { canCreatePrivateShares, requestUpgrade } = useCommercialFeatures();
+  const { canCreatePrivateShares, isResolved: isPlanResolved, requestUpgrade } = useCommercialFeatures();
   // Free tier publishes public-only (T4/T5/AD11); derived so an async
   // entitlements load never strands a locked selection in form state.
   const effectiveVisibility: PublishVisibility = canCreatePrivateShares ? visibility : 'public';
@@ -1081,7 +1081,7 @@ function ProjectSharePanelBody(properties: ProjectSharePanelProps): React.JSX.El
                 >
                   Private (only you and people you share with)
                 </Label>
-                {canCreatePrivateShares ? undefined : (
+                {canCreatePrivateShares || !isPlanResolved ? undefined : (
                   <button
                     type='button'
                     className='inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline'

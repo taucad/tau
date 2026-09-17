@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { legalUrl } from '#constants/meta.constants.js';
 import { CreditCard } from 'lucide-react';
-import { formatCreditAtoms } from '@taucad/billing';
+import { formatCreditAtoms, topupPrincipalBoundsMinor } from '@taucad/billing';
 import type { WirePaymentAction } from '@taucad/billing';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import { useBillingSession } from '@taucad/billing/hooks/billing-session';
 import {
+  BillingCollectionUnavailable,
   BillingPaymentConflict,
   cancelPaymentAction,
   confirmPaymentAction,
@@ -13,6 +15,7 @@ import {
   followPaymentRedirect,
   getUnresolvedPaymentActions,
   prepareTopup,
+  purchasesUnavailableMessage,
   recoverPaymentAction,
 } from '#lib/billing-payment-client.js';
 import { toast } from '#components/ui/sonner.js';
@@ -23,8 +26,8 @@ import { Input } from '@taucad/ui/components/input';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@taucad/ui/components/dialog';
 
 const presetsCents = [1000, 2500, 5000, 10_000] as const;
-const minCents = 500;
-const maxCents = 500_000;
+const minCents = topupPrincipalBoundsMinor.minimum;
+const maxCents = topupPrincipalBoundsMinor.maximum;
 const brandIconId: Record<string, IconId> = {
   visa: 'visa',
   mastercard: 'mastercard',
@@ -43,6 +46,20 @@ const brandLabel: Record<string, string> = {
   jcb: 'JCB',
   unionpay: 'UnionPay',
 };
+/* eslint-disable @typescript-eslint/naming-convention -- keys are the wire's snake_case action states. */
+const stateLabel: Record<WirePaymentAction['state'], string> = {
+  prepared: 'Quote ready',
+  creating: 'Starting payment',
+  redirect_required: 'Waiting for Checkout',
+  processing: 'Processing',
+  funds_received: 'Payment received',
+  fulfilled: 'Complete',
+  attention_required: 'Needs attention',
+  failed: 'Not completed',
+  canceled: 'Canceled',
+  completed: 'Complete',
+};
+/* eslint-enable @typescript-eslint/naming-convention -- end wire state keys. */
 const returnPath = (): string => `${globalThis.location.pathname}${globalThis.location.search}`;
 const formatUsdMinor = (minor: string | number): string => `US$${(Number(minor) / 100).toFixed(2)}`;
 
@@ -79,6 +96,8 @@ type TopupModalProps = {
 /** First-party quote, confirmation, recovery, and receipt flow for credit purchases. */
 export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: TopupModalProps): React.JSX.Element {
   const entitlements = useEntitlements();
+  const canPurchase = entitlements.isResolved && entitlements.paymentCollectionAvailable;
+  const queryClient = useQueryClient();
   const { apiBaseUrl, environment, userId } = useBillingSession();
   const binding = apiBaseUrl && environment && userId ? { apiBaseUrl, environment, ownerId: userId } : undefined;
   const generation = `${apiBaseUrl ?? ''}|${environment ?? ''}|${userId ?? ''}`;
@@ -109,6 +128,9 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
         }
         actionGenerationRef.current = startedGeneration;
         setAction(next);
+        if (next.state === 'fulfilled') {
+          void queryClient.invalidateQueries({ queryKey: ['billing'] });
+        }
         followPaymentRedirect(next);
       } catch (error) {
         if (scopeRef.current.value !== startedGeneration) {
@@ -126,7 +148,11 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
               : 'A payment is already in progress.',
           );
         } else {
-          toast.warning('Could not update the payment. Try again.');
+          toast.warning(
+            error instanceof BillingCollectionUnavailable
+              ? purchasesUnavailableMessage
+              : 'Could not update the payment. Try again.',
+          );
         }
       } finally {
         if (scopeRef.current.value === startedGeneration) {
@@ -134,7 +160,7 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
         }
       }
     },
-    [generationValue],
+    [generationValue, queryClient],
   );
 
   useEffect(() => {
@@ -154,7 +180,7 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
         const items = await getUnresolvedPaymentActions(currentBinding, 'manual_topup');
         // oxlint-disable-next-line typescript/no-unnecessary-condition -- cleanup can flip active while the GET is pending
         if (active) {
-          const owned = items[0];
+          const owned = items.find((item) => item.purpose === 'manual_topup');
           actionGenerationRef.current = generationValue;
           setAction(owned);
         }
@@ -229,20 +255,21 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
           <DialogTitle>{visibleAction?.state === 'fulfilled' ? 'Credits added' : 'Add credits'}</DialogTitle>
           <DialogDescription>
             {visibleAction
-              ? `Payment status: ${visibleAction.state.replaceAll('_', ' ')}`
-              : 'Top up your credit balance.'}
+              ? `Payment status: ${stateLabel[visibleAction.state]}`
+              : 'Top up your credit balance. Prices in USD, plus applicable tax.'}
           </DialogDescription>
         </DialogHeader>
         <div className='flex flex-col gap-4'>
           {/* oxlint-disable-next-line unicorn/no-negated-condition -- the empty action branch is the primary purchase form */}
           {!visibleAction ? (
             <>
-              <div className='grid grid-cols-5 gap-2' role='group' aria-label='Credit pack amount'>
+              <div className='grid grid-cols-3 gap-2 sm:grid-cols-5' role='group' aria-label='Credit pack amount'>
                 {presetsCents.map((preset) => (
                   <Button
                     key={preset}
                     size='sm'
                     variant={!isOther && amountCents === preset ? 'default' : 'outline'}
+                    aria-pressed={!isOther && amountCents === preset}
                     onClick={() => {
                       setIsOther(false);
                       setAmountCents(preset);
@@ -254,6 +281,7 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
                 <Button
                   size='sm'
                   variant={isOther ? 'default' : 'outline'}
+                  aria-pressed={isOther}
                   onClick={() => {
                     setIsOther(true);
                     setAmountCents(0);
@@ -266,8 +294,8 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
                 <Input
                   autoFocus
                   type='number'
-                  min={5}
-                  max={5000}
+                  min={minCents / 100}
+                  max={maxCents / 100}
                   aria-label='Custom amount'
                   value={customDollars}
                   onChange={(event) => {
@@ -279,7 +307,7 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
               <div className='flex flex-col gap-2'>
                 {entitlements.paymentMethod ? (
                   <Button
-                    disabled={visibleBusy || !amountIsValid || binding === undefined}
+                    disabled={visibleBusy || !amountIsValid || binding === undefined || !canPurchase}
                     onClick={async () => {
                       await run(async () =>
                         prepareTopup(binding!, {
@@ -296,7 +324,7 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
                 ) : undefined}
                 <Button
                   variant={entitlements.paymentMethod ? 'outline' : 'default'}
-                  disabled={visibleBusy || !amountIsValid || binding === undefined}
+                  disabled={visibleBusy || !amountIsValid || binding === undefined || !canPurchase}
                   onClick={async () => {
                     await run(async () =>
                       prepareTopup(binding!, {
@@ -312,6 +340,11 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
                     ? 'Use another card in Checkout'
                     : `Review ${formatUsdMinor(amountCents)} purchase`}
                 </Button>
+                {entitlements.isResolved && !entitlements.paymentCollectionAvailable ? (
+                  <p className='text-xs text-muted-foreground' role='status'>
+                    {purchasesUnavailableMessage}
+                  </p>
+                ) : undefined}
               </div>
             </>
           ) : undefined}
@@ -379,7 +412,7 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
             </div>
           ) : undefined}
           {visibleAction && ['creating', 'processing', 'funds_received'].includes(visibleAction.state) ? (
-            <p className='text-sm'>
+            <p className='text-sm' role='status'>
               {visibleAction.state === 'funds_received'
                 ? 'Payment received. Credits are still being added.'
                 : 'Payment is still processing. You can close this window and return later.'}
@@ -412,7 +445,10 @@ export function TopupModal({ isOpen, onOpenChange, defaultAmountCents = 2500 }: 
                 {formatCreditAtoms(BigInt(visibleAction.receipt.grantedCreditAtoms))} credits added.
               </p>
               <p>
-                {formatUsdMinor(visibleAction.frozen?.grossMinor ?? '0')} charged
+                {/* Checkout-basis quotes learn their total in Checkout, so there is no frozen amount to print. */}
+                {typeof visibleAction.frozen?.grossMinor === 'string'
+                  ? `${formatUsdMinor(visibleAction.frozen.grossMinor)} charged`
+                  : 'Payment charged'}
                 {visibleAction.receipt.chargedPaymentMethod ? (
                   <>
                     {' '}

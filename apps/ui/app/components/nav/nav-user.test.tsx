@@ -8,7 +8,7 @@ import { NavUser } from '#components/nav/nav-user.js';
 import { metaConfig } from '#constants/meta.constants.js';
 
 const useNetworkConnectivityMock = vi.hoisted(() => vi.fn(() => true));
-const useEntitlementsMock = vi.hoisted(() => vi.fn(() => ({ tier: 'free' })));
+const useEntitlementsMock = vi.hoisted(() => vi.fn(() => ({ tier: 'free', isResolved: true })));
 
 vi.mock('@taucad/billing/hooks/use-entitlements', () => ({
   useEntitlements: useEntitlementsMock,
@@ -71,7 +71,7 @@ describe('NavUser', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useNetworkConnectivityMock.mockReturnValue(true);
-    useEntitlementsMock.mockReturnValue({ tier: 'free' });
+    useEntitlementsMock.mockReturnValue({ tier: 'free', isResolved: true });
   });
 
   it('shows product navigation, upgrade, and settings to free users', () => {
@@ -87,13 +87,22 @@ describe('NavUser', () => {
   });
 
   it('shows billing instead of upgrade to paid users', () => {
-    useEntitlementsMock.mockReturnValue({ tier: 'pro' });
+    useEntitlementsMock.mockReturnValue({ tier: 'pro', isResolved: true });
 
     render(<NavUser />, { wrapper: MemoryRouter });
 
     expect(screen.getByText('Billing')).toBeInTheDocument();
     expect(screen.queryByText('Upgrade to Pro')).not.toBeInTheDocument();
     expect(screen.getByText('Settings')).toBeInTheDocument();
+  });
+
+  it('never offers an upgrade before the plan is known', () => {
+    useEntitlementsMock.mockReturnValue({ tier: 'free', isResolved: false });
+
+    render(<NavUser />, { wrapper: MemoryRouter });
+
+    expect(screen.getByText('Billing')).toBeInTheDocument();
+    expect(screen.queryByText('Upgrade to Pro')).not.toBeInTheDocument();
   });
 
   it('moves product help into its own menu with the current version', () => {

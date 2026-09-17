@@ -5,6 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { once } from 'node:events';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import postgres from 'postgres';
@@ -23,6 +25,21 @@ const client = postgres(databaseUrl, {
   },
 });
 afterAll(async () => client.end());
+
+/** A loopback Stripe whose every list is empty, so a worker's boot-time scan completes without provider I/O. */
+async function emptyStripe(): Promise<string> {
+  const server = createServer((request, response) => {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Stripe list wire field
+    response.end(JSON.stringify({ object: 'list', data: [], has_more: false, url: request.url }));
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  onTestFinished(() => {
+    server.close();
+  });
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
+}
 
 const launchPolicy = {
   schemaVersion: 1,
@@ -54,6 +71,27 @@ const launchPolicy = {
 };
 
 describe('billing database protections and real command', () => {
+  it('should let the release migration run when Cloud is disabled', () => {
+    const result = spawnSync(
+      process.execPath,
+      [resolve(import.meta.dirname, '../../dist/billing-command.js'), 'migrate', '--environment', 'staging'],
+      {
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- raw process environments contain strings before schema parsing
+        env: {
+          /* eslint-disable @typescript-eslint/naming-convention -- process environment keys */
+          PATH: process.env['PATH'],
+          TAU_CLOUD_ENABLED: 'false',
+          BILLING_DATABASE_URL: databaseUrl,
+          BILLING_ENVIRONMENT: 'staging',
+          /* eslint-enable @typescript-eslint/naming-convention -- process environment keys */
+        } as unknown as NodeJS.ProcessEnv,
+        encoding: 'utf8',
+      },
+    );
+    expect(result.stderr).not.toContain('requires TAU_CLOUD_ENABLED');
+    expect(result.status).toBe(0);
+  });
+
   it('should refuse every billing command before opening a database when Cloud is disabled', () => {
     const childEnvironment: Record<string, string | undefined> = {
       // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment key
@@ -121,25 +159,33 @@ describe('billing database protections and real command', () => {
     }
   });
 
-  it('should execute consented reload work on the collection worker', async () => {
+  it('should run reload work and closure reconciliation on the staging operations worker', async () => {
     const childEnvironment: Record<string, string | undefined> = {};
     childEnvironment['PATH'] = process.env['PATH'];
     childEnvironment['BILLING_DATABASE_URL'] = databaseUrl;
-    // Collection is refused outside Stripe test mode and in every prod- environment, so the worker runs on staging.
+    // Sandbox keys collect only outside prod-, so the collecting worker runs on staging.
     childEnvironment['BILLING_ENVIRONMENT'] = 'staging';
     childEnvironment['TAU_CLOUD_ENABLED'] = 'true';
-    childEnvironment['STRIPE_SECRET_KEY'] = 'rk_test_reload_worker';
-    childEnvironment['STRIPE_READ_SECRET_KEY'] = 'rk_test_reload_worker_read';
-    childEnvironment['STRIPE_ACCOUNT_ID'] = 'acct_reload_worker';
+    // Today's window already reconciled: a restarted worker reports it complete from one row, with no provider I/O.
+    await client`INSERT INTO billing.billing_cash_scan (id, environment, stripe_account_id, livemode, currency,
+        window_start, window_end, lookback_start, balance_done, payment_intent_done, charge_done, refund_done,
+        journal_done, fact_done, state, completed_at)
+      SELECT ${randomUUID()}, 'staging', 'acct_operations_worker', false, 'usd', day - interval '1 day', day,
+        day - interval '2 days', true, true, true, true, true, true, 'complete', clock_timestamp()
+      FROM (SELECT date_trunc('day', clock_timestamp() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS day) w
+      ON CONFLICT DO NOTHING`;
+    childEnvironment['STRIPE_SECRET_KEY'] = 'rk_test_operations_worker';
+    childEnvironment['STRIPE_READ_SECRET_KEY'] = 'rk_test_operations_worker_read';
+    childEnvironment['STRIPE_ACCOUNT_ID'] = 'acct_operations_worker';
     childEnvironment['STRIPE_LIVEMODE'] = 'false';
-    childEnvironment['STRIPE_PRICE_ID_PRO_MONTHLY'] = 'price_reload_worker';
-    childEnvironment['STRIPE_PRODUCT_ID_CREDIT_PACK'] = 'prod_reload_worker';
+    childEnvironment['STRIPE_PRICE_ID_PRO_MONTHLY'] = 'price_operations_worker';
+    childEnvironment['STRIPE_PRODUCT_ID_CREDIT_PACK'] = 'prod_operations_worker';
     childEnvironment['OTEL_METRICS_PORT'] = '0';
     const child = spawn(
       process.execPath,
       [
         resolve(import.meta.dirname, '../../dist/billing-command.js'),
-        'billing-reload-worker',
+        'billing-operations-worker',
         '--environment',
         'staging',
         '--limit',
@@ -148,7 +194,7 @@ describe('billing database protections and real command', () => {
         '1000',
       ],
       {
-        // The empty environment has no consented reload work, so this verifies scheduling without provider I/O.
+        // The empty environment has no reload work or closures, so this verifies scheduling without provider I/O.
         env: childEnvironment as NodeJS.ProcessEnv,
         stdio: ['ignore', 'pipe', 'pipe'],
       },
@@ -165,9 +211,13 @@ describe('billing database protections and real command', () => {
     });
     try {
       const deadline = Date.now() + 10_000;
-      while (!stdout.includes('billing.reload_work_batch')) {
+      while (
+        !stdout.includes('billing.reload_work') ||
+        !stdout.includes('billing.account_closure') ||
+        !stdout.includes('billing.source_reconciliation')
+      ) {
         if (Date.now() >= deadline) {
-          throw new Error(`Timed out waiting for billing reload worker: ${stdout}\n${stderr}`);
+          throw new Error(`Timed out waiting for billing operations worker: ${stdout}\n${stderr}`);
         }
         // oxlint-disable-next-line no-await-in-loop -- the probe waits for the first cycle
         await wait(25);
@@ -178,7 +228,17 @@ describe('billing database protections and real command', () => {
         .map((line) => JSON.parse(line) as Record<string, unknown>);
       expect(events).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ event: 'billing.reload_work_batch', environment: 'staging', failed: 0 }),
+          expect.objectContaining({ event: 'billing.reload_work', environment: 'staging' }),
+          expect.objectContaining({
+            event: 'billing.account_closure',
+            environment: 'staging',
+            report: { processed: 0, pending: 0, attention: 0 },
+          }),
+          // Due at boot, not one cadence in: a frequently restarted worker still reconciles.
+          expect.objectContaining({
+            event: 'billing.source_reconciliation',
+            report: expect.objectContaining({ cash: 'complete', purchases: 'complete' }) as unknown,
+          }),
         ]),
       );
       child.kill('SIGTERM');
@@ -191,52 +251,20 @@ describe('billing database protections and real command', () => {
     }
   });
 
-  it('should refuse to start the collection worker for a production environment', async () => {
-    const childEnvironment: Record<string, string | undefined> = {};
-    childEnvironment['PATH'] = process.env['PATH'];
-    childEnvironment['BILLING_DATABASE_URL'] = databaseUrl;
-    childEnvironment['BILLING_ENVIRONMENT'] = 'prod-us';
-    childEnvironment['TAU_CLOUD_ENABLED'] = 'true';
-    childEnvironment['STRIPE_SECRET_KEY'] = 'rk_test_reload_worker';
-    childEnvironment['STRIPE_READ_SECRET_KEY'] = 'rk_test_reload_worker_read';
-    childEnvironment['STRIPE_ACCOUNT_ID'] = 'acct_reload_worker';
-    childEnvironment['STRIPE_LIVEMODE'] = 'false';
-    childEnvironment['STRIPE_PRICE_ID_PRO_MONTHLY'] = 'price_reload_worker';
-    childEnvironment['STRIPE_PRODUCT_ID_CREDIT_PACK'] = 'prod_reload_worker';
-    childEnvironment['OTEL_METRICS_PORT'] = '0';
-    const child = spawn(
-      process.execPath,
-      [
-        resolve(import.meta.dirname, '../../dist/billing-command.js'),
-        'billing-reload-worker',
-        '--environment',
-        'prod-us',
-        '--limit',
-        '100',
-        '--poll-milliseconds',
-        '1000',
-      ],
-      { env: childEnvironment as NodeJS.ProcessEnv, stdio: ['ignore', 'pipe', 'pipe'] },
-    );
-    let stderr = '';
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk: string) => {
-      stderr += chunk;
-    });
-    const [code] = (await once(child, 'close')) as unknown[];
-    expect(code).not.toBe(0);
-    expect(stderr).toContain('Automatic reload collection is not enabled for production environments');
-  });
-
   it('should run payment recovery and journal reconciliation on the operations worker', async () => {
     const childEnvironment: Record<string, string | undefined> = {};
     childEnvironment['PATH'] = process.env['PATH'];
     childEnvironment['BILLING_DATABASE_URL'] = databaseUrl;
     childEnvironment['BILLING_ENVIRONMENT'] = 'prod-us';
     childEnvironment['TAU_CLOUD_ENABLED'] = 'true';
-    childEnvironment['STRIPE_READ_SECRET_KEY'] = 'rk_test_operations_worker';
+    childEnvironment['BILLING_STRIPE_FIXTURE_URL'] = await emptyStripe();
+    // Sandbox keys in a prod- environment collect nothing, so no reload work may run.
+    childEnvironment['STRIPE_SECRET_KEY'] = 'rk_test_operations_worker';
+    childEnvironment['STRIPE_READ_SECRET_KEY'] = 'rk_test_operations_worker_read';
     childEnvironment['STRIPE_ACCOUNT_ID'] = 'acct_operations_worker';
     childEnvironment['STRIPE_LIVEMODE'] = 'false';
+    childEnvironment['STRIPE_PRICE_ID_PRO_MONTHLY'] = 'price_operations_worker';
+    childEnvironment['STRIPE_PRODUCT_ID_CREDIT_PACK'] = 'prod_operations_worker';
     childEnvironment['OTEL_METRICS_PORT'] = '0';
     const child = spawn(
       process.execPath,
@@ -251,7 +279,7 @@ describe('billing database protections and real command', () => {
         '1000',
       ],
       {
-        // The empty environment has no payment sources, so this verifies scheduling without provider I/O.
+        // The empty environment has no payment sources; the loopback Stripe answers the boot scan.
         env: childEnvironment as NodeJS.ProcessEnv,
         stdio: ['ignore', 'pipe', 'pipe'],
       },
@@ -292,6 +320,7 @@ describe('billing database protections and real command', () => {
           }),
         ]),
       );
+      expect(events.some((event) => event['event'] === 'billing.reload_work')).toBe(false);
       child.kill('SIGTERM');
       const [code, signal] = (await once(child, 'close')) as unknown[];
       expect({ code, signal, stderr }).toEqual({ code: 0, signal: null, stderr: '' });

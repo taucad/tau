@@ -13,6 +13,7 @@ import { DirectIdbProvider } from '#backend/direct-idb-provider.js';
 import { SharedPool } from '@taucad/memory';
 import type { ChangeEvent, FileSystemProvider, WatchEvent } from '#types.js';
 import { getEventOrigin } from '#event-origin-registry.js';
+import { captureRevisionTree } from '#revision-capture.js';
 import {
   parseProjectManifestBytes,
   projectManifestSchemaUrl,
@@ -437,6 +438,26 @@ describe('WorkspaceFileService', () => {
 
       await service.configureProjectRoots({ ...configuration, checkouts: [] });
       await expect(view.readFile('main.ts')).rejects.toMatchObject({ code: 'ESTALE' });
+    });
+
+    it('should capture a checkout from its entry kinds without a stat per file', async () => {
+      const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
+      await service.configureProjectRoots({
+        projects: [{ projectId, backend: 'indexeddb', providerBasePath: projectId }],
+        checkouts: [{ checkoutId, projectId, backend: 'indexeddb', providerBasePath: checkoutBasePath }],
+        roots: [{ backend: 'indexeddb' }],
+      } as const);
+      const view = service.createRootedFileSystem(`/checkouts/${checkoutId}`);
+      await view.writeFile('main.ts', 'export const bracket = 1;\n');
+      await view.writeFile('parts/fillet.ts', 'export const fillet = 2;\n');
+      const stat = vi.spyOn(provider, 'stat');
+      const readdirEntries = vi.spyOn(provider, 'readdirEntries');
+
+      const tree = await captureRevisionTree(view);
+
+      expect(tree.entries().map(({ path }) => path)).toEqual(['main.ts', 'parts/fillet.ts']);
+      expect(stat).not.toHaveBeenCalled();
+      expect(readdirEntries.mock.calls).toEqual([[checkoutBasePath], [`${checkoutBasePath}/parts`]]);
     });
 
     /* A1 review R4 nit: `/checkouts/a/b` canonicalizes to itself, so a slashed

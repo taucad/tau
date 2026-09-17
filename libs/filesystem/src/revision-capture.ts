@@ -17,7 +17,7 @@ import type { RevisionFileMode, RevisionTreeInput } from '#revision-tree.js';
 /** Read capabilities required to capture one immutable revision tree. @public */
 export type RevisionCaptureFileSystem = Pick<
   FileSystemProvider,
-  'readFile' | 'readFileStream' | 'readdir' | 'stat' | 'getFileMode'
+  'readFile' | 'readFileStream' | 'readdir' | 'readdirEntries' | 'stat' | 'getFileMode'
 >;
 
 const isNotFoundError = (error: unknown): boolean =>
@@ -112,22 +112,38 @@ export const captureRevisionTree = async (
       throw error;
     }
   };
+  /*
+   * A kind-carrying listing spares a `stat` per child — on OPFS `stat` reads a
+   * text file whole to count its lines. A child that vanishes after the
+   * listing is skipped by its read, exactly as one that vanishes after `stat`.
+   */
+  const listChildren = async (path: string): Promise<ReadonlyArray<{ name: string; kind?: 'file' | 'dir' }>> => {
+    if (filesystem.readdirEntries !== undefined) {
+      return filesystem.readdirEntries(path);
+    }
+    const names = await filesystem.readdir(path);
+    return names.map((name) => ({ name }));
+  };
+  const statKind = async (path: string): Promise<'file' | 'dir' | undefined> => {
+    const stat = await skipIfVanished(async () => filesystem.stat(path));
+    return stat?.type;
+  };
   const filePaths: Array<Readonly<{ path: string; mode: RevisionFileMode }>> = [];
   const visit = async (path: string): Promise<void> => {
     throwIfAborted();
-    const children = await skipIfVanished(async () => filesystem.readdir(path));
+    const children = await skipIfVanished(async () => listChildren(path));
     for (const child of children ?? []) {
       throwIfAborted();
-      const childPath = joinRelativePath(path, child);
+      const childPath = joinRelativePath(path, child.name);
       if (excluded?.(childPath) === true) {
         continue;
       }
       // oxlint-disable-next-line eslint/no-await-in-loop -- Sequential traversal avoids a second nested concurrency pool.
-      const stat = await skipIfVanished(async () => filesystem.stat(childPath));
-      if (stat === undefined) {
+      const kind = child.kind ?? (await statKind(childPath));
+      if (kind === undefined) {
         continue;
       }
-      if (stat.type === 'dir') {
+      if (kind === 'dir') {
         // oxlint-disable-next-line eslint/no-await-in-loop -- Sequential traversal avoids deadlocking nested bounded pools.
         await visit(childPath);
       } else {

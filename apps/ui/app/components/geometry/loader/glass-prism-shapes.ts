@@ -63,7 +63,8 @@ export type RestOrientation = Readonly<{ axis: Vector3Tuple; angle: number }>;
 export const glassPrismRestOrientations: Readonly<Record<GlassPrismShapeId, RestOrientation>> = {
   prism: { axis: [0, 1, 0], angle: 0 },
   lens: { axis: [0, 0, 1], angle: Math.PI / 2 },
-  gem: { axis: [1, 0, 0], angle: Math.PI / 2 },
+  // Laid on its side and skewed, so the sheet cuts crown and pavilion facets unevenly and throws fire.
+  gem: { axis: [1, 0, 0.32], angle: Math.PI / 2 },
   slab: { axis: [0, 1, 0], angle: 0.35 },
   droplet: { axis: [0, 1, 0], angle: 0 },
 };

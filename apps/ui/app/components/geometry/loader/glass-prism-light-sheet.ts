@@ -16,10 +16,10 @@ export type LightSheetGeometry = Readonly<{
 
 /** Ribbon half-widths in render units, per kind; the white beam is the widest. */
 const halfWidths: Readonly<Record<RaySegmentKind, number>> = {
-  incident: 0.032,
-  internal: 0.022,
-  exit: 0.024,
-  stray: 0.016,
+  incident: 0.04,
+  internal: 0.028,
+  exit: 0.032,
+  stray: 0.018,
 };
 
 const verticesPerRibbon = 6;

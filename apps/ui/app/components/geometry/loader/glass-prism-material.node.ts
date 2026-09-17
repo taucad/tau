@@ -372,8 +372,9 @@ export const createLightRibbonMaterials = (): LightRibbonMaterials => {
   const shapeRibbon = (): { core: Node<'float'>; halo: Node<'float'>; intensity: Node<'float'> } => {
     const across = uv().y.mul(2).sub(1);
     const along = uv().x;
-    const core = exp(across.mul(across).mul(-6)).toVar('tauRibbonCore');
-    const halo = exp(across.mul(across).mul(-1.5)).mul(0.35).toVar('tauRibbonHalo');
+    // A soft profile: the beam is a body of light with feathered edges, not a hot line with a halo.
+    const core = exp(across.mul(across).mul(-4)).toVar('tauRibbonCore');
+    const halo = exp(across.mul(across).mul(-1.2)).mul(0.45).toVar('tauRibbonHalo');
     const fade = mix(float(1), pow(oneMinus(along), 2), profile.y);
     const intensity = profile.x.mul(fade).toVar('tauRibbonIntensity');
     return { core, halo, intensity };
@@ -393,7 +394,7 @@ export const createLightRibbonMaterials = (): LightRibbonMaterials => {
   });
   const lightGlow = Fn(() => {
     const { core, halo, intensity } = shapeRibbon();
-    const radiance = color.mul(core.add(halo)).mul(intensity).mul(uGain).mul(1.6);
+    const radiance = color.mul(core.add(halo)).mul(intensity).mul(uGain).mul(0.85);
     const coverage = saturate(max(core, halo).mul(intensity).mul(uGain).mul(2));
     return vec4(radiance, coverage);
   })();

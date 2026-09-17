@@ -14,7 +14,7 @@ import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
 import { createRenderer } from '#components/geometry/graphics/three/renderer.js';
 import { getGeneratedShaderSource } from '#components/geometry/graphics/three/utils/three-shader-debug.test-utils.js';
 import { glassPrismStudios } from '#components/geometry/loader/glass-prism.constants.js';
-import { traceLightSheet } from '#components/geometry/loader/glass-prism-light-field.js';
+import { spectralSamples, traceLightSheet } from '#components/geometry/loader/glass-prism-light-field.js';
 import { createLightSheetGeometry } from '#components/geometry/loader/glass-prism-light-sheet.js';
 import {
   createGlassPrismBodyMaterials,
@@ -127,19 +127,24 @@ const framedHalfExtent = 1.3;
 /** Uniform scale the unit-framed body is drawn at, leaving room for the beam and the fan. */
 const bodyScale = 0.64;
 /** Half-width of the white beam's ribbons, in render units; see `glass-prism-light-sheet.ts`. */
-const incidentHalfWidth = 0.032;
+const incidentHalfWidth = 0.04;
 /** Radians per second of the resting turn about the sheet normal. */
 const restingTurnRate = 0.3;
 /** Additional radians per second at the peak of a flow. */
 const flowingTurnRate = 1.1;
 /** Amplitude, in radians, and rates of the slow nod that tilts the body through the sheet. */
-const nod = { pitch: 0.42, pitchRate: 0.23, roll: 0.3, rollRate: 0.17 } as const;
-/** Where the white beam starts and how it drifts across the sheet, in render units. */
-const beam = { originX: -2.1, drift: 0.26, driftRate: 0.13, width: 0.2 } as const;
+const nod = { pitch: 0.5, pitchRate: 0.23, roll: 0.34, rollRate: 0.17 } as const;
+/**
+ * Where the white beam starts, how it drifts across the sheet and how wide it is, in render units. A wide
+ * beam meets more of the body at once, so more of its faces contribute to the spectrum.
+ */
+const beam = { originX: -2.1, drift: 0.3, driftRate: 0.13, width: 0.34 } as const;
 /** Distance a ray keeps travelling once it has left the body. */
-const rayReach = 2.4;
+const rayReach = 3.2;
 /** The entry face's reflection is drawn dimmer than its Fresnel share, so the spectrum stays the subject. */
-const strayLightScale = 0.55;
+const strayLightScale = 0.3;
+/** The split light is drawn brighter than its share of the beam, so the spectrum, not the beam, is the subject. */
+const spectrumLift = 2.2;
 const historyLimit = 16;
 const reducedPixelRatioScale = 0.75;
 /** Glass wants a stronger halo than chrome: the traced light is the picture. */
@@ -170,7 +175,7 @@ const qualityProfiles: Readonly<Record<GlassPrismLoaderQuality, QualityProfile>>
     bloom: false,
     environmentSize: 64,
     targetFrameRate: 30,
-    rayCount: 10,
+    rayCount: 14,
     sectionCount: 32,
     maxInteractions: 2,
     minIntensity: 0.08,
@@ -184,7 +189,7 @@ const qualityProfiles: Readonly<Record<GlassPrismLoaderQuality, QualityProfile>>
     bloom: false,
     environmentSize: 128,
     targetFrameRate: 60,
-    rayCount: 22,
+    rayCount: 32,
     sectionCount: 48,
     maxInteractions: 3,
     minIntensity: 0.05,
@@ -197,7 +202,7 @@ const qualityProfiles: Readonly<Record<GlassPrismLoaderQuality, QualityProfile>>
     bloom: true,
     environmentSize: 256,
     targetFrameRate: 60,
-    rayCount: 40,
+    rayCount: 56,
     sectionCount: 64,
     maxInteractions: 4,
     minIntensity: 0.05,
@@ -209,7 +214,7 @@ const qualityProfiles: Readonly<Record<GlassPrismLoaderQuality, QualityProfile>>
 
 /** Upper bound on ribbons per frame; beyond it the faintest branches are simply not drawn. */
 const ribbonCapacityFor = (profile: QualityProfile): number =>
-  profile.rayCount * (1 + 7 * (1 + profile.maxInteractions * 2));
+  profile.rayCount * (1 + spectralSamples.length * (1 + profile.maxInteractions * 2));
 
 const buildGeometry = (data: GlassPrismGeometryData): BufferGeometry => {
   const geometry = new BufferGeometry();
@@ -410,6 +415,7 @@ export const createGlassPrismLoader = (options: GlassPrismLoaderOptions): GlassP
       maxInteractions: profile.maxInteractions,
       minIntensity: profile.minIntensity,
       strayScale: strayLightScale,
+      spectrumGain: spectrumLift,
       reach: rayReach,
     });
     ribbonCount = ribbons.update(segments);

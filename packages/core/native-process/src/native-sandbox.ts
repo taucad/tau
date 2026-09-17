@@ -1,7 +1,7 @@
 import { realpathSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 
-import { SandboxManager } from '@anthropic-ai/sandbox-runtime';
+import { getDefaultWritePaths, SandboxManager } from '@anthropic-ai/sandbox-runtime';
 
 /**
  * The operating-system sandbox could not be established, so no native worker was started.
@@ -58,6 +58,19 @@ const deniedReadRoots = (): string[] =>
   physicalVariants([homedir(), '/Users', '/home', '/root', '/Volumes', '/mnt', '/media', '/tmp', tmpdir()]);
 
 /**
+ * Shared roots the sandbox runtime grants every command by default, which a CAD worker must not have.
+ *
+ * The runtime unions {@link getDefaultWritePaths} into the emitted write allowance, so the profile
+ * would otherwise let user-authored C# or Python write into `/tmp/claude`, `~/.npm/_logs` and
+ * `~/.claude/debug` — directories other tooling reads, i.e. an influence channel out of the sandbox.
+ * Reading the roots back from the same export keeps a runtime upgrade from re-opening the hole with a
+ * new default. Character devices stay writable because the worker's stdio needs them.
+ *
+ * @returns Every default write root except the `/dev` devices.
+ */
+const deniedWriteRoots = (): string[] => getDefaultWritePaths().filter((path) => !path.startsWith('/dev/'));
+
+/**
  * The capability profile handed to the sandbox runtime, spelled locally so the published
  * declarations never reach into the runtime's own types.
  *
@@ -73,8 +86,15 @@ export type NativeSandboxProfile = {
  *
  * Reads are denied under user homes, removable volumes, and shared temporary storage, then
  * re-allowed only for the launch's bundled runtime, source snapshot, and private writable
- * root. Writes are allowed only inside that writable root. Network egress is denied outright:
- * the allowlist is empty, `*` is denied, and no interactive callback exists to widen it.
+ * root. Writes are allowed only inside that writable root: the sandbox runtime's own broad
+ * default write roots are denied back off ({@link deniedWriteRoots}).
+ *
+ * Network egress is **proxy-mediated, not kernel-denied**. The emitted profile pins socket
+ * access to the runtime's loopback proxy ports and nothing else; the proxy then refuses every
+ * destination because the allowlist is empty, `*` is denied, and no interactive callback exists
+ * to widen it. Declaring `allowedDomains` is what selects that restricted path — removing the
+ * network facet makes the runtime emit `(allow network*)` instead, which is the inversion of
+ * this invariant. A kernel-level "no sockets at all" option does not exist in the pinned runtime.
  *
  * @public
  * @param launch - Paths of one launch; omit for the process-wide baseline used at initialization.
@@ -88,7 +108,7 @@ export const nativeSandboxPolicy = (
     denyRead: deniedReadRoots(),
     allowRead: launch ? physicalVariants([...launch.readablePaths, launch.writablePath]) : [],
     allowWrite: launch ? physicalVariants([launch.writablePath]) : [],
-    denyWrite: [],
+    denyWrite: deniedWriteRoots(),
   },
 });
 

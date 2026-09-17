@@ -204,28 +204,27 @@ const codedFailureDetail = (error: unknown): RunFailureDetail => {
 };
 
 /**
- * The typed refusal one thrown error carries, if it carries one.
+ * The login record one thrown refusal carries, if it carries one.
  *
  * A runner refuses with a coded error (`EXTERNAL_AGENT_AUTH_REQUIRED`,
  * `EXTERNAL_AGENT_MODEL_UNAVAILABLE`, …) and may hang the facts a surface needs
  * on it — the login methods, a verification URL and code. The host is
  * deliberately incurious about the payload's shape: it records what it was
- * given, and the surfaces that render it own its schema (`agent-wire.ts`).
+ * given, and the surfaces that render it own its schema (`agent-wire.ts`). The
+ * code itself, and any stop `details`, ride {@link codedFailureDetail}.
  *
  * @param error - Whatever the external runner threw.
- * @returns The refusal code, and the login record to append before the failure.
+ * @returns The login record to append before the failure.
  */
 const externalRefusalOf = (
   error: unknown,
 ): {
-  readonly code: string | undefined;
   readonly login: Omit<SessionEvent & { readonly type: 'interrupt.recorded' }, 'interruptId'> | undefined;
 } => {
-  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- reading two optional own properties off a thrown value.
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- reading one optional own property off a thrown value.
   const fields = error !== null && typeof error === 'object' ? (error as Record<string, unknown>) : undefined;
   const payload = fields?.['login'];
   return {
-    code: typeof fields?.['code'] === 'string' ? fields['code'] : undefined,
     login:
       typeof payload === 'object' && payload !== null && !Array.isArray(payload)
         ? {
@@ -1231,14 +1230,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
             : []),
           controller.signal.aborted
             ? { type: 'run.lifecycle', state: 'cancelled' }
-            : {
-                type: 'run.lifecycle',
-                state: 'failed',
-                detail: {
-                  message: error instanceof Error ? error.message : String(error),
-                  ...(refusal.code === undefined ? {} : { code: refusal.code }),
-                },
-              },
+            : { type: 'run.lifecycle', state: 'failed', detail: codedFailureDetail(error) },
         ]);
       } finally {
         if (externalByChat.get(input.chatId)?.runId === input.runId) {

@@ -33,6 +33,8 @@ export {
   externalAgentDescriptorSchema,
   externalAgentLoginSchema,
   externalAgentRefusalCodes,
+  externalAgentStopCodes,
+  externalAgentStopSchema,
 } from '#launchers/node/agent-wire.js';
 export type {
   AgentChannelAdmissionConfig,
@@ -49,6 +51,8 @@ export type {
   ExternalAgentDescriptor,
   ExternalAgentLogin,
   ExternalAgentRefusalCode,
+  ExternalAgentStop,
+  ExternalAgentStopCode,
 } from '#launchers/node/agent-wire.js';
 /* The transport union and its close vocabulary. Types only — the client half
  * itself ships from `@taucad/agent-host/channel-client`. */

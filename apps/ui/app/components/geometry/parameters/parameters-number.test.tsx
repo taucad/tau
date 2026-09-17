@@ -285,6 +285,30 @@ describe('ParametersNumber', () => {
       expect(screen.getByText('in')).toBeTruthy();
     });
 
+    it('shows the dragged value, not the authority value, while an approximated field is scrubbed', () => {
+      const { container } = render(
+        <TestWrapper>
+          <ParametersNumber
+            value={10}
+            defaultValue={10}
+            descriptor='length'
+            units={createUnits('mm', 'in')}
+            onChange={vi.fn()}
+            aria-label='Approximated width'
+          />
+        </TestWrapper>,
+      );
+      const sliderInput = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
+      Object.defineProperty(sliderInput, 'offsetWidth', { configurable: true, value: 100 });
+      const field = screen.getByRole('textbox', { name: 'Approximated width' });
+      const before = field.getAttribute('value');
+
+      fireSliderPointerEvent(sliderInput, 'pointerdown', { clientX: 0 });
+      fireSliderPointerEvent(sliderInput, 'pointermove', { clientX: 40 });
+
+      expect(field.getAttribute('value')).not.toBe(before);
+    });
+
     it('should show approximation indicator when conversion results in rounding', () => {
       const mockOnChange = vi.fn();
       const inchUnits = createUnits('mm', 'in');

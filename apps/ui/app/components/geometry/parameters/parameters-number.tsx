@@ -287,13 +287,13 @@ export function ParametersNumber({
     step === undefined ? automaticStep(displayDefault) : Math.abs(displayStep(step, binding, displayUnit));
 
   const committedDisplayValue = displayValue(authorityValue, binding, displayUnit);
-  const roundedDisplayValue = Number(committedDisplayValue.toPrecision(4));
+  // Rounding follows what the row shows, so a drag reports its own value rather than the last commit.
+  const roundedDisplayValue = Number(draftValue.toPrecision(4));
   const isApproximation =
     binding.nativeUnit !== undefined &&
     displayUnit !== undefined &&
     binding.nativeUnit !== displayUnit &&
-    Math.abs(roundedDisplayValue - committedDisplayValue) >
-      Number.EPSILON * Math.max(1, Math.abs(committedDisplayValue)) * 8;
+    Math.abs(roundedDisplayValue - draftValue) > Number.EPSILON * Math.max(1, Math.abs(draftValue)) * 8;
   const formattedValue = formatDisplayValue(
     isApproximation ? roundedDisplayValue : Number(draftValue.toPrecision(12)),
     binding,

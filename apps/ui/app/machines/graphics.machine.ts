@@ -1981,14 +1981,5 @@ export const graphicsMachine = setup({
   },
 });
 
-export const selectRequestedGltfRevision = (snapshot: GraphicsSnapshot): number =>
-  snapshot.context.gltfPresentation.requestedRevision;
-
-export const selectRequestedGeometryKey = (snapshot: GraphicsSnapshot): string =>
-  snapshot.context.gltfPresentation.requestedKey ?? snapshot.context.geometryKey;
-
 export const selectPresentedGeometryKey = (snapshot: GraphicsSnapshot): string =>
   snapshot.context.gltfPresentation.presentedKey ?? snapshot.context.geometryKey;
-
-export const selectPresentedGltfRevision = (snapshot: GraphicsSnapshot): number =>
-  snapshot.context.gltfPresentation.presentedRevision;

@@ -272,6 +272,52 @@ describe('useViewSettingsSync', () => {
     graphicsRef.stop();
   });
 
+  it('writes the last pose when the view goes away inside the settle window', () => {
+    const graphicsRef = createActor(
+      graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }),
+      { input: {} },
+    ).start();
+    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
+    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
+    let cameraRig: ThreeCameraRig | undefined;
+
+    const view = render(
+      <GraphicsProvider graphicsRef={graphicsRef}>
+        <SyncHarness
+          graphicsRef={graphicsRef}
+          editorRef={editorRef}
+          onRig={(rig) => {
+            cameraRig = rig;
+          }}
+        />
+      </GraphicsProvider>,
+    );
+
+    editorSend.mockClear();
+    act(() => {
+      cameraRig!.actorRef.send({
+        type: 'setView',
+        target: [4, 0, 0],
+        direction: [1, 0, 0],
+        up: [0, 0, 1],
+        verticalSpan: 14,
+        perspectiveZoom: 1,
+      });
+    });
+    // Closing the pane, switching file or navigating away all land here, and the settle timer that
+    // would have written the pose is cancelled with the effect. Losing the orbit the user just made
+    // is not an acceptable price for batching the writes.
+    act(() => {
+      view.unmount();
+    });
+
+    expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
+      type: 'updateViewSettings',
+      settings: { cameraView: { target: [4, 0, 0], verticalSpan: 14 } },
+    });
+    graphicsRef.stop();
+  });
+
   it('defers camera sync until a non-3D viewer can clear stale state', async () => {
     const graphicsRef = createActor(
       graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }),

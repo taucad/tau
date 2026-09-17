@@ -18,6 +18,7 @@ import type {
   KernelIssue,
 } from '#types/runtime.types.js';
 import type {
+  KernelFileSystem,
   KernelRuntime,
   CreateGeometryInput,
   GetDependenciesInput,
@@ -355,6 +356,32 @@ describe('KernelWorker lifecycle', () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  describe('bundler filesystem', () => {
+    /* `detect` and `bundle` traverse the same graph, and a module imported by ten others was
+     * probed once per edge: 146 filesystem operations for a 7-module cold open (D15). */
+    it('serves the bundler one probe and one read per path, and releases both at the operation boundary', async () => {
+      const filesystem = createMockFileSystem({ existsResult: true, readFileResult: 'export const a = 1;' });
+      const worker = createConfiguredWorker({ filesystem });
+      const view = (worker as unknown as { bundlerFilesystem: KernelFileSystem }).bundlerFilesystem;
+
+      await view.exists('lib/a.ts');
+      await view.exists('lib/a.ts');
+      expect(await view.readFile('lib/a.ts', 'utf8')).toBe('export const a = 1;');
+      await view.readFile('lib/a.ts');
+
+      expect(filesystem.mocks.exists).toHaveBeenCalledOnce();
+      expect(filesystem.mocks.readFile).toHaveBeenCalledOnce();
+
+      // A changed path drops its content, and the next operation re-probes.
+      await worker.notifyFileChanged(['lib/a.ts']);
+      await view.exists('lib/a.ts');
+      await view.readFile('lib/a.ts');
+
+      expect(filesystem.mocks.exists).toHaveBeenCalledTimes(2);
+      expect(filesystem.mocks.readFile).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('source snapshots', () => {

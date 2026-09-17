@@ -67,12 +67,15 @@ export const initializeWorkerForTesting = async <T extends KernelWorker>(
     readonly workerOptions?: Record<string, unknown>;
     readonly config?: unknown;
     readonly onTelemetry?: Parameters<T['setTelemetrySend']>[0];
+    /** Serve the store without its watch channel, for the kernel's watcherless freshness path. */
+    readonly watchable?: boolean;
   },
 ): Promise<T> => {
   if (options?.onTelemetry) {
     worker.setTelemetrySend(options.onTelemetry);
   }
-  const { port } = createFileSystemBridgePort(getTestFileSystem());
+  const base = getTestFileSystem();
+  const { port } = createFileSystemBridgePort(options?.watchable === false ? { ...base, watch: undefined } : base);
   await worker.initialize({
     callbacks: { onLog: options?.onLog ?? (() => undefined) },
     transferables: { fileSystemPort: port },

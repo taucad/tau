@@ -2420,7 +2420,14 @@ describe('cache identity regressions', () => {
         };
       },
     });
-    const worker = await createMultiKernelWorker([{ id: 'watcherless-kernel', extensions: ['mock'], definition }]);
+    // The store this fixture serves does watch its own mutations (D15), so the watcherless
+    // freshness path needs a filesystem served without that channel.
+    const worker = new KernelRuntimeWorker({
+      runtime: defineRuntime({
+        kernels: [attachRuntimePluginDefinition({ id: 'watcherless-kernel', extensions: ['mock'] }, () => definition)],
+      }),
+    });
+    await initializeWorkerForTesting(worker, { watchable: false });
 
     const first = await worker.render({ file: createGeometryFile('model.mock'), parameters: {} });
     await getTestFileSystem().writeFile('model.mock', 'second');

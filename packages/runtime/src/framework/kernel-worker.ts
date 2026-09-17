@@ -6,7 +6,7 @@ import { randomUuid } from '@taucad/utils/id';
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { named, preserveMethodNames } from '#framework/named.js';
 import { getIsolationStatus } from '#cross-origin-isolation/headers.js';
-import type { FileExtension, OnWorkerLog } from '@taucad/types';
+import type { FileExtension, FileStat, OnWorkerLog } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import type { MessagePortLike } from '@taucad/rpc';
 import type {
@@ -520,6 +520,16 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   private readonly fileHashCache = new Map<string, string>();
   private readonly fileContentCache = new Map<string, Uint8Array<ArrayBuffer> | string>();
+  /**
+   * Existence and stat answers for the current operation, for the bundler's view only.
+   *
+   * `detect` and `bundle` are two full traversals of the same import graph, and inside each one a
+   * module is probed once per edge that names it: a module imported by ten others was probed
+   * thirty times per cold open. Cleared at every operation boundary.
+   */
+  private readonly fileExistsCache = new Map<string, boolean>();
+  private readonly fileStatCache = new Map<string, FileStat>();
+  private bundlerFilesystemView: KernelFileSystem | undefined;
   private readonly compiledWasmModules = new Map<string, WebAssembly.Module>();
   private parameterResultCache:
     | { readonly key: string; readonly result: Extract<GetParametersResult, { success: true }> }
@@ -1105,6 +1115,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     await previous;
     try {
       this.operationSignal = signal;
+      // One probe per path per operation (W22/D15): an operation is the coherence window the
+      // rest of the render already assumes, so a file appearing mid-operation is unobserved
+      // either way.
+      this.fileExistsCache.clear();
+      this.fileStatCache.clear();
       return await operation();
     } finally {
       this.operationSignal = undefined;
@@ -4712,7 +4727,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const rawOptions = bundlerOptions ?? {};
       const validatedOptions = definition.optionsSchema ? definition.optionsSchema.parse(rawOptions) : rawOptions;
 
-      const context = await definition.initialize(validatedOptions, { filesystem: this.filesystem });
+      const context = await definition.initialize(validatedOptions, { filesystem: this.bundlerFilesystem });
       const loaded = { definition, ctx: context };
 
       for (const extension of extensions) {
@@ -5344,6 +5359,58 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
+   * The filesystem the bundler reads through (D15).
+   *
+   * A cold open resolved the same graph twice and read the same bytes three times over: once per
+   * bundler pass and once more for the dependency hashes. Contents come from `fileContentCache` —
+   * the map `clearVolatileFileCaches` and the watch invalidator already keep honest — and
+   * existence from the operation-scoped probe caches, so each module is probed and read once.
+   *
+   * @returns The kernel filesystem with reads and probes served from the caches.
+   */
+  private get bundlerFilesystem(): KernelFileSystem {
+    const base = this.filesystem;
+    this.bundlerFilesystemView ??= {
+      ...base,
+      // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- an overloaded method cannot be written as an arrow.
+      readFile: (async (path: string, encoding?: 'utf8') => {
+        let content = this.fileContentCache.get(path);
+        if (content === undefined) {
+          content = await base.readFile(path);
+          // Project sources only: a CDN package artifact is read twice per cold open and can be
+          // megabytes, and this cache lives as long as the watch does.
+          if (!path.startsWith('node_modules/')) {
+            this.fileContentCache.set(path, content);
+          }
+        }
+        if (encoding !== 'utf8') {
+          return typeof content === 'string' ? new TextEncoder().encode(content) : content;
+        }
+        return typeof content === 'string' ? content : new TextDecoder().decode(content);
+      }) as KernelFileSystem['readFile'],
+      exists: async (path: string) => {
+        const cached = this.fileExistsCache.get(path);
+        if (cached !== undefined) {
+          return cached;
+        }
+        const answer = await base.exists(path);
+        this.fileExistsCache.set(path, answer);
+        return answer;
+      },
+      stat: async (path: string) => {
+        const cached = this.fileStatCache.get(path);
+        if (cached !== undefined) {
+          return cached;
+        }
+        const entry = await base.stat(path);
+        this.fileStatCache.set(path, entry);
+        return entry;
+      },
+    };
+    return this.bundlerFilesystemView;
+  }
+
+  /**
    * Compute all dependencies for cache key computation.
    * Gathers file dependencies, middleware signatures, framework version, kernel options,
    * parameters (for geometry computation), and bundled assets.
@@ -5518,10 +5585,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     // 2. Read uncached files
     const uncachedPaths = rootedPaths.filter((p) => !this.fileHashCache.has(p));
     if (uncachedPaths.length > 0) {
+      // The bundler just read these through `fileContentCache`; only what it did not touch is read
+      // here (W22). A hash still needs the bytes, so a cached *string* is re-encoded, not re-read.
+      const unreadPaths = uncachedPaths.filter((p) => !this.fileContentCache.has(p));
       const readSpan = this.tracer.startSpan('deps.read', {
-        fileCount: uncachedPaths.length,
+        fileCount: unreadPaths.length,
       });
-      const contentMap: Record<string, Uint8Array<ArrayBuffer>> = await this.filesystem.readFiles(uncachedPaths);
+      const contentMap: Record<string, Uint8Array<ArrayBuffer>> = unreadPaths.length > 0
+        ? await this.filesystem.readFiles(unreadPaths)
+        : {};
+      for (const path of uncachedPaths) {
+        const cached = this.fileContentCache.get(path);
+        if (cached !== undefined) {
+          contentMap[path] = typeof cached === 'string' ? new TextEncoder().encode(cached) : cached;
+        }
+      }
       readSpan.end();
 
       const hashSpan = this.tracer.startSpan('deps.hash', {

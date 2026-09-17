@@ -16,6 +16,16 @@ import { Topic } from '@taucad/events';
  * @public
  */
 export type Port<T> = {
+  /**
+   * Optional: resolves once the wire underneath is actually carrying frames.
+   * Present only on a port wrapped around a transport that connects — a dialled
+   * socket — and absent on one that is live the moment it exists.
+   *
+   * A channel bound to a port that implements this starts its hello deadline
+   * here rather than at construction, so the peer's deadline is not also spent
+   * on DNS, TCP, TLS and the upgrade.
+   */
+  opened?: Promise<void>;
   postMessage(data: T, transfer?: readonly Transferable[]): void;
   /**
    * Register an inbound message handler. Returns an unsubscribe that is safe to call multiple times.
@@ -364,11 +374,24 @@ export const wrapWebSocket = <T>(socket: WebSocketLike, codec: Codec): Port<T> =
     messages.emit(data);
   };
 
+  /* A dialled socket is wrapped before it connects, so everything a channel
+   * would otherwise start on construction — its hello deadline above all —
+   * would be spent on DNS, TCP, TLS and the upgrade. A socket that is already
+   * open, or already gone, reports no wait at all. */
+  let reportOpen: (() => void) | undefined;
+  const opened =
+    closed || socket.readyState === webSocketOpen
+      ? undefined
+      : new Promise<void>((resolve) => {
+          reportOpen = resolve;
+        });
+
   const onSocketOpen = (): void => {
     for (const frame of outbound) {
       socket.send(frame);
     }
     outbound.length = 0;
+    reportOpen?.();
   };
 
   /** Fire the death handlers at most once, however the wire died. */
@@ -445,6 +468,7 @@ export const wrapWebSocket = <T>(socket: WebSocketLike, codec: Codec): Port<T> =
       }
       return deaths.subscribe(handler);
     },
+    ...(opened === undefined ? {} : { opened }),
     close(): void {
       closeSocket();
     },

@@ -373,6 +373,41 @@ describe('wrapWebSocket', () => {
       server.dispose();
     }
   });
+
+  /*
+   * A dialled socket is wrapped *before* it connects — the peer posts its hello
+   * the instant the upgrade completes, and a listener attached later never sees
+   * it. The hello deadline is the peer's to meet, so it must not also be spent
+   * on DNS, TCP, TLS, relay routing and the upgrade: a false expiry closes the
+   * channel permanently, with no reconnect (R3-F3).
+   */
+  it('should start the hello deadline when the socket opens, not when the client is built', async () => {
+    vi.useFakeTimers();
+    try {
+      const socket = new FakeWebSocket();
+      const client = createChannelClient({ port: wrapWebSocket<unknown>(socket, jsonCodec), sessionKey: 'ws' });
+      let readyFailure: unknown;
+      // async-iife: bootstrap — the deadline is observed here, never awaited.
+      void (async (): Promise<void> => {
+        try {
+          await client.ready;
+        } catch (error) {
+          readyFailure = error;
+        }
+      })();
+
+      // A slow connect is not a silent peer.
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(readyFailure).toBeUndefined();
+
+      socket.didOpen();
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(String(readyFailure)).toContain('sent no hello');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 /**

@@ -867,15 +867,29 @@ describe('projectAgentHostEvent', () => {
     });
   });
 
-  it('should keep a coded failure without a status or details as its plain message', () => {
-    expect(
-      projectAgentHostEvent({
-        ...base,
-        type: 'run.lifecycle',
-        state: 'failed',
-        detail: { code: 'EXTERNAL_AGENT_AUTH_REQUIRED', message: 'codex is not logged in.' },
-      }),
-    ).toEqual([{ type: 'error', errorText: 'codex is not logged in.' }]);
+  it('should carry a host failure code that has no status or details', () => {
+    const [chunk] = projectAgentHostEvent({
+      ...base,
+      type: 'run.lifecycle',
+      state: 'failed',
+      detail: { code: 'NO_EVICTABLE_HISTORY', message: 'Context is oversized but has no safe history to evict.' },
+    });
+    if (chunk?.type !== 'error') {
+      throw new Error('Expected an error projection');
+    }
+    expect(JSON.parse(chunk.errorText)).toEqual({
+      category: 'generic',
+      title: 'Error',
+      message: 'Context is oversized but has no safe history to evict.',
+      code: 'NO_EVICTABLE_HISTORY',
+    });
+    /* The code is the only thing that reaches the card's copy: without it the
+     * person reads the host's own sentence about evicting history. */
+    expect(parseErrorForPersistence(new Error(chunk.errorText))).toMatchObject({
+      code: 'NO_EVICTABLE_HISTORY',
+      message: "This chat's first message is too large to continue. Start a new chat and attach less.",
+      raw: chunk.errorText,
+    });
   });
 
   it('falls back to the generic host failure only when the run recorded no reason', () => {

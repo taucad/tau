@@ -200,7 +200,7 @@ describe('GltfMesh in-place updates', () => {
 
   it('should fall back to a full presentation while a section view is armed (I11)', async () => {
     const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
-    vi.spyOn(sectionTopology, 'registerGltfSectionSurfaceSources').mockResolvedValue(undefined);
+    vi.spyOn(sectionTopology, 'registerGltfSectionSurfaceSources').mockResolvedValue([]);
     const view = render(
       <GltfMesh gltfFile={buildGlb()} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
     );

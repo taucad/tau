@@ -330,7 +330,8 @@ export function getFatLineSourceIndices(object: Object3D): Uint32Array | Uint16A
 
 export function applyFatLineSegments(gltf: GLTF, options: ApplyFatLineSegmentsOptions): void {
   const { resolution, backend, edgeColor = gltfEdgeColorLightMode } = options;
-  const associations = gltf.parser.associations as Map<Object3D, unknown> | undefined;
+  // Capture paths and tests hand this function a scene without a loader parser.
+  const associations = (gltf as { parser?: GLTF['parser'] }).parser?.associations as Map<Object3D, unknown> | undefined;
   const sources: Array<{ parent: Group; lineSegments: LineSegments }> = [];
 
   gltf.scene.traverse((object) => {

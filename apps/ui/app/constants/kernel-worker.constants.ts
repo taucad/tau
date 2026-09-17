@@ -25,9 +25,17 @@ const createDebugRuntimeWorker = (): Worker =>
  * Wire topology — `webWorkerTransport`: the kernel runs in a dedicated
  * `Worker` spawned from the UI app's worker-owned runtime entry.
  * Cooperative abort
- * is SAB-backed (`Atomics.notify`); geometry transports as pooled SAB
- * delivery (declared via `sharedMemory.geometry`); the filesystem
- * bridges through a `MessagePort` to the FM worker.
+ * is SAB-backed (`Atomics.notify`); geometry is **transferred**, not pooled;
+ * the filesystem bridges through a `MessagePort` to the FM worker.
+ *
+ * No `sharedMemory.geometry` (W33): the pool tier copies a result twice — into the arena in the
+ * worker and out of it on the main thread — where a transfer copies once in the worker and hands
+ * the buffer over for nothing. Measured on this host: at 2.5 MB (100k triangles) the pool costs
+ * 0.28 ms in the worker plus 0.27 ms of main thread; at 27 MB (1M triangles) 1.73 plus 2.73. The
+ * transfer tier pays 0.11 / 1.26 ms in the worker and nothing on the main thread, so it is cheaper
+ * on both sides and keeps the GLB to one main-thread copy (`GLTFLoader`'s own). The pool also keys
+ * entries by the render's dependency hash and never re-stores an existing key, so two results that
+ * share a hash would deliver the first one's bytes.
  *
  * The filesystem handle is owned by the file-manager machine and only available after it
  * reaches `ready`. They are passed in here so the transport client
@@ -40,9 +48,6 @@ export const createDefaultKernelOptions: KernelOptionsFactory = ({ fileSystem, r
     createWorker: createDefaultRuntimeWorker,
     fileSystem,
     compute,
-    sharedMemory: {
-      geometry: { bytes: 100 * 1024 * 1024 },
-    },
   }),
 });
 
@@ -62,8 +67,5 @@ export const createDebugKernelOptions: KernelOptionsFactory = (deps) => ({
     devtoolsTelemetry: true,
     fileSystem: deps.fileSystem,
     compute: deps.compute,
-    sharedMemory: {
-      geometry: { bytes: 100 * 1024 * 1024 },
-    },
   }),
 });

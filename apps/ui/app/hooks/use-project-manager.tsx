@@ -20,7 +20,6 @@ import type {
 import { resolveStorageRootKey } from '@taucad/filesystem/storage-root-key';
 import type { CadAgentExecution, Chat } from '@taucad/chat';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
-import { getErrno } from '@taucad/utils/error';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type { Remote } from 'comlink';
 import { projectManagerMachine } from '#hooks/project-manager.machine.js';
@@ -65,7 +64,7 @@ import { createInitialProject } from '#constants/project.constants.js';
 import { attachmentKind, attachmentReferenceOf } from '#utils/attachment.utils.js';
 import { buildUserMessage } from '#utils/chat.utils.js';
 import type { AttachmentReference } from '#utils/attachment.utils.js';
-import { createAttachmentStore, createChatAttachmentStore } from '#db/attachment-store.js';
+import { createAttachmentStore, createChatAttachmentStore, isNotFound } from '#db/attachment-store.js';
 import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 import { defaultProjectName } from '#constants/project-names.js';
@@ -838,7 +837,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       try {
         await fileManager.client.rmdir(composerRecordPaths.project(projectId), { recursive: true });
       } catch (error) {
-        if (getErrno(error) !== 'ENOENT' && (error as { name?: unknown }).name !== 'NotFoundError') {
+        if (!isNotFound(error)) {
           throw error;
         }
       }

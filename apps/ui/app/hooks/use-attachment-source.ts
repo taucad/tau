@@ -15,7 +15,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createAttachmentStore } from '#db/attachment-store.js';
 import { useOptionalFileManager } from '#hooks/use-file-manager.js';
-import { attachmentFileName, attachmentReferenceOf, isSupportedAttachmentMediaType } from '#utils/attachment.utils.js';
+import {
+  attachmentFileName,
+  attachmentReferenceOf,
+  attachmentUrlPrefix,
+  isSupportedAttachmentMediaType,
+} from '#utils/attachment.utils.js';
 
 /** What a consumer renders for one file part. */
 export type AttachmentSource =
@@ -50,7 +55,7 @@ type AttachmentRequest = {
   readonly mediaType: string;
 };
 
-const pathOf = (directory: string, url: string): string => `${directory}/${url.slice('attachments/'.length)}`;
+const pathOf = (directory: string, url: string): string => `${directory}/${url.slice(attachmentUrlPrefix.length)}`;
 
 const load = async (entry: CacheEntry, request: AttachmentRequest): Promise<AttachmentSource> => {
   const bytes = await createAttachmentStore(request.client, request.directory).read(request.url);

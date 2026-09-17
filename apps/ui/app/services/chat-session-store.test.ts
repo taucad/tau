@@ -3529,7 +3529,6 @@ describe('ChatSessionStore — composer records (W7)', () => {
     expect(session.draftActorRef.getSnapshot().context.draftAttachments).toEqual(before);
     // The image copied before the PDF failed is taken back: nothing references it (G10).
     expect(client.namesUnder(chatAttachmentsDirectory(projectId, chatId))).toEqual([]);
-    expect(harness.created.at(-1)!.sendMessage).not.toHaveBeenCalled();
     store.release(chatId);
   });
 

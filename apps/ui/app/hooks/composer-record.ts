@@ -19,6 +19,7 @@ import { createActor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { MyUIMessage } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';
+import type { AttachmentStore } from '#db/attachment-store.js';
 import type { ComposerRecord, ComposerRecordStore } from '#db/composer-record-store.js';
 import { createEmptyDraftMessage } from '#hooks/draft.machine.js';
 import type { DraftHydration } from '#hooks/draft.machine.js';
@@ -29,13 +30,17 @@ import type { Attachment } from '#utils/attachment.utils.js';
 /** A running record actor, as every consumer of this seam holds it. */
 export type ComposerRecordRef = ActorRefFrom<typeof composerRecordMachine>;
 
+type AttachmentStoredEvent = { type: 'attachmentStored'; attachment: Attachment };
+type StoreAttachmentInput = { bytes: Uint8Array<ArrayBuffer>; mediaType: string; filename?: string };
+type StoreAttachmentActor = ReturnType<typeof fromSafeAsync<AttachmentStoredEvent, StoreAttachmentInput>>;
+
 /** The actors `draftMachine` is provided with when its surface has a record. */
 export type DraftPersistenceActors = {
   persistDraftActor: ReturnType<typeof persistDraftActorFor>;
   persistEditDraftActor: ReturnType<typeof persistEditDraftActorFor>;
   persistSelectionActor: ReturnType<typeof persistSelectionActorFor>;
   clearMessageEditActor: ReturnType<typeof clearMessageEditActorFor>;
-  storeAttachmentActor: ReturnType<typeof storeAttachmentActorFor>;
+  storeAttachmentActor: StoreAttachmentActor;
 };
 
 const persistDraftActorFor = (recordRef: ComposerRecordRef) =>
@@ -61,13 +66,16 @@ const clearMessageEditActorFor = (recordRef: ComposerRecordRef) =>
     recordRef.send({ type: 'patch', fields: { messageEdits: { [input.messageId]: createEmptyDraftMessage() } } });
   });
 
-const storeAttachmentActorFor = (store: ComposerRecordStore) =>
-  fromSafeAsync<
-    { type: 'attachmentStored'; attachment: Attachment },
-    { bytes: Uint8Array<ArrayBuffer>; mediaType: string; filename?: string }
-  >(async ({ input }) => ({
+/**
+ * The `draftMachine` actor that writes an attachment's bytes into a store.
+ *
+ * @param attachments - Where the draft's attachments live.
+ * @returns The actor.
+ */
+export const storeAttachmentActorFor = (attachments: AttachmentStore): StoreAttachmentActor =>
+  fromSafeAsync<AttachmentStoredEvent, StoreAttachmentInput>(async ({ input }) => ({
     type: 'attachmentStored',
-    attachment: await store.attachments.put(input.bytes, input.mediaType, input.filename),
+    attachment: await attachments.put(input.bytes, input.mediaType, input.filename),
   }));
 
 /**
@@ -197,6 +205,6 @@ export function draftPersistenceFor(recordRef: ComposerRecordRef, store: Compose
     persistEditDraftActor: persistEditDraftActorFor(recordRef),
     persistSelectionActor: persistSelectionActorFor(recordRef),
     clearMessageEditActor: clearMessageEditActorFor(recordRef),
-    storeAttachmentActor: storeAttachmentActorFor(store),
+    storeAttachmentActor: storeAttachmentActorFor(store.attachments),
   };
 }

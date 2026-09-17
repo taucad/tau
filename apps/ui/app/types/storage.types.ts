@@ -87,7 +87,7 @@ export type ChatStorage = {
   /**
    * Atomic, field-scoped writer for a single top-level chat field. Preferred
    * over `updateChat` for all single-field writes — eliminates the
-   * read-modify-write race that resurrects sent drafts.
+   * read-modify-write race that lets one field's write undo another's.
    */
   patchChat<K extends keyof Chat>(chatId: string, key: K, value: Chat[K]): Promise<Chat | undefined>;
   /** Advance user-action recency monotonically. */

@@ -13,6 +13,7 @@ import type { CarouselApi } from '@taucad/ui/components/carousel';
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from '@taucad/ui/components/dialog';
 import { cn } from '@taucad/ui/utils/cn';
 import { attachmentAbsentLabel, attachmentDownloadName, useAttachmentSource } from '#hooks/use-attachment-source.js';
+import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 
 type ImageCarouselDialogItem = {
   readonly id: string;
@@ -27,7 +28,7 @@ type ImageCarouselDialogItem = {
 type ImageCarouselDialogProperties = {
   readonly items: readonly ImageCarouselDialogItem[];
   /** The directory the items' `attachments/` references resolve against. */
-  readonly directory: string | undefined;
+  readonly directory: AttachmentDirectories;
   readonly isOpen: boolean;
   readonly initialIndex: number;
   readonly onOpenChange: (open: boolean) => void;
@@ -56,7 +57,7 @@ function getDownloadName(item: ImageCarouselDialogItem, index: number): string {
 }
 
 type DownloadLinkProperties = {
-  readonly directory: string | undefined;
+  readonly directory: AttachmentDirectories;
   readonly item: ImageCarouselDialogItem;
   readonly name: string;
 };
@@ -89,7 +90,7 @@ function DownloadLink({ directory, item, name }: DownloadLinkProperties): React.
 }
 
 type SlideImageProperties = {
-  readonly directory: string | undefined;
+  readonly directory: AttachmentDirectories;
   readonly item: ImageCarouselDialogItem;
   readonly onError: () => void;
 };

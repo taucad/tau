@@ -315,12 +315,12 @@ describe('PaneviewHeaderControls', () => {
 
     const controls = screen.getByRole('button', { name: 'Action' }).closest('[data-slot="paneview-header-controls"]');
     expect(controls).toHaveAttribute('data-slot', 'paneview-header-controls');
-    expect(controls?.className).toContain('[&_button:hover]:bg-muted-foreground/10');
+    expect(controls?.className).toContain('[&_button:hover]:bg-accent');
     expect(controls?.className).toContain('[&_button:hover]:text-foreground');
-    expect(controls?.className).toContain('[&_button:focus-visible]:bg-muted-foreground/10');
+    expect(controls?.className).toContain('[&_button:focus-visible]:bg-accent');
     expect(controls?.className).toContain('[&_button:focus-visible]:text-foreground');
     expect(controls?.className).toContain('[&_button:focus-visible]:focus-outline');
-    expect(controls?.className).toContain('[&_button[data-state=open]]:bg-muted-foreground/10');
+    expect(controls?.className).toContain('[&_button[data-state=open]]:bg-accent');
     expect(controls?.className).toContain('[&_button[data-state=open]]:text-foreground');
   });
 });
@@ -457,7 +457,7 @@ describe('PaneviewHeaderAction', () => {
     );
 
     const button = screen.getByRole('button');
-    expect(button.classList.contains('hover:bg-muted-foreground/10')).toBe(true);
+    expect(button.classList.contains('hover:bg-accent')).toBe(true);
     expect(button.classList.contains('hover:text-foreground')).toBe(true);
   });
 

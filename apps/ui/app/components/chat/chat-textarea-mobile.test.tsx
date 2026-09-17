@@ -62,13 +62,31 @@ vi.mock('#components/chat/chat-context-actions.js', () => ({
   ChatContextActions: () => <div data-testid='context-actions' />,
 }));
 
-vi.mock('#components/chat/chat-textarea-mobile-images.js', () => ({
-  ChatTextareaMobileImages: () => <div data-testid='mobile-images' />,
+vi.mock('#components/chat/chat-textarea-image-strip.js', () => ({
+  ChatTextareaAttachmentRail: ({
+    blockReason,
+    blockReasonId,
+  }: {
+    readonly blockReason?: string;
+    readonly blockReasonId?: string;
+  }) => <p id={blockReasonId}>{blockReason}</p>,
 }));
 
 vi.mock('#components/chat/chat-textarea-submit-button.js', () => ({
-  ChatTextareaSubmitButton: ({ isDisabled }: { readonly isDisabled: boolean }) => (
-    <button type='button' data-testid='submit' aria-label='Send message' disabled={isDisabled}>
+  ChatTextareaSubmitButton: ({
+    isDisabled,
+    describedBy,
+  }: {
+    readonly isDisabled: boolean;
+    readonly describedBy?: string;
+  }) => (
+    <button
+      type='button'
+      data-testid='submit'
+      aria-label='Send message'
+      aria-describedby={describedBy}
+      disabled={isDisabled}
+    >
       submit
     </button>
   ),
@@ -147,6 +165,7 @@ function renderMobile(options?: {
   readonly isSubmitDisabled?: boolean;
   readonly focusInput?: () => void;
   readonly showContextMenu?: boolean;
+  readonly sendBlockReason?: string;
 }) {
   return render(
     <ChatTextareaMobile
@@ -158,7 +177,7 @@ function renderMobile(options?: {
       inputText={options?.inputText ?? ''}
       attachments={[]}
       attachmentDirectory='/.tau/composers/new-project/attachments'
-      sendBlockReason={undefined}
+      sendBlockReason={options?.sendBlockReason}
       attachmentAccept='image/png'
       attachmentInputSupported
       selectedToolChoice='auto'
@@ -237,6 +256,22 @@ describe('ChatTextareaMobile — chat-scoped kernel resolution', () => {
   it('disables the submit button for external prerequisites even with text', () => {
     renderMobile({ inputText: 'draft', isSubmitDisabled: true });
     expect(screen.getByRole('button', { name: /send/i })).toBeDisabled();
+  });
+
+  it('should disable Send and describe it with the reason the model cannot read an attachment (S14)', () => {
+    renderMobile({ inputText: 'draft', sendBlockReason: "GPT Image can't read PDFs." });
+
+    const send = screen.getByRole('button', { name: /send/i });
+    expect(send).toBeDisabled();
+    expect(send).toHaveAccessibleDescription("GPT Image can't read PDFs.");
+  });
+
+  it('should leave Send enabled and undescribed when nothing blocks it', () => {
+    renderMobile({ inputText: 'draft' });
+
+    const send = screen.getByRole('button', { name: /send/i });
+    expect(send).toBeEnabled();
+    expect(send).not.toHaveAttribute('aria-describedby');
   });
 
   it('returns focus to the editor when the options drawer closes', () => {

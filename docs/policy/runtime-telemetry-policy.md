@@ -3,9 +3,10 @@ title: 'Kernel Telemetry Policy'
 description: 'Kernel worker telemetry: span naming, hierarchy rules, attribute conventions, and performance contracts. Covers RuntimeTracer, OC API tracing, and WorkerTelemetryCollector.'
 status: active
 created: '2026-02-20'
-updated: '2026-08-28'
+updated: '2026-09-16'
 related:
   - docs/policy/runtime-api-policy.md
+  - docs/research/realtime-cad-performance-charter.md
   - docs/research/first-party-runtime-library-tracing-blueprint.md
   - docs/research/replicad-native-batch-operations-performance-blueprint.md
 ---
@@ -24,6 +25,7 @@ Structured telemetry enables performance debugging and kernel panel visualizatio
 - The worker does the heavy lifting: span hierarchy, timing, and attributes are computed entirely on the worker thread. Consumers (UI, DevTools) receive pre-structured data and never need to reconstruct relationships.
 - Span overhead must be negligible: use monotonic counter IDs (not UUIDs), `performance.now()` timing, direct entry batching, and no string concatenation in hot loops.
 - Do not write runtime spans to the realm-wide Performance Timeline during normal operation. Mirror uniquely named `tau:*` measures only when `devtoolsTelemetry` is explicitly enabled.
+- The DevTools extension `devtools` track payload is meaningful only as `performance.measure` detail. Build it inside the `devtoolsTelemetry` branch, never on the entry every consumer discards: carrying it cost 57 % of span CPU and 45 % of wire bytes.
 - The `RuntimeTracer` uses stack-based parent tracking via `activeSpanId`. Async/await naturally preserves hierarchy as long as spans are started and ended in the correct order within the same async context.
 
 ## Naming Convention
@@ -170,6 +172,16 @@ Attributes are `Record<string, string | number | boolean>` only. No objects, no 
 - Root spans should carry identifying context (file, kernel, format).
 - Avoid high-cardinality attributes (e.g., full file contents, large arrays).
 
+## Batch Identity and Retention
+
+Spans are emitted per producer and merged per session, so a batch must say who produced it and what its clock means.
+
+- Every telemetry batch carries `origin`: `{ label, instance }`. `label` is the process role (`worker`, `utility`, `renderer`, `cli`, `main`, `node`); `instance` is a per-producer nonce minted once where the dispatcher is wired. A label alone does not discriminate producers — one session recycles kernel clients and opens several geometry units, and `spanId` restarts at `0` per tracer — so consumers key spans on `origin.instance` plus `spanId`, never on `spanId` alone.
+- Every telemetry batch carries `epoch`: the absolute Unix-epoch millisecond value of that realm's `performance.now()` zero, recomputed at each flush (`Date.now() - performance.now()`). Consumers reconcile clocks with `epoch + startTime`. `workerTimeOrigin` is the fallback, not the rule: it is captured once at realm start and never re-anchored, so realms that started on opposite sides of a system suspend or an NTP step disagree by that step.
+- `origin` and `epoch` are batch fields. They MUST NOT be added per span.
+- Telemetry MUST NOT accumulate without bound in any process. A machine or store that retains entries for display bounds them at the assign site — 20 traces' worth of entries, bounded entries per trace, with the trace the user has selected preserved across eviction — and MUST NOT copy the retained array per batch.
+- File exporters enqueue and return. An exporter MUST NOT perform synchronous filesystem work in the flush turn, MUST attach an error handler and disable itself on failure rather than throwing out of the event loop, and MUST bound what it buffers. Native child processes never write telemetry files; their stage timings ride the existing control channel as numeric attributes on one span.
+
 ## OC API Call Tracing
 
 The Replicad kernel supports automatic OpenCASCADE API call tracing via a JavaScript Proxy that wraps the OC WASM instance. Controlled by the `ocTracing` kernel option.
@@ -249,7 +261,7 @@ Kernel-owned JavaScript libraries registered through Tau's built-in module regis
 
 - The telemetry aggregator forwards entries to the CAD machine immediately with zero processing overhead.
 - No synchronous `performance.measure()` calls on the main thread event loop.
-- `storeTelemetry` in the CAD machine appends entries to the context array, producing a new reference for React's `useSelector`.
+- `storeTelemetry` in the CAD machine appends entries to a **bounded** context array, producing a new reference for React's `useSelector`. Unbounded accumulation is a defect, not a contract: per-event main-thread cost grew from 0.015 ms to 0.209 ms as history grew, and the per-batch copy reached 207 ms at 80k entries. See Batch Identity and Retention.
 
 ### UI Side
 

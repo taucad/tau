@@ -1,14 +1,15 @@
-import { currentFileParameterEntrySchema, fileParameterRecordProfile } from '@taucad/types';
-import type { CurrentFileParameterEntry, FileParameterEntry } from '@taucad/types';
+import { fileParameterEntrySchema, fileParameterRecordProfile } from '@taucad/types';
+import type { FileParameterEntry } from '@taucad/types';
+import { serializeParameterRecord } from '@taucad/parameters';
 
 const defaultParameterGroupName = 'default';
 
 /** Create an empty current parameter record for a new local project. */
-export const createDefaultEntry = (): CurrentFileParameterEntry => createParameterEntry({});
+export const createDefaultEntry = (): FileParameterEntry => createParameterEntry({});
 
 /** Create the current default-group record populated with native values. */
-export const createParameterEntry = (values: Record<string, unknown>): CurrentFileParameterEntry =>
-  currentFileParameterEntrySchema.parse({
+export const createParameterEntry = (values: Record<string, unknown>): FileParameterEntry =>
+  fileParameterEntrySchema.parse({
     recordVersion: 1,
     profile: fileParameterRecordProfile,
     activeGroup: defaultParameterGroupName,
@@ -17,6 +18,6 @@ export const createParameterEntry = (values: Record<string, unknown>): CurrentFi
     },
   });
 
-/** Serialize a validated current record for local project creation. */
+/** Serialize a validated current record in the authority's canonical byte form. */
 export const serializeParameterEntry = (entry: FileParameterEntry): string =>
-  `${JSON.stringify(currentFileParameterEntrySchema.parse(entry), undefined, 2)}\n`;
+  new TextDecoder().decode(serializeParameterRecord(entry));

@@ -83,7 +83,7 @@ const startActor = (
 
 const interaction = (
   actor: InputActor,
-  state: 'conflicted' | 'dragging' | 'failed' | 'initializing' | 'submitting' | 'viewing',
+  state: 'conflicted' | 'dragging' | 'editing' | 'failed' | 'initializing' | 'submitting' | 'viewing',
 ): boolean => actor.getSnapshot().matches({ active: { interaction: state } });
 
 const editing = (actor: InputActor, state: 'complete-valid' | 'incomplete' | 'invalid'): boolean =>
@@ -365,6 +365,40 @@ describe('parameterInputMachine', () => {
     expect(interaction(actor, 'viewing')).toBe(true);
     expect(actor.getSnapshot().context.acknowledged.revision).toEqual(revision('2'));
     expect(actor.getSnapshot().context.acknowledged.value).toBeCloseTo(12.7, 12);
+    actor.stop();
+  });
+
+  it('should give every actor lifetime distinct request IDs for the same generation', () => {
+    const ids = [startActor(), startActor()].map(({ actor, emitted }) => {
+      actor.send({ type: 'focus' });
+      actor.send({ type: 'changeRaw', text: '30 mm' });
+      actor.send({ type: 'pressEnter' });
+      actor.stop();
+      return emitted[0]!.request;
+    });
+    expect(ids[0]!.draftGeneration).toBe(ids[1]!.draftGeneration);
+    expect(ids[0]!.requestId).not.toBe(ids[1]!.requestId);
+  });
+
+  it('should start the next draft from typing in a field that kept focus through its commit', () => {
+    const { actor, emitted } = startActor(input({ display: { unit: 'mm', locale: 'en-NZ' } }));
+    actor.send({ type: 'focus' });
+    actor.send({ type: 'changeRaw', text: '30' });
+    actor.send({ type: 'pressEnter' });
+    actor.send({
+      type: 'settleSubmission',
+      generation: emitted[0]!.request.draftGeneration,
+      outcome: committed(emitted[0]!),
+    });
+    expect(interaction(actor, 'viewing')).toBe(true);
+    // No new focus event arrives: the field never lost focus.
+    actor.send({ type: 'changeRaw', text: '99' });
+    expect(actor.getSnapshot().context.draft).toMatchObject({ raw: '99', focused: true, dirty: true });
+    actor.send({ type: 'pressEscape' });
+    expect(interaction(actor, 'viewing')).toBe(true);
+    expect(actor.getSnapshot().context.draft).toBeUndefined();
+    expect(actor.getSnapshot().context.acknowledged.value).toBe(30);
+    expect(emitted).toHaveLength(1);
     actor.stop();
   });
 
@@ -967,7 +1001,7 @@ describe('parameterInputMachine', () => {
     actor.stop();
   });
 
-  it('should retain acknowledgement when submission is cancelled before apply', () => {
+  it('should retain the draft and acknowledgement when submission is cancelled before apply', () => {
     const { actor, emitted } = startActor();
     actor.send({ type: 'focus' });
     actor.send({ type: 'changeRaw', text: '2 in' });
@@ -981,8 +1015,75 @@ describe('parameterInputMachine', () => {
         requestId: intent.request.requestId,
       },
     });
+    expect(interaction(actor, 'editing')).toBe(true);
+    expect(actor.getSnapshot().context).toMatchObject({
+      acknowledged: { value: 25.4 },
+      draft: { raw: '2 in', dirty: true },
+      diagnostic: { code: 'CANCELLED_BEFORE_APPLY' },
+    });
+    actor.stop();
+  });
+
+  it('should ignore an equal authority refresh while a draft is dirty', () => {
+    const { actor } = startActor();
+    actor.send({ type: 'focus' });
+    actor.send({ type: 'changeRaw', text: '2 in' });
+    const { binding: current, value, revision: acknowledged } = actor.getSnapshot().context.acknowledged;
+    actor.send({ type: 'refreshAuthority', binding: current, value, revision: acknowledged });
+    expect(editing(actor, 'complete-valid')).toBe(true);
+    expect(actor.getSnapshot().context).toMatchObject({ draft: { raw: '2 in', dirty: true } });
+    expect(actor.getSnapshot().context.draft?.conflict).toBeUndefined();
+    expect(actor.getSnapshot().context.diagnostic).toBeUndefined();
+    actor.stop();
+  });
+
+  it('should adopt a new revision with an unchanged value without conflicting a dirty draft', () => {
+    const { actor, emitted } = startActor();
+    actor.send({ type: 'focus' });
+    actor.send({ type: 'changeRaw', text: '2 in' });
+    actor.send({ type: 'refreshAuthority', binding: binding(), value: 25.4, revision: revision('source-edit') });
+    expect(editing(actor, 'complete-valid')).toBe(true);
+    expect(actor.getSnapshot().context).toMatchObject({
+      acknowledged: { revision: revision('source-edit') },
+      draft: { raw: '2 in', expected: revision('source-edit') },
+    });
+    actor.send({ type: 'pressEnter' });
+    expect(emitted[0]?.request.expected).toEqual(revision('source-edit'));
+    actor.stop();
+  });
+
+  it('should keep submitting across an echo of the previous value and settle to viewing', () => {
+    const { actor, emitted } = startActor();
+    actor.send({ type: 'focus' });
+    actor.send({ type: 'changeRaw', text: '2 in' });
+    actor.send({ type: 'pressEnter' });
+    actor.send({ type: 'refreshAuthority', binding: binding(), value: 25.4, revision: revision() });
+    expect(interaction(actor, 'submitting')).toBe(true);
+    const intent = emitted[0]!;
+    actor.send({ type: 'settleSubmission', generation: intent.request.draftGeneration, outcome: committed(intent) });
     expect(interaction(actor, 'viewing')).toBe(true);
-    expect(actor.getSnapshot().context.acknowledged.value).toBe(25.4);
+    expect(actor.getSnapshot().context.acknowledged.revision).toEqual(revision('2'));
+    expect(actor.getSnapshot().context.acknowledged.value).toBeCloseTo(50.8, 12);
+    actor.stop();
+  });
+
+  it('should resubmit a rebound draft with the adopted identity after a stale rejection', () => {
+    const { actor, emitted } = startActor();
+    actor.send({ type: 'focus' });
+    actor.send({ type: 'changeRaw', text: '2 in' });
+    actor.send({ type: 'pressEnter' });
+    const intent = emitted[0]!;
+    actor.send({
+      type: 'settleSubmission',
+      generation: intent.request.draftGeneration,
+      outcome: { status: 'rejected', requestId: intent.request.requestId, code: 'STALE_MANIFEST', message: 'stale' },
+    });
+    expect(interaction(actor, 'conflicted')).toBe(true);
+    actor.send({ type: 'refreshAuthority', binding: binding(), value: 25.4, revision: revision('3') });
+    expect(interaction(actor, 'conflicted')).toBe(true);
+    actor.send({ type: 'rebind' });
+    actor.send({ type: 'pressEnter' });
+    expect(emitted[1]?.request.expected).toEqual(revision('3'));
     actor.stop();
   });
 

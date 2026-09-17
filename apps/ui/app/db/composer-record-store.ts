@@ -14,11 +14,10 @@ import type { CadAgentExecution, MyUIMessage } from '@taucad/chat';
 import { cadAgentExecutionSchema, safeValidateUiMessages } from '@taucad/chat';
 import { chatMode } from '@taucad/chat/constants';
 import type { ChatMode } from '@taucad/chat/constants';
-import { getErrno } from '@taucad/utils/error';
-import { createAttachmentStore } from '#db/attachment-store.js';
-import type { AttachmentStore } from '#db/attachment-store.js';
+import { createAttachmentStore, isNotFound } from '#db/attachment-store.js';
+import type { AttachmentClient, AttachmentStore } from '#db/attachment-store.js';
 import { KeyedMutex } from '#db/keyed-mutex.js';
-import { isAttachmentUrl, isSupportedAttachmentMediaType } from '#utils/attachment.utils.js';
+import { attachmentReferenceOf, attachmentUrl, isSupportedAttachmentMediaType } from '#utils/attachment.utils.js';
 
 const composersRoot = '/.tau/composers';
 
@@ -74,14 +73,7 @@ export type ComposerRecordReadResult =
   | { readonly status: 'invalid'; readonly error: Error };
 
 /** The filesystem surface a composer record store needs — the same one its attachment store takes. */
-export type ComposerRecordClient = {
-  readFile: (path: string) => Promise<Uint8Array<ArrayBuffer>>;
-  writeFile: (path: string, data: Uint8Array<ArrayBuffer>) => Promise<void>;
-  exists: (path: string) => Promise<boolean>;
-  readdir: (path: string) => Promise<string[]>;
-  unlink: (path: string) => Promise<void>;
-  rmdir: (path: string, options?: { recursive?: boolean }) => Promise<void>;
-};
+export type ComposerRecordClient = AttachmentClient;
 
 /** The code every unrepairable `patch` rejection carries, so a caller branches without parsing a message. */
 export const composerRecordInputErrorCode = 'COMPOSER_RECORD_UNREPAIRABLE_INPUT';
@@ -150,11 +142,6 @@ const mutex = new KeyedMutex<string>();
 // The write order every record is serialised in, so equal records produce equal bytes.
 const fieldOrder = ['draft', 'messageEdits', 'toolChoice', 'mode', 'unread', 'execution'] as const;
 
-const isNotFound = (error: unknown): boolean => {
-  const code = getErrno(error);
-  return code === 'ENOENT' || code === 'ENOTDIR' || (error as { name?: unknown }).name === 'NotFoundError';
-};
-
 const invalid = (error: unknown): ComposerRecordReadResult => ({
   status: 'invalid',
   error: error instanceof Error ? error : new Error(String(error)),
@@ -197,8 +184,13 @@ const checkAttachments = (message: MyUIMessage, allowDataUrl: boolean): Error | 
     if (!isSupportedAttachmentMediaType(part.mediaType)) {
       return new Error(`Unsupported attachment type: ${part.mediaType}`);
     }
-    if (!isAttachmentUrl(part.url)) {
+    const reference = attachmentReferenceOf(part);
+    if (reference === undefined) {
       return new Error(`A composer attachment must be referenced as attachments/<sha256>.<ext>, not ${part.url}.`);
+    }
+    // The extension names the file on disk, so it must be the one the media type implies (S9).
+    if (attachmentUrl(reference) !== part.url) {
+      return new Error(`Attachment ${part.url} does not match its media type ${part.mediaType}.`);
     }
   }
   return undefined;

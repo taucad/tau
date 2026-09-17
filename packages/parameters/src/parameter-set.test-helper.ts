@@ -1,4 +1,4 @@
-import { contentDigest } from '@taucad/cache-core';
+import { contentDigest, digestContent } from '@taucad/cache-core';
 import type { ActorRefFrom } from 'xstate';
 import type { ParameterSnapshot } from '#snapshot.js';
 import { createActor, fromPromise } from 'xstate';
@@ -38,6 +38,7 @@ export const parameterSetHarness = async (
     source: { id: 'fixture', version: '1', revision: digest, capability: 'json-structure' },
     dependency: digest,
     middleware: digest,
+    sourceFiles: { 'main.ts': await digestContent({ bytes: new TextEncoder().encode('source:1') }) },
   });
   let current = await resolveParameterSnapshot({
     target,
@@ -76,7 +77,7 @@ export const parameterSetHarness = async (
   const submit = async (request: ParameterSetRequest): Promise<ParameterSetOutcome> =>
     new Promise((resolve) => {
       const subscription = actor.on('settled', (event) => {
-        if (event.request !== undefined && sameRequestDelivery(event.request, request)) {
+        if (sameRequestDelivery(event.request, request)) {
           subscription.unsubscribe();
           resolve(event.outcome);
         }

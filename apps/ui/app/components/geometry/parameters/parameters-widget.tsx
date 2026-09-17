@@ -10,6 +10,8 @@ import { toUcumLengthCode } from '#constants/length-units.js';
 import type { RJSFContext } from '#components/geometry/parameters/rjsf-context.js';
 import { toInstancePointer, useRenderedFieldPath } from '#components/geometry/parameters/rjsf-field-path.js';
 import { Input } from '@taucad/ui/components/input';
+import { validateParameterInputValue } from '@taucad/parameters/input-machine';
+import { toast } from '#components/ui/sonner.js';
 
 const numericConstraint = (
   constraints: Readonly<Record<string, unknown>> | undefined,
@@ -54,6 +56,24 @@ export function ParametersWidget(
       onChange(newValue);
     }
   };
+  /* An authoritative form commits a non-numeric field on its own: RJSF's whole-group `formData` can
+   * still hold a pre-commit value of another field, which a group replacement would write back. */
+  const commitField = async (newValue: boolean | string | undefined): Promise<void> => {
+    const pointer = fieldPath === undefined ? undefined : toInstancePointer(fieldPath);
+    const { parameterEdit } = formContext;
+    if (isDisabled) {
+      return;
+    }
+    if (parameterEdit.kind !== 'authoritative' || pointer === undefined || newValue === undefined) {
+      onChange(newValue);
+      return;
+    }
+    try {
+      await parameterEdit.commit.setValue({ pointer, value: newValue });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'The parameter could not be saved.');
+    }
+  };
 
   switch (type) {
     case 'boolean': {
@@ -72,7 +92,7 @@ export function ParametersWidget(
           onBlur={() => {
             onBlur(id, value);
           }}
-          onChange={handleChange}
+          onChange={commitField}
         />
       );
     }
@@ -123,7 +143,30 @@ export function ParametersWidget(
             }}
             onChange={(event) => {
               const next = event.target.valueAsNumber;
-              handleChange(Number.isFinite(next) ? next : undefined);
+              if (!Number.isFinite(next)) {
+                handleChange(undefined);
+                return;
+              }
+              // The raw fallback input admits values through the same rules as the numeric editor.
+              const diagnostic = validateParameterInputValue(
+                {
+                  target: { authority: 'form', root: '/', entry: name },
+                  group: 'default',
+                  parameterId: name,
+                  resource: fieldProjection.schema?.resource ?? 'urn:taucad:ui:parameter',
+                  pointer: instancePointer,
+                  representation: fieldProjection.representation ?? 'binary64',
+                  constraints: {
+                    ...(min === undefined ? {} : { minimum: min }),
+                    ...(max === undefined ? {} : { maximum: max }),
+                    ...(step === undefined ? {} : { multipleOf: step }),
+                  },
+                },
+                next,
+              );
+              if (diagnostic === undefined) {
+                handleChange(next);
+              }
             }}
           />
         );
@@ -174,7 +217,7 @@ export function ParametersWidget(
             onBlur(id, value);
           }}
           onChange={(nextValue) => {
-            handleChange(nextValue === '' && props.required !== true ? undefined : nextValue);
+            void commitField(nextValue === '' && props.required !== true ? undefined : nextValue);
           }}
         />
       );

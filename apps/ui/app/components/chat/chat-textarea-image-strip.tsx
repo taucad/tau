@@ -6,16 +6,19 @@ import { cn } from '@taucad/ui/utils/cn';
 import { focusTrapAttribute } from '#components/chat/chat-textarea-types.js';
 import { AttachmentFileChip, AttachmentImage } from '#components/chat/attachment-preview.js';
 import type { DraftAttachment } from '#hooks/draft.machine.js';
+import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { attachmentKind, attachmentUrl } from '#utils/attachment.utils.js';
 
 type ChatTextareaAttachmentRailSize = 'desktop' | 'mobile';
 
 type ChatTextareaAttachmentRailProperties = {
   readonly attachments: readonly DraftAttachment[];
-  /** The directory the draft's attachment references resolve against. */
-  readonly directory: string;
+  /** The directories the draft's attachment references resolve against, in order. */
+  readonly directory: AttachmentDirectories;
   /** Why Send is disabled for these attachments, shown under them (D20). */
   readonly blockReason?: string;
+  /** The block reason's element id, so Send can point at it. */
+  readonly blockReasonId?: string;
   readonly onRemove: (index: number) => void;
   readonly size: ChatTextareaAttachmentRailSize;
 };
@@ -40,6 +43,7 @@ export const ChatTextareaAttachmentRail = memo(function ({
   attachments,
   directory,
   blockReason,
+  blockReasonId,
   onRemove,
   size,
 }: ChatTextareaAttachmentRailProperties): React.JSX.Element | undefined {
@@ -170,7 +174,11 @@ export const ChatTextareaAttachmentRail = memo(function ({
         </div>
       </OmniScroller>
       {blockReason === undefined ? null : (
-        <p role='status' className={cn('text-xs text-destructive', size === 'desktop' ? 'px-3 pb-1' : 'pb-1')}>
+        <p
+          id={blockReasonId}
+          role='status'
+          className={cn('text-xs text-destructive', size === 'desktop' ? 'px-3 pb-1' : 'pb-1')}
+        >
           {blockReason}
         </p>
       )}

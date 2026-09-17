@@ -94,6 +94,38 @@ describe('useAttachmentSource', () => {
     expect(createObjectURL).not.toHaveBeenCalled();
   });
 
+  it('should resolve from a later directory when an earlier one lacks the bytes (F5)', async () => {
+    const composer = '/.tau/composers/chats/p1/c1/attachments';
+    function OrderedProbe() {
+      const source = useAttachmentSource([composer, directory], imagePart);
+      return <output data-testid='ordered'>{source.status}</output>;
+    }
+
+    render(<OrderedProbe />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ordered')).toHaveTextContent('ready');
+    });
+    expect(readFile.mock.calls.map(([path]) => path)).toEqual([
+      `${composer}/${imageHash}.png`,
+      `${directory}/${imageHash}.png`,
+    ]);
+  });
+
+  it('should stay absent when no listed directory holds the bytes', async () => {
+    files.clear();
+    function OrderedProbe() {
+      const source = useAttachmentSource(['/a/attachments', directory], imagePart);
+      return <output data-testid='ordered'>{source.status}</output>;
+    }
+
+    render(<OrderedProbe />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('ordered')).toHaveTextContent('absent');
+    });
+  });
+
   it('should report absent bytes as the placeholder state', async () => {
     files.clear();
     render(<Probe id='missing' part={imagePart} />);

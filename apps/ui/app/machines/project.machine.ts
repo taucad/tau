@@ -482,6 +482,13 @@ export const projectMachine = setup({
         newPath,
       });
 
+      // A moved unit renders its new path, so its geometry and parameter manifest follow the file.
+      for (const [key, unit] of context.geometryUnits) {
+        if (matches(key)) {
+          enqueue.sendTo(unit, { type: 'setEntryPath', entryPath: rewrite(key) });
+        }
+      }
+
       enqueue.assign(({ context }) => {
         // GeometryUnits: Map<entryPath, ActorRef>
         const newUnits = new Map(context.geometryUnits);

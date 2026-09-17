@@ -3,6 +3,7 @@ import { Primitive } from '@gltf-transform/core';
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 
 import { cadEdgeOverlayMaterialDefaults, cadMaterialDefaults } from '@taucad/runtime/types';
+import type { KernelIssue } from '@taucad/runtime/types';
 import {
   detectEdges,
   transformNormalArray,
@@ -15,30 +16,23 @@ import type { GeometryOutputTransformOptions, GlbInput, GlbNode, GlbPrimitive } 
 import { getRenderableJscadParts } from '#jscad-parts.js';
 import type { JscadPartDescriptor } from '#jscad-parts.js';
 
+import { createJscadEdgeLedger, jscadPartIssue } from '#jscad-diagnostics.js';
+import type { JscadMeshTopology } from '#jscad-diagnostics.js';
+
 import type { JscadModeling } from '#jscad-modeling.js';
 
 type JscadVec3 = JscadMaths.vec3.Vec3;
 type JscadGeom3 = JscadGeometries.geom3.Geom3;
 type JscadPolygon = { vertices: JscadVec3[] };
-type Vertex3 = [number, number, number];
-/**
- */
-export type JscadMeshTriangle = {
-  index0: number;
-  index1: number;
-  index2: number;
-  normal: Vertex3;
-};
 /**
  */
 export type JscadMeshData = {
   vertices: number[];
   normals: number[];
   indices: number[];
-  triangles: JscadMeshTriangle[];
+  topology: JscadMeshTopology;
 };
 const jscadEdgeThresholdDegrees = 30;
-const hashPrecisionMultiplier = 10_000_000;
 
 /**
  * Type guard to check if a shape has a color property
@@ -124,7 +118,18 @@ function getRenderablePolygons(shape: unknown, shapeIndex: number, modeling: Jsc
   }
 }
 
-function computeTriangleNormal(v1: JscadVec3, v2: JscadVec3, v3: JscadVec3): Vertex3 {
+/**
+ * Unit face normal of a triangle, with the cross-product length carried alongside
+ * it: a length of `0` (colinear) or a non-finite length is exactly the
+ * zero-area face `poly3.validate` rejects, and recomputing it later would mean a
+ * second cross product per triangle.
+ *
+ * @param v1 - first triangle vertex
+ * @param v2 - second triangle vertex
+ * @param v3 - third triangle vertex
+ * @returns `[x, y, z, length]`
+ */
+function computeTriangleNormal(v1: JscadVec3, v2: JscadVec3, v3: JscadVec3): [number, number, number, number] {
   const edge1X = v2[0] - v1[0];
   const edge1Y = v2[1] - v1[1];
   const edge1Z = v2[2] - v1[2];
@@ -144,11 +149,7 @@ function computeTriangleNormal(v1: JscadVec3, v2: JscadVec3, v3: JscadVec3): Ver
     normalZ /= length;
   }
 
-  return [normalX, normalY, normalZ];
-}
-
-function hashVertex(vertex: Vertex3): string {
-  return `${Math.round(vertex[0] * hashPrecisionMultiplier)},${Math.round(vertex[1] * hashPrecisionMultiplier)},${Math.round(vertex[2] * hashPrecisionMultiplier)}`;
+  return [normalX, normalY, normalZ, length];
 }
 
 /**
@@ -160,6 +161,10 @@ function hashVertex(vertex: Vertex3): string {
  * owner-local edge lines are derived from that normalized evidence without
  * mutating the original native shape.
  *
+ * The same pass feeds a directed half-edge ledger, so the part's topology verdict
+ * costs one welded-vertex lookup per triangle corner instead of a second
+ * `clone + generalize + geom3.validate` round.
+ *
  * @internal
  *
  * @param shape - JSCAD geometry object
@@ -169,7 +174,7 @@ function hashVertex(vertex: Vertex3): string {
  *          - vertices: flat x,y,z coordinates
  *          - normals: flat normal vectors
  *          - indices: triangle indices
- *          - triangles: triangle metadata for topology edge extraction
+ *          - topology: welded-edge evidence for the part diagnostic
  *
  * @see {@link jscadToGltf} — the public API that orchestrates these helpers
  */
@@ -182,7 +187,8 @@ export function extractMeshDataFromJscadShape(
   const vertices: number[] = [];
   const normals: number[] = [];
   const indices: number[] = [];
-  const triangles: JscadMeshTriangle[] = [];
+  const ledger = createJscadEdgeLedger('grid');
+  let degenerateTriangles = 0;
   let vertexIndex = 0;
 
   for (const polygon of polygons) {
@@ -206,27 +212,38 @@ export function extractMeshDataFromJscadShape(
       }
 
       const normal = computeTriangleNormal(vert1, vert2, vert3);
-      const hash0 = hashVertex([vert1[0], vert1[1], vert1[2]]);
-      const hash1 = hashVertex([vert2[0], vert2[1], vert2[2]]);
-      const hash2 = hashVertex([vert3[0], vert3[1], vert3[2]]);
-      if (hash0 === hash1 || hash1 === hash2 || hash2 === hash0) {
+      const id0 = ledger.vertexId(vert1[0], vert1[1], vert1[2]);
+      const id1 = ledger.vertexId(vert2[0], vert2[1], vert2[2]);
+      const id2 = ledger.vertexId(vert3[0], vert3[1], vert3[2]);
+      if (id0 === id1 || id1 === id2 || id2 === id0) {
+        degenerateTriangles += 1;
         continue;
+      }
+      if (!(Number.isFinite(normal[3]) && normal[3] > 0)) {
+        // Colinear or non-finite: `poly3.validate` rejects it, but it stays in the
+        // surface stream so the delivered GLB is unchanged.
+        degenerateTriangles += 1;
       }
 
       vertices.push(vert1[0], vert1[1], vert1[2], vert2[0], vert2[1], vert2[2], vert3[0], vert3[1], vert3[2]);
       normals.push(normal[0], normal[1], normal[2], normal[0], normal[1], normal[2], normal[0], normal[1], normal[2]);
       indices.push(vertexIndex, vertexIndex + 1, vertexIndex + 2);
-      triangles.push({
-        index0: vertexIndex,
-        index1: vertexIndex + 1,
-        index2: vertexIndex + 2,
-        normal,
-      });
+      ledger.addTriangle(id0, id1, id2);
       vertexIndex += 3;
     }
   }
 
-  return { vertices, normals, indices, triangles };
+  return {
+    vertices,
+    normals,
+    indices,
+    topology: {
+      summary: ledger.summarize(),
+      degenerateTriangles,
+      normalizedPolygonCount: polygons.length,
+      vertices,
+    },
+  };
 }
 
 /**
@@ -242,10 +259,13 @@ export function extractMeshDataFromJscadShape(
  * @param thresholdDegrees - minimum dihedral angle to treat as a visible edge
  * @returns flattened line endpoint positions
  */
-function extractTopologyEdgePositions(meshData: JscadMeshData, thresholdDegrees = jscadEdgeThresholdDegrees): number[] {
-  return [
-    ...detectEdges(new Float32Array(meshData.vertices), new Uint32Array(meshData.indices), thresholdDegrees).positions,
-  ];
+function extractTopologyEdgePositions(
+  meshData: JscadMeshData,
+  thresholdDegrees = jscadEdgeThresholdDegrees,
+): Float32Array {
+  // The surface indices are the identity permutation, which `detectEdges` assumes
+  // when they are omitted.
+  return detectEdges(new Float32Array(meshData.vertices), undefined, thresholdDegrees).positions;
 }
 
 function createSequentialIndices(vertexCount: number): Uint32Array<ArrayBuffer> {
@@ -263,20 +283,21 @@ function createSequentialIndices(vertexCount: number): Uint32Array<ArrayBuffer> 
  * @param part - the normalized JSCAD part descriptor
  * @param transformOptions - coordinate-system and unit conversion options
  * @param modeling - resolved `@jscad/modeling` API from the kernel context
- * @returns the GlbNode, or undefined if no renderable geometry
+ * @returns the GlbNode when the part has renderable geometry, plus its topology warning
  */
 function buildNodeFromJscadPart(
   part: JscadPartDescriptor,
   transformOptions: GeometryOutputTransformOptions & { includeEdges?: boolean },
   modeling: JscadModeling,
-): GlbNode | undefined {
+): { node?: GlbNode; issue?: KernelIssue } {
   const { shape } = part;
   const color = extractColorFromShape(shape);
   const meshData = extractMeshDataFromJscadShape(shape, part.index, modeling);
   const { vertices, normals, indices } = meshData;
+  const issue = jscadPartIssue({ part, topology: meshData.topology, modeling });
 
   if (vertices.length === 0 || indices.length === 0) {
-    return undefined;
+    return issue ? { issue } : {};
   }
 
   const positions = transformVertexArray(vertices, transformOptions);
@@ -304,7 +325,8 @@ function buildNodeFromJscadPart(
   };
 
   const primitives: GlbPrimitive[] = [primitive];
-  const edgeVertices = transformOptions.includeEdges === true ? extractTopologyEdgePositions(meshData) : [];
+  const edgeVertices =
+    transformOptions.includeEdges === true ? extractTopologyEdgePositions(meshData) : new Float32Array(0);
   if (edgeVertices.length > 0) {
     const linePositions = transformVertexArray(edgeVertices, transformOptions);
     primitives.push({
@@ -322,8 +344,11 @@ function buildNodeFromJscadPart(
   }
 
   return {
-    name: part.name,
-    primitives,
+    node: {
+      name: part.name,
+      primitives,
+    },
+    ...(issue ? { issue } : {}),
   };
 }
 
@@ -369,32 +394,36 @@ function buildNodeFromJscadPart(
  *               - Shapes created with colorize() will preserve their colors
  * @param transformOptions - coordinate-system and unit conversion options
  * @param modeling - resolved `@jscad/modeling` API from the kernel context
- * @returns GLB binary (binary glTF format)
+ * @returns the GLB binary and the topology warnings derived from the same normalization
  *
  * @throws {Error} If any shape cannot be converted to GLTF polygon
  *
  * @example <caption>Converting JSCAD shapes to glTF</caption>
  * ```typescript
  * const shape = primitives.cube({ size: 10 });
- * const glb = jscadToGltf(shape, {}, modeling);
+ * const { content, issues } = jscadToGltf(shape, {}, modeling);
  *
  * const redSphere = colors.colorize([1, 0, 0], primitives.sphere({ radius: 5 }));
  * const blueCube = colors.colorize([0, 0, 1, 0.5], primitives.cube({ size: 10 }));
- * const coloredGlb = jscadToGltf([redSphere, blueCube], {}, modeling);
+ * const coloredGlb = jscadToGltf([redSphere, blueCube], {}, modeling).content;
  * ```
  */
 export function jscadToGltf(
   shape: unknown,
   transformOptions: GeometryOutputTransformOptions & { includeEdges?: boolean },
   modeling: JscadModeling,
-): Uint8Array<ArrayBuffer> {
+): { content: Uint8Array<ArrayBuffer>; issues: KernelIssue[] } {
   const parts = getRenderableJscadParts(shape, modeling);
 
   const nodes: GlbNode[] = [];
+  const issues: KernelIssue[] = [];
   for (const part of parts) {
-    const node = buildNodeFromJscadPart(part, transformOptions, modeling);
+    const { node, issue } = buildNodeFromJscadPart(part, transformOptions, modeling);
     if (node) {
       nodes.push(node);
+    }
+    if (issue) {
+      issues.push(issue);
     }
   }
 
@@ -405,5 +434,5 @@ export function jscadToGltf(
     nodes,
     ...(hasLinePrimitives ? { extensionsUsed: [KHRMaterialsUnlit.EXTENSION_NAME] } : {}),
   };
-  return writeGlb(input);
+  return { content: writeGlb(input), issues };
 }

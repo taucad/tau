@@ -26,6 +26,7 @@ import { classify } from '@taucad/filesystem/path-registry';
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { materializeConflict, readConflictTerms } from '#revision-conflict.js';
+import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPort } from '#revision-port.js';
 import { gitOnPath, nativeHarness } from '#test/native-git-harness.js';
 import { generatedGitattributesPath, generatedIgnorePath } from '#workspace-config.js';
@@ -1151,6 +1152,81 @@ describe('independent sync record failures', () => {
       }),
     );
     expect(result.refs).toContainEqual(expect.objectContaining({ name: 'refs/tau/chats/chat-two', status: 'updated' }));
+  }, 30_000);
+
+  /* Lane E2's two-client row 3 found this on the wire: every refusal class
+   * rendered *Sync now*, because a whole-push throw was flattened here into
+   * per-ref `rejected` outcomes, and the scheduler read those as a ref refusal.
+   * The throw is the scheduler's to classify (its R5 path). */
+  it('lets a whole-push refusal reach the scheduler with its code, instead of flattening it per ref', async () => {
+    const context = await fixture({ 'main.ts': 'base\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const tree = await captureRevisionTree(context.filesystem, { exclude: (path) => !classify(path).versioned });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree,
+      provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13) },
+      summary: { generated: 'Main' },
+    });
+    await context.port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(receipt.commitId) });
+    await context.port.setHead('main');
+    const refusing: RevisionPort = {
+      ...context.port,
+      push: async () => {
+        throw new RevisionPortError('REMOTE_NOT_ENTITLED', 'Syncing files to Tau Cloud is a paid plan feature.');
+      },
+    };
+    const actors = createRevisionActors({
+      port: refusing,
+      projectId: 'project-1',
+      authorityEpoch: 'epoch-1',
+      filesystem: () => context.filesystem,
+      deviceId: () => 'device-one',
+    });
+
+    await expect(run(actors.sync.push, { remote: 'tau', branch: 'main', leases: {} })).rejects.toMatchObject({
+      code: 'REMOTE_NOT_ENTITLED',
+      message: 'Syncing files to Tau Cloud is a paid plan feature.',
+    });
+  }, 30_000);
+
+  it('keeps a server’s per-ref refusal per ref, so records still push beside it', async () => {
+    const context = await fixture({ 'main.ts': 'base\n' });
+    await context.port.init({ author: { name: 'Tau', email: 'noreply@tau.new' } });
+    const tree = await captureRevisionTree(context.filesystem, { exclude: (path) => !classify(path).versioned });
+    const receipt = await context.port.writeRevision({
+      parents: [],
+      tree,
+      provenance: { source: 'user', actorId: 'ada', createdAt: Date.UTC(2026, 8, 13) },
+      summary: { generated: 'Main' },
+    });
+    await context.port.updateRef({ name: 'main', expectedHead: undefined, head: revisionId(receipt.commitId) });
+    await context.port.setHead('main');
+    const refusing: RevisionPort = {
+      ...context.port,
+      push: async () => {
+        throw new RevisionPortError('REMOTE_REJECTED', 'Tau: refused refs/heads/main — it does not fast-forward 1a2b');
+      },
+    };
+    const actors = createRevisionActors({
+      port: refusing,
+      projectId: 'project-1',
+      authorityEpoch: 'epoch-1',
+      filesystem: () => context.filesystem,
+      deviceId: () => 'device-one',
+    });
+
+    const result = await run<{ refs: ReadonlyArray<{ name: string; status: string; reason?: string }> }>(
+      actors.sync.push,
+      { remote: 'tau', branch: 'main', leases: {} },
+    );
+    expect(result.refs).toContainEqual(
+      expect.objectContaining({
+        name: 'refs/heads/main',
+        status: 'rejected',
+        reason: 'Tau: refused refs/heads/main — it does not fast-forward 1a2b',
+      }),
+    );
   }, 30_000);
 
   it('drains a delayed valid projection before reporting a sibling record failure', async () => {

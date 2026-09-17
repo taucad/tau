@@ -1795,7 +1795,11 @@ export const compileParameterManifest = async (input: CompileParameterManifestIn
   const declaration = admitParameterDeclaration(input.declaration);
   requireDigest(input.dependency, 'dependency');
   requireDigest(input.middleware, 'middleware');
-  const resolution = admitResolution(deepFreeze(cloneBoundedJson(input.resolution ?? {}, limits)));
+  // `mode: 'default'` is the absent mode; normalising it keeps one identity for one semantics.
+  const { mode, ...resolutionRest } = input.resolution ?? {};
+  const resolution = admitResolution(
+    deepFreeze(cloneBoundedJson(mode === 'declared-only' ? { ...resolutionRest, mode } : resolutionRest, limits)),
+  );
   const scope = admitScope(cloneBoundedJson(input.scope, limits));
   const source = admitSource(cloneBoundedJson(input.source, limits));
   const sourceFiles = admitSourceFiles(cloneBoundedJson(input.sourceFiles ?? {}, limits));

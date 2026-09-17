@@ -683,6 +683,8 @@ const compactionModelsWithTransport = (options: {
   readonly createId: () => string;
   readonly prepareInvocation?: CreateTransportStreamOptions['prepareInvocation'];
   readonly bindInvocation?: CreateTransportStreamOptions['bindInvocation'];
+  /** The session's side table, so a summarised document keeps its name (P32). */
+  readonly documents: () => ReadonlyMap<string, MaterializedDocument>;
 }): Models => {
   const models: Pick<Models, 'completeSimple'> = {
     completeSimple: async (model, context, streamOptions): Promise<AssistantMessage> => {
@@ -696,9 +698,11 @@ const compactionModelsWithTransport = (options: {
           funded && options.prepareInvocation
             ? await options.prepareInvocation('compaction', model.id, signal)
             : options.createId();
+        const documents = options.documents();
         const stream = options.transport.stream({
           attemptId,
           invocationPurpose: 'compaction',
+          ...(documents.size === 0 ? {} : { documents: new Map(documents) }),
           ...(funded
             ? {
                 onInvocationBound: async (binding: ModelInvocationBinding) =>
@@ -965,6 +969,11 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         );
       }
     }
+    if (outcome.malformed > 0) {
+      console.warn(
+        `Chat ${options.chatId}: ${String(outcome.malformed)} malformed attachment row(s) omitted; the model will not see them.`,
+      );
+    }
     return history.map((message) => materializedById.get(message.id) ?? message);
   };
   const initialHistory = await record.history();
@@ -1203,7 +1212,17 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
         return;
       }
       record.messages.set(partial, messageId);
-      const assistant = piMessageToProvider(partial, record.messages);
+      const provider = piMessageToProvider(partial, record.messages);
+      /* The block has not ended yet: a checkpoint row lets its live end (or the
+       * message end's final row) close it, so the end time survives and a
+       * reattach keeps later text (chat activity indicator closeout R9). */
+      const assistant: ProviderMessage = {
+        ...provider,
+        metadata: {
+          ...provider.metadata,
+          tauInternal: { kind: 'stream-checkpoint', ...provider.metadata?.tauInternal, streamState: 'checkpoint' },
+        },
+      };
       await record.append(
         committedMessageIds.has(messageId)
           ? { type: 'message.envelope-replaced', messageId, replacement: assistant }
@@ -1307,6 +1326,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
           identities: record.messages,
           toolInputIds,
           createId,
+          documents: () => documents,
           ...(options.modelTransport.usesBillingAttempt ? { prepareInvocation, bindInvocation } : {}),
         }),
     onSummary: () => {

@@ -1,8 +1,8 @@
 import { memo } from 'react';
-import { RefreshCcw } from 'lucide-react';
+import { CircleAlert, RefreshCcw } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
-import { cn } from '@taucad/ui/utils/cn';
 import { useChatActions } from '#hooks/use-chat.js';
+import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
 
 export const ChatErrorCredits = memo(function ({
   className,
@@ -13,12 +13,18 @@ export const ChatErrorCredits = memo(function ({
 }): React.JSX.Element {
   const { continueChat } = useChatActions();
   return (
-    <div className={cn('flex min-w-0 flex-col gap-2 rounded-md border bg-muted/40 p-3 text-sm', className)}>
-      <p className='font-medium text-foreground'>Request could not be completed</p>
-      <p className='text-xs text-muted-foreground'>Retry with the providers configured by this server.</p>
-      <Button className='self-end' variant='ghost' size='sm' onClick={continueChat}>
-        <RefreshCcw className='size-3.5' /> Retry
-      </Button>
-    </div>
+    <ChatErrorCard
+      tone='neutral'
+      icon={CircleAlert}
+      className={className}
+      title='Request could not be completed'
+      description='Retry with the providers configured by this server.'
+      actions={
+        <Button variant='outline' size='sm' onClick={continueChat}>
+          <RefreshCcw className='size-3.5' />
+          Try again
+        </Button>
+      }
+    />
   );
 });

@@ -20,7 +20,7 @@ describe('ChatErrorRateLimit', () => {
 
     const { container } = render(<ChatErrorRateLimit />);
 
-    expect(screen.getByText('Rate Limit Exceeded')).toBeInTheDocument();
+    expect(screen.getByText('Rate limit exceeded')).toBeInTheDocument();
     expect(screen.getByText('Too many requests. Please wait a moment before trying again.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^retry$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument();

@@ -64,6 +64,21 @@ const dreiDeepJsImportRestriction = {
     'Do not value-import Drei deep .js modules from app code. Netlify SSR can classify typeless Drei .js files as CommonJS; import from the Drei barrel or a direct dependency instead. See docs/research/netlify-drei-camera-controls-ssr-crash.md.',
 };
 
+/*
+ * `useMonaco`, `Editor` and `DiffEditor` call `loader.init()` on mount, and a
+ * first `init()` before `configureMonaco` has run `loader.config` binds the page
+ * to the loader's CDN Monaco for good. Only the two owners may touch them:
+ * `lib/monaco.lib.client.ts` (configures the loader) and
+ * `components/code/code-editor.client.tsx` (mounts `Editor` once configured).
+ */
+const monacoLoaderImportRestriction = {
+  name: '@monaco-editor/react',
+  importNames: ['default', 'DiffEditor', 'Editor', 'loader', 'useMonaco'],
+  allowTypeImports: true,
+  message:
+    'Read Monaco with `useConfiguredMonaco` (#hooks/use-monaco-configuration) and render editors with `CodeEditor`; these exports run `loader.init()`, which fetches Monaco from a CDN if it runs before `configureMonaco`. See docs/research/editor-loading-splash-removal-blueprint.md.',
+};
+
 /**
  * Minimal ESLint config -- only rules that cannot run in oxlint.
  *
@@ -889,6 +904,7 @@ const config = [
       '@typescript-eslint/no-restricted-imports': [
         'error',
         {
+          paths: [monacoLoaderImportRestriction],
           patterns: [
             {
               group: ['monaco-editor', 'monaco-editor/*'],
@@ -919,6 +935,26 @@ const config = [
       '@typescript-eslint/no-restricted-imports': [
         'error',
         {
+          patterns: [dreiDeepJsImportRestriction],
+        },
+      ],
+    },
+  },
+  {
+    /* Client and worker modules may value-import `monaco-editor`, but not the
+     * loader-bound React exports — except their two owners. */
+    files: [
+      'apps/ui/app/**/*.client.ts',
+      'apps/ui/app/**/*.client.tsx',
+      'apps/ui/app/**/*.worker.ts',
+      'apps/ui/app/**/*.worker.tsx',
+    ],
+    ignores: ['apps/ui/app/components/code/code-editor.client.tsx', 'apps/ui/app/lib/monaco.lib.client.ts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          paths: [monacoLoaderImportRestriction],
           patterns: [dreiDeepJsImportRestriction],
         },
       ],

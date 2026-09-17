@@ -1,4 +1,4 @@
-import { Fragment, forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { ScrollerProps, VirtuosoHandle } from 'react-virtuoso';
 import { useLocation } from 'react-router';
@@ -84,12 +84,13 @@ const TurnGroup = memo(function ({
   return (
     <div className={cn('py-1 gap-1 flex flex-col', isLast && 'min-h-(--chat-live-turn-min-h)')}>
       {messageIds.map((id, index) => (
-        <Fragment key={id}>
-          <ChatMessage messageId={id} />
-          {/* The request's revision summary sits directly after the user
-              message, so appending assistant messages never moves it. */}
-          {index === 0 ? <ChatRevisionMarker userMessageId={id} isLatestTurn={isLast} /> : null}
-        </Fragment>
+        <ChatMessage
+          key={id}
+          messageId={id}
+          // The request's revision summary is a card attached under the user
+          // message, so appending assistant messages never moves it.
+          footer={index === 0 ? <ChatRevisionMarker userMessageId={id} isLatestTurn={isLast} /> : undefined}
+        />
       ))}
       {isLast ? <ChatError className='mx-4' /> : null}
     </div>
@@ -191,7 +192,8 @@ export const ChatHistory = memo(function (props: {
   const submitChat = cadChat.submit;
   const onSubmit: ChatTextareaProperties['onSubmit'] = useCallback(
     async ({ content, attachments }) => {
-      submitChat({ text: content, attachments });
+      // Pending until the message lands, so the composer stays busy through admission (R8).
+      await submitChat({ text: content, attachments });
     },
     [submitChat],
   );

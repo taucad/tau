@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { ChatAttachmentDirectoriesContext, chatAttachmentDirectories } from '#components/chat/attachment-preview.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import {
@@ -10,7 +11,7 @@ import {
 import type { ResolvedModel } from '#hooks/use-models.js';
 import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
 import type { DraftAttachmentOptions } from '#hooks/use-chat.js';
-import type { DraftAttachment } from '#hooks/draft.machine.js';
+import type { DraftAttachment, DraftAttachmentSource } from '#hooks/draft.machine.js';
 import type { ChatTextareaSubmitPayload } from '#components/chat/chat-textarea-types.js';
 
 // ---------------------------------------------------------------------------
@@ -50,11 +51,11 @@ let mockActiveModel: ResolvedModel = stableModel;
 const chatActionsMock = {
   stop: vi.fn<() => void>(),
   setDraftText: vi.fn<(text: string) => void>(),
-  addDraftAttachment: vi.fn<(dataUrl: string, options: DraftAttachmentOptions) => void>(),
+  addDraftAttachment: vi.fn<(source: DraftAttachmentSource, options: DraftAttachmentOptions) => void>(),
   removeDraftAttachment: vi.fn<(index: number) => void>(),
   setDraftToolChoice: vi.fn<(choice: string | string[]) => void>(),
   setEditDraftText: vi.fn<(text: string) => void>(),
-  addEditDraftAttachment: vi.fn<(dataUrl: string, options: DraftAttachmentOptions) => void>(),
+  addEditDraftAttachment: vi.fn<(source: DraftAttachmentSource, options: DraftAttachmentOptions) => void>(),
   removeEditDraftAttachment: vi.fn<(index: number) => void>(),
 };
 
@@ -445,7 +446,7 @@ describe('useChatTextareaLogic — dragKind detection + drop routing', () => {
 /**
  * Multi-image OS drag-drop integration. Locks the call sequence and arguments
  * observable from the hook's perspective: each dropped image is read
- * sequentially and dispatched synchronously into `addDraftImage` with the
+ * sequentially and dispatched synchronously into `addDraftAttachment` with the
  * **raw** (un-resized) data URL. The downstream `draftMachine.imageProcessing`
  * chokepoint is responsible for resizing — these tests make sure the hook
  * never re-introduces an inline `resizeImageForChat` step that would silently
@@ -472,8 +473,14 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
     };
   };
 
+  const stubBytes = new TextEncoder().encode('stub');
+
   const makeFile = (name: string, type = 'image/png'): File => {
-    return Object.assign(new File([new Blob(['stub'])], name, { type }), { __taggedAs: name });
+    // The jsdom File has no `arrayBuffer`; every browser the app supports does.
+    return Object.assign(new File([new Blob(['stub'])], name, { type }), {
+      __taggedAs: name,
+      arrayBuffer: async () => new Uint8Array(stubBytes).buffer,
+    });
   };
 
   let originalFileReader: typeof FileReader;
@@ -589,11 +596,46 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
     const model = { name: 'chat-scoped-model', support: stableModel.model?.support };
     expect(chatActionsMock.addDraftAttachment.mock.calls).toEqual([
       ['data:image/png;base64,RAW_A.png', { filename: 'A.png', model }],
-      ['data:application/pdf;base64,RAW_doc.pdf', { filename: 'doc.pdf', model }],
+      [
+        { bytes: stubBytes, mediaType: 'application/pdf' },
+        { filename: 'doc.pdf', model },
+      ],
       ['data:image/png;base64,RAW_C.png', { filename: 'C.png', model }],
     ]);
     expect(toastErrorMock).toHaveBeenCalledTimes(1);
     expect(toastErrorMock).toHaveBeenCalledWith('Only images and PDFs are supported');
+  });
+
+  it('should resolve a project chat rail against its composer directory, then its transcript (F5)', () => {
+    const directories = chatAttachmentDirectories('p1', 'c1');
+    const { result } = renderHook(
+      () => useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+      {
+        wrapper: ({ children }: { readonly children: React.ReactNode }) => (
+          <ChatAttachmentDirectoriesContext.Provider value={directories}>
+            {children}
+          </ChatAttachmentDirectoriesContext.Provider>
+        ),
+      },
+    );
+
+    expect(result.current.attachmentDirectory).toEqual([directories.composer, directories.transcript]);
+  });
+
+  it('should add the PDF of a mixed drop on a model that reads no images (S13)', async () => {
+    mockActiveModel = makeResolvedModel('pdf-reader', ['text', 'pdf']);
+    const { result } = renderHook(() =>
+      useChatTextareaLogic({ ref: undefined, onSubmit: vi.fn(async () => undefined) }),
+    );
+
+    await act(async () => {
+      await result.current.handleDrop(buildDragEvent([makeFile('A.png'), makeFile('doc.pdf', 'application/pdf')]));
+    });
+
+    // The image is refused on its own; the PDF still lands.
+    expect(chatActionsMock.addDraftAttachment.mock.calls.map(([source]) => source)).toEqual([
+      { bytes: stubBytes, mediaType: 'application/pdf' },
+    ]);
   });
 
   it('should hand a picked PDF to the draft machine, which owns the refusal for a model without PDF input', async () => {
@@ -610,10 +652,14 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
     await waitFor(() => {
       expect(chatActionsMock.addDraftAttachment).toHaveBeenCalledOnce();
     });
-    expect(chatActionsMock.addDraftAttachment).toHaveBeenCalledWith('data:application/pdf;base64,RAW_doc.pdf', {
-      filename: 'doc.pdf',
-      model: { name: 'chat-scoped-model', support: stableModel.model?.support },
-    });
+    // A document is handed over as its bytes, never re-encoded as a data URL (S7).
+    expect(chatActionsMock.addDraftAttachment).toHaveBeenCalledWith(
+      { bytes: stubBytes, mediaType: 'application/pdf' },
+      {
+        filename: 'doc.pdf',
+        model: { name: 'chat-scoped-model', support: stableModel.model?.support },
+      },
+    );
     expect(input.value).toBe('');
     expect(toastErrorMock).not.toHaveBeenCalled();
   });
@@ -631,7 +677,7 @@ describe('useChatTextareaLogic — multi-image OS drag-drop dispatch', () => {
 
     const dispatched = chatActionsMock.addDraftAttachment.mock.calls[0]?.[0];
     expect(dispatched).toBe('data:image/png;base64,RAW_A.png');
-    expect(dispatched?.startsWith('data:image/png;base64,RAW_')).toBe(true);
+    expect(typeof dispatched === 'string' && dispatched.startsWith('data:image/png;base64,RAW_')).toBe(true);
   });
 
   it('should dispatch addDraftAttachment once per pasted image, in paste order, with raw data URLs', async () => {

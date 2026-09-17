@@ -39,12 +39,17 @@ describe('deriveTurnRevisionState', () => {
       facts({ runState: 'working', base: { kind: 'revision', n: 4 }, isRequestActive: true }),
     );
     expect(state).toStrictEqual({ kind: 'working', base: { kind: 'revision', n: 4 }, isWaiting: false });
-    expect(turnRevisionLabel(state, 0)).toBe('Starting from Rev 4 · Working');
+    expect(turnRevisionLabel(state, 0)).toBe('Starting from Rev 4');
   });
 
   it('should never invent a number for an unborn branch', () => {
     const state = deriveTurnRevisionState(facts({ runState: 'working', base: { kind: 'first' } }));
-    expect(turnRevisionLabel(state, 0)).toBe('Starting first revision · Working');
+    expect(turnRevisionLabel(state, 0)).toBe('Starting first revision');
+  });
+
+  it('should name an unknown starting point as a new revision', () => {
+    const state = deriveTurnRevisionState(facts({ runState: 'working', isRequestActive: true }));
+    expect(turnRevisionLabel(state, 0)).toBe('New revision');
   });
 
   it('should say Waiting for you during an approval pause', () => {

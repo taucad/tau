@@ -1,3 +1,4 @@
+import { util as zodUtility } from 'zod';
 import { createActor, fromCallback } from 'xstate';
 import type { AnyActorRef, EventObject } from 'xstate';
 import { getShortestPaths } from 'xstate/graph';
@@ -358,7 +359,10 @@ describe('chatSessionMachine', () => {
     const actor = start();
     actor.send({ type: 'runLifecycle', phase: 'running' });
 
-    const { context } = actor.getPersistedSnapshot() as unknown as { context: Record<string, unknown> };
+    const persisted = actor.getPersistedSnapshot();
+    const context: Record<string, unknown> =
+      'context' in persisted && zodUtility.isObject(persisted.context) ? persisted.context : {};
+    expect(Object.keys(context)).not.toEqual([]);
     for (const [key, value] of Object.entries(context)) {
       expect(typeof value, key).not.toBe('function');
     }

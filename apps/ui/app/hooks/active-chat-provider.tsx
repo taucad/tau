@@ -31,7 +31,7 @@
  */
 
 import { useActorRef, useSelector } from '@xstate/react';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { Chat } from '@ai-sdk/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -54,12 +54,18 @@ import { useKernel } from '#hooks/use-kernel.js';
 import { withTauExecutionModel } from '#utils/chat-execution.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { composerRecordPaths, createComposerRecordStore } from '#db/composer-record-store.js';
-import { draftHydrationOf, draftPersistenceFor, useComposerRecord } from '#hooks/composer-record.js';
+import {
+  draftHydrationOf,
+  draftPersistenceFor,
+  flushRecord,
+  storeAttachmentActorFor,
+  useComposerRecord,
+} from '#hooks/composer-record.js';
+import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import type { ComposerRecordRef } from '#hooks/composer-record.js';
 import { createAttachmentStore } from '#db/attachment-store.js';
 import type { AttachmentStore } from '#db/attachment-store.js';
 import { attachmentUrl } from '#utils/attachment.utils.js';
-import type { Attachment } from '#utils/attachment.utils.js';
 import type { ChatMode } from '@taucad/chat/constants';
 import { useComposerRecordToasts } from '#hooks/use-composer-record-toasts.js';
 
@@ -216,13 +222,7 @@ function useComposerDraftMachine(attachments: AttachmentStore) {
         persistEditDraftActor: noopPersistEditDraftActor,
         persistSelectionActor: noopPersistSelectionActor,
         clearMessageEditActor: noopClearMessageEditActor,
-        storeAttachmentActor: fromSafeAsync<
-          { type: 'attachmentStored'; attachment: Attachment },
-          { bytes: Uint8Array<ArrayBuffer>; mediaType: string; filename?: string }
-        >(async ({ input }) => ({
-          type: 'attachmentStored',
-          attachment: await attachments.put(input.bytes, input.mediaType, input.filename),
-        })),
+        storeAttachmentActor: storeAttachmentActorFor(attachments),
         resizeImageActor,
       },
     });
@@ -296,6 +296,15 @@ export function HomeNewProjectComposerProvider({
 }): React.JSX.Element {
   const { client } = useFileManager();
   const store = useMemo(() => createComposerRecordStore(client, composerRecordPaths.newProject), [client]);
+  /* Declared before both actors: effect cleanups run in declaration order, so the debounced keystroke
+   * reaches the record while the draft and the record are still running (R9). */
+  const flushDraftOnUnmount = useRef<() => void>(undefined);
+  useEffect(
+    () => () => {
+      flushDraftOnUnmount.current?.();
+    },
+    [],
+  );
   const recordRef = useComposerRecord(store);
   useComposerRecordToasts(recordRef);
   const homeDraftMachine = useMemo(
@@ -304,6 +313,19 @@ export function HomeNewProjectComposerProvider({
   );
   const draftActorRef = useActorRef(homeDraftMachine, { input: {}, inspect });
   useDraftImageErrorToast(draftActorRef);
+  useEffect(() => {
+    flushDraftOnUnmount.current = () => {
+      draftActorRef.send({ type: 'flushNow' });
+    };
+  }, [draftActorRef]);
+  useFlushOnClose(
+    async () => {
+      draftActorRef.send({ type: 'flushNow' });
+      await waitFor(draftActorRef, (state) => state.matches({ inputSaving: 'idle' }));
+      await flushRecord(recordRef);
+    },
+    { stage: 'producer' },
+  );
 
   useEffect(() => {
     // R2: Home keeps the selectors it renders (tool choice, mode) as a chat record does.

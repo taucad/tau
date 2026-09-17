@@ -1,4 +1,5 @@
 import { assertType, describe, expectTypeOf, it } from 'vitest';
+import { fileParameterRecordProfile } from '@taucad/types';
 import type { FileParameterEntry, ParameterGroup } from '@taucad/types';
 
 describe('parameter sidecar public types', () => {
@@ -8,6 +9,8 @@ describe('parameter sidecar public types', () => {
 
   it('should accept recursively JSON-compatible values', () => {
     assertType<FileParameterEntry>({
+      recordVersion: 1,
+      profile: fileParameterRecordProfile,
       activeGroup: 'default',
       groups: { default: { values: { nested: { enabled: true, sizes: [1, 2, null] } } } },
     });
@@ -15,6 +18,8 @@ describe('parameter sidecar public types', () => {
 
   it('should expose optional atomic identity, binding provenance, and receipt fields', () => {
     assertType<FileParameterEntry>({
+      recordVersion: 1,
+      profile: fileParameterRecordProfile,
       activeGroup: 'default',
       groups: {
         default: {

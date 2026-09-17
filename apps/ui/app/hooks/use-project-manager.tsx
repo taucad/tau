@@ -20,7 +20,6 @@ import type {
 import { resolveStorageRootKey } from '@taucad/filesystem/storage-root-key';
 import type { CadAgentExecution, Chat } from '@taucad/chat';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
-import { getErrno } from '@taucad/utils/error';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type { Remote } from 'comlink';
 import { projectManagerMachine } from '#hooks/project-manager.machine.js';
@@ -65,7 +64,7 @@ import { createInitialProject } from '#constants/project.constants.js';
 import { attachmentKind, attachmentReferenceOf } from '#utils/attachment.utils.js';
 import { buildUserMessage } from '#utils/chat.utils.js';
 import type { AttachmentReference } from '#utils/attachment.utils.js';
-import { createAttachmentStore, createChatAttachmentStore } from '#db/attachment-store.js';
+import { createAttachmentStore, createChatAttachmentStore, isNotFound } from '#db/attachment-store.js';
 import { getMainFile, getEmptyCode } from '#utils/kernel.utils.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 import { defaultProjectName } from '#constants/project-names.js';
@@ -258,7 +257,6 @@ type ProjectManagerContextType = {
   consumeChatStartupRequest: (chatId: string, requestId: string) => Promise<Chat | undefined>;
   commitCancelledDraftRestore: (chatId: string, input: CommitCancelledDraftRestoreInput) => Promise<Chat | undefined>;
   softDeleteChat: (chatId: string) => Promise<Chat | undefined>;
-  duplicateChat: (chatId: string) => Promise<Chat>;
   getAllChats: (options?: { includeDeleted?: boolean }) => Promise<Chat[]>;
   getChatsForResource: (resourceId: string, options?: { includeDeleted?: boolean }) => Promise<Chat[]>;
   getChat: (chatId: string) => Promise<Chat | undefined>;
@@ -839,7 +837,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       try {
         await fileManager.client.rmdir(composerRecordPaths.project(projectId), { recursive: true });
       } catch (error) {
-        if (getErrno(error) !== 'ENOENT' && (error as { name?: unknown }).name !== 'NotFoundError') {
+        if (!isNotFound(error)) {
           throw error;
         }
       }
@@ -2213,16 +2211,6 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [chatStore, invalidateProjectsList, touchProject],
   );
 
-  const duplicateChat = useCallback(
-    async (chatId: string): Promise<Chat> => {
-      const chat = await chatStore.duplicateChat(chatId);
-      await touchProject(chat.resourceId);
-      invalidateProjectsList();
-      return chat;
-    },
-    [chatStore, invalidateProjectsList, touchProject],
-  );
-
   const getChatsForResource = useCallback(
     async (resourceId: string, options?: { includeDeleted?: boolean }): Promise<Chat[]> => {
       return chatStore.getChatsForResource(resourceId, options);
@@ -2294,7 +2282,6 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       consumeChatStartupRequest,
       commitCancelledDraftRestore,
       softDeleteChat,
-      duplicateChat,
       getAllChats,
       getChatsForResource,
       getChat,
@@ -2338,7 +2325,6 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     consumeChatStartupRequest,
     commitCancelledDraftRestore,
     softDeleteChat,
-    duplicateChat,
     getAllChats,
     getChatsForResource,
     getChat,

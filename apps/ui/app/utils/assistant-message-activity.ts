@@ -255,6 +255,13 @@ const partState = (part: MyMessagePart): ActivityState => {
   return 'completed';
 };
 
+/**
+ * Whether a part is still running: receiving input, executing, reporting
+ * progress, or resuming after an answered approval. The activity summary's verb
+ * and a collapsed group's spinner both read this one test.
+ */
+export const isActivityPartActive = (part: MyMessagePart): boolean => partState(part) === 'active';
+
 const displayTitle = (part: MyMessagePart): string => {
   if (part.type !== 'dynamic-tool') {
     return 'Tool call';

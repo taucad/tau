@@ -192,6 +192,20 @@ describe('rewriteDocuments', () => {
     expect(bare.messages[0]?.content).toBe('see [attached document]');
   });
 
+  it('should give an assistant block that echoes a sentinel the neutral marker, not a document (G7)', () => {
+    const payload = {
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: sentinel }] },
+        { role: 'assistant', content: [{ type: 'text', text: sentinel }] },
+      ],
+    };
+
+    rewriteDocuments(new Map([[hash, pdf]]), 'anthropic-messages')(payload);
+
+    expect(payload.messages[0]!.content[0]).toMatchObject({ type: 'document' });
+    expect(payload.messages[1]!.content[0]).toEqual({ type: 'text', text: '[attached document: bracket-spec.pdf]' });
+  });
+
   it('refuses a standalone sentinel the side table cannot resolve (D21)', () => {
     const payload = { messages: [{ role: 'user', content: [{ type: 'text', text: sentinel }] }] };
 
@@ -512,8 +526,8 @@ describe('gateway transport document rewrite (D21, D22)', () => {
     expect(fetch).toHaveBeenCalledTimes(2);
     const [summary, generation] = bodies.map((body) => JSON.stringify(body));
     expect(summary).toContain('You are a context summarization assistant');
-    // Pi's contentText joins the blocks with no separator; the table travels on no compaction request.
-    expect(summary).toContain('[User]: Here is the bracket spec.[attached document]');
+    // Pi's contentText joins the blocks with no separator; the side table names the document (G6).
+    expect(summary).toContain('[User]: Here is the bracket spec.[attached document: bracket-spec.pdf]');
     for (const body of [summary, generation]) {
       expect(body).not.toContain(sentinelOpening);
     }

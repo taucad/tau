@@ -1,10 +1,5 @@
-import { digestContent } from '@taucad/cache-core';
-import {
-  currentFileParameterEntrySchema,
-  fileParameterRecordProfile,
-  legacyFileParameterEntrySchema,
-} from '@taucad/types';
-import type { CurrentFileParameterEntry, FileParameterEntry } from '@taucad/types';
+import { fileParameterEntrySchema, fileParameterRecordProfile } from '@taucad/types';
+import type { FileParameterEntry, JSONValue } from '@taucad/types';
 import { assertBoundedJson } from '#bounded-json.js';
 
 const decoder = new TextDecoder('utf-8', { fatal: true });
@@ -22,16 +17,6 @@ export type ParameterRecordRead =
   | Readonly<{
       status: 'current';
       bytes: Uint8Array<ArrayBuffer>;
-      record: CurrentFileParameterEntry;
-    }>
-  | Readonly<{
-      status: 'migration-ready';
-      bytes: Uint8Array<ArrayBuffer>;
-      record: FileParameterEntry;
-    }>
-  | Readonly<{
-      status: 'legacy-readable';
-      bytes: Uint8Array<ArrayBuffer>;
       record: FileParameterEntry;
     }>
   | Readonly<{
@@ -47,10 +32,7 @@ export type ParameterRecordRead =
     }>;
 
 /** Decode a record without changing or discarding unsupported source bytes. @public */
-export const readParameterRecord = (
-  input: Uint8Array<ArrayBuffer>,
-  options: Readonly<{ migrationAvailable?: boolean }> = {},
-): ParameterRecordRead => {
+export const readParameterRecord = (input: Uint8Array<ArrayBuffer>): ParameterRecordRead => {
   const bytes = Uint8Array.from(input);
   if (bytes.byteLength > maximumRecordBytes) {
     return {
@@ -71,7 +53,7 @@ export const readParameterRecord = (
     };
   }
 
-  const current = currentFileParameterEntrySchema.safeParse(value);
+  const current = fileParameterEntrySchema.safeParse(value);
   if (current.success) {
     return { status: 'current', bytes, record: current.data };
   }
@@ -88,41 +70,73 @@ export const readParameterRecord = (
     }
   }
 
-  const legacy = legacyFileParameterEntrySchema.safeParse(value);
-  return legacy.success
-    ? {
-        status: options.migrationAvailable === false ? 'legacy-readable' : 'migration-ready',
-        bytes,
-        record: legacy.data,
-      }
-    : { status: 'invalid-preserved', bytes, error: current.error.message };
+  return { status: 'invalid-preserved', bytes, error: current.error.message };
 };
 
-/** Plan one backup-correlated upgrade of an exact legacy record. @public */
-export const planParameterRecordMigration = async (
-  source: Extract<ParameterRecordRead, { status: 'migration-ready' }>,
-  backupRevision: string,
-): Promise<
-  Readonly<{
-    sourceDigest: string;
-    record: CurrentFileParameterEntry;
-    bytes: Uint8Array<ArrayBuffer>;
-  }>
-> => {
-  const sourceDigest = await digestContent({ bytes: source.bytes });
-  const record = currentFileParameterEntrySchema.parse({
-    recordVersion: 1,
-    profile: fileParameterRecordProfile,
-    ...source.record,
-    migration: { sourceDigest, backupRevision },
-  });
-  return {
-    sourceDigest,
-    record,
-    bytes: encoder.encode(`${JSON.stringify(record, undefined, 2)}\n`),
+/** Deep key sort; arrays keep their order. `Object.fromEntries` defines own keys, so `__proto__` stays data. */
+const sortKeys = (value: JSONValue): JSONValue => {
+  if (Array.isArray(value)) {
+    return value.map((item) => sortKeys(item));
+  }
+  if (typeof value !== 'object' || value === null) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.keys(value)
+      .toSorted()
+      .map((key) => [key, sortKeys(value[key]!)]),
+  );
+};
+
+/**
+ * Serialize a validated record for checked persistence. Field order follows the schema, so
+ * `recordVersion` and `profile` lead; values and bindings are keyed by name and written in sorted
+ * key order so equal records produce equal bytes. Group key order is kept: without `order` it is
+ * the display order. @public
+ */
+export const serializeParameterRecord = (entry: FileParameterEntry): Uint8Array<ArrayBuffer> => {
+  const parsed = fileParameterEntrySchema.parse(entry);
+  const groups = Object.fromEntries(
+    Object.entries(parsed.groups).map(([name, group]) => [
+      name,
+      {
+        ...group,
+        values: sortKeys(group.values),
+        ...(group.bindings === undefined ? {} : { bindings: sortKeys(group.bindings as unknown as JSONValue) }),
+      },
+    ]),
+  );
+  return encoder.encode(`${JSON.stringify({ ...parsed, groups }, undefined, 2)}\n`);
+};
+
+/** A record that no reader may interpret; its bytes stay untouched until a person resets them. @public */
+export type ParameterRecordFailure = Error &
+  Readonly<{ code: 'INVALID_RECORD' | 'UNSUPPORTED_RECORD'; applicationState: 'known-not-applied' }>;
+
+/**
+ * The single invalid-record policy shared by every reader: decode current bytes, or throw a typed
+ * {@link ParameterRecordFailure} naming why they cannot be used.
+ * @param bytes - Stored record bytes.
+ * @returns The current record.
+ * @public
+ */
+export const requireParameterRecord = (bytes: Uint8Array<ArrayBuffer>): FileParameterEntry => {
+  const read = readParameterRecord(bytes);
+  if (read.status === 'current') {
+    return read.record;
+  }
+  const unsupported = read.status === 'unsupported-preserved';
+  const detail: Pick<ParameterRecordFailure, 'code' | 'applicationState'> = {
+    code: unsupported ? 'UNSUPPORTED_RECORD' : 'INVALID_RECORD',
+    applicationState: 'known-not-applied',
   };
+  const failure: ParameterRecordFailure = Object.assign(
+    new Error(
+      unsupported
+        ? 'Saved parameter values use an unsupported record version or profile; their bytes are preserved.'
+        : `Saved parameter values are not a valid record; their bytes are preserved. ${read.error}`,
+    ),
+    detail,
+  );
+  throw failure;
 };
-
-/** Serialize a validated current record for checked persistence. @public */
-export const serializeParameterRecord = (entry: CurrentFileParameterEntry): Uint8Array<ArrayBuffer> =>
-  encoder.encode(`${JSON.stringify(currentFileParameterEntrySchema.parse(entry), undefined, 2)}\n`);

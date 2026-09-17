@@ -52,32 +52,16 @@ export function mountFileOperationParticipants(init: {
   readonly contentService: FileContentService;
   readonly editorRef: ActorRefFrom<typeof editorMachine>;
   readonly projectRef: ActorRefFrom<typeof projectMachine>;
+  /** The transactional sidecar mover: prepared before the source mutation, committed or rolled back with it. */
   readonly parameterFiles?: Readonly<{
-    movePath(oldPath: string, newPath: string, directory: boolean): Promise<void>;
-    deletePath(path: string, directory: boolean): Promise<void>;
     prepareFileOperation: Parameters<FileContentService['addFileOperationParticipant']>[0];
   }>;
-  readonly onError?: (error: unknown) => void;
 }): () => void {
-  const { contentService, editorRef, projectRef, parameterFiles, onError } = init;
+  const { contentService, editorRef, projectRef, parameterFiles } = init;
   const disposePreparedParticipant =
     parameterFiles === undefined
       ? undefined
       : contentService.addFileOperationParticipant(parameterFiles.prepareFileOperation);
-  const run = (operation: Promise<void> | undefined): void => {
-    if (operation === undefined) {
-      return;
-    }
-    const report = async (): Promise<void> => {
-      try {
-        await operation;
-      } catch (error) {
-        onError?.(error);
-      }
-    };
-    // async-iife: bootstrap -- content notifications cannot await optional participant cleanup.
-    void report();
-  };
 
   const disposeContentParticipant = contentService.onDidContentChange((event: ContentChangeEvent) => {
     switch (event.type) {
@@ -118,7 +102,6 @@ export function mountFileOperationParticipants(init: {
           oldPath: event.oldPath,
           newPath: event.newPath,
         });
-        run(parameterFiles?.movePath(event.oldPath, event.newPath, event.type === 'directoryRenamed'));
         sendProjectFileActivity(projectRef, event.type, [event.oldPath, event.newPath]);
         return;
       }
@@ -131,7 +114,6 @@ export function mountFileOperationParticipants(init: {
           path: event.path,
         });
         projectRef.send({ type: 'fileDeleted', path: event.path });
-        run(parameterFiles?.deletePath(event.path, false));
         sendProjectFileActivity(projectRef, 'deleted', [event.path]);
         return;
       }
@@ -152,7 +134,6 @@ export function mountFileOperationParticipants(init: {
           path: event.path,
         });
         projectRef.send({ type: 'directoryDeleted', path: event.path });
-        run(parameterFiles?.deletePath(event.path, true));
         sendProjectFileActivity(projectRef, 'directoryDeleted', [event.path]);
         break;
       }

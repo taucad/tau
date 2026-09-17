@@ -20,7 +20,7 @@ import { extractModifiedProperties } from '#utils/object.utils.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { rjsfValidator } from '#lib/rjsf-validator.js';
 import type { ParameterManifest } from '@taucad/parameters';
-import type { CurrentFileParameterEntry } from '@taucad/types';
+import type { FileParameterEntry } from '@taucad/types';
 
 type ParametersProperties = {
   readonly parameters: Record<string, unknown>;
@@ -37,7 +37,7 @@ type ParametersProperties = {
   readonly isInitialExpanded?: boolean;
   readonly isAllExpanded?: boolean;
   readonly parameterManifest: ParameterManifest;
-  readonly parameterBindings?: CurrentFileParameterEntry['groups'][string]['bindings'];
+  readonly parameterBindings?: FileParameterEntry['groups'][string]['bindings'];
   readonly parameterEdit: ParameterEdit;
 };
 

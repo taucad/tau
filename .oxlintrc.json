@@ -116,6 +116,7 @@
     "tau-lint/no-impl-in-index": "error",
     "tau-lint/plugin-capability-filename": "error",
     "tau-lint/no-authored-pointer-cursor": "error",
+    "tau-lint/no-inline-actor-selector": "error",
     "unicorn/no-accessor-recursion": "error",
     "unicorn/no-anonymous-default-export": "error",
     "unicorn/no-array-callback-reference": "error",
@@ -980,6 +981,22 @@
     "@typescript-eslint/no-unnecessary-condition": "error"
   },
   "overrides": [
+    {
+      /*
+       * Debt to burn down: three call sites still pass an inline `useCadSelector`
+       * selector (realtime CAD performance charter W9, lane C-ui-main-thread — those
+       * files were outside that lane's write budget). Hoist each selector to module
+       * scope and delete this override.
+       */
+      "files": [
+        "apps/ui/app/routes/w.$workspace.$project/chat-viewer-status.tsx",
+        "apps/ui/app/routes/w.$workspace.$project/chat-stack-trace.tsx",
+        "apps/ui/app/components/geometry/cad/viewer-settings.tsx"
+      ],
+      "rules": {
+        "tau-lint/no-inline-actor-selector": "off"
+      }
+    },
     {
       /*
        * NestJS overrides:

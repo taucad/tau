@@ -1,5 +1,6 @@
 import { createActor } from 'xstate';
 import { Topic } from '@taucad/events';
+import { fileParameterRecordProfile } from '@taucad/types';
 import type { FileParameterEntry, JSONValue } from '@taucad/types';
 import { parameterInputMachine } from '@taucad/parameters/input-machine';
 import type { ParameterInputMachineInput } from '@taucad/parameters/input-machine';
@@ -32,11 +33,15 @@ export const createConfigurationParameterOwner = (): Readonly<{
     return topic;
   };
   const store = (entry: string, values: Readonly<Record<string, JSONValue>>) => {
-    const record: FileParameterEntry = { activeGroup: 'default', groups: { default: { values } } };
+    const record: FileParameterEntry = {
+      recordVersion: 1,
+      profile: fileParameterRecordProfile,
+      activeGroup: 'default',
+      groups: { default: { values } },
+    };
     const snapshot: NonNullable<ReturnType<ParameterSetService['snapshot']>> = {
       entry: record,
       identity,
-      access: { status: 'current', writeAllowed: true },
     };
     snapshots.set(entry, snapshot);
     changesFor(entry).emit();

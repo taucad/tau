@@ -89,8 +89,15 @@ export type CadChatSubmitInput = {
  * @public
  */
 export type CadChatClient = {
-  /** Send a fresh user message. Builds `{ body: { agent } }` from the live agent config. */
-  submit: (input: CadChatSubmitInput) => void;
+  /**
+   * Send a fresh user message. Builds `{ body: { agent } }` from the live agent config.
+   *
+   * Settles once the message is handed to the chat or the dispatch failed, so
+   * the composer can stay busy through attachment copy and workspace admission
+   * (chat activity indicator closeout R8). It never rejects; failures surface
+   * on the chat's error banner or a toast.
+   */
+  submit: (input: CadChatSubmitInput) => Promise<void>;
   /**
    * Replace the targeted user message's text/image parts and regenerate the
    * assistant turn from there. The wire body's `agent` block is composed
@@ -764,7 +771,7 @@ export const useCadChatClient = (): CadChatClient => {
   }, [requestInFlight, surfaceDispatchFailure]);
 
   const withWorkspace = useCallback(
-    (
+    async (
       turnId: string | undefined,
       operation: (execution: ChatExecutionTarget, runId: string | undefined) => void,
       /* The execution this dispatch will actually run, when it is not the live
@@ -785,17 +792,13 @@ export const useCadChatClient = (): CadChatClient => {
         return;
       }
       preparing.current = true;
-      const runPreparedOperation = async (): Promise<void> => {
-        try {
-          operation(...(await admitWorkspace(turnId, turnExecution ?? agent.execution)));
-        } catch (error) {
-          surfaceDispatchFailure(error);
-        } finally {
-          preparing.current = false;
-        }
-      };
-      // async-iife: bootstrap
-      void runPreparedOperation();
+      try {
+        operation(...(await admitWorkspace(turnId, turnExecution ?? agent.execution)));
+      } catch (error) {
+        surfaceDispatchFailure(error);
+      } finally {
+        preparing.current = false;
+      }
     },
     [admitWorkspace, agent.execution, surfaceDispatchFailure, workspaceAuthority],
   );
@@ -874,7 +877,7 @@ export const useCadChatClient = (): CadChatClient => {
    * leaves the draft as it is and sends nothing.
    */
   const withAttachments = useCallback(
-    (attachments: readonly AttachmentReference[], send: () => void): void => {
+    async (attachments: readonly AttachmentReference[], send: () => Promise<void>): Promise<void> => {
       if (agent.execution.kind === 'tau' && attachments.length > 0) {
         const resolved = resolveModelRef.current(agent.execution.model);
         const blocked = attachmentSendBlockReason(attachments, {
@@ -886,11 +889,7 @@ export const useCadChatClient = (): CadChatClient => {
           return;
         }
       }
-      if (attachments.length === 0) {
-        send();
-        return;
-      }
-      const promoteThenSend = async (): Promise<void> => {
+      if (attachments.length > 0) {
         try {
           await store.promoteDraftAttachments(activeChatId, attachments);
         } catch (error) {
@@ -900,22 +899,20 @@ export const useCadChatClient = (): CadChatClient => {
           });
           return;
         }
-        send();
-      };
-      // async-iife: bootstrap — a submit verb is synchronous; the failure is reported by the toast above
-      void promoteThenSend();
+      }
+      await send();
     },
     [activeChatId, agent.execution, store, surfaceDispatchFailure],
   );
 
   const submit = useCallback(
-    (input: CadChatSubmitInput) => {
+    async (input: CadChatSubmitInput): Promise<void> => {
       if (refuseWhileBusy()) {
         return;
       }
 
       const userMessage = buildUserMessage(input);
-      withAttachments(input.attachments ?? [], () => {
+      await withAttachments(input.attachments ?? [], async () =>
         withWorkspace(userMessage.id, (execution, runId) => {
           actions.sendMessage(userMessage, {
             body: createRunBody({
@@ -931,8 +928,8 @@ export const useCadChatClient = (): CadChatClient => {
               }),
             }),
           });
-        });
-      });
+        }),
+      );
     },
     [actions, activeChatId, agent, projectId, refuseWhileBusy, withAttachments, withWorkspace],
   );
@@ -943,7 +940,8 @@ export const useCadChatClient = (): CadChatClient => {
         return;
       }
 
-      withAttachments(input.attachments ?? [], () => {
+      // async-iife: bootstrap — the edit composer closes at once; failures surface on the banner or a toast.
+      void withAttachments(input.attachments ?? [], async () =>
         withWorkspace(messageId, (execution, runId) => {
           actions.editMessage(messageId, input.text, {
             ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
@@ -963,8 +961,8 @@ export const useCadChatClient = (): CadChatClient => {
               }),
             }),
           });
-        });
-      });
+        }),
+      );
     },
     [actions, activeChatId, agent, messages, projectId, refuseWhileBusy, withAttachments, withWorkspace],
   );
@@ -995,7 +993,8 @@ export const useCadChatClient = (): CadChatClient => {
           return;
         }
       }
-      withWorkspace(
+      // async-iife: bootstrap — failures surface on the chat's error banner.
+      void withWorkspace(
         userTurnIdAtOrBefore(messages, messageId),
         (execution, runId) => {
           const overrideBody = createRunBody({
@@ -1027,7 +1026,8 @@ export const useCadChatClient = (): CadChatClient => {
     }
 
     const lastAssistantId = messages.findLast((message) => message.role === 'assistant')?.id;
-    withWorkspace(userTurnIdAtOrBefore(messages, lastAssistantId), (execution, runId) => {
+    // async-iife: bootstrap — failures surface on the chat's error banner.
+    void withWorkspace(userTurnIdAtOrBefore(messages, lastAssistantId), (execution, runId) => {
       actions.regenerate({
         body: createRunBody({
           agent,

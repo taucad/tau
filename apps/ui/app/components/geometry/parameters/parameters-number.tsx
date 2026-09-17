@@ -335,17 +335,26 @@ const AuthoritativeParametersNumber = ({
   });
   const parameterRef = retainedInput.actor;
   React.useEffect(() => retainedInput.attach(), [retainedInput]);
-  const acknowledged = useSelector(parameterRef, (state) => state.context.acknowledged);
+  /* Select only what the row draws: every commit forwards the new revision to every row, and a
+   * revision alone must not re-render rows whose value and text are unchanged. */
+  const acknowledgedValue = useSelector(parameterRef, (state) => state.context.acknowledged.value);
+  const acknowledgedText = useSelector(parameterRef, (state) =>
+    numericProjection(state.context.acknowledged.projection),
+  );
   const draft = useSelector(parameterRef, (state) => state.context.draft);
   const workflowDiagnostic = useSelector(
     parameterRef,
     (state) => state.context.draft?.diagnostic?.message ?? state.context.diagnostic?.message,
   );
 
-  /* Only a binding change is React's to report: value and revision refreshes are forwarded by the
-   * service from the authority actor, so an edit to another field never reaches this row. */
+  /* Only a binding change is React's to report, and only when it differs from what the actor holds:
+   * value and revision refreshes are forwarded by the service from the authority actor, so this row
+   * never re-sends a revision it does not own. */
   React.useEffect(() => {
     const { acknowledged } = parameterRef.getSnapshot().context;
+    if (JSON.stringify(acknowledged.binding) === JSON.stringify(binding)) {
+      return;
+    }
     parameterRef.send({
       type: 'refreshAuthority',
       binding,
@@ -366,12 +375,11 @@ const AuthoritativeParametersNumber = ({
   }, [currentStep, displayUnit, parameterRef]);
 
   const committedDisplayValue =
-    typeof acknowledged.value === 'number' ? displayValue(acknowledged.value, binding, displayUnit) : value;
+    typeof acknowledgedValue === 'number' ? displayValue(acknowledgedValue, binding, displayUnit) : value;
   const localValue =
     typeof draft?.nativeValue === 'number'
       ? displayValue(draft.nativeValue, binding, displayUnit)
       : committedDisplayValue;
-  const acknowledgedText = numericProjection(acknowledged.projection);
   const roundedDisplayValue = Number(committedDisplayValue.toPrecision(4));
   const isApproximation =
     binding.nativeUnit !== undefined &&

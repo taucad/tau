@@ -65,13 +65,19 @@ const revisionChip = (): ReturnType<typeof selectors.getByRole> =>
  * each under load, and the tree hash it was blamed on costs 1.2 ms for the whole
  * tree (C48's `blobOid` and `cleanedTrees` memoization both work). The cost is
  * one whole-tree **capture** per save: `captureRevisionTree` walks the project
- * and makes two OPFS round trips per file (`stat`, then the content stream), and
- * that walk is what a save pays for. Raising the file count is therefore the way
- * to reproduce a B1 regression, and shrinking the export is not a fix.
+ * and reads every versioned file, and that walk is what a save pays for.
+ * Raising the file count is therefore the way to reproduce a B1 regression, and
+ * shrinking the export is not a fix.
+ *
+ * The walk used to `stat` every child to learn its kind, and OPFS `stat` reads a
+ * text file whole to count its lines — two reads per file. It now takes kinds
+ * from the rooted view's `readdirEntries` (lane H): zero `stat` calls, the same
+ * tree ids, and a warm save of 339 ms against 440 ms in 32 interleaved pairs
+ * at load 17–31 (24 of 32 pairs favour it).
  *
  * Owner of the residual: `libs/filesystem/src/revision-capture.ts`. Meeting
- * 100 ms needs a capture that does not re-read unchanged files, not a faster
- * digest — `crypto.subtle` (C53) was measured and declined on this evidence.
+ * 100 ms still needs a capture that does not re-read unchanged files, not a
+ * faster digest — `crypto.subtle` (C53) was measured and declined on this evidence.
  */
 /** B1's stated budget, and the regression ceiling actually asserted. */
 const savedBudgetMilliseconds = 100;

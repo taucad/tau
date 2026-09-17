@@ -1,6 +1,6 @@
 /* oxlint-disable @typescript-eslint/consistent-type-assertions -- Dockview structural test doubles cover only exercised fields */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createPortal } from 'react-dom';
 import type {
@@ -92,11 +92,13 @@ const mockContentSaveEditor = vi.fn(async () => undefined);
 const mockAcquireModel = vi.fn(async () => undefined);
 const mockReleaseModel = vi.fn();
 const mockIsApplyingFilesystemContent = vi.fn(() => false);
+const mockHasSyncedModel = vi.fn((_path: string) => false);
 const mockSaveEditor = vi.fn<(path: string, data: Uint8Array<ArrayBuffer>) => Promise<void>>(async () => undefined);
 const mockModelService = {
   acquireModel: mockAcquireModel,
   releaseModel: mockReleaseModel,
   isApplyingFilesystemContent: mockIsApplyingFilesystemContent,
+  hasSyncedModel: mockHasSyncedModel,
   saveEditor: mockSaveEditor,
 };
 
@@ -158,8 +160,9 @@ vi.mock('#flags/use-feature.js', () => ({
   useFeature: () => featureState.value,
 }));
 
+vi.mock('#hooks/use-monaco-configuration.js', () => ({ useConfiguredMonaco: () => undefined }));
+
 vi.mock('@monaco-editor/react', () => ({
-  useMonaco: () => undefined,
   /* `configureMonaco` hands the loader the editor module; under jsdom nothing
    * is loaded, so the mock only has to accept the call (W14 sweep). */
   loader: { config: vi.fn() },
@@ -168,12 +171,14 @@ vi.mock('@monaco-editor/react', () => ({
 const defaultViewer = ({
   filePath,
   content,
+  isEditorReady,
 }: {
   filePath: string;
   content: string;
   onChange?: (value: string) => void;
+  isEditorReady?: boolean;
 }) => (
-  <div data-testid='viewer'>
+  <div data-testid='viewer' data-editor-ready={isEditorReady}>
     <div data-testid='viewer-path'>{filePath}</div>
     <div data-testid='viewer-content'>{content}</div>
   </div>
@@ -219,7 +224,10 @@ vi.mock('#routes/w.$workspace.$project/file-viewers/built-in-viewers.js', () => 
         render: (request: {
           readonly path: string;
           readonly resource: { readonly outcome: FileContentResult };
-          readonly textEditor?: { readonly onChange: (value: string | undefined) => void };
+          readonly textEditor?: {
+            readonly isReady: boolean;
+            readonly onChange: (value: string | undefined) => void;
+          };
           readonly renderPane: (content: {
             readonly actions?: React.ReactNode;
             readonly body: React.ReactNode;
@@ -238,6 +246,7 @@ vi.mock('#routes/w.$workspace.$project/file-viewers/built-in-viewers.js', () => 
               <Viewer
                 filePath={request.path}
                 content={content}
+                isEditorReady={request.textEditor?.isReady}
                 onChange={request.textEditor?.onChange as (value: string) => void}
               />
             ),
@@ -384,16 +393,58 @@ describe('FileEditor routing', () => {
     mockSaveEditor.mockResolvedValue(undefined);
     mockContentSaveEditor.mockResolvedValue(undefined);
     mockUseMonacoServices.mockReturnValue({ modelService: mockModelService });
+    mockHasSyncedModel.mockImplementation(() => false);
     mockResolveViewer.mockReturnValue(defaultViewer);
   });
 
-  it('should render the loader when outcome is loading', () => {
+  it('should render the pane placeholder when outcome is loading', () => {
     mockUseFileContent.mockReturnValue({ kind: 'loading' });
 
-    const { container } = render(<FileEditor paneId='test-pane' filePath='mystery.dat' panelApi={mockPanelApi} />);
+    render(<FileEditor paneId='test-pane' filePath='mystery.dat' panelApi={mockPanelApi} />);
 
-    expect(container.querySelector('[data-slot="loader"], svg')).toBeTruthy();
+    const placeholder = screen.getByRole('status');
+    expect(placeholder).toHaveAttribute('data-slot', 'editor-pane-placeholder');
+    expect(placeholder).toHaveTextContent('Loading mystery.dat');
     expect(screen.getAllByRole('group', { name: 'File actions for mystery.dat' })).toHaveLength(1);
+  });
+
+  /* I3: an editor that mounts before the model is bound creates the model
+   * itself, and the workspace file system then adopts it unsubscribed. */
+  it('should hold the text editor until the pane model is bound', async () => {
+    const hold = Promise.withResolvers<undefined>();
+    mockAcquireModel.mockReturnValueOnce(hold.promise);
+    mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('x') });
+
+    render(<FileEditor paneId='test-pane' filePath='main.ts' panelApi={mockPanelApi} />);
+
+    expect(screen.getByTestId('viewer')).toHaveAttribute('data-editor-ready', 'false');
+    expect(mockAcquireModel).toHaveBeenCalledWith('main.ts');
+    await act(async () => {
+      hold.resolve(undefined);
+      await hold.promise;
+    });
+    expect(screen.getByTestId('viewer')).toHaveAttribute('data-editor-ready', 'true');
+  });
+
+  it('should hold the text editor while Monaco services are unavailable', () => {
+    mockUseMonacoServices.mockReturnValue({ modelService: undefined });
+    mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('x') });
+
+    render(<FileEditor paneId='test-pane' filePath='main.ts' panelApi={mockPanelApi} />);
+
+    expect(screen.getByTestId('viewer')).toHaveAttribute('data-editor-ready', 'false');
+    expect(mockAcquireModel).not.toHaveBeenCalled();
+  });
+
+  /* A rename moves the bound model to the new path; the pane stays mounted. */
+  it('should keep the editor ready for a path whose model is already bound', () => {
+    mockHasSyncedModel.mockImplementation((path) => path === 'main.ts');
+    mockAcquireModel.mockReturnValueOnce(new Promise(() => undefined));
+    mockUseFileContent.mockReturnValue({ kind: 'text', content: new TextEncoder().encode('x') });
+
+    render(<FileEditor paneId='test-pane' filePath='main.ts' panelApi={mockPanelApi} />);
+
+    expect(screen.getByTestId('viewer')).toHaveAttribute('data-editor-ready', 'true');
   });
 
   it('should render the binary warning when outcome is binary, regardless of filename', () => {
@@ -697,7 +748,7 @@ describe('FileEditor routing', () => {
         kind: 'text',
         content: new TextEncoder().encode('restored content'),
       });
-      mockResolveViewer.mockReturnValueOnce(({ onChange }: { readonly onChange: (value: string) => void }) => (
+      mockResolveViewer.mockReturnValue(({ onChange }: { readonly onChange: (value: string) => void }) => (
         <button
           type='button'
           data-testid='trigger-change'
@@ -737,7 +788,7 @@ describe('FileEditor routing', () => {
       // we exercise the resolver via a direct call: capture the
       // handler from FileEditor by mocking the viewer to invoke it.
 
-      mockResolveViewer.mockReturnValueOnce(({ onChange }: { readonly onChange: (value: string) => void }) => (
+      mockResolveViewer.mockReturnValue(({ onChange }: { readonly onChange: (value: string) => void }) => (
         <button
           type='button'
           data-testid='trigger-change'
@@ -764,7 +815,7 @@ describe('FileEditor routing', () => {
         kind: 'text',
         content: new TextEncoder().encode('hello'),
       });
-      mockResolveViewer.mockReturnValueOnce(({ onChange }: { readonly onChange: (value: string) => void }) => (
+      mockResolveViewer.mockReturnValue(({ onChange }: { readonly onChange: (value: string) => void }) => (
         <button
           type='button'
           data-testid='trigger-change'
@@ -790,7 +841,7 @@ describe('FileEditor routing', () => {
         kind: 'text',
         content: new TextEncoder().encode('hello'),
       });
-      mockResolveViewer.mockReturnValueOnce(({ onChange }: { readonly onChange: (value: string) => void }) => (
+      mockResolveViewer.mockReturnValue(({ onChange }: { readonly onChange: (value: string) => void }) => (
         <button
           type='button'
           data-testid='trigger-change'
@@ -823,7 +874,7 @@ describe('FileEditor routing', () => {
         kind: 'text',
         content: new TextEncoder().encode('hello'),
       });
-      mockResolveViewer.mockReturnValueOnce(({ onChange }: { readonly onChange: (value: string) => void }) => (
+      mockResolveViewer.mockReturnValue(({ onChange }: { readonly onChange: (value: string) => void }) => (
         <button
           type='button'
           data-testid='trigger-change'
@@ -851,7 +902,7 @@ describe('FileEditor routing', () => {
         kind: 'text',
         content: new TextEncoder().encode('hello'),
       });
-      mockResolveViewer.mockReturnValueOnce(({ onChange }: { readonly onChange: (value: string) => void }) => (
+      mockResolveViewer.mockReturnValue(({ onChange }: { readonly onChange: (value: string) => void }) => (
         <button
           type='button'
           data-testid='trigger-change'
@@ -875,7 +926,7 @@ describe('FileEditor routing', () => {
         kind: 'text',
         content: new TextEncoder().encode('read only'),
       });
-      mockResolveViewer.mockReturnValueOnce(({ onChange }: { readonly onChange: (value: string) => void }) => (
+      mockResolveViewer.mockReturnValue(({ onChange }: { readonly onChange: (value: string) => void }) => (
         <button
           type='button'
           data-testid='trigger-change'

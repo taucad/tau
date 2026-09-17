@@ -447,8 +447,6 @@ vi.mock('#db/chat-file-storage.js', () => ({
     commitCancelledDraftRestore: vi.fn(async () => undefined),
     softDeleteChat: vi.fn(async () => undefined),
     deleteChat: vi.fn(async () => undefined),
-    duplicateChat: vi.fn(async () => activityChat),
-    duplicateResourceChats: vi.fn(async () => ({})),
   }),
 }));
 

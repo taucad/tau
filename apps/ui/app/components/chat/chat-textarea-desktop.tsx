@@ -1,4 +1,5 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { Bot, Brain, Paperclip, Wrench, AtSign, SlidersHorizontal } from 'lucide-react';
 import type { AcpSessionData, Chat, ToolSelection } from '@taucad/chat';
 import type { FileEntry } from '@taucad/types';
@@ -24,7 +25,7 @@ import { formatKeyCombination } from '#utils/keys.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { ChatContextIndicator } from '#components/chat/chat-context-indicator.js';
 import { ChatTextareaBorderBeam } from '#components/chat/chat-textarea-border-beam.js';
-import { ChatTextareaDesktopImages } from '#components/chat/chat-textarea-desktop-images.js';
+import { ChatTextareaAttachmentRail } from '#components/chat/chat-textarea-image-strip.js';
 import { ChatTextareaSubmitButton } from '#components/chat/chat-textarea-submit-button.js';
 import { focusTrapAttribute } from '#components/chat/chat-textarea-types.js';
 import type { ChatAttachmentAddOptions, ChatTextareaDragKind } from '#components/chat/chat-textarea-types.js';
@@ -62,7 +63,7 @@ type ChatTextareaDesktopProperties = {
   readonly isSubmitting: boolean;
   readonly inputText: string;
   readonly attachments: readonly DraftAttachment[];
-  readonly attachmentDirectory: string;
+  readonly attachmentDirectory: AttachmentDirectories;
   readonly sendBlockReason: string | undefined;
   readonly attachmentAccept: string;
   readonly attachmentInputSupported: boolean;
@@ -345,6 +346,7 @@ export const ChatTextareaDesktop = memo(function ({
 
   const isDisabled =
     isSubmitDisabled || sendBlockReason !== undefined || (inputText.trim().length === 0 && attachments.length === 0);
+  const blockReasonId = useId();
 
   return (
     // Outer wrapper is purely a positioning context for the beam overlay
@@ -369,11 +371,13 @@ export const ChatTextareaDesktop = memo(function ({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        {/* Images */}
-        <ChatTextareaDesktopImages
+        {/* Attachments */}
+        <ChatTextareaAttachmentRail
           attachments={attachments}
           directory={attachmentDirectory}
           blockReason={sendBlockReason}
+          blockReasonId={blockReasonId}
+          size='desktop'
           onRemove={removeAttachment}
         />
 
@@ -423,6 +427,7 @@ export const ChatTextareaDesktop = memo(function ({
           status={status}
           isSubmitting={isSubmitting}
           isDisabled={isDisabled}
+          describedBy={sendBlockReason === undefined ? undefined : blockReasonId}
           formattedCancelKeyCombination={formattedCancelKeyCombination}
           handleSubmit={handleSubmit}
           handleCancelClick={handleCancelClick}
@@ -823,6 +828,7 @@ const ChatTextareaRightControls = memo(function ({
   status,
   isSubmitting,
   isDisabled,
+  describedBy,
   formattedCancelKeyCombination,
   handleSubmit,
   handleCancelClick,
@@ -834,6 +840,7 @@ const ChatTextareaRightControls = memo(function ({
   readonly status: string;
   readonly isSubmitting: boolean;
   readonly isDisabled: boolean;
+  readonly describedBy: string | undefined;
   readonly formattedCancelKeyCombination: string;
   readonly handleSubmit: () => Promise<void>;
   readonly handleCancelClick: () => void;
@@ -889,6 +896,7 @@ const ChatTextareaRightControls = memo(function ({
         status={status}
         isSubmitting={isSubmitting}
         isDisabled={isDisabled}
+        describedBy={describedBy}
         formattedCancelKeyCombination={formattedCancelKeyCombination}
         onSubmit={handleSubmit}
         onCancel={handleCancelClick}

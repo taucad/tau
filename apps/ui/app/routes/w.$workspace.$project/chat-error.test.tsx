@@ -72,7 +72,7 @@ describe('ChatError', () => {
   it('tells the customer when a rate-limited request can be retried', () => {
     const rateLimited: ChatErrorPayload = {
       category: errorCategory.rateLimit,
-      title: 'Rate Limit Exceeded',
+      title: 'Rate limit exceeded',
       message: 'The funded-operation failsafe is active.',
       code: 'FUNDED_OPERATION_LIMIT',
       httpStatus: 429,
@@ -90,7 +90,7 @@ describe('ChatError', () => {
   it("should route an external agent's usage limit to its stop notice instead of the generic block", () => {
     const quota: ChatErrorPayload = {
       category: errorCategory.rateLimit,
-      title: 'Rate Limit Exceeded',
+      title: 'Rate limit exceeded',
       message: "You've hit your usage limit.",
       code: 'EXTERNAL_AGENT_LIMIT_REACHED',
       details: {
@@ -107,7 +107,7 @@ describe('ChatError', () => {
     expect(screen.getByRole('region', { name: 'External agent stop' })).toHaveTextContent(
       "You've hit your usage limit.",
     );
-    expect(screen.queryByText('Rate Limit Exceeded')).not.toBeInTheDocument();
+    expect(screen.queryByText('Rate limit exceeded')).not.toBeInTheDocument();
   });
 
   it('should keep the generic fallback for an external failure whose details do not match the stop schema', () => {
@@ -322,7 +322,7 @@ describe('ChatError', () => {
     for (const [first, second] of snapshots) {
       expect(Object.is(first, second)).toBe(true);
     }
-    expect(screen.getByText('Credit Limit Reached')).toBeInTheDocument();
+    expect(screen.getByText('Credit limit reached')).toBeInTheDocument();
   });
 
   /* The funded boundary's own 402 copy is credit-denominated and reaches the
@@ -351,10 +351,10 @@ describe('ChatError', () => {
       ),
     });
 
-    expect(screen.getByText('Credit Limit Reached')).toBeInTheDocument();
+    expect(screen.getByText('Credit limit reached')).toBeInTheDocument();
     expect(screen.getByText(creditMessage)).toBeInTheDocument();
     expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
-    expect(screen.queryByText('Processing Error')).not.toBeInTheDocument();
+    expect(screen.queryByText('Processing error')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /try again/i })).not.toBeInTheDocument();
 

@@ -1225,6 +1225,28 @@ describe('KernelWorker lifecycle', () => {
       }
     });
 
+    it('lets a pending open retarget the preview before a change to the replaced file is routed', async () => {
+      const worker = createConfiguredWorker();
+      try {
+        await openAndWaitForRender(worker, createGeometryFile('main.ts'));
+        const preview = observePreview(worker);
+        const settled = preview.waitForState(
+          ({ renderId, state }) => renderId === previewId(101) && (state === 'idle' || state === 'error'),
+        );
+
+        // A rename opens the moved file while the watcher reports the old path as gone.
+        worker.handleOpenFile({ renderId: previewId(101), file: createGeometryFile('renamed.ts'), parameters: {} });
+        await worker.notifyFileChanged(['main.ts']);
+        await settled;
+        await flushMicrotasks();
+
+        expect(preview.geometries.map(({ renderId }) => renderId)).toEqual([previewId(101)]);
+        expect(preview.states.every(({ renderId }) => renderId === previewId(101))).toBe(true);
+      } finally {
+        await worker.cleanup();
+      }
+    });
+
     it('should route staged peer writes exactly without scheduling the active preview', async () => {
       const worker = createConfiguredWorker();
       try {
@@ -3310,6 +3332,33 @@ describe('preview admission invariants', () => {
     expect(worker.renderCancellationRecords.size).toBe(0);
   });
 
+  it('schedules a committed parameter edit without a zero-delay timer (W1/D18)', async () => {
+    const worker = createConfiguredWorker();
+    const observed = observePreview(worker);
+    const openedId = previewId(3810);
+    worker.handleOpenFile({ renderId: openedId, file: createGeometryFile('main.ts'), parameters: {} });
+    await observed.waitForState((event) => event.renderId === openedId && event.state === 'idle');
+
+    /* `parameterDebounce` is 0, and a zero-delay `setTimeout` is clamped to >= 1 ms in
+     * Node — so `updateParameters` used to pay that clamp twice per render, once here
+     * and once for the render lane's cooperative yield. The buffering turn stays; the
+     * timer does not. */
+    const timeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+    const parametersId = previewId(3811);
+    worker.handleUpdateParameters({ renderId: parametersId, parameters: { size: 2 } });
+    await observed.waitForState((event) => event.renderId === parametersId && event.state === 'idle');
+
+    const zeroDelayTimers = timeoutSpy.mock.calls.filter(([, delay]) => (delay ?? 0) <= 0);
+    expect(zeroDelayTimers).toEqual([]);
+    expect(observed.states.filter((event) => event.renderId === parametersId).map((event) => event.state)).toEqual([
+      'buffering',
+      'rendering',
+      'idle',
+    ]);
+    timeoutSpy.mockRestore();
+    await worker.cleanup();
+  });
+
   it('releases a shutdown-window notifyFileChanged admission (T38)', async () => {
     const worker = createConfiguredWorker();
     const observed = observePreview(worker);
@@ -4927,6 +4976,28 @@ describe('native-handle materialization', () => {
 
     expect(result.success).toBe(true);
     expect(worker.createGeometryCalls).toBeGreaterThan(callsAfterRender);
+  });
+
+  it('keeps the durable snapshot off a display render result (W6b/D12)', async () => {
+    const serializedData = { brep: 'BREP_DATA', meta: { name: 'part' } };
+    const worker = createConfiguredWorker({
+      computeResult: {
+        success: true,
+        data: { format: 'gltf', content: new Uint8Array([1, 2, 3]) },
+        issues: [],
+        serializedNativeHandle: serializedData,
+      },
+    });
+
+    await openAndWaitForRender(worker);
+
+    const artifact = (worker as unknown as { currentPublishedRender?: MaterializedRender }).currentPublishedRender;
+    expect(artifact).toBeDefined();
+    /* `toTransportResult` spreads this object into `geometryComputed` and the
+     * `evaluateModel` reply, so anything left on it is copied to the client on every
+     * display render. The snapshot belongs to the export path's slot alone. */
+    expect(artifact!.result).not.toHaveProperty('serializedNativeHandle');
+    expect(artifact!.serializedNativeHandleSlot?.serializedNativeHandle).toEqual(serializedData);
   });
 
   it('should fall back to re-running createGeometry when no handle data exists', async () => {

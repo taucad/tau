@@ -98,7 +98,9 @@ identity remains readable even when advanced controls are folded away.
 
 In chat, one compact revision summary belongs directly after its user request,
 before the assistant's reasoning, tools and answer, while changes are pending,
-saved or uncertain. Update it in place. A reconnect is connection status, not a
+saved or uncertain. It is a card attached under the request bubble, sharing its
+radius, whose whole header opens the details, so it reads as the request's own
+state rather than as conversation. Update it in place. A reconnect is connection status, not a
 revision state: keep the last known summary while the host log replays, and show
 **Save not confirmed** with a visible Retry only when the host stays unreachable.
 When the host confirms that no files
@@ -108,6 +110,13 @@ reserve a number or invent a snapshot. Show the confirmed result and expose
 exact changes on request. Authored design files precede a labelled project-setup
 group. The complete history belongs in Revisions, without duplicating its full
 card in chat.
+
+While a turn runs, the chat history always ends with one activity indicator
+unless the newest content already moves: streaming text, a loading tool card
+or a pending approval. The run state decides whether work is live; part states
+only decide whether something else already shows it. A collapsed activity group
+with a running row shows a spinner in place of its icon. The chat header and
+sidebar add no second live cue.
 
 **Saved**, **checks passed**, **work finished** and **backed up** are independent
 facts. A saved revision can contain interrupted or unverified work. Loading is
@@ -119,8 +128,8 @@ identity and action vocabulary across compact and expanded surfaces.
 Group adjacent provider-exposed reasoning into one collapsible body, preserving
 tool/commentary boundaries and event identity. Reasoning and its supplied
 summaries use normal-weight italics without a redundant “Reasoning” heading.
-Collapsed copy may say “Thought briefly” or a duration supported by actual
-timing; never invent reasoning or precision to make providers look identical.
+A thought that is still streaming says “Thinking…”. Collapsed copy may say
+“Thought briefly” or a duration supported by actual timing; never invent reasoning or precision to make providers look identical.
 Use consistent action vocabulary such as “Rendering” / “Rendered models”,
 without repeating a provider-supplied verb (“Read Read”). This is a chat-specific
 contract, not a requirement to italicize ordinary detail panels.
@@ -156,6 +165,10 @@ decorative numbering or sharp-cornered theme to signal that direction.
   have a persistent label, icon/shape or boundary at rest. Use shared Button
   variants, clear action labels and visible neutral hover feedback. Keep enabled
   action text legible; muted metadata must not make it look disabled.
+- Size a pane's content by the pane, not the window. Chat notices use the
+  shared chat error card: actions stack at full width until the card is wide
+  enough, then share one row at equal widths. The action that resolves the stop
+  comes first, and every action has a visible body.
 - Put infrequent row actions in a persistently reachable, named overflow menu.
   Fine-pointer hover may reveal shortcuts only when a visible route provides
   the same action. Include focus-within parity and coarse-pointer access. Hover,

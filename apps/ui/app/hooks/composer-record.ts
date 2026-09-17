@@ -14,12 +14,12 @@
  * the write, its coalescing and its retry curve from that point on.
  */
 
-import { useMemo } from 'react';
-import { useActorRef } from '@xstate/react';
+import { useEffect, useState } from 'react';
 import { createActor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { MyUIMessage } from '@taucad/chat';
 import type { ChatMode } from '@taucad/chat/constants';
+import type { AttachmentStore } from '#db/attachment-store.js';
 import type { ComposerRecord, ComposerRecordStore } from '#db/composer-record-store.js';
 import { createEmptyDraftMessage } from '#hooks/draft.machine.js';
 import type { DraftHydration } from '#hooks/draft.machine.js';
@@ -30,13 +30,17 @@ import type { Attachment } from '#utils/attachment.utils.js';
 /** A running record actor, as every consumer of this seam holds it. */
 export type ComposerRecordRef = ActorRefFrom<typeof composerRecordMachine>;
 
+type AttachmentStoredEvent = { type: 'attachmentStored'; attachment: Attachment };
+type StoreAttachmentInput = { bytes: Uint8Array<ArrayBuffer>; mediaType: string; filename?: string };
+type StoreAttachmentActor = ReturnType<typeof fromSafeAsync<AttachmentStoredEvent, StoreAttachmentInput>>;
+
 /** The actors `draftMachine` is provided with when its surface has a record. */
 export type DraftPersistenceActors = {
   persistDraftActor: ReturnType<typeof persistDraftActorFor>;
   persistEditDraftActor: ReturnType<typeof persistEditDraftActorFor>;
   persistSelectionActor: ReturnType<typeof persistSelectionActorFor>;
   clearMessageEditActor: ReturnType<typeof clearMessageEditActorFor>;
-  storeAttachmentActor: ReturnType<typeof storeAttachmentActorFor>;
+  storeAttachmentActor: StoreAttachmentActor;
 };
 
 const persistDraftActorFor = (recordRef: ComposerRecordRef) =>
@@ -62,13 +66,16 @@ const clearMessageEditActorFor = (recordRef: ComposerRecordRef) =>
     recordRef.send({ type: 'patch', fields: { messageEdits: { [input.messageId]: createEmptyDraftMessage() } } });
   });
 
-const storeAttachmentActorFor = (store: ComposerRecordStore) =>
-  fromSafeAsync<
-    { type: 'attachmentStored'; attachment: Attachment },
-    { bytes: Uint8Array<ArrayBuffer>; mediaType: string; filename?: string }
-  >(async ({ input }) => ({
+/**
+ * The `draftMachine` actor that writes an attachment's bytes into a store.
+ *
+ * @param attachments - Where the draft's attachments live.
+ * @returns The actor.
+ */
+export const storeAttachmentActorFor = (attachments: AttachmentStore): StoreAttachmentActor =>
+  fromSafeAsync<AttachmentStoredEvent, StoreAttachmentInput>(async ({ input }) => ({
     type: 'attachmentStored',
-    attachment: await store.attachments.put(input.bytes, input.mediaType, input.filename),
+    attachment: await attachments.put(input.bytes, input.mediaType, input.filename),
   }));
 
 /**
@@ -91,16 +98,84 @@ export function draftHydrationOf(record: ComposerRecord | 'absent'): DraftHydrat
   };
 }
 
+/** Resolve once no write of `ref` is on the wire (or the actor has stopped). */
+export const writesSettled = async (ref: ComposerRecordRef): Promise<void> => {
+  const settled = (snapshot: ReturnType<ComposerRecordRef['getSnapshot']>): boolean =>
+    snapshot.status !== 'active' || !snapshot.matches({ writes: 'persisting' });
+  if (settled(ref.getSnapshot())) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    const subscription = ref.subscribe({
+      next: (snapshot) => {
+        if (settled(snapshot)) {
+          subscription.unsubscribe();
+          resolve();
+        }
+      },
+      complete: resolve,
+    });
+  });
+};
+
+/**
+ * Write whatever `ref` holds now, including a patch waiting out its retry, and
+ * resolve once that write has left the wire.
+ *
+ * @param ref - The record actor to flush.
+ */
+export const flushRecord = async (ref: ComposerRecordRef): Promise<void> => {
+  ref.send({ type: 'flushNow' });
+  await writesSettled(ref);
+};
+
+/**
+ * Stop a record actor once no write is on the wire, so a closing composer keeps
+ * its last keystroke. A retrying write is abandoned; it is failing anyway.
+ *
+ * @param ref - The record actor to stop.
+ */
+export const stopWhenWritesSettle = async (ref: ComposerRecordRef): Promise<void> => {
+  await writesSettled(ref);
+  ref.stop();
+};
+
+/** Live mounts per actor, so Strict Mode's disconnect-then-reconnect does not stop a record it keeps using. */
+const mounts = new WeakMap<ComposerRecordRef, number>();
+
 /**
  * Mount a record actor for the lifetime of the calling component.
+ *
+ * The hook owns one actor per store: a new store starts a fresh actor, which
+ * reads its own record, and the previous one stops once its last write lands.
  *
  * @param store - The store for this surface's record.
  * @returns The running actor; the composer is interactive before it resolves.
  */
 export function useComposerRecord(store: ComposerRecordStore): ComposerRecordRef {
-  const logic = useMemo(() => composerRecordMachine.provide(composerRecordActors(store)), [store]);
+  const [owned, setOwned] = useState(() => ({ store, ref: createComposerRecordActor(store) }));
+  let current = owned;
+  if (owned.store !== store) {
+    current = { store, ref: createComposerRecordActor(store) };
+    setOwned(current);
+  }
+  const { ref } = current;
 
-  return useActorRef(logic, { input: {} });
+  useEffect(() => {
+    mounts.set(ref, (mounts.get(ref) ?? 0) + 1);
+    ref.start();
+    return () => {
+      mounts.set(ref, (mounts.get(ref) ?? 1) - 1);
+      // Strict Mode reconnects within the same commit; only a mount that stays released stops the actor.
+      queueMicrotask(() => {
+        if (mounts.get(ref) === 0) {
+          void stopWhenWritesSettle(ref);
+        }
+      });
+    };
+  }, [ref]);
+
+  return ref;
 }
 
 /**
@@ -130,6 +205,6 @@ export function draftPersistenceFor(recordRef: ComposerRecordRef, store: Compose
     persistEditDraftActor: persistEditDraftActorFor(recordRef),
     persistSelectionActor: persistSelectionActorFor(recordRef),
     clearMessageEditActor: clearMessageEditActorFor(recordRef),
-    storeAttachmentActor: storeAttachmentActorFor(store),
+    storeAttachmentActor: storeAttachmentActorFor(store.attachments),
   };
 }

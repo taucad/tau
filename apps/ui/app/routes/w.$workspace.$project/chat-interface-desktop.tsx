@@ -7,6 +7,7 @@ import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockvi
 import { WorkbenchDockview } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
 import { WorkbenchToggle } from '#routes/w.$workspace.$project/project-workspace-actions.js';
 import { ProjectUnavailableOverlay } from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
+import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
 import { ChatContextInsertionProvider } from '#components/chat/chat-context-insertion.js';
 import { useSidebar } from '#components/ui/sidebar.js';
 import { useProject } from '#hooks/use-project.js';
@@ -70,7 +71,9 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
             <WorkbenchToggle isOpen={workbenchVisible} onOpenChange={setWorkbenchOpen} />
           </div>
         ) : null}
-        <ChatInterfaceSessionGate fallback={<div className='size-full' />}>
+        {/* Until the editor state has loaded and the focused chat exists, the
+            lanes stand in at their default widths rather than a blank page. */}
+        <ChatInterfaceSessionGate fallback={<WorkspaceSkeleton isCompact={isCompact} />}>
           {isClient && isEditorReady ? (
             <Allotment
               separator={false}
@@ -121,7 +124,9 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
                 <WorkbenchDockview />
               </Allotment.Pane>
             </Allotment>
-          ) : null}
+          ) : (
+            <WorkspaceSkeleton isCompact={isCompact} />
+          )}
         </ChatInterfaceSessionGate>
       </div>
     </ChatContextInsertionProvider>

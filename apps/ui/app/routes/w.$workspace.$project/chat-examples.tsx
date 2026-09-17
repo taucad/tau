@@ -17,7 +17,7 @@ export const ChatExamples = memo(function () {
   const cadChat = useCadChatClient();
 
   const handleExampleClick = (example: ChatExample) => {
-    cadChat.submit({ text: example.prompt });
+    void cadChat.submit({ text: example.prompt });
   };
 
   const handleRefreshExamples = () => {

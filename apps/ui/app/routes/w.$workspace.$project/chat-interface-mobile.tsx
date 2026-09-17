@@ -15,6 +15,7 @@ import { useChatInterfaceState } from '#routes/w.$workspace.$project/use-chat-in
 import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
 import { Drawer, DrawerContent, DrawerTitle, DrawerDescription } from '@taucad/ui/components/drawer';
 import { ChatInterfaceSessionGate } from '#routes/w.$workspace.$project/focused-chat-gate.js';
+import { MobileWorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
 
 export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
   const { activeTab, handleTabChange, drawerOpen, handleDrawerChange, snapPoints, activeSnapPoint, handleSnapChange } =
@@ -23,7 +24,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
   const isViewerTab = activeTab === 'viewer';
 
   return (
-    <ChatInterfaceSessionGate fallback={<div className='absolute inset-0 size-full md:hidden' />}>
+    <ChatInterfaceSessionGate fallback={<MobileWorkspaceSkeleton />}>
       <div
         className={cn(
           // --nav-height is the height of the navigation tabs

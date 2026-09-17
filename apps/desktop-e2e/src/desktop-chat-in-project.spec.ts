@@ -2,6 +2,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import { afterEach, expect, test } from 'vitest';
+import type { Page } from 'playwright';
 import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import { gatewayFixtureFinalText, gatewayFixtureModelName, installGatewayFixture } from '#support/gateway-fixture.js';
@@ -45,6 +46,34 @@ const prompt = 'Create a cube with a centered cylindrical cutout and verify it.'
  * between them the default suite exercises both arms.
  */
 const location = process.env['TAU_E2E_DESKTOP_LOCATION'] ?? 'picked';
+
+/**
+ * Record every label the latest turn's revision marker shows, in order.
+ *
+ * *Saving revision* lasts as long as the host's settlement takes, which a
+ * scripted turn can make shorter than any poll interval, so the marker's own
+ * live region is observed rather than sampled. Red-First row 18.
+ *
+ * @param page - The renderer.
+ * @returns A reader for the labels seen so far.
+ */
+const recordTurnMarker = async (page: Page): Promise<() => Promise<readonly string[]>> => {
+  await page.evaluate(() => {
+    const seen: string[] = [];
+    Object.assign(globalThis, { tauTurnMarkerLabels: seen });
+    const sample = (): void => {
+      const markers = document.querySelectorAll('[role="status"][aria-label="Turn revision status"]');
+      const text = [...markers].at(-1)?.textContent.trim() ?? '';
+      if (text !== '' && seen.at(-1) !== text) {
+        seen.push(text);
+      }
+    };
+    new MutationObserver(sample).observe(document.body, { characterData: true, childList: true, subtree: true });
+    sample();
+  });
+  return async () =>
+    page.evaluate(() => [...((globalThis as { tauTurnMarkerLabels?: string[] }).tauTurnMarkerLabels ?? [])]);
+};
 
 let session: DesktopSession | undefined;
 let fixture: GatewayFixture | undefined;
@@ -107,6 +136,7 @@ test('builds an openrscad model on disk from the project chat', async () => {
     const seedWritten = statSync(await waitForProjectOnDisk(root, slug, { extension: '.scad' })).mtimeMs;
     const gatewayCallsBefore = fixture.gatewayRequests.length;
 
+    const markerLabels = await recordTurnMarker(page);
     const promptStart = Date.now();
     await sendPrompt(page, prompt);
 
@@ -124,11 +154,69 @@ test('builds an openrscad model on disk from the project chat', async () => {
     await expectLauncher2Turn(session.logPath, join(root, slug), activeChatId(page));
 
     await expectModelBuilt({ finalText: gatewayFixtureFinalText, logPath: session.logPath, page, sourcePath });
+
+    /* Row 18: working → saving → saved, on this turn, in that order. */
+    const lastLabel = async (): Promise<string | undefined> => {
+      const seen = await markerLabels();
+      return seen.at(-1);
+    };
+    await expect.poll(lastLabel, { timeout: 120_000 }).toMatch(/^Rev \d+ saved/u);
+    const labels = await markerLabels();
+    const working = labels.findLastIndex((label) => label.endsWith('Working'));
+    const saving = labels.lastIndexOf('Saving revision');
+    console.info(`[desktop-e2e] in-project turn marker: ${JSON.stringify(labels)}`);
+    expect(working, `marker never said Working: ${JSON.stringify(labels)}`).toBeGreaterThanOrEqual(0);
+    expect(saving, `marker never said Saving revision after Working: ${JSON.stringify(labels)}`).toBeGreaterThan(
+      working,
+    );
+    expect(labels.length - 1).toBeGreaterThan(saving);
     console.info(`[desktop-e2e] in-project prompt-to-framed-geometry: ${String(Date.now() - promptStart)} ms`);
     console.info(`[desktop-e2e] in-project API chat calls: ${JSON.stringify(fixture.apiChatRequests)}`);
     expectNoDesktopAnalytics(session);
   } catch (error) {
     await session.capture('in-project-failure');
+    throw error;
+  }
+});
+
+/* Row 18's other half: a turn whose provider call is refused must not claim a
+ * save it never made. */
+test('says Save not confirmed when the gateway refuses the turn', async () => {
+  const account = tauTestAccount('in-project-failure');
+  seededEmail = account.email;
+  const token = await seedTauTestUser(account);
+  session = await launchDesktopApp({ token });
+  const { page } = session;
+  fixture = await installGatewayFixture(page);
+
+  try {
+    await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
+    await selectKernel(page, 'OpenSCAD');
+    await selectChatModel(page, gatewayFixtureModelName);
+    await submitPrompt(page, prompt);
+    await expect.poll(() => fixture!.gatewayRequests.length, { timeout: 120_000 }).toBeGreaterThanOrEqual(2);
+
+    fixture.setFailure({ status: 500, message: 'Provider unavailable for this test.' });
+    const markerLabels = await recordTurnMarker(page);
+    await sendPrompt(page, prompt);
+    await expect
+      .poll(
+        async () => {
+          const seen = await markerLabels();
+          return seen.at(-1);
+        },
+        {
+          message: 'the refused turn must end on Save not confirmed',
+          timeout: 300_000,
+        },
+      )
+      .toBe('Save not confirmed');
+    console.info(`[desktop-e2e] refused turn marker: ${JSON.stringify(await markerLabels())}`);
+  } catch (error) {
+    console.info(
+      `[desktop-e2e] refused turn marker: ${JSON.stringify(await page.evaluate(() => (globalThis as { tauTurnMarkerLabels?: string[] }).tauTurnMarkerLabels).catch(() => []))}`,
+    );
+    await session.capture('in-project-refused-turn');
     throw error;
   }
 });

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import type { Chat } from '@taucad/chat';
@@ -8,6 +8,8 @@ import type { ProjectListItem } from '#types/project.types.js';
 import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
 
 const mockUseChats = vi.fn();
+const mockWarmMonaco = vi.hoisted(() => vi.fn());
+vi.mock('#lib/monaco-warmup.js', () => ({ warmMonaco: mockWarmMonaco }));
 const mockUseChatSession = vi.fn();
 const mockNavigate = vi.fn();
 let search = '?chat=chat_12';
@@ -228,6 +230,15 @@ describe('ProjectChatList', () => {
     expect(link.querySelector('.font-medium')).toBeNull();
   });
 
+  it('starts Monaco when a chat row is pointed at or focused', () => {
+    render(<ProjectChatList project={project} isProjectActive />);
+    const link = screen.getByRole('link', { name: 'Chat 12' });
+
+    fireEvent.pointerEnter(link);
+    fireEvent.focus(link);
+    expect(mockWarmMonaco).toHaveBeenCalledTimes(2);
+  });
+
   it('hangs the chats off a rail one slot in', () => {
     render(<ProjectChatList project={project} isProjectActive />);
     expect(document.querySelector('#project-chats-proj_one')).toHaveClass('ml-3.5', 'border-l', 'pl-1.5', 'gap-0');
@@ -258,6 +269,23 @@ describe('ProjectChatList', () => {
     mockChatStatus.mockReturnValue(status({ state: 'working' }));
     render(<ProjectChatList project={project} isProjectActive />);
     fireEvent.click(screen.getByRole('button', { name: 'Stop Chat 12' }));
+    expect(mockCloseChat).toHaveBeenCalledExactlyOnceWith('proj_one', 'chat_12');
+  });
+
+  it('opens the same actions on right-click anywhere on the row', async () => {
+    mockChatStatus.mockReturnValue(status({ state: 'working' }));
+    render(<ProjectChatList project={project} isProjectActive />);
+    const row = screen.getByRole('link', { name: 'Chat 12' }).closest<HTMLElement>('[data-slot=chat-trigger]')!;
+    fireEvent.contextMenu(row);
+
+    const menu = await screen.findByRole('menu');
+    expect(row).toHaveAttribute('data-state', 'open');
+    expect(
+      within(menu)
+        .getAllByRole('menuitem')
+        .map((item) => item.textContent),
+    ).toEqual(['Rename', 'Stop', 'Delete']);
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Stop Chat 12' }));
     expect(mockCloseChat).toHaveBeenCalledExactlyOnceWith('proj_one', 'chat_12');
   });
 

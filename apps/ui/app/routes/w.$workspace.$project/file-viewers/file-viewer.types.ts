@@ -35,6 +35,11 @@ export type FileViewerRenderRequest = {
   readonly textEditor:
     | {
         readonly language: string;
+        /**
+         * Whether the pane's model is bound to the workspace, so an editor may
+         * mount. Until then a text viewer shows the pane placeholder.
+         */
+        readonly isReady: boolean;
         readonly onChange: (value: string | undefined) => void;
         readonly onValidate: (markers: editor.IMarkerData[]) => void;
       }

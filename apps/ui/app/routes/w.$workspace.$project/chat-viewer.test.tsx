@@ -755,11 +755,38 @@ describe('ChatViewer reopen-renderer overlay', () => {
     expect(label).toHaveTextContent('Right Rim');
     expect(label).toHaveAttribute('aria-hidden', 'true');
     expect(label.className).toContain('pointer-events-none');
-    expect(label).toHaveStyle({
-      left: '64px',
-      top: '72px',
+    // The badge is placed from custom properties written straight to the
+    // layout element, so a pointer move never re-renders the viewer subtree.
+    expect(screen.getByTestId('chat-viewer-layout')).toHaveStyle({
       '--viewer-hover-label-x': '64px',
       '--viewer-hover-label-y': '72px',
+    });
+    expect(label).toHaveStyle({
+      left: 'var(--viewer-hover-label-x, 0px)',
+      top: 'var(--viewer-hover-label-y, 0px)',
+    });
+  });
+
+  it('should place the hover badge on later pointer moves without re-rendering the viewer', () => {
+    mockHoveredComponentId = rightRimComponentId;
+    const cadActor = createMockCadActor();
+    mockGeometryUnits.set(helperEntryPath, cadActor);
+
+    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    const canvasRegion = screen.getByTestId('cad-viewer-canvas-region');
+    fireCanvasPointerMove(canvasRegion, { clientX: 74, clientY: 92 });
+
+    // Each render of the viewer reads every cad subscription's snapshot, so a
+    // flat read count across pointer moves means no React commit happened.
+    const readsAfterFirstMove = vi.mocked(cadActor.getSnapshot).mock.calls.length;
+    fireCanvasPointerMove(canvasRegion, { clientX: 120, clientY: 140 });
+    fireCanvasPointerMove(canvasRegion, { clientX: 160, clientY: 180 });
+
+    expect(vi.mocked(cadActor.getSnapshot).mock.calls.length).toBe(readsAfterFirstMove);
+    expect(screen.getByTestId('chat-viewer-layout')).toHaveStyle({
+      '--viewer-hover-label-x': '150px',
+      '--viewer-hover-label-y': '160px',
     });
   });
 

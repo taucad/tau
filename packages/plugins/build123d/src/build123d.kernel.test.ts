@@ -121,6 +121,21 @@ describe('Build123d kernel lifecycle errors', () => {
     });
   });
 
+  it.each([
+    ['{', 'INVALID_RECORD'],
+    [JSON.stringify({ recordVersion: 2, profile: 'future', groups: {} }), 'UNSUPPORTED_RECORD'],
+  ])('reports the stored record %s as a typed %s issue before building', async (record, code) => {
+    const context = createContext();
+    runtime.filesystem.readFile = vi.fn().mockResolvedValue(new TextEncoder().encode(record));
+    await expect(
+      definition.createGeometry({ entryPath: 'main.py', parameters: {}, options: renderOptions }, runtime, context),
+    ).rejects.toMatchObject({
+      name: 'Build123dKernelError',
+      issues: [{ code, type: 'runtime', severity: 'error', location: { fileName: '.tau/parameters/main.py.json' } }],
+    });
+    expect(context.session.request).not.toHaveBeenCalled();
+  });
+
   it('returns structured generic and stale-handle failures', async () => {
     const context = createContext();
     context.session.request.mockResolvedValueOnce({

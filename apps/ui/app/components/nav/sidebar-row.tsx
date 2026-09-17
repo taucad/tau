@@ -11,21 +11,39 @@
  * - A row being renamed carries the focus outline; the field inside draws none.
  */
 
-import type { ReactNode } from 'react';
-import { CircleAlert } from 'lucide-react';
+import type { ComponentProps, ComponentType, ReactNode } from 'react';
+import { CircleAlert, MoreHorizontal } from 'lucide-react';
 import { Link } from 'react-router';
+import { Button } from '@taucad/ui/components/button';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@taucad/ui/components/context-menu';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@taucad/ui/components/dropdown-menu';
 import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 import { cn } from '@taucad/ui/utils/cn';
 import { Loader } from '#components/ui/loader.js';
+import { warmMonaco } from '#lib/monaco-warmup.js';
 
 /*
  * `--fade-scrim-into` follows the row's own background, so the actions' scrim
- * matches it at rest (coarse pointers) and on hover, focus and active.
+ * matches it at rest (coarse pointers) and on hover, focus and active. An open
+ * menu keeps the row lit: the actions menu through its trigger, the context
+ * menu through the row's own `data-state`.
  */
 const rowClass =
-  'group/row fade-row flex h-7 w-full min-w-0 items-center gap-1 rounded-md pr-0.5 pl-0.5 text-sm text-sidebar-foreground transition-colors [--fade-scrim-into:var(--sidebar-background)] focus-within:bg-sidebar-accent focus-within:[--fade-scrim-into:var(--sidebar-accent)] hover:bg-sidebar-accent hover:[--fade-scrim-into:var(--sidebar-accent)] data-[active=true]:bg-sidebar-accent data-[active=true]:[--fade-scrim-into:var(--sidebar-accent)] pointer-coarse:[--fade-label-size:var(--fade-label-size-actions)]';
+  'group/row fade-row flex h-7 w-full min-w-0 items-center gap-1 rounded-md pr-0.5 pl-0.5 text-sm text-sidebar-foreground transition-colors [--fade-scrim-into:var(--sidebar-background)] focus-within:bg-sidebar-accent focus-within:[--fade-scrim-into:var(--sidebar-accent)] hover:bg-sidebar-accent hover:[--fade-scrim-into:var(--sidebar-accent)] data-[active=true]:bg-sidebar-accent data-[active=true]:[--fade-scrim-into:var(--sidebar-accent)] has-[[aria-haspopup=menu][data-state=open]]:bg-sidebar-accent has-[[aria-haspopup=menu][data-state=open]]:[--fade-scrim-into:var(--sidebar-accent)] data-[state=open]:bg-sidebar-accent data-[state=open]:[--fade-scrim-into:var(--sidebar-accent)] pointer-coarse:[--fade-label-size:var(--fade-label-size-actions)]';
 
 /**
  * The row's class. Renaming moves the focus outline onto the row (D17): the
@@ -54,9 +72,98 @@ export const sidebarRowButtonClass = nestedActionVariants({ className: 'size-6 s
  */
 export function SidebarRowActions({ children }: { readonly children: ReactNode }): React.JSX.Element {
   return (
-    <span className='fade-action absolute inset-y-0 right-0.5 hidden items-center rounded-r-md bg-(--fade-scrim-into) group-focus-within/row:flex group-hover/row:flex pointer-coarse:flex'>
+    /* An open menu moves focus into its portal and the pointer off the row; the
+     * slot stays shown so the menu keeps an anchor instead of jumping to (0,0). */
+    <span className='fade-action absolute inset-y-0 right-0.5 hidden items-center rounded-r-md bg-(--fade-scrim-into) group-focus-within/row:flex group-hover/row:flex has-[[aria-haspopup=menu][data-state=open]]:flex pointer-coarse:flex'>
       {children}
     </span>
+  );
+}
+
+type SidebarRowMenuItemProps = Pick<
+  ComponentProps<typeof DropdownMenuItem>,
+  'aria-label' | 'children' | 'disabled' | 'onSelect' | 'variant'
+>;
+
+/** The menu parts a row's items are written against, so one list serves both menus. @public */
+export type SidebarRowMenuParts = {
+  readonly Item: ComponentType<SidebarRowMenuItemProps>;
+  readonly Separator: ComponentType;
+};
+
+/** A row's menu items, rendered into the actions menu and the context menu alike. @public */
+export type SidebarRowMenuItems = (parts: SidebarRowMenuParts) => ReactNode;
+
+const dropdownParts: SidebarRowMenuParts = { Item: DropdownMenuItem, Separator: DropdownMenuSeparator };
+const contextParts: SidebarRowMenuParts = { Item: ContextMenuItem, Separator: ContextMenuSeparator };
+
+/**
+ * The row's menu, on right-click (or long press) anywhere on the row as well as
+ * on its actions button — the file tree's two ways in.
+ *
+ * @param props - The row, its items, and whether the menu is available.
+ * @returns The row, wrapped.
+ * @public
+ */
+export function SidebarRowContextMenu({
+  items,
+  isDisabled,
+  className,
+  children,
+}: {
+  readonly items: SidebarRowMenuItems;
+  /** A row being renamed keeps the field's own context menu. */
+  readonly isDisabled: boolean;
+  readonly className: string;
+  readonly children: ReactNode;
+}): React.JSX.Element {
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild disabled={isDisabled}>
+        {children}
+      </ContextMenuTrigger>
+      <ContextMenuContent className={className}>{items(contextParts)}</ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+/**
+ * The row's actions button and its menu.
+ *
+ * @param props - The row's name, its items, and where the menu opens.
+ * @returns The button and its menu.
+ * @public
+ */
+export function SidebarRowMenuButton({
+  name,
+  items,
+  className,
+  side = 'right',
+  align = 'start',
+}: {
+  readonly name: string;
+  readonly items: SidebarRowMenuItems;
+  readonly className: string;
+  readonly side?: ComponentProps<typeof DropdownMenuContent>['side'];
+  readonly align?: ComponentProps<typeof DropdownMenuContent>['align'];
+}): React.JSX.Element {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type='button'
+          variant='ghost'
+          size='icon'
+          className={sidebarRowButtonClass}
+          aria-label={`More actions for ${name}`}
+        >
+          <MoreHorizontal aria-hidden className='size-3.5' />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent side={side} align={align} className={className}>
+        {items(dropdownParts)}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -91,6 +198,10 @@ export function SidebarRowLink({
       aria-busy={isPending}
       aria-describedby={sentence === undefined ? undefined : descriptionId}
       className='flex h-full min-w-0 flex-1 items-center rounded-sm outline-hidden focus-visible:focus-outline'
+      /* Every row opens a project route, whose editors need Monaco: start it on intent. */
+      onPointerEnter={warmMonaco}
+      onPointerDown={warmMonaco}
+      onFocus={warmMonaco}
       onClick={onClick}
     >
       {isPending ? <Loader className='mr-1.5 size-3.5 shrink-0' /> : null}

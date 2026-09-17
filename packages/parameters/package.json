@@ -96,7 +96,9 @@
     "@cfworker/json-schema": "catalog:",
     "@json-structure/sdk": "catalog:",
     "@taucad/cache-core": "workspace:*",
-    "@taucad/units": "workspace:*"
+    "@taucad/units": "workspace:*",
+    "@types/json-schema": "catalog:",
+    "type-fest": "catalog:"
   },
   "peerDependenciesMeta": {
     "xstate": {

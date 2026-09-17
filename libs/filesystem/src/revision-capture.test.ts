@@ -10,7 +10,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { captureRevisionTree } from '#revision-capture.js';
 import type { RevisionCaptureFileSystem } from '#revision-capture.js';
-import type { FileStat } from '#types.js';
+import type { DirectoryEntry, FileStat } from '#types.js';
 
 /**
  * A real filesystem can drop an entry between `readdir` and the `stat` that
@@ -359,6 +359,62 @@ describe('captureRevisionTree', () => {
       RangeError,
     );
     expect(readdir).not.toHaveBeenCalled();
+  });
+
+  /*
+   * On OPFS `stat` reads a text file whole to count its lines, so a walk that
+   * stats each child to learn its kind reads every file twice per save.
+   */
+  it('takes entry kinds from readdirEntries and stats nothing when the view offers it', async () => {
+    const tree: Record<string, readonly string[] | string> = {
+      '': ['a.ts', 'nested', 'b.txt'],
+      'a.ts': 'a',
+      'b.txt': 'b',
+      nested: ['c.ts', 'deeper'],
+      'nested/c.ts': 'c',
+      'nested/deeper': ['d.ts'],
+      'nested/deeper/d.ts': 'd',
+    };
+    const fallback = vanishingFileSystem(tree, new Set());
+    const fallbackStat = vi.spyOn(fallback, 'stat');
+    const listing = vanishingFileSystem(tree, new Set());
+    const listingStat = vi.spyOn(listing, 'stat');
+    const withEntries = Object.assign(listing, {
+      readdirEntries: async (path: string): Promise<DirectoryEntry[]> => {
+        const names = await listing.readdir(path);
+        return names.map((name) => ({
+          name,
+          kind: typeof tree[path === '' ? name : `${path}/${name}`] === 'string' ? 'file' : 'dir',
+        }));
+      },
+    });
+
+    const expected = await captureRevisionTree(fallback);
+    const captured = await captureRevisionTree(withEntries);
+
+    expect(listingStat).not.toHaveBeenCalled();
+    expect(fallbackStat).toHaveBeenCalledTimes(6);
+    expect(captured.entries()).toStrictEqual(expected.entries());
+    expect(captured.entries().map(({ path }) => path)).toEqual(['a.ts', 'b.txt', 'nested/c.ts', 'nested/deeper/d.ts']);
+  });
+
+  it('treats a directory that vanishes before its kind listing as empty', async () => {
+    const filesystem = vanishingFileSystem({ '': ['main.ts', 'run_a'], 'main.ts': 'kept' }, new Set(['run_a']));
+    const withEntries = Object.assign(filesystem, {
+      readdirEntries: async (path: string): Promise<DirectoryEntry[]> => {
+        if (path === 'run_a') {
+          throw Object.assign(new Error('gone'), { name: 'NotFoundError' });
+        }
+        return [
+          { name: 'main.ts', kind: 'file' },
+          { name: 'run_a', kind: 'dir' },
+        ];
+      },
+    });
+
+    const captured = await captureRevisionTree(withEntries);
+
+    expect(captured.entries().map(({ path }) => path)).toEqual(['main.ts']);
   });
   /* eslint-enable @typescript-eslint/naming-convention -- Re-enable after path-keyed fixtures. */
 });

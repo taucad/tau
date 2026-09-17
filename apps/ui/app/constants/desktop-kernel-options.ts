@@ -33,7 +33,7 @@ export const desktopProjectRoot = async (projectId: string): Promise<string> => 
  * @returns The lazy options factory for this project's desktop kernel.
  */
 export const desktopKernelOptions =
-  (projectId: string, nativeKernelId?: string, computeMode: ComputeReuseMode = 'durable'): LazyKernelOptionsFactory =>
+  (projectId: string, nativeKernelId: string | undefined, computeMode: ComputeReuseMode): LazyKernelOptionsFactory =>
   async () => {
     const projectRoot = await desktopProjectRoot(projectId);
     if (nativeKernelId) {

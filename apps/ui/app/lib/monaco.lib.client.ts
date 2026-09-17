@@ -1,4 +1,5 @@
 import { loader } from '@monaco-editor/react';
+import { Topic } from '@taucad/events';
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
 import TsWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
@@ -56,27 +57,90 @@ registry.addContribution(csharpContribution);
 registry.addContribution(tsContribution);
 registry.addContribution(jsContribution);
 
+/**
+ * Where Monaco's one-time configuration stands.
+ *
+ * `ready` carries the configured instance; only then has `loader.config` run,
+ * so only then may anything call `loader.init()` (directly, through
+ * `useMonaco`, or by mounting `Editor`) without the loader fetching a second
+ * Monaco from its CDN default.
+ */
+export type MonacoConfiguration =
+  | { readonly status: 'idle' }
+  | { readonly status: 'pending' }
+  | { readonly status: 'ready'; readonly monaco: typeof Monaco }
+  | { readonly status: 'failed'; readonly error: Error };
+
 // Guard to ensure configureMonaco runs only once. shikiToMonaco monkey-patches
 // monaco.editor.create and monaco.editor.setTheme, creating chained wrappers
-// on repeated calls. This flag prevents that during HMR or multiple call sites.
-let configuration: Promise<void> | undefined;
+// on repeated calls. This promise prevents that during HMR or multiple call
+// sites. A failed attempt (typically an offline chunk load) clears it so the
+// next caller retries.
+let configuration: Promise<typeof Monaco | undefined> | undefined;
+let configurationSnapshot: MonacoConfiguration = { status: 'idle' };
+const configurationTopic = new Topic<void>({ name: 'monaco-configuration' });
+
+const publishConfiguration = (next: MonacoConfiguration): void => {
+  configurationSnapshot = next;
+  configurationTopic.emit();
+};
 
 /**
  * Configure the Monaco editor.
  *
  * This custom loader supports Vite bundling and ensures a minimal
  * bundle size. Idempotent -- safe to call from multiple entry points.
+ * Call it from effects or event handlers, never at module evaluation: its
+ * dynamic imports can resolve to the chunk that is still evaluating the caller.
+ *
+ * @returns The configured Monaco instance, or `undefined` outside a browser.
  */
-export const configureMonaco = async (): Promise<void> => {
+export const configureMonaco = async (): Promise<typeof Monaco | undefined> => {
   // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- can be undefined in SSR
   if (globalThis.self === undefined) {
-    return;
+    return undefined;
   }
-  configuration ??= initializeMonaco();
+  configuration ??= startConfiguration();
   return configuration;
 };
 
-const initializeMonaco = async (): Promise<void> => {
+const startConfiguration = async (): Promise<typeof Monaco> => {
+  publishConfiguration({ status: 'pending' });
+  try {
+    const monaco = await initializeMonaco();
+    publishConfiguration({ status: 'ready', monaco });
+    return monaco;
+  } catch (error) {
+    configuration = undefined;
+    publishConfiguration({ status: 'failed', error: error instanceof Error ? error : new Error(String(error)) });
+    throw error;
+  }
+};
+
+/**
+ * The current configuration state, for `useSyncExternalStore`.
+ *
+ * @returns The latest snapshot; a new object only when the state changes.
+ */
+export const getMonacoConfiguration = (): MonacoConfiguration => configurationSnapshot;
+
+/**
+ * Subscribe to configuration changes, starting configuration if it has not
+ * started (or retrying it after a failure). Subscribing happens in React's
+ * commit phase, so configuration never starts during module evaluation.
+ *
+ * @param listener - Called after every state change.
+ * @returns The unsubscribe function.
+ */
+export const subscribeMonacoConfiguration = (listener: () => void): (() => void) => {
+  const unsubscribe = configurationTopic.subscribe(listener);
+  if (configurationSnapshot.status !== 'ready') {
+    void configureMonaco().catch(() => undefined);
+  }
+  return unsubscribe;
+};
+
+const initializeMonaco = async (): Promise<typeof Monaco> => {
   // Prime Geist Mono before Monaco's first DomCharWidthReader pass.
   //
   // Monaco caches char-width measurements as "trusted" on the first read
@@ -220,6 +284,8 @@ const initializeMonaco = async (): Promise<void> => {
     Object.assign(monacoTheme.colors, generateJsonBracketHighlightColors(shikiTheme));
     monaco.editor.defineTheme(themeId, monacoTheme);
   }
+
+  return monaco;
 };
 
 /**

@@ -92,6 +92,22 @@ const workerError = (type: 'syntax' | 'validation' | 'runtime' | 'kernel') =>
     },
   ]);
 
+/**
+ * The attributes one named span was ended with.
+ *
+ * @param name - Span name the kernel opened.
+ * @returns What `end()` received, or undefined when no such span was opened.
+ */
+const endedSpanAttributes = (name: string): Record<string, unknown> | undefined => {
+  const index = runtime.tracer.startSpan.mock.calls.findIndex(([spanName]) => spanName === name);
+  if (index === -1) {
+    return undefined;
+  }
+  // oxlint-disable-next-line typescript/no-unsafe-member-access -- the mock's own return value
+  const end = runtime.tracer.startSpan.mock.results[index]?.value.end as ReturnType<typeof vi.fn>;
+  return end.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+};
+
 describe('PicoGK kernel', () => {
   let definition: AnyKernelDefinition;
   beforeEach(async () => {
@@ -103,15 +119,18 @@ describe('PicoGK kernel', () => {
     const filesystem = createMockFileSystem({ readFileResult: 'x' });
     filesystem.mocks.readdirStat.mockImplementation(async (directory: string) =>
       directory === ''
-        ? ['main.cs', 'thumbnail.webp', 'tau.json', 'package.json'].map((name) => ({
-            type: 'file' as const,
-            size: 1,
-            mtimeMs: 0,
-            contentKind: 'text' as const,
-            lineCount: 1,
-            path: name,
-            name,
-          }))
+        ? ['main.cs', 'thumbnail.webp', 'tau.json', 'package.json'].map(
+            (name) =>
+              ({
+                type: 'file',
+                size: 1,
+                mtimeMs: 0,
+                contentKind: 'text',
+                lineCount: 1,
+                path: name,
+                name,
+              }) as const,
+          )
         : [],
     );
     const mirrorRuntime = { ...createMockKernelRuntime(), filesystem };
@@ -174,20 +193,12 @@ describe('PicoGK kernel', () => {
       runtime,
       value,
     );
-    expect(runtime.logger.debug).toHaveBeenCalledWith(
-      'PicoGK C# analysis performance',
-      expect.objectContaining({ data: expect.objectContaining(compilationTimings) }),
-    );
-    expect(runtime.logger.debug).toHaveBeenCalledWith(
-      'PicoGK C# build performance',
-      expect.objectContaining({
-        data: expect.objectContaining({
-          ...workerTimings,
-          artifactRead: expect.any(Number),
-          glbTransform: expect.any(Number),
-        }),
-      }),
-    );
+    /* D8: the C# stage timings are attributes on the span that measured the request, not a debug
+     * log line, so the breakdown is answerable from the trace file with no log parsing. */
+    expect(endedSpanAttributes('picogk.analyze')).toMatchObject(compilationTimings);
+    expect(endedSpanAttributes('picogk.build')).toMatchObject(workerTimings);
+    expect(runtime.tracer.startSpan.mock.calls.map(([name]) => String(name))).toContain('picogk.artifact-read');
+    expect(runtime.logger.debug).not.toHaveBeenCalledWith(expect.stringContaining('performance'), expect.anything());
     // W17/D2: an aborted build stops the worker cooperatively, which is what the live-edit lane needs.
     expect(value.session.request).toHaveBeenLastCalledWith(expect.objectContaining({ cancelMethod: 'cancel' }));
     expect(definition.liveEdit).toBe(true);

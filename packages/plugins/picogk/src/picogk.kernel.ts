@@ -92,17 +92,17 @@ export const picogkKernel = defineKernel({
 
   async getParameters({ entryPath }, runtime, context) {
     await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
+    /* D8: the worker's own stage timings are attributes on the span that measured the request. The
+     * span's duration is the total, so nothing here times the call a second time. */
+    const span = runtime.tracer.startSpan('picogk.analyze', { entryPath });
     try {
-      const started = performance.now();
       const analysis = await context.session.request({
         method: 'analyze',
         params: { entryPath },
         schema: picogkAnalysisSchema,
         signal: runtime.signal,
       });
-      runtime.logger.debug('PicoGK C# analysis performance', {
-        data: { ...analysis.timings, total: performance.now() - started },
-      });
+      span.end({ ...analysis.timings });
       return createKernelSuccess(
         createKernelParameterDeclaration(analysis.defaultParameters, analysis.jsonSchema, {
           id: 'urn:taucad:picogk:parameters',
@@ -111,13 +111,17 @@ export const picogkKernel = defineKernel({
       );
     } catch (error) {
       return createKernelError(issuesFrom(error, entryPath));
+    } finally {
+      /* Idempotent: the success path already ended it with its attributes. A failed request must
+       * still close it, or the tracer keeps parenting later spans under a span that never ended. */
+      span.end();
     }
   },
 
   async createGeometry({ entryPath, parameters }, runtime, context) {
     await context.mirror.sync(runtime.filesystem, runtime.fileContentCache);
+    const span = runtime.tracer.startSpan('picogk.build', { entryPath });
     try {
-      const started = performance.now();
       const result = await context.session.request({
         method: 'build',
         params: { entryPath, parameters },
@@ -127,21 +131,22 @@ export const picogkKernel = defineKernel({
         cancelMethod: 'cancel',
       });
       try {
-        const readStarted = performance.now();
-        const artifact = await context.session.readArtifact(result);
-        const artifactRead = performance.now() - readStarted;
-        const transformStarted = performance.now();
-        const glb = picogkArtifactToGlb(artifact, result);
+        const readSpan = runtime.tracer.startSpan('picogk.artifact-read');
+        let artifact;
+        try {
+          artifact = await context.session.readArtifact(result);
+        } finally {
+          readSpan.end();
+        }
+        const transformSpan = runtime.tracer.startSpan('picogk.glb-transform');
+        let glb;
+        try {
+          glb = picogkArtifactToGlb(artifact, result);
+        } finally {
+          transformSpan.end();
+        }
         runtime.signal.throwIfAborted();
-        runtime.logger.debug('PicoGK C# build performance', {
-          data: {
-            ...result.timings,
-            metrics: result.metrics,
-            artifactRead,
-            glbTransform: performance.now() - transformStarted,
-            total: performance.now() - started,
-          },
-        });
+        span.end({ ...result.timings, ...result.metrics });
         return {
           geometry: { format: 'gltf', content: glb },
           nativeHandle: { glb },
@@ -153,6 +158,8 @@ export const picogkKernel = defineKernel({
       }
     } catch (error) {
       throw new PicogkKernelError(issuesFrom(error, entryPath));
+    } finally {
+      span.end();
     }
   },
 

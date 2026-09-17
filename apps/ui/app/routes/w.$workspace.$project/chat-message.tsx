@@ -22,7 +22,11 @@ import type { CombinedChatState } from '#hooks/use-chat.js';
 import { serializeMessage } from '#utils/chat.utils.js';
 import { parseInlineReferences } from '#utils/at-reference.utils.js';
 import type { ActivityFamily, ActivityGroup, AggregatedGroup } from '#utils/assistant-message-activity.js';
-import { groupAssistantParts, findLastMeaningfulPartIndex } from '#utils/assistant-message-activity.js';
+import {
+  groupAssistantParts,
+  findLastMeaningfulPartIndex,
+  isActivityPartActive,
+} from '#utils/assistant-message-activity.js';
 import { AtReferenceChip } from '#components/chat/at-reference-chip.js';
 import { ContextChip } from '#components/chat/context-chip.js';
 import { ChatActivityGroup } from '#components/chat/chat-activity-group.js';
@@ -481,6 +485,7 @@ function renderActivityGroup(
       summary={group.summary}
       icon={activityIcons[group.families[0] ?? 'other']}
       isActive={context.isActiveGroup}
+      hasActiveRows={context.isMessageActive && group.parts.some((part) => isActivityPartActive(part))}
     >
       {renderActivityRows(group, context)}
     </ChatActivityGroup>

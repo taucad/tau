@@ -467,8 +467,8 @@ const userMessage = <Message extends UIMessage>(messages: readonly Message[]): U
         });
         continue;
       }
-      // The legacy arm (D14): a caller that still hands over inline base64.
-      const match = /^data:([^;,]+);base64,(.*)$/u.exec(part.url);
+      // The legacy arm (D14): a caller that still hands over inline base64. Only an image is an image block (G8).
+      const match = /^data:(image\/[^;,]+);base64,(.*)$/u.exec(part.url);
       if (!match) {
         throw new TypeError(`Browser agent host cannot record file part URL "${part.url}".`);
       }

@@ -18,7 +18,7 @@ import { getErrno } from '@taucad/utils/error';
 import { createAttachmentStore } from '#db/attachment-store.js';
 import type { AttachmentStore } from '#db/attachment-store.js';
 import { KeyedMutex } from '#db/keyed-mutex.js';
-import { isAttachmentUrl, isSupportedAttachmentMediaType } from '#utils/attachment.utils.js';
+import { attachmentReferenceOf, attachmentUrl, isSupportedAttachmentMediaType } from '#utils/attachment.utils.js';
 
 const composersRoot = '/.tau/composers';
 
@@ -197,8 +197,13 @@ const checkAttachments = (message: MyUIMessage, allowDataUrl: boolean): Error | 
     if (!isSupportedAttachmentMediaType(part.mediaType)) {
       return new Error(`Unsupported attachment type: ${part.mediaType}`);
     }
-    if (!isAttachmentUrl(part.url)) {
+    const reference = attachmentReferenceOf(part);
+    if (reference === undefined) {
       return new Error(`A composer attachment must be referenced as attachments/<sha256>.<ext>, not ${part.url}.`);
+    }
+    // The extension names the file on disk, so it must be the one the media type implies (S9).
+    if (attachmentUrl(reference) !== part.url) {
+      return new Error(`Attachment ${part.url} does not match its media type ${part.mediaType}.`);
     }
   }
   return undefined;

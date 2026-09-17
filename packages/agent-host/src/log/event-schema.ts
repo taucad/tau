@@ -64,7 +64,13 @@ const metadataSchema = z
  * Both spellings must stay in step — a row this rejects is a row the UI wrote
  * and no reader can resolve.
  */
-const attachmentPath = z.string().regex(/^attachments\/[\da-f]{64}\.(?:jpg|png|webp|gif|pdf)$/u);
+/**
+ * A durable `file-ref` path: `attachments/<sha256>.<ext>`.
+ *
+ * @internal
+ */
+export const attachmentPathPattern = /^attachments\/[\da-f]{64}\.(?:jpg|png|webp|gif|pdf)$/u;
+const attachmentPath = z.string().regex(attachmentPathPattern);
 /**
  * Schema for a content-addressed attachment reference in durable message content.
  *

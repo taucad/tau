@@ -683,6 +683,8 @@ const compactionModelsWithTransport = (options: {
   readonly createId: () => string;
   readonly prepareInvocation?: CreateTransportStreamOptions['prepareInvocation'];
   readonly bindInvocation?: CreateTransportStreamOptions['bindInvocation'];
+  /** The session's side table, so a summarised document keeps its name (P32). */
+  readonly documents: () => ReadonlyMap<string, MaterializedDocument>;
 }): Models => {
   const models: Pick<Models, 'completeSimple'> = {
     completeSimple: async (model, context, streamOptions): Promise<AssistantMessage> => {
@@ -696,9 +698,11 @@ const compactionModelsWithTransport = (options: {
           funded && options.prepareInvocation
             ? await options.prepareInvocation('compaction', model.id, signal)
             : options.createId();
+        const documents = options.documents();
         const stream = options.transport.stream({
           attemptId,
           invocationPurpose: 'compaction',
+          ...(documents.size === 0 ? {} : { documents: new Map(documents) }),
           ...(funded
             ? {
                 onInvocationBound: async (binding: ModelInvocationBinding) =>
@@ -964,6 +968,11 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
           `Chat ${options.chatId}: attachment ${path} is not available on this device; the model will not see it.`,
         );
       }
+    }
+    if (outcome.malformed > 0) {
+      console.warn(
+        `Chat ${options.chatId}: ${String(outcome.malformed)} malformed attachment row(s) omitted; the model will not see them.`,
+      );
     }
     return history.map((message) => materializedById.get(message.id) ?? message);
   };
@@ -1307,6 +1316,7 @@ export const createAgentSession = async (options: CreateAgentSessionOptions): Pr
           identities: record.messages,
           toolInputIds,
           createId,
+          documents: () => documents,
           ...(options.modelTransport.usesBillingAttempt ? { prepareInvocation, bindInvocation } : {}),
         }),
     onSummary: () => {

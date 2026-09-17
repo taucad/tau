@@ -40,6 +40,8 @@ export type AttachmentStore = {
   read: (ref: AttachmentRef) => Promise<Uint8Array<ArrayBuffer> | undefined>;
   has: (ref: AttachmentRef) => Promise<boolean>;
   copyTo: (target: AttachmentStore, attachment: AttachmentReference) => Promise<void>;
+  /** Unlink one attachment; an absent one is already removed. */
+  remove: (ref: AttachmentRef) => Promise<void>;
   retainOnly: (referenced: Iterable<AttachmentRef>) => Promise<void>;
   removeAll: () => Promise<void>;
 };
@@ -132,6 +134,19 @@ export function createAttachmentStore(client: AttachmentClient, directory: strin
         throw new Error(`Attachment ${attachment.hash} is missing; nothing was copied.`);
       }
       await target.put(bytes, attachment.mediaType, attachment.filename);
+    },
+    remove: async (ref) => {
+      const path = pathOf(ref);
+      if (path === undefined) {
+        return;
+      }
+      try {
+        await client.unlink(path);
+      } catch (error) {
+        if (!isNotFound(error)) {
+          throw error;
+        }
+      }
     },
     retainOnly: async (referenced) => {
       const keep = new Set<string>();

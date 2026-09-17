@@ -3,13 +3,7 @@ import { useSelector } from '@xstate/react';
 import { useProject } from '#hooks/use-project.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useChatSidebarStatus } from '#hooks/use-sidebar-status.js';
-
-const isDocumentActive = (): boolean => {
-  if (typeof document === 'undefined') {
-    return false;
-  }
-  return document.visibilityState === 'visible' && document.hasFocus();
-};
+import { isDocumentActive } from '#services/chat-session-store.js';
 
 /**
  * Clears unread state only while the focused chat is actually visible to the user.
@@ -33,6 +27,17 @@ export function useFocusedChatReadState(): void {
       chatSessions.markViewed(focusedChatId);
     }
   }, [chatSessions, focusedChatId, unread]);
+
+  // The store decides what a finishing turn leaves unread from this fact (R3).
+  useEffect(() => {
+    if (focusedChatId === undefined) {
+      return undefined;
+    }
+    chatSessions.focusChat(focusedChatId);
+    return () => {
+      chatSessions.blurChat(focusedChatId);
+    };
+  }, [chatSessions, focusedChatId]);
 
   useEffect(clearUnread, [clearUnread]);
 

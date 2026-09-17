@@ -25,6 +25,8 @@ vi.mock('#hooks/use-sidebar-status.js', () => ({ useChatSidebarStatus: vi.fn() }
 const unreadChats = new Set<string>();
 const recordedUnread = new Set<string>();
 const markViewed = vi.fn();
+const focusChat = vi.fn();
+const blurChat = vi.fn();
 const editorRef = { getSnapshot: () => ({ context: { focusedChatId: 'chat-focused' } }) };
 let visibilityState: DocumentVisibilityState = 'visible';
 
@@ -44,9 +46,13 @@ describe('useFocusedChatReadState', () => {
     recordedUnread.clear();
     visibilityState = 'visible';
     markViewed.mockReset();
+    focusChat.mockReset();
+    blurChat.mockReset();
     vi.mocked(useProjectManager).mockReset();
     vi.mocked(useChatSessionStore).mockReturnValue({
       markViewed,
+      focusChat,
+      blurChat,
       isUnread: (chatId: string) => recordedUnread.has(chatId),
     } as unknown as ReturnType<typeof useChatSessionStore>);
     vi.mocked(useChatSidebarStatus).mockImplementation((_projectId, chatId) => status(unreadChats.has(chatId)));
@@ -128,6 +134,18 @@ describe('useFocusedChatReadState', () => {
 
     expect(markViewed).toHaveBeenCalledExactlyOnceWith('chat-focused');
     expect(vi.mocked(useProjectManager)).not.toHaveBeenCalled();
+  });
+
+  it('should tell the store which chat is focused, and take it back on unmount (R3)', () => {
+    const view = renderHook(() => {
+      useFocusedChatReadState();
+    });
+    expect(focusChat).toHaveBeenCalledExactlyOnceWith('chat-focused');
+    expect(blurChat).not.toHaveBeenCalled();
+
+    view.unmount();
+
+    expect(blurChat).toHaveBeenCalledExactlyOnceWith('chat-focused');
   });
 
   /* W20 pin (b): the sidebar's `unread` is the chat machine's `read` region and

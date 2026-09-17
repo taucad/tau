@@ -15,6 +15,7 @@ import { useCreditPreflight } from '#hooks/use-credit-preflight.js';
 import { useActiveChatSession } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { attachmentSendBlockReason, buildUserMessage } from '#utils/chat.utils.js';
+import { attachmentReferenceOf } from '#utils/attachment.utils.js';
 import type { AttachmentReference } from '#utils/attachment.utils.js';
 import { parseErrorForPersistence } from '#utils/error.utils.js';
 import { useProject } from '#hooks/use-project.js';
@@ -388,6 +389,16 @@ const userTurnIdAtOrBefore = (messages: readonly MyUIMessage[], messageId?: stri
   const messageIndex =
     messageId === undefined ? messages.length - 1 : messages.findIndex((message) => message.id === messageId);
   return messages.findLast((message, index) => index <= messageIndex && message.role === 'user')?.id;
+};
+
+/** The attachments a retry of `messageId` re-sends: every one held by a user turn up to and including its own. */
+const retainedAttachments = (messages: readonly MyUIMessage[], messageId: string): AttachmentReference[] => {
+  const turnIndex = messages.findIndex((message) => message.id === userTurnIdAtOrBefore(messages, messageId));
+  return messages
+    .slice(0, turnIndex + 1)
+    .filter((message) => message.role === 'user')
+    .flatMap((message) => message.parts.flatMap((part) => (part.type === 'file' ? [attachmentReferenceOf(part)] : [])))
+    .filter((reference) => reference !== undefined);
 };
 
 const requireProviderKind = (provider: ModelProvider | undefined): ModelProvider => {
@@ -972,6 +983,18 @@ export const useCadChatClient = (): CadChatClient => {
       // would silently fall through to the active model and the
       // model-selector dropdown would be a no-op (R10/t17).
       const requestAgent = modelId ? { ...agent, execution: withExecutionModel(agent.execution, modelId) } : agent;
+      // The other model re-reads the whole retained history, so a PDF anywhere in it must be readable (G5).
+      if (modelId !== undefined && requestAgent.execution.kind === 'tau') {
+        const resolved = resolveModelRef.current(requestAgent.execution.model);
+        const blocked = attachmentSendBlockReason(retainedAttachments(messages, messageId), {
+          name: resolved.name,
+          support: resolved.model?.support,
+        });
+        if (blocked !== undefined) {
+          surfaceDispatchFailure(new Error(blocked));
+          return;
+        }
+      }
       withWorkspace(
         userTurnIdAtOrBefore(messages, messageId),
         (execution, runId) => {
@@ -995,7 +1018,7 @@ export const useCadChatClient = (): CadChatClient => {
         requestAgent.execution,
       );
     },
-    [actions, activeChatId, agent, messages, projectId, refuseWhileBusy, withWorkspace],
+    [actions, activeChatId, agent, messages, projectId, refuseWhileBusy, surfaceDispatchFailure, withWorkspace],
   );
 
   const regenerateTail = useCallback(() => {

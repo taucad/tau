@@ -4,6 +4,7 @@ import { renderHook, act, waitFor } from '@testing-library/react';
 import { mock } from 'vitest-mock-extended';
 import type { Chat } from '@ai-sdk/react';
 import type { CadAgentConfigInput, CadAgentExecution, MyUIMessage } from '@taucad/chat';
+import { attachmentUrl } from '#utils/attachment.utils.js';
 import { useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
 import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
@@ -609,6 +610,40 @@ describe('useCadChatClient', () => {
       expect(actions.retryMessage).toHaveBeenCalled();
     });
     expect(creditPreflightHarness.calls).toEqual([['openai-gpt-retry', 'GPT Retry']]);
+  });
+
+  it('should refuse a retry on a model that cannot read a PDF earlier in the history (G5)', () => {
+    const messages: MyUIMessage[] = [
+      {
+        id: 'msg_user',
+        role: 'user',
+        parts: [
+          {
+            type: 'file',
+            mediaType: 'application/pdf',
+            filename: 'bracket-spec.pdf',
+            url: attachmentUrl(pdfAttachment),
+          },
+          { type: 'text', text: 'Read the spec.' },
+        ],
+      },
+      { id: 'msg_assistant', role: 'assistant', parts: [{ type: 'text', text: 'Done.' }] },
+    ];
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => messages });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    const actions = buildActions();
+    installActions(actions);
+
+    const { result } = renderHook(() => useCadChatClient());
+    act(() => {
+      result.current.retry('msg_assistant', 'openai-gpt-retry');
+    });
+
+    expect(actions.retryMessage).not.toHaveBeenCalled();
+    expect(persistedErrors).toEqual([
+      expect.objectContaining({ message: "GPT Retry can't read PDFs. Remove the PDF or pick another model." }),
+    ]);
   });
 
   it('places an external-agent turn on its daemon, naming the agent and no Tau model', async () => {

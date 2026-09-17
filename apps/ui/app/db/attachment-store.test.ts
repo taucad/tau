@@ -210,6 +210,22 @@ describe('attachment store', () => {
     });
   });
 
+  describe('remove', () => {
+    it('should unlink only the named attachment and treat an absent one as removed', async () => {
+      const client = memoryClient();
+      const store = createAttachmentStore(client, directory);
+      const image = await store.put(png, 'image/png');
+      const document = await store.put(pdf, 'application/pdf', 'spec.pdf');
+
+      await store.remove(image);
+      client.unlink.mockRejectedValueOnce(notFound('gone'));
+      await store.remove(image);
+
+      expect(await store.has(image)).toBe(false);
+      expect(await store.has(document)).toBe(true);
+    });
+  });
+
   describe('createChatAttachmentStore', () => {
     it('should root a chat attachment store beside that chat record', async () => {
       const client = memoryClient();

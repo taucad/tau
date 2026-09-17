@@ -819,6 +819,19 @@ describe('chat file store — composer record deletion (D11)', () => {
     await expect(files.exists(attachmentPath(projectId, chat.id))).resolves.toBe(false);
   });
 
+  it('should remove the record of a chat that was already tombstoned (G11)', async () => {
+    const files = createStoreWithFiles();
+    const chat = await files.store.createChat(projectId, { name: 'Deleted elsewhere', messages: [] });
+    await files.store.softDeleteChat(chat.id);
+    // Written after the tombstone: another device deleted it while this one still held a draft.
+    await seedComposer(files, projectId, chat.id);
+
+    await files.store.deleteChat(chat.id);
+
+    await expect(files.exists(recordPath(projectId, chat.id))).resolves.toBe(false);
+    await expect(files.exists(attachmentPath(projectId, chat.id))).resolves.toBe(false);
+  });
+
   it('deletes a chat that never had a draft without failing', async () => {
     const files = createStoreWithFiles();
     const chat = await files.store.createChat(projectId, { name: 'No draft', messages: [] });

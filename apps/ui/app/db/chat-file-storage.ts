@@ -341,6 +341,26 @@ export function createChatFileStore(
   const removeComposerRecord = async (projectId: string, chatId: string): Promise<void> =>
     createComposerRecordStore(options.client, composerRecordPaths.chat(projectId, chatId)).remove();
 
+  /**
+   * Tombstone a chat and reclaim its composer record. The record goes even when
+   * the chat was already tombstoned — by another device, or a repeated delete —
+   * because this device's record travels nowhere and nothing else removes it.
+   */
+  const tombstone = async (chatId: string): Promise<Chat | undefined> => {
+    const deleted = await patch(chatId, (chat) => {
+      if (isDeleted(chat)) {
+        return false;
+      }
+      chat.deletedAt = Date.now();
+      return true;
+    });
+    const projectId = deleted?.resourceId ?? (await locate(chatId));
+    if (projectId !== undefined) {
+      await removeComposerRecord(projectId, chatId);
+    }
+    return deleted;
+  };
+
   return {
     invalidateLog: (chatId) => {
       staleLogs.add(chatId);
@@ -411,35 +431,14 @@ export function createChatFileStore(
         return changed;
       }),
 
-    softDeleteChat: async (chatId) => {
-      const deleted = await patch(chatId, (chat) => {
-        if (isDeleted(chat)) {
-          return false;
-        }
-        chat.deletedAt = Date.now();
-        return true;
-      });
-      if (deleted !== undefined) {
-        await removeComposerRecord(deleted.resourceId, chatId);
-      }
-      return deleted;
-    },
+    softDeleteChat: async (chatId) => tombstone(chatId),
 
     /* A tombstone, not an erasure: `deletedAt` in the record is what travels to
      * the other device, where an absent file would just look like a chat that
      * had not arrived yet (S39, S43). The composer record is the exception —
      * it is this device's alone and travels nowhere, so it goes (D11). */
     deleteChat: async (chatId) => {
-      const deleted = await patch(chatId, (chat) => {
-        if (isDeleted(chat)) {
-          return false;
-        }
-        chat.deletedAt = Date.now();
-        return true;
-      });
-      if (deleted !== undefined) {
-        await removeComposerRecord(deleted.resourceId, chatId);
-      }
+      await tombstone(chatId);
     },
 
     getChat: async (chatId) => {

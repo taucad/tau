@@ -186,6 +186,12 @@ export type RuntimeRenderInput<
   readonly source: RuntimeSource<Files>;
   readonly parameters?: Record<string, unknown>;
   readonly renderOptions?: CollectRenderOptions<Kernels>;
+  /**
+   * Bytes written onto the runtime's filesystem in the same envelope as the command, before
+   * dependency resolution. The runtime observes them as the paths' current revision, so a host
+   * that persists the same bytes in parallel does not also trigger a watched re-render.
+   */
+  readonly stage?: Readonly<Record<string, Uint8Array<ArrayBuffer> | string>>;
 } & ContentRequestFor<RenderContentFor<Kernels, Middleware>>;
 
 /** Request-scoped model evaluation input with exact render-schema inference. @public */
@@ -686,6 +692,24 @@ const normalizeRuntimeSource = (source: RuntimeSource | unknown): NormalizedRunt
     throw new TypeError('Runtime source `path` must be a string.');
   }
   throw new TypeError('Runtime source must include either `files` or `path`.');
+};
+
+/** Fold a command's own staged bytes into the source's, so both reach the worker in one envelope. */
+const withStagedFiles = (
+  normalized: NormalizedRuntimeSource,
+  stage: Readonly<Record<string, Uint8Array<ArrayBuffer> | string>> | undefined,
+): NormalizedRuntimeSource => {
+  if (stage === undefined) {
+    return normalized;
+  }
+  if (!isRecord(stage)) {
+    throw new TypeError('Runtime `stage` must be a map of runtime paths to bytes.');
+  }
+  const merged: Record<string, Uint8Array<ArrayBuffer>> = { ...normalized.stage };
+  for (const [filename, content] of Object.entries(stage)) {
+    merged[assertRuntimeFilePath(filename)] = toStagedBytes(filename, content);
+  }
+  return { ...normalized, stage: merged };
 };
 
 const normalizeSnapshotAdditionalPaths = (
@@ -1999,7 +2023,7 @@ export function createRuntimeClient(
       assertRecordInput('evaluate', 'parameters', input.parameters);
       assertRecordInput('evaluate', 'renderOptions', input.renderOptions);
       assertRecordInput('evaluate', 'content', input.content);
-      const normalized = normalizeRuntimeSource(input.source);
+      const normalized = withStagedFiles(normalizeRuntimeSource(input.source), input.stage);
       input.signal?.throwIfAborted();
       const client = await waitForSignal(ensureConnected(), input.signal);
       assertIntentAdmissionOpen();
@@ -2087,7 +2111,7 @@ export function createRuntimeClient(
       assertRecordInput('render', 'parameters', input.parameters);
       assertRecordInput('render', 'renderOptions', input.renderOptions);
       assertRecordInput('render', 'content', input.content);
-      const normalized = normalizeRuntimeSource(input.source);
+      const normalized = withStagedFiles(normalizeRuntimeSource(input.source), input.stage);
       const parameters = input.parameters ?? {};
       const { renderOptions, content } = input;
       const admissionClient = getWorkerClient();

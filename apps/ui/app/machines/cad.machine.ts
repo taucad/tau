@@ -34,6 +34,8 @@ export type CadContext = {
   entryPath: string | undefined;
   screenshot: string | undefined;
   parameters: Record<string, unknown>;
+  /** Committed parameter-sidecar bytes staged with every render of this entry. */
+  parameterStage: Record<string, Uint8Array<ArrayBuffer>> | undefined;
   units: { length: LengthSymbol };
   /** Outcome of the latest selected runtime geometry event. */
   latestGeometryOutcome: LatestGeometryOutcome;
@@ -90,7 +92,12 @@ type CadEvent =
       parameters?: Record<string, unknown>;
     }
   | { type: 'setEntryPath'; entryPath: string }
-  | { type: 'setParameters'; parameters: Record<string, unknown> }
+  | {
+      type: 'setParameters';
+      parameters: Record<string, unknown>;
+      /** The parameter sidecar's committed bytes, carried so the runtime sees them without a watch. */
+      stage?: Record<string, Uint8Array<ArrayBuffer>>;
+    }
   | { type: 'setCodeIssues'; errors: CadContext['codeIssues'] }
   | { type: 'geometryComputed'; geometry: Geometry; issues: KernelIssue[] }
   | { type: 'geometryFailed'; issues: KernelIssue[] }
@@ -153,6 +160,7 @@ type RenderModelInput = {
   client: AppRuntimeClient | undefined;
   entryPath: string | undefined;
   parameters: Record<string, unknown>;
+  stage: Record<string, Uint8Array<ArrayBuffer>> | undefined;
   /** Whether no newer UI render was requested since this one. */
   isLatestRequest: () => boolean;
 };
@@ -345,6 +353,7 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input })
     source: { path: input.entryPath },
     parameters: input.parameters,
     content: { includeEdges: true },
+    ...(input.stage === undefined ? {} : { stage: input.stage }),
   } as const;
   const outcome = await input.client.render(request);
   // Runtime state events usually stop this actor before the render settles, so ask the machine
@@ -469,6 +478,8 @@ export const cadMachine = setup({
         assertEvent(event, 'setEntryPath');
         return event.entryPath;
       },
+      // The staged bytes belong to the entry that was open; the new entry re-supplies its own.
+      parameterStage: () => undefined,
       latestGeometryOutcome: () => undefined,
       codeIssues: () => [],
       kernelIssues({ context, event }) {
@@ -482,6 +493,12 @@ export const cadMachine = setup({
       parameters({ event }) {
         assertEvent(event, 'setParameters');
         return event.parameters;
+      },
+      /* Persistence has already landed these bytes; carrying them makes the runtime observe the
+       * revision it is about to be told about, so the sidecar's watch event renders nothing. */
+      parameterStage({ event, context }) {
+        assertEvent(event, 'setParameters');
+        return event.stage ?? context.parameterStage;
       },
       latestGeometryOutcome: () => undefined,
     }),
@@ -609,6 +626,7 @@ export const cadMachine = setup({
     screenshot: undefined,
     units: { length: 'mm' },
     parameters: {},
+    parameterStage: undefined,
     latestGeometryOutcome: undefined,
     geometry: undefined,
     kernelIssues: new Map(),
@@ -814,6 +832,7 @@ export const cadMachine = setup({
               client: context.kernelClient,
               entryPath: context.entryPath,
               parameters: context.parameters,
+              stage: context.parameterStage,
               isLatestRequest: () => self.getSnapshot().context.lastRequestedRenderId === context.lastRequestedRenderId,
             }),
             onDone: {

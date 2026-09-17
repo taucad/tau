@@ -12,7 +12,9 @@ const snapshot = (): ShareProjectSnapshot => ({
   files: [
     {
       path: '.tau/parameters/main.ts.json',
-      content: bytes('{"activeGroup":"default","groups":{"default":{"values":{}}}}'),
+      content: bytes(
+        '{"recordVersion":1,"profile":"tau-json-structure-units-03-v1","activeGroup":"default","groups":{"default":{"values":{}}}}',
+      ),
       sha256: 'parameters',
       role: 'project-metadata',
     },

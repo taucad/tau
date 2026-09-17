@@ -19,6 +19,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/t
 import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 import { cn } from '@taucad/ui/utils/cn';
 import { Loader } from '#components/ui/loader.js';
+import { warmMonaco } from '#lib/monaco-warmup.js';
 
 /*
  * `--fade-scrim-into` follows the row's own background, so the actions' scrim
@@ -91,6 +92,10 @@ export function SidebarRowLink({
       aria-busy={isPending}
       aria-describedby={sentence === undefined ? undefined : descriptionId}
       className='flex h-full min-w-0 flex-1 items-center rounded-sm outline-hidden focus-visible:focus-outline'
+      /* Every row opens a project route, whose editors need Monaco: start it on intent. */
+      onPointerEnter={warmMonaco}
+      onPointerDown={warmMonaco}
+      onFocus={warmMonaco}
       onClick={onClick}
     >
       {isPending ? <Loader className='mr-1.5 size-3.5 shrink-0' /> : null}

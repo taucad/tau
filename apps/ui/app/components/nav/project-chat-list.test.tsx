@@ -8,6 +8,8 @@ import type { ProjectListItem } from '#types/project.types.js';
 import type * as SidebarStatusModule from '#hooks/use-sidebar-status.js';
 
 const mockUseChats = vi.fn();
+const mockWarmMonaco = vi.hoisted(() => vi.fn());
+vi.mock('#lib/monaco-warmup.js', () => ({ warmMonaco: mockWarmMonaco }));
 const mockUseChatSession = vi.fn();
 const mockNavigate = vi.fn();
 let search = '?chat=chat_12';
@@ -226,6 +228,15 @@ describe('ProjectChatList', () => {
     expect(slot?.querySelector('.absolute')).toHaveTextContent('1');
     /* No bold for unread: the mark says it (D2). */
     expect(link.querySelector('.font-medium')).toBeNull();
+  });
+
+  it('starts Monaco when a chat row is pointed at or focused', () => {
+    render(<ProjectChatList project={project} isProjectActive />);
+    const link = screen.getByRole('link', { name: 'Chat 12' });
+
+    fireEvent.pointerEnter(link);
+    fireEvent.focus(link);
+    expect(mockWarmMonaco).toHaveBeenCalledTimes(2);
   });
 
   it('hangs the chats off a rail one slot in', () => {

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { createHash } from 'node:crypto';
 
-import { validateTauCadTopology } from '@taucad/geometry-core';
+import { transformNormalArray, transformVertexArray, validateTauCadTopology } from '@taucad/geometry-core';
 import type { TauCadTopologyPayload } from '@taucad/geometry-core';
 import { describe, expect, it } from 'vitest';
 
@@ -79,12 +79,25 @@ const glbJson = (bytes: Uint8Array<ArrayBuffer>) => {
   return JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + length))) as {
     readonly nodes: ReadonlyArray<{ readonly mesh?: number }>;
     readonly meshes: ReadonlyArray<{
-      readonly primitives: ReadonlyArray<{ readonly mode?: number; readonly indices?: number }>;
+      readonly primitives: ReadonlyArray<{
+        readonly mode?: number;
+        readonly indices?: number;
+        readonly attributes: Record<string, number>;
+      }>;
     }>;
-    readonly accessors: ReadonlyArray<{ readonly count: number }>;
+    readonly accessors: ReadonlyArray<{ readonly count: number; readonly bufferView: number }>;
     readonly extensions: { readonly TAU_cad_topology: { readonly topologyBufferView: number } };
     readonly bufferViews: ReadonlyArray<{ readonly byteOffset?: number; readonly byteLength: number }>;
   };
+};
+
+/** Read one buffer view's bytes back out of the GLB's binary chunk. */
+const viewBytes = (glb: Uint8Array<ArrayBuffer>, accessor: number): Uint8Array<ArrayBuffer> => {
+  const json = glbJson(glb);
+  const start = 20 + new DataView(glb.buffer, glb.byteOffset).getUint32(12, true) + 8;
+  const view = json.bufferViews[json.accessors[accessor]!.bufferView]!;
+  const offset = start + (view.byteOffset ?? 0);
+  return Uint8Array.from(glb.subarray(offset, offset + view.byteLength));
 };
 
 describe('PicoGK mesh artifact adapter', () => {
@@ -116,6 +129,27 @@ describe('PicoGK mesh artifact adapter', () => {
         ),
       }),
     ).toEqual([]);
+  });
+
+  it('should encode exactly the canonical geometry-core transform of the worker arrays', () => {
+    // The adapter fuses validation into its own rotation loop rather than calling these helpers,
+    // so this pins the encoded bytes to the canonical transform they replaced.
+    const positions = [1000, -2000, 3000, 2000, 0, -3000, -0, 3000, 3000];
+    const normals = [0, 0, 1, 0, -1, 0, -0, 0, 1];
+    const indices = [0, 2, 1];
+    const { bytes, result } = artifact({ positions, normals, indices });
+
+    const glb = picogkArtifactToGlb(bytes, result);
+
+    const primitive = glbJson(glb).meshes[0]!.primitives[0]!;
+    expect(viewBytes(glb, primitive.attributes['POSITION']!)).toEqual(
+      new Uint8Array(transformVertexArray(new Float32Array(positions)).buffer),
+    );
+    expect(viewBytes(glb, primitive.attributes['NORMAL']!)).toEqual(
+      new Uint8Array(transformNormalArray(new Float32Array(normals)).buffer),
+    );
+    // The index view is shared straight through from the artifact; the writer makes the only copy.
+    expect(viewBytes(glb, primitive.indices!)).toEqual(new Uint8Array(new Uint32Array(indices).buffer));
   });
 
   it('keeps the worker component id stable when its display name changes', () => {
@@ -204,6 +238,18 @@ describe('PicoGK mesh artifact adapter', () => {
       /overlapping/,
     ],
     ['non-finite', () => artifact({ positions: [Number.NaN, 0, 0, 1, 0, 0, 0, 1, 0] }), /mesh values/],
+    [
+      'positive infinity',
+      () => artifact({ positions: [0, 0, 0, 1, 0, 0, 0, Number.POSITIVE_INFINITY, 0] }),
+      /mesh values/,
+    ],
+    [
+      'negative infinity',
+      () => artifact({ positions: [0, 0, Number.NEGATIVE_INFINITY, 1, 0, 0, 0, 1, 0] }),
+      /mesh values/,
+    ],
+    ['non-finite normal', () => artifact({ normals: [0, 0, 1, 0, Number.NaN, 1, 0, 0, 1] }), /mesh values/],
+    ['infinite normal', () => artifact({ normals: [0, 0, 1, 0, 0, 1, Number.POSITIVE_INFINITY, 0, 1] }), /mesh values/],
     ['index range', () => artifact({ indices: [0, 1, 3] }), /mesh values/],
   ])('rejects an invalid %s', (_name, mutate, message) => {
     const value = mutate(artifact());

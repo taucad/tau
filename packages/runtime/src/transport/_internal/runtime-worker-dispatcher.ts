@@ -52,6 +52,7 @@ import type {
   RuntimeHelloPayload,
   RuntimeProtocol,
   RuntimeGeometryComputedArgs,
+  TelemetryBatch,
   TelemetryEntry,
 } from '#types/runtime-protocol.types.js';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
@@ -60,7 +61,6 @@ import { logFlushDebounce } from '#framework/runtime-framework.constants.js';
 import { createErrorTrap } from '#framework/worker-error-trap.js';
 import { createTelemetryOrigin, telemetryEpoch } from '#framework/worker-telemetry.js';
 import type { TelemetryExporter } from '#framework/telemetry-file-sink.js';
-import type { TelemetryBatch } from '#types/runtime-protocol.types.js';
 import { openTelemetryFileSink, telemetryDirectory, telemetryFormat } from '#framework/telemetry-file-sink.js';
 import { packageVersion } from '#utils/package-info.js';
 import { protocolVersion } from '#types/protocol-header.types.js';

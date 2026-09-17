@@ -2938,13 +2938,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       return { liveNativeHandleSlot, serializedNativeHandleSlot: undefined };
     }
 
-    const serializedNativeHandleSlot = {
+    const serializedNativeHandleSlot: SerializedNativeHandleSlot = {
       identityKey,
       kernelId: identity.selectedKernelId,
       kernelVersion: identity.selectedKernelVersion,
-    } as SerializedNativeHandleSlot;
+      serializedNativeHandle,
+    };
     if (hasSnapshot) {
-      serializedNativeHandleSlot.serializedNativeHandle = serializedNativeHandle;
       return { liveNativeHandleSlot, serializedNativeHandleSlot };
     }
     /* Resolved on the first read and remembered, so an export and the reheat that follows it do not

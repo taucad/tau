@@ -160,7 +160,7 @@ const qualityProfiles: Readonly<Record<MetalMorphLoaderQuality, QualityProfile>>
     bloom: false,
     environmentSize: 64,
     targetFrameRate: 30,
-    material: { iridescence: 0, perturbNormals: false },
+    material: { iridescence: 0, perturbNormals: false, exactStarNormals: false },
     powerPreference: 'low-power',
   },
   balanced: {

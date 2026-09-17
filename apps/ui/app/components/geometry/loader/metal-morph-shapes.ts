@@ -529,3 +529,100 @@ export const getMetalMorphGeometryData = (detail: number): MetalMorphGeometryDat
   geometryDataCache.set(detail, data);
   return data;
 };
+
+export type PlaneTuple = readonly [number, number, number, number];
+
+/**
+ * Per-shape plane bookkeeping for the fragment shader: core plane start and count, side plane start, sides per
+ * core face. All zero for a plain solid, whose fillets are wide enough to interpolate from the vertex normals.
+ */
+export type PlaneDescriptor = readonly [number, number, number, number];
+
+export type MetalMorphPlaneTable = Readonly<{
+  /** `normal.xyz, offset` per plane: each stellated shape's core planes followed by its pyramid side planes. */
+  planes: readonly PlaneTuple[];
+  /** Aligned with `planes`: for a side plane, the neighbouring spike's plane through the same core edge; zero for core planes. */
+  twins: readonly PlaneTuple[];
+  /** Indexed like {@link metalMorphShapeIds}. */
+  descriptors: readonly PlaneDescriptor[];
+  /** Log-sum-exp temperature per shape, indexed like {@link metalMorphShapeIds}. */
+  roundness: readonly number[];
+}>;
+
+type PlaneRange = Readonly<{ start: number; count: number }>;
+
+const planeOf = (plane: RadialPlane): PlaneTuple => [plane.normal[0], plane.normal[1], plane.normal[2], plane.offset];
+
+const planesInRange = (planes: readonly PlaneTuple[], range: PlaneRange): RadialPlane[] =>
+  planes
+    .slice(range.start, range.start + range.count)
+    .map((plane) => ({ normal: [plane[0], plane[1], plane[2]], offset: plane[3] }));
+
+let planeTableCache: MetalMorphPlaneTable | undefined;
+
+/**
+ * Flatten the stellated shapes' planes into one table so a fragment shader can recover their rounded normal
+ * along any direction with bounded loops: spike ridges and creases are narrower than the shared mesh, so
+ * interpolated vertex normals would zig-zag along them. Plain solids need no planes.
+ */
+export const getMetalMorphPlaneTable = (): MetalMorphPlaneTable => {
+  if (planeTableCache !== undefined) {
+    return planeTableCache;
+  }
+  const planes: PlaneTuple[] = [];
+  const twins: PlaneTuple[] = [];
+  const descriptors: PlaneDescriptor[] = [];
+  const roundness: number[] = [];
+  for (const id of metalMorphShapeIds) {
+    const solid = prepareSolid(metalMorphShapeDefinitions[id]);
+    roundness.push(solid.roundness);
+    if (solid.spikes === undefined || solid.creases === undefined) {
+      descriptors.push([0, 0, 0, 0]);
+      continue;
+    }
+    const coreStart = planes.length;
+    for (const face of solid.faces) {
+      planes.push(planeOf(face));
+      twins.push([0, 0, 0, 0]);
+    }
+    const sideStart = planes.length;
+    for (const [faceIndex, sides] of solid.spikes.entries()) {
+      for (const [sideIndex, plane] of sides.entries()) {
+        const twin = solid.creases[faceIndex]?.[sideIndex];
+        if (twin === undefined) {
+          throw new Error(`Spike ${faceIndex} of ${id} has no crease pairing for side ${sideIndex}.`);
+        }
+        planes.push(planeOf(plane));
+        twins.push(planeOf(twin));
+      }
+    }
+    descriptors.push([coreStart, solid.faces.length, sideStart, solid.spikes[0]?.length ?? 0]);
+  }
+  planeTableCache = { planes, twins, descriptors, roundness };
+  return planeTableCache;
+};
+
+/** CPU twin of the fragment shader's stellated lookup; must agree with {@link sampleRadial} for the stars. */
+export const sampleFromPlaneTable = (
+  table: MetalMorphPlaneTable,
+  shapeIndex: number,
+  direction: Vector3Tuple,
+): RadialSample => {
+  const descriptor = table.descriptors[shapeIndex];
+  const roundness = table.roundness[shapeIndex];
+  if (descriptor === undefined || roundness === undefined) {
+    throw new Error(`No plane descriptor for shape index ${shapeIndex}.`);
+  }
+  const [coreStart, coreCount, sideStart, sidesPerFace] = descriptor;
+  if (sidesPerFace === 0) {
+    throw new Error(`Shape index ${shapeIndex} is not stellated; its normals interpolate from the vertices.`);
+  }
+  const query: RadialQuery = { direction, roundness };
+  const core = nearestExit(planesInRange(table.planes, { start: coreStart, count: coreCount }), direction);
+  const range: PlaneRange = { start: sideStart + core.index * sidesPerFace, count: sidesPerFace };
+  const spike = softExit(planesInRange(table.planes, range), query);
+  if (spike === undefined) {
+    throw new Error(`No side plane of shape ${shapeIndex} faces the sampled direction.`);
+  }
+  return fillCreases(spike, planesInRange(table.twins, range), query);
+};

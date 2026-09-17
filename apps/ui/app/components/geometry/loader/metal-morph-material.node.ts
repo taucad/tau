@@ -1,8 +1,8 @@
 /* oxlint-disable new-cap -- three/tsl `Fn`/`If`/`Loop` are shader graph factories */
-import { Vector3 } from 'three';
+import { Vector3, Vector4 } from 'three';
 import type { Color } from 'three';
 import { MeshPhysicalNodeMaterial } from 'three/webgpu';
-import type { AttributeNode, Node, UniformNode } from 'three/webgpu';
+import type { AttributeNode, Node, UniformArrayNode, UniformNode } from 'three/webgpu';
 import {
   abs,
   attribute,
@@ -13,6 +13,9 @@ import {
   float,
   Fn,
   If,
+  int,
+  log,
+  Loop,
   max,
   min,
   mix,
@@ -25,17 +28,18 @@ import {
   step,
   transformNormalToView,
   uniform,
+  uniformArray,
   varyingProperty,
   vec3,
   vec4,
 } from 'three/tsl';
 
 import { metalMorphBodyColor } from '#components/geometry/loader/metal-morph.constants.js';
-import { metalMorphShapeIds } from '#components/geometry/loader/metal-morph-shapes.js';
+import { getMetalMorphPlaneTable, metalMorphShapeIds } from '#components/geometry/loader/metal-morph-shapes.js';
 
 // Node types must stay literals for TSL generics; grouping them under one `as const` object satisfies
 // `tau-lint(no-literal-const-assertion)` while preserving tsgo narrowing (a bare `'vec4'` widens).
-const nodeTypes = { packedSample: 'vec4' } as const;
+const nodeTypes = { packedSample: 'vec4', scalar: 'float' } as const;
 
 /** Vertex attribute carrying one shape's packed `normal.xyz, radius` sample, indexed like {@link metalMorphShapeIds}. */
 export const metalMorphShapeAttributeName = (index: number): string => `shapeSample${index}`;
@@ -57,6 +61,12 @@ export type MetalMorphMaterialOptions = Readonly<{
    * evaluations per vertex, which small spinners cannot show.
    */
   perturbNormals?: boolean;
+  /**
+   * Recover the stellated forms' normals per fragment from their plane table. Their ridges and creases are
+   * narrower than the shared mesh, so interpolated vertex normals zig-zag along them at hero sizes; small
+   * spinners cannot show the difference and skip the loops.
+   */
+  exactStarNormals?: boolean;
   /** Back-ease overshoot applied to the travelling front; 0 removes the spring entirely. */
   overshoot?: number;
   /** Half-width of the transformation front, as a fraction of the body's extent along the sweep axis. */
@@ -110,6 +120,7 @@ const defaultOptions: Required<Omit<MetalMorphMaterialOptions, 'color'>> = {
   swell: 0.055,
   ringAmplitude: 0.02,
   perturbNormals: true,
+  exactStarNormals: true,
 };
 
 /** Finite-difference step for the displacement gradient, in render units on the unit sphere. */
@@ -125,6 +136,20 @@ const wakeWidth = 1.8;
 const crestWidth = 0.8;
 /** Nudge that keeps blended normals away from zero when two face normals oppose. */
 const normalBlendNudge = 1e-4;
+/** Radius reported for planes the sampled ray runs away from, so they never win the nearest-exit search. */
+const unreachablePlaneRadius = 1e9;
+/** Dimensionless guard that rejects planes the sampled ray grazes. */
+const grazingDenominator = 1e-6;
+/** Integer loop bounds for the TSL `Loop` helper, declared once so overload inference stays tractable. */
+type LoopRange = { start: Node<'int'>; end: Node<'int'>; type: 'int'; condition: string };
+
+/** Uniform mirrors of the stellated plane table; see `getMetalMorphPlaneTable`. */
+type PlaneTableUniforms = Readonly<{
+  planes: UniformArrayNode<'vec4'>;
+  twins: UniformArrayNode<'vec4'>;
+  descriptors: UniformArrayNode<'vec4'>;
+  roundness: UniformArrayNode<'float'>;
+}>;
 
 /** Uniforms that place the travelling front along the sweep axis. */
 type FrontUniforms = Readonly<{
@@ -198,11 +223,90 @@ const createFrontField = (uniforms: FrontUniforms & Readonly<{ uOvershoot: Unifo
   });
 
 /**
+ * Rounded outward normal of one stellated shape along a direction, recovered from the plane table with the
+ * same log-sum-exp blends the CPU sampler uses for the vertex radii (`sampleRadial`): a softmin over the
+ * facing sides of the spike the ray leaves through, then a softmax with the neighbouring spikes' planes
+ * across the base edges so the concave creases fill. Invoked per fragment, so every local stays unnamed.
+ */
+const createStarNormalField = (table: PlaneTableUniforms) =>
+  Fn(([shapeIndex, direction]: [Node<'float'>, Node<'vec3'>]) => {
+    /* oxlint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return -- TSL array element and loop nodes are typed as `any` in `@types/three`; the CPU twin in metal-morph-shapes.test.ts proves the lookup order. */
+    const descriptor = vec4(table.descriptors.element(shapeIndex.toInt())).toVar();
+    const roundness = float(table.roundness.element(shapeIndex.toInt())).toVar();
+    const coreStart = descriptor.x.toInt().toVar();
+    const coreCount = descriptor.y.toInt().toVar();
+    const sideStart = descriptor.z.toInt().toVar();
+    const sidesPerFace = descriptor.w.toInt().toVar();
+
+    // Sharp nearest core exit selects the spike the ray leaves through.
+    const coreRadius = float(unreachablePlaneRadius).toVar();
+    const coreIndex = int(0).toVar();
+    const coreRange: LoopRange = { start: int(0), end: coreCount, type: 'int', condition: '<' };
+    Loop(coreRange, ({ i }) => {
+      const plane = vec4(table.planes.element(coreStart.add(i))).toVar();
+      const denominator = dot(plane.xyz, direction).toVar();
+      const radius = plane.w.div(max(denominator, grazingDenominator)).toVar();
+      If(denominator.greaterThan(grazingDenominator).and(radius.lessThan(coreRadius)), () => {
+        coreRadius.assign(radius);
+        coreIndex.assign(i);
+      });
+    });
+
+    const spikeStart = sideStart.add(coreIndex.mul(sidesPerFace)).toVar();
+    const sideRange: LoopRange = { start: int(0), end: sidesPerFace, type: 'int', condition: '<' };
+    const sideRadius = float(unreachablePlaneRadius).toVar();
+    Loop(sideRange, ({ i }) => {
+      const plane = vec4(table.planes.element(spikeStart.add(i))).toVar();
+      const denominator = dot(plane.xyz, direction).toVar();
+      const radius = plane.w.div(max(denominator, grazingDenominator)).toVar();
+      If(denominator.greaterThan(grazingDenominator).and(radius.lessThan(sideRadius)), () => {
+        sideRadius.assign(radius);
+      });
+    });
+    // Softmin over the spike's own sides: ridges and the tip round by the temperature.
+    const spikeTotal = float(0).toVar();
+    const spikeNormal = vec3(0, 0, 0).toVar();
+    Loop(sideRange, ({ i }) => {
+      const plane = vec4(table.planes.element(spikeStart.add(i))).toVar();
+      const denominator = dot(plane.xyz, direction).toVar();
+      If(denominator.greaterThan(grazingDenominator), () => {
+        const weight = exp(plane.w.div(denominator).sub(sideRadius).negate().div(roundness));
+        spikeTotal.addAssign(weight);
+        spikeNormal.addAssign(plane.xyz.mul(weight));
+      });
+    });
+    const spikeRadius = sideRadius.sub(roundness.mul(log(spikeTotal))).toVar();
+    // Softmax with the neighbouring spikes' planes through the base edges: they surface only at the creases.
+    const peak = spikeRadius.toVar();
+    Loop(sideRange, ({ i }) => {
+      const twin = vec4(table.twins.element(spikeStart.add(i))).toVar();
+      const denominator = dot(twin.xyz, direction).toVar();
+      const radius = twin.w.div(max(denominator, grazingDenominator)).toVar();
+      If(denominator.greaterThan(grazingDenominator).and(radius.greaterThan(peak)), () => {
+        peak.assign(radius);
+      });
+    });
+    const blended = normalize(spikeNormal)
+      .mul(exp(spikeRadius.sub(peak).div(roundness)))
+      .toVar();
+    Loop(sideRange, ({ i }) => {
+      const twin = vec4(table.twins.element(spikeStart.add(i))).toVar();
+      const denominator = dot(twin.xyz, direction).toVar();
+      If(denominator.greaterThan(grazingDenominator), () => {
+        const weight = exp(twin.w.div(denominator).sub(peak).div(roundness));
+        blended.addAssign(twin.xyz.mul(weight));
+      });
+    });
+    return normalize(blended);
+    /* oxlint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return */
+  });
+
+/**
  * Liquid-metal body material for the loader. One TSL graph serves the WebGPU and WebGL 2 backends of the
  * node renderer; all animation flows through uniform mutation so the pipeline compiles once. Positions and
- * normals morph per vertex from the packed samples (the fillets are baked into those normals, so the
- * fragment stage only normalises the interpolated result), and the liquid fields are skipped by a uniform
- * branch while the body rests.
+ * normals morph per vertex from the packed samples: the fillets of the plain solids are baked into those
+ * normals, only the stellated forms recover their sharper ridges per fragment, and the liquid fields are
+ * skipped by a uniform branch while the body rests.
  */
 export const createMetalMorphNodeMaterial = (
   options?: MetalMorphMaterialOptions,
@@ -232,6 +336,16 @@ export const createMetalMorphNodeMaterial = (
   const uIridescence = uniform(settings.iridescence, 'float');
   const useIridescence = settings.iridescence > 0;
 
+  const planeTable = getMetalMorphPlaneTable();
+  const toVector4 = (tuple: readonly [number, number, number, number]): Vector4 => new Vector4(...tuple);
+  const uPlanes: UniformArrayNode<'vec4'> = uniformArray(planeTable.planes.map(toVector4), nodeTypes.packedSample);
+  const uTwins: UniformArrayNode<'vec4'> = uniformArray(planeTable.twins.map(toVector4), nodeTypes.packedSample);
+  const uDescriptors: UniformArrayNode<'vec4'> = uniformArray(
+    planeTable.descriptors.map(toVector4),
+    nodeTypes.packedSample,
+  );
+  const uRoundness: UniformArrayNode<'float'> = uniformArray([...planeTable.roundness], nodeTypes.scalar);
+
   const shapeAttributes: ReadonlyArray<AttributeNode<'vec4'>> = metalMorphShapeIds.map((_id, index) =>
     attribute(metalMorphShapeAttributeName(index), nodeTypes.packedSample),
   );
@@ -256,8 +370,20 @@ export const createMetalMorphNodeMaterial = (
     uRippleDecay,
   });
   const frontField = createFrontField({ uSweepAxis, uProgress, uFrontBand, uOvershoot });
+  const starNormalField = createStarNormalField({
+    planes: uPlanes,
+    twins: uTwins,
+    descriptors: uDescriptors,
+    roundness: uRoundness,
+  });
+  /* oxlint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return -- TSL array element nodes are typed as `any` in `@types/three`. */
+  const isStellated = (index: Node<'float'>): Node<'bool'> =>
+    vec4(uDescriptors.element(index.toInt())).w.greaterThan(float(0));
 
   const vNormal = varyingProperty('vec3', 'tauMorphNormalVarying');
+  const vDirection = varyingProperty('vec3', 'tauMorphDirectionVarying');
+  const vFromNormal = varyingProperty('vec3', 'tauMorphFromNormalVarying');
+  const vToNormal = varyingProperty('vec3', 'tauMorphToNormalVarying');
   const vPerturbation = varyingProperty('vec3', 'tauMorphPerturbationVarying');
   const vMolten = varyingProperty('float', 'tauMorphMoltenVarying');
   const vHeat = varyingProperty('float', 'tauMorphHeatVarying');
@@ -319,7 +445,13 @@ export const createMetalMorphNodeMaterial = (
       .toVar('tauMorphRing');
     const displaced = direction.mul(radius.add(ringWave)).add(faceNormal.mul(relief));
 
-    vNormal.assign(faceNormal);
+    if (settings.exactStarNormals) {
+      vDirection.assign(direction);
+      vFromNormal.assign(source.xyz);
+      vToNormal.assign(target.xyz);
+    } else {
+      vNormal.assign(faceNormal);
+    }
     vPerturbation.assign(perturbation);
     vMolten.assign(molten);
     if (useIridescence) {
@@ -329,7 +461,27 @@ export const createMetalMorphNodeMaterial = (
     return displaced;
   })();
 
-  material.normalNode = Fn(() => transformNormalToView(normalize(vNormal.sub(vPerturbation))))();
+  material.normalNode = settings.exactStarNormals
+    ? Fn(() => {
+        const direction = normalize(vDirection).toVar('tauMorphFragmentDirection');
+        const front = frontField(direction).toVar('tauMorphFragmentFront');
+        const fromNormal = normalize(vFromNormal).toVar('tauMorphFromNormal');
+        const toNormal = normalize(vToNormal).toVar('tauMorphToNormal');
+        // Uniform branches: only a stellated form pays for its plane loops, and a resting one pays once.
+        If(isStellated(uFromIndex), () => {
+          fromNormal.assign(starNormalField(uFromIndex, direction));
+        });
+        If(uToIndex.equal(uFromIndex), () => {
+          toNormal.assign(fromNormal);
+        }).ElseIf(isStellated(uToIndex), () => {
+          toNormal.assign(starNormalField(uToIndex, direction));
+        });
+        const faceNormal = normalize(
+          mix(fromNormal, toNormal, saturate(front.x)).add(direction.mul(normalBlendNudge)),
+        ).toVar('tauMorphFragmentNormal');
+        return transformNormalToView(normalize(faceNormal.sub(vPerturbation)));
+      })()
+    : Fn(() => transformNormalToView(normalize(vNormal.sub(vPerturbation))))();
   material.roughnessNode = mix(uRoughnessRest, uRoughnessMolten, vMolten);
   if (useIridescence) {
     material.iridescenceNode = vMolten.mul(uIridescence);

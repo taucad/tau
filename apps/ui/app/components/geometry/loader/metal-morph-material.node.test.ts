@@ -35,7 +35,11 @@ describe('createMetalMorphNodeMaterial', () => {
   });
 
   it('should leave the thin-film model and the gradient probes out of a spinner material', () => {
-    const { material } = createMetalMorphNodeMaterial({ iridescence: 0, perturbNormals: false });
+    const { material } = createMetalMorphNodeMaterial({
+      iridescence: 0,
+      perturbNormals: false,
+      exactStarNormals: false,
+    });
 
     expect(material.iridescence).toBe(0);
     expect(material.iridescenceNode).toBeNull();

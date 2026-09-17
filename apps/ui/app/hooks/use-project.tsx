@@ -31,6 +31,7 @@ import { useProjectManager } from '#hooks/use-project-manager.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { ChatStorage } from '#types/storage.types.js';
 import { localKernelOptions } from '#constants/local-kernel-options.js';
+import { useComputeReuseMode } from '#lib/compute-reuse-preference.js';
 import { createParameterSetService } from '#services/parameter-set-service.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
 import { compareChatsByRecency } from '#utils/chat-recency.utils.js';
@@ -205,7 +206,11 @@ export function ProjectProvider({
   readonly kernelOptionsFactory?: LazyKernelOptionsFactory;
   readonly profile?: 'editor' | 'shared';
 }): React.JSX.Element {
-  const resolvedKernelOptionsFactory = kernelOptionsFactory ?? localKernelOptions(projectId);
+  // The shared-project workbench passes no factory, so this default is a real
+  // product path: it reads the same preference the focused workbench does
+  // instead of silently opting into durable reuse (charter D3).
+  const computeMode = useComputeReuseMode();
+  const resolvedKernelOptionsFactory = kernelOptionsFactory ?? localKernelOptions(projectId, undefined, computeMode);
   const queryClient = useQueryClient();
   // Create the project machine actor - it will auto-load based on projectId
   const fileManager = useFileManager();

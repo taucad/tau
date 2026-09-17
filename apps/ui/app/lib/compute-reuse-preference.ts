@@ -5,12 +5,19 @@ export type ComputeReuseMode = 'off' | 'memory' | 'durable';
 
 const storageKey = 'tau-compute-reuse-mode';
 const topic = new Topic<void>({ name: 'compute-reuse-preference' });
+/**
+ * Reuse is opt-in: the durable store costs more than it saves on a cold open
+ * (charter D3), so an unset preference bypasses it. Every kernel-options path
+ * derives its mode from here — no caller carries its own default.
+ */
+const defaultMode: ComputeReuseMode = 'off';
+
 const read = (): ComputeReuseMode => {
   try {
     const value = globalThis.localStorage.getItem(storageKey);
-    return value === 'off' || value === 'memory' || value === 'durable' ? value : 'durable';
+    return value === 'off' || value === 'memory' || value === 'durable' ? value : defaultMode;
   } catch {
-    return 'durable';
+    return defaultMode;
   }
 };
 

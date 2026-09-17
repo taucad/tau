@@ -82,10 +82,12 @@ describe('desktopKernelOptions', () => {
       const { desktop, handleStore } = await loadModules();
       await handleStore.setProjectFileSystemConfig({ projectId, backend: 'node', providerBasePath: 'widget' });
 
-      const factory = await desktop.desktopKernelOptions(projectId)();
+      const factory = await desktop.desktopKernelOptions(projectId, undefined, 'off')();
 
+      // Charter D3: the utility is forked with the caller's reuse mode, never a
+      // preset literal — the desktop preset carries no default of its own.
       expect(requestRuntimePort).toHaveBeenCalledExactlyOnceWith(expect.any(String), {
-        computeMode: 'durable',
+        computeMode: 'off',
         definition: 'default',
         projectRoot: `${homeRoot}/widget`,
       });
@@ -115,7 +117,7 @@ describe('desktopKernelOptions', () => {
         providerBasePath: 'widget',
       });
 
-      await desktop.desktopKernelOptions(projectId)();
+      await desktop.desktopKernelOptions(projectId, undefined, 'durable')();
 
       expect(requestRuntimePort).toHaveBeenCalledExactlyOnceWith(expect.any(String), {
         computeMode: 'durable',
@@ -134,7 +136,7 @@ describe('desktopKernelOptions', () => {
       const { desktop, handleStore } = await loadModules();
       await handleStore.setProjectFileSystemConfig({ projectId, backend: 'opfs', providerBasePath: 'widget' });
 
-      await expect(desktop.desktopKernelOptions(projectId)()).rejects.toThrow(/not on disk/);
+      await expect(desktop.desktopKernelOptions(projectId, undefined, 'off')()).rejects.toThrow(/not on disk/);
       expect(requestRuntimePort).not.toHaveBeenCalled();
     },
     moduleGraphTimeout,

@@ -20,9 +20,10 @@ const errorText = (value: unknown, fallback: string): string => {
   }
   if (isRecord(value) && typeof value['message'] === 'string') {
     const { code, status, details } = value;
-    // A coded refusal with a status or structured fields is a card, not prose:
-    // an external agent's stop carries `details` but no HTTP status.
-    if (typeof code === 'string' && (typeof status === 'number' || isRecord(details))) {
+    // A coded refusal is a card, not prose: the code is what the card's copy is
+    // keyed on, and a host refusal such as `NO_EVICTABLE_HISTORY` carries
+    // neither an HTTP status nor structured fields.
+    if (typeof code === 'string') {
       // The gateway code is authoritative; the status is only a fallback for uncoded failures.
       const category =
         code === 'INSUFFICIENT_CREDIT'

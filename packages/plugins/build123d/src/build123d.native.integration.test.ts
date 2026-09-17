@@ -376,7 +376,7 @@ describe('Build123d native kernel', () => {
           sourceRevision: admitted.source.revision,
           capability: 'change-source-unit:preserve-size:v1',
         },
-        dependencies: { 'main.py': admitted.source.revision },
+        dependencies: admitted.identity.sourceFiles,
       } as const;
       const cancelledProposal = await agent.applyParameterOperation(
         {

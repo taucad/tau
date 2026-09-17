@@ -8,7 +8,7 @@ import {
 } from '@taucad/runtime/kernel';
 import type { ComputeAnnouncement, KernelIssue } from '@taucad/runtime/kernel';
 import { createExportFile, parametersDirectory } from '@taucad/runtime/types';
-import { readParameterRecord, resolveProducerParameterValues } from '@taucad/parameters';
+import { requireParameterRecord, resolveProducerParameterValues } from '@taucad/parameters';
 import { actionDigest, canonicalizeComputeAction, contentDigest } from '@taucad/cache-core';
 import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
 import { sha256StringSync } from '@taucad/utils/hash';
@@ -81,6 +81,26 @@ const issuesFrom = (error: unknown, fileName?: string): KernelIssue[] => {
       ...(fileName ? { location: { fileName, startLineNumber: 1, startColumn: 1 } } : {}),
     },
   ];
+};
+
+/** Decode stored values under the shared record policy, reporting a refusal as a typed kernel issue. */
+const recordFrom = (bytes: Uint8Array<ArrayBuffer>, fileName: string): ReturnType<typeof requireParameterRecord> => {
+  try {
+    return requireParameterRecord(bytes);
+  } catch (error) {
+    throw new Build123dKernelError([
+      {
+        message: error instanceof Error ? error.message : String(error),
+        code:
+          error instanceof Error && 'code' in error && error.code === 'UNSUPPORTED_RECORD'
+            ? 'UNSUPPORTED_RECORD'
+            : 'INVALID_RECORD',
+        type: 'runtime',
+        severity: 'error',
+        location: { fileName, startLineNumber: 1, startColumn: 1 },
+      },
+    ]);
+  }
 };
 
 /** `build123d` kernel capability. @public */
@@ -168,14 +188,7 @@ export const build123dKernel = defineKernel({
     try {
       const parameterPath = assertRootedPath(`${parametersDirectory}/${entryPath}.json`);
       const bytes = await runtime.filesystem.readFile(parameterPath);
-      const decoded = readParameterRecord(bytes, { migrationAvailable: false });
-      if (decoded.status !== 'current') {
-        throw new Error(
-          decoded.status === 'invalid-preserved'
-            ? `Invalid parameter record: ${decoded.error}`
-            : 'Unsupported parameter record version or profile.',
-        );
-      }
+      const entry = recordFrom(bytes, parameterPath);
       const analysis = await context.session.request({
         method: 'analyze',
         params: {
@@ -191,7 +204,7 @@ export const build123dKernel = defineKernel({
       executionParameters = resolveProducerParameterValues({
         producer: 'build123d',
         declaration: analysis.declaration,
-        entry: decoded.record,
+        entry,
         values: parameters,
       });
     } catch (error) {

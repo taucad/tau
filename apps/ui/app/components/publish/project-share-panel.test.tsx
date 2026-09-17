@@ -173,7 +173,7 @@ const renderPanel = (ui: ReactElement, initialEntries?: string[]): ReturnType<ty
 
 describe('ProjectSharePanel', () => {
   beforeEach(() => {
-    useEntitlementsMock.mockReturnValue(entitlementsFromTier('pro'));
+    useEntitlementsMock.mockReturnValue({ ...entitlementsFromTier('pro'), isResolved: true });
     revisionStatusHarness.reset();
     openSettingsDialogMock.mockClear();
     Element.prototype.scrollIntoView = vi.fn();
@@ -743,7 +743,7 @@ describe('nextVersionName', () => {
 
 describe('ProjectSharePanel free-tier visibility gate (T5)', () => {
   beforeEach(() => {
-    useEntitlementsMock.mockReturnValue(entitlementsFromTier('free'));
+    useEntitlementsMock.mockReturnValue({ ...entitlementsFromTier('free'), isResolved: true });
     globalThis.fetch = vi.fn().mockResolvedValue(mockJsonResponse(unpublishedEnvelope));
   });
 

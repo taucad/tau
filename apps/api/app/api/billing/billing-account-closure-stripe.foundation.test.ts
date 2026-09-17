@@ -927,7 +927,7 @@ describe('retained obligations after closure and auth deletion', () => {
         intentId: prepared.intentId,
         reviewActorId: 'operator_fixture',
         capability: {
-          qualification: 'controlled-local-protected-refund',
+          qualification: 'protected-refund',
           environment: 'development',
           stripeAccountId: lateStripeAccountId,
           livemode: false,

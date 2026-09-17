@@ -274,6 +274,13 @@
       "when": 1789435673694,
       "tag": "0039_pink_jane_foster",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1789583135517,
+      "tag": "0040_payment_checkout_expiry",
+      "breakpoints": true
     }
   ]
 }

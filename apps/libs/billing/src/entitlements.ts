@@ -45,6 +45,8 @@ export type Entitlements = {
   readonly paidThrough: Date | undefined;
   readonly graceEndsAt: Date | undefined;
   readonly cancelAtPeriodEnd: boolean;
+  /** Whether this deployment can take a payment now; purchase controls stay disabled while it is false. */
+  readonly paymentCollectionAvailable: boolean;
 };
 
 const freeEntitlements = {
@@ -111,6 +113,7 @@ export const entitlementsFromTier = (tier: BillingTier): Entitlements => {
         paidThrough: undefined,
         graceEndsAt: undefined,
         cancelAtPeriodEnd: false,
+        paymentCollectionAvailable: false,
       };
     }
 
@@ -123,6 +126,7 @@ export const entitlementsFromTier = (tier: BillingTier): Entitlements => {
         paidThrough: undefined,
         graceEndsAt: undefined,
         cancelAtPeriodEnd: false,
+        paymentCollectionAvailable: false,
       };
     }
 
@@ -144,6 +148,7 @@ export const entitlementsFromTier = (tier: BillingTier): Entitlements => {
         paidThrough: undefined,
         graceEndsAt: undefined,
         cancelAtPeriodEnd: false,
+        paymentCollectionAvailable: false,
       };
     }
   }

@@ -9,7 +9,7 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { and, asc, desc, eq, gt, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { Stripe } from 'stripe';
 import { wireAutoReloadConsentSchema, wirePaymentActionSchema } from '@taucad/billing';
@@ -25,7 +25,9 @@ import {
   exactPaymentOfferTotals,
   noChargeEvidenceSchema,
   paidPaymentEvidenceSchema,
+  paymentCheckoutExpiryEvidenceSchema,
   paymentOfferSnapshotSchema,
+  subscriptionCheckoutExpiryEvidenceSchema,
 } from '#api/billing/billing-payment-contract.js';
 import type { PaymentOfferSnapshot } from '#api/billing/billing-payment-contract.js';
 import {
@@ -50,6 +52,8 @@ import {
   retrieveStripeSubscriptionSchedule,
   updateStripeSubscriptionScheduleOnce,
 } from '#api/billing/billing-stripe.js';
+import type { StripeCreateLeg, StripeCreateResult } from '#api/billing/billing-stripe.js';
+import { retrieveStripeDispute, retrieveStripeRefund } from '#api/billing/billing-cash-stripe.js';
 import {
   isConclusiveNoCharge,
   qualifyManualPayment,
@@ -59,6 +63,8 @@ import {
   qualifySubscriptionInvoice,
 } from '#api/billing/billing-payments.recovery.js';
 import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
+import { collectionMatchesScope } from '#api/billing/billing-collection.js';
+import type { BillingCollection } from '#api/billing/billing-collection.js';
 import type { DatabaseService } from '#database/database.service.js';
 import {
   billingOwnerBinding,
@@ -101,6 +107,17 @@ export type PrepareRenewalOfferInput = {
   readonly disclosureEvidence: Record<string, unknown>;
   readonly requestId: string;
 };
+/** Stripe object types (`event.data.object.object`) whose events drive a fulfilment action. */
+const reconciledSourceTypes = new Set([
+  'payment_intent',
+  'checkout.session',
+  'invoice',
+  'subscription',
+  'charge',
+  'refund',
+  'dispute',
+]);
+
 type SourceClaim = {
   readonly id: string;
   readonly generation: bigint;
@@ -110,6 +127,8 @@ type SourceClaim = {
   readonly stripeAccountId: string;
   readonly livemode: boolean;
   readonly sourceAcceptedAt?: Date;
+  /** Highest delivery attempt among the claimed inbox events; paces retries of a source that stays pending. */
+  readonly attempts: number;
   readonly hasFailureEvent: boolean;
   readonly inbox: Array<{ id: string; generation: bigint }>;
 };
@@ -127,11 +146,7 @@ export type BillingPaymentsConfig = {
   readonly uiOrigin: string;
   readonly webhookSecret: string;
   // oxlint-disable-next-line typescript/no-restricted-types -- null structurally disables collection
-  readonly collection: null | {
-    readonly kind: 'local_fixture' | 'stripe_test';
-    readonly monthlyPriceId: string;
-    readonly topupProductId: string;
-  };
+  readonly collection: BillingCollection | null;
 };
 
 type Owner = { readonly ownerId: string; readonly accountId: string; readonly subjectId: string };
@@ -181,6 +196,12 @@ export type BillingCashQualification = {
     readonly originalTaxMinor: bigint;
     readonly maximumRefundPages: number;
   }): Promise<CashQualificationResult | UnclaimedCashProjection>;
+  /** Applies what Stripe now reports for a fulfilled charge; absent in compositions without a cash service. */
+  reconcileCharge?(input: {
+    readonly environment: FinancialEnvironment;
+    readonly chargeId: string;
+    readonly maximumRefundPages: number;
+  }): Promise<{ readonly status: 'applied' | 'no_cause' | 'pending' | 'attention' }>;
 };
 
 /** Detail rows for the renewal-failed notice, as display strings. Absent fields drop their row. */
@@ -548,7 +569,7 @@ export class BillingPaymentsService {
     if (consent[0] !== undefined) return this.confirmReloadConsent(owner, consent[0]);
     const claimed = await this.claimPurchaseLeg(owner.accountId, actionId);
     if (claimed !== undefined) {
-      const result = await dispatchStripeLegOnce(this.stripe, claimed.leg);
+      const result = await dispatchStripeLegOnce(this.stripe, claimed.leg).catch(declinedPaymentIntent);
       await this.databaseService.database.transaction(async (tx) => {
         await this.lockPaymentAccount(tx, owner.accountId);
         const purchases = await tx
@@ -602,7 +623,9 @@ export class BillingPaymentsService {
   }
 
   public async getReloadConsent(userId: string): Promise<WireAutoReloadConsent | undefined> {
-    const owner = await this.resolveOwner(userId);
+    // An account that never bought anything has no consent to show, not a missing owner.
+    const owner = await this.findOwner(userId);
+    if (owner === undefined) return undefined;
     const rows = await this.databaseService.database
       .select()
       .from(billingReloadConsent)
@@ -886,6 +909,40 @@ export class BillingPaymentsService {
 
   public async cancelAction(userId: string, actionId: string): Promise<WirePaymentAction> {
     const owner = await this.resolveOwner(userId);
+    // A hosted Checkout the customer walked away from is closed at Stripe first, so it can never be paid later.
+    const [checkoutLeg] = await this.databaseService.database
+      .select()
+      .from(billingProviderLeg)
+      .where(
+        and(
+          eq(billingProviderLeg.accountId, owner.accountId),
+          or(eq(billingProviderLeg.purchaseId, actionId), eq(billingProviderLeg.subscriptionId, actionId)),
+          or(eq(billingProviderLeg.kind, 'checkout_payment'), eq(billingProviderLeg.kind, 'checkout_subscription')),
+          or(eq(billingProviderLeg.state, 'known'), eq(billingProviderLeg.state, 'attention')),
+        ),
+      )
+      .limit(1);
+    if (checkoutLeg?.providerObjectId !== null && checkoutLeg?.providerObjectId !== undefined) {
+      if (!this.collectionAvailable) throw new ConflictException({ code: 'action_not_cancelable' });
+      let session = await this.sourceStripe.checkout.sessions.retrieve(checkoutLeg.providerObjectId);
+      if (session.status === 'open') {
+        await this.databaseService.database
+          .update(billingProviderLeg)
+          .set({
+            expirationRequestedAt: sql`coalesce(${billingProviderLeg.expirationRequestedAt}, date_trunc('milliseconds', clock_timestamp()))`,
+          })
+          .where(eq(billingProviderLeg.id, checkoutLeg.id));
+        await expireStripeCheckoutSession(this.stripe, {
+          sessionId: session.id,
+          idempotencyKey: `${checkoutLeg.id}:cancel-expire`,
+        });
+        session = await this.sourceStripe.checkout.sessions.retrieve(session.id);
+      }
+      if (session.status !== 'expired' || !(await this.closeExpiredCheckout(checkoutLeg, session, 'canceled'))) {
+        throw new ConflictException({ code: 'action_not_cancelable' });
+      }
+      return this.getAction(userId, actionId);
+    }
     const changed = await this.databaseService.database.transaction(async (tx) => {
       const rows = await tx
         .update(billingPurchase)
@@ -901,7 +958,8 @@ export class BillingPaymentsService {
       return rows[0] !== undefined;
     });
     if (!changed) {
-      const current = await this.ownedPurchase(owner.accountId, actionId);
+      // A replayed cancel of an already-closed action returns its terminal state.
+      const current = await this.getAction(userId, actionId);
       if (current.state !== 'canceled') throw new ConflictException({ code: 'action_not_cancelable' });
     }
     return this.getAction(userId, actionId);
@@ -1376,13 +1434,20 @@ export class BillingPaymentsService {
     const owner = await this.findOwner(userId);
     if (owner === undefined) return [];
     const actions: WirePaymentAction[] = [];
-    if (purpose === undefined || purpose === 'manual_topup') {
+    if (purpose === undefined || purpose === 'manual_topup' || purpose === 'automatic_topup') {
+      const purposes =
+        purpose === undefined
+          ? ['manual_checkout', 'manual_saved_card', 'automatic']
+          : purpose === 'manual_topup'
+            ? ['manual_checkout', 'manual_saved_card']
+            : ['automatic'];
       const rows = await this.databaseService.database
         .select()
         .from(billingPurchase)
         .where(
           and(
             eq(billingPurchase.accountId, owner.accountId),
+            inArray(billingPurchase.purpose, purposes),
             ne(billingPurchase.state, 'fulfilled'),
             ne(billingPurchase.state, 'failed'),
             ne(billingPurchase.state, 'canceled'),
@@ -1524,10 +1589,14 @@ export class BillingPaymentsService {
     )
       throw new RangeError('Invalid payment recovery scope');
     const result = { processed: [] as string[], pending: [] as string[], failed: [] as string[] };
-    const claims = await this.claimSources(input.limit);
+    // Sources take at most half of a pass, so provider-leg recovery (unfulfilled payments, reload
+    // charges) always progresses however many webhook sources are waiting.
+    const claims = await this.claimSources(Math.ceil(input.limit / 2));
     for (const claim of claims) {
       try {
-        if (await this.reconcileClaimedSource(claim)) {
+        // Refund, dispute, charge and invoice-payment events have no fulfilment action here; the
+        // independent cash scan owns them. Finishing them keeps the source queue bounded.
+        if (!reconciledSourceTypes.has(claim.sourceType) || (await this.reconcileClaimedSource(claim))) {
           await this.finishSourceClaim(claim);
           result.processed.push(claim.id);
         } else {
@@ -1545,6 +1614,13 @@ export class BillingPaymentsService {
     for (const { leg, leaseUntil } of due) {
       try {
         if (leg.kind === 'payment_intent' && leg.state === 'prepared' && leg.purchaseId !== null) {
+          // Only a process that may collect confirms an automatic charge; any other one would move the
+          // leg to dispatched and then fail the POST, stranding the purchase.
+          if (!this.collectionAvailable) {
+            await this.releaseProviderLegClaim(leg.id, leaseUntil, 'payment_collection_disabled');
+            result.pending.push(leg.id);
+            continue;
+          }
           const workGeneration = automaticWorkGeneration(leg.request);
           if (leg.reloadConsentId === null || workGeneration === undefined)
             throw new ConflictException({ code: 'automatic_payment_request_invalid' });
@@ -1626,7 +1702,15 @@ export class BillingPaymentsService {
         }
         // Paid-unfulfilled rows deliberately re-enter source and cash qualification below;
         // a persisted nominal paid proof is not enough to issue credit after a crash.
-        const recovered = await recoverStripeLegSource(this.sourceStripe, recoveryQuery(leg));
+        let recovered = await recoverStripeLegSource(this.sourceStripe, recoveryQuery(leg));
+        if (recovered.status !== 'known' && leg.state === 'dispatched' && leg.providerObjectId === null) {
+          const replayed = await this.replayLostDispatch(leg, leaseUntil);
+          if (replayed === 'closed') {
+            result.processed.push(leg.id);
+            continue;
+          }
+          if (replayed !== undefined) recovered = { status: 'known', object: replayed };
+        }
         if (recovered.status !== 'known') {
           await this.releaseProviderLegClaim(
             leg.id,
@@ -1725,6 +1809,8 @@ export class BillingPaymentsService {
             state: 'processing',
             generation: sql`${billingReloadWork.generation} + 1`,
             leaseUntil: sql`date_trunc('milliseconds', clock_timestamp()) + interval '30 seconds'`,
+            // The wake is fresh when claimed: a backlog or a retried release must not age it out.
+            updatedAt: sql`clock_timestamp()`,
             errorCode: null,
           })
           .where(and(eq(billingReloadWork.accountId, row.accountId), eq(billingReloadWork.generation, row.generation)))
@@ -1762,8 +1848,8 @@ export class BillingPaymentsService {
             eq(billingProviderLeg.environment, this.config.environment),
             eq(billingProviderLeg.kind, 'checkout_setup'),
             eq(billingProviderLeg.state, 'known'),
-            isNull(billingProviderLeg.expirationRequestedAt),
             sql`${billingProviderLeg.expiresAt} <= clock_timestamp()`,
+            sql`${billingProviderLeg.nextAttemptAt} <= clock_timestamp()`,
           ),
         )
         .orderBy(asc(billingProviderLeg.expiresAt))
@@ -1771,10 +1857,15 @@ export class BillingPaymentsService {
         .for('update', { skipLocked: true });
       const claimed: typeof rows = [];
       for (const row of rows) {
+        // The stamp is write-once; `nextAttemptAt` paces a retry after a failed or inconclusive pass.
         const updated = await tx
           .update(billingProviderLeg)
-          .set({ expirationRequestedAt: sql`clock_timestamp()` })
-          .where(and(eq(billingProviderLeg.id, row.id), isNull(billingProviderLeg.expirationRequestedAt)))
+          .set({
+            // Millisecond precision: the stamp is read back into a JS Date and fences the terminal write.
+            expirationRequestedAt: sql`coalesce(${billingProviderLeg.expirationRequestedAt}, date_trunc('milliseconds', clock_timestamp()))`,
+            nextAttemptAt: sql`clock_timestamp() + interval '5 minutes'`,
+          })
+          .where(and(eq(billingProviderLeg.id, row.id), eq(billingProviderLeg.state, 'known')))
           .returning();
         if (updated[0] !== undefined) claimed.push(updated[0]);
       }
@@ -1784,11 +1875,15 @@ export class BillingPaymentsService {
     for (const leg of legs) {
       try {
         if (leg.providerObjectId === null) throw new Error('Setup expiry has no Session identity');
-        await expireStripeCheckoutSession(this.stripe, {
-          sessionId: leg.providerObjectId,
-          idempotencyKey: `expire:${leg.id}`,
-        });
-        const session = await this.sourceStripe.checkout.sessions.retrieve(leg.providerObjectId);
+        let session = await this.sourceStripe.checkout.sessions.retrieve(leg.providerObjectId);
+        // Stripe closes a Session at its own `expires_at`; only a Session still open needs the write.
+        if (session.status === 'open') {
+          await expireStripeCheckoutSession(this.stripe, {
+            sessionId: leg.providerObjectId,
+            idempotencyKey: `expire:${leg.id}`,
+          });
+          session = await this.sourceStripe.checkout.sessions.retrieve(leg.providerObjectId);
+        }
         const customer = await this.ownedCustomer(leg.accountId, leg.customerBindingId);
         if (
           session.status !== 'expired' ||
@@ -1810,23 +1905,34 @@ export class BillingPaymentsService {
           sourceDigest: digest(session),
           observedAt: new Date().toISOString(),
         });
-        const changed = await this.databaseService.database
-          .update(billingProviderLeg)
-          .set({
-            state: 'expired',
-            terminalEvidence: evidence,
-            redirectUrl: null,
-            nextAttemptAt: new Date('9999-12-31T00:00:00Z'),
-          })
-          .where(
-            and(
-              eq(billingProviderLeg.id, leg.id),
-              eq(billingProviderLeg.state, 'known'),
-              eq(billingProviderLeg.expirationRequestedAt, leg.expirationRequestedAt ?? new Date(0)),
-            ),
-          )
-          .returning({ id: billingProviderLeg.id });
-        if (changed[0] === undefined) throw new ConflictException({ code: 'stale_setup_expiry' });
+        await this.databaseService.database.transaction(async (tx) => {
+          // The redirect URL is dispatch identity and stays; readers show it only while the leg is `known`.
+          const changed = await tx
+            .update(billingProviderLeg)
+            .set({ state: 'expired', terminalEvidence: evidence, nextAttemptAt: new Date('9999-12-31T00:00:00Z') })
+            .where(
+              and(
+                eq(billingProviderLeg.id, leg.id),
+                eq(billingProviderLeg.state, 'known'),
+                eq(billingProviderLeg.expirationRequestedAt, leg.expirationRequestedAt ?? new Date(0)),
+              ),
+            )
+            .returning({ id: billingProviderLeg.id });
+          if (changed[0] === undefined) throw new ConflictException({ code: 'stale_setup_expiry' });
+          // An expired Session can never enable its consent; retiring it frees the account to set up again.
+          if (leg.reloadConsentId !== null) {
+            await tx
+              .update(billingReloadConsent)
+              .set({ state: 'revoked', updatedAt: new Date() })
+              .where(
+                and(
+                  eq(billingReloadConsent.id, leg.reloadConsentId),
+                  eq(billingReloadConsent.accountId, leg.accountId),
+                  eq(billingReloadConsent.state, 'pending_setup'),
+                ),
+              );
+          }
+        });
         result.processed.push(leg.id);
       } catch {
         result.failed.push(leg.id);
@@ -2500,7 +2606,10 @@ export class BillingPaymentsService {
         freshAccount.promoHeldAtoms -
         freshAccount.planHeldAtoms -
         freshAccount.purchasedHeldAtoms;
-      return freshAvailable < freshConsent.thresholdAtoms ? work : undefined;
+      if (freshAvailable >= freshConsent.thresholdAtoms) return undefined;
+      // A capped account must not quote Stripe Tax on every wake; the insert transaction rechecks the cap.
+      const monthlyGross = await this.automaticMonthlyGrossMinor(tx, accountId);
+      return monthlyGross + freshConsent.grossCeilingMinor > freshConsent.monthlyGrossCapMinor ? undefined : work;
     });
     if (eligibleWork === undefined) {
       await this.finishReloadWork(accountId, generation);
@@ -2588,6 +2697,7 @@ export class BillingPaymentsService {
         currency: 'usd',
         customer: customer.stripeCustomerId,
         payment_method: consent.paymentMethodId,
+        payment_method_types: ['card'],
         confirm: true,
         off_session: true,
         metadata: {
@@ -2654,22 +2764,11 @@ export class BillingPaymentsService {
         lockedAccount.planHeldAtoms -
         lockedAccount.purchasedHeldAtoms;
       if (lockedAvailable >= current.thresholdAtoms) return false;
-      const sums = await tx
-        .select({
-          total: sql<string>`coalesce(sum(case when ${billingPurchase.automaticSourceAcceptedAt} is null then ${billingPurchase.automaticGrossCeilingMinor} else (${billingPurchase.offerSnapshot}->>'grossMinor')::numeric end), 0)::text`,
-        })
-        .from(billingPurchase)
-        .where(
-          and(
-            eq(billingPurchase.accountId, accountId),
-            eq(billingPurchase.purpose, 'automatic'),
-            or(
-              and(isNull(billingPurchase.automaticSourceAcceptedAt), isNull(billingPurchase.automaticTerminalOutcome)),
-              sql`${billingPurchase.automaticSourceAcceptedAt} >= date_trunc('month', clock_timestamp() at time zone 'UTC') at time zone 'UTC'`,
-            ),
-          ),
-        );
-      if (BigInt(sums[0]?.total ?? '0') + consent.grossCeilingMinor > consent.monthlyGrossCapMinor) return false;
+      if (
+        (await this.automaticMonthlyGrossMinor(tx, accountId)) + consent.grossCeilingMinor >
+        consent.monthlyGrossCapMinor
+      )
+        return false;
       await tx.insert(billingPurchase).values({
         id: purchaseId,
         accountId,
@@ -2952,6 +3051,26 @@ export class BillingPaymentsService {
     });
   }
 
+  /** Automatic gross counted against this UTC month's cap: accepted sources plus open ceilings. */
+  private async automaticMonthlyGrossMinor(tx: Transaction, accountId: string): Promise<bigint> {
+    const [sums] = await tx
+      .select({
+        total: sql<string>`coalesce(sum(case when ${billingPurchase.automaticSourceAcceptedAt} is null then ${billingPurchase.automaticGrossCeilingMinor} else (${billingPurchase.offerSnapshot}->>'grossMinor')::numeric end), 0)::text`,
+      })
+      .from(billingPurchase)
+      .where(
+        and(
+          eq(billingPurchase.accountId, accountId),
+          eq(billingPurchase.purpose, 'automatic'),
+          or(
+            and(isNull(billingPurchase.automaticSourceAcceptedAt), isNull(billingPurchase.automaticTerminalOutcome)),
+            sql`${billingPurchase.automaticSourceAcceptedAt} >= date_trunc('month', clock_timestamp() at time zone 'UTC') at time zone 'UTC'`,
+          ),
+        ),
+      );
+    return BigInt(sums?.total ?? '0');
+  }
+
   private async finishReloadWork(accountId: string, generation: bigint): Promise<void> {
     await this.databaseService.database
       .update(billingReloadWork)
@@ -3058,7 +3177,9 @@ export class BillingPaymentsService {
         const inbox: SourceClaim['inbox'] = [];
         let sourceAcceptedAt: Date | undefined;
         let hasFailureEvent = false;
+        let attempts = 1;
         for (const item of pending) {
+          attempts = Math.max(attempts, item.attempts + 1);
           const itemGeneration = item.claimGeneration + 1n;
           await tx
             .update(stripeEventInbox)
@@ -3095,6 +3216,7 @@ export class BillingPaymentsService {
           livemode: row.livemode,
           sourceAcceptedAt,
           hasFailureEvent,
+          attempts,
           inbox,
         });
       }
@@ -3103,10 +3225,29 @@ export class BillingPaymentsService {
   }
 
   private async reconcileClaimedSource(claim: SourceClaim): Promise<boolean> {
+    if (claim.sourceType === 'charge' || claim.sourceType === 'refund' || claim.sourceType === 'dispute') {
+      if (this.cash.reconcileCharge === undefined) return true;
+      const reference =
+        claim.sourceType === 'charge'
+          ? claim.sourceId
+          : claim.sourceType === 'refund'
+            ? (await retrieveStripeRefund(this.sourceStripe, claim.sourceId)).charge
+            : (await retrieveStripeDispute(this.sourceStripe, claim.sourceId)).charge;
+      const chargeId = typeof reference === 'string' ? reference : reference?.id;
+      if (chargeId === undefined) return true;
+      const applied = await this.cash.reconcileCharge({
+        environment: this.config.environment,
+        chargeId,
+        maximumRefundPages: 10,
+      });
+      // `attention` finishes the source: the cash scan holds the account-scoped case until an operator acts.
+      return applied.status !== 'pending';
+    }
     if (claim.sourceType === 'payment_intent') {
       const source = await retrieveStripePaymentEvidence(this.sourceStripe, claim.sourceId);
       const providerLegId = source.paymentIntent.metadata['tau_provider_leg_id'];
-      if (providerLegId === undefined) return false;
+      // Invoice and dashboard PaymentIntents carry no Tau leg; their invoices or the cash scan own them.
+      if (providerLegId === undefined) return true;
       const legs = await this.databaseService.database
         .select({ leg: billingProviderLeg })
         .from(billingProviderLeg)
@@ -3155,6 +3296,9 @@ export class BillingPaymentsService {
         .limit(1);
       const leg = legs[0];
       if (leg === undefined || session.client_reference_id !== (leg.purchaseId ?? leg.subscriptionId)) return false;
+      if (session.status === 'expired' && session.payment_status === 'unpaid') {
+        return this.closeExpiredCheckout(leg, session, 'failed', claim);
+      }
       const paymentIntentId =
         typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id;
       if (leg.purchaseId !== null && paymentIntentId !== null && paymentIntentId !== undefined) {
@@ -3206,7 +3350,7 @@ export class BillingPaymentsService {
       }
     }
     if (claim.sourceType === 'invoice') return this.reconcileInvoice(claim.sourceId, claim);
-    if (claim.sourceType === 'customer.subscription') {
+    if (claim.sourceType === 'subscription') {
       const remote = await this.sourceStripe.subscriptions.retrieve(claim.sourceId);
       if (remote.livemode !== this.config.livemode) return false;
       const remoteCustomerId = typeof remote.customer === 'string' ? remote.customer : remote.customer.id;
@@ -3558,6 +3702,125 @@ export class BillingPaymentsService {
     return true;
   }
 
+  /**
+   * Terminalises a hosted Checkout Stripe has expired, once the source proves nothing was collected:
+   * the purchase fails (or is canceled by its owner) and a Pro slot ends, so the account can start again.
+   */
+  private async closeExpiredCheckout(
+    leg: typeof billingProviderLeg.$inferSelect,
+    session: Stripe.Checkout.Session,
+    outcome: 'failed' | 'canceled',
+    claim?: SourceClaim,
+  ): Promise<boolean> {
+    const [binding] = await this.databaseService.database
+      .select()
+      .from(billingStripeCustomer)
+      .where(
+        and(
+          eq(billingStripeCustomer.id, leg.customerBindingId),
+          eq(billingStripeCustomer.accountId, leg.accountId),
+          eq(billingStripeCustomer.environment, this.config.environment),
+          eq(billingStripeCustomer.stripeAccountId, this.config.stripeAccountId),
+          eq(billingStripeCustomer.livemode, this.config.livemode),
+        ),
+      )
+      .limit(1);
+    const customerId = stripeObjectId(session.customer);
+    const paymentIntentId = stripeObjectId(session.payment_intent) ?? null;
+    if (
+      session.id !== leg.providerObjectId ||
+      session.status !== 'expired' ||
+      session.payment_status !== 'unpaid' ||
+      session.livemode !== this.config.livemode ||
+      binding?.stripeCustomerId === null ||
+      binding?.stripeCustomerId !== customerId ||
+      session.client_reference_id !== (leg.purchaseId ?? leg.subscriptionId)
+    )
+      return false;
+    const sourceDigest = digest({ session, paymentIntentId });
+    const observedAt = new Date().toISOString();
+    let evidence: Record<string, unknown>;
+    if (leg.kind === 'checkout_payment') {
+      if (session.mode !== 'payment') return false;
+      if (paymentIntentId !== null) {
+        const intent = await this.sourceStripe.paymentIntents.retrieve(paymentIntentId);
+        if (intent.status !== 'canceled' || intent.amount_received !== 0 || intent.amount_capturable !== 0)
+          return false;
+      }
+      evidence = paymentCheckoutExpiryEvidenceSchema.parse({
+        version: 'stripe-payment-checkout-expired-v1',
+        checkoutSessionId: session.id,
+        customerId,
+        stripeAccountId: this.config.stripeAccountId,
+        livemode: this.config.livemode,
+        status: 'expired',
+        mode: 'payment',
+        paymentIntentId,
+        paymentStatus: 'unpaid',
+        amountReceived: '0',
+        sourceDigest,
+        observedAt,
+      });
+    } else if (leg.kind === 'checkout_subscription') {
+      if (session.mode !== 'subscription' || session.subscription !== null || paymentIntentId !== null) return false;
+      evidence = subscriptionCheckoutExpiryEvidenceSchema.parse({
+        version: 'stripe-subscription-checkout-expired-v1',
+        checkoutSessionId: session.id,
+        customerId,
+        stripeAccountId: this.config.stripeAccountId,
+        livemode: this.config.livemode,
+        status: 'expired',
+        mode: 'subscription',
+        subscriptionId: null,
+        paymentIntentId: null,
+        paymentStatus: 'unpaid',
+        sourceDigest,
+        observedAt,
+      });
+    } else {
+      return false;
+    }
+    await this.databaseService.database.transaction(async (tx) => {
+      await this.lockPaymentAccount(tx, leg.accountId);
+      if (claim !== undefined) await this.assertSourceClaim(tx, claim);
+      await tx
+        .update(billingProviderLeg)
+        .set({
+          state: 'expired',
+          expirationRequestedAt: sql`coalesce(${billingProviderLeg.expirationRequestedAt}, date_trunc('milliseconds', clock_timestamp()))`,
+          terminalEvidence: sql`coalesce(${billingProviderLeg.terminalEvidence}, ${JSON.stringify(evidence)}::jsonb)`,
+          nextAttemptAt: new Date('9999-12-31T00:00:00Z'),
+        })
+        .where(and(eq(billingProviderLeg.id, leg.id), ne(billingProviderLeg.state, 'expired')));
+      if (leg.purchaseId !== null) {
+        await tx
+          .update(billingPurchase)
+          .set({ state: outcome, updatedAt: new Date() })
+          .where(
+            and(
+              eq(billingPurchase.id, leg.purchaseId),
+              eq(billingPurchase.accountId, leg.accountId),
+              inArray(billingPurchase.state, ['prepared', 'creating', 'pending', 'attention']),
+            ),
+          );
+      }
+      if (leg.subscriptionId !== null) {
+        await tx
+          .update(subscription)
+          .set({ slotState: 'ended', status: 'incomplete_expired', updatedAt: new Date() })
+          .where(
+            and(
+              eq(subscription.id, leg.subscriptionId),
+              eq(subscription.accountId, leg.accountId),
+              isNull(subscription.stripeSubscriptionId),
+              inArray(subscription.slotState, ['pending', 'attention']),
+            ),
+          );
+      }
+    });
+    return true;
+  }
+
   private async finishSourceClaim(claim: SourceClaim): Promise<void> {
     await this.databaseService.database.transaction(async (tx) => {
       const source = await tx
@@ -3618,13 +3881,15 @@ export class BillingPaymentsService {
   }
 
   private async releaseSourceClaim(claim: SourceClaim, errorCode: string): Promise<void> {
+    // 30 s doubling to a one-hour ceiling: a source that cannot settle yet must not crowd out the others.
+    const retryDelay = sql`least(interval '30 seconds' * power(2, ${Math.min(claim.attempts, 8) - 1}), interval '1 hour')`;
     await this.databaseService.database.transaction(async (tx) => {
       await tx
         .update(billingStripeSource)
         .set({
           state: 'pending',
           leaseUntil: null,
-          nextAttemptAt: sql`clock_timestamp() + interval '30 seconds'`,
+          nextAttemptAt: sql`clock_timestamp() + ${retryDelay}`,
           errorCode,
         })
         .where(
@@ -3641,7 +3906,7 @@ export class BillingPaymentsService {
           .set({
             state: 'pending',
             leaseUntil: null,
-            nextAttemptAt: sql`clock_timestamp() + interval '30 seconds'`,
+            nextAttemptAt: sql`clock_timestamp() + ${retryDelay}`,
             errorCode,
           })
           .where(
@@ -3657,13 +3922,19 @@ export class BillingPaymentsService {
 
   private assertCollectionEnabled(): void {
     if (
-      this.config.collection === null ||
-      this.config.livemode ||
-      this.config.environment.startsWith('prod-') ||
+      !collectionMatchesScope(this.config.collection, this.config) ||
       (this.config.collection.kind === 'local_fixture') !== isLoopbackBillingStripeClient(this.stripe)
     ) {
       throw new ForbiddenException('payment_collection_disabled');
     }
+  }
+
+  /** Whether this process may start a purchase; the UI reads it so it never offers one that must fail. */
+  public get collectionAvailable(): boolean {
+    return (
+      collectionMatchesScope(this.config.collection, this.config) &&
+      (this.config.collection.kind === 'local_fixture') === isLoopbackBillingStripeClient(this.stripe)
+    );
   }
 
   private async ensureOwner(userId: string): Promise<Owner> {
@@ -3856,6 +4127,7 @@ export class BillingPaymentsService {
         currency: 'usd',
         customer: customerId,
         payment_method: offer.paymentMethod?.id,
+        payment_method_types: ['card'],
         confirm: true,
         metadata,
       };
@@ -3885,6 +4157,106 @@ export class BillingPaymentsService {
       payment_intent_data: { metadata, setup_future_usage: 'on_session' },
       tax_id_collection: { enabled: true },
     };
+  }
+
+  /**
+   * Re-sends a create whose response was lost before Stripe answered. The persisted idempotency key
+   * makes Stripe replay the first result if it landed, so this can never create a second object. After
+   * Stripe's 24 h key window, or when Stripe rejects the request itself, the purchase fails instead.
+   */
+  private async replayLostDispatch(
+    leg: typeof billingProviderLeg.$inferSelect,
+    leaseUntil: Date,
+  ): Promise<StripeCreateResult | 'closed' | undefined> {
+    if (!this.collectionAvailable || leg.dispatchStartedAt === null) return undefined;
+    const purchase = leg.purchaseId === null ? undefined : await this.ownedPurchase(leg.accountId, leg.purchaseId);
+    let create: StripeCreateLeg | undefined;
+    if (leg.kind === 'customer') {
+      create = parseStripeCreateLeg({ kind: 'customer', idempotencyKey: leg.idempotencyKey, request: leg.request });
+    } else if (leg.kind === 'payment_intent' && purchase?.purpose === 'manual_saved_card') {
+      create = parseStripeCreateLeg({
+        kind: 'payment_intent',
+        idempotencyKey: leg.idempotencyKey,
+        request: leg.request,
+      });
+    } else if (leg.kind === 'checkout_payment' && purchase?.purpose === 'manual_checkout') {
+      const offer = paymentOfferSnapshotSchema.parse(purchase.offerSnapshot);
+      create = parseStripeCreateLeg({
+        kind: 'checkout',
+        idempotencyKey: leg.idempotencyKey,
+        request: leg.request,
+        checkoutContract: {
+          kind: 'top_up',
+          productId: offer.stripeProductId ?? '',
+          principalMinor: Number(offer.principalMinor),
+        },
+        onSessionSaveConsent: true,
+      });
+    }
+    if (create === undefined) return undefined;
+    // `rejected` is proven: a replay with the same key would have returned any object the first request
+    // made. `expired` is not, so that purchase waits for an operator instead of being discarded.
+    const close = async (outcome: 'rejected' | 'expired', errorType?: string): Promise<'closed'> => {
+      await this.databaseService.database.transaction(async (tx) => {
+        await this.lockPaymentAccount(tx, leg.accountId);
+        await this.assertProviderLegClaim(tx, leg.id, leaseUntil);
+        const dispatchedLeg = and(eq(billingProviderLeg.id, leg.id), eq(billingProviderLeg.state, 'dispatched'));
+        const parked = new Date('9999-12-31T00:00:00Z');
+        if (outcome === 'rejected') {
+          await tx
+            .update(billingProviderLeg)
+            .set({
+              state: 'no_charge',
+              errorCode: 'provider_request_rejected',
+              cancellationRequestedAt: sql`coalesce(${billingProviderLeg.cancellationRequestedAt}, clock_timestamp())`,
+              cancellationConfirmedAt: sql`coalesce(${billingProviderLeg.cancellationConfirmedAt}, clock_timestamp())`,
+              terminalEvidence: {
+                version: 'stripe-request-rejected-v1',
+                idempotencyKey: leg.idempotencyKey,
+                errorType: errorType ?? 'StripeInvalidRequestError',
+                observedAt: new Date().toISOString(),
+              },
+              nextAttemptAt: parked,
+            })
+            .where(dispatchedLeg);
+        } else {
+          await tx
+            .update(billingProviderLeg)
+            .set({ state: 'attention', errorCode: 'provider_outcome_expired', nextAttemptAt: parked })
+            .where(dispatchedLeg);
+        }
+        if (leg.purchaseId !== null)
+          await tx
+            .update(billingPurchase)
+            .set({ state: outcome === 'rejected' ? 'failed' : 'attention', updatedAt: new Date() })
+            .where(
+              and(
+                eq(billingPurchase.id, leg.purchaseId),
+                eq(billingPurchase.accountId, leg.accountId),
+                eq(billingPurchase.state, 'creating'),
+              ),
+            );
+      });
+      return 'closed';
+    };
+    // Stripe keeps an idempotency key for 24 hours; stop an hour early so a replay is never a fresh create.
+    const [window] = await this.databaseService.database.execute<{ open: boolean }>(
+      sql`select ${leg.dispatchStartedAt.toISOString()}::timestamptz > clock_timestamp() - interval '23 hours' as open`,
+    );
+    if (window?.open !== true) return leg.purchaseId === null ? undefined : close('expired');
+    try {
+      return await dispatchStripeLegOnce(this.stripe, create).catch(declinedPaymentIntent);
+    } catch (error) {
+      // A request Stripe rejected outright (for example a detached card) created nothing and never will.
+      if (
+        error instanceof Error &&
+        'type' in error &&
+        error.type === 'StripeInvalidRequestError' &&
+        leg.kind === 'payment_intent'
+      )
+        return close('rejected', error.type);
+      throw error;
+    }
   }
 
   private async claimPurchaseLeg(accountId: string, actionId: string) {
@@ -3989,6 +4361,22 @@ export class BillingPaymentsService {
       const cash = await this.qualifyInitialCash(accountId, purchaseId, 'purchased', evidence);
       if (cash.status !== 'qualified' || !('sourceClaimId' in cash)) return false;
       try {
+        // A crash after `paid_unfulfilled` must still record the tax source the first pass would have:
+        // commit the saved-card Tax Transaction and re-read the hosted Checkout that carried Stripe's tax.
+        // Both follow the cash claim, which is what fences a concurrent recovery of the same purchase.
+        const taxTransaction = await this.paidTaxTransaction(purchase, evidence);
+        const [checkoutLeg] = await this.databaseService.database
+          .select({ sessionId: billingProviderLeg.providerObjectId })
+          .from(billingProviderLeg)
+          .where(and(eq(billingProviderLeg.purchaseId, purchaseId), eq(billingProviderLeg.kind, 'checkout_payment')))
+          .limit(1);
+        const retainedCheckout =
+          checkoutLeg?.sessionId === null || checkoutLeg?.sessionId === undefined
+            ? undefined
+            : await fetchStripeCheckoutSource(this.sourceStripe, {
+                sessionId: checkoutLeg.sessionId,
+                maximumLinePages: 10,
+              });
         await this.tax.observePaidSource({
           claim: {
             id: cash.sourceClaimId,
@@ -4002,6 +4390,8 @@ export class BillingPaymentsService {
           },
           accountId,
           paidEvidence: evidence,
+          ...(retainedCheckout === undefined ? {} : { checkout: retainedCheckout.session }),
+          ...(taxTransaction === undefined ? {} : { taxTransaction }),
         });
         await this.databaseService.database.transaction(async (tx) => {
           await this.lockPaymentAccount(tx, accountId);
@@ -4092,6 +4482,29 @@ export class BillingPaymentsService {
           : { type: 'payment_intent.succeeded', createdAt: claim.sourceAcceptedAt },
       source: paymentSource,
     });
+    // A saved card the issuer declined leaves the PaymentIntent waiting for a new method that no
+    // off-page flow will supply. Cancelling it at Stripe makes the no-charge outcome conclusive.
+    const declined =
+      qualification.status === 'pending' &&
+      paymentSource.paymentIntent.status === 'requires_payment_method' &&
+      paymentSource.paymentIntent.last_payment_error !== null &&
+      paymentSource.paymentIntent.id === paymentIntentId &&
+      paymentSource.paymentIntent.metadata['tau_provider_leg_id'] === expected.providerLegId &&
+      expected.expectedPaymentMethodId !== undefined;
+    if (declined && this.collectionAvailable) {
+      await this.databaseService.database
+        .update(billingProviderLeg)
+        .set({
+          cancellationRequestedAt: sql`coalesce(${billingProviderLeg.cancellationRequestedAt}, clock_timestamp())`,
+        })
+        .where(and(eq(billingProviderLeg.id, expected.providerLegId), eq(billingProviderLeg.purchaseId, purchaseId)));
+      await cancelStripePaymentIntent(this.stripe, {
+        paymentIntentId,
+        idempotencyKey: `${expected.providerLegId}:cancel`,
+      });
+      // The source now reads `canceled`, which the no-charge branch below terminalises.
+      return this.reconcilePurchase(accountId, purchaseId, paymentIntentId, claim, expected, providerClaim);
+    }
     if (qualification.status !== 'paid') {
       const quotedGrossMinor = offer.grossMinor === null ? undefined : Number(offer.grossMinor);
       const authenticationRequired =
@@ -4108,7 +4521,8 @@ export class BillingPaymentsService {
         expected.expectedPaymentMethodId !== undefined &&
         offer.paymentMethod?.id === expected.expectedPaymentMethodId &&
         stripeObjectId(paymentSource.paymentIntent.payment_method) === expected.expectedPaymentMethodId;
-      const automaticNoCharge = qualification.status === 'no_charge' && purchase.purpose === 'automatic';
+      const noCharge = qualification.status === 'no_charge';
+      const automaticNoCharge = noCharge && purchase.purpose === 'automatic';
       await this.databaseService.database.transaction(async (tx) => {
         await this.lockPaymentAccount(tx, accountId);
         await tx
@@ -4119,7 +4533,7 @@ export class BillingPaymentsService {
         if (claim !== undefined) await this.assertSourceClaim(tx, claim);
         if (providerClaim !== undefined)
           await this.assertProviderLegClaim(tx, providerClaim.id, providerClaim.leaseUntil);
-        if (automaticNoCharge) {
+        if (noCharge) {
           const noChargeEvidence = noChargeEvidenceSchema.parse({
             version: 'stripe-no-charge-v1',
             status: 'canceled',
@@ -4147,16 +4561,28 @@ export class BillingPaymentsService {
             .where(
               and(eq(billingProviderLeg.id, expected.providerLegId), eq(billingProviderLeg.purchaseId, purchaseId)),
             );
-          await tx
-            .update(billingPurchase)
-            .set({
-              state: 'failed',
-              automaticTerminalOutcome: 'no_charge_failure',
-              automaticTerminalAt: sql`clock_timestamp()`,
-              updatedAt: new Date(),
-            })
-            .where(and(eq(billingPurchase.id, purchaseId), isNull(billingPurchase.automaticTerminalOutcome)));
-          if (purchase.reloadConsentId !== null) {
+          if (automaticNoCharge) {
+            await tx
+              .update(billingPurchase)
+              .set({
+                state: 'failed',
+                automaticTerminalOutcome: 'no_charge_failure',
+                automaticTerminalAt: sql`clock_timestamp()`,
+                updatedAt: new Date(),
+              })
+              .where(and(eq(billingPurchase.id, purchaseId), isNull(billingPurchase.automaticTerminalOutcome)));
+          } else {
+            await tx
+              .update(billingPurchase)
+              .set({ state: 'failed', updatedAt: new Date() })
+              .where(
+                and(
+                  eq(billingPurchase.id, purchaseId),
+                  inArray(billingPurchase.state, ['creating', 'pending', 'attention']),
+                ),
+              );
+          }
+          if (automaticNoCharge && purchase.reloadConsentId !== null) {
             const consentState = await tx
               .update(billingReloadConsent)
               .set({
@@ -4221,7 +4647,7 @@ export class BillingPaymentsService {
               and(eq(billingProviderLeg.id, expected.providerLegId), eq(billingProviderLeg.purchaseId, purchaseId)),
             );
         }
-        if (!automaticNoCharge)
+        if (!noCharge)
           await tx
             .update(billingPurchase)
             .set({
@@ -4571,10 +4997,10 @@ export class BillingPaymentsService {
     const state =
       consent.state === 'enabled'
         ? 'completed'
-        : leg?.redirectUrl
-          ? 'redirect_required'
-          : consent.state === 'revoked'
-            ? 'canceled'
+        : consent.state === 'revoked'
+          ? 'canceled'
+          : leg?.redirectUrl && leg.state !== 'expired'
+            ? 'redirect_required'
             : 'prepared';
     return wirePaymentActionSchema.parse({
       version: 'payment-action-v1',
@@ -4832,9 +5258,12 @@ export class BillingPaymentsService {
       .orderBy(desc(billingPeriod.periodEnd))
       .limit(1);
     const entitlementPeriod = periods[0];
-    const redirectUrl = entitlementPeriod === undefined ? (leg?.redirectUrl ?? null) : null;
-    const state: WirePaymentAction['state'] =
-      entitlementPeriod === undefined
+    // An ended slot that never paid is an abandoned Checkout; its dead URL is never offered again.
+    const abandoned = entitlementPeriod === undefined && row.slotState === 'ended';
+    const redirectUrl = entitlementPeriod === undefined && !abandoned ? (leg?.redirectUrl ?? null) : null;
+    const state: WirePaymentAction['state'] = abandoned
+      ? 'canceled'
+      : entitlementPeriod === undefined
         ? row.slotState === 'attention'
           ? 'attention_required'
           : redirectUrl === null
@@ -4952,6 +5381,27 @@ function automaticWorkGeneration(request: Readonly<Record<string, unknown>>): bi
 }
 
 // oxlint-disable-next-line typescript/no-restricted-types -- Stripe SDK represents an absent expandable field as null.
+/**
+ * Stripe answers a declined confirmation with 402 and the PaymentIntent it created; that object is the
+ * dispatch result, so the decline is reconciled instead of leaving the leg's outcome unknown.
+ */
+function declinedPaymentIntent(error: unknown): StripeCreateResult {
+  const intent = error instanceof Error && 'payment_intent' in error ? error.payment_intent : undefined;
+  if (
+    typeof intent === 'object' &&
+    intent !== null &&
+    'object' in intent &&
+    intent.object === 'payment_intent' &&
+    'id' in intent &&
+    typeof intent.id === 'string'
+  ) {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- Stripe attaches the full PaymentIntent to a card error
+    return { kind: 'payment_intent', object: intent as Stripe.PaymentIntent };
+  }
+  throw error;
+}
+
+// oxlint-disable-next-line typescript/no-restricted-types -- Stripe SDK represents an absent expandable field as null.
 function stripeObjectId(value: string | { readonly id: string } | null): string | undefined {
   return typeof value === 'string' ? value : value?.id;
 }
@@ -4996,6 +5446,7 @@ function recoveryQuery(leg: typeof billingProviderLeg.$inferSelect): Parameters<
       kind: 'checkout',
       providerObjectId: leg.providerObjectId ?? undefined,
       clientReferenceId: leg.purchaseId ?? leg.subscriptionId ?? '',
+      customerId: typeof leg.request['customer'] === 'string' ? leg.request['customer'] : undefined,
     };
   return { kind: 'portal', providerObjectId: leg.providerObjectId ?? undefined };
 }

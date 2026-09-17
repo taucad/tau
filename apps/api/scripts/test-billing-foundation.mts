@@ -20,9 +20,12 @@ const toolEnvironment = Object.fromEntries(
 );
 
 async function main(): Promise<void> {
-  const args = process.argv.slice(2);
+  const allArgs = process.argv.slice(2);
+  // Bare arguments are vitest file filters, so one native file can be iterated without the whole suite.
+  const fileFilters = allArgs.filter((argument) => !argument.startsWith('-'));
+  const args = allArgs.filter((argument) => argument.startsWith('-'));
   if (args.some((argument) => !/^--(?:runtime=(?:native|compose)|postgres-bin=.+)$/u.test(argument))) {
-    throw new Error('Expected --runtime=native|compose and optional --postgres-bin=/path/to/keg/bin');
+    throw new Error('Expected --runtime=native|compose, optional --postgres-bin=/path/to/keg/bin and file filters');
   }
   const runtime = args.find((argument) => argument.startsWith('--runtime='))?.slice('--runtime='.length) ?? 'compose';
   const binaryDirectory = args
@@ -255,7 +258,15 @@ async function main(): Promise<void> {
     }
     await run(
       'pnpm',
-      ['--config.verify-deps-before-run=warn', 'exec', 'vitest', 'run', '--config', 'vitest.billing.config.ts'],
+      [
+        '--config.verify-deps-before-run=warn',
+        'exec',
+        'vitest',
+        'run',
+        '--config',
+        'vitest.billing.config.ts',
+        ...fileFilters,
+      ],
       {
         env: testEnvironment,
         inherit: true,

@@ -426,7 +426,11 @@ export function isConclusiveNoCharge(
     paymentIntent.metadata['tau_purchase_id'] === expected.purchaseId &&
     paymentIntent.metadata['tau_customer_binding_id'] === expected.customerBindingId &&
     paymentIntent.metadata['tau_provider_leg_id'] === expected.providerLegId &&
-    (expected.paymentMethodId === undefined || stripeId(paymentIntent.payment_method) === expected.paymentMethodId) &&
+    // A declined attempt detaches its method; the decline itself still names the card that was tried.
+    (expected.paymentMethodId === undefined ||
+      stripeId(paymentIntent.payment_method) === expected.paymentMethodId ||
+      (paymentIntent.payment_method === null &&
+        stripeId(paymentIntent.last_payment_error?.payment_method ?? null) === expected.paymentMethodId)) &&
     paymentIntent.status === 'canceled' &&
     paymentIntent.amount_received === 0 &&
     paymentIntent.amount_capturable === 0 &&

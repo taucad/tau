@@ -5,6 +5,8 @@ import type {
   CheckoutExpiryEvidence,
   SubscriptionCancellationEvidence,
   SubscriptionCheckoutExpiryEvidence,
+  PaymentCheckoutExpiryEvidence,
+  RequestRejectedEvidence,
 } from '#api/billing/billing-payment-contract.js';
 import type { SupplierValuation, JointInputMaximum, InputCountEvidence } from '#api/billing/credit-ledger.types.js';
 import { sql, desc } from 'drizzle-orm';
@@ -1177,7 +1179,11 @@ export const billingProviderLeg = billing.table(
     cancellationConfirmedAt: timestamp('cancellation_confirmed_at', { withTimezone: true }),
     noChargeEvidence: jsonb('no_charge_evidence').$type<NoChargeEvidence>(),
     terminalEvidence: jsonb('terminal_evidence').$type<
-      CheckoutExpiryEvidence | SubscriptionCancellationEvidence | SubscriptionCheckoutExpiryEvidence
+      | CheckoutExpiryEvidence
+      | SubscriptionCancellationEvidence
+      | SubscriptionCheckoutExpiryEvidence
+      | PaymentCheckoutExpiryEvidence
+      | RequestRejectedEvidence
     >(),
     errorCode: text('error_code'),
     generation: bigint('generation', { mode: 'bigint' })
@@ -1233,11 +1239,11 @@ export const billingProviderLeg = billing.table(
     ),
     check(
       'billing_provider_no_charge',
-      sql`${table.state} <> 'no_charge' OR ${table.dispatchStartedAt} IS NULL OR ((${table.kind} = 'payment_intent' AND ${table.noChargeEvidence} IS NOT NULL OR ${table.kind} = 'subscription_cancel' AND ${table.terminalEvidence} IS NOT NULL) AND ${table.cancellationConfirmedAt} IS NOT NULL)`,
+      sql`${table.state} <> 'no_charge' OR ${table.dispatchStartedAt} IS NULL OR ((${table.kind} = 'payment_intent' AND (${table.noChargeEvidence} IS NOT NULL OR ${table.terminalEvidence}->>'version' = 'stripe-request-rejected-v1') OR ${table.kind} = 'subscription_cancel' AND ${table.terminalEvidence} IS NOT NULL) AND ${table.cancellationConfirmedAt} IS NOT NULL)`,
     ),
     check(
       'billing_provider_expired',
-      sql`${table.state} <> 'expired' OR (${table.kind} IN ('checkout_setup','checkout_subscription') AND ${table.terminalEvidence} IS NOT NULL AND ${table.expirationRequestedAt} IS NOT NULL)`,
+      sql`${table.state} <> 'expired' OR (${table.kind} IN ('checkout_setup','checkout_subscription','checkout_payment') AND ${table.terminalEvidence} IS NOT NULL AND ${table.expirationRequestedAt} IS NOT NULL)`,
     ),
     check('billing_provider_known', sql`${table.state} <> 'known' OR ${table.providerObjectId} IS NOT NULL`),
     check(

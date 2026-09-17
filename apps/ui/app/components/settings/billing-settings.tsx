@@ -1,8 +1,9 @@
 import { SettingsItem, SettingsSectionCard } from '#components/settings/settings-item.js';
 import { useRef, useState } from 'react';
+import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import { CreditCard, ExternalLink, Plus } from 'lucide-react';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- this first-party settings surface owns the direct billing client contract
-import { formatCreditAtoms } from '@taucad/billing';
+import { formatCreditAtoms, tauPlanCatalog } from '@taucad/billing';
 import type { Entitlements } from '@taucad/billing';
 import { useEntitlements } from '@taucad/billing/hooks/use-entitlements';
 import { useCredits } from '@taucad/billing/hooks/use-credits';
@@ -17,7 +18,8 @@ import { PlanCards } from '#components/billing/plan-cards.js';
 import { AutoReloadSettings } from '#components/billing/auto-reload-settings.js';
 import { AccountClosureSettings } from '#components/billing/account-closure-settings.js';
 
-const proMonthlyPriceLabel = '$20.00 per month';
+const proPlan = tauPlanCatalog.find((entry) => entry.id === 'pro');
+const proMonthlyPriceLabel = `${proPlan?.priceLabel ?? ''}${proPlan?.priceSubLabel ?? ''}`;
 
 const formatRenewalDate = (date: Date): string =>
   date.toLocaleDateString(undefined, {
@@ -97,6 +99,8 @@ export function BillingSettings(): React.JSX.Element {
   const entitlements = useEntitlements();
   const credits = useCredits();
   const availableBalance = credits?.balance ?? undefined;
+  const queryClient = useQueryClient();
+  const isBalanceLoading = useIsFetching({ queryKey: ['billing', 'credits'] }) > 0;
   const { apiBaseUrl, environment, userId } = useBillingSession();
   const binding =
     apiBaseUrl && environment && userId
@@ -172,7 +176,7 @@ export function BillingSettings(): React.JSX.Element {
           <CardHeader className='flex flex-row items-center justify-between space-y-0'>
             <CardTitle className='flex items-center gap-2 text-base'>
               Current plan
-              <TierBadge tier={entitlements.tier} />
+              {entitlements.isResolved ? <TierBadge tier={entitlements.tier} /> : undefined}
               {entitlements.status === 'past_due' ? <Badge variant='outline'>Past due</Badge> : undefined}
             </CardTitle>
             {isPaidTier ? (
@@ -192,6 +196,11 @@ export function BillingSettings(): React.JSX.Element {
             {stateIsCurrent && portalError ? <span className='text-xs text-warning'>{portalError}</span> : undefined}
           </CardHeader>
           <CardContent className='flex flex-col gap-2 text-sm text-muted-foreground'>
+            {entitlements.isResolved ? undefined : (
+              <span role='status' aria-busy='true'>
+                Loading plan…
+              </span>
+            )}
             {entitlements.tier === 'pro' ? <span>{proMonthlyPriceLabel}</span> : undefined}
             {entitlements.tier === 'enterprise' ? (
               <>
@@ -210,7 +219,7 @@ export function BillingSettings(): React.JSX.Element {
               <span>Renews on {formatRenewalDate(entitlements.currentPeriodEnd)}</span>
             ) : undefined}
             {isPaidTier ? <PaidTierQuotas entitlements={entitlements} /> : undefined}
-            {entitlements.tier === 'free' ? (
+            {entitlements.isResolved && entitlements.tier === 'free' ? (
               // U2/T7: the free state shows the full plan grid — same catalogue
               // as the landing pricing section, "Current plan" pinned to Free.
               <PlanCards currentTier='free' className='pt-2' isFeatureListScrollable />
@@ -219,27 +228,30 @@ export function BillingSettings(): React.JSX.Element {
         </SettingsSectionCard>
       </SettingsItem>
 
-      {availableBalance ? (
-        <SettingsItem settingId='credit-balance'>
-          <SettingsSectionCard>
-            <CardHeader className='flex flex-row items-center justify-between space-y-0'>
-              <CardTitle className='text-base'>Credit balance</CardTitle>
-              <div className='flex items-center gap-3'>
-                <Button
-                  variant='outline'
-                  size='sm'
-                  onClick={() => {
-                    setIsTopupOpen(true);
-                  }}
-                >
-                  <Plus className='size-3.5' />
-                  Add credits
-                </Button>
+      <SettingsItem settingId='credit-balance'>
+        <SettingsSectionCard>
+          <CardHeader className='flex flex-row items-center justify-between space-y-0'>
+            <CardTitle className='text-base'>Credit balance</CardTitle>
+            <div className='flex items-center gap-3'>
+              <Button
+                variant='outline'
+                size='sm'
+                disabled={binding === undefined}
+                onClick={() => {
+                  setIsTopupOpen(true);
+                }}
+              >
+                <Plus className='size-3.5' />
+                Add credits
+              </Button>
+              {availableBalance ? (
                 <span className='font-mono text-lg' data-testid='credit-balance'>
                   {formatCreditAtoms(BigInt(availableBalance.eligibleAvailableCreditAtoms))}
                 </span>
-              </div>
-            </CardHeader>
+              ) : undefined}
+            </div>
+          </CardHeader>
+          {availableBalance ? (
             <CardContent className='flex flex-col gap-1 text-sm text-muted-foreground'>
               {BigInt(availableBalance.netBalanceCreditAtoms) < 0n ? (
                 <span className='text-warning'>
@@ -265,9 +277,26 @@ export function BillingSettings(): React.JSX.Element {
                 <span>No credits yet. Add credits to start using AI.</span>
               ) : undefined}
             </CardContent>
-          </SettingsSectionCard>
-        </SettingsItem>
-      ) : undefined}
+          ) : isBalanceLoading ? (
+            <CardContent className='text-sm text-muted-foreground' role='status' aria-busy='true'>
+              Loading balance…
+            </CardContent>
+          ) : (
+            <CardContent className='flex items-center justify-between gap-2 text-sm text-muted-foreground'>
+              <span role='alert'>Balance unavailable.</span>
+              <Button
+                variant='ghost'
+                size='sm'
+                onClick={() => {
+                  void queryClient.invalidateQueries({ queryKey: ['billing', 'credits'] });
+                }}
+              >
+                Retry
+              </Button>
+            </CardContent>
+          )}
+        </SettingsSectionCard>
+      </SettingsItem>
 
       <SettingsItem settingId='automatic-reload'>
         <AutoReloadSettings binding={binding} />

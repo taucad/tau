@@ -9,6 +9,7 @@ export const useCommercialFeatures = (): {
   readonly canSyncFiles: boolean;
   readonly canConnectGitHub: boolean;
   readonly hasNoTrainGuarantee: boolean;
+  readonly isResolved: boolean;
   readonly requestUpgrade: () => void;
 } => ({
   canCreatePrivateShares: true,
@@ -16,5 +17,6 @@ export const useCommercialFeatures = (): {
   canSyncFiles: true,
   canConnectGitHub: true,
   hasNoTrainGuarantee: false,
+  isResolved: true,
   requestUpgrade: useCallback(() => undefined, []),
 });

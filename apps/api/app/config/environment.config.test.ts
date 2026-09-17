@@ -114,6 +114,59 @@ describe('environmentSchema', () => {
     expect(result.success).toBe(true);
   });
 
+  describe('Stripe mode and environment', () => {
+    const cloud = (overrides: Record<string, string | undefined>) =>
+      environmentSchema.safeParse({
+        ...withRequiredCookieSecret(process.env),
+        TAU_CLOUD_ENABLED: 'true',
+        BILLING_USAGE_CURSOR_SECRET: 'test-usage-cursor-secret-min-32-chars',
+        BILLING_REQUEST_DIGEST_SECRET: 'test-request-digest-secret-min-32-chars',
+        STRIPE_ACCOUNT_ID: 'acct_test',
+        STRIPE_WEBHOOK_SECRET: 'whsec_test',
+        STRIPE_PRICE_ID_PRO_MONTHLY: 'price_test',
+        STRIPE_PRODUCT_ID_CREDIT_PACK: 'prod_test',
+        ...overrides,
+      });
+    const live = {
+      STRIPE_SECRET_KEY: 'rk_live_create',
+      STRIPE_READ_SECRET_KEY: 'rk_live_read',
+      STRIPE_LIVEMODE: 'true',
+    };
+    const test = {
+      STRIPE_SECRET_KEY: 'rk_test_create',
+      STRIPE_READ_SECRET_KEY: 'rk_test_read',
+      STRIPE_LIVEMODE: 'false',
+    };
+    const failedPaths = (result: ReturnType<typeof cloud>): string[] =>
+      result.success ? [] : result.error.issues.map((issue) => String(issue.path[0]));
+
+    it('accepts activated live collection in production', () => {
+      expect(cloud({ ...live, BILLING_ENVIRONMENT: 'prod-us', BILLING_LIVE_COLLECTION_ENABLED: 'true' }).success).toBe(
+        true,
+      );
+    });
+
+    it('accepts live keys in production before activation', () => {
+      const result = cloud({ ...live, BILLING_ENVIRONMENT: 'prod-us' });
+      expect(result.success).toBe(true);
+      expect(result.success && result.data.BILLING_LIVE_COLLECTION_ENABLED).toBe(false);
+    });
+
+    it('rejects live keys outside production', () => {
+      expect(failedPaths(cloud({ ...live, BILLING_ENVIRONMENT: 'staging' }))).toContain('STRIPE_LIVEMODE');
+    });
+
+    it('rejects sandbox keys in production', () => {
+      expect(failedPaths(cloud({ ...test, BILLING_ENVIRONMENT: 'prod-us' }))).toContain('STRIPE_LIVEMODE');
+    });
+
+    it('rejects live activation without live keys', () => {
+      expect(
+        failedPaths(cloud({ ...test, BILLING_ENVIRONMENT: 'staging', BILLING_LIVE_COLLECTION_ENABLED: 'true' })),
+      ).toContain('BILLING_LIVE_COLLECTION_ENABLED');
+    });
+  });
+
   it('rejects a full test-mode key when Tau Cloud is enabled', () => {
     const result = environmentSchema.safeParse({
       ...withRequiredCookieSecret(process.env),

@@ -798,9 +798,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
             /* Resolved per request, never captured: main refreshes the bearer and a
              * captured string would pin this host to a stale one. */
             auth: () => authToken,
-            modelTransport: (typeof tauCloudBuildEnabled !== 'undefined' && tauCloudBuildEnabled
-              ? createTauCloudGatewayModelTransport
-              : createGatewayModelTransport)(transportOptions),
+            /* The build defines this; a missing define must fail loudly rather than
+             * quietly running a Cloud build on the self-host transport. */
+            modelTransport: (tauCloudBuildEnabled ? createTauCloudGatewayModelTransport : createGatewayModelTransport)(
+              transportOptions,
+            ),
             /* The adapters main resolved, wired through the daemon's own port —
              * same factory, same branch confinement, same refusal for an agent this
              * machine cannot start, and the same `tau` MCP server over this

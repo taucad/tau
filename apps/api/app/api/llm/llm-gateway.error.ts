@@ -38,5 +38,7 @@ export class LlmGatewayError extends HttpException {
     details?: Record<string, unknown>,
   ) {
     super({ type: 'error', error: { type, message, ...(details === undefined ? {} : { details }) } }, status);
+    // Logs and in-process callers read the user-safe reason, not Nest's derived class name.
+    this.message = message;
   }
 }

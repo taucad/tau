@@ -17,6 +17,7 @@ import {
   billingPurchase,
   billingRefundIntent,
   billingReversalCase,
+  billingStripeCustomer,
   creditAccount,
   creditTransaction,
 } from '#database/schema.js';
@@ -26,6 +27,7 @@ import {
   listStripePaymentIntentPage,
   listStripeRefundPage,
   retrieveStripeCharge,
+  retrieveStripeDispute,
   retrieveStripePaymentIntent,
 } from '#api/billing/billing-cash-stripe.js';
 import { paidPaymentEvidenceSchema } from '#api/billing/billing-payment-contract.js';
@@ -36,6 +38,13 @@ type Scan = typeof billingCashScan.$inferSelect;
 type StreamName = 'balance' | 'paymentIntent' | 'charge' | 'refund';
 type CashObject = Stripe.BalanceTransaction | Stripe.PaymentIntent | Stripe.Charge | Stripe.Refund;
 type Transaction = Parameters<Parameters<DatabaseService['database']['transaction']>[0]>[0];
+/** Kinds that were once opened without an account; their owned rows use a distinct key. */
+const attributedCaseKinds = new Set([
+  'refund_unresolved',
+  'dispute_unresolved',
+  'missing_local_payment',
+  'gross_fee_net_mismatch',
+]);
 
 export const cashBlockingFinancialCaseKinds: readonly string[] = [
   'orphan_local_receipt',
@@ -134,6 +143,84 @@ export class BillingCashReconciliationService {
     return existing.id;
   }
 
+  /** True once the window's scan finished; the hourly job then has no cash work left for that window. */
+  public async isComplete(scanId: string): Promise<boolean> {
+    const [scan] = await this.databaseService.database
+      .select({ state: billingCashScan.state })
+      .from(billingCashScan)
+      .where(eq(billingCashScan.id, scanId));
+    return scan?.state === 'complete';
+  }
+
+  /**
+   * Operator disposition for a case the scan cannot close itself: a reviewed resolution, or a
+   * re-scope that retires an unattributed row once its owned successor exists.
+   */
+  public async resolveCaseByOperator(input: {
+    readonly environment: FinancialEnvironment;
+    readonly caseId: string;
+    readonly disposition: 'resolved' | 'rescoped';
+    readonly reviewActorId: string;
+    readonly reason: string;
+  }): Promise<{ readonly caseId: string; readonly before: string; readonly after: 'resolved' }> {
+    if (input.environment !== this.config.environment) throw new ConflictException('case_scope');
+    return this.databaseService.database.transaction(async (tx) => {
+      const [found] = await tx
+        .select()
+        .from(billingFinancialCase)
+        .where(
+          and(
+            eq(billingFinancialCase.id, input.caseId),
+            eq(billingFinancialCase.environment, this.config.environment),
+            eq(billingFinancialCase.stripeAccountId, this.config.stripeAccountId),
+            eq(billingFinancialCase.livemode, this.config.livemode),
+          ),
+        );
+      if (found === undefined) throw new ConflictException('case_not_found');
+      if (found.state === 'resolved') return { caseId: found.id, before: 'resolved', after: 'resolved' };
+      if (found.accountId !== null) {
+        await tx
+          .select({ id: creditAccount.id })
+          .from(creditAccount)
+          .where(eq(creditAccount.id, found.accountId))
+          .for('update');
+      }
+      if (input.disposition === 'rescoped') {
+        const [owned] = await tx
+          .select({ id: billingFinancialCase.id })
+          .from(billingFinancialCase)
+          .where(
+            and(
+              eq(billingFinancialCase.environment, found.environment),
+              eq(billingFinancialCase.stripeAccountId, found.stripeAccountId),
+              eq(billingFinancialCase.livemode, found.livemode),
+              eq(billingFinancialCase.kind, found.kind),
+              sql`${billingFinancialCase.dedupeKey} LIKE ${`${found.dedupeKey}:%`}`,
+              isNotNull(billingFinancialCase.accountId),
+            ),
+          )
+          .limit(1);
+        if (found.accountId !== null || owned === undefined) throw new ConflictException('case_rescope_unowned');
+      }
+      const [updated] = await tx
+        .update(billingFinancialCase)
+        .set({
+          state: 'resolved',
+          resolvedAt: sql`clock_timestamp()`,
+          resolutionEvidence: {
+            disposition: input.disposition,
+            reviewActorId: input.reviewActorId,
+            reason: input.reason,
+            previousState: found.state,
+          },
+        })
+        .where(and(eq(billingFinancialCase.id, found.id), eq(billingFinancialCase.state, found.state)))
+        .returning({ id: billingFinancialCase.id });
+      if (updated === undefined) throw new ServiceUnavailableException('case_changed');
+      return { caseId: found.id, before: found.state, after: 'resolved' };
+    });
+  }
+
   public async runScan(input: { readonly scanId: string; readonly maximumPagesPerStream: number }): Promise<{
     readonly status: 'complete' | 'incomplete';
   }> {
@@ -210,10 +297,27 @@ export class BillingCashReconciliationService {
     return scan;
   }
 
+  /** Extends a live claim before each unit of provider I/O; a lapsed or superseded claim stops the pass. */
+  private async renewLease(claim: Scan): Promise<void> {
+    const [renewed] = await this.databaseService.database
+      .update(billingCashScan)
+      .set({ leaseUntil: sql`date_trunc('milliseconds', clock_timestamp()) + interval '30 seconds'` })
+      .where(
+        and(
+          eq(billingCashScan.id, claim.id),
+          eq(billingCashScan.generation, claim.generation),
+          sql`${billingCashScan.leaseUntil} > clock_timestamp()`,
+        ),
+      )
+      .returning({ id: billingCashScan.id });
+    if (renewed === undefined) throw new ServiceUnavailableException('stale_cash_scan');
+  }
+
   private async scanStream(claim: Scan, stream: StreamName, maximumPages: number): Promise<void> {
     let cursor = cursorOf(claim, stream);
     if (doneOf(claim, stream)) return;
     for (let pageIndex = 0; pageIndex < maximumPages; pageIndex += 1) {
+      await this.renewLease(claim);
       const page = await this.fetchPage(claim, stream, cursor);
       await this.commitPage(claim, stream, page.data, page.nextCursor, !page.hasMore);
       if (!page.hasMore) return;
@@ -264,7 +368,10 @@ export class BillingCashReconciliationService {
       await persistFacts(tx, claim, stream, objects);
       await tx
         .update(billingCashScan)
-        .set(streamUpdate(stream, nextCursor, done))
+        .set({
+          ...streamUpdate(stream, nextCursor, done),
+          leaseUntil: sql`date_trunc('milliseconds', clock_timestamp()) + interval '30 seconds'`,
+        })
         .where(and(eq(billingCashScan.id, claim.id), eq(billingCashScan.generation, claim.generation)));
     });
   }
@@ -288,6 +395,7 @@ export class BillingCashReconciliationService {
       .limit(1001);
     const receipts = receiptPage.slice(0, 1000).map((row) => row.transaction);
     for (const receipt of receipts) {
+      await this.renewLease(claim);
       const recovered = await this.retrieveLateReceiptSource(claim, receipt);
       if (!recovered) {
         await this.openCase(claim, 'orphan_local_receipt', receipt.id, receipt.accountId, {
@@ -298,7 +406,7 @@ export class BillingCashReconciliationService {
       }
     }
     const journalDone = receiptPage.length <= 1000;
-    await this.databaseService.database
+    const [advanced] = await this.databaseService.database
       .update(billingCashScan)
       .set({ journalCursor: receipts.at(-1)?.id ?? claim.journalCursor, journalDone })
       .where(
@@ -307,7 +415,9 @@ export class BillingCashReconciliationService {
           eq(billingCashScan.generation, claim.generation),
           sql`${billingCashScan.leaseUntil} > clock_timestamp()`,
         ),
-      );
+      )
+      .returning({ id: billingCashScan.id });
+    if (advanced === undefined) throw new ServiceUnavailableException('stale_cash_scan');
   }
 
   private async compareFacts(claim: Scan): Promise<void> {
@@ -325,6 +435,7 @@ export class BillingCashReconciliationService {
       .limit(1001);
     const facts = rows.slice(0, 1000).map((row) => row.fact);
     for (const fact of facts) {
+      await this.renewLease(claim);
       // The scan currency scopes the presentment streams; a balance transaction carries the account's
       // settlement currency, which differs whenever the account settles outside its presentment currency.
       // Only the gross/fee/net identity is currency-independent, so only that is asserted here.
@@ -335,20 +446,32 @@ export class BillingCashReconciliationService {
           fact.netMinor === null ||
           fact.amountMinor - fact.feeMinor !== fact.netMinor)
       ) {
-        await this.openCase(claim, 'gross_fee_net_mismatch', fact.sourceId, undefined, {
-          factId: fact.id,
-          amountMinor: fact.amountMinor?.toString() ?? null,
-          feeMinor: fact.feeMinor?.toString() ?? null,
-          netMinor: fact.netMinor?.toString() ?? null,
-          currency: fact.currency,
-        });
+        await this.openCase(
+          claim,
+          'gross_fee_net_mismatch',
+          fact.sourceId,
+          await this.owningAccount(claim, fact.evidence),
+          {
+            factId: fact.id,
+            amountMinor: fact.amountMinor?.toString() ?? null,
+            feeMinor: fact.feeMinor?.toString() ?? null,
+            netMinor: fact.netMinor?.toString() ?? null,
+            currency: fact.currency,
+          },
+        );
       }
       if (fact.sourceType === 'payment_intent' && fact.evidence['status'] === 'succeeded') {
         const disposition = await this.localPaymentDisposition(claim, fact.sourceId);
         if (disposition.status === 'paid_unfulfilled') {
           await this.openCase(claim, 'paid_unfulfilled_recovery', fact.sourceId, disposition.accountId, fact.evidence);
         } else if (disposition.status === 'missing') {
-          await this.openCase(claim, 'missing_local_payment', fact.sourceId, undefined, fact.evidence);
+          await this.openCase(
+            claim,
+            'missing_local_payment',
+            fact.sourceId,
+            await this.owningAccount(claim, fact.evidence),
+            fact.evidence,
+          );
         } else {
           await this.resolveCase(claim, 'missing_local_payment', fact.sourceId);
           await this.resolveCase(claim, 'paid_unfulfilled_recovery', fact.sourceId);
@@ -361,7 +484,13 @@ export class BillingCashReconciliationService {
           fact.evidence['status'] === 'requires_action' ||
           (fact.evidence['status'] === 'succeeded' && !owned)
         ) {
-          await this.openCase(claim, 'refund_unresolved', fact.sourceId, undefined, fact.evidence);
+          await this.openCase(
+            claim,
+            'refund_unresolved',
+            fact.sourceId,
+            await this.owningAccount(claim, fact.evidence),
+            fact.evidence,
+          );
         } else if (owned) {
           await this.resolveCase(claim, 'refund_unresolved', fact.sourceId);
         }
@@ -373,15 +502,27 @@ export class BillingCashReconciliationService {
       ) {
         const disputeId = fact.evidence['source'];
         if (typeof disputeId !== 'string') {
-          await this.openCase(claim, 'dispute_unresolved', fact.sourceId, undefined, fact.evidence);
+          await this.openCase(
+            claim,
+            'dispute_unresolved',
+            fact.sourceId,
+            await this.owningAccount(claim, fact.evidence),
+            fact.evidence,
+          );
         } else if (await this.hasQualifiedDispute(claim, disputeId)) {
           await this.resolveCase(claim, 'dispute_unresolved', disputeId);
         } else {
-          await this.openCase(claim, 'dispute_unresolved', disputeId, undefined, fact.evidence);
+          await this.openCase(
+            claim,
+            'dispute_unresolved',
+            disputeId,
+            await this.owningAccount(claim, { ...fact.evidence, charge: await this.disputedCharge(disputeId) }),
+            fact.evidence,
+          );
         }
       }
     }
-    await this.databaseService.database
+    const [advanced] = await this.databaseService.database
       .update(billingCashScan)
       .set({ factCursor: facts.at(-1)?.id ?? claim.factCursor, factDone: rows.length <= 1000 })
       .where(
@@ -390,7 +531,9 @@ export class BillingCashReconciliationService {
           eq(billingCashScan.generation, claim.generation),
           sql`${billingCashScan.leaseUntil} > clock_timestamp()`,
         ),
-      );
+      )
+      .returning({ id: billingCashScan.id });
+    if (advanced === undefined) throw new ServiceUnavailableException('stale_cash_scan');
   }
 
   private async localPaymentDisposition(
@@ -433,6 +576,21 @@ export class BillingCashReconciliationService {
   }
 
   private async hasOwnedRefund(fact: typeof billingCashFact.$inferSelect): Promise<boolean> {
+    // An external (dashboard) refund is resolved once a qualified projection has applied it to the ledger.
+    const [projected] = await this.databaseService.database
+      .select({ id: billingReversalCase.id })
+      .from(billingReversalCase)
+      .where(
+        and(
+          eq(billingReversalCase.environment, fact.environment),
+          eq(billingReversalCase.stripeAccountId, fact.stripeAccountId),
+          eq(billingReversalCase.livemode, fact.livemode),
+          isNotNull(billingReversalCase.projectionEvidence),
+          sql`${billingReversalCase.projectionEvidence}->'refundIds' ? ${fact.sourceId}`,
+        ),
+      )
+      .limit(1);
+    if (projected !== undefined) return true;
     const { refundIntentId: intentId, reversalCaseId } = fact.evidence;
     if (typeof intentId !== 'string' || typeof reversalCaseId !== 'string') return false;
     const [owned] = await this.databaseService.database
@@ -449,6 +607,66 @@ export class BillingCashReconciliationService {
       )
       .limit(1);
     return owned !== undefined;
+  }
+
+  /**
+   * The account a provider fact belongs to, so its case restricts only that customer. Resolution runs
+   * through the fulfilled cause, then the purchase, then the Customer binding; `undefined` stays global.
+   */
+  private async owningAccount(scan: Scan, evidence: Record<string, unknown>): Promise<string | undefined> {
+    const text = (value: unknown): string | undefined =>
+      typeof value === 'string' && value.length > 0 ? value : undefined;
+    const source = text(evidence['source']);
+    const charge =
+      text(evidence['charge']) ??
+      (evidence['object'] === 'charge' ? text(evidence['id']) : undefined) ??
+      (source !== undefined && (source.startsWith('ch_') || source.startsWith('py_')) ? source : undefined);
+    const paymentIntent =
+      text(evidence['paymentIntent']) ?? (evidence['object'] === 'payment_intent' ? text(evidence['id']) : undefined);
+    const scope = (table: typeof billingReversalCase | typeof billingStripeCustomer) =>
+      and(
+        eq(table.environment, scan.environment),
+        eq(table.stripeAccountId, scan.stripeAccountId),
+        eq(table.livemode, scan.livemode),
+      );
+    const bySource = (table: typeof billingReversalCase | typeof billingPurchase) =>
+      or(
+        charge === undefined ? sql`false` : eq(table.chargeId, charge),
+        paymentIntent === undefined ? sql`false` : eq(table.paymentIntentId, paymentIntent),
+      );
+    if (charge !== undefined || paymentIntent !== undefined) {
+      const [cause] = await this.databaseService.database
+        .select({ accountId: billingReversalCase.accountId })
+        .from(billingReversalCase)
+        .where(and(scope(billingReversalCase), bySource(billingReversalCase)))
+        .limit(1);
+      if (cause !== undefined) return cause.accountId;
+      const [purchase] = await this.databaseService.database
+        .select({ accountId: billingPurchase.accountId })
+        .from(billingPurchase)
+        .innerJoin(creditAccount, eq(creditAccount.id, billingPurchase.accountId))
+        .where(and(eq(creditAccount.environment, scan.environment), bySource(billingPurchase)))
+        .limit(1);
+      if (purchase !== undefined) return purchase.accountId;
+    }
+    const customer = text(evidence['customer']);
+    if (customer === undefined) return undefined;
+    const [binding] = await this.databaseService.database
+      .select({ accountId: billingStripeCustomer.accountId })
+      .from(billingStripeCustomer)
+      .where(and(scope(billingStripeCustomer), eq(billingStripeCustomer.stripeCustomerId, customer)))
+      .limit(1);
+    return binding?.accountId;
+  }
+
+  /** The charge a dispute withdrew from; a failed read leaves the case unattributed rather than failing the scan. */
+  private async disputedCharge(disputeId: string): Promise<string | undefined> {
+    try {
+      const dispute = await retrieveStripeDispute(this.sourceStripe, disputeId);
+      return typeof dispute.charge === 'string' ? dispute.charge : dispute.charge.id;
+    } catch {
+      return undefined;
+    }
   }
 
   private async hasQualifiedDispute(claim: Scan, disputeId: string): Promise<boolean> {
@@ -563,7 +781,11 @@ export class BillingCashReconciliationService {
     accountId: string | undefined,
     evidence: Record<string, unknown>,
   ): Promise<void> {
-    const dedupeKey = `${kind}:${sourceId}`;
+    // An owned case keys on its account, so an unattributed row for the same source never reopens it.
+    const dedupeKey =
+      accountId === undefined || !attributedCaseKinds.has(kind)
+        ? `${kind}:${sourceId}`
+        : `${kind}:${sourceId}:${accountId}`;
     await this.databaseService.database.transaction(async (tx) => {
       if (accountId !== undefined) {
         const [account] = await tx
@@ -627,27 +849,32 @@ export class BillingCashReconciliationService {
     });
   }
 
+  /** Resolves every open row for the source, whether it was opened for an account or unattributed. */
   private async resolveCase(scan: Scan, kind: string, sourceId: string): Promise<void> {
-    const dedupeKey = `${kind}:${sourceId}`;
-    const [existing] = await this.databaseService.database
-      .select({ accountId: billingFinancialCase.accountId })
+    const matching = and(
+      eq(billingFinancialCase.environment, scan.environment),
+      eq(billingFinancialCase.stripeAccountId, scan.stripeAccountId),
+      eq(billingFinancialCase.livemode, scan.livemode),
+      eq(billingFinancialCase.kind, kind),
+      or(
+        eq(billingFinancialCase.dedupeKey, `${kind}:${sourceId}`),
+        sql`${billingFinancialCase.dedupeKey} LIKE ${`${kind}:${sourceId}:%`}`,
+      ),
+      or(eq(billingFinancialCase.state, 'open'), eq(billingFinancialCase.state, 'attention')),
+    );
+    const rows = await this.databaseService.database
+      .select({ id: billingFinancialCase.id, accountId: billingFinancialCase.accountId })
       .from(billingFinancialCase)
-      .where(
-        and(
-          eq(billingFinancialCase.environment, scan.environment),
-          eq(billingFinancialCase.stripeAccountId, scan.stripeAccountId),
-          eq(billingFinancialCase.livemode, scan.livemode),
-          eq(billingFinancialCase.kind, kind),
-          eq(billingFinancialCase.dedupeKey, dedupeKey),
-        ),
-      );
-    if (existing === undefined) return;
+      .where(matching);
+    if (rows.length === 0) return;
     await this.databaseService.database.transaction(async (tx) => {
-      if (existing.accountId !== null) {
+      const accounts = [...new Set(rows.flatMap((row) => (row.accountId === null ? [] : [row.accountId])))].sort();
+      if (accounts.length > 0) {
         await tx
           .select({ id: creditAccount.id })
           .from(creditAccount)
-          .where(eq(creditAccount.id, existing.accountId))
+          .where(inArray(creditAccount.id, accounts))
+          .orderBy(asc(creditAccount.id))
           .for('update');
       }
       const [live] = await tx
@@ -669,16 +896,7 @@ export class BillingCashReconciliationService {
           resolvedAt: sql`clock_timestamp()`,
           resolutionEvidence: { scanId: scan.id, sourceId, disposition: 'source_qualified' },
         })
-        .where(
-          and(
-            eq(billingFinancialCase.environment, scan.environment),
-            eq(billingFinancialCase.stripeAccountId, scan.stripeAccountId),
-            eq(billingFinancialCase.livemode, scan.livemode),
-            eq(billingFinancialCase.kind, kind),
-            eq(billingFinancialCase.dedupeKey, dedupeKey),
-            or(eq(billingFinancialCase.state, 'open'), eq(billingFinancialCase.state, 'attention')),
-          ),
-        );
+        .where(matching);
     });
   }
 

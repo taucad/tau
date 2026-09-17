@@ -17,10 +17,14 @@ export const useKernelCommercialAccess = (): {
   readonly isAllowed: (kernel: KernelProvider) => boolean;
   readonly requestUpgrade: () => void;
 } => {
-  const { tier } = useEntitlements();
+  const { tier, isResolved } = useEntitlements();
   const { open: openSettings } = useSettingsDialog();
   return {
-    isAllowed: useCallback((kernel: KernelProvider) => isKernelAllowed(kernel, tier), [tier]),
+    // The kernel gateway enforces the tier; an unresolved plan must not prompt a Pro customer to upgrade.
+    isAllowed: useCallback(
+      (kernel: KernelProvider) => !isResolved || isKernelAllowed(kernel, tier),
+      [isResolved, tier],
+    ),
     requestUpgrade: useCallback(() => {
       openSettings('billing');
     }, [openSettings]),

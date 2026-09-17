@@ -427,6 +427,30 @@ const stripeFixture = createServer((request, response) => {
     );
     return;
   }
+  // The paid Checkout a recovery re-reads for its customer and tax evidence.
+  if (url.pathname === '/v1/checkout/sessions/cs_process_paid/line_items') {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({ object: 'list', data: [], has_more: false, url: url.pathname }));
+    return;
+  }
+  if (url.pathname === '/v1/checkout/sessions/cs_process_paid') {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(
+      JSON.stringify({
+        id: 'cs_process_paid',
+        object: 'checkout.session',
+        client_reference_id: sourcePayment?.purchaseId ?? null,
+        customer: customerSearchId,
+        customer_details: null,
+        livemode: false,
+        mode: 'payment',
+        payment_intent: 'pi_process_paid',
+        payment_status: 'paid',
+        status: 'complete',
+      }),
+    );
+    return;
+  }
   if (url.pathname === '/v1/checkout/sessions' && request.method === 'POST') {
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(

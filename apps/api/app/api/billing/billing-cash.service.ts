@@ -105,11 +105,15 @@ type ChargeSourceInput = {
   readonly maximumRefundPages: number;
 };
 
+/**
+ * Issued only by a composition that holds the write key for a collecting deployment: the local
+ * fixture, a sandbox deployment, or a production deployment whose live collection is activated.
+ */
 export type ProtectedRefundCapability = {
-  readonly qualification: 'controlled-local-protected-refund';
-  readonly environment: 'development';
+  readonly qualification: 'protected-refund';
+  readonly environment: FinancialEnvironment;
   readonly stripeAccountId: string;
-  readonly livemode: false;
+  readonly livemode: boolean;
 };
 
 export type BillingCashQualification = {
@@ -139,10 +143,10 @@ export type BillingCashQualification = {
   }): Promise<QualifiedCashSource | UnqualifiedCashSource>;
 };
 const protectedRefundCapabilitySchema = z.strictObject({
-  qualification: z.literal('controlled-local-protected-refund'),
-  environment: z.literal('development'),
+  qualification: z.literal('protected-refund'),
+  environment: z.string().min(1),
   stripeAccountId: z.string().min(1),
-  livemode: z.literal(false),
+  livemode: z.boolean(),
 });
 const reviewedRefundRequestSchema = z.strictObject({
   environment: z.enum(['development', 'staging', 'production']),
@@ -195,6 +199,30 @@ export function qualifyStripeCashProjection(input: {
       ? { status: 'attention', reason: 'invalid_original_cash' }
       : { status: 'pending', reason: 'incomplete_refund_pages' };
   }
+  // A refund Tau did not issue (a dashboard refund) carries no reviewed split. It is allocated
+  // pro rata on the cumulative external total, so a full refund returns exactly the original
+  // principal and tax, and rounding never drifts across several partial refunds.
+  const refundAllocations: Record<string, { readonly principalMinor: bigint; readonly taxMinor: bigint }> = {
+    ...input.refundAllocations,
+  };
+  const external = input.refunds
+    .filter(
+      (refund) =>
+        refund.status === 'succeeded' &&
+        refundAllocations[refund.id] === undefined &&
+        typeof refund.metadata?.['tau_refund_intent_id'] !== 'string' &&
+        isSafeMinor(refund.amount),
+    )
+    .sort((left, right) => (left.created ?? 0) - (right.created ?? 0) || left.id.localeCompare(right.id));
+  let externalGross = 0n;
+  let externalPrincipal = 0n;
+  for (const refund of external) {
+    externalGross += BigInt(refund.amount);
+    const cumulativePrincipal = (externalGross * input.originalPrincipalMinor) / originalGross;
+    const principalMinor = cumulativePrincipal - externalPrincipal;
+    refundAllocations[refund.id] = { principalMinor, taxMinor: BigInt(refund.amount) - principalMinor };
+    externalPrincipal = cumulativePrincipal;
+  }
   let principalLoss = 0n;
   let taxLoss = 0n;
   const refundIds: string[] = [];
@@ -223,7 +251,7 @@ export function qualifyStripeCashProjection(input: {
       return { status: 'attention', reason: 'unsupported_refund_status' };
     }
     if (refund.status !== 'succeeded') continue;
-    const allocation = input.refundAllocations[refund.id];
+    const allocation = refundAllocations[refund.id];
     if (
       allocation === undefined ||
       allocation.principalMinor < 0n ||
@@ -611,9 +639,9 @@ export class BillingCashService {
   }): Promise<{ readonly status: 'pending'; readonly refundId: string }> {
     const capability = protectedRefundCapabilitySchema.parse(input.capability);
     if (
-      this.config.environment !== 'development' ||
       input.environment !== this.config.environment ||
-      this.config.livemode ||
+      capability.environment !== this.config.environment ||
+      capability.livemode !== this.config.livemode ||
       capability.stripeAccountId !== this.config.stripeAccountId
     ) {
       throw new ConflictException('refund_executor_unqualified');
@@ -776,6 +804,73 @@ export class BillingCashService {
 
   public async qualifyChargeSource(input: ChargeSourceInput): Promise<QualifiedCashSource | UnqualifiedCashSource> {
     return this.qualifyChargeSourceClaimed(input);
+  }
+
+  /**
+   * Re-reads a fulfilled charge and applies every refund and dispute Stripe now reports, so an
+   * external refund becomes a ledger reversal. Webhook recovery and the operator command share it.
+   */
+  public async reconcileCharge(input: {
+    readonly environment: FinancialEnvironment;
+    readonly chargeId: string;
+    readonly maximumRefundPages: number;
+  }): Promise<UnqualifiedCashSource | { readonly status: 'applied' | 'no_cause'; readonly accountId?: string }> {
+    if (input.environment !== this.config.environment) throw new ConflictException('charge_scope');
+    const [reversal] = await this.databaseService.database
+      .select()
+      .from(billingReversalCase)
+      .where(
+        and(
+          eq(billingReversalCase.environment, this.config.environment),
+          eq(billingReversalCase.stripeAccountId, this.config.stripeAccountId),
+          eq(billingReversalCase.livemode, this.config.livemode),
+          eq(billingReversalCase.chargeId, input.chargeId),
+        ),
+      );
+    // No fulfilled cause yet: first qualification of the purchase or period applies the refund.
+    if (reversal === undefined) return { status: 'no_cause' };
+    const causeId = reversal.purchaseId ?? reversal.periodId;
+    if (causeId === null) return { status: 'attention', reason: 'cash_case_incomplete' };
+    const source = reversal.source === 'plan' ? 'plan' : 'purchased';
+    const qualified = await this.qualifyChargeSource({
+      environment: input.environment,
+      accountId: reversal.accountId,
+      reversalCaseId: reversal.id,
+      maximumRefundPages: input.maximumRefundPages,
+    });
+    if (qualified.status !== 'qualified') return qualified;
+    const claim = { id: qualified.sourceClaimId, generation: qualified.sourceGeneration };
+    try {
+      await this.databaseService.database.transaction(async (tx) => {
+        await this.ledger.applyCashDisposition(
+          {
+            accountId: reversal.accountId,
+            causeId,
+            source,
+            ...qualified,
+            occurredAt: cashOccurredAt(qualified, new Date()),
+          },
+          tx,
+        );
+        await this.tax.observeQualifiedCashCorrection({ transaction: tx, causeId, source, qualified });
+        const [finished] = await tx
+          .update(billingStripeSource)
+          .set({ state: 'done', leaseUntil: null, errorCode: null })
+          .where(
+            and(
+              eq(billingStripeSource.id, claim.id),
+              eq(billingStripeSource.generation, claim.generation),
+              eq(billingStripeSource.state, 'processing'),
+              sql`${billingStripeSource.leaseUntil} > clock_timestamp()`,
+            ),
+          )
+          .returning({ id: billingStripeSource.id });
+        if (finished === undefined) throw new ServiceUnavailableException('charge_apply_fence');
+      });
+    } catch (error) {
+      return this.releaseClaimAndRethrow(claim, 'charge_application_failed', error);
+    }
+    return { status: 'applied', accountId: reversal.accountId };
   }
 
   public async releaseQualifiedClaim(input: {

@@ -8,9 +8,7 @@ vi.mock('@xstate/react', () => ({
 
 vi.mock('#hooks/use-cad-preview.js', () => ({
   useCadPreview: () => ({
-    cadRef: {
-      getSnapshot: () => ({ context: { parameters: { length: 0.5 }, units: { length: 'mm' } } }),
-    },
+    parameters: { length: 0.5 },
     defaultParameters: { length: 0.5 },
     parameterManifest: { bindings: {}, bindingDeclarations: {}, provenance: {} },
     graphicsRef: {

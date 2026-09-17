@@ -21,7 +21,6 @@ const sourceUnitSnapshot = async (resolution?: ParameterResolutionOptions): Prom
     target,
     path: '.tau/parameters/main.ts.json',
     bytes: null,
-    preconditions: [],
     manifest: await compileParameterManifest({
       declaration: {
         schema: {
@@ -175,12 +174,6 @@ it.each([
   },
   { label: 'close', event: { type: 'close' }, expected: { status: 'cancelled-before-apply' }, state: 'closed' },
   {
-    label: 'watch.changed',
-    event: { type: 'watch.changed' },
-    expected: { status: 'rejected', code: 'STALE_MANIFEST' },
-    state: 'ready',
-  },
-  {
     label: 'watch.error',
     event: { type: 'watch.error', message: 'reset' },
     expected: { status: 'rejected', code: 'DISCONNECTED' },
@@ -227,7 +220,21 @@ it('rejects a conflicted commit as stale, carries the current identity, and refr
   fixture.actor.stop();
 });
 
-it('holds an unprovable write as indeterminate when recovery cannot read, then recovers on change', async () => {
+it('re-plans a pending confirmation when the record changes, instead of losing the command', async () => {
+  const fixture = await start();
+  const { outcome } = await confirming(fixture);
+  const before = fixture.emitted.filter((event) => event.type === 'confirmation-required').length;
+  fixture.actor.send({ type: 'watch.changed' });
+  await waitFor(fixture.actor, (snapshot) => snapshot.matches({ open: 'confirmation' }) && fixture.counts().loads > 1);
+  // The command is still pending its confirmation, re-planned against the fresh record.
+  expect(fixture.emitted.filter((event) => event.type === 'confirmation-required').length).toBe(before + 1);
+  expect(fixture.counts().writes).toBe(0);
+  fixture.actor.send({ type: 'cancel', requestId: 'unit' });
+  await expect(outcome).resolves.toMatchObject({ status: 'cancelled-before-apply' });
+  fixture.actor.stop();
+});
+
+it('holds an unprovable write as indeterminate when recovery cannot read, then reopens on change', async () => {
   const fixture = await start({
     commit: async () => {
       throw new Error('Reply lost');
@@ -244,9 +251,10 @@ it('holds an unprovable write as indeterminate when recovery cannot read, then r
     code: 'RECOVERY_FAILED',
   });
   expect(fixture.actor.getSnapshot().matches({ open: 'uncertain' })).toBe(true);
+  // Recovering means reloading and accepting commands again; the settled command stays settled.
   fixture.actor.send({ type: 'watch.changed' });
-  await waitFor(fixture.actor, (snapshot) => fixture.counts().loads === 3 && snapshot.matches({ open: 'uncertain' }));
-  expect(fixture.emitted.at(-1)).toMatchObject({ type: 'settled', outcome: { code: 'UNKNOWN_APPLICATION' } });
+  await waitFor(fixture.actor, (snapshot) => snapshot.matches({ open: 'ready' }));
+  expect(fixture.emitted.filter((event) => event.type === 'settled')).toHaveLength(1);
   fixture.actor.stop();
 });
 
@@ -330,7 +338,7 @@ it('bounds the pending queue and refuses the overflow as busy', async () => {
   const fixture = await start({ commit: async () => gate.promise });
   void submitParameterRequest(fixture.actor, groupRequest(fixture.current, 'active'));
   await waitFor(fixture.actor, (snapshot) => snapshot.matches({ open: 'applying' }));
-  const queued = Array.from({ length: 16 }, async (_, index) =>
+  const queued = Array.from({ length: 8 }, async (_, index) =>
     submitParameterRequest(fixture.actor, groupRequest(fixture.current, `queued-${String(index)}`)),
   );
   await expect(submitParameterRequest(fixture.actor, groupRequest(fixture.current, 'overflow'))).resolves.toMatchObject(
@@ -338,8 +346,8 @@ it('bounds the pending queue and refuses the overflow as busy', async () => {
       code: 'BUSY',
     },
   );
-  expect(fixture.actor.getSnapshot().context.pending).toHaveLength(16);
+  expect(fixture.actor.getSnapshot().context.pending).toHaveLength(8);
   fixture.actor.send({ type: 'close' });
-  await expect(Promise.all(queued)).resolves.toHaveLength(16);
+  await expect(Promise.all(queued)).resolves.toHaveLength(8);
   gate.resolve({ status: 'applied', content: new Uint8Array() });
 });

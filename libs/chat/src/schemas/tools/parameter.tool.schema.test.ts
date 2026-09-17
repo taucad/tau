@@ -11,12 +11,7 @@ describe('parameter tool schemas', () => {
     const input = {
       targetFile: 'main.py',
       requestId: 'agent:1',
-      expected: {
-        sourceRevision: 'source',
-        manifestRevision: 'manifest',
-        valueRevision: 'value',
-        dependencyRevision: 'dependency',
-      },
+      expected: { manifestRevision: 'manifest' },
       pressure: 'final',
       operation: {
         kind: 'unit-value',
@@ -45,7 +40,7 @@ describe('parameter tool schemas', () => {
     ).toMatchObject({ success: false });
   });
 
-  it('keeps source-unit capability and dependencies explicit', () => {
+  it('keeps the source-unit capability explicit and refuses pinned source digests', () => {
     expect(
       parameterSetOperationSchema.safeParse({
         kind: 'source-unit',
@@ -60,9 +55,22 @@ describe('parameter tool schemas', () => {
           sourceRevision: 'source',
           capability: 'literal-v1',
         },
-        dependencies: { source: 'source' },
       }),
     ).toMatchObject({ success: true });
+    // A source change already produces a new manifest revision; no source digest is carried.
+    expect(
+      parameterSetOperationSchema.safeParse({
+        kind: 'source-unit',
+        mode: 'preserve-size',
+        group: 'default',
+        parameterId: 'width',
+        resource: 'urn:test',
+        pointer: '/width',
+        unit: 'cm',
+        producerCapability: { producer: 'build123d', sourceRevision: 'source', capability: 'literal-v1' },
+        dependencies: { source: 'source' },
+      }),
+    ).toMatchObject({ success: false });
   });
 
   it('admits explicit confirmation and cancellation continuations', () => {
@@ -92,20 +100,9 @@ describe('parameter tool schemas', () => {
             sourceRevision: 'source',
             capability: 'literal-v1',
           },
-          dependencies: { source: 'source' },
           proposed: {
-            entry: {
-              recordVersion: 1,
-              profile: 'tau-json-structure-units-03-v1',
-              activeGroup: 'default',
-              groups: { default: { values: { width: 25 } } },
-            },
-            identity: {
-              sourceRevision: 'source',
-              manifestRevision: 'manifest',
-              valueRevision: 'value',
-              dependencyRevision: 'dependency',
-            },
+            entry: { activeGroup: 'default', groups: { default: { values: { width: 25 } } } },
+            identity: { manifestRevision: 'manifest' },
           },
         },
       }),

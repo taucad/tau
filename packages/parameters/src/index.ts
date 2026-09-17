@@ -21,9 +21,9 @@ export {
   resolveProducerParameterValues,
   valueAtPointer,
 } from '#values.js';
-export { readParameterRecord, requireParameterRecord, serializeParameterRecord } from '#record.js';
+export { readParameterRecord, requireParameterRecord, sameRecordBytes, serializeParameterRecord } from '#record.js';
 export type { Draft7ParameterDeclarationInput } from '#json-schema-adapter.js';
-export type { ParameterFieldDisplay, ParameterFieldAuthorityBinding, ParameterFieldProjection } from '#projection.js';
+export type { ParameterFieldDisplay, ParameterFieldProjection } from '#projection.js';
 export type { ParameterRecordRead } from '#record.js';
 export type {
   CompileParameterManifestInput,
@@ -56,7 +56,5 @@ export type {
   ParameterSetRequestBase,
   ParameterSourceUnitCapability,
 } from '#types.js';
-export { classifyParameterReceipt } from '#receipt.js';
-export type { ParameterReceipt } from '#receipt.js';
 export { inferParameterManifest } from '#inference.js';
 export type { ParameterSetAuthoritySnapshot } from '#types.js';

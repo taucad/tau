@@ -320,12 +320,7 @@ describe('createChatToolRegistry invocation', () => {
 
   it('preserves a checked parameter outcome when its reply signal aborts after admission', async () => {
     const controller = new AbortController();
-    const expected = {
-      sourceRevision: 'source',
-      manifestRevision: 'manifest',
-      valueRevision: 'value',
-      dependencyRevision: 'dependency',
-    };
+    const expected = { manifestRevision: 'manifest' };
     const parameters: RpcParameterClient = {
       getParameters: vi.fn(),
       applyParameterOperation: vi.fn<RpcParameterClient['applyParameterOperation']>(async (input) => {

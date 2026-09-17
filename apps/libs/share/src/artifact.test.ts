@@ -12,9 +12,7 @@ const snapshot = (): ShareProjectSnapshot => ({
   files: [
     {
       path: '.tau/parameters/main.ts.json',
-      content: bytes(
-        '{"recordVersion":1,"profile":"tau-json-structure-units-03-v1","activeGroup":"default","groups":{"default":{"values":{}}}}',
-      ),
+      content: bytes('{"activeGroup":"default","groups":{"default":{"values":{}}}}'),
       sha256: 'parameters',
       role: 'project-metadata',
     },
@@ -63,9 +61,8 @@ describe('portable share artifacts', () => {
   });
 
   it.each([
-    '{"activeGroup":"default","groups":{"default":{"values":{"width":12}}}}',
-    '{"recordVersion":1,"profile":"tau-json-structure-units-03-v1","activeGroup":"default","groups":{"default":{"values":{"width":12}}}}',
-    '{"recordVersion":2,"profile":"future","activeGroup":"alternate","groups":{"alternate":{"values":{"width":"12.500"}}}}',
+    '{"activeGroup":"default","groups":{"default":{"values":{"width":12},"units":{"/width":"in"}}}}',
+    '{"recordVersion":1,"activeGroup":"default","groups":{"default":{"values":{"width":12}}}}',
     '{"activeGroup":"default","groups":{"default":{"values":{"exact":"1.2300"}}}}',
     '{',
   ])('preserves parameter record bytes without interpreting %s', async (record) => {

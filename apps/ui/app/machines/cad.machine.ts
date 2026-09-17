@@ -33,11 +33,8 @@ type CadTag = 'cad-loading' | 'cad-runtime-error';
 export type CadContext = {
   entryPath: string | undefined;
   screenshot: string | undefined;
-  parameters: Record<string, unknown>;
-  /** Committed parameter-sidecar bytes staged with every render of this entry. */
-  parameterStage: Record<string, Uint8Array<ArrayBuffer>> | undefined;
-  /** Whether the pending render is a drag sample rather than a committed value. */
-  parameterTransient: boolean;
+  /** What the next render carries beyond the entry, cleared by any other render trigger. */
+  parameterRender: ParameterRender | undefined;
   units: { length: LengthSymbol };
   /** Outcome of the latest selected runtime geometry event. */
   latestGeometryOutcome: LatestGeometryOutcome;
@@ -61,8 +58,8 @@ export type CadContext = {
   eventCleanups: Array<() => void>;
   /**
    * Monotonically increasing render identifier. Bumped whenever the UI
-   * issues a render-triggering event (`setEntryPath`, `setParameters`,
-   * `initializeModel`). Consumed by `awaitFreshRender` to detect when a
+   * issues a render-triggering event (`setEntryPath`, `initializeModel`).
+   * Consumed by `awaitFreshRender` to detect when a
    * settled geometry result corresponds to a request issued at-or-after a
    * given baseline.
    */
@@ -88,20 +85,10 @@ type FileSystemBindingChangedEvent = {
 };
 
 type CadEvent =
-  | {
-      type: 'initializeModel';
-      entryPath: string;
-      parameters?: Record<string, unknown>;
-    }
+  | { type: 'initializeModel'; entryPath: string }
   | { type: 'setEntryPath'; entryPath: string }
-  | {
-      type: 'setParameters';
-      parameters: Record<string, unknown>;
-      /** The parameter sidecar's committed bytes, carried so the runtime sees them without a watch. */
-      stage?: Record<string, Uint8Array<ArrayBuffer>>;
-      /** A drag sample: rendered for display, never persisted and never published (D2). */
-      transient?: boolean;
-    }
+  | { type: 'commitParameters'; stage: Record<string, Uint8Array<ArrayBuffer>> }
+  | { type: 'scrubParameters'; parameters: Record<string, unknown> }
   | { type: 'setCodeIssues'; errors: CadContext['codeIssues'] }
   | { type: 'geometryComputed'; geometry: Geometry; issues: KernelIssue[] }
   | { type: 'geometryFailed'; issues: KernelIssue[] }
@@ -163,12 +150,15 @@ type ConnectKernelInput = {
 type RenderModelInput = {
   client: AppRuntimeClient | undefined;
   entryPath: string | undefined;
-  parameters: Record<string, unknown>;
-  stage: Record<string, Uint8Array<ArrayBuffer>> | undefined;
-  transient: boolean;
+  parameterRender: ParameterRender | undefined;
   /** Whether no newer UI render was requested since this one. */
   isLatestRequest: () => boolean;
 };
+
+/** What one render carries for parameters: committed sidecar bytes (D1) or a drag sample (D2). */
+type ParameterRender =
+  | Readonly<{ kind: 'commit'; stage: Record<string, Uint8Array<ArrayBuffer>> }>
+  | Readonly<{ kind: 'scrub'; parameters: Record<string, unknown> }>;
 
 const fallbackCadFailureIssues: readonly KernelIssue[] = Object.freeze([
   Object.freeze({
@@ -359,21 +349,17 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input })
     throw new Error('No model file is selected');
   }
 
-  /* A transient render is never persisted, so it stages nothing: the sidecar still holds the last
-   * committed value and the runtime must keep reading it. */
-  const request = input.transient
-    ? ({
-        source: { path: input.entryPath },
-        parameters: input.parameters,
-        content: { includeEdges: true },
-        transient: true,
-      } as const)
-    : ({
-        source: { path: input.entryPath },
-        parameters: input.parameters,
-        content: { includeEdges: true },
-        ...(input.stage === undefined ? {} : { stage: input.stage }),
-      } as const);
+  /* Stored values are never a second copy in this machine: a committed edit carries the sidecar
+   * bytes the authority just wrote (D1) and the runtime resolves the values from them, and a drag
+   * sample carries values that are on no disk at all and are never persisted (D2). */
+  const request = {
+    source: { path: input.entryPath },
+    content: { includeEdges: true },
+    ...(input.parameterRender?.kind === 'commit' ? { stage: input.parameterRender.stage } : {}),
+    ...(input.parameterRender?.kind === 'scrub'
+      ? { parameters: input.parameterRender.parameters, transient: true }
+      : {}),
+  } as const;
   const outcome = await input.client.render(request);
   // Runtime state events usually stop this actor before the render settles, so ask the machine
   // whether this is still the latest request. If so, the runtime's watched rerender won, and it
@@ -381,7 +367,7 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input })
   // gone). Re-assert this unit's file once.
   // ponytail: one retry; loop only if a render can keep losing to repeated external edits.
   // A superseded drag sample is simply stale; only a committed render re-asserts itself.
-  if (outcome.superseded && !input.transient && input.isLatestRequest()) {
+  if (outcome.superseded && input.parameterRender?.kind !== 'scrub' && input.isLatestRequest()) {
     await input.client.render(request);
   }
 });
@@ -499,8 +485,7 @@ export const cadMachine = setup({
         return event.entryPath;
       },
       // The staged bytes belong to the entry that was open; the new entry re-supplies its own.
-      parameterStage: () => undefined,
-      parameterTransient: () => false,
+      parameterRender: () => undefined,
       latestGeometryOutcome: () => undefined,
       codeIssues: () => [],
       kernelIssues({ context, event }) {
@@ -510,20 +495,15 @@ export const cadMachine = setup({
         return newErrorsMap;
       },
     }),
-    setParameters: assign({
-      parameters({ event }) {
-        assertEvent(event, 'setParameters');
-        return event.parameters;
-      },
-      /* Persistence has already landed these bytes; carrying them makes the runtime observe the
-       * revision it is about to be told about, so the sidecar's watch event renders nothing. */
-      parameterStage({ event, context }) {
-        assertEvent(event, 'setParameters');
-        return event.stage ?? context.parameterStage;
-      },
-      parameterTransient({ event }) {
-        assertEvent(event, 'setParameters');
-        return event.transient === true;
+    /* Persistence has already landed these bytes; carrying them makes the runtime observe the
+     * revision it is about to be told about, so the sidecar's watch event renders nothing. */
+    setParameterRender: assign({
+      parameterRender({ event }) {
+        if (event.type === 'commitParameters') {
+          return { kind: 'commit', stage: event.stage } as const;
+        }
+        assertEvent(event, 'scrubParameters');
+        return { kind: 'scrub', parameters: event.parameters } as const;
       },
       latestGeometryOutcome: () => undefined,
     }),
@@ -589,10 +569,10 @@ export const cadMachine = setup({
       assertEvent(event, 'initializeModel');
       enqueue.assign({
         entryPath: event.entryPath,
-        parameters: event.parameters ?? {},
         codeIssues: [],
         latestGeometryOutcome: undefined,
         parameterManifest: undefined,
+        parameterRender: undefined,
       });
     }),
     storeKernelConnection: enqueueActions(({ enqueue, context, event }) => {
@@ -650,9 +630,7 @@ export const cadMachine = setup({
     entryPath: undefined,
     screenshot: undefined,
     units: { length: 'mm' },
-    parameters: {},
-    parameterStage: undefined,
-    parameterTransient: false,
+    parameterRender: undefined,
     latestGeometryOutcome: undefined,
     geometry: undefined,
     kernelIssues: new Map(),
@@ -743,9 +721,6 @@ export const cadMachine = setup({
         setEntryPath: {
           actions: ['bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
         },
-        setParameters: {
-          actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'],
-        },
         kernelLog: { actions: 'sendKernelLogs' },
         kernelProgress: { actions: 'trackProgress' },
         kernelTelemetry: { actions: 'storeTelemetry' },
@@ -768,9 +743,13 @@ export const cadMachine = setup({
           target: '#cad.rendering.submitting',
           actions: ['bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
         },
-        setParameters: {
+        commitParameters: {
           target: '#cad.rendering.submitting',
-          actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'],
+          actions: ['bumpRequestedRenderId', 'setParameterRender', 'notifyExportAvailability'],
+        },
+        scrubParameters: {
+          target: '#cad.rendering.submitting',
+          actions: ['bumpRequestedRenderId', 'setParameterRender', 'notifyExportAvailability'],
         },
         setCodeIssues: { actions: 'setCodeIssues' },
         geometryComputed: {
@@ -815,9 +794,13 @@ export const cadMachine = setup({
           target: '#cad.rendering.submitting',
           actions: ['bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
         },
-        setParameters: {
+        commitParameters: {
           target: '#cad.rendering.submitting',
-          actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'],
+          actions: ['bumpRequestedRenderId', 'setParameterRender', 'notifyExportAvailability'],
+        },
+        scrubParameters: {
+          target: '#cad.rendering.submitting',
+          actions: ['bumpRequestedRenderId', 'setParameterRender', 'notifyExportAvailability'],
         },
         setCodeIssues: { actions: 'setCodeIssues' },
         geometryComputed: {
@@ -859,9 +842,7 @@ export const cadMachine = setup({
             input: ({ context, self }) => ({
               client: context.kernelClient,
               entryPath: context.entryPath,
-              parameters: context.parameters,
-              stage: context.parameterStage,
-              transient: context.parameterTransient,
+              parameterRender: context.parameterRender,
               isLatestRequest: () => self.getSnapshot().context.lastRequestedRenderId === context.lastRequestedRenderId,
             }),
             onDone: {
@@ -932,10 +913,15 @@ export const cadMachine = setup({
           reenter: true,
           actions: ['bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
         },
-        setParameters: {
+        commitParameters: {
           target: '#cad.rendering.submitting',
           reenter: true,
-          actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'],
+          actions: ['bumpRequestedRenderId', 'setParameterRender', 'notifyExportAvailability'],
+        },
+        scrubParameters: {
+          target: '#cad.rendering.submitting',
+          reenter: true,
+          actions: ['bumpRequestedRenderId', 'setParameterRender', 'notifyExportAvailability'],
         },
         setCodeIssues: { actions: 'setCodeIssues' },
         geometryComputed: {
@@ -976,9 +962,6 @@ export const cadMachine = setup({
         setEntryPath: {
           target: 'connecting',
           actions: ['destroyKernel', 'bumpRequestedRenderId', 'setEntryPath', 'notifyExportAvailability'],
-        },
-        setParameters: {
-          actions: ['bumpRequestedRenderId', 'setParameters', 'notifyExportAvailability'],
         },
         setCodeIssues: { actions: 'setCodeIssues' },
         geometryComputed: {

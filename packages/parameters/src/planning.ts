@@ -1,13 +1,10 @@
-import { canonicalizeCacheValue, digestContent } from '@taucad/cache-core';
-import type { CacheValue } from '@taucad/cache-core';
 import type { CheckedFileWrite, JSONValue } from '@taucad/types';
-import { fileParameterEntrySchema } from '@taucad/types';
-import { serializeParameterRecord } from '#record.js';
+import { serializeParameterRecord, sameRecordBytes } from '#record.js';
 import { validRequestShape } from '#request.js';
 import { resolveParameterBinding } from '#manifest.js';
 import { planParameterRecord, resolveEffectiveParameterBinding, valueAtPointer } from '#values.js';
 import type { ParameterSnapshot } from '#snapshot.js';
-import type { ParameterSetIdentity, ParameterSetPlanResult, ParameterSetRequest } from '#types.js';
+import type { ParameterSetPlanResult, ParameterSetRequest } from '#types.js';
 
 /** Pure checked-write proposal; persistence remains the caller's responsibility. @public */
 export type ParameterChange =
@@ -15,7 +12,6 @@ export type ParameterChange =
   | Readonly<{ status: 'unchanged'; current: ParameterSnapshot }>
   | Readonly<{
       status: 'prepared';
-      fingerprint: string;
       proposed: ParameterSnapshot;
       write: CheckedFileWrite;
       confirmation?: Extract<ParameterSetPlanResult, { status: 'confirmation-required' }>;
@@ -31,12 +27,11 @@ const sameBaseBinding = (base: NonNullable<ParameterSetRequest['base']>, current
   if (native === undefined) {
     return false;
   }
-  const group = current.entry.groups[current.entry.activeGroup];
   const effective = resolveEffectiveParameterBinding(
     current.manifest,
     base.pointer,
     native,
-    group?.bindings?.[base.pointer],
+    current.entry.groups[current.entry.activeGroup],
   );
   return (
     base.binding.unit === effective.unit &&
@@ -48,118 +43,62 @@ const sameBaseBinding = (base: NonNullable<ParameterSetRequest['base']>, current
 };
 
 /**
- * Accept a draft whose whole-record revision moved only because another field changed. The field
- * the request touches must still hold the value the editor was working from, under an unchanged
- * effective binding; source, manifest and dependency revisions are never rebased.
+ * Field-scoped conflict: an edit commits while its own field still holds the value the editor was
+ * working from, under the binding it was working from. An edit of a different field, a group
+ * operation or an agent write elsewhere in the record never blocks it.
  */
-const rebasedExpectation = (
-  request: ParameterSetRequest,
-  current: ParameterSnapshot,
-): ParameterSetIdentity | undefined => {
-  const { base, expected, operation } = request;
-  // Only a single-field edit of the active group may rebase, and only onto the field it names.
-  if (
-    base === undefined ||
-    (operation.kind !== 'native-value' && operation.kind !== 'unit-value') ||
-    operation.pointer !== base.pointer ||
-    operation.group !== current.entry.activeGroup ||
-    expected.sourceRevision !== current.identity.sourceRevision ||
-    expected.manifestRevision !== current.identity.manifestRevision ||
-    expected.dependencyRevision !== current.identity.dependencyRevision ||
-    expected.valueRevision === current.identity.valueRevision
-  ) {
-    return undefined;
+const conflictsWithBase = (request: ParameterSetRequest, current: ParameterSnapshot): boolean => {
+  const { base, operation } = request;
+  if (base === undefined || (operation.kind !== 'native-value' && operation.kind !== 'unit-value')) {
+    return false;
   }
-  const group = current.entry.groups[operation.group];
-  const stored = valueAtPointer(group?.values ?? {}, base.pointer);
+  const stored = valueAtPointer(current.entry.groups[operation.group]?.values ?? {}, base.pointer);
   // An untouched field is absent from the record and still reads as its manifest default; a stored
   // `null` is an explicit value, not an absence.
   const effective =
     stored === undefined
       ? valueAtPointer(current.manifest.defaults as Readonly<Record<string, JSONValue>>, base.pointer)
       : stored;
-  return Object.is(effective, base.value) && sameBaseBinding(base, current) ? current.identity : undefined;
+  return !Object.is(effective, base.value) || !sameBaseBinding(base, current);
 };
 
 /** Plan one atomic sidecar replacement without reading, writing or resolving producers. @public */
-export const planParameterChange = async (
+export const planParameterChange = (
   input: Readonly<{
     current: ParameterSnapshot;
     request: ParameterSetRequest;
   }>,
-): Promise<ParameterChange> => {
-  try {
-    if (!validRequestShape(input.request)) {
-      throw new Error('Invalid parameter request.');
-    }
-  } catch (error) {
-    return {
-      status: 'rejected',
-      code: 'INVALID_REQUEST',
-      message: error instanceof Error ? error.message : 'Invalid parameter request.',
-    };
+): ParameterChange => {
+  if (!validRequestShape(input.request)) {
+    return { status: 'rejected', code: 'INVALID_REQUEST', message: 'Invalid parameter request.' };
   }
-  const { current } = input;
-  const rebased = rebasedExpectation(input.request, current);
-  if (rebased !== undefined) {
-    input = { ...input, request: { ...input.request, expected: rebased } };
-  }
-  const fingerprint = await digestContent({
-    bytes: new TextEncoder().encode(
-      canonicalizeCacheValue({
-        value: {
-          target: current.target,
-          expected: input.request.expected,
-          operation: input.request.operation,
-        } as unknown as CacheValue,
-      }),
-    ),
-  });
-  const receipt = current.entry.lastOperation;
-  if (receipt?.requestId === input.request.requestId) {
-    if (receipt.fingerprint !== fingerprint) {
-      return {
-        status: 'rejected',
-        code: 'REQUEST_ID_COLLISION',
-        message: 'Request ID was reused with different content.',
-      };
-    }
-    if (
-      receipt.sourceRevision === current.identity.sourceRevision &&
-      receipt.manifestRevision === current.identity.manifestRevision &&
-      receipt.valueRevision === current.identity.valueRevision &&
-      receipt.dependencyRevision === current.identity.dependencyRevision
-    ) {
-      return { status: 'unchanged', current };
-    }
+  const { current, request } = input;
+  if (conflictsWithBase(request, current)) {
     return {
       status: 'rejected',
       code: 'STALE_MANIFEST',
-      message: 'The receipt belongs to an earlier parameter state.',
+      message: 'The field changed since this edit began.',
     };
   }
-  const request = { ...input.request, fingerprint } as const;
-  const result = await planParameterRecord({ current, request });
+  const result = planParameterRecord({ current, request });
   if (result.status === 'rejected') {
     return result;
   }
-  if (result.status === 'ready' && result.proposed.identity.valueRevision === current.identity.valueRevision) {
+  const bytes = serializeParameterRecord(result.proposed.entry);
+  // Equal bytes are the whole no-op proof: the record we would write is the record on disk.
+  if (result.status === 'ready' && sameRecordBytes(bytes, current.bytes)) {
     return { status: 'unchanged', current };
   }
-  const bytes = serializeParameterRecord(fileParameterEntrySchema.parse(result.proposed.entry));
   return {
     status: 'prepared',
-    fingerprint,
     // The manifest is deep-frozen at compile time and the planner mutates nothing it is given, so
     // only the bytes that become the checked write are copied.
     proposed: { ...current, ...result.proposed, bytes },
     write: {
       path: current.path,
       data: bytes,
-      preconditions: [
-        ...current.preconditions,
-        { path: current.path, expected: current.bytes === null ? null : Uint8Array.from(current.bytes) },
-      ],
+      // The sidecar's own bytes are the entire concurrency proof; no source file is pinned.
+      preconditions: [{ path: current.path, expected: current.bytes === null ? null : Uint8Array.from(current.bytes) }],
     },
     ...(result.status === 'confirmation-required' ? { confirmation: result } : {}),
   };

@@ -1,11 +1,10 @@
 import * as React from 'react';
-import { useSelector } from '@xstate/react';
-import type { ParameterInputAcknowledged, ParameterInputBinding } from '@taucad/parameters/input-machine';
-import { validateParameterInputValue } from '@taucad/parameters/input-machine';
 import type { ParameterFieldProjection } from '@taucad/parameters';
 import { convert, createQuantity } from '@taucad/units/quantity';
 import { formatQuantity, parseInput } from '@taucad/units/input';
 import { ParametersNumberField } from '#components/geometry/parameters/parameters-number-field.js';
+import { validateParameterInputValue } from '#components/geometry/parameters/parameter-field.js';
+import type { ParameterFieldBinding } from '#components/geometry/parameters/parameter-field.js';
 import type { ParameterCommit } from '#components/geometry/parameters/rjsf-context.js';
 
 const defaultRangeForZero = 100;
@@ -21,7 +20,7 @@ const automaticExtent = (value: number): number => {
   return magnitude > Number.MAX_VALUE / 2 ? Number.MAX_VALUE : magnitude * 2;
 };
 
-const displayValue = (value: number, binding: ParameterInputBinding, displayUnit?: string): number => {
+const displayValue = (value: number, binding: ParameterFieldBinding, displayUnit?: string): number => {
   if (!binding.nativeUnit || !displayUnit || binding.nativeUnit === displayUnit) {
     return value;
   }
@@ -37,7 +36,7 @@ const displayValue = (value: number, binding: ParameterInputBinding, displayUnit
   return converted.status === 'success' && typeof converted.value.value === 'number' ? converted.value.value : value;
 };
 
-const displayStep = (value: number, binding: ParameterInputBinding, displayUnit?: string): number =>
+const displayStep = (value: number, binding: ParameterFieldBinding, displayUnit?: string): number =>
   displayValue(
     value,
     binding.space === 'point'
@@ -46,10 +45,7 @@ const displayStep = (value: number, binding: ParameterInputBinding, displayUnit?
     displayUnit,
   );
 
-const numericProjection = (projection: ParameterInputAcknowledged['projection']): string | undefined =>
-  projection.status === 'success' ? projection.value.parts.map(({ value }) => value).join('') : undefined;
-
-const formatDisplayValue = (value: number, binding: ParameterInputBinding, displayUnit?: string): string => {
+const formatDisplayValue = (value: number, binding: ParameterFieldBinding, displayUnit?: string): string => {
   const quantity = createQuantity({
     value,
     representation: 'binary64',
@@ -88,184 +84,24 @@ type ParametersNumberProps = {
   readonly onBlur?: () => void;
 };
 
-type AuthoritativeParametersNumberProps = Omit<ParametersNumberProps, 'edit'> & {
-  readonly edit: Readonly<{ kind: 'authoritative'; commit: ParameterCommit }>;
-};
+const fieldBinding = (fieldProjection: ParameterFieldProjection): ParameterFieldBinding => ({
+  ...(fieldProjection.nativeUnit === undefined ? {} : { nativeUnit: fieldProjection.nativeUnit }),
+  representation: fieldProjection.representation ?? 'binary64',
+  constraints: fieldProjection.constraints ?? {},
+  ...(fieldProjection.quantityKind === undefined ? {} : { quantityKind: fieldProjection.quantityKind }),
+  ...(fieldProjection.space === undefined ? {} : { space: fieldProjection.space }),
+  ...(fieldProjection.reference === undefined ? {} : { reference: fieldProjection.reference }),
+});
 
-const inputBinding = (properties: Pick<ParametersNumberProps, 'fieldProjection' | 'id'>): ParameterInputBinding => {
-  const { fieldProjection, id } = properties;
-  return {
-    target: { authority: 'ui-local-input', root: '/', entry: fieldProjection.parameterId ?? id ?? 'value' },
-    group: 'local',
-    parameterId: fieldProjection.parameterId ?? id ?? 'value',
-    resource: fieldProjection.schema?.resource ?? 'urn:taucad:ui:local-parameter',
-    pointer: fieldProjection.instancePointer,
-    ...(fieldProjection.nativeUnit === undefined ? {} : { nativeUnit: fieldProjection.nativeUnit }),
-    representation: fieldProjection.representation ?? 'binary64',
-    constraints: fieldProjection.constraints ?? {},
-    ...(fieldProjection.quantityKind === undefined ? {} : { quantityKind: fieldProjection.quantityKind }),
-    ...(fieldProjection.space === undefined ? {} : { space: fieldProjection.space }),
-    ...(fieldProjection.reference === undefined ? {} : { reference: fieldProjection.reference }),
-  };
-};
+/** The authority value this row last showed, which a commit proves it was still editing. */
+type EditBase = Readonly<{ value: number; binding: ParameterFieldBinding }>;
 
-const StandaloneParametersNumber = ({
-  value,
-  defaultValue,
-  fieldProjection,
-  onChange,
-  min,
-  max,
-  step,
-  id,
-  autoFocus,
-  readOnly,
-  disabled,
-  className,
-  'aria-label': ariaLabel,
-  onFocus,
-  onBlur,
-}: Omit<ParametersNumberProps, 'edit'>): React.JSX.Element => {
-  const binding = React.useMemo(() => inputBinding({ fieldProjection, id }), [fieldProjection, id]);
-  const { displayUnit } = fieldProjection;
-  const toNative = (next: number): number => {
-    if (displayUnit === undefined || binding.nativeUnit === undefined || displayUnit === binding.nativeUnit) {
-      return next;
-    }
-    return displayValue(next, { ...binding, nativeUnit: displayUnit }, binding.nativeUnit);
-  };
-  const [draftValue, setDraftValue] = React.useState(() => displayValue(value, binding, displayUnit));
-  const [rawText, setRawText] = React.useState('');
-  const [inputDiagnostic, setInputDiagnostic] = React.useState<string>();
-  const lastCommittedNativeRef = React.useRef(value);
-  React.useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect -- External authority changes replace the acknowledged field value.
-    setDraftValue(displayValue(value, binding, displayUnit));
-    lastCommittedNativeRef.current = value;
-  }, [binding, displayUnit, value]);
-  const displayDefault = displayValue(defaultValue, binding, displayUnit);
-  const rangeMin =
-    min === undefined
-      ? displayDefault > 0
-        ? 0
-        : -automaticExtent(displayDefault)
-      : displayValue(min, binding, displayUnit);
-  const rangeMax =
-    max === undefined
-      ? displayDefault < 0
-        ? 0
-        : automaticExtent(displayDefault)
-      : displayValue(max, binding, displayUnit);
-  const currentStep =
-    step === undefined ? automaticStep(displayDefault) : Math.abs(displayStep(step, binding, displayUnit));
-  const commit = (next: number): void => {
-    const native = toNative(next);
-    const diagnostic = validateParameterInputValue(binding, native);
-    if (diagnostic !== undefined) {
-      setDraftValue(displayValue(value, binding, displayUnit));
-      setInputDiagnostic(diagnostic.message);
-      return;
-    }
-    setInputDiagnostic(undefined);
-    setRawText('');
-    setDraftValue(next);
-    if (!Object.is(native, lastCommittedNativeRef.current)) {
-      lastCommittedNativeRef.current = native;
-      onChange(native);
-    }
-  };
-  const commitText = (): void => {
-    const parsed = parseInput({
-      text: rawText,
-      locale: globalThis.navigator.language,
-      inputUnit: displayUnit ?? '1',
-      expectedUnit: binding.nativeUnit ?? '1',
-      ...(binding.quantityKind === undefined ? {} : { kind: binding.quantityKind }),
-      space: binding.space ?? 'linear',
-      ...(binding.reference === undefined ? {} : { reference: binding.reference }),
-    });
-    if (parsed.status !== 'success') {
-      setInputDiagnostic(parsed.diagnostic.message);
-      return;
-    }
-    const native = convert({ quantity: parsed.value.quantity, to: binding.nativeUnit ?? '1' });
-    if (native.status === 'success' && typeof native.value.value === 'number') {
-      const diagnostic = validateParameterInputValue(binding, native.value.value);
-      if (diagnostic !== undefined) {
-        setInputDiagnostic(diagnostic.message);
-        return;
-      }
-      setInputDiagnostic(undefined);
-      setRawText('');
-      setDraftValue(displayValue(native.value.value, binding, displayUnit));
-      if (
-        !Object.is(native.value.value, value) &&
-        Math.abs(native.value.value - value) >
-          Number.EPSILON * Math.max(1, Math.abs(native.value.value), Math.abs(value)) * 8
-      ) {
-        onChange(native.value.value);
-      }
-    }
-  };
-  const roundedDisplayValue = Number(draftValue.toPrecision(4));
-  const isApproximation =
-    binding.nativeUnit !== undefined &&
-    displayUnit !== undefined &&
-    binding.nativeUnit !== displayUnit &&
-    Math.abs(roundedDisplayValue - draftValue) > Number.EPSILON * Math.max(1, Math.abs(draftValue)) * 8;
-  const formattedValue = formatDisplayValue(
-    isApproximation ? roundedDisplayValue : Number(draftValue.toPrecision(12)),
-    binding,
-    displayUnit,
-  );
-  return (
-    <ParametersNumberField
-      value={draftValue}
-      formattedValue={formattedValue}
-      editingValue={rawText || undefined}
-      unit={fieldProjection.adornment}
-      isApproximation={isApproximation}
-      diagnostic={fieldProjection.diagnostic?.message ?? inputDiagnostic}
-      rangeMin={rangeMin}
-      rangeMax={rangeMax}
-      step={currentStep}
-      id={id}
-      shouldAutoFocus={autoFocus}
-      isReadOnly={readOnly}
-      disabled={disabled === true || fieldProjection.status === 'unsupported'}
-      className={className}
-      aria-label={ariaLabel}
-      onSliderChange={setDraftValue}
-      onSliderRelease={commit}
-      onSliderCancel={() => {
-        setDraftValue(displayValue(value, binding, displayUnit));
-        setRawText('');
-        setInputDiagnostic(undefined);
-      }}
-      onValueChange={commit}
-      onTextChange={setRawText}
-      onEnter={commitText}
-      onEscape={() => {
-        setDraftValue(displayValue(value, binding, displayUnit));
-        setRawText('');
-        setInputDiagnostic(undefined);
-      }}
-      onFocusChange={(isFocused) => {
-        if (isFocused) {
-          onFocus?.();
-        } else {
-          onBlur?.();
-        }
-      }}
-    />
-  );
-};
-
-const AuthoritativeParametersNumber = ({
+export function ParametersNumber({
   value,
   defaultValue,
   fieldProjection,
   edit,
+  onChange,
   min,
   max,
   step,
@@ -278,33 +114,182 @@ const AuthoritativeParametersNumber = ({
   'aria-label': ariaLabel,
   onFocus,
   onBlur,
-}: AuthoritativeParametersNumberProps): React.JSX.Element => {
-  const { commit: parameterCommit } = edit;
-  const { editorInstance } = parameterCommit;
-  const { nativeUnit, quantityKind } = fieldProjection;
-  const binding = React.useMemo<ParameterInputBinding>(
-    () => ({
-      target: {
-        authority: parameterCommit.target.authority,
-        root: parameterCommit.target.root,
-        ...(parameterCommit.target.checkout === undefined ? {} : { checkout: parameterCommit.target.checkout }),
-        entry: parameterCommit.target.entry,
-      },
-      group: parameterCommit.group,
-      parameterId: fieldProjection.parameterId ?? id ?? editorInstance,
-      resource: fieldProjection.schema?.resource ?? 'urn:taucad:ui:parameter',
-      pointer: fieldProjection.instancePointer,
-      ...(nativeUnit === undefined ? {} : { nativeUnit }),
-      representation: fieldProjection.representation ?? 'binary64',
-      constraints: fieldProjection.constraints ?? {},
-      ...(quantityKind === undefined ? {} : { quantityKind }),
-      ...(fieldProjection.space === undefined ? {} : { space: fieldProjection.space }),
-      ...(fieldProjection.reference === undefined ? {} : { reference: fieldProjection.reference }),
-    }),
-    [editorInstance, fieldProjection, id, nativeUnit, parameterCommit.group, parameterCommit.target, quantityKind],
-  );
+}: ParametersNumberProps): React.JSX.Element {
+  const binding = React.useMemo(() => fieldBinding(fieldProjection), [fieldProjection]);
+  const { displayUnit, instancePointer } = fieldProjection;
   const authorityValue = typeof value === 'number' ? value : defaultValue;
-  const { displayUnit } = fieldProjection;
+  const commit = edit.kind === 'authoritative' ? edit.commit : undefined;
+
+  /* The draft is the only local state: `text` is exactly what was typed, `base` is the authority
+   * value the edit started from. A retained draft is seeded back on mount so collapsing a group
+   * never discards an in-progress edit. */
+  const [draftText, setDraftText] = React.useState(() => commit?.draft(instancePointer)?.text ?? '');
+  const [draftValue, setDraftValue] = React.useState(() => displayValue(authorityValue, binding, displayUnit));
+  const [inputDiagnostic, setInputDiagnostic] = React.useState<string>();
+  const [base, setBase] = React.useState<EditBase>(() => ({ value: authorityValue, binding }));
+
+  const isDirty = draftText !== '';
+  /* An authority value that arrived while this row was being edited: the draft is kept, and the row
+   * says the field moved underneath it rather than silently overwriting either side. */
+  const hasConflict = isDirty && !Object.is(authorityValue, base.value);
+
+  React.useEffect(() => {
+    if (draftText !== '') {
+      return;
+    }
+    // oxlint-disable-next-line react/set-state-in-effect -- An authority change replaces the shown value of a clean row.
+    setDraftValue(displayValue(authorityValue, binding, displayUnit));
+    // oxlint-disable-next-line react/set-state-in-effect -- A clean row always edits from the current value.
+    setBase({ value: authorityValue, binding });
+  }, [authorityValue, binding, displayUnit, draftText]);
+
+  /* The blur handler runs inside the same event as Enter, whose state update has not landed yet, so
+   * every writer of `draftText` mirrors it here; the ref is what keeps a committed draft from being
+   * committed a second time. */
+  const draftRef = React.useRef(draftText);
+  const retainDraft = (text: string, valid: boolean): void => {
+    draftRef.current = text;
+    setDraftText(text);
+    commit?.setDraft(instancePointer, text === '' ? undefined : { text, valid });
+  };
+
+  // Drafts can be discarded from outside the row (the unsaved-drafts dialog), so a mounted row
+  // follows the retained draft rather than owning the only copy of it.
+  React.useEffect(
+    () =>
+      commit?.subscribeDrafts(() => {
+        if (commit.draft(instancePointer) === undefined) {
+          draftRef.current = '';
+          setDraftText('');
+        }
+      }),
+    [commit, instancePointer],
+  );
+
+  /* One in-flight transient commit per animation frame per field: a drag keeps the newest value and
+   * drops the frames in between, and the pointer release always sends the final one. */
+  const frameRef = React.useRef<number>(undefined);
+  const cancelFrame = (): void => {
+    if (frameRef.current !== undefined) {
+      globalThis.cancelAnimationFrame(frameRef.current);
+      frameRef.current = undefined;
+    }
+  };
+  React.useEffect(() => cancelFrame, []);
+
+  const toNative = (next: number): number => {
+    if (displayUnit === undefined || binding.nativeUnit === undefined || displayUnit === binding.nativeUnit) {
+      return next;
+    }
+    return displayValue(next, { ...binding, nativeUnit: displayUnit }, binding.nativeUnit);
+  };
+
+  const send = (native: number, pressure: 'transient' | 'final'): void => {
+    if (commit === undefined) {
+      onChange(native);
+      return;
+    }
+    // The sidecar write is what re-renders the model, so an authoritative row reports no value here.
+    // It does report a refusal: a transient value is superseded by design, and so is a final one a
+    // newer edit displaced before it was applied, but anything else the authority refused must not
+    // look entered.
+    const settle = async (): Promise<void> => {
+      try {
+        const outcome = await commit.commit({
+          pointer: instancePointer,
+          value: native,
+          pressure,
+          base: {
+            pointer: instancePointer,
+            value: base.value,
+            binding: {
+              representation: base.binding.representation,
+              ...(base.binding.nativeUnit === undefined ? {} : { unit: base.binding.nativeUnit }),
+              ...(base.binding.quantityKind === undefined ? {} : { quantityKind: base.binding.quantityKind }),
+              ...(base.binding.space === undefined ? {} : { space: base.binding.space }),
+              ...(base.binding.reference === undefined ? {} : { reference: base.binding.reference }),
+            },
+          },
+        });
+        if (
+          pressure === 'final' &&
+          outcome !== undefined &&
+          outcome.status !== 'committed' &&
+          outcome.status !== 'cancelled-before-apply'
+        ) {
+          setInputDiagnostic('message' in outcome ? outcome.message : 'The parameter could not be saved.');
+        }
+      } catch (error) {
+        setInputDiagnostic(error instanceof Error ? error.message : 'The parameter could not be saved.');
+      }
+    };
+    // async-iife: bootstrap -- an input handler cannot return the authority's settlement.
+    void settle();
+  };
+
+  /** Enter a value from the slider or the stepper; text entry goes through {@link commitText}. */
+  const commitValue = (next: number): void => {
+    cancelFrame();
+    const native = toNative(next);
+    const diagnostic = validateParameterInputValue(binding, native);
+    if (diagnostic !== undefined) {
+      setDraftValue(displayValue(authorityValue, binding, displayUnit));
+      setInputDiagnostic(diagnostic.message);
+      return;
+    }
+    setInputDiagnostic(undefined);
+    retainDraft('', true);
+    setDraftValue(next);
+    if (!Object.is(native, base.value)) {
+      send(native, 'final');
+      setBase({ value: native, binding });
+    }
+  };
+
+  const commitText = (): void => {
+    const parsed = parseInput({
+      text: draftRef.current,
+      locale: globalThis.navigator.language,
+      inputUnit: displayUnit ?? '1',
+      expectedUnit: binding.nativeUnit ?? '1',
+      ...(binding.quantityKind === undefined ? {} : { kind: binding.quantityKind }),
+      space: binding.space ?? 'linear',
+      ...(binding.reference === undefined ? {} : { reference: binding.reference }),
+    });
+    if (parsed.status !== 'success') {
+      setInputDiagnostic(parsed.diagnostic.message);
+      return;
+    }
+    const native = convert({ quantity: parsed.value.quantity, to: binding.nativeUnit ?? '1' });
+    if (native.status !== 'success' || typeof native.value.value !== 'number') {
+      return;
+    }
+    const diagnostic = validateParameterInputValue(binding, native.value.value);
+    if (diagnostic !== undefined) {
+      setInputDiagnostic(diagnostic.message);
+      return;
+    }
+    setInputDiagnostic(undefined);
+    retainDraft('', true);
+    setDraftValue(displayValue(native.value.value, binding, displayUnit));
+    if (
+      !Object.is(native.value.value, base.value) &&
+      Math.abs(native.value.value - base.value) >
+        Number.EPSILON * Math.max(1, Math.abs(native.value.value), Math.abs(base.value)) * 8
+    ) {
+      send(native.value.value, 'final');
+      setBase({ value: native.value.value, binding });
+    }
+  };
+
+  const revert = (): void => {
+    cancelFrame();
+    setDraftValue(displayValue(authorityValue, binding, displayUnit));
+    setBase({ value: authorityValue, binding });
+    retainDraft('', true);
+    setInputDiagnostic(undefined);
+  };
+
   const displayDefault = displayValue(defaultValue, binding, displayUnit);
   const rangeMin =
     min === undefined
@@ -320,142 +305,101 @@ const AuthoritativeParametersNumber = ({
       : displayValue(max, binding, displayUnit);
   const currentStep =
     step === undefined ? automaticStep(displayDefault) : Math.abs(displayStep(step, binding, displayUnit));
-  // The service owns the acknowledged value and revision; these are only the seed for a field whose
-  // authority snapshot has not loaded yet.
-  const retainedInput = parameterCommit.input({
-    editorInstance: JSON.stringify([editorInstance, binding.pointer]),
-    binding,
-    acknowledgedValue: binding.representation === 'decimal' ? String(authorityValue) : authorityValue,
-    display: {
-      locale: globalThis.navigator.language,
-      ...(displayUnit === undefined ? {} : { unit: displayUnit }),
-      increment: currentStep,
-    },
-    pressure: enableContinualOnChange ? 'continual' : 'default',
-  });
-  const parameterRef = retainedInput.actor;
-  React.useEffect(() => retainedInput.attach(), [retainedInput]);
-  /* Select only what the row draws: every commit forwards the new revision to every row, and a
-   * revision alone must not re-render rows whose value and text are unchanged. */
-  const acknowledgedValue = useSelector(parameterRef, (state) => state.context.acknowledged.value);
-  const acknowledgedText = useSelector(parameterRef, (state) =>
-    numericProjection(state.context.acknowledged.projection),
-  );
-  const draft = useSelector(parameterRef, (state) => state.context.draft);
-  const workflowDiagnostic = useSelector(
-    parameterRef,
-    (state) => state.context.draft?.diagnostic?.message ?? state.context.diagnostic?.message,
-  );
 
-  /* Only a binding change is React's to report, and only when it differs from what the actor holds:
-   * value and revision refreshes are forwarded by the service from the authority actor, so this row
-   * never re-sends a revision it does not own. */
-  React.useEffect(() => {
-    const { acknowledged } = parameterRef.getSnapshot().context;
-    if (JSON.stringify(acknowledged.binding) === JSON.stringify(binding)) {
-      return;
-    }
-    parameterRef.send({
-      type: 'refreshAuthority',
-      binding,
-      value: acknowledged.value,
-      revision: acknowledged.revision,
-    });
-  }, [binding, parameterRef]);
-
-  React.useEffect(() => {
-    parameterRef.send({
-      type: 'changeDisplay',
-      display: {
-        locale: globalThis.navigator.language,
-        ...(displayUnit === undefined ? {} : { unit: displayUnit }),
-        increment: currentStep,
-      },
-    });
-  }, [currentStep, displayUnit, parameterRef]);
-
-  const committedDisplayValue =
-    typeof acknowledgedValue === 'number' ? displayValue(acknowledgedValue, binding, displayUnit) : value;
-  const localValue =
-    typeof draft?.nativeValue === 'number'
-      ? displayValue(draft.nativeValue, binding, displayUnit)
-      : committedDisplayValue;
-  const roundedDisplayValue = Number(committedDisplayValue.toPrecision(4));
+  const committedDisplayValue = displayValue(authorityValue, binding, displayUnit);
+  // Rounding follows what the row shows, so a drag reports its own value rather than the last commit.
+  const roundedDisplayValue = Number(draftValue.toPrecision(4));
   const isApproximation =
     binding.nativeUnit !== undefined &&
     displayUnit !== undefined &&
     binding.nativeUnit !== displayUnit &&
-    Math.abs(roundedDisplayValue - committedDisplayValue) >
-      Number.EPSILON * Math.max(1, Math.abs(committedDisplayValue)) * 8;
-  const formattedValue = draft?.focused ? undefined : isApproximation ? String(roundedDisplayValue) : acknowledgedText;
-  const isUnsupported = fieldProjection.status === 'unsupported';
+    Math.abs(roundedDisplayValue - draftValue) > Number.EPSILON * Math.max(1, Math.abs(draftValue)) * 8;
+  const formattedValue = formatDisplayValue(
+    isApproximation ? roundedDisplayValue : Number(draftValue.toPrecision(12)),
+    binding,
+    displayUnit,
+  );
 
   return (
     <ParametersNumberField
-      value={localValue}
+      value={draftValue}
       formattedValue={formattedValue}
-      editingValue={draft?.raw}
+      editingValue={draftText || undefined}
       unit={fieldProjection.adornment}
       isApproximation={isApproximation}
-      diagnostic={fieldProjection.diagnostic?.message ?? workflowDiagnostic}
+      diagnostic={
+        fieldProjection.diagnostic?.message ??
+        inputDiagnostic ??
+        (hasConflict
+          ? `This field changed to ${formatDisplayValue(committedDisplayValue, binding, displayUnit)} elsewhere. Enter to overwrite it, Escape to keep it.`
+          : undefined)
+      }
       rangeMin={rangeMin}
       rangeMax={rangeMax}
       step={currentStep}
       id={id}
       shouldAutoFocus={autoFocus}
       isReadOnly={readOnly}
-      disabled={disabled === true || isUnsupported}
+      disabled={disabled === true || fieldProjection.status === 'unsupported'}
       className={className}
       aria-label={ariaLabel}
-      onSliderChange={(nextValue) => {
-        parameterRef.send({ type: 'pointerChanged', value: nextValue });
-        /* The drag value the kernel needs is the native one the input machine just derived, not the
-         * display number the slider reports. `scrub` is absent unless the kernel declared the lane. */
-        const { nativeValue } = parameterRef.getSnapshot().context.draft ?? {};
-        if (nativeValue !== undefined) {
-          parameterCommit.scrub?.({ pointer: binding.pointer, value: nativeValue });
+      onSliderChange={(next) => {
+        setDraftValue(next);
+        if (frameRef.current !== undefined) {
+          return;
         }
+        frameRef.current = globalThis.requestAnimationFrame(() => {
+          frameRef.current = undefined;
+          const native = toNative(next);
+          if (validateParameterInputValue(binding, native) !== undefined || Object.is(native, base.value)) {
+            return;
+          }
+          /* D2: a drag renders on the transient lane, which persists nothing. `scrub` is absent
+           * unless the kernel declared cooperative cancellation, and the row then only shows the
+           * dragged value until the release commits it. */
+          if (commit?.scrub !== undefined) {
+            commit.scrub({ pointer: instancePointer, value: native });
+          } else if (enableContinualOnChange) {
+            send(native, 'transient');
+          }
+        });
       }}
-      onSliderRelease={() => {
-        parameterRef.send({ type: 'pointerReleased' });
-        parameterCommit.endScrub?.();
+      onSliderRelease={(next) => {
+        commit?.endScrub?.();
+        commitValue(next);
       }}
       onSliderCancel={() => {
-        parameterRef.send({ type: 'pointerCancelled' });
-        parameterCommit.endScrub?.();
+        commit?.endScrub?.();
+        revert();
       }}
-      onValueChange={(nextValue) => {
-        parameterRef.send({ type: 'changeRaw', text: String(nextValue) });
-        parameterRef.send({ type: 'pressEnter' });
-      }}
+      onValueChange={commitValue}
       onTextChange={(text) => {
-        parameterRef.send({ type: 'changeRaw', text });
+        retainDraft(
+          text,
+          text === '' ||
+            parseInput({
+              text,
+              locale: globalThis.navigator.language,
+              inputUnit: displayUnit ?? '1',
+              expectedUnit: binding.nativeUnit ?? '1',
+              ...(binding.quantityKind === undefined ? {} : { kind: binding.quantityKind }),
+              space: binding.space ?? 'linear',
+              ...(binding.reference === undefined ? {} : { reference: binding.reference }),
+            }).status === 'success',
+        );
       }}
-      onEnter={() => {
-        parameterRef.send({ type: 'pressEnter' });
-      }}
-      onEscape={() => {
-        parameterRef.send({ type: 'pressEscape' });
-      }}
-      onStep={(direction, modifiers) => {
-        parameterRef.send({ type: 'step', direction, modifiers });
-      }}
+      onEnter={commitText}
+      onEscape={revert}
       onFocusChange={(isFocused) => {
-        parameterRef.send({ type: isFocused ? 'focus' : 'blur' });
         if (isFocused) {
           onFocus?.();
         } else {
           onBlur?.();
+          if (draftRef.current !== '') {
+            commitText();
+          }
         }
       }}
     />
-  );
-};
-
-export function ParametersNumber(properties: ParametersNumberProps): React.JSX.Element {
-  return properties.edit.kind === 'transient' ? (
-    <StandaloneParametersNumber {...properties} />
-  ) : (
-    <AuthoritativeParametersNumber {...properties} edit={properties.edit} />
   );
 }

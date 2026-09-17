@@ -56,7 +56,6 @@ it('admits one writer across two actual Node transport clients and refreshes the
     const byteAuthority: ParameterAuthority = {
       path: () => path,
       read: async () => ((await provider.exists(path)) ? provider.readFile(path) : null),
-      semanticPreconditions: async () => [{ path: 'main.ts', expected: await provider.readFile('main.ts') }],
       writeChecked: async (write) => provider.writeFileChecked(write),
     };
     return createActor(
@@ -105,7 +104,8 @@ it('admits one writer across two actual Node transport clients and refreshes the
     if (record.status !== 'current') {
       throw new Error('Expected persisted record');
     }
-    expect(record.record.lastOperation?.requestId).toMatch(/^writer:[01]$/u);
+    // The record names no writer: the losing actor learns it lost from its own checked write.
+    expect(Object.keys(record.record)).toEqual(['activeGroup', 'groups']);
     expect(record.record.groups['default']!.values['width']).toBe(outcomes[0]!.status === 'committed' ? 20 : 21);
   } finally {
     for (const actor of actors) {

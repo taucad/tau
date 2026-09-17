@@ -1,14 +1,13 @@
 import type { ParameterSetRequest, ParameterSetPlanResult } from '#types.js';
 import type { ParameterSnapshot } from '#snapshot.js';
 import { snapshotFor } from '#snapshot.js';
-import { groupOperationRejection, validRequestShape, sameIdentity } from '#request.js';
+import { groupOperationRejection, validRequestShape } from '#request.js';
 import { canonicalizeCacheValue } from '@taucad/cache-core';
 import type { CacheValue } from '@taucad/cache-core';
 import { fileParameterEntrySchema } from '@taucad/types';
-import type { FileParameterEntry, JSONValue } from '@taucad/types';
+import type { FileParameterEntry, JSONValue, ParameterGroup } from '@taucad/types';
 import { parseInput } from '@taucad/units/input';
 import { convert, createQuantity } from '@taucad/units/quantity';
-import { admitUnit } from '@taucad/units/unit';
 import { admitParameterValues, resolveParameterBinding, resolveParameterBindingPointer } from '#manifest.js';
 import type { ParameterBinding, ParameterDeclaration, ParameterManifest, ParameterProvenance } from '#manifest.js';
 
@@ -16,7 +15,19 @@ const failure = (code: string, message: string, applicationState?: string): Erro
   Object.assign(new Error(message), { code, applicationState });
 
 const escapePointer = (value: string): string => value.replaceAll('~', '~0').replaceAll('/', '~1');
-type PersistedParameterBinding = NonNullable<FileParameterEntry['groups'][string]['bindings']>[string];
+
+/**
+ * The unit a person authored for one field, and whether its producer sanctioned the change. A
+ * sanctioned claim may override the producer's own declared unit because the producer converts the
+ * stored value back; an unsanctioned one may only refine a unit the manifest inferred or omitted.
+ */
+const chosenUnitFor = (
+  group: ParameterGroup | undefined,
+  pointer: string,
+): Readonly<{ unit: string; sanctioned: boolean }> | undefined => {
+  const unit = group?.units?.[pointer];
+  return unit === undefined ? undefined : { unit, sanctioned: group?.sourceUnits?.[pointer] !== undefined };
+};
 
 /** Resolve the provenance for one field of the effective parameter binding. @public */
 // oxlint-disable-next-line max-params -- Provenance lookup needs the admitted manifest, pointer, binding, and one field.
@@ -25,10 +36,16 @@ export const resolveEffectiveParameterProvenance = (
   pointer: string,
   binding: ParameterBinding,
   field: 'unit' | 'quantityKind' | 'space' | 'reference',
-  persisted?: PersistedParameterBinding,
+  group?: ParameterGroup,
 ): Omit<ParameterProvenance, 'field'> | undefined => {
-  if (shouldKeepPersistedField(manifest, pointer, binding, persisted, field)) {
-    return persisted?.provenance?.[field];
+  // A unit in the record is the whole "the person chose this" bit; nothing else is ever authored.
+  if (field === 'unit' && appliedUnit(manifest, pointer, binding, group) !== undefined) {
+    return {
+      origin: 'project',
+      producer: manifest.source.id,
+      sourceRevision: manifest.source.revision,
+      evidence: `unit:${pointer}`,
+    };
   }
   const bindingPointer = resolveParameterBindingPointer(manifest, pointer) ?? pointer;
   const declared = manifest.bindingDeclarations[bindingPointer]?.provenance?.[field];
@@ -50,73 +67,52 @@ export const resolveEffectiveParameterProvenance = (
       };
 };
 
-const persistedMatchesBinding = (
-  binding: ParameterBinding,
-  persisted?: PersistedParameterBinding,
-): persisted is PersistedParameterBinding =>
-  persisted !== undefined &&
-  persisted.parameter.value === binding.parameter.value &&
-  persisted.parameter.stability === binding.parameter.stability &&
-  persisted.schema.resource === binding.schema.resource &&
-  persisted.schema.pointer === binding.schema.pointer &&
-  persisted.representation === binding.representation;
-
-// oxlint-disable-next-line max-params -- Claim precedence is defined across the admitted and persisted records.
-const shouldKeepPersistedField = (
-  manifest: ParameterManifest,
-  pointer: string,
-  binding: ParameterBinding,
-  persisted: PersistedParameterBinding | undefined,
-  field: 'unit' | 'quantityKind' | 'space' | 'reference',
-): boolean => {
-  if (!persistedMatchesBinding(binding, persisted)) {
+/** Whether the manifest states this field's unit itself rather than guessing at it. */
+const manifestDeclaresUnit = (manifest: ParameterManifest, pointer: string, binding: ParameterBinding): boolean => {
+  if (binding.unit === undefined) {
     return false;
   }
-  const previous = persisted.provenance?.[field];
-  const current = resolveEffectiveParameterProvenance(manifest, pointer, binding, field);
-  return (
-    persisted[field] !== undefined &&
-    previous?.origin === 'project' &&
-    (binding[field] === undefined ||
-      current?.origin === 'inferred' ||
-      (field === 'unit' && persisted.sourceUnit !== undefined))
-  );
+  const origin = resolveEffectiveParameterProvenance(manifest, pointer, binding, 'unit')?.origin;
+  return origin !== undefined && origin !== 'inferred';
 };
 
-// oxlint-disable-next-line max-params -- Persisted binding construction correlates one manifest binding with prior evidence.
-const persistedBinding = (
+/** The chosen unit once precedence has been applied, or `undefined` when the manifest keeps its own. */
+// oxlint-disable-next-line max-params -- Unit precedence needs the manifest, pointer, binding and group.
+const appliedUnit = (
   manifest: ParameterManifest,
   pointer: string,
   binding: ParameterBinding,
-  previous?: PersistedParameterBinding,
-) => ({
-  parameter: binding.parameter,
-  schema: binding.schema,
-  representation: binding.representation,
-  ...(binding.unit === undefined ? {} : { unit: binding.unit }),
-  ...(binding.quantityKind === undefined ? {} : { quantityKind: binding.quantityKind }),
-  ...(binding.space === undefined ? {} : { space: binding.space }),
-  ...(binding.reference === undefined ? {} : { reference: binding.reference }),
-  constraints: structuredClone(binding.constraints) as Record<string, JSONValue>,
-  ...(previous?.sourceUnit === undefined ? {} : { sourceUnit: previous.sourceUnit }),
-  provenance: Object.fromEntries(
-    (['unit', 'quantityKind', 'space', 'reference'] as const).flatMap((field) => {
-      const previousProvenance = previous?.provenance?.[field];
-      const current = resolveParameterBinding(manifest, pointer);
-      const currentProvenance =
-        current === undefined ? undefined : resolveEffectiveParameterProvenance(manifest, pointer, current, field);
-      const keepPrevious =
-        previousProvenance?.origin === 'project' &&
-        (current?.[field] === undefined ||
-          currentProvenance?.origin === 'inferred' ||
-          (field === 'unit' && previous?.sourceUnit !== undefined));
-      const value = keepPrevious
-        ? previousProvenance
-        : resolveEffectiveParameterProvenance(manifest, pointer, binding, field);
-      return value === undefined ? [] : [[field, value]];
-    }),
-  ),
-});
+  group?: ParameterGroup,
+): string | undefined => {
+  const chosen = chosenUnitFor(group, pointer);
+  if (chosen === undefined || chosen.unit === binding.unit) {
+    return undefined;
+  }
+  return chosen.sanctioned || !manifestDeclaresUnit(manifest, pointer, binding) ? chosen.unit : undefined;
+};
+
+/**
+ * Refuse a stored unit the producer's own declaration contradicts. A source-unit change is exempt:
+ * the producer advertised the capability and converts the stored value back itself.
+ * @param manifest - Effective admitted parameter manifest.
+ * @param group - The group whose authored claims are being admitted.
+ * @throws A `METADATA_CONFLICT` failure naming the first contradicted field.
+ */
+const admitGroupClaims = (manifest: ParameterManifest, group: ParameterGroup): void => {
+  for (const [pointer, unit] of Object.entries(group.units ?? {})) {
+    const binding = resolveParameterBinding(manifest, pointer);
+    if (binding === undefined || unit === binding.unit || group.sourceUnits?.[pointer] !== undefined) {
+      continue;
+    }
+    if (manifestDeclaresUnit(manifest, pointer, binding)) {
+      throw failure(
+        'METADATA_CONFLICT',
+        `Project unit for ${pointer} conflicts with the explicit parameter declaration.`,
+        'known-not-applied',
+      );
+    }
+  }
+};
 
 const pointerParts = (pointer: string): string[] | undefined => {
   if (!pointer.startsWith('/')) {
@@ -235,27 +231,32 @@ const admittedBinding = (
   return binding;
 };
 
-/** Resolve declared, project and inferred claims using the authority's canonical precedence. @public */
-// oxlint-disable-next-line max-params -- Effective binding precedence requires the current and persisted claims together.
+/**
+ * Resolve the effective binding for one field: the admitted manifest binding, refined by the unit
+ * the person chose for it. Constraints follow the unit, so a bound authored in the manifest's unit
+ * is reported in the chosen one. Nothing here throws; {@link admitGroupClaims} refuses a claim the
+ * declaration contradicts before a write, and display tolerates it. @public
+ */
+// oxlint-disable-next-line max-params -- Effective binding precedence correlates the record's authored claims.
 export const resolveEffectiveParameterBinding = (
   manifest: ParameterManifest,
   pointer: string,
   binding: ParameterBinding,
-  persisted?: PersistedParameterBinding,
+  group?: ParameterGroup,
 ): ParameterBinding => {
-  const keep = (field: 'unit' | 'quantityKind' | 'space' | 'reference'): boolean => {
-    return shouldKeepPersistedField(manifest, pointer, binding, persisted, field);
-  };
+  const unit = appliedUnit(manifest, pointer, binding, group);
+  if (unit === undefined) {
+    return binding;
+  }
   return {
     ...binding,
-    ...(keep('unit') ? { unit: persisted!.unit } : {}),
-    ...(keep('quantityKind') ? { quantityKind: persisted!.quantityKind } : {}),
-    ...(keep('space') ? { space: persisted!.space } : {}),
-    ...(keep('reference') ? { reference: persisted!.reference } : {}),
+    unit,
+    // Bounds authored in the producer's unit are restated in the chosen one. With no prior unit
+    // there is nothing to convert from, so they stay as the producer wrote them.
     constraints:
-      persistedMatchesBinding(binding, persisted) && persisted.sourceUnit !== undefined
-        ? (persisted.constraints ?? binding.constraints)
-        : binding.constraints,
+      binding.unit === undefined
+        ? binding.constraints
+        : convertedConstraints(binding, binding.constraints, binding.unit, unit),
   };
 };
 
@@ -313,36 +314,38 @@ const nativeUnitValue = (binding: ParameterBinding, value: string | JSONValue, i
   return converted.value.value;
 };
 
+/**
+ * Restate numeric bounds in the chosen unit. A bound the conversion cannot carry is dropped rather
+ * than reported wrongly: it constrains the producer's own unit, which still admits the value.
+ */
 // oxlint-disable-next-line max-params -- Constraint conversion needs both authored and selected unit context.
 const convertedConstraints = (
   binding: ParameterBinding,
   constraints: Readonly<Record<string, unknown>>,
   inputUnit: string,
   unit: string,
-): Readonly<Record<string, unknown>> =>
-  Object.fromEntries(
-    Object.entries(constraints).map(([key, value]) => {
-      const convertValue = (item: unknown): JSONValue => {
-        if (typeof item !== 'number') {
-          throw failure('REPRESENTATION_UNSUPPORTED', `Source-unit constraint ${key} must be numeric.`);
-        }
-        return nativeUnitValue({ ...binding, unit }, item, inputUnit);
-      };
-      return [key, Array.isArray(value) ? value.map((item) => convertValue(item)) : convertValue(value)];
+): ParameterBinding['constraints'] => {
+  const convertValue = (item: unknown): JSONValue | undefined => {
+    if (typeof item !== 'number') {
+      return undefined;
+    }
+    try {
+      return nativeUnitValue({ ...binding, unit, representation: 'binary64' }, item, inputUnit);
+    } catch {
+      return undefined;
+    }
+  };
+  return Object.fromEntries(
+    Object.entries(constraints).flatMap(([key, value]) => {
+      if (Array.isArray(value)) {
+        const items = value.map((item) => convertValue(item));
+        return items.some((item) => item === undefined) ? [] : [[key, items as JSONValue]];
+      }
+      const converted = convertValue(value);
+      return converted === undefined ? [] : [[key, converted]];
     }),
-  );
-
-/**
- * A persisted source-unit context stays valid while the same producer still advertises the same
- * capability for the same authored unit; an unrelated source edit does not invalidate it.
- */
-const sourceUnitContextMatches = (
-  context: NonNullable<PersistedParameterBinding['sourceUnit']>,
-  producer: Readonly<{ id: string; capability?: string; unit?: string }>,
-): boolean =>
-  context.producer === producer.id &&
-  context.capability === producer.capability &&
-  context.producerUnit === producer.unit;
+  ) as ParameterBinding['constraints'];
+};
 
 const sourceUnitRebindRequired = (): Error =>
   failure(
@@ -351,47 +354,37 @@ const sourceUnitRebindRequired = (): Error =>
     'known-not-applied',
   );
 
+/**
+ * Convert every source-unit field of a group back to the unit its producer executes in, so the
+ * admitted values are the ones the producer will actually see.
+ */
 const producerNativeValues = (
   manifest: ParameterManifest,
-  group: FileParameterEntry['groups'][string],
+  group: ParameterGroup,
   values: Readonly<Record<string, JSONValue>>,
 ): Readonly<Record<string, JSONValue>> => {
   let resolved = structuredClone(values);
-  for (const [pointer, persisted] of Object.entries(group.bindings ?? {})) {
-    const context = persisted.sourceUnit;
-    if (context === undefined) {
-      continue;
-    }
+  for (const pointer of Object.keys(group.sourceUnits ?? {})) {
     const binding = resolveParameterBinding(manifest, pointer);
-    if (
-      binding === undefined ||
-      !sourceUnitContextMatches(context, {
-        id: manifest.source.id,
-        ...(binding.sourceUnitCapability === undefined ? {} : { capability: binding.sourceUnitCapability }),
-        ...(binding.unit === undefined ? {} : { unit: binding.unit }),
-      })
-    ) {
+    const chosen = group.units?.[pointer];
+    if (binding?.sourceUnitCapability === undefined || chosen === undefined) {
       throw sourceUnitRebindRequired();
     }
     const value = valueAtPointer(resolved, pointer);
-    if (value === undefined || persisted.unit === undefined) {
+    if (value === undefined) {
       continue;
     }
-    const effective = resolveEffectiveParameterBinding(manifest, pointer, binding, persisted);
-    resolved = setPointer(
-      resolved,
-      pointer,
-      nativeUnitValue({ ...effective, unit: context.producerUnit }, value, persisted.unit),
-    );
+    resolved = setPointer(resolved, pointer, nativeUnitValue(binding, value, chosen));
   }
   return resolved;
 };
 
 const admitGroupValues = (
   manifest: ParameterManifest,
-  group: FileParameterEntry['groups'][string],
+  group: ParameterGroup,
   values: Readonly<Record<string, JSONValue>>,
 ): void => {
+  admitGroupClaims(manifest, group);
   admitParameterValues(manifest, producerNativeValues(manifest, group, values));
 };
 
@@ -462,7 +455,10 @@ export const resolveParameterInputValues = (
   return resolved;
 };
 
-/** Convert a checked source-unit record back to one producer's authored execution units. @public */
+/**
+ * Convert a checked source-unit record back to one producer's authored execution units. The unit
+ * to convert back to comes from the producer's live declaration, never from the record. @public
+ */
 export const resolveProducerParameterValues = (
   input: Readonly<{
     producer: string;
@@ -476,22 +472,12 @@ export const resolveProducerParameterValues = (
     throw failure('INVALID_RECORD', 'The active parameter group is missing.');
   }
   let resolved = structuredClone(input.values) as Record<string, JSONValue>;
-  for (const [pointer, persisted] of Object.entries(group.bindings ?? {})) {
-    const context = persisted.sourceUnit;
-    if (context === undefined) {
-      continue;
-    }
+  for (const pointer of Object.keys(group.sourceUnits ?? {})) {
     const declared = input.declaration.bindings?.[pointer];
-    if (
-      declared === undefined ||
-      !sourceUnitContextMatches(context, {
-        id: input.producer,
-        ...(declared.sourceUnitCapability === undefined ? {} : { capability: declared.sourceUnitCapability }),
-        ...(declared.unit === undefined ? {} : { unit: declared.unit }),
-      }) ||
-      persisted.unit === undefined ||
-      persisted.representation === undefined
-    ) {
+    const chosen = group.units?.[pointer];
+    // The producer must still advertise the capability, still declare a unit to convert back to,
+    // and the record must still name the unit the value was authored in.
+    if (declared?.sourceUnitCapability === undefined || declared.unit === undefined || chosen === undefined) {
       throw sourceUnitRebindRequired();
     }
     const value = valueAtPointer(resolved, pointer);
@@ -503,34 +489,47 @@ export const resolveProducerParameterValues = (
       pointer,
       nativeUnitValue(
         {
-          parameter: persisted.parameter,
-          schema: persisted.schema,
-          representation: persisted.representation,
+          parameter: { value: pointer, stability: 'revision-scoped' },
+          schema: { resource: input.producer, pointer },
+          // Source-unit changes are admitted only for finite linear binary64 fields.
+          representation: 'binary64',
           optional: false,
           nullable: false,
-          unit: context.producerUnit,
-          quantityKind: declared.quantityKind ?? persisted.quantityKind,
-          space: declared.space ?? persisted.space,
-          reference: declared.reference ?? persisted.reference,
-          constraints: persisted.constraints ?? {},
+          unit: declared.unit,
+          ...(declared.quantityKind === undefined ? {} : { quantityKind: declared.quantityKind }),
+          ...(declared.space === undefined ? {} : { space: declared.space }),
+          ...(declared.reference === undefined ? {} : { reference: declared.reference }),
+          constraints: {},
         },
         value,
-        persisted.unit,
+        chosen,
       ),
     );
   }
   return resolved;
 };
 
+/** Drop a claim map once it holds nothing, so an untouched group stays at its minimal shape. */
+const withoutEmptyClaims = (group: ParameterGroup): ParameterGroup => ({
+  values: group.values,
+  ...(group.units === undefined || Object.keys(group.units).length === 0 ? {} : { units: group.units }),
+  ...(group.sourceUnits === undefined || Object.keys(group.sourceUnits).length === 0
+    ? {}
+    : { sourceUnits: group.sourceUnits }),
+});
+
+const sameValues = (left: Readonly<Record<string, JSONValue>>, right: Readonly<Record<string, JSONValue>>): boolean =>
+  canonicalizeCacheValue({ value: left as CacheValue }) === canonicalizeCacheValue({ value: right as CacheValue });
+
 /** Compute a record transition from one admitted semantic snapshot. @internal */
-export const planParameterRecord = async (
-  input: Readonly<{ current: ParameterSnapshot; request: ParameterSetRequest & Readonly<{ fingerprint: string }> }>,
-): Promise<ParameterSetPlanResult> => {
+export const planParameterRecord = (
+  input: Readonly<{ current: ParameterSnapshot; request: ParameterSetRequest }>,
+): ParameterSetPlanResult => {
   if (!validRequestShape(input.request)) {
     return { status: 'rejected', code: 'INVALID_REQUEST', message: 'Invalid parameter request.' };
   }
-  if (!sameIdentity(input.request.expected, input.current.identity)) {
-    return { status: 'rejected', code: 'STALE_MANIFEST', message: 'Parameter snapshot changed.' };
+  if (input.request.expected.manifestRevision !== input.current.identity.manifestRevision) {
+    return { status: 'rejected', code: 'STALE_MANIFEST', message: 'Parameter semantics changed.' };
   }
   const rejected = groupOperationRejection(input.request, input.current);
   if (rejected !== undefined) {
@@ -556,12 +555,10 @@ export const planParameterRecord = async (
         const values = structuredClone(operation.values ?? {});
         admitGroupValues(manifest, { values }, values);
         entry.groups[operation.group] = { values };
-        entry.order = [...(entry.order ?? Object.keys(input.current.entry.groups)), operation.group];
         break;
       }
       case 'delete-group': {
         Reflect.deleteProperty(entry.groups, operation.group);
-        entry.order = entry.order?.filter((group) => group !== operation.group);
         break;
       }
       case 'select-group': {
@@ -575,187 +572,53 @@ export const planParameterRecord = async (
           entry.groups[operation.nextGroup] = entry.groups[operation.group]!;
           Reflect.deleteProperty(entry.groups, operation.group);
           entry.activeGroup = entry.activeGroup === operation.group ? operation.nextGroup : entry.activeGroup;
-          entry.order = entry.order?.map((group) => (group === operation.group ? operation.nextGroup : group));
         }
         break;
       }
       case 'reset-group': {
+        // Reset drops the authored units with the values: it restores the producer's own defaults.
         entry.groups[operation.group] = { values: {} };
         break;
       }
       case 'replace-group-values': {
         const group = entry.groups[operation.group]!;
         const values = structuredClone(operation.values);
-        const bindings = Object.fromEntries(
-          Object.entries(manifest.bindings).map(([pointer, binding]) => {
-            const previous = group.bindings?.[pointer];
-            return [
-              pointer,
-              persistedBinding(
-                manifest,
-                pointer,
-                resolveEffectiveParameterBinding(manifest, pointer, binding, previous),
-                previous,
-              ),
-            ];
-          }),
-        );
-        admitGroupValues(manifest, { values, bindings }, values);
-        changed =
-          canonicalizeCacheValue({ value: values as CacheValue }) !==
-          canonicalizeCacheValue({ value: group.values as CacheValue });
-        entry.groups[operation.group] = {
-          values,
-          bindings,
-        };
+        // Authored units survive a value replacement: they say what the numbers mean.
+        const next = withoutEmptyClaims({ ...group, values });
+        admitGroupValues(manifest, next, values);
+        changed = !sameValues(values, group.values);
+        entry.groups[operation.group] = next;
         break;
       }
       case 'native-value':
       case 'unit-value': {
         const binding = admittedBinding(manifest, operation);
         const group = entry.groups[operation.group]!;
-        const previous = group.bindings?.[operation.pointer];
-        const effective = resolveEffectiveParameterBinding(manifest, operation.pointer, binding, previous);
+        const effective = resolveEffectiveParameterBinding(manifest, operation.pointer, binding, group);
         const value = nativeUnitValue(
           effective,
           operation.value,
           operation.kind === 'unit-value' ? operation.inputUnit : undefined,
         );
         const values = setPointer(group.values, operation.pointer, value);
-        const nextGroup = {
-          values,
-          bindings: {
-            ...group.bindings,
-            [operation.pointer]: persistedBinding(manifest, operation.pointer, effective, previous),
-          },
-        };
-        admitGroupValues(manifest, nextGroup, values);
-        changed =
-          canonicalizeCacheValue({ value: values as CacheValue }) !==
-          canonicalizeCacheValue({ value: group.values as CacheValue });
-        entry.groups[operation.group] = nextGroup;
+        const next = withoutEmptyClaims({ ...group, values });
+        admitGroupValues(manifest, next, values);
+        changed = !sameValues(values, group.values);
+        entry.groups[operation.group] = next;
         break;
       }
       case 'batch': {
         const group = entry.groups[operation.group]!;
         let values = structuredClone(group.values);
-        const bindings = { ...group.bindings };
         for (const edit of operation.edits) {
           const binding = admittedBinding(manifest, edit);
-          const previous = bindings[edit.pointer];
-          const effective = resolveEffectiveParameterBinding(manifest, edit.pointer, binding, previous);
+          const effective = resolveEffectiveParameterBinding(manifest, edit.pointer, binding, group);
           values = setPointer(values, edit.pointer, nativeUnitValue(effective, edit.value, edit.inputUnit));
-          bindings[edit.pointer] = persistedBinding(manifest, edit.pointer, effective, previous);
         }
-        admitGroupValues(manifest, { values, bindings }, values);
-        changed =
-          canonicalizeCacheValue({ value: values as CacheValue }) !==
-          canonicalizeCacheValue({ value: group.values as CacheValue });
-        entry.groups[operation.group] = { values, bindings };
-        break;
-      }
-      case 'confirm-inference': {
-        const binding = admittedBinding(manifest, operation);
-        const group = entry.groups[operation.group]!;
-        const persisted = persistedBinding(
-          manifest,
-          operation.pointer,
-          resolveEffectiveParameterBinding(manifest, operation.pointer, binding, group.bindings?.[operation.pointer]),
-          group.bindings?.[operation.pointer],
-        );
-        entry.groups[operation.group] = {
-          ...group,
-          bindings: {
-            ...group.bindings,
-            [operation.pointer]: {
-              ...persisted,
-              provenance: Object.fromEntries(
-                Object.entries(persisted.provenance).map(([field, provenance]) => [
-                  field,
-                  provenance.origin === 'inferred'
-                    ? {
-                        ...provenance,
-                        origin: 'project',
-                        evidence: `confirmed:${operation.pointer}`,
-                      }
-                    : provenance,
-                ]),
-              ),
-            },
-          },
-        };
-        break;
-      }
-      case 'bind-parameter': {
-        const admitted = admittedBinding(manifest, operation);
-        const group = entry.groups[operation.group];
-        if (group === undefined) {
-          throw failure('GROUP_NOT_FOUND', `Parameter group "${operation.group}" does not exist.`);
-        }
-        for (const field of ['unit', 'quantityKind', 'space', 'reference'] as const) {
-          if (operation.binding[field] === undefined) {
-            continue;
-          }
-          const current = resolveEffectiveParameterProvenance(manifest, operation.pointer, admitted, field);
-          if (
-            admitted[field] !== undefined &&
-            current?.origin !== 'inferred' &&
-            current?.origin !== 'project' &&
-            operation.binding[field] !== admitted[field]
-          ) {
-            throw failure(
-              'METADATA_CONFLICT',
-              `Project ${field} conflicts with the explicit parameter declaration.`,
-              'known-not-applied',
-            );
-          }
-        }
-        const binding: ParameterBinding = { ...admitted, ...operation.binding };
-        if (binding.unit !== undefined) {
-          const unit = admitUnit(binding.unit);
-          if (unit.status !== 'success') {
-            throw failure(unit.diagnostic.code, unit.diagnostic.message);
-          }
-          const quantity = createQuantity({
-            value: 0,
-            representation: binding.representation === 'decimal' ? 'binary64' : binding.representation,
-            unit: binding.unit,
-            ...(binding.quantityKind === undefined ? {} : { kind: binding.quantityKind }),
-            space: binding.space ?? 'linear',
-            ...(binding.reference === undefined ? {} : { reference: binding.reference }),
-          });
-          if (quantity.status !== 'success') {
-            throw failure(quantity.diagnostic.code, quantity.diagnostic.message);
-          }
-        }
-        const persisted = persistedBinding(manifest, operation.pointer, binding, group.bindings?.[operation.pointer]);
-        const projectProvenance = Object.fromEntries(
-          (['unit', 'quantityKind', 'space', 'reference'] as const).flatMap((field) =>
-            operation.binding[field] === undefined || operation.binding[field] === admitted[field]
-              ? []
-              : [
-                  [
-                    field,
-                    {
-                      origin: 'project',
-                      producer: 'parameter-set',
-                      sourceRevision: manifest.source.revision,
-                      evidence: `binding:${operation.pointer}`,
-                    },
-                  ],
-                ],
-          ),
-        );
-        entry.groups[operation.group] = {
-          ...group,
-          bindings: {
-            ...group.bindings,
-            [operation.pointer]: {
-              ...persisted,
-              provenance: { ...persisted.provenance, ...projectProvenance },
-            },
-          },
-        };
+        const next = withoutEmptyClaims({ ...group, values });
+        admitGroupValues(manifest, next, values);
+        changed = !sameValues(values, group.values);
+        entry.groups[operation.group] = next;
         break;
       }
       case 'source-unit': {
@@ -775,19 +638,10 @@ export const planParameterRecord = async (
             'The declaration owner does not support this source-unit transaction.',
           );
         }
-        for (const [file, digest] of Object.entries(operation.dependencies ?? {})) {
-          if (manifest.identity.sourceFiles[file] !== digest) {
-            throw failure(
-              'STALE_MANIFEST',
-              `The source-unit request observed ${file} at a different revision than the admitted manifest.`,
-              'known-not-applied',
-            );
-          }
-        }
         const group = entry.groups[operation.group]!;
-        const previous = group.bindings?.[operation.pointer];
-        const fromUnit = previous?.sourceUnit ? previous.unit : binding.unit;
-        if (fromUnit === undefined || fromUnit === operation.unit) {
+        // The unit in force for this field today: the one already authored, else the producer's.
+        const fromUnit = group.units?.[operation.pointer] ?? binding.unit;
+        if (fromUnit === operation.unit) {
           throw failure('NO_CHANGE', 'The requested source unit is already active.');
         }
         const current =
@@ -796,100 +650,30 @@ export const planParameterRecord = async (
         if (current === undefined) {
           throw failure('INVALID_OPERATION', 'The source-unit parameter has no current or default value.');
         }
-        const sourceBinding = resolveEffectiveParameterBinding(manifest, operation.pointer, binding, previous);
-        const producerDefault = valueAtPointer(
-          manifest.defaults as Readonly<Record<string, JSONValue>>,
-          operation.pointer,
-        );
-        const constraints = {
-          ...(producerDefault === undefined
-            ? {}
-            : {
-                default:
-                  previous?.sourceUnit === undefined
-                    ? producerDefault
-                    : nativeUnitValue({ ...binding, unit: fromUnit }, producerDefault, binding.unit),
-              }),
-          ...sourceBinding.constraints,
-        };
-        const nextBinding: NonNullable<FileParameterEntry['groups'][string]['bindings']>[string] = {
-          ...persistedBinding(
-            manifest,
-            operation.pointer,
-            {
-              ...sourceBinding,
-              unit: operation.unit,
-              constraints: convertedConstraints(sourceBinding, constraints, fromUnit, operation.unit),
-            },
-            previous,
-          ),
-          sourceUnit: {
-            producer: operation.producerCapability.producer,
-            sourceRevision: operation.producerCapability.sourceRevision,
-            capability: operation.producerCapability.capability,
-            producerUnit: previous?.sourceUnit?.producerUnit ?? binding.unit,
-          },
-          unit: operation.unit,
-          provenance: {
-            ...persistedBinding(manifest, operation.pointer, binding).provenance,
-            unit: {
-              origin: 'project',
-              producer: operation.producerCapability.producer,
-              sourceRevision: operation.producerCapability.sourceRevision,
-              evidence: `source-unit:${operation.pointer}`,
-            },
-          },
-        };
         const values = setPointer(
           group.values,
           operation.pointer,
-          nativeUnitValue({ ...sourceBinding, unit: operation.unit }, current, fromUnit),
+          nativeUnitValue({ ...binding, unit: operation.unit }, current, fromUnit),
         );
-        const nextGroup = {
+        const next = withoutEmptyClaims({
           values,
-          bindings: {
-            ...group.bindings,
-            [operation.pointer]: nextBinding,
-          },
-        };
-        admitGroupValues(manifest, nextGroup, values);
-        entry.groups[operation.group] = nextGroup;
-        const proposed = await snapshotFor(entry, manifest);
-        proposed.entry.lastOperation = {
-          requestId: input.request.requestId,
-          fingerprint: input.request.fingerprint,
-          outcome: 'committed',
-          ...proposed.identity,
-        };
+          units: { ...group.units, [operation.pointer]: operation.unit },
+          sourceUnits: { ...group.sourceUnits, [operation.pointer]: operation.unit },
+        });
+        admitGroupValues(manifest, next, values);
+        entry.groups[operation.group] = next;
         return {
           status: 'confirmation-required',
-          proposed: {
-            ...proposed,
-            entry: fileParameterEntrySchema.parse(proposed.entry),
-          },
-          planFingerprint: input.request.fingerprint,
+          proposed: snapshotFor(entry, manifest),
+          planFingerprint: `${input.request.requestId}:${operation.pointer}:${operation.unit}`,
           producerCapability: operation.producerCapability,
-          dependencies: manifest.identity.sourceFiles,
         };
       }
     }
     if (!changed) {
       return { status: 'ready', proposed: input.current };
     }
-    const proposed = await snapshotFor(entry, manifest);
-    proposed.entry.lastOperation = {
-      requestId: input.request.requestId,
-      fingerprint: input.request.fingerprint,
-      outcome: 'committed',
-      ...proposed.identity,
-    };
-    return {
-      status: 'ready',
-      proposed: {
-        ...proposed,
-        entry: fileParameterEntrySchema.parse(proposed.entry),
-      },
-    };
+    return { status: 'ready', proposed: snapshotFor(entry, manifest) };
   } catch (error) {
     return {
       status: 'rejected',

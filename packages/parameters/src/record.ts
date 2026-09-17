@@ -1,4 +1,4 @@
-import { fileParameterEntrySchema, fileParameterRecordProfile } from '@taucad/types';
+import { fileParameterEntrySchema } from '@taucad/types';
 import type { FileParameterEntry, JSONValue } from '@taucad/types';
 import { assertBoundedJson } from '#bounded-json.js';
 
@@ -18,12 +18,6 @@ export type ParameterRecordRead =
       status: 'current';
       bytes: Uint8Array<ArrayBuffer>;
       record: FileParameterEntry;
-    }>
-  | Readonly<{
-      status: 'unsupported-preserved';
-      bytes: Uint8Array<ArrayBuffer>;
-      recordVersion?: unknown;
-      profile?: unknown;
     }>
   | Readonly<{
       status: 'invalid-preserved';
@@ -54,23 +48,31 @@ export const readParameterRecord = (input: Uint8Array<ArrayBuffer>): ParameterRe
   }
 
   const current = fileParameterEntrySchema.safeParse(value);
-  if (current.success) {
-    return { status: 'current', bytes, record: current.data };
-  }
+  return current.success
+    ? { status: 'current', bytes, record: current.data }
+    : { status: 'invalid-preserved', bytes, error: current.error.message };
+};
 
-  if (value !== null && typeof value === 'object' && ('recordVersion' in value || 'profile' in value)) {
-    const markers = value as { recordVersion?: unknown; profile?: unknown };
-    if (markers.recordVersion !== 1 || markers.profile !== fileParameterRecordProfile) {
-      return {
-        status: 'unsupported-preserved',
-        bytes,
-        ...(markers.recordVersion === undefined ? {} : { recordVersion: markers.recordVersion }),
-        ...(markers.profile === undefined ? {} : { profile: markers.profile }),
-      };
-    }
+/**
+ * Byte equality for record content, the one concurrency proof the record still carries. Absence
+ * (`null`) equals only absence, so an unwritten sidecar never compares equal to an empty one.
+ * @param left - One record content, its text form, or absence.
+ * @param right - The other record content, its text form, or absence.
+ * @returns Whether both sides name exactly the same bytes.
+ * @public
+ */
+export const sameRecordBytes = (
+  // oxlint-disable-next-line typescript/no-restricted-types -- null is the filesystem CAS contract for an absent file.
+  left: Uint8Array<ArrayBuffer> | string | null,
+  // oxlint-disable-next-line typescript/no-restricted-types -- null is the filesystem CAS contract for an absent file.
+  right: Uint8Array<ArrayBuffer> | string | null,
+): boolean => {
+  if (left === null || right === null) {
+    return left === right;
   }
-
-  return { status: 'invalid-preserved', bytes, error: current.error.message };
+  const a = typeof left === 'string' ? encoder.encode(left) : left;
+  const b = typeof right === 'string' ? encoder.encode(right) : right;
+  return a.length === b.length && a.every((byte, index) => byte === b[index]);
 };
 
 /** Deep key sort; arrays keep their order. `Object.fromEntries` defines own keys, so `__proto__` stays data. */
@@ -88,30 +90,29 @@ const sortKeys = (value: JSONValue): JSONValue => {
   );
 };
 
+/** Drop an optional claim map that holds nothing, so an untouched record stays at the March shape. */
+const withClaims = (group: FileParameterEntry['groups'][string]): Readonly<Record<string, JSONValue | undefined>> => ({
+  values: sortKeys(group.values),
+  ...(group.units === undefined || Object.keys(group.units).length === 0 ? {} : { units: sortKeys(group.units) }),
+  ...(group.sourceUnits === undefined || Object.keys(group.sourceUnits).length === 0
+    ? {}
+    : { sourceUnits: sortKeys(group.sourceUnits) }),
+});
+
 /**
  * Serialize a validated record for checked persistence. Field order follows the schema, so
- * `recordVersion` and `profile` lead; values and bindings are keyed by name and written in sorted
- * key order so equal records produce equal bytes. Group key order is kept: without `order` it is
- * the display order. @public
+ * `activeGroup` leads; `values`, `units` and `sourceUnits` are written in sorted key order so equal
+ * records produce equal bytes. Group key order is kept: it is the display order. @public
  */
 export const serializeParameterRecord = (entry: FileParameterEntry): Uint8Array<ArrayBuffer> => {
   const parsed = fileParameterEntrySchema.parse(entry);
-  const groups = Object.fromEntries(
-    Object.entries(parsed.groups).map(([name, group]) => [
-      name,
-      {
-        ...group,
-        values: sortKeys(group.values),
-        ...(group.bindings === undefined ? {} : { bindings: sortKeys(group.bindings as unknown as JSONValue) }),
-      },
-    ]),
-  );
+  const groups = Object.fromEntries(Object.entries(parsed.groups).map(([name, group]) => [name, withClaims(group)]));
   return encoder.encode(`${JSON.stringify({ ...parsed, groups }, undefined, 2)}\n`);
 };
 
 /** A record that no reader may interpret; its bytes stay untouched until a person resets them. @public */
 export type ParameterRecordFailure = Error &
-  Readonly<{ code: 'INVALID_RECORD' | 'UNSUPPORTED_RECORD'; applicationState: 'known-not-applied' }>;
+  Readonly<{ code: 'INVALID_RECORD'; applicationState: 'known-not-applied' }>;
 
 /**
  * The single invalid-record policy shared by every reader: decode current bytes, or throw a typed
@@ -125,17 +126,12 @@ export const requireParameterRecord = (bytes: Uint8Array<ArrayBuffer>): FilePara
   if (read.status === 'current') {
     return read.record;
   }
-  const unsupported = read.status === 'unsupported-preserved';
   const detail: Pick<ParameterRecordFailure, 'code' | 'applicationState'> = {
-    code: unsupported ? 'UNSUPPORTED_RECORD' : 'INVALID_RECORD',
+    code: 'INVALID_RECORD',
     applicationState: 'known-not-applied',
   };
   const failure: ParameterRecordFailure = Object.assign(
-    new Error(
-      unsupported
-        ? 'Saved parameter values use an unsupported record version or profile; their bytes are preserved.'
-        : `Saved parameter values are not a valid record; their bytes are preserved. ${read.error}`,
-    ),
+    new Error(`Saved parameter values are not a valid record; their bytes are preserved. ${read.error}`),
     detail,
   );
   throw failure;

@@ -35,7 +35,6 @@
     ".": "./src/index.ts",
     "./package.json": "./package.json",
     "./set-machine": "./src/parameter-set.machine.ts",
-    "./input-machine": "./src/parameter-input.machine.ts",
     "./authority": "./src/authority.ts",
     "./schema": "./src/schema-admission.ts",
     "./json": "./src/bounded-json.ts"
@@ -53,11 +52,6 @@
         "types": "./dist/parameter-set.machine.d.mts",
         "import": "./dist/parameter-set.machine.mjs",
         "default": "./dist/parameter-set.machine.mjs"
-      },
-      "./input-machine": {
-        "types": "./dist/parameter-input.machine.d.mts",
-        "import": "./dist/parameter-input.machine.mjs",
-        "default": "./dist/parameter-input.machine.mjs"
       },
       "./authority": {
         "types": "./dist/authority.d.mts",

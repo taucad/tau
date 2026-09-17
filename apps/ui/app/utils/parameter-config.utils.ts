@@ -1,4 +1,4 @@
-import { fileParameterEntrySchema, fileParameterRecordProfile } from '@taucad/types';
+import { fileParameterEntrySchema } from '@taucad/types';
 import type { FileParameterEntry } from '@taucad/types';
 import { serializeParameterRecord } from '@taucad/parameters';
 
@@ -10,12 +10,8 @@ export const createDefaultEntry = (): FileParameterEntry => createParameterEntry
 /** Create the current default-group record populated with native values. */
 export const createParameterEntry = (values: Record<string, unknown>): FileParameterEntry =>
   fileParameterEntrySchema.parse({
-    recordVersion: 1,
-    profile: fileParameterRecordProfile,
     activeGroup: defaultParameterGroupName,
-    groups: {
-      [defaultParameterGroupName]: { values },
-    },
+    groups: { [defaultParameterGroupName]: { values } },
   });
 
 /** Serialize a validated current record in the authority's canonical byte form. */

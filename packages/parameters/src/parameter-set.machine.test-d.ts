@@ -11,12 +11,7 @@ import type { ParameterSetIdentity, ParameterSetOperation, ParameterSetOutcome, 
 
 expectTypeOf(parameterSetMachine).toExtend<AnyStateMachine>();
 
-const identity: ParameterSetIdentity = {
-  sourceRevision: 'source:1',
-  manifestRevision: 'manifest:1',
-  valueRevision: 'value:1',
-  dependencyRevision: 'dependency:1',
-};
+const identity: ParameterSetIdentity = { manifestRevision: 'manifest:1' };
 const field = { group: 'default', parameterId: 'width', resource: 'urn:test', pointer: '/width' } as const;
 
 // Every operation kind is a positive fixture of the public operation union.
@@ -30,8 +25,6 @@ const operations = [
   { kind: 'delete-group', group: 'second' },
   { kind: 'select-group', group: 'second' },
   { kind: 'rename-group', group: 'second', nextGroup: 'third' },
-  { kind: 'confirm-inference', ...field },
-  { kind: 'bind-parameter', ...field, binding: { unit: 'mm', space: 'linear' } },
   {
     kind: 'source-unit',
     mode: 'preserve-size',
@@ -59,10 +52,10 @@ assertType<ParameterSetOperation>({
   group: 'default',
 });
 assertType<ParameterSetOperation>({
+  // @ts-expect-error -- user-authored kind, space and reference claims were retired with the record ledger
   kind: 'bind-parameter',
   ...field,
-  // @ts-expect-error -- a binding space is one of the admitted affine spaces
-  binding: { space: 'curved' },
+  binding: { unit: 'mm' },
 });
 assertType<ParameterSetRequest>({
   ...request,

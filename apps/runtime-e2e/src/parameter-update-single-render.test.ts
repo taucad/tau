@@ -28,15 +28,7 @@ const delay = async (milliseconds: number): Promise<void> =>
 
 /** Sidecar bytes exactly as `@taucad/parameters` writes them for one committed value. */
 const sidecarBytes = (values: Record<string, unknown>): Uint8Array<ArrayBuffer> =>
-  serializeParameterRecord(
-    fileParameterEntrySchema.parse({
-      recordVersion: 1,
-      profile: 'tau-json-structure-units-03-v1',
-      activeGroup: 'default',
-      order: ['default'],
-      groups: { default: { values } },
-    }),
-  );
+  serializeParameterRecord(fileParameterEntrySchema.parse({ activeGroup: 'default', groups: { default: { values } } }));
 
 /**
  * A workspace filesystem with `main.ts` staged, exposed over the same bridge the
@@ -110,11 +102,11 @@ const createProjectWorkspace = async (
 };
 
 describe('autonomous preview invalidation', () => {
-  it('should render once when a parameter update is followed by unrelated project writes', async () => {
+  it('should render once for a record write followed by unrelated project writes', async () => {
     const { service, fileSystem, dispose } = await createProjectWorkspace('parameter-update');
     const runtime = defineRuntime({
       plugins: [replicad(), esbuild()],
-      middleware: [geometryCache()],
+      middleware: [geometryCache(), parameterFileResolver()],
     });
     const client = createRuntimeClient({
       transport: inProcessTransport({ runtime, fileSystem }),
@@ -125,21 +117,21 @@ describe('autonomous preview invalidation', () => {
     const stopParameters = client.on('parametersResolved', (result) => parameterFrames.push(result));
 
     try {
-      const initial = await client.render({
-        source: { path: 'main.ts' },
-        parameters: { width: 10 },
-      });
+      const initial = await client.render({ source: { path: 'main.ts' } });
       expect(initial.superseded).toBe(false);
       if (initial.superseded || !initial.geometry.success) {
         throw new Error('Expected the initial Replicad preview to render successfully');
       }
 
       states.length = 0;
-      const update = await client.updateParameters({ width: 20 });
-      expect(update.superseded).toBe(false);
-      if (update.superseded || !update.geometry.success) {
-        throw new Error('Expected the parameter update to render successfully');
-      }
+      /* The record is a watched dependency of the render, so the checked write alone brings the
+       * geometry up to date. Nothing else forwards the value to the kernel. */
+      await service.writeFile(
+        `/projects/${projectId}/.tau/parameters/main.ts.json`,
+        JSON.stringify({ activeGroup: 'default', groups: { default: { values: { width: 20 } } } }),
+      );
+      await delay(750);
+      expect(states.filter((state) => state === 'rendering')).toEqual(['rendering']);
 
       // Automatic thumbnail generation writes through a separate filesystem
       // client after the primary render settles. This derived artifact is not a
@@ -206,7 +198,7 @@ describe('transient drag lane', () => {
       }
       // The drag frame reaches the viewer.
       expect(geometries).toHaveLength(1);
-      expect(transient.geometry.data?.hash).not.toBe(committed.geometry.data?.hash);
+      expect(transient.geometry.data.hash).not.toBe(committed.geometry.data.hash);
 
       // ...but it never became the artifact, so the export still answers the committed width.
       const afterTransient = await client.export('glb');

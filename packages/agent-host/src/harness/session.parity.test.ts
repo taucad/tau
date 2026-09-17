@@ -200,6 +200,55 @@ describe('pi full-turn parity fixture', () => {
     expect(events.filter((event) => event.type === 'model.invocation-prepared')).toHaveLength(1);
   });
 
+  it.each(['generation', 'compaction'] as const)(
+    'mints a fresh attempt when admission refused the prepared %s attempt (resume after a top-up)',
+    async (purpose) => {
+      const log = await createMemoryEventLog([
+        {
+          version: 1,
+          leaderEpoch: 'epoch-1',
+          sequence: 0,
+          recordedAt: '2026-09-01T00:00:00.000Z',
+          runId: 'run-refused',
+          type: 'model.invocation-prepared',
+          attemptId: 'attempt-refused',
+          purpose,
+          modelId: 'stub-model',
+        },
+      ]);
+      const attempts: string[] = [];
+      const lookupAttempt = vi.fn(async (): Promise<undefined> => undefined);
+      const session = await createAgentSession({
+        chatId: 'chat-refused',
+        runId: 'run-refused',
+        leaderEpoch: 'epoch-1',
+        systemPrompt: 'system',
+        model: { id: 'stub-model', contextWindow: 8192, providerKind: 'openai' },
+        modelTransport: {
+          usesBillingAttempt: () => true,
+          lookupAttempt,
+          async *stream(request) {
+            attempts.push(request.attemptId);
+            await request.onInvocationBound?.({ operationId: 'operation-funded', status: 'pending' });
+            yield { type: 'text-delta', text: 'resumed' };
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: { list: () => [], invoke: vi.fn() },
+        eventLog: log,
+      });
+
+      await session.prompt({ id: 'user-refused', role: 'user', content: 'continue' });
+
+      expect(lookupAttempt).toHaveBeenCalledWith('attempt-refused', expect.any(AbortSignal));
+      expect(attempts).toHaveLength(1);
+      expect(attempts[0]).not.toBe('attempt-refused');
+      const events = await log.read();
+      expect(events.filter((event) => event.type === 'model.invocation-prepared')).toHaveLength(2);
+      expect(events.filter((event) => event.type === 'model.invocation-bound')).toHaveLength(1);
+    },
+  );
+
   it('does not call the transport when the prepared marker cannot be durably appended', async () => {
     const stored = await createMemoryEventLog();
     const eventLog = {

@@ -548,14 +548,147 @@ const isInterruptPayload = (value: JsonValue | undefined): value is InterruptPay
   );
 };
 
-const lifecycleFor = (events: readonly AgentLogEvent[], runId: string): RunLifecycleState => {
+/**
+ * This run's latest durable lifecycle state, or `undefined` when it has none.
+ *
+ * A run id that appears only on a *settlement* is not a run: the page can write
+ * `turn.failed` under a run id whose admission never happened (an abandoned
+ * lease), and defaulting that to `admitted` made the host treat the phantom as
+ * live — it refused the real admission, fabricated a `completed` record for a
+ * run that never ran, and let a replayed `start` resume it instead of admitting
+ * it, losing the user's message. Every caller now handles `undefined` as
+ * "no such run".
+ *
+ * @param events - Every durable record of the chat.
+ * @param runId - The run being asked about.
+ * @returns Its latest lifecycle state, or `undefined` when it has no record.
+ */
+const lifecycleFor = (events: readonly AgentLogEvent[], runId: string): RunLifecycleState | undefined => {
   for (let index = events.length - 1; index >= 0; index--) {
     const event = events[index]!;
     if (event.runId === runId && event.type === 'run.lifecycle') {
       return event.state;
     }
   }
-  return 'admitted';
+  return undefined;
+};
+
+/**
+ * The chat's current run: the last one the log actually admitted.
+ *
+ * Read off the last `run.lifecycle` record rather than the log's tail, because
+ * the tail can be a settlement under a run that was never admitted. One chat
+ * runs one run at a time, so that record names both the run and its state.
+ *
+ * @param events - Every durable record of the chat.
+ * @returns The run and its state, or `undefined` when nothing was admitted.
+ */
+const currentRun = (
+  events: readonly AgentLogEvent[],
+): { readonly runId: string; readonly state: RunLifecycleState } | undefined => {
+  const lifecycle = events.findLast((event) => event.type === 'run.lifecycle');
+  return lifecycle?.type === 'run.lifecycle' ? { runId: lifecycle.runId, state: lifecycle.state } : undefined;
+};
+
+/** Settlement records may never precede their run's admission; see {@link appendExternal}. */
+const settlementTypes = new Set<AgentLogEvent['type']>(['turn.finalized', 'turn.conflicted', 'turn.failed']);
+
+/**
+ * What one chat's run is doing, as the host decides legality by.
+ *
+ * `none` is a chat with no run in memory and none in its log; `terminal` is one
+ * whose last run ended. The three in between are the host's own in-memory
+ * stages: `reserved` before a session exists, `admitted` once it does, and
+ * `running`/`paused` from the durable lifecycle.
+ *
+ * @internal
+ */
+export type HostRunState = 'none' | 'reserved' | 'admitted' | 'running' | 'paused' | 'terminal';
+
+/** One operation whose legality the run ledger decides. @internal */
+export type HostRunOperation = 'admit' | 'resume' | 'settle' | 'cancel';
+
+/**
+ * The one place `admit`, `resume`, `recordSettlement` and `cancel` agree.
+ *
+ * These four used to decide for themselves, from four different readings of the
+ * same facts — a `lifecycleFor` that defaulted to `admitted`, a reservation map,
+ * an `activeBy*` map and, for settlement, nothing at all. Their disagreement is
+ * what let a settlement be recorded under a run that was never admitted and
+ * then made the host read that record as proof the run *was* admitted.
+ *
+ * `settle` accepts `reserved`, which the design sketch did not: the host writes
+ * a run's first lifecycle row from inside its session, so a settlement racing
+ * that row names a turn that really did run, and dropping it would lose a host
+ * fact over an ordering detail.
+ *
+ * @internal
+ */
+const runOperationLegality: Readonly<Record<HostRunOperation, ReadonlySet<HostRunState>>> = {
+  admit: new Set<HostRunState>(['none', 'terminal']),
+  /* `terminal` is admissible because a run the gateway *refused* never reached
+   * the provider: its history is whole and the host continues it at the one
+   * call it could not fund. Which terminal runs those are is
+   * {@link isResumableRunFailure}'s knowledge, not the ledger's. */
+  resume: new Set<HostRunState>(['admitted', 'running', 'paused', 'terminal']),
+  settle: new Set<HostRunState>(['reserved', 'admitted', 'running', 'paused', 'terminal']),
+  cancel: new Set<HostRunState>(['reserved', 'admitted', 'running', 'paused']),
+};
+
+/**
+ * Whether one operation is legal against a run in this state.
+ *
+ * @internal
+ * @param operation - The operation being attempted.
+ * @param state - The run's current state.
+ * @returns `true` when the ledger allows it.
+ */
+export const isHostRunOperationLegal = (operation: HostRunOperation, state: HostRunState): boolean =>
+  runOperationLegality[operation].has(state);
+
+/**
+ * The state a run's durable lifecycle puts it in.
+ *
+ * @internal
+ * @param lifecycle - The run's latest lifecycle state, or `undefined` when it has none.
+ * @returns The ledger state that lifecycle implies.
+ */
+export const hostRunStateOfLifecycle = (lifecycle: RunLifecycleState | undefined): HostRunState => {
+  // ponytail: named instead of `terminalStates.has`, whose `Set#has` never narrows the union.
+  if (lifecycle === 'admitted' || lifecycle === 'running' || lifecycle === 'paused') {
+    return lifecycle;
+  }
+  return lifecycle === undefined ? 'none' : 'terminal';
+};
+
+/**
+ * The refusal one illegal ledger operation answers with.
+ *
+ * @param input - The operation, the chat and run it named, and the state it met.
+ * @returns The coded error the caller throws.
+ */
+const runOperationRefusal = (input: {
+  readonly operation: HostRunOperation;
+  readonly chatId: string;
+  readonly runId: string | undefined;
+  readonly state: HostRunState;
+}): Error => {
+  if (input.operation === 'settle') {
+    return Object.assign(
+      new Error(
+        `Run ${input.runId ?? '(unnamed)'} was never admitted in chat ${input.chatId}; its settlement cannot be recorded.`,
+      ),
+      { code: 'SETTLEMENT_WITHOUT_RUN' },
+    );
+  }
+  return Object.assign(
+    new Error(
+      input.state === 'none'
+        ? `Chat ${input.chatId} has no run to ${input.operation}.`
+        : `Chat ${input.chatId} has a ${input.state} run; ${input.operation} is refused.`,
+    ),
+    { code: 'RUN_ADMISSION_CONFLICT' },
+  );
 };
 
 const internalKind = (message: ProviderMessage): string | undefined => {
@@ -732,11 +865,24 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     close: async () => log.close(),
   });
 
+  /**
+   * What this chat's run is doing in memory, in the ledger's vocabulary.
+   *
+   * @param chatId - The chat being asked about.
+   * @returns `running` while a session is live, `reserved` while one is being
+   * composed or an external runner holds the chat, and `none` otherwise.
+   */
+  const memoryRunStateOf = (chatId: string): HostRunState => {
+    if (activeByChat.has(chatId)) {
+      return 'running';
+    }
+    return reservationsByChat.has(chatId) || externalByChat.has(chatId) ? 'reserved' : 'none';
+  };
+
   const reserve = (chatId: string, runId?: string): AdmissionReservation => {
-    if (reservationsByChat.has(chatId) || activeByChat.has(chatId)) {
-      throw Object.assign(new Error(`Chat ${chatId} already has an admitted run.`), {
-        code: 'RUN_ADMISSION_CONFLICT',
-      });
+    const state = memoryRunStateOf(chatId);
+    if (!isHostRunOperationLegal('admit', state)) {
+      throw runOperationRefusal({ operation: 'admit', chatId, runId, state });
     }
     if (runId && (reservationsByRun.has(runId) || activeByRun.has(runId))) {
       throw Object.assign(new Error(`Run ${runId} is already admitted.`), { code: 'RUN_ADMISSION_CONFLICT' });
@@ -945,6 +1091,46 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   }): Promise<void> => append(input);
 
   /**
+   * Refuse a settlement recorded under a run this chat never admitted (R3).
+   *
+   * The log's invariant is that settlement follows admission: a `turn.failed`
+   * for a run with no `run.lifecycle` is a record of a lease the page abandoned,
+   * not of a turn, and every reader that took it for a live run went wrong.
+   * Guarded here rather than in `recordSettlement` so every external writer —
+   * the page's revision root, an ACP runner — is held to it.
+   *
+   * A run the host is still admitting in memory counts as admitted: its first
+   * lifecycle row may not have landed yet, and a settlement is a fact about a
+   * turn that really ran.
+   *
+   * @param input - The append about to be chained.
+   */
+  const assertSettlementFollowsAdmission = async (input: {
+    readonly chatId: string;
+    readonly runId: string;
+    readonly log: DurableEventLog;
+    readonly events: readonly ExternalAgentLogEvent[];
+  }): Promise<void> => {
+    if (
+      !input.events.some((event) => settlementTypes.has(event.type)) ||
+      reservationsByRun.has(input.runId) ||
+      activeByRun.has(input.runId) ||
+      externalByRun.has(input.runId)
+    ) {
+      return;
+    }
+    const state = hostRunStateOfLifecycle(lifecycleFor(await input.log.read(), input.runId));
+    if (!isHostRunOperationLegal('settle', state)) {
+      throw runOperationRefusal({
+        operation: 'settle',
+        chatId: input.chatId,
+        runId: input.runId,
+        state,
+      });
+    }
+  };
+
+  /**
    * Append event bodies under this chat's leader epoch, continuing its sequence.
    *
    * Serialized per chat, and that is load-bearing rather than defensive: the
@@ -967,6 +1153,7 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     const chained = (async (): Promise<void> => {
       await prior;
       try {
+        await assertSettlementFollowsAdmission(input);
         await appendExternalEvents(input);
       } catch (error) {
         outcome = { error };
@@ -1265,15 +1452,15 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
   const resumeExternal = async (chatId: string): Promise<boolean> => {
     const log = await logFor(chatId);
     const events = await log.read();
-    const last = events.at(-1);
+    const current = currentRun(events);
     const external = externalTurnOf(events);
-    if (!last || !external || terminalStates.has(lifecycleFor(events, last.runId))) {
+    if (!current || !external || terminalStates.has(current.state)) {
       return false;
     }
     const { agentId, kind: _kind, runKind, ...state } = external.marker;
     await runExternal({
       chatId,
-      runId: last.runId,
+      runId: current.runId,
       agent: { kind: runKind, id: agentId },
       state,
     });
@@ -1339,11 +1526,16 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     }
     const messages = reduceEventLog(events);
     const failure = transportFailureFromProviderMessages(messages);
+    /* A log with no lifecycle record at all admits no run, and the tail is the
+     * only identity there is to answer with. Every log a host writes opens with
+     * one, so this is the shape of a log written by nothing that ran. */
+    const current = currentRun(events);
+    const runId = current?.runId ?? last.runId;
     return {
       chatId,
-      runId: last.runId,
-      turnId: latestTurnId(messages, last.runId),
-      state: lifecycleFor(events, last.runId),
+      runId,
+      turnId: latestTurnId(messages, runId),
+      state: current?.state ?? 'admitted',
       messages,
       ...(failure ? { failure } : {}),
     };
@@ -1357,12 +1549,18 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       try {
         const log = await logFor(request.chatId);
         const events = await log.read();
-        const latest = events.at(-1);
-        if (latest && !terminalStates.has(lifecycleFor(events, latest.runId))) {
+        const latest = currentRun(events);
+        if (latest && !terminalStates.has(latest.state)) {
           throw new Error(`Chat ${request.chatId} has a non-terminal run; resume it before admitting another turn.`);
         }
-        if (events.some((event) => event.runId === request.runId)) {
-          throw new Error(`Run ${request.runId} has already been admitted.`);
+        /* A *lifecycle* record is what makes this run id taken. Refusing on any
+         * record at all refused every turn whose id a settlement had already
+         * been written under, which is how one abandoned lease made a chat
+         * single-turn for the rest of its life. */
+        if (lifecycleFor(events, request.runId) !== undefined) {
+          throw Object.assign(new Error(`Run ${request.runId} has already been admitted.`), {
+            code: 'RUN_ADMISSION_CONFLICT',
+          });
         }
         // An empty log has nothing to rewind, so a rewinding trigger *is* a
         // first turn and runs as one. Refusing it instead — an empty retain
@@ -1447,12 +1645,18 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       try {
         const log = await logFor(chatId);
         let events = await log.read();
-        const last = events.at(-1);
-        if (!last) {
+        if (events.length === 0) {
           throw new Error(`Chat ${chatId} has no durable session log.`);
         }
-        const { runId } = last;
-        const state = lifecycleFor(events, runId);
+        const current = currentRun(events);
+        if (current === undefined) {
+          /* The ledger's `resume` row is every state but `none`, and `none` is
+           * exactly a chat whose log admitted no run. Nothing to continue: the
+           * caller gets the history as it stands rather than a fabricated
+           * lifecycle for a run that never ran. */
+          return reduceEventLog(events);
+        }
+        const { runId, state } = current;
         if (terminalStates.has(state)) {
           if (!refusedResumably(events, runId)) {
             return reduceEventLog(events);

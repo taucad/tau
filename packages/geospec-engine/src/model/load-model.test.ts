@@ -728,7 +728,7 @@ describe('createModelLoader', () => {
     const clear = setModelLoaderForensicSink(loader, (measurement) => measurements.push(measurement));
 
     await loader({ file: 'main.ts' });
-    emit?.([{ name: 'export.packGltf', duration: 4, startTime: 0, workerTimeOrigin: 0 }]);
+    emit?.({ entries: [{ name: 'export.packGltf', duration: 4, startTime: 0, workerTimeOrigin: 0 }] });
     clear();
     await loader.dispose();
 

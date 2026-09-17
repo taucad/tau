@@ -17,17 +17,7 @@
  */
 
 import { isNode } from '#framework/environment.js';
-import type { TelemetryEntry, TelemetryOrigin } from '#types/runtime-protocol.types.js';
-
-/** One exported telemetry batch: its producer, its clock anchor, and its spans. */
-export type TelemetryBatch = {
-  /** Producer identity, minted once per dispatcher. */
-  readonly origin: TelemetryOrigin;
-  /** Absolute Unix-epoch value of this realm's `performance.now()` zero, taken at flush. Milliseconds. */
-  readonly epoch: number;
-  /** Completed spans in this batch. */
-  readonly entries: readonly TelemetryEntry[];
-};
+import type { TelemetryBatch, TelemetrySpanRecord } from '#types/runtime-protocol.types.js';
 
 /** A sink that accepts batches without blocking the emitting thread. */
 export type TelemetryExporter = {
@@ -133,7 +123,8 @@ export async function openTelemetryFileSink(options: {
       }
       let lines = '';
       for (const entry of batch.entries) {
-        lines += `${JSON.stringify({ ...entry, origin: batch.origin, epoch: batch.epoch })}\n`;
+        const record: TelemetrySpanRecord = { ...entry, origin: batch.origin, epoch: batch.epoch };
+        lines += `${JSON.stringify(record)}\n`;
       }
       if (!stream || stream.writableLength > maxBufferedBytes) {
         return;

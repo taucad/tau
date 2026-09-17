@@ -163,6 +163,32 @@ export type TelemetryEntry = {
 };
 
 /**
+ * One flush of telemetry: the spans, who produced them, and that producer's
+ * clock anchor. `origin` and `epoch` are batch fields — they are never sent
+ * per span — and a consumer that keeps spans beyond one batch folds them in
+ * itself ({@link TelemetrySpanRecord}).
+ * @public
+ */
+export type TelemetryBatch = {
+  readonly entries: readonly TelemetryEntry[];
+  readonly origin: TelemetryOrigin;
+  /** Absolute Unix-epoch value of this realm's `performance.now()` zero, taken at flush. Milliseconds. */
+  readonly epoch: number;
+};
+
+/**
+ * One span outside its batch: the shape the JSONL sink writes, one line each,
+ * and the shape every consumer that retains spans across batches stores. The
+ * identity of a span is `origin.instance` plus its `spanId`, never `spanId`
+ * alone, and `epoch + startTime` is its absolute time.
+ * @public
+ */
+export type TelemetrySpanRecord = TelemetryEntry & {
+  readonly origin: TelemetryOrigin;
+  readonly epoch: number;
+};
+
+/**
  * Rendering phase identifier for progress tracking.
  * Framework-defined conventions: 'resolvingDeps', 'bundling', 'extractingParams',
  * 'computingGeometry', 'postProcessing'. Bundler and kernel modules may emit
@@ -634,14 +660,7 @@ export type RuntimeProtocol = {
       readonly args: { readonly entries: readonly LogEntry[] };
       readonly wireArgs: RuntimeLogBatchArgsWire;
     };
-    readonly telemetry: {
-      readonly args: {
-        readonly entries: readonly TelemetryEntry[];
-        readonly origin: TelemetryOrigin;
-        /** Absolute Unix-epoch value of this realm's `performance.now()` zero, taken at flush. Milliseconds. */
-        readonly epoch: number;
-      };
-    };
+    readonly telemetry: { readonly args: TelemetryBatch };
     readonly capabilitiesUpdated: {
       readonly args: { readonly capabilities: CapabilitiesManifest };
       readonly wireArgs: RuntimeCapabilitiesUpdatedArgsWire;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TelemetryEntry } from '@taucad/runtime';
+import type { TelemetrySpanRecord } from '@taucad/runtime';
 import type { SpanNode } from '#routes/w.$workspace.$project/chat-kernel-types.js';
 import {
   applyVisibility,
@@ -24,13 +24,18 @@ import {
   getVisibleAttributes,
 } from '#routes/w.$workspace.$project/chat-kernel-utils.js';
 
-function makeEntry(overrides: Partial<TelemetryEntry> & { name: string }): TelemetryEntry {
+/** Every span a test makes comes from this producer unless it names another. */
+const producer = { label: 'worker', instance: 'p1' } as const;
+
+function makeEntry(overrides: Partial<TelemetrySpanRecord> & { name: string }): TelemetrySpanRecord {
   return {
     name: overrides.name,
     startTime: overrides.startTime ?? 0,
     duration: overrides.duration ?? 0,
     workerTimeOrigin: overrides.workerTimeOrigin ?? 0,
     detail: overrides.detail,
+    origin: overrides.origin ?? producer,
+    epoch: overrides.epoch ?? 0,
   };
 }
 
@@ -55,8 +60,9 @@ describe('telemetry formatting', () => {
 describe('span tree construction', () => {
   it('extracts span identifiers safely', () => {
     const entry = makeEntry({ name: 'a', detail: { spanId: 's1', parentSpanId: 'p1' } });
-    expect(getSpanId(entry)).toBe('s1');
-    expect(getParentSpanId(entry)).toBe('p1');
+    // Scoped to the producer, which is what makes the identifier unique (I5).
+    expect(getSpanId(entry)).toBe('p1:s1');
+    expect(getParentSpanId(entry)).toBe('p1:p1');
     expect(getSpanId(makeEntry({ name: 'missing' }))).toBeUndefined();
   });
 
@@ -71,6 +77,35 @@ describe('span tree construction', () => {
     expect(roots.map(({ entry }) => entry.name)).toEqual(['earlier-root', 'root']);
     expect(roots[1]!.children.map(({ entry }) => entry.name)).toEqual(['early-child', 'late-child']);
     expect(roots[1]!.children[0]!.depth).toBe(1);
+  });
+
+  it('keeps two producers that reuse one span identifier in disjoint trees', () => {
+    /* I5: a session recycles kernel clients, and `RuntimeTracer` restarts `spanId` at 0 in every
+     * realm, so `spanId` alone is not an identity. The producer nonce is what makes it one. */
+    const first = { label: 'worker', instance: 'producer-1' } as const;
+    const second = { label: 'worker', instance: 'producer-2' } as const;
+    const roots = buildSpanTree([
+      makeEntry({ name: 'first.render', duration: 10, detail: { spanId: '0' }, origin: first }),
+      makeEntry({
+        name: 'first.bundle',
+        startTime: 1,
+        duration: 4,
+        detail: { spanId: '1', parentSpanId: '0' },
+        origin: first,
+      }),
+      makeEntry({ name: 'second.render', startTime: 20, duration: 10, detail: { spanId: '0' }, origin: second }),
+      makeEntry({
+        name: 'second.bundle',
+        startTime: 21,
+        duration: 4,
+        detail: { spanId: '1', parentSpanId: '0' },
+        origin: second,
+      }),
+    ]);
+
+    expect(roots.map(({ entry }) => entry.name)).toEqual(['first.render', 'second.render']);
+    expect(roots[0]!.children.map(({ entry }) => entry.name)).toEqual(['first.bundle']);
+    expect(roots[1]!.children.map(({ entry }) => entry.name)).toEqual(['second.bundle']);
   });
 
   it('subtracts the union of clipped direct child intervals for own time', () => {
@@ -144,18 +179,18 @@ describe('trace projection', () => {
   it('creates one trace per lifecycle root and retains orphan data explicitly', () => {
     const traces = buildTelemetryTraces(entries);
     expect(traces.map(({ kind }) => kind)).toEqual(['bootstrap', 'render', 'render', 'transcode', 'unattributed']);
-    expect(traces[1]).toMatchObject({ id: 'render-1', spanCount: 4, duration: 100, absoluteStart: 1030 });
+    expect(traces[1]).toMatchObject({ id: 'p1:render-1', spanCount: 4, duration: 100, absoluteStart: 1030 });
   });
 
   it('selects only the latest completed root', () => {
-    expect(getLatestTrace(buildTelemetryTraces(entries))?.id).toBe('orphan');
+    expect(getLatestTrace(buildTelemetryTraces(entries))?.id).toBe('p1:orphan');
     expect(getLatestTrace(buildTelemetryTraces(entries).filter(({ kind }) => kind !== 'unattributed'))?.id).toBe(
-      'transcode',
+      'p1:transcode',
     );
   });
 
   it('builds honest shared-axis phase lanes and unions overlap within a phase', () => {
-    const render = buildTelemetryTraces(entries).find(({ id }) => id === 'render-1')!;
+    const render = buildTelemetryTraces(entries).find(({ id }) => id === 'p1:render-1')!;
     const lanes = buildPipelineLanes(render);
     expect(lanes.map(({ phase }) => phase)).toEqual(['bundling', 'computingGeometry']);
     expect(lanes[0]?.intervals).toEqual([{ start: 10, duration: 60 }]);
@@ -231,18 +266,18 @@ describe('trace navigation projections', () => {
 
   it('flattens in DFS order and respects collapse', () => {
     expect(flattenSpanTree([root], new Set()).map(({ entry }) => entry.name)).toEqual(['root', 'child']);
-    expect(flattenSpanTree([root], new Set(['r']))).toHaveLength(1);
+    expect(flattenSpanTree([root], new Set(['p1:r']))).toHaveLength(1);
   });
 
   it('includes tree position and parent metadata for ARIA', () => {
     const rows = flattenSpanRows([root], new Set());
     expect(rows[0]).toMatchObject({ positionInSet: 1, setSize: 1, parentId: undefined });
-    expect(rows[1]).toMatchObject({ positionInSet: 1, setSize: 1, parentId: 'r' });
+    expect(rows[1]).toMatchObject({ positionInSet: 1, setSize: 1, parentId: 'p1:r' });
   });
 
   it('collects collapsible IDs and resolves a selected operation path', () => {
-    expect(collectAllSpanIds([root])).toEqual(new Set(['r']));
-    expect(findSpanPath([root], 'c').map(({ entry }) => entry.name)).toEqual(['root', 'child']);
+    expect(collectAllSpanIds([root])).toEqual(new Set(['p1:r']));
+    expect(findSpanPath([root], 'p1:c').map(({ entry }) => entry.name)).toEqual(['root', 'child']);
   });
 
   it('finds the slowest leaf', () => {

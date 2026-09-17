@@ -1,4 +1,4 @@
-import type { TelemetryEntry } from '@taucad/runtime';
+import type { TelemetrySpanRecord } from '@taucad/runtime';
 import type { FilterCondition } from '#components/kernel/trace-condition-picker.js';
 import type {
   FlatSpanRow,
@@ -41,21 +41,27 @@ export function formatTimestamp(ts: number): string {
   });
 }
 
-export function getSpanId(entry: TelemetryEntry): string | undefined {
+/* Every identifier below is scoped to the producer that minted it: `RuntimeTracer` restarts `spanId`
+ * at 0 in each realm, and one session recycles kernel clients, so a bare `spanId` would parent a new
+ * client's spans under the dead one's tree (I5). */
+export function getSpanId(entry: TelemetrySpanRecord): string | undefined {
   const spanId = entry.detail?.['spanId'];
-  return typeof spanId === 'string' ? spanId : undefined;
+  return typeof spanId === 'string' ? `${entry.origin.instance}:${spanId}` : undefined;
 }
 
-export function getParentSpanId(entry: TelemetryEntry): string | undefined {
+export function getParentSpanId(entry: TelemetrySpanRecord): string | undefined {
   const parentSpanId = entry.detail?.['parentSpanId'];
-  return typeof parentSpanId === 'string' ? parentSpanId : undefined;
+  return typeof parentSpanId === 'string' ? `${entry.origin.instance}:${parentSpanId}` : undefined;
 }
 
-export function getSpanKey(entry: TelemetryEntry): string {
-  return getSpanId(entry) ?? `${entry.workerTimeOrigin}:${entry.startTime}:${entry.duration}:${entry.name}`;
+export function getSpanKey(entry: TelemetrySpanRecord): string {
+  return (
+    getSpanId(entry) ??
+    `${entry.origin.instance}:${entry.workerTimeOrigin}:${entry.startTime}:${entry.duration}:${entry.name}`
+  );
 }
 
-function compareEntries(left: TelemetryEntry, right: TelemetryEntry): number {
+function compareEntries(left: TelemetrySpanRecord, right: TelemetrySpanRecord): number {
   return left.startTime - right.startTime || getSpanKey(left).localeCompare(getSpanKey(right));
 }
 
@@ -110,7 +116,7 @@ function finalizeTree(node: SpanNode, depth: number): void {
   node.selfTime = computeSelfTime(node);
 }
 
-export function buildSpanTree(entries: TelemetryEntry[]): SpanNode[] {
+export function buildSpanTree(entries: TelemetrySpanRecord[]): SpanNode[] {
   const nodes = [...entries].sort(compareEntries).map<SpanNode>((entry) => ({
     entry,
     children: [],
@@ -153,7 +159,7 @@ function countSpans(node: SpanNode): number {
   return count;
 }
 
-export function buildTelemetryTraces(entries: TelemetryEntry[]): TelemetryTrace[] {
+export function buildTelemetryTraces(entries: TelemetrySpanRecord[]): TelemetryTrace[] {
   return buildSpanTree(entries).map((root) => {
     const kind = traceKindsByRootName[root.entry.name] ?? 'unattributed';
     return {
@@ -254,7 +260,7 @@ export function getSlowestLeaf(root: SpanNode): SpanNode {
   return slowest;
 }
 
-export function getVisibleAttributes(entry: TelemetryEntry): Array<[string, string | number | boolean]> {
+export function getVisibleAttributes(entry: TelemetrySpanRecord): Array<[string, string | number | boolean]> {
   return Object.entries(entry.detail ?? {})
     .filter(
       (attribute): attribute is [string, string | number | boolean] =>

@@ -366,8 +366,8 @@ export async function runBenchmarks(
       transport,
     });
 
-    client.on('telemetry', (entries) => {
-      telemetryBatches.push(entries);
+    client.on('telemetry', (batch) => {
+      telemetryBatches.push([...batch.entries]);
     });
     client.on('log', (entry) => {
       // Surface kernel-side info/warn lines (e.g. WASM auto-selection log,

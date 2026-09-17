@@ -186,6 +186,9 @@ function createExportableRuntimeClient(): AppRuntimeClient {
 // Tests
 // ---------------------------------------------------------------------------
 
+/** One producer for every telemetry batch a case sends (I5). */
+const telemetryOrigin = { label: 'worker', instance: 'test-producer' } as const;
+
 describe('cadMachine', () => {
   describe('filesystem binding replacement', () => {
     it('disposes the settled client and reconnects for a replacement binding', async () => {
@@ -1018,7 +1021,8 @@ describe('cadMachine', () => {
       const { actor } = await enterRendering();
 
       const entries = mock<TelemetryEntry[]>([{ name: 'test', startTime: 0, duration: 100, workerTimeOrigin: 0 }]);
-      actor.send({ type: 'kernelTelemetry', entries });
+
+      actor.send({ type: 'kernelTelemetry', batch: { entries, origin: telemetryOrigin, epoch: 0 } });
       expect(actor.getSnapshot().context.telemetryEntries).toHaveLength(1);
       actor.stop();
     });
@@ -1030,22 +1034,26 @@ describe('cadMachine', () => {
       const sendTrace = (trace: number): void => {
         actor.send({
           type: 'kernelTelemetry',
-          entries: [
-            {
-              name: 'kernel.bundle',
-              startTime: trace,
-              duration: 1,
-              workerTimeOrigin: 0,
-              detail: { spanId: `child-${String(trace)}`, parentSpanId: `root-${String(trace)}` },
-            },
-            {
-              name: 'kernel.render',
-              startTime: trace,
-              duration: 2,
-              workerTimeOrigin: 0,
-              detail: { spanId: `root-${String(trace)}` },
-            },
-          ],
+          batch: {
+            origin: telemetryOrigin,
+            epoch: 0,
+            entries: [
+              {
+                name: 'kernel.bundle',
+                startTime: trace,
+                duration: 1,
+                workerTimeOrigin: 0,
+                detail: { spanId: `child-${String(trace)}`, parentSpanId: `root-${String(trace)}` },
+              },
+              {
+                name: 'kernel.render',
+                startTime: trace,
+                duration: 2,
+                workerTimeOrigin: 0,
+                detail: { spanId: `root-${String(trace)}` },
+              },
+            ],
+          },
         });
       };
 

@@ -1537,6 +1537,56 @@ describe('ChatSessionStore', () => {
     });
 
     /*
+     * The same reattach, refused. An unreachable host drives the SDK
+     * `submitted → error` before any run binds, so the "no run identity"
+     * suppression above was still armed on the error tick: the row stayed idle
+     * about a reattach that failed outright and the project session never heard
+     * the run settle.
+     */
+    it('should surface a host reattach that fails before a run binds', async () => {
+      const store = new ChatSessionStore();
+      const deps = createStubDeps();
+      const chatId = 'chat_reattach_failed';
+      deps.getChat.mockResolvedValue(chatRow(chatId, 'project_reattach', { name: 'Unreachable host chat' }));
+      store.setDependencies(deps);
+      const actor = createActor(chatSessionMachine, {
+        input: { chatId, projectId: 'project_reattach' },
+      }).start();
+      const heard: string[] = [];
+      const projectRef = {
+        send: (event: { type: string }) => {
+          heard.push(event.type);
+        },
+        getSnapshot: () => ({ context: { chatRefs: { [chatId]: actor } } }),
+      } as unknown as ProjectSessionActorRef;
+
+      try {
+        store.setFocusedProject('project_reattach');
+        store.setProjectSession('project_reattach', projectRef);
+        const session = store.acquire(chatId);
+        await vi.waitFor(() => {
+          expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+        });
+
+        store.reattachHostChat({ chatId, hostId: 'origin' });
+        const fake = harness.created.findLast((entry) => entry.id === chatId)!;
+        fake.status = 'submitted';
+        fake.emitStatusChange();
+        fake.error = new Error('host unreachable');
+        fake.status = 'error';
+        fake.emitStatusChange();
+
+        expect(heard).toContain('runSettled');
+        expect(actor.getSnapshot().matches({ run: 'failed' })).toBe(true);
+        expect(actor.getSnapshot().context.failureReason).toBe('host unreachable');
+      } finally {
+        store.release(chatId);
+        store.setProjectSession('project_reattach', undefined);
+        actor.stop();
+      }
+    });
+
+    /*
      * The transcript this store restored from local persistence already holds
      * the run the host is about to replay from cursor 0, and the AI SDK
      * *continues* a trailing assistant message on a resume — so the replay used
@@ -2890,19 +2940,43 @@ describe('ChatSessionStore', () => {
       store.release(chatId);
     });
 
-    it('should release the hold when the startup request is not eligible', async () => {
-      const chatId = 'chat_seed_ineligible';
-      // The seed already ran: the tail is no longer a pending startup message.
-      const seedMessage: MyUIMessage = {
-        id: `${chatId}_msg_seed`,
-        role: 'user',
-        parts: [{ type: 'text', text: 'Create a cube with a cylindrical cutout.' }],
-        metadata: { createdAt: 1_700_000_000_000, status: 'success' },
-      };
-      const { store } = seededRow(chatId, { messages: [seedMessage] });
+    /*
+     * Another loader already took this request, so the consume answers with
+     * nothing to dispatch. The hold was taken before the await either way, and
+     * only this branch gives it back.
+     */
+    it('should release the hold when the startup request is already gone', async () => {
+      const chatId = 'chat_seed_consumed_elsewhere';
+      const { deps, startupRequest, store } = seededRow(chatId);
+      deps.consumeChatStartupRequest.mockResolvedValue(undefined);
 
       store.acquire(chatId);
+      await vi.waitFor(() => {
+        expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith(chatId, startupRequest.id);
+      });
       await settle();
+      store.release(chatId);
+
+      expect(store.get(chatId)).toBeUndefined();
+    });
+
+    /*
+     * The consume is a filesystem patch and can reject. Nothing else releases
+     * the hold that guards it — the request was never started, so the lifecycle
+     * release never runs — and the session stayed in the store forever: no
+     * draft flush, no `chatClosed`, and re-acquiring returned the zombie.
+     */
+    it('should release the hold when the startup-request consume rejects', async () => {
+      const chatId = 'chat_seed_consume_rejects';
+      const { deps, store } = seededRow(chatId);
+      deps.consumeChatStartupRequest.mockRejectedValue(new Error('workspace patch failed'));
+
+      const session = store.acquire(chatId);
+      await vi.waitFor(() => {
+        expect(session.persistenceActorRef.getSnapshot().context.loadError?.message).toContain(
+          'workspace patch failed',
+        );
+      });
       store.release(chatId);
 
       expect(store.get(chatId)).toBeUndefined();

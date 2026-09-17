@@ -24,6 +24,8 @@ import { isDesktopTarget } from '#filesystem/desktop-bridge.js';
 import { browserLiveProjectBudget, sessionsMachine } from '#machines/sessions.machine.js';
 import type { SessionsMachineContext, SessionsProjectStatus } from '#machines/sessions.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
+import { chatSessionMachine } from '#machines/chat-session.machine.js';
+import { chatHostBinding } from '#chat-clients/_internal/chat-host-binding.js';
 import type { ProjectSessionActorRef, ProjectSessionRegion } from '#machines/project-session.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { inspect } from '#machines/inspector.js';
@@ -251,6 +253,11 @@ const projectSession = projectSessionMachine.provide({
     project: relayRegion('runtime'),
     agentHost: agentHostRegion,
     compute: computeRegion,
+    /* The chat's agent-host binding, injected here for the same reason every
+     * other resource is: the machines import no transport, no DOM and no React
+     * so their own rows run headless (policy §16 puts the binding on the chat
+     * session; this is where the real one is supplied). */
+    chatSession: chatSessionMachine.provide({ actors: { hostBinding: chatHostBinding } }),
   },
 });
 

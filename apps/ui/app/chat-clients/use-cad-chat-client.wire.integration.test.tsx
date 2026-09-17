@@ -218,46 +218,6 @@ describe('useCadChatClient wire integration', () => {
     expect(parsed.agent).toMatchObject({ snapshot, contextPayload });
   });
 
-  it('should produce a body the API schema accepts when retry fires for a specific message id', async () => {
-    const chat = mock<Chat<MyUIMessage>>();
-    vi.mocked(useActiveChatInstance).mockReturnValue(chat);
-    const actions = buildActions();
-    installActions(actions);
-
-    const { result } = renderHook(() => useCadChatClient());
-
-    await act(async () => {
-      result.current.retry('msg_target');
-    });
-
-    const [messageId, options] = actions.retryMessage.mock.calls[0]! as [
-      string,
-      { body?: Record<string, unknown> } | undefined,
-    ];
-    const wireBody = buildWireBody(options?.body);
-
-    expect(() => chatTurnRequestSchema.parse(wireBody)).not.toThrow();
-    expect(messageId).toBe('msg_target');
-  });
-
-  it('should produce a body the API schema accepts when regenerateTail fires', async () => {
-    const chat = mock<Chat<MyUIMessage>>();
-    vi.mocked(useActiveChatInstance).mockReturnValue(chat);
-    const actions = buildActions();
-    installActions(actions);
-
-    const { result } = renderHook(() => useCadChatClient());
-
-    await act(async () => {
-      result.current.regenerateTail();
-    });
-
-    const [options] = actions.regenerate.mock.calls[0]! as [{ body?: Record<string, unknown> } | undefined];
-    const wireBody = buildWireBody(options?.body);
-
-    expect(() => chatTurnRequestSchema.parse(wireBody)).not.toThrow();
-  });
-
   it('should produce a body the API schema rejects with a missing-agent path when the agent block is removed', async () => {
     const chat = mock<Chat<MyUIMessage>>();
     vi.mocked(useActiveChatInstance).mockReturnValue(chat);

@@ -370,13 +370,88 @@ describe('chatSessionMachine', () => {
     actor.stop();
   });
 
-  it('starts and stops without leaking children', () => {
+  it('starts and stops with its host binding as its only child', () => {
     const actor = start();
     actor.send({ type: 'runLifecycle', phase: 'running' });
 
-    expect(Object.keys(actor.getSnapshot().children)).toEqual([]);
+    /* The binding is the chat session's one owned resource (C1): it lives for
+     * the actor's whole life, so a run reaching `running` must not have added
+     * a second child beside it. */
+    expect(Object.keys(actor.getSnapshot().children)).toEqual(['hostBinding']);
 
     actor.stop();
     expect(actor.getSnapshot().status).toBe('stopped');
+  });
+});
+
+/**
+ * The chat's agent-host binding (C1, V6).
+ *
+ * The defect these rows exist for: the binding was registered from an effect in
+ * `useCadChatClient`, a hook mounted once per transcript message plus four
+ * other places. Every instance wrote one module-level registry and the last to
+ * unmount deleted the entry, so a rewinding dispatch — which unmounts exactly
+ * those newest instances — found the chat unconfigured. One actor, one
+ * invocation.
+ */
+describe('chatSessionMachine host region', () => {
+  /** Counts binding invocations and releases, in order. */
+  const countingBinding = (): {
+    readonly logic: ReturnType<typeof fromCallback<EventObject, { chatId: string; placement: string }>>;
+    readonly bound: string[];
+    readonly released: string[];
+  } => {
+    const bound: string[] = [];
+    const released: string[] = [];
+    const logic = fromCallback<EventObject, { chatId: string; placement: string }>(({ input }) => {
+      bound.push(input.placement);
+      return () => {
+        released.push(input.placement);
+      };
+    });
+    return { logic, bound, released };
+  };
+
+  const startWithBinding = (binding: ReturnType<typeof countingBinding>) => {
+    const actor = createActor(chatSessionMachine.provide({ actors: { hostBinding: binding.logic } }), {
+      input: { chatId: 'chat-1', projectId: 'proj_1' },
+    });
+    actor.start();
+    return actor;
+  };
+
+  it('should bind the chat host exactly once, however often the agent config changes', () => {
+    const binding = countingBinding();
+    const actor = startWithBinding(binding);
+
+    for (const model of ['a', 'b', 'c']) {
+      actor.send({ type: 'agentConfigChanged', placement: 'tau' });
+      expect(model).toBeDefined();
+    }
+
+    expect(binding.bound).toEqual(['', 'tau']);
+    expect(binding.released).toEqual(['']);
+  });
+
+  it('should rebind once when the placement moves', () => {
+    const binding = countingBinding();
+    const actor = startWithBinding(binding);
+
+    actor.send({ type: 'agentConfigChanged', placement: 'tau' });
+    actor.send({ type: 'agentConfigChanged', placement: 'desktop' });
+    actor.send({ type: 'agentConfigChanged', placement: 'desktop' });
+
+    expect(binding.bound).toEqual(['', 'tau', 'desktop']);
+    expect(binding.released).toEqual(['', 'tau']);
+  });
+
+  it('should release the binding when the chat session stops', () => {
+    const binding = countingBinding();
+    const actor = startWithBinding(binding);
+    actor.send({ type: 'agentConfigChanged', placement: 'tau' });
+
+    actor.stop();
+
+    expect(binding.released).toEqual(['', 'tau']);
   });
 });

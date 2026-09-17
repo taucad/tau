@@ -116,11 +116,13 @@ export type FileSystemClient = {
   duplicateFile(sourcePath: string, destinationPath: string): Promise<void>;
   copyDirectory(sourcePath: string, destinationPath: string): Promise<void>;
   /**
-   * Package a directory's contents into a ZIP archive. Pass `{ scope }`
-   * to zip from the standalone provider for an explicit workspace scope
-   * instead of the active mount table.
+   * Package a directory's contents into a ZIP archive, minus whatever the path
+   * registry hides. Pass `{ scope }` to zip from the standalone provider for an
+   * explicit workspace scope instead of the active mount table, or
+   * `{ versionedOnly }` for a whole-project export that carries only the bytes
+   * the registry counts as the project.
    */
-  getZippedDirectory(path: string, options?: { scope?: WorkspaceScope }): Promise<Blob>;
+  getZippedDirectory(path: string, options?: { scope?: WorkspaceScope; versionedOnly?: boolean }): Promise<Blob>;
 
   /**
    * Mount a path prefix on a fresh provider instance. Webaccess mounts

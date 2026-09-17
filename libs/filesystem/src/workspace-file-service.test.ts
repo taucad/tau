@@ -3241,6 +3241,76 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // getZippedDirectory — path registry pruning
+  // ---------------------------------------------------------------------------
+
+  describe('getZippedDirectory path classification', () => {
+    const projectId = 'proj_zzzzzzzzzzzzzzzzzzzzz';
+    const projectRoute = `/projects/${projectId}`;
+
+    /** Every seeded path, project-relative, across all four registry answers. */
+    const seeded = {
+      'main.ts': 'export const part = 1;',
+      'tau.json': '{}',
+      '.gitignore': 'node_modules',
+      '.tau/parameters/size.json': '{"width":10}',
+      'thumbnail.webp': 'webp-bytes',
+      'exports/part.stl': 'solid part',
+      '.tau/chats/chat_a/log.json': '{"messages":[]}',
+      '.git/HEAD': 'ref: refs/heads/main',
+      '.tau/revisions/refs/heads/main': 'abc123',
+    } as const;
+
+    /** Archived files, excluding the parent folder rows JSZip creates on its own. */
+    const zipEntries = async (blob: Blob): Promise<string[]> => {
+      const jszipModule = await import('jszip');
+      const jszip = jszipModule.default;
+      const zip = await jszip.loadAsync(await blob.arrayBuffer());
+      return Object.values(zip.files)
+        .filter((file) => !file.dir)
+        .map((file) => file.name)
+        .sort();
+    };
+
+    beforeEach(async () => {
+      await service.configureProjectRoots({
+        projects: [{ projectId, backend: 'memory', storageRootKey: 'memory:0', providerBasePath: 'gear-system' }],
+        roots: [],
+      });
+      for (const [path, content] of Object.entries(seeded)) {
+        // oxlint-disable-next-line no-await-in-loop -- Deterministic seed order keeps the fixture readable.
+        await service.writeFile(`${projectRoute}/${path}`, content);
+      }
+    });
+
+    it('should omit control-plane paths from a project archive without reading their bytes', async () => {
+      const readFile = vi.spyOn(rootProvider, 'readFile');
+
+      const entries = await zipEntries(await service.getZippedDirectory(projectRoute));
+
+      expect(entries).toContain('main.ts');
+      expect(entries).toContain('.tau/chats/chat_a/log.json');
+      expect(entries).toContain('thumbnail.webp');
+      expect(entries.filter((entry) => entry.startsWith('.git/') || entry.startsWith('.tau/revisions/'))).toEqual([]);
+      expect(readFile.mock.calls.filter(([path]) => path.includes('/.git/') || path.includes('/revisions/'))).toEqual(
+        [],
+      );
+    });
+
+    it('should archive only versioned project bytes when versionedOnly is set', async () => {
+      const entries = await zipEntries(await service.getZippedDirectory(projectRoute, { versionedOnly: true }));
+
+      expect(entries).toEqual(['.gitignore', '.tau/parameters/size.json', 'main.ts', 'tau.json']);
+    });
+
+    it('should archive an unversioned records folder when that folder is the zip root', async () => {
+      const entries = await zipEntries(await service.getZippedDirectory(`${projectRoute}/exports`));
+
+      expect(entries).toEqual(['part.stl']);
+    });
+  });
+
   describe('protected dynamic mounts', () => {
     let mountedService: WorkspaceFileService;
     let mountedRegistry: ProviderRegistry;

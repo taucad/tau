@@ -19,7 +19,7 @@ const playwrightProvider = (options?: Parameters<typeof playwright>[0]): Browser
 
 export default defineConfig({
   root: import.meta.dirname,
-  optimizeDeps: { include: ['axe-core', 'zod'] },
+  optimizeDeps: { include: ['axe-core', 'jszip', 'zod'] },
   resolve: {
     alias: [
       {

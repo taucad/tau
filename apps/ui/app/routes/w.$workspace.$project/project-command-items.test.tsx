@@ -14,9 +14,12 @@ let hasProjectContext = true;
 const openPanel = vi.fn();
 const captureCadImages = vi.fn<(options: unknown) => Promise<ExportFile[]>>();
 const downloadBlob = vi.fn<(blob: Blob, filename: string) => void>();
+const getZippedDirectory = vi.fn<(path: string, options?: { versionedOnly?: boolean }) => Promise<Blob>>();
 const runtimeFileSystem = {};
 const imageService = { export: vi.fn() };
 const saveRequest = vi.fn(async () => undefined);
+/** Whatever the failure branch of a `toast.promise` rendered. */
+const toastFailures: unknown[] = [];
 
 const cadActor = {
   getSnapshot: () => ({ context: { geometry: geometryFormat ? { format: geometryFormat } : undefined } }),
@@ -75,10 +78,14 @@ vi.mock('#components/ui/sonner.js', () => ({
     promise: vi.fn(
       async (
         work: Promise<unknown> | (() => Promise<unknown>),
-        messages: { success?: (value: unknown) => unknown },
+        messages: { success?: (value: unknown) => unknown; error?: unknown },
       ) => {
-        const value = await (typeof work === 'function' ? work() : work);
-        messages.success?.(value);
+        try {
+          const value = await (typeof work === 'function' ? work() : work);
+          messages.success?.(value);
+        } catch (error) {
+          toastFailures.push(typeof messages.error === 'function' ? messages.error(error) : messages.error);
+        }
       },
     ),
     success: vi.fn(),
@@ -87,7 +94,7 @@ vi.mock('#components/ui/sonner.js', () => ({
 
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
-    getZippedDirectory: vi.fn(),
+    getZippedDirectory,
     writeFile: vi.fn(),
     runtimeFileSystem,
   }),
@@ -160,6 +167,8 @@ describe('ProjectCommandPaletteItems', () => {
     captureCadImages.mockReset();
     downloadBlob.mockReset();
     saveRequest.mockReset();
+    getZippedDirectory.mockReset();
+    toastFailures.length = 0;
     revisionStatusHarness.reset();
   });
 
@@ -256,6 +265,33 @@ describe('ProjectCommandPaletteItems', () => {
     expect(blob).toBeInstanceOf(Blob);
     expect(blob.type).toBe('image/png');
     expect(filename).toBe('test-project.png');
+  });
+
+  it('should archive the file manager root, not an absolute project path', async () => {
+    getZippedDirectory.mockResolvedValue(new Blob(['zip']));
+    render(<ProjectCommandPaletteItems match={match} />);
+
+    registeredItems.find((item) => item.id === 'download-zip')?.action?.();
+
+    await vi.waitFor(() => {
+      expect(downloadBlob).toHaveBeenCalledOnce();
+    });
+    /* `''` is this provider's root. An absolute spelling is a foreign key to
+     * the workspace-relative facade and never reaches the authority. */
+    expect(getZippedDirectory).toHaveBeenCalledWith('', { versionedOnly: true });
+    expect(downloadBlob.mock.calls[0]?.[1]).toBe('test-project.zip');
+  });
+
+  it('should name the cause when the archive cannot be built', async () => {
+    getZippedDirectory.mockRejectedValue(new Error('EACCES: workspace folder is unreadable'));
+    render(<ProjectCommandPaletteItems match={match} />);
+
+    registeredItems.find((item) => item.id === 'download-zip')?.action?.();
+
+    await vi.waitFor(() => {
+      expect(toastFailures).toEqual(['Failed to create ZIP archive: EACCES: workspace folder is unreadable']);
+    });
+    expect(downloadBlob).not.toHaveBeenCalled();
   });
 
   it('reacts to camera registration and unregistration for a stable graphics actor', () => {

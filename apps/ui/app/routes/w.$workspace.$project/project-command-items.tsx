@@ -32,6 +32,7 @@ import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-stat
 import { useSaveRevisionRequest } from '#routes/w.$workspace.$project/revision-save-shortcut.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/file-tree-download-policy.js';
 import { useFeature } from '#flags/use-feature.js';
 import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { captureCadImages } from '#services/headless-capture.js';
@@ -90,18 +91,19 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
     }
 
     toast.promise(
-      async () => {
-        // Get mechanical asset files
-        const zipBlob = await fileManager.getZippedDirectory(`/projects/${project.id}`);
-        return zipBlob;
-      },
+      /* `''` is the file manager's own root, which follows the selected
+       * checkout: an absolute `/projects/<id>` is a foreign key to this
+       * workspace-relative facade, not an alias of its root. */
+      async () => fileManager.getZippedDirectory('', { versionedOnly: true }),
       {
         loading: 'Creating ZIP archive...',
         success(blob) {
           downloadBlob(blob, `${projectName}.zip`);
           return 'ZIP downloaded successfully';
         },
-        error: 'Failed to create ZIP archive',
+        error(error: unknown) {
+          return `Failed to create ZIP archive: ${getFileTreeDownloadErrorMessage(error)}`;
+        },
       },
     );
   }, [project, projectName, fileManager]);

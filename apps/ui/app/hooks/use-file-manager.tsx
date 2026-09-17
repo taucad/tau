@@ -295,7 +295,13 @@ type FileManagerContextType = {
   exists: (path: string) => Promise<boolean>;
   readdir: (path: string) => Promise<string[]>;
   getDirectoryStat: (path: string) => Promise<FileStatEntry[]>;
-  getZippedDirectory: (path: string) => Promise<Blob>;
+  /**
+   * Zip a directory through the project-scoped content facade. `''` is this
+   * provider's own root — the whole-project export — and it follows the FM's
+   * current root, so an archive taken while a linked checkout is selected is
+   * the checkout the workbench is showing.
+   */
+  getZippedDirectory: (path: string, options?: { versionedOnly?: boolean }) => Promise<Blob>;
   copyDirectory: (sourcePath: string, destinationPath: string) => Promise<void>;
   /**
    * Typed proxy dispatch facade. Use for cache-free reads/writes and
@@ -876,9 +882,9 @@ export function FileManagerProvider({
   );
 
   const getZippedDirectory = useCallback(
-    async (path: string): Promise<Blob> => {
+    async (path: string, options?: { versionedOnly?: boolean }): Promise<Blob> => {
       const { contentService } = await whenServicesReady();
-      return contentService.getZippedDirectory(path);
+      return contentService.getZippedDirectory(path, options);
     },
     [whenServicesReady],
   );

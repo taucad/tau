@@ -42,9 +42,19 @@ type LoaderCapture = Readonly<{
   size: number;
 }>;
 
+type SpinnerDiagnostics = Readonly<{
+  activeCount: number;
+  backend: string | undefined;
+  isLooping: boolean;
+  rendererCount: number;
+  sourceSize: number;
+  subscriberCount: number;
+}>;
+
 type LoaderBridge = Readonly<{
   captureFrame: () => Promise<LoaderCapture>;
   getShaderSource: () => Promise<{ readonly fragmentShader: string; readonly vertexShader: string }>;
+  getSpinnerDiagnostics: () => SpinnerDiagnostics;
   getState: () => LoaderState;
 }>;
 
@@ -97,6 +107,28 @@ const captureStage = async (name: string): Promise<LoaderCapture> => {
   await target.writeArtifact(`metal-morph-capture-${name}.json`, JSON.stringify(capture));
   return capture;
 };
+
+const readSpinnerDiagnostics = async (): Promise<SpinnerDiagnostics | undefined> =>
+  target.evaluate(() => (globalThis as LoaderWindow).__TAU_METAL_MORPH__?.getSpinnerDiagnostics());
+
+/** Share of covered pixels on the largest inline spinner, read from the 2D canvas the service paints. */
+const sampleSpinnerCoverage = async (): Promise<number> =>
+  target.evaluate(() => {
+    const canvases = [...document.querySelectorAll<HTMLCanvasElement>('span[data-state] canvas')];
+    const painted = canvases.toSorted((first, second) => second.width - first.width)[0];
+    const context = painted?.getContext('2d');
+    if (!painted || !context || painted.width === 0) {
+      return 0;
+    }
+    const { data } = context.getImageData(0, 0, painted.width, painted.height);
+    let covered = 0;
+    for (let offset = 3; offset < data.length; offset += 4) {
+      if ((data[offset] ?? 0) > 128) {
+        covered += 1;
+      }
+    }
+    return covered / (painted.width * painted.height);
+  });
 
 /** Milliseconds; software adapters prefilter the studio and compile the pipelines slowly. */
 const readyTimeout = 120_000;
@@ -390,6 +422,35 @@ test.describe('metal morph loader', () => {
     );
     expect(median, 'median frame interval in milliseconds').toBeLessThan(400);
   });
+
+  for (const backend of ['webgpu', 'webgl'] as const satisfies readonly LoaderBackend[]) {
+    test(`shares one renderer across the inline spinners through ${backend}`, async () => {
+      await target.navigate(`/loader?graphicsBackend=${backend}`);
+      await waitForReady();
+      await expect
+        .poll(async () => readSpinnerDiagnostics().then((diagnostics) => diagnostics?.subscriberCount))
+        .toBe(0);
+
+      await target.click(selectors.getByLabelText('Render 40 px and 96 px spinners'));
+
+      // Two spinners, one renderer: the count the browser's sixteen-context cap makes matter.
+      await expect
+        .poll(async () => readSpinnerDiagnostics().then((diagnostics) => diagnostics?.rendererCount), {
+          timeout: readyTimeout,
+        })
+        .toBe(1);
+      const diagnostics = await readSpinnerDiagnostics();
+      expect(diagnostics?.subscriberCount).toBe(2);
+      expect(diagnostics?.sourceSize).toBeGreaterThanOrEqual(32);
+
+      // Pixel evidence read from a spinner's own 2D canvas, which needs no adapter that can present.
+      await expect.poll(async () => sampleSpinnerCoverage(), { timeout: readyTimeout }).toBeGreaterThan(0.02);
+      await target.writeArtifact(
+        `metal-morph-spinner-diagnostics-${backend}.json`,
+        JSON.stringify({ ...(await readSpinnerDiagnostics()), coverage: await sampleSpinnerCoverage() }),
+      );
+    });
+  }
 
   test('renders the same resting silhouette on both backends', async () => {
     await target.emulateReducedMotion('reduce');

@@ -581,6 +581,20 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
    * @returns A render client bound to the loopback child.
    */
   const ensureAgentRuntime = async (workspaceRoot: string): Promise<ReturnType<typeof createRuntimeClient>> => {
+    const cached = agentRuntimes.get(workspaceRoot);
+    if (cached) {
+      const client = await cached;
+      if (client.lifecycleState !== 'terminated') {
+        return client;
+      }
+      /* A wire failure over a child that is still alive terminates the client
+       * and evicts nothing, so every later tool call would be answered by this
+       * dead client. Only the entry this call read is dropped: a concurrent
+       * caller may already have replaced it. */
+      if (agentRuntimes.get(workspaceRoot) === cached) {
+        agentRuntimes.delete(workspaceRoot);
+      }
+    }
     const pending =
       agentRuntimes.get(workspaceRoot) ??
       (async (): Promise<ReturnType<typeof createRuntimeClient>> => {

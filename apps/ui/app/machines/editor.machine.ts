@@ -192,6 +192,21 @@ function rekeyViewSettingsForRename(
   );
 }
 
+/** A view whose file was deleted loses its path, so its viewer panel closes. */
+function forgetViewSettingsForDeletedPath(
+  viewSettings: Record<string, ViewState>,
+  deletedPath: string,
+): Record<string, ViewState> {
+  return Object.fromEntries(
+    Object.entries(viewSettings).map(([viewId, viewState]) => [
+      viewId,
+      viewState.entryPath !== undefined && pathMatchesPathOrDescendant(viewState.entryPath, deletedPath)
+        ? { ...viewState, entryPath: undefined }
+        : viewState,
+    ]),
+  );
+}
+
 /**
  * Editor state Machine Context
  */
@@ -865,6 +880,7 @@ export const editorMachine = setup({
       assertEvent(event, 'pruneComponentDisplayForDeletedPath');
       return {
         modelComponentDisplay: pruneComponentDisplayForDeletedPath(context.modelComponentDisplay, event.path),
+        viewSettings: forgetViewSettingsForDeletedPath(context.viewSettings, event.path),
       };
     }),
 

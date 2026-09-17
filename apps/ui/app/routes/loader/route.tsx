@@ -221,6 +221,12 @@ export default function LoaderShowcase(): React.JSX.Element {
           trailing in its wake, and the next geometric form settles out of the flow behind it. Five forms, a random walk
           that never bounces between two of them more than twice, looping forever.
         </p>
+        <p className='text-sm text-muted-foreground'>
+          <Link to='/loader/glass' className='underline underline-offset-4'>
+            The glass prism loader
+          </Link>{' '}
+          is the other brand indicator.
+        </p>
       </header>
 
       <div className='grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start'>

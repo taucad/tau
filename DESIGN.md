@@ -119,8 +119,8 @@ identity and action vocabulary across compact and expanded surfaces.
 Group adjacent provider-exposed reasoning into one collapsible body, preserving
 tool/commentary boundaries and event identity. Reasoning and its supplied
 summaries use normal-weight italics without a redundant “Reasoning” heading.
-Collapsed copy may say “Thought briefly” or a duration supported by actual
-timing; never invent reasoning or precision to make providers look identical.
+A thought that is still streaming says “Thinking…”. Collapsed copy may say
+“Thought briefly” or a duration supported by actual timing; never invent reasoning or precision to make providers look identical.
 Use consistent action vocabulary such as “Rendering” / “Rendered models”,
 without repeating a provider-supplied verb (“Read Read”). This is a chat-specific
 contract, not a requirement to italicize ordinary detail panels.

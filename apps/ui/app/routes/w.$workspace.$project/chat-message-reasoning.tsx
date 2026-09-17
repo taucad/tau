@@ -68,7 +68,9 @@ export function ChatMessageReasoning({
   const [content, setContent] = useState<HTMLDivElement | undefined>(undefined);
   const stickToBottomRef = useRef(true);
   const isOpen = userOpen ?? (isMessageActive || !hasContent);
-  const label = thoughtLabel(visibleParts);
+  /* A streaming thought names itself; the duration only exists once it ends (R6). */
+  const isThinking = isMessageActive && visibleParts.at(-1)?.state === 'streaming';
+  const label = isThinking ? 'Thinking…' : thoughtLabel(visibleParts);
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React callback refs receive null on detach.
   const handleScrollContainerRef = useCallback((element: HTMLDivElement | null): void => {
     setScrollContainer(element ?? undefined);

@@ -35,8 +35,14 @@ const LiveProjectSessions = lazy(async () => {
   return { default: module.LiveProjectSessions };
 });
 
-const prefetchLiveProjectSessions = (): void => {
-  void import('#routes/w.$workspace.$project/project-live-sessions.js');
+const prefetchLiveProjectSessions = async (): Promise<void> => {
+  try {
+    await import('#routes/w.$workspace.$project/project-live-sessions.js');
+  } catch {
+    /* A warm-up, not a load: the `lazy()` above is what actually needs the
+     * chunk, and it reports its own failure. Swallowing this one keeps a flaky
+     * idle fetch out of the console as an unhandled rejection (9g). */
+  }
 };
 
 /* Module scope: the setter is memoised on the codec's identity. */
@@ -298,25 +304,25 @@ export function ProjectRouteGate({
   });
 
   /*
-   * I22/P72 unchanged: the focused project's subtree still hosts the shell when
-   * the editor is live, so navigating between projects does not remount it.
-   * Every other state renders the same shell as a sibling of the keyed list.
+   * I22/P72: the focused project's subtree hosts the shell when the editor is
+   * live, because the editor is the only route state that reads the project's
+   * providers (`ProjectChatRoute`). It moves between the keyed session and the
+   * sibling position below as that changes, so it does remount — but in one
+   * commit, never through a frame with no shell at all (Finding 5a).
+   *
+   * While a destination is pending the person is looking at the `resolving`
+   * notice behind the overlay, so the shell renders as a sibling: the project
+   * being left must not supply providers to the project being navigated to.
    */
   const isEditor = state?.kind === 'editor';
-  /*
-   * The destination waits behind the overlay below while the view the person
-   * is leaving still owes a flush — but only while there is nothing to say. A
-   * failed access check or a failed flush is exactly what they navigated into,
-   * so its notice renders rather than spinning forever.
-   */
-  const isHoldingDestination = pending && (state === undefined || state.kind === 'resolving');
+  const isShellHostedByFocusedSession = isEditor && !pending;
   const focused =
     resolved?.access.status === 'ready'
       ? {
           projectId: resolved.projectId,
           requestedChatId: pending ? resolved.requestedChatId : requestedChatId,
           createdChatId: pending ? undefined : createdChatId,
-          children: pending || !isEditor ? undefined : children,
+          children: isShellHostedByFocusedSession ? children : undefined,
           ...(shouldOpenFromTauCloud === true ? { shouldOpenFromTauCloud: true } : {}),
         }
       : undefined;
@@ -340,7 +346,7 @@ export function ProjectRouteGate({
                 />
               </Suspense>
             ) : null}
-            {isEditor || isHoldingDestination ? undefined : children}
+            {isShellHostedByFocusedSession ? undefined : children}
           </div>
           {pending ? (
             <div

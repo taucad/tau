@@ -555,6 +555,30 @@ describe('project route session identity', () => {
     expect(sessionIds()).toEqual([projectA, projectB]);
   });
 
+  it('should keep the app shell in the document while project B access is pending', async () => {
+    const pendingA = deferred<ProjectRouteAccess>();
+    const pendingB = deferred<ProjectRouteAccess>();
+    getProjectRouteAccess.mockImplementation(async (id) => (id === projectA ? pendingA.promise : pendingB.promise));
+    const { Provider, view } = renderRouteProvider();
+
+    await act(async () => {
+      pendingA.resolve(ready(projectA));
+      await pendingA.promise;
+    });
+
+    currentProjectId = projectB;
+    view.rerender(
+      <Provider>
+        <div>content</div>
+      </Provider>,
+    );
+
+    /* The overlay covers the wait; it does not replace the app shell. A frame
+     * with no sidebar is what `project-navigation.spec.ts` watches for. */
+    expect(screen.getByRole('status', { name: 'Opening project' })).toBeInTheDocument();
+    expect(screen.getByText('content')).toBeInTheDocument();
+  });
+
   it('should flush and await pending EditorState before replacing the current project session', async () => {
     getProjectRouteAccess.mockImplementation(async (id) => ready(id));
     const { Provider, view } = renderRouteProvider();

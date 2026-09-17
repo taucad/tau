@@ -1253,7 +1253,6 @@ export class ChatSessionStore {
               session.chat.messages = loadedChat.messages;
             }
 
-            let hydratedChat = loadedChat;
             const lastMessage = session.chat.messages.at(-1);
             const { startupRequest } = loadedChat;
             if (startupRequest) {
@@ -1261,34 +1260,47 @@ export class ChatSessionStore {
                 lastMessage?.role === 'user' &&
                 lastMessage.id === startupRequest.messageId &&
                 lastMessage.metadata?.status === 'pending';
-              const consumedChat = await depsRef().consumeChatStartupRequest(input.chatId, startupRequest.id);
-              if (consumedChat) {
-                hydratedChat = consumedChat;
-              }
+              /* Eligibility is decided *before* the consume: the seed message
+               * lives only in the chat store's in-memory hold until a host logs
+               * the turn, so a loader that reloaded in between reads
+               * `messages: []` — and consuming there burned the request and
+               * dropped the prompt with no draft restore (F4c). */
+              if (isEligibleStartupRequest) {
+                /* The consume is one-shot, so from here the session owns the
+                 * request. Home → project navigation remounts the shell under
+                 * the sidebar row that is this chat's only view; without a hold
+                 * across the await the session was disposed mid-dispatch and
+                 * its replacement found the request already gone (F3). The hold
+                 * is freed by `#scheduleRunReleaseIfTerminal` once the request
+                 * settles — including the compose failure below (F4a). */
+                session.runHeld = true;
+                const consumedChat = await depsRef().consumeChatStartupRequest(input.chatId, startupRequest.id);
+                if (consumedChat) {
+                  session.draftActorRef.send({ type: 'initializeFromChat' });
+                  session.chat.messages = consumedChat.messages;
 
-              if (isEligibleStartupRequest && consumedChat) {
-                session.draftActorRef.send({ type: 'initializeFromChat' });
-                session.chat.messages = consumedChat.messages;
+                  /* This dispatch *is* the host stream for the chat's first turn.
+                   * Marked before it is sent, because the host registration that
+                   * would otherwise reattach lands in the same tick and would open
+                   * a second stream — a second relay session on rung 2, which a
+                   * capacity-1 daemon refuses. */
+                  session.seededDispatch = true;
+                  persistenceActorRef.send({
+                    type: 'startRequest',
+                    /* The consumed row's execution rides with the dispatch. The
+                     * `chatRetrieved` event that assigns it to the machine is
+                     * only returned on the next line, and the chat client's
+                     * published factory closes over a React snapshot older still
+                     * — so without this the chat's own `acp` agent (or its
+                     * pinned Tau host/model) is rebuilt from the cookie and the
+                     * first turn silently runs somewhere else. */
+                    request: { kind: 'regenerate', execution: consumedChat.activeExecution },
+                  });
 
-                /* This dispatch *is* the host stream for the chat's first turn.
-                 * Marked before it is sent, because the host registration that
-                 * would otherwise reattach lands in the same tick and would open
-                 * a second stream — a second relay session on rung 2, which a
-                 * capacity-1 daemon refuses. */
-                session.seededDispatch = true;
-                persistenceActorRef.send({
-                  type: 'startRequest',
-                  /* The consumed row's execution rides with the dispatch. The
-                   * `chatRetrieved` event that assigns it to the machine is
-                   * only returned on the next line, and the chat client's
-                   * published factory closes over a React snapshot older still
-                   * — so without this the chat's own `acp` agent (or its
-                   * pinned Tau host/model) is rebuilt from the cookie and the
-                   * first turn silently runs somewhere else. */
-                  request: { kind: 'regenerate', execution: consumedChat.activeExecution },
-                });
-
-                return { type: 'chatRetrieved', chat: { ...consumedChat, error: undefined } };
+                  return { type: 'chatRetrieved', chat: { ...consumedChat, error: undefined } };
+                }
+                session.runHeld = false;
+                this.#disposeIfUnreferenced(session);
               }
             }
 
@@ -1302,7 +1314,7 @@ export class ChatSessionStore {
                 clearStartupRequestId: startupRequest?.id,
               });
               const healedChat = restoredChat ?? {
-                ...hydratedChat,
+                ...loadedChat,
                 messages: pendingTailRestore.truncatedMessages,
                 startupRequest: undefined,
               };
@@ -1322,7 +1334,7 @@ export class ChatSessionStore {
                 void session.chat.resumeStream();
               });
             }
-            return { type: 'chatRetrieved', chat: hydratedChat };
+            return { type: 'chatRetrieved', chat: loadedChat };
           }),
           persistMessagesActor: fromSafeAsync(async ({ input }) => {
             await depsRef().patchChat(input.chatId, 'messages', stampMessageCreatedAt(input.messages));
@@ -1468,21 +1480,37 @@ export class ChatSessionStore {
         // that a later `prepare` had already discarded: the run then executed
         // against a workspace id no claim on disk carried, nothing ever marked
         // the claim admitted, and the turn could never settle.
-        const composeBody = async (): Promise<Readonly<Record<string, unknown>> | undefined> => {
+        const composeBody = async (): Promise<Readonly<Record<string, unknown>> | Error> => {
           const compose = session.latestAgentBody ?? (await this.#waitForLatestAgentBody(session));
           if (!compose) {
-            return undefined;
+            return new Error('No agent configuration is available for this chat.');
           }
           try {
             return await compose(request.kind === 'regenerate' ? request.execution : undefined);
           } catch (error) {
             console.error('[ChatSessionStore] durable workspace admission failed for a seeded dispatch', error);
-            return undefined;
+            return error instanceof Error ? error : new Error(String(error));
           }
         };
         const dispatch = async (): Promise<void> => {
           const composed = availableBody ?? (await composeBody());
-          if (!composed || this.#sessions.get(chatId) !== session) {
+          if (this.#sessions.get(chatId) !== session) {
+            // Replaced while composing: its successor owns the chat, and the
+            // request lifecycle went with the actor this session stopped.
+            return;
+          }
+          if (composed instanceof Error) {
+            /* A dispatch that cannot compose used to return silently, leaving
+             * `requestLifecycle` in `invoking` forever with no banner — and,
+             * since F3, holding the session with it (F4a). End the request. */
+            persistenceActorRef.send({ type: 'setPersistedError', error: parseErrorForPersistence(composed) });
+            persistenceActorRef.send({
+              type: 'requestFinished',
+              messages: chat.messages,
+              isAbort: false,
+              isError: true,
+              isDisconnect: false,
+            });
             return;
           }
           const requestBody = availableBody ?? this.startRun(chatId, composed);
@@ -1953,6 +1981,14 @@ export class ChatSessionStore {
     const runId = admission.success
       ? admission.data.idempotencyKey
       : (getBoundDurableChatRunId(session.chatId) ?? session.durableRunId);
+    /* A reattach that found nothing to resume still drives the SDK through
+     * `submitted → ready`. Opening a run on that left the chat's machine in
+     * `run.finishing` waiting for a settlement no run can send — the sidebar's
+     * permanent "Finishing…" (F4b). A run phase has to name a run, so a chat
+     * that reattached with no run identity reports none and stays idle. */
+    if (runId === undefined && lastState.phase === undefined && session.reattachedHostId !== undefined) {
+      return;
+    }
     lastState.phase = next;
     /* The session counts runs so *Close* knows to ask (A35, I24). The run
      * reports to the chat's OWN project, wherever the person is now. */

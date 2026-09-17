@@ -1486,6 +1486,57 @@ describe('ChatSessionStore', () => {
     });
 
     /*
+     * On desktop every Tau turn is host-placed, so the registration effect
+     * reattaches every chat — including one with nothing to resume. The SDK
+     * still drives `submitted → ready`, and reporting that as a run left the
+     * chat machine in `run.finishing` waiting for a settlement no run can send:
+     * the sidebar said "Live, busy / Finishing…" forever.
+     */
+    it('should leave the chat idle when a host reattach finds no run', async () => {
+      const store = new ChatSessionStore();
+      const deps = createStubDeps();
+      const chatId = 'chat_reattach_no_run';
+      deps.getChat.mockResolvedValue(chatRow(chatId, 'project_reattach', { name: 'Empty chat' }));
+      store.setDependencies(deps);
+      const actor = createActor(chatSessionMachine, {
+        input: { chatId, projectId: 'project_reattach' },
+      }).start();
+      const heard: string[] = [];
+      const projectRef = {
+        send: (event: { type: string }) => {
+          heard.push(event.type);
+        },
+        getSnapshot: () => ({ context: { chatRefs: { [chatId]: actor } } }),
+      } as unknown as ProjectSessionActorRef;
+
+      try {
+        store.setFocusedProject('project_reattach');
+        store.setProjectSession('project_reattach', projectRef);
+        const session = store.acquire(chatId);
+        await vi.waitFor(() => {
+          expect(session.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
+        });
+
+        store.reattachHostChat({ chatId, hostId: 'origin' });
+        const fake = harness.created.findLast((entry) => entry.id === chatId)!;
+        fake.status = 'submitted';
+        fake.emitStatusChange();
+        fake.status = 'ready';
+        fake.emitStatusChange();
+
+        expect(heard).not.toContain('runStarted');
+        expect(heard).not.toContain('runSettled');
+        // `run: 'idle'` is what `selectChatStatus` reads as the row's `idle`;
+        // services must not import from `#hooks`, so assert the machine state.
+        expect(actor.getSnapshot().matches({ run: 'idle' })).toBe(true);
+      } finally {
+        store.release(chatId);
+        store.setProjectSession('project_reattach', undefined);
+        actor.stop();
+      }
+    });
+
+    /*
      * The transcript this store restored from local persistence already holds
      * the run the host is about to replay from cursor 0, and the AI SDK
      * *continues* a trailing assistant message on a resume — so the replay used
@@ -2765,6 +2816,139 @@ describe('ChatSessionStore', () => {
       expect(session.draftActorRef.getSnapshot().context.draftText).toBe('recover me');
 
       store.release('chat_orphan_placeholder');
+    });
+
+    /**
+     * One durable chat row, as `getChat` / `consumeChatStartupRequest` /
+     * `commitCancelledDraftRestore` see it. Two loaders over the same rows are
+     * the remount; the stub set must therefore hold state, or the second loader
+     * would consume a request the first one already took.
+     */
+    const seededRow = (chatId: string, overrides: Partial<ChatEntity> = {}) => {
+      const seedMessage: MyUIMessage = {
+        id: `${chatId}_msg_seed`,
+        role: 'user',
+        parts: [{ type: 'text', text: 'Create a cube with a cylindrical cutout.' }],
+        metadata: { createdAt: 1_700_000_000_000, status: 'pending' },
+      };
+      const startupRequest = {
+        id: `${chatId}_req`,
+        kind: 'regenerate-tail',
+        messageId: seedMessage.id,
+        source: 'homepage-initial-message',
+        createdAt: 1_700_000_000_000,
+      } as const;
+      let row: ChatEntity = {
+        ...chatRow(chatId, 'project_seed', { name: 'Seeded chat', messages: [seedMessage], startupRequest }),
+        ...overrides,
+      };
+      const deps = createStubDeps();
+      deps.getChat.mockImplementation(async () => row);
+      deps.consumeChatStartupRequest.mockImplementation(async (_chatId, requestId) => {
+        if (row.startupRequest?.id !== requestId) {
+          return undefined;
+        }
+        row = { ...row, startupRequest: undefined };
+        return row;
+      });
+      deps.commitCancelledDraftRestore.mockImplementation(async (_chatId, input) => {
+        row = { ...row, messages: input.messages, startupRequest: undefined };
+        return row;
+      });
+      const store = new ChatSessionStore();
+      store.setDependencies(deps);
+      return { deps, seedMessage, startupRequest, store };
+    };
+
+    /*
+     * Home → project navigation changes the provider list that `Compose` nests
+     * the shell in, so React remounts `AppSidebar` and with it the row that is
+     * the seeded chat's only holder. The session used to be disposed inside the
+     * wait for a body factory, its replacement found the request already
+     * consumed, and the prompt came back as a draft with no banner.
+     */
+    it('should dispatch the seeded first turn when its only view is released and reacquired before a chat client publishes a body', async () => {
+      const chatId = 'chat_seed_remount';
+      const { deps, startupRequest, store } = seededRow(chatId);
+
+      const first = store.acquire(chatId);
+      await vi.waitFor(() => {
+        expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith(chatId, startupRequest.id);
+      });
+
+      store.release(chatId);
+      const second = store.acquire(chatId);
+      expect(second).toBe(first);
+
+      store.setLatestAgentBody(chatId, async () => testRunBody);
+      const fake = harness.created.findLast((entry) => entry.id === chatId)!;
+      await vi.waitFor(() => {
+        expect(fake.regenerate).toHaveBeenCalledTimes(1);
+      });
+      expect(deps.commitCancelledDraftRestore).not.toHaveBeenCalled();
+
+      store.release(chatId);
+    });
+
+    it('should release the hold when the startup request is not eligible', async () => {
+      const chatId = 'chat_seed_ineligible';
+      // The seed already ran: the tail is no longer a pending startup message.
+      const seedMessage: MyUIMessage = {
+        id: `${chatId}_msg_seed`,
+        role: 'user',
+        parts: [{ type: 'text', text: 'Create a cube with a cylindrical cutout.' }],
+        metadata: { createdAt: 1_700_000_000_000, status: 'success' },
+      };
+      const { store } = seededRow(chatId, { messages: [seedMessage] });
+
+      store.acquire(chatId);
+      await settle();
+      store.release(chatId);
+
+      expect(store.get(chatId)).toBeUndefined();
+    });
+
+    it('should surface a failure when a seeded dispatch cannot compose its body', async () => {
+      const chatId = 'chat_seed_compose_failure';
+      const { deps, startupRequest, store } = seededRow(chatId);
+      const session = store.acquire(chatId);
+      await vi.waitFor(() => {
+        expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith(chatId, startupRequest.id);
+      });
+
+      store.setLatestAgentBody(chatId, async () => {
+        throw new Error('durable workspace admission failed');
+      });
+
+      await vi.waitFor(() => {
+        const snapshot = session.persistenceActorRef.getSnapshot();
+        expect(snapshot.matches({ requestLifecycle: 'idle' })).toBe(true);
+        expect(snapshot.context.persistedError?.message).toContain('durable workspace admission failed');
+      });
+
+      store.release(chatId);
+    });
+
+    /*
+     * A reload between project creation and dispatch: the seed message lives
+     * only in the chat store's in-memory hold, so the row reads `messages: []`.
+     * Consuming the request there drops the prompt with no draft restore.
+     */
+    it('should keep the startup request when the seed message is not loaded yet', async () => {
+      const chatId = 'chat_seed_unloaded';
+      const { deps, store } = seededRow(chatId, { messages: [] });
+
+      store.acquire(chatId);
+      await vi.waitFor(() => {
+        expect(deps.getChat).toHaveBeenCalledWith(chatId);
+      });
+      await settle();
+
+      expect(deps.consumeChatStartupRequest).not.toHaveBeenCalled();
+      const row = await deps.getChat(chatId);
+      expect(row?.startupRequest).toBeDefined();
+
+      store.release(chatId);
     });
   });
 

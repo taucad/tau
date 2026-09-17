@@ -8,6 +8,7 @@ import type {
   RpcParameterClient,
   RpcRuntimeClient,
 } from '@taucad/chat/rpc';
+import type { GetParametersOutput } from '@taucad/chat/schemas';
 import {
   applyParameterOperationOutputSchema,
   getParametersOutputSchema,
@@ -103,6 +104,17 @@ export type CreateRuntimeParameterAgentClientInput = Readonly<{
   ): ActorRefFrom<typeof parameterSetMachine> | Promise<ActorRefFrom<typeof parameterSetMachine>>;
 }>;
 
+const unresolvedParameters = (
+  diagnostic: Readonly<{ code: string; message: string }>,
+  resource: string,
+): Readonly<{ success: true } & GetParametersOutput> => ({
+  success: true,
+  ...getParametersOutputSchema.parse({
+    status: 'unresolved',
+    diagnostics: [{ ...diagnostic, severity: 'error', resource, schemaPointer: '' }],
+  }),
+});
+
 /**
  * Adapt native parameter actors to the chat RPC contract without creating another workflow owner.
  * @param input - Target resolver and host error projection.
@@ -117,6 +129,7 @@ export const createRuntimeParameterAgentClient = (
       context?.signal?.throwIfAborted();
       const targetFile = assertRootedPath(request.targetFile);
       const actor = await input.parameterActorFor(targetFile);
+      // The actor refreshes bytes for a read in its current mode, so a plan awaiting confirmation survives it.
       actor.send({
         type: 'resolve',
         resolution: request.resolutionMode === undefined ? undefined : { mode: request.resolutionMode },
@@ -125,33 +138,28 @@ export const createRuntimeParameterAgentClient = (
         actor,
         (snapshot) =>
           snapshot.matches({ open: 'ready' }) ||
+          snapshot.matches({ open: 'confirmation' }) ||
           snapshot.matches({ open: 'disconnected' }) ||
           snapshot.matches({ open: 'uncertain' }) ||
           snapshot.status === 'done',
         { signal: context?.signal },
       );
       const { current } = result.context;
-      if (!result.matches({ open: 'ready' }) || current === undefined) {
-        return {
-          success: true,
-          ...getParametersOutputSchema.parse({
-            status: 'unresolved',
-            diagnostics: [
-              {
-                ...(result.context.diagnostic ?? {
-                  code: 'SEMANTICS_UNRESOLVED',
-                  message: 'Parameter authority is unavailable.',
-                }),
-                severity: 'error',
-                resource: targetFile,
-                schemaPointer: '',
-              },
-            ],
-          }),
-        };
+      const available = result.matches({ open: 'ready' }) || result.matches({ open: 'confirmation' });
+      if (!available || current === undefined) {
+        return unresolvedParameters(
+          result.context.diagnostic ?? { code: 'SEMANTICS_UNRESOLVED', message: 'Parameter authority is unavailable.' },
+          targetFile,
+        );
       }
       if ((current.manifest.identity.resolution.mode ?? 'default') !== (request.resolutionMode ?? 'default')) {
-        throw new Error('Parameter resolution was superseded by a different admission mode.');
+        return unresolvedParameters(
+          {
+            code: 'RESOLUTION_SUPERSEDED',
+            message: 'A concurrent read changed the admission mode; read again in the mode you need.',
+          },
+          targetFile,
+        );
       }
       const manifest = await admitParameterManifest(current.manifest);
       context?.signal?.throwIfAborted();
@@ -160,7 +168,7 @@ export const createRuntimeParameterAgentClient = (
         ...getParametersOutputSchema.parse({
           status: 'resolved',
           manifest: parameterManifestWireSchema.parse(structuredClone(manifest)),
-          current: structuredClone({ entry: current.entry, identity: current.identity, access: current.access }),
+          current: structuredClone({ entry: current.entry, identity: current.identity }),
         }),
       };
     } catch (error) {
@@ -194,6 +202,7 @@ export const createRuntimeParameterAgentClient = (
       const outcome = await new Promise<unknown>((resolve, reject) => {
         const cleanup = () => {
           settled.unsubscribe();
+          rejectedCommand.unsubscribe();
           confirmation.unsubscribe();
           lifecycle.unsubscribe();
           context?.signal?.removeEventListener('abort', onAbort);
@@ -205,8 +214,14 @@ export const createRuntimeParameterAgentClient = (
         const settled = actor.on('settled', (event) => {
           if (
             event.outcome.requestId === request.requestId &&
-            (command === undefined || event.request?.fingerprint === command.fingerprint)
+            (command === undefined || event.request.fingerprint === command.fingerprint)
           ) {
+            finish(event.outcome);
+          }
+        });
+        // A confirm or cancel naming no held command is refused without a settlement.
+        const rejectedCommand = actor.on('command-rejected', (event) => {
+          if (command === undefined && event.outcome.requestId === request.requestId) {
             finish(event.outcome);
           }
         });

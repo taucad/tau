@@ -5,7 +5,9 @@ import type { RuntimeAgentClient, RuntimeAgentImageExporter } from '#runtime/run
 import type { ExportFile, HashedGeometryResult } from '@taucad/runtime/types';
 import { createActor, fromPromise, waitFor } from 'xstate';
 import { parameterSetMachine } from '@taucad/parameters/set-machine';
-import { compileParameterManifest, resolveParameterSnapshot } from '@taucad/parameters';
+import type { ParameterSetLoadInput } from '@taucad/parameters/set-machine';
+import { admitParameterManifest, compileParameterManifest, resolveParameterSnapshot } from '@taucad/parameters';
+import type { ParameterSnapshot } from '@taucad/parameters';
 
 const glb = (): Uint8Array<ArrayBuffer> => {
   const bytes = new Uint8Array(12);
@@ -463,7 +465,7 @@ describe('createRuntimeAgentClients', () => {
 });
 
 describe('createRuntimeParameterAgentClient', () => {
-  const fixture = async (gate?: Promise<void>) => {
+  const fixture = async (gate?: Promise<void>, options: Readonly<{ sourceUnit?: boolean }> = {}) => {
     const target = { authority: 'test', root: '/project', entry: 'main.py' };
     const digest = `sha256:${'1'.repeat(64)}` as Parameters<typeof compileParameterManifest>[0]['dependency'];
     const manifest = await compileParameterManifest({
@@ -474,9 +476,22 @@ describe('createRuntimeParameterAgentClient', () => {
           $uses: ['JSONSchemaUnits'],
           name: 'Parameters',
           type: 'object',
-          properties: { width: { type: 'double' } },
+          properties: { width: { type: 'double', ...(options.sourceUnit ? { ucumUnit: 'mm' } : {}) } },
         },
         defaults: { width: 1 },
+        ...(options.sourceUnit
+          ? {
+              bindings: {
+                '/width': {
+                  parameterId: 'width',
+                  quantityKind: 'http://qudt.org/vocab/quantitykind/Length',
+                  space: 'linear',
+                  unit: 'mm',
+                  sourceUnitCapability: 'change-source-unit:preserve-size:v1',
+                },
+              },
+            }
+          : {}),
       },
       scope: { kind: 'source', ...target },
       source: { id: 'fixture', version: '1', revision: digest, capability: 'json-structure' },
@@ -494,10 +509,14 @@ describe('createRuntimeParameterAgentClient', () => {
       await gate;
       return { status: 'applied', content: input.proposed.bytes! } as const;
     });
+    const loads = vi.fn();
     const actor = createActor(
       parameterSetMachine.provide({
         actors: {
-          loadParameterSet: fromPromise(async () => current),
+          loadParameterSet: fromPromise(async () => {
+            loads();
+            return current;
+          }),
           commitParameterSet: fromPromise(async ({ input }) => commit({ input })),
         },
       }),
@@ -516,7 +535,7 @@ describe('createRuntimeParameterAgentClient', () => {
       pressure: 'final',
       operation: { kind: 'replace-group-values', group: 'default', values: { width: 5 } },
     } as const;
-    return { actor, adapter, request, current, commit };
+    return { actor, adapter, request, current, commit, loads };
   };
 
   it('preserves operation identity and the complete business outcome', async () => {
@@ -560,6 +579,130 @@ describe('createRuntimeParameterAgentClient', () => {
     actor.stop();
   });
 
+  const proposeSourceUnit = async (adapter: Awaited<ReturnType<typeof fixture>>['adapter']) => {
+    // The request is built only from what `get_parameters` returned.
+    const read = await adapter.getParameters({ targetFile: 'main.py' });
+    if (!read.success || read.manifest === undefined || read.current === undefined) {
+      throw new Error('Expected resolved parameters');
+    }
+    const manifest = await admitParameterManifest(read.manifest);
+    const binding = manifest.bindings['/width'];
+    if (binding?.sourceUnitCapability === undefined) {
+      throw new Error('Expected a source-unit capable binding');
+    }
+    const proposed = await adapter.applyParameterOperation({
+      targetFile: 'main.py',
+      requestId: 'agent:unit',
+      expected: read.current.identity,
+      pressure: 'final',
+      operation: {
+        kind: 'source-unit',
+        mode: 'preserve-size',
+        group: 'default',
+        parameterId: binding.parameter.value,
+        resource: binding.schema.resource,
+        pointer: '/width',
+        unit: 'cm',
+        producerCapability: {
+          producer: manifest.source.id,
+          sourceRevision: manifest.source.revision,
+          capability: binding.sourceUnitCapability,
+        },
+      },
+    });
+    if (!proposed.success || proposed.outcome.status !== 'confirmation-required') {
+      throw new Error(`Expected a confirmation, got ${JSON.stringify(proposed)}`);
+    }
+    return proposed.outcome.planFingerprint;
+  };
+
+  it('keeps a plan awaiting confirmation across a read in the same mode', async () => {
+    const { actor, adapter, commit, loads } = await fixture(undefined, { sourceUnit: true });
+    const planFingerprint = await proposeSourceUnit(adapter);
+    const loadsBefore = loads.mock.calls.length;
+    await expect(
+      Promise.all([
+        adapter.getParameters({ targetFile: 'main.py' }),
+        adapter.getParameters({ targetFile: 'main.py', resolutionMode: 'default' }),
+      ]),
+    ).resolves.toMatchObject([
+      { success: true, status: 'resolved' },
+      { success: true, status: 'resolved' },
+    ]);
+    // A read while a plan waits observes the held snapshot and never reloads it.
+    expect(loads.mock.calls.length).toBe(loadsBefore);
+    await expect(
+      adapter.applyParameterOperation({
+        action: 'confirm',
+        targetFile: 'main.py',
+        requestId: 'agent:unit',
+        planFingerprint,
+      }),
+    ).resolves.toMatchObject({ success: true, outcome: { status: 'committed', requestId: 'agent:unit' } });
+    expect(commit).toHaveBeenCalledOnce();
+    actor.stop();
+  });
+
+  it('rejects a plan awaiting confirmation when a read changes the admission mode', async () => {
+    const { actor, adapter, commit, loads } = await fixture(undefined, { sourceUnit: true });
+    await adapter.getParameters({ targetFile: 'main.py' });
+    expect(actor.getSnapshot().context.resolution).toBeUndefined();
+    const planFingerprint = await proposeSourceUnit(adapter);
+    const settled = new Promise<unknown>((resolve) => {
+      actor.on('settled', (event) => {
+        resolve(event.outcome);
+      });
+    });
+    const loadsBefore = loads.mock.calls.length;
+    await expect(
+      adapter.getParameters({ targetFile: 'main.py', resolutionMode: 'declared-only' }),
+    ).resolves.toMatchObject({
+      success: true,
+      status: 'unresolved',
+      diagnostics: [{ code: 'RESOLUTION_SUPERSEDED' }],
+    });
+    expect(loads.mock.calls.length).toBe(loadsBefore + 1);
+    await expect(settled).resolves.toMatchObject({ status: 'rejected', code: 'STALE_MANIFEST' });
+    await expect(
+      adapter.applyParameterOperation({
+        action: 'confirm',
+        targetFile: 'main.py',
+        requestId: 'agent:unit',
+        planFingerprint,
+      }),
+    ).resolves.toMatchObject({ success: true, outcome: { status: 'rejected', code: 'STALE_PLAN' } });
+    expect(commit).not.toHaveBeenCalled();
+    actor.stop();
+  });
+
+  it('returns a typed unresolved result for an unreadable record', async () => {
+    const target = { authority: 'test', root: '/project', entry: 'main.py' };
+    const actor = createActor(
+      parameterSetMachine.provide({
+        actors: {
+          loadParameterSet: fromPromise<ParameterSnapshot, ParameterSetLoadInput>(async () => {
+            throw Object.assign(new Error('Saved parameter values are not a valid record.'), {
+              code: 'INVALID_RECORD',
+              applicationState: 'known-not-applied',
+            });
+          }),
+        },
+      }),
+      { input: { target } },
+    );
+    actor.start();
+    const adapter = createRuntimeParameterAgentClient({
+      parameterActorFor: () => actor,
+      mapRuntimeError: (error) => ({ success: false, errorCode: 'VALIDATION_ERROR', message: String(error) }),
+    });
+    await expect(adapter.getParameters({ targetFile: 'main.py' })).resolves.toMatchObject({
+      success: true,
+      status: 'unresolved',
+      diagnostics: [{ code: 'INVALID_RECORD', severity: 'error', resource: 'main.py' }],
+    });
+    actor.stop();
+  });
+
   it('projects only the wire snapshot and semantically re-admits manifests', async () => {
     const { actor, adapter, current } = await fixture();
     const result = await adapter.getParameters({ targetFile: 'main.py' });
@@ -567,7 +710,7 @@ describe('createRuntimeParameterAgentClient', () => {
     if (!result.success || result.status !== 'resolved' || result.current === undefined) {
       throw new Error('Expected resolved parameters');
     }
-    expect(Object.keys(result.current).sort()).toEqual(['access', 'entry', 'identity']);
+    expect(Object.keys(result.current).sort()).toEqual(['entry', 'identity']);
     // Snapshots share the compiled manifest, which is deep-frozen, so corrupt a copy of it.
     Object.assign(current, { manifest: { ...current.manifest, revision: 'invalid' } });
     await expect(adapter.getParameters({ targetFile: 'main.py' })).resolves.toMatchObject({

@@ -98,8 +98,8 @@ const host = createServicesHost({
   ...(diagnostics === undefined
     ? {}
     : {
-        log: (event, detail) => {
-          diagnostics.log('info', `services.${event}`, detail);
+        log: (event, detail, level) => {
+          diagnostics.log(level ?? 'info', `services.${event}`, detail);
         },
       }),
 });

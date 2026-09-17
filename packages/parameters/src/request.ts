@@ -9,6 +9,7 @@ import type {
   ParameterSetAuthoritySnapshot,
 } from '#types.js';
 const hasText = (value: string | undefined): value is string => value !== undefined && value.trim().length > 0;
+/** Whether two parameter identities name the same revisions. @internal */
 export const sameIdentity = (left: ParameterSetIdentity, right: ParameterSetIdentity): boolean =>
   left.sourceRevision === right.sourceRevision &&
   left.manifestRevision === right.manifestRevision &&
@@ -43,7 +44,8 @@ const isJsonValue = (value: unknown, ancestors = new Set<unknown>()): value is J
   return valid;
 };
 
-const sameJsonValue = (left: JSONValue, right: JSONValue): boolean => {
+/** Structural JSON equality; admitted requests are JSON by `validRequestShape`, so inputs stay `unknown`. */
+const sameJsonValue = (left: unknown, right: unknown): boolean => {
   if (left === right) {
     return true;
   }
@@ -52,7 +54,7 @@ const sameJsonValue = (left: JSONValue, right: JSONValue): boolean => {
       Array.isArray(left) &&
       Array.isArray(right) &&
       left.length === right.length &&
-      left.every((item, index) => sameJsonValue(item, right[index]!))
+      left.every((item: unknown, index) => sameJsonValue(item, right[index]))
     );
   }
   if (!isRecord(left) || !isRecord(right)) {
@@ -61,7 +63,7 @@ const sameJsonValue = (left: JSONValue, right: JSONValue): boolean => {
   const leftKeys = Object.keys(left);
   return (
     leftKeys.length === Object.keys(right).length &&
-    leftKeys.every((key) => Object.hasOwn(right, key) && sameJsonValue(left[key] as JSONValue, right[key] as JSONValue))
+    leftKeys.every((key) => Object.hasOwn(right, key) && sameJsonValue(left[key], right[key]))
   );
 };
 
@@ -75,6 +77,7 @@ const isIdentity = (value: unknown): value is ParameterSetIdentity =>
 const hasOperationText = (operation: Readonly<Record<string, unknown>>, ...fields: readonly string[]): boolean =>
   fields.every((field) => hasText(typeof operation[field] === 'string' ? operation[field] : undefined));
 
+/** Whether a value is a well-formed parameter target. @internal */
 export const validTarget = (value: unknown): value is ParameterSetTarget =>
   isRecord(value) &&
   hasOperationText(value, 'authority', 'root', 'entry') &&
@@ -100,9 +103,9 @@ const validSourceUnitOperation = (operation: Readonly<Record<string, unknown>>):
     hasOperationText(operation, 'group', 'parameterId', 'resource', 'pointer', 'unit') &&
     capability !== undefined &&
     hasOperationText(capability, 'producer', 'sourceRevision', 'capability') &&
-    dependencies !== undefined &&
-    Object.keys(dependencies).length > 0 &&
-    Object.entries(dependencies).every(([key, item]) => hasText(key) && hasText(item))
+    (operation['dependencies'] === undefined ||
+      (dependencies !== undefined &&
+        Object.entries(dependencies).every(([key, item]) => hasText(key) && hasText(item))))
   );
 };
 
@@ -176,11 +179,19 @@ const validOperation = (value: unknown): value is ParameterSetOperation => {
   }
 };
 
-const validBase = (value: unknown): boolean => {
+const validBase = (value: unknown, operation: unknown): boolean => {
   if (value === undefined) {
     return true;
   }
   if (!isRecord(value) || !hasText(typeof value['pointer'] === 'string' ? value['pointer'] : undefined)) {
+    return false;
+  }
+  // Field-scoped freshness applies only to a single-field edit of the same pointer.
+  if (
+    !isRecord(operation) ||
+    (operation['kind'] !== 'native-value' && operation['kind'] !== 'unit-value') ||
+    operation['pointer'] !== value['pointer']
+  ) {
     return false;
   }
   if (!isJsonValue(value['value'])) {
@@ -200,14 +211,16 @@ const requestShape = (request: unknown): request is ParameterSetRequest =>
   isJsonValue(request) &&
   isRecord(request) &&
   hasText(typeof request['requestId'] === 'string' ? request['requestId'] : undefined) &&
-  hasText(typeof request['fingerprint'] === 'string' ? request['fingerprint'] : undefined) &&
+  (request['fingerprint'] === undefined ||
+    hasText(typeof request['fingerprint'] === 'string' ? request['fingerprint'] : undefined)) &&
   Number.isSafeInteger(request['draftGeneration']) &&
   Number(request['draftGeneration']) >= 0 &&
   isIdentity(request['expected']) &&
-  validBase(request['base']) &&
+  validBase(request['base'], request['operation']) &&
   (request['pressure'] === 'transient' || request['pressure'] === 'final') &&
   validOperation(request['operation']);
 
+/** Whether a value is a bounded, well-formed parameter request. @internal */
 export const validRequestShape = (request: unknown): request is ParameterSetRequest => {
   try {
     assertBoundedJson(request, {
@@ -222,8 +235,9 @@ export const validRequestShape = (request: unknown): request is ParameterSetRequ
   }
 };
 
+/** Whether two requests are the same delivery, compared as JSON. @internal */
 export const sameRequestDelivery = (left: ParameterSetRequest, right: ParameterSetRequest): boolean =>
-  sameJsonValue(left as unknown as JSONValue, right as unknown as JSONValue);
+  sameJsonValue(left, right);
 
 const sourceUnitCapability = (value: unknown): ParameterSourceUnitCapability | undefined => {
   if (
@@ -252,6 +266,7 @@ const validRequest = (
   request: ParameterSetRequest | undefined,
   current: ParameterSetAuthoritySnapshot | undefined,
 ): boolean => validRequestShape(request) && current !== undefined && sameIdentity(request.expected, current.identity);
+/** Reject a group operation that is malformed or planned against a stale identity. @internal */
 export const groupOperationRejection = (
   request: ParameterSetRequest | undefined,
   current: ParameterSetAuthoritySnapshot | undefined,

@@ -273,10 +273,11 @@ describe('native parameter manifest', () => {
       mode: 'declared-only',
       inferenceLanguage: 'en-NZ',
     });
-    expect(first.identity.resolution).toEqual({
-      mode: 'default',
-      inferenceLanguage: 'en-NZ',
-    });
+    const absent = await compile(declaration(), { inferenceLanguage: 'en-NZ' });
+    // `mode: 'default'` is the absent mode, so both spellings share one identity.
+    expect(first.identity.resolution).toEqual({ inferenceLanguage: 'en-NZ' });
+    expect(absent.revision).toBe(first.revision);
+    expect(second.identity.resolution).toEqual({ mode: 'declared-only', inferenceLanguage: 'en-NZ' });
     expect(first.revision).not.toBe(second.revision);
   });
 

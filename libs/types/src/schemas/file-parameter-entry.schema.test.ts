@@ -9,6 +9,8 @@ import {
 } from '@taucad/types';
 
 const validEntry = {
+  recordVersion: 1,
+  profile: fileParameterRecordProfile,
   activeGroup: 'default',
   order: ['default', 'alternate'],
   groups: {
@@ -59,12 +61,13 @@ const attributedBinding = {
 };
 
 describe('fileParameterEntrySchema', () => {
+  it('should reject a record without its version and profile markers', () => {
+    const { recordVersion: _recordVersion, profile: _profile, ...unversioned } = validEntry;
+    expect(fileParameterEntrySchema.safeParse(unversioned).success).toBe(false);
+  });
+
   it('should parse nested JSON parameter values without loss', () => {
-    expect(fileParameterEntrySchema.parse(validEntry)).toEqual({
-      recordVersion: 1,
-      profile: fileParameterRecordProfile,
-      ...validEntry,
-    });
+    expect(fileParameterEntrySchema.parse(validEntry)).toEqual(validEntry);
   });
 
   it('should preserve arbitrary owned JSON keys without changing object prototypes', () => {
@@ -72,6 +75,8 @@ describe('fileParameterEntrySchema', () => {
       '{"__proto__":{"unitsAuditMarker":42},"constructor":{"prototype":{"value":7}}}',
     ) as Record<string, unknown>;
     const parsed = fileParameterEntrySchema.parse({
+      recordVersion: 1,
+      profile: fileParameterRecordProfile,
       activeGroup: 'default',
       groups: { default: { values } },
     });
@@ -101,11 +106,7 @@ describe('fileParameterEntrySchema', () => {
       },
     };
 
-    expect(fileParameterEntrySchema.parse(entry)).toEqual({
-      recordVersion: 1,
-      profile: fileParameterRecordProfile,
-      ...entry,
-    });
+    expect(fileParameterEntrySchema.parse(entry)).toEqual(entry);
   });
 
   it.each([

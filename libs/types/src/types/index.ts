@@ -43,16 +43,10 @@ export {
 } from '#schemas/workspace-marker.schema.js';
 export type { WorkspaceMarker } from '#schemas/workspace-marker.schema.js';
 export {
-  currentFileParameterEntrySchema,
   fileParameterEntrySchema,
   fileParameterRecordProfile,
   getActiveGroupValues,
-  legacyFileParameterEntrySchema,
   parameterEntryPath,
   parametersDirectory,
 } from '#schemas/file-parameter-entry.schema.js';
-export type {
-  CurrentFileParameterEntry,
-  FileParameterEntry,
-  ParameterGroup,
-} from '#schemas/file-parameter-entry.schema.js';
+export type { FileParameterEntry, ParameterGroup } from '#schemas/file-parameter-entry.schema.js';

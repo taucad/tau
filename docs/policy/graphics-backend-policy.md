@@ -3,7 +3,7 @@ title: 'Graphics Backend Policy'
 description: 'Dual WebGL/WebGPU Three.js rendering, portable shaders, resource ownership, interaction, and backend evidence'
 status: active
 created: '2026-05-07'
-updated: '2026-09-05'
+updated: '2026-09-16'
 related:
   - docs/policy/compatibility-policy.md
   - docs/research/viewer-webgpu-selector-removal.md
@@ -28,7 +28,9 @@ Key `ThreeCanvasInstance` by backend as `ThreeProvider` does. A backend switch m
 
 ### 2. Create renderers through the shared factory
 
-Use `createRenderer` in `graphics/three/renderer.ts`. The `viewport` preset owns interactive MSAA and backend depth/post-processing choices; `offscreen` owns bitmap-transfer choices. Await `WebGPURenderer.init()` before use, and call WebGL-only methods only after narrowing the renderer.
+Use `createRenderer` in `graphics/three/renderer.ts`. The `viewport` preset owns interactive MSAA and backend depth/post-processing choices; `offscreen` owns bitmap-transfer choices; `showcase` owns brand surfaces built on TSL node materials (the metal morph loader), always returning Three's node renderer so one graph serves WebGPU and its WebGL 2 backend. Await `WebGPURenderer.init()` before use, and call WebGL-only methods only after narrowing the renderer.
+
+A showcase surface is not an interactive viewer: it may prefer WebGPU when an adapter exists because Three falls back to the WebGL 2 backend on its own, and it must pause while offscreen, hidden, or under reduced motion. It scales its own cost to the device: tessellation, post-processing, thin-film shading and frame rate follow a quality tier, and a frame-time governor steps pixel ratio, bloom and frame rate down under load.
 
 Do not instantiate a renderer in a consumer unless that file is an established shared factory with an explicit use case.
 
@@ -90,7 +92,7 @@ Send measurement and overlay pointer events to their owning XState machine. Use 
 
 ### 12. Validate behavior, not only graph shape
 
-Shader graph snapshots and source fingerprints are supplementary. Pair them with focused runtime assertions. For user-visible parity, use the backend e2e harness and remote-canvas screenshots with deterministic pixel characteristics.
+Shader graph snapshots and source fingerprints are supplementary. Pair them with focused runtime assertions. For user-visible parity, use the backend e2e harness and remote-canvas screenshots with deterministic pixel characteristics. Where a headless adapter cannot present frames, read an offscreen render target back through the renderer so the backend still yields pixel evidence; keep presented-canvas screenshots wherever the canvas does present.
 
 Test backend construction, WebGPU initialization, reversed-depth transparent ordering, alpha/depth state, clone ownership, cross-renderer material isolation, demand-frame invalidation, cache eviction, clipping-aware picking, and gesture cancellation.
 

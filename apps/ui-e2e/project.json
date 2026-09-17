@@ -37,7 +37,7 @@
       "dependsOn": [{ "projects": ["ui"], "target": "build" }],
       "options": {
         "cwd": "{workspaceRoot}",
-        "command": "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium src/webgpu-qualification.spec.ts src/graphics-backend.spec.ts src/shader-fixture.spec.ts src/section-view-contour-fill.spec.ts src/section-view-control-restyle.spec.ts src/section-view-overlap-cap-shading.spec.ts src/section-view-overlap-performance-diagnostics.spec.ts src/user-project-thumbnail-generation.spec.ts src/headless-chat-image-capture.spec.ts src/headless-chat-image-capture.performance.spec.ts"
+        "command": "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium src/webgpu-qualification.spec.ts src/graphics-backend.spec.ts src/shader-fixture.spec.ts src/section-view-contour-fill.spec.ts src/section-view-control-restyle.spec.ts src/section-view-overlap-cap-shading.spec.ts src/section-view-overlap-performance-diagnostics.spec.ts src/user-project-thumbnail-generation.spec.ts src/headless-chat-image-capture.spec.ts src/headless-chat-image-capture.performance.spec.ts src/metal-morph-loader.spec.ts"
       }
     },
     "test:e2e:development": {

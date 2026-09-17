@@ -214,7 +214,7 @@ export const dockviewStyleOverrides = cn(
   '[&_.dv-right-actions-container_button:has(>svg:only-child)]:!w-7',
   '[&_.dv-pre-actions-container_button:has(>svg:only-child)]:!w-7',
   '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button]:!bg-transparent',
-  '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button:hover]:!bg-nested-action-hover',
+  '[&_:is(.dv-left-actions-container,.dv-right-actions-container,.dv-pre-actions-container)_button:hover]:!bg-accent',
 
   // ── Group-hover action button visibility ──
   // Hidden by default, shown on group hover to reduce visual noise.

@@ -53,6 +53,7 @@ import type {
   AgentHostExternalContext,
 } from '#workers/agent-host.contract.js';
 import { buildBrowserAgentHostSnapshotContext } from '#chat-clients/_internal/browser-agent-host-snapshot-context.js';
+import { turnIntentOf, turnTriggerOf } from '#chat-clients/turn-intent.js';
 
 /**
  * Input payload for {@link CadChatClient.submit}. Mirrors the surface the
@@ -373,24 +374,6 @@ const retainedMessageIdsBeforeTurn = (
   const turnIndex = messages.findLastIndex((message, index) => index <= messageIndex && message.role === 'user');
   return messages.slice(0, Math.max(turnIndex, 0)).map((message) => message.id);
 };
-
-/**
- * The trigger a *bodyless* dispatch admits with. Two request kinds arrive here
- * (see `dispatchRequest` in `chat-session-store.ts`): startup-request hydration
- * — the seeded "New project → first prompt" turn — and `continue`.
- *
- * A seeded first turn has no assistant history to rewind and no durable log to
- * retain a prefix from. Admitted as a `regenerate` it was refused by
- * `packages/agent-host` with `HISTORY_PREFIX_INVALID` ("retry/edit/regenerate
- * must retain an unchanged strict history prefix" — an empty log has no prefix
- * a non-empty retain can match, and an empty retain fails the same guard), so
- * the operator's primary flow never ran on the browser host. It is a first
- * turn: it admits as one, exactly like the composer's own submit.
- */
-const hydrationTrigger = (messages: readonly MyUIMessage[], lastAssistantId: string | undefined): BrowserHostTrigger =>
-  lastAssistantId === undefined
-    ? { trigger: 'submit' }
-    : { trigger: 'regenerate', retainedMessageIds: retainedMessageIdsBeforeTurn(messages, lastAssistantId) };
 
 const userTurnIdAtOrBefore = (messages: readonly MyUIMessage[], messageId?: string): string | undefined => {
   const messageIndex =
@@ -818,7 +801,6 @@ export const useCadChatClient = (): CadChatClient => {
       return;
     }
     store.setLatestAgentBody(activeChatId, async (executionOverride) => {
-      const lastAssistantId = messages.findLast((message) => message.role === 'assistant')?.id;
       // One agent object for the admission, the placement and the body. The
       // seeded first turn dispatches before this effect's `agent` has hydrated
       // from the chat row, so the dispatcher hands in the execution it read
@@ -833,11 +815,13 @@ export const useCadChatClient = (): CadChatClient => {
         // so the effect's stale cleanup cannot drop this one.
         registerTurnHost(executionOverride);
       }
+      /* Every bodyless dispatch is a regenerate: *Try again* on an error card,
+       * the persistence machine's auto-retry, and startup hydration all re-run
+       * the chat's last turn. `turnIntentOf` is the one derivation of which
+       * turn that is (V7). */
+      const intent = turnIntentOf(messages, { kind: 'regenerate' });
       try {
-        const [execution, runId] = await admitWorkspace(
-          userTurnIdAtOrBefore(messages, lastAssistantId),
-          turnAgent.execution,
-        );
+        const [execution, runId] = await admitWorkspace(intent.leaseTurnId, turnAgent.execution);
         return createRunBody({
           agent: turnAgent,
           projectId,
@@ -847,7 +831,7 @@ export const useCadChatClient = (): CadChatClient => {
             agent: turnAgent,
             chatId: activeChatId,
             resolveModel: resolveModelRef.current,
-            trigger: hydrationTrigger(messages, lastAssistantId),
+            trigger: turnTriggerOf(intent),
           }),
         });
       } catch (error) {
@@ -912,8 +896,9 @@ export const useCadChatClient = (): CadChatClient => {
       }
 
       const userMessage = buildUserMessage(input);
+      const intent = turnIntentOf(messages, { kind: 'send', messageId: userMessage.id });
       await withAttachments(input.attachments ?? [], async () =>
-        withWorkspace(userMessage.id, (execution, runId) => {
+        withWorkspace(intent.leaseTurnId, (execution, runId) => {
           actions.sendMessage(userMessage, {
             body: createRunBody({
               agent,
@@ -924,14 +909,14 @@ export const useCadChatClient = (): CadChatClient => {
                 agent,
                 chatId: activeChatId,
                 resolveModel: resolveModelRef.current,
-                trigger: { trigger: 'submit' },
+                trigger: turnTriggerOf(intent),
               }),
             }),
           });
         }),
       );
     },
-    [actions, activeChatId, agent, projectId, refuseWhileBusy, withAttachments, withWorkspace],
+    [actions, activeChatId, agent, messages, projectId, refuseWhileBusy, withAttachments, withWorkspace],
   );
 
   const edit = useCallback(
@@ -940,9 +925,10 @@ export const useCadChatClient = (): CadChatClient => {
         return;
       }
 
+      const intent = turnIntentOf(messages, { kind: 'edit', messageId });
       // async-iife: bootstrap — the edit composer closes at once; failures surface on the banner or a toast.
       void withAttachments(input.attachments ?? [], async () =>
-        withWorkspace(messageId, (execution, runId) => {
+        withWorkspace(intent.leaseTurnId, (execution, runId) => {
           actions.editMessage(messageId, input.text, {
             ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
             body: createRunBody({
@@ -954,10 +940,7 @@ export const useCadChatClient = (): CadChatClient => {
                 agent,
                 chatId: activeChatId,
                 resolveModel: resolveModelRef.current,
-                trigger: {
-                  trigger: 'edit',
-                  retainedMessageIds: retainedMessageIdsBeforeTurn(messages, messageId),
-                },
+                trigger: turnTriggerOf(intent),
               }),
             }),
           });
@@ -1025,9 +1008,9 @@ export const useCadChatClient = (): CadChatClient => {
       return;
     }
 
-    const lastAssistantId = messages.findLast((message) => message.role === 'assistant')?.id;
+    const intent = turnIntentOf(messages, { kind: 'regenerate' });
     // async-iife: bootstrap — failures surface on the chat's error banner.
-    void withWorkspace(userTurnIdAtOrBefore(messages, lastAssistantId), (execution, runId) => {
+    void withWorkspace(intent.leaseTurnId, (execution, runId) => {
       actions.regenerate({
         body: createRunBody({
           agent,
@@ -1038,10 +1021,7 @@ export const useCadChatClient = (): CadChatClient => {
             agent,
             chatId: activeChatId,
             resolveModel: resolveModelRef.current,
-            trigger: {
-              trigger: 'regenerate',
-              retainedMessageIds: retainedMessageIdsBeforeTurn(messages, lastAssistantId),
-            },
+            trigger: turnTriggerOf(intent),
           }),
         }),
       });

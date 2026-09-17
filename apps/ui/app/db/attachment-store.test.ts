@@ -107,12 +107,12 @@ describe('attachment store', () => {
       expect(client.files.size).toBe(0);
     });
 
-    it('should reject a PDF over the 20 MiB cap without writing', async () => {
+    it('should reject a PDF over the 16 MiB cap without writing', async () => {
       const client = memoryClient();
-      const oversized = new Uint8Array(20 * 1024 * 1024 + 1);
+      const oversized = new Uint8Array(16 * 1024 * 1024 + 1);
 
       await expect(createAttachmentStore(client, directory).put(oversized, 'application/pdf')).rejects.toThrow(
-        'Attachment exceeds the 20 MB limit for documents',
+        'Attachment exceeds the 16 MB limit for documents',
       );
       expect(client.writeFile).not.toHaveBeenCalled();
       expect(client.files.size).toBe(0);

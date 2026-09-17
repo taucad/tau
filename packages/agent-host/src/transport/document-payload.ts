@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- provider wire keys use native snake_case. */
-import type { Api } from '@earendil-works/pi-ai';
+import type { Api, Context, ImageContent, TextContent } from '@earendil-works/pi-ai';
 import { util as zodUtility } from 'zod';
 import { documentSentinel } from '#harness/session-record.js';
 import type { MaterializedDocument } from '#waist/ports.js';
@@ -49,6 +49,60 @@ const nativeBlock = ({
     return { type: 'input_file', filename: name, file_data: fileData };
   }
   return { type: 'file', file: { filename: name, file_data: fileData } };
+};
+
+/**
+ * Base64 characters of attachment bytes one request may carry (R1). One maximal
+ * PDF (16 MiB, 22,369,624 characters) fits with room for its turn inside the
+ * gateway's 32 MB request bound.
+ *
+ * @internal
+ */
+export const attachmentBudgetCharacters = 24_000_000;
+
+/**
+ * Keep the newest attachments a request can carry and name the rest (R1).
+ *
+ * Durable history names every attachment a chat ever held, so a long chat can
+ * outgrow any request bound. Messages are walked newest first: each image block,
+ * and each document sentinel with a side-table entry, is kept while the budget
+ * holds and otherwise becomes the text `[attachment omitted: <name>]` (or
+ * `[attachment omitted]`). The model loses sight of old bytes the way it loses
+ * old turns to eviction, instead of the whole chat being refused forever.
+ *
+ * @internal
+ * @param context - The request's pi context; it is not mutated.
+ * @param documents - The request's side table, keyed by lowercase SHA-256 hex.
+ * @param budget - The characters of base64 the request may carry.
+ * @returns The fitted context and how many attachments were omitted.
+ */
+export const fitAttachmentBudget = (
+  context: Context,
+  documents: ReadonlyMap<string, MaterializedDocument> | undefined,
+  budget: number = attachmentBudgetCharacters,
+): { readonly context: Context; readonly omitted: number } => {
+  let remaining = budget;
+  let omitted = 0;
+  const fit = (block: TextContent | ImageContent): TextContent | ImageContent => {
+    const hash = block.type === 'text' ? standaloneSentinel.exec(block.text)?.[1] : undefined;
+    const document = hash === undefined ? undefined : documents?.get(hash);
+    const size = block.type === 'image' ? block.data.length : (document?.data.length ?? 0);
+    if (size <= remaining) {
+      remaining -= size;
+      return block;
+    }
+    omitted += 1;
+    const name = document?.filename;
+    return { type: 'text', text: name === undefined ? '[attachment omitted]' : `[attachment omitted: ${name}]` };
+  };
+  const newestFirst = [...context.messages]
+    .reverse()
+    .map((message) =>
+      (message.role === 'user' || message.role === 'toolResult') && typeof message.content !== 'string'
+        ? { ...message, content: message.content.map(fit) }
+        : message,
+    );
+  return omitted === 0 ? { context, omitted } : { context: { ...context, messages: newestFirst.reverse() }, omitted };
 };
 
 /**

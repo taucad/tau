@@ -484,9 +484,9 @@ describe('billable model request contract', () => {
 
     /* The per-field ceiling counts UTF-16 code units, so a multi-byte signature
      * under it still has to be refused by the aggregate UTF-8 body bound. */
-    const multiByte = 'é'.repeat(2_000_001);
-    expect(multiByte.length).toBeLessThan(4_000_000);
-    expect(new TextEncoder().encode(multiByte).byteLength).toBeGreaterThan(4_000_000);
+    const multiByte = 'é'.repeat(16_000_001);
+    expect(multiByte.length).toBeLessThan(32_000_000);
+    expect(new TextEncoder().encode(multiByte).byteLength).toBeGreaterThan(32_000_000);
     expect(safeParseBillableModelRequest(signed(multiByte), 'openai-completions').success).toBe(false);
 
     /* Admitted signature bytes are billable input text, so they raise the priced
@@ -683,20 +683,74 @@ describe('document block admission', () => {
     ).toBe(false);
   });
 
-  it('bounds document bytes at the base64 length of 20 MiB', () => {
-    /* The aggregate 4 MB request gate in `safeParseBillableModelRequest` trips long before
-     * this bound, so the per-document ceiling is asserted against the schema itself. */
-    const oversize = 'A'.repeat(4 * Math.ceil((20 * 1024 * 1024) / 3) + 1);
+  /* R1: the largest PDF the composer admits (16 MiB) must pass the whole gate —
+   * aggregate bytes included — with room left for the turn around it. */
+  const maximalPdfBase64 = 'A'.repeat(4 * Math.ceil((16 * 1024 * 1024) / 3));
+
+  it('should admit a maximal PDF and its turn through the whole request gate', () => {
+    const body = {
+      ...anthropicBody(undefined),
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'x'.repeat(2_000_000) },
+            { ...documentBlock, source: { ...documentBlock.source, data: maximalPdfBase64 } },
+          ],
+        },
+      ],
+    };
+    expect(safeParseBillableModelRequest(body, 'anthropic').success).toBe(true);
     expect(
-      billableModelRequestSchema.safeParse(
+      safeParseBillableModelRequest(
+        responsesBody({ ...inputFileBlock, file_data: `data:application/pdf;base64,${maximalPdfBase64}` }),
+        'openai-responses',
+      ).success,
+    ).toBe(true);
+  });
+
+  it('should refuse a PDF past the 16 MiB bound through the whole request gate', () => {
+    const oversize = `${maximalPdfBase64}AAAA`;
+    expect(
+      safeParseBillableModelRequest(
         anthropicBody({ ...documentBlock, source: { ...documentBlock.source, data: oversize } }),
+        'anthropic',
       ).success,
     ).toBe(false);
     expect(
-      billableModelRequestSchema.safeParse(
-        responsesBody({ ...inputFileBlock, file_data: `data:application/pdf;base64,${oversize}` }),
+      safeParseBillableModelRequest(
+        completionsBody({
+          ...fileBlock,
+          file: { ...fileBlock.file, file_data: `data:application/pdf;base64,${oversize}` },
+        }),
+        'openai-completions',
       ).success,
     ).toBe(false);
+  });
+
+  it('should refuse a request over 32 MB even when every string is within its own bound', () => {
+    const block = { type: 'text', text: 'x'.repeat(3_600_000) };
+    const body = {
+      ...anthropicBody(undefined),
+      messages: [{ role: 'user', content: Array.from({ length: 9 }, () => block) }],
+    };
+    expect(billableModelRequestSchema.safeParse(body).success).toBe(true);
+    expect(safeParseBillableModelRequest(body, 'anthropic').success).toBe(false);
+  });
+
+  it('should admit a 4 MiB image, as a capture may be, and refuse a larger one', () => {
+    const image = (data: string) => ({
+      ...anthropicBody(undefined),
+      messages: [
+        {
+          role: 'user',
+          content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data } }],
+        },
+      ],
+    });
+    const maximal = 'A'.repeat(4 * Math.ceil((4 * 1024 * 1024) / 3));
+    expect(safeParseBillableModelRequest(image(maximal), 'anthropic').success).toBe(true);
+    expect(safeParseBillableModelRequest(image(`${maximal}AAAA`), 'anthropic').success).toBe(false);
   });
 
   it('falls closed on the funded input bound for a document request', () => {

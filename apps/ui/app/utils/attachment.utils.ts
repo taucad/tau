@@ -77,8 +77,12 @@ export const attachmentFileName = (attachment: AttachmentName): string => {
 /** The reference stored in a file part or log row, relative to the owning directory. */
 export const attachmentUrl = (attachment: AttachmentName): string => `attachments/${attachmentFileName(attachment)}`;
 
-/** Cap after processing: images 4 MiB (captures included), documents 20 MiB (D17). */
-export const attachmentCapBytes = (kind: AttachmentKind): number => (kind === 'image' ? 4 : 20) * 1024 * 1024;
+/**
+ * Cap after processing: images 4 MiB (captures included), documents 16 MiB (D17,
+ * amended R1). One maximal document must fit the agent host's per-request
+ * attachment budget and the gateway's request bound together with its turn.
+ */
+export const attachmentCapBytes = (kind: AttachmentKind): number => (kind === 'image' ? 4 : 16) * 1024 * 1024;
 
 const attachmentDirectory = 'attachments/';
 const attachmentFileNamePattern = /^[\da-f]{64}\.(?:jpg|png|webp|gif|pdf)$/;

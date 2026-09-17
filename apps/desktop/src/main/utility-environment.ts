@@ -160,6 +160,31 @@ export const utilityEnvironment = (
 };
 
 /**
+ * Point every forked realm's Node compile cache at the app's own data root.
+ *
+ * Deliberately **not** `NODE_COMPILE_CACHE`, Node's own name for this: in an
+ * Electron 43.5.1 utility process that variable is a trap. The bootstrap reads
+ * it and marks the cache enabled — a later `module.enableCompileCache()` answers
+ * `ALREADY_ENABLED` — and then never writes a single entry (measured: 0 files,
+ * versus 166 files / 2.6 MB for the same graph with the variable absent and the
+ * directory passed to the call). Setting it would disable the cache it names.
+ * So the directory travels under Tau's own name and the fork entries hand it to
+ * `enableCompileCache(dir)` explicitly.
+ *
+ * The directory must be writable and survive across launches, which rules out
+ * the signed bundle: `Contents/Resources` is read-only and covered by the code
+ * signature, and Node's own fallback (`$TMPDIR`) is purged. The app's data root
+ * is the one place that is both.
+ *
+ * @param userDataPath - Electron's `app.getPath('userData')`.
+ * @returns The environment addition every utility fork carries.
+ */
+export const compileCacheEnvironment = (userDataPath: string): Readonly<{ TAU_COMPILE_CACHE_DIR: string }> => ({
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- environment name
+  TAU_COMPILE_CACHE_DIR: join(userDataPath, 'compile-cache'),
+});
+
+/**
  * Locate esbuild's staged executable for packaged utility processes.
  *
  * Electron can read JavaScript through `app.asar`, but `child_process.spawn`

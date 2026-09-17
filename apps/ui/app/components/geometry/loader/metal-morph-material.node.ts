@@ -152,7 +152,7 @@ type PlaneTableUniforms = Readonly<{
 }>;
 
 /** Uniforms that place the travelling front along the sweep axis. */
-type FrontUniforms = Readonly<{
+export type FrontUniforms = Readonly<{
   uSweepAxis: UniformNode<'vec3', Vector3>;
   uProgress: UniformNode<'float', number>;
   uFrontBand: UniformNode<'float', number>;
@@ -162,22 +162,28 @@ type FrontUniforms = Readonly<{
 const frontPositionOf = (uniforms: FrontUniforms): Node<'float'> =>
   uniforms.uProgress.mul(float(1).add(uniforms.uFrontBand.mul(2))).sub(uniforms.uFrontBand);
 
+/** A TSL function of a point on the unit sphere, a noise seed and the time, returning a surface height. */
+export type LiquidHeightField = (point: Node<'vec3'>, seed: Node<'vec3'>, time: Node<'float'>) => Node<'float'>;
+/** A TSL function of a direction on the unit sphere returning `weight, frontness, alongSweep, local`. */
+export type FrontField = (direction: Node<'vec3'>) => Node<'vec4'>;
+
+/** Uniforms that shape the liquid displacement field on top of the front. */
+export type DisplacementUniforms = FrontUniforms &
+  Readonly<{
+    uFlowScale: UniformNode<'float', number>;
+    uFlowAmplitude: UniformNode<'float', number>;
+    uRippleAmplitude: UniformNode<'float', number>;
+    uRippleWavelength: UniformNode<'float', number>;
+    uRippleDecay: UniformNode<'float', number>;
+  }>;
+
 /**
  * Reusable displacement height at a point on the unit sphere: one broad octave of laminar undulation plus a
  * train of ripples that trails the crest and fades into the wake, so the transformed metal reads as a wave
  * rolling over the body. Invoked three times per vertex (value and forward differences), so every local
  * stays unnamed.
  */
-const createDisplacementField = (
-  uniforms: FrontUniforms &
-    Readonly<{
-      uFlowScale: UniformNode<'float', number>;
-      uFlowAmplitude: UniformNode<'float', number>;
-      uRippleAmplitude: UniformNode<'float', number>;
-      uRippleWavelength: UniformNode<'float', number>;
-      uRippleDecay: UniformNode<'float', number>;
-    }>,
-) =>
+export const createDisplacementField = (uniforms: DisplacementUniforms): LiquidHeightField =>
   Fn(([point, seed, time]: [Node<'vec3'>, Node<'vec3'>, Node<'float'>]) => {
     const drift = vec3(float(0), time.mul(0.35), time.mul(0.2));
     const flow = mx_noise_float(point.mul(uniforms.uFlowScale).add(seed).add(drift)).toVar();
@@ -201,7 +207,9 @@ const createDisplacementField = (
  * Travelling-front weights for one direction on the body, packed as `weight, frontness, alongSweep, local`.
  * Shared by the vertex stage (positions) and the fragment stage (exact normals), so every local stays unnamed.
  */
-const createFrontField = (uniforms: FrontUniforms & Readonly<{ uOvershoot: UniformNode<'float', number> }>) =>
+export const createFrontField = (
+  uniforms: FrontUniforms & Readonly<{ uOvershoot: UniformNode<'float', number> }>,
+): FrontField =>
   Fn(([direction]: [Node<'vec3'>]) => {
     // Vertices behind the front already carry the target form.
     const alongSweep = dot(direction, uniforms.uSweepAxis).mul(0.5).add(0.5).toVar();

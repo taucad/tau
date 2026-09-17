@@ -38,8 +38,8 @@ export type ConvexFace = Readonly<{
   vertices: readonly Vector3Tuple[];
 }>;
 
-export type MetalMorphShapeDefinition = Readonly<{
-  id: MetalMorphShapeId;
+export type MetalMorphShapeDefinition<Id extends string = MetalMorphShapeId> = Readonly<{
+  id: Id;
   /** Convex core vertices before `scale` is applied. */
   vertices: readonly Vector3Tuple[];
   /** Uniform scale that brings the core into the loader's unit framing. */
@@ -66,8 +66,8 @@ export type RadialPlane = Readonly<{
   offset: number;
 }>;
 
-export type PreparedSolid = Readonly<{
-  id: MetalMorphShapeId;
+export type PreparedSolid<Id extends string = MetalMorphShapeId> = Readonly<{
+  id: Id;
   roundness: number;
   faces: readonly ConvexFace[];
   /** Side planes of the pyramid raised on `faces[index]`, when the solid is stellated. */
@@ -76,15 +76,7 @@ export type PreparedSolid = Readonly<{
   creases?: ReadonlyArray<readonly ConvexFace[]>;
 }>;
 
-export type MetalMorphGeometryData = Readonly<{
-  detail: number;
-  vertexCount: number;
-  /** Unit directions, three floats per vertex; doubles as the mesh `position` attribute. */
-  directions: Float32Array;
-  index: Uint32Array;
-  /** Packed `normal.xyz, radius` samples, four floats per vertex, keyed by shape. */
-  shapes: Readonly<Record<MetalMorphShapeId, Float32Array>>;
-}>;
+export type MetalMorphGeometryData = RadialGeometryData<MetalMorphShapeId>;
 
 const goldenRatio = (1 + Math.sqrt(5)) / 2;
 /** Dimensionless coplanarity guard for unit-scale solids. */
@@ -296,9 +288,9 @@ const pairCreases = (spikes: ReadonlyArray<readonly ConvexFace[]>): ConvexFace[]
 };
 
 /** Build the plane sets a radial sampler needs for one shape definition. */
-export const prepareSolid = (definition: MetalMorphShapeDefinition): PreparedSolid => {
+export const prepareSolid = <Id extends string>(definition: MetalMorphShapeDefinition<Id>): PreparedSolid<Id> => {
   const faces = extractConvexFaces(definition.vertices.map((vertex) => scaleVector(vertex, definition.scale)));
-  const solid: PreparedSolid = { id: definition.id, roundness: definition.roundness, faces };
+  const solid: PreparedSolid<Id> = { id: definition.id, roundness: definition.roundness, faces };
   if (definition.spikeApexRadius === undefined) {
     return solid;
   }
@@ -392,7 +384,7 @@ const fillCreases = (spike: RadialSample, twins: readonly RadialPlane[], query: 
 };
 
 /** Distance and surface normal where a ray from the origin along `direction` leaves the rounded solid. */
-export const sampleRadial = (solid: PreparedSolid, direction: Vector3Tuple): RadialSample => {
+export const sampleRadial = (solid: PreparedSolid<string>, direction: Vector3Tuple): RadialSample => {
   const query: RadialQuery = { direction, roundness: solid.roundness };
   const core = nearestExit(solid.faces, direction);
   const sides = solid.spikes?.[core.index];
@@ -493,6 +485,49 @@ export const buildIcosphere = (detail: number): { positions: Float32Array; index
   return { positions: new Float32Array(positions), index: new Uint32Array(faces.flat()) };
 };
 
+/** Packed radial samples of a set of solids on one shared icosphere; see {@link sampleSolidsOntoIcosphere}. */
+export type RadialGeometryData<Id extends string> = Readonly<{
+  detail: number;
+  vertexCount: number;
+  /** Unit directions, three floats per vertex; doubles as the mesh `position` attribute. */
+  directions: Float32Array;
+  index: Uint32Array;
+  /** Packed `normal.xyz, radius` samples, four floats per vertex, keyed by shape. */
+  shapes: Readonly<Record<Id, Float32Array>>;
+}>;
+
+/**
+ * Sample every solid onto one icosphere subdivided `detail` times, packing `normal.xyz, radius` per vertex
+ * and shape, so a GPU can morph between them by interpolating the packed samples.
+ */
+export const sampleSolidsOntoIcosphere = <Id extends string>(
+  detail: number,
+  solids: ReadonlyArray<PreparedSolid<Id>>,
+): RadialGeometryData<Id> => {
+  const { positions, index } = buildIcosphere(detail);
+  const vertexCount = positions.length / 3;
+  const entries = solids.map((solid) => {
+    const packed = new Float32Array(vertexCount * 4);
+    for (let vertex = 0; vertex < vertexCount; vertex += 1) {
+      const direction: Vector3Tuple = [positions[vertex * 3]!, positions[vertex * 3 + 1]!, positions[vertex * 3 + 2]!];
+      const sample = sampleRadial(solid, direction);
+      packed[vertex * 4] = sample.normal[0];
+      packed[vertex * 4 + 1] = sample.normal[1];
+      packed[vertex * 4 + 2] = sample.normal[2];
+      packed[vertex * 4 + 3] = sample.radius;
+    }
+    return [solid.id, packed] as const;
+  });
+  return {
+    detail,
+    vertexCount,
+    directions: positions,
+    index,
+    // Every solid contributes exactly one entry, so the record is complete for the id union.
+    shapes: Object.fromEntries(entries) as Record<Id, Float32Array>,
+  };
+};
+
 const geometryDataCache = new Map<number, MetalMorphGeometryData>();
 
 /**
@@ -504,28 +539,10 @@ export const getMetalMorphGeometryData = (detail: number): MetalMorphGeometryDat
   if (cached !== undefined) {
     return cached;
   }
-  const { positions, index } = buildIcosphere(detail);
-  const vertexCount = positions.length / 3;
-  const entries = metalMorphShapeIds.map((id) => {
-    const solid = prepareSolid(metalMorphShapeDefinitions[id]);
-    const packed = new Float32Array(vertexCount * 4);
-    for (let vertex = 0; vertex < vertexCount; vertex += 1) {
-      const direction: Vector3Tuple = [positions[vertex * 3]!, positions[vertex * 3 + 1]!, positions[vertex * 3 + 2]!];
-      const sample = sampleRadial(solid, direction);
-      packed[vertex * 4] = sample.normal[0];
-      packed[vertex * 4 + 1] = sample.normal[1];
-      packed[vertex * 4 + 2] = sample.normal[2];
-      packed[vertex * 4 + 3] = sample.radius;
-    }
-    return [id, packed] as const;
-  });
-  const data: MetalMorphGeometryData = {
+  const data = sampleSolidsOntoIcosphere(
     detail,
-    vertexCount,
-    directions: positions,
-    index,
-    shapes: Object.fromEntries(entries) as Record<MetalMorphShapeId, Float32Array>,
-  };
+    metalMorphShapeIds.map((id) => prepareSolid(metalMorphShapeDefinitions[id])),
+  );
   geometryDataCache.set(detail, data);
   return data;
 };

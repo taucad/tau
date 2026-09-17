@@ -248,9 +248,12 @@ try {
 }
 
 try {
-  const outcome = await ensureBundledTypesMount(fileService, buildBundledTypesPayload(), async (payload) =>
-    populateBundledTypesMount(fileService, payload),
-  );
+  const outcome = await ensureBundledTypesMount(fileService, buildBundledTypesPayload(), {
+    populate: async (payload) => populateBundledTypesMount(fileService, payload),
+    // Vite substitutes this define inside worker bundles too (verified against
+    // vite 8.0.10); a realm without it falls back to the payload digest.
+    buildIdentity: typeof tauBuildId === 'number' ? String(tauBuildId) : undefined,
+  });
   const populationLabel = outcome === 'skipped' ? 'bundled types current, skipped' : 'bundled types populated';
   console.debug(`[FM-Worker] ${populationLabel} +${(performance.now() - t0).toFixed(1)}ms`);
 } catch (error) {

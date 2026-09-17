@@ -238,32 +238,21 @@ describe('mountFileOperationParticipants', () => {
     expect(dispose).toHaveBeenCalledOnce();
   });
 
-  it('moves and deletes parameter sidecars with their source paths', async () => {
+  it('moves and deletes parameter sidecars only through the prepared participant', async () => {
     const { editorRef, projectRef } = makeReferences();
     const { service, emit } = makeContentService();
-    const movePath = vi.fn(async () => undefined);
-    const deletePath = vi.fn(async () => undefined);
     const prepareFileOperation = vi.fn(async () => ({
       commit: async () => undefined,
       rollback: async () => undefined,
     }));
-    mountFileOperationParticipants({
-      contentService: service,
-      editorRef,
-      projectRef,
-      parameterFiles: { movePath, deletePath, prepareFileOperation },
-    });
+    const parameterFiles = { prepareFileOperation };
+    mountFileOperationParticipants({ contentService: service, editorRef, projectRef, parameterFiles });
 
     emit({ type: 'renamed', oldPath: 'old.ts', newPath: 'new.ts' });
-    emit({ type: 'directoryRenamed', oldPath: 'old', newPath: 'new' });
     emit({ type: 'deleted', path: 'gone.ts', source: 'user' });
-    emit({ type: 'directoryDeleted', path: 'gone' });
 
-    await vi.waitFor(() => {
-      expect(movePath).toHaveBeenNthCalledWith(1, 'old.ts', 'new.ts', false);
-      expect(movePath).toHaveBeenNthCalledWith(2, 'old', 'new', true);
-      expect(deletePath).toHaveBeenNthCalledWith(1, 'gone.ts', false);
-      expect(deletePath).toHaveBeenNthCalledWith(2, 'gone', true);
-    });
+    await Promise.resolve();
+    expect(prepareFileOperation).not.toHaveBeenCalled();
+    expect(service.addFileOperationParticipant).toHaveBeenCalledWith(prepareFileOperation);
   });
 });

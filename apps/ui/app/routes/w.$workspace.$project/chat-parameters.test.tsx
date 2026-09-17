@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ActorRefFrom } from 'xstate';
+import { fileParameterRecordProfile } from '@taucad/types';
 import type { FileParameterEntry } from '@taucad/types';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { ChatParameters } from '#routes/w.$workspace.$project/chat-parameters.js';
@@ -87,7 +88,12 @@ const mockParameterService = {
   snapshot: (entryPath: string) => {
     let entry = mockParameterEntries.get(entryPath) ?? mockEmptyParameterEntries.get(entryPath);
     if (entry === undefined) {
-      entry = { activeGroup: 'default', groups: { default: { values: {} } } };
+      entry = {
+        recordVersion: 1,
+        profile: fileParameterRecordProfile,
+        activeGroup: 'default',
+        groups: { default: { values: {} } },
+      };
       mockEmptyParameterEntries.set(entryPath, entry);
     }
     const current = mockParameterSnapshots.get(entryPath);
@@ -96,6 +102,7 @@ const mockParameterService = {
     }
     const snapshot = {
       entry,
+      manifest: { revision: 'manifest' },
       identity: {
         sourceRevision: 'source',
         manifestRevision: 'manifest',
@@ -112,7 +119,7 @@ const mockParameterService = {
     let actor = mockParameterActors.get(entryPath);
     if (actor === undefined) {
       actor = {
-        getSnapshot: () => ({ context: { current: mockParameterService.snapshot(entryPath) } }),
+        getSnapshot: () => ({ context: { current: mockParameterService.snapshot(entryPath) }, matches: () => false }),
         subscribe: () => ({ unsubscribe: () => undefined }),
       };
       mockParameterActors.set(entryPath, actor);
@@ -149,6 +156,7 @@ vi.mock('#hooks/use-project.js', () => ({
     parameterService: mockParameterService,
     resolveParameterEntry: mockResolveParameterEntry,
   }),
+  useParameterSetActor: (entryPath: string) => mockParameterService.actor(entryPath),
   useMainGraphics: () => ({
     getSnapshot: vi.fn(() => ({
       context: { displayUnits: { length: { symbol: 'mm', metersPerUnit: 0.001, system: 'si' } } },
@@ -421,6 +429,8 @@ describe('ChatParameters', () => {
       [
         'main.ts',
         {
+          recordVersion: 1,
+          profile: fileParameterRecordProfile,
           activeGroup: 'default',
           groups: { default: { values: { width: 15 } } },
         },
@@ -579,6 +589,8 @@ describe('ParameterGroupSelector', () => {
       [
         'main.ts',
         {
+          recordVersion: 1,
+          profile: fileParameterRecordProfile,
           activeGroup: 'default',
           groups: {
             default: { values: {} },
@@ -596,6 +608,8 @@ describe('ParameterGroupSelector', () => {
       [
         'main.ts',
         {
+          recordVersion: 1,
+          profile: fileParameterRecordProfile,
           activeGroup: 'default',
           groups: {
             default: { values: {} },
@@ -606,6 +620,8 @@ describe('ParameterGroupSelector', () => {
       [
         'helper.ts',
         {
+          recordVersion: 1,
+          profile: fileParameterRecordProfile,
           activeGroup: 'default',
           groups: { default: { values: {} } },
         },
@@ -626,6 +642,8 @@ describe('ParameterGroupSelector', () => {
       [
         'main.ts',
         {
+          recordVersion: 1,
+          profile: fileParameterRecordProfile,
           activeGroup: 'default',
           groups: { default: { values: {} } },
         },
@@ -660,7 +678,15 @@ describe('ParameterGroupSelector', () => {
   it('does not toggle the pane from reset, saved-group, or overflow controls', async () => {
     mockGeometryUnits.set('main.ts', mockCadRef);
     mockParameterEntries = new Map<string, FileParameterEntry>([
-      ['main.ts', { activeGroup: 'default', groups: { default: { values: { width: 15 } } } }],
+      [
+        'main.ts',
+        {
+          recordVersion: 1,
+          profile: fileParameterRecordProfile,
+          activeGroup: 'default',
+          groups: { default: { values: { width: 15 } } },
+        },
+      ],
     ]);
 
     render(<ChatParameters isExpanded setIsExpanded={vi.fn()} />);
@@ -686,6 +712,8 @@ describe('ParameterGroupManager — active group name', () => {
       [
         'main.ts',
         {
+          recordVersion: 1,
+          profile: fileParameterRecordProfile,
           activeGroup: 'my-custom-group',
           groups: {
             default: { values: {} },
@@ -706,6 +734,8 @@ describe('ParameterGroupManager — active group name', () => {
       [
         'main.ts',
         {
+          recordVersion: 1,
+          profile: fileParameterRecordProfile,
           activeGroup: 'default',
           groups: {
             default: { values: {} },
@@ -724,6 +754,8 @@ describe('ParameterGroupManager — active group name', () => {
       [
         'main.ts',
         {
+          recordVersion: 1,
+          profile: fileParameterRecordProfile,
           activeGroup: 'alternate',
           groups: {
             default: { values: {} },
@@ -745,7 +777,15 @@ describe('ParametersPanelHeader context menu', () => {
     mockProjectSend.mockClear();
     mockEditorSend.mockClear();
     mockParameterEntries = new Map<string, FileParameterEntry>([
-      ['main.ts', { activeGroup: 'default', groups: { default: { values: {} } } }],
+      [
+        'main.ts',
+        {
+          recordVersion: 1,
+          profile: fileParameterRecordProfile,
+          activeGroup: 'default',
+          groups: { default: { values: {} } },
+        },
+      ],
     ]);
   });
 

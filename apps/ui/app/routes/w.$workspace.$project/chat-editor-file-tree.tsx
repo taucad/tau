@@ -426,9 +426,6 @@ export const ChatEditorFileTree = memo(function ({
             editorRef,
             projectRef,
             parameterFiles: parameterService,
-            onError: (error) => {
-              toast.error(error instanceof Error ? error.message : 'Parameter sidecar operation failed.');
-            },
           })
         : undefined;
 

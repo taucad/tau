@@ -121,8 +121,10 @@ vi.mock('#components/chat/chat-textarea.js', () => ({
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-message.js', () => ({
-  ChatMessage: ({ messageId }: { readonly messageId: string }) => (
-    <div data-testid='chat-message' data-message-id={messageId} />
+  ChatMessage: ({ messageId, footer }: { readonly messageId: string; readonly footer?: React.ReactNode }) => (
+    <div data-testid='chat-message' data-message-id={messageId}>
+      {footer}
+    </div>
   ),
 }));
 
@@ -332,7 +334,7 @@ describe('ChatHistory — turn group rendering', () => {
     expect([...lastGroupMessages].map((node) => node.dataset['messageId'])).toEqual(['u2', 'a2', 'a3']);
   });
 
-  it('should anchor one revision summary directly after each request, before its replies', () => {
+  it('should attach one revision summary to each request, before its replies', () => {
     setMockMessages([
       message('u1', 'user'),
       message('a1', 'assistant'),
@@ -353,13 +355,14 @@ describe('ChatHistory — turn group rendering', () => {
     const summaryOf = (group: HTMLElement | undefined): HTMLElement | undefined =>
       group?.querySelector<HTMLElement>('[data-testid="turn-revision"]') ?? undefined;
 
-    expect(order(firstGroup)).toEqual(['chat-message:u1', 'turn-revision:u1', 'chat-message:a1']);
-    expect(order(lastGroup).slice(0, 4)).toEqual([
-      'chat-message:u2',
-      'turn-revision:u2',
-      'chat-message:a2',
-      'chat-message:a3',
-    ]);
+    /* The card is the request's own footer (R11), so replies can never land between them. */
+    const footerOf = (group: HTMLElement | undefined, id: string): string[] =>
+      order(group?.querySelector<HTMLElement>(`[data-message-id="${id}"]`) ?? undefined);
+    expect(order(firstGroup)).toEqual(['chat-message:u1', 'chat-message:a1']);
+    expect(footerOf(firstGroup, 'u1')).toEqual(['turn-revision:u1']);
+    expect(footerOf(firstGroup, 'a1')).toEqual([]);
+    expect(order(lastGroup).slice(0, 3)).toEqual(['chat-message:u2', 'chat-message:a2', 'chat-message:a3']);
+    expect(footerOf(lastGroup, 'u2')).toEqual(['turn-revision:u2']);
     expect(lastGroup?.querySelectorAll('[data-testid="turn-revision"]')).toHaveLength(1);
     expect(summaryOf(firstGroup)?.dataset['latest']).toBe('false');
     expect(summaryOf(lastGroup)?.dataset['latest']).toBe('true');

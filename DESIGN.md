@@ -98,7 +98,9 @@ identity remains readable even when advanced controls are folded away.
 
 In chat, one compact revision summary belongs directly after its user request,
 before the assistant's reasoning, tools and answer, while changes are pending,
-saved or uncertain. Update it in place. A reconnect is connection status, not a
+saved or uncertain. It is a card attached under the request bubble, sharing its
+radius, whose whole header opens the details, so it reads as the request's own
+state rather than as conversation. Update it in place. A reconnect is connection status, not a
 revision state: keep the last known summary while the host log replays, and show
 **Save not confirmed** with a visible Retry only when the host stays unreachable.
 When the host confirms that no files

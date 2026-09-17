@@ -790,82 +790,87 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
           isUser ? 'mx-2' : 'mx-4',
         )}
       >
-        <When shouldRender={isUser ? isEditing : false}>
-          <ChatTextarea
-            mode='edit'
-            className='rounded-2xl'
-            onSubmit={async (event) => {
-              // R10/t17: edit-message routes through the cad chat-client so
-              // the wire body's `agent` block is composed from the live
-              // `useCadAgentConfig` snapshot — no model/metadata stamping
-              // on the persisted user row.
-              cadChat.edit(messageId, { text: event.content, attachments: event.attachments });
-              exitEditMode();
-              setIsEditing(false);
-            }}
-            onEscapePressed={() => {
-              exitEditMode();
-              setIsEditing(false);
-            }}
-            onBlur={() => {
-              exitEditMode();
-              setIsEditing(false);
-            }}
-          />
-        </When>
-        <When shouldRender={!isEditing}>
-          {/* Matches focused-edit ChatTextarea natural max (max-h-48 editor + mb-10 toolbar room + 2px border = 14.625rem). Keep in sync so click-to-edit does not jump. */}
-          <div
-            className={cn(
-              'flex flex-col gap-0 min-w-0',
-              isUser &&
-                'cursor-action rounded-2xl border bg-background px-3 py-1 outline-none hover:border-primary focus-visible:focus-outline',
-              shouldRenderCollapsedUserRows && 'max-h-58.5 overflow-hidden',
-              fileParts.length > 0 && 'pt-3',
-              showUserBubbleStopShortcut && 'relative',
-            )}
-            role={isUser ? 'button' : undefined}
-            tabIndex={isUser ? 0 : undefined}
-            onClick={isUser ? handleEditClick : undefined}
-            onKeyDown={isUser ? handleEditKeyDown : undefined}
-          >
-            {fileParts.length > 0 ? (
-              <ChatMessageFileAttachments parts={fileParts} directory={attachmentDirectories?.transcript} />
-            ) : null}
-            {shouldRenderCollapsedUserRows ? (
-              <div className='flex flex-col gap-1 pr-1'>
-                {collapsedUserRowsWithStableKeys.map(({ keyPrefix, row }) => (
-                  <p
-                    key={`${keyPrefix}:${row.slice(0, 120)}`}
-                    className='text-sm leading-relaxed wrap-break-word whitespace-pre-wrap text-foreground/90'
-                  >
-                    <TextWithAtReferences text={row} knownSkillIds={knownSkillIds} />
-                  </p>
-                ))}
-              </div>
-            ) : (
-              <AssistantParts parts={displayMessage.parts} messageId={displayMessage.id} />
-            )}
-            {showUserBubbleStopShortcut ? (
-              <div
-                className={cn(
-                  'absolute right-1 bottom-1 z-10 transition-opacity duration-150',
-                  'pointer-events-none opacity-0',
-                  'group-hover/chat-message:pointer-events-auto group-hover/chat-message:opacity-100',
-                  'group-focus-within/chat-message:pointer-events-auto group-focus-within/chat-message:opacity-100',
-                )}
-              >
-                <ChatStreamingStopButton
-                  variant='compact'
-                  formattedCancelKeyCombination={formattedCancelKeyCombination}
-                  onCancel={stop}
-                />
-              </div>
-            ) : null}
-          </div>
-        </When>
-        <ChatMessagePlanning messageId={messageId} className='-my-1' />
-        {footer}
+        {/* The bubble and its attached footer (the turn's revision card) read as one surface. */}
+        <div className='flex min-w-0 flex-col'>
+          <When shouldRender={isUser ? isEditing : false}>
+            <ChatTextarea
+              mode='edit'
+              className='relative z-10 rounded-lg'
+              onSubmit={async (event) => {
+                // R10/t17: edit-message routes through the cad chat-client so
+                // the wire body's `agent` block is composed from the live
+                // `useCadAgentConfig` snapshot — no model/metadata stamping
+                // on the persisted user row.
+                cadChat.edit(messageId, { text: event.content, attachments: event.attachments });
+                exitEditMode();
+                setIsEditing(false);
+              }}
+              onEscapePressed={() => {
+                exitEditMode();
+                setIsEditing(false);
+              }}
+              onBlur={() => {
+                exitEditMode();
+                setIsEditing(false);
+              }}
+            />
+          </When>
+          <When shouldRender={!isEditing}>
+            {/* Matches focused-edit ChatTextarea natural max (max-h-48 editor + mb-10 toolbar room + 2px border = 14.625rem). Keep in sync so click-to-edit does not jump. */}
+            <div
+              className={cn(
+                'flex flex-col gap-0 min-w-0',
+                isUser &&
+                  'relative z-10 cursor-action rounded-lg border bg-background px-3 py-1 outline-none hover:border-primary focus-visible:focus-outline',
+                shouldRenderCollapsedUserRows && 'max-h-58.5 overflow-hidden',
+                fileParts.length > 0 && 'pt-3',
+              )}
+              role={isUser ? 'button' : undefined}
+              tabIndex={isUser ? 0 : undefined}
+              onClick={isUser ? handleEditClick : undefined}
+              onKeyDown={isUser ? handleEditKeyDown : undefined}
+            >
+              {fileParts.length > 0 ? (
+                <ChatMessageFileAttachments parts={fileParts} directory={attachmentDirectories?.transcript} />
+              ) : null}
+              {shouldRenderCollapsedUserRows ? (
+                <div className='flex flex-col gap-1 pr-1'>
+                  {collapsedUserRowsWithStableKeys.map(({ keyPrefix, row }) => (
+                    <p
+                      key={`${keyPrefix}:${row.slice(0, 120)}`}
+                      className='text-sm leading-relaxed wrap-break-word whitespace-pre-wrap text-foreground/90'
+                    >
+                      <TextWithAtReferences text={row} knownSkillIds={knownSkillIds} />
+                    </p>
+                  ))}
+                </div>
+              ) : (
+                <AssistantParts parts={displayMessage.parts} messageId={displayMessage.id} />
+              )}
+              {/* Flush under the activity rows, so the indicator keeps their pitch. */}
+              {isUser ? null : <ChatMessagePlanning messageId={messageId} />}
+              {showUserBubbleStopShortcut ? (
+                <div
+                  className={cn(
+                    'absolute right-1 bottom-1 z-10 transition-opacity duration-150',
+                    'pointer-events-none opacity-0',
+                    'group-hover/chat-message:pointer-events-auto group-hover/chat-message:opacity-100',
+                    'group-focus-within/chat-message:pointer-events-auto group-focus-within/chat-message:opacity-100',
+                  )}
+                >
+                  <ChatStreamingStopButton
+                    variant='compact'
+                    formattedCancelKeyCombination={formattedCancelKeyCombination}
+                    onCancel={stop}
+                  />
+                </div>
+              ) : null}
+            </div>
+          </When>
+          {footer}
+        </div>
+        {/* A trailing request's indicator sits below its revision card, aligned with the activity rows. */}
+        {isUser ? <ChatMessagePlanning messageId={messageId} className='-mt-1 ml-0' /> : null}
         <When shouldRender={!isUser}>
           <div className='mt-1 flex flex-row items-start justify-start text-muted-foreground'>
             <CopyButton

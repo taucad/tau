@@ -145,12 +145,14 @@ const baseName = (base: TurnRevisionBase): string | undefined => {
 export const turnRevisionLabel = (state: TurnRevisionState, fileCount: number): string => {
   switch (state.kind) {
     case 'working': {
+      /* The dashed status icon already says the work is in progress, so only a
+       * pause adds a suffix (chat activity indicator closeout R11). */
       const name = baseName(state.base);
-      const activity = state.isWaiting ? 'Waiting for you' : 'Working';
       if (name === undefined) {
-        return activity;
+        return state.isWaiting ? 'Waiting for you' : 'New revision';
       }
-      return state.base.kind === 'first' ? `Starting ${name} · ${activity}` : `Starting from ${name} · ${activity}`;
+      const start = state.base.kind === 'first' ? `Starting ${name}` : `Starting from ${name}`;
+      return state.isWaiting ? `${start} · Waiting for you` : start;
     }
     case 'saving': {
       return 'Saving revision';

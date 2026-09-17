@@ -393,26 +393,29 @@ export function useSharedFileManagerWorker(): Worker | undefined {
  * What the gate shows when the root mount has no worker (blueprint R7).
  *
  * "No worker" means one of two things and the gate must not confuse them: the
- * root mount is still connecting one, which is progress and stays silent, or
- * its machine gave up, which used to be an unexplained blank. `initialize`
- * takes the machine's `error` state back to `connectingWorker`, so Try again
- * is a real retry rather than a page reload.
+ * root mount is still connecting one, which is progress and shows the caller's
+ * placeholder, or its machine gave up, which used to be an unexplained blank.
+ * `initialize` takes the machine's `error` state back to `connectingWorker`, so
+ * Try again is a real retry rather than a page reload.
  *
  * Soft-error tone, not destructive red: nothing was lost, the service just did
  * not start.
  *
- * @param properties - The root mount's machine, for the failure check and the retry.
- * @returns The notice, or undefined while the worker is still on its way.
+ * @param properties - The root mount's machine, for the failure check and the
+ *   retry, and what to show while the worker is still on its way.
+ * @returns The notice, or the placeholder.
  */
 function SharedWorkerFallback({
   fileManagerRef,
+  placeholder,
 }: {
   readonly fileManagerRef: FileManagerRef;
-}): React.JSX.Element | undefined {
+  readonly placeholder: ReactNode;
+}): React.ReactNode {
   const hasFailed = useSelector(fileManagerRef, (state) => state.matches('error'));
 
   if (!hasFailed) {
-    return undefined;
+    return placeholder;
   }
 
   return (
@@ -438,7 +441,21 @@ function SharedWorkerFallback({
   );
 }
 
-export function SharedWorkerGate({ children }: { readonly children: ReactNode }): React.ReactNode | undefined {
+/**
+ * Hold `children` until this document's file-manager worker exists.
+ *
+ * @param properties - The gated subtree, and the `placeholder` to show while
+ *   the worker connects. A route that knows what it is opening passes its own
+ *   loading state; without one the gate waits invisibly, as it always did.
+ * @returns The children, the placeholder, or the failure notice.
+ */
+export function SharedWorkerGate({
+  children,
+  placeholder,
+}: {
+  readonly children: ReactNode;
+  readonly placeholder?: ReactNode;
+}): React.ReactNode {
   const worker = useContext(SharedWorkerContext);
   const fileManager = useOptionalFileManager();
 
@@ -447,7 +464,11 @@ export function SharedWorkerGate({ children }: { readonly children: ReactNode })
   }
 
   /* Outside a provider there is no machine to report on, so the gate stays silent. */
-  return fileManager === undefined ? undefined : <SharedWorkerFallback fileManagerRef={fileManager.fileManagerRef} />;
+  return fileManager === undefined ? (
+    placeholder
+  ) : (
+    <SharedWorkerFallback fileManagerRef={fileManager.fileManagerRef} placeholder={placeholder} />
+  );
 }
 
 /**
@@ -481,6 +502,12 @@ export type FileManagerProviderProps = FileManagerProviderCommonProps &
 
 export type HomeFileManagerProviderProps = FileManagerProviderCommonProps & {
   readonly projectId?: string;
+  /**
+   * What to show while Home's storage engine resolves. This mount wraps the
+   * whole app, so a route that knows what it is opening passes its own loading
+   * state rather than leaving the window empty.
+   */
+  readonly placeholder?: ReactNode;
 };
 
 /** Resolve Home once at the app root and reuse that engine at every nested mount. */
@@ -489,7 +516,8 @@ export function HomeFileManagerProvider({
   rootDirectory,
   projectId,
   shouldInitializeOnStart,
-}: HomeFileManagerProviderProps): React.JSX.Element {
+  placeholder,
+}: HomeFileManagerProviderProps): React.ReactNode {
   const inheritedBackend = useContext(HomeStorageBackendContext);
   const [resolvedBackend, setResolvedBackend] = useState<HomeStorageBackend>();
   const [resolutionFailure, setResolutionFailure] = useState<Error>();
@@ -525,7 +553,8 @@ export function HomeFileManagerProvider({
   }
 
   if (!backend) {
-    return <div role='status' aria-label='Opening Home' />;
+    /* The placeholder carries its own status role; without one this is the bare live region. */
+    return placeholder ?? <div role='status' aria-label='Opening Home' />;
   }
 
   const fileManager = (

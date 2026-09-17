@@ -16,6 +16,7 @@ import {
 } from '#routes/w.$workspace.$project/project-route-state.js';
 import type { ProjectRouteSlugs } from '#routes/w.$workspace.$project/project-route-state.js';
 import { ProjectRouteRetryContext } from '#routes/w.$workspace.$project/project-route-notices.js';
+import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
 import type { ProjectSessionFlushRegistration } from '#routes/w.$workspace.$project/project-live-sessions.js';
 import { isKernelAvailable, nativeKernelRequirementForEntryPath } from '#constants/available-kernel-configurations.js';
 import { useLiveProjectIds, useSessions } from '#hooks/use-sessions.js';
@@ -328,15 +329,18 @@ export function ProjectRouteGate({
       : undefined;
 
   return (
-    <SharedWorkerGate>
+    /* The file service is part of opening this project, so its wait wears the project's own skeleton. */
+    <SharedWorkerGate placeholder={<WorkspaceSkeleton withShellFrame />}>
       <ProjectRouteStateContext.Provider value={state}>
         <ProjectRouteRetryContext.Provider value={handleRetryLoad}>
           <div className='contents' inert={pending || undefined} aria-busy={pending}>
             {/* P72: this keyed resource list stays at one React tree position for
                 project, loading, error and non-project routes alike. It is absent only while no
                 project is live at all, where it would render nothing anyway (W21). */}
+            {/* The shell is inside the boundary below once the editor is live, so a null fallback
+                would blank the window while the workspace chunk loads. */}
             {liveProjectIds.length > 0 ? (
-              <Suspense fallback={null}>
+              <Suspense fallback={isShellHostedByFocusedSession ? <WorkspaceSkeleton withShellFrame /> : null}>
                 <LiveProjectSessions
                   focused={focused}
                   liveProjectIds={liveProjectIds}
@@ -363,9 +367,12 @@ export function ProjectRouteGate({
   );
 }
 
+/** The canonical project URL, for the mounts that ask whether a project is what is opening. */
+export const projectRoutePath = '/w/:workspace/:project';
+
 /** Mount every live project below the app registry and place route chrome in the focused one. */
 export function ProjectSessionsHost({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
-  const match = useMatch({ path: '/w/:workspace/:project', end: true });
+  const match = useMatch({ path: projectRoutePath, end: true });
   /* Opening a project must not pay for the split: fetch the workspace chunk once the shell has
    * nothing better to do, so it is already there when a project goes live. */
   useEffect(() => {

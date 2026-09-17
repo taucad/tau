@@ -25,6 +25,7 @@ import { useFeatureFlags } from '#flags/use-feature.js';
 import { DesktopTitlebarControls } from '#components/layout/desktop-titlebar-controls.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { TauWordmark } from '#components/icons/tau-wordmark.js';
+import { sidebarPreferredWidth } from '#constants/sidebar.constants.js';
 
 export const headerHeight = 'calc(var(--spacing) * 12)';
 export const desktopHeaderHeight = 'calc(var(--spacing) * 9)';
@@ -33,7 +34,6 @@ const desktopTitlebarControlsWidth = 'calc(var(--spacing) * 47)';
 const webTitlebarControlsWidth = 'calc(var(--spacing) * 28)';
 
 const sidebarMinimumWidth = 192;
-const sidebarPreferredWidth = 224;
 const sidebarMaximumWidth = 480;
 const sidebarKeyboardResizeStep = 16;
 

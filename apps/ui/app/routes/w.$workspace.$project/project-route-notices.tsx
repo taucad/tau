@@ -37,6 +37,7 @@ import { useSessions } from '#hooks/use-sessions.js';
 import { projectSessionIdleWindowMilliseconds } from '#machines/project-session.machine.js';
 import type { ProjectSessionCloseReason } from '#machines/project-session.machine.js';
 import type { ProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
+import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
 import type { PendingProjectRecoveryReason } from '#types/pending-project-operation.types.js';
 
 /** Every verb a notice may offer. Closed on purpose: the table cannot invent an effect. @public */
@@ -134,7 +135,7 @@ export const describeProjectRouteNotice = (
       return undefined;
     }
     case 'resolving': {
-      /* The loader alone, so the shell does not flash in and out around it. */
+      /* Nothing to say yet: an empty title is what tells the renderer to show the workspace skeleton. */
       return { icon: Loader, tone: 'neutral', live: 'status', title: '', description: '', actions: [] };
     }
     case 'closed': {
@@ -346,6 +347,12 @@ export const ProjectRouteNotice = ({ state }: { readonly state: ProjectRouteStat
   const heading = noticeHeading(state);
   const isProgressOnly = spec.title === '';
 
+  /* Nothing to say yet, so this is the workspace arriving, not a notice about it: the same
+   * skeleton the session gate shows next, rather than a spinner and a header that both vanish. */
+  if (isProgressOnly) {
+    return <WorkspaceSkeleton />;
+  }
+
   return (
     <div data-slot='project-route-notice' className='flex h-full min-h-0 flex-col bg-background'>
       <header
@@ -357,60 +364,49 @@ export const ProjectRouteNotice = ({ state }: { readonly state: ProjectRouteStat
         {isMobile ? <SidebarTrigger aria-label='Toggle Sidebar' /> : null}
         {heading === '' ? null : <span className='truncate'>{heading}</span>}
       </header>
-      <div
-        className='flex min-h-0 flex-1 flex-col'
-        role={spec.live}
-        aria-busy={spec.live === 'status' || undefined}
-        aria-label={isProgressOnly ? 'Opening project' : undefined}
-      >
-        {isProgressOnly ? (
-          <div className='flex h-full items-center justify-center'>
-            <Loader />
+      <div className='flex min-h-0 flex-1 flex-col' role={spec.live} aria-busy={spec.live === 'status' || undefined}>
+        <PanelEmptyState
+          icon={spec.icon}
+          iconClassName={cn(spec.tone === 'soft-error' && 'text-feature')}
+          title={spec.title}
+          description={spec.description}
+          /* D2: PanelEmptyState's own mt-3 is tuned for small panes; a full route surface needs more air. */
+          className='p-6 [&_[data-slot=panel-empty-state-copy]]:mt-6'
+        >
+          <div className='flex w-full max-w-sm flex-col items-center gap-4'>
+            {spec.actions.length > 0 ? (
+              <div className='flex flex-wrap items-center justify-center gap-2'>
+                {spec.actions.map((action) => (
+                  <Button
+                    key={action.label}
+                    type='button'
+                    variant={action.isPrimary === true ? 'default' : 'outline'}
+                    onClick={() => {
+                      runAction(action.run);
+                    }}
+                  >
+                    {action.icon ? <action.icon /> : null}
+                    {action.label}
+                  </Button>
+                ))}
+              </div>
+            ) : null}
+            {spec.details === undefined ? null : (
+              <Collapsible className='w-full'>
+                <CollapsibleTrigger asChild>
+                  <Button type='button' variant='ghost' size='xs' className='text-muted-foreground'>
+                    Details
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <pre className='mt-2 max-h-40 overflow-auto rounded-md border bg-muted/30 p-2 text-left font-mono text-xs whitespace-pre-wrap text-muted-foreground'>
+                    {spec.details}
+                  </pre>
+                </CollapsibleContent>
+              </Collapsible>
+            )}
           </div>
-        ) : (
-          <PanelEmptyState
-            icon={spec.icon}
-            iconClassName={cn(spec.tone === 'soft-error' && 'text-feature')}
-            title={spec.title}
-            description={spec.description}
-            /* D2: PanelEmptyState's own mt-3 is tuned for small panes; a full route surface needs more air. */
-            className='p-6 [&_[data-slot=panel-empty-state-copy]]:mt-6'
-          >
-            <div className='flex w-full max-w-sm flex-col items-center gap-4'>
-              {spec.actions.length > 0 ? (
-                <div className='flex flex-wrap items-center justify-center gap-2'>
-                  {spec.actions.map((action) => (
-                    <Button
-                      key={action.label}
-                      type='button'
-                      variant={action.isPrimary === true ? 'default' : 'outline'}
-                      onClick={() => {
-                        runAction(action.run);
-                      }}
-                    >
-                      {action.icon ? <action.icon /> : null}
-                      {action.label}
-                    </Button>
-                  ))}
-                </div>
-              ) : null}
-              {spec.details === undefined ? null : (
-                <Collapsible className='w-full'>
-                  <CollapsibleTrigger asChild>
-                    <Button type='button' variant='ghost' size='xs' className='text-muted-foreground'>
-                      Details
-                    </Button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <pre className='mt-2 max-h-40 overflow-auto rounded-md border bg-muted/30 p-2 text-left font-mono text-xs whitespace-pre-wrap text-muted-foreground'>
-                      {spec.details}
-                    </pre>
-                  </CollapsibleContent>
-                </Collapsible>
-              )}
-            </div>
-          </PanelEmptyState>
-        )}
+        </PanelEmptyState>
       </div>
     </div>
   );

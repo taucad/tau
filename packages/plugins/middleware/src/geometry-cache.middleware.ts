@@ -108,11 +108,22 @@ const buildCodec: CacheCodec<CreateGeometryResult> = {
     if (result.data?.format === 'webrtc') {
       throw new Error('Live WebRTC geometry is not reusable.');
     }
-    if (result.data === undefined && result.serializedNativeHandle === undefined) {
+    /* D12: a fresh build carries the means to make its snapshot, not the snapshot — nothing on the
+     * display path reads one. A cache entry has to hold the value, so this is where it is made. */
+    const serializedNativeHandle = result.serializedNativeHandle ?? result.serializeNativeHandleSnapshot?.();
+    if (result.data === undefined && serializedNativeHandle === undefined) {
       throw new Error('A reusable build requires geometry or a serialized native handle.');
     }
-    const { [nativeBuildInputSymbol]: _nativeBuildInput, ...publicResult } = result;
-    return msgpackEncode({ schemaVersion: 1, result: publicResult, nativeBuildInput });
+    const {
+      [nativeBuildInputSymbol]: _nativeBuildInput,
+      serializeNativeHandleSnapshot: _serializeNativeHandleSnapshot,
+      ...publicResult
+    } = result;
+    return msgpackEncode({
+      schemaVersion: 1,
+      result: { ...publicResult, ...(serializedNativeHandle === undefined ? {} : { serializedNativeHandle }) },
+      nativeBuildInput,
+    });
   },
   decode: ({ bytes }) => {
     const entry = buildEntrySchema.parse(msgpackDecode(bytes));

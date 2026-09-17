@@ -291,21 +291,27 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
       this.captureNativeHandle(output.nativeHandle, owner);
 
-      if (kernel.definition.serializeNativeHandle) {
-        const serializedNativeHandle = kernel.definition.serializeNativeHandle(
-          { nativeHandle: output.nativeHandle },
-          kernelRuntime,
-          kernel.ctx,
-        );
-        if (serializedNativeHandle === undefined || serializedNativeHandle === null) {
-          throw new Error('Kernel native-handle snapshot serializer returned null or undefined.');
-        }
-
+      const { serializeNativeHandle } = kernel.definition;
+      if (serializeNativeHandle) {
+        const { nativeHandle } = output;
         return {
           success: true,
           data: output.geometry,
           issues: output.issues ?? [],
-          serializedNativeHandle,
+          /* D12: the snapshot is an export artifact that no display render reads, and serialising a
+           * Replicad or OpenCascade shape is not cheap — so it is produced where someone asks for
+           * it. The liveness check is load-bearing, not defensive: this thunk outlives the handle,
+           * and serialising a disposed kernel shape is a crash. */
+          serializeNativeHandleSnapshot: () => {
+            if (!this.isNativeHandleLive(nativeHandle)) {
+              return undefined;
+            }
+            const serialized = serializeNativeHandle({ nativeHandle }, kernelRuntime, kernel.ctx);
+            if (serialized === undefined || serialized === null) {
+              throw new Error('Kernel native-handle snapshot serializer returned null or undefined.');
+            }
+            return serialized;
+          },
         };
       }
 

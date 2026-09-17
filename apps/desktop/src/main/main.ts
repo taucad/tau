@@ -330,6 +330,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
       clientRoot,
       protocol,
       net,
+      /* OQ-P11: development and staging only. Unpackaged is exactly that here — a packaged app
+       * has no developer to take the profile. */
+      jsProfiling: !app.isPackaged,
       contentSecurityPolicy: contentSecurityPolicy(
         storageOrigin === undefined ? authenticatedOrigins : [...authenticatedOrigins, storageOrigin],
       ),

@@ -76,11 +76,12 @@ describe('registerAppProtocol response headers', () => {
    *
    * @returns The handler plus the `net.fetch` stub it calls.
    */
-  const handlerFor = () => {
+  const handlerFor = (jsProfiling?: boolean) => {
     let handler: ((request: Request) => Promise<Response> | Response) | undefined;
     const fetched: string[] = [];
     registerAppProtocol({
       clientRoot,
+      jsProfiling,
       protocol: {
         handle: (scheme, installed) => {
           expect(scheme).toBe(appScheme);
@@ -118,6 +119,18 @@ describe('registerAppProtocol response headers', () => {
     const response = await handler(new Request(`${appOrigin}/w/acme/widget`));
     expect(response.headers.get('cross-origin-embedder-policy')).toBe('require-corp');
     expect(response.headers.get('content-type')).toBe('text/html; charset=utf-8');
+  });
+
+  it('offers the JS profiler on an unpackaged build only, and only to the document (OQ-P11)', async () => {
+    const { handler } = handlerFor(true);
+    const document = await handler(new Request(`${appOrigin}/w/acme/widget`));
+    expect(document.headers.get('document-policy')).toBe('js-profiling');
+    // A script response carrying it would say nothing: the policy is the document's.
+    const script = await handler(new Request(`${appOrigin}/assets/entry.js`));
+    expect(script.headers.get('document-policy')).toBeNull();
+
+    const packaged = await handlerFor().handler(new Request(`${appOrigin}/w/acme/widget`));
+    expect(packaged.headers.get('document-policy')).toBeNull();
   });
 
   it('pins the content types that must not be guessed, and keeps the isolation headers with them', async () => {

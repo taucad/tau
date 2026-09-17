@@ -92,13 +92,23 @@ vi.mock('#services/agent-host-client.js', () => ({
 }));
 
 /** The host directory's refusal, recorded by discovery exactly as the real one does. */
-const directoryHarness = vi.hoisted(() => ({ outage: undefined as string | undefined, refusal: 'offline' }));
+const directoryHarness = vi.hoisted(() => ({
+  outage: undefined as string | undefined,
+  refusal: 'offline',
+  /** Targets each listing answers, shifted one per call so a retry can differ. */
+  listings: [] as Array<readonly unknown[]>,
+  calls: 0,
+  /** Whether the last listing lost a source, as the real module records it. */
+  incomplete: false,
+}));
 vi.mock('#lib/agent-host-placement.js', () => ({
   listAgentHostPlacements: async () => {
+    directoryHarness.calls += 1;
     directoryHarness.outage = directoryHarness.refusal;
-    return [];
+    return directoryHarness.listings.shift() ?? [];
   },
   hostDirectoryOutage: () => directoryHarness.outage,
+  hostPlacementsIncomplete: () => directoryHarness.incomplete,
 }));
 
 const noop = (): void => undefined;
@@ -169,6 +179,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetBrowserAgentHostAvailability();
   directoryHarness.outage = undefined;
+  directoryHarness.listings.length = 0;
+  directoryHarness.calls = 0;
+  directoryHarness.incomplete = false;
   capabilityHarness.supported = true;
   capabilityHarness.readError = undefined;
   bridgeHarness.open.mockReturnValue({ port: new MessageChannel().port1, dispose: vi.fn() });
@@ -332,6 +345,37 @@ describe('useCadAgentConfig', () => {
     renderHook(() => useAgentHostPlacements());
 
     await expect(settled).resolves.toEqual({ status: 'unavailable', reason: 'offline' });
+  });
+
+  it('should retry placement discovery after a failed listing', async () => {
+    /* The external-agent IPC failed, so this computer's row lost Claude Code
+     * and Codex. Discovery runs once per project, so without a retry they stay
+     * missing until the project changes. */
+    directoryHarness.incomplete = true;
+    const recovered = [
+      {
+        hostId: 'desktop',
+        rung: 'in-process',
+        label: 'This computer',
+        workspaceRoot: '',
+        online: true,
+        externalAgents: [{ id: 'codex' }],
+      },
+    ];
+    directoryHarness.listings = [[], recovered];
+
+    const { result } = renderHook(() => useAgentHostPlacements());
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+    expect(result.current.targets).toEqual([]);
+
+    globalThis.dispatchEvent(new Event('focus'));
+
+    await waitFor(() => {
+      expect(result.current.targets).toEqual(recovered);
+    });
+    expect(directoryHarness.calls).toBe(2);
   });
 
   it('bounds the dispatch wait rather than hanging a turn forever', async () => {

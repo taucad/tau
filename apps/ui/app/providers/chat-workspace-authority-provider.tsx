@@ -151,21 +151,46 @@ type RootedBridgeReadyContext = FileManagerContext & {
 const hasRootedBridgeOpener = (context: FileManagerContext): context is RootedBridgeReadyContext =>
   context.openFileSystemBridge !== undefined;
 
-/** Wait for the file-manager machine to mint the rooted bridge opener. */
+/**
+ * How long a turn waits for the file manager to mint the rooted bridge opener
+ * before giving up. Milliseconds.
+ */
+const rootedBridgeOpenerTimeout = 30_000;
+
+/**
+ * Wait for the file-manager machine to mint the rooted bridge opener.
+ *
+ * Bounded on purpose: the caller memoizes this connection, so an opener that
+ * never arrives used to wedge the chat for the life of the page — the first
+ * submit hung in `prepare` and every later one was told a turn was still
+ * starting. A failure rejects instead, and reaches the chat's error banner.
+ */
 export const waitForRootedBridgeOpener = async (fileManagerRef: FileManagerRef): Promise<RootedBridgeReadyContext> => {
   const current = fileManagerRef.getSnapshot().context;
   if (hasRootedBridgeOpener(current)) {
     return current;
   }
-  return new Promise((resolve) => {
-    const finish = (context: FileManagerContext): void => {
-      if (!hasRootedBridgeOpener(context)) {
-        return;
-      }
-      resolve(context);
+  return new Promise((resolve, reject) => {
+    const release = (): void => {
+      globalThis.clearTimeout(openerExpiry);
       queueMicrotask(() => {
         subscription.unsubscribe();
       });
+    };
+    const openerExpiry = globalThis.setTimeout(() => {
+      release();
+      reject(new Error('The project filesystem did not finish starting. Reload the page and try again.'));
+    }, rootedBridgeOpenerTimeout);
+    const finish = (context: FileManagerContext): void => {
+      if (hasRootedBridgeOpener(context)) {
+        release();
+        resolve(context);
+        return;
+      }
+      if (context.error !== undefined) {
+        release();
+        reject(context.error);
+      }
     };
     const subscription = fileManagerRef.subscribe((state) => {
       finish(state.context);

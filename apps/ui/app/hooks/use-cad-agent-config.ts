@@ -16,7 +16,7 @@ import {
   waitForRootedBridgeOpener,
 } from '#providers/chat-workspace-authority-provider.js';
 import type { StorageDurabilityClass } from '@taucad/agent-host';
-import { hostDirectoryOutage, listAgentHostPlacements } from '#lib/agent-host-placement.js';
+import { hostDirectoryOutage, hostPlacementsIncomplete, listAgentHostPlacements } from '#lib/agent-host-placement.js';
 import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
 import { unknownIconId } from '#components/icons/svg-icon.js';
 
@@ -283,8 +283,17 @@ export const useAgentHostPlacements = (): {
       }
     };
     void discover();
+    /* A listing that lost a source is missing rows, not reporting their
+     * absence — so the next time the window is looked at, ask again. */
+    const rediscoverIfIncomplete = (): void => {
+      if (hostPlacementsIncomplete()) {
+        void discover();
+      }
+    };
+    globalThis.addEventListener('focus', rediscoverIfIncomplete);
     return () => {
       active = false;
+      globalThis.removeEventListener('focus', rediscoverIfIncomplete);
     };
   }, [projectId]);
 

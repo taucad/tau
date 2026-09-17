@@ -11,8 +11,8 @@
 import type { OpenCascadeInstance } from 'replicad-opencascadejs';
 import type { AnyShape } from 'replicad';
 import type * as ReplicadModule from 'replicad';
-import { digestContent } from '@taucad/cache-core';
-import type { CacheValue, ComputeAction } from '@taucad/cache-core';
+import { contentDigest, digestContent } from '@taucad/cache-core';
+import type { CacheValue, ComputeAction, ContentDigest } from '@taucad/cache-core';
 import { createExportFile } from '@taucad/runtime/types';
 import type {
   GeometryGltf,
@@ -112,6 +112,15 @@ const replicadSourceMapUrl = new URL('sourcemaps/replicad.js.map', import.meta.u
 const replicadSingleWasmUrl = new URL(import.meta.resolve('replicad-opencascadejs/wasm')).href;
 const replicadMultiWasmUrl = new URL(import.meta.resolve('replicad-opencascadejs/multi/wasm')).href;
 
+// Content digests of the two shipped OCCT binaries. The digest of a shipped asset is a
+// build-time constant, so reading and SHA-256ing 23 MB again at every init (~20 ms of cold
+// start) only recovers these values. `asset-ownership.test.ts` recomputes both from the
+// installed binaries and fails when the dependency moves.
+const replicadWasmDigests = {
+  single: 'sha256:ca354769b158aa38479e6fa59bc7511d0fa896059ce755a0cff85261a637ee6a',
+  multi: 'sha256:31b1fdd375d8257218bdeb155f7aeaf34e074f8ddb01a815ea7ebfa85d4e6444',
+} as const;
+
 // =============================================================================
 // WASM variant selection
 // =============================================================================
@@ -194,6 +203,34 @@ async function resolveWasm(wasm: WasmOption, logger: RuntimeLogger, tracer?: Run
   } finally {
     span?.end();
   }
+}
+
+/**
+ * Identify the implementation assets that participate in compute-reuse identity.
+ *
+ * A built-in variant resolves to its constant digest; only a caller-supplied pair has no
+ * build-time identity, so it alone is read and hashed. Returns undefined when a supplied
+ * asset cannot be read, which leaves compute reuse without an implementation identity.
+ *
+ * @param variant - Concrete variant chosen by {@link resolveWasm}.
+ * @param customUrls - Caller-supplied asset URLs, empty for the built-in variants.
+ * @returns The asset digests, or undefined when they could not be identified.
+ */
+async function identifyImplementationAssets(
+  variant: ResolvedWasm['variant'],
+  customUrls: readonly string[],
+): Promise<readonly ContentDigest[] | undefined> {
+  if (variant !== 'custom') {
+    return [contentDigest({ value: replicadWasmDigests[variant] })];
+  }
+
+  const loaded = await Promise.all(customUrls.map(async (url) => loadBinaryFile(url)));
+  const present = loaded.filter((bytes): bytes is ArrayBuffer => bytes !== undefined);
+  if (loaded.length === 0 || present.length !== loaded.length) {
+    return undefined;
+  }
+
+  return Promise.all(present.map(async (bytes) => digestContent({ bytes: new Uint8Array(bytes) })));
 }
 
 // =============================================================================
@@ -494,26 +531,17 @@ export const replicadKernel = defineKernel({
     }
 
     // Off constructs nothing: no asset read, no digest, no adapter (D14, I13, A5).
-    const implementationUrls =
+    const identifiedAssets =
       computeReuseOption === false
-        ? []
-        : [
-            ...(resolved.wasmUrl ? [resolved.wasmUrl] : []),
-            ...(typeof wasm === 'string' ? [] : [wasm.wasmBindingsUrl]),
-          ];
-    const implementationBytes = await Promise.all(implementationUrls.map(async (url) => loadBinaryFile(url)));
-    const resolvedImplementationBytes = implementationBytes.filter(
-      (bytes): bytes is ArrayBuffer => bytes !== undefined,
-    );
-    const assetsIdentified =
-      implementationUrls.length > 0 && resolvedImplementationBytes.length === implementationBytes.length;
+        ? undefined
+        : await identifyImplementationAssets(
+            resolved.variant,
+            typeof wasm === 'string' ? [] : [wasm.wasmUrl, wasm.wasmBindingsUrl],
+          );
+    const assetsIdentified = identifiedAssets !== undefined;
     // Explicit off wins; omission keeps the historical asset-derived default (C2).
     const computeReuseEnabled = computeReuseOption ?? assetsIdentified;
-    const implementationAssets = assetsIdentified
-      ? await Promise.all(
-          resolvedImplementationBytes.map(async (bytes) => digestContent({ bytes: new Uint8Array(bytes) })),
-        )
-      : [];
+    const implementationAssets = identifiedAssets ?? [];
     if (!assetsIdentified && computeReuseOption !== false) {
       logger.warn('Replicad semantic compute reuse disabled because implementation assets could not be identified.');
     }

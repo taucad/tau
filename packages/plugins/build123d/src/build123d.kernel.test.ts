@@ -136,6 +136,22 @@ describe('Build123d kernel lifecycle errors', () => {
     expect(context.session.request).not.toHaveBeenCalled();
   });
 
+  it('spans the native analyze so its wire time is attributed', async () => {
+    const context = createContext();
+    context.session.request.mockResolvedValueOnce({
+      defaultParameters: { width: 25.4 },
+      jsonSchema: { type: 'object' },
+      declaration: parameterDeclaration,
+      resolved: ['main.py'],
+      unresolved: [],
+    });
+
+    await definition.getParameters({ entryPath: 'main.py' }, runtime, context);
+
+    /* D8: a native kernel's time is in the trace, not only in its own process. */
+    expect(runtime.tracer.startSpan).toHaveBeenCalledWith('build123d.analyze', { entryPath: 'main.py' });
+  });
+
   it('returns structured generic and stale-handle failures', async () => {
     const context = createContext();
     context.session.request.mockResolvedValueOnce({

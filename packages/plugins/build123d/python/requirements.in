@@ -1,5 +1,7 @@
-# Native CAD runtime. Both direct dependencies are pinned; uv resolves and hashes every wheel below.
+# Native CAD runtime. Every direct dependency is pinned; uv resolves and hashes every wheel below.
 build123d==0.11.1
 cadquery-ocp-novtk==7.9.3.1.1
+# `glb.py` imports numpy itself, so it is a direct dependency and not build123d's to drop.
+numpy==2.5.2
 # Test instrumentation is bundled so release-matrix tests use the exact shipped interpreter offline.
 coverage==7.10.7

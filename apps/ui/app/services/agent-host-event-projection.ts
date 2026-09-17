@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { UIMessageChunk } from 'ai';
 import type { AgentLiveEvent, AgentLogEvent, ProviderMessageMetadata } from '@taucad/agent-host';
+import { externalAgentStopSchema } from '@taucad/agent-host';
 import type { AcpSessionData, BillingInvocationStatus, MyUIMessage } from '@taucad/chat';
 import { acpSessionDataSchema, billingInvocationStatusSchema } from '@taucad/chat';
 import { errorCategoryTitles, httpStatusToCategory } from '@taucad/chat/utils';
@@ -30,7 +31,12 @@ const errorText = (value: unknown, fallback: string): string => {
           ? errorCategory.credits
           : typeof status === 'number'
             ? httpStatusToCategory(status)
-            : code === 'EXTERNAL_AGENT_LIMIT_REACHED'
+            : /* `rateLimit` is the external agent's *stop* card, and that card
+               * is keyed on the stop details. A limit refused before the
+               * adapter classified anything carries the code alone, and
+               * claiming the category without the details it needs dropped the
+               * person onto a card with no "Try again" (R3-F4). */
+              code === 'EXTERNAL_AGENT_LIMIT_REACHED' && externalAgentStopSchema.safeParse(details).success
               ? errorCategory.rateLimit
               : errorCategory.generic;
       return JSON.stringify({

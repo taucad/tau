@@ -867,6 +867,32 @@ describe('projectAgentHostEvent', () => {
     });
   });
 
+  /*
+   * The same code, refused before the adapter classified anything — an
+   * admission-time limit carries the code and nothing else. `rateLimit` is the
+   * agent-stop card's category, and that card is keyed on the stop details:
+   * without them the surface falls through to the bare rate-limit card, which
+   * has no "Try again" (R3-F4). A category a card cannot honour is not this
+   * projection's to claim.
+   */
+  it('should project a detail-less agent limit as a generic card', () => {
+    const [chunk] = projectAgentHostEvent({
+      ...base,
+      type: 'run.lifecycle',
+      state: 'failed',
+      detail: { code: 'EXTERNAL_AGENT_LIMIT_REACHED', message: "You've hit your usage limit." },
+    });
+    if (chunk?.type !== 'error') {
+      throw new Error('Expected an error projection');
+    }
+    expect(JSON.parse(chunk.errorText)).toEqual({
+      category: 'generic',
+      title: 'Error',
+      message: "You've hit your usage limit.",
+      code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+    });
+  });
+
   it('should carry a host failure code that has no status or details', () => {
     const [chunk] = projectAgentHostEvent({
       ...base,

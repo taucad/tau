@@ -780,24 +780,50 @@ export const createChannelClient = <P extends RpcProtocol = EmptyRpcProtocol>(
   let resolveReady: () => void = (): void => undefined;
   let rejectReady: (reason: Error) => void = (): void => undefined;
   /* A server that never sends its hello closes the channel instead of leaving
-   * `ready` — and every call queued behind it — pending for the session. Armed
-   * before the port is wired, so a hello only ever clears a timer that exists;
-   * `rejectReady` and `closeController` are bound long before it can fire. */
-  const helloTimer = setTimeout(() => {
-    rejectReady(new Error(`Channel server sent no hello within ${defaultHelloTimeout}ms.`));
-    closeController.initiateLocal('hello-timeout');
-  }, defaultHelloTimeout);
-  unrefTimer(helloTimer);
+   * `ready` — and every call queued behind it — pending for the session. The
+   * deadline is the *server's* to meet: a port that connects reports when its
+   * wire is carrying (`Port.opened`), and arming before that spent the budget
+   * on DNS, TCP, TLS and the upgrade instead — a false expiry no reconnect
+   * undoes. A hello that beat the arming clears nothing: `helloSettled` keeps
+   * the timer from being armed at all. */
+  let helloTimer: ReturnType<typeof setTimeout> | undefined;
+  let helloSettled = false;
+  const armHelloDeadline = (): void => {
+    if (helloSettled) {
+      return;
+    }
+    helloTimer = setTimeout(() => {
+      rejectReady(new Error(`Channel server sent no hello within ${defaultHelloTimeout}ms.`));
+      closeController.initiateLocal('hello-timeout');
+    }, defaultHelloTimeout);
+    unrefTimer(helloTimer);
+  };
   const ready = new Promise<void>((resolve, reject) => {
     resolveReady = (): void => {
+      helloSettled = true;
       clearTimeout(helloTimer);
       resolve();
     };
     rejectReady = (reason): void => {
+      helloSettled = true;
       clearTimeout(helloTimer);
       reject(reason);
     };
   });
+  if (port.opened === undefined) {
+    armHelloDeadline();
+  } else {
+    /* async-iife: bootstrap — the deadline starts when the wire is carrying. A
+     * wire that dies before it opens is reported by `onClose`, not by this. */
+    void (async (): Promise<void> => {
+      try {
+        await port.opened;
+      } catch {
+        // A port that cannot report its open still gets the deadline.
+      }
+      armHelloDeadline();
+    })();
+  }
   // async-iife: bootstrap — silence unhandledrejection when consumers never await ready;
   // the public `ready` promise itself remains unwrapped so consumers can handle errors.
   void (async (): Promise<void> => {

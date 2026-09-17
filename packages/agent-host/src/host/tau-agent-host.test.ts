@@ -8,11 +8,11 @@ import type {
   ModelTransport,
   ToolRegistry,
 } from '#waist/ports.js';
-import { createTauAgentHost } from '#host/tau-agent-host.js';
-import type { ExternalAgentPort } from '#host/tau-agent-host.js';
+import { createTauAgentHost, hostRunStateOfLifecycle, isHostRunOperationLegal } from '#host/tau-agent-host.js';
+import type { ExternalAgentPort, HostRunOperation, HostRunState } from '#host/tau-agent-host.js';
 import { reduceEventLog } from '#log/reducer.js';
 import { ScriptedParityModelTransport, scriptedParityResponses } from '#host/scripted-model.fixture.js';
-import type { JsonObject, ProviderMessage } from '#log/event-types.js';
+import type { AgentLogEvent, JsonObject, ProviderMessage } from '#log/event-types.js';
 import { GatewayModelTransportError } from '#transport/gateway-model-transport.js';
 
 const tauInternal = (message: ProviderMessage | undefined): JsonObject | undefined => message?.metadata?.tauInternal;
@@ -42,6 +42,65 @@ const createMemoryLogFile = () => {
 const createIds = (prefix: string) => {
   let next = 0;
   return () => `${prefix}-${next++}`;
+};
+
+/** One scripted durable record, with the log's own base fields left to {@link seedLog}. */
+type SeededLogEvent = AgentLogEvent extends infer Event
+  ? Event extends AgentLogEvent
+    ? Omit<Event, 'version' | 'leaderEpoch' | 'sequence' | 'recordedAt'>
+    : never
+  : never;
+
+/**
+ * Write a scripted log before any host opens it.
+ *
+ * Lets a row state the log's exact shape — including shapes a fixed host will
+ * no longer write, such as a settlement recorded under a run that was never
+ * admitted — instead of driving a sequence of turns to approximate one.
+ */
+const seedLog = async (file: ReturnType<typeof createMemoryLogFile>, events: readonly SeededLogEvent[]) => {
+  const appender = await file.open();
+  let sequence = 0;
+  for (const event of events) {
+    // oxlint-disable-next-line no-await-in-loop -- the log's sequence discipline is serial by construction.
+    await appender.append({
+      ...event,
+      version: 1,
+      leaderEpoch: 'epoch-seed',
+      sequence,
+      recordedAt: new Date(Date.UTC(2026, 8, 1)).toISOString(),
+    } as AgentLogEvent);
+    sequence++;
+  }
+  await appender.close();
+};
+
+/** Every record a log holds, read through a fresh appender. */
+const readLog = async (file: ReturnType<typeof createMemoryLogFile>) => {
+  const appender = await file.open();
+  return appender.read();
+};
+
+/** A completed first turn, as a chat's log holds it. */
+const completedFirstTurn: readonly SeededLogEvent[] = [
+  { type: 'message.appended', runId: 'run-1', message: { id: 'turn-1', role: 'user', content: 'First.' } },
+  { type: 'run.lifecycle', runId: 'run-1', state: 'admitted' },
+  { type: 'run.lifecycle', runId: 'run-1', state: 'running' },
+  {
+    type: 'message.appended',
+    runId: 'run-1',
+    message: { id: 'assistant-1', role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
+  },
+  { type: 'run.lifecycle', runId: 'run-1', state: 'completed' },
+];
+
+/** The abandoned second turn's settlement, written under a run nothing admitted. */
+const settlementOnlySecondRun: SeededLogEvent = {
+  type: 'turn.failed',
+  runId: 'run-2',
+  chatId: 'chat-settlement-only',
+  turnId: 'turn-2',
+  reason: 'The turn ended before it recorded a revision.',
 };
 
 const resolvedInterruptPort = () =>
@@ -246,7 +305,8 @@ describe('createTauAgentHost', () => {
       },
     });
 
-    expect((await (await file.open()).read()).at(-1)).toMatchObject({
+    const recorded = await readLog(file);
+    expect(recorded.at(-1)).toMatchObject({
       type: 'turn.finalized',
       runId: 'run-settlement',
       revisionId: 'revision-settlement',
@@ -1252,5 +1312,171 @@ the cancelled tools left the system unchanged.
     expect(aborted).toBe(true);
     await expect(host.snapshot('chat-external-cancel')).resolves.toMatchObject({ state: 'cancelled' });
     await host.close();
+  });
+  it('admits a run whose only record is a settlement written under its id', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, [...completedFirstTurn, settlementOnlySecondRun]);
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'settlement-only',
+      }),
+    );
+
+    await host.admit({
+      chatId: 'chat-settlement-only',
+      runId: 'run-2',
+      trigger: 'submit',
+      message: { id: 'turn-2', role: 'user', content: 'Second.' },
+    });
+
+    const events = await readLog(file);
+    expect(
+      events.flatMap((event) => (event.runId === 'run-2' && event.type === 'run.lifecycle' ? [event.state] : [])),
+    ).toEqual(['admitted', 'running', 'completed']);
+    /* The turn the user actually sent is committed under the new run, which is
+     * what a replayed `start` reads to tell a real admission from a phantom. */
+    expect(
+      events.find((event) => event.runId === 'run-2' && event.type === 'turn.history-projection-committed'),
+    ).toMatchObject({ message: { id: 'turn-2' } });
+    await host.close();
+  });
+
+  it('refuses a re-admission of a run that already has a lifecycle record', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, completedFirstTurn);
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'readmit',
+      }),
+    );
+
+    await expect(
+      host.admit({
+        chatId: 'chat-readmit',
+        runId: 'run-1',
+        trigger: 'submit',
+        message: { id: 'turn-1-again', role: 'user', content: 'Again.' },
+      }),
+    ).rejects.toMatchObject({ code: 'RUN_ADMISSION_CONFLICT' });
+    await host.close();
+  });
+
+  it('names the last run with a lifecycle and resumes nothing for a settlement-only tail', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, [...completedFirstTurn, settlementOnlySecondRun]);
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'settlement-tail',
+      }),
+    );
+
+    await expect(host.snapshot('chat-settlement-only')).resolves.toMatchObject({
+      runId: 'run-1',
+      state: 'completed',
+    });
+    const before = await readLog(file);
+    await host.resume('chat-settlement-only');
+
+    const after = await readLog(file);
+    expect(after).toHaveLength(before.length);
+    await host.close();
+  });
+
+  it('refuses a settlement for a run that was never admitted', async () => {
+    const file = createMemoryLogFile();
+    await seedLog(file, completedFirstTurn);
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: {
+          async *stream(): AsyncGenerator<ModelStreamEvent> {
+            yield { type: 'completed', stopReason: 'stop' };
+          },
+        },
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        idPrefix: 'unadmitted-settlement',
+      }),
+    );
+
+    await expect(
+      host.recordSettlement({
+        chatId: 'chat-unadmitted',
+        runId: 'run-unknown',
+        event: {
+          type: 'turn.failed',
+          turnId: 'turn-1',
+          chatId: 'chat-unadmitted',
+          reason: 'The turn ended before it recorded a revision.',
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'SETTLEMENT_WITHOUT_RUN' });
+    const remaining = await readLog(file);
+    expect(remaining).toHaveLength(completedFirstTurn.length);
+    await host.close();
+  });
+});
+
+/**
+ * The run ledger's whole table, stated once (R9).
+ *
+ * `admit`, `resume`, `recordSettlement` and `cancel` each used to decide their
+ * own legality from a different reading of the same facts. This is the table
+ * they now agree on, written out in full so a change to any one cell is a
+ * change to this file rather than a surprise in one of the four.
+ */
+describe('the host run ledger', () => {
+  const states: readonly HostRunState[] = ['none', 'reserved', 'admitted', 'running', 'paused', 'terminal'];
+  const legal: Readonly<Record<HostRunOperation, readonly HostRunState[]>> = {
+    admit: ['none', 'terminal'],
+    resume: ['admitted', 'running', 'paused', 'terminal'],
+    settle: ['reserved', 'admitted', 'running', 'paused', 'terminal'],
+    cancel: ['reserved', 'admitted', 'running', 'paused'],
+  };
+
+  it.each(Object.keys(legal) as HostRunOperation[])('should allow %s from exactly its own states', (operation) => {
+    expect(states.filter((state) => isHostRunOperationLegal(operation, state))).toEqual(legal[operation]);
+  });
+
+  it.each([
+    [undefined, 'none'],
+    ['admitted', 'admitted'],
+    ['running', 'running'],
+    ['paused', 'paused'],
+    ['completed', 'terminal'],
+    ['failed', 'terminal'],
+    ['cancelled', 'terminal'],
+  ] as const)('should read the lifecycle %s as %s', (lifecycle, expected) => {
+    expect(hostRunStateOfLifecycle(lifecycle)).toBe(expected);
+  });
+
+  it('should refuse a settlement only where the ledger does', () => {
+    /* The invariant the wedge broke: a run with no lifecycle record is `none`,
+     * and `none` is the one state a settlement may not be recorded from. */
+    expect(isHostRunOperationLegal('settle', hostRunStateOfLifecycle(undefined))).toBe(false);
+    expect(isHostRunOperationLegal('settle', hostRunStateOfLifecycle('completed'))).toBe(true);
+    /* And the mirror: a run the log already admitted may not be admitted again. */
+    expect(isHostRunOperationLegal('admit', hostRunStateOfLifecycle('running'))).toBe(false);
+    expect(isHostRunOperationLegal('admit', hostRunStateOfLifecycle('completed'))).toBe(true);
   });
 });

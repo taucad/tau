@@ -247,6 +247,29 @@ describe('createServicesBroker', () => {
     expect(spawns[0]?.postMessage).toHaveBeenCalledWith({ type: 'runtime-port-refused', requestId: 'runtime-a' });
   });
 
+  /*
+   * The last holder is dropped up front, whatever the utility answers — so a
+   * release that times out (or that the utility reports as failed) still ends
+   * with nobody holding this root. Leaving its rows behind left
+   * `computeProjectRoot` answering for a root no window holds, and the next
+   * runtime port was minted off that stale grant (R3-F5).
+   */
+  it('should leave no stale project state when a release times out', async () => {
+    const { broker, spawns } = brokerHarness();
+    broker.retainAgentHost({ workspaceRoot: '/home/a', projectId: 'a', attachmentId: 'window-1' });
+    broker.connect('agentHost', { workspaceRoot: '/home/a', projectId: 'a', computeMode: 'durable' });
+    expect(broker.computeProjectRoot('/home/a')).toBe('/home/a');
+
+    // The utility never answers this release.
+    await expect(
+      broker.releaseAgentHost({ workspaceRoot: '/home/a', projectId: 'a', attachmentId: 'window-1' }, 0),
+    ).rejects.toThrow('timed out');
+
+    expect(broker.computeProjectRoot('/home/a')).toBeUndefined();
+    spawns[0]?.message({ type: 'runtime-port-request', requestId: 'runtime-a', workspaceRoot: '/home/a' });
+    expect(spawns[0]?.postMessage).toHaveBeenCalledWith({ type: 'runtime-port-refused', requestId: 'runtime-a' });
+  });
+
   it('mints runtime ports only from a main-admitted agent context', () => {
     const { broker, connectRuntime, spawns } = brokerHarness();
     broker.connect('agentHost', {

@@ -511,3 +511,81 @@ it('refuses a start that names an external agent instead of running it on Tau', 
     await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
   }
 });
+
+/*
+ * V9: the run id is the admission idempotency key, so the *same* key arriving
+ * twice is a duplicate dispatch — a retried post, a double-fired effect — not a
+ * second turn. The worker consulted its durable log only when it knew it had
+ * replayed the command, so an ordinary duplicate reached `admit` and came back
+ * as RUN_ADMISSION_CONFLICT, which the page surfaces as a failed turn even
+ * though the first copy ran to completion.
+ */
+it('answers a duplicate start under a settled run id with that run, not a conflict', async () => {
+  const fileSystemProvider = new OPFSProvider();
+  provider = fileSystemProvider;
+  await fileSystemProvider.initialize();
+  const { createFileSystemBridgePort } = await import('@taucad/fs-bridge');
+  const providerBasePath = `agent-host-duplicate-${crypto.randomUUID()}`;
+  const workspace = rootedProvider(fileSystemProvider, providerBasePath);
+  const sessionId = `session-${crypto.randomUUID()}`;
+  const start = {
+    type: 'start',
+    chatId: 'chat-duplicate-start',
+    runId: 'run-duplicate-start',
+    trigger: 'submit',
+    message: { id: 'user-duplicate-start', role: 'user', content: 'Answer once.' },
+  } as const;
+
+  try {
+    await handleAgentHostWorkerRequest(
+      {
+        type: 'initialize',
+        fileSystemPort: createFileSystemBridgePort(workspace).port,
+        projectRootPort: createFileSystemBridgePort(workspace).port,
+        projectStorage: { projectId: providerBasePath, backend: 'opfs', providerBasePath },
+        authority: { projectId: providerBasePath, workspaceId: providerBasePath },
+        gatewayBaseUrl: location.origin,
+        systemPrompt: 'Browser duplicate-start fixture.',
+        systemPromptBlocks: [
+          { type: 'text', text: 'Browser duplicate-start fixture.' },
+          { type: 'text', text: 'Dynamic fixture.' },
+        ],
+        model: { id: 'fixture-model', providerKind: 'vertexai', contextWindow: 200_000 },
+        runtimeConfig: { tauApiUrl: 'https://api.tau.test', tauWebSocketUrl: 'wss://api.tau.test' },
+      },
+      sessionId,
+    );
+    await handleAgentHostWorkerRequest(start, sessionId);
+    await vi.waitFor(
+      async () => {
+        const attached = await handleAgentHostWorkerRequest(
+          { type: 'attach', chatId: start.chatId, cursor: 0, limit: agentHostTailBatchLimit },
+          sessionId,
+        );
+        const settled = attached.type === 'attach' ? attached.snapshot : undefined;
+        if (settled?.state !== 'completed') {
+          throw new Error(`Run is ${settled?.state ?? 'unknown'}.`);
+        }
+      },
+      { timeout: 20_000, interval: 50 },
+    );
+
+    await expect(handleAgentHostWorkerRequest(start, sessionId)).resolves.toMatchObject({
+      type: 'result',
+      operation: 'start',
+      snapshot: { runId: start.runId, state: 'completed' },
+    });
+
+    // The duplicate appended no second turn under the same key.
+    const attached = await handleAgentHostWorkerRequest(
+      { type: 'attach', chatId: start.chatId, cursor: 0, limit: agentHostTailBatchLimit },
+      sessionId,
+    );
+    const committed = (attached.type === 'attach' ? attached.batch.events : []).filter(
+      (event) => event.type === 'turn.history-projection-committed' && event.runId === start.runId,
+    );
+    expect(committed).toHaveLength(1);
+  } finally {
+    await handleAgentHostWorkerRequest({ type: 'close' }, sessionId);
+  }
+});

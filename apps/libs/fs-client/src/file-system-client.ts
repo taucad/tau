@@ -112,7 +112,6 @@ export type FileSystemClient = {
   rmdir(path: string, options?: { recursive?: boolean }): Promise<void>;
   exists(path: string): Promise<boolean>;
   getDirectoryStat(path: string): Promise<FileStatEntry[]>;
-  getDirectoryContents(path: string): Promise<Record<string, Uint8Array<ArrayBuffer>>>;
   duplicateFile(sourcePath: string, destinationPath: string): Promise<void>;
   copyDirectory(sourcePath: string, destinationPath: string): Promise<void>;
   /**

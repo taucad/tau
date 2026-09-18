@@ -1,6 +1,9 @@
 // oxlint-disable-next-line import/no-unassigned-import -- Side-effect import to polyfill IndexedDB for tests
 import 'fake-indexeddb/auto';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { WorkspaceFileService } from '#workspace-file-service.js';
 import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
@@ -9,7 +12,9 @@ import { MountTable } from '#mount-table.js';
 import { composeView } from '#composed-view.js';
 import type { ComposedView } from '#composed-view.js';
 import { contents } from '#content-ops/contents.js';
+import { withReadContentOps } from '#content-ops/read-ops.js';
 import { classify, tauPathPolicy } from '#path-registry.js';
+import { serveNodeFsProvider } from '#backend/node/host.js';
 
 /**
  * Reachability pins for the filesystem north star (W0).
@@ -17,7 +22,7 @@ import { classify, tauPathPolicy } from '#path-registry.js';
  * Authority policy Rule 16 says control-plane bytes are absent from every
  * composed view and refused before provider I/O. The authority-global content
  * methods that `apps/libs/fs-client` proxies for UI consumers — `searchFiles`,
- * `getDirectoryStat`, `getDirectoryContents`, `copyDirectory` — walk the raw
+ * `getDirectoryStat`, `copyDirectory` — walk the raw
  * provider instead, so each one hands a consumer the paths the registry marks
  * `agentAccess: 'hidden'`.
  *
@@ -84,6 +89,18 @@ describe('masked path reachability through the authority-global surface', () => 
   const projectView = (consumer: 'user' | 'agent' = 'user'): ComposedView =>
     composeView({ filesystem: service.createRootedFileSystem(projectRoute) }, { consumer, policy: tauPathPolicy });
 
+  /**
+   * Every byte that is really on the provider under `authorityRoot`, read through
+   * the *unmasked* rooted surface trusted composition holds. The pins below use
+   * it as their observation deliberately: a masked read could hide a control-plane
+   * byte a copy had truly written.
+   */
+  const physically = async (
+    authorityRoot: string,
+    subdirectory = '',
+  ): Promise<Record<string, Uint8Array<ArrayBuffer>>> =>
+    contents(service.createRootedFileSystem(authorityRoot), subdirectory);
+
   beforeEach(async () => {
     service = await createService();
     await service.configureProjectRoots({
@@ -147,7 +164,7 @@ describe('masked path reachability through the authority-global surface', () => 
 
     // Reading the copy through the same unmasked surface is deliberate: it
     // proves the bytes were physically written, not merely rendered.
-    const copied = await service.getDirectoryContents(duplicateRoute);
+    const copied = await physically(duplicateRoute);
 
     expect(hiddenAmong(Object.keys(copied))).toEqual([]);
   });
@@ -155,7 +172,7 @@ describe('masked path reachability through the authority-global surface', () => 
   it('should not copy control-plane bytes through the rooted surface a consumer reaches', async () => {
     await projectView().copyTree!('', 'backup');
 
-    const copied = Object.keys(await service.getDirectoryContents(`${projectRoute}/backup`));
+    const copied = Object.keys(await physically(projectRoute, 'backup'));
 
     expect(hiddenAmong(copied)).toEqual([]);
     /* And the project's own bytes did arrive, so an empty copy cannot pass. */
@@ -180,7 +197,7 @@ describe('masked path reachability through the authority-global surface', () => 
 
     await projectView('agent').copyTree!('src', '');
 
-    const copied = Object.keys(await service.getDirectoryContents(projectRoute));
+    const copied = Object.keys(await physically(projectRoute));
 
     expect(copied).not.toContain('.tau/chats/c2.json');
     expect(copied).toContain('main.ts');
@@ -194,9 +211,103 @@ describe('masked path reachability through the authority-global surface', () => 
 
     await projectView().copyTree!('src', 'src-copy');
 
-    const copied = Object.keys(await service.getDirectoryContents(`${projectRoute}/src-copy`));
+    const copied = Object.keys(await physically(projectRoute, 'src-copy'));
 
     expect(copied).toContain('.git/HEAD');
     expect(copied).toContain('main.ts');
+  });
+});
+
+/**
+ * What a duplicated project is allowed to carry (charter D11, ZIP follow-up F-2).
+ *
+ * Duplication journals the source project's *authored file snapshot* (authority
+ * Rule 12) and reads it the way the file manager does: through that project's
+ * own rooted `user` view, wrapped by `withReadContentOps`, asking for
+ * `versionedOnly`. Two different rules do the work and the pin needs both — the
+ * view refuses `.git/**` before any provider I/O because it is the control
+ * plane, and `versionedOnly` drops `.tau/chats/**` and `thumbnail.webp` because
+ * the registry says they are records, which the mask would happily hand a
+ * `user`. Disk-backed so the seed is a real directory, as every duplicable
+ * project is.
+ */
+describe('what project duplication reads from a disk-backed project', () => {
+  const diskProjectId = 'proj_ddddddddddddddddddddd';
+  const physicalDirectory = 'gear-system';
+  const diskCleanups: Array<() => void> = [];
+
+  afterEach(() => {
+    for (const cleanup of diskCleanups.splice(0).reverse()) {
+      cleanup();
+    }
+  });
+
+  const seedDiskProject = async (): Promise<WorkspaceFileService> => {
+    const root = mkdtempSync(join(tmpdir(), 'tau-duplicate-source-'));
+    const write = (relativePath: string, body: string): void => {
+      const absolute = join(root, physicalDirectory, relativePath);
+      mkdirSync(dirname(absolute), { recursive: true });
+      writeFileSync(absolute, body);
+    };
+    write(
+      'tau.json',
+      JSON.stringify({ $schema: 'https://tau.new/schemas/project.json', id: diskProjectId, name: 'Gear' }),
+    );
+    write('src/main.ts', 'export const part = 1;');
+    write('.git/HEAD', 'ref: refs/heads/main');
+    write('.git/objects/x', 'object-bytes');
+    write('.tau/chats/c1.json', '{"messages":[]}');
+    write('thumbnail.webp', 'webp-bytes');
+
+    const { port1, port2 } = new MessageChannel();
+    const stopHost = serveNodeFsProvider(port2, { allowRoot: (candidate) => candidate === root });
+    const providerRegistry = new ProviderRegistry({ createNodeFsPort: async () => port1 });
+    const service = new WorkspaceFileService({
+      providerRegistry,
+      resourceQueue: new ResourceQueue(),
+      eventBus: new ChangeEventBus(),
+      mountTable: new MountTable(),
+    });
+    diskCleanups.push(() => {
+      service.dispose();
+      void stopHost();
+      port2.close();
+      rmSync(root, { recursive: true, force: true });
+    });
+    await service.configureProjectRoots({
+      projects: [{ backend: 'node', path: root, projectId: diskProjectId, providerBasePath: physicalDirectory }],
+      roots: [{ backend: 'node', path: root }],
+    });
+    return service;
+  };
+
+  it('hands the journal the project and nothing else that lives beside it', async () => {
+    const service = await seedDiskProject();
+    const filesystem = service.createRootedFileSystem(`/projects/${diskProjectId}`);
+    const view = withReadContentOps(
+      composeView({ filesystem }, { consumer: 'user', policy: tauPathPolicy }),
+      tauPathPolicy,
+    );
+
+    const read = Object.keys(await view.contents('', { versionedOnly: true })).sort();
+
+    expect(read).toEqual(['src/main.ts', 'tau.json']);
+  });
+
+  it('would carry every one of them without the view and the filter', async () => {
+    /* The raw walk this replaced: the same directory, no mask and no filter.
+     * Without this row the pin above could pass on an empty read. */
+    const service = await seedDiskProject();
+
+    const raw = Object.keys(await contents(service.createRootedFileSystem(`/projects/${diskProjectId}`), '')).sort();
+
+    expect(raw).toEqual([
+      '.git/HEAD',
+      '.git/objects/x',
+      '.tau/chats/c1.json',
+      'src/main.ts',
+      'tau.json',
+      'thumbnail.webp',
+    ]);
   });
 });

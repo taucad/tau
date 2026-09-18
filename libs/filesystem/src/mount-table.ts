@@ -8,12 +8,7 @@
  * @public
  */
 
-import type {
-  AdoptableProjectManifest,
-  FileSystemBackend,
-  ProjectManifest,
-  ProjectManifestParseIssue,
-} from '@taucad/types';
+import type { FileSystemBackend } from '@taucad/types';
 import type { FileSystemProvider } from '#types.js';
 import { assertRootedPath, joinRelativePath, resolveAuthorityPath } from '@taucad/utils/path';
 import type { RouteKind } from '#project-routes.js';
@@ -180,59 +175,6 @@ export type ProjectLocator =
       readonly relativeDirectory: string;
       readonly path: string;
     };
-
-/** Validated or quarantined result from project discovery. @public */
-export type ProjectDiscoveryEntry =
-  | {
-      readonly status: 'valid';
-      readonly manifest: ProjectManifest;
-      readonly locator: ProjectLocator;
-    }
-  | {
-      readonly status: 'duplicate-id';
-      readonly manifest: ProjectManifest;
-      readonly locator: ProjectLocator;
-    }
-  | {
-      /**
-       * The project is discoverable here, but its persisted route still points
-       * at a storage root this pass could not observe, so re-pointing would be
-       * unsafe. Synthesized by the UI reconciliation layer — the worker scan
-       * never emits it.
-       */
-      readonly status: 'route-blocked';
-      readonly manifest: ProjectManifest;
-      readonly locator: ProjectLocator;
-    }
-  | {
-      readonly status: 'adoption-required';
-      readonly manifest: AdoptableProjectManifest;
-      readonly locator: ProjectLocator;
-      readonly issue: ProjectManifestParseIssue;
-    }
-  | {
-      readonly status: 'invalid';
-      readonly locator: ProjectLocator;
-      readonly issue: ProjectManifestParseIssue;
-    };
-
-/** Completeness of one configured physical-root scan. @public */
-export type ProjectRootDiscoveryStatus =
-  | {
-      readonly status: 'complete';
-      readonly root: StorageRootConfig;
-    }
-  | {
-      readonly status: 'inaccessible';
-      readonly root: StorageRootConfig;
-      readonly reason: string;
-    };
-
-/** Complete project-discovery result. Entries never imply an unreported root was empty. @public */
-export type ProjectDiscoveryResult = {
-  readonly entries: readonly ProjectDiscoveryEntry[];
-  readonly roots: readonly ProjectRootDiscoveryStatus[];
-};
 
 /** Exact scoped request for permanently removing one project directory. @public */
 export type PermanentDeleteProjectDirectoryInput = {

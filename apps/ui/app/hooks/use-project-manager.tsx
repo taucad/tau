@@ -1612,8 +1612,12 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         workspaceSlug = homeWorkspaceSlug;
       }
 
+      /* The project's own composed view, `versionedOnly`: the duplicate carries
+         the source's authored bytes and none of the control plane, records or
+         cache beside them (charter D11, ZIP follow-up F-2). The fresh manifest
+         is written by the commit, so the source's own `tau.json` is dropped. */
       const sourceFiles = Object.fromEntries(
-        Object.entries(await fileManager.client.getDirectoryContents(`/projects/${projectId}`))
+        Object.entries(await fileManager.readVersionedProjectFiles(`/projects/${projectId}`))
           .filter(([path]) => path !== 'tau.json')
           .map(([path, content]) => [path, { content }]),
       );
@@ -1627,7 +1631,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       await resumePendingProjectOperation(operation, worker);
       return { ...operation.manifest, slugs: { workspaceSlug, projectSlug: directorySlug(providerBasePath) } };
     },
-    [chatStore, ensureDiscoveryReady, getProject, getReadiedWorker, resumePendingProjectOperation],
+    [chatStore, ensureDiscoveryReady, fileManager, getProject, getReadiedWorker, resumePendingProjectOperation],
   );
   // (getProjectFileSystemConfig / getWorkspace are stable module-level
   // bindings — intentionally omitted from the dep array.)

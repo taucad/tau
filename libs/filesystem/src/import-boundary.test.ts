@@ -88,12 +88,17 @@ const boundaryRules: readonly BoundaryRule[] = [
  *
  * | Work package | Clears |
  * | --- | --- |
- * | W7 | `project-manifest` |
  * | W9 | `backend-identity` |
+ *
+ * `project-manifest` is cleared: W7 moved the manifest I/O — and the discovery
+ * vocabulary that names a manifest — into `project-directories.ts`, which the
+ * rule exempts.
  */
 const allowList: ReadonlyArray<readonly [file: string, rule: string, workPackage: string]> = [
-  ['mount-table.ts', 'project-manifest', 'W7'],
-  ['workspace-file-service.ts', 'project-manifest', 'W7'],
+  /* Discovery locators and the pending-commit scope schema discriminate on the
+   * backend. They moved out of the Service with W7's extraction, so the same
+   * violation now has two homes until W9 gives backends a declared capability. */
+  ['project-directories.ts', 'backend-identity', 'W9'],
   ['workspace-file-service.ts', 'backend-identity', 'W9'],
 ];
 

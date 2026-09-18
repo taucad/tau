@@ -13,6 +13,7 @@ import type { BulkMoveEdit, BulkMoveResult, FileSystemClient } from '@taucad/fs-
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
 import type { FileManagerRef, FileManagerProxy } from '#machines/file-manager.machine.types.js';
 import type { MountConfig, WorkspaceMutationError } from '@taucad/filesystem';
+import type { ComposedViewConsumer } from '@taucad/filesystem/composed-view';
 import {
   disconnectWorkspace as disconnectStoredWorkspace,
   getHomeStorageBackend,
@@ -179,7 +180,6 @@ export type FileSystemClientFacade = Pick<
   | 'rmdir'
   | 'exists'
   | 'getDirectoryStat'
-  | 'getDirectoryContents'
   | 'duplicateFile'
   | 'copyDirectory'
   | 'getZippedDirectory'
@@ -303,6 +303,17 @@ type FileManagerContextType = {
    */
   getZippedDirectory: (path: string, options?: { versionedOnly?: boolean }) => Promise<Blob>;
   copyDirectory: (sourcePath: string, destinationPath: string) => Promise<void>;
+  /**
+   * One project's versioned bytes, read through that project's *own* composed
+   * view — the snapshot a duplicate journals (authority Rule 12, charter D11).
+   *
+   * Not `client.getDirectoryContents`: the project read here is usually not the
+   * one this FM is rooted at, and both the mask and `versionedOnly` classify
+   * project-relative paths — so the read opens that project's own rooted `user`
+   * connection, whose view refuses `.git/**` before provider I/O and whose
+   * filter drops records and cache (authority Rule 16, charter D2).
+   */
+  readVersionedProjectFiles: (projectRoot: string) => Promise<Record<string, Uint8Array<ArrayBuffer>>>;
   /**
    * Typed proxy dispatch facade. Use for cache-free reads/writes and
    * cross-workspace operations whose keys lie outside this provider's
@@ -729,16 +740,30 @@ export function FileManagerProvider({
   }, [fileManagerRef]);
 
   const openRootedFileSystemBridge = useCallback(
-    (root: string) => {
+    (root: string, consumer?: ComposedViewConsumer) => {
       const opener = fileManagerRef.getSnapshot().context.openFileSystemBridge;
       if (!opener) {
         throw new FileManagerNotReadyError('proxy-timeout', {
           cause: new Error('File Manager filesystem bridge is not ready.'),
         });
       }
-      return opener(root);
+      return opener(root, consumer);
     },
     [fileManagerRef],
+  );
+
+  const readVersionedProjectFiles = useCallback(
+    async (projectRoot: string): Promise<Record<string, Uint8Array<ArrayBuffer>>> => {
+      await whenServicesReady();
+      const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+      const proxy = createFileSystemBridgeProxy(openRootedFileSystemBridge(projectRoot, 'user'));
+      try {
+        return await proxy.contents('', { versionedOnly: true });
+      } finally {
+        proxy.dispose();
+      }
+    },
+    [openRootedFileSystemBridge, whenServicesReady],
   );
 
   const runtimeFileSystem = useMemo(
@@ -958,7 +983,6 @@ export function FileManagerProvider({
       rmdir: gated('rmdir'),
       exists: gated('exists'),
       getDirectoryStat: gated('getDirectoryStat'),
-      getDirectoryContents: gated('getDirectoryContents'),
       duplicateFile: gated('duplicateFile'),
       copyDirectory: gated('copyDirectory'),
       getZippedDirectory: gated('getZippedDirectory'),
@@ -1093,6 +1117,7 @@ export function FileManagerProvider({
       getDirectoryStat,
       getZippedDirectory,
       copyDirectory,
+      readVersionedProjectFiles,
       client,
       workspace,
       activeWorkspaceName,
@@ -1128,6 +1153,7 @@ export function FileManagerProvider({
       getDirectoryStat,
       getZippedDirectory,
       copyDirectory,
+      readVersionedProjectFiles,
       client,
       workspace,
       activeWorkspaceName,

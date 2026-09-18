@@ -115,13 +115,13 @@ describe('filesystem bridge Zod schemas', () => {
     }
   });
 
-  it('preserves getDirectoryContents result references', () => {
+  it('preserves the rooted contents result references', () => {
     const contents = {
       'main.ts': new Uint8Array([1, 2, 3]),
       'nested/model.step': new Uint8Array([4, 5, 6]),
     };
 
-    const parsed = fileSystemBridgeSchemas.calls.getDirectoryContents.result.safeParse(contents);
+    const parsed = fileSystemBridgeSchemas.calls.contents.result.safeParse(contents);
 
     expect(parsed.success).toBe(true);
     if (parsed.success) {

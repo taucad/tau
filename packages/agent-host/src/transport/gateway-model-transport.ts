@@ -983,7 +983,15 @@ export const createGatewayModelTransport = (options: GatewayModelTransportOption
                             thinking_level: reasoning.effort.toUpperCase(),
                           },
                           thought_tag_marker: 'think',
-                          stream_function_call_arguments: true,
+                          // `stream_function_call_arguments: true` belongs here on
+                          // Google's documented wire, but Vertex answers 499
+                          // CANCELLED to every function call emitted after the
+                          // first assistant message while it is set — the second
+                          // sequential call of a turn and every call from user
+                          // turn two on, 14/14 live across all four catalog
+                          // models, and 200 on the same conversations without it
+                          // (blueprint Finding 4 / RC2, ruling Q2). It only made
+                          // tool-input deltas finer-grained on Gemini.
                         },
                       },
                     },

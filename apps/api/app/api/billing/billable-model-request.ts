@@ -157,7 +157,10 @@ const googleReasoningConfigSchema = z
           })
           .strict(),
         thought_tag_marker: z.literal('think'),
-        stream_function_call_arguments: z.literal(true),
+        // `stream_function_call_arguments` is deliberately absent, and `.strict()`
+        // therefore refuses it: Vertex answers 499 CANCELLED to every function
+        // call emitted after the first assistant message while that flag is set
+        // (vertex-ai-cross-provider-closeout-blueprint Finding 4 / RC2, ruling Q2).
       })
       .strict(),
   })

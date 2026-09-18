@@ -262,7 +262,7 @@ export const isBrowserAgentHostRunResumable = (chatId: string): boolean => {
 /** Whether the run this chat ended on stopped on a refusal a resume can continue. */
 const refusedResumably = (chatId: string): boolean => {
   const run = browserRuns.get(chatId);
-  return run?.state === 'failed' && isResumableRunFailure(run.failure?.code);
+  return run?.state === 'failed' && isResumableRunFailure(run.failure);
 };
 
 /**
@@ -974,8 +974,18 @@ const createHostStream = <Message extends UIMessage>(input: {
         await projection;
       }
       closed = true;
-      await writer.close();
-      if (awaitLateSettlement && !cancelled) {
+      /* R7: the consumer cancels the readable side the moment it reads the
+       * error chunk this stream already wrote, which errors the writable side,
+       * and closing an errored writable throws. That throw used to reach the
+       * settled-stream log, which then reported a failure the card already
+       * carried ("Cannot close a ERRORED writable stream"). The stream ends
+       * here either way; only a writer that really closed has a consumer left
+       * to hold open for the settlement below. */
+      const writerClosed = await writer.close().then(
+        () => true,
+        () => false,
+      );
+      if (writerClosed && awaitLateSettlement && !cancelled) {
         lateSettlementAwaited = true;
         await awaitSettlement(turnSettlement.promise, `This turn never settled on chat ${input.chatId}.`);
         await projection;

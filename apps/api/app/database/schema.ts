@@ -262,6 +262,18 @@ export const projectGitLfsObject = pgTable(
   (table) => [
     primaryKey({ columns: [table.projectId, table.oid] }),
     index('project_git_lfs_object_pending_idx').on(table.projectId, table.finalizedAt),
+    /*
+     * The retirement pass's two candidate sets, each as a partial index so the
+     * pass reads only the rows it can act on rather than the whole table (W4b
+     * review P3). Both predicates match `lfs-retirement.ts`'s own `where`
+     * exactly; a mismatch would leave the index unused and the scan in place.
+     */
+    index('project_git_lfs_object_unreachable_idx')
+      .on(table.unreachableAt)
+      .where(sql`${table.unreachableAt} is not null`),
+    index('project_git_lfs_object_unfinalized_idx')
+      .on(table.createdAt)
+      .where(sql`${table.finalizedAt} is null`),
     check('project_git_lfs_object_size_nonnegative', sql`${table.sizeBytes} >= 0`),
   ],
 );

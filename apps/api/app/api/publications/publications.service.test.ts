@@ -16,13 +16,15 @@ import { publicationApiCode } from '@taucad/types/constants';
 import type { PublicationApiCode } from '@taucad/types/constants';
 import { publicationRowSchema } from '#api/publications/publications.dto.js';
 import { PublicationsService } from '#api/publications/publications.service.js';
+import { createMemoryRepositoryStore, seedLease } from '#testing/publication-lease.fixture.js';
+import type { RepositoryStore } from '#api/git/store/port.js';
 import {
   isPublishableTreePath,
   parseLfsPointer,
   readPublishedTree,
 } from '#api/publications/publication-materializer.js';
 import type { MaterializerDependencies } from '#api/publications/publication-materializer.js';
-import { gitLfsObjectKey } from '#api/git/git.constants.js';
+import { resolveLfsObjectLocation, tenantLfsObjectKey } from '#api/git/lfs-keys.js';
 import type { ObjectStorageServiceContract, PutBlobResult } from '#storage/object-storage.service.js';
 import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.js';
 import * as schema from '#database/schema.js';
@@ -67,15 +69,51 @@ function seededRevision(repositoryPath: string, tag = 'v1'): string {
   return result.stdout.toString('utf8').trim();
 }
 
-/** The git side of publishing: where this project's pushes landed. */
-function createGitStub(repositoryPath: string): PublicationsServiceDeps[8] {
-  return {
-    ensureRepository: vi.fn(async () => repositoryPath),
-    /* The publish path reads the tagged tree through the git service's runner,
-       so the stub runs real `git` in the seeded repository rather than faking
-       what `ls-tree` would have said (review R8 moved the runner here). */
-    run: vi.fn(async (args: readonly string[], cwd: string, stdin?: string) => realGit(cwd, args, stdin)),
-  } as unknown as PublicationsServiceDeps[8];
+/**
+ * The store side of publishing: the repository this project pushed to.
+ *
+ * Publishing hydrates a lease of its own now, so the stub is a real store with
+ * the seeded repository committed into it — one repository, whatever locator it
+ * is asked for, because these suites have one project at a time.
+ *
+ * @param repositoryPath - The seeded repository, or `''` when the test never publishes.
+ * @returns The store the service is constructed with.
+ */
+function createStoreStub(repositoryPath: string): PublicationsServiceDeps[8] {
+  const store = createMemoryRepositoryStore();
+  const only = { ownerId: 'seeded', projectId: 'seeded' };
+  let seeding: Promise<void> | undefined;
+  const ready = async (): Promise<void> => {
+    seeding ??= (async () => {
+      if (repositoryPath !== '') {
+        const lease = await seedLease({
+          store,
+          ownerId: only.ownerId,
+          projectId: only.projectId,
+          source: repositoryPath,
+        });
+        await lease.dispose();
+      }
+    })();
+    await seeding;
+  };
+
+  const seeded: RepositoryStore = {
+    capabilities: store.capabilities,
+    readManifest: async () => {
+      await ready();
+      return store.readManifest(only);
+    },
+    commitManifest: async (_locator, next, expected) => store.commitManifest(only, next, expected),
+    // oxlint-disable-next-line max-params -- the port's own signature
+    putObject: async (_locator, key, body, options) => store.putObject(only, key, body, options),
+    getObject: async (_locator, key, range) => store.getObject(only, key, range),
+    listObjects: async function* listObjects(_locator, prefix) {
+      yield* store.listObjects(only, prefix);
+    },
+    deleteObjects: async (_locator, keys) => store.deleteObjects(only, keys),
+  };
+  return seeded as unknown as PublicationsServiceDeps[8];
 }
 
 /**
@@ -96,8 +134,12 @@ function createPublishDatabase(args?: {
 } {
   const txInserts: Array<{ table: unknown; payload: Record<string, unknown> }> = [];
   const tx = {
+    /* The project advisory lock the publish path takes (review F2). */
+    execute: vi.fn().mockResolvedValue(undefined),
     select: vi.fn().mockReturnValue({
-      from: vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) }) }),
+      from: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue(args?.existingRows ?? []) }),
+      }),
     }),
     insert: vi.fn().mockImplementation((table: unknown) => ({
       values: vi.fn().mockImplementation((payload: Record<string, unknown>) => {
@@ -137,14 +179,17 @@ function createPublishDatabase(args?: {
           }),
         }),
       insert: outerInsert,
+      /* The superseded manifest's decrement, which reports whether it fired. */
       update: vi.fn().mockReturnValue({
-        set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) }),
+        set: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([{ sha256: 'decremented' }]) }),
+        }),
       }),
-      transaction: vi.fn(async (callback: (innerTx: typeof tx) => Promise<void>) => {
+      transaction: vi.fn(async <T>(callback: (innerTx: typeof tx) => Promise<T>): Promise<T> => {
         if (args?.transactionRejects === true) {
           throw new Error('transaction failed');
         }
-        await callback(tx);
+        return callback(tx);
       }),
     },
   } as unknown as PublicationsServiceDeps[0];
@@ -274,7 +319,7 @@ function createProjectShareService(args: { readonly selectRows: unknown[][] }): 
     createMetricsStub(),
     createEmailStub(),
     createBillingStub(),
-    createGitStub(''),
+    createStoreStub(''),
   );
 }
 
@@ -347,6 +392,20 @@ function createManifestStorageStub(): PublicationsServiceDeps[1] {
   return storage;
 }
 
+/**
+ * The LFS endpoint's own resolver, bound to a stub (W4b): tenant key first, the
+ * pre-D24 key second, `undefined` when neither is there.
+ *
+ * @param storage - The storage stub whose `headBlob` answers for the fixture.
+ * @returns What the materializer's dependencies carry.
+ */
+function lfsResolver(storage: PublicationsServiceDeps[1]): MaterializerDependencies['resolveLfsObject'] {
+  return async (object) => {
+    const held = await resolveLfsObjectLocation(storage, object);
+    return held?.location;
+  };
+}
+
 function isBadRequestWithCode(error: unknown, code: PublicationApiCode): boolean {
   if (!(error instanceof BadRequestException)) {
     return false;
@@ -412,8 +471,13 @@ describe('publication tree rules', () => {
     );
 
     const files = await readPublishedTree(
-      { databaseService: {} as unknown as PublicationsServiceDeps[0], storage: createStorageStub(), git: realGit },
-      { repositoryPath, projectId: 'proj_1', tag: 'v1' },
+      {
+        databaseService: {} as unknown as PublicationsServiceDeps[0],
+        storage: createStorageStub(),
+        git: realGit,
+        resolveLfsObject: lfsResolver(createStorageStub()),
+      },
+      { directory: repositoryPath, projectId: 'proj_1', ownerId: 'user_1', tag: 'v1' },
     );
 
     expect([...files.keys()].sort()).toEqual(['.tau/parameters/main.ts.json', 'main.ts']);
@@ -429,8 +493,13 @@ describe('publication tree rules', () => {
 
     await expect(
       readPublishedTree(
-        { databaseService: {} as unknown as PublicationsServiceDeps[0], storage: createStorageStub(), git: realGit },
-        { repositoryPath, projectId: 'proj_1', tag: 'v1' },
+        {
+          databaseService: {} as unknown as PublicationsServiceDeps[0],
+          storage: createStorageStub(),
+          git: realGit,
+          resolveLfsObject: lfsResolver(createStorageStub()),
+        },
+        { directory: repositoryPath, projectId: 'proj_1', ownerId: 'user_1', tag: 'v1' },
       ),
     ).rejects.toSatisfy((error: unknown) => isBadRequestWithCode(error, publicationApiCode.TOO_MANY_FILES));
   });
@@ -440,8 +509,13 @@ describe('publication tree rules', () => {
 
     await expect(
       readPublishedTree(
-        { databaseService: {} as unknown as PublicationsServiceDeps[0], storage: createStorageStub(), git: realGit },
-        { repositoryPath, projectId: 'proj_1', tag: 'v9' },
+        {
+          databaseService: {} as unknown as PublicationsServiceDeps[0],
+          storage: createStorageStub(),
+          git: realGit,
+          resolveLfsObject: lfsResolver(createStorageStub()),
+        },
+        { directory: repositoryPath, projectId: 'proj_1', ownerId: 'user_1', tag: 'v9' },
       ),
     ).rejects.toThrow(NotFoundException);
   });
@@ -461,6 +535,14 @@ describe('publication tree rules', () => {
       ]),
     );
     const storage = createStorageStub();
+    /* The push uploaded it under the owner's tenant prefix (D24), which is
+       where the shared resolver looks first. */
+    const held = { namespace: 'tenants', key: tenantLfsObjectKey('user_1', 'proj_1', oid), tier: 'private' };
+    vi.mocked(storage.headBlob).mockImplementation(async (args) =>
+      args.namespace === held.namespace && args.key === held.key
+        ? { contentType: 'application/octet-stream', size: stepBytes.byteLength, etag: 'etag', cacheControl: '' }
+        : undefined,
+    );
     vi.mocked(storage.getBlob).mockImplementation(async () => ({
       body: Readable.from([Buffer.from(stepBytes)]),
       contentType: 'application/octet-stream',
@@ -468,14 +550,19 @@ describe('publication tree rules', () => {
     }));
 
     const files = await readPublishedTree(
-      { databaseService: {} as unknown as PublicationsServiceDeps[0], storage, git: realGit },
-      { repositoryPath, projectId: 'proj_1', tag: 'v1' },
+      {
+        databaseService: {} as unknown as PublicationsServiceDeps[0],
+        storage: storage,
+        git: realGit,
+        resolveLfsObject: lfsResolver(storage),
+      },
+      { directory: repositoryPath, projectId: 'proj_1', ownerId: 'user_1', tag: 'v1' },
     );
 
     expect(files.get('part.step')).toStrictEqual(stepBytes);
     expect(vi.mocked(storage.getBlob).mock.calls[0]?.[0]).toMatchObject({
-      namespace: 'blobs',
-      key: gitLfsObjectKey('proj_1', oid),
+      namespace: 'tenants',
+      key: tenantLfsObjectKey('user_1', 'proj_1', oid),
       tier: 'private',
     });
   });
@@ -514,7 +601,7 @@ describe('PublicationsService.publishFromRevision', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createGitStub(repositoryPath),
+      createStoreStub(repositoryPath),
     );
 
     await service.publishFromRevision({ ownerId: 'user_1', request: publishRequest(repositoryPath) });
@@ -539,7 +626,7 @@ describe('PublicationsService.publishFromRevision', () => {
       createMetricsStub(),
       email,
       createBillingStub(),
-      createGitStub(repositoryPath),
+      createStoreStub(repositoryPath),
     );
 
     const result = await service.publishFromRevision({
@@ -573,7 +660,7 @@ describe('PublicationsService.publishFromRevision', () => {
       createMetricsStub(),
       email,
       createBillingStub(),
-      createGitStub(repositoryPath),
+      createStoreStub(repositoryPath),
     );
 
     const result = await service.publishFromRevision({
@@ -605,7 +692,7 @@ describe('PublicationsService.publishFromRevision', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createGitStub(repositoryPath),
+      createStoreStub(repositoryPath),
     );
 
     await expect(
@@ -841,7 +928,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createGitStub(''),
+      createStoreStub(''),
     );
 
     const result = await service.getPublicationForViewer({ publicationId: 'pub_test' });
@@ -863,7 +950,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createGitStub(''),
+      createStoreStub(''),
     );
 
     await service.getPublicationForViewer({ publicationId: 'pub_test' });
@@ -887,7 +974,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createGitStub(''),
+      createStoreStub(''),
     );
 
     await service.getPublicationForViewer({ publicationId: 'pub_test' });
@@ -926,7 +1013,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createGitStub(''),
+      createStoreStub(''),
     );
 
     const result = await service.getPublicationForViewer({
@@ -949,7 +1036,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createGitStub(''),
+      createStoreStub(''),
     );
 
     await expect(service.getPublicationForViewer({ publicationId: 'pub_test' })).rejects.toBeInstanceOf(
@@ -968,6 +1055,12 @@ describe('PublicationsService.getPublicationForViewer', () => {
     const publicationWhere = vi.fn().mockReturnValue({ limit: publicationLimit });
     const publicationFrom = vi.fn().mockReturnValue({ where: publicationWhere });
 
+    /* Every publication read consults `project_git` first: derived state that is
+       behind the manifest is repaired before the row is served (D19). */
+    const derivedFrom = vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([{ generation: 3, derivedGeneration: 3 }]) }),
+    });
+
     const userLimit = vi.fn().mockResolvedValue([{ email: 'Friend@Example.com', emailVerified: true }]);
     const userWhere = vi.fn().mockReturnValue({ limit: userLimit });
     const userFrom = vi.fn().mockReturnValue({ where: userWhere });
@@ -979,6 +1072,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
     const select = vi
       .fn()
       .mockReturnValueOnce({ from: publicationFrom })
+      .mockReturnValueOnce({ from: derivedFrom })
       .mockReturnValueOnce({ from: userFrom })
       .mockReturnValueOnce({ from: accessFrom });
     const database = { database: { select } } as unknown as PublicationsServiceDeps[0];
@@ -992,7 +1086,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createGitStub(''),
+      createStoreStub(''),
     );
 
     const result = await service.getPublicationForViewer({ publicationId: 'pub_test', viewerUserId: 'user_friend' });
@@ -1011,6 +1105,12 @@ describe('PublicationsService.getPublicationForViewer', () => {
     const publicationWhere = vi.fn().mockReturnValue({ limit: publicationLimit });
     const publicationFrom = vi.fn().mockReturnValue({ where: publicationWhere });
 
+    /* Every publication read consults `project_git` first: derived state that is
+       behind the manifest is repaired before the row is served (D19). */
+    const derivedFrom = vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([{ generation: 3, derivedGeneration: 3 }]) }),
+    });
+
     const userLimit = vi.fn().mockResolvedValue([{ email: 'stranger@example.com', emailVerified: true }]);
     const userWhere = vi.fn().mockReturnValue({ limit: userLimit });
     const userFrom = vi.fn().mockReturnValue({ where: userWhere });
@@ -1022,6 +1122,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
     const select = vi
       .fn()
       .mockReturnValueOnce({ from: publicationFrom })
+      .mockReturnValueOnce({ from: derivedFrom })
       .mockReturnValueOnce({ from: userFrom })
       .mockReturnValueOnce({ from: accessFrom });
     const database = { database: { select } } as unknown as PublicationsServiceDeps[0];
@@ -1035,7 +1136,7 @@ describe('PublicationsService.getPublicationForViewer', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createGitStub(''),
+      createStoreStub(''),
     );
 
     await expect(
@@ -1099,7 +1200,7 @@ describe('PublicationsService.updateVisibility', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createGitStub(''),
+      createStoreStub(''),
     );
 
     return { service, update, set, storage };
@@ -1318,7 +1419,7 @@ describe('PublicationsService access grants', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createGitStub(''),
+      createStoreStub(''),
     );
 
     const result = await service.listAccessGrants({ publicationId: 'pub_access', ownerId: 'user_owner' });
@@ -1353,7 +1454,7 @@ describe('PublicationsService access grants', () => {
       createMetricsStub(),
       email,
       createBillingStub(),
-      createGitStub(''),
+      createStoreStub(''),
     );
 
     const result = await service.inviteAccess({
@@ -1392,7 +1493,7 @@ describe('PublicationsService access grants', () => {
       createMetricsStub(),
       email,
       createBillingStub(),
-      createGitStub(''),
+      createStoreStub(''),
     );
 
     const result = await service.inviteAccess({
@@ -1437,7 +1538,7 @@ describe('PublicationsService access grants', () => {
       metrics,
       email,
       createBillingStub(),
-      createGitStub(''),
+      createStoreStub(''),
     );
 
     const result = await service.inviteAccess({
@@ -1482,7 +1583,7 @@ describe('PublicationsService access grants', () => {
       metrics,
       email,
       createBillingStub(),
-      createGitStub(''),
+      createStoreStub(''),
     );
 
     const result = await service.inviteAccess({
@@ -1540,7 +1641,7 @@ describe('PublicationsService.recordView', () => {
       args.metrics ?? createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createGitStub(''),
+      createStoreStub(''),
     );
   }
 
@@ -1694,7 +1795,7 @@ describe('PublicationsService.publishFromRevision storage tiers (R2/R8)', () => 
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createGitStub(repositoryPath),
+      createStoreStub(repositoryPath),
     );
 
     return { storage, txInserts, outerInsert, service, repositoryPath };
@@ -1877,7 +1978,7 @@ describe('PublicationsService.publishFromRevision storage tiers (R2/R8)', () => 
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createGitStub(repositoryPath),
+      createStoreStub(repositoryPath),
     );
 
     const result = await service.publishFromRevision({
@@ -1889,6 +1990,228 @@ describe('PublicationsService.publishFromRevision storage tiers (R2/R8)', () => 
     const publicationInsert = txInserts.find((entry) => entry.table === schema.publication);
     expect(publicationInsert?.payload).toMatchObject({ id: 'pub_existing', tag: 'v1' });
     expect(publicationInsert?.payload['manifestKey']).not.toBe(existing.manifestKey);
+  });
+});
+
+// === Materialization as derived state (D19) ===
+
+describe('PublicationsService derived-state repair', () => {
+  /**
+   * The database a repair reads and writes, answering by table rather than by
+   * call order: the repair reads `project_git`, then this project's
+   * publications, then writes both.
+   *
+   * @param args - The publication row, and the two generations on `project_git`.
+   * @returns The dependency, the row it mutates, and what it recorded.
+   */
+  function createDerivedDatabase(args: {
+    publication: Record<string, unknown>;
+    generation: number;
+    derivedGeneration: number;
+  }): {
+    readonly databaseService: PublicationsServiceDeps[0];
+    readonly publication: Record<string, unknown>;
+    readonly derivedWrites: Array<Record<string, unknown>>;
+  } {
+    const derivedWrites: Array<Record<string, unknown>> = [];
+    const state = { derivedGeneration: args.derivedGeneration };
+
+    const rowsFor = (table: unknown): unknown[] =>
+      table === schema.projectGit
+        ? [{ generation: args.generation, derivedGeneration: state.derivedGeneration }]
+        : [args.publication];
+
+    /* `where` is awaited directly by the materializer and narrowed with
+       `limit(1)` by the read path, so it is both. */
+    const selectable = (table: unknown): unknown => ({
+      // oxlint-disable-next-line typescript/promise-function-async -- Drizzle's own builder is a thenable, not an async function
+      where: vi.fn(() =>
+        Object.assign(Promise.resolve(rowsFor(table)), { limit: vi.fn().mockResolvedValue(rowsFor(table)) }),
+      ),
+    });
+
+    const writer = {
+      /* The project advisory lock the materializer takes (review F2). */
+      execute: vi.fn().mockResolvedValue(undefined),
+      /* The re-read under that lock, which this single caller always wins. */
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({ limit: vi.fn().mockResolvedValue([args.publication]) })),
+        })),
+      })),
+      insert: vi.fn(() => ({
+        values: vi.fn(() => ({ onConflictDoUpdate: vi.fn().mockResolvedValue(undefined) })),
+      })),
+      update: vi.fn((table: unknown) => ({
+        set: vi.fn((payload: Record<string, unknown>) => {
+          if (table === schema.projectGit) {
+            derivedWrites.push(payload);
+            state.derivedGeneration = Number(payload['derivedGeneration']);
+          } else {
+            Object.assign(args.publication, payload);
+          }
+          /* Both the plain update and the compare-and-swap, which this single
+             writer always wins. */
+          return { where: vi.fn(() => ({ returning: vi.fn().mockResolvedValue([{ id: 'moved' }]) })) };
+        }),
+      })),
+    };
+
+    const database = {
+      select: vi.fn(() => ({ from: vi.fn((table: unknown) => selectable(table)) })),
+      update: writer.update,
+      insert: writer.insert,
+      transaction: vi.fn(async <T>(callback: (tx: typeof writer) => Promise<T>): Promise<T> => callback(writer)),
+    };
+
+    return {
+      databaseService: { database } as unknown as PublicationsServiceDeps[0],
+      publication: args.publication,
+      derivedWrites,
+    };
+  }
+
+  it('should re-materialize from a lease and serve the repaired row when the derived generation is behind', async () => {
+    const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('export default () => {}')]]));
+    /* A push that committed its manifest and was killed before it materialized:
+       the row still points at nothing (D19). */
+    const publication: Record<string, unknown> = {
+      id: 'pub_derived',
+      projectId: 'proj_1',
+      tag: 'v1',
+      revisionId: '',
+      ownerId: 'user_1',
+      visibility: 'public',
+      manifestKey: '',
+      ogImageKey: null,
+      thumbnailKey: null,
+      unpublishedAt: null,
+      parentPublicationId: null,
+      kernels: [],
+      entryPath: 'main.ts',
+      title: 'T',
+      description: null,
+      forkCount: 0,
+      viewCount: 0,
+      ownerSnapshot: { id: 'user_1', name: 'Owner' },
+      createdAt: new Date(),
+      runtimePin: '~0.1.0',
+    };
+    const database = createDerivedDatabase({ publication, generation: 4, derivedGeneration: 2 });
+
+    const service = new PublicationsService(
+      database.databaseService,
+      createManifestStorageStub(),
+      createConfigStub(),
+      createRedisStub(),
+      createRateLimiterStub(),
+      createMetricsStub(),
+      createEmailStub(),
+      createBillingStub(),
+      createStoreStub(repositoryPath),
+    );
+
+    const result = await service.getPublicationForViewer({ publicationId: 'pub_derived' });
+
+    /* The viewer is served the version the push actually published, and the
+       marker now says so, so the next read costs one query. */
+    expect(result.publication.revisionId).toBe(seededRevision(repositoryPath));
+    expect(publication['manifestKey']).toBe(`publications/pub_derived/${seededRevision(repositoryPath)}.json`);
+    /* The marker is the git service's to advance, because its repair also
+       rebuilds accounting and the LFS marks (D19). */
+    expect(database.derivedWrites).toStrictEqual([]);
+  });
+
+  it('should serve without a lease when the marker is behind for work that is not this publication', async () => {
+    const repositoryPath = seedRepository(new Map([['main.ts', encodeUtf8('export default () => {}')]]));
+    /* The row already records the commit the manifest's tag names: the marker
+       is behind for the accounting or an LFS mark, neither of which is this
+       read's business, so nothing is hydrated. */
+    const publication: Record<string, unknown> = {
+      id: 'pub_current_tag',
+      projectId: 'proj_1',
+      tag: 'v1',
+      revisionId: seededRevision(repositoryPath),
+      ownerId: 'user_1',
+      visibility: 'public',
+      manifestKey: 'm.json',
+      ogImageKey: null,
+      thumbnailKey: null,
+      unpublishedAt: null,
+      parentPublicationId: null,
+      kernels: [],
+      entryPath: 'main.ts',
+      title: 'T',
+      description: null,
+      forkCount: 0,
+      viewCount: 0,
+      ownerSnapshot: { id: 'user_1', name: 'Owner' },
+      createdAt: new Date(),
+      runtimePin: '~0.1.0',
+    };
+    const database = createDerivedDatabase({ publication, generation: 4, derivedGeneration: 2 });
+
+    const service = new PublicationsService(
+      database.databaseService,
+      createManifestStorageStub(),
+      createConfigStub(),
+      createRedisStub(),
+      createRateLimiterStub(),
+      createMetricsStub(),
+      createEmailStub(),
+      createBillingStub(),
+      createStoreStub(repositoryPath),
+    );
+
+    const result = await service.getPublicationForViewer({ publicationId: 'pub_current_tag' });
+
+    expect(result.publication.revisionId).toBe(seededRevision(repositoryPath));
+    expect(publication['manifestKey']).toBe('m.json');
+  });
+
+  it('should serve without a lease when the derived generation is current', async () => {
+    const publication: Record<string, unknown> = {
+      id: 'pub_current',
+      projectId: 'proj_1',
+      tag: 'v1',
+      revisionId: 'a'.repeat(40),
+      ownerId: 'user_1',
+      visibility: 'public',
+      manifestKey: 'm.json',
+      ogImageKey: null,
+      thumbnailKey: null,
+      unpublishedAt: null,
+      parentPublicationId: null,
+      kernels: [],
+      entryPath: 'main.ts',
+      title: 'T',
+      description: null,
+      forkCount: 0,
+      viewCount: 0,
+      ownerSnapshot: { id: 'user_1', name: 'Owner' },
+      createdAt: new Date(),
+      runtimePin: '~0.1.0',
+    };
+    const database = createDerivedDatabase({ publication, generation: 4, derivedGeneration: 4 });
+
+    const service = new PublicationsService(
+      database.databaseService,
+      createManifestStorageStub(),
+      createConfigStub(),
+      createRedisStub(),
+      createRateLimiterStub(),
+      createMetricsStub(),
+      createEmailStub(),
+      createBillingStub(),
+      /* No repository at all: a current publication must never hydrate one. */
+      createStoreStub(''),
+    );
+
+    const result = await service.getPublicationForViewer({ publicationId: 'pub_current' });
+
+    expect(result.publication.revisionId).toBe('a'.repeat(40));
+    expect(publication['manifestKey']).toBe('m.json');
+    expect(database.derivedWrites).toStrictEqual([]);
   });
 });
 
@@ -1932,7 +2255,7 @@ describe('PublicationsService.resolvePublicationFile (R3)', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createGitStub(''),
+      createStoreStub(''),
     );
     return { service, storage };
   }
@@ -1940,6 +2263,12 @@ describe('PublicationsService.resolvePublicationFile (R3)', () => {
   function createGranteeDatabase(args: { readonly accessRows: unknown[] }): PublicationsServiceDeps[0] {
     const publicationLimit = vi.fn().mockResolvedValue([privateRow]);
     const publicationFrom = vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: publicationLimit }) });
+
+    /* Every publication read consults `project_git` first: derived state that is
+       behind the manifest is repaired before the row is served (D19). */
+    const derivedFrom = vi.fn().mockReturnValue({
+      where: vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([{ generation: 3, derivedGeneration: 3 }]) }),
+    });
 
     const userLimit = vi.fn().mockResolvedValue([{ email: 'friend@example.com', emailVerified: true }]);
     const userFrom = vi.fn().mockReturnValue({ where: vi.fn().mockReturnValue({ limit: userLimit }) });
@@ -1950,6 +2279,7 @@ describe('PublicationsService.resolvePublicationFile (R3)', () => {
     const select = vi
       .fn()
       .mockReturnValueOnce({ from: publicationFrom })
+      .mockReturnValueOnce({ from: derivedFrom })
       .mockReturnValueOnce({ from: userFrom })
       .mockReturnValueOnce({ from: accessFrom });
 
@@ -2070,7 +2400,7 @@ describe('PublicationsService.openPublicationFile (R3)', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createGitStub(''),
+      createStoreStub(''),
     );
 
     const sha = 'f'.repeat(64);
@@ -2101,7 +2431,7 @@ describe('PublicationsService.openPublicationFile (R3)', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createGitStub(''),
+      createStoreStub(''),
     );
 
     await expect(service.openPublicationFile('f'.repeat(64), 'main.ts')).rejects.toThrow('denied');
@@ -2126,7 +2456,7 @@ describe('PublicationsService.openPublicationFile (R3)', () => {
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createGitStub(''),
+      createStoreStub(''),
     );
 
     const opened = await service.openPublicationFile('f'.repeat(64), 'thumbnail.webp');
@@ -2186,7 +2516,7 @@ describe('PublicationsService.getPublicationForViewer tiered file URLs (R4/R6)',
       createMetricsStub(),
       createEmailStub(),
       createBillingStub(),
-      createGitStub(''),
+      createStoreStub(''),
     );
 
     return { service, storage };
@@ -2277,7 +2607,7 @@ describe('PublicationsService private-visibility entitlement gate (T4/T16)', () 
       createMetricsStub(),
       createEmailStub(),
       createBillingStub({ canCreatePrivateShares: args.entitled }),
-      createGitStub(seedRepository(new Map([['main.ts', new Uint8Array([1])]]))),
+      createStoreStub(seedRepository(new Map([['main.ts', new Uint8Array([1])]]))),
     );
   }
 
@@ -2313,7 +2643,7 @@ describe('PublicationsService private-visibility entitlement gate (T4/T16)', () 
       createMetricsStub(),
       createEmailStub(),
       createBillingStub({ canCreatePrivateShares: true }),
-      createGitStub(seedRepository(new Map([['main.ts', new Uint8Array([1])]]))),
+      createStoreStub(seedRepository(new Map([['main.ts', new Uint8Array([1])]]))),
     );
 
     await expect(

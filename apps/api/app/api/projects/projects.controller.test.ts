@@ -1,11 +1,10 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { BadRequestException, HttpStatus, NotFoundException } from '@nestjs/common';
 import type { SQL } from 'drizzle-orm';
 import type { DatabaseService } from '#database/database.service.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import { registeredProjectLimitPerOwner } from '#api/git/git.constants.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
-import type { GitRepositoryService } from '#api/git/git.service.js';
 import type { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { ProjectsController } from '#api/projects/projects.controller.js';
 import type { RegisterProjectDto } from '#api/projects/projects.dto.js';
@@ -67,7 +66,6 @@ describe('ProjectsController', () => {
   let withinBudget: boolean;
   let inserted: Array<Record<string, unknown>>;
   let conditions: SQL[];
-  let ensureRepository: ReturnType<typeof vi.fn>;
   /** What the caller's plan entitles, which N5 checks before either write. */
   let canSyncFiles: boolean;
   let controller: ProjectsController;
@@ -149,7 +147,6 @@ describe('ProjectsController', () => {
     inserted = [];
     conditions = [];
     canSyncFiles = true;
-    ensureRepository = vi.fn(async (id: string) => `/git/${id}.git`);
     databaseStub = {
       database: {
         /* The projection says which query this is: `{ value: count() }` is the
@@ -202,7 +199,6 @@ describe('ProjectsController', () => {
     };
     controller = new ProjectsController(
       databaseStub as DatabaseService,
-      { ensureRepository } as unknown as GitRepositoryService,
       {
         consumeDailyBudget: async () => ({ allowed: withinBudget, count: 1 }),
       } as unknown as PublicationRateLimiterService,
@@ -213,12 +209,11 @@ describe('ProjectsController', () => {
 
   /* F2: registration probes for the id, inserts, then authorizes. With a real
      `ProjectAccessService` in the seat, a miss cached by an earlier lookup would
-     answer `404` for the row this call just wrote — and skip the repository. */
+     answer `404` for the row this call just wrote. */
   it('registers a project the caller asked about moments earlier', async () => {
     const live = new ProjectAccessService(databaseStubFor(() => rows) as DatabaseService);
     const contested = new ProjectsController(
       databaseStub as DatabaseService,
-      { ensureRepository } as unknown as GitRepositoryService,
       { consumeDailyBudget: async () => ({ allowed: true, count: 1 }) } as unknown as PublicationRateLimiterService,
       entitlements(),
       live,
@@ -226,13 +221,11 @@ describe('ProjectsController', () => {
 
     await expect(live.authorize(projectId, ownerId, 'owner')).rejects.toBeInstanceOf(NotFoundException);
     await expect(contested.register(projectId, body('Bracket'), ownerId)).resolves.toEqual({ id: projectId });
-    expect(ensureRepository).toHaveBeenCalledWith(projectId);
   });
 
-  it('creates the caller’s project row and its bare repository', async () => {
+  it('creates the caller’s project row, and no repository (D1)', async () => {
     await expect(controller.register(projectId, body('Bracket'), ownerId)).resolves.toEqual({ id: projectId });
     expect(inserted).toEqual([{ id: projectId, ownerId, name: 'Bracket', origin: 'local-mirror' }]);
-    expect(ensureRepository).toHaveBeenCalledWith(projectId);
   });
 
   /**
@@ -252,14 +245,12 @@ describe('ProjectsController', () => {
       response: { code: 'GIT_SYNC_NOT_ENTITLED', message: 'Syncing files to Tau Cloud is a paid plan feature.' },
     });
     expect(inserted).toEqual([]);
-    expect(ensureRepository).not.toHaveBeenCalled();
   });
 
   it('is idempotent for the owner and still reconciles the repository', async () => {
     rows = [{ ownerId }];
     await expect(controller.register(projectId, body('Bracket'), ownerId)).resolves.toEqual({ id: projectId });
     expect(inserted).toEqual([]);
-    expect(ensureRepository).toHaveBeenCalledWith(projectId);
   });
 
   /* Ruling P55: the same answer for "no such project" and "not yours", so a
@@ -271,7 +262,6 @@ describe('ProjectsController', () => {
     await expect(controller.register(projectId, body(), ownerId)).rejects.toMatchObject({
       response: { code: 'PROJECT_NOT_FOUND' },
     });
-    expect(ensureRepository).not.toHaveBeenCalled();
     expect(inserted).toEqual([]);
   });
 
@@ -298,7 +288,6 @@ describe('ProjectsController', () => {
     };
     const contested = new ProjectsController(
       racing as unknown as DatabaseService,
-      { ensureRepository } as unknown as GitRepositoryService,
       { consumeDailyBudget: async () => ({ allowed: true, count: 1 }) } as unknown as PublicationRateLimiterService,
       entitlements(),
       /* The winner's row by the time the loser re-checks: `authorize` is what
@@ -314,19 +303,17 @@ describe('ProjectsController', () => {
     await expect(contested.register(projectId, body(), ownerId)).rejects.toMatchObject({
       response: { code: 'PROJECT_NOT_FOUND' },
     });
-    expect(ensureRepository).not.toHaveBeenCalled();
   });
 
-  /* Review R5: P51 made bare-repository creation reachable without a publish, so
-     it needs a ceiling. The cap counts projects, not calls, so an owner at the
-     cap can still re-register what it already has. */
+  /* Review R5: P51 made registration reachable without a publish, so it needs a
+     ceiling. The cap counts projects, not calls, so an owner at the cap can
+     still re-register what it already has. */
   it('refuses the registration past the per-account project ceiling', async () => {
     owned = registeredProjectLimitPerOwner;
     await expect(controller.register(projectId, body(), ownerId)).rejects.toMatchObject({
       response: { code: 'PROJECT_LIMIT_REACHED' },
     });
     expect(inserted).toEqual([]);
-    expect(ensureRepository).not.toHaveBeenCalled();
 
     owned = registeredProjectLimitPerOwner - 1;
     await expect(controller.register(projectId, body(), ownerId)).resolves.toEqual({ id: projectId });
@@ -347,12 +334,10 @@ describe('ProjectsController', () => {
     });
     expect(conditions).toEqual([]);
     expect(inserted).toEqual([]);
-    expect(ensureRepository).not.toHaveBeenCalled();
   });
 
   it('refuses an id that cannot name a repository before it writes anything', async () => {
     await expect(controller.register('../escape', body(), ownerId)).rejects.toBeInstanceOf(BadRequestException);
-    expect(ensureRepository).not.toHaveBeenCalled();
     expect(inserted).toEqual([]);
   });
 

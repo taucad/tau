@@ -44,6 +44,35 @@ describe('environmentSchema', () => {
     }
   });
 
+  /**
+   * Charter D1: the volume is retired as durable state. A machine still
+   * carrying `TAU_GIT_ROOT` is a machine whose operator believes a directory
+   * holds the repositories, so boot refuses it rather than ignoring it — W8
+   * removes the mount, the `fly.*.toml` value and the `.env.example` line in
+   * the same change.
+   */
+  it('refuses to boot with a retired TAU_GIT_ROOT', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      TAU_GIT_ROOT: '/data/git',
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const issue = result.error.issues.find((candidate) => candidate.path.join('.') === 'TAU_GIT_ROOT');
+      expect(issue?.message).toContain('retired');
+    }
+  });
+
+  it('boots without TAU_GIT_ROOT, which is now the only accepted state', () => {
+    const environment = Object.fromEntries(
+      Object.entries(withRequiredCookieSecret(process.env)).filter(([key]) => key !== 'TAU_GIT_ROOT'),
+    );
+    const result = environmentSchema.safeParse(environment);
+
+    expect(result.success, JSON.stringify(result.success ? {} : result.error.issues)).toBe(true);
+  });
+
   it('rejects non-canonical TAU_CLOUD_ENABLED values', () => {
     const result = environmentSchema.safeParse({
       ...withRequiredCookieSecret(process.env),

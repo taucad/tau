@@ -1,437 +1,516 @@
-import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { PassThrough, Readable } from 'node:stream';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ConfigService } from '@nestjs/config';
-import type { Environment } from '#config/environment.config.js';
+import { Readable } from 'node:stream';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ServiceUnavailableException } from '@nestjs/common';
 import type { DatabaseService } from '#database/database.service.js';
-import type { BillingService } from '#api/billing/billing.service.js';
-// `vi.mock` is hoisted above this import, so the service sees the stubbed spawn.
-import type { ObjectStorageService } from '#storage/object-storage.service.js';
+import type { ProjectAccessService } from '#api/collaboration/project-access.service.js';
+import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
-
-const spawnMock = vi.hoisted(() => vi.fn());
-vi.mock('node:child_process', () => ({ spawn: spawnMock }));
-
-const fakeChild = (): EventEmitter & {
-  stdout: PassThrough;
-  stderr: PassThrough;
-  stdin: PassThrough;
-  kill: ReturnType<typeof vi.fn>;
-} =>
-  // oxlint-disable-next-line unicorn/prefer-event-target -- a fake `ChildProcess`, which is a Node EventEmitter
-  Object.assign(new EventEmitter(), {
-    stdout: new PassThrough(),
-    stderr: new PassThrough(),
-    stdin: new PassThrough(),
-    kill: vi.fn(),
-  });
-
-const createService = (): InstanceType<typeof GitRepositoryService> =>
-  new GitRepositoryService(
-    {
-      get: (key: string): unknown => (key === 'TAU_GIT_ROOT' ? '/tmp/tau-git-root' : ''),
-    } as unknown as ConfigService<Environment, true>,
-    {} as unknown as DatabaseService,
-    {} as unknown as BillingService,
-    {} as unknown as ObjectStorageService,
-  );
-
-describe('GitRepositoryService.serve', () => {
-  beforeEach(() => {
-    spawnMock.mockReset();
-    spawnMock.mockImplementation(() => fakeChild());
-  });
-
-  /**
-   * The pack ceiling and compare-and-swap, which are one `-c` list (C25/OQ4).
-   *
-   * `receive.denyDeletes` and `receive.denyNonFastForwards` are the only place
-   * the I7/I9 invariant can be enforced: `pre-receive` matches ref *names*, so
-   * without them a client could delete a published tag or a chat record ref and
-   * force-rewind `main`. The behaviour over real git is pinned in
-   * `git.http.integration.test.ts`; this row pins the argv so the flags cannot
-   * be dropped by an edit to the spawn.
-   */
-  it('bounds the incoming pack and refuses deletes and rewinds on a push', () => {
-    const service = createService();
-    const abort = new AbortController();
-
-    service.serve({
-      repositoryPath: '/tmp/tau-git-root/proj_1.git',
-      service: 'git-receive-pack',
-      body: Readable.from([]),
-      gzipped: false,
-      accountFor: 'proj_1',
-      maximumInputBytes: 12_345,
-      abort: abort.signal,
-    });
-
-    expect(spawnMock).toHaveBeenCalledTimes(1);
-    const [executable, argv, options] = spawnMock.mock.calls[0] as [string, string[], Record<string, unknown>];
-    expect(executable).toBe('git');
-    expect(argv).toEqual([
-      '-c',
-      'receive.maxInputSize=12345',
-      '-c',
-      'receive.denyDeletes=true',
-      '-c',
-      'receive.denyNonFastForwards=true',
-      'receive-pack',
-      '--stateless-rpc',
-      '/tmp/tau-git-root/proj_1.git',
-    ]);
-    // R7: the child cannot outlive the request or run unbounded.
-    expect(options['signal']).toBe(abort.signal);
-    expect(options['timeout']).toBeGreaterThan(0);
-    expect(options['killSignal']).toBe('SIGKILL');
-  });
-
-  it('passes no config override on a fetch', () => {
-    const service = createService();
-
-    service.serve({
-      repositoryPath: '/tmp/tau-git-root/proj_1.git',
-      service: 'git-upload-pack',
-      body: Readable.from([]),
-      gzipped: false,
-      maximumInputBytes: 64 * 1024 * 1024,
-    });
-
-    const [, argv] = spawnMock.mock.calls[0] as [string, string[]];
-    expect(argv).toEqual(['upload-pack', '--stateless-rpc', '/tmp/tau-git-root/proj_1.git']);
-  });
-
-  /* C32: git has no `receive.maxInputSize` for `upload-pack` and Fastify's
-     `bodyLimit` does not reach a streamed content-type parser, so the count in
-     `pipeRequestBody` is the whole of the fetch RPC's bound. */
-  it('kills a fetch whose request body passes the negotiation ceiling', async () => {
-    const service = createService();
-    const child = fakeChild();
-    spawnMock.mockImplementationOnce(() => child);
-
-    service.serve({
-      repositoryPath: '/tmp/tau-git-root/proj_1.git',
-      service: 'git-upload-pack',
-      body: Readable.from([new Uint8Array(64), new Uint8Array(64)]),
-      gzipped: false,
-      maximumInputBytes: 100,
-    });
-
-    await service.settled();
-    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
-  });
-
-  it('refuses to spawn past the concurrency ceiling instead of queueing without bound', () => {
-    const service = createService();
-    const spawnOne = (): void => {
-      service.serve({
-        repositoryPath: '/tmp/tau-git-root/proj_1.git',
-        service: 'git-upload-pack',
-        body: Readable.from([]),
-        gzipped: false,
-      });
-    };
-
-    for (let index = 0; index < 32; index += 1) {
-      spawnOne();
-    }
-
-    expect(spawnOne).toThrow(/retry shortly/u);
-  });
-
-  it('holds one owner-wide admission across receive-pack and refuses a racing LFS reservation', async () => {
-    const service = createService();
-    vi.spyOn(service, 'readOwnerUsage').mockResolvedValue({
-      storageBytes: 10,
-      lfsBytes: 20,
-    });
-    const access = {
-      projectId: 'proj_1',
-      ownerId: 'owner_1',
-      repositoryPath: '/tmp/tau-git-root/proj_1.git',
-      remainingBytes: 70,
-      storageLimitBytes: 100,
-    };
-    const admission = await service.admitGitPush(access);
-    expect(admission.remainingBytes).toBe(70);
-    await expect(service.reserveLfsObjects({ access, objects: [] })).rejects.toMatchObject({
-      response: { code: 'GIT_STORAGE_BUSY' },
-    });
-    admission.release();
-    const reopened = await service.admitGitPush(access);
-    expect(reopened.remainingBytes).toBe(70);
-    reopened.release();
-  });
-
-  it('excludes repository maintenance while receive-pack owns the repository', async () => {
-    const service = createService();
-    const child = fakeChild();
-    spawnMock.mockImplementationOnce(() => child);
-    service.serve({
-      repositoryPath: '/tmp/tau-git-root/proj_1.git',
-      service: 'git-receive-pack',
-      body: Readable.from([]),
-      gzipped: false,
-      accountFor: 'proj_1',
-    });
-
-    await expect(service.withRepositoryMaintenance('proj_1', async () => undefined)).rejects.toMatchObject({
-      response: { code: 'GIT_REPOSITORY_BUSY' },
-    });
-    child.emit('close', 0);
-  });
-});
-
-/*
- * The guard `git.constants.ts` states as an invariant — "anything else never
- * reaches the filesystem" — belongs to the service, not to one controller: W8
- * added a second caller (`POST /v1/publications`) that has no controller of its
- * own to check it (review R1).
- */
-describe('GitRepositoryService.ensureRepository', () => {
-  /* A real directory, so a regression that gets past the guard writes inside
-   * `mktemp` rather than into a path this suite would then have to clean. */
-  let root: string;
-
-  beforeEach(() => {
-    root = mkdtempSync(path.join(tmpdir(), 'tau-git-guard-'));
-    spawnMock.mockReset();
-    spawnMock.mockImplementation(() => {
-      const child = fakeChild();
-      /* Settle, so a regression fails on the assertion instead of hanging on a
-       * child that never closes. */
-      queueMicrotask(() => child.emit('close', 0));
-      return child;
-    });
-  });
-
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
-  });
-
-  const rootedService = (): InstanceType<typeof GitRepositoryService> =>
-    new GitRepositoryService(
-      {
-        get: (key: string): unknown => (key === 'TAU_GIT_ROOT' ? root : ''),
-      } as unknown as ConfigService<Environment, true>,
-      {} as unknown as DatabaseService,
-      {} as unknown as BillingService,
-      {} as unknown as ObjectStorageService,
-    );
-
-  it.each([['../../tmp/evil'], ['..'], ['proj_1/../../escape'], ['/absolute'], [''], ['a'.repeat(65)]])(
-    'refuses %j before touching the filesystem',
-    async (projectId) => {
-      await expect(rootedService().ensureRepository(projectId)).rejects.toMatchObject({
-        response: { code: 'INVALID_REPOSITORY' },
-      });
-      expect(spawnMock).not.toHaveBeenCalled();
-      expect(readdirSync(root)).toStrictEqual([]);
-    },
-  );
-
-  it('refuses a traversal id from `repositoryPath` too, so no caller can compose the path itself', () => {
-    const service = rootedService();
-
-    expect(() => service.repositoryPath('../../tmp/evil')).toThrow();
-    expect(service.repositoryPath('proj_1')).toBe(path.join(root, 'proj_1.git'));
-  });
-});
+import type { GitAccess } from '#api/git/git.service.js';
+import { commitLease } from '#api/git/store/commit.js';
+import { hydrateLease } from '#api/git/store/lease.js';
+import { repositoryLocator } from '#api/git/store/locator.js';
+import type {
+  CommitToken,
+  ManifestBytes,
+  PutObjectOptions,
+  RepositoryLocator,
+  RepositoryStore,
+  StoredObject,
+} from '#api/git/store/port.js';
+import type { ObjectStorageService } from '#storage/object-storage.service.js';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import { eq } from 'drizzle-orm';
+import postgres from 'postgres';
+import * as schema from '#database/schema.js';
+import { project, projectGit, user } from '#database/schema.js';
 
 /**
- * The nightly collector's destructive step holds a Postgres advisory lock, a
- * row lock, the owner gate and the repository gate at once, and R14 requires a
- * reachability recheck inside it. What did not belong there was the *writer*:
- * `reachableLfsOids` used to refresh the record retention roots first, which is
- * a `for-each-ref` + `rev-list` + one `git grep` per 256 revisions + a
- * `cat-file` batch + an `update-ref`, all inside that transaction — so a
- * collection pass answered every concurrent push from the same account with
- * `503 GIT_STORAGE_BUSY` (review C30). The refresh moved to
- * `GitBackupService`'s maintenance window; the recheck stayed.
+ * D19's one mechanism, on its own: the generation a push commits is recorded
+ * separately from everything derived from it, so a worker killed between the
+ * two leaves `derived_generation` behind `generation` — and the next request
+ * that touches the project repairs it, with no queue, no retry table and no
+ * reconcile job.
+ *
+ * The kill is simulated by its residue rather than by a signal. What a kill
+ * actually leaves is exactly "a committed manifest in the store and a row whose
+ * derived generation is behind it"; W2's `commit.integration.test.ts` proves
+ * that a worker dying at any named fault point leaves that and nothing worse,
+ * so this suite starts from it and proves the repair.
  */
-describe('GitRepositoryService.retireLfsObject', () => {
-  let root: string;
 
-  beforeEach(() => {
-    root = mkdtempSync(path.join(tmpdir(), 'tau-git-retire-'));
-    spawnMock.mockReset();
-    spawnMock.mockImplementation(() => {
-      const child = fakeChild();
-      queueMicrotask(() => child.emit('close', 0));
-      return child;
-    });
+const ownerId = 'user-w4a';
+const projectId = 'proj-w4a';
+const scratchDirectories: string[] = [];
+
+const scratch = (label: string): string => {
+  const directory = mkdtempSync(path.join(tmpdir(), `tau-w4a-${label}-`));
+  scratchDirectories.push(directory);
+  return directory;
+};
+
+/* eslint-disable @typescript-eslint/naming-convention -- process environment names */
+/**
+ * The developer's own git configuration never reaches this suite: a global
+ * `commit.gpgsign` would make every fixture commit depend on a working agent,
+ * which is not what any of these rows is about.
+ */
+const gitEnvironment = {
+  PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+  HOME: tmpdir(),
+  LANG: 'C',
+  GIT_CONFIG_GLOBAL: '/dev/null',
+  GIT_CONFIG_SYSTEM: '/dev/null',
+  GIT_TERMINAL_PROMPT: '0',
+  TAU_GIT_PUSH_ADMITTED: '1',
+} as unknown as NodeJS.ProcessEnv;
+/* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
+
+const git = (cwd: string, ...args: readonly string[]): string =>
+  execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: gitEnvironment });
+
+/**
+ * Everything the store port promises, in one process's memory. Enough for the
+ * commit protocol — which is all this suite drives — and deliberately not a
+ * second adapter: `commit.integration.test.ts` and the two-process suite own
+ * the real one.
+ */
+const memoryStore = (): RepositoryStore => {
+  const objects = new Map<string, Uint8Array<ArrayBuffer>>();
+  const manifests = new Map<string, { manifest: ManifestBytes; token: CommitToken }>();
+  let version = 0;
+  const prefix = (locator: RepositoryLocator): string => `${locator.ownerId}/${locator.projectId}/`;
+
+  return {
+    capabilities: { conditionalWrite: true, delete: true, list: true, maxObjectBytes: 5 * 1024 ** 3 },
+    readManifest: async (locator) => manifests.get(prefix(locator)),
+    commitManifest: async (locator, next, expected) => {
+      const current = manifests.get(prefix(locator));
+      const matches = expected === 'absent' ? current === undefined : current?.token.token === expected.token;
+      if (!matches) {
+        return 'lost';
+      }
+      version += 1;
+      const token = { token: `v${String(version)}` };
+      manifests.set(prefix(locator), { manifest: next, token });
+      return token;
+    },
+    // oxlint-disable-next-line max-params -- the port's own signature
+    putObject: async (locator, key, body, _options: PutObjectOptions) => {
+      objects.set(`${prefix(locator)}${key}`, body);
+    },
+    getObject: async (locator, key) => {
+      const body = objects.get(`${prefix(locator)}${key}`);
+      if (body === undefined) {
+        throw new Error(`no such object: ${key}`);
+      }
+      return Readable.from([Buffer.from(body)]);
+    },
+    listObjects: (locator, keyPrefix) => {
+      const base = prefix(locator);
+      const matching: StoredObject[] = [...objects.entries()]
+        .filter(([key]) => key.startsWith(`${base}${keyPrefix}`))
+        .map(([key, body]) => ({ key: key.slice(base.length), bytes: body.byteLength, modifiedAt: new Date() }));
+      return (async function* () {
+        yield* matching;
+      })();
+    },
+    deleteObjects: async (locator, keys) => {
+      for (const key of keys) {
+        objects.delete(`${prefix(locator)}${key}`);
+      }
+    },
+  };
+};
+
+/** The one `project_git` row this suite has, as the service reads and writes it. */
+type GitRow = { generation: number; derivedGeneration: number; storageBytes: number };
+
+/**
+ * A database stub shaped to the three statements the derivation path makes: the
+ * generation read, the accounting write, and the transaction the LFS
+ * reachability pass opens. `failTransaction` is how a broken derivation is
+ * expressed — that is what a worker that dies inside one looks like from here.
+ */
+const databaseStub = (row: GitRow, control: { failTransaction: boolean }): DatabaseService => {
+  const update = (): unknown => ({
+    set: () => ({ where: () => ({ returning: async (): Promise<unknown[]> => [] }) }),
   });
-
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
-  });
-
-  it('runs no ref-writing git child inside the owner-serialized transaction', async () => {
-    const held = [
-      {
-        size: 64,
-        createdAt: new Date('2026-01-01T00:00:00.000Z'),
-        finalizedAt: new Date('2026-01-01T00:00:00.000Z'),
-        unreachableAt: new Date('2026-01-02T00:00:00.000Z'),
-      },
-    ];
-    const transaction = {
-      execute: async (): Promise<void> => undefined,
+  /* oxlint-disable typescript/promise-function-async -- a Drizzle builder is
+     both awaitable and chainable; an `async` member would return a promise of
+     the builder rather than being one. */
+  return {
+    database: {
       select: () => ({
         from: () => ({
-          where: () => ({
-            limit: () => ({ for: async (): Promise<typeof held> => held }),
-          }),
+          /* Two readers, two shapes: the generation read ends in `.limit(1)`,
+             and the materializer's publication lookup awaits the builder
+             itself. Both are answered here so a derivation that throws is a
+             real failure rather than a stub that ran out of methods. */
+          where: () =>
+            Object.assign(Promise.resolve([] as unknown[]), {
+              limit: async (): Promise<unknown[]> => [
+                { generation: row.generation, derivedGeneration: row.derivedGeneration },
+              ],
+            }),
         }),
       }),
-      update: () => ({ set: () => ({ where: async (): Promise<void> => undefined }) }),
-      delete: () => ({ where: async (): Promise<void> => undefined }),
-    };
-    const deleted: string[] = [];
-    const service = new GitRepositoryService(
-      {
-        get: (key: string): unknown => (key === 'TAU_GIT_ROOT' ? root : ''),
-      } as unknown as ConfigService<Environment, true>,
-      {
-        database: {
-          select: () => ({
-            from: () => ({ where: () => ({ limit: async () => [{ ownerId: 'owner_1' }] }) }),
-          }),
-          transaction: async (work: (tx: typeof transaction) => Promise<boolean>): Promise<boolean> =>
-            work(transaction),
-        },
-      } as unknown as DatabaseService,
-      {} as unknown as BillingService,
-      {
-        deleteBlob: async (args: { key: string }): Promise<void> => {
-          deleted.push(args.key);
-        },
-      } as unknown as ObjectStorageService,
-    );
-
-    const retired = await service.retireLfsObject(
-      {
-        projectId: 'proj_1',
-        oid: 'a'.repeat(64),
-        size: 64,
-        finalized: true,
-        createdAt: held[0]?.createdAt ?? new Date(),
-        finalizedAt: held[0]?.finalizedAt,
-        unreachableAt: held[0]?.unreachableAt,
+      insert: () => ({
+        values: (values: Partial<GitRow>) => ({
+          onConflictDoUpdate: async (change: { set: Record<string, unknown> }): Promise<void> => {
+            if (typeof change.set['generation'] === 'number') {
+              row.generation = change.set['generation'];
+            }
+            if (typeof change.set['derivedGeneration'] === 'number') {
+              row.derivedGeneration = change.set['derivedGeneration'];
+            }
+            if (typeof change.set['storageBytes'] === 'number') {
+              row.storageBytes = change.set['storageBytes'];
+            } else if (typeof values.storageBytes === 'number') {
+              row.storageBytes = values.storageBytes;
+            }
+          },
+        }),
+      }),
+      transaction: async (run: (transaction: unknown) => Promise<unknown>): Promise<unknown> => {
+        if (control.failTransaction) {
+          throw new Error('the worker died inside the derivation');
+        }
+        return run({ execute: async (): Promise<void> => undefined, update });
       },
-      new Date('2026-03-01T00:00:00.000Z'),
-    );
+    },
+  } as unknown as DatabaseService;
+  /* oxlint-enable typescript/promise-function-async -- end of the builder stub */
+};
 
-    expect(retired).toBe(true);
-    expect(deleted).toHaveLength(1);
-    const subcommands = spawnMock.mock.calls.map((call) => (call as [string, string[]])[1][0]);
-    expect(subcommands).toStrictEqual(['lfs']);
-    expect(subcommands).not.toContain('grep');
-    expect(subcommands).not.toContain('update-ref');
+const createService = (store: RepositoryStore, database: DatabaseService): GitRepositoryService =>
+  new GitRepositoryService(
+    database,
+    { getEntitlements: async () => ({ tier: 'pro', canSyncFiles: true }) } as unknown as CommercialEntitlementsService,
+    {} as unknown as ObjectStorageService,
+    {
+      authorize: async () => ({ projectId, ownerId, role: 'owner' }),
+      invalidate: () => undefined,
+    } as unknown as ProjectAccessService,
+    store,
+  );
+
+const access: GitAccess = {
+  projectId,
+  ownerId,
+  role: 'owner',
+  remainingBytes: 10 * 1024 ** 3,
+  storageLimitBytes: 10 * 1024 ** 3,
+};
+
+describe('GitRepositoryService derived state (D19)', () => {
+  const store = memoryStore();
+  const locator = repositoryLocator({ ownerId, projectId });
+  let committedBytes = 0;
+
+  beforeAll(async () => {
+    // One real push, committed through the real protocol, so the manifest this
+    // suite repairs against is a manifest a push actually wrote.
+    const client = scratch('client');
+    git(client, 'init', '--quiet', '--initial-branch=main', '.');
+    git(client, 'config', 'user.name', 'W4a');
+    git(client, 'config', 'user.email', 'w4a@tau.test');
+    writeFileSync(path.join(client, 'main.scad'), 'cube(10);\n');
+    git(client, 'add', '.');
+    git(client, 'commit', '--quiet', '-m', 'first revision');
+    git(client, 'tag', '-a', 'v1', '-m', 'v1');
+
+    const lease = await hydrateLease({ store, locator, parentDirectory: scratch('lease') });
+    try {
+      execFileSync('git', ['push', lease.directory, 'main', 'refs/tags/v1'], {
+        cwd: client,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: gitEnvironment,
+      });
+      const result = await commitLease({ store, lease, committedBy: ownerId });
+      expect(result.committed).toBe(true);
+      if (result.committed) {
+        expect(result.manifest.generation).toBe(1);
+        committedBytes = result.manifest.packs.reduce((total, pack) => total + pack.bytes, 0);
+      }
+    } finally {
+      await lease.dispose();
+    }
+    expect(committedBytes).toBeGreaterThan(0);
+  }, 60_000);
+
+  afterAll(() => {
+    for (const directory of scratchDirectories) {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves derived_generation behind when the derivation cannot finish, and still serves', async () => {
+    const row: GitRow = { generation: 1, derivedGeneration: 0, storageBytes: 0 };
+    const control = { failTransaction: true };
+    const service = createService(store, databaseStub(row, control));
+
+    const advertisement = await service.advertiseRefs(access, 'git-upload-pack');
+
+    /* The push is durable, so the request is answered: a derivation that cannot
+       finish is never allowed to turn a committed push into a refusal. */
+    expect(Buffer.from(advertisement).toString('utf8')).toContain('refs/heads/main');
+    expect(row.derivedGeneration).toBe(0);
+    expect(row.storageBytes).toBe(0);
+  }, 60_000);
+
+  it('repairs the mismatch on the next request, with no job in between', async () => {
+    const row: GitRow = { generation: 1, derivedGeneration: 0, storageBytes: 0 };
+    const control = { failTransaction: false };
+    const service = createService(store, databaseStub(row, control));
+
+    await service.advertiseRefs(access, 'git-upload-pack');
+
+    expect(row.derivedGeneration).toBe(1);
+    /* Accounting is the manifest's own live pack bytes — nothing walks a
+       directory to find out how large a repository is any more. */
+    expect(row.storageBytes).toBe(committedBytes);
+  }, 60_000);
+
+  it('does nothing when the row is already caught up', async () => {
+    const row: GitRow = { generation: 1, derivedGeneration: 1, storageBytes: 7 };
+    const service = createService(store, databaseStub(row, { failTransaction: true }));
+
+    await service.advertiseRefs(access, 'git-upload-pack');
+
+    // The failing transaction is never opened, which is how "no work" is visible.
+    expect(row.storageBytes).toBe(7);
+  }, 60_000);
+
+  /**
+   * Review F1, the window the a1 suite had no row for.
+   *
+   * A worker killed between `commitLease` and `recordGeneration` leaves the
+   * store at generation 1 and the row still at `0/0` — which the old gate
+   * (`derived_generation >= generation`) read as "caught up", so the repair
+   * never fired on any later request. The tag stayed durable and unpublished
+   * and the LFS objects the push made reachable kept their `unreachable_at`.
+   *
+   * The manifest is the authority, so the row's own `generation` is not part of
+   * the question any more.
+   */
+  it('repairs a generation the row never heard about, because the manifest decides', async () => {
+    const row: GitRow = { generation: 0, derivedGeneration: 0, storageBytes: 0 };
+    const service = createService(store, databaseStub(row, { failTransaction: false }));
+
+    await service.advertiseRefs(access, 'git-upload-pack');
+
+    expect(row.derivedGeneration).toBe(1);
+    /* The row converges on the store rather than staying behind it, so a later
+       request does not derive the same generation a second time. */
+    expect(row.generation).toBe(1);
+    expect(row.storageBytes).toBe(committedBytes);
+  }, 60_000);
+
+  /**
+   * Review F2. `dispose` is `rm -rf`, which suppresses ENOENT and nothing else;
+   * a throw used to skip the `release()` on the line after it, so the admission
+   * counter never came back and every later request on this worker answered
+   * `GIT_LEASE_DISK_FULL` forever. The disposal error also replaced the refusal
+   * the request had actually earned.
+   */
+  it('gives the admission back when a lease cannot be disposed, and keeps the original refusal', async () => {
+    const service = createService(
+      store,
+      databaseStub({ generation: 1, derivedGeneration: 1, storageBytes: 0 }, { failTransaction: false }),
+    );
+    /* One lease fits and a second does not, so a leaked admission is visible as
+       the next request being refused. */
+    const { bavail, bsize } = await statfs(tmpdir());
+    service.leaseDiskBytesPerLease = Math.floor(bavail * bsize * 0.6);
+
+    await expect(
+      service.withLease(access, async (lease) => {
+        (lease as { dispose: () => Promise<void> }).dispose = async () => {
+          throw new Error('EBUSY: resource busy or locked');
+        };
+        throw new ServiceUnavailableException({ code: 'GIT_PUSH_RACE_LOST', message: 'retry' });
+      }),
+      // The refusal the request earned, not the disposal's.
+    ).rejects.toMatchObject({ response: { code: 'GIT_PUSH_RACE_LOST' } });
+
+    let admitted = false;
+    await service.withLease(access, async () => {
+      admitted = true;
+    });
+    expect(admitted, 'the failed disposal leaked this worker’s lease admission').toBe(true);
+  }, 60_000);
+
+  it('refuses another lease when the reservation exceeds this worker’s free disk', async () => {
+    const service = createService(
+      store,
+      databaseStub({ generation: 1, derivedGeneration: 1, storageBytes: 0 }, { failTransaction: false }),
+    );
+    service.leaseDiskBytesPerLease = Number.MAX_SAFE_INTEGER;
+
+    await expect(service.advertiseRefs(access, 'git-upload-pack')).rejects.toMatchObject({
+      response: { code: 'GIT_LEASE_DISK_FULL' },
+    });
   });
 });
 
 /**
- * Storage accounting must never fail open (review R4).
+ * Review F4, against a real PostgreSQL: the `derived_generation` write is a
+ * compare-and-swap, so a slower deriver can never take the marker — or
+ * `storage_bytes` with it — backwards.
  *
- * `storage_bytes` is what both plan guards subtract from the allowance
- * (`authorize`'s `remainingBytes`, which becomes `receive.maxInputSize` and the
- * `pre-receive` budget), so every way of writing a number that is *lower* than
- * the truth hands the project headroom it has not paid for.
+ * The interleaving is reached by giving the stale worker a *stale row read*
+ * and the real database for its write, which is exactly the race two workers
+ * are in: both read `derived_generation = 0`, both derive, and the one that
+ * writes last is the one carrying the older generation. The manifest gate
+ * (F1) stops this from being reachable through one worker's own row read; the
+ * `setWhere` is what holds when two workers read the same stale row.
+ *
+ * Needs `pnpm infra:up` and a migrated database:
+ * `DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev`.
  */
-describe('GitRepositoryService storage accounting', () => {
-  let root: string;
-  /** Every `storage_bytes` the service wrote, in order. */
-  let written: number[];
+/*
+ * The workspace's own gate for a suite that needs a real database
+ * (`app/testing/git-storage-migration.integration.test.ts`): probe the
+ * configured URL rather than the presence of an environment variable, because
+ * the tracked `.env.test` pins a placeholder that answers nothing.
+ */
+const databaseUrl = process.env.DATABASE_URL;
 
-  const accountingService = (): InstanceType<typeof GitRepositoryService> =>
-    new GitRepositoryService(
-      {
-        get: (key: string): unknown => (key === 'TAU_GIT_ROOT' ? root : ''),
-      } as unknown as ConfigService<Environment, true>,
-      {
-        database: {
-          insert: () => ({
-            values: (values: { storageBytes?: number }) => ({
-              onConflictDoUpdate: async (update: { set: Record<string, unknown> }): Promise<void> => {
-                const next = update.set['storageBytes'] ?? values.storageBytes;
-                if (typeof next === 'number') {
-                  written.push(next);
-                }
-              },
-            }),
+const databaseReachable = async (): Promise<boolean> => {
+  try {
+    const probe = postgres(databaseUrl, {
+      max: 1,
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- postgres.js option name
+      connect_timeout: 5,
+      onnotice() {
+        /* Probe only; a notice is not a diagnostic. */
+      },
+    });
+    try {
+      await probe`SELECT 1`;
+      return true;
+    } finally {
+      await probe.end();
+    }
+  } catch {
+    return false;
+  }
+};
+
+describe.skipIf(!(await databaseReachable()))('derived_generation is a compare-and-swap (F4)', () => {
+  const casOwnerId = `user-w4a-cas-${randomBytes(5).toString('hex')}`;
+  const casProjectId = `proj-w4a-cas-${randomBytes(5).toString('hex')}`;
+  let client: ReturnType<typeof postgres>;
+  let database: ReturnType<typeof drizzle<typeof schema>>;
+
+  beforeAll(async () => {
+    client = postgres(databaseUrl, { max: 1, prepare: false });
+    database = drizzle(client, { schema });
+    await database.insert(user).values({
+      id: casOwnerId,
+      name: 'W4a CAS',
+      email: `${casOwnerId}@tau.test`,
+      emailVerified: false,
+    });
+    await database.insert(project).values({ id: casProjectId, ownerId: casOwnerId, name: 'cas' });
+  }, 60_000);
+
+  afterAll(async () => {
+    await database.delete(user).where(eq(user.id, casOwnerId));
+    await client.end();
+  }, 60_000);
+
+  it('refuses a stale deriver’s write and keeps the newer marker and its bytes', async () => {
+    const casStore = memoryStore();
+    const casLocator = repositoryLocator({ ownerId: casOwnerId, projectId: casProjectId });
+    const casAccess: GitAccess = { ...access, projectId: casProjectId, ownerId: casOwnerId };
+
+    const client2 = scratch('cas-client');
+    git(client2, 'init', '--quiet', '--initial-branch=main', '.');
+    git(client2, 'config', 'user.name', 'W4a');
+    git(client2, 'config', 'user.email', 'w4a@tau.test');
+
+    /* Two commits, so the store reaches generation 2 and the two derivers carry
+       different generations and different byte totals. */
+    const commitAndPush = async (n: number): Promise<number> => {
+      writeFileSync(path.join(client2, 'main.scad'), `cube(${String(n)});\n`);
+      git(client2, 'add', '.');
+      git(client2, 'commit', '--quiet', '-m', `rev ${String(n)}`);
+      const lease = await hydrateLease({ store: casStore, locator: casLocator, parentDirectory: scratch('cas-lease') });
+      try {
+        execFileSync('git', ['push', lease.directory, 'main'], {
+          cwd: client2,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: gitEnvironment,
+        });
+        const result = await commitLease({ store: casStore, lease, committedBy: casOwnerId });
+        expect(result.committed).toBe(true);
+        return result.committed ? result.manifest.packs.reduce((total, pack) => total + pack.bytes, 0) : 0;
+      } finally {
+        await lease.dispose();
+      }
+    };
+    await commitAndPush(1);
+    /* The generation-1 manifest, captured before the store moves on: it is what
+       the stale worker's lease is still hydrated from. Its packs stay live
+       (the bound is eight), so the lease builds. */
+    const generationOne = await casStore.readManifest(casLocator);
+    const generationTwoBytes = await commitAndPush(2);
+
+    await database
+      .insert(projectGit)
+      .values({ projectId: casProjectId, generation: 2, derivedGeneration: 0, storageBytes: 0 })
+      .onConflictDoUpdate({
+        target: projectGit.projectId,
+        set: { generation: 2, derivedGeneration: 0, storageBytes: 0 },
+      });
+
+    /* The stale worker: its store still answers with the generation-1 manifest,
+       and its row read is frozen at the moment both workers saw
+       `derived_generation = 0`. Everything it *writes* goes to the real row,
+       which is the race: two workers read the same stale marker, and the one
+       carrying the older generation writes last. */
+    const staleStore: RepositoryStore = { ...casStore, readManifest: async () => generationOne };
+    const frozenRead = { generation: 2, derivedGeneration: 0 };
+    /* oxlint-disable typescript/promise-function-async -- a Drizzle builder is
+       both awaitable and chainable; an `async` member would return a promise of
+       the builder rather than being one. */
+    const staleDatabase = {
+      database: {
+        select: () => ({
+          from: () => ({
+            leftJoin: () => ({ where: async () => [frozenRead] }),
+            where: () => Object.assign(Promise.resolve([] as unknown[]), { limit: async () => [frozenRead] }),
           }),
-        },
-      } as unknown as DatabaseService,
-      {} as unknown as BillingService,
-      {} as unknown as ObjectStorageService,
-    );
+        }),
+        insert: (table: unknown) => database.insert(table as typeof projectGit),
+        transaction: async (run: (transaction: unknown) => Promise<unknown>) => database.transaction(run),
+      },
+    } as unknown as DatabaseService;
+    /* oxlint-enable typescript/promise-function-async -- end of the builder stub */
 
-  /** One `receive-pack` request with `body` as its whole payload. */
-  const push = async (service: InstanceType<typeof GitRepositoryService>, body: string): Promise<void> => {
-    const child = fakeChild();
-    spawnMock.mockImplementationOnce(() => child);
-    service.serve({
-      repositoryPath: path.join(root, 'proj_1.git'),
-      service: 'git-receive-pack',
-      body: Readable.from([Buffer.from(body, 'utf8')]),
-      gzipped: false,
-      accountFor: 'proj_1',
-      maximumInputBytes: 1024,
+    const fresh = createService(casStore, { database } as unknown as DatabaseService);
+    const stale = createService(staleStore, staleDatabase);
+
+    await fresh.advertiseRefs(casAccess, 'git-upload-pack');
+    const afterFresh = await database.query.projectGit.findFirst({
+      where: eq(projectGit.projectId, casProjectId),
     });
-    /* The body is piped before the child closes, exactly as a real request. */
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 10);
+    expect(afterFresh?.derivedGeneration).toBe(2);
+    expect(Number(afterFresh?.storageBytes)).toBe(generationTwoBytes);
+
+    /* Now the slow one lands, still believing the marker is 0. */
+    await stale.advertiseRefs(casAccess, 'git-upload-pack');
+    const afterStale = await database.query.projectGit.findFirst({
+      where: eq(projectGit.projectId, casProjectId),
     });
-    child.emit('close', 0);
-    await service.settled();
-  };
-
-  beforeEach(() => {
-    root = mkdtempSync(path.join(tmpdir(), 'tau-git-accounting-'));
-    written = [];
-    spawnMock.mockReset();
-    spawnMock.mockImplementation(() => fakeChild());
-  });
-
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
-  });
-
-  it('leaves the row untouched when the repository cannot be walked', async () => {
-    const service = accountingService();
-    /* No repository on the volume: the walk fails rather than answering 0. */
-    await expect(service.measureRepository(path.join(root, 'missing.git'))).rejects.toThrow();
-
-    await push(service, '0000rest-of-a-pack');
-    expect(written).toStrictEqual([]);
-  });
-
-  it('does not account for the flush-only request that authenticates a chunked push', async () => {
-    mkdirSync(path.join(root, 'proj_1.git'), { recursive: true });
-    writeFileSync(path.join(root, 'proj_1.git', 'HEAD'), 'ref: refs/heads/main\n');
-    const service = accountingService();
-
-    await push(service, '0000');
-    expect(written).toStrictEqual([]);
-  });
-
-  it('records what the request that carried a pack measured, once', async () => {
-    const repository = path.join(root, 'proj_1.git');
-    mkdirSync(path.join(repository, 'objects'), { recursive: true });
-    writeFileSync(path.join(repository, 'HEAD'), 'ref: refs/heads/main\n');
-    const service = accountingService();
-
-    await push(service, '0000');
-    writeFileSync(path.join(repository, 'objects', 'pack-1'), Buffer.alloc(4096));
-    await push(service, '0000the commands and the pack');
-
-    /* One write, and it is the one the pack's own walk made: the probe never
-       ran a walk at all, so it cannot race it or overwrite it. */
-    expect(written).toHaveLength(1);
-    expect(written[0]).toBeGreaterThanOrEqual(4096);
-  });
+    expect(afterStale?.derivedGeneration, 'a slower deriver rewound the marker').toBe(2);
+    expect(Number(afterStale?.storageBytes), 'a slower deriver rewound the byte accounting').toBe(generationTwoBytes);
+  }, 120_000);
 });

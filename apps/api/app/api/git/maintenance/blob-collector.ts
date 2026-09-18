@@ -21,8 +21,18 @@ import { assertSingletonProcessGroup } from '#api/git/maintenance/singleton.js';
  * this `DELETE` on its own row lock and then fails its `refcount = 0`
  * predicate. Only the blobs the delete returned are removed.
  *
- * ponytail: no grace window and no `zeroed_at` column, because the ordering in
- * `publications.service` is the invariant rather than the timing.
+ * **The transaction spans the byte deletion**, which is the other half of that
+ * sentence (W4c review F1). With the delete committing on its own, a publisher
+ * arriving between the row delete and the byte delete found no row to block on,
+ * inserted a fresh one, saw the bytes still present and skipped its upload —
+ * and then this pass removed them, leaving a committed publication pointing at
+ * an object that is gone and a `refcount = 1` row nothing will ever revisit.
+ * Holding the transaction open until the bytes are gone makes that publisher
+ * wait on the deleted-but-uncommitted row, so it inserts afterwards, misses on
+ * `headBlob`, and puts the bytes back.
+ *
+ * ponytail: no grace window and no `zeroed_at` column, because the ordering of
+ * the two writers is the invariant rather than the timing.
  */
 
 /** Blobs removed in one pass. Bounded so an operator run has a knowable cost. */
@@ -61,19 +71,24 @@ export const collectZeroCountBlobs = async (args: BlobCollectionArguments): Prom
     return { planned, collected: [], bytes: 0 };
   }
 
-  const removed = await args.database
-    .delete(blobRef)
-    .where(and(inArray(blobRef.sha256, planned), eq(blobRef.refcount, 0)))
-    .returning({ sha256: blobRef.sha256, sizeBytes: blobRef.sizeBytes });
+  const removed = await args.database.transaction(async (transaction) => {
+    const rows = await transaction
+      .delete(blobRef)
+      .where(and(inArray(blobRef.sha256, planned), eq(blobRef.refcount, 0)))
+      .returning({ sha256: blobRef.sha256, sizeBytes: blobRef.sizeBytes });
+
+    const deletable = rows.map((row) => blobKeyFromSha256Hex(row.sha256));
+    if (deletable.length > 0) {
+      // A blob's tier follows its publication's visibility, and a delete of a key
+      // that is not there is not an error, so both tiers are swept. Inside the
+      // transaction, so no publisher can observe "row gone, bytes present".
+      await args.driver.deleteBlobs({ namespace: 'blobs', keys: deletable, tier: 'private' });
+      await args.driver.deleteBlobs({ namespace: 'blobs', keys: deletable, tier: 'public' });
+    }
+    return rows;
+  });
 
   const collected = removed.map((row) => row.sha256);
-  const keys = collected.map((sha256) => blobKeyFromSha256Hex(sha256));
-  if (keys.length > 0) {
-    // A blob's tier follows its publication's visibility, and a delete of a key
-    // that is not there is not an error, so both tiers are swept.
-    await args.driver.deleteBlobs({ namespace: 'blobs', keys, tier: 'private' });
-    await args.driver.deleteBlobs({ namespace: 'blobs', keys, tier: 'public' });
-  }
 
   const bytes = removed.reduce((total, row) => total + Number(row.sizeBytes), 0);
   report(`collected ${String(collected.length)} blobs, ${String(bytes)} bytes`);

@@ -21,6 +21,12 @@ export type OwnerLockTransaction = Parameters<Parameters<Database['transaction']
  * never be held across a push. The key is `hashtextextended(ownerId, 0)`, the
  * same expression `git.service.ts` already locks on, so the two never overlap.
  *
+ * **A transaction takes at most one advisory lock in this key space.** The only
+ * other one is the project key `publication-materializer.ts` takes to serialize
+ * a repair, and a body that took it while holding this one would let two callers
+ * acquire the pair in opposite orders and deadlock. If some future caller
+ * genuinely needs both, the owner key is taken first, everywhere.
+ *
  * @param database - The Drizzle handle to open the transaction on.
  * @param ownerId - The account whose storage state is being serialized.
  * @param body - What to run while the lock is held; it receives the transaction.

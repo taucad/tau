@@ -1,5 +1,4 @@
 /* oxlint-disable new-cap, @typescript-eslint/consistent-type-imports -- NestJS decorators are factories and DI metadata needs runtime class imports */
-/* eslint-disable @typescript-eslint/naming-convention -- git hook environment variables are SCREAMING_SNAKE_CASE */
 import {
   BadRequestException,
   Body,
@@ -12,6 +11,7 @@ import {
   Query,
   Req,
   Res,
+  ServiceUnavailableException,
   StreamableFile,
   UseFilters,
 } from '@nestjs/common';
@@ -20,7 +20,6 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Environment } from '#config/environment.config.js';
 import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
 import {
-  dumbHttpContentType,
   isGitService,
   negotiationInputLimitBytes,
   noCacheHeaders,
@@ -28,12 +27,11 @@ import {
   quotaOverrunSlackBytes,
   serviceAdvertisementPrefix,
 } from '#api/git/git.constants.js';
-import type { GitService as GitSmartService } from '#api/git/git.constants.js';
 import { LfsBatchDto, LfsVerifyDto } from '#api/git/git.dto.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
 import type { LfsBatchResponse, LfsQuotaRefusal } from '#api/git/git-lfs.service.js';
 import { GitProtocolExceptionFilter } from '#api/git/git-protocol-exception.filter.js';
-import { GitRepositoryService } from '#api/git/git.service.js';
+import { GitRepositoryService, gitRetryAfterSeconds } from '#api/git/git.service.js';
 
 const applyHeaders = (reply: FastifyReply, headers: Readonly<Record<string, string>>): void => {
   for (const [name, value] of Object.entries(headers)) {
@@ -42,10 +40,14 @@ const applyHeaders = (reply: FastifyReply, headers: Readonly<Record<string, stri
 };
 
 /**
- * The Tau Hosted Remote (A16, D15, S25): one bare repository per project on the
- * volume, served by git's own `upload-pack`/`receive-pack --stateless-rpc`,
- * with the git-LFS batch API in front of presigned R2 transfers and a
- * read-only dumb-HTTP layout kept current by `update-server-info`.
+ * The Tau Hosted Remote (charter D1, D3, D12): one tenant-prefixed repository
+ * per project in object storage, served by git's own
+ * `upload-pack`/`receive-pack --stateless-rpc` over a lease hydrated per
+ * request, with the git-LFS batch API in front of presigned transfers.
+ *
+ * Smart HTTP only. The dumb-HTTP layout and `update-server-info` are gone
+ * (D12): they were a second read path over a directory that no longer exists
+ * between requests.
  *
  * The API never parses what a client pushes (D25): chats are refs like any
  * other, and their bytes go into the pack unread.
@@ -85,27 +87,13 @@ export class GitController {
     const projectId = this.requireProjectId(repository);
     applyHeaders(reply, noCacheHeaders);
 
-    if (service === undefined) {
-      // Dumb-HTTP read: the `info/refs` file that `update-server-info` wrote.
-      const access = await this.repositories.authorize({
-        projectId,
-        userId,
-        mode: 'read',
-      });
-      const file = this.repositories.openDumbHttpFile(access.repositoryPath, 'info/refs');
-      if (file === undefined) {
-        throw new NotFoundException({
-          code: 'GIT_OBJECT_NOT_FOUND',
-          message: 'Not found',
-        });
-      }
-      return new StreamableFile(file, { type: 'text/plain' });
-    }
-
     if (!isGitService(service)) {
+      /* A missing `service` used to mean "walk the dumb layout". D12 removed
+         that layout, so the only thing an unnamed service can be now is a
+         client asking for a protocol this remote does not speak. */
       throw new BadRequestException({
         code: 'GIT_SERVICE_UNKNOWN',
-        message: 'Unknown git service',
+        message: 'This remote speaks git smart HTTP only; name a service.',
       });
     }
 
@@ -114,7 +102,9 @@ export class GitController {
       userId,
       mode: service === 'git-receive-pack' ? 'write' : 'read',
     });
-    const advertisement = await this.repositories.advertiseRefs(access.repositoryPath, service);
+    const advertisement = await this.withRetryAfter(reply, async () =>
+      this.repositories.advertiseRefs(access, service),
+    );
     return new StreamableFile(
       Buffer.concat([Buffer.from(serviceAdvertisementPrefix(service), 'utf8'), advertisement]),
       { type: `application/x-${service}-advertisement` },
@@ -131,15 +121,32 @@ export class GitController {
     @Req() request: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<StreamableFile> {
-    return this.rpc({
-      repository,
-      userId,
-      request,
-      reply,
-      service: 'git-upload-pack',
-    });
+    const projectId = this.requireProjectId(repository);
+    const access = await this.repositories.authorize({ projectId, userId, mode: 'read' });
+    applyHeaders(reply, noCacheHeaders);
+
+    const output = await this.withRetryAfter(reply, async () =>
+      this.repositories.uploadPack({
+        access,
+        body: request.raw,
+        gzipped: request.headers['content-encoding'] === 'gzip',
+        /* A fetch's body is `want`/`have` negotiation rather than a pack, so it
+           gets the flat negotiation ceiling — but it gets one: neither
+           Fastify's `bodyLimit` (the git parser streams past it) nor git itself
+           bounded `upload-pack`'s stdin (review C32). */
+        maximumInputBytes: negotiationInputLimitBytes,
+        abort: this.abortWhenClientLeaves(reply),
+      }),
+    );
+    return new StreamableFile(output, { type: 'application/x-git-upload-pack-result' });
   }
 
+  /**
+   * A push. The whole response — headers included — is withheld until the
+   * manifest commit resolves (D4, NI2), and what the client then receives is
+   * git's own report-status, relayed verbatim so every per-ref `ok`/`ng` line
+   * and every hook sentence reaches it unchanged (NI13).
+   */
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- NestJS parameter decorators bind independent request facets; bundling them would obscure the route contract
   @UseFilters(GitProtocolExceptionFilter)
   @Post(':repo/git-receive-pack')
@@ -150,17 +157,26 @@ export class GitController {
     @Req() request: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<StreamableFile> {
-    return this.rpc({
-      repository,
-      userId,
-      request,
-      reply,
-      service: 'git-receive-pack',
-    });
+    const projectId = this.requireProjectId(repository);
+    const access = await this.repositories.authorize({ projectId, userId, mode: 'write' });
+    applyHeaders(reply, noCacheHeaders);
+
+    const output = await this.withRetryAfter(reply, async () =>
+      this.repositories.receivePack({
+        access,
+        // D28/NI16: the pusher is the authenticated session, never the body.
+        committedBy: userId,
+        body: request.raw,
+        gzipped: request.headers['content-encoding'] === 'gzip',
+        maximumInputBytes: access.remainingBytes + quotaOverrunSlackBytes,
+        abort: this.abortWhenClientLeaves(reply),
+      }),
+    );
+    return new StreamableFile(Buffer.from(output), { type: 'application/x-git-receive-pack-result' });
   }
 
   /**
-   * Git-lfs's batch API (S49). `upload` hands out presigned R2 PUTs for the
+   * Git-lfs's batch API (S49). `upload` hands out presigned PUTs for the
    * objects the store is missing and refuses the whole batch with the file list
    * when they do not fit in the plan (D16); `download` hands out presigned GETs.
    */
@@ -220,40 +236,6 @@ export class GitController {
     void reply.status(200);
   }
 
-  /**
-   * The read-only dumb-HTTP layout: `HEAD`, `objects/**`, `refs/**`. Stock git
-   * clones from it when smart HTTP is unavailable, and it costs nothing to keep
-   * — `post-receive` runs `update-server-info` after every push.
-   */
-  // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- NestJS parameter decorators bind independent request facets; bundling them would obscure the route contract
-  @UseFilters(GitProtocolExceptionFilter)
-  @Get(':repo/*')
-  public async dumbHttp(
-    @Param('repo') repository: string,
-    @User('id') userId: string,
-    @Req() request: FastifyRequest,
-    @Res({ passthrough: true }) reply: FastifyReply,
-  ): Promise<StreamableFile> {
-    const projectId = this.requireProjectId(repository);
-    const relativePath = (request.params as Record<string, string | undefined>)['*'] ?? '';
-    const access = await this.repositories.authorize({
-      projectId,
-      userId,
-      mode: 'read',
-    });
-    const file = this.repositories.openDumbHttpFile(access.repositoryPath, relativePath);
-    if (file === undefined) {
-      throw new NotFoundException({
-        code: 'GIT_OBJECT_NOT_FOUND',
-        message: 'Not found',
-      });
-    }
-    applyHeaders(reply, noCacheHeaders);
-    return new StreamableFile(file, {
-      type: dumbHttpContentType(relativePath),
-    });
-  }
-
   private requireProjectId(repository: string): string {
     const projectId = projectIdFromRepository(repository);
     if (projectId === undefined) {
@@ -265,66 +247,37 @@ export class GitController {
     return projectId;
   }
 
-  private async rpc(args: {
-    repository: string;
-    userId: string;
-    request: FastifyRequest;
-    reply: FastifyReply;
-    service: GitSmartService;
-  }): Promise<StreamableFile> {
-    const projectId = this.requireProjectId(args.repository);
-    const write = args.service === 'git-receive-pack';
-    const access = await this.repositories.authorize({
-      projectId,
-      userId: args.userId,
-      mode: write ? 'write' : 'read',
-    });
-
-    applyHeaders(args.reply, noCacheHeaders);
-    // The child outlives neither an incomplete response nor a client that walks
-    // away: an upload-pack whose reader disappears would otherwise block on a
-    // full stdout pipe. A completed response lets the child finish its hooks.
+  /**
+   * The child outlives neither an incomplete response nor a client that walks
+   * away: an upload-pack whose reader disappears would otherwise block on a
+   * full stdout pipe. A completed response lets the child finish.
+   */
+  private abortWhenClientLeaves(reply: FastifyReply): AbortSignal {
     const abort = new AbortController();
-    args.reply.raw.once('close', () => {
-      if (!args.reply.raw.writableFinished) {
+    reply.raw.once('close', () => {
+      if (!reply.raw.writableFinished) {
         abort.abort();
       }
     });
-    /* `authorize` measured this owner's usage on this same request; re-reading
-       the account-wide aggregate under the gate answered the same number one
-       round-trip later (review C28). */
-    const admission = write ? this.repositories.admitGitPush(access) : undefined;
-    const remainingBytes = admission?.remainingBytes ?? access.remainingBytes;
-    const output = this.repositories.serve({
-      abort: abort.signal,
-      repositoryPath: access.repositoryPath,
-      service: args.service,
-      body: args.request.raw,
-      gzipped: args.request.headers['content-encoding'] === 'gzip',
-      environment: write
-        ? {
-            // The `pre-receive` hook reads both: it refuses a push that did not come
-            // through this admission check, and refuses one whose quarantined
-            // objects do not fit in what is left of the plan (D17).
-            TAU_GIT_PUSH_ADMITTED: '1',
-            TAU_GIT_QUOTA_REMAINING_BYTES: String(remainingBytes),
-          }
-        : undefined,
-      /* A fetch's body is `want`/`have` negotiation rather than a pack, so it
-         gets the flat negotiation ceiling instead of the plan's headroom — but
-         it gets one: neither Fastify's `bodyLimit` (the git parser streams past
-         it) nor git itself bounded `upload-pack`'s stdin (review C32). */
-      maximumInputBytes: write ? remainingBytes + quotaOverrunSlackBytes : negotiationInputLimitBytes,
-      ...(write
-        ? {
-            accountFor: projectId,
-            releaseStorageAdmission: admission?.release,
-          }
-        : {}),
-    });
+    return abort.signal;
+  }
 
-    return new StreamableFile(output, {
-      type: `application/x-${args.service}-result`,
-    });
+  /**
+   * Attaches `Retry-After` to every 503 this controller answers.
+   *
+   * There are two of them and they mean the same thing to a client: a lost
+   * manifest race (D4) and a worker with no lease disk (D33) are both "come
+   * back and push again". The filter that renders a git-protocol refusal writes
+   * status and body onto this same reply, so a header set here survives it.
+   */
+  private async withRetryAfter<T>(reply: FastifyReply, work: () => Promise<T>): Promise<T> {
+    try {
+      return await work();
+    } catch (error) {
+      if (error instanceof ServiceUnavailableException) {
+        void reply.header('retry-after', String(gitRetryAfterSeconds));
+      }
+      throw error;
+    }
   }
 }

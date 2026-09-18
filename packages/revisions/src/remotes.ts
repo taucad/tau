@@ -417,6 +417,16 @@ const gitHookSideband = /^(?:error: )?(?:pre-receive )?hook declined(?: to updat
  * @param stderr - Everything the command wrote to its error stream.
  * @returns The status and sentence, as far as they can be read.
  */
+/**
+ * The fixed first words of the hosted remote's D20 ceiling refusal.
+ *
+ * Source of truth: `ceilingRefusalMarker` in
+ * `apps/api/app/api/git/git.constants.ts`, which the `pre-receive` hook opens
+ * that refusal with. Duplicated rather than imported because this package does
+ * not depend on the API; the two change together.
+ */
+const ceilingRefusalMarker = 'Tau: repository size limit exceeded';
+
 const gitStderrRefusal = (stderr: string): RemoteRefusal => {
   const status =
     /(?:The requested URL returned error|RPC failed; HTTP|error: HTTP)[: ]\s*(?<status>\d{3})/u.exec(stderr)?.groups?.[
@@ -560,7 +570,17 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
      * rewind or a deletion on every ref family that way (contract §4). Its own
      * words, never one of Tau's (N4). */
     if (answered.message !== undefined) {
-      return new RevisionPortError('REMOTE_REJECTED', answered.message, { cause: error });
+      /* D20's ceiling refusal is one of those sentences, and it is a *quota*
+         answer rather than a rule the caller broke: the affordance must not
+         offer "Sync now" again. It is recognised by the marker the hook opens
+         with — `ceilingRefusalMarker` in `apps/api/app/api/git/git.constants.ts`,
+         duplicated here because this package cannot import the API. The
+         remote's own words, list of files and all, are still what is shown. */
+      return new RevisionPortError(
+        answered.message.includes(ceilingRefusalMarker) ? 'REMOTE_QUOTA_EXCEEDED' : 'REMOTE_REJECTED',
+        answered.message,
+        { cause: error },
+      );
     }
     /* The caller's own deadline is not the remote's answer (P36). An aborted
      * request is this host giving up on purpose, and saying "the remote could
@@ -589,11 +609,23 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
           : proxied
             ? 'REMOTE_REAUTHORIZATION_REQUIRED'
             : 'REMOTE_FORBIDDEN'
-        : status === 404
-          ? 'REMOTE_NOT_FOUND'
+        : status === 404 || status === 410
+          ? /* 410 is a project the hosted remote has tombstoned (charter NI12):
+               it existed, it is gone, and no amount of retrying brings it back.
+               It joins 404 rather than getting a code of its own because the
+               two ask the person for exactly the same thing — stop syncing to
+               this address — and the server's own sentence below is what tells
+               them which of the two happened. */
+            'REMOTE_NOT_FOUND'
           : status === 413
             ? 'REMOTE_QUOTA_EXCEEDED'
-            : 'REMOTE_UNAVAILABLE';
+            : status === 422
+              ? /* The refs themselves were not committable: loose objects, or a
+                   connectivity check the pushed packs failed. The remote said
+                   so in its own words and a blind re-push reproduces it, so
+                   this is a rejection carrying that sentence, not a retry. */
+                'REMOTE_REJECTED'
+              : 'REMOTE_UNAVAILABLE';
   return new RevisionPortError(code, answered.message ?? refusalSentence(code), { cause: error });
 };
 

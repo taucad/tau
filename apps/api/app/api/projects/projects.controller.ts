@@ -24,7 +24,6 @@ import {
   projectRegistrationsPerOwnerPerDay,
   registeredProjectLimitPerOwner,
 } from '#api/git/git.constants.js';
-import { GitRepositoryService } from '#api/git/git.service.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { RegisterProjectDto } from '#api/projects/projects.dto.js';
 
@@ -45,7 +44,6 @@ import { RegisterProjectDto } from '#api/projects/projects.dto.js';
 export class ProjectsController {
   public constructor(
     private readonly databaseService: DatabaseService,
-    private readonly repositories: GitRepositoryService,
     private readonly rateLimiter: PublicationRateLimiterService,
     @Inject(commercialEntitlementsKey)
     private readonly entitlementsService: CommercialEntitlementsService,
@@ -204,9 +202,10 @@ export class ProjectsController {
       await this.access.authorize(projectId, userId, 'owner');
     }
 
-    /* Guarded by `isProjectRepositoryId` inside the service for every caller
-       (W8 review R1), so nothing outside `TAU_GIT_ROOT` is ever created. */
-    await this.repositories.ensureRepository(projectId);
+    /* No repository is created here any more (charter D1). A repository *is*
+       its manifest, and the first manifest is written by the first push's
+       commit — so registration is the row and nothing else. `isProjectRepositoryId`
+       above still bounds the id, because that id becomes a storage key. */
     return { id: projectId };
   }
 

@@ -29,20 +29,20 @@ const gitEnvironment: Record<string, string> = {
 };
 /* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
 
-const gitChildEnvironment = (cwd: string): NodeJS.ProcessEnv => {
+export const gitChildEnvironment = (cwd: string): NodeJS.ProcessEnv => {
   // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment name
   const environment: Record<string, string> = { ...gitEnvironment, HOME: path.dirname(cwd) };
   return environment as NodeJS.ProcessEnv;
 };
 
 /** `init`, `config`, `index-pack`, `repack`, `for-each-ref`, `fsck`. */
-const gitCommandTimeoutMilliseconds = 10 * 60 * 1000;
+export const gitCommandTimeoutMilliseconds = 10 * 60 * 1000;
 
 /**
  * Stdout ceiling for the git commands this module runs. `for-each-ref` over a
  * repository with thousands of chat refs is the largest of them.
  */
-const gitMaxBufferBytes = 64 * 1024 * 1024;
+export const gitMaxBufferBytes = 64 * 1024 * 1024;
 
 /**
  * The four settings git's defaults get wrong for a lease, plus the two

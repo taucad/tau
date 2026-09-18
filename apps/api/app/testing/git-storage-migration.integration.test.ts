@@ -41,6 +41,13 @@ const addedColumns = [
 
 type Journal = { entries: Array<{ readonly tag: string; readonly when: number }> };
 
+/*
+ * W3's own migration, located by tag rather than by being last: later work adds
+ * later migrations, and injecting the failure into whichever one happens to be
+ * newest tests somebody else's DDL against W3's assertions.
+ */
+const w3MigrationTag = '0041_git_storage_substrate';
+
 const reachable = async (): Promise<boolean> => {
   const client = postgres(adminUrl, {
     max: 1,
@@ -65,9 +72,11 @@ describe.skipIf(!(await reachable()))('W3 migration on a real PostgreSQL', () =>
   let scratchUrl: string;
   let admin: postgres.Sql;
   let client: postgres.Sql;
-  /** The migrations folder with the newest entry removed from its journal. */
+  /** The migrations folder with W3's entry, and everything after it, removed. */
   let previousHeadFolder: string;
   let head: Awaited<ReturnType<typeof readMigrationHead>>;
+  /** How many migrations precede W3's, which is what the truncated folder applies. */
+  let beforeW3: number;
 
   /**
    * How many migrations the migrator believes it has applied.
@@ -133,7 +142,9 @@ describe.skipIf(!(await reachable()))('W3 migration on a real PostgreSQL', () =>
     await cp(migrationsFolder, previousHeadFolder, { recursive: true });
     const journalPath = path.join(previousHeadFolder, 'meta', '_journal.json');
     const journal = JSON.parse(await readFile(journalPath, 'utf8')) as Journal;
-    journal.entries = journal.entries.slice(0, -1);
+    beforeW3 = journal.entries.findIndex((entry) => entry.tag === w3MigrationTag);
+    expect(beforeW3, `${w3MigrationTag} is not in the migration journal`).toBeGreaterThan(-1);
+    journal.entries = journal.entries.slice(0, beforeW3);
     await writeFile(journalPath, JSON.stringify(journal, undefined, 2));
   }, 300_000);
 
@@ -147,13 +158,13 @@ describe.skipIf(!(await reachable()))('W3 migration on a real PostgreSQL', () =>
   it('should leave the previous schema untouched when the migration is interrupted part-way', async () => {
     await migrate(drizzle(client), { migrationsFolder: previousHeadFolder });
     const before = await appliedCount();
-    expect(before).toBe(head.count - 1);
+    expect(before).toBe(beforeW3);
     await expect(present()).resolves.toStrictEqual({ tables: [], columns: [] });
 
     /* The injection: run the new migration's statements the way the migrator
        does — one transaction, split on drizzle's own breakpoints — and lose the
        process after the first one. */
-    const migrationSql = await readFile(path.join(migrationsFolder, `${head.tag}.sql`), 'utf8');
+    const migrationSql = await readFile(path.join(migrationsFolder, `${w3MigrationTag}.sql`), 'utf8');
     const statements = migrationSql
       .split('--> statement-breakpoint')
       .map((statement) => statement.trim())

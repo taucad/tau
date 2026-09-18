@@ -170,9 +170,10 @@ describe('repository restore from a second bucket', () => {
   afterAll(async () => {
     /*
      * The primary is an allowlisted disposable bucket, so its prefixes go in one
-     * call. `tau-content-restore` is not on D32's allowlist — it is created by
-     * this suite and W8 adds it to the compose bootstrap — so the source side is
-     * cleaned key by key through the port instead of by prefix.
+     * call. `tau-content-restore` is allowlisted too since W8 (compose creates
+     * it), but the source side stays cleaned key by key through the port: the
+     * suite proves restore reads through the port alone, and the cleanup should
+     * not depend on a prefix delete the port does not expose.
      */
     await Promise.all(
       written.map(async (locator) =>

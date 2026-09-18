@@ -179,6 +179,21 @@ describe('ChatRevisionMarker', () => {
     expect(status.getAttribute('aria-busy')).toBe('true');
   });
 
+  it('should not read the turn base as a save while work runs', () => {
+    /* A turn that starts dirty mints its base under its own turn id (D17), so
+       the graph attaches a card to a turn that has saved nothing yet — on a new
+       project that card is the scaffold, minted as Rev 1. */
+    host.workspace = { execution: { baseRevisionId: 'rev-1' } };
+    setRevisions({
+      revisions: [revision({ revisionId: 'rev-1', n: 1, turnId: 'u1' })],
+      byTurnId: new Map([['u1', revision({ revisionId: 'rev-1', n: 1 })]]),
+    });
+    setRun('working');
+    chatState.status = 'streaming';
+    render(<ChatRevisionMarker userMessageId='u1' isLatestTurn />);
+    expect(screen.getByRole('status').textContent).toBe('Starting from Rev 1');
+  });
+
   it('should hold the last known label while the stream reconnects', () => {
     host.workspace = { execution: { baseRevisionId: 'rev-4' } };
     setRevisions({ revisions: [revision({ revisionId: 'rev-4', n: 4, turnId: undefined })] });

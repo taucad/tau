@@ -186,6 +186,52 @@ describe('useRevisions', () => {
     });
   });
 
+  it("attaches a turn's own save, not the base mint that opened it with the same turn id", async () => {
+    /* `basing` mints the pre-turn tree under *this* turn's id (turn.machine
+       D17), so a turn that started dirty holds two rows. The newer one is the
+       turn's own save; the older one is only what the tree looked like before
+       it ran — on a new project, the scaffold. */
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-2', revisionNumber: 2, turnId: 'u1', createdAt: 1_788_220_900_000 }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, turnId: 'u1', createdAt: 1_788_220_800_000 }),
+    ];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main', headRevisionId: 'rev-2' };
+
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.revisions).toHaveLength(2);
+    });
+    expect(result.current.byTurnId.get('u1')?.revisionId).toBe('rev-2');
+  });
+
+  it('keeps the row the settlement names when the base mint shares its turn id', async () => {
+    settlements.push({
+      type: 'turn.finalized',
+      turnId: 'u1',
+      runId: 'run-1',
+      chatId: 'chat-1',
+      projectId: 'p',
+      checkoutId: 'live',
+      revisionId: 'rev-2',
+      changedPaths: ['main.scad'],
+      trigger: 'turn',
+      runIds: ['run-1'],
+    });
+    revisionStatusHarness.rows = [
+      row({ revisionId: 'rev-2', revisionNumber: 2, turnId: 'u1', createdAt: 1_788_220_900_000 }),
+      row({ revisionId: 'rev-1', revisionNumber: 1, turnId: 'u1', createdAt: 1_788_220_800_000 }),
+    ];
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, branch: 'main', headRevisionId: 'rev-2' };
+
+    const { result } = renderHook(() => useRevisions(), { wrapper });
+
+    await waitFor(() => {
+      expect(result.current.byTurnId.get('u1')?.n).toBe(2);
+    });
+    expect(result.current.byTurnId.get('u1')?.revisionId).toBe('rev-2');
+  });
+
   it("keeps a settled turn's branch metadata when another branch is selected", async () => {
     settlements.push({
       type: 'turn.finalized',

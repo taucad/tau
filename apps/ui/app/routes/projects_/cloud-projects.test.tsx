@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -79,8 +79,18 @@ describe('CloudProjects', () => {
       vi.fn(async () => ({
         ok: true,
         json: async () => [
-          { id: 'proj_aaaaaaaaaaaaaaaaaaaaa', name: 'Gearbox Alpha', updatedAt: '2026-09-13T01:00:00.000Z' },
-          { id: 'proj_bbbbbbbbbbbbbbbbbbbbb', name: 'Bracket Beta', updatedAt: '2026-09-13T02:00:00.000Z' },
+          {
+            id: 'proj_aaaaaaaaaaaaaaaaaaaaa',
+            name: 'Gearbox Alpha',
+            updatedAt: '2026-09-13T01:00:00.000Z',
+            role: 'owner',
+          },
+          {
+            id: 'proj_bbbbbbbbbbbbbbbbbbbbb',
+            name: 'Bracket Beta',
+            updatedAt: '2026-09-13T02:00:00.000Z',
+            role: 'owner',
+          },
         ],
       })),
     );
@@ -125,5 +135,50 @@ describe('CloudProjects', () => {
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Open' })).toBeNull();
     });
+  });
+  /**
+   * W5b / D27: `GET /v1/projects` now lists collaborations beside owned rows,
+   * each carrying the caller's role. A collaboration that reads like an owned
+   * project is the one thing this section must not do — the row says whose it
+   * is, and a view-only one says so before it is opened.
+   */
+  it('names a collaboration and the role held on it', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => [
+          { id: 'proj_ccccccccccccccccccccc', name: 'Shared Housing', updatedAt: '2026-09-18Z', role: 'write' },
+          { id: 'proj_ddddddddddddddddddddd', name: 'Reference Jig', updatedAt: '2026-09-18Z', role: 'read' },
+        ],
+      })),
+    );
+    mountCloudProjects();
+
+    const rows = await screen.findAllByRole('listitem');
+    const rowFor = (name: string): HTMLElement => {
+      const row = rows.find((candidate) => candidate.textContent.includes(name));
+      if (row === undefined) {
+        throw new Error(`No Tau Cloud row named ${name}`);
+      }
+      return row;
+    };
+
+    const shared = rowFor('Shared Housing');
+    expect(within(shared).getByText('Can edit')).toBeDefined();
+    expect(within(shared).getByText('Shared with you. This device does not have it yet.')).toBeDefined();
+
+    const readOnly = rowFor('Reference Jig');
+    expect(within(readOnly).getByText('Can view')).toBeDefined();
+    expect(within(readOnly).getByText('Shared with you. You can open it but not change it.')).toBeDefined();
+  });
+
+  it('leaves an owned row without a role badge', async () => {
+    mountCloudProjects();
+
+    expect(await screen.findByText('Bracket Beta')).toBeDefined();
+    expect(screen.queryByText('Can edit')).toBeNull();
+    expect(screen.queryByText('Can view')).toBeNull();
+    expect(screen.getByText('Backed up on Tau Cloud. This device does not have it yet.')).toBeDefined();
   });
 });

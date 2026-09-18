@@ -626,6 +626,12 @@ export const registerProjectFailureMessage = (status: number, code?: string, mes
     if (code === 'GIT_SYNC_NOT_ENTITLED') {
       return 'Syncing files to Tau Cloud is a paid plan feature.';
     }
+    /* D27: registration needs `owner`, so a collaborator pressing *Connect* is
+     * refused by role rather than by plan or by quota. Without its own rung it
+     * fell through to "Try again", which is the one thing retrying cannot fix. */
+    if (code === 'PROJECT_ROLE_INSUFFICIENT') {
+      return 'Only the project owner can back this project up to Tau Cloud.';
+    }
   }
   if (status === 404) {
     return 'Tau Cloud has no project with this id for your account.';

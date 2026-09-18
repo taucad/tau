@@ -28,7 +28,8 @@ import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFileTreeMap } from '#hooks/use-file-tree.js';
 import { useThumbnailGenerator } from '#hooks/use-thumbnail-generator.js';
 import { useRevisions } from '#hooks/use-revisions.js';
-import { useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
+import { useProjectRole, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
+import { isSyncReadOnly } from '#hooks/use-cloud-projects.js';
 import { useSaveRevisionRequest } from '#routes/w.$workspace.$project/revision-save-shortcut.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
@@ -74,6 +75,11 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
    * unfinished). Where Tau Cloud is comes from `useRevisionCommands`, the one
    * page-side place that knows (S34). */
   const revisionStatus = useRevisionStatus();
+  const projectRole = useProjectRole();
+  /* F1: the palette offers exactly what the Sync region offers. `fetchOnly`
+     alone left an enabled *Sync now* for a read collaborator, whose push the
+     API refuses — one shared predicate rather than two conditions. */
+  const syncReadOnly = isSyncReadOnly(revisionStatus?.remote, projectRole);
   const { syncNow } = useRevisionCommands();
   const saveRevision = useSaveRevisionRequest();
   const isRemoteConnected = revisionStatus?.remote.kind !== undefined && revisionStatus.remote.kind !== 'none';
@@ -220,7 +226,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
         icon: <Cloud />,
         action: syncNow,
         visible: isRemoteConnected,
-        disabled: revisionStatus?.remote.phase !== 'connected' || revisionStatus.remote.fetchOnly === true,
+        disabled: revisionStatus?.remote.phase !== 'connected' || syncReadOnly,
       },
       {
         id: 'save-revision',
@@ -366,7 +372,7 @@ function ProjectCommandPaletteItemsReady({ match }: { readonly match: UIMatch })
       fileCount,
       isRemoteConnected,
       handleOpenSync,
-      revisionStatus?.remote.fetchOnly,
+      syncReadOnly,
       revisionStatus?.remote.phase,
       saveRevision,
       syncNow,

@@ -15,8 +15,7 @@ import type { projectMachine } from '#machines/project.machine.js';
  * panel is mid-drag still writes what its owners hold, and writes it exactly once.
  */
 export function ViewSettingsSyncHost(): React.JSX.Element {
-  const { projectRef, editorRef } = useProject();
-  const viewGraphics = useSelector(projectRef, (state) => state.context.viewGraphics);
+  const { projectRef, editorRef, viewGraphics } = useProject();
 
   return (
     <>

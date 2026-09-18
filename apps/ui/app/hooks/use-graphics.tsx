@@ -1,4 +1,4 @@
-import { createContext, useContext, useLayoutEffect, useMemo, useSyncExternalStore } from 'react';
+import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useSyncExternalStore } from 'react';
 import type { RefObject } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
@@ -65,8 +65,13 @@ export const useGraphicsCameraRigQuery = (): ((graphicsRef: GraphicsActorRef | u
  * session there is no live camera, and the view's camera keys are left as the person left them.
  */
 export const useViewCameraSession = (graphicsRef: GraphicsActorRef | undefined): ViewCameraSession | undefined => {
-  useCameraRegistryVersion();
-  return getViewCameraSession(graphicsRef);
+  /* The session is read through the store rather than beside it: a registry read in the render body
+   * is state the React Compiler cannot see changing, and it memoised the `undefined` a host that
+   * rendered before any canvas saw -- for the life of the graphics actor. A dependency on the
+   * registry version does not fix that; the compiler recomputes the dependencies from what the
+   * callback reads and drops it again. */
+  const getSession = useCallback(() => getViewCameraSession(graphicsRef), [graphicsRef]);
+  return useSyncExternalStore(subscribeGraphicsCameraRegistry, getSession, getSession);
 };
 
 /**

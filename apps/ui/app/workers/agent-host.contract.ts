@@ -396,7 +396,7 @@ const startRequestSchema = z.union([
   z.strictObject({ ...startBase, trigger: z.literal('submit') }),
   z.strictObject({
     ...startBase,
-    trigger: z.enum(['retry', 'edit', 'regenerate']),
+    trigger: z.enum(['edit', 'regenerate']),
     retainedMessageIds: z.array(nonEmptyString),
   }),
 ]);

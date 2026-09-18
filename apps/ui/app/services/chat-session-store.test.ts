@@ -12,8 +12,16 @@ import { clearLedger, recordRpcOutcome } from '#services/rpc-ledger.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
-import type { ChatSessionActorRef } from '#machines/chat-session.machine.js';
+import type { ChatRequest, ChatSessionActorRef, ChatTurnSettlementInput } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
+import { projectSessionMachine } from '#machines/project-session.machine.js';
+import {
+  chatTurnAdmission,
+  chatTurnSettlement,
+  publishChatTurnAdmission,
+  publishChatTurnSettlement,
+  resetChatTurnServices,
+} from '#chat-clients/_internal/chat-host-binding.js';
 
 // ---------------------------------------------------------------------------
 // Hoisted test harness
@@ -150,8 +158,8 @@ vi.mock('#machines/inspector.js', () => ({
 const { ChatSessionStore } = await import('#services/chat-session-store.js');
 const { attachmentSendBlockReason, buildUserMessage } = await import('#utils/chat.utils.js');
 const { bindDurableChatRun, sharedChatTransport } = await import('#chat-clients/_internal/shared-chat-transport.js');
-const { recordHostFinalizedTurn, recordHostTurnSettlement, registerAgentHost } =
-  await import('#chat-clients/_internal/browser-agent-host-transport.js');
+const transportModule = await import('#chat-clients/_internal/browser-agent-host-transport.js');
+const { recordHostFinalizedTurn, recordHostTurnSettlement, registerAgentHost } = transportModule;
 type StoreType = InstanceType<typeof ChatSessionStore>;
 type ChatSessionDeps = Parameters<StoreType['setDependencies']>[0];
 
@@ -267,6 +275,69 @@ function createStore(): StoreType {
   const store = new ChatSessionStore();
   store.setDependencies(createStubDeps());
   return store;
+}
+
+/** Project sessions a row started, stopped after it. */
+const turnOwners: Array<{ stop: () => void }> = [];
+
+/**
+ * Register the project session that owns a chat's turns (C3).
+ *
+ * `store.requestTurn` reaches the chat's session actor and nothing else, so a
+ * row that drives a verb — or a seeded first turn — has to give the chat the
+ * owner the app gives it.
+ *
+ * @param store - The store under test.
+ * @param projectId - The project whose session owns the chat.
+ */
+function startTurnOwner(store: StoreType, projectId: string): void {
+  const session = createActor(
+    projectSessionMachine.provide({
+      actors: {
+        chatSession: chatSessionMachine.provide({
+          actors: { admitTurn: chatTurnAdmission, settleTurn: chatTurnSettlement },
+        }),
+      },
+    }),
+    { input: { projectId } },
+  );
+  session.start();
+  turnOwners.push(session);
+  store.setFocusedProject(projectId);
+  store.setProjectSession(projectId, session);
+}
+
+/**
+ * Publish one chat's settlement and record every turn it ends.
+ *
+ * @param chatId - The chat this settlement belongs to.
+ * @returns The settlements the chat's session actor asked for, in order.
+ */
+function publishSettlementRecorder(chatId: string): ChatTurnSettlementInput[] {
+  const settlements: ChatTurnSettlementInput[] = [];
+  publishChatTurnSettlement(chatId, async (input) => {
+    settlements.push(input);
+  });
+  return settlements;
+}
+
+/**
+ * Publish what one chat's admission composes, as its route would.
+ *
+ * Deliberately separable from {@link startTurnOwner}: the seeded first turn is
+ * requested before the route has mounted, and the admission actor waits for
+ * this rather than timing out on it.
+ *
+ * @param chatId - The chat this admission belongs to.
+ * @param request - What the admission composes, or a throw to refuse the turn.
+ */
+function publishAdmission(chatId: string, request: () => Promise<ChatRequest> | ChatRequest): void {
+  publishChatTurnAdmission(chatId, async () => ({
+    runId: `run_${chatId}`,
+    leaseTurnId: undefined,
+    request: await request(),
+  }));
+  publishChatTurnSettlement(chatId, async () => undefined);
 }
 
 /** A host whose run ended on the one failure a resume is allowed to continue. */
@@ -1062,9 +1133,14 @@ describe('ChatSessionStore — persisted failure replay (P59)', () => {
 describe('ChatSessionStore', () => {
   beforeEach(() => {
     harness.created = [];
+    resetChatTurnServices();
   });
 
   afterEach(() => {
+    for (const owner of turnOwners.splice(0)) {
+      owner.stop();
+    }
+    resetChatTurnServices();
     vi.clearAllMocks();
     vi.unstubAllGlobals();
   });
@@ -1325,6 +1401,55 @@ describe('ChatSessionStore', () => {
 
       expect(store.getDurableRunId('chat_approval')).toBe('run_approval');
       expect(store.get('chat_approval')).toBeDefined();
+    });
+
+    /**
+     * C6/V10: a reload finds this chat's run terminal in the host's log with no
+     * settlement in it — the tab that ran it closed before the revision root
+     * answered. Nothing will ever attest it, so the chat's session actor is
+     * told to settle it, once, and the chat stops waiting in `finishing`.
+     */
+    it('should settle a reloaded terminal run the log holds no settlement for', async () => {
+      const store = createStore();
+      startTurnOwner(store, 'project_reconcile');
+      const settlements = publishSettlementRecorder('chat_reconcile');
+      store.acquire('chat_reconcile');
+      store.retainDurableRun({ chatId: 'chat_reconcile', runId: 'run_reconcile', state: 'active' });
+
+      harness.created.find((entry) => entry.id === 'chat_reconcile')!.finish();
+
+      await vi.waitFor(() => {
+        expect(settlements).toEqual([
+          { chatId: 'chat_reconcile', runId: 'run_reconcile', leaseTurnId: undefined, outcome: 'completed' },
+        ]);
+      });
+    });
+
+    /**
+     * V5: a run outlives the view that started it. Navigating away and back
+     * gives the chat a *new* session actor while its run is still in flight;
+     * an actor that starts `idle` there admits a second turn over a live one,
+     * and the host refuses it — the page ends the turn on a banner for a
+     * condition it created itself.
+     */
+    it('should adopt a run still in flight when its chat gets a new session actor', () => {
+      const store = createStore();
+      startTurnOwner(store, 'project_adopt');
+      const live = vi.spyOn(transportModule, 'getBrowserAgentHostRun').mockReturnValue({
+        runId: 'run_live',
+        state: 'running',
+        eventCount: 2,
+      });
+
+      try {
+        const session = store.acquire('chat_adopt');
+
+        const snapshot = session.stateActorRef!.getSnapshot();
+        expect(snapshot.matches({ run: 'running' })).toBe(true);
+        expect(snapshot.context.activeRunId).toBe('run_live');
+      } finally {
+        live.mockRestore();
+      }
     });
 
     it('should notify status subscribers when a durable run is released', () => {
@@ -1700,171 +1825,14 @@ describe('ChatSessionStore', () => {
      * credit, rate limit, a dead tool — left nothing to attach to and Resume did
      * nothing at all. It has to dispatch the turn again instead.
      */
-    it('re-runs the turn when a browser-placed chat has no resumable run', async () => {
-      const store = createStore();
-      const chatId = 'chat_terminal_run';
-      const session = store.acquire(chatId);
-      const unregister = registerAgentHost(chatId, {
-        projectStorage: async () => {
-          throw new Error('Unused by this dispatch.');
-        },
-        createClient: async () => {
-          throw new Error('Unused by this dispatch.');
-        },
-        markRunId: async () => undefined,
-      });
-
-      session.persistenceActorRef.send({
-        type: 'startRequest',
-        request: { kind: 'continue', body: testRunBody },
-      });
-      await vi.waitFor(() => {
-        expect(harness.created.at(-1)?.regenerate).toHaveBeenCalledOnce();
-      });
-
-      expect(harness.created.at(-1)?.resumeStream).not.toHaveBeenCalled();
-      unregister();
-      store.release(chatId);
-    });
-
     /*
-     * R9 / Journey 2. The gateway refuses the third call of a tool loop with a
-     * 402: the two calls already settled are the customer's, and the turn ends
-     * at that boundary. Nothing in the failure path may spend them again —
-     * `finalizeInterruptedToolParts` rewrites only a dangling tail, so the
-     * `output-available` parts reach the durable row intact, and Resume
-     * dispatches rather than sitting inert on a terminal host run.
-     *
-     * And the dispatch is a `continue`, not a `regenerate`: a regenerate rewinds
-     * the host history to before the user turn, so the two settled calls would
-     * be dropped and paid for a second time. The host continues the refused run
-     * at the one call it could not fund (`tau-agent-host.ts` `resume`).
+     * Whether a *Try again* re-runs the turn or resumes its stream is the
+     * chat admission's call (C3) — only it knows if the host can still
+     * continue the run — and `ChatTurnHost` owns it. The store carries out
+     * what it composed and reaches no second verdict; the row that pins the
+     * decision is in `use-cad-chat-client.test.tsx`.
      */
-    it('keeps the tool results a mid-run credit denial already paid for, and continues on Resume', async () => {
-      const chatId = 'chat_credit_denied_midrun';
-      const store = new ChatSessionStore();
-      const deps = createStubDeps();
-      store.setDependencies(deps);
-      const session = store.acquire(chatId);
-      await Promise.resolve();
-      deps.patchChat.mockClear();
-      const hostClient = refusedAgentHostClient(chatId, 'run_credit_denied_midrun');
-      const unregister = registerAgentHost(chatId, {
-        projectStorage: async () => {
-          throw new Error('Unused by this dispatch.');
-        },
-        createClient: async () => hostClient,
-        markRunId: async () => undefined,
-      });
-      const fake = harness.created.at(-1)!;
-      const settledTool = (toolCallId: string, targetFile: string): MyUIMessage['parts'][number] => ({
-        type: 'tool-create_file',
-        toolCallId,
-        state: 'output-available',
-        input: { targetFile, content: '//' },
-        output: {
-          message: '',
-          diffStats: { linesAdded: 1, linesRemoved: 0, originalContent: '', modifiedContent: '//' },
-        },
-      });
-      fake.messages = [
-        { id: 'm_user', role: 'user', metadata: { createdAt: 1 }, parts: [{ type: 'text', text: 'Build it.' }] },
-        {
-          id: 'm_assistant',
-          role: 'assistant',
-          metadata: { createdAt: 2 },
-          parts: [settledTool('tc_first', 'a.scad'), settledTool('tc_second', 'b.scad')],
-        },
-      ];
 
-      session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'regenerate' } });
-      // The third call's hold is refused; the run fails at that tool boundary.
-      session.persistenceActorRef.send({
-        type: 'requestFinished',
-        messages: [...fake.messages],
-        isAbort: false,
-        isError: true,
-        isDisconnect: false,
-      });
-      await vi.waitFor(() => {
-        expect(deps.patchChat).toHaveBeenCalledWith(chatId, 'messages', expect.anything());
-      });
-      const persistedMessages = deps.patchChat.mock.calls.findLast(([, field]) => field === 'messages')?.[2] as
-        | readonly MyUIMessage[]
-        | undefined;
-      expect(persistedMessages?.at(-1)?.parts.map((part) => (part as { state?: string }).state)).toEqual([
-        'output-available',
-        'output-available',
-      ]);
-      // The card reads its shortfall off the same durable row that kept them.
-      session.persistenceActorRef.send({
-        type: 'setPersistedError',
-        error: {
-          category: 'credits',
-          title: 'Credit Limit Reached',
-          message: 'Add 208.43 more credits to start a turn on GPT-6 Astra.',
-          code: 'INSUFFICIENT_CREDIT',
-          httpStatus: 402,
-          details: { requiredCreditAtoms: '3084332', availableCreditAtoms: '1000000', routeId: 'openai-gpt-6-astra' },
-        },
-      });
-      await vi.waitFor(() => {
-        expect(deps.patchChat).toHaveBeenCalledWith(
-          chatId,
-          'error',
-          expect.objectContaining({ category: 'credits', code: 'INSUFFICIENT_CREDIT' }),
-        );
-      });
-
-      // The tab learns the refused run from the host's own log, exactly as a
-      // reload would; the reattach itself spends nothing.
-      const reattached = await sharedChatTransport.reconnectToStream({ chatId, metadata: undefined });
-      await reattached?.getReader().cancel();
-
-      expect(hostClient.resume).not.toHaveBeenCalled();
-
-      // Resume, once the balance is topped up.
-      session.persistenceActorRef.send({
-        type: 'startRequest',
-        request: { kind: 'continue', body: testRunBody },
-      });
-      await vi.waitFor(() => {
-        expect(fake.resumeStream).toHaveBeenCalledOnce();
-      });
-      expect(fake.resumeStream).toHaveBeenCalledWith({ body: testRunBody });
-      // Never a regenerate: that rewinds the host history past the settled
-      // calls and pays for them twice.
-      expect(fake.regenerate).not.toHaveBeenCalled();
-      // The store never slices the transcript on the way out.
-      expect(fake.messages.at(-1)?.parts).toHaveLength(2);
-
-      unregister();
-      store.release(chatId);
-    });
-
-    it('still reattaches for a chat no browser host is placed on', async () => {
-      const store = createStore();
-      const session = store.acquire('chat_api_placed');
-
-      session.persistenceActorRef.send({
-        type: 'startRequest',
-        request: { kind: 'continue', body: testRunBody },
-      });
-      await vi.waitFor(() => {
-        expect(harness.created.at(-1)?.resumeStream).toHaveBeenCalledOnce();
-      });
-
-      expect(harness.created.at(-1)?.regenerate).not.toHaveBeenCalled();
-      store.release('chat_api_placed');
-    });
-
-    /*
-     * The host resume request is one-shot and only a browser-host stream consumes
-     * it. A `continue` on a chat no host is placed on must not arm it: nothing
-     * clears it on that path, so the next browser-placed stream for the same chat
-     * — a reattach nobody asked for — would inherit it and drive the host's
-     * resume, spending on a turn the user never pressed Resume for.
-     */
     it('does not arm the host resume from a continue no browser host can consume', async () => {
       const chatId = 'chat_resume_request_unplaced';
       const store = createStore();
@@ -2658,10 +2626,12 @@ describe('ChatSessionStore', () => {
       });
       store.setDependencies(deps);
 
-      const firstSession = store.acquire(chatId);
-      store.setLatestAgentBody(chatId, async () => ({
-        agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' },
+      startTurnOwner(store, 'resource_release_reacquire');
+      publishAdmission(chatId, () => ({
+        kind: 'regenerate',
+        body: { agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' } },
       }));
+      const firstSession = store.acquire(chatId);
 
       const firstFake = harness.created.find((entry) => entry.id === chatId)!;
       await vi.waitFor(() => {
@@ -2726,7 +2696,7 @@ describe('ChatSessionStore', () => {
       expect(deps.getChat).toHaveBeenCalledWith('chat_a');
     });
 
-    it('waits for latestAgentBody before dispatching a consumed startup request', async () => {
+    it('waits for the chat admission before dispatching a consumed startup request', async () => {
       const store = new ChatSessionStore();
       const deps = createStubDeps();
       store.setDependencies(deps);
@@ -2784,11 +2754,12 @@ describe('ChatSessionStore', () => {
           baseRevisionId: 'revision_startup',
         },
       };
+      startTurnOwner(store, 'resource_startup');
       store.acquire('chat_startup_hydration');
 
       // Reproduce the real mount order: IndexedDB hydration can consume the
-      // startup marker before workspace preparation publishes the required
-      // project/agent/execution body.
+      // startup marker before the route publishes the chat's admission. The
+      // admission actor waits for it; nothing polls and nothing times out.
       await vi.waitFor(() => {
         expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith('chat_startup_hydration', 'req_startup');
       });
@@ -2796,7 +2767,7 @@ describe('ChatSessionStore', () => {
       const fake = harness.created.find((entry) => entry.id === 'chat_startup_hydration')!;
       expect(fake.regenerate).not.toHaveBeenCalled();
 
-      store.setLatestAgentBody('chat_startup_hydration', async () => liveBody);
+      publishAdmission('chat_startup_hydration', () => ({ kind: 'regenerate', body: liveBody }));
       await vi.waitFor(() => {
         expect(fake.regenerate).toHaveBeenCalledTimes(1);
       });
@@ -2972,10 +2943,11 @@ describe('ChatSessionStore', () => {
      * wait for a body factory, its replacement found the request already
      * consumed, and the prompt came back as a draft with no banner.
      */
-    it('should dispatch the seeded first turn when its only view is released and reacquired before a chat client publishes a body', async () => {
+    it('should dispatch the seeded first turn when its only view is released and reacquired before the route publishes its admission', async () => {
       const chatId = 'chat_seed_remount';
       const { deps, startupRequest, store } = seededRow(chatId);
 
+      startTurnOwner(store, 'project_seed');
       const first = store.acquire(chatId);
       await vi.waitFor(() => {
         expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith(chatId, startupRequest.id);
@@ -2985,7 +2957,7 @@ describe('ChatSessionStore', () => {
       const second = store.acquire(chatId);
       expect(second).toBe(first);
 
-      store.setLatestAgentBody(chatId, async () => testRunBody);
+      publishAdmission(chatId, () => ({ kind: 'regenerate', body: testRunBody }));
       const fake = harness.created.findLast((entry) => entry.id === chatId)!;
       await vi.waitFor(() => {
         expect(fake.regenerate).toHaveBeenCalledTimes(1);
@@ -3037,23 +3009,29 @@ describe('ChatSessionStore', () => {
       expect(store.get(chatId)).toBeUndefined();
     });
 
-    it('should surface a failure when a seeded dispatch cannot compose its body', async () => {
+    /* The turn's owner is the chat's session actor (C3): a seeded dispatch that
+     * cannot be admitted fails *there*, and the banner the person sees is the
+     * one the admission itself raises. What the store owes is that nothing is
+     * left dispatched — no request went out, and no hold outlives the failure. */
+    it('should surface a failure when a seeded dispatch cannot be admitted', async () => {
       const chatId = 'chat_seed_compose_failure';
       const { deps, startupRequest, store } = seededRow(chatId);
+      startTurnOwner(store, 'project_seed');
       const session = store.acquire(chatId);
       await vi.waitFor(() => {
         expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith(chatId, startupRequest.id);
       });
 
-      store.setLatestAgentBody(chatId, async () => {
+      publishAdmission(chatId, () => {
         throw new Error('durable workspace admission failed');
       });
 
       await vi.waitFor(() => {
-        const snapshot = session.persistenceActorRef.getSnapshot();
-        expect(snapshot.matches({ requestLifecycle: 'idle' })).toBe(true);
-        expect(snapshot.context.persistedError?.message).toContain('durable workspace admission failed');
+        const snapshot = session.stateActorRef!.getSnapshot();
+        expect(snapshot.matches({ run: 'failed' })).toBe(true);
+        expect(snapshot.context.failureReason).toContain('durable workspace admission failed');
       });
+      expect(session.persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'idle' })).toBe(true);
 
       store.release(chatId);
     });
@@ -3095,11 +3073,12 @@ describe('ChatSessionStore', () => {
       const chatId = 'chat_seed_second_turn';
       const { deps, seedMessage, startupRequest, store } = seededRow(chatId);
 
+      startTurnOwner(store, 'project_seed');
       store.acquire(chatId);
-      store.setLatestAgentBody(chatId, async () => testRunBody);
       await vi.waitFor(() => {
         expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith(chatId, startupRequest.id);
       });
+      publishAdmission(chatId, () => ({ kind: 'regenerate', body: testRunBody }));
       const seededChat = harness.created.findLast((entry) => entry.id === chatId)!;
       await vi.waitFor(() => {
         expect(seededChat.regenerate).toHaveBeenCalledTimes(1);
@@ -3202,30 +3181,33 @@ describe('ChatSessionStore', () => {
      * `ChatErrorServiceUnavailable` banner (or the persistence machine's
      * transparent auto-retry fires), the resumed POST must still carry the
      * top-level `agent` block required by `chatTurnRequestSchema`. Before the
-     * fix the `continue` dispatch resumed without forwarding a body,
-     * with no body, the AI SDK transport produced `{ id, messages, trigger }`,
-     * and the API rejected it with `agent: expected object, received undefined`.
+     * fix the `continue` dispatch resumed without forwarding a body, the AI SDK
+     * transport produced `{ id, messages, trigger }`, and the API rejected it
+     * with `agent: expected object, received undefined`.
+     *
+     * Since C3 the chat's admission composes the body for every turn it opens,
+     * so a bodyless `continue` is only ever a *resume of the run already
+     * running* — it reuses that run's admitted body rather than composing a
+     * second one.
      */
-    it('forwards latestAgentBody as `body` on `continue` so the resumed POST carries the agent block', async () => {
+    it('reuses the running turn\u2019s body on a bodyless `continue` so the resumed POST carries the agent block', async () => {
       const store = createStore();
       const session = store.acquire('chat_resume_agent');
       const fake = harness.created.find((entry) => entry.id === 'chat_resume_agent')!;
 
-      const latestBody = {
+      const admitted = store.startRun('chat_resume_agent', {
         agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' },
-      };
-      store.setLatestAgentBody('chat_resume_agent', async () => latestBody);
+      });
 
       session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'continue' } });
 
       await vi.waitFor(() => {
         expect(fake.resumeStream).toHaveBeenCalledTimes(1);
       });
-      expect(fake.resumeStream).toHaveBeenCalledWith({
-        body: {
-          ...latestBody,
-          admission: { version: 1, idempotencyKey: expect.stringMatching(/^req_/u) as unknown },
-        },
+      expect(fake.resumeStream).toHaveBeenCalledWith({ body: admitted });
+      expect(admitted['admission']).toEqual({
+        version: 1,
+        idempotencyKey: expect.stringMatching(/^req_/u) as unknown,
       });
     });
   });
@@ -3287,91 +3269,30 @@ describe('ChatSessionStore', () => {
   });
 
   // ===========================================================================
-  // Retry rebuild
+  // Request body fallback
   //
-  // The retry helper slices the assistant tail and forwards `request.body`
-  // to `chat.regenerate`; model selection travels via `body.agent.execution`
-  // (composed by the chat-client), never via metadata patching.
-  // ===========================================================================
-  describe('retry rebuild', () => {
-    it('slices the assistant tail and forwards `request.body` to chat.regenerate', async () => {
-      const store = createStore();
-      const session = store.acquire('chat_retry_metadata');
-      const fake = harness.created.find((entry) => entry.id === 'chat_retry_metadata')!;
-
-      const userMessage: MyUIMessage = {
-        id: 'msg_user_retry',
-        role: 'user',
-        parts: [{ type: 'text', text: 'do thing' }],
-        metadata: { createdAt: 1, status: 'success' },
-      };
-      const assistantMessage: MyUIMessage = {
-        id: 'msg_assistant_retry',
-        role: 'assistant',
-        parts: [{ type: 'text', text: 'partial reply', state: 'done' }],
-        metadata: { createdAt: 2, status: 'success' },
-      };
-      fake.messages = [userMessage, assistantMessage];
-
-      const overrideBody = {
-        agent: { profile: 'cad', execution: { kind: 'tau', model: 'new-model' }, kernel: 'replicad' },
-      };
-      session.persistenceActorRef.send({
-        type: 'startRequest',
-        request: {
-          kind: 'retry',
-          messageId: 'msg_assistant_retry',
-          body: overrideBody,
-        },
-      });
-
-      await Promise.resolve();
-
-      expect(fake.regenerate).toHaveBeenCalledTimes(1);
-      expect(fake.regenerate).toHaveBeenCalledWith({
-        body: {
-          ...overrideBody,
-          admission: { version: 1, idempotencyKey: expect.stringMatching(/^req_/u) as unknown },
-        },
-      });
-      // The assistant turn was sliced off; the previous user message is
-      // unchanged (no metadata patching — model selection lives in
-      // `body.agent.execution`).
-      expect(fake.messages).toHaveLength(1);
-      expect(fake.messages[0]!.id).toBe('msg_user_retry');
-    });
-  });
-
-  // ===========================================================================
-  // Body fallback for request dispatch (R10/t17)
-  //
-  // Startup-request hydration and continue requests flow through the same
-  // `dispatchRequest` listener; without an explicit `request.body` they fall
-  // back to `session.latestAgentBody` published by `useCadChatClient` so the
-  // wire body still carries an `agent` block.
+  // Every turn is opened by the chat's admission, which composes the body and
+  // mints the run id with it (C3/V9). The only bodyless dispatch left is the
+  // persistence machine's own transparent auto-retry: a second *request*
+  // inside the turn already running, which must reuse that run's admitted body
+  // rather than mint a second admission for the same run.
   // ===========================================================================
   describe('request body fallback (R10/t17)', () => {
-    it('falls back to latestAgentBody when no explicit body is supplied on regenerate', async () => {
+    it('reuses the running turn\u2019s admitted body when a dispatch supplies none', async () => {
       const store = createStore();
       const session = store.acquire('chat_hydration_regen');
       const fake = harness.created.find((entry) => entry.id === 'chat_hydration_regen')!;
 
-      const latestBody = {
+      const admitted = store.startRun('chat_hydration_regen', {
         agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' },
-      };
-      store.setLatestAgentBody('chat_hydration_regen', async () => latestBody);
+      });
 
       session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'regenerate' } });
 
       await vi.waitFor(() => {
         expect(fake.regenerate).toHaveBeenCalledTimes(1);
       });
-      expect(fake.regenerate).toHaveBeenCalledWith({
-        body: {
-          ...latestBody,
-          admission: { version: 1, idempotencyKey: expect.stringMatching(/^req_/u) as unknown },
-        },
-      });
+      expect(fake.regenerate).toHaveBeenCalledWith({ body: admitted });
     });
   });
 
@@ -3668,7 +3589,10 @@ describe('ChatSessionStore', () => {
           },
         ];
 
-        session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'regenerate' } });
+        /* A turn always arrives with the body its admission composed; a
+         * bodyless dispatch is its own (separately pinned) failure and would
+         * persist an error over the tool state this row is about. */
+        session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'regenerate', body: testRunBody } });
 
         session.persistenceActorRef.send({
           type: 'requestFinished',

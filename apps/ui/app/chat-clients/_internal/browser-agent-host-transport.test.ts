@@ -144,7 +144,7 @@ const browserConfig = {
 
 const browserBody = (input: {
   readonly runId: string;
-  readonly trigger: 'submit' | 'retry' | 'edit' | 'regenerate';
+  readonly trigger: 'submit' | 'edit' | 'regenerate';
   readonly retainedMessageIds?: readonly string[];
 }) => ({
   agent: { execution: { kind: 'tau', model: 'openai-gpt-5.5', placement: 'browser-host' } },
@@ -1176,7 +1176,6 @@ describe('BrowserPlacementChatTransport', () => {
 
   it.each([
     { hostTrigger: 'submit', sdkTrigger: 'submit-message', messageId: undefined, retained: undefined },
-    { hostTrigger: 'retry', sdkTrigger: 'regenerate-message', messageId: 'assistant-1', retained: [] },
     { hostTrigger: 'edit', sdkTrigger: 'regenerate-message', messageId: undefined, retained: [] },
     { hostTrigger: 'regenerate', sdkTrigger: 'regenerate-message', messageId: undefined, retained: [] },
   ] as const)(
@@ -1261,7 +1260,7 @@ describe('BrowserPlacementChatTransport', () => {
 
     const retry = chat.regenerate({
       messageId: 'assistant-1',
-      body: browserBody({ runId: retryRunId, trigger: 'retry', retainedMessageIds: [] }),
+      body: browserBody({ runId: retryRunId, trigger: 'regenerate', retainedMessageIds: [] }),
     });
     const releaseTimer = globalThis.setTimeout(() => {
       releaseClose.resolve();
@@ -1278,7 +1277,7 @@ describe('BrowserPlacementChatTransport', () => {
       chatId,
       runId: retryRunId,
       message: { id: 'user-1', role: 'user', content: 'Build it.' },
-      trigger: 'retry',
+      trigger: 'regenerate',
       retainedMessageIds: [],
       config: browserConfig,
     });
@@ -1731,6 +1730,214 @@ describe('BrowserPlacementChatTransport', () => {
     await expect(stream.getReader().read()).resolves.toEqual({ done: true, value: undefined });
     expect(client.cancel).toHaveBeenCalledWith(runId);
     unregister();
+  });
+
+  /**
+   * V10/C6: every admitted run settles exactly once, whatever ended its stream.
+   *
+   * A stopped turn closed its writer the moment the abort landed, so the
+   * settlement the page produced a beat later had nowhere durable to go: the
+   * run's outcome depended on whether the revision root answered before the
+   * stream closed (F6). The stream that drove the admission holds its writer
+   * open for the settlement of the run it admitted.
+   */
+  it('keeps the settlement writer open for a run whose turn was stopped', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-cancel-settlement';
+    const runId = 'run-cancel-settlement';
+    const completion = Promise.withResolvers<Awaited<ReturnType<AgentHostClient['start']>>>();
+    const recordSettlement = vi.fn(async () => undefined);
+    const client = clientFor(chatId, runId, {
+      recordSettlement,
+      start: vi.fn(async () => completion.promise),
+      cancel: vi.fn(async () => {
+        const value = snapshot(chatId, runId, 'cancelled');
+        completion.resolve(value);
+        return value;
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-cancel-settlement',
+        backend: 'opfs',
+        providerBasePath: 'project-cancel-settlement',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+    const operation = new AbortController();
+
+    try {
+      const stream = await new BrowserPlacementChatTransport().sendMessages({
+        chatId,
+        trigger: 'submit-message',
+        messageId: 'message-cancel-settlement',
+        messages: [{ id: 'message-cancel-settlement', role: 'user', parts: [{ type: 'text', text: 'Stop this.' }] }],
+        abortSignal: operation.signal,
+        body: browserBody({ runId, trigger: 'submit' }),
+      });
+      operation.abort();
+      await drain(stream.getReader());
+
+      const failed = {
+        type: 'turn.failed',
+        turnId: 'message-cancel-settlement',
+        runId,
+        chatId,
+        checkoutId: undefined,
+        reason: 'the person stopped this turn',
+      } as const;
+      expect(await persistBrowserTurnSettlement(failed)).toBe(true);
+      expect(recordSettlement).toHaveBeenCalledWith(failed);
+      recordHostTurnSettlement(failed);
+      await vi.waitFor(() => {
+        expect(client.close).toHaveBeenCalledOnce();
+      });
+    } finally {
+      unregister();
+    }
+  });
+
+  /* The same run of the same invariant for a refusal: `start` throws, the
+   * stream aborts, and the turn is settled as failed by its owner afterwards. */
+  it('keeps the settlement writer open for a run the host refused', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-refusal-settlement';
+    const runId = 'run-refusal-settlement';
+    const recordSettlement = vi.fn(async () => undefined);
+    const client = clientFor(chatId, runId, {
+      recordSettlement,
+      start: vi.fn(async () => {
+        throw new Error('Refused once.');
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-refusal-settlement',
+        backend: 'opfs',
+        providerBasePath: 'project-refusal-settlement',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+
+    try {
+      const stream = await new BrowserPlacementChatTransport().sendMessages({
+        chatId,
+        trigger: 'submit-message',
+        messageId: 'message-refusal-settlement',
+        messages: [{ id: 'message-refusal-settlement', role: 'user', parts: [{ type: 'text', text: 'Refuse this.' }] }],
+        abortSignal: undefined,
+        body: browserBody({ runId, trigger: 'submit' }),
+      });
+      await drain(stream.getReader()).catch(() => undefined);
+
+      const failed = {
+        type: 'turn.failed',
+        turnId: 'message-refusal-settlement',
+        runId,
+        chatId,
+        checkoutId: undefined,
+        reason: 'Refused once.',
+      } as const;
+      expect(await persistBrowserTurnSettlement(failed)).toBe(true);
+      expect(recordSettlement).toHaveBeenCalledWith(failed);
+      recordHostTurnSettlement(failed);
+      await vi.waitFor(() => {
+        expect(client.close).toHaveBeenCalledOnce();
+      });
+    } finally {
+      unregister();
+    }
+  });
+
+  /**
+   * The page came back to a chat mid-turn: this document never attached to the
+   * run the worker is still driving, and the workspace claim that reload
+   * discovery reads was dropped when the previous document unloaded. The host
+   * is the only authority that knows, and it says so — `admit is refused`
+   * because the chat has a running run. Ending the turn on that banner made
+   * *navigate away mid-turn and back* a dead chat; the stream waits for the
+   * live run to end and admits once, which is what the person asked for.
+   */
+  it('waits out a live run the host refuses to admit over, then admits once', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-live-refusal';
+    const runId = 'run-live-refusal';
+    let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    let refusals = 0;
+    const client = clientFor(chatId, runId, {
+      start: vi.fn(async (input: Parameters<AgentHostClient['start']>[0]) => {
+        refusals += 1;
+        if (refusals === 1) {
+          throw new AgentHostWorkerError(
+            'RUN_ADMISSION_CONFLICT',
+            `Chat ${chatId} has a running run; admit is refused.`,
+          );
+        }
+        listener?.(chatId, {
+          version: 1,
+          leaderEpoch: 'leader-live-refusal',
+          sequence: 9,
+          recordedAt: '2026-09-18T00:00:09.000Z',
+          runId: input.runId,
+          type: 'run.lifecycle',
+          state: 'completed',
+        });
+        return snapshot(chatId, input.runId);
+      }),
+      attach: vi.fn(async () => ({
+        cursor: 0,
+        nextCursor: 0,
+        endCursor: 0,
+        events: [],
+        snapshot: snapshot(chatId, 'run-previous', 'running'),
+      })),
+      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+        listener = next;
+        /* The run this page never attached to ends on its own. */
+        globalThis.setTimeout(() => {
+          next(chatId, {
+            version: 1,
+            leaderEpoch: 'leader-live-refusal',
+            sequence: 4,
+            recordedAt: '2026-09-18T00:00:04.000Z',
+            runId: 'run-previous',
+            type: 'run.lifecycle',
+            state: 'completed',
+          });
+        }, 10);
+        return () => {
+          listener = undefined;
+        };
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-live-refusal',
+        backend: 'opfs',
+        providerBasePath: 'project-live-refusal',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+
+    try {
+      const stream = await new BrowserPlacementChatTransport().sendMessages({
+        chatId,
+        trigger: 'submit-message',
+        messageId: 'message-live-refusal',
+        messages: [{ id: 'message-live-refusal', role: 'user', parts: [{ type: 'text', text: 'Second.' }] }],
+        abortSignal: undefined,
+        body: browserBody({ runId, trigger: 'submit' }),
+      });
+      await drain(stream.getReader());
+
+      expect(client.start).toHaveBeenCalledTimes(2);
+      expect(refusals).toBe(2);
+    } finally {
+      unregister();
+    }
   });
 
   it('resolves an approval on the attached run without creating another admission', async () => {

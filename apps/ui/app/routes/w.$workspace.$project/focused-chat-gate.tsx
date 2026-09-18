@@ -4,6 +4,7 @@ import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Button } from '@taucad/ui/components/button';
 import { useProject } from '#hooks/use-project.js';
 import { ActiveChatProvider } from '#hooks/active-chat-provider.js';
+import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
 
 /**
  * Renders a low-fidelity placeholder shaped like the chat panel chrome
@@ -122,7 +123,15 @@ export function ChatInterfaceSessionGate({
     return <>{fallback}</>;
   }
 
-  return <ActiveChatProvider chatId={lastValidChatId}>{children}</ActiveChatProvider>;
+  return (
+    <ActiveChatProvider chatId={lastValidChatId}>
+      {/* The chat's one turn host: it owns the agent-host binding and the
+          bodyless body factory, which every consumer of `useCadChatClient`
+          used to write over each other. */}
+      <ChatTurnHost />
+      {children}
+    </ActiveChatProvider>
+  );
 }
 
 /**

@@ -120,6 +120,17 @@ const finalizedTurns = new Map<string, TurnFinalizedEvent>();
  * `settledRunHistory`.
  */
 const finalizedTurnLimit = 256;
+
+/**
+ * How long a stream's writer stays open for the settlement of the run it
+ * admitted, once the stream itself has ended.
+ *
+ * The settlement is produced by the chat's session actor in the same beat the
+ * request lifecycle ends, so this is a failure bound and not a wait anybody
+ * sees: what it prevents is one unsettled turn holding this chat's next stream
+ * behind `clientSettlements` forever.
+ */
+const settlementWriterGrace = 15_000;
 let finalizedTurnSnapshot: readonly TurnFinalizedEvent[] = [];
 const finalizedTurnTopic = new Topic<void>({ name: 'host-finalized-turns' });
 const hostTurnSettlementTopic = new Topic<HostTurnSettlement>({ name: 'host-turn-settlements' });
@@ -181,6 +192,35 @@ export const persistBrowserTurnSettlement = async (event: HostTurnSettlement): P
   }
   await active.client.recordSettlement(event);
   return true;
+};
+
+/**
+ * Resolve when the chat's current run has ended, as the host reports it.
+ *
+ * Asked only after the host has refused an admission because a run is live:
+ * the snapshot answers a run that ended in the meantime, and the subscription
+ * answers the one that ends next. Nothing polls, and no state of another owner
+ * is read twice.
+ *
+ * @param client - This chat's host client.
+ * @param chatId - The chat whose live run must end.
+ */
+const liveRunEnded = async (client: AgentHostClient, chatId: string): Promise<void> => {
+  const ended = Promise.withResolvers<void>();
+  const unsubscribe = client.subscribe((eventChatId, event) => {
+    if (eventChatId === chatId && event.type === 'run.lifecycle' && terminal(event.state)) {
+      ended.resolve();
+    }
+  });
+  try {
+    const current = await client.attach({ chatId, cursor: 0, limit: 1 });
+    if (current.snapshot === undefined || terminal(current.snapshot.state)) {
+      return;
+    }
+    await ended.promise;
+  } finally {
+    unsubscribe();
+  }
 };
 
 const recordDurableTurnSettlement = (event: AgentLiveEvent | AgentLogEvent): void => {
@@ -420,7 +460,7 @@ const registrationFor = async (chatId: string): Promise<BrowserAgentHostRegistra
 const browserHostAdmissionSchema = z.union([
   z.strictObject({ trigger: z.literal('submit'), config: agentHostAdmissionConfigSchema }),
   z.strictObject({
-    trigger: z.enum(['retry', 'edit', 'regenerate']),
+    trigger: z.enum(['edit', 'regenerate']),
     retainedMessageIds: z.array(z.string()),
     config: agentHostAdmissionConfigSchema,
   }),
@@ -430,7 +470,7 @@ const browserHostAdmissionSchema = z.union([
     context: agentHostExternalContextSchema.optional(),
   }),
   z.strictObject({
-    trigger: z.enum(['retry', 'edit', 'regenerate']),
+    trigger: z.enum(['edit', 'regenerate']),
     retainedMessageIds: z.array(z.string()),
     agent: agentHostExternalAgentSchema,
     context: agentHostExternalContextSchema.optional(),
@@ -610,6 +650,15 @@ const createHostStream = <Message extends UIMessage>(input: {
     let attaching: Array<AgentLogEvent | AgentLiveEvent> | undefined = [];
     const terminalEvent = Promise.withResolvers<void>();
     const turnSettlement = Promise.withResolvers<void>();
+    /* This stream admitted the run, so its turn *will* be settled by the chat's
+     * session actor — and the writer that settlement needs is this stream's
+     * client. Held past the readable stream on every exit, a stop and a refusal
+     * included, which is what makes "exactly one settlement per admitted run"
+     * hold rather than depend on the root answering first (V10, F6). */
+    const holdWriterForSettlement = input.admission !== undefined;
+    /* Set once the completed path has spent its loud bound on the settlement,
+     * so the quiet grace below is only ever the stop's and the refusal's. */
+    let lateSettlementAwaited = false;
     let isRunPublished = false;
     const publishRun = (): void => {
       if (runId === undefined) {
@@ -839,7 +888,7 @@ const createHostStream = <Message extends UIMessage>(input: {
        * retain a client for. Every run this stream is actively observing or
        * driving can still publish its P71 settlement after lifecycle
        * completion, so its subscription must outlive the readable stream. */
-      const awaitLateSettlement = !terminal(state) || input.admission !== undefined || driveResume;
+      const awaitLateSettlement = !terminal(state) || holdWriterForSettlement || driveResume;
       if (input.runId === undefined && runId !== undefined) {
         await bindRun(runId);
       }
@@ -856,16 +905,47 @@ const createHostStream = <Message extends UIMessage>(input: {
         turnId = admittedMessage.id;
         durableUserMessage = projectAgentHostUserMessage(admittedMessage);
         publishRun();
-        const operation = client.start({
-          chatId: input.chatId,
-          runId,
-          message: admittedMessage,
-          ...input.admission,
-        } as HostStartInput);
+        const startOnce = async (hostClient: AgentHostClient): Promise<HostRunSnapshot> =>
+          hostClient.start({
+            chatId: input.chatId,
+            runId,
+            message: admittedMessage,
+            ...input.admission,
+          } as HostStartInput);
+        /**
+         * Admit once the chat's previous run has ended.
+         *
+         * This page can come back to a chat mid-turn: the previous document
+         * unloaded with the run still going, its workspace claim went with it,
+         * and nothing here ever attached to it — so the page believes the chat
+         * is idle and the host, which knows better, refuses the admission. The
+         * refusal is the fact; waiting it out and admitting once is what the
+         * person asked for, and it is bounded by the run itself ending.
+         */
+        const recoverFromLiveRun = async (error: unknown): Promise<HostRunSnapshot> => {
+          if (
+            !(error instanceof AgentHostWorkerError) ||
+            error.code !== 'RUN_ADMISSION_CONFLICT' ||
+            cancelled ||
+            !/has a \w+ run/u.test(error.message)
+          ) {
+            throw error;
+          }
+          await liveRunEnded(client!, input.chatId);
+          return startOnce(client!);
+        };
+        /* The command itself is issued before this frame yields — the recovery
+         * is a rejection handler, never a wrapper that defers the start. */
+        const operation = startOnce(client);
         if (cancelled) {
           cancelRun();
         }
-        const snapshot = await operation;
+        let snapshot: HostRunSnapshot;
+        try {
+          snapshot = await operation;
+        } catch (error) {
+          snapshot = await recoverFromLiveRun(error);
+        }
         await projection;
         if (terminal(snapshot.state) && !terminal(state)) {
           await replay(client);
@@ -896,6 +976,7 @@ const createHostStream = <Message extends UIMessage>(input: {
       closed = true;
       await writer.close();
       if (awaitLateSettlement && !cancelled) {
+        lateSettlementAwaited = true;
         await awaitSettlement(turnSettlement.promise, `This turn never settled on chat ${input.chatId}.`);
         await projection;
       }
@@ -914,6 +995,22 @@ const createHostStream = <Message extends UIMessage>(input: {
       // that would not open — resolved no run, and rebuilds nothing.
       announce(undefined);
       input.abortSignal?.removeEventListener('abort', cancel);
+      if (holdWriterForSettlement && !lateSettlementAwaited && client !== undefined && runId !== undefined) {
+        /* The completed path waited above, loudly and bounded; this is the
+         * stopped and refused turn, whose settlement the page produces after
+         * the stream is gone.
+         * ponytail: a wall-clock bound, because a settlement that never comes
+         * would hold the chat's next stream behind `clientSettlements`. The
+         * upgrade path is the chat session actor telling the transport its turn
+         * ended without one, which is a fact only it holds. */
+        await Promise.race([
+          turnSettlement.promise,
+          new Promise<void>((resolve) => {
+            globalThis.setTimeout(resolve, settlementWriterGrace);
+          }),
+        ]);
+        await projection;
+      }
       unsubscribe?.();
       unsubscribeLive?.();
       unsubscribeSettlement?.();

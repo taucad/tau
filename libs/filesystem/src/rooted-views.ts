@@ -80,9 +80,17 @@ export type RootedPorcelain = {
  * Filesystem provider surface issued for one captured mount.
  * @public
  */
-export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked'> &
+export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked' | 'rmdir'> &
   Partial<RootedPorcelain> & {
     writeFileChecked(input: CheckedFileWrite): Promise<CheckedFileWriteResult>;
+    /**
+     * Remove one directory of this root, recursively when asked.
+     *
+     * The port's own `rmdir` empties one directory; the authority's has always
+     * taken `{ recursive: true }`, and a rooted view is the same surface issued
+     * for one mount, so it carries the option rather than silently dropping it.
+     */
+    rmdir(path: string, options?: { recursive?: boolean }): Promise<void>;
     watch(request: WatchRequest, handler: (event: WatchEvent) => void): () => void;
     /**
      * Search this root's own index, which no other root's queries evict (D3).
@@ -297,10 +305,10 @@ export class RootedViews {
       assertMutableRoot(localPath);
       await this._pipeline.unlinkResolved({ path: authorityPath, resolution, context: mutationContext });
     };
-    const rmdir = async (path: string): Promise<void> => {
+    const rmdir = async (path: string, options?: { recursive?: boolean }): Promise<void> => {
       const { authorityPath, resolution, localPath } = resolveLocal(path);
       assertMutableRoot(localPath);
-      await this._pipeline.rmdirResolved({ path: authorityPath, resolution, context: mutationContext });
+      await this._pipeline.rmdirResolved({ path: authorityPath, resolution, options, context: mutationContext });
     };
     const move = async (from: string, to: string): Promise<FileStat> => {
       const source = resolveLocal(from);

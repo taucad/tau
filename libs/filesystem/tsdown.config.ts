@@ -6,7 +6,6 @@ const baseConfig: UserConfig = {
     'src/index.ts',
     'src/backend/index.ts',
     'src/backend/node/index.ts',
-    'src/bundled-types-mount.ts',
     'src/composed-view.ts',
     'src/path-registry.ts',
     'src/content-ops/index.ts',

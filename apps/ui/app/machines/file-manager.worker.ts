@@ -24,8 +24,6 @@ import type { PushRecorder } from '@taucad/revisions';
 import { randomUuid } from '@taucad/utils/id';
 import { createIndexedDbComputeEngine, exposeComputeStoreChannel } from '@taucad/runtime/host';
 
-import { populateBundledTypesMount } from '@taucad/filesystem/bundled-types-mount';
-import type { BundledTypesMountEntry } from '@taucad/filesystem/bundled-types-mount';
 import type { WorkspaceScope } from '@taucad/filesystem';
 import {
   ChangeEventBus,
@@ -41,6 +39,8 @@ import { kernelTypePackageMaps } from '@taucad/api-extractor/kernel-types';
 import type { SyncFsWorkspaceAdapter } from '@taucad/lsp-fs/sync';
 import { attachSyncFsServer } from '@taucad/lsp-fs/sync';
 import { metaConfig } from '#constants/meta.constants.js';
+import { populateBundledTypesMount } from '#machines/bundled-types-mount.js';
+import type { BundledTypesMountEntry, BundledTypesRoot } from '#machines/bundled-types-mount.js';
 import { ensureBundledTypesMount } from '#machines/bundled-types-sentinel.js';
 import { homeBackendFromWorkerName } from '#machines/file-manager-worker-name.js';
 import { listWorkspaceDirectories } from '#machines/file-manager-sync-fs-adapter.js';
@@ -167,7 +167,16 @@ self.addEventListener('unhandledrejection', (event) => {
   self.postMessage(envelope);
 });
 
-async function createNodeModulesMount(): Promise<void> {
+/**
+ * Mount `/node_modules` and capture it as the typing feature's own writable
+ * handle. The route is read-only to every consumer — the authority refuses an
+ * authority-global mutation into it with `BUNDLED_TYPES_WORKSPACE` — so this
+ * composition site is the only place a writer for it exists (charter D15).
+ *
+ * @returns The rooted handle, or `undefined` when the mount is unavailable and
+ *   there is nowhere to install declarations.
+ */
+async function createNodeModulesMount(): Promise<BundledTypesRoot | undefined> {
   try {
     await fileService.mount('/node_modules', {
       backend: 'opfs',
@@ -175,8 +184,10 @@ async function createNodeModulesMount(): Promise<void> {
       class: 'derived',
     });
     console.debug('[FM-Worker] /node_modules mounted on OPFS');
+    return fileService.createRootedFileSystem('/node_modules');
   } catch (error) {
-    console.warn('[FM-Worker] Failed to mount OPFS /node_modules, falling through to root', error);
+    console.warn('[FM-Worker] Failed to mount OPFS /node_modules; bundled types are unavailable', error);
+    return undefined;
   }
 }
 
@@ -242,21 +253,25 @@ try {
   throw error;
 }
 
-try {
-  await createNodeModulesMount();
-} catch (error) {
-  postWorkerInitError('createNodeModulesMount', error);
-  throw error;
-}
+// Fail-soft by contract: the route is either mounted and writable, or absent.
+const nodeModules = await createNodeModulesMount();
 
 try {
-  const outcome = await ensureBundledTypesMount(fileService, buildBundledTypesPayload(), {
-    populate: async (payload) => populateBundledTypesMount(fileService, payload),
-    // Vite substitutes this define inside worker bundles too (verified against
-    // vite 8.0.10); a realm without it falls back to the payload digest.
-    buildIdentity: typeof tauBuildId === 'number' ? String(tauBuildId) : undefined,
-  });
-  const populationLabel = outcome === 'skipped' ? 'bundled types current, skipped' : 'bundled types populated';
+  const outcome =
+    nodeModules === undefined
+      ? 'unavailable'
+      : await ensureBundledTypesMount(fileService, buildBundledTypesPayload(), {
+          populate: async (payload) => populateBundledTypesMount(nodeModules, payload),
+          // Vite substitutes this define inside worker bundles too (verified against
+          // vite 8.0.10); a realm without it falls back to the payload digest.
+          buildIdentity: typeof tauBuildId === 'number' ? String(tauBuildId) : undefined,
+        });
+  const populationLabel =
+    outcome === 'unavailable'
+      ? 'bundled types skipped, /node_modules unavailable'
+      : outcome === 'skipped'
+        ? 'bundled types current, skipped'
+        : 'bundled types populated';
   console.debug(`[FM-Worker] ${populationLabel} +${(performance.now() - t0).toFixed(1)}ms`);
 } catch (error) {
   postWorkerInitError('populateBundledTypesMount', error);

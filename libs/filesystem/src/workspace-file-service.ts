@@ -62,13 +62,6 @@ import { checkoutRoute, nodeModulesRoute, parseRoute, projectRoute } from '#proj
 /** Milliseconds. */
 const kernelCoalescingWindow = 75;
 
-/**
- * Absolute prefix of the read-only synthetic mount that hosts the
- * bundled `.d.ts` payloads (see {@link populateBundledTypesMount}).
- * Mirrored by the UI-side `bundledTypesWorkspaceRootSegment` constant.
- */
-const bundledTypesAbsolutePrefix = nodeModulesRoute;
-
 /** Concurrent `getFile()` calls per directory while walking an external snapshot. */
 const externalSnapshotConcurrency = 16;
 
@@ -188,8 +181,16 @@ function isWorkspaceStatePath(physicalPath: string): boolean {
   return physicalPath.split('/')[0]?.startsWith('.') === true;
 }
 
-function isUnderBundledTypesMount(absolutePath: string): boolean {
-  return absolutePath === bundledTypesAbsolutePrefix || absolutePath.startsWith(`${bundledTypesAbsolutePrefix}/`);
+/**
+ * The `/node_modules` route is read-only to every consumer: declaration bytes
+ * are installed by the typing feature through its own trusted rooted handle
+ * (charter D15), never through an authority-global mutation.
+ *
+ * @param absolutePath - Canonical authority-global path.
+ * @returns Whether the path lies on the read-only route.
+ */
+function isUnderNodeModulesRoute(absolutePath: string): boolean {
+  return absolutePath === nodeModulesRoute || absolutePath.startsWith(`${nodeModulesRoute}/`);
 }
 
 /**
@@ -213,12 +214,6 @@ function isStructurallyValidWorkspacePath(path: string): boolean {
     return false;
   }
 }
-
-/** Fully materialized files for one package-root replacement. @public */
-export type BundledTypePackageReplacement = Readonly<{
-  packageDirectory: string;
-  files: ReadonlyArray<Readonly<{ path: string; content: string }>>;
-}>;
 
 /**
  * Layer 3a UI-side workspace orchestrator.
@@ -674,7 +669,7 @@ export class WorkspaceFileService {
     if (!isStructurallyValidWorkspacePath(target)) {
       return new WorkspaceMutationError('INVALID_NAME', target);
     }
-    if (isUnderBundledTypesMount(source) || isUnderBundledTypesMount(target)) {
+    if (isUnderNodeModulesRoute(source) || isUnderNodeModulesRoute(target)) {
       return new WorkspaceMutationError('BUNDLED_TYPES_WORKSPACE', source, { target });
     }
 
@@ -755,7 +750,7 @@ export class WorkspaceFileService {
     if (!isStructurallyValidWorkspacePath(path)) {
       return new WorkspaceMutationError('INVALID_NAME', path);
     }
-    if (isUnderBundledTypesMount(path)) {
+    if (isUnderNodeModulesRoute(path)) {
       return new WorkspaceMutationError('BUNDLED_TYPES_WORKSPACE', path);
     }
 
@@ -791,7 +786,7 @@ export class WorkspaceFileService {
 
   /**
    * Preflight {@link unlink} / {@link rmdir}: verifies the path exists
-   * and does not sit on the read-only bundled-types mount.
+   * and does not sit on the read-only `/node_modules` route.
    *
    * @param path - Absolute path to remove.
    * @returns `true` on success or a {@link WorkspaceMutationError}.
@@ -800,7 +795,7 @@ export class WorkspaceFileService {
     if (!isStructurallyValidWorkspacePath(path)) {
       return new WorkspaceMutationError('INVALID_NAME', path);
     }
-    if (isUnderBundledTypesMount(path)) {
+    if (isUnderNodeModulesRoute(path)) {
       return new WorkspaceMutationError('BUNDLED_TYPES_WORKSPACE', path);
     }
 
@@ -883,112 +878,6 @@ export class WorkspaceFileService {
       targetResolution: this._resolveProvider(target),
       context,
     });
-  }
-
-  /**
-   * Replace complete bundled declaration package roots under `/node_modules`.
-   * The caller must materialize and validate every output before admission; this
-   * method supplies the one package-set mutation boundary shared by all callers.
-   *
-   * @param packages - Complete package roots and their already-materialized files.
-   * @returns Promise fulfilled after every package root is replaced.
-   */
-  public async replaceBundledTypePackages(packages: readonly BundledTypePackageReplacement[]): Promise<void> {
-    if (packages.length === 0) {
-      return;
-    }
-
-    const packageDirectories = new Set<string>();
-    const operations: Array<{
-      packageDirectory: string;
-      packageResolution: MountResolution;
-      files: Array<{ path: string; content: string; resolution: MountResolution }>;
-    }> = [];
-    for (const replacement of packages) {
-      const packageDirectory = resolveAuthorityPath(replacement.packageDirectory);
-      if (
-        packageDirectory !== replacement.packageDirectory ||
-        !packageDirectory.startsWith(`${bundledTypesAbsolutePrefix}/`) ||
-        packageDirectories.has(packageDirectory)
-      ) {
-        throw new TypeError(`Invalid bundled type package root: ${replacement.packageDirectory}`);
-      }
-      packageDirectories.add(packageDirectory);
-      const packageResolution = this._resolveProvider(packageDirectory);
-      const seenFiles = new Set<string>();
-      const files = replacement.files.map(({ path: rawPath, content }) => {
-        const path = resolveAuthorityPath(rawPath);
-        if (
-          path !== rawPath ||
-          !path.startsWith(`${packageDirectory}/`) ||
-          seenFiles.has(path) ||
-          typeof content !== 'string'
-        ) {
-          throw new TypeError(`Invalid bundled type package file: ${rawPath}`);
-        }
-        seenFiles.add(path);
-        const resolution = this._resolveProvider(path);
-        if (resolution.entry !== packageResolution.entry) {
-          throw new TypeError(`Bundled type package crosses a mount boundary: ${path}`);
-        }
-        return { path, content, resolution };
-      });
-      operations.push({ packageDirectory, packageResolution, files });
-    }
-
-    const rootResolution = this._resolveProvider(bundledTypesAbsolutePrefix);
-    const locks = this._pipeline.mutationLockPaths([{ path: bundledTypesAbsolutePrefix, resolution: rootResolution }]);
-    return this._crossTabCoordinator.withLocks(locks, async () =>
-      this._resourceQueue.queueForMany(locks, async () => {
-        let mutationBegan = false;
-        try {
-          await this._pipeline.refreshMutationProviders([
-            rootResolution,
-            ...operations.flatMap(({ packageResolution, files }) => [
-              packageResolution,
-              ...files.map(({ resolution }) => resolution),
-            ]),
-          ]);
-          for (const { packageDirectory, packageResolution, files } of operations) {
-            // oxlint-disable-next-line no-await-in-loop -- Package replacements are intentionally serialized as complete generations under one lock.
-            if (await packageResolution.provider.exists(packageResolution.path)) {
-              mutationBegan = true;
-              // oxlint-disable-next-line no-await-in-loop -- Package replacement is intentionally ordered under one lock.
-              await this._pipeline.rmdirRecursive(packageResolution.provider, packageResolution.path);
-            }
-            this._filePool?.invalidate(packageDirectory);
-            this._treeIndexes.removeDirectory(packageDirectory);
-            for (const { path, content, resolution } of files) {
-              mutationBegan = true;
-              // oxlint-disable-next-line no-await-in-loop -- A package root becomes visible as one ordered generation.
-              await this._pipeline.writeFileUnlocked({ path, resolution, data: content });
-            }
-          }
-          if (mutationBegan) {
-            this._pipeline.emitChangeEvent(
-              { type: 'directoryChanged', path: bundledTypesAbsolutePrefix, backend: rootResolution.backend },
-              undefined,
-              { operations: [{ path: bundledTypesAbsolutePrefix, resolution: rootResolution }] },
-            );
-            this._crossTabCoordinator.notifyDirectoryChange(
-              bundledTypesAbsolutePrefix,
-              this._pipeline.physicalAuthority(rootResolution),
-            );
-          }
-        } catch (error) {
-          if (mutationBegan) {
-            this._filePool?.clear();
-            this._treeIndexes.clear();
-            this._pipeline.emitChangeEvent({ type: 'backendChanged', backend: rootResolution.backend });
-            this._crossTabCoordinator.notifyDirectoryChange(
-              bundledTypesAbsolutePrefix,
-              this._pipeline.physicalAuthority(rootResolution),
-            );
-          }
-          throw error;
-        }
-      }),
-    );
   }
 
   /**
@@ -1346,13 +1235,13 @@ export class WorkspaceFileService {
       throw new TypeError(`Dynamic mount prefix must already be canonical: ${prefix}`);
     }
     const previewInstance = this._previewInstance(canonicalPrefix);
-    if (previewInstance === undefined && canonicalPrefix !== bundledTypesAbsolutePrefix) {
+    if (previewInstance === undefined && canonicalPrefix !== nodeModulesRoute) {
       throw new TypeError(`Dynamic mount prefix is not admitted: ${prefix}`);
     }
     if (
       (previewInstance !== undefined &&
         (config.backend !== 'memory' || config.storageRootKey !== `memory:preview:${previewInstance}`)) ||
-      (canonicalPrefix === bundledTypesAbsolutePrefix && config.backend !== 'opfs')
+      (canonicalPrefix === nodeModulesRoute && config.backend !== 'opfs')
     ) {
       throw new TypeError(`Dynamic mount configuration does not match its protected prefix: ${prefix}`);
     }
@@ -1394,7 +1283,7 @@ export class WorkspaceFileService {
     const canonicalPrefix = resolveAuthorityPath(prefix);
     if (
       canonicalPrefix !== prefix ||
-      (this._previewInstance(canonicalPrefix) === undefined && canonicalPrefix !== bundledTypesAbsolutePrefix)
+      (this._previewInstance(canonicalPrefix) === undefined && canonicalPrefix !== nodeModulesRoute)
     ) {
       throw new TypeError(`Dynamic mount prefix is not admitted: ${prefix}`);
     }
@@ -2894,7 +2783,7 @@ export class WorkspaceFileService {
   }
 
   private _assertGenericMutationPath(path: string, target?: string): void {
-    if (isUnderBundledTypesMount(path)) {
+    if (isUnderNodeModulesRoute(path)) {
       throw new WorkspaceMutationError('BUNDLED_TYPES_WORKSPACE', path, target === undefined ? undefined : { target });
     }
   }

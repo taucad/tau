@@ -3,8 +3,10 @@ title: 'Revisions Policy'
 description: 'Rules for revision identity, checkouts, RevisionPort parity, actor composition, sync, records, remotes, refusal classification, latency budgets, conflicts, publication, and project liveness.'
 status: active
 created: '2026-09-14'
-updated: '2026-09-17'
+updated: '2026-09-18'
 related:
+  - docs/research/git-storage-substrate-charter.md
+  - docs/architecture/revisions-cloud-handbook.md
   - docs/research/revisions-sync-closeout-blueprint.md
   - docs/architecture/workspace-filesystem-and-revisions.md
   - docs/architecture/github-repository-integration.md
@@ -90,7 +92,7 @@ Use `classify()` as the sole answer for storage class, versioning, agent access,
 | `.tau/cache/**`                                                                                                                                                                         | cache               | no        | read-write; unwatched | host                                               |
 | any `node_modules/**`                                                                                                                                                                   | cache               | no        | read-write            | host or tooling                                    |
 | `.tau/chats/**`, `.tau/runs/**`, `.tau/artifacts/**`, `.tau/tool-results/**`, `.tau/offloaded-tool-results/**`, `exports/**`, `thumbnail.webp`                                          | records             | no        | read-only             | host through the selected checkout authority       |
-| `.tau/revisions/**`, `.git/**`, `.jj/**`, `.tau/binding.json`                                                                                                                           | control-plane       | never     | hidden                | revision or workspace authority                    |
+| `.git/**`, `.jj/**`, `.tau/binding.json`                                                                                                                                                | control-plane       | never     | hidden                | revision or workspace authority                    |
 
 Keep all record families readable and non-writable to agents and dimmed for users. Hide the control plane from both composed views. Exclude both classes from revisions and project exports. Derive `.gitignore` and `.gitattributes` from the registry; never maintain a second prefix or glob list. Refuse a linked import before materialization when its selected tree contains a tracked path that the registry cannot version; never make that path disappear from the next revision.
 
@@ -102,11 +104,11 @@ Derive user mutation gates from `source` and dimming from `versioned`; never use
 
 Choose one backend per project per host from control-plane configuration. No layer above revisions may name or bypass the backend.
 
-| Host                             | Backend                                                                                 |
-| -------------------------------- | --------------------------------------------------------------------------------------- |
-| Browser                          | `isomorphic-git` over the authority, with a standard Git layout under `.tau/revisions/` |
-| Desktop, `tau serve`, CLI, cloud | Native Git through `RevisionPort`                                                       |
-| Future disk host                 | jj over colocated Git only after its blockers close, through the same port              |
+| Host                             | Backend                                                                       |
+| -------------------------------- | ----------------------------------------------------------------------------- |
+| Browser                          | `isomorphic-git` over the authority, with a standard Git layout under `.git/` |
+| Desktop, `tau serve`, CLI, cloud | Native Git through `RevisionPort`                                             |
+| Future disk host                 | jj over colocated Git only after its blockers close, through the same port    |
 
 Keep commit identity, regular-file mode, refs, log, diff, merge, tags, checkouts, remote operations, and LFS clean/smudge behind the port. Never put clean/smudge in the composed view. Preserve `100644` and `100755` modes in the immutable tree, hashing, capture, merge, restore, and every port; refuse symlinks, gitlinks, and unknown modes before applying them. Require browser and native conformance to produce identical tree and revision identities for identical inputs and to expose the same L2–L4 behavior; the CLI exposes the same verbs headlessly.
 
@@ -200,9 +202,11 @@ Use a dedicated GitHub App user connection for first-class GitHub repository dis
 
 Expose one remote per project for now—**No remote**, **Tau Cloud**, or **Git remote**—while retaining Git's remotes list as the data model. Never model blob stores as client-side remotes.
 
-Implement the Tau Hosted Remote as a standard Git server in the API: bare repositories on the durable volume, allow-listed `receive-pack`, LFS objects in R2, server-side publication materialization, and nightly Git bundle backups. Keep the proxy Git-endpoint-only and send Tau LFS objects directly from the browser to R2 using the batch API's authorized URLs.
+Give a Tau Cloud project one owner and any number of collaborators holding `read` or `write`. Authorize every git request and every project route through one access service rather than an owner comparison, answer 404 for a non-member and a role refusal for a member below the need, and reserve registering, publishing and managing collaborators to the owner. A collaborator's bytes land in the owner's storage and count against the owner's plan; the server attributes every repository write to the authenticated pusher, while the commit author stays the person the client recorded. Revocation takes effect within the authorization cache window (5 s per API process; hits only are cached, so a revoked collaborator is refused by the first request after that window on each worker). A lease already in flight finishes.
 
-Create backups through bounded storage operations. Stream large bundles as checksum-verified multipart uploads, copy them to the dated final key only after every part and finalized LFS object succeeds, and abort incomplete uploads. A final backup marker must therefore identify a complete recoverable set rather than a partially uploaded bundle.
+Implement the Tau Hosted Remote as a standard Git server in the API whose durable state is object storage and never a host disk. A repository is immutable packfiles plus one manifest under the owner's tenant prefix; a request hydrates a disposable lease from them, runs stock `upload-pack` or `receive-pack --stateless-rpc` over it, and acknowledges a push only after the manifest commit succeeds by conditional write. Any number of stateless workers may serve one repository, so a lost commit race is a refusal the client retries rather than a lock. Keep exactly one hook, `pre-receive`, carrying the allow-list, the fast-forward rule for every ref family, the owner's quota backstop and the per-repository byte ceiling. Speak git smart HTTP only: there is no dumb-HTTP read layout, no `update-server-info` and no `post-receive`. Keep LFS objects in the owner's tenant prefix, materialize publications server-side from a lease, keep the proxy Git-endpoint-only, and send Tau LFS objects directly from the browser to R2 using the batch API's authorized URLs.
+
+Make durable state copy-ready instead of snapshotted. Write objects once under keys unique to their upload, retain retired packs through the reconstruction window, and keep every manifest addressable, so a second store is a destination a copier adds and never a mechanism it invents. Take no bundle and no nightly snapshot. Restore reads a manifest and the packs it names from any store the port can reach and rolls the primary forward with a fresh incarnation and a higher generation; it never rewrites a manifest in place. Until an independent second copy exists, retired-pack retention is the only recovery window, prefix deletion has exactly one tombstone-gated caller, and sync does not open to users.
 
 ### 12. Carry chats on record refs
 
@@ -232,7 +236,7 @@ Use the signed-in user's stable identity when available. For anonymous work, use
 
 Keep revisions and tags immutable while any ref reaches them. Do no local object garbage collection in this program; chat cards, run records, restore-by-id, and conflict evidence may retain revisions outside branches. Remove a linked checkout only through **Discard** after proving its tree equals its head. Offer merged checkouts for later removal; never remove them silently.
 
-Before server Git garbage collection, refresh host-local `refs/tau/retention/records/*` for revision ids embedded in reachable record refs. Keep finalized LFS objects reachable from any retained Git tree. Keep pending uploads and orphan blobs for at least 24 hours, and unreachable finalized objects for at least 30 days; delete only after an owner-serialized recheck confirms the object is still eligible. Update quota only with the matching database row and object deletion.
+Run no server-side Git garbage collection and keep no server-local retention refs. The manifest is the reachability statement: it names the packs that are live and the packs that have been retired, compaction is a writer-side step inside the same conditional write, and a retired pack stays readable for 30 days — that window, not a ref, is what protects a revision id embedded only in a record. Sweep only keys no manifest names. Keep finalized LFS objects reachable from any retained Git tree. Keep pending uploads and orphan blobs for at least 24 hours, and unreachable finalized objects for at least 30 days; delete only after an owner-serialized recheck confirms the object is still eligible. Update quota only with the matching database row and object deletion.
 
 Open **Compare** in the existing text `DiffViewer` from History, chat cards, and conflict rows. Treat geometry comparison as a later capability over the same revision or checkout inputs.
 
@@ -294,12 +298,36 @@ A server answer is never a network error. Classify every remote refusal once, in
 | --------------------------------- | ----------------------------------------------- |
 | `REMOTE_UNAUTHORIZED`             | 401                                             |
 | `REMOTE_NOT_ENTITLED`             | 403 `GIT_SYNC_NOT_ENTITLED`                     |
+| `REMOTE_FORBIDDEN`                | A 403 that is not `GIT_SYNC_NOT_ENTITLED`       |
 | `REMOTE_NOT_FOUND`                | 404                                             |
-| `REMOTE_QUOTA_EXCEEDED`           | 413, carrying the affected file list            |
+| `REMOTE_QUOTA_EXCEEDED`           | 413, or a ceiling refusal, with the file list   |
 | `REMOTE_REJECTED`                 | A per-ref refusal, carrying the server's reason |
 | `REMOTE_REAUTHORIZATION_REQUIRED` | An expired or revoked third-party connection    |
 
 Carry the server's own sentence as the error `message` whenever the answer has one, and render that sentence rather than replacing it with generic copy. Reserve `ENGINE_FAILED 'could not be reached'` for a failure that produced no HTTP status at all.
+
+Map the Hosted Remote's own refusals onto those classes — every code below, and no other class for any of them:
+
+| Server code                       | Status                 | Client class                                            |
+| --------------------------------- | ---------------------- | ------------------------------------------------------- |
+| `GIT_SERVICE_UNKNOWN`             | 400                    | none; stock git only                                    |
+| `GIT_SYNC_NOT_ENTITLED`           | 403                    | `REMOTE_NOT_ENTITLED`                                   |
+| `PROJECT_ROLE_INSUFFICIENT`       | 403                    | `REMOTE_FORBIDDEN`                                      |
+| `PROJECT_NOT_FOUND`               | 404                    | `REMOTE_NOT_FOUND`                                      |
+| `GIT_REPOSITORY_NOT_FOUND`        | 404                    | `REMOTE_NOT_FOUND`                                      |
+| `GIT_REPOSITORY_DELETED`          | 410                    | `REMOTE_NOT_FOUND`, terminal                            |
+| `GIT_QUOTA_EXCEEDED`              | 413                    | `REMOTE_QUOTA_EXCEEDED`                                 |
+| `GIT_REPOSITORY_CEILING_EXCEEDED` | 413                    | `REMOTE_QUOTA_EXCEEDED`                                 |
+| `GIT_PUSH_NOT_COMMITTABLE`        | 422                    | `REMOTE_REJECTED`                                       |
+| `GIT_REPOSITORY_INCOMPLETE`       | 500                    | `REMOTE_UNAVAILABLE`; retried forever — operator repair |
+| `GIT_PUSH_RACE_LOST`              | 503 + `Retry-After: 5` | `REMOTE_UNAVAILABLE`; retried and self-clearing         |
+| `GIT_LEASE_DISK_FULL`             | 503 + `Retry-After: 5` | `REMOTE_UNAVAILABLE`; retried and self-clearing         |
+
+`GIT_REPOSITORY_INCOMPLETE` is the one row whose retry never succeeds: it means the manifest names a pack the store does not hold, so the client backs off forever against a repository only an operator restore can repair. Watch for it rather than waiting for it to clear.
+
+A `pre-receive` refusal carries no HTTP status, so relay the hook's report-status bytes verbatim and classify the per-repository ceiling refusal on the fixed marker the hook opens it with, raising `REMOTE_QUOTA_EXCEEDED` carrying that sentence and its ten-largest-files list. Every other hook refusal stays `REMOTE_REJECTED`. The marker has exactly two copies — the hook's constant in the API and the client's in `packages/revisions` — because the API does not depend on that package; each carries its own test, the client's names the API as the source, and they change together.
+
+Apply that classification on both paths a hook refusal can take, through one shared predicate owned by an import-free leaf module (`packages/revisions/src/refusal-markers.ts`, whose `isCeilingRefusal` the package index re-exports while the string stays module-private): the thrown transport error on the native leg, and the per-ref push result on the `isomorphic-git` leg, which the sync scheduler tests before it settles a refused ref as `rejected`. A quota class that holds on only one leg gives the same refusal two different actions, and _Sync now_ cannot clear a ceiling.
 
 Treat `REMOTE_UNAUTHORIZED`, `REMOTE_NOT_ENTITLED`, `REMOTE_NOT_FOUND`, and `REMOTE_REAUTHORIZATION_REQUIRED` as terminal in `sync.machine`: enter `failed` or `reconnectRequired`, resume only on **Sync now**, a remote change, or a session change, and never re-enter a fetch-push cycle without passing through the queue's backoff.
 

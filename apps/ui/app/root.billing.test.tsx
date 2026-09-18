@@ -2,6 +2,7 @@ import { render, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { usePaymentActionReturn } from '#root-layout.js';
 
 const payment = vi.hoisted(() => ({
@@ -41,9 +42,11 @@ function Harness(): React.JSX.Element {
 
 /* The return parameter is router state now, not a raw history entry. */
 const returnAt = (search: string): React.JSX.Element => (
-  <MemoryRouter initialEntries={[`/work${search}`]}>
-    <Harness />
-  </MemoryRouter>
+  <QueryClientProvider client={new QueryClient()}>
+    <MemoryRouter initialEntries={[`/work${search}`]}>
+      <Harness />
+    </MemoryRouter>
+  </QueryClientProvider>
 );
 
 describe('billing payment return', () => {

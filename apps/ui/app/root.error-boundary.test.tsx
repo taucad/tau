@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -57,7 +58,12 @@ const renderRootApp = (pathname: string, isDebug = false): ReturnType<typeof ren
     ],
     { hydrationData: { loaderData: { root: loaderData } }, initialEntries: [pathname] },
   );
-  return render(<RouterProvider router={router} />);
+  /* The real `Layout` export supplies the query client; the memory router renders `App` without it. */
+  return render(
+    <QueryClientProvider client={new QueryClient()}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>,
+  );
 };
 
 describe('root error containment', () => {

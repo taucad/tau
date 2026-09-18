@@ -185,9 +185,8 @@ export const createRuntimeParameterAgentClient = (
         throw new Error('Parameter actor is closed.');
       }
       const command =
-        'action' in request
-          ? undefined
-          : {
+        request.action === 'propose'
+          ? {
               requestId: request.requestId,
               draftGeneration: 0,
               fingerprint: JSON.stringify({
@@ -199,7 +198,8 @@ export const createRuntimeParameterAgentClient = (
               expected: request.expected,
               pressure: request.pressure,
               operation: request.operation,
-            };
+            }
+          : undefined;
       const outcome = await new Promise<unknown>((resolve, reject) => {
         const cleanup = () => {
           settled.unsubscribe();
@@ -247,7 +247,7 @@ export const createRuntimeParameterAgentClient = (
         context?.signal?.addEventListener('abort', onAbort, { once: true });
         if (command !== undefined) {
           actor.send({ type: 'submit', request: command });
-        } else if ('action' in request && request.action === 'confirm') {
+        } else if (request.action === 'confirm') {
           actor.send({ type: 'confirm', requestId: request.requestId, fingerprint: request.planFingerprint });
         } else {
           actor.send({ type: 'cancel', requestId: request.requestId });

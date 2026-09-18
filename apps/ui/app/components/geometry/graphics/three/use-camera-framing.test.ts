@@ -22,8 +22,7 @@ const rig = {
   },
 };
 const unsubscribe = vi.fn();
-const beginCameraViewInitialization = vi.fn();
-let cameraViewRestoreIdentity: string | undefined = 'file-a';
+let framing = { identity: 'file-a' as string | undefined, pendingView: undefined as unknown, initialized: false };
 const graphicsActor = {
   on: vi.fn((_type: string, listener: () => void) => {
     resetListener = listener;
@@ -34,10 +33,7 @@ const graphicsActor = {
 vi.mock('@react-three/fiber', () => ({ useThree: () => ({ size }) }));
 vi.mock('#hooks/use-graphics.js', () => ({
   useCameraRig: () => rig,
-  useCameraViewInitialization: () => ({
-    identity: cameraViewRestoreIdentity,
-    begin: beginCameraViewInitialization,
-  }),
+  useViewCameraFraming: () => framing,
   useGraphics: () => graphicsActor,
 }));
 
@@ -46,9 +42,7 @@ describe('useCameraFraming portable camera events', () => {
     send.mockClear();
     unsubscribe.mockClear();
     graphicsActor.on.mockClear();
-    beginCameraViewInitialization.mockReset();
-    beginCameraViewInitialization.mockReturnValue({ initialize: true });
-    cameraViewRestoreIdentity = 'file-a';
+    framing = { identity: 'file-a', pendingView: undefined, initialized: false };
     resetListener = undefined;
     size.width = 800;
     size.height = 600;
@@ -78,7 +72,7 @@ describe('useCameraFraming portable camera events', () => {
       up: [0, 0, 1],
       verticalSpan: 7,
     } as const;
-    beginCameraViewInitialization.mockReturnValue({ initialize: true, cameraView });
+    framing.pendingView = cameraView;
     const bounds = new Box3(new Vector3(-2, -2, -2), new Vector3(2, 2, 2));
 
     renderHook(() => useCameraFraming({ geometryRadius: 4, geometryBounds: bounds }));
@@ -92,10 +86,10 @@ describe('useCameraFraming portable camera events', () => {
     expect(send.mock.calls[restoreIndex]?.[0]).toEqual({ type: 'setView', ...cameraView });
   });
 
-  it('preserves the provider-owned view when the canvas framing hook remounts', () => {
-    beginCameraViewInitialization.mockReturnValueOnce({ initialize: true }).mockReturnValue({ initialize: false });
+  it('preserves the view-owned camera when the canvas framing hook remounts', () => {
     const bounds = new Box3(new Vector3(-2, -2, -2), new Vector3(2, 2, 2));
     const first = renderHook(() => useCameraFraming({ geometryRadius: 4, geometryBounds: bounds }));
+    expect(framing.initialized).toBe(true);
     first.unmount();
     send.mockClear();
 
@@ -104,6 +98,37 @@ describe('useCameraFraming portable camera events', () => {
     expect(send).toHaveBeenCalledWith({ type: 'setBounds', bounds: { min: [-2, -2, -2], max: [2, 2, 2] } });
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'frame' }));
     expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'saveHome' }));
+  });
+
+  /* A file switch re-latches the session's framing record, so the next geometry is framed with the
+   * configured angles again and the new entry's persisted pose is applied exactly once. */
+  it('re-frames and applies the persisted pose once when the entry identity changes', () => {
+    const cameraView = {
+      target: [8, 9, 10],
+      direction: [1, 0, 0],
+      up: [0, 0, 1],
+      verticalSpan: 7,
+    } as const;
+    const bounds = new Box3(new Vector3(-2, -2, -2), new Vector3(2, 2, 2));
+    const hook = renderHook(
+      (props: { radius: number }) => useCameraFraming({ geometryRadius: props.radius, geometryBounds: bounds }),
+      { initialProps: { radius: 4 } },
+    );
+    send.mockClear();
+
+    framing = { identity: 'file-b', pendingView: cameraView, initialized: false };
+    hook.rerender({ radius: 4.5 });
+
+    expect(send).toHaveBeenCalledWith({ type: 'saveHome' });
+    expect(send).toHaveBeenLastCalledWith({ type: 'setView', ...cameraView });
+    expect(framing.initialized).toBe(true);
+
+    send.mockClear();
+    hook.rerender({ radius: 9 });
+
+    expect(send).toHaveBeenCalledWith({ type: 'frame', margin: 0.1 });
+    expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setView', target: cameraView.target }));
+    expect(send).not.toHaveBeenCalledWith({ type: 'saveHome' });
   });
 
   it('preserves orientation on aspect-only reframing and routes reset to the camera actor', () => {
@@ -125,6 +150,6 @@ describe('useCameraFraming portable camera events', () => {
   it('does not frame empty geometry', () => {
     renderHook(() => useCameraFraming({ geometryRadius: 0, geometryBounds: new Box3() }));
     expect(send).not.toHaveBeenCalled();
-    expect(beginCameraViewInitialization).not.toHaveBeenCalled();
+    expect(framing.initialized).toBe(false);
   });
 });

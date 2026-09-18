@@ -35,8 +35,7 @@ const mockEditorSend = vi.fn();
 const mockGraphicsSend = vi.fn();
 let mockGeometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
 let mockViewSettings: Record<string, { entryPath: string; graphicsSettings: GraphicsViewSettings }> = {};
-let mockCameraViewRestore: unknown;
-let mockInitialVerticalFieldOfView: number | undefined;
+let mockCameraSeed: unknown;
 const mockUseViewSettingsSync = vi.fn();
 let mockHoveredComponentId: string | undefined;
 let mockCadViewerSecondaryPointerMode: 'component-hit' | 'suppressed';
@@ -354,17 +353,8 @@ vi.mock('#hooks/use-view-settings-sync.js', () => ({
 // `use-graphics` drags in three.js via screenshot/camera capability machines, so
 // stub the provider/hooks to avoid loading three under jsdom.
 vi.mock('#hooks/use-graphics.js', () => ({
-  GraphicsProvider: ({
-    children,
-    cameraViewRestore,
-    initialVerticalFieldOfView,
-  }: {
-    children: React.ReactNode;
-    cameraViewRestore?: unknown;
-    initialVerticalFieldOfView?: number;
-  }) => {
-    mockCameraViewRestore = cameraViewRestore;
-    mockInitialVerticalFieldOfView = initialVerticalFieldOfView;
+  GraphicsProvider: ({ children, seed }: { children: React.ReactNode; seed?: unknown }) => {
+    mockCameraSeed = seed;
     return <div>{children}</div>;
   },
   useGraphics: () => mockGraphicsActor,
@@ -400,8 +390,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockGraphicsSend.mockClear();
     mockGeometryUnits = new Map();
     mockViewSettings = {};
-    mockCameraViewRestore = undefined;
-    mockInitialVerticalFieldOfView = undefined;
+    mockCameraSeed = undefined;
     mockUseViewSettingsSync.mockClear();
     mockHoveredComponentId = undefined;
     mockCadViewerSecondaryPointerMode = 'component-hit';
@@ -556,7 +545,9 @@ describe('ChatViewer reopen-renderer overlay', () => {
     expect(screen.getByRole('status', { name: 'Loading geometry' })).toHaveAttribute('aria-busy', 'true');
   });
 
-  it('passes the persisted camera view to the provider for the current entry', () => {
+  /* Law 1: one create-only seed carries every camera-owned key. A project that is navigated away
+   * from keeps its graphics actor, so the seed is what a cold load uses and revisit ignores. */
+  it('passes one camera seed built from the persisted settings and the current entry', () => {
     const cameraView = {
       frameId: 'tau:root',
       target: [3, 4, 5],
@@ -575,25 +566,8 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
     render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
-    expect(mockCameraViewRestore).toEqual({ identity: helperEntryPath, cameraView });
+    expect(mockCameraSeed).toEqual({ identity: helperEntryPath, camera: { cameraFovAngle: 42, cameraView } });
     expect(mockUseViewSettingsSync).toHaveBeenCalledWith(expect.objectContaining({ persistCameraView: true }));
-  });
-
-  /* A project that is navigated away from keeps its graphics actor, so the pane that comes back
-   * seeds a fresh rig from this prop. Without it the rig falls back to the actor's spawn-time
-   * `initialCameraFovAngle` and the person's field of view silently reverts to the default. */
-  it('seeds the provider with the persisted field of view', () => {
-    mockViewSettings = {
-      'view-1': {
-        entryPath: helperEntryPath,
-        graphicsSettings: { ...defaultGraphicsSettings, cameraFovAngle: 42 },
-      },
-    };
-    mockGeometryUnits.set(helperEntryPath, createMockCadActor());
-
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
-
-    expect(mockInitialVerticalFieldOfView).toBe(42);
   });
 
   it('clears geometry-dependent camera state when the pane switches files', () => {

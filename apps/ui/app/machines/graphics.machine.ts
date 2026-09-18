@@ -7,7 +7,7 @@ import type { LengthSymbol, UnitSystem } from '#constants/length-units.js';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type {
   GraphicsBackendPreference,
-  PinnedMeasurement,
+  GraphicsOwnedSettings,
   ResolvedGraphicsBackend,
 } from '#constants/editor.constants.js';
 import {
@@ -108,8 +108,6 @@ export type GraphicsContext = {
   /** Whether the grid size should be locked to the computed value */
   isGridSizeLocked: boolean;
 
-  /** Immutable seed used only when the provider constructs its camera actor. */
-  initialCameraFovAngle: number;
   /** Projection-neutral visible vertical span supplied by the active renderer. */
   cameraVisibleSpan: number;
   /** Physical bounding-sphere radius in metres. */
@@ -382,22 +380,12 @@ export type GraphicsEmitted =
   | { type: 'viewResetRequested' }
   | { type: 'geometryRadiusCalculated'; radius: number };
 
-// Input type
-export type GraphicsInput = {
-  defaultCameraFovAngle?: number;
+/**
+ * Create-only seed. The durable half is exactly the keys this machine owns (Law 1), so a new
+ * owned key reaches the actor without a second mapping.
+ */
+export type GraphicsInput = Partial<GraphicsOwnedSettings> & {
   measureSnapDistance?: number; // Default 20px
-  // Per-view initial settings (from persisted GraphicsViewSettings)
-  enableSurfaces?: boolean;
-  enableLines?: boolean;
-  enableGizmo?: boolean;
-  enableGrid?: boolean;
-  enableAxes?: boolean;
-  enableMatcap?: boolean;
-  enablePostProcessing?: boolean;
-  upDirection?: 'x' | 'y' | 'z';
-  /** Saved pinned measurements to restore */
-  pinnedMeasurements?: PinnedMeasurement[];
-  graphicsBackendPreference?: GraphicsBackendPreference;
   modelInteractionRef?: ModelInteractionRef;
 };
 
@@ -1509,7 +1497,7 @@ export const graphicsMachine = setup({
   ],
 
   context: ({ input, spawn }) => {
-    const preference = input.graphicsBackendPreference ?? 'webgl';
+    const preference = input.graphicsBackend ?? 'webgl';
     const ownsModelInteractionRef = input.modelInteractionRef === undefined;
     const modelInteractionRef =
       input.modelInteractionRef ??
@@ -1537,7 +1525,6 @@ export const graphicsMachine = setup({
       },
 
       // Camera state
-      initialCameraFovAngle: input.defaultCameraFovAngle ?? 60,
       cameraVisibleSpan: 0.002,
       geometryRadius: 0,
       geometryCenter: [0, 0, 0],

@@ -164,7 +164,6 @@ const ModelViewerWithOwnGraphics = memo(function ModelViewerWithOwnGraphics(
 ): React.JSX.Element {
   const graphicsRef = useActorRef(graphicsMachine, {
     input: {
-      defaultCameraFovAngle: defaultGraphicsSettings.cameraFovAngle,
       measureSnapDistance: 40,
       enableSurfaces: defaultGraphicsSettings.enableSurfaces,
       enableLines: defaultGraphicsSettings.enableLines,
@@ -174,7 +173,7 @@ const ModelViewerWithOwnGraphics = memo(function ModelViewerWithOwnGraphics(
       enableMatcap: defaultGraphicsSettings.enableMatcap,
       enablePostProcessing: defaultGraphicsSettings.enablePostProcessing,
       upDirection: defaultGraphicsSettings.upDirection,
-      graphicsBackendPreference: defaultGraphicsSettings.graphicsBackend ?? 'webgl',
+      graphicsBackend: defaultGraphicsSettings.graphicsBackend ?? 'webgl',
     },
   });
 

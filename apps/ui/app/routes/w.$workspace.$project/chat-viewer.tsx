@@ -21,6 +21,7 @@ import {
   useGraphicsSelector,
   useModelInteractionSelector,
 } from '#hooks/use-graphics.js';
+import type { ViewCameraSeed } from '#services/graphics-camera-registry.js';
 import { useViewSettingsSync } from '#hooks/use-view-settings-sync.js';
 import { ChatStackTrace } from '#routes/w.$workspace.$project/chat-stack-trace.js';
 import { ChatViewerStatus } from '#routes/w.$workspace.$project/chat-viewer-status.js';
@@ -149,6 +150,15 @@ export const ChatViewer = memo(function ({
 
   // Get the current view settings from editor state for this panel
   const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
+  /* Create-only seed for this view's camera session. The session is built on the first branch that
+   * mounts a provider, so every branch passes it -- including the ones with no canvas. */
+  const cameraSeed: ViewCameraSeed = {
+    identity: entryPath,
+    camera: {
+      cameraFovAngle: viewSettings[viewId]?.graphicsSettings.cameraFovAngle,
+      cameraView: viewSettings[viewId]?.graphicsSettings.cameraView,
+    },
+  };
 
   // Handle file selection in the viewport FileSelector
   const handleFileSelect = useCallback(
@@ -198,7 +208,7 @@ export const ChatViewer = memo(function ({
   // If no file selected, render empty state with file selector
   if (!entryPath) {
     return (
-      <GraphicsProvider graphicsRef={graphicsActor}>
+      <GraphicsProvider graphicsRef={graphicsActor} seed={cameraSeed}>
         <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
           <span className='text-sm'>No file selected</span>
           <FileSelector
@@ -219,7 +229,7 @@ export const ChatViewer = memo(function ({
   // If the entry path is a directory, show a friendly screen with a file selector
   if (isDirectory) {
     return (
-      <GraphicsProvider graphicsRef={graphicsActor}>
+      <GraphicsProvider graphicsRef={graphicsActor} seed={cameraSeed}>
         <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
           <FolderOpen className='size-12 stroke-1' />
           <p className='text-sm'>The viewer cannot display a directory.</p>
@@ -242,7 +252,7 @@ export const ChatViewer = memo(function ({
   // If the entry path doesn't exist in the file tree, show a friendly "not found" screen
   if (isMissing) {
     return (
-      <GraphicsProvider graphicsRef={graphicsActor}>
+      <GraphicsProvider graphicsRef={graphicsActor} seed={cameraSeed}>
         <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
           <FileX className='size-12 stroke-1' />
           <div className='flex flex-col items-center gap-1'>
@@ -266,14 +276,7 @@ export const ChatViewer = memo(function ({
 
   return (
     <CadProvider cadRef={cadActor}>
-      <GraphicsProvider
-        graphicsRef={graphicsActor}
-        cameraViewRestore={{
-          identity: entryPath,
-          cameraView: viewSettings[viewId]?.graphicsSettings.cameraView,
-        }}
-        initialVerticalFieldOfView={viewSettings[viewId]?.graphicsSettings.cameraFovAngle}
-      >
+      <GraphicsProvider graphicsRef={graphicsActor} seed={cameraSeed}>
         <ViewerContent viewId={viewId} entryPath={entryPath} profile={profile} />
       </GraphicsProvider>
     </CadProvider>

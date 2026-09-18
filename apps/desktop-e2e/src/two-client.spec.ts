@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import type { Page } from 'playwright';
+import type { Locator, Page } from 'playwright';
 import { desktopE2EApiUrl } from '#support/config.js';
 import { launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
@@ -16,11 +16,13 @@ import {
   installGatewayFixture,
   startGatewayFixture,
 } from '#support/gateway-fixture.js';
-import { selectChatModel, sendPrompt } from '#support/scenario.js';
+import { expectCount, expectVisible, selectChatModel, sendPrompt, stopButtonOf } from '#support/scenario.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import {
   browserFileDigest,
   browserSession,
+  chatRow,
+  chatRowLink,
   launchBrowserClient,
   openBrowserChat,
   requireRenderedOrder,
@@ -301,7 +303,30 @@ const syncRegionText = async (client: PageClient): Promise<string> =>
   // oxlint-disable-next-line unicorn/prefer-dom-node-text-content -- Playwright's own locator method; `textContent` would drop the line breaks the copy reads by.
   client.page.getByRole('region', { name: 'Sync' }).first().innerText();
 
-type ChatIdentity = Readonly<{ id: string; title: string; description: string }>;
+type ChatIdentity = Readonly<{ id: string; title: string }>;
+
+/*
+ * Sidebar v2 (7bc2f21a4) retired the chat row's spoken status line: a `done`
+ * chat the person is looking at is a plain row with nothing left to say, so it
+ * carries no `aria-describedby` at all (`selectChatFacts`,
+ * `apps/ui/app/hooks/use-sidebar-status.ts`). The terminal card is the row's
+ * mark — `none` once seen, `unread` when it finished while the person was
+ * elsewhere — read off the same `StatusMark` slot the row draws.
+ */
+const terminalGlyph = /^(?:none|unread)$/u;
+
+/*
+ * The transcript is virtualized (ed8e011b3): submitting pins the new turn to the
+ * top of the viewport and the turn above it — no longer carrying the live turn's
+ * `min-h-(--chat-live-turn-min-h)` — can fall entirely out of the scroller,
+ * where react-virtuoso unmounts it. Counting reply nodes across the whole list
+ * is therefore a layout race; read each reply inside the turn that asked for it.
+ */
+const turnReply = (page: Page, prompt: string): Locator =>
+  page
+    .locator('[data-item-index]')
+    .filter({ has: page.getByText(prompt, { exact: true }) })
+    .getByText(gatewayFixtureFinalText, { exact: true });
 
 const projectSlug = (page: Page): string => {
   const slug = new URL(page.url()).pathname.split('/').at(-1);
@@ -408,13 +433,12 @@ const finalizedTurnRevision = async (logPath: string): Promise<string | undefine
 };
 
 const chatIdentity = async (page: Page, chatId: string): Promise<ChatIdentity | undefined> => {
-  const link = page.locator(`a[aria-describedby="chat-status-${chatId}"][href*="chat="]`).first();
+  const link = chatRowLink(page, chatId);
   if ((await link.count()) === 0) {
     return undefined;
   }
   const href = await link.getAttribute('href');
-  const descriptionId = await link.getAttribute('aria-describedby');
-  if (href === null || descriptionId === null) {
+  if (href === null) {
     return undefined;
   }
   const id = new URL(href, 'https://tau.invalid').searchParams.get('chat');
@@ -422,27 +446,27 @@ const chatIdentity = async (page: Page, chatId: string): Promise<ChatIdentity | 
     return undefined;
   }
   const title = await link.textContent();
-  const description = await page.locator(`#${descriptionId}`).textContent();
-  return {
-    id,
-    title: title?.trim() ?? '',
-    description: description?.trim() ?? '',
-  };
+  return { id, title: title?.trim() ?? '' };
+};
+
+/** The row's one status mark, or `undefined` while the row is not rendered. */
+const chatGlyph = async (page: Page, chatId: string): Promise<string | undefined> => {
+  const mark = chatRow(page, chatId).locator('[data-slot="chat-status"]').first();
+  return (await mark.count()) === 0 ? undefined : ((await mark.getAttribute('data-glyph')) ?? undefined);
 };
 
 const terminalChatIdentity = async (page: Page, chatId: string, direction: string): Promise<ChatIdentity> => {
+  /* A positive edge first — the reply the fixture closes on, then the composer
+   * leaving its run state — so the mark below cannot be sampled before the run
+   * this prompt started has bound at all. */
+  await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }), 180_000);
+  await expectCount(stopButtonOf(page), 0, 180_000);
   await expect
-    .poll(
-      async () => {
-        const identity = await chatIdentity(page, chatId);
-        return identity?.description ?? '';
-      },
-      {
-        message: `${continuationOwner} ${direction}: source chat must reach its terminal sidebar card`,
-        timeout: 180_000,
-      },
-    )
-    .toContain(', done');
+    .poll(async () => chatGlyph(page, chatId), {
+      message: `${continuationOwner} ${direction}: source chat must reach its terminal sidebar card`,
+      timeout: 180_000,
+    })
+    .toMatch(terminalGlyph);
   const identity = await chatIdentity(page, chatId);
   if (identity === undefined) {
     throw new Error(`${continuationOwner} ${direction}: the terminal chat link disappeared`);
@@ -507,10 +531,18 @@ const assertCurrentRevision = async (
 const assertChatContinuation = async (page: Page, source: ChatIdentity, direction: string): Promise<void> => {
   await expect
     .poll(async () => chatIdentity(page, source.id), {
-      message: `${continuationOwner} ${direction}: destination sidebar must preserve chat id, title and terminal card`,
+      message: `${continuationOwner} ${direction}: destination sidebar must preserve chat id and title`,
       timeout: 120_000,
     })
     .toEqual(source);
+  /* The continued chat holds no run of its own here, so the destination row
+   * carries a terminal mark too — `unread` until the person opens it. */
+  await expect
+    .poll(async () => chatGlyph(page, source.id), {
+      message: `${continuationOwner} ${direction}: destination sidebar must preserve the terminal card`,
+      timeout: 120_000,
+    })
+    .toMatch(terminalGlyph);
 };
 
 beforeAll(async () => {
@@ -1125,21 +1157,9 @@ describe('a project on the browser client', () => {
        * the browser's stale-lease push must replay both segments in order. */
       await source.context.route(`${desktopE2EApiUrl}/v1/git/**`, async (route) => route.abort('connectionfailed'));
       await sendPrompt(source.page, browserPrompt);
-      await expect.poll(async () => source.page.getByText(browserPrompt, { exact: true }).count()).toBeGreaterThan(0);
-      await expect
-        .poll(async () => source.page.getByText(gatewayFixtureFinalText, { exact: true }).count(), {
-          timeout: 180_000,
-        })
-        .toBeGreaterThanOrEqual(2);
+      await expectVisible(turnReply(source.page, browserPrompt), 180_000);
       await sendPrompt(destination.page, desktopPrompt);
-      await expect
-        .poll(async () => destination.page.getByText(desktopPrompt, { exact: true }).count())
-        .toBeGreaterThan(0);
-      await expect
-        .poll(async () => destination.page.getByText(gatewayFixtureFinalText, { exact: true }).count(), {
-          timeout: 180_000,
-        })
-        .toBeGreaterThanOrEqual(2);
+      await expectVisible(turnReply(destination.page, desktopPrompt), 180_000);
 
       const readSourceChatHead = async (): Promise<string | undefined> => {
         const value = await readBrowserFile(source, sourceSlug, ['.tau', 'revisions', 'refs', 'tau', 'chats', chatId]);

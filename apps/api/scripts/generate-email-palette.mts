@@ -13,7 +13,7 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { clampChroma, formatHex, interpolate, parse } from 'culori';
+import { clampChroma, formatHex, interpolate } from 'culori';
 import type { Oklch } from 'culori';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
@@ -30,12 +30,19 @@ const readBlock = (css: string, selector: string): ReadonlyMap<string, number> =
   const body = css.slice(open + 1, css.indexOf('\n}', open));
   const values = new Map<string, number>();
   for (const [, name, value] of body.matchAll(/--([a-z-]+):\s*([\d.]+)(?:deg)?;/g)) {
-    values.set(name, Number(value));
+    if (name !== undefined) {
+      values.set(name, Number(value));
+    }
   }
   return values;
 };
 
-type Ink = { readonly lightness: string | number; readonly chroma?: number; readonly hue?: number };
+/** One email colour. Each channel is a literal oklch value or a tokens.css custom-property name. */
+type Ink = {
+  readonly lightness: string | number;
+  readonly chroma?: string | number;
+  readonly hue?: string | number;
+};
 
 /** Every email colour, as the token expression it projects. Keep the comments in sync with tokens.css. */
 const roles = {
@@ -101,7 +108,7 @@ const hex = (scheme: keyof typeof scales, ink: Ink): string => {
 
 /** `color-mix(in oklch, <other> <weight>, <base>)`, which is how --primary-action-sheen is authored. */
 const mix = (other: string, weight: number, base: string): string =>
-  formatHex(clampChroma(interpolate([parse(base), parse(other)], 'oklch')(weight), 'oklch'));
+  formatHex(clampChroma(interpolate([base, other], 'oklch')(weight), 'oklch'));
 
 const shadow = /--shadow-xs:\s*([^;]+);/.exec(css)?.[1];
 if (shadow === undefined) {

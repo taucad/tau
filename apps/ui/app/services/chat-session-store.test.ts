@@ -2794,6 +2794,66 @@ describe('ChatSessionStore', () => {
 
       store.release('chat_startup_hydration');
     });
+    /*
+     * V3a. The loader consumes the homepage seed as soon as the row loads, but
+     * the chat's owner is bound by an effect (`project-live-sessions.tsx:221`
+     * -> `setProjectSession`). A chat acquired on the route's first render
+     * consumed its seed before that effect ran, and the optional chain on
+     * `session.stateActorRef` dropped the `requestTurn` on the floor: one-shot
+     * request burnt, no lease, no banner, prompt gone on reload (signed-out
+     * repro 2026-09-19). The gesture has to wait for the owner, not the owner
+     * for the gesture.
+     */
+    it('dispatches a seeded first turn consumed before its project session bound', async () => {
+      const store = new ChatSessionStore();
+      const deps = createStubDeps();
+      store.setDependencies(deps);
+
+      const seededMessage: MyUIMessage = {
+        id: 'msg_seed_late_owner',
+        role: 'user',
+        parts: [{ type: 'text', text: 'Design a 1000L IBC tank.' }],
+        metadata: { createdAt: 1_700_000_000_000, status: 'pending' },
+      };
+      const seededChat: ChatEntity = {
+        id: 'chat_seed_late_owner',
+        resourceId: 'resource_seed_late',
+        name: 'Seeded chat',
+        messages: [seededMessage],
+        startupRequest: {
+          id: 'req_seed_late',
+          kind: 'regenerate-tail',
+          messageId: seededMessage.id,
+          source: 'homepage-initial-message',
+          createdAt: 1_700_000_000_000,
+        },
+        createdAt: 1_700_000_000_000,
+        updatedAt: 1_700_000_000_000,
+      };
+      deps.getChat.mockResolvedValue(seededChat);
+      deps.consumeChatStartupRequest.mockResolvedValue({ ...seededChat, startupRequest: undefined });
+
+      // No turn owner yet: the route's registration effect has not run.
+      store.acquire('chat_seed_late_owner');
+      await vi.waitFor(() => {
+        expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith('chat_seed_late_owner', 'req_seed_late');
+      });
+      const fake = harness.created.find((entry) => entry.id === 'chat_seed_late_owner')!;
+      expect(fake.regenerate).not.toHaveBeenCalled();
+
+      // The effect binds the owner a render later; the held gesture must flush.
+      startTurnOwner(store, 'resource_seed_late');
+      publishAdmission('chat_seed_late_owner', () => ({
+        kind: 'regenerate',
+        body: { agent: { profile: 'cad', execution: { kind: 'tau', model: 'cad-default' }, kernel: 'replicad' } },
+      }));
+
+      await vi.waitFor(() => {
+        expect(fake.regenerate).toHaveBeenCalledTimes(1);
+      });
+
+      store.release('chat_seed_late_owner');
+    });
 
     it('restores a plain pending user tail to draft on hydration without regenerating', async () => {
       const store = new ChatSessionStore();

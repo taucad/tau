@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- E2E is the established project acronym. */
 import process from 'node:process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 
 /**

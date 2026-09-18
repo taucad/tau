@@ -49,6 +49,49 @@ export const user = pgTable('user', {
     .notNull(),
 });
 
+/**
+ * A place a project's repository and LFS objects are written (D26).
+ *
+ * The Tau default account is the `null` in `project.storage_account_id` rather
+ * than a row: it is the one account that exists at launch, its locator comes
+ * from configuration, and a seeded row would be a second way to say the same
+ * thing that every reader would then have to reconcile. Rows appear when a user
+ * connects a bucket of their own, which is a later charter.
+ *
+ * `credentials_ref` is a *reference* — where the credentials are kept, never
+ * the credentials. Nothing encrypts anything yet (DQ2), and the column is
+ * nullable so the Tau default never needs one.
+ */
+export const storageAccount = pgTable(
+  'storage_account',
+  {
+    id: text('id').primaryKey(),
+    ownerId: text('owner_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    /** S3-compatible provider name; no code above the storage adapter reads it (I5). */
+    provider: text('provider').notNull(),
+    endpoint: text('endpoint').notNull(),
+    region: text('region'),
+    bucket: text('bucket').notNull(),
+    /** Key prefix inside the bucket; tenant prefixes are appended to it. */
+    prefix: text('prefix').notNull().default(''),
+    credentialsRef: text('credentials_ref'),
+    /** The port's capabilities descriptor as the conformance probe measured it (ND20). */
+    capabilities: jsonb('capabilities'),
+    status: text('status').notNull().default('active'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .defaultNow()
+      .$onUpdate(() => /* @__PURE__ */ new Date())
+      .notNull(),
+  },
+  (table) => [
+    index('storage_account_owner_idx').on(table.ownerId),
+    check('storage_account_status_check', sql`${table.status} IN ('active', 'disabled')`),
+  ],
+);
+
 export const project = pgTable('project', {
   id: text('id').primaryKey(),
   ownerId: text('owner_id')
@@ -59,12 +102,111 @@ export const project = pgTable('project', {
   origin: text('origin').notNull().default('local-mirror'),
   forkedFrom: text('forked_from').references((): AnyPgColumn => publication.id),
   currentPublicationId: text('current_publication_id').references((): AnyPgColumn => publication.id),
+  /** Null is the Tau default account (D26); a row is a bucket the owner supplied. */
+  storageAccountId: text('storage_account_id').references(() => storageAccount.id),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at')
     .defaultNow()
     .$onUpdate(() => /* @__PURE__ */ new Date())
     .notNull(),
 });
+
+/**
+ * Access to a project as a relation rather than an equality test (D27).
+ *
+ * Ownership does not move: the project keeps one owner, whose storage account
+ * and plan carry the bytes. A collaborator needs an account and a verified
+ * email, not a plan. Roles are `read` and `write`; the owner is implicit and is
+ * the only account that manages this table, so no `admin` value exists yet —
+ * adding one is a check-constraint change and no data migration.
+ */
+export const projectCollaborator = pgTable(
+  'project_collaborator',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => project.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(),
+    invitedBy: text('invited_by').references(() => user.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projectId, table.userId] }),
+    /* The listing's other direction: every project one account collaborates on. */
+    index('project_collaborator_user_idx').on(table.userId),
+    check('project_collaborator_role_check', sql`${table.role} IN ('read', 'write')`),
+  ],
+);
+
+/**
+ * An invitation to collaborate, on the `publication_access` pattern (D27).
+ *
+ * Keyed on (project, email) exactly as `publication_access` is keyed on
+ * (publication, email), which is what makes inviting twice idempotent and
+ * re-inviting a revoked address un-revoke the row in place rather than leave
+ * two. The token is stored hashed, so a leaked row cannot be replayed as a
+ * link. `email` is lowercase by check constraint, so normalisation cannot be
+ * skipped by a second writer.
+ */
+export const projectInvitation = pgTable(
+  'project_invitation',
+  {
+    projectId: text('project_id')
+      .notNull()
+      .references(() => project.id, { onDelete: 'cascade' }),
+    email: text('email').notNull(),
+    role: text('role').notNull(),
+    tokenHash: text('token_hash').notNull(),
+    invitedBy: text('invited_by').references(() => user.id, { onDelete: 'set null' }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+    /** The account the invitation bound to when it was accepted. */
+    acceptedBy: text('accepted_by').references(() => user.id, { onDelete: 'set null' }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.projectId, table.email] }),
+    uniqueIndex('project_invitation_token_hash_idx').on(table.tokenHash),
+    check('project_invitation_role_check', sql`${table.role} IN ('read', 'write')`),
+    check('project_invitation_email_lower_check', sql`${table.email} = lower(${table.email})`),
+  ],
+);
+
+/**
+ * What a deleted account leaves behind so its bytes can be purged (D10).
+ *
+ * Deliberately **without** a foreign key to `user`: the row is written in
+ * `deleteUser.beforeDelete` and has to outlive the cascade that follows it. A
+ * key would delete the tombstone in the same statement that made it necessary.
+ *
+ * `purge_after` is 30 days out for an ordinary deletion and now for a verified
+ * erasure request; W6's purge job is the one caller of prefix deletion (D31)
+ * and this row is its gate.
+ */
+export const storageTombstone = pgTable(
+  'storage_tombstone',
+  {
+    ownerId: text('owner_id').primaryKey(),
+    purgeAfter: timestamp('purge_after', { withTimezone: true }).notNull(),
+    erasure: boolean('erasure').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    /**
+     * What the purge removed, written by the job after the prefixes are gone
+     * (D31: "records what it removed"). A row with `purged_at` set is not
+     * planned again; a run that refused or failed leaves it null and is
+     * retried. Kept here rather than in a log table because one owner is
+     * purged once and the three numbers are the whole record.
+     */
+    purgedAt: timestamp('purged_at', { withTimezone: true }),
+    purgedObjects: bigint('purged_objects', { mode: 'number' }),
+    purgedBytes: bigint('purged_bytes', { mode: 'number' }),
+  },
+  (table) => [index('storage_tombstone_purge_after_idx').on(table.purgeAfter)],
+);
 
 /**
  * Storage accounting for one project's bare repository on the Tau Hosted
@@ -80,6 +222,18 @@ export const projectGit = pgTable('project_git', {
     .references(() => project.id, { onDelete: 'cascade' }),
   storageBytes: bigint('storage_bytes', { mode: 'number' }).notNull().default(0),
   lfsBytes: bigint('lfs_bytes', { mode: 'number' }).notNull().default(0),
+  /**
+   * The manifest generation this row was last told about (D19). Derived state —
+   * accounting, LFS marks, publications — is keyed to it, and any request that
+   * sees `derived_generation` behind it re-derives. There is no reconcile job.
+   */
+  generation: bigint('generation', { mode: 'number' }).notNull().default(0),
+  derivedGeneration: bigint('derived_generation', { mode: 'number' }).notNull().default(0),
+  /**
+   * The generation an independent copy holds (D11). Nothing writes it yet: the
+   * copy is deferred to DG1, and the column ships now so DG1 adds no migration.
+   */
+  copiedGeneration: bigint('copied_generation', { mode: 'number' }).notNull().default(0),
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .defaultNow()
     .$onUpdate(() => /* @__PURE__ */ new Date())
@@ -108,6 +262,18 @@ export const projectGitLfsObject = pgTable(
   (table) => [
     primaryKey({ columns: [table.projectId, table.oid] }),
     index('project_git_lfs_object_pending_idx').on(table.projectId, table.finalizedAt),
+    /*
+     * The retirement pass's two candidate sets, each as a partial index so the
+     * pass reads only the rows it can act on rather than the whole table (W4b
+     * review P3). Both predicates match `lfs-retirement.ts`'s own `where`
+     * exactly; a mismatch would leave the index unused and the scan in place.
+     */
+    index('project_git_lfs_object_unreachable_idx')
+      .on(table.unreachableAt)
+      .where(sql`${table.unreachableAt} is not null`),
+    index('project_git_lfs_object_unfinalized_idx')
+      .on(table.createdAt)
+      .where(sql`${table.finalizedAt} is null`),
     check('project_git_lfs_object_size_nonnegative', sql`${table.sizeBytes} >= 0`),
   ],
 );

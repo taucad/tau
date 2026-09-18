@@ -9,6 +9,8 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { RevisionSyncRegion } from '#routes/w.$workspace.$project/revision-sync-region.js';
 import type { RemoteFacet, SyncFacet } from '@taucad/revisions';
 import type { RevisionSyncRegionProps } from '#routes/w.$workspace.$project/revision-sync-region.js';
@@ -24,6 +26,11 @@ const githubToken = vi.hoisted(() =>
 vi.mock('#lib/github-connections.js', () => ({
   githubConnections: { token: githubToken },
 }));
+/* eslint-disable @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
+vi.mock('#environment.config.js', () => ({
+  ENV: { TAU_API_URL: 'https://api.test', TAU_GIT_REMOTE_ALLOW_PRIVATE: false },
+}));
+/* eslint-enable @typescript-eslint/naming-convention -- back to the workspace rule for the rest of the file. */
 vi.mock('#components/github/github-repository-picker.js', () => ({
   GithubRepositoryPicker: ({ onSelect }: { onSelect: (selection: unknown) => void }) => (
     <button
@@ -94,24 +101,29 @@ const renderRegion = (
   const setSyncChats = vi.fn();
   const setSyncLargeExports = vi.fn();
   const upgrade = vi.fn();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const element = (nextRemote: RemoteFacet, nextSync: SyncFacet): React.JSX.Element => (
-    <MemoryRouter>
-      <RevisionSyncRegion
-        remote={nextRemote}
-        sync={nextSync}
-        onConnect={connect}
-        onDisconnect={disconnect}
-        onCancel={cancel}
-        onSync={syncNow}
-        syncChats
-        onSyncChatsChange={setSyncChats}
-        syncLargeExports={false}
-        onSyncLargeExportsChange={setSyncLargeExports}
-        onUpgrade={upgrade}
-        signInHref='/auth/sign-in'
-        {...overrides}
-      />
-    </MemoryRouter>
+    <QueryClientProvider client={client}>
+      <TooltipProvider>
+        <MemoryRouter>
+          <RevisionSyncRegion
+            remote={nextRemote}
+            sync={nextSync}
+            onConnect={connect}
+            onDisconnect={disconnect}
+            onCancel={cancel}
+            onSync={syncNow}
+            syncChats
+            onSyncChatsChange={setSyncChats}
+            syncLargeExports={false}
+            onSyncLargeExportsChange={setSyncLargeExports}
+            onUpgrade={upgrade}
+            signInHref='/auth/sign-in'
+            {...overrides}
+          />
+        </MemoryRouter>
+      </TooltipProvider>
+    </QueryClientProvider>
   );
   const { rerender } = render(element(remote, sync));
   return {
@@ -605,5 +617,181 @@ describe('RevisionSyncRegion refusals and plan gates', () => {
     expect(exports).toBeInTheDocument();
     await user.click(exports);
     expect(region.setSyncLargeExports).toHaveBeenCalledWith(true);
+  });
+});
+
+/**
+ * The collaborator half of the Sync region (charter W5, D27).
+ *
+ * The owner alone manages this surface, and there is no invitation email — so
+ * the one-time link the API answers with *is* the product: if this region does
+ * not show it, the invitation cannot reach anybody.
+ */
+describe('RevisionSyncRegion collaborators', () => {
+  const connected = facet({ kind: 'tau', phase: 'connected' });
+
+  const answer = (
+    rows: readonly unknown[],
+    invite?: { status: number; body: unknown },
+    listing?: { status: number },
+  ): ReturnType<typeof vi.fn> => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === 'PATCH') {
+        return { ok: true, status: 200, json: async () => ({ email: 'teammate@example.test', role: 'read' }) };
+      }
+      if (init?.method === 'POST') {
+        const reply = invite ?? {
+          status: 201,
+          body: {
+            email: 'teammate@example.test',
+            role: 'write',
+            token: 'tok_abcdef',
+            expiresAt: '2026-10-02T00:00:00.000Z',
+          },
+        };
+        return { ok: reply.status < 400, status: reply.status, json: async () => reply.body };
+      }
+      if (init?.method === 'DELETE') {
+        return { ok: true, status: 204, json: async () => ({}) };
+      }
+      const status = listing?.status ?? 200;
+      return { ok: status < 400, status, json: async () => rows };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  };
+
+  beforeEach(() => {
+    answer([]);
+    /* Radix's Select asks for pointer capture before it opens, and jsdom has
+       none — the same four shims `project-share-panel.test.tsx` installs. */
+    Element.prototype.scrollIntoView = vi.fn();
+    Element.prototype.hasPointerCapture = vi.fn(() => false);
+    Element.prototype.setPointerCapture = vi.fn();
+    Element.prototype.releasePointerCapture = vi.fn();
+  });
+
+  it('offers the invite form to the owner alone', async () => {
+    renderRegion(connected, syncFacet({ state: 'backedUp' }), { role: 'owner', projectId: 'proj_1' });
+
+    expect(await screen.findByRole('textbox', { name: 'Invite by email' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Create invitation' })).toBeDefined();
+  });
+
+  /* N4: collaboration is a Tau Cloud fact. A GitHub-backed project has an owner
+     but no cloud project to invite anybody to, so the panel is not offered. */
+  it('shows the owner no panel when the remote is not Tau Cloud', () => {
+    renderRegion(
+      facet({ kind: 'git', phase: 'connected', url: 'https://github.com/o/r.git', provider: 'github' }),
+      syncFacet({ state: 'backedUp' }),
+      {
+        role: 'owner',
+        projectId: 'proj_1',
+      },
+    );
+
+    expect(screen.queryByRole('textbox', { name: 'Invite by email' })).toBeNull();
+  });
+
+  /* N1: the listing answered and did not name this project, which is what an
+     owner's revoke looks like to a tab that is still open. */
+  it('says so when access was revoked while the project was open', () => {
+    renderRegion(connected, syncFacet({ state: 'backedUp' }), { role: 'revoked', projectId: 'proj_1' });
+
+    expect(screen.getByText("You no longer have access to this project's cloud copy.")).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Sync now' })).toBeNull();
+  });
+
+  /* F4: an unread list is not an empty one. */
+  it('reports a listing it could not read instead of saying nobody has access', async () => {
+    answer([], undefined, { status: 500 });
+    renderRegion(connected, syncFacet({ state: 'backedUp' }), { role: 'owner', projectId: 'proj_1' });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('The list of people with access could not be loaded.');
+    expect(screen.queryByText('Nobody else has access to this project.')).toBeNull();
+  });
+
+  /* W3 a2: a role change is `PATCH`, not a re-invite — the invitee keeps the
+     link they were already sent and no new token is minted. */
+  it('changes a role in place without issuing a token', async () => {
+    const fetchMock = answer([
+      { email: 'teammate@example.test', role: 'write', status: 'accepted', expiresAt: '2026-10-02T00:00:00.000Z' },
+    ]);
+    renderRegion(connected, syncFacet({ state: 'backedUp' }), { role: 'owner', projectId: 'proj_1' });
+
+    await userEvent.click(await screen.findByRole('combobox', { name: 'Role for teammate@example.test' }));
+    await userEvent.click(screen.getByRole('option', { name: 'Can view' }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://api.test/v1/projects/proj_1/collaborators/teammate%40example.test',
+        expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ role: 'read' }) }),
+      );
+    });
+    expect(screen.queryByRole('textbox', { name: /Invitation link for/u })).toBeNull();
+  });
+
+  it('shows a collaborator no invite form at all', () => {
+    renderRegion(connected, syncFacet({ state: 'backedUp' }), { role: 'write', projectId: 'proj_1' });
+
+    expect(screen.queryByRole('textbox', { name: 'Invite by email' })).toBeNull();
+    expect(screen.queryByText('People with access')).toBeNull();
+  });
+
+  it('never offers a view-only collaborator a push', () => {
+    renderRegion(connected, syncFacet({ state: 'backedUp' }), { role: 'read', projectId: 'proj_1' });
+
+    expect(screen.queryByRole('button', { name: 'Sync now' })).toBeNull();
+    expect(screen.getByText('Read only')).toBeDefined();
+  });
+
+  it('surfaces the one-time link, its expiry and who it is for', async () => {
+    renderRegion(connected, syncFacet({ state: 'backedUp' }), { role: 'owner', projectId: 'proj_1' });
+
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Invite by email' }), 'teammate@example.test');
+    await userEvent.click(screen.getByRole('button', { name: 'Create invitation' }));
+
+    const link = await screen.findByRole('textbox', { name: 'Invitation link for teammate@example.test' });
+    expect((link as HTMLInputElement).value).toContain('/invitations/tok_abcdef');
+    expect(screen.getByText('Tau does not email this link. Send it to them yourself.')).toBeDefined();
+    expect(screen.getByRole('button', { name: /Copy link/u })).toBeDefined();
+    /* F5: the link is the whole product of the gesture, so it is announced and
+       it takes focus — a keyboard person must not have to hunt for it. */
+    expect(screen.getByRole('status', { name: 'Invitation created' })).toBeDefined();
+    await waitFor(() => {
+      expect(document.activeElement).toBe(link);
+    });
+  });
+
+  it('says plainly when the owner is over the daily invite budget', async () => {
+    answer([], { status: 429, body: { code: 'PROJECT_INVITE_RATE_LIMITED' } });
+    renderRegion(connected, syncFacet({ state: 'backedUp' }), { role: 'owner', projectId: 'proj_1' });
+
+    await userEvent.type(await screen.findByRole('textbox', { name: 'Invite by email' }), 'teammate@example.test');
+    await userEvent.click(screen.getByRole('button', { name: 'Create invitation' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Too many invitations today. Try again tomorrow.');
+  });
+
+  it('revokes an address the owner has already invited', async () => {
+    const fetchMock = answer([
+      { email: 'teammate@example.test', role: 'write', status: 'accepted', expiresAt: '2026-10-02T00:00:00.000Z' },
+    ]);
+    renderRegion(connected, syncFacet({ state: 'backedUp' }), { role: 'owner', projectId: 'proj_1' });
+
+    expect(await screen.findByText('teammate@example.test')).toBeDefined();
+    await userEvent.click(screen.getByRole('button', { name: 'Revoke teammate@example.test' }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://api.test/v1/projects/proj_1/collaborators/teammate%40example.test',
+        expect.objectContaining({ method: 'DELETE' }),
+      );
+    });
+    /* F5: the button the click came from is gone, so focus would fall to
+       `<body>` — the same defect review R15 fixed on the disconnect confirm. */
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'People with access' }));
+    });
   });
 });

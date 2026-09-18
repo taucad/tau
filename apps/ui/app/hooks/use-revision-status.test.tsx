@@ -671,7 +671,7 @@ describe('the page client of the worker revision root', () => {
      */
     await waitFor(
       async () => {
-        const stored: unknown = JSON.parse(await fixture.read('.tau/revisions/sync-pending'));
+        const stored: unknown = JSON.parse(await fixture.read('.git/sync-pending'));
         expect((stored as { entries: ReadonlyArray<{ ref: string }> }).entries.map((entry) => entry.ref)).toEqual([
           'refs/heads/main',
         ]);

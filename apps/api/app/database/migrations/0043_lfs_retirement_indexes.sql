@@ -1,0 +1,2 @@
+CREATE INDEX "project_git_lfs_object_unreachable_idx" ON "project_git_lfs_object" USING btree ("unreachable_at") WHERE "project_git_lfs_object"."unreachable_at" is not null;--> statement-breakpoint
+CREATE INDEX "project_git_lfs_object_unfinalized_idx" ON "project_git_lfs_object" USING btree ("created_at") WHERE "project_git_lfs_object"."finalized_at" is null;

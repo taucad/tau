@@ -1,10 +1,8 @@
 /* oxlint-disable new-cap, @typescript-eslint/consistent-type-imports -- NestJS decorators are factories and DI metadata needs runtime class imports */
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
 import type { ChildProcessByStdio } from 'node:child_process';
-import { createReadStream } from 'node:fs';
-import type { Dirent } from 'node:fs';
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, rm, stat, statfs } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import type { Readable, Writable } from 'node:stream';
@@ -13,38 +11,55 @@ import { createGunzip } from 'node:zlib';
 import {
   BadRequestException,
   ForbiddenException,
+  GoneException,
   Inject,
   Injectable,
+  InternalServerErrorException,
   Logger,
   NotFoundException,
   PayloadTooLargeException,
   ServiceUnavailableException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
-import type { OnApplicationBootstrap } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { and, eq, inArray, sql } from 'drizzle-orm';
-import type { Environment } from '#config/environment.config.js';
+import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 import { DatabaseService } from '#database/database.service.js';
 import { project, projectGit, projectGitLfsObject } from '#database/schema.js';
+import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
+import type { ProjectRole } from '#api/collaboration/project-access.service.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
-import {
-  isDumbHttpPath,
-  isProjectRepositoryId,
-  gitLfsObjectKey,
-  postReceiveHookScript,
-  preReceiveHookScript,
-  publishedTagSpoolFile,
-  storageLimitBytesByTier,
-} from '#api/git/git.constants.js';
+import { repositoryStoreKey, storageLimitBytesByTier } from '#api/git/git.constants.js';
+import type { GitService as GitSmartService } from '#api/git/git.constants.js';
+import { commitLease } from '#api/git/store/commit.js';
+import type { MovedRef } from '#api/git/store/commit.js';
+import { RepositoryStoreError } from '#api/git/store/errors.js';
+import type { FaultInjector } from '#api/git/store/fault-points.js';
+import { resolveLfsObjectLocation } from '#api/git/lfs-keys.js';
+import { markLfsReachability } from '#api/git/lfs-reachability.js';
+import { hydrateLease } from '#api/git/store/lease.js';
+import type { RepositoryLease } from '#api/git/store/lease.js';
+import { leaseDiskBytesPerLease, repositoryByteCeiling } from '#api/git/store/limits.js';
+import { repositoryLocator } from '#api/git/store/locator.js';
+import type { Manifest } from '#api/git/store/manifest.js';
+import type { RepositoryStore } from '#api/git/store/port.js';
 import { materializePublishedTags } from '#api/publications/publication-materializer.js';
 import type { MaterializerDependencies } from '#api/publications/publication-materializer.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
-import type { GitService as GitSmartService } from '#api/git/git.constants.js';
+
+/**
+ * The Tau Hosted Remote's request path over the repository store (charter D1,
+ * D3, D4).
+ *
+ * Every request hydrates a disposable lease from object storage, runs stock
+ * git over it and throws it away. Nothing on this machine is durable state
+ * (NI1), nothing here holds a per-repository lock (NI3, the manifest's
+ * conditional write is the lock), and nothing enumerates every repository
+ * (NI10).
+ */
 
 /**
  * What the git binaries are allowed to see. Never the API's own environment:
- * the hooks are child processes and have no business reading database or
+ * the hook is a child process and has no business reading database or
  * object-store credentials. The cast is the workspace's own idiom for a
  * curated child environment (`app/testing/billing-load/cluster.ts`), since
  * `NodeJS.ProcessEnv` is augmented with the validated API schema.
@@ -64,10 +79,13 @@ const childEnvironment = (
 });
 /* eslint-enable @typescript-eslint/naming-convention -- end of the process environment map */
 
+/** What `authorize` resolved for one request. */
 export type GitAccess = {
   readonly projectId: string;
+  /** The tenant whose prefix, plan and bill the bytes land on — never the pusher (D27). */
   readonly ownerId: string;
-  readonly repositoryPath: string;
+  /** What the authenticated caller may do with this project. */
+  readonly role: ProjectRole;
   /** Bytes this project may still add before the plan allowance is spent. */
   readonly remainingBytes: number;
   /** The owner's complete plan allowance, used by serialized write admission. */
@@ -78,13 +96,6 @@ export type GitLfsObjectState = {
   readonly oid: string;
   readonly size: number;
   readonly finalized: boolean;
-};
-
-export type GitLfsObjectRecord = GitLfsObjectState & {
-  readonly projectId: string;
-  readonly createdAt: Date;
-  readonly finalizedAt: Date | undefined;
-  readonly unreachableAt: Date | undefined;
 };
 
 export type GitLfsReservation =
@@ -104,127 +115,163 @@ export type GitLfsReservation =
 
 const gitExecutable = 'git';
 
+/**
+ * Whether a process id still names a running process.
+ *
+ * Signal 0 delivers nothing and only asks the question. `ESRCH` is the one
+ * answer that means "gone"; `EPERM` is somebody else's process, which is very
+ * much alive and must never have its leases swept.
+ *
+ * @param pid - The process id a lease directory is named after.
+ * @returns True unless the kernel says no such process.
+ */
+const processAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+};
+
+/**
+ * Bytes under one directory, for the sweep's log line.
+ *
+ * @param directory - The directory to measure.
+ * @returns The sum of its files' sizes.
+ */
+const directoryBytes = async (directory: string): Promise<number> => {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const sizes = await Promise.all(
+    entries.map(async (entry) => {
+      const held = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        return directoryBytes(held);
+      }
+      const measured = await stat(held);
+      return measured.size;
+    }),
+  );
+  return sizes.reduce((total, size) => total + size, 0);
+};
+
 /** A clone of a large repository is slow; an abandoned child is forever. */
 const rpcTimeoutMilliseconds = 10 * 60 * 1000;
-/** `init`, `update-server-info`, `--advertise-refs`, `bundle create`. */
+
+/** `for-each-ref`, `cat-file`, `--advertise-refs`. */
 const commandTimeoutMilliseconds = 60 * 1000;
-/**
- * Ponytail: one flat ceiling on concurrent git children, not a per-project or
- * per-user queue. The deployment is deliberately single-Machine (one volume),
- * so the resource being protected is one machine's memory and CPU; if fairness
- * between projects ever matters, this becomes a per-project semaphore.
- */
-const maximumConcurrentChildren = 32;
+
+/** What a 503 from this service tells the client to wait, in seconds. */
+export const gitRetryAfterSeconds = 5;
 
 /**
  * One pkt-line flush (`0000`), which is the whole body of the request `git push`
  * sends to authenticate a chunked push. A request no larger than this carried no
- * commands and no pack, so it changed nothing and is not accounted (review R4).
+ * commands and no pack, so it changed nothing.
  */
 const flushPacketBytes = 4;
 
 @Injectable()
-export class GitRepositoryService implements OnApplicationBootstrap {
-  readonly #logger = new Logger(GitRepositoryService.name);
-  readonly #background = new Set<Promise<void>>();
-  /** One storage re-measure at a time per project (review R4). */
-  readonly #accounting = new Map<string, Promise<void>>();
+export class GitRepositoryService {
   /**
-   * Ponytail: this deployment has one API process beside one Git volume, so a
-   * process-local owner gate covers long receive-pack operations; short LFS
-   * reservations also take a PostgreSQL advisory lock for retry/restart safety.
+   * Scratch reserved per in-flight lease (D33: 2.5 GiB). Public so the
+   * admission suite can raise it past any real disk without a fake `statfs`.
+   *
+   * ponytail: a mutable field rather than an injected bound; the only other
+   * caller that would ever set it is a deployment with a different disk, and
+   * that is an environment variable on the day someone has one.
    */
-  readonly #activeStorageOwners = new Set<string>();
-  /** Push, snapshot, and destructive retention are mutually exclusive per repository. */
-  readonly #activeRepositoryOperations = new Set<string>();
-  readonly #root: string;
-  #activeChildren = 0;
+  public leaseDiskBytesPerLease = leaseDiskBytesPerLease;
+
+  /**
+   * W2's crash seam (`store/fault-points.ts`), threaded into every commit so a
+   * suite can kill a committer at a named point. Unset in a deployment, where
+   * it costs one `await` of `undefined` per push.
+   */
+  public faults: FaultInjector | undefined;
+
+  /**
+   * D20's per-repository ceiling on non-LFS bytes. Public for the same reason
+   * as the figure above: the refusal suite proves the hook's sentence and its
+   * file list without pushing a gigabyte.
+   */
+  public repositoryByteCeiling = repositoryByteCeiling;
+
+  readonly #logger = new Logger(GitRepositoryService.name);
+
+  /**
+   * Where leases are built. The worker's ephemeral disk, which is what D33's
+   * admission figure is measured against — never a mounted volume, because
+   * there is no longer one.
+   */
+  readonly #leaseParent = path.join(tmpdir(), 'tau-git-leases', String(process.pid));
+
+  /**
+   * In-flight leases, process-local and deliberately so: this counter bounds
+   * *this* worker's disk, which no other worker shares. It is the only counter
+   * left — the owner and repository gates are gone, because the manifest's
+   * conditional write is the repository's lock (NI3) and the owner-keyed
+   * advisory lock is LFS and quota's (D18).
+   */
+  #inFlightLeases = 0;
+
+  /**
+   * Work a request started that outlives its response — today only the lease
+   * disposal that follows a fetch, whose child closes after the bytes are on
+   * the wire. Held in a set rather than fired and forgotten, so a failure has
+   * somewhere to be logged and a caller can wait for it.
+   */
+  readonly #background = new Set<Promise<void>>();
 
   public constructor(
-    private readonly configService: ConfigService<Environment, true>,
     private readonly databaseService: DatabaseService,
     @Inject(commercialEntitlementsKey)
     private readonly entitlementsService: CommercialEntitlementsService,
     private readonly storage: ObjectStorageService,
+    private readonly projectAccess: ProjectAccessService,
+    @Inject(repositoryStoreKey)
+    private readonly store: RepositoryStore,
   ) {
-    this.#root = path.resolve(this.configService.get('TAU_GIT_ROOT', { infer: true }));
-  }
-
-  public get root(): string {
-    return this.#root;
-  }
-
-  /**
-   * Retry the published-tag spools a previous process left behind.
-   *
-   * Tracked rather than awaited: boot must not wait on the volume, and a
-   * failure here is a retry, not a reason not to serve.
-   */
-  public onApplicationBootstrap(): void {
-    this.track(this.sweepAtBoot());
+    /* A crash restarts a Machine in place on the same rootfs, so boot is the
+       first chance to give the dead worker's disk back (W10 defect 2). Tracked
+       rather than awaited: nothing may wait on a sweep to serve a request. */
+    this.track(this.sweepAbandonedLeases());
   }
 
   /**
-   * `<TAU_GIT_ROOT>/<projectId>.git`, for an id that can only name a directory.
+   * Who may do what with this repository, and what the plan still allows.
    *
-   * The shape check lives here rather than at one caller because that is what
-   * makes `git.constants.ts`'s invariant — "anything else never reaches the
-   * filesystem" — true for every caller, present and future: `POST
-   * /v1/publications` reaches `ensureRepository` with no controller of its own
-   * to check it (review R1).
+   * Membership is `ProjectAccessService`'s single answer (W3, D27): a caller
+   * with no relation is told the project does not exist, and a collaborator
+   * below the role is refused `403`. That service caches a hit for five
+   * seconds, which is D22 — there is no second cache here.
    *
-   * @param projectId - The project id a client or a service named.
-   * @returns The absolute repository path.
-   * @throws NotFoundException When the id is not a project id.
-   */
-  public repositoryPath(projectId: string): string {
-    if (!isProjectRepositoryId(projectId)) {
-      throw new NotFoundException({
-        code: 'INVALID_REPOSITORY',
-        message: 'Repository not found',
-      });
-    }
-    return path.join(this.#root, `${projectId}.git`);
-  }
-
-  /**
-   * Read (fetch, dumb HTTP) needs the project; write (push, LFS upload) also
-   * needs the sync entitlement and headroom under the plan allowance. One auth
-   * path: the caller is already resolved by `AuthGuard`.
+   * A read stops after that. The plan facts cost `getEntitlements` plus an
+   * account-wide `sum()`, and a read consults neither `canSyncFiles` nor
+   * `remainingBytes` (review C28).
    *
-   * A read stops after the project row. The plan facts cost four sequential
-   * round-trips — `getEntitlements` is three uncached queries by design, and
-   * `readOwnerUsage` is a `sum()` across every project the owner has — and a
-   * read consults neither `canSyncFiles` nor `remainingBytes`. A dumb-HTTP
-   * clone pays `authorize` once *per object*, so this is the difference between
-   * five queries an object and one (review C28).
+   * @param args - The project, the authenticated caller and what it is doing.
+   * @returns The owner whose storage answers, and the plan headroom.
+   * @throws NotFoundException When the caller has no relation to the project.
+   * @throws ForbiddenException When the caller's role is below the need, or the plan cannot sync.
+   * @throws PayloadTooLargeException When the plan allowance is already spent.
    */
   public async authorize(args: {
     projectId: string;
     userId: string;
     mode: 'read' | 'write' | 'finalize';
   }): Promise<GitAccess> {
-    const { database } = this.databaseService;
-    const rows = await database
-      .select({ ownerId: project.ownerId })
-      .from(project)
-      .where(eq(project.id, args.projectId))
-      .limit(1);
-    const [row] = rows;
-    if (row === undefined || row.ownerId !== args.userId) {
-      // The same answer for "no such project" and "not yours": a git client
-      // must not learn which project ids exist.
-      throw new NotFoundException({
-        code: 'GIT_REPOSITORY_NOT_FOUND',
-        message: 'Repository not found',
-      });
-    }
+    const access = await this.projectAccess.authorize(
+      args.projectId,
+      args.userId,
+      args.mode === 'read' ? 'read' : 'write',
+    );
 
     if (args.mode === 'read') {
       return {
         projectId: args.projectId,
-        ownerId: row.ownerId,
-        repositoryPath: await this.ensureRepository(args.projectId),
+        ownerId: access.ownerId,
+        role: access.role,
         /* A read spends nothing and is offered nothing: every caller that reads
            these two is a write caller (`git.controller.ts`, `git-lfs.service.ts`). */
         remainingBytes: 0,
@@ -232,7 +279,7 @@ export class GitRepositoryService implements OnApplicationBootstrap {
       };
     }
 
-    const entitlements = await this.entitlementsService.getEntitlements(row.ownerId);
+    const entitlements = await this.entitlementsService.getEntitlements(access.ownerId);
     if (!entitlements.canSyncFiles) {
       throw new ForbiddenException({
         code: 'GIT_SYNC_NOT_ENTITLED',
@@ -243,7 +290,7 @@ export class GitRepositoryService implements OnApplicationBootstrap {
     const limit =
       entitlements.storageLimitBytes ??
       (entitlements.tier === undefined ? storageLimitBytesByTier.pro : storageLimitBytesByTier[entitlements.tier]);
-    const usage = await this.readOwnerUsage(row.ownerId);
+    const usage = await this.readOwnerUsage(access.ownerId);
     const remainingBytes = Math.max(0, limit - usage.storageBytes - usage.lfsBytes);
     if (args.mode === 'write' && remainingBytes === 0) {
       throw new PayloadTooLargeException({
@@ -254,8 +301,8 @@ export class GitRepositoryService implements OnApplicationBootstrap {
 
     return {
       projectId: args.projectId,
-      ownerId: row.ownerId,
-      repositoryPath: await this.ensureRepository(args.projectId),
+      ownerId: access.ownerId,
+      role: access.role,
       remainingBytes,
       storageLimitBytes: limit,
     };
@@ -298,175 +345,6 @@ export class GitRepositoryService implements OnApplicationBootstrap {
     }));
   }
 
-  /** Every reservation for nightly backup and retention reconciliation. */
-  public async listLfsObjects(projectId: string): Promise<readonly GitLfsObjectRecord[]> {
-    const rows = await this.databaseService.database
-      .select({
-        oid: projectGitLfsObject.oid,
-        size: projectGitLfsObject.sizeBytes,
-        createdAt: projectGitLfsObject.createdAt,
-        finalizedAt: projectGitLfsObject.finalizedAt,
-        unreachableAt: projectGitLfsObject.unreachableAt,
-      })
-      .from(projectGitLfsObject)
-      .where(eq(projectGitLfsObject.projectId, projectId));
-    return rows.map((row) => ({
-      projectId,
-      oid: row.oid,
-      size: row.size,
-      finalized: row.finalizedAt !== null,
-      createdAt: row.createdAt,
-      finalizedAt: row.finalizedAt ?? undefined,
-      unreachableAt: row.unreachableAt ?? undefined,
-    }));
-  }
-
-  /** Persist the start (or end) of one finalized object's unreachable period. */
-  public async markLfsObjectReachability(
-    record: GitLfsObjectRecord,
-    reachable: boolean,
-    observedAt: Date,
-  ): Promise<void> {
-    await this.databaseService.database
-      .update(projectGitLfsObject)
-      .set({
-        unreachableAt: reachable ? null : (record.unreachableAt ?? observedAt),
-      })
-      .where(and(eq(projectGitLfsObject.projectId, record.projectId), eq(projectGitLfsObject.oid, record.oid)));
-  }
-
-  /**
-   * Retire one unchanged reservation and its bytes under the same owner gate
-   * used by upload admission. The object is deleted before quota is released.
-   */
-  public async retireLfsObject(record: GitLfsObjectRecord, now = new Date()): Promise<boolean> {
-    const owners = await this.databaseService.database
-      .select({ ownerId: project.ownerId })
-      .from(project)
-      .where(eq(project.id, record.projectId))
-      .limit(1);
-    const ownerId = owners[0]?.ownerId;
-    if (ownerId === undefined) {
-      return false;
-    }
-    const releaseRepository = this.claimRepositoryOperation(record.projectId);
-    let release: (() => void) | undefined;
-    try {
-      release = this.claimStorageOwner(ownerId);
-      return await this.databaseService.database.transaction(async (transaction) => {
-        await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ownerId}, 0))`);
-        const held = await transaction
-          .select({
-            size: projectGitLfsObject.sizeBytes,
-            createdAt: projectGitLfsObject.createdAt,
-            finalizedAt: projectGitLfsObject.finalizedAt,
-            unreachableAt: projectGitLfsObject.unreachableAt,
-          })
-          .from(projectGitLfsObject)
-          .where(and(eq(projectGitLfsObject.projectId, record.projectId), eq(projectGitLfsObject.oid, record.oid)))
-          .limit(1)
-          .for('update');
-        const [current] = held;
-        if (
-          current === undefined ||
-          current.size !== record.size ||
-          current.createdAt.getTime() !== record.createdAt.getTime() ||
-          current.finalizedAt?.getTime() !== record.finalizedAt?.getTime()
-        ) {
-          return false;
-        }
-        const reachable = await this.reachableLfsOids(record.projectId);
-        if (reachable.has(record.oid)) {
-          if (current.unreachableAt !== null) {
-            await transaction
-              .update(projectGitLfsObject)
-              .set({ unreachableAt: null })
-              .where(and(eq(projectGitLfsObject.projectId, record.projectId), eq(projectGitLfsObject.oid, record.oid)));
-          }
-          return false;
-        }
-        const eligible =
-          current.finalizedAt === null
-            ? now.getTime() - current.createdAt.getTime() >= 24 * 60 * 60 * 1000
-            : current.unreachableAt !== null &&
-              now.getTime() - current.unreachableAt.getTime() >= 30 * 24 * 60 * 60 * 1000;
-        if (!eligible) {
-          return false;
-        }
-        await this.storage.deleteBlob({
-          namespace: 'blobs',
-          key: gitLfsObjectKey(record.projectId, record.oid),
-          tier: 'private',
-        });
-        await transaction
-          .delete(projectGitLfsObject)
-          .where(and(eq(projectGitLfsObject.projectId, record.projectId), eq(projectGitLfsObject.oid, record.oid)));
-        await transaction
-          .update(projectGit)
-          .set({
-            lfsBytes: sql`greatest(0, ${projectGit.lfsBytes} - ${record.size})`,
-            updatedAt: new Date(),
-          })
-          .where(eq(projectGit.projectId, record.projectId));
-        return true;
-      });
-    } finally {
-      release?.();
-      releaseRepository();
-    }
-  }
-
-  /** Delete a legacy/untracked LFS blob only while owner admission proves no reservation exists. */
-  public async retireOrphanLfsObject(projectId: string, oid: string): Promise<boolean> {
-    const owners = await this.databaseService.database
-      .select({ ownerId: project.ownerId })
-      .from(project)
-      .where(eq(project.id, projectId))
-      .limit(1);
-    const ownerId = owners[0]?.ownerId;
-    if (ownerId === undefined) {
-      return false;
-    }
-    const releaseRepository = this.claimRepositoryOperation(projectId);
-    let release: (() => void) | undefined;
-    try {
-      release = this.claimStorageOwner(ownerId);
-      return await this.databaseService.database.transaction(async (transaction) => {
-        await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${ownerId}, 0))`);
-        const reserved = await transaction
-          .select({ oid: projectGitLfsObject.oid })
-          .from(projectGitLfsObject)
-          .where(and(eq(projectGitLfsObject.projectId, projectId), eq(projectGitLfsObject.oid, oid)))
-          .limit(1);
-        if (reserved.length > 0) {
-          return false;
-        }
-        if ((await this.reachableLfsOids(projectId)).has(oid)) {
-          return false;
-        }
-        await this.storage.deleteBlob({
-          namespace: 'blobs',
-          key: gitLfsObjectKey(projectId, oid),
-          tier: 'private',
-        });
-        return true;
-      });
-    } finally {
-      release?.();
-      releaseRepository();
-    }
-  }
-
-  /** Run one repository snapshot while pushes and retention deletion are excluded. */
-  public async withRepositoryMaintenance<T>(projectId: string, work: () => Promise<T>): Promise<T> {
-    const release = this.claimRepositoryOperation(projectId);
-    try {
-      return await work();
-    } finally {
-      release();
-    }
-  }
-
   /**
    * Reserve every novel object and its declared bytes in one owner-serialized
    * transaction. Retries see the same primary-key row and charge nothing.
@@ -475,103 +353,98 @@ export class GitRepositoryService implements OnApplicationBootstrap {
     access: GitAccess;
     objects: ReadonlyArray<{ readonly oid: string; readonly size: number }>;
   }): Promise<GitLfsReservation> {
-    const release = this.claimStorageOwner(args.access.ownerId);
-    try {
-      return await this.databaseService.database.transaction(async (transaction) => {
-        await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${args.access.ownerId}, 0))`);
-        const requestedByOid = new Map<string, { readonly oid: string; readonly size: number }>();
-        for (const object of args.objects) {
-          const prior = requestedByOid.get(object.oid);
-          if (prior !== undefined && prior.size !== object.size) {
-            throw new BadRequestException({
-              code: 'GIT_LFS_SIZE_MISMATCH',
-              message: `LFS object ${object.oid} was requested with conflicting sizes`,
-            });
-          }
-          requestedByOid.set(object.oid, object);
+    return this.databaseService.database.transaction(async (transaction) => {
+      await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${args.access.ownerId}, 0))`);
+      const requestedByOid = new Map<string, { readonly oid: string; readonly size: number }>();
+      for (const object of args.objects) {
+        const prior = requestedByOid.get(object.oid);
+        if (prior !== undefined && prior.size !== object.size) {
+          throw new BadRequestException({
+            code: 'GIT_LFS_SIZE_MISMATCH',
+            message: `LFS object ${object.oid} was requested with conflicting sizes`,
+          });
         }
-        const requested = [...requestedByOid.values()];
-        const existing =
-          requested.length === 0
-            ? []
-            : await transaction
-                .select({
-                  oid: projectGitLfsObject.oid,
-                  size: projectGitLfsObject.sizeBytes,
-                  finalizedAt: projectGitLfsObject.finalizedAt,
-                })
-                .from(projectGitLfsObject)
-                .where(
-                  and(
-                    eq(projectGitLfsObject.projectId, args.access.projectId),
-                    inArray(
-                      projectGitLfsObject.oid,
-                      requested.map((object) => object.oid),
-                    ),
+        requestedByOid.set(object.oid, object);
+      }
+      const requested = [...requestedByOid.values()];
+      const existing =
+        requested.length === 0
+          ? []
+          : await transaction
+              .select({
+                oid: projectGitLfsObject.oid,
+                size: projectGitLfsObject.sizeBytes,
+                finalizedAt: projectGitLfsObject.finalizedAt,
+              })
+              .from(projectGitLfsObject)
+              .where(
+                and(
+                  eq(projectGitLfsObject.projectId, args.access.projectId),
+                  inArray(
+                    projectGitLfsObject.oid,
+                    requested.map((object) => object.oid),
                   ),
-                );
-        const byOid = new Map(existing.map((row) => [row.oid, row]));
-        for (const object of requested) {
-          const row = byOid.get(object.oid);
-          if (row !== undefined && row.size !== object.size) {
-            throw new BadRequestException({
-              code: 'GIT_LFS_SIZE_MISMATCH',
-              message: `LFS object ${object.oid} was requested with conflicting sizes`,
-            });
-          }
+                ),
+              );
+      const byOid = new Map(existing.map((row) => [row.oid, row]));
+      for (const object of requested) {
+        const row = byOid.get(object.oid);
+        if (row !== undefined && row.size !== object.size) {
+          throw new BadRequestException({
+            code: 'GIT_LFS_SIZE_MISMATCH',
+            message: `LFS object ${object.oid} was requested with conflicting sizes`,
+          });
         }
-        const novel = requested.filter((object) => !byOid.has(object.oid));
-        const usageRows = await transaction
-          .select({
-            storageBytes: sql<number>`coalesce(sum(${projectGit.storageBytes}), 0)`,
-            lfsBytes: sql<number>`coalesce(sum(${projectGit.lfsBytes}), 0)`,
-          })
-          .from(project)
-          .leftJoin(projectGit, eq(projectGit.projectId, project.id))
-          .where(eq(project.ownerId, args.access.ownerId));
-        const usage = usageRows[0];
-        const usedBytes = Number(usage?.storageBytes ?? 0) + Number(usage?.lfsBytes ?? 0);
-        const remainingBytes = Math.max(0, args.access.storageLimitBytes - usedBytes);
-        const incoming = novel.reduce((total, object) => total + object.size, 0);
-        if (incoming > remainingBytes) {
-          return {
-            status: 'quota',
-            shortfallBytes: incoming - remainingBytes,
-            remainingBytes,
-            files: novel,
-          };
-        }
-        if (novel.length > 0) {
-          await transaction.insert(projectGitLfsObject).values(
-            novel.map((object) => ({
-              projectId: args.access.projectId,
-              oid: object.oid,
-              sizeBytes: object.size,
-            })),
-          );
-          await transaction
-            .insert(projectGit)
-            .values({ projectId: args.access.projectId, lfsBytes: incoming })
-            .onConflictDoUpdate({
-              target: projectGit.projectId,
-              set: {
-                lfsBytes: sql`${projectGit.lfsBytes} + ${incoming}`,
-                updatedAt: new Date(),
-              },
-            });
-        }
-        const novelOids = new Set(novel.map((object) => object.oid));
+      }
+      const novel = requested.filter((object) => !byOid.has(object.oid));
+      const usageRows = await transaction
+        .select({
+          storageBytes: sql<number>`coalesce(sum(${projectGit.storageBytes}), 0)`,
+          lfsBytes: sql<number>`coalesce(sum(${projectGit.lfsBytes}), 0)`,
+        })
+        .from(project)
+        .leftJoin(projectGit, eq(projectGit.projectId, project.id))
+        .where(eq(project.ownerId, args.access.ownerId));
+      const usage = usageRows[0];
+      const usedBytes = Number(usage?.storageBytes ?? 0) + Number(usage?.lfsBytes ?? 0);
+      const remainingBytes = Math.max(0, args.access.storageLimitBytes - usedBytes);
+      const incoming = novel.reduce((total, object) => total + object.size, 0);
+      if (incoming > remainingBytes) {
         return {
-          status: 'reserved',
-          objects: requested.map((object) => ({
-            ...object,
-            finalized: !novelOids.has(object.oid) && byOid.get(object.oid)?.finalizedAt !== null,
-          })),
+          status: 'quota',
+          shortfallBytes: incoming - remainingBytes,
+          remainingBytes,
+          files: novel,
         };
-      });
-    } finally {
-      release();
-    }
+      }
+      if (novel.length > 0) {
+        await transaction.insert(projectGitLfsObject).values(
+          novel.map((object) => ({
+            projectId: args.access.projectId,
+            oid: object.oid,
+            sizeBytes: object.size,
+          })),
+        );
+        await transaction
+          .insert(projectGit)
+          .values({ projectId: args.access.projectId, lfsBytes: incoming })
+          .onConflictDoUpdate({
+            target: projectGit.projectId,
+            set: {
+              lfsBytes: sql`${projectGit.lfsBytes} + ${incoming}`,
+              updatedAt: new Date(),
+            },
+          });
+      }
+      const novelOids = new Set(novel.map((object) => object.oid));
+      return {
+        status: 'reserved',
+        objects: requested.map((object) => ({
+          ...object,
+          finalized: !novelOids.has(object.oid) && byOid.get(object.oid)?.finalizedAt !== null,
+        })),
+      };
+    });
   }
 
   /** Mark one exact reserved identity finalized; repeated verification is a no-op. */
@@ -580,66 +453,34 @@ export class GitRepositoryService implements OnApplicationBootstrap {
     oid: string;
     size: number;
   }): Promise<'finalized' | 'already-finalized' | 'unreserved'> {
-    const release = this.claimStorageOwner(args.access.ownerId);
-    try {
-      return await this.databaseService.database.transaction(async (transaction) => {
-        await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${args.access.ownerId}, 0))`);
-        const rows = await transaction
-          .select({
-            size: projectGitLfsObject.sizeBytes,
-            finalizedAt: projectGitLfsObject.finalizedAt,
-          })
-          .from(projectGitLfsObject)
-          .where(and(eq(projectGitLfsObject.projectId, args.access.projectId), eq(projectGitLfsObject.oid, args.oid)))
-          .limit(1)
-          .for('update');
-        const [row] = rows;
-        if (row === undefined || row.size !== args.size) {
-          return 'unreserved';
-        }
-        if (row.finalizedAt !== null) {
-          return 'already-finalized';
-        }
-        await transaction
-          .update(projectGitLfsObject)
-          .set({ finalizedAt: new Date() })
-          .where(and(eq(projectGitLfsObject.projectId, args.access.projectId), eq(projectGitLfsObject.oid, args.oid)));
-        return 'finalized';
-      });
-    } finally {
-      release();
-    }
-  }
-
-  /**
-   * Hold the owner gate for the entire receive-pack.
-   *
-   * The headroom is `authorize`'s own, taken on this request: re-running the
-   * account-wide `sum()` here asked the same question of the same rows a
-   * moment later and doubled the aggregate on every push (review C28). The
-   * gate is still what makes the figure safe — one storage write per account at
-   * a time — and `pre-receive` re-measures the quarantine against it anyway.
-   *
-   * @param access - What `authorize` resolved for this request.
-   * @returns The headroom the push may use, and the gate's release.
-   * @throws PayloadTooLargeException When the plan allowance is already spent.
-   * @throws ServiceUnavailableException When this account already holds the gate.
-   */
-  public admitGitPush(access: GitAccess): { remainingBytes: number; release: () => void } {
-    const release = this.claimStorageOwner(access.ownerId);
-    if (access.remainingBytes === 0) {
-      release();
-      throw new PayloadTooLargeException({
-        code: 'GIT_QUOTA_EXCEEDED',
-        message: 'Storage quota reached.',
-      });
-    }
-    return { remainingBytes: access.remainingBytes, release };
+    return this.databaseService.database.transaction(async (transaction) => {
+      await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${args.access.ownerId}, 0))`);
+      const rows = await transaction
+        .select({
+          size: projectGitLfsObject.sizeBytes,
+          finalizedAt: projectGitLfsObject.finalizedAt,
+        })
+        .from(projectGitLfsObject)
+        .where(and(eq(projectGitLfsObject.projectId, args.access.projectId), eq(projectGitLfsObject.oid, args.oid)))
+        .limit(1)
+        .for('update');
+      const [row] = rows;
+      if (row === undefined || row.size !== args.size) {
+        return 'unreserved';
+      }
+      if (row.finalizedAt !== null) {
+        return 'already-finalized';
+      }
+      await transaction
+        .update(projectGitLfsObject)
+        .set({ finalizedAt: new Date() })
+        .where(and(eq(projectGitLfsObject.projectId, args.access.projectId), eq(projectGitLfsObject.oid, args.oid)));
+      return 'finalized';
+    });
   }
 
   public async readUsage(projectId: string): Promise<{ storageBytes: number; lfsBytes: number }> {
-    const { database } = this.databaseService;
-    const rows = await database
+    const rows = await this.databaseService.database
       .select({
         storageBytes: projectGit.storageBytes,
         lfsBytes: projectGit.lfsBytes,
@@ -651,150 +492,378 @@ export class GitRepositoryService implements OnApplicationBootstrap {
     return row ?? { storageBytes: 0, lfsBytes: 0 };
   }
 
-  public async recordUsage(args: { projectId: string; storageBytes?: number; lfsBytesDelta?: number }): Promise<void> {
-    const { database } = this.databaseService;
-    await database
-      .insert(projectGit)
-      .values({
-        projectId: args.projectId,
-        storageBytes: args.storageBytes ?? 0,
-        lfsBytes: Math.max(0, args.lfsBytesDelta ?? 0),
-      })
-      .onConflictDoUpdate({
-        target: projectGit.projectId,
-        set: {
-          ...(args.storageBytes === undefined ? {} : { storageBytes: args.storageBytes }),
-          ...(args.lfsBytesDelta === undefined
-            ? {}
-            : {
-                lfsBytes: sql`greatest(0, ${projectGit.lfsBytes} + ${args.lfsBytesDelta})`,
-              }),
-          updatedAt: new Date(),
-        },
-      });
-  }
-
   /**
-   * One bare repository per project (D21), created on first contact. The hooks
-   * are reconciled on every contact so a deployment that changes the allow-list
-   * takes effect without a migration (I15).
+   * Builds a lease for this project, runs `work` against it and disposes it.
+   *
+   * The one way anything in this application touches a repository. Admission
+   * is taken before the hydrate and released after the dispose, so the counter
+   * covers the whole window the disk is occupied.
+   *
+   * @param access - What `authorize` resolved.
+   * @param work - What to do with the disposable bare directory.
+   * @returns Whatever `work` returned.
+   * @throws ServiceUnavailableException When this worker has no disk for another lease.
    */
-  public async ensureRepository(projectId: string): Promise<string> {
-    const repositoryPath = this.repositoryPath(projectId);
-    let created = false;
+  public async withLease<T>(access: GitAccess, work: (lease: RepositoryLease) => Promise<T>): Promise<T> {
+    const release = await this.admitLease();
+    let lease: RepositoryLease | undefined;
     try {
-      await stat(path.join(repositoryPath, 'HEAD'));
-    } catch {
-      created = true;
+      lease = await hydrateLease({
+        store: this.store,
+        locator: repositoryLocator({ ownerId: access.ownerId, projectId: access.projectId }),
+        parentDirectory: this.#leaseParent,
+      });
+      return await work(lease);
+    } catch (error) {
+      throw this.refusalFor(error);
+    } finally {
+      /* The admission comes back whatever the disposal did, and a disposal
+         failure never replaces the refusal this request was about to answer
+         (review F2). `rm -rf` suppresses ENOENT but not EBUSY, EACCES or
+         EPERM, and a throw here used to skip `release()` for the life of the
+         process — after which every request on this worker answered
+         `GIT_LEASE_DISK_FULL` forever, and a lost race reached the client as a
+         500 instead of the 503 it is. */
+      await this.disposeQuietly(lease, access.projectId);
+      release();
     }
-    if (created) {
-      await mkdir(this.#root, { recursive: true });
-      await this.run(['init', '--bare', '--initial-branch=main', repositoryPath], this.#root);
-      // The dumb-HTTP layout is only current after `update-server-info`; run it
-      // once at creation so an empty repository answers a dumb read too.
-      await this.run(['update-server-info'], repositoryPath);
-    }
-    await this.installHooks(repositoryPath);
-    return repositoryPath;
-  }
-
-  /** `info/refs?service=…`: the ref advertisement, without serving a request. */
-  public async advertiseRefs(repositoryPath: string, service: GitSmartService): Promise<Uint8Array<ArrayBuffer>> {
-    return this.run([service.replace('git-', ''), '--stateless-rpc', '--advertise-refs', repositoryPath], this.#root);
   }
 
   /**
-   * One smart-HTTP RPC. The request body streams into the child and the child's
-   * stdout streams back, so a pack never lands in memory.
+   * `info/refs?service=…`: the ref advertisement, over a lease.
+   *
+   * @param access - What `authorize` resolved.
+   * @param service - The service the client named.
+   * @returns The advertisement bytes, without the service prefix.
    */
-  public serve(args: {
-    repositoryPath: string;
-    service: GitSmartService;
+  public async advertiseRefs(access: GitAccess, service: GitSmartService): Promise<Uint8Array<ArrayBuffer>> {
+    return this.withLease(access, async (lease) => {
+      await this.repairDerivedState(access, lease);
+      return this.runGit([service.replace('git-', ''), '--stateless-rpc', '--advertise-refs', '.'], lease.directory);
+    });
+  }
+
+  /**
+   * `git-upload-pack`: a read. Hydrate, serve, dispose; no commit.
+   *
+   * The child's stdout is streamed rather than buffered — a clone at D20's
+   * ceiling is a gigabyte and nothing about a read needs it in memory — and the
+   * lease lives until the child closes.
+   *
+   * @param args - The access, the request body and the client's abort signal.
+   * @returns The stream the response is written from.
+   */
+  public async uploadPack(args: {
+    access: GitAccess;
     body: Readable;
     gzipped: boolean;
-    environment?: Readonly<Record<string, string>>;
-    /** Set for a push: the project whose storage row is re-measured after it. */
-    accountFor?: string;
-    /**
-     * The ceiling on the request body this service accepts, counted after
-     * decompression. For a push it is also git's own `receive.maxInputSize`, so
-     * an oversized pack is refused while it arrives instead of filling the
-     * volume before any hook runs; for a fetch, git has no equivalent and
-     * Fastify's `bodyLimit` does not reach a streamed parser, so the count here
-     * is the whole of the bound (review C32).
-     */
-    maximumInputBytes?: number;
-    /** Aborted when the client goes away, which kills the child. */
+    maximumInputBytes: number;
     abort?: AbortSignal;
-    /** Releases the owner-wide storage admission when receive-pack exits. */
-    releaseStorageAdmission?: () => void;
-  }): Readable {
-    let releaseRepository: (() => void) | undefined;
-    if (args.accountFor !== undefined) {
+  }): Promise<Readable> {
+    const release = await this.admitLease();
+    let lease: RepositoryLease | undefined;
+    try {
+      lease = await hydrateLease({
+        store: this.store,
+        locator: repositoryLocator({ ownerId: args.access.ownerId, projectId: args.access.projectId }),
+        parentDirectory: this.#leaseParent,
+      });
+      await this.repairDerivedState(args.access, lease);
+      const held = lease;
+      const child = this.spawnService({
+        lease: held,
+        service: 'git-upload-pack',
+        maximumInputBytes: args.maximumInputBytes,
+        ...(args.abort === undefined ? {} : { abort: args.abort }),
+      });
+      child.on('close', () => {
+        this.track(this.disposeAfterFetch(held, release, args.access.projectId));
+      });
+      this.pipeRequestBody({ ...args, child, service: 'git-upload-pack' });
+      return child.stdout;
+    } catch (error) {
+      // Same shape as `withLease`'s `finally` (review F2).
+      await this.disposeQuietly(lease, args.access.projectId);
+      release();
+      throw this.refusalFor(error);
+    }
+  }
+
+  /**
+   * `git-receive-pack`: a push.
+   *
+   * The whole response is withheld until `commitLease` resolves (D4, NI2), so
+   * git's own report-status is buffered rather than streamed: a client that
+   * read `ok refs/heads/main` off the wire before the manifest was durable
+   * would have been told a lie the protocol cannot take back. Buffering costs
+   * nothing — report-status is a few pkt-lines whatever the pack was.
+   *
+   * @param args - The access, the pusher, the request body and the abort signal.
+   * @returns Git's report-status, verbatim (NI13).
+   */
+  public async receivePack(args: {
+    access: GitAccess;
+    /** The authenticated pusher, from the session and never the request (D28, NI16). */
+    committedBy: string;
+    body: Readable;
+    gzipped: boolean;
+    maximumInputBytes: number;
+    abort?: AbortSignal;
+  }): Promise<Uint8Array<ArrayBuffer>> {
+    return this.withLease(args.access, async (lease) => {
+      await this.repairDerivedState(args.access, lease);
+      const ceilingRemaining = Math.max(
+        0,
+        this.repositoryByteCeiling - (lease.manifest?.packs ?? []).reduce((total, pack) => total + pack.bytes, 0),
+      );
+      const child = this.spawnService({
+        lease,
+        service: 'git-receive-pack',
+        maximumInputBytes: args.maximumInputBytes,
+        ...(args.abort === undefined ? {} : { abort: args.abort }),
+        environment: {
+          /* The `pre-receive` hook reads all three: it refuses a push that did
+             not come through this admission check, one whose quarantine does
+             not fit in what is left of the plan, and one that would take the
+             repository past D20's ceiling (D17, D20). */
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
+          TAU_GIT_PUSH_ADMITTED: '1',
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
+          TAU_GIT_QUOTA_REMAINING_BYTES: String(args.access.remainingBytes),
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- process environment names
+          TAU_GIT_CEILING_REMAINING_BYTES: String(ceilingRemaining),
+        },
+      });
+
+      const output = this.collect(child.stdout);
+      const request = this.pipeRequestBody({ ...args, child, service: 'git-receive-pack' });
+      const [body] = await Promise.all([output, this.awaitChild(child), request.done]);
+
+      if (request.counter.bytes <= flushPacketBytes) {
+        /* The flush-only body `git push` authenticates a chunked push with.
+           Nothing arrived, so there is nothing to commit and no generation to
+           record. */
+        return body;
+      }
+
+      const result = await commitLease({
+        store: this.store,
+        lease,
+        committedBy: args.committedBy,
+        byteCeiling: this.repositoryByteCeiling,
+        ...(this.faults === undefined ? {} : { faults: this.faults }),
+      });
+      if (result.committed) {
+        await this.recordGeneration(args.access.projectId, result.manifest.generation);
+        await this.derive({ access: args.access, lease, manifest: result.manifest, moved: result.moved });
+      }
+      return body;
+    });
+  }
+
+  /** Waits for the work a finished request left running. */
+  public async settled(): Promise<void> {
+    await Promise.all(this.#background);
+  }
+
+  /**
+   * What the publication materializer needs from this service.
+   *
+   * Public so the publication routes can materialize through a lease of their
+   * own rather than a second git runner (W4c).
+   */
+  public get materializerDependencies(): MaterializerDependencies {
+    return {
+      databaseService: this.databaseService,
+      storage: this.storage,
+      git: async (repositoryPath, args, stdin) => this.runGit(args, repositoryPath, stdin),
+      /* The one answer to "where is this object" lives in W4b's leaf module, so
+         binding it here keeps the materializer out of the LFS service's import
+         cycle. Two statements because the member read of an awaited call is a
+         lint error in this workspace. */
+      resolveLfsObject: async (object) => {
+        const held = await resolveLfsObjectLocation(this.storage, object);
+        return held?.location;
+      },
+    };
+  }
+
+  /**
+   * Removes the lease directories of workers that are no longer running (W10
+   * defect 2).
+   *
+   * A worker killed mid-push cannot unlink its own lease, and admission counts
+   * the *free* bytes of the disk those leases sit on — so every crash used to
+   * cost this machine up to `leaseDiskBytesPerLease` of headroom permanently.
+   * Leases therefore live under `tau-git-leases/<pid>/`, and a sibling is only
+   * removed when its pid is gone: two API processes share one `tmpdir` locally
+   * and must never sweep each other.
+   *
+   * Runs on service init *and* before every admission, because a surviving
+   * worker is the only process that will ever boot again after a crash in
+   * place, and admission is the moment the leaked bytes matter.
+   *
+   * ponytail: unthrottled — a `readdir` of a handful of names plus a signal-0
+   * per name. Add a throttle if a machine ever hosts thousands of siblings.
+   */
+  private async sweepAbandonedLeases(): Promise<void> {
+    const root = path.dirname(this.#leaseParent);
+    let siblings: readonly string[];
+    try {
+      siblings = await readdir(root);
+    } catch {
+      /* Nothing has run on this machine yet. */
+      return;
+    }
+    const abandoned = siblings.filter((name) => /^\d+$/u.test(name) && !processAlive(Number(name)));
+    if (abandoned.length === 0) {
+      return;
+    }
+    let reclaimed = 0;
+    for (const name of abandoned) {
+      const held = path.join(root, name);
       try {
-        releaseRepository = this.claimRepositoryOperation(args.accountFor);
+        // oxlint-disable-next-line no-await-in-loop -- one dead worker at a time; the list is tiny and the removal is I/O, not CPU
+        reclaimed += await directoryBytes(held);
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        await rm(held, { recursive: true, force: true });
       } catch (error) {
-        args.releaseStorageAdmission?.();
-        throw error;
+        this.#logger.warn({ err: error, directory: held }, 'A dead worker’s lease directory could not be removed');
       }
     }
-    if (this.#activeChildren >= maximumConcurrentChildren) {
-      releaseRepository?.();
-      args.releaseStorageAdmission?.();
+    this.#logger.log(
+      { directories: abandoned.length, bytes: reclaimed },
+      'Reclaimed the lease directories of workers that are no longer running',
+    );
+  }
+
+  /**
+   * Admits one more lease while this worker's disk can hold it (D33).
+   *
+   * Concurrent leases × the per-lease reservation against the *free* space of
+   * the lease parent, read with `statfs` on every admission rather than
+   * assumed: an operator who resizes the machine's disk changes the answer
+   * without changing a constant. This replaces the flat 32-child ceiling,
+   * which bounded the wrong resource — a lease is disk, not CPU.
+   *
+   * @returns The release, which every path must call.
+   * @throws ServiceUnavailableException When another lease would not fit.
+   */
+  private async admitLease(): Promise<() => void> {
+    await this.sweepAbandonedLeases();
+    await mkdir(this.#leaseParent, { recursive: true });
+    const { bavail, bsize } = await statfs(this.#leaseParent);
+    const free = bavail * bsize;
+    if ((this.#inFlightLeases + 1) * this.leaseDiskBytesPerLease > free) {
       throw new ServiceUnavailableException({
-        code: 'GIT_BUSY',
-        message: 'Too many git operations in flight; retry shortly.',
+        code: 'GIT_LEASE_DISK_FULL',
+        message: 'This server has no room for another repository right now; retry shortly.',
       });
     }
+    this.#inFlightLeases += 1;
+    let released = false;
+    return () => {
+      if (!released) {
+        released = true;
+        this.#inFlightLeases -= 1;
+      }
+    };
+  }
 
-    let child: ChildProcessByStdio<Writable, Readable, Readable>;
-    try {
-      child = spawn(
-        gitExecutable,
-        [
-          ...(args.accountFor === undefined
-            ? []
-            : [
-                '-c',
-                `receive.maxInputSize=${String(args.maximumInputBytes ?? 0)}`,
-                /* Compare-and-swap, on the one side of the wire that can enforce
-                   it (charter I7/I9, ruling OQ4). `pre-receive` matches ref
-                   *names* only, so until these two a client could delete a
-                   published tag or a chat record ref and force-rewind `main` —
-                   reproduced against the real hook (review C25). `--force-with-lease`
-                   is client discipline; a stale, buggy or hostile client bypasses
-                   it and the second device's work is gone. All ref families:
-                   retention is server-local (D17) and never needs a client delete. */
-                '-c',
-                'receive.denyDeletes=true',
-                '-c',
-                'receive.denyNonFastForwards=true',
-              ]),
-          args.service.replace('git-', ''),
-          '--stateless-rpc',
-          args.repositoryPath,
-        ],
-        {
-          env: childEnvironment(args.repositoryPath, args.environment) as NodeJS.ProcessEnv,
-          stdio: ['pipe', 'pipe', 'pipe'],
-          timeout: rpcTimeoutMilliseconds,
-          killSignal: 'SIGKILL',
-          ...(args.abort === undefined ? {} : { signal: args.abort }),
-        },
-      );
-    } catch (error) {
-      releaseRepository?.();
-      args.releaseStorageAdmission?.();
-      throw error;
+  /**
+   * Turns a store refusal into the HTTP answer the charter names for it.
+   *
+   * Returns the refusal rather than raising it, so every caller reads as
+   * `throw this.refusalFor(error)` and the throw site stays where the control
+   * flow is.
+   *
+   * @param error - Whatever the store, the lease or the commit raised.
+   * @returns The exception to throw.
+   */
+  private refusalFor(error: unknown): Error {
+    if (!(error instanceof RepositoryStoreError)) {
+      return error instanceof Error ? error : new Error(String(error));
     }
-    this.#activeChildren += 1;
+    switch (error.code) {
+      case 'lost':
+      case 'deadline': {
+        /* D4: a lost race is not a failed push, it is a push that has to happen
+           again. The client re-pushes against the manifest that won. */
+        return new ServiceUnavailableException({
+          code: 'GIT_PUSH_RACE_LOST',
+          message: 'Another push for this project committed first; retry.',
+        });
+      }
+      case 'incarnation-changed': {
+        return new NotFoundException({
+          code: 'GIT_REPOSITORY_NOT_FOUND',
+          message: 'Repository not found',
+        });
+      }
+      case 'tombstoned': {
+        return new GoneException({
+          code: 'GIT_REPOSITORY_DELETED',
+          message: 'This project has been deleted.',
+        });
+      }
+      case 'ceiling-exceeded': {
+        /* `pre-receive` bounds what *arrives*, so the backstop is reachable
+           without a bug: a compacting commit repacks the retained pack together
+           with the arrival, and a repack that deltifies worse than its inputs
+           is larger than the sum the hook measured (review F12). Nothing is
+           durable either way — the assertion runs before the first upload. */
+        this.#logger.log({ message: error.message }, 'The D20 ceiling was reached past the pre-receive hook');
+        return new PayloadTooLargeException({
+          code: 'GIT_REPOSITORY_CEILING_EXCEEDED',
+          message: error.message,
+        });
+      }
+      case 'loose-objects':
+      case 'connectivity': {
+        return new UnprocessableEntityException({
+          code: 'GIT_PUSH_NOT_COMMITTABLE',
+          message: error.message,
+        });
+      }
+      case 'missing-pack': {
+        return new InternalServerErrorException({
+          code: 'GIT_REPOSITORY_INCOMPLETE',
+          message: error.message,
+        });
+      }
+    }
+  }
 
-    /* What the client actually sent. `git push` over HTTP authenticates a
-     * chunked push with a flush-only `0000` body first, and that request updates
-     * nothing — accounting for it walked the whole repository a second time and
-     * raced the pack's own walk for the row (review R4). */
-    const request = { bytes: 0 };
-
+  /**
+   * One smart-HTTP RPC child over a lease.
+   *
+   * @param args - The lease, the service and the bounds.
+   * @returns The spawned child.
+   */
+  private spawnService(args: {
+    lease: RepositoryLease;
+    service: GitSmartService;
+    maximumInputBytes: number;
+    environment?: Readonly<Record<string, string>>;
+    abort?: AbortSignal;
+  }): ChildProcessByStdio<Writable, Readable, Readable> {
+    const write = args.service === 'git-receive-pack';
+    const child = spawn(
+      gitExecutable,
+      [
+        ...(write ? ['-c', `receive.maxInputSize=${String(args.maximumInputBytes)}`] : []),
+        args.service.replace('git-', ''),
+        '--stateless-rpc',
+        args.lease.directory,
+      ],
+      {
+        env: childEnvironment(args.lease.directory, args.environment) as NodeJS.ProcessEnv,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: rpcTimeoutMilliseconds,
+        killSignal: 'SIGKILL',
+        ...(args.abort === undefined ? {} : { signal: args.abort }),
+      },
+    );
     const stderr: Array<Uint8Array<ArrayBuffer>> = [];
     child.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => stderr.push(chunk));
     // An aborted or timed-out child emits `error`; without a listener that is
@@ -803,9 +872,6 @@ export class GitRepositoryService implements OnApplicationBootstrap {
       this.#logger.warn({ err: error, service: args.service }, 'git smart-HTTP child ended early');
     });
     child.on('close', (code) => {
-      this.#activeChildren -= 1;
-      releaseRepository?.();
-      args.releaseStorageAdmission?.();
       if (code !== 0) {
         this.#logger.warn(
           {
@@ -815,336 +881,277 @@ export class GitRepositoryService implements OnApplicationBootstrap {
           },
           'git smart-HTTP service exited non-zero',
         );
-        return;
-      }
-      if (args.accountFor !== undefined && request.bytes > flushPacketBytes) {
-        this.track(this.accountAfterPush(args.accountFor, args.repositoryPath));
-        /* The push moved refs; `post-receive` left the tag names it saw in the
-         * repository. Materialization runs here, in this service's background
-         * set, rather than in the hook: the hook is a git child under the
-         * concurrency ceiling and the RPC lifetime bound, and a publication's
-         * bytes must not be killed with the request that carried them (S32). */
-        this.track(this.materializeAfterPush(args.accountFor, args.repositoryPath));
       }
     });
-
-    this.track(
-      this.pipeRequestBody({
-        body: args.body,
-        child,
-        gzipped: args.gzipped,
-        service: args.service,
-        request,
-        maximumInputBytes: args.maximumInputBytes,
-      }),
-    );
-
-    return child.stdout;
+    return child;
   }
 
-  /**
-   * Work a request started that outlives its response: the storage re-measure
-   * after a push, and the request body pumped into the child. Held so nothing
-   * is a fire-and-forget promise chain, and so a caller can wait for it.
-   */
-  public async settled(): Promise<void> {
-    await Promise.all(this.#background);
-  }
-
-  /** A file of the read-only dumb-HTTP layout, or `undefined`. */
-  public openDumbHttpFile(repositoryPath: string, relativePath: string): Readable | undefined {
-    if (!isDumbHttpPath(relativePath)) {
-      return undefined;
-    }
-    const resolved = path.resolve(repositoryPath, relativePath);
-    if (resolved !== path.normalize(resolved) || !resolved.startsWith(`${repositoryPath}${path.sep}`)) {
-      return undefined;
-    }
-    return createReadStream(resolved);
-  }
-
-  /**
-   * The repository's size on the volume, as `pre-receive`'s budget counts it.
-   *
-   * **Throws rather than answering zero when the walk fails** (review R4). This
-   * number is written straight into `storage_bytes`, which is what both plan
-   * guards subtract from the allowance, so a swallowed `readdir` failure — EMFILE
-   * under the 32-child ceiling is the obvious one — used to reset a full project
-   * to a full plan. The only caller logs and leaves the row alone, which is the
-   * fail-closed reading: a stale figure refuses too much, never too little.
-   *
-   * A single file that vanishes between `readdir` and `stat` is still counted as
-   * zero, because it really is gone.
-   *
-   * @param repositoryPath - The bare repository to measure.
-   * @returns Its size in bytes.
-   * @throws Error When the directory cannot be walked.
-   */
-  public async measureRepository(repositoryPath: string): Promise<number> {
-    const walk = async (directory: string): Promise<number> => {
-      const entries = await readdir(directory, { withFileTypes: true });
-      const sizes = await Promise.all(
-        entries.map(async (entry) => {
-          const child = path.join(directory, entry.name);
-          if (entry.isDirectory()) {
-            return walk(child);
-          }
-          if (!entry.isFile()) {
-            return 0;
-          }
-          try {
-            const info = await stat(child);
-            return info.size;
-          } catch {
-            return 0;
-          }
-        }),
-      );
-      return sizes.reduce((total, size) => total + size, 0);
+  private track(work: Promise<void>): void {
+    const settle = async (): Promise<void> => {
+      try {
+        await work;
+      } catch (error) {
+        /* Nothing is awaiting this promise but `settled()`, so an unhandled
+           rejection here would be the process's problem rather than the
+           request's (review F10). */
+        this.#logger.warn({ err: error }, 'Background work after a response failed');
+      } finally {
+        this.#background.delete(tracked);
+      }
     };
-    return walk(repositoryPath);
-  }
-
-  /** Every repository on the volume, for the nightly bundle snapshot. */
-  public async listRepositories(): Promise<readonly string[]> {
-    let entries: Dirent[];
-    try {
-      entries = await readdir(this.#root, { withFileTypes: true });
-    } catch {
-      return [];
-    }
-    return entries
-      .filter((entry) => entry.isDirectory() && entry.name.endsWith('.git'))
-      .map((entry) => entry.name.slice(0, -4));
+    const tracked = settle();
+    this.#background.add(tracked);
   }
 
   /**
-   * Every LFS object reachable from all refs.
-   *
-   * A read, and only a read. `refreshRecordRetentionRoots` used to run from
-   * here, which put a ref-writing `for-each-ref` + `rev-list` + batched
-   * `git grep` + `update-ref` fan-out **inside** `retireLfsObject`'s
-   * `pg_advisory_xact_lock` transaction, where R14 needs a reachability
-   * recheck — so a nightly collection pass held one account's storage gate
-   * across minutes of git work and every concurrent push got `503
-   * GIT_STORAGE_BUSY` (review C30). The refresh is maintenance and now runs
-   * once per pass from `GitBackupService`, under the repository gate it
-   * already holds.
-   *
-   * @param projectId - The project to scan.
-   * @returns Every oid `git lfs ls-files --all` reports.
+   * Disposes a fetch's lease once its child has closed, and gives the
+   * admission back. A failure here leaks a temporary directory, which is
+   * recoverable; failing the response the client already has is not.
    */
-  public async reachableLfsOids(projectId: string): Promise<ReadonlySet<string>> {
-    const repositoryPath = this.repositoryPath(projectId);
-    const listed = Buffer.from(await this.run(['lfs', 'ls-files', '--all', '--long'], repositoryPath)).toString('utf8');
-    return new Set(
-      listed
-        .split('\n')
-        .map((line) => /^(?<oid>[\da-f]{64})\s/u.exec(line)?.groups?.['oid'])
-        .filter((oid) => oid !== undefined),
+  private async disposeAfterFetch(lease: RepositoryLease, release: () => void, projectId: string): Promise<void> {
+    await this.disposeQuietly(lease, projectId);
+    release();
+  }
+
+  /**
+   * Disposes a lease and never raises (review F2).
+   *
+   * Every caller has something more important to do next — give the admission
+   * back, or raise the refusal the request actually earned — and a `rm -rf`
+   * that hit EBUSY must not take either of those away. What it costs is a
+   * temporary directory, which is recoverable; what the alternative cost was is
+   * a worker that refuses every later request.
+   */
+  private async disposeQuietly(lease: RepositoryLease | undefined, projectId: string): Promise<void> {
+    try {
+      await lease?.dispose();
+    } catch (error) {
+      this.#logger.warn({ err: error, projectId }, 'Lease disposal failed; its directory is left behind');
+    }
+  }
+
+  /** Every byte a child wrote to stdout. */
+  private async collect(stream: Readable): Promise<Uint8Array<ArrayBuffer>> {
+    const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+    for await (const chunk of stream) {
+      chunks.push(chunk as Uint8Array<ArrayBuffer>);
+    }
+    return Buffer.concat(chunks);
+  }
+
+  /**
+   * Resolves when the child has exited, whatever its status.
+   *
+   * `receive-pack` exits 0 on a push it refused entirely, so its code is never
+   * the commit signal — the ref-map difference is (`store/commit.ts`). This
+   * only orders the commit after the child.
+   */
+  private async awaitChild(child: ChildProcessByStdio<Writable, Readable, Readable>): Promise<void> {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      child.once('close', () => {
+        resolve();
+      });
+      child.once('error', () => {
+        resolve();
+      });
+    });
+  }
+
+  /**
+   * Streams the request body into the child, counting what actually arrived.
+   *
+   * @returns A promise that also carries the running byte count.
+   */
+  private pipeRequestBody(args: {
+    body: Readable;
+    child: ChildProcessByStdio<Writable, Readable, Readable>;
+    gzipped: boolean;
+    service: GitSmartService;
+    maximumInputBytes: number;
+  }): { done: Promise<void>; counter: { bytes: number } } {
+    const counter = { bytes: 0 };
+    const ceiling = args.maximumInputBytes;
+    const source = args.gzipped ? args.body.pipe(createGunzip()) : args.body;
+    source.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
+      counter.bytes += chunk.byteLength;
+      if (ceiling > 0 && counter.bytes > ceiling) {
+        source.destroy(new Error(`The request body exceeded ${String(ceiling)} bytes.`));
+      }
+    });
+    const done = (async (): Promise<void> => {
+      try {
+        await pipeline(source, args.child.stdin);
+      } catch (error) {
+        this.#logger.warn({ err: error, service: args.service }, 'git smart-HTTP request body failed');
+        args.child.kill('SIGKILL');
+      }
+    })();
+    return { done, counter };
+  }
+
+  /**
+   * Records the manifest generation this worker just committed (D19).
+   *
+   * Written before derivation and separately from it, which is the whole
+   * mechanism: a worker killed between the two leaves `derived_generation`
+   * behind the store, and the next request to touch this project repairs it.
+   * There is no reconcile job.
+   *
+   * Idempotent and monotonic. It is not the row that decides whether a repair
+   * is owed — the manifest is (see `repairDerivedState`) — so this write only
+   * ever carries the column *forward*: a slow writer for generation 5 landing
+   * after generation 6 must not rewind the marker.
+   */
+  private async recordGeneration(projectId: string, generation: number): Promise<void> {
+    await this.databaseService.database
+      .insert(projectGit)
+      .values({ projectId, generation })
+      .onConflictDoUpdate({
+        target: projectGit.projectId,
+        set: { generation, updatedAt: new Date() },
+        setWhere: lt(projectGit.generation, generation),
+      });
+  }
+
+  /**
+   * Re-derives everything that follows from a committed manifest (D19).
+   *
+   * Byte accounting is the manifest's own live pack bytes, so nothing walks a
+   * directory to find out how large a repository is any more. Publications and
+   * LFS reachability read through the lease that is already open.
+   *
+   * A failure here is logged and swallowed on purpose. The push is durable by
+   * the time this runs, and telling a client its committed push failed is the
+   * one lie this path must not tell; the generation mismatch it leaves behind
+   * is what the next request repairs.
+   */
+  private async derive(args: {
+    access: GitAccess;
+    lease: RepositoryLease;
+    manifest: Manifest;
+    /** The refs this commit moved, or every ref of the manifest on a repair. */
+    moved: readonly MovedRef[];
+  }): Promise<void> {
+    const { access, manifest } = args;
+    const storageBytes = manifest.packs.reduce((total, pack) => total + pack.bytes, 0);
+    try {
+      const tags = args.moved.flatMap((ref) =>
+        ref.ref.startsWith('refs/tags/') && ref.after !== undefined ? [{ ref: ref.ref, oid: ref.after }] : [],
+      );
+      if (tags.length > 0) {
+        await materializePublishedTags(this.materializerDependencies, {
+          projectId: access.projectId,
+          ownerId: access.ownerId,
+          directory: args.lease.directory,
+          tags,
+        });
+      }
+      await markLfsReachability(
+        { database: this.databaseService.database },
+        {
+          projectId: access.projectId,
+          ownerId: access.ownerId,
+          directory: args.lease.directory,
+          at: new Date(),
+        },
+      );
+    } catch (error) {
+      this.#logger.warn(
+        { err: error, projectId: access.projectId, generation: manifest.generation },
+        'Derived state could not be rebuilt; the next request for this project repairs it',
+      );
+      return;
+    }
+
+    await this.databaseService.database
+      .insert(projectGit)
+      .values({
+        projectId: access.projectId,
+        storageBytes,
+        generation: manifest.generation,
+        derivedGeneration: manifest.generation,
+      })
+      .onConflictDoUpdate({
+        target: projectGit.projectId,
+        set: {
+          storageBytes,
+          /* `generation` moves with the marker: this row is the proof that the
+             store reached this generation, so a repair that runs because
+             `recordGeneration` never did must leave the two columns agreeing
+             (review F1). */
+          generation: manifest.generation,
+          derivedGeneration: manifest.generation,
+          updatedAt: new Date(),
+        },
+        /* Compare-and-swap (review F4). A request repairing generation 5 and a
+           request committing generation 6 are not ordered by anything, and the
+           slower of the two must not take `derived_generation` — and
+           `storage_bytes` with it — backwards. */
+        setWhere: lt(projectGit.derivedGeneration, manifest.generation),
+      });
+  }
+
+  /**
+   * Repairs derived state a worker that died after its commit left behind (D19).
+   *
+   * **The manifest decides, never the row** (review F1). The row was the
+   * gate here once — `derived_generation >= generation` — and that made the
+   * repair blind to the one window it exists for: a worker killed between
+   * `commitLease` and `recordGeneration` leaves the store at N+1 and the row
+   * at N/N, which reads as "caught up" forever. The tag is durable and
+   * advertised, the publication is never materialized, and the LFS objects the
+   * push made reachable keep their `unreachable_at` and become eligible for
+   * retirement — W4's "no reachable pointer without bytes" broken permanently.
+   *
+   * This request already hydrated a lease, so it already holds the only
+   * authority on what committed. A missing row is generation 0.
+   *
+   * One row read per git request. On a mismatch the whole derivation is re-run
+   * over the lease this request holds, against every tag the manifest names
+   * rather than the ref-map difference of a push nobody recorded.
+   */
+  private async repairDerivedState(access: GitAccess, lease: RepositoryLease): Promise<void> {
+    const { manifest } = lease;
+    if (manifest === undefined) {
+      return;
+    }
+    const rows = await this.databaseService.database
+      .select({
+        generation: projectGit.generation,
+        derivedGeneration: projectGit.derivedGeneration,
+      })
+      .from(projectGit)
+      .where(eq(projectGit.projectId, access.projectId))
+      .limit(1);
+    const derivedGeneration = rows[0]?.derivedGeneration ?? 0;
+    if (derivedGeneration >= manifest.generation) {
+      return;
+    }
+    this.#logger.log(
+      { projectId: access.projectId, generation: manifest.generation, derivedGeneration },
+      'Repairing derived state left behind by an interrupted worker',
     );
+    await this.derive({
+      access,
+      lease,
+      manifest,
+      moved: Object.entries(manifest.refs).map(([ref, value]) => ({ ref, after: value.oid })),
+    });
   }
 
   /**
    * One bounded git invocation whose whole output is wanted.
    *
-   * Counted against the same 32-child ceiling `serve` uses, because the ceiling
-   * protects the machine's memory and CPU and every git child on it is one of
-   * those children — the publication materializer's `ls-tree`/`cat-file` pairs
-   * included (review R8).
-   *
    * @param args - Arguments after `git`.
    * @param cwd - Where the child runs; also its `HOME`.
    * @param stdin - Written to the child and closed, when given.
    * @returns The child's whole stdout.
-   * @throws ServiceUnavailableException When the child ceiling is reached.
    * @throws Error When git exits non-zero.
    */
-  public async run(args: readonly string[], cwd: string, stdin?: string): Promise<Uint8Array<ArrayBuffer>> {
-    if (this.#activeChildren >= maximumConcurrentChildren) {
-      throw new ServiceUnavailableException({
-        code: 'GIT_BUSY',
-        message: 'Too many git operations in flight; retry shortly.',
-      });
-    }
-    this.#activeChildren += 1;
-    try {
-      return await this.spawnRun(args, cwd, stdin);
-    } finally {
-      this.#activeChildren -= 1;
-    }
-  }
-
-  /**
-   * Retry every published-tag spool a previous process did not finish.
-   *
-   * Called once at boot: a crash between claiming a spool and writing the row
-   * would otherwise leave a publication serving a superseded tree forever
-   * (review R8).
-   */
-  public async sweepPublishedTagSpools(): Promise<void> {
-    for (const projectId of await this.listRepositories()) {
-      const repositoryPath = this.repositoryPath(projectId);
-      let names: readonly string[];
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- one repository at a time, once at boot.
-        names = await readdir(repositoryPath);
-      } catch {
-        continue;
-      }
-      for (const name of names) {
-        if (name === publishedTagSpoolFile) {
-          // oxlint-disable-next-line no-await-in-loop -- sequential by design, see above.
-          await this.materializeAfterPush(projectId, repositoryPath);
-          continue;
-        }
-        if (name.startsWith(`${publishedTagSpoolFile}.`) && name.endsWith('.claimed')) {
-          // oxlint-disable-next-line no-await-in-loop -- ditto.
-          await this.drainClaimedSpool(projectId, repositoryPath, path.join(repositoryPath, name));
-        }
-      }
-    }
-  }
-
-  /**
-   * Keep revisions named only inside synchronized chat records reachable from
-   * git's own collector.
-   *
-   * A maintenance **writer**: it moves `refs/tau/retention/records/*` and
-   * spawns a `git grep` per 256 revisions to find them. Called once per
-   * collection pass from `GitBackupService`, inside the repository-maintenance
-   * window it already holds, and never from a request or from inside a database
-   * transaction (review C30).
-   *
-   * @param repositoryPath - The bare repository to reconcile.
-   * @returns Nothing.
-   */
-  public async refreshRecordRetentionRoots(repositoryPath: string): Promise<void> {
-    const listed = Buffer.from(
-      await this.run(
-        [
-          'for-each-ref',
-          '--format=%(refname) %(objectname)',
-          'refs/tau/chats/',
-          'refs/tau/evidence/',
-          'refs/tau/artifacts/',
-        ],
-        repositoryPath,
-      ),
-    ).toString('utf8');
-    const recordReferences = listed
-      .split('\n')
-      .map((line) => line.slice(0, line.indexOf(' ')))
-      .filter((ref) => ref !== '');
-    let matching = '';
-    if (recordReferences.length > 0) {
-      const versions = [
-        ...new Set(
-          Buffer.from(await this.run(['rev-list', ...recordReferences], repositoryPath))
-            .toString('utf8')
-            .split('\n')
-            .filter((oid) => oid !== ''),
-        ),
-      ];
-      for (let offset = 0; offset < versions.length; offset += 256) {
-        try {
-          // oxlint-disable-next-line no-await-in-loop -- bounded argv batches keep record-history scans below OS limits.
-          const bytes = await this.run(
-            [
-              'grep',
-              '-h',
-              '-I',
-              '-E',
-              String.raw`[0-9a-f]{40}([0-9a-f]{24})?`,
-              ...versions.slice(offset, offset + 256),
-              '--',
-            ],
-            repositoryPath,
-          );
-          matching += Buffer.from(bytes).toString('utf8');
-        } catch (error) {
-          if (!(error instanceof Error && /\bexited 1:\s*$/u.test(error.message))) {
-            throw error;
-          }
-          // Git grep uses exit 1 for a verified no-match result.
-        }
-      }
-    }
-    const candidates = [...new Set(matching.match(/\b[\da-f]{40}(?:[\da-f]{24})?\b/gu) ?? [])];
-    const checked =
-      candidates.length === 0
-        ? ''
-        : Buffer.from(
-            await this.run(
-              ['cat-file', '--batch-check=%(objectname) %(objecttype)'],
-              repositoryPath,
-              `${candidates.join('\n')}\n`,
-            ),
-          ).toString('utf8');
-    const retained = new Set(
-      checked.split('\n').flatMap((line) => {
-        const [oid, type] = line.split(' ');
-        return type === 'commit' && oid !== undefined ? [oid] : [];
-      }),
-    );
-    const current = new Map(
-      Buffer.from(
-        await this.run(
-          ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/tau/retention/records/'],
-          repositoryPath,
-        ),
-      )
-        .toString('utf8')
-        .split('\n')
-        .flatMap((line) => {
-          const [ref, oid] = line.split(' ');
-          return ref === undefined || ref === '' || oid === undefined ? [] : [[ref, oid] as const];
-        }),
-    );
-    const commands = [
-      ...[...retained]
-        .filter((oid) => !current.has(`refs/tau/retention/records/${oid}`))
-        .map((oid) => `update refs/tau/retention/records/${oid} ${oid}`),
-      ...[...current]
-        .filter(([ref]) => !retained.has(ref.slice('refs/tau/retention/records/'.length)))
-        .map(([ref, oid]) => `delete ${ref} ${oid}`),
-    ];
-    if (commands.length > 0) {
-      await this.run(['update-ref', '--stdin'], repositoryPath, `${commands.join('\n')}\n`);
-    }
-  }
-
-  private claimStorageOwner(ownerId: string): () => void {
-    if (this.#activeStorageOwners.has(ownerId)) {
-      throw new ServiceUnavailableException({
-        code: 'GIT_STORAGE_BUSY',
-        message: 'Another storage write for this account is in flight; retry shortly.',
-      });
-    }
-    this.#activeStorageOwners.add(ownerId);
-    let released = false;
-    return () => {
-      if (!released) {
-        released = true;
-        this.#activeStorageOwners.delete(ownerId);
-      }
-    };
-  }
-
-  private claimRepositoryOperation(projectId: string): () => void {
-    if (this.#activeRepositoryOperations.has(projectId)) {
-      throw new ServiceUnavailableException({
-        code: 'GIT_REPOSITORY_BUSY',
-        message: 'Another repository maintenance operation is in flight; retry shortly.',
-      });
-    }
-    this.#activeRepositoryOperations.add(projectId);
-    return () => {
-      this.#activeRepositoryOperations.delete(projectId);
-    };
-  }
-
-  private async spawnRun(args: readonly string[], cwd: string, stdin?: string): Promise<Uint8Array<ArrayBuffer>> {
+  private async runGit(args: readonly string[], cwd: string, stdin?: string): Promise<Uint8Array<ArrayBuffer>> {
     return new Promise((resolve, reject) => {
       const child = spawn(gitExecutable, [...args], {
         cwd,
@@ -1169,220 +1176,5 @@ export class GitRepositoryService implements OnApplicationBootstrap {
         child.stdin.end(stdin);
       }
     });
-  }
-
-  /**
-   * Hooks are written to a temporary name with their mode and `rename`d into
-   * place, which is atomic within the repository's own filesystem: a push that
-   * arrives mid-reconcile sees either the old hook or the new one, never an
-   * empty or non-executable file (both of which git treats as "no hook" and
-   * would fail open). A hook whose bytes already match is left alone.
-   */
-  private async installHooks(repositoryPath: string): Promise<void> {
-    const hooks = path.join(repositoryPath, 'hooks');
-    await mkdir(hooks, { recursive: true });
-    await Promise.all(
-      (
-        [
-          ['pre-receive', preReceiveHookScript],
-          ['post-receive', postReceiveHookScript],
-        ] as const
-      ).map(async ([name, body]) => {
-        const file = path.join(hooks, name);
-        try {
-          const existing = await readFile(file, 'utf8');
-          if (existing === body) {
-            return;
-          }
-        } catch {
-          // Absent or unreadable: write it.
-        }
-        const staged = path.join(hooks, `.${name}.${String(process.pid)}.tmp`);
-        await writeFile(staged, body, { encoding: 'utf8', mode: 0o755 });
-        await rename(staged, file);
-      }),
-    );
-  }
-
-  private track(work: Promise<void>): void {
-    const settle = async (): Promise<void> => {
-      try {
-        await work;
-      } finally {
-        this.#background.delete(tracked);
-      }
-    };
-    const tracked = settle();
-    this.#background.add(tracked);
-  }
-
-  private async pipeRequestBody(args: {
-    body: Readable;
-    child: ChildProcessByStdio<Writable, Readable, Readable>;
-    gzipped: boolean;
-    service: GitSmartService;
-    /** Counted so a flush-only request is not mistaken for a push (review R4). */
-    request: { bytes: number };
-    /** The body ceiling; `0` and `undefined` are both "unbounded" (review C32). */
-    maximumInputBytes?: number;
-  }): Promise<void> {
-    const ceiling = args.maximumInputBytes ?? 0;
-    const source = args.gzipped ? args.body.pipe(createGunzip()) : args.body;
-    source.on('data', (chunk: Uint8Array<ArrayBuffer>) => {
-      args.request.bytes += chunk.byteLength;
-      if (ceiling > 0 && args.request.bytes > ceiling) {
-        source.destroy(new Error(`The request body exceeded ${String(ceiling)} bytes.`));
-      }
-    });
-    try {
-      await pipeline(source, args.child.stdin);
-    } catch (error) {
-      this.#logger.warn({ err: error, service: args.service }, 'git smart-HTTP request body failed');
-      args.child.kill('SIGKILL');
-    }
-  }
-
-  /**
-   * Re-materialize every publication whose named version this push moved.
-   *
-   * The spool is read and removed before the work starts, so a second push
-   * arriving mid-materialization records its own names rather than having them
-   * dropped, and a spool that names nothing published costs one query.
-   *
-   * @param projectId - The project that was pushed to.
-   * @param repositoryPath - Its bare repository.
-   */
-  /**
-   * What the publication materializer needs from this service.
-   *
-   * The runner is this service's own, so the children a materialization starts
-   * are counted by the same ceiling as every other git child (review R8).
-   */
-  private get materializerDependencies(): MaterializerDependencies {
-    return {
-      databaseService: this.databaseService,
-      storage: this.storage,
-      git: async (repositoryPath, args, stdin) => this.run(args, repositoryPath, stdin),
-    };
-  }
-
-  /**
-   * Re-materialize every publication whose named version this push moved.
-   *
-   * The spool is *renamed* before the work starts, so a push arriving
-   * mid-materialization records its own names into a fresh file, and the claimed
-   * file is removed only once the work succeeded — a crash or a restart leaves
-   * it for `sweepPublishedTagSpools` to pick up rather than losing the names
-   * (review R8).
-   *
-   * @param projectId - The project that was pushed to.
-   * @param repositoryPath - Its bare repository.
-   */
-  private async materializeAfterPush(projectId: string, repositoryPath: string): Promise<void> {
-    const spool = path.join(repositoryPath, publishedTagSpoolFile);
-    const claimed = `${spool}.${randomUUID()}.claimed`;
-    try {
-      await rename(spool, claimed);
-    } catch {
-      /* No tag moved: the hook writes the file only when one did. */
-      return;
-    }
-    await this.drainClaimedSpool(projectId, repositoryPath, claimed);
-  }
-
-  /**
-   * Materialize the names one claimed spool file holds, and remove it on success.
-   *
-   * @param projectId - The project the repository belongs to.
-   * @param repositoryPath - Its bare repository.
-   * @param claimed - The renamed spool file.
-   */
-  private async drainClaimedSpool(projectId: string, repositoryPath: string, claimed: string): Promise<void> {
-    let tags: readonly string[] = [];
-    try {
-      const recorded = await readFile(claimed, 'utf8');
-      tags = recorded
-        .split('\n')
-        .filter((line) => line.startsWith('refs/tags/'))
-        .map((line) => line.slice('refs/tags/'.length));
-    } catch (error) {
-      this.#logger.warn({ err: error, projectId }, 'Published-tag spool could not be read');
-      return;
-    }
-    if (tags.length === 0) {
-      await rm(claimed, { force: true });
-      return;
-    }
-    try {
-      const materialized = await materializePublishedTags(this.materializerDependencies, {
-        projectId,
-        repositoryPath,
-        tags,
-      });
-      await rm(claimed, { force: true });
-      if (materialized.length > 0) {
-        this.#logger.log({ projectId, tags, materialized }, 'Re-materialized publications after a push');
-      }
-    } catch (error) {
-      /* Kept on disk deliberately: the publication is still serving the previous
-         tree and the next push or boot retries these names. */
-      this.#logger.warn({ err: error, projectId, tags, claimed }, 'Publication materialization failed after a push');
-    }
-  }
-
-  /**
-   * Re-measure one project's repository and record it.
-   *
-   * **Serialized per project** (review R4): two pushes to one project — two
-   * devices on one account is the ordinary case — would otherwise walk and write
-   * concurrently, and the row would keep whichever measurement happened to
-   * finish last rather than the latest one. Chained, the last push's figure is
-   * the one that stands.
-   *
-   * A failed measurement leaves the row alone and is logged: `storage_bytes` is
-   * what both plan guards subtract from the allowance, so a stale figure is
-   * safe and a zero is not.
-   *
-   * @param projectId - The project that was pushed to.
-   * @param repositoryPath - Its bare repository.
-   * @returns Nothing.
-   */
-  private async accountAfterPush(projectId: string, repositoryPath: string): Promise<void> {
-    const measure = async (): Promise<void> => {
-      try {
-        await this.recordUsage({
-          projectId,
-          storageBytes: await this.measureRepository(repositoryPath),
-        });
-      } catch (error) {
-        this.#logger.warn({ err: error, projectId }, 'Repository storage accounting failed after a push');
-      }
-    };
-    const previous = this.#accounting.get(projectId);
-    const queued = (async () => {
-      await previous;
-      await measure();
-    })();
-    this.#accounting.set(projectId, queued);
-    try {
-      await queued;
-    } finally {
-      if (this.#accounting.get(projectId) === queued) {
-        this.#accounting.delete(projectId);
-      }
-    }
-  }
-
-  /**
-   * The boot sweep, with its failure kept off the process.
-   *
-   * @returns Nothing; a failure is logged and left to the next push or boot.
-   */
-  private async sweepAtBoot(): Promise<void> {
-    try {
-      await this.sweepPublishedTagSpools();
-    } catch (error) {
-      this.#logger.warn({ err: error }, 'Published-tag spool sweep failed at boot');
-    }
   }
 }

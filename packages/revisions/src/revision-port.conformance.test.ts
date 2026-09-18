@@ -138,8 +138,8 @@ const isomorphicHarness = async (): Promise<Harness> => {
         http: createRevisionHttpClient({ authorization: () => 'Bearer session-token' }),
       }),
     writeRawRef: async (name, head) => {
-      await filesystem.mkdir(`.tau/revisions/${name.slice(0, name.lastIndexOf('/'))}`, { recursive: true });
-      await filesystem.writeFile(`.tau/revisions/${name}`, `${head}\n`);
+      await filesystem.mkdir(`.git/${name.slice(0, name.lastIndexOf('/'))}`, { recursive: true });
+      await filesystem.writeFile(`.git/${name}`, `${head}\n`);
     },
     readGenerated: async (path) => filesystem.readFile(path, 'utf8'),
     liveRoot: `/projects/${projectId}`,
@@ -228,7 +228,7 @@ const conformance = (adapter: Adapter): void => {
     it('generates the ignore file', async () => {
       const ignore = await harness.readGenerated(generatedIgnorePath);
       expect(ignore).toContain('/.tau/cache/');
-      expect(ignore).toContain('/.tau/revisions/');
+      expect(ignore).toContain('/.git/');
       expect(ignore).toContain('node_modules/');
     });
 
@@ -1081,7 +1081,7 @@ describe('browser ref publication under a Web Lock (8-review S4)', () => {
         }),
       ]),
     ).resolves.toBe('waiting');
-    expect(requested).toEqual([`tau:revision-ref:${filesystem.id}:.tau/revisions:main`]);
+    expect(requested).toEqual([`tau:revision-ref:${filesystem.id}:.git:main`]);
 
     held.resolve();
     await expect(publishing).resolves.toMatchObject({ status: 'updated', name: 'main' });
@@ -1120,7 +1120,7 @@ describe('browser ref publication under a Web Lock (8-review S4)', () => {
         }),
       ]),
     ).resolves.toBe('waiting');
-    expect(requested).toEqual([`tau:revision-ref:${filesystem.id}:.tau/revisions:HEAD`]);
+    expect(requested).toEqual([`tau:revision-ref:${filesystem.id}:.git:HEAD`]);
 
     held.resolve();
     await moving;

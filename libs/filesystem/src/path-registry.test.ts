@@ -49,9 +49,20 @@ describe('path registry', () => {
   });
 
   it('answers the same for the directory itself and for anything beneath it', () => {
-    expect(classify('.tau/revisions').agentAccess).toBe('hidden');
-    expect(classify('.tau/revisions/objects/ab/cdef').agentAccess).toBe('hidden');
-    expect(classify('/.tau/revisions/HEAD').agentAccess).toBe('hidden');
+    expect(classify('.git').agentAccess).toBe('hidden');
+    expect(classify('.git/objects/ab/cdef').agentAccess).toBe('hidden');
+    expect(classify('/.git/HEAD').agentAccess).toBe('hidden');
+  });
+
+  /* Ruling D29: one repository name on every host. `.tau/revisions` was the
+   * browser's second name for the same directory; nothing but the anchored
+   * `.git` row may claim the control plane now. */
+  it('names the repository once, at .git', () => {
+    expect(pathRegistry.filter((row) => row.class === 'control-plane').map((row) => row.prefix)).toStrictEqual([
+      '.tau/binding.json',
+      '.jj',
+      '.git',
+    ]);
   });
 
   it('matches a nested node_modules but only a project-root exports', () => {

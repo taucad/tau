@@ -10,6 +10,7 @@ import type { IdPrefix } from '@taucad/types';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type { DatabaseService } from '#database/database.service.js';
+import { storageTombstone } from '#database/schema.js';
 import type { Environment } from '#config/environment.config.js';
 import { staticAuthConfig } from '#config/auth.js';
 import type { EmailService } from '#email/email.service.js';
@@ -20,6 +21,9 @@ import {
   buildFrontendVerificationUrl,
 } from '#email/email-link-builder.js';
 import { deviceFromRequest, tokenLifetimeSeconds } from '#email/email-copy.js';
+
+/** D10: thirty days between a deletion and the purge that may follow it. Milliseconds. */
+const storageTombstoneGrace = 30 * 24 * 60 * 60 * 1000;
 
 // The recipient's timezone is not knowable from the reset request, so the row states UTC explicitly
 // rather than implying a local time the reader would have to second-guess.
@@ -123,13 +127,34 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
     user: {
       deleteUser: {
         enabled: true,
-        ...(options.closure
-          ? {
-              beforeDelete: async (user, request) => {
-                await options.closure?.prepareForAuthDeletion({ authUserId: user.id, request });
-              },
-            }
-          : {}),
+        /**
+         * D10: one storage lifecycle, and it starts here.
+         *
+         * Deleting the account cascades away every row that references it —
+         * projects, `project_git`, LFS reservations — but nothing in that
+         * cascade touches a byte in the object store, and afterwards nobody can
+         * say which prefixes were the account's. So the tombstone is written
+         * inside the same hook, and carries no foreign key, so the cascade that
+         * follows cannot take it with the rows. W6's purge job is its only
+         * reader, and `purge_after` is when it may act: thirty days out for an
+         * ordinary deletion, and moved to now when an erasure request is
+         * verified.
+         *
+         * **After the closure, not before it.** `prepareForAuthDeletion` can
+         * refuse the deletion outright, and the tombstone is idempotent by
+         * `owner_id` — so a row written before a refusal would still be there
+         * when the account was really deleted weeks later, and
+         * `onConflictDoNothing` would keep the abandoned attempt's `purge_after`
+         * rather than starting the window again. The closure deletes no bytes
+         * of its own, so writing first bought nothing to pay for that.
+         */
+        beforeDelete: async (user, request) => {
+          await options.closure?.prepareForAuthDeletion({ authUserId: user.id, request });
+          await databaseService.database
+            .insert(storageTombstone)
+            .values({ ownerId: user.id, purgeAfter: new Date(Date.now() + storageTombstoneGrace) })
+            .onConflictDoNothing();
+        },
       },
     },
 

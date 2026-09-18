@@ -444,6 +444,42 @@ describe('syncMachine', () => {
     harness.stop();
   });
 
+  /**
+   * W10 defect 4: on the isomorphic-git leg D20's ceiling refusal arrives as a
+   * per-ref result, not as a thrown transport error, and it used to be filed as
+   * `rejected` — whose one affordance is *Sync now*, which replays the same
+   * bytes and can never clear a ceiling. It is a quota answer, and the remote's
+   * own sentence (with the file list the hook prints) is still what is shown.
+   */
+  it('files a per-ref ceiling refusal as quota, keeping the remote’s sentence', async () => {
+    const harness = start();
+    await openCleanly(harness);
+
+    const sentence = [
+      'Tau: repository size limit exceeded — this push needs 4080 bytes more than this repository may hold.',
+      'Tau: the largest files it adds are:',
+      'Tau:   huge.bin (5000 bytes)',
+    ].join('\n');
+    harness.actor.send({ type: 'syncNow' });
+    await vi.waitFor(() => {
+      expect(harness.effects.running('push')).toBe(1);
+    });
+    harness.effects.settle('push', {
+      output: pushResult({ name: mainRef, status: 'rejected', head: 'h1', reason: sentence }),
+    });
+    await settleWhenRunning(harness.effects, 'writePending', { output: undefined });
+    await vi.waitFor(() => {
+      expect(harness.actor.getSnapshot().matches('queued')).toBe(true);
+    });
+
+    const facet = selectSyncFacet(harness.actor.getSnapshot());
+    expect(facet.reason).toBe('quota');
+    expect(facet.error).toContain('Tau: repository size limit exceeded');
+    expect(facet.error).toContain('huge.bin (5000 bytes)');
+
+    harness.stop();
+  });
+
   it('row 37 (C3b/N2): a refusal the plan will never satisfy is terminal, and names itself', async () => {
     const harness = start();
     await openCleanly(harness);

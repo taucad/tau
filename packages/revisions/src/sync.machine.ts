@@ -4,7 +4,7 @@
  * Sync is never a user event (D28, S41). A remote that is connected means every
  * minted revision reaches it within one debounce; a tab going hidden means the
  * `close` revision is pushed while the page can still `await`; anything the
- * server did not acknowledge is a record in `.tau/revisions/sync-pending` that
+ * server did not acknowledge is a record in `.git/sync-pending` that
  * the next open of this project on this device retries before it does anything
  * else. Opening pulls first, under a bound, so a second device sees the first
  * device's work without anybody pressing anything.
@@ -30,6 +30,7 @@
 import { assign, emit, enqueueActions, fromCallback, fromPromise, setup } from 'xstate';
 import type { AnyActorRef, SnapshotFrom } from 'xstate';
 
+import { isCeilingRefusal } from '#refusal-markers.js';
 import type { RemoteStorageRefusal } from '#revision-port.js';
 
 /** How one offered ref ended, in the port's own three outcomes. @public */
@@ -50,7 +51,7 @@ export type SyncRefOutcome = Readonly<{
  * One ref this device has not had acknowledged yet.
  *
  * A record, not a machine snapshot: it is written as JSON under
- * `.tau/revisions/sync-pending` and is the whole of what "retried on the next
+ * `.git/sync-pending` and is the whole of what "retried on the next
  * open" reads.
  *
  * @public
@@ -88,7 +89,7 @@ export type SyncQueueEntry = Readonly<{
   recordedAt: number;
 }>;
 
-/** The durable queue as the record spells it (`.tau/revisions/sync-pending`). @public */
+/** The durable queue as the record spells it (`.git/sync-pending`). @public */
 export type SyncQueueRecord = Readonly<{ version: 1; entries: readonly SyncQueueEntry[] }>;
 
 /**
@@ -1211,7 +1212,18 @@ export const syncMachine = setup({
               attempt: pending.length > 0 ? context.attempt + 1 : 0,
               conflictRef: refusedHistory === undefined ? undefined : refusedHistory.name,
               error: refusedHistory?.reason ?? (pending.length > 0 ? pending[0]?.reason : undefined),
-              reason: pending.length > 0 ? 'rejected' : undefined,
+              /* D20's ceiling refusal arrives here as a per-ref result rather
+                 than as a thrown transport error, and it is a quota answer:
+                 *Sync now* replays the same bytes and cannot clear a ceiling
+                 (W10 defect 4). Recognised by the same predicate the native
+                 leg uses; every other refusal stays `rejected`, and the
+                 remote's own sentence and file list are untouched either way. */
+              reason:
+                pending.length > 0
+                  ? pending.some((entry) => isCeilingRefusal(entry.reason))
+                    ? 'quota'
+                    : 'rejected'
+                  : undefined,
             });
             /* The over-quota list is `remote.machine`'s, always (P19, A40): the
              * scheduler forwards it through the parent and keeps no copy. */

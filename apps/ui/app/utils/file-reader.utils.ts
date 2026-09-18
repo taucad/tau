@@ -13,24 +13,50 @@ export type FileData = {
 
 export type FileMap = Map<string, FileData>;
 
-/** Regenerable bytes an import recreates rather than carries (path registry). */
-const isDerivedImportCachePath = (path: string): boolean => classify(path).class === 'cache';
+/**
+ * Whether an import leaves this path behind.
+ *
+ * An import carries a working tree. It does not carry the bytes a host
+ * regenerates (`cache`), and it does not carry the repository that came with the
+ * tree (`control-plane`): under D29/ND23 the new project's own repository lives
+ * at `.git` inside the very same filesystem as its working tree, so those bytes
+ * would not sit beside the store — they would be written over it, before it is
+ * initialized.
+ *
+ * The one place that question is asked. The disk machine asks it at the top of
+ * its funnel, so the repository never reaches the main-file picker; this module
+ * asks it again at the project-create boundary, which is where the archive route
+ * arrives with no machine in front of it.
+ *
+ * The registry row for `.git` is anchored, so a vendored `vendor/dep/.git` stays
+ * the user's own content.
+ *
+ * @param path - Project-relative path from the imported tree.
+ * @returns Whether the import drops it.
+ * @public
+ */
+export const isExcludedImportPath = (path: string): boolean => {
+  const { class: storageClass } = classify(path);
+  return storageClass === 'cache' || storageClass === 'control-plane';
+};
 
 /**
- * Convert imported files into the project-create payload while omitting the
- * regenerable bytes the path registry classifies as cache.
+ * Convert imported files into the project-create payload, omitting what the
+ * path registry says an import does not carry.
  */
 export function createImportedProjectFiles(
   files: FileMap,
   mainFile: string,
 ): Record<string, { content: Uint8Array<ArrayBuffer> }> {
-  if (isDerivedImportCachePath(mainFile)) {
-    throw new Error('The selected main file is regenerable cache content and cannot be imported.');
+  if (isExcludedImportPath(mainFile)) {
+    throw new Error(
+      "That file belongs to a repository or a cache, so it can't be the main file. Choose a design file.",
+    );
   }
 
   const projectFiles: Record<string, { content: Uint8Array<ArrayBuffer> }> = {};
   for (const [path, file] of files) {
-    if (!isDerivedImportCachePath(path)) {
+    if (!isExcludedImportPath(path)) {
       projectFiles[path] = { content: file.content };
     }
   }

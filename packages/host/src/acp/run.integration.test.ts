@@ -2347,11 +2347,11 @@ describe('external turns through the revision port', () => {
     const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-mask-'));
     roots.push(cwd);
     await mkdir(join(cwd, '.tau', 'chats', 'chat-1'), { recursive: true });
-    await mkdir(join(cwd, '.tau', 'revisions'), { recursive: true });
+    await mkdir(join(cwd, '.git'), { recursive: true });
     await writeFile(join(cwd, '.tau', 'chats', 'chat-1', 'events.jsonl'), '{"type":"run.lifecycle"}\n', 'utf8');
-    await writeFile(join(cwd, '.tau', 'revisions', 'note.txt'), 'store\n', 'utf8');
+    await writeFile(join(cwd, '.git', 'note.txt'), 'store\n', 'utf8');
 
-    for (const path of ['.tau/chats/chat-1/events.jsonl', '.tau/revisions/note.txt', '.tau/chats']) {
+    for (const path of ['.tau/chats/chat-1/events.jsonl', '.git/note.txt', '.tau/chats']) {
       // oxlint-disable-next-line no-await-in-loop -- one refusal at a time is the assertion.
       await expect(writeSessionTextFile(cwd, { path, content: 'forged' })).rejects.toMatchObject({
         code: 'WORKSPACE_MASKED_PATH',
@@ -2369,7 +2369,7 @@ describe('external turns through the revision port', () => {
     );
     /* The revision control plane is invisible, not merely read-only: a read is
      * refused exactly as a write is (path registry `hidden`, north star S18). */
-    await expect(readSessionTextFile(cwd, { path: '.tau/revisions/note.txt' })).rejects.toMatchObject({
+    await expect(readSessionTextFile(cwd, { path: '.git/note.txt' })).rejects.toMatchObject({
       code: 'WORKSPACE_MASKED_PATH',
     });
     /* Inside `.tau` a path that only *starts* like a masked one is still Tau's

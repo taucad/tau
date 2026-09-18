@@ -25,6 +25,8 @@ const workspaceRoot = resolve(import.meta.dirname, '../../../..');
 export type TauCloudOwner = {
   readonly accountId: string;
   readonly email: string;
+  /** Better Auth asks for it again before it will delete the account (W10, D10). */
+  readonly password: string;
   readonly token: string;
   readonly userId: string;
 };
@@ -132,7 +134,7 @@ export const seedTauCloudOwner = async (label: string): Promise<TauCloudOwner> =
   const accountId = await psql(
     `SELECT account_id FROM billing.billing_owner_binding WHERE auth_user_id = '${userId}' AND revoked_at IS NULL;`,
   );
-  return { accountId, email: account.email, token, userId };
+  return { accountId, email: account.email, password: account.password, token, userId };
 };
 
 /**
@@ -294,3 +296,15 @@ export const runGit = async (
     return { code: failure.code ?? 1, stdout: failure.stdout ?? '', stderr: failure.stderr ?? String(error) };
   }
 };
+
+/**
+ * Run one read-only statement against the database the API boots with (W10).
+ *
+ * The same `docker exec` path the seeding helpers use, exported so the
+ * sustained-rate suite can read `pg_stat_database` counters at the start and
+ * the end of a run.
+ *
+ * @param statement - The SQL to run.
+ * @returns Its single-column output, trimmed.
+ */
+export const queryDatabase = async (statement: string): Promise<string> => psql(statement);

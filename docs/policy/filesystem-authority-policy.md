@@ -3,7 +3,7 @@ title: 'Filesystem Authority Policy'
 description: 'The single-filesystem-authority invariant: one FM-worker authority per host, one provider instance per storage root, mounts as pure routing from persistent config, manifest-based discovery, cross-tab coherence, and webaccess handle lifecycle rules.'
 status: active
 created: '2026-07-13'
-updated: '2026-09-14'
+updated: '2026-09-18'
 related:
   - docs/policy/filesystem-policy.md
   - docs/policy/revisions-policy.md
@@ -212,7 +212,7 @@ Every workspace has exactly four storage classes, each with one owner; a byte is
 | Authored: `tau.json`, sources, inputs, authored `.tau` controls, `.gitignore`, and `.gitattributes`; generated `.tau/types/**`, `.tau/tsconfig.generated.json`, and `.tau/lockfile.json` remain authored-class but unversioned | The selected checkout under the single authority; the path registry alone decides versioning            | Yes only where the registry says `versioned`; these bytes form the revision | Read and write (Rule 15)                                      |
 | Records: `.tau/chats/**`, `.tau/runs/**`, `.tau/artifacts/**`, `.tau/tool-results/**`, `.tau/offloaded-tool-results/**`, `exports/**`, `thumbnail.webp`                                                                        | The selected checkout authority's protected owner path; hosts write, agents may only read               | No                                                                          | Read-only (Rule 15, I-MASK)                                   |
 | Cache: `.tau/cache/**`, `node_modules/**`                                                                                                                                                                                      | Regenerable storage in or composed over the selected checkout; never a private compute-store projection | No                                                                          | Read and write; watch behavior follows provenance and Rule 26 |
-| Control plane: revision objects, refs and transactional metadata; binding, epoch, head-routing and idempotency state (`.tau/revisions/**`, `.git/**`, `.jj/**`, `refs/tau/*`, `.tau/binding.json`)                             | The revision authority, written only through `RevisionPort` and authority admission                     | No: a revision hash never covers its own store, refs, or control state      | Absent from every composed view; refused before provider I/O  |
+| Control plane: revision objects, refs and transactional metadata; binding, epoch, head-routing and idempotency state (`.git/**` on every host, `.jj/**`, `refs/tau/*`, `.tau/binding.json`)                                    | The revision authority, written only through `RevisionPort` and authority admission                     | No: a revision hash never covers its own store, refs, or control state      | Absent from every composed view; refused before provider I/O  |
 
 Classification is trusted and structural, never a glob: the authority names each class at admission, the generated ignore file is a convenience barrier, and a post-snapshot membership audit proves that no record, cache, control, or private byte entered a revision and no authored `.tau` control was excluded. Already-tracked bytes stay tracked; force-add attempts and symlink escapes into a private store are refused.
 

@@ -448,8 +448,26 @@ const config = [
           selector: 'Literal[value=/\\.tau\\/workspaces/], TemplateElement[value.raw=/\\.tau\\/workspaces/]',
           message:
             "`.tau/workspaces` is retired. A turn is placed on its chat's checkout; leases live " +
-            'at `.tau/runs/<runId>.json` and the store at `.tau/revisions`. ' +
+            'at `.tau/runs/<runId>.json` and the store at `.git`. ' +
             'See docs/architecture/workspace-filesystem-and-revisions.md (A38).',
+        },
+        {
+          // The browser's second name for the repository, retired by D29: one
+          // `.git` on every host, in the project's own filesystem. A residual
+          // directory is inert — it falls to `reservedTauPathClassification`
+          // like any unlisted `.tau` member (P13) — but nothing may name it
+          // again. Three halves: a plain string, a template literal's text, and
+          // the path-segment array the desktop e2e specs build, which is the
+          // spelling that survived the first sweep of this rename.
+          // (Comments are not AST nodes, so the two prose mentions that explain
+          // the history are untouched, and so is this rule's own source: this
+          // config is `.mjs` and the block only lints `.ts`/`.tsx`.)
+          selector:
+            'Literal[value=/\\.tau\\/revisions/], TemplateElement[value.raw=/\\.tau\\/revisions/], ArrayExpression > Literal[value=".tau"] + Literal[value="revisions"]',
+          message:
+            '`.tau/revisions` is retired. The repository is `.git` in the project root on every ' +
+            'host, browser included, and the durable sync queue is `.git/sync-pending`. ' +
+            'See docs/policy/revisions-policy.md and the charter (D29, ND23).',
         },
         {
           // The three modules S43 deleted, by name: the Jujutsu adapter, the

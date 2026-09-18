@@ -37,7 +37,7 @@ docker compose -f "${COMPOSE_FILE}" run --rm \
     mc anonymous get local/tau-content >/dev/null
 
     mc alias set apiLocal http://minio:9000 tau-api tau-api-dev-secret
-    printf probe | mc cp - apiLocal/tau-content/blobs/smoke/ci-probe.bin
+    printf probe | mc pipe apiLocal/tau-content/blobs/smoke/ci-probe.bin
     mc rm --force apiLocal/tau-content/blobs/smoke/ci-probe.bin >/dev/null
     echo "minio smoke ok"
   '

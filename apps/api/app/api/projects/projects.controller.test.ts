@@ -1,12 +1,10 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { BadRequestException, HttpStatus, NotFoundException } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
 import type { SQL } from 'drizzle-orm';
 import type { DatabaseService } from '#database/database.service.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
-import { project } from '#database/schema.js';
 import { registeredProjectLimitPerOwner } from '#api/git/git.constants.js';
-import type { GitRepositoryService } from '#api/git/git.service.js';
+import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { ProjectsController } from '#api/projects/projects.controller.js';
 import type { RegisterProjectDto } from '#api/projects/projects.dto.js';
@@ -31,14 +29,34 @@ describe('ProjectsController', () => {
    * the filter, or filtered on the wrong column, answers with rows that are not
    * the caller's (W18 DEF-2).
    */
-  const table = [
-    { id: 'proj_ownerbracket00000', ownerId, name: 'Bracket', updatedAt: new Date('2026-09-13T02:00:00.000Z') },
-    { id: 'proj_ownerhinge0000000', ownerId, name: 'Hinge', updatedAt: new Date('2026-09-13T01:00:00.000Z') },
+  const table: Array<{
+    id: string;
+    ownerId: string;
+    name: string;
+    updatedAt: Date;
+    /** D27: the project's collaborators, which the listing joins the caller against. */
+    collaborators: Record<string, string>;
+  }> = [
+    {
+      id: 'proj_ownerbracket00000',
+      ownerId,
+      name: 'Bracket',
+      updatedAt: new Date('2026-09-13T02:00:00.000Z'),
+      collaborators: { [strangerId]: 'write' },
+    },
+    {
+      id: 'proj_ownerhinge0000000',
+      ownerId,
+      name: 'Hinge',
+      updatedAt: new Date('2026-09-13T01:00:00.000Z'),
+      collaborators: {},
+    },
     {
       id: 'proj_strangerpart00000',
       ownerId: strangerId,
       name: 'Theirs',
       updatedAt: new Date('2026-09-13T03:00:00.000Z'),
+      collaborators: {},
     },
   ];
   let rows: Array<{ ownerId: string }>;
@@ -48,10 +66,11 @@ describe('ProjectsController', () => {
   let withinBudget: boolean;
   let inserted: Array<Record<string, unknown>>;
   let conditions: SQL[];
-  let ensureRepository: ReturnType<typeof vi.fn>;
   /** What the caller's plan entitles, which N5 checks before either write. */
   let canSyncFiles: boolean;
   let controller: ProjectsController;
+  /** The route's own database stub, reused by rows that build a second controller. */
+  let databaseStub: unknown;
 
   const entitlements = (): CommercialEntitlementsService => ({
     getEntitlements: async () => ({
@@ -61,11 +80,60 @@ describe('ProjectsController', () => {
     }),
   });
 
+  /**
+   * D27: the route's ownership decision is `ProjectAccessService.authorize`,
+   * not a comparison of its own. The stub answers from the same `rows` fixture
+   * the route's existence probe reads, so a registration that is not the
+   * caller's still ends in the ruling-P55 `404`.
+   *
+   * @returns The access authority the controller is constructed with.
+   */
+  const access = (): ProjectAccessService =>
+    ({
+      authorize: async (id: string, callerId: string) => {
+        const owner = rows[0]?.ownerId;
+        if (owner === undefined || owner !== callerId) {
+          throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: 'Project not found' });
+        }
+        return { projectId: id, ownerId: owner, role: 'owner' };
+      },
+      invalidate: () => undefined,
+    }) as unknown as ProjectAccessService;
+
   /** The one string a `column = $1` condition carries: the owner being asked for. */
-  const ownerOf = (condition: SQL | undefined): string | undefined =>
-    condition?.queryChunks
-      .map((chunk) => (chunk as Readonly<{ value?: unknown }>).value)
-      .find((value): value is string => typeof value === 'string');
+  const ownerOf = (condition: SQL | undefined): string | undefined => {
+    /* The listing's condition is an `or(...)` of two `eq(...)`s, so the caller's
+       id is one level down; the registration route's conditions are flat. */
+    const strings = (chunks: unknown[]): string[] =>
+      chunks.flatMap((chunk) => {
+        const { value } = chunk as Readonly<{ value?: unknown }>;
+        if (typeof value === 'string') {
+          return [value];
+        }
+        const nested = (chunk as Readonly<{ queryChunks?: unknown[] }>).queryChunks;
+        return nested === undefined ? [] : strings(nested);
+      });
+    return condition === undefined ? undefined : strings(condition.queryChunks)[0];
+  };
+
+  /**
+   * The joined read `ProjectAccessService` makes, over the same `rows` fixture
+   * the route's own existence probe reads.
+   *
+   * @param read - Where the project row comes from at call time.
+   * @returns A database stub with the one query the access service issues.
+   */
+  const databaseStubFor = (read: () => Array<{ ownerId: string }>): unknown => ({
+    database: {
+      select: () => ({
+        from: () => ({
+          leftJoin: () => ({
+            where: () => ({ limit: async (): Promise<unknown[]> => read().map((row) => ({ ...row, role: null })) }),
+          }),
+        }),
+      }),
+    },
+  });
 
   const body = (name?: string): RegisterProjectDto => {
     const dto: RegisterProjectDto = { name };
@@ -79,20 +147,38 @@ describe('ProjectsController', () => {
     inserted = [];
     conditions = [];
     canSyncFiles = true;
-    ensureRepository = vi.fn(async (id: string) => `/git/${id}.git`);
-    const databaseStub = {
+    databaseStub = {
       database: {
         /* The projection says which query this is: `{ value: count() }` is the
            R5 ceiling's count, anything else is a row read. */
         select: (projection?: Record<string, unknown>) => ({
           from: () => ({
+            /* Only the listing joins, so the join is what separates it from the
+               registration route's existence probe and its ceiling count. */
+            leftJoin: () => ({
+              where: (condition: SQL) => {
+                conditions.push(condition);
+                const caller = ownerOf(condition);
+                const visible = table.filter(
+                  (row) => row.ownerId === caller || (caller !== undefined && caller in row.collaborators),
+                );
+                return {
+                  orderBy: async (): Promise<unknown[]> =>
+                    visible.map((row) => ({
+                      id: row.id,
+                      name: row.name,
+                      updatedAt: row.updatedAt,
+                      ownerId: row.ownerId,
+                      role: caller === undefined ? null : (row.collaborators[caller] ?? null),
+                    })),
+                };
+              },
+            }),
             where: (condition: SQL) => {
               conditions.push(condition);
-              const mine = table.filter((row) => row.ownerId === ownerOf(condition));
               const counting = projection !== undefined && 'value' in projection;
               return {
                 limit: async (): Promise<unknown[]> => (counting ? [{ value: owned }] : rows),
-                orderBy: async (): Promise<typeof mine> => mine,
               };
             },
           }),
@@ -112,19 +198,34 @@ describe('ProjectsController', () => {
       },
     };
     controller = new ProjectsController(
-      databaseStub as unknown as DatabaseService,
-      { ensureRepository } as unknown as GitRepositoryService,
+      databaseStub as DatabaseService,
       {
         consumeDailyBudget: async () => ({ allowed: withinBudget, count: 1 }),
       } as unknown as PublicationRateLimiterService,
       entitlements(),
+      access(),
     );
   });
 
-  it('creates the caller’s project row and its bare repository', async () => {
+  /* F2: registration probes for the id, inserts, then authorizes. With a real
+     `ProjectAccessService` in the seat, a miss cached by an earlier lookup would
+     answer `404` for the row this call just wrote. */
+  it('registers a project the caller asked about moments earlier', async () => {
+    const live = new ProjectAccessService(databaseStubFor(() => rows) as DatabaseService);
+    const contested = new ProjectsController(
+      databaseStub as DatabaseService,
+      { consumeDailyBudget: async () => ({ allowed: true, count: 1 }) } as unknown as PublicationRateLimiterService,
+      entitlements(),
+      live,
+    );
+
+    await expect(live.authorize(projectId, ownerId, 'owner')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(contested.register(projectId, body('Bracket'), ownerId)).resolves.toEqual({ id: projectId });
+  });
+
+  it('creates the caller’s project row, and no repository (D1)', async () => {
     await expect(controller.register(projectId, body('Bracket'), ownerId)).resolves.toEqual({ id: projectId });
     expect(inserted).toEqual([{ id: projectId, ownerId, name: 'Bracket', origin: 'local-mirror' }]);
-    expect(ensureRepository).toHaveBeenCalledWith(projectId);
   });
 
   /**
@@ -144,14 +245,12 @@ describe('ProjectsController', () => {
       response: { code: 'GIT_SYNC_NOT_ENTITLED', message: 'Syncing files to Tau Cloud is a paid plan feature.' },
     });
     expect(inserted).toEqual([]);
-    expect(ensureRepository).not.toHaveBeenCalled();
   });
 
   it('is idempotent for the owner and still reconciles the repository', async () => {
     rows = [{ ownerId }];
     await expect(controller.register(projectId, body('Bracket'), ownerId)).resolves.toEqual({ id: projectId });
     expect(inserted).toEqual([]);
-    expect(ensureRepository).toHaveBeenCalledWith(projectId);
   });
 
   /* Ruling P55: the same answer for "no such project" and "not yours", so a
@@ -163,7 +262,6 @@ describe('ProjectsController', () => {
     await expect(controller.register(projectId, body(), ownerId)).rejects.toMatchObject({
       response: { code: 'PROJECT_NOT_FOUND' },
     });
-    expect(ensureRepository).not.toHaveBeenCalled();
     expect(inserted).toEqual([]);
   });
 
@@ -171,20 +269,12 @@ describe('ProjectsController', () => {
      the only thing that can tell it the id is not its own. Without it the loser
      is answered `200` for somebody else's project. */
   it('answers 404 when it loses the insert race for the id', async () => {
-    const stranger = [{ ownerId: strangerId }];
-    let reads = 0;
     const racing = {
       database: {
         select: () => ({
           from: () => ({
-            where: () => ({
-              limit: async (): Promise<Array<{ ownerId: string }>> => {
-                reads += 1;
-                /* Absent when the route looks, another account's by the time the
-                   insert has been attempted. */
-                return reads === 1 ? [] : stranger;
-              },
-            }),
+            /* Absent when the route looks, so it goes on to insert. */
+            where: () => ({ limit: async (): Promise<Array<{ ownerId: string }>> => [] }),
           }),
         }),
         insert: () => ({
@@ -198,27 +288,32 @@ describe('ProjectsController', () => {
     };
     const contested = new ProjectsController(
       racing as unknown as DatabaseService,
-      { ensureRepository } as unknown as GitRepositoryService,
       { consumeDailyBudget: async () => ({ allowed: true, count: 1 }) } as unknown as PublicationRateLimiterService,
       entitlements(),
+      /* The winner's row by the time the loser re-checks: `authorize` is what
+         tells the loser the id is not its own (review R6). */
+      {
+        authorize: async () => {
+          throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: 'Project not found' });
+        },
+        invalidate: () => undefined,
+      } as unknown as ProjectAccessService,
     );
 
     await expect(contested.register(projectId, body(), ownerId)).rejects.toMatchObject({
       response: { code: 'PROJECT_NOT_FOUND' },
     });
-    expect(ensureRepository).not.toHaveBeenCalled();
   });
 
-  /* Review R5: P51 made bare-repository creation reachable without a publish, so
-     it needs a ceiling. The cap counts projects, not calls, so an owner at the
-     cap can still re-register what it already has. */
+  /* Review R5: P51 made registration reachable without a publish, so it needs a
+     ceiling. The cap counts projects, not calls, so an owner at the cap can
+     still re-register what it already has. */
   it('refuses the registration past the per-account project ceiling', async () => {
     owned = registeredProjectLimitPerOwner;
     await expect(controller.register(projectId, body(), ownerId)).rejects.toMatchObject({
       response: { code: 'PROJECT_LIMIT_REACHED' },
     });
     expect(inserted).toEqual([]);
-    expect(ensureRepository).not.toHaveBeenCalled();
 
     owned = registeredProjectLimitPerOwner - 1;
     await expect(controller.register(projectId, body(), ownerId)).resolves.toEqual({ id: projectId });
@@ -239,12 +334,10 @@ describe('ProjectsController', () => {
     });
     expect(conditions).toEqual([]);
     expect(inserted).toEqual([]);
-    expect(ensureRepository).not.toHaveBeenCalled();
   });
 
   it('refuses an id that cannot name a repository before it writes anything', async () => {
     await expect(controller.register('../escape', body(), ownerId)).rejects.toBeInstanceOf(BadRequestException);
-    expect(ensureRepository).not.toHaveBeenCalled();
     expect(inserted).toEqual([]);
   });
 
@@ -257,16 +350,17 @@ describe('ProjectsController', () => {
    * with more than one project id. The `desc(updatedAt)` ordering is the
    * database's and is not asserted here; the fixture is already in that order.
    */
-  it('lists only the caller’s own projects', async () => {
+  it('lists the caller’s own projects and the collaborations they hold, each with its role', async () => {
     await expect(controller.list(ownerId)).resolves.toEqual([
-      { id: 'proj_ownerbracket00000', name: 'Bracket', updatedAt: '2026-09-13T02:00:00.000Z' },
-      { id: 'proj_ownerhinge0000000', name: 'Hinge', updatedAt: '2026-09-13T01:00:00.000Z' },
+      { id: 'proj_ownerbracket00000', name: 'Bracket', updatedAt: '2026-09-13T02:00:00.000Z', role: 'owner' },
+      { id: 'proj_ownerhinge0000000', name: 'Hinge', updatedAt: '2026-09-13T01:00:00.000Z', role: 'owner' },
     ]);
-    expect(conditions.at(-1)).toEqual(eq(project.ownerId, ownerId));
 
+    /* D27: the stranger owns one project and collaborates on another, and the
+       listing is what a second device names either from. */
     await expect(controller.list(strangerId)).resolves.toEqual([
-      { id: 'proj_strangerpart00000', name: 'Theirs', updatedAt: '2026-09-13T03:00:00.000Z' },
+      { id: 'proj_ownerbracket00000', name: 'Bracket', updatedAt: '2026-09-13T02:00:00.000Z', role: 'write' },
+      { id: 'proj_strangerpart00000', name: 'Theirs', updatedAt: '2026-09-13T03:00:00.000Z', role: 'owner' },
     ]);
-    expect(conditions.at(-1)).toEqual(eq(project.ownerId, strangerId));
   });
 });

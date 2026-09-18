@@ -1694,7 +1694,7 @@ for (const actorSet of actorSets) {
 }
 
 describe('the durable queue’s writer', () => {
-  const queuePath = '.tau/revisions/sync-pending';
+  const queuePath = '.git/sync-pending';
 
   it('serializes two overlapping writes, so a settle never tears the record (review 2 R5)', async () => {
     const writes: string[] = [];
@@ -1783,7 +1783,7 @@ describe('connecting a remote', () => {
      * the old destination's queue, and `SyncQueueEntry.remote` is what keeps
      * the entry from being offered to the new one. */
     expect(await port.readRef('refs/remotes/origin/main')).toBe(head);
-    expect(JSON.parse(await filesystem.readFile('.tau/revisions/sync-pending', 'utf8'))).toEqual({
+    expect(JSON.parse(await filesystem.readFile('.git/sync-pending', 'utf8'))).toEqual({
       version: 1,
       entries: [{ ref: 'refs/heads/main', reason: 'offline', recordedAt: 1 }],
     });

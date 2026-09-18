@@ -28,7 +28,7 @@ Each chat picks a revision mode, and every turn is recorded as a revision either
 - **Direct** — the agent works in the project folder itself. Its edits are the files you are looking at.
 - **Candidate** — the host materializes a checkout, the agent works there, and the result comes back as a branch you can review and merge.
 
-Both are offered wherever the host advertises them; Tau Desktop and `tau serve` advertise both. `.tau/chats`, `.tau/workspaces` and `.tau/revisions` are readable to the agent and refuse its writes.
+Both are offered wherever the host advertises them; Tau Desktop and `tau serve` advertise both. The project's records — `.tau/chats`, `.tau/runs` and the rest — are readable to the agent and refuse its writes, and the revision store itself is hidden from it entirely.
 
 ## What reaches the vendor
 

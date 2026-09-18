@@ -176,13 +176,13 @@ describe.runIf(gitOnPath)('a Node host records the person it runs for', () => {
 
     /* The flush's own outcome, before anything is cloned: `release()` bounds the
      * cut, so a mint that did not land is a fact about this run, not a bad clone. */
-    const storeDirectory = join(workspaceRoot, '.tau', 'revisions');
+    const storeDirectory = join(workspaceRoot, '.git');
     expect(execFileSync('git', ['-C', storeDirectory, 'for-each-ref'], { encoding: 'utf8' })).toContain(
       'refs/heads/main',
     );
 
     const clone = join(workspaceRoot, '..', 'clone-host-actor');
-    execFileSync('git', ['clone', '--quiet', join(workspaceRoot, '.tau', 'revisions'), clone], { stdio: 'ignore' });
+    execFileSync('git', ['clone', '--quiet', join(workspaceRoot, '.git'), clone], { stdio: 'ignore' });
     /* The branch by name, not the clone's HEAD: Tau writes refs itself and
      * never sets the store's default branch, so which branch a fresh clone
      * checks out is `git init.defaultBranch` on the machine, not this project. */

@@ -142,27 +142,21 @@
     },
     {
       "inputNodes": {
-        "node": "<nodeRef>"
+        "groupNode": "<nodeRef>"
       },
-      "type": "VarNode"
-    },
-    {
       "nodeType": "float",
       "precision": null,
-      "type": "ConstNode",
+      "type": "UniformNode",
       "value": 140,
       "valueType": "float"
     },
     {
       "inputNodes": {
-        "node": "<nodeRef>"
+        "groupNode": "<nodeRef>"
       },
-      "type": "VarNode"
-    },
-    {
       "nodeType": "float",
       "precision": null,
-      "type": "ConstNode",
+      "type": "UniformNode",
       "value": 480,
       "valueType": "float"
     },

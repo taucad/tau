@@ -8,6 +8,7 @@ import type {
   MetalMorphBackendInUse,
   MetalMorphLoaderController,
   MetalMorphLoaderTheme,
+  MetalMorphTuningPatch,
 } from '#components/geometry/loader/metal-morph-controller.js';
 
 /**
@@ -72,6 +73,8 @@ export type MetalMorphSpinnerService = Readonly<{
   setDocumentHidden: (isHidden: boolean) => void;
   /** Re-read every subscriber's size and visibility, after a resize or an intersection change. */
   refresh: () => void;
+  /** Tune the shared renderer; remembered, so a renderer opened later starts with it. */
+  tune: (patch: MetalMorphTuningPatch) => void;
   getDiagnostics: () => MetalMorphSpinnerDiagnostics;
 }>;
 
@@ -128,6 +131,8 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
   let controller: MetalMorphLoaderController | undefined;
   let creation: Promise<void> | undefined;
   let theme: MetalMorphLoaderTheme = 'dark';
+  /** Every tuning patch so far, folded together, for a renderer opened after they were made. */
+  let tuning: MetalMorphTuningPatch = {};
   let isMotionAllowed = true;
   let isDocumentHidden = false;
   let isLooping = false;
@@ -293,6 +298,9 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
         onFrame: blit,
       });
       controller = created;
+      if (Object.keys(tuning).length > 0) {
+        created.tune(tuning);
+      }
       applySourceSize();
       await created.ready;
       if (controller !== created) {
@@ -374,6 +382,17 @@ export const createMetalMorphSpinnerService = (): MetalMorphSpinnerService => {
     refresh: () => {
       applySourceSize();
       refreshPlayback();
+    },
+    tune: (patch) => {
+      tuning = {
+        ...tuning,
+        ...patch,
+        material: { ...tuning.material, ...patch.material },
+        timing: { ...tuning.timing, ...patch.timing },
+        bloom: { ...tuning.bloom, ...patch.bloom },
+        environment: { ...tuning.environment, ...patch.environment },
+      };
+      controller?.tune(patch);
     },
     getDiagnostics: () => ({
       subscriberCount: registrations.size,

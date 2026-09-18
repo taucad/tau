@@ -5,6 +5,7 @@ import {
   defaultMorphTiming,
   hasSameShapePairRun,
   pickNextShape,
+  rebaseMorphElapsed,
   sampleMorphTimeline,
 } from '#components/geometry/loader/metal-morph-sequence.js';
 import { metalMorphShapeIds } from '#components/geometry/loader/metal-morph-shapes.js';
@@ -121,5 +122,28 @@ describe('sampleMorphTimeline', () => {
   it('should clamp negative or non-finite elapsed values to the start', () => {
     expect(sampleMorphTimeline(-500)).toEqual(sampleMorphTimeline(0));
     expect(sampleMorphTimeline(Number.NaN)).toEqual(sampleMorphTimeline(0));
+  });
+});
+
+describe('rebaseMorphElapsed', () => {
+  const slow = { restDuration: 2000, morphDuration: 3000 };
+  const fast = { restDuration: 500, morphDuration: 1000 };
+
+  it.each([
+    { name: 'mid-rest', elapsed: 2 * 5000 + 1000 },
+    { name: 'mid-morph', elapsed: 2 * 5000 + 2000 + 1200 },
+    { name: 'the last moment of a morph', elapsed: 3 * 5000 - 1 },
+  ])('should keep the cycle, phase and progress when the timing changes $name', ({ elapsed }) => {
+    const before = sampleMorphTimeline(elapsed, slow);
+    const rebased = rebaseMorphElapsed(elapsed, slow, fast);
+    const after = sampleMorphTimeline(rebased, fast);
+
+    expect(after.cycleIndex).toBe(before.cycleIndex);
+    expect(after.phase).toBe(before.phase);
+    expect(after.phaseProgress).toBeCloseTo(before.phaseProgress, 6);
+  });
+
+  it('should be the identity when the timing does not change', () => {
+    expect(rebaseMorphElapsed(7321, slow, slow)).toBeCloseTo(7321, 6);
   });
 });

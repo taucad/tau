@@ -21,6 +21,8 @@ vi.mock('#components/geometry/loader/metal-morph-controller.js', () => ({
       setTheme: vi.fn(),
       setSpeed: vi.fn(),
       jumpTo: vi.fn(),
+      tune: vi.fn(),
+      getTuning: vi.fn(),
       getSequenceState: vi.fn(),
       getStatistics: vi.fn(() => ({ backend: 'webgl2' })),
       getShaderSource: vi.fn(),
@@ -392,6 +394,35 @@ describe('metalMorphSpinnerService', () => {
       expect(target.context.drawImage).toHaveBeenCalledTimes(2);
     }
     expect(service.getDiagnostics()).toMatchObject({ frameCount: 2, missedFrameCount: 0 });
+  });
+
+  it('should tune the renderer it has and start a renderer it opens later with the same tuning', async () => {
+    const service = createMetalMorphSpinnerService();
+    service.tune({ material: { roughnessRest: 0.3 }, timing: { restDuration: 900 } });
+    service.tune({ material: { swell: 0.1 }, exposure: 1.2 });
+    const unsubscribe = service.subscribe(createTarget());
+    await settle();
+
+    // Opened after both patches: it starts from their fold, not from the last one alone.
+    expect(lastController().tune).toHaveBeenCalledExactlyOnceWith({
+      material: { roughnessRest: 0.3, swell: 0.1 },
+      timing: { restDuration: 900 },
+      bloom: {},
+      environment: {},
+      exposure: 1.2,
+    });
+
+    service.tune({ bloom: { strength: 0.5 } });
+    expect(lastController().tune).toHaveBeenLastCalledWith({ bloom: { strength: 0.5 } });
+
+    unsubscribe();
+    await vi.advanceTimersByTimeAsync(30_000);
+    service.subscribe(createTarget());
+    await settle();
+    expect(hoisted.controllers).toHaveLength(2);
+    expect(lastController().tune).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ exposure: 1.2, bloom: { strength: 0.5 } }),
+    );
   });
 
   it('should not open a context when every spinner leaves while the adapter is being probed', async () => {

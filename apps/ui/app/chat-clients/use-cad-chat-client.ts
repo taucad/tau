@@ -18,9 +18,8 @@ import {
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { useModels } from '#hooks/use-models.js';
-import { createRunBody, hostAdmission } from '#chat-clients/_internal/turn-body.js';
+import { createRunBody } from '#chat-clients/_internal/turn-body.js';
 import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
-import { turnIntentOf, turnTriggerOf } from '#chat-clients/turn-intent.js';
 
 /**
  * Input payload for {@link CadChatClient.submit}. Mirrors the surface the
@@ -138,11 +137,11 @@ export const useCadChatClient = (): CadChatClient => {
   const { projectId } = useProject();
   const { resolveModel } = useModels();
   const workspaceAuthority = useOptionalChatWorkspaceAuthority();
-  /* This hook is a *view*: it composes verbs and reads the live chat. The
-   * chat's agent-host binding and its bodyless body factory belong to
-   * `ChatTurnHost`, which is mounted once — registering either from here made
-   * every transcript message a writer of a fact the chat can only have one of. */
-  const { surfaceDispatchFailure, withWorkspace } = useTurnAdmission(agent.execution);
+  /* This hook is a *view*: it composes gestures and reads the live chat. The
+   * chat's agent-host binding and its admission belong to `ChatTurnHost`, which
+   * is mounted once — owning either here made every transcript message a writer
+   * of a fact the chat can only have one of. */
+  const { surfaceDispatchFailure } = useTurnAdmission(agent.execution);
   // Always the current resolver: a dispatch composed before `GET /v1/models`
   // answers must read the catalog row that arrives *while* it waits, not the
   // unresolved one its render closed over.
@@ -153,26 +152,13 @@ export const useCadChatClient = (): CadChatClient => {
   const messages = Array.isArray(chat.messages) ? chat.messages : [];
 
   /**
-   * A verb that cannot dispatch must say so. Returning silently made a typed
-   * submit vanish with no message row, no request and no banner — the user's
-   * only signal was that nothing happened.
-   */
-  const refuseWhileBusy = useCallback((): boolean => {
-    if (!requestInFlight) {
-      return false;
-    }
-    surfaceDispatchFailure(new Error('This chat is still running a turn. Stop it before sending another message.'));
-    return true;
-  }, [requestInFlight, surfaceDispatchFailure]);
-
-  /**
    * Refuse a draft the turn's model cannot read (D20), and copy the rest into
    * the chat's directory before anything is admitted (D18). Admission first
    * would leave a claim admitted for a turn that never sends. A failed copy
    * leaves the draft as it is and sends nothing.
    */
   const withAttachments = useCallback(
-    async (attachments: readonly AttachmentReference[], send: () => Promise<void>): Promise<void> => {
+    async (attachments: readonly AttachmentReference[], send: () => void | Promise<void>): Promise<void> => {
       if (agent.execution.kind === 'tau' && attachments.length > 0) {
         const resolved = resolveModelRef.current(agent.execution.model);
         const blocked = attachmentSendBlockReason(attachments, {
@@ -202,63 +188,26 @@ export const useCadChatClient = (): CadChatClient => {
 
   const submit = useCallback(
     async (input: CadChatSubmitInput): Promise<void> => {
-      if (refuseWhileBusy()) {
-        return;
-      }
-
       const userMessage = buildUserMessage(input);
-      const intent = turnIntentOf(messages, { kind: 'send', messageId: userMessage.id });
       await withAttachments(input.attachments ?? [], async () =>
-        withWorkspace(intent.leaseTurnId, (execution, runId) => {
-          actions.sendMessage(userMessage, {
-            body: createRunBody({
-              agent,
-              projectId,
-              execution,
-              runId,
-              browserHost: hostAdmission({
-                agent,
-                chatId: activeChatId,
-                resolveModel: resolveModelRef.current,
-                trigger: turnTriggerOf(intent),
-              }),
-            }),
-          });
-        }),
+        actions.sendMessage(userMessage, input.attachments === undefined ? {} : { attachments: input.attachments }),
       );
     },
-    [actions, activeChatId, agent, messages, projectId, refuseWhileBusy, withAttachments, withWorkspace],
+    [actions, withAttachments],
   );
 
   const edit = useCallback(
     (messageId: string, input: CadChatSubmitInput) => {
-      if (refuseWhileBusy()) {
-        return;
-      }
-
-      const intent = turnIntentOf(messages, { kind: 'edit', messageId });
       // async-iife: bootstrap — the edit composer closes at once; failures surface on the banner or a toast.
-      void withAttachments(input.attachments ?? [], async () =>
-        withWorkspace(intent.leaseTurnId, (execution, runId) => {
-          actions.editMessage(messageId, input.text, {
-            ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
-            body: createRunBody({
-              agent,
-              projectId,
-              execution,
-              runId,
-              browserHost: hostAdmission({
-                agent,
-                chatId: activeChatId,
-                resolveModel: resolveModelRef.current,
-                trigger: turnTriggerOf(intent),
-              }),
-            }),
-          });
-        }),
-      );
+      void withAttachments(input.attachments ?? [], () => {
+        actions.editMessage(
+          messageId,
+          input.text,
+          input.attachments === undefined ? {} : { attachments: input.attachments },
+        );
+      });
     },
-    [actions, activeChatId, agent, messages, projectId, refuseWhileBusy, withAttachments, withWorkspace],
+    [actions, withAttachments],
   );
 
   const stop = useCallback(() => {

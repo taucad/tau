@@ -4,7 +4,8 @@ import type { CadAgentExecution, Chat, MyUIMessage } from '@taucad/chat';
 import type { ChatError } from '@taucad/types';
 import type { KernelId } from '@taucad/types/constants';
 import { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
-import type { ChatRequest, ChatRetrievedEvent, RequestTerminationCause } from '#hooks/chat-persistence.machine.js';
+import type { ChatRetrievedEvent, RequestTerminationCause } from '#hooks/chat-persistence.machine.js';
+import type { ChatRequest } from '#machines/chat-session.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 
 type MockMessage = { id: string; role: string; parts: Array<{ type: string; text?: string }> };

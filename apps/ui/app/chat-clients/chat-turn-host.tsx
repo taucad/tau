@@ -13,8 +13,11 @@
  *   is not configured". The binding is now owned by the chat's own session
  *   actor (`chat-session.machine`'s `host` region, policy §16); this component
  *   only publishes what the registration is composed from.
- * - **the bodyless dispatch's body factory.** Each instance published its own
- *   closure over its own `messages`, and whichever rendered last won.
+ * - **the chat's admission.** Each instance composed its own turn from its own
+ *   closure over its own `messages`, and whichever rendered last won. The
+ *   chat's session actor now invokes one published admission (C3), so an edit,
+ *   a *Try again* and the seeded first turn all derive their rewind point from
+ *   the live transcript through `turnIntentOf`.
  *
  * Renders nothing.
  */
@@ -34,7 +37,15 @@ import {
   useOptionalChatWorkspaceAuthority,
 } from '#providers/chat-workspace-authority-provider.js';
 import type { BrowserAgentHostRegistration } from '#chat-clients/_internal/browser-agent-host-transport.js';
-import { publishChatHostServices } from '#chat-clients/_internal/chat-host-binding.js';
+import { publishChatHostServices, publishChatTurnAdmission } from '#chat-clients/_internal/chat-host-binding.js';
+import {
+  getBrowserAgentHostRun,
+  isBrowserAgentHostPlaced,
+  isBrowserAgentHostRunResumable,
+} from '#chat-clients/_internal/browser-agent-host-transport.js';
+import type { ChatRequest, ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.js';
+import { generatePrefixedId } from '@taucad/utils/id';
+import { idPrefix } from '@taucad/types/constants';
 import { agentHostConfig, createRunBody, dialAgentHost, hostAdmission } from '#chat-clients/_internal/turn-body.js';
 import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
 import { turnIntentOf, turnTriggerOf } from '#chat-clients/turn-intent.js';
@@ -70,7 +81,6 @@ export function ChatTurnHost(): ReactNode {
   const computeMode = useComputeReuseMode();
   const { resolveModel } = useModels();
   const { admitWorkspace, surfaceDispatchFailure } = useTurnAdmission(agent.execution);
-  const messages = Array.isArray(chat.messages) ? chat.messages : [];
   const resolveModelRef = useRef(resolveModel);
   useEffect(() => {
     resolveModelRef.current = resolveModel;
@@ -246,50 +256,66 @@ export function ChatTurnHost(): ReactNode {
     store.setTurnPlacement(activeChatId, placement);
   }, [activeChatId, placement, store]);
 
-  // Publish how a bodyless dispatch composes its wire body, so startup
-  // hydration and *Try again* admit their workspace exactly like an explicit
-  // submit. Without this, the homepage-seeded first turn would dispatch with
-  // `body: undefined` and the API would 400 with `agent: Required` — and with a
-  // *snapshot* body it dispatched against a workspace no claim carried, so the
-  // turn never settled. See `ChatSessionStore.setLatestAgentBody`.
-  useEffect(() => {
-    const daemonPlaced = daemonPlacementOf(agent.execution) !== undefined;
-    if (!workspaceAuthority && !daemonPlaced) {
-      store.setLatestAgentBody(activeChatId, undefined);
-      return;
-    }
-    store.setLatestAgentBody(activeChatId, async (executionOverride) => {
-      // One agent object for the admission, the placement and the body. The
-      // seeded first turn dispatches before this effect's `agent` has hydrated
-      // from the chat row, so the dispatcher hands in the execution it read
-      // from that row; composing the three from separate sources is how the
-      // body and the host admission came to disagree.
-      const turnAgent = executionOverride ? { ...agent, execution: executionOverride } : agent;
-      if (executionOverride && placementOf(executionOverride) !== placementOf(agent.execution)) {
-        /* V-W1 §5: the effect above keys on the render's execution, which for a
-         * seeded turn is still the pre-hydration fallback. Re-bind on the row's
-         * own execution so the transport, the body and the admission are one
-         * placement — the services first, so the actor's re-invocation finds
-         * them, then the event that re-invokes it. */
-        boundExecutionRef.current = executionOverride;
+  /**
+   * Take this chat's next turn (C3).
+   *
+   * The chat's session actor invokes this from `run.queued`; it is the only
+   * place a lease is taken and the only place a turn's request is composed.
+   * Every route — an explicit send, an edit, *Try again*, the auto-retry and
+   * the homepage-seeded first turn — arrives here as one gesture, and
+   * `turnIntentOf` is the one derivation of the rewind point (V7).
+   */
+  const admit = useCallback(
+    async (gesture: ChatTurnGesture): Promise<ChatTurn> => {
+      const liveAgent = agentRef.current;
+      const execution = gesture.kind === 'regenerate' && gesture.execution ? gesture.execution : liveAgent.execution;
+      const turnAgent = execution === liveAgent.execution ? liveAgent : { ...liveAgent, execution };
+      if (placementOf(execution) !== placementOf(liveAgent.execution)) {
+        /* V-W1 §5: a seeded turn runs the execution the store read from the
+         * chat row, one render ahead of anything this component has seen. The
+         * services first, so the binding actor's re-invocation finds them, then
+         * the event that re-invokes it. */
+        boundExecutionRef.current = execution;
         publishChatHostServices(activeChatId, {
-          placement: placementOf(executionOverride),
+          placement: placementOf(execution),
           compose: () => composeRef.current(boundExecutionRef.current),
         });
-        store.setTurnPlacement(activeChatId, placementOf(executionOverride));
+        store.setTurnPlacement(activeChatId, placementOf(execution));
       }
-      /* Every bodyless dispatch is a regenerate: *Try again* on an error card,
-       * the persistence machine's auto-retry, and startup hydration all re-run
-       * the chat's last turn. `turnIntentOf` is the one derivation of which
-       * turn that is (V7). */
-      const intent = turnIntentOf(messages, { kind: 'regenerate' });
+      /* A stream the host can still continue is the *same* turn: resuming it
+       * takes no lease and mints no run id, and rewinding it instead would
+       * charge a second time for tool work the customer already paid for. A
+       * turn the gateway refused at admission leaves a terminal run and no
+       * live stream, so *Try again* on one is a new turn, not a resume. */
+      if (
+        gesture.kind === 'continue' &&
+        (!isBrowserAgentHostPlaced(activeChatId) || isBrowserAgentHostRunResumable(activeChatId))
+      ) {
+        return {
+          runId: getBrowserAgentHostRun(activeChatId)?.runId,
+          leaseTurnId: undefined,
+          request: { kind: 'continue' },
+        };
+      }
+      const messages = Array.isArray(chat.messages) ? chat.messages : [];
+      const intent = turnIntentOf(
+        messages,
+        gesture.kind === 'send'
+          ? { kind: 'send', messageId: gesture.message.id }
+          : gesture.kind === 'edit'
+            ? { kind: 'edit', messageId: gesture.messageId }
+            : { kind: 'regenerate' },
+      );
       try {
-        const [execution, runId] = await admitWorkspace(intent.leaseTurnId, turnAgent.execution);
-        return createRunBody({
+        const [target, preparedRunId] = await admitWorkspace(intent.leaseTurnId, execution);
+        /* One id for the lease, the host request and the settlement. A daemon
+         * placement leases nothing here, so the key is minted for it. */
+        const runId = preparedRunId ?? generatePrefixedId(idPrefix.request);
+        const body = createRunBody({
           agent: turnAgent,
           projectId,
+          execution: target,
           runId,
-          execution,
           browserHost: hostAdmission({
             agent: turnAgent,
             chatId: activeChatId,
@@ -297,15 +323,35 @@ export function ChatTurnHost(): ReactNode {
             trigger: turnTriggerOf(intent),
           }),
         });
+        const request: ChatRequest =
+          gesture.kind === 'send'
+            ? { kind: 'send', message: gesture.message, body }
+            : gesture.kind === 'edit'
+              ? {
+                  kind: 'edit',
+                  messageId: gesture.messageId,
+                  content: gesture.text,
+                  ...(gesture.attachments === undefined ? {} : { attachments: gesture.attachments }),
+                  body,
+                }
+              : { kind: 'regenerate', body };
+        return { runId, leaseTurnId: intent.leaseTurnId, request };
       } catch (error) {
+        /* The machine records the reason on the chat's row; the banner is how
+         * the person sees it, and it is the same one a transport error uses. */
         surfaceDispatchFailure(error);
         throw error;
       }
-    });
-    // Deliberately not cleared on unmount: the store owns the published
-    // factory for as long as the session lives, so a run that outlives this
-    // view can still compose its body.
-  }, [activeChatId, admitWorkspace, agent, messages, projectId, store, surfaceDispatchFailure, workspaceAuthority]);
+    },
+    [activeChatId, admitWorkspace, chat, projectId, store, surfaceDispatchFailure],
+  );
+
+  /* Deliberately not unpublished on unmount: the turn is the chat session's,
+   * and a run can outlive the view that started it. The store forgets it when
+   * the chat's session is disposed. */
+  useEffect(() => {
+    publishChatTurnAdmission(activeChatId, admit);
+  }, [activeChatId, admit]);
 
   return null;
 }

@@ -272,6 +272,7 @@ export const ChatViewer = memo(function ({
           identity: entryPath,
           cameraView: viewSettings[viewId]?.graphicsSettings.cameraView,
         }}
+        initialVerticalFieldOfView={viewSettings[viewId]?.graphicsSettings.cameraFovAngle}
       >
         <ViewerContent viewId={viewId} entryPath={entryPath} profile={profile} />
       </GraphicsProvider>

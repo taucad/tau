@@ -21,7 +21,14 @@ export type {
 } from '#types.js';
 export type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 
-export { pendingProjectCommitInputSchema, WorkspaceFileService } from '#workspace-file-service.js';
+export { WorkspaceFileService } from '#workspace-file-service.js';
+export { pendingProjectCommitInputSchema, ProjectDirectories } from '#project-directories.js';
+export type {
+  ProjectDiscoveryEntry,
+  ProjectDiscoveryResult,
+  ProjectRootDiscoveryStatus,
+  ResolvedDiscoveryRoot,
+} from '#project-directories.js';
 export type { BundledTypePackageReplacement } from '#workspace-file-service.js';
 export { MutationPipeline } from '#mutation-pipeline.js';
 export type { BulkMoveEdit, BulkMoveResult } from '#mutation-pipeline.js';
@@ -76,14 +83,11 @@ export type {
   CheckoutRootConfig,
   ProjectRootConfig,
   ProjectRootConfiguration,
-  ProjectDiscoveryEntry,
-  ProjectDiscoveryResult,
   CommitPendingProjectDirectoryInput,
   CommitPendingProjectDirectoryResult,
   PermanentDeleteProjectDirectoryInput,
   PermanentDeleteProjectDirectoryResult,
   ProjectLocator,
-  ProjectRootDiscoveryStatus,
   StorageRootConfig,
   WorkspaceScope,
 } from '#mount-table.js';

@@ -102,7 +102,6 @@ type WorkspaceBridgeMethodName =
   | 'rmdir'
   | 'exists'
   | 'getDirectoryStat'
-  | 'getDirectoryContents'
   | 'duplicateFile'
   | 'copyDirectory'
   | 'getZippedDirectory'
@@ -653,7 +652,6 @@ const callSchemas = {
   rmdir: { args: z.tuple([z.string(), recursiveOptionsSchema.optional()]), result: voidResult },
   exists: { args: oneStringArgument, result: booleanResult },
   getDirectoryStat: { args: oneStringArgument, result: fileStatEntriesSchema },
-  getDirectoryContents: { args: oneStringArgument, result: directoryContentsSchema },
   duplicateFile: { args: twoStringArgs, result: voidResult },
   copyDirectory: { args: twoStringArgs, result: voidResult },
   /* Scope-only: a routed path is archived on its rooted view (`archive`), never here. */

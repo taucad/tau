@@ -13,6 +13,7 @@ import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { ChangeEventBus } from '#change-event-bus.js';
 import { MountTable } from '#mount-table.js';
+import { contents } from '#content-ops/contents.js';
 
 type Counters = Record<'stat' | 'readFile' | 'readdir' | 'readdirEntries' | 'readdirWithStats', number>;
 
@@ -105,9 +106,12 @@ describe('directory walks use entry kinds', () => {
   it('should collect directory contents without statting each child', async () => {
     const before = { ...context.source.counts };
 
-    const contents = await context.service.getDirectoryContents('/tree');
+    /* The recursive read a consumer reaches is the `contents` content operation
+     * over a rooted surface (charter D2); the copy's walker keeps the same
+     * entry-kind contract underneath it. */
+    const collected = await contents(context.service.createRootedFileSystem('/'), 'tree');
 
-    expect(Object.keys(contents).sort()).toEqual(['a.txt', 'b.bin', 'nested/c.txt', 'nested/deep/d.txt']);
+    expect(Object.keys(collected).sort()).toEqual(['a.txt', 'b.bin', 'nested/c.txt', 'nested/deep/d.txt']);
     expect(context.source.counts.readFile - before.readFile).toBe(4);
     expect(context.source.counts.stat - before.stat).toBe(0);
   });

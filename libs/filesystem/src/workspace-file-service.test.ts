@@ -15,6 +15,7 @@ import type { ChangeEvent, FileSystemProvider, WatchEvent } from '#types.js';
 import { getEventOrigin } from '#event-origin-registry.js';
 import { composeView } from '#composed-view.js';
 import { withReadContentOps } from '#content-ops/read-ops.js';
+import { contents } from '#content-ops/contents.js';
 import { tauPathPolicy } from '#path-registry.js';
 import {
   parseProjectManifestBytes,
@@ -1978,28 +1979,35 @@ describe('WorkspaceFileService', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // getDirectoryContents
+  // recursive contents over the rooted surface
   // ---------------------------------------------------------------------------
 
-  describe('getDirectoryContents', () => {
+  /* The authority had `getDirectoryContents`; its last consumer (project
+   * duplication) moved to the project's own composed view in W7, so the walk is
+   * reached as the `contents` content operation over a rooted surface (D2). The
+   * rows are the authority's, kept on the surface that now serves them. */
+  describe('contents over the rooted surface', () => {
+    const rootedContents = async (path: string): Promise<Record<string, Uint8Array<ArrayBuffer>>> =>
+      contents(service.createRootedFileSystem('/'), path);
+
     it('should return all files with relative paths', async () => {
       await service.writeFile('/proj/readme.md', '# Hi');
       await service.writeFile('/proj/src/main.ts', 'code');
-      const contents = await service.getDirectoryContents('/proj');
-      expect(decoder.decode(contents['readme.md'])).toBe('# Hi');
-      expect(decoder.decode(contents['src/main.ts'])).toBe('code');
+      const files = await rootedContents('proj');
+      expect(decoder.decode(files['readme.md'])).toBe('# Hi');
+      expect(decoder.decode(files['src/main.ts'])).toBe('code');
     });
 
     it('should propagate a missing-directory error', async () => {
-      await expect(service.getDirectoryContents('/nonexistent')).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(rootedContents('nonexistent')).rejects.toMatchObject({ code: 'ENOENT' });
     });
 
     it('distinguishes an empty directory from a file path', async () => {
       await service.mkdir('/empty');
       await service.writeFile('/file.txt', 'file');
 
-      await expect(service.getDirectoryContents('/empty')).resolves.toEqual({});
-      await expect(service.getDirectoryContents('/file.txt')).rejects.toMatchObject({ code: 'ENOTDIR' });
+      await expect(rootedContents('empty')).resolves.toEqual({});
+      await expect(rootedContents('file.txt')).rejects.toMatchObject({ code: 'ENOTDIR' });
     });
   });
 

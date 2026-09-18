@@ -181,7 +181,6 @@ vi.mock('#hooks/use-file-manager.js', () => ({
       stat: mockStat,
       exists: vi.fn(async (path: string) => attachmentFiles.has(path)),
       rmdir: mockRmdir,
-      getDirectoryContents: vi.fn(async () => ({})),
       listProjectManifests: mockListProjectManifests,
       permanentlyDeleteProjectDirectory: mockPermanentlyDeleteProjectDirectory,
       commitPendingProjectDirectory: mockCommitPendingProjectDirectory,

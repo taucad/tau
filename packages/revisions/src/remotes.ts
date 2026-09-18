@@ -14,6 +14,7 @@
  * kind's UI; the data model already holds it.
  */
 
+import { isCeilingRefusal } from '#refusal-markers.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPortErrorCode } from '#revision-port.js';
 
@@ -417,16 +418,6 @@ const gitHookSideband = /^(?:error: )?(?:pre-receive )?hook declined(?: to updat
  * @param stderr - Everything the command wrote to its error stream.
  * @returns The status and sentence, as far as they can be read.
  */
-/**
- * The fixed first words of the hosted remote's D20 ceiling refusal.
- *
- * Source of truth: `ceilingRefusalMarker` in
- * `apps/api/app/api/git/git.constants.ts`, which the `pre-receive` hook opens
- * that refusal with. Duplicated rather than imported because this package does
- * not depend on the API; the two change together.
- */
-const ceilingRefusalMarker = 'Tau: repository size limit exceeded';
-
 const gitStderrRefusal = (stderr: string): RemoteRefusal => {
   const status =
     /(?:The requested URL returned error|RPC failed; HTTP|error: HTTP)[: ]\s*(?<status>\d{3})/u.exec(stderr)?.groups?.[
@@ -572,12 +563,12 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
     if (answered.message !== undefined) {
       /* D20's ceiling refusal is one of those sentences, and it is a *quota*
          answer rather than a rule the caller broke: the affordance must not
-         offer "Sync now" again. It is recognised by the marker the hook opens
-         with — `ceilingRefusalMarker` in `apps/api/app/api/git/git.constants.ts`,
-         duplicated here because this package cannot import the API. The
-         remote's own words, list of files and all, are still what is shown. */
+         offer "Sync now" again. `isCeilingRefusal` (`refusal-markers.ts`) is
+         the one place that question is answered, for this leg and for the
+         scheduler's. The remote's own words, list of files and all, are still
+         what is shown. */
       return new RevisionPortError(
-        answered.message.includes(ceilingRefusalMarker) ? 'REMOTE_QUOTA_EXCEEDED' : 'REMOTE_REJECTED',
+        isCeilingRefusal(answered.message) ? 'REMOTE_QUOTA_EXCEEDED' : 'REMOTE_REJECTED',
         answered.message,
         { cause: error },
       );

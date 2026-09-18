@@ -30,6 +30,7 @@
 import { assign, emit, enqueueActions, fromCallback, fromPromise, setup } from 'xstate';
 import type { AnyActorRef, SnapshotFrom } from 'xstate';
 
+import { isCeilingRefusal } from '#refusal-markers.js';
 import type { RemoteStorageRefusal } from '#revision-port.js';
 
 /** How one offered ref ended, in the port's own three outcomes. @public */
@@ -1211,7 +1212,18 @@ export const syncMachine = setup({
               attempt: pending.length > 0 ? context.attempt + 1 : 0,
               conflictRef: refusedHistory === undefined ? undefined : refusedHistory.name,
               error: refusedHistory?.reason ?? (pending.length > 0 ? pending[0]?.reason : undefined),
-              reason: pending.length > 0 ? 'rejected' : undefined,
+              /* D20's ceiling refusal arrives here as a per-ref result rather
+                 than as a thrown transport error, and it is a quota answer:
+                 *Sync now* replays the same bytes and cannot clear a ceiling
+                 (W10 defect 4). Recognised by the same predicate the native
+                 leg uses; every other refusal stays `rejected`, and the
+                 remote's own sentence and file list are untouched either way. */
+              reason:
+                pending.length > 0
+                  ? pending.some((entry) => isCeilingRefusal(entry.reason))
+                    ? 'quota'
+                    : 'rejected'
+                  : undefined,
             });
             /* The over-quota list is `remote.machine`'s, always (P19, A40): the
              * scheduler forwards it through the parent and keeps no copy. */

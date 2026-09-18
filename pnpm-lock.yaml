@@ -1440,8 +1440,8 @@ importers:
         specifier: ^0.9.10
         version: 0.9.10(three@0.184.0)
       three-viewport-gizmo:
-        specifier: npm:@taulabs/three-viewport-gizmo@2.2.3
-        version: '@taulabs/three-viewport-gizmo@2.2.3(three@0.184.0)'
+        specifier: npm:@taulabs/three-viewport-gizmo@2.2.4
+        version: '@taulabs/three-viewport-gizmo@2.2.4(three@0.184.0)'
       tslib:
         specifier: 'catalog:'
         version: 2.8.1
@@ -14005,8 +14005,8 @@ packages:
   '@taulabs/replicad@0.23.4-beta.2':
     resolution: {integrity: sha512-qYOc74h8YnBhzqGyGIT0LX6iM98szBi9lq7GNPoXjUjIkY1jJVSraB62uXVNPWZB7xL8fKs+NbOSoAkWVg7mdQ==}
 
-  '@taulabs/three-viewport-gizmo@2.2.3':
-    resolution: {integrity: sha512-+/Lo5FsmRXDtMLqQZQzGhPKnptl6wF76VVVUBTOdQLo6x7OTZdEypTRRsd0M/xumEp2pOez2q809jgYVd7bA0A==}
+  '@taulabs/three-viewport-gizmo@2.2.4':
+    resolution: {integrity: sha512-vqvgsi4oTyaKf19useCAZBSV929cZWum/pVny5xHTUDOV8GwrP89OpKeF18Ui4rJ7/b5cLMKmoAZRBvAMDKf9w==}
     peerDependencies:
       three: '>=0.162.0 <1.0.0'
 
@@ -36998,7 +36998,7 @@ snapshots:
       opentype.js: 1.3.4
       replicad-opencascadejs: '@taulabs/replicad-opencascadejs@0.23.0-beta.0'
 
-  '@taulabs/three-viewport-gizmo@2.2.3(three@0.184.0)':
+  '@taulabs/three-viewport-gizmo@2.2.4(three@0.184.0)':
     dependencies:
       three: 0.184.0
 

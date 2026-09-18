@@ -17,7 +17,7 @@ import {
   bindViewportGizmoInvalidationEvents,
   useViewportGizmoRenderLoop,
 } from '#components/geometry/graphics/three/controls/viewport-gizmo-render-loop.js';
-import { useCameraRetarget, useCameraRig, useGraphics } from '#hooks/use-graphics.js';
+import { useCameraRetarget, useCameraRig, useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 import {
   resolveGizmoContainer,
@@ -44,6 +44,9 @@ export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubePro
   const interactionLock = useViewportGizmoInteractionLock();
   const graphicsActor = useGraphics();
   const cameraRig = useCameraRig();
+  // The gizmo orients its faces, drags and face clicks around its own up axis; the process-global
+  // THREE.Object3D.DEFAULT_UP is not written per view (persisted view settings blueprint, E3).
+  const upDirection = useGraphicsSelector((state) => state.context.upDirection);
 
   const { serialized } = useColor();
   const { theme, isHighContrast } = useTheme();
@@ -118,6 +121,7 @@ export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubePro
 
     const gizmoConfig: GizmoOptions = {
       type: 'rounded-cube',
+      up: upDirection,
       placement: container ? 'top-right' : 'bottom-right',
       size,
       font: {
@@ -261,6 +265,7 @@ export function ViewportGizmoCube({ size = 96, container }: ViewportGizmoCubePro
     interactionLock,
     graphicsActor,
     cameraRig,
+    upDirection,
   ]);
 
   useGizmoResizeSync(gizmoRef);

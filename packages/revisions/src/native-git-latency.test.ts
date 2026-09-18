@@ -18,8 +18,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
-import type { RevisionId, RevisionTreeInput } from '@taucad/filesystem/revisions';
+import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
+import type { RevisionId, RevisionTreeInput } from '#algorithms/index.js';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { cleanLargeObjects } from '#lfs.js';

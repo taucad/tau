@@ -18,8 +18,8 @@
  * graph, so deleting a chat never renumbers anything.
  */
 
-import type { RevisionId } from '@taucad/filesystem/revisions';
-import { revisionId } from '@taucad/filesystem/revisions';
+import type { RevisionId } from '#algorithms/index.js';
+import { revisionId } from '#algorithms/index.js';
 import type { RevisionProvenance } from '#revision-authority.js';
 import type { RevisionDiffEntry, RevisionLogEntry, RevisionPort } from '#revision-port.js';
 

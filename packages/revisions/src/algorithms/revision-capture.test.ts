@@ -8,9 +8,9 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { captureRevisionTree } from '#revision-capture.js';
-import type { RevisionCaptureFileSystem } from '#revision-capture.js';
-import type { DirectoryEntry, FileStat } from '#types.js';
+import { captureRevisionTree } from '#algorithms/revision-capture.js';
+import type { RevisionCaptureFileSystem } from '#algorithms/revision-capture.js';
+import type { DirectoryEntry, FileStat } from '@taucad/filesystem';
 
 /**
  * A real filesystem can drop an entry between `readdir` and the `stat` that

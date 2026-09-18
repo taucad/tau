@@ -1,5 +1,6 @@
-import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
-import type { RevisionFileMode, RevisionId } from '@taucad/filesystem/revisions';
+import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
+import type { FileMode } from '@taucad/filesystem';
+import type { RevisionId } from '#algorithms/index.js';
 import { revisionBranchName } from '#revision-authority.js';
 import type { RevisionProvenance, RevisionSummary } from '#revision-authority.js';
 import { RevisionPortError } from '#revision-port.js';
@@ -27,7 +28,7 @@ export type RemoteBootstrapInput = Readonly<{
       Readonly<{
         path: string;
         content?: Uint8Array<ArrayBuffer>;
-        mode?: RevisionFileMode;
+        mode?: FileMode;
       }>
     >;
     provenance: RevisionProvenance;

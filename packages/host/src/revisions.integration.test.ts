@@ -24,7 +24,7 @@ import { createNativeGitRevisionPort } from '@taucad/revisions/node';
 import type { RevisionPort } from '@taucad/revisions';
 import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
-import { ImmutableRevisionTree, revisionId } from '@taucad/filesystem/revisions';
+import { ImmutableRevisionTree, revisionId } from '@taucad/revisions/algorithms';
 
 import { createProjectRevisionPort, createProjectRevisions, openProjectRevisions } from '#revisions.js';
 import type { HostRevisionEvent, ProjectRevisions, TurnCheckout, TurnFinalizedEvent } from '#revisions.js';

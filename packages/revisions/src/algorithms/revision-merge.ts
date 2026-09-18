@@ -1,6 +1,7 @@
-import { seemsBinary } from '#content-metadata.js';
-import { ImmutableRevisionTree } from '#revision-tree.js';
-import type { RevisionFileMode, RevisionTreeInput } from '#revision-tree.js';
+import { seemsBinary } from '@taucad/filesystem';
+import { ImmutableRevisionTree } from '#algorithms/revision-tree.js';
+import type { FileMode } from '@taucad/filesystem';
+import type { RevisionTreeInput } from '#algorithms/revision-tree.js';
 
 /** Conflicting additions of different bytes at the same absent base path. @public */
 export type AddAddConflict = Readonly<{
@@ -42,8 +43,8 @@ export type TextConflict = Readonly<{
 export type ModeConflict = Readonly<{
   type: 'mode';
   path: string;
-  ours: RevisionFileMode;
-  theirs: RevisionFileMode;
+  ours: FileMode;
+  theirs: FileMode;
 }>;
 
 /**
@@ -155,10 +156,10 @@ const own = (bytes: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => new Uin
 const comparePath = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 
 const mergedMode = (
-  base: RevisionFileMode | undefined,
-  ours: RevisionFileMode | undefined,
-  theirs: RevisionFileMode | undefined,
-): RevisionFileMode | undefined => {
+  base: FileMode | undefined,
+  ours: FileMode | undefined,
+  theirs: FileMode | undefined,
+): FileMode | undefined => {
   if (ours === theirs) {
     return ours;
   }

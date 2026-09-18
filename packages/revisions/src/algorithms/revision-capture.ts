@@ -9,10 +9,10 @@
  */
 
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
-import { bufferToStream } from '#backend/stream-utils.js';
-import type { FileSystemProvider } from '#types.js';
-import { ImmutableRevisionTree } from '#revision-tree.js';
-import type { RevisionFileMode, RevisionTreeInput } from '#revision-tree.js';
+import { bufferToStream } from '@taucad/filesystem';
+import type { FileMode, FileSystemProvider } from '@taucad/filesystem';
+import { ImmutableRevisionTree } from '#algorithms/revision-tree.js';
+import type { RevisionTreeInput } from '#algorithms/revision-tree.js';
 
 /** Read capabilities required to capture one immutable revision tree. @public */
 export type RevisionCaptureFileSystem = Pick<
@@ -32,7 +32,7 @@ export type CaptureRevisionTreeOptions = Readonly<{
   /** File paths that must be present in the completed capture. */
   requiredPaths?: readonly string[];
   /** Mode inherited from the checkout's recorded base when this backend has no executable-bit support. */
-  inheritedMode?: (path: string) => RevisionFileMode | undefined;
+  inheritedMode?: (path: string) => FileMode | undefined;
   /** Maximum number of file streams read at once. Defaults to 16. */
   concurrency?: number;
   /** Maximum aggregate file payload. Defaults to 1 GiB. */
@@ -128,7 +128,7 @@ export const captureRevisionTree = async (
     const stat = await skipIfVanished(async () => filesystem.stat(path));
     return stat?.type;
   };
-  const filePaths: Array<Readonly<{ path: string; mode: RevisionFileMode }>> = [];
+  const filePaths: Array<Readonly<{ path: string; mode: FileMode }>> = [];
   const visit = async (path: string): Promise<void> => {
     throwIfAborted();
     const children = await skipIfVanished(async () => listChildren(path));
@@ -166,7 +166,7 @@ export const captureRevisionTree = async (
     let nextIndex = 0;
     let capturedBytes = 0;
     let firstFailure: unknown;
-    const captureFile = async (path: string, mode: RevisionFileMode, index: number): Promise<void> => {
+    const captureFile = async (path: string, mode: FileMode, index: number): Promise<void> => {
       let reservedBytes = 0;
       let reader: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>> | undefined;
       let cancellation: Promise<void> | undefined;

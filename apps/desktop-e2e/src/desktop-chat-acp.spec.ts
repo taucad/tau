@@ -914,8 +914,8 @@ test.skipIf(!codexAvailable)(
         .toBe(finalizedBeforeNativeReturn + 1);
       expect(finalizedRevisions(logOf(candidateChatId)).at(-1)?.branch).toBe('main');
 
-      /* Restore to the direct turn's revision: the live folder is the seed again. */
-      await openRevisionCard(page, 2);
+      /* Restore to the direct turn's revision through the Revisions pane's history
+       * (the candidate chat holds no Rev 2 card): the live folder is the seed again. */
       await page.getByRole('button', { name: 'Restore to Revision 2', exact: true }).first().click();
       await expect.poll(liveSource, { timeout: 120_000 }).toBe(seededSource);
       await session.capture('rev-branches-after-restore');
@@ -1008,9 +1008,14 @@ test.skipIf(!codexAvailable)(
       const logPath = join(session.pickedDirectory, slug, '.tau/chats', chatId, 'events.jsonl');
       await sendPrompt(page, attachmentPrompt);
 
-      /* The prompt itself carries `HOLE=`, so only an assistant row counts as the answer. */
+      /* The prompt itself carries `HOLE=`, and so does the assistant-role ACP session row, whose
+       * title Codex sets to the first prompt. Only an assistant text row is the answer. */
       const assistantAnswer = (log: string): string | undefined =>
-        log.split('\n').findLast((line) => line.includes('"role":"assistant"') && line.includes('HOLE='));
+        log
+          .split('\n')
+          .findLast(
+            (line) => line.includes('"role":"assistant"') && line.includes('HOLE=') && !line.includes('"acp-session"'),
+          );
       await expect
         .poll(() => (existsSync(logPath) ? assistantAnswer(readFileSync(logPath, 'utf8')) : undefined), {
           timeout: 600_000,

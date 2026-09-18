@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { MoreHorizontal, Download } from 'lucide-react';
+import { EllipsisVertical, Download } from 'lucide-react';
 import { FloatingPanelMenuButton } from '#components/ui/floating-panel.js';
 import {
   DropdownMenu,
@@ -38,7 +38,7 @@ export function ChatHistorySettings(): React.ReactNode {
     <DropdownMenu modal={false}>
       <FloatingPanelMenuButton asChild tooltip='Chat options' aria-label='Chat options'>
         <DropdownMenuTrigger>
-          <MoreHorizontal className='size-4' />
+          <EllipsisVertical className='size-4' />
         </DropdownMenuTrigger>
       </FloatingPanelMenuButton>
       <DropdownMenuContent

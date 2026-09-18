@@ -1,4 +1,4 @@
-import { Copy, Ellipsis, Pencil, Trash, ArrowUpRightSquare } from 'lucide-react';
+import { Copy, EllipsisVertical, Pencil, Trash, ArrowUpRightSquare } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import type { ProjectListItem } from '#types/project.types.js';
@@ -46,7 +46,7 @@ export function ProjectActionDropdown({ project, actions }: ProjectActionDropdow
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant='ghost' size='icon' aria-label={`Actions for ${project.name}`}>
-            <Ellipsis className='size-4' />
+            <EllipsisVertical className='size-4' />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align='end'>

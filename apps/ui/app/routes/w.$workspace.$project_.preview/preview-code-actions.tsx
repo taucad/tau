@@ -1,4 +1,4 @@
-import { Download, Ellipsis, FileCode } from 'lucide-react';
+import { Download, EllipsisVertical, FileCode } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
@@ -22,7 +22,7 @@ export function PreviewCodeActions({ onEdit, onDownloadZip }: PreviewCodeActions
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant='ghost' size='icon' aria-label='More code actions' data-testid='preview-code-actions-menu'>
-            <Ellipsis className='size-4' />
+            <EllipsisVertical className='size-4' />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align='end'>

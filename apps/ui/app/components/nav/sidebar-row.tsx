@@ -12,7 +12,7 @@
  */
 
 import type { ComponentProps, ComponentType, ReactNode } from 'react';
-import { CircleAlert, MoreHorizontal } from 'lucide-react';
+import { CircleAlert, EllipsisVertical } from 'lucide-react';
 import { Link } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import {
@@ -156,7 +156,7 @@ export function SidebarRowMenuButton({
           className={sidebarRowButtonClass}
           aria-label={`More actions for ${name}`}
         >
-          <MoreHorizontal aria-hidden className='size-3.5' />
+          <EllipsisVertical aria-hidden className='size-3.5' />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side={side} align={align} className={className}>

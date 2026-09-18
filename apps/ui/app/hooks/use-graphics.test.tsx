@@ -183,6 +183,32 @@ describe('GraphicsProvider camera rig ownership', () => {
     expect(rig?.perspectiveCamera.fov).toBe(45);
   });
 
+  /* The prop is a seed, not a control. It follows the persisted setting, which the viewer rewrites
+   * as soon as the person moves the slider -- rebuilding the rig there would drop the live camera. */
+  it('keeps the committed rig when the requested field of view changes', () => {
+    const graphicsActor = createGraphicsActor();
+    const rigs: ThreeCameraRig[] = [];
+    const onRig = (rig: ThreeCameraRig): void => {
+      if (rigs.at(-1) !== rig) {
+        rigs.push(rig);
+      }
+    };
+    const mounted = render(
+      <GraphicsProvider graphicsRef={graphicsActor} initialVerticalFieldOfView={45}>
+        <RigProbe onRig={onRig} />
+      </GraphicsProvider>,
+    );
+
+    mounted.rerender(
+      <GraphicsProvider graphicsRef={graphicsActor} initialVerticalFieldOfView={20}>
+        <RigProbe onRig={onRig} />
+      </GraphicsProvider>,
+    );
+
+    expect(rigs).toHaveLength(1);
+    expect(rigs[0]?.actorRef.getSnapshot().context.view.requestedVerticalFieldOfView).toBe(45);
+  });
+
   it('unregisters and stops the committed rig after StrictMode unmount', async () => {
     const graphicsActor = createGraphicsActor();
     let stop: ReturnType<typeof vi.spyOn> | undefined;

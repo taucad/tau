@@ -184,14 +184,18 @@ export function GraphicsProvider({
       listeners: new Set(),
     };
   }
+  /* Both halves of the seed are latched: the field of view follows a persisted setting the viewer
+   * rewrites while the pane is open, and rebuilding the rig on that would drop the live camera. */
   const initialCameraViewRef = useRef({
     graphicsRef,
     cameraView: cameraViewRestore?.cameraView,
+    verticalFieldOfView: initialVerticalFieldOfView,
   });
   if (initialCameraViewRef.current.graphicsRef !== graphicsRef) {
     initialCameraViewRef.current = {
       graphicsRef,
       cameraView: cameraViewRestore?.cameraView,
+      verticalFieldOfView: initialVerticalFieldOfView,
     };
   }
   const cameraRig = useMemo(
@@ -200,10 +204,10 @@ export function GraphicsProvider({
         graphicsRef,
         connectorRef: cameraConnectorRef,
         cameraView: initialCameraViewRef.current.cameraView,
-        initialVerticalFieldOfView,
+        initialVerticalFieldOfView: initialCameraViewRef.current.verticalFieldOfView,
         renderFrame: renderFrameOwnerRef.current.current,
       }),
-    [graphicsRef, initialVerticalFieldOfView],
+    [graphicsRef],
   );
   const cameraRigRef = useRef(cameraRig);
   cameraRigRef.current = cameraRig;

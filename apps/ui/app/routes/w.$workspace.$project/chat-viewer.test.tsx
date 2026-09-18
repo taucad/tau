@@ -36,6 +36,7 @@ const mockGraphicsSend = vi.fn();
 let mockGeometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
 let mockViewSettings: Record<string, { entryPath: string; graphicsSettings: GraphicsViewSettings }> = {};
 let mockCameraViewRestore: unknown;
+let mockInitialVerticalFieldOfView: number | undefined;
 const mockUseViewSettingsSync = vi.fn();
 let mockHoveredComponentId: string | undefined;
 let mockCadViewerSecondaryPointerMode: 'component-hit' | 'suppressed';
@@ -353,8 +354,17 @@ vi.mock('#hooks/use-view-settings-sync.js', () => ({
 // `use-graphics` drags in three.js via screenshot/camera capability machines, so
 // stub the provider/hooks to avoid loading three under jsdom.
 vi.mock('#hooks/use-graphics.js', () => ({
-  GraphicsProvider: ({ children, cameraViewRestore }: { children: React.ReactNode; cameraViewRestore?: unknown }) => {
+  GraphicsProvider: ({
+    children,
+    cameraViewRestore,
+    initialVerticalFieldOfView,
+  }: {
+    children: React.ReactNode;
+    cameraViewRestore?: unknown;
+    initialVerticalFieldOfView?: number;
+  }) => {
     mockCameraViewRestore = cameraViewRestore;
+    mockInitialVerticalFieldOfView = initialVerticalFieldOfView;
     return <div>{children}</div>;
   },
   useGraphics: () => mockGraphicsActor,
@@ -391,6 +401,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockGeometryUnits = new Map();
     mockViewSettings = {};
     mockCameraViewRestore = undefined;
+    mockInitialVerticalFieldOfView = undefined;
     mockUseViewSettingsSync.mockClear();
     mockHoveredComponentId = undefined;
     mockCadViewerSecondaryPointerMode = 'component-hit';
@@ -566,6 +577,23 @@ describe('ChatViewer reopen-renderer overlay', () => {
 
     expect(mockCameraViewRestore).toEqual({ identity: helperEntryPath, cameraView });
     expect(mockUseViewSettingsSync).toHaveBeenCalledWith(expect.objectContaining({ persistCameraView: true }));
+  });
+
+  /* A project that is navigated away from keeps its graphics actor, so the pane that comes back
+   * seeds a fresh rig from this prop. Without it the rig falls back to the actor's spawn-time
+   * `initialCameraFovAngle` and the person's field of view silently reverts to the default. */
+  it('seeds the provider with the persisted field of view', () => {
+    mockViewSettings = {
+      'view-1': {
+        entryPath: helperEntryPath,
+        graphicsSettings: { ...defaultGraphicsSettings, cameraFovAngle: 42 },
+      },
+    };
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor());
+
+    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    expect(mockInitialVerticalFieldOfView).toBe(42);
   });
 
   it('clears geometry-dependent camera state when the pane switches files', () => {

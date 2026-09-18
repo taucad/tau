@@ -30,8 +30,10 @@ import { sidebarPreferredWidth } from '#constants/sidebar.constants.js';
 export const headerHeight = 'calc(var(--spacing) * 12)';
 export const desktopHeaderHeight = 'calc(var(--spacing) * 9)';
 
-const desktopTitlebarControlsWidth = 'calc(var(--spacing) * 47)';
-const webTitlebarControlsWidth = 'calc(var(--spacing) * 28)';
+/* The width each control row fills, minus 4 px: the chat header's own first control then
+ * lands one row-gap after the last of these, so the two read as one row. */
+const desktopTitlebarControlsWidth = 'calc(var(--spacing) * 44)';
+const webTitlebarControlsWidth = 'calc(var(--spacing) * 26)';
 
 const sidebarMinimumWidth = 192;
 const sidebarMaximumWidth = 480;
@@ -76,7 +78,7 @@ const WebTitlebarControls = ({
 }): React.JSX.Element => (
   <div
     data-slot='web-titlebar-controls'
-    className='fixed top-0 left-0 z-50 hidden h-9 w-(--titlebar-controls-width) items-center gap-2 bg-transparent px-2 md:flex'
+    className='fixed top-0 left-0 z-50 hidden h-9 w-(--titlebar-controls-width) items-center gap-1 bg-transparent pr-1 pl-2 md:flex'
   >
     <Link
       to='/'

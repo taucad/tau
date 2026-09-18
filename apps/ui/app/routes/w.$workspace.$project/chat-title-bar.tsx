@@ -1,10 +1,17 @@
+import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { SquarePen } from 'lucide-react';
-import { Separator } from '@taucad/ui/components/separator';
+import { useSelector } from '@xstate/react';
+import { cn } from '@taucad/ui/utils/cn';
 import { ChatHistorySettings } from '#routes/w.$workspace.$project/chat-history-settings.js';
+import { useActiveChatNaming } from '#routes/w.$workspace.$project/use-active-chat-naming.js';
 import { useOpenNewChat } from '#routes/w.$workspace.$project/use-open-new-chat.js';
+import { useChats } from '#hooks/use-chats.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
+import { useProject } from '#hooks/use-project.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
+import { InlineTextEditor } from '#components/inline-text-editor.js';
+import { sidebarRowEditorClass } from '#components/nav/sidebar-row.js';
 import { FloatingPanelButtonGroup, FloatingPanelContentHeaderActions } from '#components/ui/floating-panel.js';
 import { PaneButton } from '#components/ui/pane-button.js';
 import { useSidebar } from '#components/ui/sidebar.js';
@@ -15,31 +22,89 @@ const newChatKeyCombination = {
   shiftKey: true,
 } satisfies KeyCombination;
 
-/** Current-session title and status; chat collection navigation lives in the sidebar. */
+/**
+ * The chat pane's one header row: the active chat's name, renamed in place the
+ * way a sidebar row is, with the chat menu and the close control at the end.
+ * Chat collection navigation lives in the sidebar; with the sidebar collapsed
+ * the row opens with "New chat", one row-gap after the host's own controls.
+ */
 export function ChatTitleBar({ closeButton }: { readonly closeButton?: ReactNode }): React.JSX.Element {
   const { isMobile, open: isSidebarOpen } = useSidebar();
   const { openNewChat, isReady: canOpenNewChat } = useOpenNewChat();
+  const { editorRef, projectRef, projectId } = useProject();
+  const activeChatId = useSelector(editorRef, (state) => state.context.focusedChatId);
+  const isProjectLoading = useSelector(projectRef, (state) => state.context.isLoading);
+  const { chats, applyGeneratedChatName, updateChatName, isLoading: isChatsLoading } = useChats(projectId);
+  const activeChat = useMemo(() => chats.find((chat) => chat.id === activeChatId), [chats, activeChatId]);
+  const isGeneratingName = useActiveChatNaming({
+    activeChat,
+    isProjectLoading,
+    isChatsLoading,
+    applyGeneratedChatName,
+  });
+  const [isRenaming, setIsRenaming] = useState(false);
+  const name = activeChat?.name ?? 'Chat';
 
   const createAndOpenChat = async (): Promise<void> => openNewChat();
 
   useKeybinding(newChatKeyCombination, createAndOpenChat);
 
+  const startRename = (): void => {
+    if (activeChat) {
+      setIsRenaming(true);
+    }
+  };
+
   return (
     <>
       {!isMobile && !isSidebarOpen ? (
-        <>
-          <PaneButton aria-label='New chat' disabled={!canOpenNewChat} tooltip='New chat' onClick={createAndOpenChat}>
-            <SquarePen aria-hidden className='size-3.5 translate-y-[0.5px]' />
-          </PaneButton>
-          <span className='mx-2 h-4'>
-            <Separator orientation='vertical' />
-          </span>
-        </>
+        <PaneButton aria-label='New chat' disabled={!canOpenNewChat} tooltip='New chat' onClick={createAndOpenChat}>
+          <SquarePen aria-hidden className='size-3.5 translate-y-[0.5px]' />
+        </PaneButton>
       ) : null}
-      <div className='min-w-0 flex-1 self-stretch [app-region:drag]' />
+      {/* oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- the double-click is a
+          pointer shortcut for the menu's Rename item, which stays the keyboard route. */}
+      <div
+        className={cn(
+          'flex min-w-0 flex-1 items-center self-stretch',
+          // The editor draws no outline of its own (the sidebar's row does the same).
+          isRenaming && 'rounded-sm focus-outline',
+        )}
+        onDoubleClick={isRenaming ? undefined : startRename}
+      >
+        {isRenaming && activeChat ? (
+          <InlineTextEditor
+            value={activeChat.name}
+            variant='ghost'
+            shouldStartEditing
+            ariaLabel='Chat name'
+            // A field inside the desktop drag region cannot be typed into or selected.
+            className={cn(sidebarRowEditorClass, '[app-region:no-drag]')}
+            onSave={async (next) => {
+              await updateChatName(activeChat.id, next);
+            }}
+            onEditingChange={(isEditing) => {
+              if (!isEditing) {
+                setIsRenaming(false);
+              }
+            }}
+          />
+        ) : (
+          <span className='fade-label flex-1 text-sm font-medium'>
+            {/* The text, not its box, leaves the drag region: a double-click on a macOS drag
+                region zooms the window, and the rest of the row still drags it. */}
+            <span
+              className={cn('text-foreground [app-region:no-drag]', isGeneratingName && 'animate-pulse')}
+              aria-busy={isGeneratingName}
+            >
+              {name}
+            </span>
+          </span>
+        )}
+      </div>
       <FloatingPanelContentHeaderActions>
         <FloatingPanelButtonGroup>
-          <ChatHistorySettings />
+          <ChatHistorySettings onRename={startRename} />
         </FloatingPanelButtonGroup>
         {closeButton}
       </FloatingPanelContentHeaderActions>

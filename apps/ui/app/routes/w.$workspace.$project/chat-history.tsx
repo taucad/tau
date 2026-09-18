@@ -14,7 +14,6 @@ import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import { useChatContext, useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatTitleBar } from '#routes/w.$workspace.$project/chat-title-bar.js';
-import { ChatHistoryStatus } from '#routes/w.$workspace.$project/chat-history-status.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import {
   FloatingPanel,
@@ -279,8 +278,8 @@ export const ChatHistory = memo(function (props: {
           )}
         >
           {/* Chat-restore time-travel: wire the store seams + surface a fork marker. */}
-          {/* Header with chat selector */}
-          <FloatingPanelContentHeader>
+          {/* The one header row: name, rename in place, chat menu, close. */}
+          <FloatingPanelContentHeader className='gap-1'>
             <ChatTitleBar
               closeButton={
                 <FloatingPanelClose
@@ -295,9 +294,6 @@ export const ChatHistory = memo(function (props: {
               }
             />
           </FloatingPanelContentHeader>
-
-          {/* Sticky status bar - last activity, model, cost */}
-          <ChatHistoryStatus />
 
           {/* Main chat content area */}
           <AtReferenceProvider treeService={treeService} chats={chats}>

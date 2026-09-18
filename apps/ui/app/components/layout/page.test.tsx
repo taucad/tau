@@ -241,12 +241,14 @@ describe('Page application shell', () => {
     expect(controlRegion.children[0]).toBe(within(controlRegion).getByRole('link', { name: 'Home' }));
     expect(controlRegion.children[1]).toBe(within(controlRegion).getByRole('button', { name: 'Toggle Sidebar' }));
     expect(controlRegion.children).toHaveLength(2);
-    expect(controlRegion).toHaveClass('gap-2');
+    // The wordmark clears the first control by the row's own gap, not a wider one.
+    expect(controlRegion).toHaveClass('gap-1', 'pl-2', 'pr-1');
+    expect(controlRegion).not.toHaveClass('gap-2', 'px-2');
     expect(
       container
         .querySelector<HTMLElement>('[data-slot=application-shell]')
         ?.style.getPropertyValue('--titlebar-controls-width'),
-    ).toBe('calc(var(--spacing) * 28)');
+    ).toBe('calc(var(--spacing) * 26)');
   });
 
   it('resizes the sidebar by 16px and clamps to the pane bounds', () => {
@@ -310,7 +312,7 @@ describe('Page header contract', () => {
       container
         .querySelector<HTMLElement>('[data-slot=application-shell]')
         ?.style.getPropertyValue('--titlebar-controls-width'),
-    ).toBe('calc(var(--spacing) * 47)');
+    ).toBe('calc(var(--spacing) * 44)');
     expect(container.querySelector('header > div')).toHaveClass(
       'md:group-data-[sidebar-open=false]/app-shell:ml-(--titlebar-controls-width)',
     );

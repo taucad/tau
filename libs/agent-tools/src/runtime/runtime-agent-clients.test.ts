@@ -528,6 +528,7 @@ describe('createRuntimeParameterAgentClient', () => {
       mapRuntimeError: (error) => ({ success: false, errorCode: 'VALIDATION_ERROR', message: String(error) }),
     });
     const request = {
+      action: 'propose',
       targetFile: 'main.py',
       requestId: 'agent:1',
       expected: current.identity,
@@ -590,6 +591,7 @@ describe('createRuntimeParameterAgentClient', () => {
       throw new Error('Expected a source-unit capable binding');
     }
     const proposed = await adapter.applyParameterOperation({
+      action: 'propose',
       targetFile: 'main.py',
       requestId: 'agent:unit',
       expected: read.current.identity,

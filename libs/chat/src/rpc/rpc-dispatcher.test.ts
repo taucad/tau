@@ -71,6 +71,7 @@ describe('createRpcDispatcher invocation context', () => {
         {
           rpcName: rpcName.applyParameterOperation,
           args: {
+            action: 'propose',
             targetFile: 'main.ts',
             requestId: 'agent:1',
             expected,

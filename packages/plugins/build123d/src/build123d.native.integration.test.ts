@@ -379,6 +379,7 @@ describe('Build123d native kernel', () => {
       } as const;
       const cancelledProposal = await agent.applyParameterOperation(
         {
+          action: 'propose',
           targetFile: 'main.py',
           requestId: 'build123d-agent:cancel',
           expected: resolved.current.identity,
@@ -402,6 +403,7 @@ describe('Build123d native kernel', () => {
       ).resolves.toMatchObject({ success: true, outcome: { status: 'cancelled-before-apply' } });
       const proposal = await agent.applyParameterOperation(
         {
+          action: 'propose',
           targetFile: 'main.py',
           requestId: 'build123d-agent:confirm',
           expected: resolved.current.identity,

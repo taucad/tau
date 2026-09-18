@@ -21,6 +21,19 @@ const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 );
 const jsonObjectSchema = z.object({}).catchall(jsonValueSchema);
 
+/*
+ * Provider-facing JSON values. The recursive schemas above serialize as `$ref` loops through
+ * `definitions`, which Vertex refuses outright ("ref loops are only supported if they include
+ * optional or nullable property values"). Piping a typeless input side into them keeps the full
+ * runtime check — non-finite numbers and non-JSON graphs are still rejected — while the wire form
+ * `z.toJSONSchema(…, { io: 'input' })` emits is just the description.
+ */
+const wireJsonValueSchema = z.any().describe('Any JSON value.').pipe(jsonValueSchema);
+const wireJsonObjectSchema = z
+  .any()
+  .describe('A JSON object mapping parameter names to any JSON value.')
+  .pipe(jsonObjectSchema);
+
 /**
  * The admitted manifest a parameter read or operation was built from. A source change produces a
  * new manifest revision, so this one token covers every semantic input. @public
@@ -40,7 +53,7 @@ const parameterEditSchema = z
     parameterId: tokenSchema,
     resource: tokenSchema,
     pointer: z.string(),
-    value: jsonValueSchema,
+    value: wireJsonValueSchema,
     inputUnit: tokenSchema.optional(),
   })
   .strict();
@@ -54,7 +67,7 @@ export const parameterSetOperationSchema = z.discriminatedUnion('kind', [
       parameterId: tokenSchema,
       resource: tokenSchema,
       pointer: z.string(),
-      value: jsonValueSchema,
+      value: wireJsonValueSchema,
     })
     .strict(),
   z
@@ -80,14 +93,14 @@ export const parameterSetOperationSchema = z.discriminatedUnion('kind', [
     .object({
       kind: z.enum(['replace-group-values']),
       group: tokenSchema,
-      values: jsonObjectSchema,
+      values: wireJsonObjectSchema,
     })
     .strict(),
   z
     .object({
       kind: z.enum(['create-group']),
       group: tokenSchema,
-      values: jsonObjectSchema.optional(),
+      values: wireJsonObjectSchema.optional(),
     })
     .strict(),
   z.object({ kind: z.enum(['delete-group']), group: tokenSchema }).strict(),
@@ -179,35 +192,75 @@ export const getParametersOutputSchema = z
     }
   });
 
-const proposeParameterOperationInputSchema = z
-  .object({
-    targetFile: rootedFilePathSchema.describe('Geometry source file relative to the project root.'),
-    requestId: tokenSchema.describe('Stable caller-owned identifier reused only for identical retries.'),
-    expected: parameterSetIdentitySchema,
-    pressure: z.enum(['transient', 'final']),
-    operation: parameterSetOperationSchema,
-  })
-  .strict();
+const targetFileField = rootedFilePathSchema.describe('Geometry source file relative to the project root.');
+const requestIdField = tokenSchema.describe(
+  'Stable caller-owned identifier. Reuse it only for an identical retry, and reuse the proposal’s id to confirm or cancel it.',
+);
 
-/** Propose, confirm, or cancel one checked parameter operation. @public */
-export const applyParameterOperationInputSchema = z.union([
-  proposeParameterOperationInputSchema,
+/**
+ * The narrow shape each action really carries. Every field a given action does not use is refused,
+ * so a `confirm` cannot smuggle an operation and a `propose` cannot smuggle a plan fingerprint.
+ */
+const applyParameterOperationActionSchema = z.discriminatedUnion('action', [
+  z
+    .object({
+      action: z.enum(['propose']),
+      targetFile: targetFileField,
+      requestId: requestIdField,
+      expected: parameterSetIdentitySchema,
+      pressure: z.enum(['transient', 'final']),
+      operation: parameterSetOperationSchema,
+    })
+    .strict(),
   z
     .object({
       action: z.enum(['confirm']),
-      targetFile: rootedFilePathSchema,
-      requestId: tokenSchema,
+      targetFile: targetFileField,
+      requestId: requestIdField,
       planFingerprint: tokenSchema,
     })
     .strict(),
   z
     .object({
       action: z.enum(['cancel']),
-      targetFile: rootedFilePathSchema,
-      requestId: tokenSchema,
+      targetFile: targetFileField,
+      requestId: requestIdField,
     })
     .strict(),
 ]);
+
+/**
+ * Propose, confirm, or cancel one checked parameter operation.
+ *
+ * The wire form is one flat object: a top-level union has no `type: 'object'`, which Anthropic
+ * rejects outright and pi's Anthropic codec silently degrades to a tool with no parameters at all.
+ * The flat object is only the input side — it narrows to {@link applyParameterOperationActionSchema},
+ * so per-action requirements are still enforced at the boundary rather than at every consumer.
+ * @public
+ */
+export const applyParameterOperationInputSchema = z
+  .object({
+    action: z
+      .enum(['propose', 'confirm', 'cancel'])
+      .describe(
+        'propose submits one operation; confirm applies a plan a previous propose returned as confirmation-required; cancel discards it.',
+      ),
+    targetFile: targetFileField,
+    requestId: requestIdField,
+    expected: parameterSetIdentitySchema
+      .describe('Required for propose: the exact identity get_parameters returned.')
+      .optional(),
+    pressure: z
+      .enum(['transient', 'final'])
+      .describe('Required for propose: transient for an intermediate step, final for the settled value.')
+      .optional(),
+    operation: parameterSetOperationSchema.describe('Required for propose: the operation to apply.').optional(),
+    planFingerprint: tokenSchema
+      .describe('Required for confirm: the planFingerprint from the confirmation-required outcome.')
+      .optional(),
+  })
+  .strict()
+  .pipe(applyParameterOperationActionSchema);
 
 const parameterSetOutcomeSchema = z.discriminatedUnion('status', [
   z

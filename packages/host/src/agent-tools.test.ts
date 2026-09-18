@@ -375,6 +375,7 @@ describe('createHostToolRegistry', () => {
     expect(JSON.stringify(unresolved.content)).toContain('SEMANTICS_UNRESOLVED');
 
     const rejected = await invoke(registry, 'apply_parameter_operation', {
+      action: 'propose',
       targetFile: 'main.ts',
       requestId: 'request-1',
       expected: { manifestRevision: 'manifest' },

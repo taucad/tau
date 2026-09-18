@@ -487,6 +487,54 @@ describe('ChatWorkspaceAuthorityProvider (north star W3d)', () => {
     expect(transport.getHostFinalizedTurns().map((entry) => entry.turnId)).toContain('turn_wire');
   });
 
+  /**
+   * F5: a settlement the chat's durable log refuses is not a fact. Recording it
+   * anyway put page memory and the log permanently at odds — and because
+   * `getHostFinalizedTurns()` is read as "the host already attested this run",
+   * the next settlement of that run discarded instead of publishing.
+   */
+  it('should not remember a settlement the durable chat log refused', async () => {
+    const { project } = fixture();
+    bindFileManager(project);
+    renderHook(() => useChatWorkspaceAuthority(), { wrapper: wrapper() });
+
+    const transport = await import('#chat-clients/_internal/browser-agent-host-transport.js');
+    const refused = vi
+      .spyOn(transport, 'persistBrowserTurnSettlement')
+      .mockRejectedValue(new Error('SETTLEMENT_WITHOUT_RUN'));
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const observed: WorkerRevisionEvent[] = [];
+    const unsubscribe = transport.subscribeHostTurnSettlements((event) => observed.push(event));
+
+    for (const listener of revisionRoot.eventListeners) {
+      listener({
+        type: 'turn.finalized',
+        turnId: 'turn_refused',
+        runId: 'run_refused',
+        chatId: 'chat_refused',
+        projectId: 'project_test',
+        checkoutId: 'live',
+        revisionId: 'rev-refused',
+        changedPaths: ['main.scad'],
+        trigger: 'turn',
+        runIds: ['run_refused'],
+      });
+    }
+
+    await waitFor(() => {
+      expect(refused).toHaveBeenCalled();
+    });
+    await waitFor(() => {
+      expect(consoleError).toHaveBeenCalled();
+    });
+    expect(observed).toEqual([]);
+    expect(transport.getHostFinalizedTurns().map((entry) => entry.turnId)).not.toContain('turn_refused');
+
+    unsubscribe();
+    refused.mockRestore();
+    consoleError.mockRestore();
+  });
+
   it('should adopt a finalized daemon turn into the browser revision projection', async () => {
     const { project } = fixture();
     bindFileManager(project);

@@ -468,12 +468,24 @@ export function ChatWorkspaceAuthorityProvider({ children }: { readonly children
         return;
       }
       let persisted = false;
+      let refused = false;
       try {
         persisted = await persistBrowserTurnSettlement(event);
       } catch (error) {
+        /* F5: the durable log refused this settlement — the run it names is not
+         * one the log holds. It is not a fact, so it never becomes one here:
+         * `getHostFinalizedTurns()` is read as "the host already attested this
+         * run", and a refusal recorded as an attestation makes the next
+         * settlement of that run discard instead of publishing. */
+        refused = true;
         console.error('[browserAgentHost] turn settlement was not persisted', error);
       }
-      recordHostTurnSettlement(event);
+      if (!refused) {
+        /* `persisted === false` is not a refusal: it is a settlement with no
+         * durable writer to hand it to, which the reload reconciliation picks
+         * up. The revision it names is real either way. */
+        recordHostTurnSettlement(event);
+      }
       if (persisted) {
         revisions?.send({ command: 'recordsChanged' });
       }

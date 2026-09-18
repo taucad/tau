@@ -626,6 +626,44 @@ describe('chatSessionMachine run ownership', () => {
     actor.stop();
   });
 
+  /**
+   * C6/V10: a reload finds a run the host carried to a terminal state with no
+   * settlement in its log — the tab that ran it died before the revision root
+   * answered. Nobody is coming to attest it, so the page that adopted it
+   * settles it, once, and the chat leaves `finishing` instead of sitting in it.
+   */
+  it('should settle a terminal run the log holds no settlement for, once', async () => {
+    const script = turnActors();
+    const actor = startOwning(script.actors);
+
+    actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-reloaded' });
+    expect(runState(actor)).toBe('finishing.observing');
+
+    actor.send({ type: 'reconcileSettlement', runId: 'run-reloaded', outcome: 'completed' });
+    await vi.waitFor(() => {
+      expect(script.settlements).toHaveLength(1);
+    });
+    expect(script.settlements[0]).toMatchObject({
+      chatId: 'chat-1',
+      runId: 'run-reloaded',
+      leaseTurnId: undefined,
+      outcome: 'completed',
+    });
+    await vi.waitFor(() => {
+      expect(runState(actor)).toBe('done');
+    });
+
+    /* A second reconciliation of the same run — a later reattach, another
+     * `onFinish` — settles nothing: the run it named is over. */
+    actor.send({ type: 'reconcileSettlement', runId: 'run-reloaded', outcome: 'completed' });
+    await vi.waitFor(() => {
+      expect(runState(actor)).toBe('done');
+    });
+    expect(script.settlements).toHaveLength(1);
+
+    actor.stop();
+  });
+
   it('should refuse to dispatch a turn no host can admit', async () => {
     const script = turnActors({
       admit: async () => {

@@ -9,6 +9,7 @@ import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { BrowserContext } from 'playwright';
 import type { BrowserCommand, BrowserCommandContext } from 'vitest/node';
+import { localDatabaseName } from '@taucad/utils/worktree-database';
 import type {
   TargetClickOptions,
   TargetCookie,
@@ -96,7 +97,7 @@ const queryTauDatabase = async (statement: string): Promise<string> => {
       '-U',
       'dev_user',
       '-d',
-      'tau_dev',
+      localDatabaseName(),
       '-c',
       statement,
     ],

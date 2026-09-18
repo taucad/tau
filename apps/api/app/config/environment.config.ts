@@ -1,4 +1,5 @@
 import process from 'node:process';
+import { ensureWorktreeDatabase } from '@taucad/utils/worktree-database';
 import { z } from 'zod';
 import { jsonCodec } from '#lib/zod.lib.js';
 
@@ -459,8 +460,29 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
   }
 });
 
+/**
+ * Point a linked git worktree's API at its own local database fork.
+ *
+ * Development only: production has no repository and tests keep their `.env.test` database.
+ * The fork is created from the base database on first use, so a worktree never shares
+ * (or migrates from under) another checkout's schema.
+ */
+const withWorktreeDatabases = (environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+  if (environment['NODE_ENV'] !== 'development') {
+    return environment;
+  }
+  const forked = { ...environment };
+  for (const key of ['DATABASE_URL', 'BILLING_DATABASE_URL'] as const) {
+    const url = environment[key];
+    if (url) {
+      forked[key] = ensureWorktreeDatabase(url);
+    }
+  }
+  return forked;
+};
+
 export const getEnvironment = (): Environment => {
-  const result = environmentSchema.safeParse(process.env);
+  const result = environmentSchema.safeParse(withWorktreeDatabases(process.env));
 
   if (!result.success) {
     const formattedError = z.treeifyError(result.error).properties;

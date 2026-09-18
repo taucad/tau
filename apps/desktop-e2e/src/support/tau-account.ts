@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import process from 'node:process';
 import { promisify } from 'node:util';
+import { localDatabaseName } from '@taucad/utils/worktree-database';
 import { desktopE2EApiUrl, desktopE2ECompletedArtifact, desktopE2EFrontendUrl } from '#support/config.js';
 
 /**
@@ -109,7 +110,7 @@ export const tauDatabaseExecArgs = (
   }
   const container = environment['TAU_E2E_POSTGRES_CONTAINER'] ?? 'tau-postgres';
   const user = environment['TAU_E2E_POSTGRES_USER'] ?? 'dev_user';
-  const database = environment['TAU_E2E_POSTGRES_DATABASE'] ?? 'tau_dev';
+  const database = environment['TAU_E2E_POSTGRES_DATABASE'] ?? localDatabaseName();
   if (![container, user, database].every((value) => /^[a-zA-Z0-9_.-]+$/u.test(value))) {
     throw new Error('Desktop E2E database identity contains unsupported characters.');
   }

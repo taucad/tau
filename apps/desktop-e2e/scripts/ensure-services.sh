@@ -43,8 +43,10 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 docker-compose -f "${REPO_ROOT}/infra/docker-compose.yml" up -d postgres redis minio minio-bootstrap
 pnpm --dir "${REPO_ROOT}" exec nx run api:db-migrate
 
-# The same psql vocabulary `src/support/two-client/tau-cloud.ts` seeds through.
-existing_head="$(docker exec tau-postgres psql -qtAX -v ON_ERROR_STOP=1 -U dev_user -d tau_dev \
+# The same psql vocabulary `src/support/two-client/tau-cloud.ts` seeds through,
+# against this checkout's database (a linked worktree owns a fork of `tau_dev`).
+database="$(node --input-type=module -e "import { localDatabaseName } from '${REPO_ROOT}/libs/utils/src/worktree-database.utils.ts'; console.log(localDatabaseName())")"
+existing_head="$(docker exec tau-postgres psql -qtAX -v ON_ERROR_STOP=1 -U dev_user -d "${database}" \
   -c "SELECT revision FROM billing.billing_policy_head WHERE environment = 'development';")"
 
 if [[ -n "${existing_head}" ]]; then

@@ -1,6 +1,7 @@
 import 'reflect-metadata'; // oxlint-disable-line import/no-unassigned-import -- Nest decorators require metadata before service imports
 import { readFile } from 'node:fs/promises';
 import { setTimeout as wait } from 'node:timers/promises';
+import { ensureWorktreeDatabase } from '@taucad/utils/worktree-database';
 import { runBillingLifecycleCommand } from '#api/billing/billing-lifecycle.command.js';
 import { runBillingBudgetCommand } from '#api/billing/billing-budget.command.js';
 import { BillingCashService } from '#api/billing/billing-cash.service.js';
@@ -64,11 +65,14 @@ async function main(): Promise<void> {
     throw new Error('billing-command requires TAU_CLOUD_ENABLED=true');
   }
   registerBillableModelMeterContracts();
-  const databaseUrl = process.env['BILLING_DATABASE_URL'];
+  const configuredDatabaseUrl = process.env['BILLING_DATABASE_URL'];
   const environment = process.env.BILLING_ENVIRONMENT;
-  if (!databaseUrl || !environment) {
+  if (!configuredDatabaseUrl || !environment) {
     throw new Error('BILLING_DATABASE_URL and BILLING_ENVIRONMENT are required');
   }
+  // A linked worktree's development commands run against that worktree's database fork.
+  const databaseUrl =
+    environment === 'development' ? ensureWorktreeDatabase(configuredDatabaseUrl) : configuredDatabaseUrl;
   const flags = args.filter((argument) => argument.startsWith('--')).map((argument) => argument.split('=')[0]);
   if (new Set(flags).size !== flags.length) {
     throw new Error('Duplicate command options are not permitted');

@@ -58,6 +58,18 @@ Make sure you have the following environment variable set:
 DATABASE_URL=postgresql://db_user:password@localhost:5432/database_name
 ```
 
+### 4. One database per git worktree
+
+In development every linked git worktree resolves the local `DATABASE_URL` (and
+`BILLING_DATABASE_URL`) to its own fork, `<database>_<worktree id>`, through
+`@taucad/utils/worktree-database`. The API, `pnpm db:migrate`, the billing
+command and the e2e suites all derive the same name, and the first of them to
+run creates the fork by copying the base database inside the `tau-postgres`
+container (`pg_dump | psql`, so it works while the base is in use). Nothing
+changes in the main worktree, in CI or against a remote host, and `NODE_ENV=test`
+keeps `.env.test`. Drop a fork you no longer need with
+`docker exec tau-postgres dropdb -U dev_user <database>_<worktree id>`.
+
 ## Migration
 
 Migrations run automatically during service initialization (`OnModuleInit`). The service ensures that:

@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -112,7 +113,7 @@ describe('ACP attachment materialisation (D23)', () => {
     expect(message).toEqual(snapshot);
   });
 
-  it('sends a PDF reference to the agent as a resource with its blob', async () => {
+  it('sends a PDF reference to the agent as a resource_link to the file and a resource with its blob', async () => {
     const blocks = await run({
       id: 'user-1',
       role: 'user',
@@ -121,12 +122,33 @@ describe('ACP attachment materialisation (D23)', () => {
       ],
     });
 
+    /* The link comes first: codex-acp has no document item, so the blob reaches the
+     * model as raw base64 text. The link is what its own PDF tooling can open. */
     expect(blocks).toEqual([
+      {
+        type: 'resource_link',
+        uri: pathToFileURL(join(root, '.tau', 'chats', 'chat-1', 'attachments', `${pdfHash}.pdf`)).href,
+        name: 'a.pdf',
+      },
       {
         type: 'resource',
         resource: { uri: `tau://attachments/${pdfHash}.pdf`, blob: base64(pdfBytes), mimeType: 'application/pdf' },
       },
     ]);
+  });
+
+  it('names the resource_link by the attachment file when the reference carries no filename', async () => {
+    const [link] = await run({
+      id: 'user-1',
+      role: 'user',
+      content: [{ type: 'file-ref', path: `attachments/${pdfHash}.pdf`, mimeType: 'application/pdf' }],
+    });
+
+    expect(link).toEqual({
+      type: 'resource_link',
+      uri: pathToFileURL(join(root, '.tau', 'chats', 'chat-1', 'attachments', `${pdfHash}.pdf`)).href,
+      name: `${pdfHash}.pdf`,
+    });
   });
 
   it('omits a reference whose bytes are absent and warns once across turns', async () => {

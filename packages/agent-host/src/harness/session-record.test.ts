@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ProviderMessage } from '#log/event-types.js';
+import type { JsonValue, ProviderMessage } from '#log/event-types.js';
 import {
   absentAttachmentMarker,
   chatAttachmentPath,
@@ -135,6 +135,24 @@ describe('materializeAttachments', () => {
       type: 'resource',
       resource: { uri: `tau://attachments/${pdfHash}.pdf`, blob: base64(pdfBytes) },
     });
+  });
+
+  it('flattens a builder that carries one document as several blocks, in its own order', async () => {
+    const outcome = await materializeAttachments(
+      history().slice(0, 1),
+      reader({ [imagePath]: imageBytes, [pdfPath]: pdfBytes }),
+      (hash, document, reference): readonly JsonValue[] => [
+        { type: 'resource_link', uri: `file:///${reference.path}`, name: reference.filename ?? hash },
+        { type: 'resource', resource: { uri: `tau://attachments/${hash}.pdf`, blob: document.data } },
+      ],
+    );
+
+    expect(outcome.messages[0]?.content).toEqual([
+      { type: 'text', text: 'look at these' },
+      { type: 'image', mimeType: 'image/png', data: base64(imageBytes) },
+      { type: 'resource_link', uri: `file:///${pdfPath}`, name: 'spec.pdf' },
+      { type: 'resource', resource: { uri: `tau://attachments/${pdfHash}.pdf`, blob: base64(pdfBytes) } },
+    ]);
   });
 });
 

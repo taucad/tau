@@ -1248,13 +1248,25 @@ export class ChatSessionStore {
             this.#rebindSessionProject(session, loadedChat.resourceId);
             bindComposer(loadedChat.resourceId);
 
-            // Defensive guard: only seed messages from the loaded chat when
-            // the live `Chat` instance has not started accumulating its own
-            // (a brand-new chat that's already in-flight). Prevents the
-            // classic "load wipes in-flight messages" race.
-            if (session.chat.messages.length === 0) {
-              session.chat.messages = loadedChat.messages;
-            }
+            /* Splice, never replace and never skip. The live `Chat` may already
+             * hold messages this load never saw — a brand-new chat that is
+             * already in-flight, a host reattach that rebuilt from the log, a
+             * reconciled durable user row — and overwriting them is the classic
+             * "load wipes in-flight messages" race. But *skipping* the load when
+             * they are there loses the other side: a session recreated by the
+             * shell's remount starts with an empty `Chat` and reads its history
+             * asynchronously, so a submit landing inside that read dropped every
+             * earlier turn for good — nothing reads the row twice, and a
+             * browser-placed chat has no reattach to rebuild it from the log.
+             * Ids are shared with the log's own derivation (P26), so keeping the
+             * row's messages this transcript does not already name can only add
+             * history, never a second copy of it. */
+            const inFlight = session.chat.messages;
+            const inFlightIds = new Set(inFlight.map((message) => message.id));
+            session.chat.messages = [
+              ...loadedChat.messages.filter((message) => !inFlightIds.has(message.id)),
+              ...inFlight,
+            ];
 
             const lastMessage = session.chat.messages.at(-1);
             const { startupRequest } = loadedChat;
@@ -1324,7 +1336,12 @@ export class ChatSessionStore {
               }
             }
 
-            const pendingTailRestore = buildPendingTailDraftRestore(session.chat.messages);
+            /* Healing a pending tail into the composer is for a turn *this load*
+             * found abandoned in the row. A message the live `Chat` was already
+             * carrying belongs to a request in flight right now, and yanking it
+             * back into the draft cancels the turn the person just sent. */
+            const pendingTailRestore =
+              inFlight.length > 0 ? undefined : buildPendingTailDraftRestore(session.chat.messages);
             session.draftActorRef.send({ type: 'initializeFromChat' });
             if (pendingTailRestore) {
               session.chat.messages = pendingTailRestore.truncatedMessages;

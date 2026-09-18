@@ -3079,6 +3079,83 @@ describe('ChatSessionStore', () => {
 
       store.release(chatId);
     });
+
+    /*
+     * The shell remount lands again *after* the seeded turn, now that its hold
+     * outlives the dispatch and `#scheduleRunReleaseIfTerminal` gives it back.
+     * The replacement session starts with an empty `Chat` and reads its history
+     * asynchronously — on desktop `chat.json` carries no `messages` (P26), so
+     * that read derives the transcript from the chat's log across the
+     * filesystem worker. A submit landing inside that read made the loader's
+     * "already accumulating" guard drop the whole durable history, permanently:
+     * nothing reads the row a second time, and a browser-placed chat has no
+     * reattach to rebuild it from the log either.
+     */
+    it('should keep the seeded first turn in the transcript when the second turn is submitted after its hold was released', async () => {
+      const chatId = 'chat_seed_second_turn';
+      const { deps, seedMessage, startupRequest, store } = seededRow(chatId);
+
+      store.acquire(chatId);
+      store.setLatestAgentBody(chatId, async () => testRunBody);
+      await vi.waitFor(() => {
+        expect(deps.consumeChatStartupRequest).toHaveBeenCalledWith(chatId, startupRequest.id);
+      });
+      const seededChat = harness.created.findLast((entry) => entry.id === chatId)!;
+      await vi.waitFor(() => {
+        expect(seededChat.regenerate).toHaveBeenCalledTimes(1);
+      });
+
+      const answeredSeed: MyUIMessage = { ...seedMessage, metadata: { createdAt: 1, status: 'success' } };
+      const seededReply: MyUIMessage = {
+        id: 'req_seed_run',
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'Browser host completed the workspace change.' }],
+        metadata: { createdAt: 2, status: 'success' },
+      };
+      seededChat.messages = [answeredSeed, seededReply];
+      seededChat.finish();
+      await settle();
+
+      // The seeded turn's hold is back, so the shell's remount disposes the session.
+      store.release(chatId);
+      expect(store.get(chatId)).toBeUndefined();
+
+      const loaded = Promise.withResolvers<ChatEntity>();
+      deps.getChat.mockImplementation(async () => loaded.promise);
+      const replacement = store.acquire(chatId);
+      const secondChat = harness.created.findLast((entry) => entry.id === chatId)!;
+      expect(secondChat).not.toBe(seededChat);
+
+      // The person submits the attachment turn before that read answers.
+      const attachmentTurn: MyUIMessage = {
+        id: 'msg_attachment_turn',
+        role: 'user',
+        parts: [{ type: 'text', text: 'Read the attached specification.' }],
+        metadata: { createdAt: 3, status: 'pending' },
+      };
+      replacement.persistenceActorRef.send({
+        type: 'startRequest',
+        request: { kind: 'send', message: attachmentTurn, body: testRunBody },
+      });
+      await vi.waitFor(() => {
+        expect(secondChat.sendMessage).toHaveBeenCalledTimes(1);
+      });
+      // What the AI SDK does inside `sendMessage`.
+      secondChat.messages = [...secondChat.messages, attachmentTurn];
+
+      loaded.resolve(chatRow(chatId, 'project_seed', { name: 'Seeded chat', messages: [answeredSeed, seededReply] }));
+      await settle();
+
+      expect(secondChat.messages.map((message) => message.id)).toEqual([
+        answeredSeed.id,
+        seededReply.id,
+        attachmentTurn.id,
+      ]);
+      // The in-flight turn is a live request, never a cancelled draft to heal.
+      expect(deps.commitCancelledDraftRestore).not.toHaveBeenCalled();
+
+      store.release(chatId);
+    });
   });
 
   // ===========================================================================

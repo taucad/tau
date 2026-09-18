@@ -212,6 +212,56 @@ describe('CollaboratorsController', () => {
     await expect(invitationsController.accept('not-a-token', inviteeId)).rejects.toThrow(NotFoundException);
   });
 
+  // === role change (PATCH) ===
+
+  /* W5b changes a role through this route rather than through a re-invite, so
+     the address keeps the invitation and the token it was already sent: minting
+     a new one would invalidate a link the invitee may be holding. */
+  it('should change an accepted collaborator’s role without minting a token', async () => {
+    const invited = await collaboratorsController.invite(
+      projectId,
+      { email: 'invitee@example.test', role: 'write' },
+      ownerId,
+    );
+    await invitationsController.accept(invited.token, inviteeId);
+    const tokenHashBefore = invitations[0]?.['tokenHash'];
+
+    await expect(
+      collaboratorsController.setRole({ projectId, email: 'invitee@example.test' }, { role: 'read' }, ownerId),
+    ).resolves.toStrictEqual({ email: 'invitee@example.test', role: 'read' });
+
+    expect(collaborators).toStrictEqual([expect.objectContaining({ userId: inviteeId, role: 'read' })]);
+    expect(invitations[0]).toMatchObject({ role: 'read', tokenHash: tokenHashBefore });
+  });
+
+  it('should change the role a pending invitation will grant when it is accepted', async () => {
+    const invited = await collaboratorsController.invite(
+      projectId,
+      { email: 'invitee@example.test', role: 'read' },
+      ownerId,
+    );
+    await collaboratorsController.setRole({ projectId, email: 'Invitee@Example.test' }, { role: 'write' }, ownerId);
+
+    await expect(invitationsController.accept(invited.token, inviteeId)).resolves.toMatchObject({ role: 'write' });
+    expect(collaborators).toStrictEqual([expect.objectContaining({ userId: inviteeId, role: 'write' })]);
+  });
+
+  it('should refuse a role change for an address that was never invited', async () => {
+    await expect(
+      collaboratorsController.setRole({ projectId, email: 'stranger@example.test' }, { role: 'write' }, ownerId),
+    ).rejects.toMatchObject({ response: { code: 'INVITATION_NOT_FOUND' } });
+  });
+
+  it('should refuse a role change from anybody but the owner', async () => {
+    await collaboratorsController.invite(projectId, { email: 'invitee@example.test', role: 'read' }, ownerId);
+    projectRow = { ownerId, role: 'write' };
+
+    await expect(
+      collaboratorsController.setRole({ projectId, email: 'invitee@example.test' }, { role: 'write' }, strangerId),
+    ).rejects.toThrow(ForbiddenException);
+    expect(invitations[0]).toMatchObject({ role: 'read' });
+  });
+
   // === revoke and list ===
 
   it('should drop the collaborator row when the owner revokes an accepted invitation', async () => {

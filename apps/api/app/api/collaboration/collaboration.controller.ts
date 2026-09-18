@@ -1,10 +1,10 @@
 /* oxlint-disable new-cap, @typescript-eslint/consistent-type-imports -- NestJS decorators are factories and DI metadata needs runtime class imports */
-import { Body, Controller, Delete, Get, HttpException, HttpStatus, Param, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpException, HttpStatus, Param, Patch, Post } from '@nestjs/common';
 import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
 import type { ProjectCollaboratorEntry } from '#api/collaboration/project-access.service.js';
-import { InviteCollaboratorDto } from '#api/collaboration/collaboration.dto.js';
+import { InviteCollaboratorDto, SetCollaboratorRoleDto } from '#api/collaboration/collaboration.dto.js';
 
 /** Daily invite cap per owner, matching the publication invite budget it shares a limiter with. */
 const collaboratorInvitesPerOwnerPerDay = 200;
@@ -78,6 +78,28 @@ export class CollaboratorsController {
     }
 
     return this.access.invite({ projectId, ownerId: access.ownerId, email: body.email, role: body.role });
+  }
+
+  /**
+   * Changes the role an address holds.
+   *
+   * Separate from a re-invite because it must not mint a token: the invitee may
+   * be holding the link they were already sent, and a role change is no reason
+   * to break it. Works whether or not the address has accepted yet.
+   *
+   * @param target - The project and the invited address, both from the path.
+   * @param body - The role it should now hold.
+   * @param userId - The signed-in caller, who must own the project.
+   * @returns The address and its new role.
+   */
+  @Patch(':email')
+  public async setRole(
+    @Param() target: { projectId: string; email: string },
+    @Body() body: SetCollaboratorRoleDto,
+    @User('id') userId: string,
+  ): Promise<{ email: string; role: 'read' | 'write' }> {
+    await this.access.authorize(target.projectId, userId, 'owner');
+    return this.access.setRole({ projectId: target.projectId, email: target.email, role: body.role });
   }
 
   /**

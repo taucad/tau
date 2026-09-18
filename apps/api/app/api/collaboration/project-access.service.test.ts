@@ -190,19 +190,39 @@ describe('ProjectAccessService', () => {
     expect(invitationUpdates[0]).toMatchObject({ acceptedBy: collaboratorId });
   });
 
-  it('should refuse an unverified email and write no membership', async () => {
+  /* The two refusals are told apart because only one of them is the invitee's
+     to fix: an unverified account verifies its address and tries again, while a
+     mismatched one has to sign in as somebody else. A single code left the
+     client unable to say which. */
+  it('should name an unverified address as unverified, and write no membership', async () => {
     invitationRow = invitation();
     viewerRow = { id: collaboratorId, email: 'invitee@example.test', emailVerified: false };
 
+    await expect(service.accept('raw-token', collaboratorId)).rejects.toMatchObject({
+      response: { code: 'INVITATION_EMAIL_UNVERIFIED' },
+    });
     await expect(service.accept('raw-token', collaboratorId)).rejects.toThrow(ForbiddenException);
     expect(collaboratorWrites).toStrictEqual([]);
   });
 
-  it('should refuse an account whose verified email is not the invited one', async () => {
+  it('should name a verified address that is not the invited one as a mismatch', async () => {
     invitationRow = invitation();
     viewerRow = { id: collaboratorId, email: 'someone.else@example.test', emailVerified: true };
 
+    await expect(service.accept('raw-token', collaboratorId)).rejects.toMatchObject({
+      response: { code: 'INVITATION_EMAIL_MISMATCH' },
+    });
     await expect(service.accept('raw-token', collaboratorId)).rejects.toThrow(ForbiddenException);
+    expect(collaboratorWrites).toStrictEqual([]);
+  });
+
+  it('should refuse an account that no longer exists as unverified rather than mismatched', async () => {
+    invitationRow = invitation();
+    viewerRow = undefined;
+
+    await expect(service.accept('raw-token', collaboratorId)).rejects.toMatchObject({
+      response: { code: 'INVITATION_EMAIL_UNVERIFIED' },
+    });
     expect(collaboratorWrites).toStrictEqual([]);
   });
 

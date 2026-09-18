@@ -253,6 +253,16 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
             }),
           }),
         }),
+        /* D18: an LFS batch answer of "present" clears `unreachable_at` under
+           the owner-keyed advisory lock, so the batch route now opens a
+           transaction. The mark itself is not part of what this tier proves —
+           `git-lfs.service.test.ts` owns it — so the body runs against a
+           recording no-op rather than a second table stub. */
+        transaction: async (run: (tx: unknown) => Promise<unknown>): Promise<unknown> =>
+          run({
+            execute: async (): Promise<void> => undefined,
+            update: () => ({ set: () => ({ where: async (): Promise<void> => undefined }) }),
+          }),
         insert: () => ({
           values: (values: { storageBytes?: number; lfsBytes?: number }) => ({
             onConflictDoUpdate: async (update: { set: Record<string, unknown> }): Promise<void> => {

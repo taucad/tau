@@ -7,13 +7,29 @@ import type { ConfigService } from '@nestjs/config';
 import type { DatabaseService } from '#database/database.service.js';
 import type { EmailService } from '#email/email.service.js';
 
+/** Every row `beforeDelete` wrote, and when, so ordering against the closure is observable. */
+type RecordedWrite = { readonly table: unknown; readonly values: Record<string, unknown> };
+
 const createConfig = (authUrl = 'http://localhost:4000') => {
+  const writes: RecordedWrite[] = [];
+  const order: string[] = [];
   const emailService = {
     sendMagicLink: vi.fn<EmailService['sendMagicLink']>().mockResolvedValue(undefined),
     sendResetPassword: vi.fn<EmailService['sendResetPassword']>().mockResolvedValue(undefined),
     sendVerification: vi.fn<EmailService['sendVerification']>().mockResolvedValue(undefined),
   } satisfies Pick<EmailService, 'sendMagicLink' | 'sendResetPassword' | 'sendVerification'>;
-  const databaseService = { database: {} } as unknown as DatabaseService;
+  const databaseService = {
+    database: {
+      insert: (table: unknown) => ({
+        values: (values: Record<string, unknown>) => ({
+          onConflictDoNothing: async (): Promise<void> => {
+            writes.push({ table, values });
+            order.push('tombstone');
+          },
+        }),
+      }),
+    },
+  } as unknown as DatabaseService;
   const configService = {
     get: vi.fn((key: string) => {
       const values = new Map([
@@ -29,7 +45,11 @@ const createConfig = (authUrl = 'http://localhost:4000') => {
     }),
   } satisfies Pick<ConfigService<Environment, true>, 'get'>;
 
-  const closure = { prepareForAuthDeletion: vi.fn().mockResolvedValue(undefined) };
+  const closure = {
+    prepareForAuthDeletion: vi.fn().mockImplementation(async () => {
+      order.push('closure');
+    }),
+  };
   const config = getBetterAuthConfig({
     closure,
     databaseService,
@@ -37,7 +57,7 @@ const createConfig = (authUrl = 'http://localhost:4000') => {
     emailService: emailService as unknown as EmailService,
   });
 
-  return { config, emailService, closure };
+  return { config, emailService, closure, writes, order };
 };
 
 type TestEmailCallbackArgs = {
@@ -92,6 +112,75 @@ describe('getBetterAuthConfig abuse gates', () => {
     expect(closure.prepareForAuthDeletion).toHaveBeenCalledWith({ authUserId: user.id, request });
     closure.prepareForAuthDeletion.mockRejectedValueOnce(new Error('closure not durable'));
     await expect(beforeDelete(user, request)).rejects.toThrow('closure not durable');
+  });
+
+  it('should write no tombstone when the financial closure refuses the deletion', async () => {
+    const { config, closure, writes } = createConfig();
+    const beforeDelete = config.user?.deleteUser?.beforeDelete;
+    if (!beforeDelete) {
+      throw new Error('Deletion hook is missing');
+    }
+    closure.prepareForAuthDeletion.mockRejectedValueOnce(new Error('account still owes'));
+
+    await expect(
+      beforeDelete(
+        {
+          id: 'user_refused',
+          email: 'refused@example.test',
+          name: 'Refused',
+          emailVerified: true,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+        new Request('http://localhost:4000/v1/auth/delete-user'),
+      ),
+    ).rejects.toThrow('account still owes');
+    expect(writes).toStrictEqual([]);
+  });
+
+  /**
+   * D10: the storage tombstone is what the purge job later finds, and it has to
+   * be written while the account still exists — Better Auth cascades every row
+   * that references the user away, so a tombstone written afterwards would name
+   * bytes nobody could still attribute.
+   */
+  it('should record a storage tombstone with a thirty-day purge date before the financial closure runs', async () => {
+    const { config, writes, order } = createConfig();
+    const beforeDelete = config.user?.deleteUser?.beforeDelete;
+    if (!beforeDelete) {
+      throw new Error('Deletion hook is missing');
+    }
+    const user = {
+      id: 'user_tombstone',
+      email: 'tombstone@example.test',
+      name: 'Tombstone',
+      emailVerified: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    await beforeDelete(user, new Request('http://localhost:4000/v1/auth/delete-user'));
+
+    /* After the closure, not before it (F4). `prepareForAuthDeletion` can
+       refuse the deletion outright, and a tombstone written first would survive
+       that refusal: `onConflictDoNothing` then keeps the abandoned attempt's
+       `purge_after`, so the real deletion weeks later inherits a window that has
+       already run down. The closure deletes no bytes, so writing first bought
+       nothing. */
+    expect(order).toStrictEqual(['closure', 'tombstone']);
+    expect(writes).toHaveLength(1);
+    const values = writes[0]?.values;
+    expect(values).toMatchObject({ ownerId: user.id });
+    const purgeAfter = values?.['purgeAfter'];
+    if (!(purgeAfter instanceof Date)) {
+      throw new TypeError('purgeAfter is not a date');
+    }
+    const days = (purgeAfter.getTime() - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(29.9);
+    expect(days).toBeLessThan(30.1);
+    /* Erasure is the operator's later, verified act; an ordinary deletion is
+       not one, so the row starts without it. */
+    expect(values?.['erasure']).not.toBe(true);
   });
 
   it.each([

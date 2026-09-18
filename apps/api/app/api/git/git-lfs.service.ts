@@ -2,6 +2,10 @@
 /* eslint-disable @typescript-eslint/naming-convention -- git-lfs wire fields are snake_case */
 import { createHash } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
+import { and, eq, inArray } from 'drizzle-orm';
+import { DatabaseService } from '#database/database.service.js';
+import { withOwnerLock } from '#database/owner-lock.js';
+import { projectGitLfsObject } from '#database/schema.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 import { gitLfsObjectKey } from '#api/git/git.constants.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
@@ -60,6 +64,7 @@ export class GitLfsService {
   public constructor(
     private readonly objectStorage: ObjectStorageService,
     private readonly repositories: GitRepositoryService,
+    private readonly databaseService: DatabaseService,
   ) {}
 
   public async batch(args: {
@@ -77,52 +82,50 @@ export class GitLfsService {
         args.objects.map((object) => object.oid),
       );
       const finalized = new Map(records.map((object) => [object.oid, object]));
-      return {
-        status: 200,
-        body: {
-          transfer: 'basic',
-          objects: await Promise.all(
-            args.objects.map(async (object): Promise<LfsObjectResponse> => {
-              const record = finalized.get(object.oid);
-              const stored =
-                record?.finalized === true && record.size === object.size
-                  ? await this.objectStorage.headBlob({
-                      namespace: 'blobs',
-                      key: gitLfsObjectKey(args.access.projectId, object.oid),
-                      tier: 'private',
-                    })
-                  : undefined;
-              if (stored === undefined || stored.size !== object.size) {
-                return {
-                  oid: object.oid,
-                  size: object.size,
-                  authenticated: true,
-                  error: {
-                    code: 404,
-                    message: 'Object does not exist on the Tau Hosted Remote',
-                  },
-                };
-              }
-              return {
-                oid: object.oid,
-                size: object.size,
-                authenticated: true,
-                actions: {
-                  download: {
-                    href: await this.objectStorage.presignGet({
-                      namespace: 'blobs',
-                      key: gitLfsObjectKey(args.access.projectId, object.oid),
-                      expiresInSeconds: transferExpirySeconds,
-                      tier: 'private',
-                    }),
-                    expires_in: transferExpirySeconds,
-                  },
-                },
-              };
-            }),
-          ),
-        },
-      };
+      const downloadable: string[] = [];
+      const objects = await Promise.all(
+        args.objects.map(async (object): Promise<LfsObjectResponse> => {
+          const record = finalized.get(object.oid);
+          const stored =
+            record?.finalized === true && record.size === object.size
+              ? await this.objectStorage.headBlob({
+                  namespace: 'blobs',
+                  key: gitLfsObjectKey(args.access.projectId, object.oid),
+                  tier: 'private',
+                })
+              : undefined;
+          if (stored === undefined || stored.size !== object.size) {
+            return {
+              oid: object.oid,
+              size: object.size,
+              authenticated: true,
+              error: {
+                code: 404,
+                message: 'Object does not exist on the Tau Hosted Remote',
+              },
+            };
+          }
+          downloadable.push(object.oid);
+          return {
+            oid: object.oid,
+            size: object.size,
+            authenticated: true,
+            actions: {
+              download: {
+                href: await this.objectStorage.presignGet({
+                  namespace: 'blobs',
+                  key: gitLfsObjectKey(args.access.projectId, object.oid),
+                  expiresInSeconds: transferExpirySeconds,
+                  tier: 'private',
+                }),
+                expires_in: transferExpirySeconds,
+              },
+            },
+          };
+        }),
+      );
+      await this.#clearUnreachable(args.access, downloadable);
+      return { status: 200, body: { transfer: 'basic', objects } };
     }
 
     const reservation = await this.repositories.reserveLfsObjects({ access: args.access, objects: args.objects });
@@ -154,6 +157,10 @@ export class GitLfsService {
         });
         return stored?.size === object.size;
       }),
+    );
+    await this.#clearUnreachable(
+      args.access,
+      args.objects.filter((_, index) => present[index] === true).map((object) => object.oid),
     );
 
     return {
@@ -235,5 +242,35 @@ export class GitLfsService {
       return false;
     }
     return (await this.repositories.finalizeLfsObject(args)) !== 'unreserved';
+  }
+
+  /**
+   * A batch answer of "present" restarts the object's retirement clock (D18, ND17).
+   *
+   * `unreachable_at` is the first moment no retained tree reached an object, and
+   * thirty days after it the object is collected. But a client that has the
+   * object still holds it: git-lfs asks the batch endpoint before it pushes the
+   * pointer that will make it reachable again, and that question is the earliest
+   * evidence there is. Clearing the mark there closes the window where an object
+   * is deleted between the batch answer and the push that would have saved it.
+   *
+   * Under the owner-keyed advisory lock, which is the same lock the retirement
+   * pass and the quota recheck take, so a "present" answer and a destructive
+   * recheck cannot interleave.
+   *
+   * @param access - The authorized request, which names the owner to lock on.
+   * @param oids - The objects this batch found present; none is not an error.
+   */
+  async #clearUnreachable(access: GitAccess, oids: readonly string[]): Promise<void> {
+    const present = [...new Set(oids)];
+    if (present.length === 0) {
+      return;
+    }
+    await withOwnerLock(this.databaseService.database, access.ownerId, async (transaction) => {
+      await transaction
+        .update(projectGitLfsObject)
+        .set({ unreachableAt: null })
+        .where(and(eq(projectGitLfsObject.projectId, access.projectId), inArray(projectGitLfsObject.oid, present)));
+    });
   }
 }

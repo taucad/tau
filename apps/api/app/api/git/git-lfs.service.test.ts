@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SQL } from 'drizzle-orm';
+import type { DatabaseService } from '#database/database.service.js';
 import type { ObjectStorageService } from '#storage/object-storage.service.js';
 import type { GitAccess, GitRepositoryService } from '#api/git/git.service.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
@@ -17,6 +19,8 @@ describe('GitLfsService finalized-object boundary', () => {
   const bytes = new TextEncoder().encode('verified lfs bytes');
   const oid = createHash('sha256').update(bytes).digest('hex');
   const stored: { current: Uint8Array<ArrayBuffer> } = { current: bytes };
+  /** Whether the reservation the repository answers with is already finalized. */
+  let reservedFinalized = false;
   const objectStorage = {
     headBlob: vi.fn(async () => ({
       contentType: 'application/octet-stream',
@@ -34,13 +38,12 @@ describe('GitLfsService finalized-object boundary', () => {
     presignGet: vi.fn(async () => 'https://store.test/download'),
   };
   const repositories = {
-    reserveLfsObjects: vi.fn(
-      async () =>
-        ({
-          status: 'reserved',
-          objects: [{ oid, size: bytes.byteLength, finalized: false }],
-        }) as const,
-    ),
+    reserveLfsObjects: vi.fn(async () => ({
+      status: 'reserved',
+      /* Whether the reservation already holds finalized bytes, which is what
+         makes an upload batch answer "present" (D18). */
+      objects: [{ oid, size: bytes.byteLength, finalized: reservedFinalized }],
+    })),
     readLfsObjects: vi.fn(async () => [{ oid, size: bytes.byteLength, finalized: true }]),
     finalizeLfsObject: vi
       .fn<GitRepositoryService['finalizeLfsObject']>()
@@ -48,19 +51,55 @@ describe('GitLfsService finalized-object boundary', () => {
       .mockResolvedValue('already-finalized'),
   };
 
+  /** Every statement the service ran outside a query builder, in order. */
+  let executed: SQL[];
+  /** Every `set(...)` a locked update applied, in order. */
+  let updates: Array<Record<string, unknown>>;
+
   beforeEach(() => {
     vi.clearAllMocks();
     stored.current = bytes;
+    reservedFinalized = false;
+    executed = [];
+    updates = [];
     repositories.finalizeLfsObject
       .mockReset()
       .mockResolvedValueOnce('finalized')
       .mockResolvedValue('already-finalized');
   });
 
+  /** The strings a `select pg_advisory_xact_lock(hashtextextended($1, 0))` carries. */
+  const lockedOwners = (): string[] =>
+    executed.flatMap((statement) =>
+      /* A `sql` template interpolates a bare value as the chunk itself, so the
+         lock key is a plain string between the two static fragments. */
+      statement.queryChunks.filter((chunk): chunk is string => typeof chunk === 'string'),
+    );
+
+  const databaseStub = (): DatabaseService =>
+    ({
+      database: {
+        transaction: async (run: (tx: unknown) => Promise<unknown>): Promise<unknown> =>
+          run({
+            execute: async (statement: SQL): Promise<void> => {
+              executed.push(statement);
+            },
+            update: () => ({
+              set: (values: Record<string, unknown>) => ({
+                where: async (): Promise<void> => {
+                  updates.push(values);
+                },
+              }),
+            }),
+          }),
+      },
+    }) as unknown as DatabaseService;
+
   const service = (): GitLfsService =>
     new GitLfsService(
       objectStorage as unknown as ObjectStorageService,
       repositories as unknown as GitRepositoryService,
+      databaseStub(),
     );
 
   it('signs an exact length and SHA-256 and finalizes valid bytes idempotently', async () => {
@@ -136,5 +175,52 @@ describe('GitLfsService finalized-object boundary', () => {
     if (missing.status === 200) {
       expect(missing.body.objects[0]?.error?.code).toBe(404);
     }
+  });
+
+  // === D18/ND17: a batch answer of "present" restarts the retirement clock ===
+
+  it('should clear the unreachable mark under the owner lock when a download finds the object present', async () => {
+    await service().batch({
+      access,
+      operation: 'download',
+      objects: [{ oid, size: bytes.byteLength }],
+      authorization: undefined,
+      endpoint: 'https://api.test/repo/info/lfs/objects',
+    });
+
+    expect(lockedOwners()).toStrictEqual([access.ownerId]);
+    expect(updates).toStrictEqual([{ unreachableAt: null }]);
+  });
+
+  it('should clear the unreachable mark when an upload batch finds the object already stored', async () => {
+    reservedFinalized = true;
+
+    const batch = await service().batch({
+      access,
+      operation: 'upload',
+      objects: [{ oid, size: bytes.byteLength }],
+      authorization: 'Bearer token',
+      endpoint: 'https://api.test/repo/info/lfs/objects',
+    });
+
+    /* A present object is answered with no actions, which is how git-lfs skips it. */
+    if (batch.status === 200) {
+      expect(batch.body.objects[0]?.actions).toBeUndefined();
+    }
+    expect(lockedOwners()).toStrictEqual([access.ownerId]);
+    expect(updates).toStrictEqual([{ unreachableAt: null }]);
+  });
+
+  it('should take no lock and clear nothing when the object is absent', async () => {
+    await service().batch({
+      access,
+      operation: 'upload',
+      objects: [{ oid, size: bytes.byteLength }],
+      authorization: 'Bearer token',
+      endpoint: 'https://api.test/repo/info/lfs/objects',
+    });
+
+    expect(lockedOwners()).toStrictEqual([]);
+    expect(updates).toStrictEqual([]);
   });
 });

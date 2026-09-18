@@ -23,12 +23,11 @@ import {
   ensureFilesPane,
   expectCount,
   expectGeometryFramed,
+  expectRenderCycleSince,
   expectSignedIn,
   expectVisible,
   fileTreeItemOf,
-  geometryCacheEntries,
-  geometryCacheSnapshot,
-  parameterCacheContents,
+  renderCycleCount,
   selectChatModel,
   selectKernel,
   submitPrompt,
@@ -220,29 +219,6 @@ const picogkWorkers = (): readonly NativeWorker[] => {
   });
 };
 
-const waitForNewGeometry = async (sourcePath: string, before: ReadonlySet<string>): Promise<void> => {
-  await expect
-    .poll(() => geometryCacheEntries(sourcePath).some(({ actionDigest }) => !before.has(actionDigest)), {
-      timeout: 120_000,
-    })
-    .toBe(true);
-};
-
-const assertOneNewSettledGeometry = async (sourcePath: string, before: ReadonlySet<string>): Promise<void> => {
-  await waitForNewGeometry(sourcePath, before);
-  await new Promise((resolve) => {
-    setTimeout(resolve, 1500);
-  });
-  const newBuildEntries = geometryCacheEntries(sourcePath).filter(({ actionDigest }) => !before.has(actionDigest));
-  const settledDigests = new Set(newBuildEntries.map(({ contentDigest }) => contentDigest));
-
-  // The authoring agent and viewer each own a runtime client and therefore a
-  // dependency cache key. One filesystem revision must still settle to one
-  // geometry result across those consumers.
-  expect(newBuildEntries.length).toBeGreaterThan(0);
-  expect(settledDigests.size).toBe(1);
-};
-
 const exportToProject = async (page: Page, projectRoot: string, extension: 'glb' | 'stl'): Promise<string> => {
   const exportRoot = join(projectRoot, 'exports');
   const digest = (path: string): string => createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -305,16 +281,19 @@ const exportToProject = async (page: Page, projectRoot: string, extension: 'glb'
   return path;
 };
 
-const hasDependentParameterSchema = (sourcePath: string): boolean =>
-  parameterCacheContents(sourcePath).some((content) => {
-    const parsed = JSON.parse(content) as {
-      readonly data?: { readonly defaultParameters?: Readonly<Record<string, unknown>> };
-    };
-    const parameters = parsed.data?.defaultParameters;
-    return (
-      parameters?.['width'] === 20 && parameters['height'] === 10 && parameters['gap'] === 4 && !('depth' in parameters)
-    );
-  });
+/**
+ * The Parameters pane is built from the kernel's own parse of the source it
+ * watches, so the declarations it lists witness which bytes the kernel read.
+ * `dependentSource` moves `depth` out of `Params` and into `dimensions.py`.
+ */
+const expectDependentParameterSchema = async (page: Page): Promise<void> => {
+  await page.keyboard.press('Control+x');
+  await expectVisible(page.getByText('Parameters', { exact: true }), 30_000);
+  await expectVisible(page.getByLabel('Input for Width').first(), 60_000);
+  await expectVisible(page.getByLabel('Input for Height').first(), 60_000);
+  await expectVisible(page.getByLabel('Input for Gap').first(), 60_000);
+  await expectCount(page.getByLabel('Input for Depth'), 0, 60_000);
+};
 
 const validateStep = (path: string): readonly number[] => {
   const resourceRoot = resolve(workspaceRoot, `apps/desktop/resources/python/${process.platform}-${process.arch}`);
@@ -450,10 +429,10 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
     const width = page.getByLabel('Input for Width').first();
     await expectVisible(width, 60_000);
     await expectVisible(page.getByLabel('Input for Depth').first(), 60_000);
-    const beforeParameter = geometryCacheSnapshot(sourcePath);
+    const beforeParameter = await renderCycleCount(page);
     await width.fill('30');
     await width.press('Tab');
-    await waitForNewGeometry(sourcePath, beforeParameter);
+    await expectRenderCycleSince(page, beforeParameter);
     await expectGeometryFramed(page);
 
     await page.keyboard.press('Control+a');
@@ -462,15 +441,17 @@ test('[completed-artifact] runs the Build123d filesystem, parameter, topology, w
     await expectVisible(page.getByRole('button', { name: 'Right', exact: true }), 60_000);
 
     writeFileSync(join(projectRoot, 'dimensions.py'), 'def depth():\n    return 8.0\n', 'utf8');
-    const beforeDependency = geometryCacheSnapshot(sourcePath);
+    const beforeDependency = await renderCycleCount(page);
     writeFileSync(sourcePath, dependentSource, 'utf8');
-    await expect.poll(() => hasDependentParameterSchema(sourcePath), { timeout: 60_000 }).toBe(true);
-    await waitForNewGeometry(sourcePath, beforeDependency);
+    await expectRenderCycleSince(page, beforeDependency);
+    await expectDependentParameterSchema(page);
     await expectGeometryFramed(page);
 
-    const beforeImportedEdit = geometryCacheSnapshot(sourcePath);
+    /* The imported module's only observable is the depth it returns, which the
+     * STEP export below reads back as `size[1]`. */
+    const beforeImportedEdit = await renderCycleCount(page);
     writeFileSync(join(projectRoot, 'dimensions.py'), 'def depth():\n    return 12.0\n', 'utf8');
-    await waitForNewGeometry(sourcePath, beforeImportedEdit);
+    await expectRenderCycleSince(page, beforeImportedEdit);
     await expectGeometryFramed(page);
 
     await page.getByRole('button', { name: 'Export', exact: true }).click();
@@ -619,10 +600,10 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     const radius = page.getByLabel('Input for Radius').first();
     await expectVisible(radius, 60_000);
     await expectVisible(page.getByLabel('Input for Voxel size').first(), 60_000);
-    const beforeParameter = geometryCacheSnapshot(sourcePath);
+    const beforeParameter = await renderCycleCount(page);
     await radius.fill('16');
     await radius.press('Tab');
-    await assertOneNewSettledGeometry(sourcePath, beforeParameter);
+    await expectRenderCycleSince(page, beforeParameter);
 
     await page.keyboard.press('Control+a');
     const body = page.getByRole('button', { name: 'group-0-object-1', exact: true });
@@ -634,7 +615,6 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     await sphere.click();
     await expect.poll(async () => sphere.getAttribute('aria-pressed')).toBe('true');
 
-    const beforeMultiStep = geometryCacheSnapshot(sourcePath);
     await page.evaluate(() => {
       const target = globalThis as typeof globalThis & {
         __tauPicoGkStates?: string[];
@@ -661,7 +641,17 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
       capture();
     });
     writeFileSync(sourcePath, multiStepPicogkSource, 'utf8');
-    await assertOneNewSettledGeometry(sourcePath, beforeMultiStep);
+    /* The row's own observer is the barrier: the lifecycle it records is
+     * exactly the sequence asserted below, so no second witness is needed. */
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(
+            () => (globalThis as typeof globalThis & { __tauPicoGkStates?: string[] }).__tauPicoGkStates ?? [],
+          ),
+        { timeout: 120_000 },
+      )
+      .toEqual(['buffering...', 'rendering...', 'idle']);
     const multiStepStates = await page.evaluate(() => {
       const target = globalThis as typeof globalThis & {
         __tauPicoGkStates?: string[];
@@ -712,21 +702,22 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     const initialBounds = getBoundingBoxFromInspect(await getInspectReport(initialGlb));
     expect(initialBounds).toBeDefined();
 
-    const beforeDependencySetup = geometryCacheSnapshot(sourcePath);
+    const beforeDependencySetup = await renderCycleCount(page);
     writeFileSync(join(projectRoot, 'ShapeFactory.cs'), picogkHelperSource(2), 'utf8');
     writeFileSync(join(projectRoot, 'radius-scale.txt'), '0.5\n', 'utf8');
     writeFileSync(sourcePath, picogkDependentSource, 'utf8');
-    await waitForNewGeometry(sourcePath, beforeDependencySetup);
+    await expectRenderCycleSince(page, beforeDependencySetup);
     await new Promise((resolve) => {
       setTimeout(resolve, 1500);
     });
     await expectCount(page.getByRole('alert', { name: 'CAD runtime error' }), 0, 120_000);
-    const dependentGeometry = geometryCacheSnapshot(sourcePath);
+    const beforeHelperEdit = await renderCycleCount(page);
     writeFileSync(join(projectRoot, 'ShapeFactory.cs'), picogkHelperSource(3), 'utf8');
-    await assertOneNewSettledGeometry(sourcePath, dependentGeometry);
-    const assetGeometry = geometryCacheSnapshot(sourcePath);
+    await expectRenderCycleSince(page, beforeHelperEdit);
+    const beforeAssetEdit = await renderCycleCount(page);
     writeFileSync(join(projectRoot, 'radius-scale.txt'), '0.75\n', 'utf8');
-    await assertOneNewSettledGeometry(sourcePath, assetGeometry);
+    await expectRenderCycleSince(page, beforeAssetEdit);
+    await expectGeometryFramed(page);
 
     writeFileSync(
       join(projectRoot, 'ShapeFactory.cs'),

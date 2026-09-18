@@ -1,5 +1,5 @@
 /* oxlint-disable no-await-in-loop -- UI steps are intentionally sequential. */
-import { basename, dirname, join } from 'node:path';
+import { basename, join } from 'node:path';
 import process from 'node:process';
 import { setTimeout } from 'node:timers/promises';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -310,6 +310,106 @@ export const expectGeometryFramed = async (page: Page): Promise<void> => {
   }
 };
 
+/**
+ * One page-wide render-lifecycle sample: whether any viewer is busy, and how
+ * many busy → idle transitions the counter has recorded since it was installed.
+ */
+const renderCycleState = async (page: Page): Promise<{ readonly busy: boolean; readonly completed: number }> =>
+  page.evaluate(() => {
+    const scope = globalThis as typeof globalThis & {
+      __tauRenderCycles?: { busy: boolean; completed: number };
+    };
+    const installed = scope.__tauRenderCycles;
+    if (installed) {
+      return { busy: installed.busy, completed: installed.completed };
+    }
+
+    /* `ChatViewerStatus` renders the CAD machine's own loading phase — and
+     * nothing else — as `<span>{phase}...</span>`, one per open viewer pane. */
+    const isBusy = (): boolean =>
+      [...document.querySelectorAll('span')].some((element) =>
+        /^(?:buffering|connecting|rendering)\.\.\.$/u.test(element.textContent.trim().toLowerCase()),
+      );
+    const state = { busy: isBusy(), completed: 0 };
+    const observer = new MutationObserver(() => {
+      const busy = isBusy();
+      if (busy === state.busy) {
+        return;
+      }
+      state.busy = busy;
+      if (!busy) {
+        state.completed += 1;
+      }
+    });
+    observer.observe(document.body, { characterData: true, childList: true, subtree: true });
+    scope.__tauRenderCycles = state;
+    return { busy: state.busy, completed: state.completed };
+  });
+
+/**
+ * Snapshot the viewer's completed render count, once nothing is rendering.
+ *
+ * Pair it with {@link expectRenderCycleSince} around a write: the pair replaces
+ * the `.tau/cache/compute/v1` action-digest snapshot both packaged specs used
+ * to poll. 5608f5051 deleted that CAS along with `createRetainedSceneStore`,
+ * and `createProjectComputeStores` has had no product caller since, so those
+ * polls could only ever run out their timeout.
+ *
+ * The surviving witness is the CAD machine's own lifecycle: `buffering`,
+ * `connecting` and `rendering` are tagged `cad-loading`
+ * (`apps/ui/app/machines/cad.machine.ts:675`, `:793`, `:841`), and
+ * `ChatViewerStatus` paints that phase into the DOM
+ * (`apps/ui/app/routes/w.$workspace.$project/chat-viewer-status.tsx:22-34`). A
+ * watcher-driven re-render therefore takes the page busy and back to idle
+ * exactly once. A `MutationObserver` records that transition even when it is
+ * shorter than a poll interval, which a plain locator poll cannot do — the same
+ * technique `desktop-build123d.spec.ts` already uses for PicoGK's multi-step
+ * lifecycle row.
+ *
+ * @param page - The renderer.
+ * @param timeout - How long the viewer may stay busy before the snapshot fails.
+ * @returns The completed render count to pass to {@link expectRenderCycleSince}.
+ */
+export const renderCycleCount = async (page: Page, timeout = 120_000): Promise<number> => {
+  let completed = 0;
+  await expect
+    .poll(
+      async () => {
+        const state = await renderCycleState(page);
+        completed = state.completed;
+        return state.busy;
+      },
+      { timeout },
+    )
+    .toBe(false);
+  return completed;
+};
+
+/**
+ * Wait until the viewer has completed a further render cycle.
+ *
+ * A barrier, not a content assertion: it proves the bytes the caller just wrote
+ * reached the kernel and settled, so the row's own witness — an export's
+ * geometry, the Parameters pane, the absence of a runtime error — reads the new
+ * render rather than the previous one.
+ *
+ * @param page - The renderer.
+ * @param before - The count {@link renderCycleCount} returned before the write.
+ * @param timeout - How long the render may take.
+ * @returns Nothing.
+ */
+export const expectRenderCycleSince = async (page: Page, before: number, timeout = 120_000): Promise<void> => {
+  await expect
+    .poll(
+      async () => {
+        const state = await renderCycleState(page);
+        return state.completed;
+      },
+      { timeout },
+    )
+    .toBeGreaterThan(before);
+};
+
 /** Wait for the run to finish — the stop button is the liveness signal. */
 export const waitForRunToSettle = async (page: Page, settleTimeout: number): Promise<void> => {
   await expectCount(stopButtonOf(page), 0, settleTimeout);
@@ -468,97 +568,6 @@ export const expectModelBuilt = async (options: {
   expect(readFileSync(sourcePath, 'utf8').length).toBeGreaterThan(0);
   console.info(`[desktop-e2e] kernel engine: ${engineVersion}`);
 };
-
-type ComputeCacheEntry = {
-  readonly actionDigest: string;
-  readonly codecId: string;
-  readonly contentDigest: string;
-};
-
-const computeCacheEntries = (sourcePath: string): readonly ComputeCacheEntry[] => {
-  const root = join(dirname(sourcePath), '.tau/cache/compute/v1/actions/sha256');
-  if (!existsSync(root)) {
-    return [];
-  }
-
-  const entries: ComputeCacheEntry[] = [];
-  const pending = [root];
-  while (pending.length > 0) {
-    const directory = pending.pop();
-    if (!directory) {
-      continue;
-    }
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      const path = join(directory, entry.name);
-      if (entry.isDirectory()) {
-        pending.push(path);
-        continue;
-      }
-      if (!entry.name.endsWith('.json')) {
-        continue;
-      }
-      try {
-        const record: unknown = JSON.parse(readFileSync(path, 'utf8'));
-        if (
-          typeof record === 'object' &&
-          record !== null &&
-          'actionDigest' in record &&
-          typeof record.actionDigest === 'string' &&
-          'codec' in record &&
-          typeof record.codec === 'object' &&
-          record.codec !== null &&
-          'id' in record.codec &&
-          typeof record.codec.id === 'string' &&
-          'output' in record &&
-          typeof record.output === 'object' &&
-          record.output !== null &&
-          'digest' in record.output &&
-          typeof record.output.digest === 'string'
-        ) {
-          entries.push({
-            actionDigest: record.actionDigest,
-            codecId: record.codec.id,
-            contentDigest: record.output.digest,
-          });
-        }
-      } catch {
-        // Atomic CAS publication can leave a temporary file visible for one poll.
-      }
-    }
-  }
-  return entries;
-};
-
-/** Read the immutable geometry action records published by the project compute CAS. */
-export const geometryCacheEntries = (sourcePath: string): readonly ComputeCacheEntry[] =>
-  computeCacheEntries(sourcePath).filter(({ codecId }) => codecId.startsWith('@taucad/middleware/geometry-'));
-
-const computeContentPath = (sourcePath: string, digest: string): string => {
-  const hexadecimal = digest.slice('sha256:'.length);
-  return join(dirname(sourcePath), '.tau/cache/compute/v1/blobs/sha256', hexadecimal.slice(0, 2), hexadecimal.slice(2));
-};
-
-/** Read validated parameter-result blobs published by the project compute CAS. */
-export const parameterCacheContents = (sourcePath: string): readonly string[] =>
-  computeCacheEntries(sourcePath)
-    .filter(({ codecId }) => codecId === '@taucad/middleware/parameters')
-    .flatMap(({ contentDigest }) => {
-      const path = computeContentPath(sourcePath, contentDigest);
-      return existsSync(path) ? [readFileSync(path, 'utf8')] : [];
-    });
-
-/**
- * Snapshot the kernel's geometry cache before an external write.
- *
- * A re-render is only provable against a "before": the viewer can be framed
- * from the *previous* geometry, so framing alone does not witness that the new
- * bytes were rendered.
- *
- * @param sourcePath - The project source about to be rewritten.
- * @returns The immutable geometry action digests present before the write.
- */
-export const geometryCacheSnapshot = (sourcePath: string): ReadonlySet<string> =>
-  new Set(geometryCacheEntries(sourcePath).map(({ actionDigest }) => actionDigest));
 
 /**
  * Assert the kernel re-parsed the bytes an external writer just put on disk.

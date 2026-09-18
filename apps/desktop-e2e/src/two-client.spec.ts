@@ -1277,7 +1277,7 @@ describe('a project on the browser client', () => {
         })
         .toBeGreaterThan(0);
 
-      await client.page.getByRole('button', { name: 'Loaded 1 tool', exact: true }).last().click();
+      await client.page.getByRole('button', { name: 'Loaded tools', exact: true }).last().click();
       await client.page.getByRole('button', { name: 'cad-openscad', exact: true }).last().click();
       await client.page.keyboard.press('Control+KeyF');
       await client.page.getByRole('button', { name: 'View source', exact: true }).last().click();

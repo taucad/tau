@@ -108,7 +108,14 @@ export const selectChatModel = async (page: Page, modelName: string): Promise<vo
   await parkPointer(page);
   await composerOf(page).click();
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+Slash' : 'Control+Slash');
-  await page.getByRole('option', { name: modelName, exact: true }).first().click();
+  /* A cloud-enabled build renders the credit estimate inside the option, so
+   * its accessible name is "Haiku 4.5 ≈ 30.84 credits": match the name as a
+   * whole leading word, not the exact string. */
+  const escaped = modelName.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`);
+  await page
+    .getByRole('option', { name: new RegExp(String.raw`^${escaped}(?:\s|$)`, 'u') })
+    .first()
+    .click();
 };
 
 /** Select a model from the active external agent's own model namespace. */

@@ -644,7 +644,11 @@ const callSchemas = {
   getDirectoryContents: { args: oneStringArgument, result: directoryContentsSchema },
   duplicateFile: { args: twoStringArgs, result: voidResult },
   copyDirectory: { args: twoStringArgs, result: voidResult },
-  getZippedDirectory: { args: z.tuple([z.string(), scopedOptionsSchema.optional()]), result: z.instanceof(Blob) },
+  /* Scope-only: a routed path is archived on its rooted view (`archive`), never here. */
+  getZippedDirectory: {
+    args: z.tuple([z.string(), z.looseObject({ scope: workspaceScopeSchema })]),
+    result: z.instanceof(Blob),
+  },
   mount: { args: z.tuple([z.string(), mountConfigSchema]), result: voidResult },
   unmount: { args: oneStringArgument, result: voidResult },
   configureProjectRoots: { args: z.tuple([projectRootConfigurationSchema]), result: voidResult },

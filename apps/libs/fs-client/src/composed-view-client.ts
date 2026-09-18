@@ -1,6 +1,6 @@
 import type { FileStat, FileStatEntry, FileProvenance } from '@taucad/types';
 import { WorkspaceMutationError } from '@taucad/filesystem';
-import type { FileTreeNode } from '@taucad/filesystem';
+import type { FileTreeNode, WorkspaceScope } from '@taucad/filesystem';
 import type { FileSystemClient } from '#file-system-client.js';
 import type { WorkspacePathResolver } from '#workspace-path-resolver.js';
 
@@ -306,11 +306,15 @@ export const createComposedViewClient = (input: {
       const relative = viewPath(absolutePath);
       return relative === undefined ? workspace.exists(absolutePath) : view.exists(relative);
     },
-    getZippedDirectory: async (absolutePath: string, options?: { versionedOnly?: boolean }) => {
+    getZippedDirectory: async (absolutePath: string, options?: { scope?: WorkspaceScope; versionedOnly?: boolean }) => {
+      if (options?.scope !== undefined) {
+        return workspace.getZippedDirectory(absolutePath, { scope: options.scope });
+      }
       const relative = viewPath(absolutePath);
-      return relative === undefined
-        ? workspace.getZippedDirectory(absolutePath, options)
-        : view.archive(relative, options);
+      if (relative === undefined) {
+        throw new Error(`No rooted view serves ${absolutePath}; pass a workspace scope to archive it`);
+      }
+      return view.archive(relative, options);
     },
     getDirectoryStat: async (absolutePath: string) => {
       const relative = viewPath(absolutePath);

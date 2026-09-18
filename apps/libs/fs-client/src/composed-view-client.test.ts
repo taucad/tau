@@ -315,12 +315,22 @@ describe('createComposedViewClient read content operations (north star W3)', () 
     expect(view.archive).toHaveBeenCalledWith('exports', undefined);
   });
 
-  it('should leave an archive outside the project root on the authority', async () => {
+  it('should archive an explicit workspace scope on the authority even inside the project root', async () => {
+    const { client, authority, view } = await harness();
+    const scope = { backend: 'memory', storageRootKey: 'memory:scope' } as const;
+
+    await client.getZippedDirectory(root, { scope });
+
+    expect(authority.getZippedDirectory).toHaveBeenCalledWith(root, { scope });
+    expect(view.archive).not.toHaveBeenCalled();
+  });
+
+  it('should refuse an archive outside the project root that names no scope', async () => {
     const { client, authority, view } = await harness();
 
-    await client.getZippedDirectory('/node_modules/three');
+    await expect(client.getZippedDirectory('/node_modules/three')).rejects.toThrow(/No rooted view serves/u);
 
-    expect(authority.getZippedDirectory).toHaveBeenCalledWith('/node_modules/three', undefined);
+    expect(authority.getZippedDirectory).not.toHaveBeenCalled();
     expect(view.archive).not.toHaveBeenCalled();
   });
 

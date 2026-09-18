@@ -2,14 +2,9 @@
 import 'fake-indexeddb/auto';
 import { describe, expect, it, vi } from 'vitest';
 import { MemoryProvider } from '#backend/memory-provider.js';
-import { ChangeEventBus } from '#change-event-bus.js';
 import { composeView } from '#composed-view.js';
 import { archive, contents, walk } from '#content-ops/index.js';
-import { MountTable } from '#mount-table.js';
 import { classify, tauPathPolicy } from '#path-registry.js';
-import { ProviderRegistry } from '#provider-registry.js';
-import { ResourceQueue } from '#resource-queue.js';
-import { WorkspaceFileService } from '#workspace-file-service.js';
 import type { WalkEntry } from '#content-ops/index.js';
 
 const decoder = new TextDecoder();
@@ -152,39 +147,6 @@ describe('content operations over a composed view', () => {
     const view = composeView({ filesystem: await seeded(checkout) }, { consumer: 'user', policy: tauPathPolicy });
 
     expect(Object.keys(await archived(await archive(view, '')))).toEqual(['.tau/chats/c1.json', 'src/main.ts']);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Byte equivalence with the authority archive this operation replaces
-// ---------------------------------------------------------------------------
-
-describe('archive against the authority archive', () => {
-  it('should be the one ZIP encoder the authority delegates to for an unmasked tree', async () => {
-    const providerRegistry = new ProviderRegistry({ databasePrefix: 'tau-content-ops-test' });
-    const provider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey: 'memory:0' });
-    const mountTable = new MountTable();
-    mountTable.mount('/', provider, { class: 'authored', backend: 'memory', storageRootKey: 'memory:0' });
-    const service = new WorkspaceFileService({
-      providerRegistry,
-      resourceQueue: new ResourceQueue(),
-      eventBus: new ChangeEventBus(),
-      mountTable,
-    });
-
-    try {
-      for (const [path, text] of Object.entries(tree)) {
-        // oxlint-disable-next-line no-await-in-loop -- Deterministic seed order keeps the fixture readable.
-        await service.writeFile(`/${path}`, text);
-      }
-
-      const authority = await archived(await service.getZippedDirectory('/'));
-
-      expect(Object.keys(authority)).toHaveLength(Object.keys(tree).length);
-      expect(await archived(await archive(provider, ''))).toEqual(authority);
-    } finally {
-      service.dispose();
-    }
   });
 });
 

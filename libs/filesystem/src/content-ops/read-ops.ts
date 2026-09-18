@@ -61,7 +61,9 @@ export const withReadContentOps = <View extends ContentFileSystem>(
   policy: Pick<PathPolicy, 'classify'>,
 ): View & ReadContentOps => {
   /* The registry answers about project-relative spellings, and an archive root
-   * can be any directory of the project. */
+   * can be any directory of the project. The join assumes the view is rooted at
+   * the project root, as the file manager's is; a view rooted below it would
+   * need its own root joined first (charter W12). */
   const options = (path: string, filter?: ContentExportFilter): WalkOptions =>
     filter?.versionedOnly === true
       ? {

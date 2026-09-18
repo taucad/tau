@@ -3250,11 +3250,14 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
   // ---------------------------------------------------------------------------
 
   describe('getZippedDirectory', () => {
+    /* Scope-only since W3: a routed path is archived on its rooted view. */
+    const scope = { backend: 'indexeddb' } as const;
+
     it('should return a Blob containing the directory files as a zip', async () => {
       await service.writeFile('/ziptest/a.txt', 'hello');
       await service.writeFile('/ziptest/b.txt', 'world');
 
-      const blob = await service.getZippedDirectory('/ziptest');
+      const blob = await service.getZippedDirectory('/ziptest', { scope });
 
       expect(blob).toBeInstanceOf(Blob);
       expect(blob.size).toBeGreaterThan(0);
@@ -3264,7 +3267,7 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       await service.writeFile('/ziptest/sub/nested.txt', 'nested content');
       await service.writeFile('/ziptest/root.txt', 'root content');
 
-      const blob = await service.getZippedDirectory('/ziptest');
+      const blob = await service.getZippedDirectory('/ziptest', { scope });
       const jszipModule = await import('jszip');
       const jszip = jszipModule.default;
       const zip = await jszip.loadAsync(await blob.arrayBuffer());
@@ -3283,7 +3286,7 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
     it('should handle empty directories', async () => {
       await service.mkdir('/emptydir', { recursive: true });
 
-      const blob = await service.getZippedDirectory('/emptydir');
+      const blob = await service.getZippedDirectory('/emptydir', { scope });
 
       expect(blob).toBeInstanceOf(Blob);
       expect(blob.size).toBeGreaterThan(0);
@@ -3292,8 +3295,8 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
     it('rejects missing and file paths instead of returning plausible empty archives', async () => {
       await service.writeFile('/file.txt', 'file');
 
-      await expect(service.getZippedDirectory('/missing')).rejects.toMatchObject({ code: 'ENOENT' });
-      await expect(service.getZippedDirectory('/file.txt')).rejects.toMatchObject({ code: 'ENOTDIR' });
+      await expect(service.getZippedDirectory('/missing', { scope })).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(service.getZippedDirectory('/file.txt', { scope })).rejects.toMatchObject({ code: 'ENOTDIR' });
     });
   });
 

@@ -1642,10 +1642,10 @@ export class WorkspaceFileService {
    * instead, where the mask comes with the view (charter D2, W12).
    *
    * @param path    - Absolute directory path.
-   * @param options - Optional `{ scope }` discriminator.
+   * @param options - The `{ scope }` discriminator; a routed path has a view to serve it instead.
    * @returns ZIP archive as a `Blob`.
    */
-  public async getZippedDirectory(path: string, options?: { scope?: WorkspaceScope }): Promise<Blob> {
+  public async getZippedDirectory(path: string, options: { scope: WorkspaceScope }): Promise<Blob> {
     const { provider, path: resolvedPath } = await this._resolve(path, options);
     return archive(provider, resolvedPath);
   }

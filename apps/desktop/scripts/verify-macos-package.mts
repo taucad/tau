@@ -349,6 +349,22 @@ for (const icon of ['icon.png', 'icon-dark.png']) {
     throw new Error(`The packaged app is missing branding/${icon}.`);
   }
 }
+/* `tau://` deep links only work from a packaged app, and only because this key
+ * is in the bundle: without it Launch Services never routes a link here and
+ * `open-url` never fires (R4). The Quick Look document types are merged into
+ * the same plist, so this also proves the two did not displace each other. */
+const bundledUrlSchemes = run('plutil', [
+  '-extract',
+  'CFBundleURLTypes.0.CFBundleURLSchemes',
+  'json',
+  '-o',
+  '-',
+  resolve(appPath, 'Contents/Info.plist'),
+]).trim();
+if (!(JSON.parse(bundledUrlSchemes) as string[]).includes('tau')) {
+  throw new Error(`The packaged app does not claim the tau:// scheme: ${bundledUrlSchemes}`);
+}
+run('plutil', ['-extract', 'CFBundleDocumentTypes', 'json', '-o', '-', resolve(appPath, 'Contents/Info.plist')]);
 if (release) {
   run('xcrun', ['stapler', 'validate', appPath]);
   run('spctl', ['--assess', '--type', 'execute', '--verbose=2', appPath]);

@@ -74,6 +74,7 @@ import {
 } from '#main/utility-environment.js';
 import { createQuickLookController, removeStaleQuickLookSessions } from '#main/quick-look.js';
 import type { QuickLookController } from '#main/quick-look.js';
+import { deepLinkArgument, parseDeepLink } from '#main/deep-links.js';
 import { createOpenFileQueue } from '#main/open-files.js';
 import {
   appIconThemeChannel,
@@ -126,6 +127,44 @@ app.on('open-file', (event, path) => {
   enqueueOpenFiles([path]);
 });
 enqueueOpenFiles(process.argv.slice(1));
+
+/** Bring the app forward, whatever asked it to (a second launch, a deep link). */
+const focusMainWindow = (): void => {
+  const window = BrowserWindow.getAllWindows()[0];
+  if (window?.isMinimized()) {
+    window.restore();
+  }
+  window?.show();
+  window?.focus();
+};
+
+/*
+ * `tau://` deep links (R4, ruling D4).
+ *
+ * The same pre-`ready` problem as `open-file`: on macOS the link that launched
+ * the app arrives before anything could have asked for it, so the listener is
+ * installed here and the link is held until the window exists. One slot rather
+ * than a list — a launch delivers one link, and if a second arrives first the
+ * newer one is the one the person just clicked.
+ */
+let deliverDeepLink: ((value: string) => void) | undefined;
+let queuedDeepLink: string | undefined;
+const receiveDeepLink = (value: string): void => {
+  if (deliverDeepLink === undefined) {
+    queuedDeepLink = value;
+    return;
+  }
+  deliverDeepLink(value);
+};
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  receiveDeepLink(url);
+});
+/* Windows and Linux hand the link to the process as an argument instead. */
+const launchDeepLink = deepLinkArgument(process.argv.slice(1));
+if (launchDeepLink !== undefined) {
+  receiveDeepLink(launchDeepLink);
+}
 
 /**
  * How long quit waits for every served project to settle (W19, D31).
@@ -184,16 +223,24 @@ const askRendererToQuiesce = async (
 const ownsSingleInstanceLock = app.requestSingleInstanceLock();
 app.on('second-instance', (_event, argv) => {
   enqueueOpenFiles(argv.slice(1));
-  const window = BrowserWindow.getAllWindows()[0];
-  if (window?.isMinimized()) {
-    window.restore();
+  const link = deepLinkArgument(argv.slice(1));
+  if (link !== undefined) {
+    receiveDeepLink(link);
   }
-  window?.show();
-  window?.focus();
+  focusMainWindow();
 });
 
 app.setName('Tau');
 process.title = 'Tau';
+/* Unpackaged on Windows and Linux the registration has to name the executable
+ * and the script Electron was started with, or the OS records `electron` itself
+ * as the handler; on macOS `CFBundleURLTypes` in the packaged bundle is what
+ * counts and this call is a no-op for a development run. */
+if (process.defaultApp && process.argv.length >= 2) {
+  app.setAsDefaultProtocolClient('tau', process.execPath, [resolve(process.argv[1]!)]);
+} else {
+  app.setAsDefaultProtocolClient('tau');
+}
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.taucad.tau');
 }
@@ -793,6 +840,15 @@ const bootstrapElectronApp = async (): Promise<void> => {
     }
   });
 
+  /**
+   * One in-app route, as an absolute URL for whichever renderer is serving.
+   *
+   * @param path - Route path, already validated by whoever produced it.
+   * @returns The URL to load.
+   */
+  const rendererUrl = (path: string): string =>
+    new URL(path, isDevelopment ? environment.ELECTRON_RENDERER_URL! : `${appOrigin}/`).href;
+
   const createMainWindow = async (): Promise<BrowserWindow> => {
     const window = new BrowserWindow({
       width: 1440,
@@ -862,9 +918,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     window.webContents.on('will-navigate', guardNavigation('will-navigate'));
     window.webContents.on('will-redirect', guardNavigation('will-redirect'));
 
-    const path = openFiles.hasPending() ? '/import?desktop-open=1' : '/';
-    const rendererUrl = new URL(path, isDevelopment ? environment.ELECTRON_RENDERER_URL! : `${appOrigin}/`).href;
-    await window.loadURL(rendererUrl);
+    await window.loadURL(rendererUrl(openFiles.hasPending() ? '/import?desktop-open=1' : '/'));
     window.show();
     return window;
   };
@@ -875,12 +929,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
     if (!window || window.webContents.getURL().includes('/import?desktop-open=1')) {
       return;
     }
-    const rendererUrl = new URL(
-      '/import?desktop-open=1',
-      isDevelopment ? environment.ELECTRON_RENDERER_URL! : `${appOrigin}/`,
-    ).href;
     const navigate = async (): Promise<void> => {
-      await window.loadURL(rendererUrl);
+      await window.loadURL(rendererUrl('/import?desktop-open=1'));
       window.show();
       window.focus();
     };
@@ -889,6 +939,49 @@ const bootstrapElectronApp = async (): Promise<void> => {
   };
   if (openFiles.hasPending()) {
     showOpenFileImport();
+  }
+
+  /*
+   * Opening a deep link is a window navigation, not a channel of its own.
+   *
+   * Every content link resolves to an in-app route the renderer already serves,
+   * loaded exactly the way an Open With file loads `/import?desktop-open=1`;
+   * the route owns what a signed-out person sees, so main holds nothing back.
+   * The sign-in callback is the exception: it carries a credential, is redeemed
+   * here, and never reaches the renderer.
+   */
+  const openDeepLink = async (value: string): Promise<void> => {
+    try {
+      const link = parseDeepLink(value);
+      if (link === undefined) {
+        /* A custom scheme has no ownership proof, so a link that is not one of
+         * the four the app publishes is another application's, or an attempt. */
+        /* Never the query or fragment: a malformed sign-in callback still
+         * carries a live one-time token, and a share fragment is the payload. */
+        log.log('warn', 'deep-link.refused', { url: value.split(/[?#]/u)[0]!.slice(0, 256) });
+      } else if (link.kind === 'auth-callback') {
+        await auth.handleCallback(link);
+      } else {
+        log.log('info', 'deep-link.opened', { kind: link.kind });
+        /* macOS keeps the app alive with every window closed. */
+        const window = BrowserWindow.getAllWindows()[0] ?? (await createMainWindow());
+        await window.loadURL(rendererUrl(link.route));
+      }
+    } catch (error) {
+      log.log('error', 'deep-link.failed', error);
+    }
+    /* Whatever the outcome, the person clicked something: come forward and say
+     * so, rather than leaving the app behind the browser doing nothing. */
+    focusMainWindow();
+  };
+  deliverDeepLink = (value) => {
+    // async-iife: bootstrap -- Electron event callbacks do not consume promises.
+    void openDeepLink(value);
+  };
+  if (queuedDeepLink !== undefined) {
+    const queued = queuedDeepLink;
+    queuedDeepLink = undefined;
+    deliverDeepLink(queued);
   }
 
   app.on('activate', () => {

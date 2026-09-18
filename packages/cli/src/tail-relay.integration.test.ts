@@ -44,6 +44,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 
 import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
+import { localDatabaseName } from '@taucad/utils/worktree-database';
 import type { AgentChannelClient, AgentLogEvent, EventLogBatch } from '@taucad/agent-host';
 
 const execFileAsync = promisify(execFile);
@@ -196,7 +197,7 @@ const runPsql = async (statement: string): Promise<string> => {
       '-U',
       'dev_user',
       '-d',
-      'tau_dev',
+      localDatabaseName(),
       '-t',
       '-A',
       '-F',

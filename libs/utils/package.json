@@ -28,7 +28,8 @@
     "./dispose": "./src/dispose.utils.ts",
     "./error": "./src/error.utils.ts",
     "./cache": "./src/cache.utils.ts",
-    "./hash": "./src/hash.utils.ts"
+    "./hash": "./src/hash.utils.ts",
+    "./worktree-database": "./src/worktree-database.utils.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -77,6 +78,11 @@
         "types": "./dist/hash.utils.d.mts",
         "import": "./dist/hash.utils.mjs",
         "default": "./dist/hash.utils.mjs"
+      },
+      "./worktree-database": {
+        "types": "./dist/worktree-database.utils.d.mts",
+        "import": "./dist/worktree-database.utils.mjs",
+        "default": "./dist/worktree-database.utils.mjs"
       }
     }
   },

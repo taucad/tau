@@ -12,5 +12,6 @@ Shared utilities for the Tau CAD platform. Exposed as granular subpaths so consu
 - `@taucad/utils/dispose` — disposal helpers
 - `@taucad/utils/error` — error helpers
 - `@taucad/utils/cache` — cache helpers
+- `@taucad/utils/worktree-database` — per-worktree local Postgres forks (node only)
 
 Part of the [Tau](https://github.com/taucad/tau) monorepo.

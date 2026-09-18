@@ -12,6 +12,7 @@ const baseConfig: UserConfig = {
     'src/error.utils.ts',
     'src/cache.utils.ts',
     'src/hash.utils.ts',
+    'src/worktree-database.utils.ts',
   ],
   sourcemap: false,
   clean: ['dist'],

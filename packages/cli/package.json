@@ -97,6 +97,7 @@
   },
   "devDependencies": {
     "@taucad/rpc": "workspace:*",
+    "@taucad/utils": "workspace:*",
     "@types/react": "catalog:",
     "@types/semver": "catalog:",
     "@types/ws": "^8.18.1"

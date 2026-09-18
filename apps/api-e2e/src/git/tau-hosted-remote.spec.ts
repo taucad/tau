@@ -4,6 +4,7 @@ import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { localDatabaseName } from '@taucad/utils/worktree-database';
 import { gitE2EApiUrl, gitE2EFrontendUrl } from '#git/config.js';
 import {
   basicAuthorization,
@@ -131,7 +132,7 @@ const spendStorage = async (projectId: string, bytes: number): Promise<void> => 
     '-U',
     'dev_user',
     '-d',
-    'tau_dev',
+    localDatabaseName(),
     '-c',
     `INSERT INTO project_git (project_id, storage_bytes, lfs_bytes) VALUES ('${projectId}', 0, ${String(bytes)}) ` +
       `ON CONFLICT (project_id) DO UPDATE SET lfs_bytes = ${String(bytes)};`,

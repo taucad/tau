@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import process from 'node:process';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { localDatabaseName } from '@taucad/utils/worktree-database';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import { launchBrowserClient } from '#support/two-client/browser-client.js';
 import type { BrowserClient } from '#support/two-client/browser-client.js';
@@ -45,7 +46,7 @@ const countRows = async (statement: string): Promise<number> => {
       '-U',
       'dev_user',
       '-d',
-      'tau_dev',
+      localDatabaseName(),
       '-c',
       statement,
     ],

@@ -254,15 +254,34 @@ describe('ProjectNavigation', () => {
     expect(mockSetProjectDisclosure).toHaveBeenCalledWith('proj_two', true);
   });
 
-  it('shows route loading only on the destination project', () => {
+  /* The spinner takes the disclosure slot, so a loading route never moves the
+   * name, and the pointer that started it cannot hide the spinner. */
+  it('spins in the disclosure slot of the destination project only', () => {
     pendingLocation = { pathname: '/w/home/Two%20space', search: '' };
     render(<ProjectNavigation />);
 
     const pendingLink = screen.getByRole('link', { name: 'Two' });
     const idleLink = screen.getByRole('link', { name: 'One' });
     expect(pendingLink).toHaveAttribute('aria-busy', 'true');
-    expect(pendingLink.closest('[data-slot=project-trigger]')?.querySelector('.animate-spin')).toBeInTheDocument();
-    expect(idleLink.closest('[data-slot=project-trigger]')?.querySelector('.animate-spin')).not.toBeInTheDocument();
+    expect(pendingLink.querySelector('.animate-spin')).toBeNull();
+    const mark = screen
+      .getByRole('button', { name: /(?:Expand|Collapse) Two/u })
+      .querySelector<HTMLElement>('[data-glyph]');
+    expect(mark?.dataset['glyph']).toBe('pending');
+    expect(mark?.querySelector('.animate-spin')).toBeInTheDocument();
+    expect(mark?.className).not.toContain('group-hover/row:hidden');
+    expect(idleLink.closest('[data-slot=project-trigger]')?.querySelector('.animate-spin')).toBeNull();
+  });
+
+  it('opens the rename field on a double-click, but not from the disclosure control', () => {
+    render(<ProjectNavigation />);
+
+    fireEvent.doubleClick(screen.getByRole('button', { name: /(?:Expand|Collapse) One/u }));
+    expect(screen.queryByTestId('inline-editor')).not.toBeInTheDocument();
+
+    const row = screen.getByRole('link', { name: 'One' }).closest('[data-slot=project-trigger]');
+    fireEvent.doubleClick(row!);
+    expect(screen.getByTestId('inline-editor')).toBeInTheDocument();
   });
 
   it('creates a chat by project id before navigating to its canonical query URL', async () => {

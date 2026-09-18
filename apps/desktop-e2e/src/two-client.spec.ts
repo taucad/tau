@@ -843,8 +843,7 @@ describe('a project on the browser client', () => {
         .poll(
           async () => {
             const ref = await readBrowserFile(browserDestination, browserDestinationSlug, [
-              '.tau',
-              'revisions',
+              '.git',
               'refs',
               'tags',
               'v1',
@@ -1204,8 +1203,7 @@ describe('a project on the browser client', () => {
         .poll(
           async () => {
             const head = await readBrowserFile(source, sourceSlug, [
-              '.tau',
-              'revisions',
+              '.git',
               'refs',
               'remotes',
               'tau',

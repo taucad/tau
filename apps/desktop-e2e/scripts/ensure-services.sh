@@ -26,7 +26,8 @@
 # Required env vars:
 #   None
 # Optional env vars:
-#   None
+#   DATABASE_URL                Overrides the connection `apps/api/.env` names.
+#   TAU_E2E_POSTGRES_DATABASE   Overrides the database the policy guard reads.
 #
 # Usage:
 #   apps/desktop-e2e/scripts/ensure-services.sh
@@ -43,12 +44,28 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 docker-compose -f "${REPO_ROOT}/infra/docker-compose.yml" up -d postgres redis minio minio-bootstrap
 pnpm --dir "${REPO_ROOT}" exec nx run api:db-migrate
 
-# The same psql vocabulary `src/support/two-client/tau-cloud.ts` seeds through.
-existing_head="$(docker exec tau-postgres psql -qtAX -v ON_ERROR_STOP=1 -U dev_user -d tau_dev \
+# The same psql vocabulary `src/support/two-client/tau-cloud.ts` seeds through,
+# against the same database the API boots with. `docker exec` cannot see the
+# API's `DATABASE_URL`, and this line used to name `tau_dev` outright — so in a
+# linked worktree, whose `apps/api/.env` points at that worktree's own fork, the
+# guard read a head belonging to a database nobody was using and either skipped
+# a bootstrap the fork still needed or attempted one it did not (W10 defect 1,
+# the same hard-coding fixed in `src/git/config.ts` and `src/support/config.ts`).
+# `TAU_E2E_POSTGRES_DATABASE` still wins, as it does for the TypeScript helpers.
+api_env_file="${REPO_ROOT}/apps/api/.env"
+database_url="${DATABASE_URL:-}"
+if [[ -z "${database_url}" && -f "${api_env_file}" ]]; then
+  database_url="$(sed -n 's/^DATABASE_URL=//p' "${api_env_file}" | head -1)"
+fi
+database_name="${TAU_E2E_POSTGRES_DATABASE:-${database_url##*/}}"
+database_name="${database_name%%\?*}"
+: "${database_name:=tau_dev}"
+
+existing_head="$(docker exec tau-postgres psql -qtAX -v ON_ERROR_STOP=1 -U dev_user -d "${database_name}" \
   -c "SELECT revision FROM billing.billing_policy_head WHERE environment = 'development';")"
 
 if [[ -n "${existing_head}" ]]; then
-  echo "Development billing policy already published at revision ${existing_head}; skipping bootstrap."
+  echo "Development billing policy already published in ${database_name} at revision ${existing_head}; skipping bootstrap."
   exit 0
 fi
 

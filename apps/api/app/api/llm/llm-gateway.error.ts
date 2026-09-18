@@ -9,6 +9,15 @@ export type LlmGatewayErrorType =
   | 'INVALID_REQUEST'
   | 'MODEL_NOT_IN_CATALOG'
   | 'ORIGIN_NOT_ALLOWED'
+  /**
+   * The provider account behind the key Tau spent against has no credit or is
+   * not billable. Distinct from INSUFFICIENT_CREDIT, which is the customer's own
+   * Tau balance. `details` carries `providerId`, the provider's own
+   * `providerCode` when it sent one, and `accountOwner`: `operator` on a
+   * self-hosted API, whose message is the provider's own sentence, or `tau` on
+   * Cloud, whose message never names the supplier's state.
+   */
+  | 'PROVIDER_ACCOUNT_EXHAUSTED'
   | 'PROVIDER_UNAVAILABLE'
   | 'RATE_LIMITED'
   | 'UNAUTHENTICATED'

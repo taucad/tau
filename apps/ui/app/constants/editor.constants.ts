@@ -91,8 +91,10 @@ export type GraphicsViewSettings = {
   cameraFovAngle: number;
   /** Canonical user-authored camera view; derived viewport, bounds, and clipping are intentionally omitted. */
   cameraView?: PersistedCameraView;
-  /** Render timeout. Milliseconds. */
-  renderTimeout: number;
+  /** Durable cut through this entry's geometry. Absent means no cut. Added in schema v11. */
+  sectionView?: PersistedSectionView;
+  /** Durable preferences for how any cut is shown. Added in schema v11. */
+  sectionDisplay?: PersistedSectionDisplay;
   /** Persisted pinned measurements -- optional so legacy data deserializes cleanly */
   pinnedMeasurements?: PinnedMeasurement[];
   /**
@@ -112,9 +114,60 @@ export type GraphicsViewSettings = {
    * `8` = migrates persisted world-space lengths from millimetres to metres.
    * `9` = adds perspective magnification to the canonical camera view.
    * `10` = names the physical frame of cameras and measurements.
+   * `11` = moves `renderTimeout` to `EditorState.unitSettings` (per file) and adds the section view.
    */
-  schemaVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+  schemaVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
 };
+
+/** Entry-scoped cut: cleared on file switch, not inherited by a new pane. */
+export type PersistedSectionView = {
+  active: boolean;
+  plane?: 'xy' | 'xz' | 'yz';
+  /** Metres, in the `tau:root` frame. */
+  pivot: [number, number, number];
+  /** Radians. */
+  rotation: [number, number, number];
+  direction: 1 | -1;
+};
+
+/** Pane-scoped preferences about how any cut is shown: kept on file switch and inherited. */
+export type PersistedSectionDisplay = {
+  clipLines: boolean;
+  clipMesh: boolean;
+  planeName: 'cartesian' | 'face';
+};
+
+/** Durable settings of one entry path, keyed by that path in `EditorState.unitSettings`. */
+export type PersistedUnitSettings = {
+  /** Render timeout. Milliseconds. */
+  renderTimeout: number;
+};
+
+/**
+ * Durable keys whose live owner is the per-view `graphicsMachine`.
+ * They are seeded once, at actor construction, and the actor is the value afterwards.
+ */
+export type GraphicsOwnedSettings = Pick<
+  GraphicsViewSettings,
+  | 'enableSurfaces'
+  | 'enableLines'
+  | 'enableGizmo'
+  | 'enableGrid'
+  | 'enableAxes'
+  | 'enableMatcap'
+  | 'enablePostProcessing'
+  | 'upDirection'
+  | 'graphicsBackend'
+  | 'pinnedMeasurements'
+  | 'sectionView'
+  | 'sectionDisplay'
+>;
+
+/** Durable keys whose live owner is the view's camera actor, held by its `ViewCameraSession`. */
+export type CameraOwnedSettings = Pick<GraphicsViewSettings, 'cameraFovAngle' | 'cameraView'>;
+
+/** Durable keys whose live owner is the entry path's `cadMachine`. */
+export type CadOwnedSettings = Pick<PersistedUnitSettings, 'renderTimeout'>;
 
 // ============================================================================
 // Zod Schemas for Runtime Validation of Persisted State
@@ -151,6 +204,20 @@ export const componentDisplayStateSchema = z.object({
   unitsById: z.record(z.string(), componentDisplayUnitSchema),
 });
 
+const sectionViewSchema = z.object({
+  active: z.boolean(),
+  plane: z.enum(['xy', 'xz', 'yz']).optional(),
+  pivot: vector3Schema,
+  rotation: vector3Schema,
+  direction: z.union([z.literal(1), z.literal(-1)]),
+});
+
+const sectionDisplaySchema = z.object({
+  clipLines: z.boolean(),
+  clipMesh: z.boolean(),
+  planeName: z.enum(['cartesian', 'face']),
+});
+
 export const graphicsViewSettingsSchema = z.object({
   enableSurfaces: z.boolean(),
   enableLines: z.boolean(),
@@ -161,8 +228,10 @@ export const graphicsViewSettingsSchema = z.object({
   enablePostProcessing: z.boolean(),
   upDirection: z.enum(['x', 'y', 'z']),
   cameraFovAngle: z.number(),
-  /** Render timeout. Milliseconds. */
-  renderTimeout: z.number(),
+  /** Milliseconds. Records at v10 and earlier carried it here; v11 hoists it into `unitSettings`. */
+  renderTimeout: z.number().optional(),
+  sectionView: sectionViewSchema.optional(),
+  sectionDisplay: sectionDisplaySchema.optional(),
   pinnedMeasurements: z.array(pinnedMeasurementSchema).optional(),
   graphicsBackend: z.enum(['auto', 'webgl', 'webgpu']).optional(),
   componentDisplay: componentDisplayStateSchema.optional(),
@@ -179,6 +248,7 @@ export const graphicsViewSettingsSchema = z.object({
    * `8` = metre world-space camera and measurement lengths.
    * `9` = adds perspective magnification to the canonical camera view.
    * `10` = names physical frames.
+   * `11` = per-file render timeout and durable section view.
    */
   schemaVersion: z
     .union([
@@ -192,6 +262,7 @@ export const graphicsViewSettingsSchema = z.object({
       z.literal(8),
       z.literal(9),
       z.literal(10),
+      z.literal(11),
     ])
     .optional(),
 });
@@ -212,7 +283,7 @@ const parsePersistedCameraView = (
   if (!result.success) {
     return undefined;
   }
-  if ((schemaVersion === 9 || schemaVersion === 10) && result.data.perspectiveZoom === undefined) {
+  if (schemaVersion !== undefined && schemaVersion >= 9 && result.data.perspectiveZoom === undefined) {
     return undefined;
   }
 
@@ -290,14 +361,13 @@ export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
   }
 
   const parsed = result.data;
-  const lengthScale =
-    parsed.schemaVersion === 8 || parsed.schemaVersion === 9 || parsed.schemaVersion === 10 ? 1 : 0.001;
+  const lengthScale = parsed.schemaVersion !== undefined && parsed.schemaVersion >= 8 ? 1 : 0.001;
   const cameraView = parsePersistedCameraView(parsed.cameraView, {
     requestedVerticalFieldOfView: parsed.cameraFovAngle,
     lengthScale,
     schemaVersion: parsed.schemaVersion,
   });
-  const { componentDisplay: _legacyComponentDisplay, ...settings } = parsed;
+  const { componentDisplay: _legacyComponentDisplay, renderTimeout: _hoistedRenderTimeout, ...settings } = parsed;
   const pinnedMeasurements = parsed.pinnedMeasurements?.map((measurement) => ({
     ...measurement,
     frameId: measurement.frameId ?? 'tau:root',
@@ -310,13 +380,24 @@ export function parseGraphicsViewSettings(raw: unknown): GraphicsViewSettings {
     ...settings,
     cameraView,
     pinnedMeasurements,
-    renderTimeout:
-      parsed.schemaVersion === undefined || parsed.schemaVersion === 1
-        ? parsed.renderTimeout * 1000
-        : parsed.renderTimeout,
     graphicsBackend: 'webgl',
-    schemaVersion: 10,
+    schemaVersion: 11,
   };
+}
+
+/**
+ * Milliseconds. Reads the render timeout a record at schema v10 or earlier carried per view, so the
+ * v11 load can hoist it into the per-entry record. Absent / `1` means the value was in seconds.
+ */
+export function readLegacyRenderTimeout(raw: unknown): number | undefined {
+  if (typeof raw !== 'object' || raw === null) {
+    return undefined;
+  }
+  const { renderTimeout, schemaVersion } = raw as { renderTimeout?: unknown; schemaVersion?: unknown };
+  if (typeof renderTimeout !== 'number' || !Number.isFinite(renderTimeout) || renderTimeout <= 0) {
+    return undefined;
+  }
+  return schemaVersion === undefined || schemaVersion === 1 ? renderTimeout * 1000 : renderTimeout;
 }
 
 /**
@@ -333,9 +414,8 @@ export const defaultGraphicsSettings: GraphicsViewSettings = {
   enablePostProcessing: false,
   upDirection: 'z',
   cameraFovAngle: 60,
-  renderTimeout: defaultRenderTimeout,
   graphicsBackend: 'webgl',
-  schemaVersion: 10,
+  schemaVersion: 11,
 };
 
 // ============================================================================

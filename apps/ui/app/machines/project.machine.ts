@@ -6,7 +6,7 @@ import { assertRootedPath, normalizePath } from '@taucad/utils/path';
 import { classify } from '@taucad/filesystem/path-registry';
 import { isBrowser } from '#constants/browser.constants.js';
 import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
-import type { GraphicsViewSettings } from '#constants/editor.constants.js';
+import type { GraphicsOwnedSettings, GraphicsViewSettings } from '#constants/editor.constants.js';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import { cadMachine } from '#machines/cad.machine.js';
@@ -127,7 +127,7 @@ type ProjectEventInternal =
   | { type: 'updateTags'; tags: string[] }
   | { type: 'loadModel' }
   | { type: 'setMainFile'; path: string }
-  | { type: 'createGeometryUnit'; entryPath: string }
+  | { type: 'createGeometryUnit'; entryPath: string; renderTimeout?: number }
   | {
       type: 'geometryUnit.exportAvailabilityChanged';
       actorId: string;
@@ -414,6 +414,7 @@ export const projectMachine = setup({
             fileManagerRef: context.fileManagerRef,
             kernelOptionsFactory: context.kernelOptionsFactory,
             fileSystemRoot: context.fileSystemRoot,
+            renderTimeout: event.renderTimeout,
           },
         });
 
@@ -613,22 +614,29 @@ export const projectMachine = setup({
 
       const settings = event.settings ?? defaultGraphicsSettings;
 
+      /* Every graphics-owned key, spelled out: a key added to the partition fails to compile here
+       * until the spawn seeds it, which is what makes Law 1's declaration reach the actor. */
+      const graphicsSeed: { [K in keyof Required<GraphicsOwnedSettings>]: GraphicsOwnedSettings[K] } = {
+        enableSurfaces: settings.enableSurfaces,
+        enableLines: settings.enableLines,
+        enableGizmo: settings.enableGizmo,
+        enableGrid: settings.enableGrid,
+        enableAxes: settings.enableAxes,
+        enableMatcap: settings.enableMatcap,
+        enablePostProcessing: settings.enablePostProcessing,
+        upDirection: settings.upDirection,
+        pinnedMeasurements: settings.pinnedMeasurements,
+        sectionView: settings.sectionView,
+        sectionDisplay: settings.sectionDisplay,
+        graphicsBackend: settings.graphicsBackend ?? 'webgl',
+      };
+
       enqueue.assign(({ spawn, context }) => {
         const gfx = spawn('graphics', {
           id: `graphics-view-${context.projectId}-${event.viewId}`,
           input: {
-            defaultCameraFovAngle: settings.cameraFovAngle,
+            ...graphicsSeed,
             measureSnapDistance: 40,
-            enableSurfaces: settings.enableSurfaces,
-            enableLines: settings.enableLines,
-            enableGizmo: settings.enableGizmo,
-            enableGrid: settings.enableGrid,
-            enableAxes: settings.enableAxes,
-            enableMatcap: settings.enableMatcap,
-            enablePostProcessing: settings.enablePostProcessing,
-            upDirection: settings.upDirection,
-            pinnedMeasurements: settings.pinnedMeasurements,
-            graphicsBackendPreference: settings.graphicsBackend ?? 'webgl',
             modelInteractionRef: context.modelInteractionRef,
           },
         });

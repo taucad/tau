@@ -1,37 +1,31 @@
-import { createContext, useContext, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useSyncExternalStore } from 'react';
 import type { RefObject } from 'react';
 import { useSelector } from '@xstate/react';
-import type { ActorRefFrom, AnyActorRef, Snapshot, SnapshotFrom } from 'xstate';
-import { createCameraView } from '@taucad/camera';
+import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { selectCameraDriverSnapshot } from '@taucad/camera/machine';
-import type { CameraDriverSnapshot, CameraMachineSnapshot } from '@taucad/camera/machine';
+import type { CameraMachineSnapshot } from '@taucad/camera/machine';
 import type { RenderFrame } from '@taucad/spatial';
-import { createThreeCameraRig } from '@taucad/three/camera';
-import type { ThreeCamera, ThreeCameraRig } from '@taucad/three/camera';
+import type { ThreeCameraRig } from '@taucad/three/camera';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
-import type { PersistedCameraView } from '#constants/editor.constants.js';
 import {
+  acquireViewCameraSession,
   getGraphicsCameraRegistryVersion,
+  getViewCameraSession,
   hasGraphicsCameraRig,
-  registerGraphicsCameraRig,
+  notifyViewCameraSession,
   subscribeGraphicsCameraRegistry,
-  unregisterGraphicsCameraRig,
+} from '#services/graphics-camera-registry.js';
+import type {
+  CameraUpdateHandler,
+  RenderFrameUpdateHandler,
+  ViewCameraFraming,
+  ViewCameraSeed,
+  ViewCameraSession,
 } from '#services/graphics-camera-registry.js';
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
 type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
-type CameraUpdateHandler = (camera: ThreeCamera, snapshot: CameraDriverSnapshot) => void;
-type RenderFrameUpdateHandler = (renderFrame: RenderFrame) => void;
-
-export type CameraViewRestore = Readonly<{
-  identity: string;
-  cameraView?: PersistedCameraView;
-}>;
-
-export type CameraViewInitialization =
-  | Readonly<{ initialize: false }>
-  | Readonly<{ initialize: true; cameraView?: PersistedCameraView }>;
 
 type GraphicsContextValue = {
   graphicsRef: GraphicsActorRef;
@@ -42,12 +36,11 @@ type GraphicsContextValue = {
   setRenderFrame: (renderFrame: RenderFrame) => void;
   subscribeRenderFrame: (listener: () => void) => () => void;
   renderFrameConsumersRef: RefObject<Set<RenderFrameUpdateHandler>>;
-  cameraViewRestoreIdentity: string | undefined;
-  beginCameraViewInitialization: () => CameraViewInitialization;
+  framing: ViewCameraFraming;
 };
 
 const GraphicsContext = createContext<GraphicsContextValue | undefined>(undefined);
-/** Re-renders external camera consumers when a provider registers or unregisters its rig. */
+/** Re-renders external camera consumers when a view camera session is created or released. */
 const useCameraRegistryVersion = (): number =>
   useSyncExternalStore(
     subscribeGraphicsCameraRegistry,
@@ -55,7 +48,7 @@ const useCameraRegistryVersion = (): number =>
     getGraphicsCameraRegistryVersion,
   );
 
-/** Returns a registry query whose identity changes with camera registration. */
+/** Returns a registry query whose identity changes with camera session lifetime. */
 export const useGraphicsCameraRigQuery = (): ((graphicsRef: GraphicsActorRef | undefined) => boolean) => {
   const version = useCameraRegistryVersion();
   return useMemo(
@@ -65,238 +58,91 @@ export const useGraphicsCameraRigQuery = (): ((graphicsRef: GraphicsActorRef | u
   );
 };
 
-const initialDirection = [Math.sqrt(3 / 8), -Math.sqrt(3 / 8), 0.5] as const;
-const createInitialRenderFrame = (): RenderFrame => ({
-  anchorFrameId: 'tau:root',
-  originMeters: [0, 0, 0],
-  metersPerRenderUnit: 1,
-});
-
-const getPixelRatio = (): number => {
-  const pixelRatio = Reflect.get(globalThis, 'devicePixelRatio');
-  return Math.min(typeof pixelRatio === 'number' && pixelRatio > 0 ? pixelRatio : 1, 2);
-};
-
-const createInitialCameraRig = ({
-  graphicsRef,
-  connectorRef,
-  cameraView,
-  initialVerticalFieldOfView,
-  renderFrame,
-}: {
-  readonly graphicsRef: GraphicsActorRef;
-  readonly connectorRef: RefObject<CameraUpdateHandler | undefined>;
-  readonly cameraView?: PersistedCameraView;
-  readonly initialVerticalFieldOfView?: number;
-  readonly renderFrame: RenderFrame;
-}): ThreeCameraRig => {
-  const graphics = graphicsRef.getSnapshot().context;
-  const up =
-    graphics.upDirection === 'x'
-      ? ([1, 0, 0] as const)
-      : graphics.upDirection === 'y'
-        ? ([0, 1, 0] as const)
-        : ([0, 0, 1] as const);
-
-  const initialView = cameraView ?? {
-    target: [0, 0, 0],
-    direction: initialDirection,
-    up,
-    verticalSpan: 2,
-    perspectiveZoom: 1,
-  };
-
-  return createThreeCameraRig({
-    pixelBudget: 0.25,
-    renderFrame,
-    initialView: createCameraView({
-      frameId: 'tau:root',
-      requestedVerticalFieldOfView: initialVerticalFieldOfView ?? graphics.initialCameraFovAngle,
-      ...initialView,
-      viewport: { width: 1, height: 1, pixelRatio: getPixelRatio() },
-      bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
-    }),
-    onUpdate(camera, snapshot) {
-      connectorRef.current?.(camera, snapshot);
-    },
-  });
-};
-
-// Mirrors @xstate/react's reconnect-safe actor cleanup. React can disconnect and reconnect
-// effects without rendering a new provider; a plain stop leaves invoked children stopped.
-const stopActorForReactReconnect = (actorRef: AnyActorRef): void => {
-  type SnapshotWithChildren = Snapshot<unknown> & {
-    readonly children?: Readonly<Record<string, AnyActorRef>>;
-  };
-  const persistedSnapshots: Array<readonly [AnyActorRef, Snapshot<unknown>]> = [];
-  const visit = (ref: AnyActorRef): void => {
-    const snapshot = ref.getSnapshot() as SnapshotWithChildren;
-    persistedSnapshots.push([ref, snapshot]);
-    for (const child of Object.values(snapshot.children ?? {})) {
-      visit(child);
-    }
-    Reflect.set(ref, 'observers', new Set());
-  };
-  visit(actorRef);
-  const systemSnapshot = actorRef.system.getSnapshot();
-
-  actorRef.stop();
-
-  Reflect.set(actorRef.system, '_snapshot', systemSnapshot);
-  for (const [ref, snapshot] of persistedSnapshots) {
-    Reflect.set(ref, '_processingStatus', 0);
-    Reflect.set(ref, '_snapshot', snapshot);
-  }
+/**
+ * Returns a view's camera session from outside its provider, re-rendering when one comes or goes.
+ *
+ * The write-side host reads a view whose pane may not be mounted: until some canvas acquires the
+ * session there is no live camera, and the view's camera keys are left as the person left them.
+ */
+export const useViewCameraSession = (graphicsRef: GraphicsActorRef | undefined): ViewCameraSession | undefined => {
+  /* The session is read through the store rather than beside it: a registry read in the render body
+   * is state the React Compiler cannot see changing, and it memoised the `undefined` a host that
+   * rendered before any canvas saw -- for the life of the graphics actor. A dependency on the
+   * registry version does not fix that; the compiler recomputes the dependencies from what the
+   * callback reads and drops it again. */
+  const getSession = useCallback(() => getViewCameraSession(graphicsRef), [graphicsRef]);
+  return useSyncExternalStore(subscribeGraphicsCameraRegistry, getSession, getSession);
 };
 
 /**
  * Provider that makes a per-view graphics machine and its capabilities available to all descendants.
- * Owns the per-view portable camera rig and registry entry.
+ * Binds the view's camera session, whose owner is the graphics actor rather than this mount.
  * Placed in ChatViewer (and standalone viewers like hero-viewer, converter).
  */
-/* oxlint-disable react/refs -- The `use no memo` compiler opt-out preserves this imperative XState/graphics bridge contract: stable callbacks synchronously rebind mutable per-actor state during render. */
 export function GraphicsProvider({
   graphicsRef,
-  cameraViewRestore,
+  seed,
   initialVerticalFieldOfView,
   children,
 }: {
   readonly graphicsRef: GraphicsActorRef;
-  readonly cameraViewRestore?: CameraViewRestore;
+  readonly seed?: ViewCameraSeed;
+  /** Standalone hosts with no persisted record; folded into the create-only camera seed. */
   readonly initialVerticalFieldOfView?: number;
   readonly children: React.ReactNode;
 }): React.JSX.Element {
   'use no memo';
 
-  const cameraConnectorRef = useRef<CameraUpdateHandler | undefined>(undefined);
-  const cameraConsumersRef = useRef(new Set<CameraUpdateHandler>());
-  const renderFrameOwnerRef = useRef({
-    graphicsRef,
-    current: createInitialRenderFrame(),
-    consumers: new Set<RenderFrameUpdateHandler>(),
-    listeners: new Set<() => void>(),
+  const session = acquireViewCameraSession(graphicsRef, {
+    identity: seed?.identity,
+    camera:
+      initialVerticalFieldOfView === undefined
+        ? seed?.camera
+        : { ...seed?.camera, cameraFovAngle: initialVerticalFieldOfView },
   });
-  if (renderFrameOwnerRef.current.graphicsRef !== graphicsRef) {
-    renderFrameOwnerRef.current = {
-      graphicsRef,
-      current: createInitialRenderFrame(),
-      consumers: new Set(),
-      listeners: new Set(),
-    };
-  }
-  /* Both halves of the seed are latched: the field of view follows a persisted setting the viewer
-   * rewrites while the pane is open, and rebuilding the rig on that would drop the live camera. */
-  const initialCameraViewRef = useRef({
-    graphicsRef,
-    cameraView: cameraViewRestore?.cameraView,
-    verticalFieldOfView: initialVerticalFieldOfView,
-  });
-  if (initialCameraViewRef.current.graphicsRef !== graphicsRef) {
-    initialCameraViewRef.current = {
-      graphicsRef,
-      cameraView: cameraViewRestore?.cameraView,
-      verticalFieldOfView: initialVerticalFieldOfView,
-    };
-  }
-  const cameraRig = useMemo(
-    () =>
-      createInitialCameraRig({
-        graphicsRef,
-        connectorRef: cameraConnectorRef,
-        cameraView: initialCameraViewRef.current.cameraView,
-        initialVerticalFieldOfView: initialCameraViewRef.current.verticalFieldOfView,
-        renderFrame: renderFrameOwnerRef.current.current,
-      }),
-    [graphicsRef],
-  );
-  const cameraRigRef = useRef(cameraRig);
-  cameraRigRef.current = cameraRig;
-  const cameraViewInitializationRef = useRef({
-    graphicsRef,
-    identity: cameraViewRestore?.identity,
-    cameraView: cameraViewRestore?.cameraView,
-    initialized: false,
-  });
-  if (
-    cameraViewInitializationRef.current.graphicsRef !== graphicsRef ||
-    cameraViewInitializationRef.current.identity !== cameraViewRestore?.identity
-  ) {
-    cameraViewInitializationRef.current = {
-      graphicsRef,
-      identity: cameraViewRestore?.identity,
-      cameraView: cameraViewRestore?.cameraView,
-      initialized: false,
-    };
-  }
-  const beginCameraViewInitialization = useRef((): CameraViewInitialization => {
-    const initialization = cameraViewInitializationRef.current;
-    if (initialization.initialized) {
-      return { initialize: false };
-    }
-    initialization.initialized = true;
-    return { initialize: true, cameraView: initialization.cameraView };
-  }).current;
-  const getRenderFrame = useRef((): RenderFrame => renderFrameOwnerRef.current.current).current;
-  const subscribeRenderFrame = useRef((listener: () => void): (() => void) => {
-    renderFrameOwnerRef.current.listeners.add(listener);
-    return () => renderFrameOwnerRef.current.listeners.delete(listener);
-  }).current;
-  const setRenderFrame = useRef((renderFrame: RenderFrame): void => {
-    const owner = renderFrameOwnerRef.current;
-    const previous = owner.current;
-    if (
-      renderFrame.anchorFrameId === previous.anchorFrameId &&
-      renderFrame.metersPerRenderUnit === previous.metersPerRenderUnit &&
-      renderFrame.originMeters.every((value, index) => value === previous.originMeters[index])
-    ) {
-      return;
-    }
-    owner.current = renderFrame;
-    for (const update of owner.consumers) {
-      update(renderFrame);
-    }
-    cameraRigRef.current.setRenderFrame(renderFrame);
-    for (const listener of owner.listeners) {
-      listener();
-    }
-  }).current;
 
   useLayoutEffect(() => {
-    cameraRig.actorRef.start();
-    registerGraphicsCameraRig(graphicsRef, cameraRig);
-    return () => {
-      unregisterGraphicsCameraRig(graphicsRef, cameraRig);
-      stopActorForReactReconnect(cameraRig.actorRef);
-    };
-  }, [cameraRig, graphicsRef]);
+    notifyViewCameraSession(session);
+  }, [session]);
 
-  const value = useMemo(
-    (): GraphicsContextValue => ({
+  const value = useMemo((): GraphicsContextValue => {
+    const { renderFrame, rig } = session;
+    return {
       graphicsRef,
-      cameraRig,
-      cameraConnectorRef,
-      cameraConsumersRef,
-      getRenderFrame,
-      setRenderFrame,
-      subscribeRenderFrame,
-      renderFrameConsumersRef: { current: renderFrameOwnerRef.current.consumers },
-      cameraViewRestoreIdentity: cameraViewRestore?.identity,
-      beginCameraViewInitialization,
-    }),
-    [
-      beginCameraViewInitialization,
-      cameraRig,
-      cameraViewRestore?.identity,
-      getRenderFrame,
-      graphicsRef,
-      setRenderFrame,
-      subscribeRenderFrame,
-    ],
-  );
+      cameraRig: rig,
+      cameraConnectorRef: session.connectorRef,
+      cameraConsumersRef: session.consumersRef,
+      getRenderFrame: () => renderFrame.current,
+      setRenderFrame: (next: RenderFrame): void => {
+        const previous = renderFrame.current;
+        if (
+          next.anchorFrameId === previous.anchorFrameId &&
+          next.metersPerRenderUnit === previous.metersPerRenderUnit &&
+          next.originMeters.every((value, index) => value === previous.originMeters[index])
+        ) {
+          return;
+        }
+        // oxlint-disable-next-line react/immutability -- the render frame belongs to the view camera session, whose owner is the graphics actor rather than this mount.
+        renderFrame.current = next;
+        for (const update of renderFrame.consumers) {
+          update(next);
+        }
+        rig.setRenderFrame(next);
+        for (const listener of renderFrame.listeners) {
+          listener();
+        }
+      },
+      subscribeRenderFrame: (listener: () => void): (() => void) => {
+        renderFrame.listeners.add(listener);
+        return () => renderFrame.listeners.delete(listener);
+      },
+      renderFrameConsumersRef: { current: renderFrame.consumers },
+      framing: session.framing,
+    };
+  }, [graphicsRef, session]);
 
   return <GraphicsContext.Provider value={value}>{children}</GraphicsContext.Provider>;
 }
-/* oxlint-enable react/refs */
 
 /**
  * Returns the per-view graphics actor ref from the nearest GraphicsProvider.
@@ -311,7 +157,7 @@ export function useGraphics(): GraphicsActorRef {
   return context.graphicsRef;
 }
 
-/** Returns the provider-owned portable native camera rig. */
+/** Returns the view-owned portable native camera rig. */
 export function useCameraRig(): ThreeCameraRig {
   const context = useContext(GraphicsContext);
   if (!context) {
@@ -390,22 +236,13 @@ export function useCameraConsumersRef(): RefObject<Set<CameraUpdateHandler>> {
   return context.cameraConsumersRef;
 }
 
-/** Coordinates the one-time default frame and optional persisted view restore for this provider identity. */
-export function useCameraViewInitialization(): Readonly<{
-  identity: string | undefined;
-  begin: () => CameraViewInitialization;
-}> {
+/** Returns the session-owned record that gates the one-time framing and persisted-view restore. */
+export function useViewCameraFraming(): ViewCameraFraming {
   const context = useContext(GraphicsContext);
   if (!context) {
-    throw new Error('useCameraViewInitialization must be used within a GraphicsProvider');
+    throw new Error('useViewCameraFraming must be used within a GraphicsProvider');
   }
-  return useMemo(
-    () => ({
-      identity: context.cameraViewRestoreIdentity,
-      begin: context.beginCameraViewInitialization,
-    }),
-    [context.beginCameraViewInitialization, context.cameraViewRestoreIdentity],
-  );
+  return context.framing;
 }
 
 /** Curried selector hook for the provider-owned portable camera actor. */

@@ -77,13 +77,16 @@ const failEditorFlush = (error: Error): void => {
     observer.error?.(error);
   }
 };
+/* One Map for the life of the suite: the write-side host selects it, and a fresh one per snapshot
+ * read would hand React a new value on every render. */
+const viewGraphics = new Map();
 const projectRef = {
   send: projectSend,
   /* `matches` is not decoration: the session's `closing.flushingProducers`
    * awaits `waitFor(projectRef, (state) => state.matches(...))`, so a snapshot
    * without it threw, the session settled in `failed` instead of `closed`, and
    * the registry never dropped its ref. */
-  getSnapshot: () => ({ context: { project: undefined }, matches: () => true }),
+  getSnapshot: () => ({ context: { project: undefined, viewGraphics }, matches: () => true }),
   subscribe: () => ({ unsubscribe: () => undefined }),
 };
 const parameterService = {
@@ -140,7 +143,7 @@ vi.mock('#hooks/use-project.js', () => ({
     projectProviderChatInputs.push({ requestedChatId, createdChatId });
     return <div>{children}</div>;
   },
-  useProject: () => ({ projectRef, editorRef, parameterService }),
+  useProject: () => ({ projectRef, editorRef, parameterService, viewGraphics }),
 }));
 vi.mock('#hooks/use-flush-on-close.js', () => ({
   useFlushOnClose: () => undefined,

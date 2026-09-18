@@ -3,6 +3,7 @@ import type {
   MobilePanelId,
   GraphicsViewSettings,
   PersistedModelComponentDisplayState,
+  PersistedUnitSettings,
 } from '#constants/editor.constants.js';
 
 // ============================================================================
@@ -125,6 +126,8 @@ export type EditorState = {
   viewSettings: Record<string, ViewState>;
   /** Project-scoped model appearance shared by all viewer panels. */
   modelComponentDisplay?: PersistedModelComponentDisplayState;
+  /** Per-entry-path settings whose live owner is the entry's CAD actor. Added in schema v11. */
+  unitSettings?: Record<string, PersistedUnitSettings>;
   /** Timestamp of last update */
   updatedAt: number;
 };

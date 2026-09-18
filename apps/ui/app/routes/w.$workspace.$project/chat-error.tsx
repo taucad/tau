@@ -16,6 +16,7 @@ import { ChatErrorCredits } from '#routes/w.$workspace.$project/chat-error-credi
 import { ChatErrorRateLimit } from '#routes/w.$workspace.$project/chat-error-rate-limit.js';
 import { ChatErrorTool } from '#routes/w.$workspace.$project/chat-error-tool.js';
 import { ChatErrorAgentStop } from '#routes/w.$workspace.$project/chat-error-agent-stop.js';
+import { ChatErrorProviderAccount } from '#routes/w.$workspace.$project/chat-error-provider-account.js';
 import { externalAgentStopCodes, externalAgentStopSchema } from '@taucad/agent-host';
 
 /**
@@ -123,6 +124,19 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
     : undefined;
   if (agentStop?.success) {
     return <ChatErrorAgentStop className={cn('min-w-0', className)} stop={agentStop.data} />;
+  }
+
+  // The provider account behind Tau's key refused; the deployment's own card
+  // says whose account it is, so the code outranks the category (a 503 relayed
+  // in a 200 stream would otherwise read as a Tau outage).
+  if (parsedError.code === 'PROVIDER_ACCOUNT_EXHAUSTED') {
+    return (
+      <ChatErrorProviderAccount
+        className={cn('min-w-0', className)}
+        description={parsedError.message}
+        details={parsedError.details}
+      />
+    );
   }
 
   // Route to specialized error components based on category

@@ -29,16 +29,21 @@ const errorText = (value: unknown, fallback: string): string => {
       const category =
         code === 'INSUFFICIENT_CREDIT'
           ? errorCategory.credits
-          : typeof status === 'number'
-            ? httpStatusToCategory(status)
-            : /* `rateLimit` is the external agent's *stop* card, and that card
-               * is keyed on the stop details. A limit refused before the
-               * adapter classified anything carries the code alone, and
-               * claiming the category without the details it needs dropped the
-               * person onto a card with no "Try again" (R3-F4). */
-              code === 'EXTERNAL_AGENT_LIMIT_REACHED' && externalAgentStopSchema.safeParse(details).success
-              ? errorCategory.rateLimit
-              : errorCategory.generic;
+          : /* The provider-account refusal is a 503 pre-stream but rides a 200
+             * response when the gateway rewrites an in-stream error frame, so
+             * the code names the category the status cannot. */
+            code === 'PROVIDER_ACCOUNT_EXHAUSTED'
+            ? errorCategory.overloaded
+            : typeof status === 'number'
+              ? httpStatusToCategory(status)
+              : /* `rateLimit` is the external agent's *stop* card, and that card
+                 * is keyed on the stop details. A limit refused before the
+                 * adapter classified anything carries the code alone, and
+                 * claiming the category without the details it needs dropped the
+                 * person onto a card with no "Try again" (R3-F4). */
+                code === 'EXTERNAL_AGENT_LIMIT_REACHED' && externalAgentStopSchema.safeParse(details).success
+                ? errorCategory.rateLimit
+                : errorCategory.generic;
       return JSON.stringify({
         category,
         title: errorCategoryTitles[category],

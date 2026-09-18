@@ -844,6 +844,40 @@ describe('projectAgentHostEvent', () => {
     });
   });
 
+  /* The gateway rewrites the provider's in-stream error frame, so the relayed
+   * response is still HTTP 200: only the code can say the provider account
+   * refused, and the card is keyed on that code. */
+  it('should project a provider-account refusal as overloaded with its details, whatever the status', () => {
+    const details = { providerId: 'openai', providerCode: 'credit_balance_exhausted', accountOwner: 'tau' };
+    const [chunk] = projectAgentHostEvent({
+      ...base,
+      type: 'run.lifecycle',
+      state: 'failed',
+      detail: {
+        code: 'PROVIDER_ACCOUNT_EXHAUSTED',
+        status: 200,
+        message: "The model provider's account is unavailable.",
+        details,
+      },
+    });
+    if (chunk?.type !== 'error') {
+      throw new Error('Expected an error projection');
+    }
+    expect(JSON.parse(chunk.errorText)).toEqual({
+      category: 'overloaded',
+      title: 'Service Temporarily Unavailable',
+      message: "The model provider's account is unavailable.",
+      code: 'PROVIDER_ACCOUNT_EXHAUSTED',
+      httpStatus: 200,
+      details,
+    });
+    expect(parseErrorForPersistence(new Error(chunk.errorText))).toMatchObject({
+      category: 'overloaded',
+      code: 'PROVIDER_ACCOUNT_EXHAUSTED',
+      details,
+    });
+  });
+
   it("should carry an external agent's stop details through to the persisted ChatError without a status", () => {
     const details = {
       agentId: 'codex',

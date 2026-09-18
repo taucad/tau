@@ -1944,6 +1944,129 @@ describe('BrowserPlacementChatTransport', () => {
     expect(await reattach(lossy)).toEqual(rebuilt);
     unregister();
   });
+
+  it('should fail a submit whose prior stream never settles within the deadline', async () => {
+    installBrowserGlobals();
+    vi.useFakeTimers();
+    try {
+      const chatId = 'chat-prior-never-settles';
+      /* Two streams for one chat serialise through the same settlement. This
+         reattach never gets its log back, and the submit behind it used to wait
+         on it forever, silently, with the composer stuck on "Planning next
+         moves…". */
+      const wedged = clientFor(chatId, 'run-wedged', {
+        attach: vi.fn(
+          async () =>
+            new Promise<never>(() => {
+              /* The log this reattach asked for never comes back. */
+            }),
+        ),
+      });
+      const unregister = registerAgentHost(chatId, {
+        projectStorage: async () => ({
+          projectId: 'project-prior-settlement',
+          backend: 'opfs',
+          providerBasePath: 'project-prior-settlement',
+        }),
+        createClient: async () => wedged,
+        markRunId: async () => undefined,
+      });
+      const transport = new BrowserPlacementChatTransport();
+      // The reattach that never comes back, holding this chat's settlement.
+      await transport.sendMessages({
+        chatId,
+        trigger: 'submit-message',
+        messageId: undefined,
+        messages: [{ id: 'user-wedged', role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }],
+        abortSignal: undefined,
+        body: browserBody({ runId: 'run-wedged', trigger: 'submit' }),
+      });
+
+      const chat = new Chat<MyUIMessage>({ id: chatId, transport });
+      const sending = chat.sendMessage(
+        { id: 'user-after-wedge', role: 'user', parts: [{ type: 'text', text: 'And again.' }] },
+        { body: browserBody({ runId: 'run-after-wedge', trigger: 'submit' }) },
+      );
+      await vi.advanceTimersByTimeAsync(30_000);
+      await sending;
+
+      expect(chat.status).toBe('error');
+      expect(chat.error).toMatchObject({ code: 'BROWSER_HOST_SETTLEMENT_TIMEOUT' });
+      unregister();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('should fail a turn whose settlement never arrives within the deadline', async () => {
+    installBrowserGlobals();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.useFakeTimers();
+    try {
+      const chatId = 'chat-settlement-never-arrives';
+      let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+      /* The run completes and the stream closes — the turn looks done on screen
+         — but no `turn.finalized` ever lands, so the late-settlement wait keeps
+         this chat's settlement and every later submit behind it. */
+      const lifecycleOnly = clientFor(chatId, 'run-unsettled', {
+        start: vi.fn(async (input: Parameters<AgentHostClient['start']>[0]) => {
+          listener?.(chatId, {
+            version: 1,
+            leaderEpoch: 'leader-unsettled',
+            sequence: 1,
+            recordedAt: '2026-09-01T00:00:01.000Z',
+            runId: input.runId,
+            type: 'run.lifecycle',
+            state: 'completed',
+          });
+          return snapshot(chatId, input.runId);
+        }),
+        subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+          listener = next;
+          return () => {
+            listener = undefined;
+          };
+        }),
+      });
+      const unregister = registerAgentHost(chatId, {
+        projectStorage: async () => ({
+          projectId: 'project-turn-settlement',
+          backend: 'opfs',
+          providerBasePath: 'project-turn-settlement',
+        }),
+        createClient: async () => lifecycleOnly,
+        markRunId: async () => undefined,
+      });
+      const transport = new BrowserPlacementChatTransport();
+      const send = async (runId: string): Promise<ReadableStream<UIMessageChunk>> =>
+        transport.sendMessages({
+          chatId,
+          trigger: 'submit-message',
+          messageId: undefined,
+          messages: [{ id: `user-${runId}`, role: 'user', parts: [{ type: 'text', text: 'Build it.' }] }],
+          abortSignal: undefined,
+          body: browserBody({ runId, trigger: 'submit' }),
+        });
+
+      const unsettled = await send('run-unsettled');
+      await drain(unsettled.getReader());
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(consoleError).toHaveBeenCalledWith(
+        '[browserAgentHost] stream failed after it settled',
+        chatId,
+        expect.objectContaining({ code: 'BROWSER_HOST_SETTLEMENT_TIMEOUT' }),
+      );
+      // And the chat is free: the next turn runs rather than inheriting the wait.
+      const next = await send('run-after-unsettled');
+      await drain(next.getReader());
+      expect(lifecycleOnly.start).toHaveBeenCalledTimes(2);
+      unregister();
+    } finally {
+      vi.useRealTimers();
+      consoleError.mockRestore();
+    }
+  });
 });
 
 /* W9: a durable turn references its attachments by content-addressed path. The

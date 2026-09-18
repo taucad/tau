@@ -62,6 +62,35 @@ const clientSettlements = new Map<string, Promise<void>>();
 const requestedResumes = new Set<string>();
 
 /**
+ * How long one stream waits on a settlement before it gives up. Milliseconds.
+ *
+ * The same bound the rooted-bridge opener takes, and for the same reason: a
+ * chat's streams serialise through {@link clientSettlements}, so an unbounded
+ * wait on one of them was a wedge nobody could see — the submit behind it never
+ * reached the host, wrote nothing to the log, and left the composer on
+ * "Planning next moves…" for as long as the page stayed open.
+ */
+const settlementTimeout = 30_000;
+
+/**
+ * Await a settlement, or throw once the bound expires.
+ *
+ * @param settling - The settlement to wait out.
+ * @param reason - What the user is told when it never lands.
+ */
+const awaitSettlement = async (settling: Promise<void>, reason: string): Promise<void> => {
+  const settlementExpiry = Promise.withResolvers<never>();
+  const timer = globalThis.setTimeout(() => {
+    settlementExpiry.reject(new AgentHostWorkerError('BROWSER_HOST_SETTLEMENT_TIMEOUT', reason));
+  }, settlementTimeout);
+  try {
+    await Promise.race([settling, settlementExpiry.promise]);
+  } finally {
+    globalThis.clearTimeout(timer);
+  }
+};
+
+/**
  * Turns a *host* settled, by turn id (S9, A4).
  *
  * A turn the browser placed settles in the file-manager worker's revision root
@@ -749,7 +778,12 @@ const createHostStream = <Message extends UIMessage>(input: {
       return reconciled;
     };
     try {
-      await priorSettlement;
+      if (priorSettlement) {
+        await awaitSettlement(
+          priorSettlement,
+          'The previous message on this chat never finished. Reload the page and try again.',
+        );
+      }
       const registration = await registrationFor(input.chatId);
       const bindRun = async (bound: string): Promise<void> => {
         await registration.markRunId(bound);
@@ -852,11 +886,16 @@ const createHostStream = <Message extends UIMessage>(input: {
       closed = true;
       await writer.close();
       if (awaitLateSettlement && !cancelled) {
-        await turnSettlement.promise;
+        await awaitSettlement(turnSettlement.promise, `This turn never settled on chat ${input.chatId}.`);
         await projection;
       }
     } catch (error) {
-      if (!closed) {
+      if (closed) {
+        /* Past the writer there is nobody left to refuse to — this stream's
+         * chunks are already on screen. Said out loud anyway, because the wait
+         * that lands here is the one that used to hold the next turn. */
+        console.error('[browserAgentHost] stream failed after it settled', input.chatId, error);
+      } else {
         closed = true;
         await (cancelled ? writer.close() : writer.abort(error)).catch(() => undefined);
       }

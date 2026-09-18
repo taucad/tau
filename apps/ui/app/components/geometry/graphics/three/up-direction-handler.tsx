@@ -12,7 +12,9 @@ type UpDirectionHandlerProperties = {
 };
 
 /**
- * Component that handles dynamic up direction changes for the camera and all scene objects.
+ * Component that handles dynamic up direction changes for this canvas' camera and scene objects.
+ * The up direction is per view, so nothing here writes `THREE.Object3D.DEFAULT_UP`: two panes with
+ * different up directions must not fight over one process-global value.
  * Must be inside the Canvas component to access the Three.js context.
  */
 export function UpDirectionHandler({ upDirection }: UpDirectionHandlerProperties): undefined {
@@ -32,9 +34,6 @@ export function UpDirectionHandler({ upDirection }: UpDirectionHandlerProperties
         : upDirection === 'y'
           ? new THREE.Vector3(0, 1, 0)
           : new THREE.Vector3(0, 0, 1);
-
-    // Set the global default for new objects
-    THREE.Object3D.DEFAULT_UP.copy(newUp);
 
     const {
       context: { view },

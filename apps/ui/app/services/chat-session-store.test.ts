@@ -12,7 +12,7 @@ import { clearLedger, recordRpcOutcome } from '#services/rpc-ledger.js';
 import { chatSessionMachine } from '#machines/chat-session.machine.js';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { uint8ArrayToBase64 } from 'uint8array-extras';
-import type { ChatRequest, ChatSessionActorRef } from '#machines/chat-session.machine.js';
+import type { ChatRequest, ChatSessionActorRef, ChatTurnSettlementInput } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import { projectSessionMachine } from '#machines/project-session.machine.js';
 import {
@@ -305,6 +305,20 @@ function startTurnOwner(store: StoreType, projectId: string): void {
   turnOwners.push(session);
   store.setFocusedProject(projectId);
   store.setProjectSession(projectId, session);
+}
+
+/**
+ * Publish one chat's settlement and record every turn it ends.
+ *
+ * @param chatId - The chat this settlement belongs to.
+ * @returns The settlements the chat's session actor asked for, in order.
+ */
+function publishSettlementRecorder(chatId: string): ChatTurnSettlementInput[] {
+  const settlements: ChatTurnSettlementInput[] = [];
+  publishChatTurnSettlement(chatId, async (input) => {
+    settlements.push(input);
+  });
+  return settlements;
 }
 
 /**
@@ -1387,6 +1401,28 @@ describe('ChatSessionStore', () => {
 
       expect(store.getDurableRunId('chat_approval')).toBe('run_approval');
       expect(store.get('chat_approval')).toBeDefined();
+    });
+
+    /**
+     * C6/V10: a reload finds this chat's run terminal in the host's log with no
+     * settlement in it — the tab that ran it closed before the revision root
+     * answered. Nothing will ever attest it, so the chat's session actor is
+     * told to settle it, once, and the chat stops waiting in `finishing`.
+     */
+    it('should settle a reloaded terminal run the log holds no settlement for', async () => {
+      const store = createStore();
+      startTurnOwner(store, 'project_reconcile');
+      const settlements = publishSettlementRecorder('chat_reconcile');
+      store.acquire('chat_reconcile');
+      store.retainDurableRun({ chatId: 'chat_reconcile', runId: 'run_reconcile', state: 'active' });
+
+      harness.created.find((entry) => entry.id === 'chat_reconcile')!.finish();
+
+      await vi.waitFor(() => {
+        expect(settlements).toEqual([
+          { chatId: 'chat_reconcile', runId: 'run_reconcile', leaseTurnId: undefined, outcome: 'completed' },
+        ]);
+      });
     });
 
     it('should notify status subscribers when a durable run is released', () => {

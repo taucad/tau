@@ -195,6 +195,15 @@ export type ChatSessionMachineEvent =
   | { readonly type: 'turnAdmitted'; readonly turn: ChatTurn }
   /** Reload discovery found a durable run for a chat this page never started (V5). */
   | { readonly type: 'adoptRun'; readonly runId: string }
+  /**
+   * A terminal run of this chat that the host's log holds no settlement for.
+   *
+   * The tab that ran it died before the revision root answered, so no
+   * attestation is coming and `finishing.observing` would wait forever. The
+   * page that adopted the run settles it instead — once; the host refuses a
+   * second settlement of a run already settled (V10).
+   */
+  | { readonly type: 'reconcileSettlement'; readonly runId: string; readonly outcome: ChatTurnOutcome }
   /** The route's live agent selection for this chat; only its placement is state. */
   | { readonly type: 'agentConfigChanged'; readonly placement: string }
   | { readonly type: 'interruptRecorded'; readonly state: 'requested' | 'resolved'; readonly count?: number }
@@ -228,6 +237,23 @@ export type ChatSessionActorRef = ActorRefFrom<typeof chatSessionMachine>;
  *
  * @public
  */
+/**
+ * Settle a terminal run of this chat that the host's log holds no settlement
+ * for (C6, V10).
+ *
+ * Accepted only where the chat is not mid-turn: a turn this page admitted is
+ * already on its way through `finishing.settling`, and the settlement it waits
+ * for is the very one this event reports missing. Sent by the store, which
+ * reads the log — so a run settled by this transition is not reported again;
+ * and a page that asks twice regardless is refused by the host, which is where
+ * exactly-once actually lives.
+ */
+const reconcileSettlementTransition = {
+  guard: 'hasNoOwnTurn',
+  target: '#chat-session.run.finishing.settling',
+  actions: ['adoptSettlementTarget', 'announce'],
+} as const;
+
 export const chatSessionMachine = setup({
   types: {
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- xstate setup
@@ -343,6 +369,11 @@ export const chatSessionMachine = setup({
         : { turn: context.turn },
     ),
     clearTurn: assign({ turn: undefined, outcome: undefined }),
+    adoptSettlementTarget: assign(({ context, event }) =>
+      event.type === 'reconcileSettlement'
+        ? { activeRunId: event.runId, outcome: event.outcome }
+        : { activeRunId: context.activeRunId },
+    ),
     recordOutcome: assign({
       outcome: ({ context, event }) =>
         event.type === 'runLifecycle' && event.phase !== 'admitted' && event.phase !== 'running'
@@ -437,6 +468,7 @@ export const chatSessionMachine = setup({
               target: '#chat-session.run.running.reconnecting',
               actions: ['adoptDiscoveredRun', 'announce'],
             },
+            reconcileSettlement: reconcileSettlementTransition,
           },
         },
         queued: {
@@ -557,7 +589,9 @@ export const chatSessionMachine = setup({
                 src: 'settleTurn',
                 input: ({ context }) => ({
                   chatId: context.chatId,
-                  runId: context.turn?.runId,
+                  /* A reconciled run took no lease here, so it has no turn —
+                   * the run it settles is the one this chat is holding. */
+                  runId: context.turn?.runId ?? context.activeRunId,
                   leaseTurnId: context.turn?.leaseTurnId,
                   outcome: context.outcome ?? 'completed',
                 }),
@@ -612,11 +646,12 @@ export const chatSessionMachine = setup({
               actions: [assign({ failureReason: 'revision conflict' }), 'announce'],
             },
             requestTurn: { actions: ['recordGesture', 'announce'] },
+            reconcileSettlement: reconcileSettlementTransition,
           },
         },
         done: {},
-        failed: {},
-        stopped: {},
+        failed: { on: { reconcileSettlement: reconcileSettlementTransition } },
+        stopped: { on: { reconcileSettlement: reconcileSettlementTransition } },
       },
       on: {
         /* The one way a turn starts. Every verb sends this and nothing else;

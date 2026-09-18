@@ -220,6 +220,9 @@ test('sends a new message after stopping a gated turn', async () => {
   await sendDraft('Second plain message.');
 
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(2);
+  /* The settlement of the second turn is written when that turn ends, so the
+   * log invariant is only meaningful once its reply has landed. */
+  await target.expectVisible(selectors.getByText('Reply two.', { exact: true }).last(), 120_000);
   await expectNoAdmissionRefusal();
   await expectLogInvariant(chatId, 2);
 });

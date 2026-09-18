@@ -102,7 +102,7 @@ describe('AppSidebar', () => {
 
     expect(sidebar).toHaveAttribute('id', 'app-sidebar');
     expect(sidebar).toHaveClass('w-full', 'border-r');
-    expect(projectsButton).toHaveClass('data-[active=true]:text-sidebar-accent-foreground');
+    expect(projectsButton).toHaveClass('data-[active=true]:text-foreground');
     expect(projectsButton).not.toHaveClass('data-[active=true]:text-primary');
     expect(screen.getByRole('button', { name: 'Account' })).toBeInTheDocument();
     expect(container.querySelector('[data-slot=sidebar-header]')).toHaveClass('h-9');

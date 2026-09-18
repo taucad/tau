@@ -29,7 +29,6 @@ export type {
   ProjectRootDiscoveryStatus,
   ResolvedDiscoveryRoot,
 } from '#project-directories.js';
-export type { BundledTypePackageReplacement } from '#workspace-file-service.js';
 export { MutationPipeline } from '#mutation-pipeline.js';
 export type { BulkMoveEdit, BulkMoveResult } from '#mutation-pipeline.js';
 export { RootedViews } from '#rooted-views.js';

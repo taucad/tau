@@ -1,21 +1,30 @@
-/* eslint-disable @typescript-eslint/naming-convention -- test data uses invalid virtual paths as object keys */
-// oxlint-disable-next-line import/no-unassigned-import -- IndexedDB polyfill for WorkspaceFileService tests
-import 'fake-indexeddb/auto';
+// @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { populateBundledTypesMount } from '#bundled-types-mount.js';
-import { WorkspaceFileService } from '#workspace-file-service.js';
-import { ProviderRegistry } from '#provider-registry.js';
-import { ResourceQueue } from '#resource-queue.js';
-import { ChangeEventBus } from '#change-event-bus.js';
-import { MountTable } from '#mount-table.js';
-import type { WatchEvent } from '#types.js';
+import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
+import type { WatchEvent } from '@taucad/filesystem';
+import { populateBundledTypesMount } from '#machines/bundled-types-mount.js';
+import type { BundledTypesRoot } from '#machines/bundled-types-mount.js';
 
 const decoder = new TextDecoder();
 
+/**
+ * The live worker mounts `/node_modules` on its own OPFS provider and installs
+ * through a rooted handle on it; a memory provider under the same route is the
+ * same composition.
+ *
+ * @param providerRegistry - Shared registry, so two services can contend for one physical root.
+ * @returns A service whose `/node_modules` route is its own mount.
+ */
 async function createService(providerRegistry = new ProviderRegistry()): Promise<WorkspaceFileService> {
   const provider = await providerRegistry.getProvider({ backend: 'memory', storageRootKey: 'memory:test-root' });
   const mountTable = new MountTable();
   mountTable.mount('/', provider, { class: 'authored', backend: 'memory', storageRootKey: 'memory:test-root' });
+  const nodeModulesScope = { backend: 'memory', storageRootKey: 'memory:test-node-modules' } as const;
+  mountTable.mount('/node_modules', await providerRegistry.getProvider(nodeModulesScope), {
+    ...nodeModulesScope,
+    providerBasePath: 'tau-node-modules',
+    class: 'derived',
+  });
   return new WorkspaceFileService({
     providerRegistry,
     resourceQueue: new ResourceQueue(),
@@ -24,11 +33,17 @@ async function createService(providerRegistry = new ProviderRegistry()): Promise
   });
 }
 
+/** The trusted installer handle for one service's `/node_modules` route. */
+const nodeModulesOf = (service: WorkspaceFileService): BundledTypesRoot =>
+  service.createRootedFileSystem('/node_modules');
+
 describe('populateBundledTypesMount', () => {
   let service: WorkspaceFileService;
+  let nodeModules: BundledTypesRoot;
 
   beforeEach(async () => {
     service = await createService();
+    nodeModules = nodeModulesOf(service);
   });
 
   afterEach(() => {
@@ -37,7 +52,7 @@ describe('populateBundledTypesMount', () => {
   });
 
   it('should write index.d.ts and package.json under /node_modules/<pkg>/', async () => {
-    await populateBundledTypesMount(service, [{ packageName: 'replicad', content: 'export declare const x: 1;' }]);
+    await populateBundledTypesMount(nodeModules, [{ packageName: 'replicad', content: 'export declare const x: 1;' }]);
 
     const dts = await service.readFile('/node_modules/replicad/index.d.ts');
     expect(typeof dts === 'string' ? dts : decoder.decode(dts)).toBe('export declare const x: 1;');
@@ -49,14 +64,14 @@ describe('populateBundledTypesMount', () => {
   });
 
   it('should replace stale files inside a payload-owned package root', async () => {
-    await populateBundledTypesMount(service, [
+    await populateBundledTypesMount(nodeModules, [
       { packageName: 'replaced', content: 'old', files: { 'stale.d.ts': 'stale' } },
       { packageName: 'unrelated', content: 'preserved' },
     ]);
     const events: WatchEvent[] = [];
     const stop = service.watch({ paths: ['/node_modules/replaced/stale.d.ts'] }, (event) => events.push(event));
 
-    await populateBundledTypesMount(service, [{ packageName: 'replaced', content: 'export {}' }]);
+    await populateBundledTypesMount(nodeModules, [{ packageName: 'replaced', content: 'export {}' }]);
 
     await expect(service.exists('/node_modules/replaced/stale.d.ts')).resolves.toBe(false);
     await expect(service.readFile('/node_modules/replaced/index.d.ts', 'utf8')).resolves.toBe('export {}');
@@ -66,7 +81,7 @@ describe('populateBundledTypesMount', () => {
   });
 
   it('should write scoped and unscoped subpath declarations beneath one package root', async () => {
-    await populateBundledTypesMount(service, [
+    await populateBundledTypesMount(nodeModules, [
       {
         packageName: '@jscad/modeling',
         content: 'export type Geometry = unknown;',
@@ -121,17 +136,17 @@ describe('populateBundledTypesMount', () => {
       message: 'Invalid bundled type path: "../escape.d.ts"',
     },
   ])('should reject invalid cache inputs before any filesystem access', async ({ entry, message }) => {
-    const replaceSpy = vi.spyOn(service, 'replaceBundledTypePackages');
+    const writeSpy = vi.spyOn(nodeModules, 'writeFiles');
 
     try {
-      await populateBundledTypesMount(service, [{ packageName: 'valid', content: 'export {}' }, entry]);
+      await populateBundledTypesMount(nodeModules, [{ packageName: 'valid', content: 'export {}' }, entry]);
       expect.fail('populateBundledTypesMount should reject invalid package input');
     } catch (error) {
       expect(error).toBeInstanceOf(TypeError);
       expect((error as Error).message).toBe(message);
     }
 
-    expect(replaceSpy).not.toHaveBeenCalled();
+    expect(writeSpy).not.toHaveBeenCalled();
   });
 
   it.each<{ name: string; files: Record<string, string> }>([
@@ -158,26 +173,28 @@ describe('populateBundledTypesMount', () => {
       },
     },
   ])('should reject $name before any filesystem access', async ({ files }) => {
-    const replaceSpy = vi.spyOn(service, 'replaceBundledTypePackages');
+    const writeSpy = vi.spyOn(nodeModules, 'writeFiles');
 
     await expect(
-      populateBundledTypesMount(service, [{ packageName: 'collision', content: 'export {};', files }]),
+      populateBundledTypesMount(nodeModules, [{ packageName: 'collision', content: 'export {};', files }]),
     ).rejects.toThrow('ancestor');
 
-    expect(replaceSpy).not.toHaveBeenCalled();
+    expect(writeSpy).not.toHaveBeenCalled();
   });
 
   it('should materialize cyclic package metadata before replacing prior bytes', async () => {
-    await populateBundledTypesMount(service, [{ packageName: 'cyclic', content: 'old', files: { 'old.d.ts': 'old' } }]);
+    await populateBundledTypesMount(nodeModules, [
+      { packageName: 'cyclic', content: 'old', files: { 'old.d.ts': 'old' } },
+    ]);
     const packageJson: Record<string, unknown> = {};
     packageJson['self'] = packageJson;
-    const replaceSpy = vi.spyOn(service, 'replaceBundledTypePackages');
+    const writeSpy = vi.spyOn(nodeModules, 'writeFiles');
 
     await expect(
-      populateBundledTypesMount(service, [{ packageName: 'cyclic', content: 'new', packageJson }]),
+      populateBundledTypesMount(nodeModules, [{ packageName: 'cyclic', content: 'new', packageJson }]),
     ).rejects.toThrow(/circular/i);
 
-    expect(replaceSpy).not.toHaveBeenCalled();
+    expect(writeSpy).not.toHaveBeenCalled();
     await expect(service.readFile('/node_modules/cyclic/old.d.ts', 'utf8')).resolves.toBe('old');
   });
 
@@ -206,10 +223,10 @@ describe('populateBundledTypesMount', () => {
     service = first;
 
     await Promise.all([
-      populateBundledTypesMount(first, [
+      populateBundledTypesMount(nodeModulesOf(first), [
         { packageName: 'race', content: 'first', files: { 'first.d.ts': 'first-extra' } },
       ]),
-      populateBundledTypesMount(second, [
+      populateBundledTypesMount(nodeModulesOf(second), [
         { packageName: 'race', content: 'second', files: { 'second.d.ts': 'second-extra' } },
       ]),
     ]);

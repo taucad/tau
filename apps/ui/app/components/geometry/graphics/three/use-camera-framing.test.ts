@@ -116,7 +116,12 @@ describe('useCameraFraming portable camera events', () => {
     );
     send.mockClear();
 
-    framing = { identity: 'file-b', pendingView: cameraView, initialized: false };
+    /* The registry mutates the session's framing record in place, so the object identity the effect
+     * depends on does not change: the re-latch takes effect on the next geometry, which is the
+     * ordering the design wants -- the old code re-framed the file that was leaving. */
+    framing.identity = 'file-b';
+    framing.pendingView = cameraView;
+    framing.initialized = false;
     hook.rerender({ radius: 4.5 });
 
     expect(send).toHaveBeenCalledWith({ type: 'saveHome' });

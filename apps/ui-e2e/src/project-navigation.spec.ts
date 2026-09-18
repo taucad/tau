@@ -382,12 +382,14 @@ test('client navigation keeps every project-scoped resource on one logical proje
     });
     await openRecentProject(projectNames.b);
     await expectProject({ name: projectNames.b, entryPath: 'beta.ts' });
+    /* Observe from here, as the orthographic leg does: the sampler only records while alpha is the
+     * active tab, and waiting for B's own camera first hid alpha's first frames behind a race. */
+    await startCameraRestoreObservation('alpha.ts');
     await waitForCameraBridge();
     await waitForTwoFrames();
     const projectBetaCamera = await readCamera();
     expect(projectBetaCamera.projection).toBe('perspective');
     expect(projectBetaCamera.requestedFov).toBe(60);
-    await startCameraRestoreObservation('alpha.ts');
     await openRecentProject(projectNames.a);
     await expectProject({ name: projectNames.a, entryPath: 'alpha.ts' });
     await waitForCameraBridge();

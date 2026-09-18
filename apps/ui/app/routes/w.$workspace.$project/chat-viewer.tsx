@@ -22,7 +22,6 @@ import {
   useModelInteractionSelector,
 } from '#hooks/use-graphics.js';
 import type { ViewCameraSeed } from '#services/graphics-camera-registry.js';
-import { useViewSettingsSync } from '#hooks/use-view-settings-sync.js';
 import { ChatStackTrace } from '#routes/w.$workspace.$project/chat-stack-trace.js';
 import { ChatViewerStatus } from '#routes/w.$workspace.$project/chat-viewer-status.js';
 import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';
@@ -151,8 +150,8 @@ export const ChatViewer = memo(function ({
   // Get the current view settings from editor state for this panel
   const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
   const unitSettings = useSelector(editorRef, (state) => state.context.unitSettings);
-  /* Create-only seed for this view's camera session. The session is built on the first branch that
-   * mounts a provider, so every branch passes it -- including the ones with no canvas. */
+  /* Create-only seed for this view's camera session, built when the viewer mounts its canvas. The
+   * canvas-less branches mount no provider, so a directory or a missing file builds no camera (R8). */
   const cameraSeed: ViewCameraSeed = {
     identity: entryPath,
     camera: {
@@ -172,6 +171,11 @@ export const ChatViewer = memo(function ({
           renderTimeout: unitSettings[path]?.renderTimeout,
         });
       }
+
+      /* The cut is entry-scoped and the graphics actor is retained across a file switch, so the
+       * live cut is closed here too. Clearing only the record would let the next persist write the
+       * previous file's cut -- pivoted on geometry that is gone -- straight back into it. */
+      graphicsActor?.send({ type: 'setSectionViewActive', payload: false });
 
       // Preserve existing view settings (FOV, visibility, environment preset, etc.)
       // But clear geometry-dependent state (camera pose, measurements) on file switch
@@ -199,7 +203,7 @@ export const ChatViewer = memo(function ({
       const fileName = path.split('/').pop() ?? path;
       panelApi.setTitle(fileName);
     },
-    [projectRef, editorRef, geometryUnits, viewId, panelApi, viewSettings, unitSettings],
+    [projectRef, editorRef, geometryUnits, graphicsActor, viewId, panelApi, viewSettings, unitSettings],
   );
 
   // If no graphics actor yet, render a placeholder
@@ -214,69 +218,63 @@ export const ChatViewer = memo(function ({
   // If no file selected, render empty state with file selector
   if (!entryPath) {
     return (
-      <GraphicsProvider graphicsRef={graphicsActor} seed={cameraSeed}>
-        <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
-          <span className='text-sm'>No file selected</span>
-          <FileSelector
-            selectedFile={undefined}
-            placeholder='Select file to render...'
-            className='h-8 w-[200px]'
-            title='Viewport File'
-            description='Choose which file to render in the viewport'
-            searchPlaceholder='Search files...'
-            emptyMessage='No files found.'
-            onSelect={handleFileSelect}
-          />
-        </div>
-      </GraphicsProvider>
+      <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
+        <span className='text-sm'>No file selected</span>
+        <FileSelector
+          selectedFile={undefined}
+          placeholder='Select file to render...'
+          className='h-8 w-[200px]'
+          title='Viewport File'
+          description='Choose which file to render in the viewport'
+          searchPlaceholder='Search files...'
+          emptyMessage='No files found.'
+          onSelect={handleFileSelect}
+        />
+      </div>
     );
   }
 
   // If the entry path is a directory, show a friendly screen with a file selector
   if (isDirectory) {
     return (
-      <GraphicsProvider graphicsRef={graphicsActor} seed={cameraSeed}>
-        <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
-          <FolderOpen className='size-12 stroke-1' />
-          <p className='text-sm'>The viewer cannot display a directory.</p>
-          <FileSelector
-            selectedFile={undefined}
-            initialPath={entryPath}
-            placeholder='Select a file to render...'
-            className='h-8 w-[200px]'
-            title='Viewport File'
-            description='Choose a file to render in the viewport'
-            searchPlaceholder='Search files...'
-            emptyMessage='No files found.'
-            onSelect={handleFileSelect}
-          />
-        </div>
-      </GraphicsProvider>
+      <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
+        <FolderOpen className='size-12 stroke-1' />
+        <p className='text-sm'>The viewer cannot display a directory.</p>
+        <FileSelector
+          selectedFile={undefined}
+          initialPath={entryPath}
+          placeholder='Select a file to render...'
+          className='h-8 w-[200px]'
+          title='Viewport File'
+          description='Choose a file to render in the viewport'
+          searchPlaceholder='Search files...'
+          emptyMessage='No files found.'
+          onSelect={handleFileSelect}
+        />
+      </div>
     );
   }
 
   // If the entry path doesn't exist in the file tree, show a friendly "not found" screen
   if (isMissing) {
     return (
-      <GraphicsProvider graphicsRef={graphicsActor} seed={cameraSeed}>
-        <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
-          <FileX className='size-12 stroke-1' />
-          <div className='flex flex-col items-center gap-1'>
-            <p className='text-sm font-medium'>File not found</p>
-            <p className='max-w-60 truncate text-xs'>{entryPath}</p>
-          </div>
-          <FileSelector
-            selectedFile={undefined}
-            placeholder='Select a file to render...'
-            className='h-8 w-[200px]'
-            title='Viewport File'
-            description='Choose a file to render in the viewport'
-            searchPlaceholder='Search files...'
-            emptyMessage='No files found.'
-            onSelect={handleFileSelect}
-          />
+      <div className='flex h-full flex-col items-center justify-center gap-4 text-muted-foreground'>
+        <FileX className='size-12 stroke-1' />
+        <div className='flex flex-col items-center gap-1'>
+          <p className='text-sm font-medium'>File not found</p>
+          <p className='max-w-60 truncate text-xs'>{entryPath}</p>
         </div>
-      </GraphicsProvider>
+        <FileSelector
+          selectedFile={undefined}
+          placeholder='Select a file to render...'
+          className='h-8 w-[200px]'
+          title='Viewport File'
+          description='Choose a file to render in the viewport'
+          searchPlaceholder='Search files...'
+          emptyMessage='No files found.'
+          onSelect={handleFileSelect}
+        />
+      </div>
     );
   }
 
@@ -341,16 +339,6 @@ const ViewerContent = memo(function ({
       });
     }
   }, [entryPath, graphicsActor, geometry, units]);
-
-  // Sync graphics + render timeout settings back to editor state for persistence
-  useViewSettingsSync({
-    viewId,
-    entryPath,
-    graphicsRef: graphicsActor,
-    cadRef,
-    editorRef,
-    persistCameraView: geometry === undefined ? 'pending' : geometry.format === 'gltf',
-  });
 
   // Select individual primitive values so that useSelector's reference equality
   // check works correctly. An object-returning selector creates a new reference

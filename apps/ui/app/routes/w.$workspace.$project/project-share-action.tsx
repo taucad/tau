@@ -73,10 +73,13 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
   const [navigationIntent] = useState(() => parseProjectShareNavigationIntent(location.search));
-  const { parameterService, projectId, projectRef } = useProject();
+  const { parameterService, projectId, projectRef, editorRef } = useProject();
   const { client: fileClient } = useFileManager();
   const { projects } = useProjects();
   const project = useSelector(projectRef, (state) => state.context.project);
+  /* The entry's CAD actor owns its render timeout; a unit spawned for the thumbnail is seeded from
+   * the durable per-entry record rather than left on the default (E1). */
+  const unitSettings = useSelector(editorRef, (state) => state.context.unitSettings);
   const projectUpdatedAt = projects.find((candidate) => candidate.id === projectId)?.lastActivityAt;
 
   useEffect(() => {
@@ -95,7 +98,11 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
       const { entryPath, thumbnail } = project.assets.main;
       let geometryUnit = projectRef.getSnapshot().context.geometryUnits.get(entryPath);
       if (!geometryUnit) {
-        projectRef.send({ type: 'createGeometryUnit', entryPath });
+        projectRef.send({
+          type: 'createGeometryUnit',
+          entryPath,
+          renderTimeout: unitSettings[entryPath]?.renderTimeout,
+        });
         const projectState = await waitFor(
           projectRef,
           (candidate) => candidate.context.geometryUnits.has(entryPath) || candidate.matches('error'),
@@ -166,7 +173,7 @@ export function ProjectShareWorkbenchPanel(): React.JSX.Element {
         })),
       };
     },
-    [fileClient, parameterService, project, projectId, projectRef],
+    [fileClient, parameterService, project, projectId, projectRef, unitSettings],
   );
 
   const entryPath = project?.assets.main.entryPath ?? '';

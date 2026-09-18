@@ -9,6 +9,7 @@
  */
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { awaitFreshRender, AwaitFreshRenderTimeoutError } from '#machines/await-fresh-render.js';
+import type { editorMachine } from '#machines/editor.machine.js';
 import type {
   RpcCall,
   RpcClientErrorCode,
@@ -93,6 +94,8 @@ export type RpcHandlerDependencies = {
     runtimeFileSystem: RuntimeFileSystem;
   };
   projectRef?: ActorRefFrom<typeof projectMachine>;
+  /** Durable per-entry settings live here; a unit this adapter spawns is seeded from them (E1). */
+  editorRef?: ActorRefFrom<typeof editorMachine>;
   /** Headless overrides retained independently of the visible project route. */
   kernelClient?: RpcRuntimeClient;
   graphicsClient?: RpcGraphicsClient;
@@ -305,6 +308,7 @@ export type EnsureGeometryUnitResult =
 async function ensureGeometryUnit(
   projectRef: ActorRefFrom<typeof projectMachine>,
   targetFile: string,
+  editorRef: ActorRefFrom<typeof editorMachine> | undefined,
 ): Promise<EnsureGeometryUnitResult> {
   try {
     const projectSnapshot = projectRef.getSnapshot();
@@ -315,6 +319,7 @@ async function ensureGeometryUnit(
       projectRef.send({
         type: 'createGeometryUnit',
         entryPath: targetFile,
+        renderTimeout: editorRef?.getSnapshot().context.unitSettings[targetFile]?.renderTimeout,
       });
       const refreshed = projectRef.getSnapshot();
       cadUnit = refreshed.context.geometryUnits.get(targetFile);
@@ -351,10 +356,13 @@ function geometryFailureMessage(issues: readonly KernelIssue[]): string {
   return issues.map((issue) => issue.message).join('; ');
 }
 
-function createBrowserRuntimeClient(projectRef: ActorRefFrom<typeof projectMachine>): RpcRuntimeClient {
+function createBrowserRuntimeClient(
+  projectRef: ActorRefFrom<typeof projectMachine>,
+  editorRef: ActorRefFrom<typeof editorMachine> | undefined,
+): RpcRuntimeClient {
   return {
     async getKernelResult(targetFile: string): Promise<GetKernelResultRpcResult> {
-      const resolved = await ensureGeometryUnit(projectRef, targetFile);
+      const resolved = await ensureGeometryUnit(projectRef, targetFile, editorRef);
       if (!resolved.ok) {
         return { success: false, errorCode: resolved.errorCode, message: resolved.message };
       }
@@ -392,7 +400,10 @@ function createBrowserGeoSpecClient(createGeoSpecClient: (() => RpcGeoSpecClient
   };
 }
 
-function createBrowserGraphicsClient(projectRef: ActorRefFrom<typeof projectMachine>): RpcGraphicsClient {
+function createBrowserGraphicsClient(
+  projectRef: ActorRefFrom<typeof projectMachine>,
+  editorRef: ActorRefFrom<typeof editorMachine> | undefined,
+): RpcGraphicsClient {
   return {
     async exportGeometry({
       targetFile,
@@ -401,7 +412,7 @@ function createBrowserGraphicsClient(projectRef: ActorRefFrom<typeof projectMach
       targetFile: string;
       format: string;
     }): Promise<RpcGraphicsExportGeometryResult> {
-      const resolved = await ensureGeometryUnit(projectRef, targetFile);
+      const resolved = await ensureGeometryUnit(projectRef, targetFile, editorRef);
       if (!resolved.ok) {
         return { success: false, errorCode: resolved.errorCode, message: resolved.message };
       }
@@ -467,6 +478,7 @@ function createBrowserGraphicsClient(projectRef: ActorRefFrom<typeof projectMach
 function createBrowserImageClient(
   projectRef: ActorRefFrom<typeof projectMachine>,
   imageService: Pick<HeadlessImageService, 'export'>,
+  editorRef: ActorRefFrom<typeof editorMachine> | undefined,
 ): RpcImageClient {
   const findGraphicsRef = (targetFile: string): ActorRefFrom<typeof graphicsMachine> | undefined => {
     const unitId = createSourceModelInteractionUnitId(targetFile);
@@ -480,7 +492,7 @@ function createBrowserImageClient(
 
   return {
     async captureImages(input: CaptureImagesRpcInput): Promise<CaptureImagesRpcResult> {
-      const resolved = await ensureGeometryUnit(projectRef, input.targetFile);
+      const resolved = await ensureGeometryUnit(projectRef, input.targetFile, editorRef);
       if (!resolved.ok) {
         return { success: false, errorCode: resolved.errorCode, message: resolved.message };
       }
@@ -533,7 +545,7 @@ function createBrowserImageClient(
  * to createRpcDispatcher from @taucad/chat/rpc.
  */
 export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
-  const { chatId, fileManager, projectRef, headlessImageService, createGeoSpecClient } = deps;
+  const { chatId, fileManager, projectRef, editorRef, headlessImageService, createGeoSpecClient } = deps;
   const fileSystem = createBrowserRpcFileSystem(fileManager);
   const skillResolver = createSkillResolver({
     async readFile(path) {
@@ -550,7 +562,7 @@ export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
     kernelClient:
       deps.kernelClient ??
       (projectRef
-        ? createBrowserRuntimeClient(projectRef)
+        ? createBrowserRuntimeClient(projectRef, editorRef)
         : {
             getKernelResult: async () => ({
               success: false,
@@ -560,10 +572,12 @@ export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
           }),
     geospec: deps.geoSpecClient ?? createBrowserGeoSpecClient(createGeoSpecClient),
     skillResolver,
-    graphics: deps.graphicsClient ?? (projectRef ? createBrowserGraphicsClient(projectRef) : undefined),
+    graphics: deps.graphicsClient ?? (projectRef ? createBrowserGraphicsClient(projectRef, editorRef) : undefined),
     images:
       deps.imageClient ??
-      (projectRef && headlessImageService ? createBrowserImageClient(projectRef, headlessImageService) : undefined),
+      (projectRef && headlessImageService
+        ? createBrowserImageClient(projectRef, headlessImageService, editorRef)
+        : undefined),
   };
 
   const dispatcher = createRpcDispatcher(rpcDeps);

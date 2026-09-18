@@ -15,6 +15,7 @@ import { ProjectProvider, useProject } from '#hooks/use-project.js';
 import { ProjectChatRunSettlement } from '#routes/w.$workspace.$project/project-chat-run-settlement.js';
 import { ProjectWorkspaceProvider } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { ProjectShareRouteIntent } from '#routes/w.$workspace.$project/project-share-action.js';
+import { ViewSettingsSyncHost } from '#routes/w.$workspace.$project/view-settings-sync-host.js';
 import { HomeFileManagerProvider, useFileManager } from '#hooks/use-file-manager.js';
 import { MonacoModelServiceProvider } from '#hooks/use-monaco-model-service.js';
 import { RevisionConflictChat } from '#routes/w.$workspace.$project/revision-conflict-chat.js';
@@ -296,6 +297,7 @@ function ProjectSession({
           kernelOptionsFactory={kernelSelection.kernelOptionsFactory}
         >
           <ProjectPersistenceGuard projectId={projectId} onFlushRegistration={onFlushRegistration} />
+          <ViewSettingsSyncHost />
           <ProjectSessionBinding
             projectId={projectId}
             isFocused={focused}

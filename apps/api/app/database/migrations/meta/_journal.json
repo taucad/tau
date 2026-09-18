@@ -281,6 +281,13 @@
       "when": 1789583135517,
       "tag": "0040_payment_checkout_expiry",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1789702357396,
+      "tag": "0041_git_storage_substrate",
+      "breakpoints": true
     }
   ]
 }

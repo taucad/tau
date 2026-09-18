@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '#database/database.module.js';
 import { GitModule } from '#api/git/git.module.js';
+import { CollaborationModule } from '#api/collaboration/collaboration.module.js';
 import { PublicationsModule } from '#api/publications/publications.module.js';
 import { ProjectsController } from '#api/projects/projects.controller.js';
 
@@ -14,7 +15,7 @@ import { ProjectsController } from '#api/projects/projects.controller.js';
   /* `PublicationsModule` exports the API's daily-budget rate limiter, which
      `PUT /v1/projects/:projectId` consumes (review R5). One direction only:
      nothing in publications reads this module. */
-  imports: [DatabaseModule, GitModule, PublicationsModule],
+  imports: [DatabaseModule, GitModule, PublicationsModule, CollaborationModule],
   controllers: [ProjectsController],
 })
 export class ProjectsModule {}

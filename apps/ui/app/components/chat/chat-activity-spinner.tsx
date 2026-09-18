@@ -58,6 +58,7 @@ export function ChatActivitySpinner({ className }: ChatActivitySpinnerProperties
         <MetalMorphLoaderLazy
           className='pointer-events-none absolute top-1/2 left-1/2 size-6 -translate-1/2'
           quality={spinnerQuality}
+          speed={2}
           supersample={2}
           poolKey={chatSpinnerPoolKey}
           semantic='presentation'

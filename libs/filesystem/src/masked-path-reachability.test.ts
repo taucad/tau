@@ -6,7 +6,9 @@ import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { ChangeEventBus } from '#change-event-bus.js';
 import { MountTable } from '#mount-table.js';
-import { classify } from '#path-registry.js';
+import { composeView } from '#composed-view.js';
+import { contents } from '#content-ops/contents.js';
+import { classify, tauPathPolicy } from '#path-registry.js';
 
 /**
  * Reachability pins for the filesystem north star (W0).
@@ -18,9 +20,10 @@ import { classify } from '#path-registry.js';
  * provider instead, so each one hands a consumer the paths the registry marks
  * `agentAccess: 'hidden'`.
  *
- * Every case here is `it.fails` on purpose: the bypass is the finding, and the
- * suite must stay green for the other lanes until the work package named on
- * each case flips it to a plain `it`.
+ * A case still marked `it.fails` is a bypass a consumer can still reach, kept
+ * that way so the suite stays green for the other lanes until the work package
+ * named above it flips it to a plain `it` — which it does by asserting through
+ * the surface that consumer now reaches, not by filtering the old one.
  */
 
 const projectId = 'proj_mmmmmmmmmmmmmmmmmmmmm';
@@ -108,11 +111,19 @@ describe('masked path reachability through the authority-global surface', () => 
     expect(hiddenAmong(entries.map((entry) => entry.path))).toEqual([]);
   });
 
-  // W3 (contents served by the rooted surface) flips this to `it`.
-  it.fails('should not return control-plane bytes from project directory contents', async () => {
-    const contents = await service.getDirectoryContents(projectRoute);
+  /* Flipped by W3: a consumer asks the rooted surface, which reads the subtree
+   * through its composed view, so the control plane is never enumerated. */
+  it('should not return control-plane bytes from project directory contents', async () => {
+    const view = composeView(
+      { filesystem: service.createRootedFileSystem(projectRoute) },
+      { consumer: 'user', policy: tauPathPolicy },
+    );
 
-    expect(hiddenAmong(Object.keys(contents))).toEqual([]);
+    const read = Object.keys(await contents(view, ''));
+
+    expect(hiddenAmong(read)).toEqual([]);
+    /* And the project's own bytes are still there, so an empty walk cannot pass. */
+    expect(read).toContain('src/main.ts');
   });
 
   // W5 (mask-checked copyTree on the rooted surface) flips this to `it`.

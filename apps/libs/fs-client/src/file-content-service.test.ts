@@ -13,7 +13,9 @@ import { WorkspaceMutationError } from '@taucad/filesystem';
 import { composeView } from '@taucad/filesystem/composed-view';
 import type { ComposedViewOverlay } from '@taucad/filesystem/composed-view';
 import { MemoryProvider } from '@taucad/filesystem/backend';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createComposedViewClient } from '#composed-view-client.js';
+import type { ComposedViewProxy } from '#composed-view-client.js';
 
 function createMockProxy(overrides?: Partial<FileSystemClient>): FileSystemClient {
   const proxy = mock<FileSystemClient>({
@@ -1957,7 +1959,12 @@ describe('FileContentService over the composed view (north star W2)', () => {
     const authority = createMockProxy();
     const proxy = createComposedViewClient({
       workspace: authority,
-      view: composeView({ filesystem: provider }, { consumer: 'user', overlays: [overlay()] }),
+      view: Object.assign(
+        composeView({ filesystem: provider }, { consumer: 'user', overlays: [overlay()], policy: tauPathPolicy }),
+        /* The rooted connection also archives a subtree (charter D2); this
+         * harness reads single files. */
+        { archive: vi.fn<ComposedViewProxy['archive']>() },
+      ),
       paths: new WorkspacePathResolver('/projects/abc'),
     });
     return { ...createHarness({ workspaceRoot: '/projects/abc', proxy }), authority };

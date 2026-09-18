@@ -117,10 +117,13 @@ export type FileSystemClient = {
   copyDirectory(sourcePath: string, destinationPath: string): Promise<void>;
   /**
    * Package a directory's contents into a ZIP archive, minus whatever the path
-   * registry hides. Pass `{ scope }` to zip from the standalone provider for an
-   * explicit workspace scope instead of the active mount table, or
-   * `{ versionedOnly }` for a whole-project export that carries only the bytes
-   * the registry counts as the project.
+   * registry hides.
+   *
+   * A path inside the composed view's root is served by `archive` on the rooted
+   * surface, where the mask comes with the view and `{ versionedOnly }` keeps
+   * only the bytes the registry counts as the project. Pass `{ scope }` to zip a
+   * physical workspace scope the mount table does not route — the `/files`
+   * browser's folder download — which the authority still serves.
    */
   getZippedDirectory(path: string, options?: { scope?: WorkspaceScope; versionedOnly?: boolean }): Promise<Blob>;
 

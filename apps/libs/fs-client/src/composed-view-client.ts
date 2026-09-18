@@ -21,6 +21,8 @@ export type ComposedViewProxy = {
   exists(path: string): Promise<boolean>;
   readdirWithStats(path: string): Promise<Array<{ name: string } & FileStat>>;
   provenance(path: string): Promise<FileProvenance>;
+  /** ZIP one subtree of the view; `{ versionedOnly }` keeps the bytes that are the project. */
+  archive(path: string, options?: { versionedOnly?: boolean }): Promise<Blob>;
 };
 
 /**
@@ -139,13 +141,15 @@ const touchedPaths = (property: string, args: readonly unknown[]): readonly stri
  *
  * - **Reads inside the project root** go to the view, because that is the one
  *   composition the agent's tools read too (charter D1): the same overlay
- *   entries, the same mask, the same provenance on every row.
- * - **Writes and workspace porcelain** — zip, recursive stat, search, the
- *   move preflights, cross-root writes — stay on the authority. Porcelain is
- *   authority-global and has no rooted counterpart; writes stay there because
- *   the authority suppresses a port's own change events, and re-issuing this
- *   client's writes through a second port would echo every UI edit back to the
- *   UI as an external change.
+ *   entries, the same mask, the same provenance on every row. That includes the
+ *   whole-subtree reads — the archive a person downloads is composed exactly
+ *   like the tree they are looking at (charter D2).
+ * - **Writes and the remaining workspace porcelain** — recursive stat, search,
+ *   the move preflights, cross-root writes — stay on the authority. That
+ *   porcelain is authority-global and has no rooted counterpart yet; writes stay
+ *   there because the authority suppresses a port's own change events, and
+ *   re-issuing this client's writes through a second port would echo every UI
+ *   edit back to the UI as an external change.
  * - **Paths outside the project root** (the global `/node_modules` alias the
  *   resolver keeps) are the authority's too: dependencies are a mount, not an
  *   overlay.
@@ -294,6 +298,12 @@ export const createComposedViewClient = (input: {
     exists: async (absolutePath: string) => {
       const relative = viewPath(absolutePath);
       return relative === undefined ? workspace.exists(absolutePath) : view.exists(relative);
+    },
+    getZippedDirectory: async (absolutePath: string, options?: { versionedOnly?: boolean }) => {
+      const relative = viewPath(absolutePath);
+      return relative === undefined
+        ? workspace.getZippedDirectory(absolutePath, options)
+        : view.archive(relative, options);
     },
     readDirectory: async (absolutePath: string) => {
       const relative = viewPath(absolutePath);

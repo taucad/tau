@@ -88,16 +88,11 @@ const boundaryRules: readonly BoundaryRule[] = [
  *
  * | Work package | Clears |
  * | --- | --- |
- * | W3 | `archive-format` |
  * | W6 | `route-literals` |
  * | W7 | `project-manifest` |
  * | W9 | `backend-identity` |
- * | W10 | `path-registry` |
  */
 const allowList: ReadonlyArray<readonly [file: string, rule: string, workPackage: string]> = [
-  ['composed-view.ts', 'path-registry', 'W10'],
-  ['workspace-file-service.ts', 'path-registry', 'W10'],
-  ['workspace-file-service.ts', 'archive-format', 'W3'],
   ['mount-table.ts', 'project-manifest', 'W7'],
   ['workspace-file-service.ts', 'project-manifest', 'W7'],
   ['workspace-file-service.ts', 'backend-identity', 'W9'],

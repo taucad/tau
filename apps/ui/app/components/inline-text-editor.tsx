@@ -10,7 +10,9 @@ const inlineTextEditorVariants = cva('h-full px-[calc(var(--spacing)*1.75)] text
   variants: {
     variant: {
       default: 'bg-background',
-      ghost: 'border-transparent bg-transparent px-0 shadow-none',
+      /* ponytail: `border-0`, not `border-transparent` — a transparent border
+       * still occupies 1px and shifts the text off the label it replaces. */
+      ghost: 'border-0 bg-transparent px-0 shadow-none',
     },
   },
   defaultVariants: {

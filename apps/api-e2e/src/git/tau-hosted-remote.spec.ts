@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { gitE2EApiUrl, gitE2EFrontendUrl } from '#git/config.js';
+import { gitE2EApiUrl, gitE2EDatabaseName, gitE2EFrontendUrl } from '#git/config.js';
 import {
   basicAuthorization,
   deleteTauCloudOwner,
@@ -131,7 +131,7 @@ const spendStorage = async (projectId: string, bytes: number): Promise<void> => 
     '-U',
     'dev_user',
     '-d',
-    'tau_dev',
+    gitE2EDatabaseName,
     '-c',
     `INSERT INTO project_git (project_id, storage_bytes, lfs_bytes) VALUES ('${projectId}', 0, ${String(bytes)}) ` +
       `ON CONFLICT (project_id) DO UPDATE SET lfs_bytes = ${String(bytes)};`,

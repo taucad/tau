@@ -1,7 +1,66 @@
+/**
+ * The index that answers search and recursive stat without a provider walk (charter D3).
+ *
+ * One {@link TreeIndex} holds one root's tree, keyed on paths relative to that
+ * root; {@link TreeIndexes} owns the set of them and is the only thing that
+ * speaks absolute paths, so the mutation and external-change facts the
+ * authority already produces land in every index that contains the path and in
+ * none that does not.
+ *
+ * @module
+ */
+
 import type { FileContentMetadata, FileStat, FileStatEntry } from '@taucad/types';
+import { normalizePath } from '@taucad/utils/path';
 import { fileMetadataFields } from '#content-metadata.js';
 
 const defaultSearchMaxResults = 100;
+
+/**
+ * Which entries an index query may answer with.
+ *
+ * The mask is one of these: a composed view passes its policy's answer, so a
+ * hidden subtree is never descended into and `maxResults` counts only rows the
+ * consumer may see. The index itself asks the registry nothing (charter D6).
+ *
+ * @public
+ */
+export type TreeIndexAdmits = (relativePath: string, kind: TreeNode['type']) => boolean;
+
+/** Options every index search takes. @public */
+export type TreeSearchOptions = {
+  readonly maxResults?: number;
+  readonly includeDirectories?: boolean;
+  readonly admits?: TreeIndexAdmits;
+};
+
+/**
+ * Convert an absolute path to a path relative to one index's scan root, so
+ * incremental updates match the paths {@link TreeIndex.build} stored.
+ *
+ * @param root - Absolute path the index was scanned from.
+ * @param absolutePath - Normalized absolute filesystem path.
+ * @returns Path relative to the scan root, `''` for the root itself, or `undefined` if outside the tree.
+ */
+const treeRelative = (root: string, absolutePath: string): string | undefined => {
+  const normalizedRoot = normalizePath(root);
+  const abs = normalizePath(absolutePath);
+
+  if (abs === normalizedRoot) {
+    return '';
+  }
+
+  if (normalizedRoot === '/') {
+    return abs.startsWith('/') ? abs.slice(1) : abs;
+  }
+
+  const rootPrefix = `${normalizedRoot}/`;
+  if (abs.startsWith(rootPrefix)) {
+    return abs.slice(rootPrefix.length);
+  }
+
+  return undefined;
+};
 
 /**
  * Node in the in-memory file tree.
@@ -33,7 +92,7 @@ export type TreeNode =
  *
  * @public
  */
-export class InMemoryFileTree {
+export class TreeIndex {
   private _root: TreeNode = { type: 'dir', size: 0, mtimeMs: 0, children: new Map() };
   private _built = false;
 
@@ -123,16 +182,17 @@ export class InMemoryFileTree {
    * the signature of `WorkspaceFileService.getDirectoryStat`.
    *
    * @param basePath - Absolute directory path to walk.
+   * @param options - Optional `admits` mask, asked before a descent.
    * @returns Flat array of file stat entries with paths relative to basePath.
    */
-  public getDirectoryStat(basePath: string): FileStatEntry[] {
+  public getDirectoryStat(basePath: string, options?: { admits?: TreeIndexAdmits }): FileStatEntry[] {
     const node = this.stat(basePath);
     if (!node?.children) {
       return [];
     }
 
     const results: FileStatEntry[] = [];
-    this._collectStats(node, '', results);
+    this._collectStats({ node, prefix: '', results, admits: options?.admits });
     return results;
   }
 
@@ -262,12 +322,20 @@ export class InMemoryFileTree {
    * @param options - Search options: `maxResults` (default 100), `includeDirectories` (default false).
    * @returns Matching entries with paths relative to the tree root.
    */
-  public searchFiles(query: string, options?: { maxResults?: number; includeDirectories?: boolean }): FileStatEntry[] {
+  public searchFiles(query: string, options?: TreeSearchOptions): FileStatEntry[] {
     const maxResults = options?.maxResults ?? defaultSearchMaxResults;
     const includeDirectories = options?.includeDirectories ?? false;
     const lowerQuery = query.toLowerCase();
     const results: FileStatEntry[] = [];
-    this._searchRecursive({ node: this._root, prefix: '', lowerQuery, includeDirectories, maxResults, results });
+    this._searchRecursive({
+      node: this._root,
+      prefix: '',
+      lowerQuery,
+      includeDirectories,
+      maxResults,
+      results,
+      admits: options?.admits,
+    });
     return results;
   }
 
@@ -312,8 +380,9 @@ export class InMemoryFileTree {
     includeDirectories: boolean;
     maxResults: number;
     results: FileStatEntry[];
+    admits?: TreeIndexAdmits;
   }): void {
-    const { node, prefix, lowerQuery, includeDirectories, maxResults, results } = options;
+    const { node, prefix, lowerQuery, includeDirectories, maxResults, results, admits } = options;
     if (!node.children || results.length >= maxResults) {
       return;
     }
@@ -322,6 +391,9 @@ export class InMemoryFileTree {
         return;
       }
       const path = prefix ? `${prefix}/${name}` : name;
+      if (admits?.(path, child.type) === false) {
+        continue;
+      }
       if (child.type === 'file') {
         if (path.toLowerCase().includes(lowerQuery)) {
           results.push({
@@ -337,18 +409,35 @@ export class InMemoryFileTree {
         if (includeDirectories && path.toLowerCase().includes(lowerQuery)) {
           results.push({ path, name, type: 'dir', size: 0, mtimeMs: child.mtimeMs });
         }
-        this._searchRecursive({ node: child, prefix: path, lowerQuery, includeDirectories, maxResults, results });
+        this._searchRecursive({
+          node: child,
+          prefix: path,
+          lowerQuery,
+          includeDirectories,
+          maxResults,
+          results,
+          admits,
+        });
       }
     }
   }
 
-  private _collectStats(node: TreeNode, prefix: string, results: FileStatEntry[]): void {
+  private _collectStats(options: {
+    node: TreeNode;
+    prefix: string;
+    results: FileStatEntry[];
+    admits?: TreeIndexAdmits;
+  }): void {
+    const { node, prefix, results, admits } = options;
     if (!node.children) {
       return;
     }
 
     for (const [name, child] of node.children) {
       const relativePath = prefix ? `${prefix}/${name}` : name;
+      if (admits?.(relativePath, child.type) === false) {
+        continue;
+      }
       if (child.type === 'file') {
         results.push({
           path: relativePath,
@@ -359,7 +448,179 @@ export class InMemoryFileTree {
           ...fileMetadataFields(child),
         });
       } else {
-        this._collectStats(child, relativePath, results);
+        this._collectStats({ node: child, prefix: relativePath, results, admits });
+      }
+    }
+  }
+}
+
+/**
+ * The set of built indexes, one per scanned root.
+ *
+ * Keyed by root (charter D3): two roots queried alternately both stay warm,
+ * where the single slot this replaced rebuilt on every switch. Every fact
+ * arrives as an absolute authority path, so this is the one place that
+ * converts — each index whose root contains the path is updated, and one whose
+ * root does not is left alone.
+ */
+export class TreeIndexes {
+  /** Absolute scan root to its index; in-memory paths are relative to the key. */
+  private readonly _byRoot = new Map<string, TreeIndex>();
+
+  /**
+   * Replace the index for one root with a freshly scanned tree.
+   *
+   * @param root - Absolute path the scan was rooted at.
+   * @param entries - Flat file entries relative to `root`.
+   * @returns The built index.
+   */
+  public build(root: string, entries: readonly FileStatEntry[]): TreeIndex {
+    const index = new TreeIndex();
+    index.build(
+      entries.map((entry) =>
+        entry.type === 'dir'
+          ? { path: entry.path, type: 'dir', size: entry.size, mtimeMs: entry.mtimeMs }
+          : {
+              path: entry.path,
+              type: 'file',
+              size: entry.size,
+              mtimeMs: entry.mtimeMs,
+              ...fileMetadataFields(entry),
+            },
+      ),
+    );
+    this._byRoot.set(normalizePath(root), index);
+    return index;
+  }
+
+  /**
+   * The built index for one exact root.
+   *
+   * @param root - Absolute root the caller wants warm.
+   * @returns The index, or `undefined` when that root is cold.
+   */
+  public get(root: string): TreeIndex | undefined {
+    return this._byRoot.get(normalizePath(root));
+  }
+
+  /**
+   * Search one exact root, when it is warm.
+   *
+   * @param root - Absolute root to search.
+   * @param query - Case-insensitive substring to match.
+   * @param options - Search options forwarded to {@link TreeIndex.searchFiles}.
+   * @returns Matches relative to `root`, or `undefined` when that root is cold.
+   */
+  public search(root: string, query: string, options?: TreeSearchOptions): FileStatEntry[] | undefined {
+    return this.get(root)?.searchFiles(query, options);
+  }
+
+  /**
+   * Recursively stat a directory from whichever index already covers it.
+   *
+   * @param absolutePath - Absolute directory path.
+   * @param options - Optional `admits` mask forwarded to the index.
+   * @returns Entries relative to `absolutePath`, or `undefined` when no index covers it.
+   */
+  public statTree(absolutePath: string, options?: { admits?: TreeIndexAdmits }): FileStatEntry[] | undefined {
+    const covering = this._covering(absolutePath);
+    return covering === undefined ? undefined : covering.index.getDirectoryStat(covering.relative, options);
+  }
+
+  /**
+   * The kind an index already knows for one absolute path.
+   *
+   * @param absolutePath - Absolute path to look up.
+   * @returns `'file'`, `'dir'`, or `undefined` when no index knows it.
+   */
+  public statType(absolutePath: string): TreeNode['type'] | undefined {
+    const covering = this._covering(absolutePath);
+    return covering?.index.stat(covering.relative)?.type;
+  }
+
+  /**
+   * Record a completed file write.
+   *
+   * @param absolutePath - Absolute file path.
+   * @param metadata - File byte size and content metadata.
+   */
+  public addFile(absolutePath: string, metadata: { size: number } & FileContentMetadata): void {
+    this._apply(absolutePath, (index, relative) => {
+      index.addFile(relative, metadata);
+    });
+  }
+
+  /**
+   * Record a created directory.
+   *
+   * @param absolutePath - Absolute directory path.
+   */
+  public addDirectory(absolutePath: string): void {
+    this._apply(absolutePath, (index, relative) => {
+      index.addDirectory(relative);
+    });
+  }
+
+  /**
+   * Record a removed file.
+   *
+   * @param absolutePath - Absolute file path.
+   */
+  public removeFile(absolutePath: string): void {
+    this._apply(absolutePath, (index, relative) => {
+      index.removeFile(relative);
+    });
+  }
+
+  /**
+   * Record a removed directory and everything under it.
+   *
+   * @param absolutePath - Absolute directory path.
+   */
+  public removeDirectory(absolutePath: string): void {
+    this._apply(absolutePath, (index, relative) => {
+      index.removeDirectory(relative);
+    });
+  }
+
+  /**
+   * Record a rename. An index that holds only one of the two paths keeps its
+   * entries untouched, exactly as the single-root index did.
+   *
+   * @param from - Absolute source path.
+   * @param to - Absolute target path.
+   */
+  public rename(from: string, to: string): void {
+    for (const [root, index] of this._byRoot) {
+      const relativeFrom = treeRelative(root, normalizePath(from));
+      const relativeTo = treeRelative(root, normalizePath(to));
+      if (relativeFrom !== undefined && relativeTo !== undefined) {
+        index.rename(relativeFrom, relativeTo);
+      }
+    }
+  }
+
+  /** Drop every index; the next query rebuilds from its provider. */
+  public clear(): void {
+    this._byRoot.clear();
+  }
+
+  /** The first index whose root is `absolutePath` or an ancestor of it. */
+  private _covering(absolutePath: string): { index: TreeIndex; relative: string } | undefined {
+    for (const [root, index] of this._byRoot) {
+      const relative = treeRelative(root, absolutePath);
+      if (relative !== undefined) {
+        return { index, relative };
+      }
+    }
+    return undefined;
+  }
+
+  private _apply(absolutePath: string, update: (index: TreeIndex, relative: string) => void): void {
+    for (const [root, index] of this._byRoot) {
+      const relative = treeRelative(root, normalizePath(absolutePath));
+      if (relative !== undefined) {
+        update(index, relative);
       }
     }
   }

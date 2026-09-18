@@ -428,8 +428,9 @@ export class FileTreeService {
   }
 
   /**
-   * Search files on the worker's InMemoryFileTree. Returns only matching results.
-   * The main thread never holds the full file index for interactive filtering.
+   * Search the project through the worker's index for this root. Returns only
+   * matching results: the main thread never holds the full file index for
+   * interactive filtering.
    * @param query - Free-text search string understood by the worker search index.
    * @param options - Optional cap / directory inclusion flags forwarded to the proxy.
    * @returns Matching {@link FileStatEntry} records from the worker.

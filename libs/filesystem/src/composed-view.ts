@@ -24,7 +24,7 @@
  * @module
  */
 
-import type { FileContentMetadata, FileProvenance, FileProvenanceSource, FileStat } from '@taucad/types';
+import type { FileContentMetadata, FileProvenance, FileProvenanceSource, FileStat, FileStatEntry } from '@taucad/types';
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import type {
   DirectoryEntry,
@@ -34,6 +34,7 @@ import type {
   WatchEvent,
   WatchRequest,
 } from '#types.js';
+import type { TreeSearchOptions } from '#tree-index.js';
 
 /** Who a view is composed for. The set of paths is the same; the mask is not. @public */
 export type ComposedViewConsumer = 'agent' | 'user';
@@ -84,6 +85,18 @@ type WatchableFileSystem = {
 };
 
 /**
+ * Optional index-backed reads a rooted filesystem brings to the view (charter D3).
+ *
+ * Not derivable from the port: search and recursive stat are answered from the
+ * root's own {@link TreeSearchOptions}-filtered index, so a host that composes
+ * over a bare provider simply offers neither.
+ */
+type IndexedFileSystem = {
+  search(query: string, options?: TreeSearchOptions): Promise<FileStatEntry[]>;
+  statTree(path: string, options?: { admits?: TreeSearchOptions['admits'] }): Promise<FileStatEntry[]>;
+};
+
+/**
  * The working copy a view is composed over: already rooted at the checkout.
  *
  * The root is a string on a host with a mount table and nothing at all on a
@@ -94,7 +107,7 @@ type WatchableFileSystem = {
  * @public
  */
 export type ComposedViewCheckout = Readonly<{
-  filesystem: FileSystemProvider & Partial<WatchableFileSystem>;
+  filesystem: FileSystemProvider & Partial<WatchableFileSystem> & Partial<IndexedFileSystem>;
   /** Stable checkout id, reported as the `identity` of project entries. */
   id?: string;
 }>;
@@ -115,7 +128,8 @@ export type ComposedViewOptions = Readonly<{
 
 /** A rooted filesystem with provenance. @public */
 export type ComposedView = FileSystemProvider &
-  Partial<WatchableFileSystem> & {
+  Partial<WatchableFileSystem> &
+  Partial<IndexedFileSystem> & {
     /** What this view knows about one checkout-relative path. */
     provenance(path: string): Promise<FileProvenance>;
     /** One directory's immediate children with stat metadata and provenance. */
@@ -305,6 +319,16 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     route.kind === 'overlay'
       ? overlayProvenance(route.overlay.source, route.identity)
       : projectProvenance(path, route.kind === 'project' ? route.overrides : undefined);
+
+  /**
+   * The mask an index query descends with: control-plane subtrees are never
+   * entered, and a caller's own filter narrows further but can never widen.
+   */
+  const admitsVisible =
+    (queryRoot: string, callerAdmits?: TreeSearchOptions['admits']) =>
+    (relativePath: string, kind: 'file' | 'dir'): boolean =>
+      classify(joinRelativePath(queryRoot, relativePath)).agentAccess !== 'hidden' &&
+      callerAdmits?.(relativePath, kind) !== false;
 
   /** Names the checkout contributes to a directory, control-plane rows dropped for every consumer. */
   const upperNames = async (path: string, tolerateMissing: boolean): Promise<string[]> => {
@@ -543,5 +567,28 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
     ...(base.refresh === undefined
       ? {}
       : { refresh: async (prefixes?: readonly string[]): Promise<void> => base.refresh!(prefixes) }),
+    /*
+     * The index answers whole subtrees at once, so the mask goes *down* as
+     * `admits` rather than filtering rows on the way back: a hidden subtree is
+     * never descended into, and a capped search returns `maxResults` rows the
+     * consumer may actually see.
+     */
+    ...(base.search === undefined
+      ? {}
+      : {
+          search: async (query: string, searchOptions?: TreeSearchOptions): Promise<FileStatEntry[]> =>
+            base.search!(query, { ...searchOptions, admits: admitsVisible('', searchOptions?.admits) }),
+        }),
+    ...(base.statTree === undefined
+      ? {}
+      : {
+          statTree: async (
+            path: string,
+            statOptions?: { admits?: TreeSearchOptions['admits'] },
+          ): Promise<FileStatEntry[]> => {
+            const target = readablePath(canonical(path));
+            return base.statTree!(target, { admits: admitsVisible(target, statOptions?.admits) });
+          },
+        }),
   };
 };

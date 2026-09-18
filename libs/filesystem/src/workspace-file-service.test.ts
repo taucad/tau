@@ -14,9 +14,8 @@ import { SharedPool } from '@taucad/memory';
 import type { ChangeEvent, FileSystemProvider, WatchEvent } from '#types.js';
 import { getEventOrigin } from '#event-origin-registry.js';
 import { composeView } from '#composed-view.js';
-import { archive } from '#content-ops/archive.js';
-import { classify, tauPathPolicy } from '#path-registry.js';
-import { joinRelativePath } from '@taucad/utils/path';
+import { withReadContentOps } from '#content-ops/read-ops.js';
+import { tauPathPolicy } from '#path-registry.js';
 import {
   parseProjectManifestBytes,
   projectManifestSchemaUrl,
@@ -2945,7 +2944,7 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
   });
 
   describe('searchFiles', () => {
-    it('should return matching files from InMemoryFileTree', async () => {
+    it('should return matching files from the tree index', async () => {
       await service.writeFile('/src/main.ts', 'console.log("hi")');
       await service.writeFile('/src/utils/helper.ts', 'export {}');
       await service.writeFile('/README.md', '# Hello');
@@ -2980,13 +2979,51 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       expect(types).toContain('dir');
     });
 
-    it('rebuilds the sole cache for sequential A to B to A searches', async () => {
+    /*
+     * Charter D3: the index is per root, so two roots queried alternately both
+     * stay warm. The single-slot index this replaced rebuilt on every switch.
+     */
+    it('keeps two roots warm across alternating searches', async () => {
       await service.writeFile('/a/a-only.ts', 'a');
       await service.writeFile('/b/b-only.ts', 'b');
+      await expect(service.searchFiles('/a', 'only')).resolves.toMatchObject([{ path: 'a-only.ts' }]);
+      await expect(service.searchFiles('/b', 'only')).resolves.toMatchObject([{ path: 'b-only.ts' }]);
+      const reads = vi.spyOn(rootProvider, 'readdirWithStats');
 
       await expect(service.searchFiles('/a', 'only')).resolves.toMatchObject([{ path: 'a-only.ts' }]);
       await expect(service.searchFiles('/b', 'only')).resolves.toMatchObject([{ path: 'b-only.ts' }]);
-      await expect(service.searchFiles('/a', 'only')).resolves.toMatchObject([{ path: 'a-only.ts' }]);
+
+      expect(reads).not.toHaveBeenCalled();
+    });
+
+    /*
+     * Charter D3's acceptance: a warm query performs no provider walk at all.
+     * The spies cover every read a scan can make, so a fallback walk sneaking
+     * back in fails here rather than only showing up as latency.
+     */
+    it('serves a warm search and statTree without reading the provider', async () => {
+      await service.writeFile('/src/main.ts', 'a');
+      await service.writeFile('/src/util/helper.ts', 'b');
+      const rooted = service.createRootedFileSystem('/');
+      const reads = (['readdirWithStats', 'readdirEntries', 'readdir', 'stat'] as const)
+        .filter((method) => typeof rootProvider[method] === 'function')
+        .map((method) => vi.spyOn(rootProvider, method));
+
+      await expect(rooted.search!('helper')).resolves.toMatchObject([{ path: 'src/util/helper.ts' }]);
+
+      /* Cold: exactly one scan of the root and its one subdirectory. */
+      expect(reads.some((spy) => spy.mock.calls.length > 0)).toBe(true);
+      for (const spy of reads) {
+        spy.mockClear();
+      }
+
+      await expect(rooted.search!('main')).resolves.toMatchObject([{ path: 'src/main.ts' }]);
+      await expect(rooted.statTree!('')).resolves.toHaveLength(2);
+      await expect(rooted.statTree!('src/util')).resolves.toMatchObject([{ path: 'helper.ts' }]);
+
+      for (const spy of reads) {
+        expect(spy).not.toHaveBeenCalled();
+      }
     });
 
     it('returns concurrent root scans from their local trees independent of completion order', async () => {
@@ -3300,22 +3337,14 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
     };
 
     /** The rooted read content operation exactly as `handlerForRoot` composes it. */
-    const projectArchive = async (path: string, options?: { versionedOnly?: boolean }): Promise<Blob> => {
-      const view = composeView(
-        { filesystem: service.createRootedFileSystem(projectRoute) },
-        { consumer: 'user', policy: tauPathPolicy },
-      );
-      return archive(
-        view,
-        path,
-        options?.versionedOnly === true
-          ? {
-              admits: (relativePath, kind) =>
-                kind === 'dir' || classify(joinRelativePath(path, relativePath)).versioned,
-            }
-          : {},
-      );
-    };
+    const projectArchive = async (path: string, options?: { versionedOnly?: boolean }): Promise<Blob> =>
+      withReadContentOps(
+        composeView(
+          { filesystem: service.createRootedFileSystem(projectRoute) },
+          { consumer: 'user', policy: tauPathPolicy },
+        ),
+        tauPathPolicy,
+      ).archive(path, options);
 
     beforeEach(async () => {
       await service.configureProjectRoots({

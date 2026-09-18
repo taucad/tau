@@ -57,6 +57,8 @@ const overlay = (): ComposedViewOverlay => {
 const authorityMock = (): FileSystemClient =>
   mock<FileSystemClient>({
     getZippedDirectory: vi.fn().mockResolvedValue(new Blob(['authority'])),
+    getDirectoryStat: vi.fn().mockResolvedValue([]),
+    searchFiles: vi.fn().mockResolvedValue([]),
     writeFile: vi.fn().mockResolvedValue(undefined),
     writeFileChecked: vi.fn().mockResolvedValue({ status: 'applied', content: new Uint8Array() }),
     writeFiles: vi.fn().mockResolvedValue(undefined),
@@ -87,7 +89,11 @@ const harness = async (
    * so what this package owns is the routing, not the archive bytes. */
   const view: ComposedViewProxy = Object.assign(
     composeView({ filesystem: provider }, { consumer: 'user', overlays: [overlay()], policy: tauPathPolicy }),
-    { archive: vi.fn<ComposedViewProxy['archive']>().mockResolvedValue(new Blob(['view'])) },
+    {
+      archive: vi.fn<ComposedViewProxy['archive']>().mockResolvedValue(new Blob(['view'])),
+      search: vi.fn<ComposedViewProxy['search']>().mockResolvedValue([]),
+      statTree: vi.fn<ComposedViewProxy['statTree']>().mockResolvedValue([]),
+    },
   );
   return {
     authority,
@@ -316,5 +322,37 @@ describe('createComposedViewClient read content operations (north star W3)', () 
 
     expect(authority.getZippedDirectory).toHaveBeenCalledWith('/node_modules/three', undefined);
     expect(view.archive).not.toHaveBeenCalled();
+  });
+
+  /*
+   * Charter D3: search and recursive stat are the view's, read from the root's
+   * own index, so the Files pane and the agent see the same masked rows.
+   */
+  it('should search the project through the view, never the authority', async () => {
+    const { client, authority, view } = await harness();
+
+    await client.searchFiles(root, 'main', { maxResults: 5 });
+
+    expect(view.search).toHaveBeenCalledWith('main', { maxResults: 5 });
+    expect(authority.searchFiles).not.toHaveBeenCalled();
+  });
+
+  it('should recursively stat a project directory through the view', async () => {
+    const { client, authority, view } = await harness();
+
+    await client.getDirectoryStat(`${root}/exports`);
+
+    expect(view.statTree).toHaveBeenCalledWith('exports');
+    expect(authority.getDirectoryStat).not.toHaveBeenCalled();
+  });
+
+  /* The global `/node_modules` alias has no rooted handle until W12 (D12). */
+  it('should leave a recursive stat outside the project root on the authority', async () => {
+    const { client, authority, view } = await harness();
+
+    await client.getDirectoryStat('/node_modules/three');
+
+    expect(authority.getDirectoryStat).toHaveBeenCalledWith('/node_modules/three');
+    expect(view.statTree).not.toHaveBeenCalled();
   });
 });

@@ -1963,7 +1963,11 @@ describe('FileContentService over the composed view (north star W2)', () => {
         composeView({ filesystem: provider }, { consumer: 'user', overlays: [overlay()], policy: tauPathPolicy }),
         /* The rooted connection also archives a subtree (charter D2); this
          * harness reads single files. */
-        { archive: vi.fn<ComposedViewProxy['archive']>() },
+        {
+          archive: vi.fn<ComposedViewProxy['archive']>(),
+          search: vi.fn<ComposedViewProxy['search']>(),
+          statTree: vi.fn<ComposedViewProxy['statTree']>(),
+        },
       ),
       paths: new WorkspacePathResolver('/projects/abc'),
     });

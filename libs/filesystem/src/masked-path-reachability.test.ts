@@ -7,6 +7,7 @@ import { ResourceQueue } from '#resource-queue.js';
 import { ChangeEventBus } from '#change-event-bus.js';
 import { MountTable } from '#mount-table.js';
 import { composeView } from '#composed-view.js';
+import type { ComposedView } from '#composed-view.js';
 import { contents } from '#content-ops/contents.js';
 import { classify, tauPathPolicy } from '#path-registry.js';
 
@@ -31,11 +32,14 @@ const projectRoute = `/projects/${projectId}`;
 const duplicateId = 'proj_nnnnnnnnnnnnnnnnnnnnn';
 const duplicateRoute = `/projects/${duplicateId}`;
 
-/** One seed per registry answer that matters: two hidden rows, one records row, two authored rows. */
+/**
+ * One seed per registry answer that matters: two hidden rows, one records row,
+ * two authored rows. The revision store lives under `.git` on every host (git
+ * storage substrate D29), so `.git/**` alone stands for the control plane.
+ */
 const seeded = {
   '.git/HEAD': 'ref: refs/heads/main',
   '.git/objects/x': 'object-bytes',
-  '.tau/revisions/r1.json': '{"revisionId":"rev_1"}',
   '.tau/chats/c1.json': '{"messages":[]}',
   'tau.json': '{}',
   'src/main.ts': 'export const part = 1;',
@@ -76,6 +80,13 @@ afterEach(() => {
 describe('masked path reachability through the authority-global surface', () => {
   let service: WorkspaceFileService;
 
+  /** The project as a consumer reaches it: one rooted view, composed as every host composes it. */
+  const projectView = (): ComposedView =>
+    composeView(
+      { filesystem: service.createRootedFileSystem(projectRoute) },
+      { consumer: 'user', policy: tauPathPolicy },
+    );
+
   beforeEach(async () => {
     service = await createService();
     await service.configureProjectRoots({
@@ -92,34 +103,36 @@ describe('masked path reachability through the authority-global surface', () => 
   });
 
   it('should seed both control-plane rows the pins below look for', () => {
-    expect(hiddenPaths).toEqual(['.git/HEAD', '.git/objects/x', '.tau/revisions/r1.json']);
+    expect(hiddenPaths).toEqual(['.git/HEAD', '.git/objects/x']);
   });
 
-  // W4 (per-root TreeIndex, masked on output) flips this to `it`.
-  it.fails('should not return control-plane entries from a project search', async () => {
-    const matches = await Promise.all(
-      ['HEAD', 'r1', 'objects', 'main'].map(async (query) => service.searchFiles(projectRoute, query)),
-    );
+  /* Flipped by W4: the search a consumer reaches is `search` on the rooted
+   * surface, over that root's own index, and the view's policy refuses a hidden
+   * subtree before the descent rather than filtering rows afterwards. */
+  it('should not return control-plane entries from a project search', async () => {
+    const view = projectView();
 
-    expect(hiddenAmong(matches.flat().map((entry) => entry.path))).toEqual([]);
+    const matches = await Promise.all(['HEAD', 'objects', 'main'].map(async (query) => view.search!(query)));
+
+    const found = matches.flat().map((entry) => entry.path);
+    expect(hiddenAmong(found)).toEqual([]);
+    /* And the project's own file is still found, so an empty search cannot pass. */
+    expect(found).toContain('src/main.ts');
   });
 
-  // W4 (per-root TreeIndex, masked on output) flips this to `it`.
-  it.fails('should not return control-plane entries from a recursive project stat', async () => {
-    const entries = await service.getDirectoryStat(projectRoute);
+  /* Flipped by W4: the recursive stat a consumer reaches is `statTree` over the
+   * same index, masked by the same policy. */
+  it('should not return control-plane entries from a recursive project stat', async () => {
+    const entries = await projectView().statTree!('');
 
     expect(hiddenAmong(entries.map((entry) => entry.path))).toEqual([]);
+    expect(entries.map((entry) => entry.path)).toContain('src/main.ts');
   });
 
   /* Flipped by W3: a consumer asks the rooted surface, which reads the subtree
    * through its composed view, so the control plane is never enumerated. */
   it('should not return control-plane bytes from project directory contents', async () => {
-    const view = composeView(
-      { filesystem: service.createRootedFileSystem(projectRoute) },
-      { consumer: 'user', policy: tauPathPolicy },
-    );
-
-    const read = Object.keys(await contents(view, ''));
+    const read = Object.keys(await contents(projectView(), ''));
 
     expect(hiddenAmong(read)).toEqual([]);
     /* And the project's own bytes are still there, so an empty walk cannot pass. */

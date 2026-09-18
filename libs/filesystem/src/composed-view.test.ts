@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { FileStatEntry } from '@taucad/types';
 import { MemoryProvider } from '#backend/memory-provider.js';
 import { composeView } from '#composed-view.js';
 import { tauPathPolicy } from '#path-registry.js';
@@ -402,5 +403,75 @@ describe('composeView path policy', () => {
      * the policy it was given. */
     expect(await view.readFile('.git/HEAD', 'utf8')).toBe('ref: refs/heads/main\n');
     expect(await view.provenance('.git/HEAD')).toMatchObject({ versioned: true, agentAccess: 'read-write' });
+  });
+});
+
+describe('composeView index-backed reads', () => {
+  /** A rooted filesystem whose index is a fixed list, so the mask is the only variable. */
+  const indexed = (entries: ReadonlyArray<{ path: string; type: 'file' | 'dir' }>) => {
+    type Admits = (path: string, kind: 'file' | 'dir') => boolean;
+    const rows: FileStatEntry[] = entries.map(({ path, type }) =>
+      type === 'file'
+        ? { path, name: path.split('/').at(-1)!, type, size: 1, mtimeMs: 0, contentKind: 'binary' }
+        : { path, name: path.split('/').at(-1)!, type, size: 1, mtimeMs: 0 },
+    );
+    const admitted = (queryRoot: string, admits?: Admits) =>
+      rows
+        .filter(({ path }) => queryRoot === '' || path.startsWith(`${queryRoot}/`))
+        .map((row) => ({ ...row, path: queryRoot === '' ? row.path : row.path.slice(queryRoot.length + 1) }))
+        .filter(({ path, type }) => admits?.(path, type) !== false);
+    return Object.assign(new MemoryProvider(), {
+      search: async (query: string, options?: { maxResults?: number; admits?: Admits }) =>
+        admitted('', options?.admits)
+          .filter(({ path }) => path.includes(query))
+          .slice(0, options?.maxResults ?? 100),
+      statTree: async (path: string, options?: { admits?: Admits }) => admitted(path, options?.admits),
+    });
+  };
+
+  it('refuses the control plane before the descent, so a capped search still fills its cap', async () => {
+    const view = composeView(
+      {
+        filesystem: indexed([
+          { path: '.git', type: 'dir' },
+          { path: '.git/a.ts', type: 'file' },
+          { path: '.git/b.ts', type: 'file' },
+          { path: 'src', type: 'dir' },
+          { path: 'src/c.ts', type: 'file' },
+          { path: 'src/d.ts', type: 'file' },
+        ]),
+      },
+      { consumer: 'agent', policy: tauPathPolicy },
+    );
+
+    /* Two of the four `.ts` rows are the control plane's; the cap must be spent
+     * on the two a consumer may see, not filtered down to nothing afterwards. */
+    await expect(view.search!('.ts', { maxResults: 2 })).resolves.toMatchObject([
+      { path: 'src/c.ts' },
+      { path: 'src/d.ts' },
+    ]);
+  });
+
+  it('masks a recursive stat relative to the directory it was asked about', async () => {
+    const view = composeView(
+      {
+        filesystem: indexed([
+          { path: '.git', type: 'dir' },
+          { path: '.git/HEAD', type: 'file' },
+          { path: 'src/main.ts', type: 'file' },
+        ]),
+      },
+      { consumer: 'user', policy: tauPathPolicy },
+    );
+
+    await expect(view.statTree!('')).resolves.toMatchObject([{ path: 'src/main.ts' }]);
+    await expect(view.statTree!('.git')).rejects.toMatchObject({ code: 'EPERM' });
+  });
+
+  it('offers neither read when the composed filesystem has no index', async () => {
+    const view = composeView({ filesystem: provider }, { consumer: 'user', policy: tauPathPolicy });
+
+    expect(view.search).toBeUndefined();
+    expect(view.statTree).toBeUndefined();
   });
 });

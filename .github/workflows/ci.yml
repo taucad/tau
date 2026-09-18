@@ -133,8 +133,17 @@ jobs:
       # Browser-backed targets are not in this list — they run in the `e2e` lane,
       # which is the only job that installs Chromium.
       # Learn more: https://nx.dev/ci/features/affected
+      #
+      # `test` is invoked separately with `tag:scope:api` excluded, because this lane
+      # has no services. The API's default suite now carries the repository store, the
+      # git transport and the lifecycle jobs (charter W1, W2, W4, W6), which drive real
+      # PostgreSQL and real MinIO and refuse rather than skip when they are absent. The
+      # whole of `test` for that tag runs in the `api` lane below, which has both; this
+      # lane stays hermetic. The selector is a tag, never a project name.
       - name: Run affected tasks
-        run: pnpm nx affected -t lint test build typecheck size pkgcheck audit-public-surface readme-quickstart
+        run: |
+          pnpm nx affected -t lint build typecheck size pkgcheck audit-public-surface readme-quickstart
+          pnpm nx affected -t test --exclude tag:scope:api
 
       - name: Check workspace root hygiene
         if: always()
@@ -373,10 +382,12 @@ jobs:
         if: always()
         run: docker rm -f tau-api-smoke || true
 
-  # Service lane: the suites that need Postgres + Redis + MinIO. Unit tests for
-  # the same projects already ran in `affected`; only the service-backed targets
-  # (`test:models`, `test:server-modes`) run here. Always runs on `main` pushes
-  # so the deploy gate is never green off a stale service check.
+  # Service lane: the suites that need Postgres + Redis + MinIO. Since the git
+  # storage substrate landed, that is the whole of `test` for `tag:scope:api` —
+  # the `affected` lane above excludes the tag rather than trying to guess which
+  # files reach a service — plus the service-backed targets (`test:models`,
+  # `test:server-modes`, `test:git`, the billing foundation). Always runs on `main`
+  # pushes so the deploy gate is never green off a stale service check.
   api:
     name: API tests (Postgres + MinIO)
     runs-on: ubuntu-latest
@@ -401,6 +412,30 @@ jobs:
       - name: Apply Drizzle migrations
         run: cd apps/api && DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev pnpm exec drizzle-kit migrate
 
+      # The default suite, moved here whole from the `affected` lane. `DATABASE_URL`
+      # is named here rather than left to `apps/api/.env` — which the step above
+      # copies from `.env.example` and which carries the same URL — so the database
+      # these suites talk to is stated at the place they run, not inherited from a
+      # file three steps away. An inherited value wins over anything a Vitest config
+      # loads, which is what makes naming it work at all.
+      #
+      # The `TAU_S3_CONFORMANCE_*` family is the env gate on the R2 half of the
+      # repository-store conformance suite (charter D32). These secrets deliberately
+      # do not exist in this repository: the scratch-bucket credentials are read from
+      # Terraform outputs at run time and are never placed in CI. Absent, they expand
+      # to empty strings, `conformanceAccountFromEnvironment` answers `undefined` and
+      # that half skips; the MinIO half above it still runs on every push. The suite
+      # itself refuses any bucket outside the scratch allowlist before a credential is
+      # used, so this can never be pointed at a staging content bucket.
+      - name: Run API suites (real PostgreSQL + MinIO)
+        env:
+          DATABASE_URL: postgresql://dev_user:dev_password@localhost:5432/tau_dev
+          TAU_S3_CONFORMANCE_ENDPOINT: ${{ secrets.TAU_S3_CONFORMANCE_ENDPOINT }}
+          TAU_S3_CONFORMANCE_BUCKET: ${{ secrets.TAU_S3_CONFORMANCE_BUCKET }}
+          TAU_S3_CONFORMANCE_ACCESS_KEY_ID: ${{ secrets.TAU_S3_CONFORMANCE_ACCESS_KEY_ID }}
+          TAU_S3_CONFORMANCE_SECRET_ACCESS_KEY: ${{ secrets.TAU_S3_CONFORMANCE_SECRET_ACCESS_KEY }}
+        run: pnpm nx run-many -t test --projects tag:scope:api
+
       - name: Qualify API development and production servers
         run: pnpm nx run-many -t test:server-modes
 
@@ -409,10 +444,24 @@ jobs:
       - name: Run deterministic file-edit qualification (edit bench)
         run: pnpm nx run-many -t test:models -- app/testing/edit-bench/edit-bench.test.ts
 
+      # Testing policy §13 for the durable migration the release command applies:
+      # interrupted part-way it leaves the schema where it was, and a re-run is a
+      # no-op. Lives under `app/testing/**`, so it runs through the same target as
+      # the edit bench and needs the PostgreSQL this lane starts.
+      - name: Run the durable-migration failure injection
+        run: pnpm nx run-many -t test:models -- app/testing/git-storage-migration.integration.test.ts
+
+      # Charter S2, end to end: two real API processes over one MinIO and one
+      # PostgreSQL, driven by stock `git` and `git-lfs`. The target brings up its own
+      # compose services (idempotent against the ones above) and migrates before it
+      # boots either process.
+      - name: Run the git end-to-end tier (two API processes, one object store)
+        run: pnpm nx run-many -t test:git
+
       # L2 billing lane (every PR, zero Stripe credentials): the complete local
       # PostgreSQL/Redis foundation, including signed webhook settlement.
       - name: Run billing foundation (L2)
-        run: pnpm nx run api:test:billing-foundation
+        run: pnpm nx run-many -t test:billing-foundation
 
   # L3 billing e2e: real Stripe test-mode objects + `stripe listen` forwarding
   # the live event stream into the app under test. External forks do not run
@@ -460,7 +509,7 @@ jobs:
         run: cd apps/api && DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev pnpm exec drizzle-kit migrate
 
       - name: Run real Stripe billing acceptance (L3)
-        run: pnpm nx run api:test:billing-stripe
+        run: pnpm nx run-many -t test:billing-stripe
 
   # D19's funded cell: one real frontier turn placed on launcher 2, against a local
   # API with real provider keys. Secrets-gated exactly like `billing-e2e` above and
@@ -517,9 +566,19 @@ jobs:
   # and rebuilt automatically by the Netlify GitHub integration on every push to
   # `main` (production context) and on every PR (deploy-preview context); only
   # the API ships to Fly here (`tau-api-staging`).
+  # `api` is in `needs` because the API's own suites left the `affected` lane: since
+  # the git storage substrate landed, `test` for `tag:scope:api` — the repository
+  # store, the commit protocol, the git transport, the lifecycle jobs and the git
+  # e2e tier — runs only in the `api` job, and a deploy gated on `affected` alone
+  # would ship with all of them red. No `always()` gating is needed and none is
+  # wanted: the `api` job's own `if` (above) carries
+  # `(github.ref == 'refs/heads/main' && github.event_name == 'push')`, so on the
+  # only event that can reach this job it is unconditional and can never be skipped
+  # into skipping the deploy. A docs-only push to `main` still runs `api`, and this
+  # job still skips on its own `contains(…, 'api')` condition, so nothing is blocked.
   deploy-api-staging:
     name: Deploy API (Staging)
-    needs: [workspace, affected, plan]
+    needs: [workspace, affected, plan, api]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push' && contains(fromJSON(needs.plan.outputs.apps), 'api')
     uses: ./.github/workflows/deploy.yml
     with:

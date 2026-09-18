@@ -13,6 +13,16 @@ import process from 'node:process';
 export const gitE2EApiUrl = process.env['TAU_E2E_API_URL'] ?? 'http://localhost:4014';
 
 /**
+ * The second API process this tier boots, on the same PostgreSQL and the same
+ * object store (charter S2).
+ *
+ * `:4016` rather than `:4015`, which `apps/desktop-e2e` uses for its provider
+ * stub — the two tiers never run at once, but a port that is free in both is one
+ * less way for a failure to be somebody else's.
+ */
+export const gitE2ESecondaryApiUrl = process.env['TAU_E2E_API_URL_SECONDARY'] ?? 'http://localhost:4016';
+
+/**
  * The web origin the API derives better-auth's `trustedOrigins` and its CORS
  * allow-list from. Nothing listens on it in this tier — every caller here is
  * node-side, where CORS does not apply — but the sign-up and sign-in calls must

@@ -93,11 +93,12 @@ services:
         mc mb --ignore-existing local/tau-content;
         mc anonymous set download local/tau-content;
         mc mb --ignore-existing local/tau-content-private;
+        mc mb --ignore-existing local/tau-content-restore;
         mc admin user add local tau-api tau-api-dev-secret || true;
         mc admin policy attach local readwrite --user tau-api || true;
         mc cp /seed/default-og.png local/tau-content/defaults/og.png;
         mc cp /seed/default-thumb.webp local/tau-content/defaults/thumb.webp;
-        printf "ok\n" | mc cp - local/tau-content/__health/probe.txt;
+        printf "ok\n" | mc pipe local/tau-content/__health/probe.txt;
         echo "MinIO bootstrap complete";
       '
     restart: 'no'

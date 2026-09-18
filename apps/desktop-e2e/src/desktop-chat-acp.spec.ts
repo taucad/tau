@@ -696,7 +696,10 @@ test.skipIf(!codexAvailable)(
        * necessarily published the new head. A branch created in that window is
        * correctly refused as unborn because no base revision is visible yet.
        * Synchronize on the user-visible head instead of racing that projection. */
-      await expectVisible(page.getByRole('button', { name: /^Open Revisions\. You are on main, Rev \d+\.$/u }), 60_000);
+      await expectVisible(
+        page.getByRole('button', { name: /^Open Revisions\. You are on main, Rev \d+(?:, Modified)?\.$/u }),
+        60_000,
+      );
       const seededSource = liveSource();
       expect(seededSource).toContain('difference()');
       /* A direct turn records onto the trunk the live tree tracks, and creates

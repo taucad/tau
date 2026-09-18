@@ -5,7 +5,6 @@ import type { ItemInstance, TreeInstance } from '@headless-tree/core';
 import {
   FilePlus,
   FolderPlus,
-  EllipsisVertical,
   Box,
   Folder,
   FolderOpen,
@@ -40,7 +39,7 @@ import type { KernelConfiguration } from '@taucad/types/constants';
 import type { FileItem } from '#types/editor.types.js';
 import type { FileEntry, FileProvenance } from '@taucad/types';
 import { cn } from '@taucad/ui/utils/cn';
-import { Button, buttonVariants } from '@taucad/ui/components/button';
+import { buttonVariants } from '@taucad/ui/components/button';
 import { Badge } from '@taucad/ui/components/badge';
 import { SearchInput } from '#components/search-input.js';
 import { toast } from '#components/ui/sonner.js';
@@ -71,17 +70,17 @@ import {
   DropdownMenuSeparator,
   DropdownMenuLabel,
 } from '@taucad/ui/components/dropdown-menu';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-  ContextMenuSeparator,
-} from '@taucad/ui/components/context-menu';
 import { useProject } from '#hooks/use-project.js';
 import { mountFileOperationParticipants } from '#filesystem/file-operation-participants.js';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { HighlightText } from '#components/highlight-text.js';
+import {
+  SidebarRowActions,
+  SidebarRowContextMenu,
+  SidebarRowMenuButton,
+  sidebarRowClass,
+} from '#components/nav/sidebar-row.js';
+import type { SidebarRowMenuItems } from '#components/nav/sidebar-row.js';
 import { FileExtensionIcon, getIconIdForFilename } from '#components/icons/file-extension-icon.js';
 import { getFileExtension, encodeTextFile } from '#utils/filesystem.utils.js';
 import { downloadBlob, asBuffer } from '@taucad/utils/file';
@@ -2129,10 +2128,7 @@ function TreeItem({
   if (isRenaming) {
     const renameInputProps = item.getRenameInputProps() as React.InputHTMLAttributes<HTMLInputElement>;
     return (
-      <div
-        className='relative flex h-7 items-center border border-input py-1 pr-1 pl-2 focus-within:focus-outline'
-        style={{ paddingLeft: `${paddingLeft}px` }}
-      >
+      <div className={cn(sidebarRowClass(true), 'py-1 pl-2')} style={{ paddingLeft: `${paddingLeft}px` }}>
         {/* Indent guide lines (VS Code-style) */}
         {Array.from({ length: itemLevel }, (_, index) => {
           const guideDepth = index + 1;
@@ -2160,7 +2156,7 @@ function TreeItem({
             <FileExtensionIcon filename={item.getItemName()} className='size-3.5 shrink-0 text-muted-foreground' />
           )}
           <input
-            className='h-full min-w-0 flex-1 border-none bg-transparent px-0 text-sm shadow-none outline-none focus:border-transparent focus-visible:outline-none'
+            className='h-full min-w-0 flex-1 border-0 bg-transparent px-0 text-sm outline-hidden'
             autoCorrect='off'
             {...renameInputProps}
             onFocus={(event) => {
@@ -2188,378 +2184,260 @@ function TreeItem({
   const treeDragOver = (treeItemProps as { readonly onDragOver?: (event: DragEvent) => void }).onDragOver;
   const treeDrop = (treeItemProps as { readonly onDrop?: (event: DragEvent) => void }).onDrop;
 
-  return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <div
-          {...treeItemProps}
-          data-testid='file-tree-item'
-          data-file-tree-path={item.getId()}
-          data-file-tree-kind={isFolder ? 'directory' : 'file'}
-          {...(description ? { 'aria-describedby': descriptionId, title: description } : {})}
-          className={cn(
-            // Own compositing layer so the native drag image keeps transparent rounded corners.
-            'group/file relative flex h-7 w-full transform-gpu items-center justify-between rounded-md py-1 pr-1 pl-2 text-sm text-sidebar-foreground transition-colors',
-            !isActive && 'hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground',
-            isActive && !isSelected && 'bg-sidebar-accent',
-            isSelected && 'bg-sidebar-accent/70 text-sidebar-accent-foreground',
-            item.isMatchingSearch() && 'bg-primary/20',
-            (item.isDragTarget() || isInsideDragTarget) && 'bg-primary/20',
-          )}
-          style={{ paddingLeft: `${paddingLeft}px` }}
-          onClick={(event) => {
-            if (event.shiftKey || event.ctrlKey || event.metaKey) {
-              // Multi-select click: handle selection + focus only, skip primaryAction (file open)
-              if (event.shiftKey) {
-                item.selectUpTo(event.ctrlKey || event.metaKey);
-              } else {
-                item.toggleSelect();
-              }
-
-              item.setFocused();
-              return;
-            }
-
-            // Plain click: delegate to tree's onClick (handles selection, focus, primaryAction, expand/collapse)
-            const { onClick } = treeItemProps as {
-              onClick?: (event: MouseEvent) => void;
-            };
-            onClick?.(event.nativeEvent);
-          }}
-          onDragOver={(event) => {
-            if (canReadForeignFileTreeDrop(event.dataTransfer)) {
-              event.preventDefault();
-              event.stopPropagation();
-              event.dataTransfer.dropEffect = readOnly ? 'none' : 'copy';
-              return;
-            }
-
-            treeDragOver?.(event.nativeEvent);
-          }}
-          onDrop={(event) => {
-            if (canReadForeignFileTreeDrop(event.dataTransfer)) {
-              event.preventDefault();
-              event.stopPropagation();
-              void onForeignDrop({
-                path: item.getId(),
-                isFolder,
-                dataTransfer: event.dataTransfer,
-              });
-              return;
-            }
-
-            treeDrop?.(event.nativeEvent);
-          }}
-        >
-          {/* Indent guide lines (VS Code-style); the guide at a mounted subtree's own depth is dashed. */}
-          {Array.from({ length: itemLevel }, (_, index) => {
-            const guideDepth = index + 1;
-            const isActiveGuide = activeFileLevel > 0 ? guideDepth === activeFileLevel : guideDepth === itemLevel;
-            const isSubtreeGuide =
-              presentation.subtreeRootLevel !== undefined && guideDepth === presentation.subtreeRootLevel + 1;
-            return (
-              <span
-                key={guideDepth}
-                aria-hidden
-                className={cn(
-                  'pointer-events-none absolute -top-0.5 -bottom-0.5',
-                  isSubtreeGuide
-                    ? 'w-0 border-l border-dashed border-border'
-                    : cn(
-                        'w-px',
-                        isActiveGuide
-                          ? 'bg-border'
-                          : 'bg-border opacity-0 transition-opacity group-hover/filetree:opacity-100',
-                      ),
-                )}
-                style={{ left: `${guideDepth * 16}px` }}
-              />
-            );
-          })}
-          <div className='flex min-w-0 flex-1 grow items-center gap-2'>
-            {isFolder ? (
-              item.isExpanded() ? (
-                <FolderOpen className='size-3.5 shrink-0 text-muted-foreground' />
-              ) : (
-                <Folder className='size-3.5 shrink-0 text-muted-foreground' />
-              )
-            ) : (
-              <FileExtensionIcon filename={item.getItemName()} className='size-3.5 shrink-0 text-muted-foreground' />
-            )}
-            <span
-              className={cn(
-                'truncate',
-                isOpen && 'font-medium',
-                presentation.dimmed && 'text-muted-foreground',
-                isActive && 'text-sidebar-accent-foreground',
-              )}
-            >
-              <HighlightText text={item.getItemName()} searchTerm={searchQuery} />
-            </span>
-            {presentation.isSubtreeRoot && presentation.badge ? (
-              <Badge variant='secondary' className='ml-auto shrink-0 px-1.5 py-0 font-normal'>
-                {presentation.badge}
-              </Badge>
-            ) : null}
-            {presentation.isSubtreeRoot && presentation.glyph === 'lock' ? (
-              <Lock aria-hidden data-provenance-glyph='lock' className='size-3 shrink-0 text-muted-foreground' />
-            ) : null}
-            {description ? (
-              <span id={descriptionId} className='sr-only'>
-                {description}
-              </span>
-            ) : null}
-          </div>
-          {isFolder ? null : (
-            <DropdownMenu modal={false}>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant='ghost'
-                  size='icon'
-                  aria-label={`Actions for ${item.getItemName()}`}
-                  className='absolute top-1/2 right-1 size-4.5 -translate-y-1/2 rounded-[5px] bg-transparent p-0 text-muted-foreground opacity-0 group-hover/file:opacity-100 hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground data-[state=open]:opacity-100'
-                  onClick={(event) => {
-                    event.stopPropagation();
-                  }}
-                >
-                  <EllipsisVertical className='size-3.5' />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align='start' side='right'>
-                <DropdownMenuItem
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onOpenInEditor(item.getId());
-                  }}
-                >
-                  <Code />
-                  <span>Open in Editor</span>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onOpenInViewer(item.getId());
-                  }}
-                >
-                  <Box />
-                  <span>Open in Viewer</span>
-                </DropdownMenuItem>
-                {onQuickLook ? (
-                  <DropdownMenuItem
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onQuickLook(item.getId());
-                    }}
-                  >
-                    <Eye />
-                    <span>Quick Look</span>
-                  </DropdownMenuItem>
-                ) : null}
-                <DropdownMenuSeparator />
-                {readOnly ? (
-                  <>
-                    <DropdownMenuItem disabled>
-                      <Lock />
-                      <span>Read-only</span>
-                    </DropdownMenuItem>
-                    {overridableUnit ? (
-                      <DropdownMenuItem
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onCopyToProject(item.getId());
-                        }}
-                      >
-                        <Copy />
-                        <span>Copy to project</span>
-                      </DropdownMenuItem>
-                    ) : null}
-                  </>
-                ) : (
-                  <>
-                    <DropdownMenuItem
-                      onSelect={() => {
-                        item.startRenaming();
-                      }}
-                    >
-                      <Edit />
-                      <span>Rename</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onUpload(item.getId());
-                      }}
-                    >
-                      <Upload />
-                      <span>Upload Files</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onDuplicate([item]);
-                      }}
-                    >
-                      <Copy />
-                      <span>Duplicate</span>
-                    </DropdownMenuItem>
-                  </>
-                )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void onCopyPath(item.getId());
-                  }}
-                >
-                  <Clipboard />
-                  <span>Copy Path</span>
-                </DropdownMenuItem>
-                {downloadPolicy.allowed ? (
-                  <DropdownMenuItem
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onDownload(item.getId(), false);
-                    }}
-                  >
-                    <Download />
-                    <span>Download</span>
-                  </DropdownMenuItem>
-                ) : null}
-                {readOnly ? null : (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      variant='destructive'
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onDelete([item]);
-                      }}
-                    >
-                      <Trash2 />
-                      <span>Delete</span>
-                    </DropdownMenuItem>
-                  </>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </div>
-      </ContextMenuTrigger>
-      <ContextMenuContent>
-        {isFolder ? null : (
-          <>
-            <ContextMenuItem
-              onClick={() => {
-                onOpenInEditor(item.getId());
-              }}
-            >
-              <Code />
-              <span>Open in Editor</span>
-            </ContextMenuItem>
-            <ContextMenuItem
-              onClick={() => {
-                onOpenInViewer(item.getId());
-              }}
-            >
-              <Box />
-              <span>Open in Viewer</span>
-            </ContextMenuItem>
-            {onQuickLook ? (
-              <ContextMenuItem
-                onClick={() => {
-                  onQuickLook(item.getId());
-                }}
-              >
-                <Eye />
-                <span>Quick Look</span>
-              </ContextMenuItem>
-            ) : null}
-            <ContextMenuSeparator />
-          </>
-        )}
-        {readOnly ? (
-          <>
-            <ContextMenuItem disabled>
-              <Lock />
-              <span>Read-only</span>
-            </ContextMenuItem>
-            {overridableUnit ? (
-              <ContextMenuItem
-                onClick={() => {
-                  onCopyToProject(item.getId());
-                }}
-              >
-                <Copy />
-                <span>Copy to project</span>
-              </ContextMenuItem>
-            ) : null}
-            <ContextMenuSeparator />
-          </>
-        ) : (
-          <>
-            <ContextMenuItem
-              onSelect={() => {
-                item.startRenaming();
-              }}
-            >
-              <Edit />
-              <span>Rename</span>
-            </ContextMenuItem>
-            <ContextMenuItem
-              onClick={() => {
-                onUpload(item.getId());
-              }}
-            >
-              <Upload />
-              <span>Upload Files</span>
-            </ContextMenuItem>
-            {isFolder ? null : (
-              <ContextMenuItem
-                onClick={() => {
-                  onDuplicate([item]);
-                }}
-              >
-                <Copy />
-                <span>Duplicate</span>
-              </ContextMenuItem>
-            )}
-            <ContextMenuSeparator />
-          </>
-        )}
-        <ContextMenuItem
-          onClick={() => {
-            void onCopyPath(item.getId());
-          }}
-        >
-          <Clipboard />
-          <span>Copy Path</span>
-        </ContextMenuItem>
-        {downloadPolicy.allowed ? (
-          <ContextMenuItem
-            onClick={() => {
-              onDownload(item.getId(), isFolder);
+  /* One list for the row's context menu and its actions button alike. */
+  const menuItems: SidebarRowMenuItems = ({ Item, Separator }) => (
+    <>
+      {isFolder ? null : (
+        <>
+          <Item
+            onSelect={() => {
+              onOpenInEditor(item.getId());
             }}
           >
-            <Download />
-            <span>{isFolder ? 'Download as ZIP' : 'Download'}</span>
-          </ContextMenuItem>
-        ) : null}
-        {readOnly ? null : (
-          <>
-            <ContextMenuSeparator />
-            <ContextMenuItem
-              variant='destructive'
-              onClick={() => {
-                onDelete([item]);
+            <Code aria-hidden />
+            Open in Editor
+          </Item>
+          <Item
+            onSelect={() => {
+              onOpenInViewer(item.getId());
+            }}
+          >
+            <Box aria-hidden />
+            Open in Viewer
+          </Item>
+          {onQuickLook ? (
+            <Item
+              onSelect={() => {
+                onQuickLook(item.getId());
               }}
             >
-              <Trash2 />
-              <span>Delete</span>
-            </ContextMenuItem>
-          </>
+              <Eye aria-hidden />
+              Quick Look
+            </Item>
+          ) : null}
+          <Separator />
+        </>
+      )}
+      {readOnly ? (
+        <>
+          <Item disabled>
+            <Lock aria-hidden />
+            Read-only
+          </Item>
+          {overridableUnit ? (
+            <Item
+              onSelect={() => {
+                onCopyToProject(item.getId());
+              }}
+            >
+              <Copy aria-hidden />
+              Copy to project
+            </Item>
+          ) : null}
+          <Separator />
+        </>
+      ) : (
+        <>
+          <Item
+            onSelect={() => {
+              item.startRenaming();
+            }}
+          >
+            <Edit aria-hidden />
+            Rename
+          </Item>
+          <Item
+            onSelect={() => {
+              onUpload(item.getId());
+            }}
+          >
+            <Upload aria-hidden />
+            Upload Files
+          </Item>
+          {isFolder ? null : (
+            <Item
+              onSelect={() => {
+                onDuplicate([item]);
+              }}
+            >
+              <Copy aria-hidden />
+              Duplicate
+            </Item>
+          )}
+          <Separator />
+        </>
+      )}
+      <Item
+        onSelect={() => {
+          void onCopyPath(item.getId());
+        }}
+      >
+        <Clipboard aria-hidden />
+        Copy Path
+      </Item>
+      {downloadPolicy.allowed ? (
+        <Item
+          onSelect={() => {
+            onDownload(item.getId(), isFolder);
+          }}
+        >
+          <Download aria-hidden />
+          {isFolder ? 'Download as ZIP' : 'Download'}
+        </Item>
+      ) : null}
+      {readOnly ? null : (
+        <>
+          <Separator />
+          <Item
+            variant='destructive'
+            onSelect={() => {
+              onDelete([item]);
+            }}
+          >
+            <Trash2 aria-hidden />
+            Delete
+          </Item>
+        </>
+      )}
+    </>
+  );
+
+  return (
+    <SidebarRowContextMenu items={menuItems} isDisabled={false} className='w-48'>
+      <div
+        {...treeItemProps}
+        data-testid='file-tree-item'
+        data-file-tree-path={item.getId()}
+        data-file-tree-kind={isFolder ? 'directory' : 'file'}
+        {...(description ? { 'aria-describedby': descriptionId, title: description } : {})}
+        className={cn(
+          // The sidebar's row: dissolving name, actions over its tail, one lit background on hover,
+          // focus and open menus. Own compositing layer so the native drag image keeps transparent
+          // rounded corners.
+          sidebarRowClass(false),
+          'transform-gpu py-1 pl-2 hover:text-sidebar-accent-foreground',
+          isActive && !isSelected && 'bg-sidebar-accent',
+          isSelected && 'bg-sidebar-accent/70 text-sidebar-accent-foreground',
+          item.isMatchingSearch() && 'bg-primary/20',
+          (item.isDragTarget() || isInsideDragTarget) && 'bg-primary/20',
         )}
-      </ContextMenuContent>
-    </ContextMenu>
+        style={{ paddingLeft: `${paddingLeft}px` }}
+        /* Double-clicking the name renames it, as in the sidebar. */
+        onDoubleClick={
+          readOnly
+            ? undefined
+            : () => {
+                item.startRenaming();
+              }
+        }
+        onClick={(event) => {
+          if (event.shiftKey || event.ctrlKey || event.metaKey) {
+            // Multi-select click: handle selection + focus only, skip primaryAction (file open)
+            if (event.shiftKey) {
+              item.selectUpTo(event.ctrlKey || event.metaKey);
+            } else {
+              item.toggleSelect();
+            }
+
+            item.setFocused();
+            return;
+          }
+
+          // Plain click: delegate to tree's onClick (handles selection, focus, primaryAction, expand/collapse)
+          const { onClick } = treeItemProps as {
+            onClick?: (event: MouseEvent) => void;
+          };
+          onClick?.(event.nativeEvent);
+        }}
+        onDragOver={(event) => {
+          if (canReadForeignFileTreeDrop(event.dataTransfer)) {
+            event.preventDefault();
+            event.stopPropagation();
+            event.dataTransfer.dropEffect = readOnly ? 'none' : 'copy';
+            return;
+          }
+
+          treeDragOver?.(event.nativeEvent);
+        }}
+        onDrop={(event) => {
+          if (canReadForeignFileTreeDrop(event.dataTransfer)) {
+            event.preventDefault();
+            event.stopPropagation();
+            void onForeignDrop({
+              path: item.getId(),
+              isFolder,
+              dataTransfer: event.dataTransfer,
+            });
+            return;
+          }
+
+          treeDrop?.(event.nativeEvent);
+        }}
+      >
+        {/* Indent guide lines (VS Code-style); the guide at a mounted subtree's own depth is dashed. */}
+        {Array.from({ length: itemLevel }, (_, index) => {
+          const guideDepth = index + 1;
+          const isActiveGuide = activeFileLevel > 0 ? guideDepth === activeFileLevel : guideDepth === itemLevel;
+          const isSubtreeGuide =
+            presentation.subtreeRootLevel !== undefined && guideDepth === presentation.subtreeRootLevel + 1;
+          return (
+            <span
+              key={guideDepth}
+              aria-hidden
+              className={cn(
+                'pointer-events-none absolute -top-0.5 -bottom-0.5',
+                isSubtreeGuide
+                  ? 'w-0 border-l border-dashed border-border'
+                  : cn(
+                      'w-px',
+                      isActiveGuide
+                        ? 'bg-border'
+                        : 'bg-border opacity-0 transition-opacity group-hover/filetree:opacity-100',
+                    ),
+              )}
+              style={{ left: `${guideDepth * 16}px` }}
+            />
+          );
+        })}
+        <div className='flex min-w-0 flex-1 grow items-center gap-2'>
+          {isFolder ? (
+            item.isExpanded() ? (
+              <FolderOpen className='size-3.5 shrink-0 text-muted-foreground' />
+            ) : (
+              <Folder className='size-3.5 shrink-0 text-muted-foreground' />
+            )
+          ) : (
+            <FileExtensionIcon filename={item.getItemName()} className='size-3.5 shrink-0 text-muted-foreground' />
+          )}
+          <span
+            className={cn(
+              'fade-label flex-1',
+              isOpen && 'font-medium',
+              presentation.dimmed && 'text-muted-foreground',
+              isActive && 'text-sidebar-accent-foreground',
+            )}
+          >
+            <HighlightText text={item.getItemName()} searchTerm={searchQuery} />
+          </span>
+          {presentation.isSubtreeRoot && presentation.badge ? (
+            <Badge variant='secondary' className='ml-auto shrink-0 px-1.5 py-0 font-normal'>
+              {presentation.badge}
+            </Badge>
+          ) : null}
+          {presentation.isSubtreeRoot && presentation.glyph === 'lock' ? (
+            <Lock aria-hidden data-provenance-glyph='lock' className='size-3 shrink-0 text-muted-foreground' />
+          ) : null}
+          {description ? (
+            <span id={descriptionId} className='sr-only'>
+              {description}
+            </span>
+          ) : null}
+        </div>
+        <SidebarRowActions>
+          <SidebarRowMenuButton name={item.getItemName()} items={menuItems} className='w-48' />
+        </SidebarRowActions>
+      </div>
+    </SidebarRowContextMenu>
   );
 }
 

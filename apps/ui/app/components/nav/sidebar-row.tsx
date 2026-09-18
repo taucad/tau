@@ -70,10 +70,20 @@ export const sidebarRowButtonClass = nestedActionVariants({ className: 'size-6 s
  * @public
  */
 export function SidebarRowActions({ children }: { readonly children: ReactNode }): React.JSX.Element {
+  /* An action is not the row: its clicks — and those of a menu it opens, which
+   * bubble back through the portal — never select, open or rename the row. */
+  const stop = (event: React.SyntheticEvent): void => {
+    event.stopPropagation();
+  };
   return (
     /* An open menu moves focus into its portal and the pointer off the row; the
      * slot stays shown so the menu keeps an anchor instead of jumping to (0,0). */
-    <span className='fade-action absolute inset-y-0 right-0.5 hidden items-center rounded-r-md bg-(--fade-scrim-into) group-focus-within/row:flex group-hover/row:flex has-[[aria-haspopup=menu][data-state=open]]:flex pointer-coarse:flex'>
+    <span
+      data-slot='row-actions'
+      className='fade-action absolute inset-y-0 right-0.5 hidden items-center rounded-r-md bg-(--fade-scrim-into) group-focus-within/row:flex group-hover/row:flex has-[[aria-haspopup=menu][data-state=open]]:flex pointer-coarse:flex'
+      onClick={stop}
+      onDoubleClick={stop}
+    >
       {children}
     </span>
   );

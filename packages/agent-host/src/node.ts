@@ -1,7 +1,7 @@
-import { mkdir, open, readFile, stat, unlink } from 'node:fs/promises';
+import { mkdir, open, readFile, realpath, stat, unlink } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { FileHandle } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
 import { EventLogError } from '#log/event-log-error.js';
 // eslint-disable-next-line import-x/no-extraneous-dependencies -- Package import map resolves this internal source file.
@@ -40,13 +40,25 @@ export type NodeEventLogOptions = {
   readonly filePath: string;
 };
 
+// The log a lock was taken on, resolved through symlinks so two spellings of one log compare equal.
+const resolveLogPath = async (filePath: string): Promise<string> =>
+  join(await realpath(dirname(filePath)).catch(() => dirname(filePath)), basename(filePath));
+
 // A lock whose recorded writer pid no longer exists was left behind by a crashed or killed host;
 // nothing will ever release it, so it may be taken over. Unreadable or non-numeric content counts as held.
 // ponytail: pid liveness only; a reused pid after reboot keeps a dead lock alive until that process exits — add a boot id if that bites.
-const isStaleLock = async (path: string): Promise<boolean> => {
-  const pid = Number.parseInt(await readFile(path, 'utf8').catch(() => ''), 10);
+const isStaleLock = async (path: string, logPath: string): Promise<boolean> => {
+  const contents = await readFile(path, 'utf8').catch(() => '');
+  const [pidLine = '', recordedPath] = contents.split('\n');
+  const pid = Number.parseInt(pidLine, 10);
   if (!Number.isInteger(pid) || pid <= 0) {
     return false;
+  }
+  // A directory copied while Tau runs (duplicate project, restore from a copy) brings the lock with it,
+  // naming a live pid that writes the original log, not this one. Locks written before this line record
+  // no path and are still judged by pid alone.
+  if (recordedPath !== undefined && recordedPath !== '' && recordedPath !== logPath) {
+    return true;
   }
   try {
     process.kill(pid, 0);
@@ -69,11 +81,12 @@ const openLock = async (path: string): Promise<FileHandle | undefined> => {
 
 const acquireWriterLock = async (filePath: string): Promise<{ readonly handle: FileHandle; readonly path: string }> => {
   const path = `${filePath}.lock`;
+  const logPath = await resolveLogPath(filePath);
   const locked = (): EventLogError =>
     new EventLogError('WRITER_LOCKED', `Event log "${filePath}" already has an active Node writer.`);
   let handle = await openLock(path);
   let tookOver = false;
-  if (handle === undefined && (await isStaleLock(path))) {
+  if (handle === undefined && (await isStaleLock(path, logPath))) {
     await unlink(path).catch(() => undefined);
     handle = await openLock(path);
     tookOver = true;
@@ -84,7 +97,7 @@ const acquireWriterLock = async (filePath: string): Promise<{ readonly handle: F
     throw locked();
   }
   try {
-    await handle.writeFile(`${process.pid}\n`);
+    await handle.writeFile(`${process.pid}\n${logPath}\n`);
     await handle.sync();
   } catch (error) {
     await handle.close().catch(() => undefined);

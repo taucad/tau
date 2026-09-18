@@ -104,6 +104,29 @@ describe('Node event log', () => {
     }
   });
 
+  it('should take over a lock copied from another log path even when its writer pid is alive', async () => {
+    const filePath = await temporaryLogPath();
+    await mkdir(dirname(filePath), { recursive: true });
+    // A project duplicated while Tau runs copies `events.jsonl.lock` naming the live services process,
+    // but that process holds the original log, not this copy.
+    await writeFile(`${filePath}.lock`, `${process.pid}\n/elsewhere/.tau/chats/chat-a/events.jsonl\n`);
+    const copied = await createNodeEventLog({ filePath });
+    const recorded = await readFile(`${filePath}.lock`, 'utf8');
+    await copied.close();
+    expect(recorded.split('\n')[0]).toBe(String(process.pid));
+
+    // The same live pid naming this very log is a genuine writer and still fences.
+    await writeFile(`${filePath}.lock`, recorded);
+    try {
+      await expect(createNodeEventLog({ filePath })).rejects.toMatchObject({
+        name: 'EventLogError',
+        code: 'WRITER_LOCKED',
+      });
+    } finally {
+      await rm(`${filePath}.lock`, { force: true });
+    }
+  });
+
   it('should not release a lock another writer has taken over since', async () => {
     const filePath = await temporaryLogPath();
     await mkdir(dirname(filePath), { recursive: true });

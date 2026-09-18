@@ -130,7 +130,7 @@ it('runs a gateway turn in the dedicated launcher and commits its OPFS event log
       const retried = await retryClient.start({
         chatId: 'chat-browser-fixture',
         runId: 'run-browser-retry',
-        trigger: 'retry',
+        trigger: 'regenerate',
         retainedMessageIds: [],
         message: retryMessage,
       });

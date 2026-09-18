@@ -76,7 +76,7 @@ const harness = vi.hoisted(() => {
       resolveModel,
       setSelectedModelId: noop,
     },
-    actions: { sendMessage: vi.fn(), regenerate: vi.fn(), retryMessage: vi.fn(), stop: vi.fn() },
+    actions: { sendMessage: vi.fn(), regenerate: vi.fn(), stop: vi.fn() },
     /** An empty worker filesystem: every composer record reads as absent. */
     client: {
       readFile: async (path: string): Promise<Uint8Array<ArrayBuffer>> => {

@@ -94,7 +94,6 @@ export type ChatRequest =
       attachments?: readonly AttachmentReference[];
       body?: ChatRequestBody;
     }
-  | { kind: 'retry'; messageId: string; body?: ChatRequestBody }
   | { kind: 'continue'; body?: ChatRequestBody };
 
 /**
@@ -629,22 +628,49 @@ export const chatSessionMachine = setup({
           on: {
             /* Only for a run this page did not admit. `settleTurn` awaits the
              * same attestation itself, and its `onDone` is the one transition
-             * that ends an owned turn. */
-            turnFinalizedObserved: {
-              guard: and(['hasNoOwnTurn', 'matchesActiveRun']),
-              target: 'done',
-              actions: 'announce',
-            },
-            turnFailedObserved: {
-              guard: and(['hasNoOwnTurn', 'matchesActiveRun']),
-              target: 'failed',
-              actions: [assign({ failureReason: ({ event }) => event.reason }), 'announce'],
-            },
-            turnConflictedObserved: {
-              guard: and(['hasNoOwnTurn', 'matchesActiveRun']),
-              target: 'failed',
-              actions: [assign({ failureReason: 'revision conflict' }), 'announce'],
-            },
+             * that ends an owned turn.
+             *
+             * A gesture made over an adopted run is held exactly as one made
+             * over an owned turn is (V2), so the attestation that ends the run
+             * is also what admits it — otherwise the turn the person asked for
+             * while the page was catching up stays queued behind a run that
+             * has already finished. */
+            turnFinalizedObserved: [
+              {
+                guard: and(['hasNoOwnTurn', 'matchesActiveRun', 'hasPendingGesture']),
+                target: '#chat-session.run.queued.admitting',
+                actions: 'announce',
+              },
+              {
+                guard: and(['hasNoOwnTurn', 'matchesActiveRun']),
+                target: 'done',
+                actions: 'announce',
+              },
+            ],
+            turnFailedObserved: [
+              {
+                guard: and(['hasNoOwnTurn', 'matchesActiveRun', 'hasPendingGesture']),
+                target: '#chat-session.run.queued.admitting',
+                actions: [assign({ failureReason: ({ event }) => event.reason }), 'announce'],
+              },
+              {
+                guard: and(['hasNoOwnTurn', 'matchesActiveRun']),
+                target: 'failed',
+                actions: [assign({ failureReason: ({ event }) => event.reason }), 'announce'],
+              },
+            ],
+            turnConflictedObserved: [
+              {
+                guard: and(['hasNoOwnTurn', 'matchesActiveRun', 'hasPendingGesture']),
+                target: '#chat-session.run.queued.admitting',
+                actions: [assign({ failureReason: 'revision conflict' }), 'announce'],
+              },
+              {
+                guard: and(['hasNoOwnTurn', 'matchesActiveRun']),
+                target: 'failed',
+                actions: [assign({ failureReason: 'revision conflict' }), 'announce'],
+              },
+            ],
             requestTurn: { actions: ['recordGesture', 'announce'] },
             reconcileSettlement: reconcileSettlementTransition,
           },

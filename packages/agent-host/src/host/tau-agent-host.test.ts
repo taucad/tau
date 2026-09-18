@@ -1011,6 +1011,60 @@ the cancelled tools left the system unchanged.
     await host.close();
   });
 
+  /**
+   * F2, closeout: a rewind of any turn but the first.
+   *
+   * The client's transcript and this log do not share assistant message ids —
+   * one run is one assistant message on a page and any number of provider
+   * messages here — so a client can only ever name the *user* message its turn
+   * belongs to. Matching its `retainedMessageIds` against this projection
+   * refused every *Try again* and every edit whose retained prefix contained
+   * an assistant message, which is every one after the first turn.
+   */
+  it('rewinds to the turn the client names, not to the prefix it guessed', async () => {
+    const file = createMemoryLogFile();
+    const host = createTauAgentHost(
+      hostOptions({
+        openEventLog: file.open,
+        transport: new ScriptedParityModelTransport(scriptedParityResponses.slice(0, 3)),
+        toolRegistry: tools(async () => ({ content: 'fixture-main', isError: false })),
+        idPrefix: 'anchor',
+      }),
+    );
+    await host.admit({
+      chatId: 'chat-anchor',
+      runId: 'run-one',
+      trigger: 'submit',
+      message: { id: 'turn-one', role: 'user', content: 'First.' },
+    });
+    await host.admit({
+      chatId: 'chat-anchor',
+      runId: 'run-two',
+      trigger: 'submit',
+      message: { id: 'turn-two', role: 'user', content: 'Second.' },
+    });
+
+    /* What the page retains: its own ids, where the assistant message of turn
+     * one is named after the run that produced it. */
+    await host.admit({
+      chatId: 'chat-anchor',
+      runId: 'run-three',
+      trigger: 'regenerate',
+      retainedMessageIds: ['turn-one', 'run-one'],
+      message: { id: 'turn-two', role: 'user', content: 'Second.' },
+    });
+
+    const log = await file.open();
+    const events = await log.read();
+    expect(events).toContainEqual(expect.objectContaining({ type: 'history.rewound', trigger: 'regenerate' }));
+    expect(
+      reduceEventLog(events)
+        .filter((message) => message.role === 'user')
+        .map((message) => message.id),
+    ).toEqual(['turn-one', 'turn-two']);
+    await host.close();
+  });
+
   it('resolves every tool call of a turn that fires four of them at once', async () => {
     // The API-coordinated placement deadlocked here (Postgres 40P01): three
     // delivery transactions locked `chat_rpc_exchange` rows and the

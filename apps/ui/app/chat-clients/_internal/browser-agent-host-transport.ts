@@ -155,6 +155,35 @@ export const persistBrowserTurnSettlement = async (event: HostTurnSettlement): P
   return true;
 };
 
+/**
+ * Resolve when the chat's current run has ended, as the host reports it.
+ *
+ * Asked only after the host has refused an admission because a run is live:
+ * the snapshot answers a run that ended in the meantime, and the subscription
+ * answers the one that ends next. Nothing polls, and no state of another owner
+ * is read twice.
+ *
+ * @param client - This chat's host client.
+ * @param chatId - The chat whose live run must end.
+ */
+const liveRunEnded = async (client: AgentHostClient, chatId: string): Promise<void> => {
+  const ended = Promise.withResolvers<void>();
+  const unsubscribe = client.subscribe((eventChatId, event) => {
+    if (eventChatId === chatId && event.type === 'run.lifecycle' && terminal(event.state)) {
+      ended.resolve();
+    }
+  });
+  try {
+    const current = await client.attach({ chatId, cursor: 0, limit: 1 });
+    if (current.snapshot === undefined || terminal(current.snapshot.state)) {
+      return;
+    }
+    await ended.promise;
+  } finally {
+    unsubscribe();
+  }
+};
+
 const recordDurableTurnSettlement = (event: AgentLiveEvent | AgentLogEvent): void => {
   if (!('leaderEpoch' in event)) {
     return;
@@ -392,7 +421,7 @@ const registrationFor = async (chatId: string): Promise<BrowserAgentHostRegistra
 const browserHostAdmissionSchema = z.union([
   z.strictObject({ trigger: z.literal('submit'), config: agentHostAdmissionConfigSchema }),
   z.strictObject({
-    trigger: z.enum(['retry', 'edit', 'regenerate']),
+    trigger: z.enum(['edit', 'regenerate']),
     retainedMessageIds: z.array(z.string()),
     config: agentHostAdmissionConfigSchema,
   }),
@@ -402,7 +431,7 @@ const browserHostAdmissionSchema = z.union([
     context: agentHostExternalContextSchema.optional(),
   }),
   z.strictObject({
-    trigger: z.enum(['retry', 'edit', 'regenerate']),
+    trigger: z.enum(['edit', 'regenerate']),
     retainedMessageIds: z.array(z.string()),
     agent: agentHostExternalAgentSchema,
     context: agentHostExternalContextSchema.optional(),
@@ -829,16 +858,47 @@ const createHostStream = <Message extends UIMessage>(input: {
         turnId = admittedMessage.id;
         durableUserMessage = projectAgentHostUserMessage(admittedMessage);
         publishRun();
-        const operation = client.start({
-          chatId: input.chatId,
-          runId,
-          message: admittedMessage,
-          ...input.admission,
-        } as HostStartInput);
+        const startOnce = async (hostClient: AgentHostClient): Promise<HostRunSnapshot> =>
+          hostClient.start({
+            chatId: input.chatId,
+            runId,
+            message: admittedMessage,
+            ...input.admission,
+          } as HostStartInput);
+        /**
+         * Admit once the chat's previous run has ended.
+         *
+         * This page can come back to a chat mid-turn: the previous document
+         * unloaded with the run still going, its workspace claim went with it,
+         * and nothing here ever attached to it — so the page believes the chat
+         * is idle and the host, which knows better, refuses the admission. The
+         * refusal is the fact; waiting it out and admitting once is what the
+         * person asked for, and it is bounded by the run itself ending.
+         */
+        const recoverFromLiveRun = async (error: unknown): Promise<HostRunSnapshot> => {
+          if (
+            !(error instanceof AgentHostWorkerError) ||
+            error.code !== 'RUN_ADMISSION_CONFLICT' ||
+            cancelled ||
+            !/has a \w+ run/u.test(error.message)
+          ) {
+            throw error;
+          }
+          await liveRunEnded(client!, input.chatId);
+          return startOnce(client!);
+        };
+        /* The command itself is issued before this frame yields — the recovery
+         * is a rejection handler, never a wrapper that defers the start. */
+        const operation = startOnce(client);
         if (cancelled) {
           cancelRun();
         }
-        const snapshot = await operation;
+        let snapshot: HostRunSnapshot;
+        try {
+          snapshot = await operation;
+        } catch (error) {
+          snapshot = await recoverFromLiveRun(error);
+        }
         await projection;
         if (terminal(snapshot.state) && !terminal(state)) {
           await replay(client);

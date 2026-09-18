@@ -12,8 +12,6 @@ import { ProviderService } from '#api/providers/provider.service.js';
 import type { Model, ModelProviderKind, ModelSupport } from '#api/models/model.schema.js';
 import { isModelListEntryEnabled, modelList, modelListEntryToModel } from '#api/models/model.constants.js';
 import { Span } from '#telemetry/tracer.service.js';
-import type { ProviderDiagnosticsContext, ProviderDiagnosticsLogger } from '#api/chat/utils/provider-diagnostics.js';
-import { createProviderDiagnosticsContext } from '#api/chat/utils/provider-diagnostics.js';
 import {
   isFundedGatewayProviderId,
   isGatewayProviderConfigured,
@@ -35,7 +33,7 @@ export class ModelService implements OnModuleInit {
   @Span()
   public buildModel(
     modelId: string,
-    options: { providerDiagnosticsContext?: ProviderDiagnosticsContext; maximumOutputTokens?: number } = {},
+    options: { maximumOutputTokens?: number } = {},
   ): { model: BaseChatModel; support?: ModelSupport } {
     const modelConfig = this.models.find((model) => model.id === modelId);
 
@@ -52,28 +50,13 @@ export class ModelService implements OnModuleInit {
         ...modelConfig.configuration,
         configuration: provider.configuration,
       },
-      {
-        diagnosticsContext: options.providerDiagnosticsContext,
-        maximumOutputTokens: options.maximumOutputTokens,
-      },
+      { maximumOutputTokens: options.maximumOutputTokens },
     );
 
     return {
       model: modelClass,
       support: modelConfig.support,
     };
-  }
-
-  public createProviderDiagnosticsContext(options: {
-    chatId: string;
-    modelId: string;
-    providerId: ProviderId;
-    logger: ProviderDiagnosticsLogger;
-  }): ProviderDiagnosticsContext {
-    return createProviderDiagnosticsContext({
-      ...options,
-      verbose: this.configService.get('TAU_PROVIDER_DIAGNOSTICS_VERBOSE', { infer: true }) ?? false,
-    });
   }
 
   public async onModuleInit(): Promise<void> {

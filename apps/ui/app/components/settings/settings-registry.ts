@@ -189,12 +189,6 @@ const settingsCatalog = [
         keywords: ['editor', 'context'],
       },
       { id: 'open-tabs', label: 'Open Tabs', description: 'Include all open editor tabs', keywords: ['context'] },
-      {
-        id: 'code-preview',
-        label: 'Code Preview',
-        description: 'Show inline code previews for file operations',
-        keywords: ['tool', 'display'],
-      },
       { id: 'testing-tools', label: 'Enable Testing Tools', description: 'Allow the agent to run and edit tests' },
     ],
   },

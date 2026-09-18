@@ -45,7 +45,6 @@ describe('searchSettings', () => {
       'filesystem-context',
       'active-file',
       'open-tabs',
-      'code-preview',
       'testing-tools',
     ]);
   });

@@ -9,7 +9,6 @@ const mockSetShowModelCost = vi.fn();
 const mockSetIncludeFileSystem = vi.fn();
 const mockSetIncludeActiveFile = vi.fn();
 const mockSetIncludeOpenFiles = vi.fn();
-const mockSetShowCodePreview = vi.fn();
 const mockSetTestingEnabled = vi.fn();
 
 let mockCookieValues: Record<string, boolean>;
@@ -22,7 +21,6 @@ vi.mock('#hooks/use-cookie.js', () => ({
       'chat-ctx-fs': mockSetIncludeFileSystem,
       'chat-ctx-active': mockSetIncludeActiveFile,
       'chat-ctx-open': mockSetIncludeOpenFiles,
-      'chat-tool-code-preview': mockSetShowCodePreview,
       'chat-testing-enabled': mockSetTestingEnabled,
     };
     return [value, setterMap[name] ?? vi.fn()];
@@ -41,16 +39,14 @@ function renderAgentSettings(): ReturnType<typeof render> {
  * 1 - Filesystem
  * 2 - Active File
  * 3 - Open Tabs
- * 4 - Code Preview
- * 5 - Enable Testing Tools
+ * 4 - Enable Testing Tools
  */
 const switchIndex = {
   showModelCost: 0,
   filesystem: 1,
   activeFile: 2,
   openTabs: 3,
-  codePreview: 4,
-  testing: 5,
+  testing: 4,
 } as const;
 
 function getAllSwitches(): HTMLElement[] {
@@ -71,7 +67,6 @@ describe('AgentSettings', () => {
       'chat-ctx-fs': true,
       'chat-ctx-active': true,
       'chat-ctx-open': true,
-      'chat-tool-code-preview': true,
       'chat-testing-enabled': true,
     };
   });
@@ -83,7 +78,6 @@ describe('AgentSettings', () => {
 
     expect(screen.getByText('Metadata Display')).toBeInTheDocument();
     expect(screen.getByText('Editor Context')).toBeInTheDocument();
-    expect(screen.getByText('Tool Display')).toBeInTheDocument();
     expect(screen.getByText('Testing')).toBeInTheDocument();
   });
 
@@ -94,11 +88,18 @@ describe('AgentSettings', () => {
     expect(screen.queryByText('Screenshot Quality')).not.toBeInTheDocument();
   });
 
+  it('should omit the retired code-preview control', () => {
+    renderAgentSettings();
+
+    expect(screen.queryByText('Tool Display')).not.toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: 'Code Preview' })).not.toBeInTheDocument();
+  });
+
   it('should render all switch toggles', () => {
     renderAgentSettings();
 
     const switches = getAllSwitches();
-    expect(switches).toHaveLength(6);
+    expect(switches).toHaveLength(5);
   });
 
   // ── Initial state ──────────────────────────────────────────────────────
@@ -118,7 +119,6 @@ describe('AgentSettings', () => {
       'chat-ctx-fs': false,
       'chat-ctx-active': false,
       'chat-ctx-open': false,
-      'chat-tool-code-preview': false,
       'chat-testing-enabled': false,
     };
 
@@ -162,14 +162,6 @@ describe('AgentSettings', () => {
 
     await user.click(getSwitchAt(switchIndex.openTabs));
     expect(mockSetIncludeOpenFiles).toHaveBeenCalledWith(false);
-  });
-
-  it('should call setter when toggling Code Preview', async () => {
-    renderAgentSettings();
-    const user = userEvent.setup();
-
-    await user.click(getSwitchAt(switchIndex.codePreview));
-    expect(mockSetShowCodePreview).toHaveBeenCalledWith(false);
   });
 
   it('should call setter when toggling Testing', async () => {

@@ -21,8 +21,7 @@ describe('AgentSettings without Tau Cloud', () => {
     expect(screen.queryByText('Metadata Display')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Show Credits')).not.toBeInTheDocument();
     expect(screen.getByText('Editor Context')).toBeInTheDocument();
-    expect(screen.getByText('Tool Display')).toBeInTheDocument();
     expect(screen.getByText('Testing')).toBeInTheDocument();
-    expect(screen.getAllByRole('switch')).toHaveLength(5);
+    expect(screen.getAllByRole('switch')).toHaveLength(4);
   });
 });

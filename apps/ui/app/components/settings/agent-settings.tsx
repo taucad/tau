@@ -30,7 +30,6 @@ export function AgentSettings(): React.JSX.Element {
   const [includeFileSystem, setIncludeFileSystem] = useCookie(cookieName.chatCtxFs, true);
   const [includeActiveFile, setIncludeActiveFile] = useCookie(cookieName.chatCtxActive, true);
   const [includeOpenFiles, setIncludeOpenFiles] = useCookie(cookieName.chatCtxOpen, true);
-  const [showCodePreview, setShowCodePreview] = useCookie(cookieName.chatToolCodePreview, true);
   const [testingEnabled, setTestingEnabled] = useCookie(cookieName.chatTestingEnabled, true);
 
   return (
@@ -71,19 +70,6 @@ export function AgentSettings(): React.JSX.Element {
           <SettingsItem settingId='open-tabs'>
             <SettingRow label='Open Tabs' description='Include all open editor tabs'>
               <Switch aria-label='Open Tabs' checked={includeOpenFiles} onCheckedChange={setIncludeOpenFiles} />
-            </SettingRow>
-          </SettingsItem>
-        </CardContent>
-      </SettingsSectionCard>
-
-      <SettingsSectionCard>
-        <CardHeader>
-          <CardTitle>Tool Display</CardTitle>
-        </CardHeader>
-        <CardContent className='flex flex-col gap-4'>
-          <SettingsItem settingId='code-preview'>
-            <SettingRow label='Code Preview' description='Show inline code previews for file operations'>
-              <Switch aria-label='Code Preview' checked={showCodePreview} onCheckedChange={setShowCodePreview} />
             </SettingRow>
           </SettingsItem>
         </CardContent>

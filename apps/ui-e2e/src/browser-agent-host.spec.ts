@@ -676,10 +676,10 @@ describe('seeded first turn', () => {
     ).toEqual(['admitted', 'running', 'completed']);
     // Settlement releases the claim it admitted; a retained one blocks the next turn.
     await expect.poll(seededLease, { timeout: 60_000, interval: 250 }).toBeUndefined();
-    // A released claim proves settlement finished, not that it finished first
-    // time: the retry budget is per effect instance, so a failing settlement
-    // still publishes once the effect re-runs. The console is the only place
-    // those failed attempts are visible.
+    // A released claim proves the settlement happened; whether it *failed* on
+    // the way is only visible in the console. The turn's owner attempts one
+    // settlement per turn (C3) — the five-attempt retry timer this row used to
+    // wait out is gone with the effect that owned it.
     await expectNoSettlementFailures();
   });
 });

@@ -1715,9 +1715,26 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
         // with `HISTORY_PREFIX_INVALID` and the chat had no way out.
         if (request.trigger !== 'submit' && events.length > 0) {
           const messages = reduceEventLog(events);
+          /* The rewind point is the turn the caller names, and the prefix it
+           * keeps is this log's own.
+           *
+           * A caller's transcript ids are not these: one run is one assistant
+           * message on a page and any number of provider messages here, so a
+           * caller can only ever name the *user* message its turn belongs to —
+           * that id it minted and this log stored verbatim. Matching its
+           * `retainedMessageIds` against this projection refused every rewind
+           * whose retained prefix contained an assistant message, which is
+           * every turn after the first (F2).
+           *
+           * ponytail: `retainedMessageIds` stays on the start input for the
+           * caller that rewinds to a turn this log has never seen — the branch
+           * below. The cleanup is to drop it from the waist entirely and make
+           * the rewound turn the only thing a rewinding trigger carries. */
+          const rewindTo = messages.findIndex((message) => message.id === request.message.id);
           if (
-            request.retainedMessageIds.length >= messages.length ||
-            request.retainedMessageIds.some((id, index) => messages[index]?.id !== id)
+            rewindTo === -1 &&
+            (request.retainedMessageIds.length >= messages.length ||
+              request.retainedMessageIds.some((id, index) => messages[index]?.id !== id))
           ) {
             throw Object.assign(new Error('Retry/edit/regenerate must retain an unchanged strict history prefix.'), {
               code: 'HISTORY_PREFIX_INVALID',
@@ -1731,7 +1748,10 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
               {
                 type: 'history.rewound',
                 trigger: request.trigger,
-                retainedMessageIds: request.retainedMessageIds,
+                retainedMessageIds:
+                  rewindTo === -1
+                    ? request.retainedMessageIds
+                    : messages.slice(0, rewindTo).map((message) => message.id),
               },
             ],
           });

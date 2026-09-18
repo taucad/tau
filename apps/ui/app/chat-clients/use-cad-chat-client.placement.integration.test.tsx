@@ -226,7 +226,6 @@ const buildAgent = (overrides: Partial<CadAgentConfigInput> = {}): CadAgentConfi
 type ActionsMock = {
   sendMessage: ReturnType<typeof vi.fn>;
   regenerate: ReturnType<typeof vi.fn>;
-  retryMessage: ReturnType<typeof vi.fn>;
   editMessage: ReturnType<typeof vi.fn>;
   stop: ReturnType<typeof vi.fn>;
   setMessages: ReturnType<typeof vi.fn>;
@@ -235,7 +234,6 @@ type ActionsMock = {
 const buildActions = (): ActionsMock => ({
   sendMessage: vi.fn(),
   regenerate: vi.fn(),
-  retryMessage: vi.fn(),
   editMessage: vi.fn(),
   stop: vi.fn(),
   setMessages: vi.fn(),

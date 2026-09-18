@@ -664,6 +664,35 @@ describe('chatSessionMachine run ownership', () => {
     actor.stop();
   });
 
+  /**
+   * V2 on a run this page adopted: the gesture made over it is held, and the
+   * thing that releases it is the run ending. An adopted run ends on the
+   * host's own attestation, and the held gesture has to be admitted there too
+   * — navigating away mid-turn and back left the second message queued behind
+   * a run that had already finished.
+   */
+  it('should admit a gesture held over an adopted run once the host attests it', async () => {
+    const script = turnActors();
+    const actor = startOwning(script.actors);
+
+    actor.send({ type: 'adoptRun', runId: 'run-adopted' });
+    expect(runState(actor)).toBe('running.reconnecting');
+
+    actor.send({ type: 'requestTurn', gesture: sendGesture });
+    expect(script.admissions).toEqual([]);
+
+    actor.send({ type: 'runLifecycle', phase: 'completed', runId: 'run-adopted' });
+    expect(runState(actor)).toBe('finishing.observing');
+    actor.send({ type: 'turnFinalizedObserved', runId: 'run-adopted', turnId: 'user-adopted' });
+
+    await vi.waitFor(() => {
+      expect(script.admissions).toHaveLength(1);
+    });
+    expect(script.admissions[0]?.gesture).toEqual(sendGesture);
+
+    actor.stop();
+  });
+
   it('should refuse to dispatch a turn no host can admit', async () => {
     const script = turnActors({
       admit: async () => {

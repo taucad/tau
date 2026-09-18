@@ -20,7 +20,7 @@ vi.mock('#hooks/use-kernel.js', () => ({
 }));
 
 // Chat-history only reads `messageOrder` / `messages` selectors from useChat
-// now; sendMessage / retryMessage / etc. flow through useCadChatClient.
+// now; sendMessage / regenerate / etc. flow through useCadChatClient.
 const chatStateRef: { current: { messages: readonly MyUIMessage[] } } = { current: { messages: [] } };
 const setMockMessages = (messages: readonly MyUIMessage[]): void => {
   chatStateRef.current = { messages };

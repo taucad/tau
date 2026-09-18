@@ -144,7 +144,7 @@ const browserConfig = {
 
 const browserBody = (input: {
   readonly runId: string;
-  readonly trigger: 'submit' | 'retry' | 'edit' | 'regenerate';
+  readonly trigger: 'submit' | 'edit' | 'regenerate';
   readonly retainedMessageIds?: readonly string[];
 }) => ({
   agent: { execution: { kind: 'tau', model: 'openai-gpt-5.5', placement: 'browser-host' } },
@@ -1176,7 +1176,6 @@ describe('BrowserPlacementChatTransport', () => {
 
   it.each([
     { hostTrigger: 'submit', sdkTrigger: 'submit-message', messageId: undefined, retained: undefined },
-    { hostTrigger: 'retry', sdkTrigger: 'regenerate-message', messageId: 'assistant-1', retained: [] },
     { hostTrigger: 'edit', sdkTrigger: 'regenerate-message', messageId: undefined, retained: [] },
     { hostTrigger: 'regenerate', sdkTrigger: 'regenerate-message', messageId: undefined, retained: [] },
   ] as const)(
@@ -1261,7 +1260,7 @@ describe('BrowserPlacementChatTransport', () => {
 
     const retry = chat.regenerate({
       messageId: 'assistant-1',
-      body: browserBody({ runId: retryRunId, trigger: 'retry', retainedMessageIds: [] }),
+      body: browserBody({ runId: retryRunId, trigger: 'regenerate', retainedMessageIds: [] }),
     });
     const releaseTimer = globalThis.setTimeout(() => {
       releaseClose.resolve();
@@ -1278,7 +1277,7 @@ describe('BrowserPlacementChatTransport', () => {
       chatId,
       runId: retryRunId,
       message: { id: 'user-1', role: 'user', content: 'Build it.' },
-      trigger: 'retry',
+      trigger: 'regenerate',
       retainedMessageIds: [],
       config: browserConfig,
     });
@@ -1847,6 +1846,95 @@ describe('BrowserPlacementChatTransport', () => {
       await vi.waitFor(() => {
         expect(client.close).toHaveBeenCalledOnce();
       });
+    } finally {
+      unregister();
+    }
+  });
+
+  /**
+   * The page came back to a chat mid-turn: this document never attached to the
+   * run the worker is still driving, and the workspace claim that reload
+   * discovery reads was dropped when the previous document unloaded. The host
+   * is the only authority that knows, and it says so — `admit is refused`
+   * because the chat has a running run. Ending the turn on that banner made
+   * *navigate away mid-turn and back* a dead chat; the stream waits for the
+   * live run to end and admits once, which is what the person asked for.
+   */
+  it('waits out a live run the host refuses to admit over, then admits once', async () => {
+    installBrowserGlobals();
+    const chatId = 'chat-live-refusal';
+    const runId = 'run-live-refusal';
+    let listener: Parameters<AgentHostClient['subscribe']>[0] | undefined;
+    let refusals = 0;
+    const client = clientFor(chatId, runId, {
+      start: vi.fn(async (input: Parameters<AgentHostClient['start']>[0]) => {
+        refusals += 1;
+        if (refusals === 1) {
+          throw new AgentHostWorkerError(
+            'RUN_ADMISSION_CONFLICT',
+            `Chat ${chatId} has a running run; admit is refused.`,
+          );
+        }
+        listener?.(chatId, {
+          version: 1,
+          leaderEpoch: 'leader-live-refusal',
+          sequence: 9,
+          recordedAt: '2026-09-18T00:00:09.000Z',
+          runId: input.runId,
+          type: 'run.lifecycle',
+          state: 'completed',
+        });
+        return snapshot(chatId, input.runId);
+      }),
+      attach: vi.fn(async () => ({
+        cursor: 0,
+        nextCursor: 0,
+        endCursor: 0,
+        events: [],
+        snapshot: snapshot(chatId, 'run-previous', 'running'),
+      })),
+      subscribe: vi.fn((next: Parameters<AgentHostClient['subscribe']>[0]) => {
+        listener = next;
+        /* The run this page never attached to ends on its own. */
+        globalThis.setTimeout(() => {
+          next(chatId, {
+            version: 1,
+            leaderEpoch: 'leader-live-refusal',
+            sequence: 4,
+            recordedAt: '2026-09-18T00:00:04.000Z',
+            runId: 'run-previous',
+            type: 'run.lifecycle',
+            state: 'completed',
+          });
+        }, 10);
+        return () => {
+          listener = undefined;
+        };
+      }),
+    });
+    const unregister = registerAgentHost(chatId, {
+      projectStorage: async () => ({
+        projectId: 'project-live-refusal',
+        backend: 'opfs',
+        providerBasePath: 'project-live-refusal',
+      }),
+      createClient: async () => client,
+      markRunId: async () => undefined,
+    });
+
+    try {
+      const stream = await new BrowserPlacementChatTransport().sendMessages({
+        chatId,
+        trigger: 'submit-message',
+        messageId: 'message-live-refusal',
+        messages: [{ id: 'message-live-refusal', role: 'user', parts: [{ type: 'text', text: 'Second.' }] }],
+        abortSignal: undefined,
+        body: browserBody({ runId, trigger: 'submit' }),
+      });
+      await drain(stream.getReader());
+
+      expect(client.start).toHaveBeenCalledTimes(2);
+      expect(refusals).toBe(2);
     } finally {
       unregister();
     }

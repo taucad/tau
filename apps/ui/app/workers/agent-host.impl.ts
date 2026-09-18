@@ -632,7 +632,12 @@ const acknowledgeRun = async (
   chatId: string,
   completion: Promise<unknown>,
 ): Promise<HostRunSnapshot> => {
-  const admitted = await active.host.waitForAdmission(chatId);
+  /* A refused admission is an answer, not a race to lose: `waitForAdmission`
+   * asks the *chat* what is running, so a command the host refused — because
+   * the chat's previous run has not ended — used to be answered with that
+   * previous run's snapshot, and the caller reported a run-id mismatch while
+   * the real reason was swallowed with the rejected promise. */
+  const admitted = await Promise.race([active.host.waitForAdmission(chatId), completion.then(() => undefined)]);
   if (!admitted) {
     await completion;
     return active.host.snapshot(chatId);

@@ -68,6 +68,7 @@ import {
   getBoundDurableChatRunId,
 } from '#chat-clients/_internal/shared-chat-transport.js';
 import {
+  getBrowserAgentHostRun,
   getHostTurnSettlement,
   isBrowserAgentHostPlaced,
   registerAgentHostRunReset,
@@ -78,6 +79,9 @@ import type { HostTurnSettlement } from '#chat-clients/_internal/browser-agent-h
 import { clearChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import { ENV } from '#environment.config.js';
+
+/** Run states a browser-placed run never leaves. */
+const terminalBrowserRunStates = new Set(['completed', 'failed', 'cancelled']);
 
 const admissionEnvelopeSchema = z.strictObject({
   version: z.literal(1),
@@ -1100,6 +1104,14 @@ export class ChatSessionStore {
      * turns run, so its host binding would invoke on an empty placement. */
     if (session.placement !== undefined) {
       session.stateActorRef?.send({ type: 'agentConfigChanged', placement: session.placement });
+    }
+    /* A run outlives the view that started it (V5). Navigating away and back
+     * gives this chat a new actor while its run is still in flight, and an
+     * actor that starts `idle` admits a second turn over the live one — which
+     * the host refuses, ending the turn on a banner the page caused itself. */
+    const live = getBrowserAgentHostRun(session.chatId);
+    if (live !== undefined && !terminalBrowserRunStates.has(live.state)) {
+      session.stateActorRef?.send({ type: 'adoptRun', runId: live.runId });
     }
   }
 

@@ -82,6 +82,21 @@ const admissionOrderOf = (
   };
 };
 
+/**
+ * The settlement each run of one chat ended with, oldest run first.
+ *
+ * `expectLogInvariant` counts settlements without reading their kind, because a
+ * stopped or refused run settles as `turn.failed` and still settles exactly
+ * once. A row that drives turns it expects to *record* asserts the kind here.
+ */
+const settlementKinds = async (chatId: string): Promise<readonly string[]> => {
+  const records = await chatLog(chatId);
+  const runIds = [...new Set(records.map((record) => record.runId))];
+  return runIds.map(
+    (runId) => records.find((record) => record.runId === runId && settlementTypes.has(record.type))?.type ?? 'none',
+  );
+};
+
 const expectLogInvariant = async (chatId: string, expectedRuns: number): Promise<void> => {
   const records = await chatLog(chatId);
   const runIds = [...new Set(records.map((record) => record.runId))];
@@ -288,7 +303,6 @@ test('edits twice in a row after a completed turn', async () => {
   await editFirstMessage(' Edited.');
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(2);
   await target.expectVisible(selectors.getByText('Reply two.', { exact: true }).last(), 120_000);
-  await target.expectVisible(selectors.getByText(/Rev 2 saved/u).first(), 60_000);
 
   await editFirstMessage(' Again.');
 
@@ -296,6 +310,12 @@ test('edits twice in a row after a completed turn', async () => {
   await target.expectVisible(selectors.getByText('Reply three.', { exact: true }).last(), 120_000);
   await expectNoAdmissionRefusal();
   await expectLogInvariant(chatId, 3);
+  /* An edit rewinds the turn and records it again: the revision ordinal the
+   * card shows does not move, so what says the work was recorded is the
+   * settlement kind, per run. */
+  await expect
+    .poll(async () => settlementKinds(chatId), { timeout: 60_000 })
+    .toEqual(['turn.finalized', 'turn.finalized', 'turn.finalized']);
 });
 
 test('retries a refused turn that follows a completed one', async () => {
@@ -330,6 +350,9 @@ test('retries a refused turn twice', async () => {
 
   await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(3);
   await target.expectVisible(selectors.getByText('Reply one.', { exact: true }).last(), 120_000);
+  /* The third attempt is the one that records a revision, and its settlement
+   * is written with it — the log invariant is only meaningful once it has. */
+  await target.expectVisible(selectors.getByText(/Rev 1 saved/u).first(), 60_000);
   await expectNoAdmissionRefusal();
   await expectLogInvariant(chatId, 3);
 });

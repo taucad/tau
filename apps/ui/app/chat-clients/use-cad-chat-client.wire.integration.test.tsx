@@ -112,7 +112,7 @@ const admittedBody = async (): Promise<Record<string, unknown> | undefined> => {
  * Wires the **real** `useCadAgentConfig` assembler hook (with the producer
  * hooks at realistic mocked values) into the **real** `useCadChatClient`,
  * intercepts the `body` the client hands to `useChatActions`'s
- * `sendMessage` / `regenerate` / `retryMessage` verbs (this is the same
+ * `sendMessage` / `regenerate` verbs (this is the same
  * `body` the chat-session-store dispatcher forwards to `Chat.sendMessage` /
  * `Chat.regenerate`), and asserts the composed wire body parses cleanly
  * through the **shared** `chatTurnRequestSchema` from `@taucad/chat/schemas`.
@@ -142,14 +142,12 @@ const buildWireBody = (
 type ActionsMock = {
   sendMessage: ReturnType<typeof vi.fn>;
   regenerate: ReturnType<typeof vi.fn>;
-  retryMessage: ReturnType<typeof vi.fn>;
   stop: ReturnType<typeof vi.fn>;
 };
 
 const buildActions = (): ActionsMock => ({
   sendMessage: vi.fn(),
   regenerate: vi.fn(),
-  retryMessage: vi.fn(),
   stop: vi.fn(),
 });
 

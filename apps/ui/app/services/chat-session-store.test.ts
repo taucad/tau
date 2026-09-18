@@ -158,8 +158,8 @@ vi.mock('#machines/inspector.js', () => ({
 const { ChatSessionStore } = await import('#services/chat-session-store.js');
 const { attachmentSendBlockReason, buildUserMessage } = await import('#utils/chat.utils.js');
 const { bindDurableChatRun, sharedChatTransport } = await import('#chat-clients/_internal/shared-chat-transport.js');
-const { recordHostFinalizedTurn, recordHostTurnSettlement, registerAgentHost } =
-  await import('#chat-clients/_internal/browser-agent-host-transport.js');
+const transportModule = await import('#chat-clients/_internal/browser-agent-host-transport.js');
+const { recordHostFinalizedTurn, recordHostTurnSettlement, registerAgentHost } = transportModule;
 type StoreType = InstanceType<typeof ChatSessionStore>;
 type ChatSessionDeps = Parameters<StoreType['setDependencies']>[0];
 
@@ -1423,6 +1423,33 @@ describe('ChatSessionStore', () => {
           { chatId: 'chat_reconcile', runId: 'run_reconcile', leaseTurnId: undefined, outcome: 'completed' },
         ]);
       });
+    });
+
+    /**
+     * V5: a run outlives the view that started it. Navigating away and back
+     * gives the chat a *new* session actor while its run is still in flight;
+     * an actor that starts `idle` there admits a second turn over a live one,
+     * and the host refuses it — the page ends the turn on a banner for a
+     * condition it created itself.
+     */
+    it('should adopt a run still in flight when its chat gets a new session actor', () => {
+      const store = createStore();
+      startTurnOwner(store, 'project_adopt');
+      const live = vi.spyOn(transportModule, 'getBrowserAgentHostRun').mockReturnValue({
+        runId: 'run_live',
+        state: 'running',
+        eventCount: 2,
+      });
+
+      try {
+        const session = store.acquire('chat_adopt');
+
+        const snapshot = session.stateActorRef!.getSnapshot();
+        expect(snapshot.matches({ run: 'running' })).toBe(true);
+        expect(snapshot.context.activeRunId).toBe('run_live');
+      } finally {
+        live.mockRestore();
+      }
     });
 
     it('should notify status subscribers when a durable run is released', () => {

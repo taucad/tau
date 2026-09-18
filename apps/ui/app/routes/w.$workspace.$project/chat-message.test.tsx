@@ -42,7 +42,6 @@ vi.mock('#hooks/use-chat.js', () => ({
   useChatActions() {
     return {
       editMessage: vi.fn(),
-      retryMessage: vi.fn(),
       startEditingMessage: vi.fn(),
       exitEditMode: vi.fn(),
       stop: vi.fn(),

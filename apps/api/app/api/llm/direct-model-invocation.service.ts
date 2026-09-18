@@ -14,6 +14,7 @@ import {
 } from '#api/llm/provider-account-refusal.js';
 import type { ProviderAccountRefusal } from '#api/llm/provider-account-refusal.js';
 import { createProviderAccountFrameFilter } from '#api/llm/provider-account-stream.js';
+import type { ProviderTerminalFailure } from '#api/llm/provider-account-stream.js';
 import type {
   ModelInvocationIntent,
   ModelInvocationResult,
@@ -121,12 +122,17 @@ export class DirectModelInvocationService implements ModelInvocationService {
         'Configured provider returned no response stream.',
       );
     }
+    // The provider's own identifier for this call, for its request log.
+    const requestId = response.headers.get('x-request-id') ?? response.headers.get('request-id') ?? undefined;
     const relayed = response.body.pipeThrough(
       createProviderAccountFrameFilter({
         providerId: route.providerId,
         accountOwner: 'operator',
         onRefusal: (refusal) => {
           this.warnProviderAccount(route.providerId, refusal);
+        },
+        onTerminalFailure: (failure) => {
+          this.logTerminalFailure({ providerId: route.providerId, modelId: route.modelId, requestId, failure });
         },
       }),
     );
@@ -139,6 +145,31 @@ export class DirectModelInvocationService implements ModelInvocationService {
       }),
       completion: Promise.resolve(),
     };
+  }
+
+  /**
+   * ERROR with the only evidence this path keeps of a terminal failure frame:
+   * unlike the funded path it writes no ledger row, so a 200 that ends in
+   * `response.failed` or an `error` event leaves nothing behind (R8).
+   *
+   * Identification and the provider's own sentence only; no prompt or response
+   * content, and the sentence is clamped the way a relayed reason is.
+   *
+   * @param input - The route the request took, the provider's own identifier
+   * for the call when it sent one, and what the terminal frame said about itself.
+   */
+  private logTerminalFailure(input: {
+    readonly providerId: GatewayProviderId;
+    readonly modelId: string;
+    readonly requestId: string | undefined;
+    readonly failure: ProviderTerminalFailure;
+  }): void {
+    const { failure } = input;
+    this.logger.error(
+      `Provider stream failed for ${input.providerId} ${input.modelId} (${failure.code ?? failure.type ?? 'no code'})` +
+        `${input.requestId === undefined ? '' : ` request ${input.requestId}`}: ` +
+        `${failure.message?.slice(0, 500) ?? 'no message'}`,
+    );
   }
 
   /** WARN with what the operator needs to act: the provider, its code, its sentence and where to pay. */

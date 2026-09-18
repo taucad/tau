@@ -18,7 +18,12 @@ import { RevisionSyncRegion } from '#routes/w.$workspace.$project/revision-sync-
 import { useRevisionChanges, useRevisions } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useRestoreToPoint } from '#hooks/use-restore-to-point.js';
-import { useRevisionClient, useRevisionCommands, useRevisionStatus } from '#hooks/use-revision-status.js';
+import {
+  useProjectRole,
+  useRevisionClient,
+  useRevisionCommands,
+  useRevisionStatus,
+} from '#hooks/use-revision-status.js';
 import { clearTurnOutcome, useTurnOutcomes } from '#routes/w.$workspace.$project/revision-outcomes.js';
 import { useChats } from '#hooks/use-chats.js';
 import { useProject } from '#hooks/use-project.js';
@@ -378,6 +383,7 @@ export function RevisionsPanelBody(): React.JSX.Element {
   const { revisions, headRevisionId, branch, branchFacts = new Map(), isDirty, isLoading } = useRevisions();
   const status = useRevisionStatus();
   const commands = useRevisionCommands();
+  const projectRole = useProjectRole();
   const { restore, isBusy } = useRestoreToPoint();
   const { chats } = useChats(projectId);
   /* A29: *Sync* appears when a remote exists, or when the person opens it. */
@@ -585,6 +591,10 @@ export function RevisionsPanelBody(): React.JSX.Element {
             canConnectGitHub={canConnectGitHub}
             onUpgrade={requestUpgrade}
             signInHref={signIn}
+            /* D27: the account's role on the Tau Cloud project, which gates the
+               owner's collaborator surface and a read collaborator's push. */
+            role={projectRole}
+            projectId={projectId}
           />
         ) : null}
       </div>

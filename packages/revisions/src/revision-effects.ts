@@ -1292,7 +1292,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
    * so the queue is never a file a person sees, an agent reads, or a revision
    * records — and never a machine snapshot (D29).
    */
-  const syncQueuePath = '.tau/revisions/sync-pending';
+  const syncQueuePath = '.git/sync-pending';
 
   const isQueueEntry = (value: unknown): value is SyncQueueEntry =>
     typeof value === 'object' &&
@@ -3597,7 +3597,7 @@ export const createProjectRevisionsActor = (
  *
  * The same 5 s the close flush itself is given: a quit must not hang on a remote
  * that stopped answering, and a revision this host could not push is a record in
- * `.tau/revisions/sync-pending` that the next open retries (D28).
+ * `.git/sync-pending` that the next open retries (D28).
  *
  * @public
  */

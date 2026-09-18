@@ -216,7 +216,7 @@ export class JobsController {
       expiresInSeconds: 900,
       tier: 'private',
     });
-    return { uploadUrl, headers: { 'x-amz-checksum-sha256': body.checksumSha256 } };
+    return { uploadUrl, headers: this.objectStorage.uploadPartHeaders(body.checksumSha256) };
   }
 
   @Post('worker-artifacts/uploads/complete')

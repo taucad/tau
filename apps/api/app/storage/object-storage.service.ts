@@ -5,6 +5,7 @@ import {
   CopyObjectCommand,
   CreateMultipartUploadCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
   GetObjectCommand,
   HeadBucketCommand,
   HeadObjectCommand,
@@ -13,8 +14,9 @@ import {
   S3Client,
   UploadPartCommand,
 } from '@aws-sdk/client-s3';
+import type { S3ClientConfig } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Environment } from '#config/environment.config.js';
 import { STORAGE_HEALTH_PROBE_KEY, STORAGE_NAMESPACE_PREFIXES } from '#storage/storage.constants.js';
@@ -30,17 +32,56 @@ import type { StorageNamespace } from '#storage/storage.constants.js';
  */
 export type StorageTier = 'public' | 'private';
 
+/**
+ * Where a tenant's authoritative bytes live: endpoint, region, bucket and
+ * credentials. Tau's own account is the only one that exists at launch
+ * (charter D26); `project.storage_account_id` and credential decryption are
+ * W3's, so this descriptor deliberately carries no secret handling of its own.
+ */
+export type StorageAccount = {
+  /** Stable identity used to decide whether a scoped driver is needed. */
+  id: string;
+  endpoint: string;
+  region: string;
+  /** The account's single bucket. For the Tau default this is the public content bucket. */
+  bucket: string;
+  forcePathStyle: boolean;
+  credentials: { accessKeyId: string; secretAccessKey: string };
+};
+
+/** Identity of the account the environment configures. */
+export const TAU_DEFAULT_STORAGE_ACCOUNT_ID = 'tau-default';
+
 export type PutBlobArgs = {
   namespace: StorageNamespace;
   key: string;
   body: Uint8Array<ArrayBuffer>;
   contentType: string;
   cacheControl?: string;
+  /** `'*'` creates only when absent; any other value is an ETag precondition. Both are forwarded. */
   ifNoneMatch?: '*' | string;
+  /** ETag precondition for a compare-and-swap write. A refusal is reported, never thrown. */
+  ifMatch?: string;
+  /** Base64 SHA-256 the backend verifies against the received bytes. */
+  checksumSha256?: string;
   tier?: StorageTier;
 };
 
-export type PutBlobResult = { etag: string; alreadyExisted: boolean };
+/**
+ * The outcome of a put, discriminated on `lost` so a caller cannot read an
+ * ETag that a refused write never produced.
+ *
+ * `lost` is true whenever a precondition refused the write — a `412`, or the
+ * `404`/`NoSuchKey` an `ifMatch` against an absent key produces (AR-A E7).
+ * `alreadyExisted` is its `ifNoneMatch: '*'` spelling, kept for the callers
+ * that predate conditional writes. An unconditional put is never lost.
+ */
+export type PutBlobResult =
+  | { lost: false; etag: string; alreadyExisted: boolean }
+  | { lost: true; alreadyExisted: boolean };
+
+/** One object in a prefix listing, keyed relative to its namespace. */
+export type ListedObject = { key: string; bytes: number; modifiedAt: Date | undefined };
 
 export type ObjectStorageServiceContract = {
   putBlob(args: PutBlobArgs): Promise<PutBlobResult>;
@@ -60,6 +101,17 @@ export type ObjectStorageServiceContract = {
     | undefined
   >;
   deleteBlob(args: { namespace: StorageNamespace; key: string; tier?: StorageTier }): Promise<void>;
+  deleteBlobs(args: {
+    namespace: StorageNamespace;
+    keys: readonly string[];
+    tier?: StorageTier;
+  }): Promise<{ deleted: number }>;
+  listObjects(args: {
+    namespace: StorageNamespace;
+    keyPrefix: string;
+    tier?: StorageTier;
+    pageSize?: number;
+  }): AsyncIterable<ListedObject>;
   presignGet(args: {
     namespace: StorageNamespace;
     key: string;
@@ -136,6 +188,42 @@ export type ObjectStorageServiceContract = {
   headPrivateBucket(): Promise<boolean>;
 };
 
+/** Maximum keys one `DeleteObjects` request accepts, per the S3 API. */
+const DELETE_OBJECTS_BATCH_SIZE = 1000;
+
+/**
+ * True only for "this key does not exist". Deliberately narrower than
+ * {@link isS3ObjectMissing}: a `404 NoSuchBucket` is a misconfiguration and
+ * must not be reported as a lost conditional write.
+ */
+const isNoSuchKey = (error: unknown): boolean =>
+  error !== null &&
+  typeof error === 'object' &&
+  'name' in error &&
+  ((error as { name: string }).name === 'NoSuchKey' || (error as { name: string }).name === 'NotFound');
+
+/**
+ * True only for genuine AWS S3, the endpoint the SDK's default checksum mode
+ * was designed against.
+ *
+ * Charter D8 puts every other endpoint on `WHEN_REQUIRED`, which still sends
+ * the checksums an operation requires (`DeleteObjects`) and the ones callers
+ * pass explicitly (`checksumSha256` on a single-part put), and stops the SDK
+ * adding a CRC32 trailer of its own to every request.
+ *
+ * It also decides per-part multipart checksums. W0b measured real R2: it
+ * silently drops `ChecksumAlgorithm` on `CreateMultipartUpload` and answers
+ * `501 NotImplemented` to an `UploadPart` carrying `x-amz-checksum-sha256`.
+ * MinIO accepts both, so only AWS is treated as supporting them.
+ */
+const isAwsEndpoint = (endpoint: string): boolean => {
+  try {
+    return new URL(endpoint).hostname.endsWith('.amazonaws.com');
+  } catch {
+    return false;
+  }
+};
+
 export const isPreconditionFailed = (error: unknown): boolean =>
   error !== null &&
   typeof error === 'object' &&
@@ -153,6 +241,9 @@ export const isS3ObjectMissing = (error: unknown): boolean => {
 
 @Injectable()
 export class ObjectStorageService implements ObjectStorageServiceContract {
+  /** The storage account this instance addresses. See {@link forAccount}. */
+  public readonly account: StorageAccount;
+
   private readonly client: S3Client;
 
   private readonly bucket: string;
@@ -161,23 +252,55 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
 
   private readonly publicBaseUrl: string;
 
+  /**
+   * Whether this endpoint supports per-part SHA-256 on a multipart upload.
+   * Only AWS does (see {@link isAwsEndpoint}); elsewhere per-part integrity
+   * rests on the part ETag (MD5) that `CompleteMultipartUpload` verifies.
+   */
+  private readonly supportsPartChecksums: boolean;
+
   // Pnpm currently resolves the presigner and S3 client through two compatible
   // @smithy/types patch versions. Keep that package-manager detail at this
   // boundary instead of leaking casts into every caller.
   private readonly signingClient: Parameters<typeof getSignedUrl>[0];
 
-  public constructor(private readonly configService: ConfigService<Environment, true>) {
-    const endpoint = this.configService.get('TAU_S3_ENDPOINT', { infer: true });
-    const region = this.configService.get('TAU_S3_REGION', { infer: true });
-    const accessKeyId = this.configService.get('TAU_S3_ACCESS_KEY_ID', { infer: true });
-    const secretAccessKey = this.configService.get('TAU_S3_SECRET_ACCESS_KEY', { infer: true });
-    const forcePathStyle = this.configService.get('TAU_S3_FORCE_PATH_STYLE', { infer: true });
+  public constructor(
+    private readonly configService: ConfigService<Environment, true>,
+    // oxlint-disable-next-line eslint/new-cap -- Nest's Optional decorator is a function by contract.
+    @Optional() scopedAccount?: StorageAccount,
+  ) {
+    const configuredEndpoint = this.configService.get('TAU_S3_ENDPOINT', { infer: true });
+    const configuredRegion = this.configService.get('TAU_S3_REGION', { infer: true });
+    const configuredAccessKeyId = this.configService.get('TAU_S3_ACCESS_KEY_ID', { infer: true });
+    const configuredSecretAccessKey = this.configService.get('TAU_S3_SECRET_ACCESS_KEY', { infer: true });
+    const configuredForcePathStyle = this.configService.get('TAU_S3_FORCE_PATH_STYLE', { infer: true });
 
-    this.bucket = this.configService.get('TAU_S3_BUCKET', { infer: true });
-    this.privateBucket = this.configService.get('TAU_S3_PRIVATE_BUCKET', { infer: true });
-    this.publicBaseUrl = this.configService.get('TAU_S3_PUBLIC_BASE_URL', { infer: true }).replace(/\/$/u, '');
+    const endpoint = scopedAccount?.endpoint ?? configuredEndpoint;
+    const region = scopedAccount?.region ?? configuredRegion;
+    const accessKeyId = scopedAccount?.credentials.accessKeyId ?? configuredAccessKeyId;
+    const secretAccessKey = scopedAccount?.credentials.secretAccessKey ?? configuredSecretAccessKey;
+    const forcePathStyle = scopedAccount?.forcePathStyle ?? configuredForcePathStyle;
 
-    this.client = new S3Client({
+    // A non-default account has one bucket, so both tiers resolve to it: the
+    // public/private split is Tau's own CDN arrangement, and publications are
+    // never placed in another account's bucket.
+    this.bucket = scopedAccount?.bucket ?? this.configService.get('TAU_S3_BUCKET', { infer: true });
+    this.privateBucket = scopedAccount?.bucket ?? this.configService.get('TAU_S3_PRIVATE_BUCKET', { infer: true });
+    this.publicBaseUrl =
+      scopedAccount === undefined
+        ? this.configService.get('TAU_S3_PUBLIC_BASE_URL', { infer: true }).replace(/\/$/u, '')
+        : '';
+
+    this.account = scopedAccount ?? {
+      id: TAU_DEFAULT_STORAGE_ACCOUNT_ID,
+      endpoint,
+      region,
+      bucket: this.bucket,
+      forcePathStyle,
+      credentials: { accessKeyId, secretAccessKey },
+    };
+
+    const clientConfig: S3ClientConfig = {
       region,
       endpoint,
       forcePathStyle,
@@ -185,8 +308,33 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         accessKeyId,
         secretAccessKey,
       },
-    });
+    };
+
+    this.supportsPartChecksums = isAwsEndpoint(endpoint);
+
+    if (!this.supportsPartChecksums) {
+      clientConfig.requestChecksumCalculation = 'WHEN_REQUIRED';
+      clientConfig.responseChecksumValidation = 'WHEN_REQUIRED';
+    }
+
+    this.client = new S3Client(clientConfig);
     this.signingClient = this.client as unknown as Parameters<typeof getSignedUrl>[0];
+  }
+
+  /**
+   * Returns a driver bound to `account`. The Tau default account returns this
+   * instance; any other account builds one client for that endpoint.
+   *
+   * Only the Tau default exists at launch (charter D26), so there is
+   * deliberately no registry and no client cache: a second account arrives
+   * with `storage_account` in W3, and the cache belongs with it.
+   */
+  public forAccount(account: StorageAccount): ObjectStorageService {
+    if (account.id === this.account.id) {
+      return this;
+    }
+
+    return new ObjectStorageService(this.configService, account);
   }
 
   public async putBlob(args: PutBlobArgs): Promise<PutBlobResult> {
@@ -200,16 +348,25 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
           Body: args.body,
           ContentType: args.contentType,
           ...(args.cacheControl ? { CacheControl: args.cacheControl } : {}),
-          ...(args.ifNoneMatch === '*' ? { IfNoneMatch: '*' } : {}),
+          ...(args.ifNoneMatch === undefined ? {} : { IfNoneMatch: args.ifNoneMatch }),
+          ...(args.ifMatch === undefined ? {} : { IfMatch: args.ifMatch }),
+          ...(args.checksumSha256 === undefined ? {} : { ChecksumSHA256: args.checksumSha256 }),
         }),
       );
 
       const etag = response.ETag?.replaceAll('"', '') ?? '';
 
-      return { etag, alreadyExisted: false };
+      return { lost: false, etag, alreadyExisted: false };
     } catch (error) {
-      if (args.ifNoneMatch === '*' && isPreconditionFailed(error)) {
-        return { etag: '', alreadyExisted: true };
+      const conditional = args.ifNoneMatch !== undefined || args.ifMatch !== undefined;
+
+      // A conditional write that loses is an outcome, not a fault. MinIO and R2
+      // answer `404 NoSuchKey` rather than `412` when an `If-Match` names an
+      // absent key (AR-A E7); that is a lost race, never a create.
+      const absentTarget = args.ifMatch !== undefined && isNoSuchKey(error);
+
+      if (conditional && (isPreconditionFailed(error) || absentTarget)) {
+        return { lost: true, alreadyExisted: args.ifNoneMatch === '*' };
       }
 
       throw error;
@@ -289,6 +446,117 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     );
   }
 
+  /**
+   * Deletes the named keys in `DeleteObjects` batches. Deleting a key that was
+   * never written is not an error, so this is safe to call with a manifest's
+   * retired-pack list after a partial sweep.
+   */
+  public async deleteBlobs(args: {
+    namespace: StorageNamespace;
+    keys: readonly string[];
+    tier?: StorageTier;
+  }): Promise<{ deleted: number }> {
+    const bucket = this.resolveBucket(args.tier);
+    let deleted = 0;
+
+    for (let offset = 0; offset < args.keys.length; offset += DELETE_OBJECTS_BATCH_SIZE) {
+      const batch = args.keys.slice(offset, offset + DELETE_OBJECTS_BATCH_SIZE);
+      // oxlint-disable-next-line no-await-in-loop -- batches are sequential so a failure stops the sweep.
+      const response = await this.client.send(
+        new DeleteObjectsCommand({
+          Bucket: bucket,
+          Delete: { Objects: batch.map((key) => ({ Key: this.resolveKey(args.namespace, key).resolvedKey })) },
+        }),
+      );
+
+      const failure = response.Errors?.[0];
+      if (failure !== undefined) {
+        throw new Error(
+          `S3 DeleteObjects failed for ${failure.Key ?? '<unknown>'}: ${failure.Message ?? failure.Code ?? 'unknown error'}`,
+        );
+      }
+
+      deleted += batch.length;
+    }
+
+    return { deleted };
+  }
+
+  /**
+   * Deletes every object under a namespace-relative prefix and reports what it
+   * listed and removed.
+   *
+   * Charter D31: the purge job is the only permitted caller, gated on a
+   * tombstone whose `purge_after` has passed, planning before it deletes and
+   * requiring explicit confirmation above a bounded object count. No request
+   * path and no other job may call this. With no bucket versioning, no object
+   * lock and no second copy yet, an unbounded prefix delete is the one
+   * irrecoverable action the system can take — hence the name.
+   *
+   * The repository-store conformance suite is the single sanctioned exception
+   * (D32): it runs against a dedicated scratch bucket, under a tenant prefix it
+   * created itself, and never against `tau-staging-content*`.
+   */
+  public async deleteEntirePrefixForPurgeJob(args: {
+    namespace: StorageNamespace;
+    keyPrefix: string;
+    tier?: StorageTier;
+  }): Promise<{ listed: number; deleted: number }> {
+    const keys: string[] = [];
+    for await (const object of this.listObjects(args)) {
+      keys.push(object.key);
+    }
+
+    const { deleted } = await this.deleteBlobs({
+      namespace: args.namespace,
+      keys,
+      ...(args.tier === undefined ? {} : { tier: args.tier }),
+    });
+
+    return { listed: keys.length, deleted };
+  }
+
+  /**
+   * Yields every object under a namespace-relative prefix, following
+   * continuation tokens. `pageSize` exists so tests can force pagination
+   * without writing a thousand objects; production leaves it at the S3 default.
+   */
+  public async *listObjects(args: {
+    namespace: StorageNamespace;
+    keyPrefix: string;
+    tier?: StorageTier;
+    pageSize?: number;
+  }): AsyncIterable<ListedObject> {
+    const prefix = this.resolveKey(args.namespace, args.keyPrefix).resolvedKey;
+    const namespacePrefix = STORAGE_NAMESPACE_PREFIXES[args.namespace];
+    const bucket = this.resolveBucket(args.tier);
+    let continuationToken: string | undefined;
+
+    do {
+      // oxlint-disable-next-line no-await-in-loop -- S3 pagination is sequential by token.
+      const response = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: bucket,
+          Prefix: prefix,
+          ...(args.pageSize === undefined ? {} : { MaxKeys: args.pageSize }),
+          ...(continuationToken === undefined ? {} : { ContinuationToken: continuationToken }),
+        }),
+      );
+
+      for (const object of response.Contents ?? []) {
+        if (object.Key !== undefined) {
+          yield {
+            key: object.Key.slice(namespacePrefix.length),
+            bytes: Number(object.Size ?? 0),
+            modifiedAt: object.LastModified,
+          };
+        }
+      }
+
+      continuationToken = response.IsTruncated === true ? response.NextContinuationToken : undefined;
+    } while (continuationToken !== undefined);
+  }
+
   public async presignGet(args: {
     namespace: StorageNamespace;
     key: string;
@@ -338,7 +606,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         Bucket: this.resolveBucket(args.tier),
         Key: resolvedKey,
         ContentType: args.contentType,
-        ChecksumAlgorithm: 'SHA256',
+        ...(this.supportsPartChecksums ? { ChecksumAlgorithm: 'SHA256' } : {}),
       }),
     );
     if (!response.UploadId) {
@@ -363,10 +631,18 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         Key: resolvedKey,
         UploadId: args.uploadId,
         PartNumber: args.partNumber,
-        ChecksumSHA256: args.checksumSha256,
+        ...(this.supportsPartChecksums ? { ChecksumSHA256: args.checksumSha256 } : {}),
       }),
       args.expiresInSeconds,
     );
+  }
+
+  /**
+   * The headers a client must send with a URL from {@link presignUploadPart}.
+   * Empty off AWS, where a part checksum is rejected outright.
+   */
+  public uploadPartHeaders(checksumSha256: string): Readonly<Record<string, string>> {
+    return this.supportsPartChecksums ? { 'x-amz-checksum-sha256': checksumSha256 } : {};
   }
 
   public async uploadPart(args: {
@@ -386,7 +662,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         UploadId: args.uploadId,
         PartNumber: args.partNumber,
         Body: args.body,
-        ChecksumSHA256: args.checksumSha256,
+        ...(this.supportsPartChecksums ? { ChecksumSHA256: args.checksumSha256 } : {}),
       }),
     );
     return {
@@ -409,10 +685,12 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         Key: resolvedKey,
         UploadId: args.uploadId,
         MultipartUpload: {
+          // Off AWS the parts list carries ETags only, and the part ETag (MD5)
+          // that CompleteMultipartUpload verifies is the per-part integrity check.
           Parts: args.parts.map((part) => ({
             PartNumber: part.partNumber,
             ETag: part.etag,
-            ChecksumSHA256: part.checksumSha256,
+            ...(this.supportsPartChecksums ? { ChecksumSHA256: part.checksumSha256 } : {}),
           })),
         },
       }),
@@ -454,31 +732,21 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
     keyPrefix: string;
     tier?: StorageTier;
   }): Promise<ReadonlyArray<{ key: string; size: number; lastModified: Date | undefined }>> {
-    const prefix = this.resolveKey(args.namespace, args.keyPrefix).resolvedKey;
-    const namespacePrefix = STORAGE_NAMESPACE_PREFIXES[args.namespace];
     const objects: Array<{ key: string; size: number; lastModified: Date | undefined }> = [];
-    let continuationToken: string | undefined;
-    do {
-      // oxlint-disable-next-line no-await-in-loop -- S3 pagination is sequential by token.
-      const response = await this.client.send(
-        new ListObjectsV2Command({
-          Bucket: this.resolveBucket(args.tier),
-          Prefix: prefix,
-          ...(continuationToken === undefined ? {} : { ContinuationToken: continuationToken }),
-        }),
-      );
-      for (const object of response.Contents ?? []) {
-        if (object.Key !== undefined) {
-          objects.push({
-            key: object.Key.slice(namespacePrefix.length),
-            size: Number(object.Size ?? 0),
-            lastModified: object.LastModified,
-          });
-        }
-      }
-      continuationToken = response.IsTruncated === true ? response.NextContinuationToken : undefined;
-    } while (continuationToken !== undefined);
+    for await (const object of this.listObjects(args)) {
+      objects.push({ key: object.key, size: object.bytes, lastModified: object.modifiedAt });
+    }
     return objects;
+  }
+
+  /**
+   * The physical bucket a tier resolves to on this account. Exposed so a
+   * destructive test suite can apply the D32 allowlist to the bucket it will
+   * actually write to, which for the default account differs per tier and is
+   * never `account.bucket` for the private tier.
+   */
+  public bucketFor(tier?: StorageTier): string {
+    return this.resolveBucket(tier);
   }
 
   public publicUrl(args: { namespace: StorageNamespace; key: string }): string {

@@ -30,6 +30,16 @@ const importsSiblingMachine = (specifier: string): boolean => /^#[a-z-]+\.machin
 const importsPackageContract = (specifier: string): boolean =>
   specifier === '#revision-port.js' || specifier === '#revision-authority.js' || specifier === '#remotes.js';
 
+/*
+ * The one module a machine may call at runtime. I20/AC22 is about host
+ * coupling — a filesystem, git, React or DOM import on one host's side of the
+ * seam — and `refusal-markers.ts` imports nothing at all: it is a string the
+ * server prints and a predicate over it, so both the transport classifier and
+ * the scheduler can file the same refusal the same way without either
+ * importing the other. The row below pins the premise.
+ */
+const importsRefusalMarkers = (specifier: string): boolean => specifier === '#refusal-markers.js';
+
 describe('revision machine import boundary', () => {
   it('finds every machine subpath module', () => {
     expect(
@@ -77,10 +87,17 @@ describe('revision machine import boundary', () => {
         (entry) =>
           !importsXstate(entry.specifier) &&
           !importsSiblingMachine(entry.specifier) &&
+          !importsRefusalMarkers(entry.specifier) &&
           !(importsPackageContract(entry.specifier) && entry.typeOnly),
       );
 
     expect(offenders).toEqual([]);
+  });
+
+  it('keeps the one runtime-importable module import-free, which is why it is allowed', () => {
+    const leaf = readFileSync(join(sourceDirectory, 'refusal-markers.ts'), 'utf8');
+
+    expect(leaf).not.toMatch(/^import\s/mu);
   });
 
   it('imports nothing from the filesystem, git, node builtins, React or the DOM', () => {

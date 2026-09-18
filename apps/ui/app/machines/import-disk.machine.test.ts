@@ -4,7 +4,8 @@ import { createActor, waitFor } from 'xstate';
 import { importDiskMachine } from '#machines/import-disk.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 
-vi.mock('#utils/file-reader.utils.js', () => ({
+vi.mock('#utils/file-reader.utils.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('#utils/file-reader.utils.js')>()),
   readFromFileList: vi.fn(async () => new Map([['main.ts', { filename: 'main.ts', content: new Uint8Array([1]) }]])),
   readFromDataTransfer: vi.fn(
     async () => new Map([['main.ts', { filename: 'main.ts', content: new Uint8Array([1]) }]]),
@@ -28,6 +29,18 @@ vi.mock('jszip', () => ({
 
 const mockFiles = new Map([['main.ts', { filename: 'main.ts', content: new Uint8Array([1]) }]]);
 
+/** A zip a person exported from a checkout: working tree plus the repository. */
+const repositoryFiles = new Map([
+  ['main.ts', { filename: 'main.ts', content: new Uint8Array([1]) }],
+  ['src/part.ts', { filename: 'src/part.ts', content: new Uint8Array([2]) }],
+  ['.git/HEAD', { filename: '.git/HEAD', content: new Uint8Array([3]) }],
+  ['.git/objects/ab/cdef', { filename: '.git/objects/ab/cdef', content: new Uint8Array([4]) }],
+  ['.tau/binding.json', { filename: '.tau/binding.json', content: new Uint8Array([5]) }],
+  ['node_modules/replicad/index.js', { filename: 'node_modules/replicad/index.js', content: new Uint8Array([6]) }],
+  /* Anchored, so a vendored repository is the user's own content. */
+  ['vendor/dep/.git/HEAD', { filename: 'vendor/dep/.git/HEAD', content: new Uint8Array([7]) }],
+]);
+
 type OnProgress = (processed: number, total: number) => void;
 
 type FilesReadEvent = { type: 'filesRead'; files: typeof mockFiles; importName: string };
@@ -38,14 +51,14 @@ function createReadActor<Input>() {
   });
 }
 
-function createTestActor(options?: { throwOnRead?: boolean }) {
+function createTestActor(options?: { throwOnRead?: boolean; files?: typeof mockFiles }) {
   const machine = importDiskMachine.provide({
     actors: {
       readFilesActor: fromSafeAsync(async () => {
         if (options?.throwOnRead) {
           throw new Error('read failed');
         }
-        return { type: 'filesRead', files: mockFiles, importName: 'Test Import' };
+        return { type: 'filesRead', files: options?.files ?? mockFiles, importName: 'Test Import' };
       }),
       readDataTransferActor: createReadActor<{ items: DataTransferItemList; onProgress: OnProgress }>(),
       readDirectoryHandleActor: createReadActor<{ handle: FileSystemDirectoryHandle; onProgress: OnProgress }>(),
@@ -121,6 +134,39 @@ describe('importDiskMachine', () => {
       actor.send({ type: 'processFiles', files: mock<FileList>() });
       await waitFor(actor, (s) => s.value === 'selectingMainFile');
       expect(actor.getSnapshot().context.selectedMainFile).toBe('main.ts');
+      actor.stop();
+    });
+  });
+
+  /* D29/ND23: the project's own repository lives at `.git` in the same
+   * filesystem as its working tree, so an imported `.git` would be written over
+   * it. The import carries the tree and drops the repository that came with it. */
+  describe('an import that carries its own repository', () => {
+    it('imports the working tree and drops what no import carries', async () => {
+      const actor = createTestActor({ files: repositoryFiles });
+      actor.start();
+      actor.send({ type: 'processFiles', files: mock<FileList>() });
+      await waitFor(actor, (s) => s.value === 'selectingMainFile');
+
+      expect([...actor.getSnapshot().context.files.keys()]).toStrictEqual([
+        'main.ts',
+        'src/part.ts',
+        'vendor/dep/.git/HEAD',
+      ]);
+      actor.stop();
+    });
+
+    it('never emits the dropped bytes to the route that creates the project', async () => {
+      const actor = createTestActor({ files: repositoryFiles });
+      const ready: string[][] = [];
+      actor.on('filesReady', (event) => {
+        ready.push([...event.files.keys()]);
+      });
+      actor.start();
+      actor.send({ type: 'processFiles', files: mock<FileList>() });
+      await waitFor(actor, (s) => s.value === 'selectingMainFile');
+
+      expect(ready).toStrictEqual([['main.ts', 'src/part.ts', 'vendor/dep/.git/HEAD']]);
       actor.stop();
     });
   });

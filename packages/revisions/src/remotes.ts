@@ -14,6 +14,7 @@
  * kind's UI; the data model already holds it.
  */
 
+import { isCeilingRefusal } from '#refusal-markers.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPortErrorCode } from '#revision-port.js';
 
@@ -560,7 +561,17 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
      * rewind or a deletion on every ref family that way (contract §4). Its own
      * words, never one of Tau's (N4). */
     if (answered.message !== undefined) {
-      return new RevisionPortError('REMOTE_REJECTED', answered.message, { cause: error });
+      /* D20's ceiling refusal is one of those sentences, and it is a *quota*
+         answer rather than a rule the caller broke: the affordance must not
+         offer "Sync now" again. `isCeilingRefusal` (`refusal-markers.ts`) is
+         the one place that question is answered, for this leg and for the
+         scheduler's. The remote's own words, list of files and all, are still
+         what is shown. */
+      return new RevisionPortError(
+        isCeilingRefusal(answered.message) ? 'REMOTE_QUOTA_EXCEEDED' : 'REMOTE_REJECTED',
+        answered.message,
+        { cause: error },
+      );
     }
     /* The caller's own deadline is not the remote's answer (P36). An aborted
      * request is this host giving up on purpose, and saying "the remote could
@@ -589,11 +600,23 @@ export const remoteTransportError = (error: unknown, context: RemoteTransportCon
           : proxied
             ? 'REMOTE_REAUTHORIZATION_REQUIRED'
             : 'REMOTE_FORBIDDEN'
-        : status === 404
-          ? 'REMOTE_NOT_FOUND'
+        : status === 404 || status === 410
+          ? /* 410 is a project the hosted remote has tombstoned (charter NI12):
+               it existed, it is gone, and no amount of retrying brings it back.
+               It joins 404 rather than getting a code of its own because the
+               two ask the person for exactly the same thing — stop syncing to
+               this address — and the server's own sentence below is what tells
+               them which of the two happened. */
+            'REMOTE_NOT_FOUND'
           : status === 413
             ? 'REMOTE_QUOTA_EXCEEDED'
-            : 'REMOTE_UNAVAILABLE';
+            : status === 422
+              ? /* The refs themselves were not committable: loose objects, or a
+                   connectivity check the pushed packs failed. The remote said
+                   so in its own words and a blind re-push reproduces it, so
+                   this is a rejection carrying that sentence, not a retry. */
+                'REMOTE_REJECTED'
+              : 'REMOTE_UNAVAILABLE';
   return new RevisionPortError(code, answered.message ?? refusalSentence(code), { cause: error });
 };
 
@@ -625,6 +648,12 @@ export const registerProjectFailureMessage = (status: number, code?: string, mes
     }
     if (code === 'GIT_SYNC_NOT_ENTITLED') {
       return 'Syncing files to Tau Cloud is a paid plan feature.';
+    }
+    /* D27: registration needs `owner`, so a collaborator pressing *Connect* is
+     * refused by role rather than by plan or by quota. Without its own rung it
+     * fell through to "Try again", which is the one thing retrying cannot fix. */
+    if (code === 'PROJECT_ROLE_INSUFFICIENT') {
+      return 'Only the project owner can back this project up to Tau Cloud.';
     }
   }
   if (status === 404) {

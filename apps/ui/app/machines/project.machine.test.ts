@@ -117,7 +117,7 @@ describe('projectMachine', () => {
       ['exports/model.step', false],
       ['.tau/chats/chat-1/events.jsonl', false],
       ['.tau/cache/render.bin', false],
-      ['.tau/revisions/HEAD', false],
+      ['.git/HEAD', false],
       ['node_modules', false],
       ['node_modules/replicad/index.d.ts', false],
       /* An authored `.tau` control *is* content: the blanket `.tau` exclusion
@@ -417,7 +417,7 @@ describe('projectMachine', () => {
       actor.send({
         type: 'projectFileActivity',
         operation: 'batchWritten',
-        paths: ['', 'tau.json', '.tau/cache/render.bin', '.tau/revisions/HEAD', 'node_modules/pkg/index.d.ts'],
+        paths: ['', 'tau.json', '.tau/cache/render.bin', '.git/HEAD', 'node_modules/pkg/index.d.ts'],
       });
       expect(emitted).toEqual([]);
       actor.stop();

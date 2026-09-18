@@ -21,6 +21,7 @@ import {
   isTauApiUrl,
   lfsRemoteUnsupportedMessage,
   refPatternIsHostLocal,
+  registerProjectFailureMessage,
   remoteCarriesLargeObjects,
   remoteKindOf,
   remoteOf,
@@ -30,6 +31,10 @@ import {
   tauRemoteUrl,
 } from '#remotes.js';
 import type { GitRemoteCredential } from '#remotes.js';
+/* The two W4 rows assert the *consequence* of the code, not only the code: a
+   terminal class is what stops `sync.machine` retrying, and that classifier is
+   the machine's, not this module's. */
+import { syncFailureReason } from '#sync.machine.js';
 
 describe('remotes', () => {
   it('reads the kind from the reserved name, never from the URL', () => {
@@ -233,6 +238,44 @@ describe('remoteTransportError', () => {
     expect(refusal.message).toBe('Tau: refused refs/tau/chats/abc — it does not fast-forward 1a2b3c4d');
   });
 
+  /*
+   * D20's ceiling refusal arrives the same way — on the sideband, with no HTTP
+   * status — but it is a quota answer, not a rule the caller broke, so it must
+   * reach the machine as `quota` and not offer "Sync now" again. It is told
+   * apart by the marker the hook opens with (`ceilingRefusalMarker`,
+   * `apps/api/app/api/git/git.constants.ts`), and the remote's own sentence and
+   * file list are still what the caller reads (NI13, N4).
+   */
+  it('reads the ceiling refusal on the sideband as a quota answer, with the file list intact', () => {
+    const stderr = [
+      'remote: Tau: repository size limit exceeded — this push needs 4080 bytes more than this repository may hold.',
+      'remote: Tau: the largest files it adds are:',
+      'remote:   huge.bin (5000 bytes)',
+      'remote: Tau: nothing was written.',
+      'To https://api.tau.build/v1/git/p1.git',
+      ' ! [remote rejected] refs/heads/main -> refs/heads/main (pre-receive hook declined)',
+    ].join('\n');
+
+    const refusal = remoteTransportError(new Error(stderr), { remote: tauRemoteName, stderr });
+
+    expect(refusal.code).toBe('REMOTE_QUOTA_EXCEEDED');
+    expect(syncFailureReason(refusal)).toBe('quota');
+    expect(refusal.message).toContain('Tau: repository size limit exceeded');
+    expect(refusal.message).toContain('huge.bin (5000 bytes)');
+  });
+
+  it('leaves a sideband refusal without the ceiling marker a plain rejection', () => {
+    const stderr = [
+      'remote: Tau: refused refs/heads/main — Tau Cloud never deletes a ref; retention is decided on the server.',
+      ' ! [remote rejected] refs/heads/main -> refs/heads/main (pre-receive hook declined)',
+    ].join('\n');
+
+    const refusal = remoteTransportError(new Error(stderr), { remote: tauRemoteName, stderr });
+
+    expect(refusal.code).toBe('REMOTE_REJECTED');
+    expect(syncFailureReason(refusal)).toBe('rejected');
+  });
+
   /* Rule 19: a browser request always sends `Origin`, so the API answers with
    * its JSON envelope, whose sentence is `error` (`HttpExceptionFilter`); only
    * git-lfs's batch body names it `message`. Reading `message` alone rendered
@@ -268,6 +311,48 @@ describe('remoteTransportError', () => {
     });
 
     expect(remoteTransportError(thrown, { remote: tauRemoteName }).message).toBe('Tau Cloud storage is full.');
+  });
+
+  /* W4: the hosted remote answers `410 GIT_REPOSITORY_DELETED` for a project it
+   * has tombstoned (charter NI12). Without a ladder row it fell through to
+   * `REMOTE_UNAVAILABLE`, which `sync.machine` retries — so a sync loop kept
+   * asking a deleted project for its refs forever. It joins 404's terminal
+   * class, and the server's own sentence is what says which of the two it was. */
+  it('reads a tombstoned project as terminally not found, in the server’s own words', () => {
+    const sentence = 'This project has been deleted.';
+    const thrown = Object.assign(new Error('HTTP Error: 410 Gone'), {
+      data: {
+        statusCode: 410,
+        response: JSON.stringify({ error: sentence, code: 'GIT_REPOSITORY_DELETED', statusCode: 410 }),
+      },
+    });
+
+    const refusal = remoteTransportError(thrown, { remote: tauRemoteName });
+
+    expect(refusal.code).toBe('REMOTE_NOT_FOUND');
+    expect(refusal.message).toBe(sentence);
+    /* The point of the row: `notFound` is terminal, so nothing retries it. */
+    expect(syncFailureReason(refusal)).toBe('notFound');
+  });
+
+  /* W4: `422 GIT_PUSH_NOT_COMMITTABLE` is the commit protocol refusing the refs
+   * themselves — loose objects, or packs that failed the connectivity check.
+   * A re-push reproduces it, so it is a rejection in the server's words rather
+   * than the retryable outage `REMOTE_UNAVAILABLE` made it. */
+  it('reads an uncommittable push as a rejection carrying the server’s sentence', () => {
+    const sentence = 'the lease holds 3 loose objects; committing would name refs whose objects are in no pack';
+    const thrown = Object.assign(new Error('HTTP Error: 422'), {
+      data: {
+        statusCode: 422,
+        response: JSON.stringify({ error: sentence, code: 'GIT_PUSH_NOT_COMMITTABLE', statusCode: 422 }),
+      },
+    });
+
+    const refusal = remoteTransportError(thrown, { remote: tauRemoteName });
+
+    expect(refusal.code).toBe('REMOTE_REJECTED');
+    expect(refusal.message).toBe(sentence);
+    expect(syncFailureReason(refusal)).toBe('rejected');
   });
 
   it('still reads a failure with neither a status nor a server sentence as unreachable', () => {
@@ -388,5 +473,29 @@ describe('createGitRemoteTransport', () => {
       'has not been told where the Tau API is',
     );
     expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * W5b: a collaborator pressing *Connect* (D27).
+ *
+ * `PUT /v1/projects/:id` needs `owner`, so a `write` collaborator reaching it
+ * is answered `403 PROJECT_ROLE_INSUFFICIENT` — a class this ladder had no rung
+ * for, which made it fall through to "Try again" on a refusal that retrying
+ * cannot fix.
+ */
+describe('registerProjectFailureMessage', () => {
+  it('tells a collaborator the owner alone backs a project up', () => {
+    expect(registerProjectFailureMessage(403, 'PROJECT_ROLE_INSUFFICIENT', 'Forbidden')).toBe(
+      'Only the project owner can back this project up to Tau Cloud.',
+    );
+  });
+
+  it('keeps the classes it already answered', () => {
+    expect(registerProjectFailureMessage(403, 'GIT_SYNC_NOT_ENTITLED')).toBe(
+      'Syncing files to Tau Cloud is a paid plan feature.',
+    );
+    expect(registerProjectFailureMessage(404)).toBe('Tau Cloud has no project with this id for your account.');
+    expect(registerProjectFailureMessage(500)).toBe('Tau Cloud could not register this project. Try again.');
   });
 });

@@ -9,8 +9,18 @@ import {
   readFromDirectoryHandle,
   normalizeFilePaths,
   getImportName,
+  isExcludedImportPath,
 } from '#utils/file-reader.utils.js';
 import { findMainFile } from '#routes/import.$/import.utils.js';
+
+/**
+ * What {@link isExcludedImportPath} leaves behind, dropped at the one place
+ * every read actor's result enters the machine — so the repository a zip
+ * carried reaches neither the main-file picker, nor `filesReady`, nor
+ * `createProject`.
+ */
+const withoutExcludedImportPaths = (files: FileMap): FileMap =>
+  new Map([...files].filter(([path]) => !isExcludedImportPath(path)));
 
 /**
  * Import Disk Machine Context
@@ -209,7 +219,7 @@ export const importDiskMachine = setup({
     setFilesFromResult: assign({
       files({ event }) {
         assertEvent(event, 'filesRead');
-        return event.files;
+        return withoutExcludedImportPaths(event.files);
       },
       importName({ event }) {
         assertEvent(event, 'filesRead');

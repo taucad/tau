@@ -1,50 +1,75 @@
 /* oxlint-disable new-cap, typescript/consistent-type-imports -- NestJS decorators are factories and constructor injection needs the runtime class */
 /* eslint-disable @typescript-eslint/naming-convention -- decorators are not constructors; git-lfs wire fields are snake_case */
 import { spawn } from 'node:child_process';
-import { createHash, randomFillSync } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { createServer, request as httpRequest } from 'node:http';
-import type { Server } from 'node:http';
-import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { Readable } from 'node:stream';
+import process from 'node:process';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { Injectable, Module, UnauthorizedException, VersioningType } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  Module,
+  NotFoundException,
+  UnauthorizedException,
+  VersioningType,
+} from '@nestjs/common';
 import type { CanActivate, ExecutionContext, MiddlewareConsumer, NestModule, OnModuleInit } from '@nestjs/common';
 import { APP_FILTER, APP_PIPE, HttpAdapterHost } from '@nestjs/core';
-import { ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { FastifyAdapter } from '@nestjs/platform-fastify';
 import type { FastifyInstance } from 'fastify';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { AuthGuard } from '#auth/auth.guard.js';
+import { getEnvironment } from '#config/environment.config.js';
 import { corsBaseConfiguration } from '#constants/cors.constant.js';
 import { DatabaseService } from '#database/database.service.js';
 import { RedisService } from '#redis/redis.service.js';
 import { HttpExceptionFilter } from '#filters/http-exception.filter.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
+import { StorageModule } from '#storage/storage.module.js';
+import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';
+import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
+import type { ProjectRole } from '#api/collaboration/project-access.service.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
+import { repositoryStoreKey } from '#api/git/git.constants.js';
 import { GitBasicAuthMiddleware, registerGitContentTypeParsers } from '#api/git/git-transport.js';
 import { GitController } from '#api/git/git.controller.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
+import { tenantLfsObjectKey } from '#api/git/lfs-keys.js';
 import { GitProxyController } from '#api/git/git-proxy.controller.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
-import { gitLfsObjectKey } from '#api/git/git.constants.js';
-import { project, projectGit } from '#database/schema.js';
-
-const projectId = 'proj_w11a';
-const ownerId = 'user-owner';
-const ownerToken = 'owner-token';
+import { RepositoryStoreError } from '#api/git/store/errors.js';
+import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
+import type { RepositoryStore } from '#api/git/store/port.js';
 
 /**
- * This harness's stand-in for the deployed `TAU_API_URL`.
+ * The Tau Hosted Remote end to end over the repository store (W4).
  *
- * Reserved before the application is built, because `GitController` reads the
- * value in its constructor (the point of C24 is that the LFS endpoint is a
- * configured fact rather than a per-request one) and stock `git-lfs` then has
- * to reach it. Assigned in `beforeAll`.
+ * Stock `git` talks to a real Nest application, which hydrates a real lease
+ * from real object storage (local MinIO) on every request and commits the
+ * manifest before it answers. Nothing here is a filesystem repository: between
+ * two requests the only state that exists is in the store.
  */
+
+const suffix = randomBytes(5).toString('hex');
+const projectId = `proj-w4-${suffix}`;
+const ownerId = `user-owner-${suffix}`;
+
+/** The four callers D27's roles are proved with. */
+const callers = {
+  owner: { id: ownerId, token: 'owner-token', role: 'owner' as ProjectRole | undefined },
+  writer: { id: `user-writer-${suffix}`, token: 'writer-token', role: 'write' as ProjectRole | undefined },
+  reader: { id: `user-reader-${suffix}`, token: 'reader-token', role: 'read' as ProjectRole | undefined },
+  stranger: { id: `user-stranger-${suffix}`, token: 'stranger-token', role: undefined },
+};
+
+const roleRank: Record<ProjectRole, number> = { read: 0, write: 1, owner: 2 };
+
 let configuredApiUrl = '';
 
 /** A port nothing is listening on yet, so the API can be configured for it. */
@@ -60,69 +85,17 @@ const reservePort = async (): Promise<number> =>
     });
   });
 
-/**
- * A forwarding shim that hides *smart* HTTP and passes everything else through
- * to the API unchanged.
- *
- * Git has no client-side switch for the dumb protocol: it asks for
- * `info/refs?service=git-upload-pack` and walks the dumb layout only when the
- * answer is not a smart advertisement. A 404 is not that — git dies with
- * "repository not found" — so the shim drops the `service` parameter and lets
- * the API answer with the plain `info/refs` file `update-server-info` wrote,
- * which is exactly what a deployment without smart HTTP returns. Every other
- * byte of the clone — `HEAD`, `info/refs`,
- * `objects/info/packs`, each loose object and pack, and git-lfs's batch POST —
- * is served by the API's own routes, which is what W18/V8 name as an
- * acceptance path and what no suite had ever actually performed.
- *
- * @param target - The API origin to forward to.
- * @returns The shim server and its origin.
- */
-const createDumbOnlyProxy = async (target: string): Promise<{ server: Server; origin: string }> =>
-  new Promise((resolve) => {
-    const upstream = new URL(target);
-    const server = createServer((incoming, response) => {
-      const requested = incoming.url ?? '/';
-      const url = requested.includes('?service=') ? requested.slice(0, requested.indexOf('?')) : requested;
-      const forwarded = httpRequest(
-        {
-          hostname: upstream.hostname,
-          port: upstream.port,
-          path: url,
-          method: incoming.method,
-          headers: incoming.headers,
-        },
-        (answer) => {
-          response.writeHead(answer.statusCode ?? 502, answer.headers);
-          answer.pipe(response);
-        },
-      );
-      forwarded.on('error', () => {
-        response.statusCode = 502;
-        response.end();
-      });
-      incoming.pipe(forwarded);
-    });
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      const port = typeof address === 'string' || address === null ? 0 : address.port;
-      resolve({ server, origin: `http://127.0.0.1:${String(port)}` });
-    });
-  });
-
 /** Mutable fixture state the stubs read. */
 const state = {
-  ownerId: ownerId as string | undefined,
   tier: 'pro' as 'free' | 'pro' | 'enterprise',
   storageBytes: 0,
   lfsBytes: 0,
+  generation: 0,
+  derivedGeneration: 0,
 };
 
-/**
- * What one request cost the database, so the read path's cost is a fact rather
- * than a reading of the source (review C28).
- */
-const queries = { project: 0, entitlements: 0, usage: 0 };
+/** What one request cost the plan lookups, so the read path's cost is a fact. */
+const queries = { entitlements: 0, usage: 0 };
 
 const runGit = async (
   args: readonly string[],
@@ -157,6 +130,16 @@ const runGit = async (
     });
   });
 
+/** Runs one git command and fails the test with git's own stderr if it refused. */
+const gitOk = async (
+  args: readonly string[],
+  cwd: string,
+): Promise<{ code: number | undefined; stdout: string; stderr: string }> => {
+  const outcome = await runGit(args, cwd);
+  expect(outcome.code, `git ${args.join(' ')}: ${outcome.stderr}`).toBe(0);
+  return outcome;
+};
+
 @Injectable()
 class GitTestAuthGuard implements CanActivate {
   public canActivate(context: ExecutionContext): boolean {
@@ -165,174 +148,156 @@ class GitTestAuthGuard implements CanActivate {
       user?: unknown;
     }>();
     const { authorization } = request.headers;
-    if (authorization === `Bearer ${ownerToken}`) {
-      request.user = { id: ownerId, name: 'Owner', email: 'owner@test.com' };
+    const caller = Object.values(callers).find((candidate) => authorization === `Bearer ${candidate.token}`);
+    if (caller !== undefined) {
+      request.user = { id: caller.id, name: caller.id, email: `${caller.id}@test.com` };
       return true;
     }
     /* The deployed `AuthGuard` raises rather than returning `false`, and the
-       difference is 401 versus Nest's default 403 — which is what a browser
-       client has to tell apart (review C8). */
+       difference is 401 versus Nest's default 403 (review C8). */
     throw new UnauthorizedException({ code: 'UNAUTHORIZED', message: 'Authentication required' });
   }
 }
 
-/** The bytes a presigned PUT stored, keyed by object-store key. */
-const objectStore = new Map<string, Uint8Array<ArrayBuffer>>();
+/**
+ * Delegates every port member to `inner` and lets one test replace
+ * `commitManifest`, which is how a rate-limited or lost conditional write is
+ * reproduced against the real adapter rather than a fake one.
+ */
+const storeControl: { commitManifest: RepositoryStore['commitManifest'] | undefined } = {
+  commitManifest: undefined,
+};
+
+const wrapStore = (inner: RepositoryStore): RepositoryStore => ({
+  capabilities: inner.capabilities,
+  readManifest: async (locator) => inner.readManifest(locator),
+  commitManifest: async (locator, next, expected) =>
+    (storeControl.commitManifest ?? inner.commitManifest.bind(inner))(locator, next, expected),
+  // oxlint-disable-next-line max-params -- the port's own signature
+  putObject: async (locator, key, body, options) => inner.putObject(locator, key, body, options),
+  getObject: async (locator, key, range) => inner.getObject(locator, key, range),
+  listObjects: (locator, prefix) => inner.listObjects(locator, prefix),
+  deleteObjects: async (locator, keys) => inner.deleteObjects(locator, keys),
+});
+
 const lfsRows = new Map<string, { size: number; finalized: boolean }>();
 
-const createObjectStoreServer = async (): Promise<{
-  server: Server;
-  origin: string;
-}> =>
-  new Promise((resolve) => {
-    const server = createServer((request, response) => {
-      const key = decodeURIComponent((request.url ?? '/').slice(1).split('?')[0] ?? '');
-      if (request.method === 'PUT') {
-        const chunks: Array<Uint8Array<ArrayBuffer>> = [];
-        request.on('data', (chunk: Uint8Array<ArrayBuffer>) => chunks.push(chunk));
-        request.on('end', () => {
-          objectStore.set(key, Buffer.concat(chunks));
-          response.statusCode = 200;
-          response.end();
-        });
-        return;
-      }
-      const stored = objectStore.get(key);
-      if (stored === undefined) {
-        response.statusCode = 404;
-        response.end();
-        return;
-      }
-      response.statusCode = 200;
-      response.setHeader('content-length', String(stored.byteLength));
-      response.end(stored);
-    });
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      const port = typeof address === 'string' || address === null ? 0 : address.port;
-      resolve({ server, origin: `http://127.0.0.1:${port}` });
-    });
-  });
-
-describe('Tau Hosted Remote (git server) over HTTP', () => {
+describe('Tau Hosted Remote (git server) over the repository store', () => {
   let app: NestFastifyApplication;
   let baseUrl: string;
   let remoteUrl: string;
-  let gitRoot: string;
   let workspace: string;
-  let storeOrigin: string;
-  let storeServer: Server;
+  let repositories: GitRepositoryService;
+  let storage: ObjectStorageService;
+
+  const remoteFor = (token: string): string =>
+    `http://tau:${token}@${new URL(configuredApiUrl).host}/v1/git/${projectId}.git`;
+
+  const advertised = async (token = callers.owner.token): Promise<string> => {
+    const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    return response.text();
+  };
 
   beforeAll(async () => {
-    gitRoot = await mkdtemp(path.join(tmpdir(), 'tau-git-root-'));
     workspace = await mkdtemp(path.join(tmpdir(), 'tau-git-work-'));
     const port = await reservePort();
     configuredApiUrl = `http://127.0.0.1:${String(port)}`;
-    ({ server: storeServer, origin: storeOrigin } = await createObjectStoreServer());
+    process.env.TAU_API_URL = configuredApiUrl;
 
+    /* One statement shape per reader, because the derivation path and the plan
+       lookups ask different questions of the same two tables. */
+    const rows = (): unknown[] => [
+      {
+        storageBytes: state.storageBytes,
+        lfsBytes: state.lfsBytes,
+        generation: state.generation,
+        derivedGeneration: state.derivedGeneration,
+      },
+    ];
+    /* oxlint-disable typescript/promise-function-async -- a Drizzle builder is
+       both awaitable and chainable; an `async` member would return a promise of
+       the builder rather than being one. */
+    const selectBuilder = (): unknown => ({
+      from: () => ({
+        leftJoin: () => ({ where: () => Object.assign(Promise.resolve(rows()), { limit: async () => rows() }) }),
+        where: () => Object.assign(Promise.resolve([] as unknown[]), { limit: async () => rows() }),
+      }),
+    });
+    /* oxlint-enable typescript/promise-function-async -- end of the builder stub */
     const databaseStub = {
       database: {
-        select: () => ({
-          from: (table: unknown) => ({
-            where: () => ({
-              limit: async (): Promise<unknown[]> => {
-                if (table === project) {
-                  queries.project += 1;
-                  return state.ownerId === undefined ? [] : [{ ownerId: state.ownerId }];
-                }
-                if (table === projectGit) {
-                  return [
-                    {
-                      storageBytes: state.storageBytes,
-                      lfsBytes: state.lfsBytes,
-                    },
-                  ];
-                }
-                return [];
-              },
-            }),
-          }),
-        }),
+        select: selectBuilder,
         insert: () => ({
-          values: (values: { storageBytes?: number; lfsBytes?: number }) => ({
-            onConflictDoUpdate: async (update: { set: Record<string, unknown> }): Promise<void> => {
-              if (typeof update.set['storageBytes'] === 'number') {
-                state.storageBytes = update.set['storageBytes'];
-              } else if (typeof values.storageBytes === 'number' && values.storageBytes > 0) {
-                state.storageBytes = values.storageBytes;
+          values: (values: Record<string, unknown>) => ({
+            onConflictDoUpdate: async (change: { set: Record<string, unknown> }): Promise<void> => {
+              const merged = { ...values, ...change.set };
+              if (typeof merged['storageBytes'] === 'number') {
+                state.storageBytes = merged['storageBytes'];
               }
-              if (update.set['lfsBytes'] !== undefined) {
-                state.lfsBytes += values.lfsBytes ?? 0;
+              if (typeof merged['generation'] === 'number') {
+                state.generation = merged['generation'];
+              }
+              if (typeof merged['derivedGeneration'] === 'number') {
+                state.derivedGeneration = merged['derivedGeneration'];
               }
             },
           }),
         }),
+        transaction: async (run: (transaction: unknown) => Promise<unknown>): Promise<unknown> =>
+          run({
+            execute: async (): Promise<void> => undefined,
+            update: () => ({
+              set: () => ({ where: () => ({ returning: async (): Promise<unknown[]> => [] }) }),
+            }),
+          }),
       },
     };
 
-    const objectStorageStub = {
-      headBlob: async (args: { key: string }) => {
-        const stored = objectStore.get(args.key);
-        return stored === undefined
-          ? undefined
-          : {
-              contentType: 'application/octet-stream',
-              size: stored.byteLength,
-              etag: '"x"',
-              cacheControl: '',
-            };
-      },
-      getBlob: async (args: { key: string }) => {
-        const stored = objectStore.get(args.key);
-        if (stored === undefined) {
-          throw new Error('Object missing');
+    const projectAccessStub = {
+      authorize: async (project: string, userId: string, need: ProjectRole) => {
+        const caller = Object.values(callers).find((candidate) => candidate.id === userId);
+        if (caller?.role === undefined) {
+          throw new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: 'Project not found' });
         }
-        return {
-          body: Readable.from([stored]),
-          contentType: 'application/octet-stream',
-          etag: 'x',
-          contentLength: stored.byteLength,
-        };
+        if (roleRank[caller.role] < roleRank[need]) {
+          throw new ForbiddenException({
+            code: 'PROJECT_ROLE_INSUFFICIENT',
+            message: `This project needs ${need} access.`,
+          });
+        }
+        /* Every collaborator's bytes land in the *owner's* tenant prefix (D27),
+           which is why one locator answers for all four callers. */
+        return { projectId: project, ownerId, role: caller.role };
       },
-      presignPut: async (args: { key: string }) => `${storeOrigin}/${encodeURIComponent(args.key)}`,
-      presignGet: async (args: { key: string }) => `${storeOrigin}/${encodeURIComponent(args.key)}`,
-      putBlob: async (args: { key: string; body: Uint8Array<ArrayBuffer> }) => {
-        objectStore.set(args.key, Buffer.from(args.body));
-        return { etag: '"x"', alreadyExisted: false };
-      },
+      invalidate: () => undefined,
     };
 
     @Module({
+      imports: [ConfigModule.forRoot({ validate: getEnvironment, isGlobal: true }), StorageModule],
       controllers: [GitController, GitProxyController],
       providers: [
         GitRepositoryService,
         GitLfsService,
+        S3RepositoryStore,
+        {
+          provide: repositoryStoreKey,
+          useFactory: (inner: S3RepositoryStore) => wrapStore(inner),
+          inject: [S3RepositoryStore],
+        },
+        { provide: DatabaseService, useValue: databaseStub },
         {
           provide: RedisService,
           useValue: { client: { get: async () => undefined, set: async () => 'OK' } },
         },
-        { provide: DatabaseService, useValue: databaseStub },
-        { provide: ObjectStorageService, useValue: objectStorageStub },
+        { provide: ProjectAccessService, useValue: projectAccessStub },
         {
           provide: commercialEntitlementsKey,
           useValue: {
             getEntitlements: async () => {
               queries.entitlements += 1;
-              return {
-                tier: state.tier,
-                canSyncFiles: state.tier !== 'free',
-              };
-            },
-          },
-        },
-        {
-          provide: ConfigService,
-          useValue: {
-            get: (key: string): unknown => {
-              if (key === 'TAU_GIT_ROOT') {
-                return gitRoot;
-              }
-              return key === 'TAU_API_URL' ? configuredApiUrl : '';
+              return { tier: state.tier, canSyncFiles: state.tier !== 'free' };
             },
           },
         },
@@ -352,23 +317,22 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
       }
     }
 
-    const moduleRef = await Test.createTestingModule({
-      imports: [GitTestModule],
-    })
+    const moduleRef = await Test.createTestingModule({ imports: [GitTestModule] })
       .overrideGuard(AuthGuard)
       .useClass(GitTestAuthGuard)
       .compile();
 
     app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter({ bodyLimit: 256 * 1024 * 1024 }));
-    /* The deployed allow-list, so a browser preflight is answered here exactly
-       as `main.ts` answers it (W18 DEF-5). Only the origin predicate differs. */
     app.enableCors({ ...corsBaseConfiguration, origin: true });
     app.enableVersioning({ type: VersioningType.URI });
     await app.init();
     await app.getHttpAdapter().getInstance().ready();
     await app.listen(new URL(configuredApiUrl).port, '127.0.0.1');
 
-    const repositories = app.get(GitRepositoryService);
+    storage = app.get(ObjectStorageService);
+    assertDestructiveTestBucketAllowed(storage.bucketFor('private'), 'the Tau Hosted Remote HTTP suite');
+
+    repositories = app.get(GitRepositoryService);
     vi.spyOn(repositories, 'readOwnerUsage').mockImplementation(async () => {
       queries.usage += 1;
       return { storageBytes: state.storageBytes, lfsBytes: state.lfsBytes };
@@ -384,12 +348,7 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
       const incoming = novel.reduce((total, object) => total + object.size, 0);
       const remainingBytes = Math.max(0, access.storageLimitBytes - state.storageBytes - state.lfsBytes);
       if (incoming > remainingBytes) {
-        return {
-          status: 'quota',
-          shortfallBytes: incoming - remainingBytes,
-          remainingBytes,
-          files: novel,
-        };
+        return { status: 'quota', shortfallBytes: incoming - remainingBytes, remainingBytes, files: novel };
       }
       for (const object of novel) {
         lfsRows.set(object.oid, { size: object.size, finalized: false });
@@ -397,10 +356,7 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
       }
       return {
         status: 'reserved',
-        objects: objects.map((object) => ({
-          ...object,
-          finalized: lfsRows.get(object.oid)?.finalized ?? false,
-        })),
+        objects: objects.map((object) => ({ ...object, finalized: lfsRows.get(object.oid)?.finalized ?? false })),
       };
     });
     vi.spyOn(repositories, 'finalizeLfsObject').mockImplementation(async ({ oid, size }) => {
@@ -416,51 +372,47 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
     });
 
     baseUrl = configuredApiUrl;
-    remoteUrl = `http://tau:${ownerToken}@${new URL(configuredApiUrl).host}/v1/git/${projectId}.git`;
-  });
+    remoteUrl = remoteFor(callers.owner.token);
+  }, 120_000);
 
   afterAll(async () => {
     await app.close();
-    storeServer.close();
-    await rm(gitRoot, { recursive: true, force: true });
+    await storage.deleteEntirePrefixForPurgeJob({
+      namespace: 'tenants',
+      keyPrefix: `${ownerId}/`,
+      tier: 'private',
+    });
     await rm(workspace, { recursive: true, force: true });
-  });
+  }, 60_000);
 
-  it('serves a stock `git clone`, `git push` and `git fetch` for a project', async () => {
+  it('serves a stock `git clone`, `git push` and `git fetch` with nothing on disk between them', async () => {
     const clone = path.join(workspace, 'clone');
-    const cloned = await runGit(['clone', remoteUrl, clone], workspace);
-    expect(cloned.code, cloned.stderr).toBe(0);
+    await gitOk(['clone', remoteUrl, clone], workspace);
 
     await writeFile(path.join(clone, 'part.ts'), 'export const width = 10;\n', 'utf8');
-    {
-      const outcome = await runGit(['add', '.'], clone);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
-    {
-      const outcome = await runGit(['commit', '-m', 'first revision'], clone);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
-    state.storageBytes = 0;
+    await gitOk(['add', '.'], clone);
+    await gitOk(['commit', '-m', 'first revision'], clone);
+
     const pushed = await runGit(['push', 'origin', 'HEAD:refs/heads/main'], clone);
     expect(pushed.code, pushed.stderr).toBe(0);
-    await expect
-      .poll(() => state.storageBytes, {
-        message: 'a completed receive-pack response must retain its post-push accounting work',
-        timeout: 10_000,
-      })
-      .toBeGreaterThan(0);
+
+    /* D19: the generation is recorded and everything derived from it caught up
+       *before* the response — no background work, no poll. Accounting is the
+       manifest's live pack bytes, so a push that stored bytes is a row above
+       zero. */
+    expect(state.generation).toBe(1);
+    expect(state.derivedGeneration).toBe(1);
+    expect(state.storageBytes).toBeGreaterThan(0);
 
     const second = path.join(workspace, 'second');
-    const secondClone = await runGit(['clone', remoteUrl, second], workspace);
-    expect(secondClone.code, secondClone.stderr).toBe(0);
-    const log = await runGit(['log', '--oneline'], second);
+    await gitOk(['clone', remoteUrl, second], workspace);
+    const log = await gitOk(['log', '--oneline'], second);
     expect(log.stdout).toContain('first revision');
-  });
+  }, 120_000);
 
-  // Red pin (a).
   it('advertises refs/heads/main on info/refs?service=git-upload-pack', async () => {
     const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
-      headers: { Authorization: `Bearer ${ownerToken}` },
+      headers: { Authorization: `Bearer ${callers.owner.token}` },
     });
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('application/x-git-upload-pack-advertisement');
@@ -469,30 +421,233 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
     expect(body).toContain('refs/heads/main');
   });
 
-  it.each(['git-upload-pack', 'git-receive-pack'] as const)(
-    'should answer a %s POST with the smart-HTTP result status and media type',
-    async (service) => {
-      const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/${service}`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${ownerToken}`,
-          'content-type': `application/x-${service}-request`,
-        },
-        body: '0000',
-      });
-      await response.arrayBuffer();
+  /** D12: the dumb layout is gone, and an unnamed service is now a refusal. */
+  it('refuses info/refs without a service instead of answering a dumb-HTTP layout', async () => {
+    const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs`, {
+      headers: { Authorization: `Bearer ${callers.owner.token}` },
+    });
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain('smart HTTP');
 
-      expect(response.status).toBe(200);
-      expect(response.headers.get('content-type')?.split(';', 1)[0]).toBe(`application/x-${service}-result`);
-    },
-  );
+    const objects = await fetch(`${baseUrl}/v1/git/${projectId}.git/objects/info/packs`, {
+      headers: { Authorization: `Bearer ${callers.owner.token}` },
+    });
+    expect(objects.status).toBe(404);
+  });
 
   /**
-   * W18 DEF-5, pinned on the wire rather than on the constant: a real preflight
-   * for the header `isomorphic-git` sends. Until `git-protocol` was allowed, the
-   * `204` below carried every other name and Chromium dropped the `GET` that
-   * follows without surfacing anything to the page.
+   * NI13: the hook's own sentence reaches the client, byte for byte, and the
+   * A39 two-set rule holds — the refused record ref does not stop the branch,
+   * because they are two pushes.
    */
+  it('relays the pre-receive refusal verbatim and keeps the pushes that were allowed', async () => {
+    const clone = path.join(workspace, 'clone');
+    await gitOk(['update-ref', 'refs/tau/chats/chat_1', 'HEAD'], clone);
+    await gitOk(['update-ref', 'refs/tau/owners/owner_1', 'HEAD'], clone);
+
+    const refusedOwners = await runGit(['push', 'origin', 'refs/tau/owners/owner_1'], clone);
+    expect(refusedOwners.code).not.toBe(0);
+    expect(refusedOwners.stderr).toContain(
+      'Tau: refused refs/tau/owners/owner_1 — host-local refs never leave a host.',
+    );
+
+    const chatPush = await runGit(['push', 'origin', 'refs/tau/chats/chat_1'], clone);
+    expect(chatPush.code, chatPush.stderr).toBe(0);
+
+    await writeFile(path.join(clone, 'part.ts'), 'export const width = 12;\n', 'utf8');
+    await gitOk(['commit', '-am', 'second revision'], clone);
+    const branchPush = await runGit(['push', 'origin', 'HEAD:refs/heads/main'], clone);
+    expect(branchPush.code, branchPush.stderr).toBe(0);
+
+    const references = await advertised();
+    expect(references).toContain('refs/tau/chats/chat_1');
+    expect(references).not.toContain('refs/tau/owners/owner_1');
+  }, 120_000);
+
+  it('rejects a mixed stock push atomically, without accepting its ordinary branch', async () => {
+    const clone = path.join(workspace, 'clone');
+    await writeFile(path.join(clone, 'part.ts'), 'export const width = 13;\n', 'utf8');
+    await gitOk(['commit', '-am', 'mixed push probe'], clone);
+    await gitOk(['update-ref', 'refs/heads/sync/tau/main', 'HEAD'], clone);
+
+    const pushed = await runGit(['push', 'origin', 'HEAD:refs/heads/atomic-probe', 'refs/heads/sync/tau/main'], clone);
+    expect(pushed.code).not.toBe(0);
+    expect(pushed.stderr).toContain('refs/heads/sync/tau/main');
+
+    expect(await advertised()).not.toContain('atomic-probe');
+  }, 120_000);
+
+  /**
+   * D4: a manifest race the committer lost is a 503 the client retries, never a
+   * refusal and never a silent success. The race is injected at W2's own
+   * `before-manifest-commit` fault point, which is the instant a second writer
+   * would have won.
+   */
+  it('answers a lost manifest race with 503 and succeeds on the retry', async () => {
+    const clone = path.join(workspace, 'clone');
+    await writeFile(path.join(clone, 'part.ts'), 'export const width = 14;\n', 'utf8');
+    await gitOk(['commit', '-am', 'raced revision'], clone);
+
+    repositories.faults = (point) => {
+      if (point === 'before-manifest-commit') {
+        throw new RepositoryStoreError('lost', 'another writer committed first');
+      }
+    };
+    const raced = await runGit(['push', 'origin', 'HEAD:refs/heads/main'], clone);
+    repositories.faults = undefined;
+
+    expect(raced.code, `the lost race was accepted: ${raced.stderr}`).not.toBe(0);
+    expect(raced.stderr).toMatch(/503|committed first/u);
+    expect(await advertised()).not.toContain('raced revision');
+
+    const retried = await runGit(['push', 'origin', 'HEAD:refs/heads/main'], clone);
+    expect(retried.code, retried.stderr).toBe(0);
+  }, 120_000);
+
+  /**
+   * W0b: R2 answers a same-key burst with `429` and `retry-after: 5`, which the
+   * AWS SDK surfaces under an unrelated error *name* — so the classification is
+   * the HTTP status alone. W2 retries the conditional write twice; a caller that
+   * exhausts them is a lost race for the client's purposes, which is 503 and a
+   * retry rather than a 500.
+   */
+  it('retries a rate-limited manifest write and answers 503 once the retries are spent', async () => {
+    const clone = path.join(workspace, 'clone');
+    await writeFile(path.join(clone, 'part.ts'), 'export const width = 15;\n', 'utf8');
+    await gitOk(['commit', '-am', 'rate limited revision'], clone);
+
+    const attempts = { count: 0 };
+    storeControl.commitManifest = async () => {
+      attempts.count += 1;
+      throw Object.assign(new Error('Reduce your concurrent request rate for the same object'), {
+        name: 'ServiceUnavailable',
+        $metadata: { httpStatusCode: 429 },
+      });
+    };
+    const refused = await runGit(['push', 'origin', 'HEAD:refs/heads/main'], clone);
+    storeControl.commitManifest = undefined;
+
+    expect(attempts.count, 'the conditional write must be retried, not abandoned on the first 429').toBe(3);
+    expect(refused.code).not.toBe(0);
+    expect(refused.stderr).toMatch(/503|committed first/u);
+
+    const retried = await runGit(['push', 'origin', 'HEAD:refs/heads/main'], clone);
+    expect(retried.code, retried.stderr).toBe(0);
+  }, 120_000);
+
+  /**
+   * D19, end to end: a worker killed *after* its manifest commit leaves a
+   * durable ref and a row that never heard about it. Nothing sweeps that up in
+   * the background — the next request through the repository notices
+   * `derived_generation` trails the manifest it is holding and re-derives. A
+   * read is enough, because the repair keys off the lease's own manifest rather
+   * than off anything the row claims (review F1).
+   */
+  it('repairs the derived row on the next request after a worker dies past its commit', async () => {
+    const clone = path.join(workspace, 'clone');
+    await writeFile(path.join(clone, 'part.ts'), 'export const width = 16;\n', 'utf8');
+    await gitOk(['commit', '-am', 'the revision that outlived its worker'], clone);
+
+    const before = { generation: state.generation, derivedGeneration: state.derivedGeneration };
+    repositories.faults = (point) => {
+      if (point === 'after-manifest-commit') {
+        throw new Error('the worker died here');
+      }
+    };
+    const killed = await runGit(['push', 'origin', 'HEAD:refs/heads/outlived'], clone);
+    repositories.faults = undefined;
+    await repositories.settled();
+
+    expect(killed.code, 'the client must not be told a push succeeded when its worker died').not.toBe(0);
+    expect(state.generation, 'a killed worker must not have recorded its generation').toBe(before.generation);
+    expect(state.derivedGeneration).toBe(before.derivedGeneration);
+
+    /* The commit is durable all the same, and the plain read that proves it is
+       also the request that repairs the row: both columns agree afterwards. */
+    expect(await advertised()).toContain('refs/heads/outlived');
+    expect(state.derivedGeneration).toBeGreaterThan(before.derivedGeneration);
+    expect(state.generation).toBe(state.derivedGeneration);
+  }, 120_000);
+
+  /**
+   * D20, over the wire: the ceiling is enforced in `pre-receive`, so the client
+   * sees the hook's sentence *and the files it brings*. The figure is lowered
+   * for the suite rather than pushing a gigabyte; the mechanism under test is
+   * the refusal, not the number.
+   */
+  it('refuses a push past the repository ceiling with the file list, and writes no ref', async () => {
+    const clone = path.join(workspace, 'ceiling');
+    await gitOk(['clone', remoteUrl, clone], workspace);
+    await writeFile(path.join(clone, 'huge.bin'), Buffer.alloc(96 * 1024, 3));
+    await gitOk(['add', '.'], clone);
+    await gitOk(['commit', '-m', 'over the ceiling'], clone);
+
+    const ceiling = repositories.repositoryByteCeiling;
+    repositories.repositoryByteCeiling = 1024;
+    const refused = await runGit(['push', 'origin', 'HEAD:refs/heads/ceiling-probe'], clone);
+    repositories.repositoryByteCeiling = ceiling;
+
+    expect(refused.code, refused.stderr).not.toBe(0);
+    expect(refused.stderr).toContain('Tau: repository size limit exceeded');
+    expect(refused.stderr).toContain('huge.bin');
+    expect(refused.stderr).toContain('nothing was written');
+    expect(await advertised()).not.toContain('ceiling-probe');
+  }, 120_000);
+
+  /** D27: a collaborator pushes into the owner's storage, under the owner's plan. */
+  it('lets a write collaborator push, and refuses a read collaborator', async () => {
+    const clone = path.join(workspace, 'collaborator');
+    await gitOk(['clone', remoteFor(callers.writer.token), clone], workspace);
+    await writeFile(path.join(clone, 'collaborator.ts'), 'export const shared = true;\n', 'utf8');
+    await gitOk(['add', '.'], clone);
+    await gitOk(['commit', '-m', 'collaborator revision'], clone);
+    const pushed = await runGit(['push', 'origin', 'HEAD:refs/heads/main'], clone);
+    expect(pushed.code, pushed.stderr).toBe(0);
+
+    /* A reader clones and fetches, and is refused the moment it asks for the
+       push service — which is where git asks, before it sends a byte. */
+    const readOnly = path.join(workspace, 'read-only');
+    await gitOk(['clone', remoteFor(callers.reader.token), readOnly], workspace);
+    const refused = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-receive-pack`, {
+      headers: { Authorization: `Bearer ${callers.reader.token}` },
+    });
+    expect(refused.status).toBe(403);
+    expect(await refused.text()).toContain('write access');
+  }, 120_000);
+
+  /** Ruling P55: an account with no relation to the project is told it does not exist. */
+  it('answers a stranger with 404 rather than 403', async () => {
+    const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
+      headers: { Authorization: `Bearer ${callers.stranger.token}` },
+    });
+    expect(response.status).toBe(404);
+    expect(await response.text()).toContain('not found');
+  });
+
+  /**
+   * D33: admission is concurrent leases × the per-lease reservation against the
+   * worker's free disk. A worker that cannot hold another lease says so with a
+   * `Retry-After` rather than filling its own disk and failing halfway.
+   */
+  it('answers 503 with Retry-After when this worker has no room for another lease', async () => {
+    const reservation = repositories.leaseDiskBytesPerLease;
+    repositories.leaseDiskBytesPerLease = Number.MAX_SAFE_INTEGER;
+    const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
+      headers: { Authorization: `Bearer ${callers.owner.token}` },
+    });
+    repositories.leaseDiskBytesPerLease = reservation;
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get('retry-after')).toBe('5');
+    expect(await response.text()).toContain('retry shortly');
+  });
+
+  it('challenges an unauthenticated git client with Basic so stock git asks for credentials', async () => {
+    const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`);
+    expect(response.status).toBe(401);
+    expect(response.headers.get('www-authenticate')).toBe('Basic realm="Tau"');
+  });
+
   it('answers a browser git client’s preflight with every header it sends', async () => {
     const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
       method: 'OPTIONS',
@@ -511,167 +666,100 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
     );
   });
 
-  it('challenges an unauthenticated git client with Basic so stock git asks for credentials', async () => {
-    const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`);
-    expect(response.status).toBe(401);
-    expect(response.headers.get('www-authenticate')).toBe('Basic realm="Tau"');
-  });
-
-  // Red pin (b) — and the A39 two-set rule: the rejected record ref does not
-  // stop the history set, because they are two pushes.
-  it('refuses a host-local ref and keeps the chat ref and the branch push', async () => {
-    const clone = path.join(workspace, 'clone');
-    {
-      const outcome = await runGit(['update-ref', 'refs/tau/chats/chat_1', 'HEAD'], clone);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
-    {
-      const outcome = await runGit(['update-ref', 'refs/tau/owners/owner_1', 'HEAD'], clone);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
-
-    const refusedOwners = await runGit(['push', 'origin', 'refs/tau/owners/owner_1'], clone);
-    expect(refusedOwners.code).not.toBe(0);
-    expect(refusedOwners.stderr).toContain('refs/tau/owners/owner_1');
-    expect(refusedOwners.stderr).toContain('host-local');
-
-    const chatPush = await runGit(['push', 'origin', 'refs/tau/chats/chat_1'], clone);
-    expect(chatPush.code, chatPush.stderr).toBe(0);
-
-    await writeFile(path.join(clone, 'part.ts'), 'export const width = 12;\n', 'utf8');
-    {
-      const outcome = await runGit(['commit', '-am', 'second revision'], clone);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
-    const branchPush = await runGit(['push', 'origin', 'HEAD:refs/heads/main'], clone);
-    expect(branchPush.code, branchPush.stderr).toBe(0);
-
-    const advertised = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
-      headers: { Authorization: `Bearer ${ownerToken}` },
-    }).then(async (response) => response.text());
-    expect(advertised).toContain('refs/tau/chats/chat_1');
-    expect(advertised).not.toContain('refs/tau/owners/owner_1');
-  });
-
-  it('rejects a mixed stock push without accepting its ordinary branch', async () => {
-    const clone = path.join(workspace, 'clone');
-    await writeFile(path.join(clone, 'part.ts'), 'export const width = 13;\n', 'utf8');
-    {
-      const outcome = await runGit(['commit', '-am', 'mixed push probe'], clone);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
-    {
-      const outcome = await runGit(['update-ref', 'refs/heads/sync/tau/main', 'HEAD'], clone);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
-    const pushed = await runGit(['push', 'origin', 'HEAD:refs/heads/atomic-probe', 'refs/heads/sync/tau/main'], clone);
-    expect(pushed.code).not.toBe(0);
-    expect(pushed.stderr).toContain('refs/heads/sync/tau/main');
-
-    const advertised = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
-      headers: { Authorization: `Bearer ${ownerToken}` },
-    }).then(async (response) => response.text());
-    expect(advertised).not.toContain('refs/heads/atomic-probe');
-  });
-
-  it('serves the read-only dumb-HTTP layout kept current by update-server-info', async () => {
-    const head = await fetch(`${baseUrl}/v1/git/${projectId}.git/HEAD`, {
-      headers: { Authorization: `Bearer ${ownerToken}` },
-    });
-    expect(head.status).toBe(200);
-    const headBody = await head.text();
-    expect(headBody).toContain('refs/heads/main');
-
-    const references = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs`, {
-      headers: { Authorization: `Bearer ${ownerToken}` },
-    });
-    expect(references.status).toBe(200);
-    const referencesBody = await references.text();
-    expect(referencesBody).toContain('refs/heads/main');
-
-    const refused = await fetch(`${baseUrl}/v1/git/${projectId}.git/config`, {
-      headers: { Authorization: `Bearer ${ownerToken}` },
-    });
-    expect(refused.status).toBe(404);
-  });
-
-  it('answers a project the caller does not own with 404', async () => {
-    state.ownerId = 'user-someone-else';
-    const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
-      headers: { Authorization: `Bearer ${ownerToken}` },
-    });
-    state.ownerId = ownerId;
-    expect(response.status).toBe(404);
-  });
-
-  it('refuses a push from an account without the sync entitlement', async () => {
+  /**
+   * C7 / N6: git prints the body of a failed request only when it is
+   * `text/plain`; a browser is told apart by `Origin` and keeps the JSON
+   * envelope.
+   */
+  it('answers a git-protocol refusal as text/plain for a client that is not a browser', async () => {
     state.tier = 'free';
-    const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-receive-pack`, {
-      headers: { Authorization: `Bearer ${ownerToken}` },
+    const forGit = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-receive-pack`, {
+      headers: { Authorization: `Bearer ${callers.owner.token}` },
+    });
+    const forBrowser = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-receive-pack`, {
+      headers: { Authorization: `Bearer ${callers.owner.token}`, origin: 'https://tau.new' },
     });
     state.tier = 'pro';
-    expect(response.status).toBe(403);
+
+    expect(forGit.status).toBe(403);
+    expect(forGit.headers.get('content-type')).toMatch(/text\/plain/u);
+    expect(await forGit.text()).toContain('paid plan');
+
+    expect(forBrowser.status).toBe(403);
+    expect(forBrowser.headers.get('content-type')).toMatch(/application\/json/u);
+    expect(await forBrowser.json()).toEqual(expect.objectContaining({ code: 'GIT_SYNC_NOT_ENTITLED' }));
   });
 
-  // Red pin (d).
-  it('hands out an LFS upload action at the git-lfs oid path and verifies the stored object', async () => {
+  it('answers an unauthenticated browser request through CORS instead of the raw challenge', async () => {
+    const browser = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-receive-pack`, {
+      headers: { origin: 'https://tau.new' },
+    });
+    expect(browser.status).toBe(401);
+    expect(browser.headers.get('access-control-allow-origin')).toBe('https://tau.new');
+    expect(await browser.json()).toEqual(expect.objectContaining({ code: 'UNAUTHORIZED' }));
+  });
+
+  /**
+   * C28, restated for W3's cache: a read consults neither `canSyncFiles` nor the
+   * plan headroom, and a write pays for the plan once rather than twice.
+   */
+  it('costs a read no plan lookup at all', async () => {
+    queries.entitlements = 0;
+    queries.usage = 0;
+
+    const read = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
+      headers: { Authorization: `Bearer ${callers.owner.token}` },
+    });
+    expect(read.status).toBe(200);
+    expect(queries).toEqual({ entitlements: 0, usage: 0 });
+
+    const write = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-receive-pack`, {
+      headers: { Authorization: `Bearer ${callers.owner.token}` },
+    });
+    expect(write.status).toBe(200);
+    expect(queries).toEqual({ entitlements: 1, usage: 1 });
+  });
+
+  it('hands out an LFS upload action under the owner’s tenant prefix and verifies the stored object', async () => {
     const bytes = Buffer.from('hello world\n');
     const oid = createHash('sha256').update(bytes).digest('hex');
     const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/lfs/objects/batch`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${ownerToken}`,
+        Authorization: `Bearer ${callers.owner.token}`,
         'content-type': 'application/vnd.git-lfs+json',
       },
-      body: JSON.stringify({
-        operation: 'upload',
-        transfers: ['basic'],
-        objects: [{ oid, size: 12 }],
-      }),
+      body: JSON.stringify({ operation: 'upload', transfers: ['basic'], objects: [{ oid, size: 12 }] }),
     });
     expect(response.status).toBe(200);
     const body = (await response.json()) as {
       transfer: string;
-      objects: Array<{
-        oid: string;
-        actions?: { upload?: { href: string }; verify?: { href: string } };
-      }>;
+      objects: Array<{ oid: string; actions?: { upload?: { href: string }; verify?: { href: string } } }>;
     };
     expect(body.transfer).toBe('basic');
     const action = body.objects[0]?.actions?.upload;
-    expect(action?.href).toContain(encodeURIComponent(gitLfsObjectKey(projectId, oid)));
-    expect(gitLfsObjectKey(projectId, oid)).toBe(
-      `git-lfs/${projectId}/lfs/objects/${oid.slice(0, 2)}/${oid.slice(2, 4)}/${oid}`,
-    );
+    /* D24: the bytes land under the owner's tenant prefix, whichever
+       collaborator uploaded them. */
+    expect(action?.href).toContain(`/tenants/${tenantLfsObjectKey(ownerId, projectId, oid)}?`);
     expect(body.objects[0]?.actions?.verify?.href).toContain('/info/lfs/objects/verify');
 
-    await fetch(action?.href ?? '', { method: 'PUT', body: bytes });
+    const stored = await fetch(action?.href ?? '', { method: 'PUT', body: bytes });
+    expect(stored.ok, `presigned PUT failed: ${String(stored.status)}`).toBe(true);
     const verified = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/lfs/objects/verify`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${ownerToken}`,
+        Authorization: `Bearer ${callers.owner.token}`,
         'content-type': 'application/vnd.git-lfs+json',
       },
       body: JSON.stringify({ oid, size: 12 }),
     });
     expect(verified.status).toBe(200);
     expect(state.lfsBytes).toBe(12);
-    const verifiedAgain = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/lfs/objects/verify`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${ownerToken}`,
-        'content-type': 'application/vnd.git-lfs+json',
-      },
-      body: JSON.stringify({ oid, size: 12 }),
-    });
-    expect(verifiedAgain.status).toBe(200);
-    expect(state.lfsBytes).toBe(12);
+
     state.lfsBytes = 0;
     lfsRows.delete(oid);
-    objectStore.delete(gitLfsObjectKey(projectId, oid));
-  });
+  }, 60_000);
 
-  // Red pin (c).
   it('refuses an over-quota LFS batch with 413 and the file list', async () => {
     state.storageBytes = 10 * 1024 ** 3 - 1024;
     const objects = [
@@ -681,198 +769,25 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
     const response = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/lfs/objects/batch`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${ownerToken}`,
+        Authorization: `Bearer ${callers.owner.token}`,
         'content-type': 'application/vnd.git-lfs+json',
       },
-      body: JSON.stringify({
-        operation: 'upload',
-        transfers: ['basic'],
-        objects,
-      }),
+      body: JSON.stringify({ operation: 'upload', transfers: ['basic'], objects }),
     });
     state.storageBytes = 0;
+
     expect(response.status).toBe(413);
-    const body = (await response.json()) as {
-      files?: Array<{ oid: string; size: number }>;
-      message?: string;
-    };
+    const body = (await response.json()) as { files?: Array<{ oid: string }>; message?: string };
     expect(body.files?.map((file) => file.oid)).toEqual(objects.map((object) => object.oid));
     expect(body.message).toContain('quota');
   });
 
-  it('refuses an over-quota push in pre-receive without writing a ref', async () => {
-    const clone = path.join(workspace, 'clone');
-    await writeFile(path.join(clone, 'part.ts'), 'export const width = 14;\n', 'utf8');
-    {
-      const outcome = await runGit(['commit', '-am', 'third revision'], clone);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
-
-    state.storageBytes = 10 * 1024 ** 3 - 1;
-    const pushed = await runGit(['push', 'origin', 'HEAD:refs/heads/quota-probe'], clone);
-    state.storageBytes = 0;
-
-    expect(pushed.code).not.toBe(0);
-    expect(pushed.stderr).toContain('quota');
-    const advertised = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
-      headers: { Authorization: `Bearer ${ownerToken}` },
-    }).then(async (response) => response.text());
-    expect(advertised).not.toContain('quota-probe');
-  });
-
   /**
-   * W18 DEF-4, root-caused here rather than at `receive.maxInputSize`.
-   *
-   * The pack is larger than the plan headroom but smaller than
-   * `quotaOverrunSlackBytes`, so git's own input ceiling deliberately does not
-   * fire and the `pre-receive` backstop is what has to refuse it — over a
-   * *chunked* push, which is the shape DEF-4 was reported against: git
-   * authenticates such a push with an empty `git-receive-pack` POST first, and
-   * this row runs the whole two-request exchange.
-   *
-   * The spent allowance is seeded as **LFS** bytes on purpose. `storage_bytes`
-   * is the repository as the server last measured it, so the accounting that
-   * follows the empty probe POST overwrites any figure a fixture puts there —
-   * which is the whole of what DEF-4 observed (see the lane report).
-   */
-  it('refuses a chunked push that does not fit in what is left of the plan', async () => {
-    const clone = path.join(workspace, 'over-plan');
-    {
-      const outcome = await runGit(['clone', remoteUrl, clone], workspace);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
-    const noise = Buffer.alloc(8 * 1024 * 1024);
-    randomFillSync(noise);
-    await writeFile(path.join(clone, 'noise.bin'), noise);
-    {
-      const outcome = await runGit(['add', '.'], clone);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
-    {
-      const outcome = await runGit(['commit', '-m', 'over plan'], clone);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
-
-    state.lfsBytes = 10 * 1024 ** 3 - 4 * 1024 * 1024;
-    const pushed = await runGit(['push', 'origin', 'HEAD:refs/heads/over-plan'], clone);
-    state.lfsBytes = 0;
-
-    expect(pushed.code, `push stderr: ${pushed.stderr}`).not.toBe(0);
-    /* The hook's own sentence, not a family of refusals (review R3): git's
-       `pack exceeds maximum allowed size` and `authorize`'s `Storage quota
-       reached` would both satisfy a looser match, and either would mean the
-       backstop had rotted behind a green row. */
-    expect(pushed.stderr).toContain('Tau: storage quota exceeded');
-    const advertised = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
-      headers: { Authorization: `Bearer ${ownerToken}` },
-    }).then(async (response) => response.text());
-    expect(advertised).not.toContain('over-plan');
-  }, 120_000);
-
-  it('round-trips a large object through stock git-lfs', async () => {
-    const clone = path.join(workspace, 'lfs-clone');
-    {
-      const outcome = await runGit(['clone', remoteUrl, clone], workspace);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
-    {
-      const outcome = await runGit(['lfs', 'install', '--local'], clone);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
-    await writeFile(path.join(clone, '.gitattributes'), '*.bin filter=lfs diff=lfs merge=lfs -text\n', 'utf8');
-    await writeFile(path.join(clone, 'scan.bin'), Buffer.alloc(2 * 1024 * 1024, 7));
-    {
-      const outcome = await runGit(['add', '.'], clone);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
-    {
-      const outcome = await runGit(['commit', '-m', 'large object'], clone);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
-
-    const pushed = await runGit(['push', 'origin', 'HEAD:refs/heads/main'], clone);
-    expect(pushed.code, pushed.stderr).toBe(0);
-    expect([...objectStore.keys()].some((key) => key.startsWith(`git-lfs/${projectId}/lfs/objects/`))).toBe(true);
-    expect(state.lfsBytes).toBe(2 * 1024 * 1024);
-
-    // A clone whose git-lfs filter is configured smudges the pointer back into
-    // the real bytes through the batch API's `download` actions. (The harness
-    // pins `GIT_CONFIG_GLOBAL=/dev/null`, so the filter is installed per clone
-    // rather than inherited from the developer's own git configuration.)
-    const reader = path.join(workspace, 'lfs-reader');
-    const cloned = await runGit(['clone', remoteUrl, reader], workspace);
-    expect(cloned.code, cloned.stderr).toBe(0);
-    {
-      const outcome = await runGit(['lfs', 'install', '--local'], reader);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
-    const pulled = await runGit(['lfs', 'pull'], reader);
-    expect(pulled.code, pulled.stderr).toBe(0);
-    const { size } = await stat(path.join(reader, 'scan.bin'));
-    expect(size).toBe(2 * 1024 * 1024);
-  });
-
-  /**
-   * V8 / W18's acceptance path, performed rather than reasoned about: a stock
-   * `git clone` over the **dumb** protocol of a repository that holds an LFS
-   * object, followed by `git lfs pull`.
-   *
-   * The repository is the one the row above pushed `scan.bin` to, so the clone
-   * walks `info/refs`, `objects/info/packs` and every loose object through
-   * `GitController.dumbHttp`, and git-lfs then smudges the pointer through the
-   * batch API. It also happens to prove C24 from the other side: the shim's own
-   * `Host` is what the API sees, and the `verify` href is still the configured
-   * one.
-   */
-  it('clones over the dumb protocol with stock git and pulls its LFS object', async () => {
-    const { server: shim, origin: shimOrigin } = await createDumbOnlyProxy(baseUrl);
-    try {
-      const smart = await fetch(`${shimOrigin}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
-        headers: { Authorization: `Bearer ${ownerToken}` },
-      });
-      expect(smart.status).toBe(200);
-      expect(
-        smart.headers.get('content-type'),
-        'the shim must hide smart HTTP for git to walk the dumb layout',
-      ).toContain('text/plain');
-
-      const into = path.join(workspace, 'dumb-clone');
-      const dumbUrl = `http://tau:${ownerToken}@${new URL(shimOrigin).host}/v1/git/${projectId}.git`;
-      const cloned = await runGit(['clone', '-q', dumbUrl, into], workspace);
-      expect(cloned.code, cloned.stderr).toBe(0);
-
-      const expected = await runGit(['rev-parse', 'refs/heads/main'], path.join(gitRoot, `${projectId}.git`));
-      const actual = await runGit(['rev-parse', 'HEAD'], into);
-      expect(actual.stdout.trim()).toBe(expected.stdout.trim());
-
-      {
-        const outcome = await runGit(['lfs', 'install', '--local'], into);
-        expect(outcome.code, outcome.stderr).toBe(0);
-      }
-      const pulled = await runGit(['lfs', 'pull'], into);
-      expect(pulled.code, pulled.stderr).toBe(0);
-      const { size } = await stat(path.join(into, 'scan.bin'));
-      expect(size).toBe(2 * 1024 * 1024);
-    } finally {
-      shim.close();
-    }
-  }, 120_000);
-
-  /**
-   * C24 (P0, charter I8): the `verify` action carries the caller's own Tau
-   * bearer, so its href decides where that credential is sent.
-   *
-   * It used to be built from `request.protocol`/`request.host`: behind Fly
-   * `trustProxy` is unset and TLS terminates at the proxy, so `protocol` was
-   * `http` and the credential crossed the public internet in cleartext — and
-   * `Host` is the client's own header, so the same line let a caller point its
-   * credential at any origin it liked. Built from the validated `TAU_API_URL`
-   * instead, exactly as `git-proxy.controller.ts` already builds the LFS relay.
+   * C24 (charter I8): the `verify` action carries the caller's own Tau bearer,
+   * so its href is built from the validated `TAU_API_URL` and never from the
+   * client's own `Host`.
    */
   it('builds the LFS verify href from the configured API URL, not from the request', async () => {
-    /* `fetch` refuses to set `Host` (it is a forbidden header name), and `Host`
-       is half of what C24 is about — so this one request is written with the
-       raw client, exactly as a hostile caller would. */
     const spoofed = await new Promise<{ status: number; body: string }>((resolve, reject) => {
       const upstream = new URL(baseUrl);
       const call = httpRequest(
@@ -882,7 +797,7 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
           path: `/v1/git/${projectId}.git/info/lfs/objects/batch`,
           method: 'POST',
           headers: {
-            authorization: `Bearer ${ownerToken}`,
+            authorization: `Bearer ${callers.owner.token}`,
             'content-type': 'application/vnd.git-lfs+json',
             host: 'evil.example',
           },
@@ -897,11 +812,7 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
       );
       call.on('error', reject);
       call.end(
-        JSON.stringify({
-          operation: 'upload',
-          transfers: ['basic'],
-          objects: [{ oid: 'd'.repeat(64), size: 7 }],
-        }),
+        JSON.stringify({ operation: 'upload', transfers: ['basic'], objects: [{ oid: 'd'.repeat(64), size: 7 }] }),
       );
     });
 
@@ -912,46 +823,23 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
     const verify = body.objects[0]?.actions?.verify;
     expect(verify?.href).not.toContain('evil.example');
     expect(verify?.href).toBe(`${configuredApiUrl}/v1/git/${projectId}.git/info/lfs/objects/verify`);
-    /* The credential is still attached — that is git-lfs's contract — which is
-       exactly why the href above may not be the caller's to choose. */
-    expect(verify?.header?.['Authorization']).toBe(`Bearer ${ownerToken}`);
+    expect(verify?.header?.['Authorization']).toBe(`Bearer ${callers.owner.token}`);
 
     state.lfsBytes = 0;
     lfsRows.delete('d'.repeat(64));
   });
 
   /**
-   * C25 / ruling OQ4: compare-and-swap, enforced where it can be.
-   *
-   * `pre-receive` matches ref *names* only, so until `receive.denyDeletes` and
-   * `receive.denyNonFastForwards` joined the spawn a client could delete a
-   * published tag, delete a chat record ref and force-rewind `main` — all three
-   * reproduced against the real hook. `--force-with-lease` is client
-   * discipline; this is the server's, and it covers every ref family because
-   * retention is server-local (D17) and never needs a client delete.
+   * C25 / ruling OQ4: compare-and-swap for every ref family. `--force-with-lease`
+   * is client discipline; this is the server's.
    */
   it('refuses a ref deletion and a non-fast-forward push, and keeps what they aimed at', async () => {
     const clone = path.join(workspace, 'cas');
-    {
-      const outcome = await runGit(['clone', remoteUrl, clone], workspace);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
-    {
-      const outcome = await runGit(['tag', 'v-cas'], clone);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
-    {
-      const outcome = await runGit(['push', 'origin', 'refs/tags/v-cas'], clone);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
-    {
-      const outcome = await runGit(['update-ref', 'refs/tau/chats/chat_cas', 'HEAD'], clone);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
-    {
-      const outcome = await runGit(['push', 'origin', 'refs/tau/chats/chat_cas'], clone);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
+    await gitOk(['clone', remoteUrl, clone], workspace);
+    await gitOk(['tag', 'v-cas'], clone);
+    await gitOk(['push', 'origin', 'refs/tags/v-cas'], clone);
+    await gitOk(['update-ref', 'refs/tau/chats/chat_cas', 'HEAD'], clone);
+    await gitOk(['push', 'origin', 'refs/tau/chats/chat_cas'], clone);
 
     const deletedTag = await runGit(['push', 'origin', ':refs/tags/v-cas'], clone);
     expect(deletedTag.code, `tag deletion was accepted: ${deletedTag.stderr}`).not.toBe(0);
@@ -959,119 +847,29 @@ describe('Tau Hosted Remote (git server) over HTTP', () => {
     const deletedRecord = await runGit(['push', 'origin', ':refs/tau/chats/chat_cas'], clone);
     expect(deletedRecord.code, `record deletion was accepted: ${deletedRecord.stderr}`).not.toBe(0);
 
-    const head = await runGit(['rev-parse', 'HEAD'], clone);
-    {
-      const outcome = await runGit(['reset', '--hard', 'HEAD~1'], clone);
-      expect(outcome.code, outcome.stderr).toBe(0);
-    }
+    const head = await gitOk(['rev-parse', 'HEAD'], clone);
+    await gitOk(['reset', '--hard', 'HEAD~1'], clone);
     const rewound = await runGit(['push', '--force', 'origin', 'HEAD:refs/heads/main'], clone);
     expect(rewound.code, `a force push was accepted: ${rewound.stderr}`).not.toBe(0);
 
-    const advertised = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
-      headers: { Authorization: `Bearer ${ownerToken}` },
-    }).then(async (response) => response.text());
-    expect(advertised).toContain('refs/tags/v-cas');
-    expect(advertised).toContain('refs/tau/chats/chat_cas');
-    expect(advertised).toContain(head.stdout.trim());
+    const references = await advertised();
+    expect(references).toContain('refs/tags/v-cas');
+    expect(references).toContain('refs/tau/chats/chat_cas');
+    expect(references).toContain(head.stdout.trim());
   }, 120_000);
 
-  /**
-   * C7 / N6: git prints the body of a failed request only when it is
-   * `text/plain` (`show_http_message`, measured against git 2.55) — under
-   * `application/json` the identical bytes are discarded and a free account
-   * sees `error: 403` and nothing else. A browser is told apart by `Origin`,
-   * which stock git never sends, and keeps the JSON envelope.
-   */
-  it('answers a git-protocol refusal as text/plain for a client that is not a browser', async () => {
-    state.tier = 'free';
-    const forGit = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-receive-pack`, {
-      headers: { Authorization: `Bearer ${ownerToken}` },
-    });
-    const forBrowser = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-receive-pack`, {
-      headers: { Authorization: `Bearer ${ownerToken}`, origin: 'https://tau.new' },
-    });
-    state.tier = 'pro';
-
-    expect(forGit.status).toBe(403);
-    expect(forGit.headers.get('content-type')).toMatch(/text\/plain/u);
-    expect(await forGit.text()).toContain('paid plan');
-
-    expect(forBrowser.status).toBe(403);
-    expect(forBrowser.headers.get('content-type')).toMatch(/application\/json/u);
-    expect(await forBrowser.json()).toEqual(expect.objectContaining({ code: 'GIT_SYNC_NOT_ENTITLED' }));
-  });
-
-  /**
-   * C8: the Basic challenge is written straight to the raw `ServerResponse`, so
-   * neither `@fastify/cors` nor `@fastify/helmet` runs on it — a signed-out
-   * browser `fetch` saw an opaque network failure and could not tell "sign in
-   * again" from "the API is down". Stock git never sends `Origin`, and it is
-   * the only client that needs the challenge, so a request that carries one
-   * goes to the guard and is answered through the whole chain.
-   */
-  it('answers an unauthenticated browser request through CORS instead of the raw challenge', async () => {
-    const browser = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-receive-pack`, {
-      headers: { origin: 'https://tau.new' },
-    });
-    expect(browser.status).toBe(401);
-    expect(browser.headers.get('access-control-allow-origin')).toBe('https://tau.new');
-    expect(await browser.json()).toEqual(expect.objectContaining({ code: 'UNAUTHORIZED' }));
-
-    // Stock git still gets the challenge that makes it ask its credential helper.
-    const git = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-receive-pack`);
-    expect(git.status).toBe(401);
-    expect(git.headers.get('www-authenticate')).toBe('Basic realm="Tau"');
-  });
-
-  /**
-   * C28: a read consults neither `canSyncFiles` nor the plan headroom, and it
-   * used to pay for both anyway — `getEntitlements` is three uncached queries
-   * by design and `readOwnerUsage` is a `sum()` across every project the owner
-   * has. A dumb-HTTP clone pays `authorize` once per *object*, which is what
-   * made five round-trips per read worth removing.
-   */
-  it('costs a read exactly one database query', async () => {
-    queries.project = 0;
-    queries.entitlements = 0;
-    queries.usage = 0;
-
-    const advertisement = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-upload-pack`, {
-      headers: { Authorization: `Bearer ${ownerToken}` },
-    });
-    expect(advertisement.status).toBe(200);
-    expect(queries).toEqual({ project: 1, entitlements: 0, usage: 0 });
-
-    // And a write still pays for the plan — once, not twice (`admitGitPush`).
-    const write = await fetch(`${baseUrl}/v1/git/${projectId}.git/info/refs?service=git-receive-pack`, {
-      headers: { Authorization: `Bearer ${ownerToken}` },
-    });
-    expect(write.status).toBe(200);
-    expect(queries).toEqual({ project: 2, entitlements: 1, usage: 1 });
-  });
-
   it('refuses a proxy target with a credential in the URL, a private host, or a non-git path', async () => {
-    const refusedQueryToken = await fetch(
-      `${baseUrl}/v1/git/proxy?url=${encodeURIComponent('https://github.com/tau/x.git/info/refs?access_token=secret')}`,
-      { headers: { Authorization: `Bearer ${ownerToken}` } },
-    );
-    expect(refusedQueryToken.status).toBe(400);
-
-    const refusedHost = await fetch(
-      `${baseUrl}/v1/git/proxy?url=${encodeURIComponent('https://127.0.0.1:9000/x.git/info/refs')}`,
-      { headers: { Authorization: `Bearer ${ownerToken}` } },
-    );
-    expect(refusedHost.status).toBe(400);
-
-    const refusedPath = await fetch(
-      `${baseUrl}/v1/git/proxy?url=${encodeURIComponent('https://github.com/tau/x.git/secrets')}`,
-      { headers: { Authorization: `Bearer ${ownerToken}` } },
-    );
-    expect(refusedPath.status).toBe(400);
-
-    const refusedScheme = await fetch(
-      `${baseUrl}/v1/git/proxy?url=${encodeURIComponent('http://github.com/tau/x.git/info/refs')}`,
-      { headers: { Authorization: `Bearer ${ownerToken}` } },
-    );
-    expect(refusedScheme.status).toBe(400);
+    for (const target of [
+      'https://github.com/tau/x.git/info/refs?access_token=secret',
+      'https://127.0.0.1:9000/x.git/info/refs',
+      'https://github.com/tau/x.git/secrets',
+      'http://github.com/tau/x.git/info/refs',
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one refusal at a time, by design
+      const refused = await fetch(`${baseUrl}/v1/git/proxy?url=${encodeURIComponent(target)}`, {
+        headers: { Authorization: `Bearer ${callers.owner.token}` },
+      });
+      expect(refused.status, target).toBe(400);
+    }
   });
 });

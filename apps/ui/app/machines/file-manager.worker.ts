@@ -317,8 +317,9 @@ const revisionRegistry = createWorkerRevisionRegistry({
    *
    * On a host-served project the Node host serves the filesystem *and* owns the
    * revisions actor system over the project's own `.git/`. A browser revision
-   * port here would create a second store (`.tau/revisions/`) in the same
-   * directory, recording the same bytes twice and agreeing with neither side —
+   * port here would open a second writer onto that same `.git/` (D29 gave both
+   * legs one repository name), recording the same bytes twice and agreeing with
+   * neither side —
    * the two-store ceiling W5 §9 recorded. The session injects the host kind at
    * `revisionsConnect`; a host-served project gets no port at all, and its
    * `RevisionStatus` projection comes from the Node side.

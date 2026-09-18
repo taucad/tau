@@ -1144,7 +1144,7 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
      * The same seam the browser worker's `release` uses, because it is the same
      * question: has the close revision reached the remote, or at least the
      * record? A quit that does not wait leaves a revision nothing knows is
-     * unsent; after the bound, `.tau/revisions/sync-pending` is the guarantee
+     * unsent; after the bound, `.git/sync-pending` is the guarantee
      * and the next open retries it (D28, AC21).
      */
     await awaitSyncSettled(actor, closeFlushMilliseconds);

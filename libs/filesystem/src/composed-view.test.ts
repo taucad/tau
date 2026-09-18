@@ -222,7 +222,7 @@ describe('composeView optional provider members', () => {
     expect(await collect(view.readFileStream!('main.ts'))).toBe('export {};\n');
     expect(await collect(view.readFileStream!(`${skillsRoot}/demo/api-index.md`))).toBe(contents['api-index.md']);
     /* The mask refuses before the stream exists — no I/O, nothing to cancel. */
-    expect(() => view.readFileStream!('.tau/revisions/HEAD')).toThrow(/exists in a composed view/u);
+    expect(() => view.readFileStream!('.git/HEAD')).toThrow(/exists in a composed view/u);
   });
 
   /* A2 re-review R12: the wrapper forwarded `position`/`length`/`signal` on one
@@ -302,8 +302,8 @@ describe('composeView agent mask', () => {
     await provider.writeFile('.tau/chats/chat-1/events.jsonl', '{"type":"run.lifecycle"}\n');
     await provider.mkdir('.tau/runs', { recursive: true });
     await provider.writeFile('.tau/runs/run-1.json', '{}\n');
-    await provider.mkdir('.tau/revisions/refs/heads', { recursive: true });
-    await provider.writeFile('.tau/revisions/HEAD', 'ref: refs/heads/main\n');
+    await provider.mkdir('.git/refs/heads', { recursive: true });
+    await provider.writeFile('.git/HEAD', 'ref: refs/heads/main\n');
     await provider.writeFile('.tau/binding.json', '{}\n');
   });
 
@@ -315,7 +315,10 @@ describe('composeView agent mask', () => {
 
     const controlPlane = await view.readdir('.tau');
     expect(controlPlane.toSorted()).toStrictEqual(['chats', 'runs']);
-    await expect(view.readFile('.tau/revisions/HEAD')).rejects.toMatchObject({
+    /* The store moved to the project root under D29, so the listing half of
+     * this pin belongs at the root too. */
+    expect(await view.readdir('')).not.toContain('.git');
+    await expect(view.readFile('.git/HEAD')).rejects.toMatchObject({
       code: 'EPERM',
       reason: 'WORKSPACE_MASKED_PATH',
     });
@@ -337,7 +340,7 @@ describe('composeView agent mask', () => {
     });
     /* The browser port's object store is revision evidence (RC6 S5 gate 15):
      * an agent that could write it could forge the account of its own turn. */
-    await expect(view.writeFile('.tau/revisions/objects/ab/cdef', 'forged')).rejects.toMatchObject({
+    await expect(view.writeFile('.git/objects/ab/cdef', 'forged')).rejects.toMatchObject({
       code: 'EPERM',
       reason: 'WORKSPACE_MASKED_PATH',
     });
@@ -353,8 +356,8 @@ describe('composeView agent mask', () => {
 
     const records = await view.readdir('.tau');
     expect(records.toSorted()).toStrictEqual(['chats', 'runs']);
-    expect(await view.exists('.tau/revisions/HEAD')).toBe(false);
-    await expect(view.readFile('.tau/revisions/HEAD', 'utf8')).rejects.toMatchObject({ code: 'EPERM' });
+    expect(await view.exists('.git/HEAD')).toBe(false);
+    await expect(view.readFile('.git/HEAD', 'utf8')).rejects.toMatchObject({ code: 'EPERM' });
     await expect(view.writeFile('.tau/chats/chat-1/events.jsonl', '')).resolves.toBeUndefined();
   });
 });

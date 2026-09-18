@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Readable as NodeReadable } from 'node:stream';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
@@ -10,6 +10,8 @@ import { concatUint8Arrays } from '#storage/concat-uint8-arrays.js';
 import { StorageModule } from '#storage/storage.module.js';
 import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.js';
 import { ObjectStorageService, isPreconditionFailed } from '#storage/object-storage.service.js';
+import type { PutBlobResult } from '#storage/object-storage.service.js';
+import { assertDestructiveTestBucketAllowed } from '#storage/destructive-test-bucket-guard.js';
 import { STORAGE_HEALTH_PROBE_KEY } from '#storage/storage.constants.js';
 
 const scaleIt = process.env['TAU_SCALE_TESTS'] === '1' ? it : it.skip;
@@ -34,6 +36,15 @@ describe('ObjectStorageService', () => {
 
   const randomPayload = (bytes: number): Uint8Array<ArrayBuffer> => new Uint8Array(randomBytes(bytes));
 
+  /** Narrows a put result to the branch that carries an ETag, failing the test if it was refused. */
+  const won = (result: PutBlobResult): { etag: string; alreadyExisted: boolean } => {
+    if (result.lost) {
+      throw new Error('expected the write to succeed, but a precondition refused it');
+    }
+
+    return result;
+  };
+
   beforeAll(async () => {
     moduleRef = await Test.createTestingModule({
       imports: [
@@ -53,6 +64,12 @@ describe('ObjectStorageService', () => {
     }
 
     publicBaseUrl = rawPublicBaseUrl.replace(/\/$/u, '');
+
+    // D32: this suite writes and prefix-deletes, so it refuses any bucket that
+    // is not a local MinIO bucket or a dedicated scratch bucket — whatever the
+    // environment happens to point at.
+    assertDestructiveTestBucketAllowed(service.bucketFor('public'), 'the ObjectStorageService suite (public tier)');
+    assertDestructiveTestBucketAllowed(service.bucketFor('private'), 'the ObjectStorageService suite (private tier)');
   });
 
   afterAll(async () => {
@@ -71,7 +88,7 @@ describe('ObjectStorageService', () => {
     });
 
     expect(result.alreadyExisted).toBe(false);
-    expect(result.etag.length).toBeGreaterThan(0);
+    expect(won(result).etag.length).toBeGreaterThan(0);
 
     await service.deleteBlob({ namespace: 'blobs', key });
   });
@@ -320,7 +337,7 @@ describe('ObjectStorageService', () => {
           // oxlint-disable-next-line eslint/no-await-in-loop -- multipart order is part of this storage check.
           const response = await fetch(uploadUrl, {
             method: 'PUT',
-            headers: { 'x-amz-checksum-sha256': checksumSha256 },
+            headers: service.uploadPartHeaders(checksumSha256),
             body: bytes,
           });
           expect(response.ok).toBe(true);
@@ -438,7 +455,7 @@ describe('ObjectStorageService', () => {
           // oxlint-disable-next-line eslint/no-await-in-loop -- each part is the durable resume boundary under test.
           const response = await fetch(uploadUrl, {
             method: 'PUT',
-            headers: { 'x-amz-checksum-sha256': checksumSha256 },
+            headers: service.uploadPartHeaders(checksumSha256),
             body: bytes,
           });
           expect(response.ok).toBe(true);
@@ -472,5 +489,327 @@ describe('ObjectStorageService', () => {
         await service.deleteBlob({ namespace: 'blobs', key, tier: 'private' });
       }
     });
+  });
+  // === W1: conditional writes, batch/prefix delete, paginated listing (charter D8/D31) ===
+
+  describe('conditional writes', () => {
+    const conditionalKey = (): string => `__w1-conditional/${randomBytes(8).toString('hex')}/object.bin`;
+
+    it('should forward a non-wildcard ifNoneMatch and report the write as lost when the stored ETag matches', async () => {
+      const key = conditionalKey();
+      const created = await service.putBlob({
+        namespace: 'blobs',
+        key,
+        body: randomPayload(16),
+        contentType: 'application/octet-stream',
+        ifNoneMatch: '*',
+      });
+      expect(created.lost).toBe(false);
+
+      try {
+        const refused = await service.putBlob({
+          namespace: 'blobs',
+          key,
+          body: randomPayload(16),
+          contentType: 'application/octet-stream',
+          ifNoneMatch: won(created).etag,
+        });
+
+        expect(refused).toStrictEqual({ lost: true, alreadyExisted: false });
+      } finally {
+        await service.deleteBlob({ namespace: 'blobs', key });
+      }
+    });
+
+    it('should return the next ETag when an ifMatch write matches the stored ETag', async () => {
+      const key = conditionalKey();
+      const created = await service.putBlob({
+        namespace: 'blobs',
+        key,
+        body: randomPayload(16),
+        contentType: 'application/octet-stream',
+        ifNoneMatch: '*',
+      });
+
+      try {
+        const next = await service.putBlob({
+          namespace: 'blobs',
+          key,
+          body: randomPayload(24),
+          contentType: 'application/octet-stream',
+          ifMatch: won(created).etag,
+        });
+
+        expect(next.lost).toBe(false);
+        expect(won(next).etag).not.toBe(won(created).etag);
+        expect(won(next).etag.length).toBeGreaterThan(0);
+      } finally {
+        await service.deleteBlob({ namespace: 'blobs', key });
+      }
+    });
+
+    it('should report an ifMatch write as lost without throwing when the stored ETag has moved on', async () => {
+      const key = conditionalKey();
+      const created = await service.putBlob({
+        namespace: 'blobs',
+        key,
+        body: randomPayload(16),
+        contentType: 'application/octet-stream',
+        ifNoneMatch: '*',
+      });
+
+      try {
+        await service.putBlob({
+          namespace: 'blobs',
+          key,
+          body: randomPayload(24),
+          contentType: 'application/octet-stream',
+          ifMatch: won(created).etag,
+        });
+
+        const lost = await service.putBlob({
+          namespace: 'blobs',
+          key,
+          body: randomPayload(32),
+          contentType: 'application/octet-stream',
+          ifMatch: won(created).etag,
+        });
+
+        expect(lost).toStrictEqual({ lost: true, alreadyExisted: false });
+      } finally {
+        await service.deleteBlob({ namespace: 'blobs', key });
+      }
+    });
+
+    it('should report an ifMatch write against an absent key as lost rather than creating it (AR-A E7)', async () => {
+      const key = conditionalKey();
+
+      const lost = await service.putBlob({
+        namespace: 'blobs',
+        key,
+        body: randomPayload(16),
+        contentType: 'application/octet-stream',
+        ifMatch: 'deadbeefdeadbeefdeadbeefdeadbeef',
+      });
+
+      expect(lost).toStrictEqual({ lost: true, alreadyExisted: false });
+      await expect(service.headBlob({ namespace: 'blobs', key })).resolves.toBeUndefined();
+    });
+  });
+
+  describe('body checksums', () => {
+    it('should store a blob whose checksumSha256 matches and refuse one whose checksum is wrong', async () => {
+      const payload = randomPayload(64);
+      const matching = createHash('sha256').update(payload).digest('base64');
+      const wrong = createHash('sha256').update(randomPayload(64)).digest('base64');
+      const acceptedKey = `__w1-checksum/${randomBytes(8).toString('hex')}/accepted.bin`;
+      const refusedKey = `__w1-checksum/${randomBytes(8).toString('hex')}/refused.bin`;
+
+      try {
+        const accepted = await service.putBlob({
+          namespace: 'blobs',
+          key: acceptedKey,
+          body: payload,
+          contentType: 'application/octet-stream',
+          checksumSha256: matching,
+        });
+
+        expect(accepted.lost).toBe(false);
+        await expect(service.headBlob({ namespace: 'blobs', key: acceptedKey })).resolves.toMatchObject({ size: 64 });
+
+        await expect(
+          service.putBlob({
+            namespace: 'blobs',
+            key: refusedKey,
+            body: payload,
+            contentType: 'application/octet-stream',
+            checksumSha256: wrong,
+          }),
+        ).rejects.toMatchObject({ name: 'XAmzContentChecksumMismatch' });
+
+        await expect(service.headBlob({ namespace: 'blobs', key: refusedKey })).resolves.toBeUndefined();
+      } finally {
+        await service.deleteBlobs({ namespace: 'blobs', keys: [acceptedKey, refusedKey] });
+      }
+    });
+  });
+
+  describe('batch and prefix deletion', () => {
+    it('should delete every listed key and ignore a key that was never written', async () => {
+      const prefix = `__w1-delete/${randomBytes(8).toString('hex')}/`;
+      const written = [`${prefix}a.bin`, `${prefix}b.bin`];
+      for (const key of written) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- two fixture writes, sequential is clearer than a pool.
+        await service.putBlob({
+          namespace: 'blobs',
+          key,
+          body: randomPayload(8),
+          contentType: 'application/octet-stream',
+        });
+      }
+
+      await service.deleteBlobs({ namespace: 'blobs', keys: [...written, `${prefix}never-written.bin`] });
+
+      const remaining: string[] = [];
+      for await (const object of service.listObjects({ namespace: 'blobs', keyPrefix: prefix })) {
+        remaining.push(object.key);
+      }
+
+      expect(remaining).toStrictEqual([]);
+    });
+
+    it('should leave nothing under the prefix after the purge-job prefix delete', async () => {
+      const prefix = `__w1-purge/${randomBytes(8).toString('hex')}/`;
+      for (const name of ['a.bin', 'nested/b.bin', 'nested/deeper/c.bin']) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- three fixture writes, sequential is clearer than a pool.
+        await service.putBlob({
+          namespace: 'blobs',
+          key: `${prefix}${name}`,
+          body: randomPayload(8),
+          contentType: 'application/octet-stream',
+        });
+      }
+
+      const removed = await service.deleteEntirePrefixForPurgeJob({ namespace: 'blobs', keyPrefix: prefix });
+
+      expect(removed).toStrictEqual({ listed: 3, deleted: 3 });
+
+      const remaining: string[] = [];
+      for await (const object of service.listObjects({ namespace: 'blobs', keyPrefix: prefix })) {
+        remaining.push(object.key);
+      }
+
+      expect(remaining).toStrictEqual([]);
+    });
+
+    it('should page a listing that exceeds one response page', async () => {
+      const prefix = `__w1-list/${randomBytes(8).toString('hex')}/`;
+      const keys = Array.from({ length: 5 }, (_unused, index) => `${prefix}${String(index)}.bin`);
+      for (const key of keys) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- five fixture writes, sequential is clearer than a pool.
+        await service.putBlob({
+          namespace: 'blobs',
+          key,
+          body: randomPayload(4),
+          contentType: 'application/octet-stream',
+        });
+      }
+
+      try {
+        const listed: string[] = [];
+        for await (const object of service.listObjects({ namespace: 'blobs', keyPrefix: prefix, pageSize: 2 })) {
+          listed.push(object.key);
+          expect(object.bytes).toBe(4);
+          expect(object.modifiedAt).toBeInstanceOf(Date);
+        }
+
+        expect([...listed].sort()).toStrictEqual([...keys].sort());
+      } finally {
+        await service.deleteBlobs({ namespace: 'blobs', keys });
+      }
+    });
+  });
+
+  describe('storage-account factory', () => {
+    it('should return the same instance for the default account and a distinct instance for another account', () => {
+      expect(service.forAccount(service.account)).toBe(service);
+
+      const other = service.forAccount({ ...service.account, id: 'conformance', bucket: 'tau-content' });
+
+      expect(other).not.toBe(service);
+      expect(other.account.bucket).toBe('tau-content');
+    });
+  });
+
+  // W0b measured this against real R2: `UploadPart` carrying
+  // `x-amz-checksum-sha256` answers `501 NotImplemented`, and
+  // `CreateMultipartUpload` silently drops `ChecksumAlgorithm`. Only genuine
+  // AWS supports per-part SHA-256, so the endpoint class decides.
+  describe('multipart part checksums by endpoint class', () => {
+    const checksum = `${'A'.repeat(43)}=`;
+
+    const driverFor = (id: string, endpoint: string): ObjectStorageService =>
+      service.forAccount({
+        id,
+        endpoint,
+        region: 'auto',
+        bucket: 'tau-content',
+        forcePathStyle: true,
+        credentials: { accessKeyId: 'checksum-key', secretAccessKey: 'checksum-secret' },
+      });
+
+    const r2 = (): ObjectStorageService => driverFor('r2', 'https://account.r2.cloudflarestorage.com');
+    const aws = (): ObjectStorageService => driverFor('aws', 'https://s3.us-east-1.amazonaws.com');
+
+    const partArgs = {
+      namespace: 'blobs',
+      key: 'jobs/test/checksums/part',
+      uploadId: 'upload-1',
+      partNumber: 1,
+      checksumSha256: checksum,
+      expiresInSeconds: 60,
+    } as const;
+
+    /* eslint-disable @typescript-eslint/naming-convention -- AWS SDK command inputs use PascalCase fields */
+    type SentCommand = {
+      input: {
+        ChecksumAlgorithm?: string;
+        MultipartUpload?: { Parts?: ReadonlyArray<Record<string, unknown>> };
+      };
+    };
+
+    // The SDK's `send` overloads defeat spy typing, so the one cast stays here
+    // rather than at every assertion; the prototype is unchanged at runtime.
+    const sendable = S3Client.prototype as unknown as { send: (command: SentCommand) => Promise<unknown> };
+
+    it('should request a part checksum algorithm only on an AWS endpoint', async () => {
+      const send = vi.spyOn(sendable, 'send').mockResolvedValue({ UploadId: 'upload-1' });
+
+      try {
+        const args = { namespace: 'blobs', key: partArgs.key, contentType: 'application/octet-stream' } as const;
+        await r2().createMultipartUpload(args);
+        await aws().createMultipartUpload(args);
+
+        const [onR2, onAws] = send.mock.calls.map(([command]) => command.input);
+
+        expect(onR2).not.toHaveProperty('ChecksumAlgorithm');
+        expect(onAws).toHaveProperty('ChecksumAlgorithm', 'SHA256');
+      } finally {
+        send.mockRestore();
+      }
+    });
+
+    it('should sign a part checksum into the presigned upload URL only on an AWS endpoint', async () => {
+      await expect(r2().presignUploadPart(partArgs)).resolves.not.toContain('checksum-sha256');
+      await expect(aws().presignUploadPart(partArgs)).resolves.toContain('x-amz-checksum-sha256');
+    });
+
+    it('should tell the caller which part headers to send for each endpoint class', () => {
+      expect(r2().uploadPartHeaders(checksum)).toStrictEqual({});
+      expect(aws().uploadPartHeaders(checksum)).toStrictEqual({ 'x-amz-checksum-sha256': checksum });
+    });
+
+    it('should complete a non-AWS multipart upload by ETag alone', async () => {
+      const send = vi.spyOn(sendable, 'send').mockResolvedValue({});
+
+      try {
+        const args = {
+          namespace: 'blobs',
+          key: partArgs.key,
+          uploadId: partArgs.uploadId,
+          parts: [{ partNumber: 1, etag: 'etag-1', checksumSha256: checksum }],
+        } as const;
+        await r2().completeMultipartUpload(args);
+        await aws().completeMultipartUpload(args);
+
+        const [onR2, onAws] = send.mock.calls.map(([command]) => command.input.MultipartUpload?.Parts?.[0]);
+
+        expect(onR2).toStrictEqual({ PartNumber: 1, ETag: 'etag-1' });
+        expect(onAws).toStrictEqual({ PartNumber: 1, ETag: 'etag-1', ChecksumSHA256: checksum });
+      } finally {
+        send.mockRestore();
+      }
+    });
+    /* eslint-enable @typescript-eslint/naming-convention -- end AWS SDK PascalCase inputs scope */
   });
 });

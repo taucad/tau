@@ -8,14 +8,15 @@ import {
   HttpException,
   HttpStatus,
   Inject,
-  NotFoundException,
   Param,
   Put,
 } from '@nestjs/common';
-import { count, desc, eq } from 'drizzle-orm';
+import { and, count, desc, eq, or } from 'drizzle-orm';
 import { UseAuth, User } from '#auth/decorators/auth.decorator.js';
 import { DatabaseService } from '#database/database.service.js';
-import { project } from '#database/schema.js';
+import { project, projectCollaborator } from '#database/schema.js';
+import { ProjectAccessService } from '#api/collaboration/project-access.service.js';
+import type { ProjectRole } from '#api/collaboration/project-access.service.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
 import {
@@ -23,7 +24,6 @@ import {
   projectRegistrationsPerOwnerPerDay,
   registeredProjectLimitPerOwner,
 } from '#api/git/git.constants.js';
-import { GitRepositoryService } from '#api/git/git.service.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
 import { RegisterProjectDto } from '#api/projects/projects.dto.js';
 
@@ -44,10 +44,10 @@ import { RegisterProjectDto } from '#api/projects/projects.dto.js';
 export class ProjectsController {
   public constructor(
     private readonly databaseService: DatabaseService,
-    private readonly repositories: GitRepositoryService,
     private readonly rateLimiter: PublicationRateLimiterService,
     @Inject(commercialEntitlementsKey)
     private readonly entitlementsService: CommercialEntitlementsService,
+    private readonly access: ProjectAccessService,
   ) {}
 
   /**
@@ -60,20 +60,39 @@ export class ProjectsController {
    * show. `git.service.ts`'s rule that a *git* client must not learn which
    * repositories exist is about the unauthenticated git surface and is untouched.
    *
+   * Since D27 this is also where a collaboration is named: the same shape with
+   * the caller's `role` on each row, so a second device can open a project
+   * somebody else owns exactly as it opens its own.
+   *
    * @param userId - The signed-in caller.
-   * @returns Every project this account owns, most recently changed first.
+   * @returns Every project this account owns or collaborates on, most recently changed first.
    */
   @Get()
   public async list(
     @User('id') userId: string,
-  ): Promise<ReadonlyArray<{ id: string; name: string; updatedAt: string }>> {
+  ): Promise<ReadonlyArray<{ id: string; name: string; updatedAt: string; role: ProjectRole }>> {
     const { database } = this.databaseService;
     const rows = await database
-      .select({ id: project.id, name: project.name, updatedAt: project.updatedAt })
+      .select({
+        id: project.id,
+        name: project.name,
+        updatedAt: project.updatedAt,
+        ownerId: project.ownerId,
+        role: projectCollaborator.role,
+      })
       .from(project)
-      .where(eq(project.ownerId, userId))
+      .leftJoin(
+        projectCollaborator,
+        and(eq(projectCollaborator.projectId, project.id), eq(projectCollaborator.userId, userId)),
+      )
+      .where(or(eq(project.ownerId, userId), eq(projectCollaborator.userId, userId)))
       .orderBy(desc(project.updatedAt));
-    return rows.map((row) => ({ id: row.id, name: row.name, updatedAt: row.updatedAt.toISOString() }));
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      updatedAt: row.updatedAt.toISOString(),
+      role: row.ownerId === userId ? 'owner' : row.role === 'write' ? 'write' : 'read',
+    }));
   }
 
   /**
@@ -92,8 +111,8 @@ export class ProjectsController {
    * @param userId - The signed-in caller, who becomes the owner.
    * @returns The registered project's id.
    * @throws BadRequestException When the id cannot name a repository.
-   * @throws NotFoundException When the id is already another account's (P55).
-   * @throws ForbiddenException When the plan does not entitle syncing (N5), or when the account is at its project ceiling.
+   * @throws NotFoundException When the id belongs to an account the caller has no relation to (P55).
+   * @throws ForbiddenException When the caller is a collaborator rather than the owner, when the plan does not entitle syncing (N5), or when the account is at its project ceiling.
    * @throws HttpException When the account is over its daily registration budget.
    */
   @Put(':projectId')
@@ -121,9 +140,15 @@ export class ProjectsController {
     }
 
     const { database } = this.databaseService;
-    const existing = await this.ownerOf(projectId);
-    if (existing !== undefined && existing !== userId) {
-      throw this.notFound();
+    /* D27: the id's existence is this route's question — it may have to create
+       the row — but *whose* it is belongs to `ProjectAccessService`, the single
+       authority. Registration is the owner's act, so `owner` is the need: a
+       caller with no relation to the id gets the ruling-P55 `404`, and a
+       collaborator on somebody else's project is refused `403` — they already
+       know the project exists, so hiding it would only mislead. */
+    const exists = await this.projectExists(projectId);
+    if (exists) {
+      await this.access.authorize(projectId, userId, 'owner');
     }
 
     /* Before the row and before the repository (N5). Registration is the write
@@ -145,7 +170,7 @@ export class ProjectsController {
       });
     }
 
-    if (existing === undefined) {
+    if (!exists) {
       const [counted] = await database
         .select({ value: count() })
         .from(project)
@@ -172,43 +197,33 @@ export class ProjectsController {
           origin: 'local-mirror',
         })
         .onConflictDoNothing();
-      if ((await this.ownerOf(projectId)) !== userId) {
-        throw this.notFound();
-      }
+      /* The loser of the race inserted nothing, and `authorize` is what tells it
+         so — with the same `404` a stranger's id gets (review R6, ruling P55). */
+      await this.access.authorize(projectId, userId, 'owner');
     }
 
-    /* Guarded by `isProjectRepositoryId` inside the service for every caller
-       (W8 review R1), so nothing outside `TAU_GIT_ROOT` is ever created. */
-    await this.repositories.ensureRepository(projectId);
+    /* No repository is created here any more (charter D1). A repository *is*
+       its manifest, and the first manifest is written by the first push's
+       commit — so registration is the row and nothing else. `isProjectRepositoryId`
+       above still bounds the id, because that id becomes a storage key. */
     return { id: projectId };
   }
 
   /**
-   * Who owns this project id, if anybody.
+   * Whether any row holds this project id.
+   *
+   * Existence only: *whose* it is, and the ruling-P55 `404` that follows from
+   * that, is `ProjectAccessService.authorize`'s answer and not this route's.
    *
    * @param projectId - The id to look up.
-   * @returns The owner's user id, or `undefined` when no row holds the id.
+   * @returns Whether the id is taken.
    */
-  private async ownerOf(projectId: string): Promise<string | undefined> {
+  private async projectExists(projectId: string): Promise<boolean> {
     const [row] = await this.databaseService.database
-      .select({ ownerId: project.ownerId })
+      .select({ id: project.id })
       .from(project)
       .where(eq(project.id, projectId))
       .limit(1);
-    return row?.ownerId;
-  }
-
-  /**
-   * The one answer a caller who does not own an id ever gets (ruling P55).
-   *
-   * The same answer for "no such project" and "not yours", which is the rule
-   * `git.service.ts` states for the git surface and now holds here too: a
-   * signed-in caller must not be able to use this route as an oracle for which
-   * project ids exist.
-   *
-   * @returns The exception to throw.
-   */
-  private notFound(): NotFoundException {
-    return new NotFoundException({ code: 'PROJECT_NOT_FOUND', message: 'Project not found' });
+    return row !== undefined;
   }
 }

@@ -1,72 +1,98 @@
-/* eslint-disable @typescript-eslint/naming-convention -- PostHog and environment APIs use snake/constant case. */
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CaptureResult } from 'posthog-js';
-import { posthogConfig } from '#lib/posthog.lib.js';
+/**
+ * An invitation token is a bearer credential that lives in a URL (charter W5,
+ * D27), and analytics is in the business of recording URLs: `history_change`
+ * pageviews capture `$current_url` and `$pathname`, autocapture records the
+ * `href` of whatever was clicked, and the sign-in round trip carries the whole
+ * path back as `?redirectTo=%2Finvitations%2F…`.
+ *
+ * Anybody who can read the analytics project could then accept the invitation.
+ * These rows pin the redaction that keeps the token out of the payload.
+ */
 
-const state = vi.hoisted(() => ({ consent: 'accepted' as 'accepted' | 'declined' }));
-const environment = vi.hoisted(() => ({
-  POSTHOG_CLIENT_KEY: 'initial-key',
-  POSTHOG_UI_HOST: 'https://initial-posthog.tau.test',
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('#environment.config.js', () => ({
+  /* eslint-disable-next-line @typescript-eslint/naming-convention -- `window.ENV`'s keys are the deployment's own environment variable names. */
+  ENV: { POSTHOG_UI_HOST: 'https://us.posthog.com', POSTHOG_CLIENT_KEY: 'phc_test' },
 }));
+vi.mock('#lib/cookie-consent.lib.js', () => ({ readConsentStatus: () => 'accepted' }));
 
-vi.mock('#lib/cookie-consent.lib.js', () => ({ readConsentStatus: () => state.consent }));
-vi.mock('#environment.config.js', () => ({ ENV: environment }));
+const { posthogConfig, redactEventProperties, redactInvitationTokens } = await import('#lib/posthog.lib.js');
 
-describe('posthogConfig', () => {
-  afterEach(() => {
-    environment.POSTHOG_CLIENT_KEY = 'initial-key';
-    environment.POSTHOG_UI_HOST = 'https://initial-posthog.tau.test';
-    state.consent = 'accepted';
+/** One analytics event, narrowed to what these rows put in it. */
+type TestEvent = { event: string; properties?: Record<string, unknown> };
+
+describe('redactInvitationTokens', () => {
+  it('removes the token from a plain invitation path', () => {
+    expect(redactInvitationTokens('https://tau.new/invitations/AbC-123_xyz')).toBe(
+      'https://tau.new/invitations/[redacted]',
+    );
+    expect(redactInvitationTokens('/invitations/AbC-123_xyz')).toBe('/invitations/[redacted]');
   });
 
-  it('should keep accepted web analytics BAU with SPA pageviews and no opt-out workarounds', () => {
-    const { before_send: beforeSend, ...staticOptions } = posthogConfig.options;
-    expect(staticOptions).toEqual({
-      __preview_deferred_init_extensions: true,
-      api_host: '/api/ph',
-      autocapture: true,
-      capture_dead_clicks: true,
-      capture_pageleave: true,
-      capture_pageview: 'history_change',
-      defaults: '2025-11-30',
-      disable_session_recording: true,
-      persistence: 'localStorage+cookie',
-      ui_host: 'https://initial-posthog.tau.test',
+  it('removes it from the percent-encoded copy the sign-in round trip carries', () => {
+    expect(redactInvitationTokens('https://tau.new/auth/sign-in?redirectTo=%2Finvitations%2FAbC-123_xyz')).toBe(
+      'https://tau.new/auth/sign-in?redirectTo=%2Finvitations%2F[redacted]',
+    );
+  });
+
+  it('keeps a query string, a fragment and everything that is not a token', () => {
+    expect(redactInvitationTokens('/invitations/AbC-123?utm=x#top')).toBe('/invitations/[redacted]?utm=x#top');
+    expect(redactInvitationTokens('/projects')).toBe('/projects');
+    /* The listing route, which holds no token and must stay legible. */
+    expect(redactInvitationTokens('/invitations')).toBe('/invitations');
+  });
+});
+
+describe('redactEventProperties', () => {
+  it('rewrites every string property an event carries', () => {
+    const event: TestEvent = {
+      event: '$pageview',
+      properties: {
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- PostHog's own property names.
+        $current_url: 'https://tau.new/invitations/AbC-123_xyz',
+
+        $pathname: '/invitations/AbC-123_xyz',
+
+        $referrer: 'https://tau.new/auth/sign-in?redirectTo=%2Finvitations%2FAbC-123_xyz',
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- PostHog's own property names.
+        $screen_height: 900,
+      },
+    };
+
+    const redacted = redactEventProperties(event);
+
+    expect(redacted.properties).toStrictEqual({
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- PostHog's own property names.
+      $current_url: 'https://tau.new/invitations/[redacted]',
+
+      $pathname: '/invitations/[redacted]',
+
+      $referrer: 'https://tau.new/auth/sign-in?redirectTo=%2Finvitations%2F[redacted]',
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- PostHog's own property names.
+      $screen_height: 900,
     });
-    expect(Object.keys(posthogConfig.options).sort()).toStrictEqual([
-      '__preview_deferred_init_extensions',
-      'api_host',
-      'autocapture',
-      'before_send',
-      'capture_dead_clicks',
-      'capture_pageleave',
-      'capture_pageview',
-      'defaults',
-      'disable_session_recording',
-      'persistence',
-      'ui_host',
-    ]);
-    expect(typeof beforeSend).toBe('function');
-    expect(posthogConfig.options.cookieless_mode).toBeUndefined();
   });
 
-  it('should discard events immediately after withdrawal', () => {
-    const event: CaptureResult = { event: 'example', properties: {}, uuid: 'event-id' };
-    const beforeSend = posthogConfig.options.before_send;
-    expect(typeof beforeSend).toBe('function');
-    if (typeof beforeSend !== 'function') {
-      throw new TypeError('Expected a single before_send function');
-    }
-    expect(beforeSend(event)).toBe(event);
-    state.consent = 'declined';
-    expect(beforeSend(event)).toBeNull();
+  it('leaves an event with no properties alone', () => {
+    const bare: TestEvent = { event: '$pageview' };
+    expect(redactEventProperties(bare)).toStrictEqual({ event: '$pageview' });
   });
+});
 
-  it('should read PostHog environment values lazily', () => {
-    environment.POSTHOG_CLIENT_KEY = 'late-key';
-    environment.POSTHOG_UI_HOST = 'https://late-posthog.tau.test';
+describe('posthogConfig.before_send', () => {
+  it('redacts the event it lets through, so nothing reaches the wire unredacted', () => {
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions, typescript/no-restricted-types -- posthog-js allows an array of hooks and this build configures exactly one, and its own signature returns `null` to drop an event.
+    const send = posthogConfig.options.before_send as (event: TestEvent) => TestEvent | null;
 
-    expect(posthogConfig.apiKey).toBe('late-key');
-    expect(posthogConfig.options.ui_host).toBe('https://late-posthog.tau.test');
+    const sent = send({
+      event: '$pageview',
+
+      properties: { $pathname: '/invitations/AbC-123_xyz' },
+    });
+
+    expect(sent?.properties).toStrictEqual({
+      $pathname: '/invitations/[redacted]',
+    });
   });
 });

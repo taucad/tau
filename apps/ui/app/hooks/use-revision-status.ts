@@ -40,6 +40,8 @@ import { deviceId } from '#lib/device-id.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { useProject } from '#hooks/use-project.js';
+import { useProjectAccessRole } from '#hooks/use-cloud-projects.js';
+import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 import { githubConnections } from '#lib/github-connections.js';
 import { githubProjectBinding } from '#lib/github-project-binding.js';
 import type { AgentChannelClient, JsonValue } from '@taucad/agent-host';
@@ -680,6 +682,29 @@ export const revisionClientTestApi = {
   reset: (): void => {
     clients.clear();
   },
+};
+
+/**
+ * What this account may do with the open project on Tau Cloud (D27).
+ *
+ * `GET /v1/projects` is the only place a client learns it, and the listing is
+ * the one the library already reads — a role shown in the Sync region is the
+ * same row the library labels, from one cache key.
+ *
+ * `undefined` is the honest answer for a project Tau Cloud does not list for
+ * this account: signed out, offline, never backed up, or somebody else's. Every
+ * surface it gates folds away rather than guessing, and the API refuses each of
+ * them again on its own.
+ *
+ * @returns The role held, or `undefined`.
+ * @public
+ */
+export const useProjectRole = (): ProjectAccessRole | undefined => {
+  const { projectId } = useProject();
+  const status = useRevisionStatus();
+  /* N3: only a Tau remote has a cloud project that can hold a role, so a
+     GitHub-backed or unconnected project never makes the listing request. */
+  return useProjectAccessRole(projectId, status?.remote.kind === 'tau');
 };
 
 /**

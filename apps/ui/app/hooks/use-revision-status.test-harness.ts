@@ -13,6 +13,7 @@ import { vi } from 'vitest';
 import type { RevisionStatusProjection } from '@taucad/revisions/project-revisions-machine';
 import type { RevisionDiffEntry, RevisionRow } from '@taucad/revisions';
 import type { RevisionToast, RevisionFileComparison } from '#machines/file-manager.worker.revisions.js';
+import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 
 const emptyStatus = (): RevisionStatusProjection => ({
   projectId: 'p',
@@ -70,6 +71,8 @@ export const revisionStatusHarness = {
   logRequests: [] as string[],
   comparison: emptyComparison(),
   comparisonError: undefined as Error | undefined,
+  /** D27: which role the account holds on this project, or none at all. */
+  role: undefined as ProjectAccessRole | undefined,
   toasts: new Set<(toast: RevisionToast) => void>(),
   commands: {
     restore: vi.fn<(revisionId: string) => void>(),
@@ -114,6 +117,7 @@ export const revisionStatusHarness = {
     this.logRequests.length = 0;
     this.comparison = emptyComparison();
     this.comparisonError = undefined;
+    this.role = undefined;
     this.toasts.clear();
     for (const command of Object.values(this.commands)) {
       command.mockClear();
@@ -166,5 +170,8 @@ export const revisionStatusMock = (): Record<string, unknown> => {
     useRevisionStatus: () => (revisionStatusHarness.connected ? revisionStatusHarness.status : undefined),
     useRevisionCommands: () => revisionStatusHarness.commands,
     useRevisionClient: () => client,
+    /* D27's role, from the harness rather than from `GET /v1/projects`: a pane
+       row that asserts revision UI must not depend on a network answer. */
+    useProjectRole: () => revisionStatusHarness.role,
   };
 };

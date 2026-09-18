@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { act, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { BookOpen } from 'lucide-react';
 import { ChatActivityGroup } from '#components/chat/chat-activity-group.js';
@@ -20,7 +20,64 @@ const renderGroup = (
     </ChatActivityGroup>,
   );
 
+class TestResizeObserver implements ResizeObserver {
+  public static callback: ResizeObserverCallback | undefined;
+
+  public constructor(callback: ResizeObserverCallback) {
+    TestResizeObserver.callback = callback;
+  }
+
+  public observe(): void {
+    // Only construction and manual callback invocation are needed.
+  }
+  public unobserve(): void {
+    // Only construction and manual callback invocation are needed.
+  }
+  public disconnect(): void {
+    // Only construction and manual callback invocation are needed.
+  }
+}
+
+const observerStub = new TestResizeObserver(() => undefined);
+
+const originalResizeObserver = globalThis.ResizeObserver;
+
+beforeEach(() => {
+  globalThis.ResizeObserver = TestResizeObserver;
+});
+
+afterEach(() => {
+  globalThis.ResizeObserver = originalResizeObserver;
+  TestResizeObserver.callback = undefined;
+});
+
+/** Jsdom never lays out, so the overflow the pin reacts to has to be declared. */
+const measure = (element: HTMLElement, scrollHeight: number, clientHeight: number): void => {
+  Object.defineProperty(element, 'scrollHeight', { configurable: true, value: scrollHeight });
+  Object.defineProperty(element, 'clientHeight', { configurable: true, value: clientHeight });
+};
+
 describe('ChatActivityGroup', () => {
+  it('pins a streaming group to its newest row until the reader scrolls away', () => {
+    renderGroup({ active: true, running: true, summary: 'Reading files' });
+    const details = screen.getByRole('region', { name: 'Reading files details' });
+    measure(details, 800, 320);
+
+    act(() => {
+      TestResizeObserver.callback?.([], observerStub);
+    });
+    expect(details.scrollTop).toBe(800);
+
+    details.dispatchEvent(new WheelEvent('wheel'));
+    details.scrollTop = 100;
+    details.dispatchEvent(new Event('scroll'));
+    measure(details, 1200, 320);
+    act(() => {
+      TestResizeObserver.callback?.([], observerStub);
+    });
+    expect(details.scrollTop).toBe(100);
+  });
+
   it('spins a collapsed header while a row runs and keeps the family icon when open or settled (S08, S12)', async () => {
     const user = userEvent.setup();
     const { container, rerender } = renderGroup({ active: true, running: true, summary: 'Reading files' });

@@ -1,13 +1,12 @@
 import type { ReasoningUIPart } from 'ai';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { ChevronRight, LoaderCircle } from 'lucide-react';
 import { getReasoningEndedAtMs, getReasoningStartedAtMs } from '@taucad/chat';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { Button } from '@taucad/ui/components/button';
 import { ThoughtBubble } from '#components/icons/thought-bubble.js';
 import { MarkdownViewerChat } from '#components/markdown/markdown-viewer-chat.js';
-
-const bottomTolerance = 8;
+import { useStickToBottom } from '#hooks/use-stick-to-bottom.js';
 
 type ChatMessageReasoningProperties = {
   readonly parts: readonly ReasoningUIPart[];
@@ -64,64 +63,11 @@ export function ChatMessageReasoning({
 
   const visibleParts = useMemo(() => parts.filter((part) => part.text.trim() !== ''), [parts]);
   const [userOpen, setUserOpen] = useState<boolean | undefined>(undefined);
-  const [scrollContainer, setScrollContainer] = useState<HTMLDivElement | undefined>(undefined);
-  const [content, setContent] = useState<HTMLDivElement | undefined>(undefined);
-  const stickToBottomRef = useRef(true);
   const isOpen = userOpen ?? (isMessageActive || !hasContent);
   /* A streaming thought names itself; the duration only exists once it ends (R6). */
   const isThinking = isMessageActive && visibleParts.at(-1)?.state === 'streaming';
   const label = isThinking ? 'Thinking…' : thoughtLabel(visibleParts);
-  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React callback refs receive null on detach.
-  const handleScrollContainerRef = useCallback((element: HTMLDivElement | null): void => {
-    setScrollContainer(element ?? undefined);
-  }, []);
-  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React callback refs receive null on detach.
-  const handleContentRef = useCallback((element: HTMLDivElement | null): void => {
-    setContent(element ?? undefined);
-  }, []);
-
-  useEffect(() => {
-    if (!isMessageActive || !isOpen || !scrollContainer || !content || typeof ResizeObserver === 'undefined') {
-      return;
-    }
-    let userInteracting = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const markUserInteraction = (): void => {
-      userInteracting = true;
-      globalThis.clearTimeout(timer);
-      timer = globalThis.setTimeout(() => {
-        userInteracting = false;
-      }, 150);
-    };
-    const updateStickiness = (): void => {
-      if (!userInteracting) {
-        return;
-      }
-      const distance = scrollContainer.scrollHeight - scrollContainer.clientHeight - scrollContainer.scrollTop;
-      stickToBottomRef.current = distance <= bottomTolerance;
-    };
-    const pin = (): void => {
-      if (stickToBottomRef.current) {
-        // oxlint-disable-next-line react/immutability -- keeping a live transcript pinned is an imperative DOM operation.
-        scrollContainer.scrollTop = scrollContainer.scrollHeight;
-      }
-    };
-    pin();
-    const observer = new ResizeObserver(pin);
-    observer.observe(content);
-    scrollContainer.addEventListener('wheel', markUserInteraction, { passive: true });
-    scrollContainer.addEventListener('touchstart', markUserInteraction, { passive: true });
-    scrollContainer.addEventListener('pointerdown', markUserInteraction, { passive: true });
-    scrollContainer.addEventListener('scroll', updateStickiness, { passive: true });
-    return () => {
-      observer.disconnect();
-      globalThis.clearTimeout(timer);
-      scrollContainer.removeEventListener('wheel', markUserInteraction);
-      scrollContainer.removeEventListener('touchstart', markUserInteraction);
-      scrollContainer.removeEventListener('pointerdown', markUserInteraction);
-      scrollContainer.removeEventListener('scroll', updateStickiness);
-    };
-  }, [content, isMessageActive, isOpen, scrollContainer]);
+  const { scrollRef, contentRef } = useStickToBottom(isMessageActive && isOpen);
 
   if (visibleParts.length === 0) {
     return undefined;
@@ -135,7 +81,11 @@ export function ChatMessageReasoning({
           size='xs'
           className='group/chat-tool-trigger -ml-2 flex w-full min-w-0 items-center justify-start gap-1.5 overflow-hidden font-normal text-muted-foreground hover:bg-transparent hover:text-foreground dark:hover:bg-transparent'
         >
-          <ThoughtBubble aria-hidden='true' className='size-3 shrink-0' />
+          {isThinking ? (
+            <LoaderCircle aria-hidden='true' className='size-3 shrink-0 animate-spin motion-reduce:animate-none' />
+          ) : (
+            <ThoughtBubble aria-hidden='true' className='size-3 shrink-0' />
+          )}
           <span className='min-w-0 truncate'>{label}</span>
           <ChevronRight
             aria-hidden='true'
@@ -145,12 +95,12 @@ export function ChatMessageReasoning({
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div
-          ref={handleScrollContainerRef}
+          ref={scrollRef}
           role='region'
           aria-label={`${label} details`}
           className='reasoning-body relative max-h-[min(30rem,60svh)] scroll-shadows-y overflow-y-auto overscroll-contain pl-5 text-sm font-normal text-muted-foreground italic [&_*]:font-normal [&_*]:italic [&_h1]:text-inherit [&_h2]:text-inherit [&_h3]:text-inherit [&_h4]:text-inherit [&_h5]:text-inherit [&_h6]:text-inherit'
         >
-          <div ref={handleContentRef}>
+          <div ref={contentRef}>
             {visibleParts.map((part, index) => (
               <MarkdownViewerChat
                 key={`${String(getReasoningStartedAtMs(part))}:${String(getReasoningEndedAtMs(part))}:${part.text}:${String(index)}`}

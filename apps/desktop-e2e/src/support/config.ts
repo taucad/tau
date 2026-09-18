@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/naming-convention -- E2E is the established project acronym. */
 import process from 'node:process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 
 /**
@@ -64,3 +64,23 @@ export const desktopE2EPackagedExecutable = (): string => {
  * which is where it belongs.
  */
 export const desktopE2EFrontendUrl = 'http://localhost:3014';
+
+/**
+ * The database the API this tier boots actually uses (W10).
+ *
+ * The tier's helpers reach Postgres through `docker exec tau-postgres psql`,
+ * which cannot see the API's `DATABASE_URL` and so named `tau_dev` outright. In
+ * a linked worktree `apps/api/.env` points at that worktree's own fork, the API
+ * writes there, and a helper writing to `tau_dev` silently updates a row nobody
+ * reads (W10 defect 1). `TAU_E2E_POSTGRES_DATABASE` still wins when it is set.
+ */
+export const desktopE2EDatabaseName = ((): string => {
+  const explicit = process.env['TAU_E2E_POSTGRES_DATABASE'];
+  if (explicit !== undefined && explicit !== '') {
+    return explicit;
+  }
+  const url =
+    process.env['DATABASE_URL'] ??
+    /^DATABASE_URL=(.*)$/mu.exec(readFileSync(resolve(import.meta.dirname, '../../../api/.env'), 'utf8'))?.[1];
+  return url === undefined ? 'tau_dev' : new URL(url).pathname.slice(1);
+})();

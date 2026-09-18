@@ -188,3 +188,47 @@ export const routeGitRefusal = async (
  */
 export const routeGitOffline = async (target: GitFaultTarget, pattern: string = gitWirePattern): Promise<GitFault> =>
   installGitFault(target, async (route) => route.abort('connectionfailed'), pattern);
+
+/**
+ * Answer a `git-receive-pack` POST with real report-status pkt-lines (W10).
+ *
+ * The Hosted Remote's D20 ceiling refusal has no HTTP status at all: it is the
+ * `pre-receive` hook's bytes, relayed verbatim (Rule 19, NI13), so a JSON
+ * envelope cannot produce it and `routeGitRefusal` is the wrong shape. The
+ * client recognises it by the fixed marker the hook opens with, which is why
+ * the marker below must stay byte-identical to `ceilingRefusalMarker` in
+ * `apps/api/app/api/git/git.constants.ts` and its copy in
+ * `packages/revisions/src/remotes.ts`.
+ *
+ * @param target - The client to refuse.
+ * @param reason - The hook's whole sentence, including its marker and file list.
+ * @param ref - The ref the refusal names.
+ * @returns The installed fault.
+ */
+export const routeGitHookRefusal = async (
+  target: GitFaultTarget,
+  reason: string,
+  ref = 'refs/heads/main',
+): Promise<GitFault> => {
+  const pktLine = (text: string): string => `${(text.length + 4).toString(16).padStart(4, '0')}${text}`;
+  /* A single-line `ng` reason: the hook's own newlines would end the pkt-line,
+   * so they arrive as the vertical-bar separator the hook's own relay uses. */
+  const report = `${pktLine('unpack ok\n')}${pktLine(`ng ${ref} ${reason.replaceAll('\n', ' | ')}\n`)}0000`;
+  /* `git-receive-pack` advertises `side-band-64k` and isomorphic-git asks for
+   * it, so the report-status stream arrives multiplexed on band 1. A bare
+   * pkt-line stream parses as garbage and the client reports "could not be
+   * reached" instead of the refusal — which is exactly the wrong answer to
+   * prove. */
+  const body = Buffer.from(`${pktLine(`\u0001${report}`)}0000`, 'binary');
+  return installGitFault(
+    target,
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/x-git-receive-pack-result',
+        body,
+      });
+    },
+    '**/git-receive-pack',
+  );
+};

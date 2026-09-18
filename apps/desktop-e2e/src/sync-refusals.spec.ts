@@ -3,10 +3,11 @@ import { execFile } from 'node:child_process';
 import process from 'node:process';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { desktopE2EDatabaseName } from '#support/config.js';
 import { deleteTauTestUser, seedTauTestUser, tauTestAccount } from '#support/tau-account.js';
 import { launchBrowserClient } from '#support/two-client/browser-client.js';
 import type { BrowserClient } from '#support/two-client/browser-client.js';
-import { routeGitRefusal } from '#support/two-client/git-faults.js';
+import { routeGitHookRefusal, routeGitRefusal } from '#support/two-client/git-faults.js';
 import type { GitRefusal } from '#support/two-client/git-faults.js';
 import {
   forgetSeededProjects,
@@ -45,7 +46,7 @@ const countRows = async (statement: string): Promise<number> => {
       '-U',
       'dev_user',
       '-d',
-      'tau_dev',
+      desktopE2EDatabaseName,
       '-c',
       statement,
     ],
@@ -365,6 +366,149 @@ describe('a Pro owner whose pushes are refused', () => {
         'C3b: one refused push, not a loop',
       ).toBeLessThanOrEqual(2);
       expect(await backupText(client)).not.toMatch(/Checking…/u);
+    } finally {
+      await fault.remove();
+    }
+  }, 900_000);
+});
+
+/**
+ * The three browser-leg answers the git storage substrate charter's W10 owes
+ * (items 3): a retryable 503, a terminal 410, and D20's ceiling refusal.
+ *
+ * All three are the *client's* behaviour, which is why they are here and not in
+ * `apps/api-e2e`: what W10 has to show is that the sync machine retries the
+ * first, stops on the second, and lands in `quota` with the server's own
+ * sentence on the third.
+ */
+describe("a Pro owner meeting the hosted remote's own three answers (W10 item 3)", () => {
+  it('should retry a lost race answered 503 and end up backed up', async () => {
+    const { client } = required(pro);
+    await connectAndBackUp(client, 'W10 Race 503');
+    /* `GIT_PUSH_RACE_LOST` is D4's answer to a lost conditional write, and Rule
+     * 19 files it as retryable with no user-facing class: the row must not
+     * settle on a refusal, it must settle on Backed up. */
+    const fault = await routeGitRefusal(
+      client,
+      {
+        status: 503,
+        code: 'GIT_PUSH_RACE_LOST',
+        message: 'Another writer committed first; retry this push.',
+      },
+      '**/git-receive-pack',
+    );
+    await mintRevision(client, 'raced.scad');
+    await expect.poll(() => fault.requestsMatching('git-receive-pack').length, { timeout: 180_000 }).toBeGreaterThan(0);
+    /* The store is "available" again, which is what the client's own retry
+     * then meets. */
+    await fault.remove();
+    await expect.poll(async () => backupText(client), { timeout: 180_000 }).toMatch(/Backed up/u);
+    console.info(
+      `[sync-refusals] 503: backed up after ${String(fault.requestsMatching('git-receive-pack').length)} refused pushes`,
+    );
+  }, 900_000);
+
+  it('should stop on a 410 and name the project as gone', async () => {
+    const { client } = required(pro);
+    await connectAndBackUp(client, 'W10 Tombstone 410');
+    const sentence = 'This Tau Cloud project was deleted (W10 410).';
+    const fault = await routeGitRefusal(client, {
+      status: 410,
+      code: 'GIT_REPOSITORY_DELETED',
+      message: sentence,
+    });
+    try {
+      await mintRevision(client, 'tombstoned.scad');
+      await expect.poll(async () => backupText(client), { timeout: 180_000 }).toContain(sentence);
+
+      /* Rule 19: `REMOTE_NOT_FOUND` is terminal — the machine enters `failed`
+       * and stops, which is observable as the refused calls plateauing. */
+      const calls = (): number => fault.requests().length;
+      let seen = calls();
+      let stableSince = Date.now();
+      const plateaued = await expect
+        .poll(
+          () => {
+            if (calls() !== seen) {
+              seen = calls();
+              stableSince = Date.now();
+            }
+            return Date.now() - stableSince;
+          },
+          { interval: 1000, timeout: 50_000 },
+        )
+        .toBeGreaterThanOrEqual(25_000)
+        .then(
+          () => true,
+          () => false,
+        );
+      console.info(`[sync-refusals] 410: plateaued=${String(plateaued)} after ${String(calls())} git calls`);
+      expect(plateaued, 'a 410 is terminal: the sync machine must stop').toBe(true);
+    } finally {
+      await fault.remove();
+    }
+  }, 900_000);
+
+  /* The hook's own bytes: the fixed marker `remotes.ts` classifies on, the
+   * sentence, and the ten-largest-files list D20 asks for. */
+  const ceilingReason =
+    'Tau: repository size limit exceeded (1.2 GiB of 1 GiB). Remove large files and push again. ' +
+    'Largest files: assembly.step 412 MiB | frame.step 311 MiB | housing.step 208 MiB';
+
+  it("should render D20's ceiling refusal in the hook's own words, file list and all", async () => {
+    const { client } = required(pro);
+    await connectAndBackUp(client, 'W10 Ceiling Words');
+    const fault = await routeGitHookRefusal(client, ceilingReason);
+    try {
+      await mintRevision(client, 'over-ceiling.scad');
+      await expect
+        .poll(() => fault.requestsMatching('git-receive-pack').length, { timeout: 180_000 })
+        .toBeGreaterThan(0);
+      await expect
+        .poll(async () => backupText(client), { timeout: 180_000 })
+        .toMatch(/repository size limit exceeded/u);
+      const rendered = await backupText(client);
+      console.info(`[sync-refusals] ceiling row: ${JSON.stringify(rendered)}`);
+      expect(rendered, "the hook's own file list must be on the row").toContain('assembly.step');
+    } finally {
+      await fault.remove();
+    }
+  }, 900_000);
+
+  /**
+   * W10 defect 4, now closed. Rule 19 and D20 say a ceiling refusal is
+   * `REMOTE_QUOTA_EXCEEDED` → the `quota` reason, whose one action is
+   * *Upgrade*; *Sync now* cannot clear a ceiling, because a fetch and a replay
+   * push the same bytes again.
+   *
+   * `remotes.ts:573-581` does classify on `ceilingRefusalMarker` — but only on
+   * the path where the refusal arrives as a *thrown* transport error, which is
+   * the native leg. On the isomorphic-git leg a `pre-receive` refusal comes
+   * back as a per-ref result, and `sync.machine.ts:1214` writes
+   * `reason: 'rejected'` for any refused ref without ever reading the marker.
+   * Measured: the row shows the server's sentence and its file list (the case
+   * above) and offers **Sync now**.
+   *
+   * Fixed in W4 lane a a4: `sync.machine.ts` now files a per-ref refusal
+   * carrying the marker as `quota`, whose one action is Upgrade, while the
+   * remote's sentence and file list are untouched (`sync.machine.test.ts` →
+   * "files a per-ref ceiling refusal as quota, keeping the remote's sentence").
+   */
+  it('should offer Upgrade rather than Sync now on a ceiling refusal', async () => {
+    const { client } = required(pro);
+    await connectAndBackUp(client, 'W10 Ceiling Action');
+    const fault = await routeGitHookRefusal(client, ceilingReason);
+    try {
+      await mintRevision(client, 'over-ceiling-action.scad');
+      await expect
+        .poll(async () => backupText(client), { timeout: 180_000 })
+        .toMatch(/repository size limit exceeded/u);
+      const buttons = await backupStatus(client).getByRole('button').allInnerTexts();
+      const links = await backupStatus(client).getByRole('link').allInnerTexts();
+      const offered = [...buttons, ...links].map((text) => text.trim());
+      console.info(`[sync-refusals] ceiling actions: ${JSON.stringify(offered)}`);
+      expect(offered).toHaveLength(1);
+      expect(offered[0]).toMatch(/Upgrade/u);
     } finally {
       await fault.remove();
     }

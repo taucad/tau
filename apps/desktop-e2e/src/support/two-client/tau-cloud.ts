@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import process from 'node:process';
 import { promisify } from 'node:util';
-import { desktopE2EApiUrl, desktopE2EFrontendUrl } from '#support/config.js';
+import { desktopE2EApiUrl, desktopE2EDatabaseName, desktopE2EFrontendUrl } from '#support/config.js';
 
 /**
  * What one Tau Cloud owner needs before a project can sync at all (charter W18).
@@ -38,7 +38,7 @@ const psql = async (statement: string): Promise<string> => {
       '-U',
       'dev_user',
       '-d',
-      'tau_dev',
+      desktopE2EDatabaseName,
       '-c',
       statement,
     ],

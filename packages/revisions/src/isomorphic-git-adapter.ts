@@ -2,10 +2,11 @@
 /**
  * `RevisionPort` over a `FileSystemProvider`, backed by `isomorphic-git`.
  *
- * The store is a real Git repository whose control plane lives at
- * `.tau/revisions` and whose worktree is the project root, so objects, packs,
- * refs and — once S24 lands its transport — smart HTTP are the library's, not
- * Tau's. Only the commit object is still written by Tau: every revision carries
+ * The store is a real Git repository whose control plane lives at `.git` and
+ * whose worktree is the project root — one layout on every host (D29), in the
+ * one filesystem the project already has — so objects, packs, refs and — once
+ * S24 lands its transport — smart HTTP are the library's, not Tau's. Only the
+ * commit object is still written by Tau: every revision carries
  * a `change-id`, and a conflicted one carries `jj:trees` and
  * `jj:conflict-labels`, none of which `isomorphic-git`'s `CommitObject` can
  * express, so the bytes come from `#git-objects.js` and go in through
@@ -152,7 +153,7 @@ export type IsomorphicGitCheckoutOptions = Readonly<{
 /** Configuration for one provider-backed Git repository. @public */
 export type IsomorphicGitRevisionPortOptions = Readonly<{
   filesystem: FileSystemProvider;
-  /** Control plane location. Defaults to `.tau/revisions`, which the generated ignore excludes. */
+  /** Control plane location. Defaults to `.git`, the one repository name on every host (D29). */
   gitDirectory?: string;
   /** Recorded object format. `isomorphic-git` writes SHA-1 only. */
   objectFormat?: ObjectFormat;
@@ -167,7 +168,7 @@ export type IsomorphicGitRevisionPortOptions = Readonly<{
   http?: RevisionHttpClient;
 }>;
 
-const defaultGitDirectory = '.tau/revisions';
+const defaultGitDirectory = '.git';
 const defaultBranch = 'main';
 const branchRefPrefix = 'refs/heads';
 const tagRefPrefix = 'refs/tags';

@@ -260,7 +260,7 @@ describe('isomorphic-git tag ref locking', () => {
       expect.objectContaining({ name: 'v1', revisionId: firstRevision, note: 'Local move' }),
     ]);
     expect(new Set(requestedLocks.filter((name) => name.endsWith('refs/tags/v1')))).toEqual(
-      new Set([`tau:revision-ref:${storage.id}:.tau/revisions:refs/tags/v1`]),
+      new Set([`tau:revision-ref:${storage.id}:.git:refs/tags/v1`]),
     );
   });
 });

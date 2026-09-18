@@ -37,9 +37,25 @@ describe('createImportedProjectFiles', () => {
     expect(result['.tau/parameters/main.json']?.content).toBe(parameterRecordBytes);
   });
 
+  /* The disk machine drops the repository before its picker ever sees it; this
+   * is the same rule on the archive route, which has no such machine in front
+   * of it. */
+  it('excludes the repository an archive carried', () => {
+    const files: FileMap = new Map([
+      ['main.ts', { filename: 'main.ts', content: bytes(1) }],
+      ['.git/HEAD', { filename: '.git/HEAD', content: bytes(2) }],
+      ['.git/objects/ab/cdef', { filename: '.git/objects/ab/cdef', content: bytes(3) }],
+      ['.tau/binding.json', { filename: '.tau/binding.json', content: bytes(4) }],
+      /* Anchored, so a vendored repository is the user's own content. */
+      ['vendor/dep/.git/HEAD', { filename: 'vendor/dep/.git/HEAD', content: bytes(5) }],
+    ]);
+
+    expect(Object.keys(createImportedProjectFiles(files, 'main.ts'))).toEqual(['main.ts', 'vendor/dep/.git/HEAD']);
+  });
+
   it('rejects an excluded selected main file', () => {
     expect(() => createImportedProjectFiles(createFiles(), '.tau/cache/geometry/hash.bin')).toThrow(
-      'selected main file is regenerable cache content',
+      "That file belongs to a repository or a cache, so it can't be the main file.",
     );
   });
 

@@ -3259,7 +3259,7 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       'exports/part.stl': 'solid part',
       '.tau/chats/chat_a/log.json': '{"messages":[]}',
       '.git/HEAD': 'ref: refs/heads/main',
-      '.tau/revisions/refs/heads/main': 'abc123',
+      '.git/refs/heads/main': 'abc123',
     } as const;
 
     /** Archived files, excluding the parent folder rows JSZip creates on its own. */
@@ -3292,7 +3292,7 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
       expect(entries).toContain('main.ts');
       expect(entries).toContain('.tau/chats/chat_a/log.json');
       expect(entries).toContain('thumbnail.webp');
-      expect(entries.filter((entry) => entry.startsWith('.git/') || entry.startsWith('.tau/revisions/'))).toEqual([]);
+      expect(entries.filter((entry) => entry.startsWith('.git/'))).toEqual([]);
       expect(readFile.mock.calls.filter(([path]) => path.includes('/.git/') || path.includes('/revisions/'))).toEqual(
         [],
       );

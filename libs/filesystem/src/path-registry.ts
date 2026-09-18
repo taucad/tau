@@ -260,15 +260,6 @@ export const pathRegistry: readonly PathRegistryRow[] = Object.freeze([
   /* Control plane: hidden from every composed view, refused before provider
    * I/O. A revision hash never covers its own store. */
   {
-    prefix: '.tau/revisions',
-    class: 'control-plane',
-    versioned: false,
-    agentAccess: 'hidden',
-    watch: 'none',
-    anchored: true,
-    directory: true,
-  },
-  {
     prefix: '.tau/binding.json',
     class: 'control-plane',
     versioned: false,
@@ -334,7 +325,7 @@ const rowClassifications: readonly PathClassification[] = Object.freeze(
  * ```typescript
  * import { classify } from '@taucad/filesystem/path-registry';
  *
- * classify('.tau/revisions/HEAD').agentAccess; // 'hidden'
+ * classify('.git/HEAD').agentAccess; // 'hidden'
  * classify('src/part.ts').versioned; // true
  * ```
  */

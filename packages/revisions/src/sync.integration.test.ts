@@ -11,7 +11,7 @@
  * | # | Row | What it proves |
  * | --- | --- | --- |
  * | 1 | **red pin (c)** | a record ref the server refuses re-queues only itself; `main` is on the remote |
- * | 2 | **red pin (a)** | a `close` revision that could not be pushed is in `.tau/revisions/sync-pending`, and a fresh actor retries it first |
+ * | 2 | **red pin (a)** | a `close` revision that could not be pushed is in `.git/sync-pending`, and a fresh actor retries it first |
  * | 3 | **red pin (d)** | device B's open pull brings device A's file into B's checkout with no reload, and B renders before the pull answers |
  * | 4 | **red pin (e)** | a device that is merely *ahead* of the remote drains its durable queue on the next open, online, and never reports a conflict (review 2 R1) |
  * | 6 | **W18-b red pin (c)** | a device that has never held the project materializes its tree *and* its `.tau/chats` projection from the remote, with no chat turn (W18 DEF-2) |
@@ -44,7 +44,7 @@ const author = { name: 'Tau', email: 'tau@example.com' };
 const chatId = 'c1';
 const chatRef = `refs/tau/chats/${chatId}`;
 const mainRef = 'refs/heads/main';
-const syncQueuePath = '.tau/revisions/sync-pending';
+const syncQueuePath = '.git/sync-pending';
 
 const gitOnPath = ((): boolean => {
   try {

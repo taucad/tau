@@ -81,11 +81,8 @@ describe('masked path reachability through the authority-global surface', () => 
   let service: WorkspaceFileService;
 
   /** The project as a consumer reaches it: one rooted view, composed as every host composes it. */
-  const projectView = (): ComposedView =>
-    composeView(
-      { filesystem: service.createRootedFileSystem(projectRoute) },
-      { consumer: 'user', policy: tauPathPolicy },
-    );
+  const projectView = (consumer: 'user' | 'agent' = 'user'): ComposedView =>
+    composeView({ filesystem: service.createRootedFileSystem(projectRoute) }, { consumer, policy: tauPathPolicy });
 
   beforeEach(async () => {
     service = await createService();
@@ -163,6 +160,30 @@ describe('masked path reachability through the authority-global surface', () => 
     expect(hiddenAmong(copied)).toEqual([]);
     /* And the project's own bytes did arrive, so an empty copy cannot pass. */
     expect(copied).toContain('src/main.ts');
+  });
+
+  it('should not let a copy land control-plane bytes where they become the control plane', async () => {
+    /* `src/.git/HEAD` is authored where it sits, but copied to the project
+     * root it would be `.git/HEAD` — a destination the mask refuses. */
+    await service.writeFile(`${projectRoute}/src/.git/HEAD`, 'authored where it sits');
+    await service.writeFile(`${projectRoute}/src/.tau/chats/c2.json`, '{}');
+
+    await projectView().copyTree!('src', '');
+
+    /* The project's own control plane is untouched, and the copy did land. */
+    await expect(service.readFile(`${projectRoute}/.git/HEAD`, 'utf8')).resolves.toBe(seeded['.git/HEAD']);
+    await expect(service.exists(`${projectRoute}/main.ts`)).resolves.toBe(true);
+  });
+
+  it('should not let an agent copy records into a records path', async () => {
+    await service.writeFile(`${projectRoute}/src/.tau/chats/c2.json`, '{}');
+
+    await projectView('agent').copyTree!('src', '');
+
+    const copied = Object.keys(await service.getDirectoryContents(projectRoute));
+
+    expect(copied).not.toContain('.tau/chats/c2.json');
+    expect(copied).toContain('main.ts');
   });
 
   it('should classify a mid-tree copy against the project root, not the copy root', async () => {

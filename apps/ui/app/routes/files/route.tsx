@@ -7,7 +7,7 @@ import {
   FolderArchive,
   FolderOpen,
   House,
-  MoreHorizontal,
+  EllipsisVertical,
   Plus,
   RefreshCw,
   Unplug,
@@ -161,7 +161,7 @@ function FileActions({
           event.stopPropagation();
         }}
       >
-        <MoreHorizontal className='size-4' />
+        <EllipsisVertical className='size-4' />
       </Button>
     </ComboBoxResponsive>
   );
@@ -206,7 +206,7 @@ function FolderActions({
           event.stopPropagation();
         }}
       >
-        <MoreHorizontal className='size-4' />
+        <EllipsisVertical className='size-4' />
       </Button>
     </ComboBoxResponsive>
   );

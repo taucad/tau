@@ -5,7 +5,7 @@ import {
   CopyPlus,
   Pencil,
   Trash,
-  MoreHorizontal,
+  EllipsisVertical,
   X as CloseIcon,
   Download,
   Box,
@@ -812,7 +812,7 @@ function ParametersPanelHeader({
                 <DropdownMenu modal={false}>
                   <DropdownMenuTrigger asChild>
                     <PaneviewHeaderAction aria-label='Compilation unit actions' tooltip='More actions'>
-                      <MoreHorizontal />
+                      <EllipsisVertical />
                     </PaneviewHeaderAction>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align='end' side='bottom'>

@@ -5,7 +5,7 @@ import type { ItemInstance, TreeInstance } from '@headless-tree/core';
 import {
   FilePlus,
   FolderPlus,
-  MoreHorizontal,
+  EllipsisVertical,
   Box,
   Folder,
   FolderOpen,
@@ -2322,7 +2322,7 @@ function TreeItem({
                     event.stopPropagation();
                   }}
                 >
-                  <MoreHorizontal className='size-3.5' />
+                  <EllipsisVertical className='size-3.5' />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align='start' side='right'>

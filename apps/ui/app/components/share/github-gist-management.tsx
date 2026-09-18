@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import { Ellipsis, Loader2, RefreshCw, Trash2 } from 'lucide-react';
+import { EllipsisVertical, Loader2, RefreshCw, Trash2 } from 'lucide-react';
 import { formatShareUrl } from '@taucad/share/locator';
 import type { ShareLocator } from '@taucad/share/locator';
 import { isShareError } from '@taucad/share/provider';
@@ -191,7 +191,7 @@ export function GithubGistManagement({
             {busy ? (
               <Loader2 className='size-3.5 animate-spin' aria-hidden />
             ) : (
-              <Ellipsis className='size-3.5' aria-hidden />
+              <EllipsisVertical className='size-3.5' aria-hidden />
             )}
             <span className='hidden sm:inline'>Manage</span>
           </Button>

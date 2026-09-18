@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertTriangle, Check, FileText, GitBranch, GitCompare, MoreHorizontal, Pencil, Plus } from 'lucide-react';
+import { AlertTriangle, Check, FileText, GitBranch, GitCompare, EllipsisVertical, Pencil, Plus } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { Button } from '@taucad/ui/components/button';
 import {
@@ -507,7 +507,7 @@ export function RevisionBranches({
                         aria-label={`Actions for ${branch.name}`}
                         disabled={isBusy}
                       >
-                        <MoreHorizontal aria-hidden />
+                        <EllipsisVertical aria-hidden />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align='end'>

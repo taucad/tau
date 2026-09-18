@@ -30,6 +30,7 @@ import type { EventLogBatch } from '#log/event-log-appender.js';
 import type { AgentSession, AgentSessionModel, CreateAgentSessionOptions } from '#harness/session.js';
 import type { ClientContext } from '#harness/cad-middleware.js';
 import { createInterruptRecoveryMessage } from '#harness/interrupt-recovery.js';
+import { externalAgentStopCodes } from '#launchers/node/agent-wire.js';
 
 type SessionEvent = AgentLogEvent extends infer Event
   ? Event extends LogEventBase
@@ -894,32 +895,69 @@ const terminalStates = new Set<RunLifecycleState>(['completed', 'failed', 'cance
 /**
  * Failure codes whose run can be continued at the step it stopped on.
  *
- * A refused *admission* never reached the provider, so the turn's history is
- * whole: every tool that ran is settled, nothing is half applied, and the only
- * thing missing is the model call the gateway would not fund. Once the account
- * can fund it, re-issuing that one call is the entire recovery — no rewind of
- * the turn, and no second charge for tool work the customer already paid for.
- * Every other failure ends the run for good and is dispatched afresh.
+ * A model call that failed — refused before it was funded, or dropped in the
+ * middle of its stream — leaves the turn's history whole: every tool that ran
+ * is settled, nothing is half applied (a tool call only runs once its response
+ * completes), and the only thing missing is that one call. Re-issuing it is the
+ * entire recovery — no rewind of the turn, and no second charge for tool work
+ * the customer already paid for. A failure that a second attempt would only
+ * meet again (no evictable history, a lost leadership, a model the catalog does
+ * not carry) ends the run for good and is dispatched afresh.
  *
  * One set, read by the host's own `resume` and by the surfaces that decide
- * whether to offer Resume at all.
+ * whether to offer Resume at all. The non-resumable half is ruled by
+ * `tau-agent-host.test.ts`, which keys both code unions exhaustively.
  */
-const resumableRunFailureCodes = new Set<string>(['INSUFFICIENT_CREDIT']);
+const resumableRunFailureCodes = new Set<string>([
+  'INSUFFICIENT_CREDIT',
+  'INVALID_REQUEST',
+  'MALFORMED_RESPONSE',
+  'NETWORK_ERROR',
+  'PROVIDER_UNAVAILABLE',
+  'RATE_LIMITED',
+  // A session that expired mid-turn: signing in again is the whole recovery.
+  'UNAUTHENTICATED',
+  'UPSTREAM_REJECTED',
+]);
 
 /**
- * Whether a failed run's recorded failure code can be resumed at its blocked step.
+ * Whether an external agent's own stop record says a retry can help.
  *
- * @param code - `RunFailureDetail.code` from the run's terminal record.
+ * An external turn stops on its provider's terms, not on a code Tau can rule:
+ * the same `EXTERNAL_AGENT_LIMIT_REACHED` is a rate limit that clears in a
+ * minute or a context ceiling only a new session clears. The agent says which
+ * in `failure.actions` ({@link externalAgentStopCodes}), so that is what the
+ * host reads; an empty list means retrying cannot help.
+ *
+ * @param failure - The terminal record's `details`, as the runner attached them.
+ * @returns `true` when the agent listed `retry` among the actions that help.
+ */
+const externalStopOffersRetry = (failure: RunFailureDetail): boolean => {
+  if (!externalAgentStopCodes.some((code) => code === failure.code)) {
+    return false;
+  }
+  const stop = zodUtility.isObject(failure.details) ? failure.details['failure'] : undefined;
+  const actions = zodUtility.isObject(stop) ? stop['actions'] : undefined;
+  return Array.isArray(actions) && actions.includes('retry');
+};
+
+/**
+ * Whether a failed run's terminal record can be resumed at its blocked step.
+ *
+ * Reads the whole record, not just its code: an external agent's stop is
+ * resumable or not by the actions the agent itself reported.
+ *
+ * @param failure - `RunFailureDetail` from the run's terminal record.
  * @returns `true` when `resume` will continue this run rather than replay it.
  * @public
  */
-export const isResumableRunFailure = (code: string | undefined): boolean =>
-  code !== undefined && resumableRunFailureCodes.has(code);
+export const isResumableRunFailure = (failure: RunFailureDetail | undefined): boolean =>
+  failure?.code !== undefined && (resumableRunFailureCodes.has(failure.code) || externalStopOffersRetry(failure));
 
 /* Whether this run's terminal record is a refusal {@link isResumableRunFailure} covers. */
 const refusedResumably = (events: readonly AgentLogEvent[], runId: string): boolean => {
   const last = events.findLast((event) => event.runId === runId && event.type === 'run.lifecycle');
-  return last?.type === 'run.lifecycle' && last.state === 'failed' && isResumableRunFailure(last.detail?.code);
+  return last?.type === 'run.lifecycle' && last.state === 'failed' && isResumableRunFailure(last.detail);
 };
 
 /**
@@ -1592,7 +1630,10 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
     const events = await log.read();
     const current = currentRun(events);
     const external = externalTurnOf(events);
-    if (!current || !external || terminalStates.has(current.state)) {
+    /* A terminal run has nothing to continue — unless the agent stopped it and
+     * said a retry can help, which is the same continuation one attempt later
+     * (R9/S11). */
+    if (!current || !external || (terminalStates.has(current.state) && !refusedResumably(events, current.runId))) {
       return false;
     }
     const { agentId, kind: _kind, runKind, ...state } = external.marker;
@@ -1600,7 +1641,12 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
       chatId,
       runId: current.runId,
       agent: { kind: runKind, id: agentId },
-      state,
+      /* The session this chat *reached*, not the one its admission asked for:
+       * `remember` records the vendor session id by replacing the user
+       * message's envelope, which only the reducer's view carries. Resuming
+       * from the raw marker opened a second vendor session and replayed the
+       * turn on the person's own quota. */
+      state: externalSessionOf(events, agentId) ?? state,
     });
     return true;
   };
@@ -1834,7 +1880,10 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
            * tell the model a network drop cancelled tools that in fact all
            * settled. Retracting it restores the exact context the refused call
            * was built from, so the resume re-issues that one call. */
-          const refused = reduceEventLog(events);
+          /* An external stop retracts nothing: its trailing assistant message
+           * is the agent's own work, and the vendor session still holds the
+           * turn this resume continues. */
+          const refused = externalTurnOf(events) ? [] : reduceEventLog(events);
           if (refused.at(-1)?.role === 'assistant') {
             await append({
               chatId,

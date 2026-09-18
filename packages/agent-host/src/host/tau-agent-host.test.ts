@@ -8,12 +8,19 @@ import type {
   ModelTransport,
   ToolRegistry,
 } from '#waist/ports.js';
-import { createTauAgentHost, hostRunStateOfLifecycle, runLedgerOf } from '#host/tau-agent-host.js';
+import {
+  createTauAgentHost,
+  hostRunStateOfLifecycle,
+  isResumableRunFailure,
+  runLedgerOf,
+} from '#host/tau-agent-host.js';
 import type { ExternalAgentPort } from '#host/tau-agent-host.js';
 import { reduceEventLog } from '#log/reducer.js';
 import { ScriptedParityModelTransport, scriptedParityResponses } from '#host/scripted-model.fixture.js';
 import type { AgentLogEvent, JsonObject, ProviderMessage } from '#log/event-types.js';
-import { GatewayModelTransportError } from '#transport/gateway-model-transport.js';
+import { GatewayModelTransportError, gatewayModelErrorCodes } from '#transport/gateway-model-transport.js';
+import type { GatewayModelErrorCode } from '#transport/gateway-model-transport.js';
+import type { HostCompactionError } from '#harness/compaction.js';
 
 const tauInternal = (message: ProviderMessage | undefined): JsonObject | undefined => message?.metadata?.tauInternal;
 
@@ -407,8 +414,11 @@ describe('createTauAgentHost', () => {
 
   it.each([
     ['INSUFFICIENT_CREDIT', 402, true],
+    /* The in-stream guard wraps a provider failure with the *healthy*
+     * response's status, so a mid-call `NETWORK_ERROR` carries a 200. */
+    ['NETWORK_ERROR', 200, true],
     ['MODEL_NOT_IN_CATALOG', 400, false],
-  ] as const)('resumes a %s refusal at the blocked step only when it is retryable', async (code, status, retryable) => {
+  ] as const)('resumes a %s failure at the blocked step only when it is retryable', async (code, status, retryable) => {
     const file = createMemoryLogFile();
     const requests: ModelStreamRequest[] = [];
     const invoke = vi.fn(async () => ({ content: 'fixture-main', isError: false }));
@@ -475,6 +485,12 @@ describe('createTauAgentHost', () => {
     // built from: the prior tool result intact, the user turn appearing once,
     // and no rewind of the turn itself.
     expect(lifecycle).toEqual(['admitted', 'running', 'failed', 'running', 'completed']);
+    /* The one retraction a resume makes: the trailing failure marker, and
+     * nothing before it (R4). A `regenerate` would retain nothing past the
+     * user message instead. */
+    const rewound = events.filter((event) => event.type === 'history.rewound');
+    expect(rewound.map((event) => event.trigger)).toEqual(['retry']);
+    expect(rewound[0]?.retainedMessageIds).toEqual(refused.messages.slice(0, -1).map((message) => message.id));
     expect(requests).toHaveLength(3);
     expect(requests[2]?.messages.map((message) => `${message.role}:${message.id}`)).toEqual(
       requests[1]?.messages.map((message) => `${message.role}:${message.id}`),
@@ -491,6 +507,46 @@ describe('createTauAgentHost', () => {
       state: 'completed',
     });
     await host.close();
+  });
+
+  it('rules every failure code a run can end on either resumable or not', () => {
+    /* Q5: the *non-resumable* half of the ruling lives here rather than in a
+     * second production set nothing would read. Both unions are keyed
+     * exhaustively, so a code added to the transport or to compaction fails to
+     * compile until this table rules it one way or the other. */
+    /* eslint-disable @typescript-eslint/naming-convention -- the keys are wire failure codes, not identifiers. */
+    const resumability = {
+      // Gateway transport (`gatewayModelErrorCodes`); the seven resumable ones are Q2's list.
+      BILLING_RECOVERY_UNAVAILABLE: false,
+      FUNDED_HELPER_LIMIT: false,
+      FUNDED_OPERATION_LIMIT: false,
+      INSUFFICIENT_CREDIT: true,
+      MODEL_NOT_IN_CATALOG: false,
+      MODEL_PROVIDER_UNSUPPORTED: false,
+      ORIGIN_NOT_ALLOWED: false,
+      PROVIDER_ACCOUNT_EXHAUSTED: false,
+      RATE_LIMITED: true,
+      UNAUTHENTICATED: true,
+      INVALID_REQUEST: true,
+      PROVIDER_UNAVAILABLE: true,
+      UPSTREAM_REJECTED: true,
+      MALFORMED_RESPONSE: true,
+      NETWORK_ERROR: true,
+      UNKNOWN_GATEWAY_ERROR: false,
+      // Compaction and leadership (R12): a resume would meet the same wall.
+      SUMMARY_REQUIRED: false,
+      NO_EVICTABLE_HISTORY: false,
+      SESSION_LOG_INTEGRITY: false,
+      CIRCUIT_BREAKER_OPEN: false,
+      LEADERSHIP_LOST: false,
+    } as const satisfies Record<GatewayModelErrorCode | HostCompactionError['code'] | 'LEADERSHIP_LOST', boolean>;
+    /* eslint-enable @typescript-eslint/naming-convention -- ends the wire-code key exception. */
+    const ruled = Object.entries(resumability);
+
+    expect(gatewayModelErrorCodes.filter((code) => !(code in resumability))).toEqual([]);
+    expect(
+      ruled.filter(([code]) => isResumableRunFailure({ message: `fixture ${code}`, code })).map(([code]) => code),
+    ).toEqual(ruled.filter(([, resumable]) => resumable).map(([code]) => code));
   });
 
   it('executes tool and steady-state turns, then cold-rebuilds the completed transcript', async () => {
@@ -1311,6 +1367,100 @@ the cancelled tools left the system unchanged.
     });
     await host.close();
   });
+
+  it.each([
+    ['retry', true],
+    ['new_session', false],
+  ] as const)(
+    'resumes an external stop offering %s on the session it remembered only when it can be retried',
+    async (action, resumable) => {
+      const file = createMemoryLogFile();
+      const seen: Array<JsonObject | undefined> = [];
+      const closedChats: string[] = [];
+      let attempt = 0;
+      const externalPort: ExternalAgentPort = {
+        list: () => ['stub-agent'],
+        run: async (turn) => {
+          seen.push(turn.state);
+          attempt += 1;
+          if (attempt > 1) {
+            return;
+          }
+          await turn.remember({ acpSessionId: 'session-1' });
+          throw Object.assign(new Error('The agent is rate limited.'), {
+            code: 'EXTERNAL_AGENT_LIMIT_REACHED',
+            details: {
+              agentId: 'stub-agent',
+              failure: { category: 'limit', title: 'The agent is rate limited.', actions: [action] },
+            },
+          });
+        },
+        closeChat: async (chatId) => {
+          closedChats.push(chatId);
+        },
+      };
+      const chatId = `chat-external-${action}`;
+      const host = createTauAgentHost({
+        ...hostOptions({
+          openEventLog: file.open,
+          transport: {
+            stream: () => {
+              throw new Error('An external turn must never reach the Tau model.');
+            },
+          },
+          toolRegistry: tools(async () => ({ content: null, isError: false })),
+          idPrefix: `external-${action}`,
+        }),
+        externalRunners: { acp: externalPort },
+      });
+
+      await host.admit({
+        chatId,
+        runId: 'run-external-limit',
+        trigger: 'submit',
+        message: { id: 'turn-external-limit', role: 'user', content: 'Run this elsewhere.' },
+        config: {
+          systemPrompt: 'unused by an external turn',
+          toolChoice: 'none',
+          agent: { kind: 'acp', id: 'stub-agent' },
+        },
+      });
+      await vi.waitFor(async () => {
+        const stopped = await host.snapshot(chatId);
+        expect(stopped.state).toBe('failed');
+      });
+      await host.resume(chatId);
+      if (!resumable) {
+        const settled = await readLog(file);
+        expect(seen).toHaveLength(1);
+        expect(settled.flatMap((event) => (event.type === 'run.lifecycle' ? [event.state] : []))).toEqual([
+          'admitted',
+          'running',
+          'failed',
+        ]);
+        await host.close();
+        return;
+      }
+      await vi.waitFor(() => {
+        expect(seen).toHaveLength(2);
+      });
+      const events = await readLog(file);
+      /* The agent said retrying can help, so the turn continues in the vendor
+       * session it already holds: nothing told the runner to close the chat,
+       * the second attempt carries the remembered session id, and the turn is
+       * neither rewound nor sent a second time (R9/S11). */
+      expect(seen).toHaveLength(2);
+      expect(closedChats).toEqual([]);
+      expect(seen[1]).toMatchObject({ acpSessionId: 'session-1', agentId: 'stub-agent' });
+      expect(events.some((event) => event.type === 'history.rewound')).toBe(false);
+      expect(
+        reduceEventLog(events)
+          .filter((message) => message.role === 'user')
+          .map((message) => message.id),
+      ).toEqual(['turn-external-limit']);
+      await host.close();
+    },
+  );
 
   it('holds cancel open until an external run settles as cancelled', async () => {
     const file = createMemoryLogFile();

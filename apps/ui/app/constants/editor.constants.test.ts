@@ -7,6 +7,7 @@ import {
   parseGraphicsViewSettings,
   parseLegacyModelComponentDisplay,
   omitEmptyComponentDisplayState,
+  readLegacyRenderTimeout,
 } from '#constants/editor.constants.js';
 
 const componentDisplayUnitId = 'file:src/main.ts';
@@ -38,9 +39,16 @@ describe('editor constants – panel consistency', () => {
 });
 
 describe('graphics view settings parsing', () => {
-  it('should default render timeout to 60_000ms', () => {
+  /* Schema v11 (E1): the render timeout is owned per file, so it no longer rides in a view record. */
+  it('should keep the render timeout out of the per-view record', () => {
     expect(defaultRenderTimeout).toBe(180_000);
-    expect(defaultGraphicsSettings.renderTimeout).toBe(defaultRenderTimeout);
+    expect(defaultGraphicsSettings).not.toHaveProperty('renderTimeout');
+    expect(
+      parseGraphicsViewSettings({ ...defaultGraphicsSettings, schemaVersion: 10, renderTimeout: 30_000 }),
+    ).not.toHaveProperty('renderTimeout');
+    expect(readLegacyRenderTimeout({ renderTimeout: 30, schemaVersion: 1 })).toBe(30_000);
+    expect(readLegacyRenderTimeout({ renderTimeout: 30_000, schemaVersion: 10 })).toBe(30_000);
+    expect(readLegacyRenderTimeout({ schemaVersion: 11 })).toBeUndefined();
   });
 
   it('should strip a legacy environment preset without discarding other settings', () => {
@@ -79,7 +87,7 @@ describe('graphics view settings parsing', () => {
     } as const;
     const settings = parseGraphicsViewSettings(persisted);
 
-    expect(settings.schemaVersion).toBe(10);
+    expect(settings.schemaVersion).toBe(11);
     expect(settings.cameraFovAngle).toBe(0);
     expect(settings.cameraView).toEqual({
       frameId: 'tau:root',
@@ -102,14 +110,14 @@ describe('graphics view settings parsing', () => {
     });
   });
 
-  it.each([2, 3, 4, 5, 6, 8, 9] as const)('should migrate schema v%s settings to v10', (schemaVersion) => {
+  it.each([2, 3, 4, 5, 6, 8, 9] as const)('should migrate schema v%s settings to v11', (schemaVersion) => {
     const settings = parseGraphicsViewSettings({
       ...defaultGraphicsSettings,
       schemaVersion,
       graphicsBackend: schemaVersion === 3 ? 'auto' : 'webgl',
     });
 
-    expect(settings.schemaVersion).toBe(10);
+    expect(settings.schemaVersion).toBe(11);
     expect(settings.cameraView).toBeUndefined();
     expect(settings.graphicsBackend).toBe('webgl');
   });
@@ -124,7 +132,7 @@ describe('graphics view settings parsing', () => {
         enableGrid: false,
       });
 
-      expect(settings.schemaVersion).toBe(10);
+      expect(settings.schemaVersion).toBe(11);
       expect(settings.graphicsBackend).toBe('webgl');
       expect(settings.enableGrid).toBe(false);
     },
@@ -161,7 +169,7 @@ describe('graphics view settings parsing', () => {
       cameraView,
     });
 
-    expect(settings).toMatchObject({ schemaVersion: 10, enableGrid: false, cameraFovAngle: 42 });
+    expect(settings).toMatchObject({ schemaVersion: 11, enableGrid: false, cameraFovAngle: 42 });
     expect(settings.cameraView).toBeUndefined();
   });
 
@@ -184,7 +192,7 @@ describe('graphics view settings parsing', () => {
       enableGrid: false,
       cameraView: { ...cameraView, perspectiveZoom: 0 },
     });
-    expect(invalid).toMatchObject({ schemaVersion: 10, enableGrid: false });
+    expect(invalid).toMatchObject({ schemaVersion: 11, enableGrid: false });
     expect(invalid.cameraView).toBeUndefined();
   });
 

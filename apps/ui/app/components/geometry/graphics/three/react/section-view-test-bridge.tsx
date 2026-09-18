@@ -5,6 +5,8 @@ import { perspectiveVerticalSpan } from '@taucad/camera';
 import type { RenderFrame } from '@taucad/spatial';
 import { toThreeRenderPoint } from '@taucad/three/spatial';
 import { useFeature } from '#flags/use-feature.js';
+import { useProject } from '#hooks/use-project.js';
+import type { GraphicsViewSettings } from '#constants/editor.constants.js';
 import {
   useCameraConnectorRef,
   useCameraRig,
@@ -154,6 +156,8 @@ export type SectionViewTestCapCompleteness =
 
 export type SectionViewTestBridgeApi = Readonly<{
   getGraphicsBackend(): 'webgl' | 'webgpu';
+  /** The durable record this view persists, for revisit-equals-reload assertions (Law 4). */
+  getViewSettings(): GraphicsViewSettings | undefined;
   isGeometryFramed(): boolean;
   showPlaneSelectors(): void;
   setSectionView(state: SectionViewTestState): void;
@@ -405,6 +409,7 @@ export const getSectionViewTestCapPerformanceDiagnostics = (
 export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometryFramed: boolean }): React.ReactNode {
   const isTauDebugEnabled = useFeature('tauDebug');
   const graphicsActor = useGraphics();
+  const project = useProject({ enableNoContext: true });
   const cameraRig = useCameraRig();
   const cameraConnectorRef = useCameraConnectorRef();
   const setRenderFrame = useSetRenderFrame();
@@ -476,6 +481,19 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
       };
     };
     const bridge: SectionViewTestBridgeApi = {
+      getViewSettings() {
+        if (!project) {
+          return undefined;
+        }
+        /* The view id is the Dockview panel id the project keyed this graphics actor by, so the
+         * bridge finds its own record without a prop drilled through the whole R3F tree. */
+        const viewId = [...project.projectRef.getSnapshot().context.viewGraphics.entries()].find(
+          ([, actor]) => actor === graphicsActor,
+        )?.[0];
+        return viewId === undefined
+          ? undefined
+          : project.editorRef.getSnapshot().context.viewSettings[viewId]?.graphicsSettings;
+      },
       getGraphicsBackend() {
         const renderer = get().gl as unknown as { readonly backend?: { readonly isWebGPUBackend?: boolean } };
         return renderer.backend?.isWebGPUBackend === true ? 'webgpu' : 'webgl';
@@ -815,6 +833,7 @@ export function SectionViewTestBridge({ isGeometryFramed }: { readonly isGeometr
     isGeometryFramed,
     isTauDebugEnabled,
     modelInteractionRef,
+    project,
     setRenderFrame,
   ]);
 

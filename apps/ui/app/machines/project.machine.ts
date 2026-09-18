@@ -127,7 +127,7 @@ type ProjectEventInternal =
   | { type: 'updateTags'; tags: string[] }
   | { type: 'loadModel' }
   | { type: 'setMainFile'; path: string }
-  | { type: 'createGeometryUnit'; entryPath: string }
+  | { type: 'createGeometryUnit'; entryPath: string; renderTimeout?: number }
   | {
       type: 'geometryUnit.exportAvailabilityChanged';
       actorId: string;
@@ -414,6 +414,7 @@ export const projectMachine = setup({
             fileManagerRef: context.fileManagerRef,
             kernelOptionsFactory: context.kernelOptionsFactory,
             fileSystemRoot: context.fileSystemRoot,
+            renderTimeout: event.renderTimeout,
           },
         });
 

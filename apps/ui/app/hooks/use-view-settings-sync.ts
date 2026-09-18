@@ -2,7 +2,13 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import { defaultRenderTimeout } from '#constants/editor.constants.js';
-import type { GraphicsViewSettings, PersistedCameraView, PinnedMeasurement } from '#constants/editor.constants.js';
+import type {
+  GraphicsViewSettings,
+  PersistedCameraView,
+  PersistedSectionDisplay,
+  PersistedSectionView,
+  PinnedMeasurement,
+} from '#constants/editor.constants.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
@@ -43,6 +49,7 @@ const cameraViewEqual = (left: PersistedCameraView, right: PersistedCameraView):
  */
 export function useViewSettingsSync({
   viewId,
+  entryPath,
   graphicsRef,
   cadRef,
   editorRef,
@@ -50,6 +57,8 @@ export function useViewSettingsSync({
   enabled = true,
 }: {
   viewId: string;
+  /** Entry path this view renders; the key of the per-file durable record. */
+  entryPath?: string;
   graphicsRef: ActorRefFrom<typeof graphicsMachine>;
   cadRef: ActorRefFrom<typeof cadMachine> | undefined;
   editorRef: ActorRefFrom<typeof editorMachine>;
@@ -78,10 +87,20 @@ export function useViewSettingsSync({
   const cameraRig = useCameraRig();
   const graphicsBackendPreference = useSelector(graphicsRef, (s) => s.context.graphicsBackendPreference);
 
+  // Section view: the cut is entry-scoped, its display preferences are pane-scoped (E2)
+  const isSectionViewActive = useSelector(graphicsRef, (s) => s.context.isSectionViewActive);
+  const selectedSectionViewId = useSelector(graphicsRef, (s) => s.context.selectedSectionViewId);
+  const sectionViewPivot = useSelector(graphicsRef, (s) => s.context.sectionViewPivot);
+  const sectionViewRotation = useSelector(graphicsRef, (s) => s.context.sectionViewRotation);
+  const sectionViewDirection = useSelector(graphicsRef, (s) => s.context.sectionViewDirection);
+  const enableClippingLines = useSelector(graphicsRef, (s) => s.context.enableClippingLines);
+  const enableClippingMesh = useSelector(graphicsRef, (s) => s.context.enableClippingMesh);
+  const planeName = useSelector(graphicsRef, (s) => s.context.planeName);
+
   // Pinned measurements for persistence
   const measurements = useSelector(graphicsRef, (s) => s.context.measurements);
 
-  // Render timeout lives on the cad machine (per-file), not the graphics machine (per-view)
+  // Render timeout lives on the cad machine (per-file), so it is written to the per-entry record
   const renderTimeout = useSelector(cadRef, (s) => s?.context.renderTimeout ?? defaultRenderTimeout);
 
   // Rebuilt only when the measurements themselves change, so the shallow
@@ -99,6 +118,22 @@ export function useViewSettingsSync({
           name: m.name,
         })),
     [measurements],
+  );
+
+  const sectionView = useMemo<PersistedSectionView>(
+    () => ({
+      active: isSectionViewActive,
+      plane: selectedSectionViewId,
+      pivot: sectionViewPivot,
+      rotation: sectionViewRotation,
+      direction: sectionViewDirection,
+    }),
+    [isSectionViewActive, selectedSectionViewId, sectionViewPivot, sectionViewRotation, sectionViewDirection],
+  );
+
+  const sectionDisplay = useMemo<PersistedSectionDisplay>(
+    () => ({ clipLines: enableClippingLines, clipMesh: enableClippingMesh, planeName }),
+    [enableClippingLines, enableClippingMesh, planeName],
   );
 
   useEffect(() => {
@@ -135,8 +170,9 @@ export function useViewSettingsSync({
         cameraView: currentCameraView,
         graphicsBackend: graphicsBackendPreference,
         pinnedMeasurements,
-        renderTimeout,
-        schemaVersion: 10,
+        sectionView,
+        sectionDisplay,
+        schemaVersion: 11,
       };
 
       // Skip the first 3D emission to avoid overwriting restored state. A
@@ -187,8 +223,24 @@ export function useViewSettingsSync({
     persistCameraView,
     graphicsBackendPreference,
     pinnedMeasurements,
-    renderTimeout,
+    sectionView,
+    sectionDisplay,
   ]);
+
+  /* The entry's CAD actor owns its render timeout, so only a change the person makes while this
+   * pane is open is written back. The value observed at mount is the seed, not an edit. */
+  const observedRenderTimeoutRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (!enabled || entryPath === undefined || !cadRef) {
+      return;
+    }
+    const observed = observedRenderTimeoutRef.current;
+    observedRenderTimeoutRef.current = renderTimeout;
+    if (observed === undefined || observed === renderTimeout) {
+      return;
+    }
+    editorRef.send({ type: 'setUnitSettings', entryPath, settings: { renderTimeout } });
+  }, [cadRef, editorRef, enabled, entryPath, renderTimeout]);
 
   // Persist the camera pose once it has settled instead of once per frame.
   useEffect(() => {

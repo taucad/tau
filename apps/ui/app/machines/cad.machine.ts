@@ -131,6 +131,8 @@ type CadInput = {
   fileManagerRef?: ActorRefFrom<typeof fileManagerMachine>;
   kernelOptionsFactory: LazyKernelOptionsFactory;
   fileSystemRoot: string;
+  /** Milliseconds. Create-only seed from the entry's durable record; the actor owns it afterwards. */
+  renderTimeout?: number;
 };
 
 /** Release the runtime resources held by one CAD unit. */
@@ -650,7 +652,7 @@ export const cadMachine = setup({
     parameterManifest: undefined,
     renderPhase: undefined,
     telemetryEntries: [],
-    renderTimeout: defaultRenderTimeout,
+    renderTimeout: input.renderTimeout ?? defaultRenderTimeout,
     kernelClient: undefined,
     capabilities: undefined,
     activeKernelId: undefined,

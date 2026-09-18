@@ -264,6 +264,84 @@ async function stopObservingProjectShell(): Promise<string | undefined> {
   });
 }
 
+type SectionViewInput = Readonly<{
+  plane: 'xy' | 'xz' | 'yz';
+  direction?: 1 | -1;
+  rotationRadians?: readonly [number, number, number];
+  pivot?: readonly [number, number, number];
+}>;
+
+type SectionViewEvidence = Readonly<{
+  isSectionViewActive: boolean;
+  selectedSectionViewId: string | undefined;
+  sectionViewDirection: 1 | -1;
+  sectionViewPivot: readonly [number, number, number];
+  sectionViewRotation: readonly [number, number, number];
+  enableClippingLines: boolean;
+  enableClippingMesh: boolean;
+}>;
+
+type DurableViewSettings = Readonly<{
+  cameraFovAngle: number;
+  upDirection: 'x' | 'y' | 'z';
+  enableGrid: boolean;
+  sectionView?: Readonly<{
+    active: boolean;
+    plane?: 'xy' | 'xz' | 'yz';
+    pivot: readonly [number, number, number];
+    rotation: readonly [number, number, number];
+    direction: 1 | -1;
+  }>;
+  sectionDisplay?: Readonly<{ clipLines: boolean; clipMesh: boolean; planeName: 'cartesian' | 'face' }>;
+}>;
+
+type SectionViewBridge = Readonly<{
+  setSectionView(state: SectionViewInput): void;
+  getPresentation(): SectionViewEvidence;
+  getViewSettings(): (DurableViewSettings & Record<string, unknown>) | undefined;
+}>;
+
+const setSectionView = async (state: SectionViewInput): Promise<void> => {
+  await waitForCameraBridge();
+  await target.evaluate((nextState) => {
+    const bridge = (globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: SectionViewBridge })
+      .__TAU_SECTION_VIEW_TEST__;
+    if (!bridge) {
+      throw new Error('Graphics e2e bridge is unavailable.');
+    }
+    bridge.setSectionView(nextState);
+  }, state);
+  await waitForTwoFrames();
+};
+
+const readSectionView = async (): Promise<SectionViewEvidence> =>
+  target.evaluate(() => {
+    const bridge = (globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: SectionViewBridge })
+      .__TAU_SECTION_VIEW_TEST__;
+    if (!bridge) {
+      throw new Error('Graphics e2e bridge is unavailable.');
+    }
+    return bridge.getPresentation();
+  });
+
+/** The persisted record this view owns, narrowed to keys Law 4 calls durable. */
+const readDurableViewSettings = async (): Promise<DurableViewSettings | undefined> =>
+  target.evaluate(() => {
+    const bridge = (globalThis as typeof globalThis & { __TAU_SECTION_VIEW_TEST__?: SectionViewBridge })
+      .__TAU_SECTION_VIEW_TEST__;
+    const settings = bridge?.getViewSettings();
+    if (!settings) {
+      return undefined;
+    }
+    return {
+      cameraFovAngle: settings.cameraFovAngle,
+      upDirection: settings.upDirection,
+      enableGrid: settings.enableGrid,
+      sectionView: settings.sectionView,
+      sectionDisplay: settings.sectionDisplay,
+    };
+  });
+
 test('client navigation keeps every project-scoped resource on one logical project ID', async () => {
   await target.addInitScript(() => {
     (globalThis as typeof globalThis & { __tauDocumentIdentity?: string }).__tauDocumentIdentity = crypto.randomUUID();
@@ -643,4 +721,60 @@ test('project and chat rows reveal their actions over a dissolving name', async 
     label: 'More actions for Initial chat',
     visible: true,
   });
+});
+
+/* Law 4: a durable key restores identically whether the person returns to a live project or reloads
+ * the tab. The camera proves the session substrate (W3); the section view proves the v11 seed (W5). */
+test('revisit and reload restore the same durable view settings', async () => {
+  await target.navigate('/__e2e/project-navigation');
+  await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
+  await expectProject({ name: projectNames.a, entryPath: 'alpha.ts' });
+  await waitForCameraBridge();
+
+  const camera = await setCamera({
+    position: [43, -31, 27],
+    target: [3, -4, 5],
+    fov: 42,
+    zoom: 1,
+    rollRadians: 0.37,
+  });
+  await setSectionView({
+    plane: 'xz',
+    direction: -1,
+    rotationRadians: [0, 0.4, 0],
+    pivot: [0.011, 0.022, 0.033],
+  });
+  const sectionAfterCut = await readSectionView();
+  expect(sectionAfterCut.isSectionViewActive).toBe(true);
+  expect(sectionAfterCut.selectedSectionViewId).toBe('xz');
+  // The write side is debounced, so wait for the cut to reach the durable record.
+  await expect
+    .poll(
+      async () => {
+        const persisted = await readDurableViewSettings();
+        return persisted?.sectionView?.plane;
+      },
+      { timeout: 30_000 },
+    )
+    .toBe('xz');
+  const durableAfterCut = await readDurableViewSettings();
+
+  await openRecentProject(projectNames.b);
+  await expectProject({ name: projectNames.b, entryPath: 'beta.ts' });
+  await openRecentProject(projectNames.a);
+  await expectProject({ name: projectNames.a, entryPath: 'alpha.ts' });
+  await waitForCameraBridge();
+  await waitForTwoFrames();
+  expectCameraRestored(await readCamera(), camera);
+  expect(await readSectionView()).toEqual(sectionAfterCut);
+  expect(await readDurableViewSettings()).toEqual(durableAfterCut);
+
+  await target.reload();
+  await target.expectUrl(/\/w\/[^/]+\/[^/]+$/u, 60_000);
+  await expectProject({ name: projectNames.a, entryPath: 'alpha.ts' });
+  await waitForCameraBridge();
+  await waitForTwoFrames();
+  expectCameraFrameRestored(await readCamera(), camera);
+  expect(await readSectionView()).toEqual(sectionAfterCut);
+  expect(await readDurableViewSettings()).toEqual(durableAfterCut);
 });

@@ -33,7 +33,6 @@ import { Skeleton } from '@taucad/ui/components/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { nestedActionVariants } from '@taucad/ui/components/nested-action.variants';
 import { cn } from '@taucad/ui/utils/cn';
-import { Loader } from '#components/ui/loader.js';
 import { warmMonaco } from '#lib/monaco-warmup.js';
 
 /*
@@ -170,6 +169,9 @@ export function SidebarRowMenuButton({
 /**
  * The row's name link, with its sentence one hover or focus away (D1).
  *
+ * A pending route only sets `aria-busy` here; its spinner belongs to the row's
+ * status slot (`StatusMark`), so loading never moves the name.
+ *
  * @param props - The link's target and state, the name, and the sentence.
  * @returns The link, its tooltip and its description.
  * @public
@@ -204,7 +206,6 @@ export function SidebarRowLink({
       onFocus={warmMonaco}
       onClick={onClick}
     >
-      {isPending ? <Loader className='mr-1.5 size-3.5 shrink-0' /> : null}
       <span className='fade-label flex-1'>{name}</span>
     </Link>
   );

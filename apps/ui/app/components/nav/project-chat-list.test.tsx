@@ -176,14 +176,24 @@ describe('ProjectChatList', () => {
     expect(screen.getByRole('link', { name: 'Chat 11' })).not.toHaveAttribute('aria-current');
   });
 
-  it('shows route loading only on the destination chat', () => {
+  /* The loader spins in the status column, over the row's own mark, so a
+   * loading route never moves the name. */
+  it('spins in the status slot of the destination chat only, over its mark', () => {
     pendingLocation = { pathname: '/w/home/project%20one', search: '?chat=chat_11' };
+    mockChatStatus.mockImplementation((_projectId: string, chatId: string) =>
+      chatId === 'chat_11' ? status({ state: 'failed', failureReason: 'the model refused' }) : status(),
+    );
     render(<ProjectChatList project={project} isProjectActive />);
 
     const pendingLink = screen.getByRole('link', { name: 'Chat 11' });
     expect(pendingLink).toHaveAttribute('aria-busy', 'true');
-    expect(pendingLink.querySelector('.animate-spin')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Chat 12' }).querySelector('.animate-spin')).not.toBeInTheDocument();
+    expect(pendingLink.querySelector('.animate-spin')).not.toBeInTheDocument();
+    const pendingRow = pendingLink.closest('[data-slot=chat-trigger]');
+    expect(pendingRow?.querySelector('[data-slot=chat-status][data-glyph=pending] .animate-spin')).toBeInTheDocument();
+    expect(pendingRow?.querySelector('[data-glyph=failed]')).toBeNull();
+    expect(
+      screen.getByRole('link', { name: 'Chat 12' }).closest('[data-slot=chat-trigger]')?.querySelector('.animate-spin'),
+    ).toBeNull();
   });
 
   it('replaces a deleted focused-chat URL with the deterministic next chat', async () => {
@@ -318,6 +328,13 @@ describe('ProjectChatList', () => {
     const row = screen.getByTestId('inline-editor').closest('[data-slot=chat-trigger]');
     expect(row).toHaveClass('focus-outline');
     expect(row?.querySelector('[data-slot=chat-status]')).toBeInTheDocument();
+  });
+
+  it('opens the rename field when the row is double-clicked', () => {
+    render(<ProjectChatList project={project} isProjectActive />);
+    expect(screen.queryByTestId('inline-editor')).not.toBeInTheDocument();
+    fireEvent.doubleClick(document.querySelectorAll('[data-slot=chat-trigger]')[0]!);
+    expect(screen.getByTestId('inline-editor')).toBeInTheDocument();
   });
 
   it('groups chats by day only when both days are on screen', () => {

@@ -186,7 +186,8 @@ test.skipIf(!codexAvailable)('uses native Tau skills and tools through the Codex
       .toBe(true);
     const cadActivityGroups = await page
       .getByRole('button', {
-        name: /^(?:Rendered models(?:, captured images)?(?:, ran tests)?|Captured images(?:, ran tests)?|Ran tests)$/u,
+        // The group joins its verbs in call order, so any order of the three is one CAD group.
+        name: /^(?:Rendered models|Captured images|Ran tests)(?:, (?:rendered models|captured images|ran tests))*$/u,
       })
       .all();
     expect(cadActivityGroups.length).toBeGreaterThan(0);
@@ -691,6 +692,8 @@ test.skipIf(!codexAvailable)(
       /* 3. A second chat gets a named branch and linked checkout. Created before
        * anything is spent: a failure here costs no quota. */
       await parkPointer(page);
+      // Sidebar row actions render only while the row is hovered or focused.
+      await page.locator('[data-slot="project-trigger"]').first().hover();
       await page
         .getByRole('button', { name: /^New chat in /u })
         .first()
@@ -986,17 +989,22 @@ test.skipIf(!codexAvailable)(
       const logPath = join(session.pickedDirectory, slug, '.tau/chats', chatId, 'events.jsonl');
       await sendPrompt(page, attachmentPrompt);
 
+      /* The prompt itself carries `HOLE=`, so only an assistant row counts as the answer. */
+      const assistantAnswer = (log: string): string | undefined =>
+        log.split('\n').findLast((line) => line.includes('"role":"assistant"') && line.includes('HOLE='));
       await expect
-        .poll(() => (existsSync(logPath) ? readFileSync(logPath, 'utf8') : ''), { timeout: 600_000 })
-        .toMatch(/HOLE\s*=/u);
+        .poll(() => (existsSync(logPath) ? assistantAnswer(readFileSync(logPath, 'utf8')) : undefined), {
+          timeout: 600_000,
+        })
+        .toBeDefined();
       const events = readFileSync(logPath, 'utf8');
       /* Durable rows stay by reference on every path, external included (D14). */
       expect(events).toContain('"file-ref"');
       expect(events).not.toContain('"data":"/9j/');
-      const answer = events.slice(events.lastIndexOf('HOLE='));
-      expect(answer, 'the agent did not read the specification PDF').toMatch(/HOLE\s*=\s*"?7\.3/u);
-      expect(answer, 'the agent did not read the specification PDF').toMatch(/PLATE\s*=\s*"?4\.5/u);
-      expect(answer, 'the agent did not receive the image').toMatch(/DARK\s*=\s*"?yes/iu);
+      const answer = assistantAnswer(events) ?? '';
+      expect(answer, 'the agent did not read the specification PDF').toMatch(/HOLE\s*=\s*(?:\\?")?7\.3/u);
+      expect(answer, 'the agent did not read the specification PDF').toMatch(/PLATE\s*=\s*(?:\\?")?4\.5/u);
+      expect(answer, 'the agent did not receive the image').toMatch(/DARK\s*=\s*(?:\\?")?yes/iu);
       console.info(`[desktop-e2e] acp attachment answer: ${answer.slice(0, 200)}`);
     } catch (error) {
       await session.capture('acp-attachments-failure');

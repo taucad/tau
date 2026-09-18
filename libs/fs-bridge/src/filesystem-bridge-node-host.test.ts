@@ -11,11 +11,12 @@
 
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { composeView } from '@taucad/filesystem/composed-view';
 import { withReadContentOps } from '@taucad/filesystem/content-ops';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
+import type { ChangeEvent } from '@taucad/types';
 import type { ExposeFileSystemHandle, FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { createTransferredFileSystemBridgeProxy, exposeFileSystem, openFileSystemBridge } from '@taucad/fs-bridge';
 
@@ -308,5 +309,180 @@ describe('filesystem bridge authority on a Node host (X8)', () => {
     );
 
     expect(importers).toEqual([]);
+  });
+});
+
+/*
+ * W12(a) — can ONE rooted connection be the file manager's change transport?
+ *
+ * The FM holds two ports today (`file-manager.machine.ts:474`): reads on the
+ * rooted view, writes and `ChangeEvent`s on the workspace surface, because the
+ * change channel needs both root-relative paths and echo suppression. These
+ * rows answer whether the rooted connection already carries both, over a real
+ * `MessageChannel`, against a real authority and a real `ChangeEventBus`.
+ *
+ * Deliveries are asserted by ordering, never by a timeout: a port is FIFO, so
+ * waiting for a later event proves an earlier one was never sent.
+ */
+describe('one rooted connection as the change transport (W12a)', () => {
+  const collect = (proxy: FileSystemBridgeProxy): { events: ChangeEvent[]; stop: () => void } => {
+    const events: ChangeEvent[] = [];
+    const stop = proxy.listen('fileChanged', (event) => {
+      events.push(event as ChangeEvent);
+    });
+    return { events, stop };
+  };
+
+  it('never echoes a write made through the rooted connection back to it', async () => {
+    const workspace = await createWorkspace();
+    const host = hostOnNode(workspace);
+    const rooted = host.connect(projectRoot, 'user');
+    const surface = host.connect();
+    const observed = collect(rooted.proxy);
+
+    try {
+      await rooted.proxy.ready;
+      await surface.proxy.ready;
+
+      await rooted.proxy.writeFile('self.ts', 'mine');
+      /* A peer write after it: the rooted port is FIFO, so once this arrives
+       * the author's own event has had its turn and did not come. */
+      await surface.proxy.writeFile(`${projectRoot}/peer.ts`, 'theirs');
+
+      await vi.waitFor(() => {
+        expect(observed.events).toContainEqual(expect.objectContaining({ type: 'fileWritten', path: 'peer.ts' }));
+      });
+      expect(observed.events).not.toContainEqual(expect.objectContaining({ path: 'self.ts' }));
+    } finally {
+      observed.stop();
+      rooted.dispose();
+      surface.dispose();
+      host.dispose();
+    }
+  });
+
+  it('delivers a workspace-surface write under the root in the root-relative namespace', async () => {
+    const workspace = await createWorkspace();
+    const host = hostOnNode(workspace);
+    const rooted = host.connect(projectRoot, 'user');
+    const surface = host.connect();
+    const observed = collect(rooted.proxy);
+
+    try {
+      await rooted.proxy.ready;
+      await surface.proxy.ready;
+
+      await surface.proxy.writeFile(`${projectRoot}/src/peer.ts`, 'theirs');
+
+      await vi.waitFor(() => {
+        expect(observed.events).toContainEqual(expect.objectContaining({ type: 'fileWritten', path: 'src/peer.ts' }));
+      });
+      /* The authority spelling never reaches the connection (I6). */
+      expect(observed.events).not.toContainEqual(expect.objectContaining({ path: `${projectRoot}/src/peer.ts` }));
+    } finally {
+      observed.stop();
+      rooted.dispose();
+      surface.dispose();
+      host.dispose();
+    }
+  });
+
+  it('withholds a write outside the root from the rooted connection', async () => {
+    const workspace = await createWorkspace();
+    const host = hostOnNode(workspace);
+    const rooted = host.connect(projectRoot, 'user');
+    const surface = host.connect();
+    const observed = collect(rooted.proxy);
+
+    try {
+      await rooted.proxy.ready;
+      await surface.proxy.ready;
+
+      await surface.proxy.writeFile('/outside.ts', 'secret');
+      await surface.proxy.writeFile(`${projectRoot}/inside.ts`, 'visible');
+
+      await vi.waitFor(() => {
+        expect(observed.events).toContainEqual(expect.objectContaining({ type: 'fileWritten', path: 'inside.ts' }));
+      });
+      expect(observed.events.map((event) => JSON.stringify(event)).join('\n')).not.toContain('outside.ts');
+    } finally {
+      observed.stop();
+      rooted.dispose();
+      surface.dispose();
+      host.dispose();
+    }
+  });
+
+  /*
+   * I5 — batch semantics are unchanged by the root. A `copyTree` is one lock
+   * set and one `directoryCopied` summary over per-path facts (Rule 5a,
+   * `mutation-pipeline.ts:386`); it is *not* collapsed to a single event, and
+   * the coalescer only merges repeats of one path (`event-coalescer.ts:214`).
+   * So the pin is equality: the rooted observer sees exactly the sequence the
+   * workspace surface sees, translated, with exactly one summary — and the
+   * author of the batch sees none of it.
+   */
+  it('delivers a rooted batch as the surface sequence, translated, with one summary and no self-echo', async () => {
+    const workspace = await createWorkspace();
+    for (const [path, body] of Object.entries({
+      'main.ts': 'export default 1;\n',
+      'src/helper.ts': 'export const helper = 1;\n',
+    })) {
+      // oxlint-disable-next-line no-await-in-loop -- Deterministic seed order keeps the fixture readable.
+      await workspace.service.writeFile(`${projectRoot}/${path}`, body);
+    }
+    const host = hostOnNode(workspace);
+    const author = host.connect(projectRoot, 'user');
+    const peer = host.connect(projectRoot, 'user');
+    const surface = host.connect();
+    const authored = collect(author.proxy);
+    const observed = collect(peer.proxy);
+    const global = collect(surface.proxy);
+
+    try {
+      await author.proxy.ready;
+      await peer.proxy.ready;
+      await surface.proxy.ready;
+
+      await author.proxy.copyTree('', 'backup');
+
+      await vi.waitFor(() => {
+        expect(global.events).toContainEqual(
+          expect.objectContaining({ type: 'directoryCopied', targetPath: `${projectRoot}/backup` }),
+        );
+      });
+      await vi.waitFor(() => {
+        expect(observed.events).toContainEqual(
+          expect.objectContaining({ type: 'directoryCopied', targetPath: 'backup' }),
+        );
+      });
+
+      const summaries = observed.events.filter((event) => event.type === 'directoryCopied');
+      expect(summaries).toStrictEqual([
+        { type: 'directoryCopied', sourcePath: '', targetPath: 'backup', backend: 'memory' },
+      ]);
+      /* Same facts, same order, one namespace apart. */
+      expect(observed.events.map((event) => event.type)).toStrictEqual(global.events.map((event) => event.type));
+      expect(observed.events).toStrictEqual(
+        global.events.map((event) =>
+          Object.fromEntries(
+            Object.entries(event).map(([key, value]) => [
+              key,
+              typeof value === 'string' && value.startsWith(projectRoot) ? value.slice(projectRoot.length + 1) : value,
+            ]),
+          ),
+        ),
+      );
+      /* The batch's author is told nothing it already knows (D12). */
+      expect(authored.events).toStrictEqual([]);
+    } finally {
+      authored.stop();
+      observed.stop();
+      global.stop();
+      author.dispose();
+      peer.dispose();
+      surface.dispose();
+      host.dispose();
+    }
   });
 });

@@ -138,11 +138,10 @@ export const serviceAdvertisementPrefix = (service: GitService): string => `${pk
  *
  * A `pre-receive` refusal carries no HTTP status, so this sentence is the only
  * thing that tells a client its push was refused for the *repository* ceiling
- * rather than for a rewind or a host-local ref. `packages/revisions`
- * (`src/remotes.ts`) matches on it to classify the refusal as
- * `REMOTE_QUOTA_EXCEEDED` while still showing the hook's own words; it cannot
- * import this module, so the string is duplicated there with a comment naming
- * this constant as its source. Changing it changes both.
+ * rather than for a rewind or a host-local ref. The client matches on it in
+ * `packages/revisions/src/refusal-markers.ts`, which holds the same string
+ * because that package does not depend on this app: those two copies, each
+ * tested, are the only ones, and changing one changes the other.
  */
 export const ceilingRefusalMarker = 'Tau: repository size limit exceeded';
 

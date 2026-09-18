@@ -1,6 +1,6 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -207,6 +207,51 @@ const access: GitAccess = {
   remainingBytes: 10 * 1024 ** 3,
   storageLimitBytes: 10 * 1024 ** 3,
 };
+
+/**
+ * W10 defect 2: a worker killed mid-push leaves its lease directory behind, and
+ * admission counts the free bytes of the disk those directories sit on — so a
+ * crash used to cost this machine 2.5 GiB of headroom for good. Leases now live
+ * under `tau-git-leases/<pid>/`, and a sibling is reclaimed only when its
+ * process is gone: two API processes share one `tmpdir` here and must never
+ * sweep each other.
+ */
+describe('abandoned lease directories', () => {
+  const leaseRoot = path.join(tmpdir(), 'tau-git-leases');
+
+  it('reclaims a dead worker’s directory on init and leaves a living worker’s alone', async () => {
+    /* A pid that is certainly gone: a child of this process, waited for. */
+    const corpse = spawn('sh', ['-c', 'exit 0']);
+    await new Promise<void>((resolve) => {
+      corpse.on('close', () => {
+        resolve();
+      });
+    });
+    /* And one that is certainly not: a second process, still running. */
+    const living = spawn('sh', ['-c', 'sleep 30']);
+    const deadDirectory = path.join(leaseRoot, String(corpse.pid));
+    const livingDirectory = path.join(leaseRoot, String(living.pid));
+    mkdirSync(deadDirectory, { recursive: true });
+    mkdirSync(livingDirectory, { recursive: true });
+    writeFileSync(path.join(deadDirectory, 'pack'), Buffer.alloc(4096, 1));
+
+    try {
+      const service = createService(
+        memoryStore(),
+        databaseStub({ storageBytes: 0, generation: 0, derivedGeneration: 0 }, { failTransaction: false }),
+      );
+      await service.settled();
+
+      expect(existsSync(deadDirectory), 'a dead worker’s lease directory must be reclaimed').toBe(false);
+      expect(existsSync(livingDirectory), 'a living worker’s lease directory is not this worker’s to remove').toBe(
+        true,
+      );
+    } finally {
+      living.kill('SIGKILL');
+      rmSync(livingDirectory, { recursive: true, force: true });
+    }
+  });
+});
 
 describe('GitRepositoryService derived state (D19)', () => {
   const store = memoryStore();

@@ -131,6 +131,12 @@ export type FileSystemBridgeRuntimeService = FileSystemProvider & {
    */
   archive?: (path: string, options?: ArchiveOptions) => Promise<Blob>;
   contents?: (path: string, options?: ArchiveOptions) => Promise<Record<string, Uint8Array<ArrayBuffer>>>;
+  /*
+   * Search and recursive stat are the root's index, masked by the view above it
+   * (charter D3): a bare provider has no index and offers neither.
+   */
+  search?: (query: string, options?: SearchOptions) => Promise<FileStatEntry[]>;
+  statTree?: (path: string) => Promise<FileStatEntry[]>;
 };
 
 /**
@@ -144,6 +150,16 @@ export type FileSystemBridgeRuntimeService = FileSystemProvider & {
  * @public
  */
 export type ArchiveOptions = { readonly versionedOnly?: boolean };
+
+/**
+ * Caller-owned cap and shape of a rooted search.
+ *
+ * The mask is not here: the view applies its own policy before the index is
+ * asked, so `maxResults` counts only rows the consumer may see.
+ *
+ * @public
+ */
+export type SearchOptions = { readonly maxResults?: number; readonly includeDirectories?: boolean };
 
 type FileSystemBridgeReadFile = {
   (path: string, options: 'utf8' | { readonly encoding: 'utf8'; readonly scope?: WorkspaceScope }): Promise<string>;
@@ -166,6 +182,8 @@ export type FileSystemBridgeService = Omit<FileSystemBridgeWorkspaceService, 're
     writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
     archive(path: string, options?: ArchiveOptions): Promise<Blob>;
     contents(path: string, options?: ArchiveOptions): Promise<Record<string, Uint8Array<ArrayBuffer>>>;
+    search(query: string, options?: SearchOptions): Promise<FileStatEntry[]>;
+    statTree(path: string): Promise<FileStatEntry[]>;
   };
 
 type FileSystemBridgeCallName = keyof FileSystemBridgeService;
@@ -656,6 +674,11 @@ const callSchemas = {
   provenance: { args: oneStringArgument, result: fileProvenanceSchema },
   archive: { args: z.tuple([z.string(), archiveOptionsSchema.optional()]), result: z.instanceof(Blob) },
   contents: { args: z.tuple([z.string(), archiveOptionsSchema.optional()]), result: directoryContentsSchema },
+  search: {
+    args: z.tuple([z.string(), searchOptionsSchema.optional()]),
+    result: fileStatEntriesSchema,
+  },
+  statTree: { args: oneStringArgument, result: fileStatEntriesSchema },
 } satisfies FileSystemBridgeCallSchemas;
 
 const broadcastValidator = z.looseObject({ event: z.literal('fileChanged'), data: changeEventSchema });

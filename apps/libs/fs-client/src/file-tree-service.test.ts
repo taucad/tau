@@ -72,7 +72,11 @@ const createComposedProxy = async (): Promise<FileSystemClient> => {
       composeView({ filesystem: provider }, { consumer: 'user', overlays: [skillOverlay()], policy: tauPathPolicy }),
       /* The rooted connection also archives a subtree (charter D2); this
        * harness reads rows. */
-      { archive: vi.fn<ComposedViewProxy['archive']>() },
+      {
+        archive: vi.fn<ComposedViewProxy['archive']>(),
+        search: vi.fn<ComposedViewProxy['search']>().mockResolvedValue([]),
+        statTree: vi.fn<ComposedViewProxy['statTree']>().mockResolvedValue([]),
+      },
     ),
     paths: new WorkspacePathResolver(workspaceRoot),
   });

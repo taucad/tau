@@ -1,4 +1,4 @@
-import type { FileStat, FileProvenance } from '@taucad/types';
+import type { FileStat, FileStatEntry, FileProvenance } from '@taucad/types';
 import { WorkspaceMutationError } from '@taucad/filesystem';
 import type { FileTreeNode } from '@taucad/filesystem';
 import type { FileSystemClient } from '#file-system-client.js';
@@ -23,6 +23,10 @@ export type ComposedViewProxy = {
   provenance(path: string): Promise<FileProvenance>;
   /** ZIP one subtree of the view; `{ versionedOnly }` keeps the bytes that are the project. */
   archive(path: string, options?: { versionedOnly?: boolean }): Promise<Blob>;
+  /** Search this view's root from its own index; the mask is applied before the cap. */
+  search(query: string, options?: { maxResults?: number; includeDirectories?: boolean }): Promise<FileStatEntry[]>;
+  /** Recursively stat one directory of the view from the same index. */
+  statTree(path: string): Promise<FileStatEntry[]>;
 };
 
 /**
@@ -144,12 +148,15 @@ const touchedPaths = (property: string, args: readonly unknown[]): readonly stri
  *   entries, the same mask, the same provenance on every row. That includes the
  *   whole-subtree reads — the archive a person downloads is composed exactly
  *   like the tree they are looking at (charter D2).
- * - **Writes and the remaining workspace porcelain** — recursive stat, search,
- *   the move preflights, cross-root writes — stay on the authority. That
- *   porcelain is authority-global and has no rooted counterpart yet; writes stay
- *   there because the authority suppresses a port's own change events, and
- *   re-issuing this client's writes through a second port would echo every UI
- *   edit back to the UI as an external change.
+ *   That includes search and recursive stat, which the view answers from its
+ *   root's own index (charter D3): the same rows the tree shows, masked by the
+ *   same policy, and warm for as long as the project is open.
+ * - **Writes and the remaining workspace porcelain** — the move preflights,
+ *   cross-root writes — stay on the authority. That porcelain is
+ *   authority-global and has no rooted counterpart yet; writes stay there
+ *   because the authority suppresses a port's own change events, and re-issuing
+ *   this client's writes through a second port would echo every UI edit back to
+ *   the UI as an external change.
  * - **Paths outside the project root** (the global `/node_modules` alias the
  *   resolver keeps) are the authority's too: dependencies are a mount, not an
  *   overlay.
@@ -304,6 +311,22 @@ export const createComposedViewClient = (input: {
       return relative === undefined
         ? workspace.getZippedDirectory(absolutePath, options)
         : view.archive(relative, options);
+    },
+    getDirectoryStat: async (absolutePath: string) => {
+      const relative = viewPath(absolutePath);
+      return relative === undefined ? workspace.getDirectoryStat(absolutePath) : view.statTree(relative);
+    },
+    searchFiles: async (
+      absoluteRoot: string,
+      query: string,
+      options?: { maxResults?: number; includeDirectories?: boolean },
+    ) => {
+      /* The index is rooted at the checkout, so only the view's own root is
+       * searchable through it; a wider or narrower root has no rooted handle
+       * until W12 and stays on the authority. */
+      return viewPath(absoluteRoot) === ''
+        ? view.search(query, options)
+        : workspace.searchFiles(absoluteRoot, query, options);
     },
     readDirectory: async (absolutePath: string) => {
       const relative = viewPath(absolutePath);

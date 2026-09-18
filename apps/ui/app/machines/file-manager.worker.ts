@@ -11,9 +11,8 @@
 
 import { exposeFileSystem, workerReadyMessageType } from '@taucad/fs-bridge';
 import { composeView } from '@taucad/filesystem/composed-view';
-import { archive, contents } from '@taucad/filesystem/content-ops';
-import type { WalkOptions } from '@taucad/filesystem/content-ops';
-import { classify, tauPathPolicy } from '@taucad/filesystem/path-registry';
+import { withReadContentOps } from '@taucad/filesystem/content-ops';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import {
   createGitRemoteTransport,
   createIsomorphicGitRevisionPort,
@@ -23,7 +22,6 @@ import {
 } from '@taucad/revisions';
 import type { PushRecorder } from '@taucad/revisions';
 import { randomUuid } from '@taucad/utils/id';
-import { joinRelativePath } from '@taucad/utils/path';
 import { createIndexedDbComputeEngine, exposeComputeStoreChannel } from '@taucad/runtime/host';
 
 import { populateBundledTypesMount } from '@taucad/filesystem/bundled-types-mount';
@@ -280,25 +278,10 @@ exposeFileSystem(fileService, {
         : composeView({ filesystem }, { consumer, overlays: [systemSkillsOverlay()], policy: tauPathPolicy });
     /*
      * The read content operations run here, over the view the connection asked
-     * for (charter D2). The mask comes with the view — a hidden entry is never
-     * enumerated — so the only filter left to build is the caller's own: a
-     * whole-project export carries the registry's `versioned` rows, which is
-     * what makes it the project rather than a backup of the working directory.
+     * for (charter D2); `search` and `statTree` are already on it, answered from
+     * the root's index and masked by the view itself (D3).
      */
-    const options = (path: string, exportFilter?: { versionedOnly?: boolean }): WalkOptions =>
-      exportFilter?.versionedOnly === true
-        ? {
-            /* The registry answers about project-relative spellings, and an
-             * archive root can be any directory of the project. */
-            admits: (relativePath, kind) => kind === 'dir' || classify(joinRelativePath(path, relativePath)).versioned,
-          }
-        : {};
-    return Object.assign(view, {
-      archive: async (path: string, exportFilter?: { versionedOnly?: boolean }) =>
-        archive(view, path, options(path, exportFilter)),
-      contents: async (path: string, exportFilter?: { versionedOnly?: boolean }) =>
-        contents(view, path, options(path, exportFilter)),
-    });
+    return withReadContentOps(view, tauPathPolicy);
   },
   changeEventBus: eventBus,
   createCoalescer: (deliver, coalescingWindow, onOverflow) =>

@@ -12,7 +12,6 @@ import type {
   AdoptableProjectManifest,
   CheckedFileWrite,
   CheckedFileWriteResult,
-  FileContentMetadata,
   FileStat,
   FileStatEntry,
   FileSystemBackend,
@@ -31,7 +30,8 @@ import type {
 import type { ProviderRegistry } from '#provider-registry.js';
 import type { ResourceQueue } from '#resource-queue.js';
 import type { ChangeEventBus } from '#change-event-bus.js';
-import { InMemoryFileTree } from '#in-memory-file-tree.js';
+import { TreeIndexes } from '#tree-index.js';
+import type { TreeIndex, TreeIndexAdmits, TreeSearchOptions } from '#tree-index.js';
 import { WatchRegistry } from '#watch-registry.js';
 import type { NodeFsWatchEvent } from '#backend/node/protocol.js';
 import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-utils.js';
@@ -454,6 +454,21 @@ export type BundledTypePackageReplacement = Readonly<{
 export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked'> & {
   writeFileChecked(input: CheckedFileWrite): Promise<CheckedFileWriteResult>;
   watch(request: WatchRequest, handler: (event: WatchEvent) => void): () => void;
+  /**
+   * Search this root's own index, which no other root's queries evict (D3).
+   *
+   * Unmasked here, like every other rooted primitive: the mask belongs to the
+   * composed view above, which passes its policy's answer as `admits` so a
+   * hidden subtree is never descended into and `maxResults` counts only the
+   * rows its consumer may see.
+   *
+   * Optional for the same reason `readdirEntries` is: a rooted surface that is
+   * not the authority's own — a bridge client rooted at someone else's
+   * checkout — holds no index and offers neither read.
+   */
+  search?(query: string, options?: TreeSearchOptions): Promise<FileStatEntry[]>;
+  /** Recursively stat one directory of this root from the same index. */
+  statTree?(path: string, options?: { admits?: TreeIndexAdmits }): Promise<FileStatEntry[]>;
 };
 
 /**
@@ -474,7 +489,7 @@ export class WorkspaceFileService {
   private readonly _crossTabCoordinator: CrossTabCoordinator;
   private _filePool: SharedPool | undefined;
   private readonly _mountTable: MountTable;
-  private _inMemoryTree = new InMemoryFileTree();
+  private readonly _treeIndexes = new TreeIndexes();
   private readonly _projectRoutes = new Set<string>();
   private readonly _checkoutRoutes = new Set<string>();
   private _projectConfigurationTail: Promise<void> = Promise.resolve();
@@ -485,8 +500,6 @@ export class WorkspaceFileService {
     storageRootKey: string;
   }> = [];
   private readonly _observedExternalRoots = new Map<string, ObservedExternalRoot>();
-  /** Absolute path passed to the first {@link getDirectoryStat} that populated the tree; in-memory paths are relative to this root. */
-  private _directoryStatRoot: string | undefined;
 
   /**
    * Create a {@link WorkspaceFileService} with injected dependencies.
@@ -727,6 +740,16 @@ export class WorkspaceFileService {
       const { resolution } = resolveLocal(path);
       return resolution.provider.lstat(resolution.path);
     };
+    const search = async (query: string, options?: TreeSearchOptions): Promise<FileStatEntry[]> => {
+      assertCurrent();
+      const index = await this._treeIndexFor(root);
+      return index.searchFiles(query, options);
+    };
+    const statTree = async (path: string, options?: { admits?: TreeIndexAdmits }): Promise<FileStatEntry[]> => {
+      const { localPath } = resolveLocal(path);
+      const index = await this._treeIndexFor(root);
+      return index.getDirectoryStat(localPath, options);
+    };
     const watch = (request: WatchRequest, handler: (event: WatchEvent) => void): (() => void) => {
       assertCurrent();
       if (request.paths.length === 0) {
@@ -817,6 +840,8 @@ export class WorkspaceFileService {
       exists,
       lstat,
       watch,
+      search,
+      statTree,
     };
   }
 
@@ -1030,7 +1055,7 @@ export class WorkspaceFileService {
         if (result.status === 'rejected') {
           const { path } = ownedFiles[index]!;
           this._filePool?.invalidate(path);
-          this._inMemoryTreeRemoveFile(path);
+          this._treeIndexes.removeFile(path);
         }
       }
       const operationsByBackend = Map.groupBy(
@@ -1432,7 +1457,7 @@ export class WorkspaceFileService {
             await resolution.provider.mkdir(resolution.path, { recursive: true });
             if (!existed) {
               if (this._isCurrentResolution(path, resolution)) {
-                this._inMemoryTreeAddDirectory(path);
+                this._treeIndexes.addDirectory(path);
               }
               this._emitChangeEvent({ type: 'directoryCreated', path, backend: resolution.backend }, context, {
                 operations: [{ path, resolution }],
@@ -1465,8 +1490,7 @@ export class WorkspaceFileService {
             const globallyVisible = this._isCurrentResolution(destination, destinationResolution);
             if (globallyVisible) {
               this._filePool?.clear();
-              this._inMemoryTree.clear();
-              this._directoryStatRoot = undefined;
+              this._treeIndexes.clear();
             }
             this._emitChangeEvent({ type: 'backendChanged', backend: destinationResolution.backend }, context, {
               operations: [{ path: destination, resolution: destinationResolution }],
@@ -1555,7 +1579,7 @@ export class WorkspaceFileService {
               await this._rmdirRecursive(packageResolution.provider, packageResolution.path);
             }
             this._filePool?.invalidate(packageDirectory);
-            this._inMemoryTreeRemoveDirectory(packageDirectory);
+            this._treeIndexes.removeDirectory(packageDirectory);
             for (const { path, content, resolution } of files) {
               mutationBegan = true;
               // oxlint-disable-next-line no-await-in-loop -- A package root becomes visible as one ordered generation.
@@ -1576,8 +1600,7 @@ export class WorkspaceFileService {
         } catch (error) {
           if (mutationBegan) {
             this._filePool?.clear();
-            this._inMemoryTreeRemoveDirectory(bundledTypesAbsolutePrefix);
-            this._directoryStatRoot = undefined;
+            this._treeIndexes.clear();
             this._emitChangeEvent({ type: 'backendChanged', backend: rootResolution.backend });
             this._crossTabCoordinator.notifyDirectoryChange(
               bundledTypesAbsolutePrefix,
@@ -1708,6 +1731,13 @@ export class WorkspaceFileService {
   /**
    * Recursively collect stat information for every file under a directory.
    *
+   * Unmasked, and therefore not the surface a project consumer reads any more:
+   * a path inside a composed view's root is served by {@link RootedFileSystem.statTree}
+   * through that view (charter D3, W4). What is left here is the paths no rooted
+   * handle covers yet — the global `/node_modules` alias the workspace path
+   * resolver keeps addressable — which W12 retires along with the rest of the
+   * absolute-path client surface (D12).
+   *
    * @param path - Absolute directory path to walk.
    * @param options - Optional abort signal for long walks.
    * @returns Flat array of file stat entries with relative paths.
@@ -1715,11 +1745,9 @@ export class WorkspaceFileService {
   public async getDirectoryStat(path: string, options?: { signal?: AbortSignal }): Promise<FileStatEntry[]> {
     const normalizedPath = resolveAuthorityPath(path);
 
-    if (this._inMemoryTree.isBuilt && this._directoryStatRoot !== undefined) {
-      const treeRelativePath = this._toTreeRelative(normalizedPath);
-      if (treeRelativePath !== undefined) {
-        return this._inMemoryTree.getDirectoryStat(treeRelativePath);
-      }
+    const warm = this._treeIndexes.statTree(normalizedPath);
+    if (warm !== undefined) {
+      return warm;
     }
 
     const { provider, path: resolvedPath } = this._resolveProvider(normalizedPath);
@@ -1729,15 +1757,18 @@ export class WorkspaceFileService {
       options,
     );
 
-    const nextTree = this._createInMemoryTree(fileStats);
-    this._directoryStatRoot = normalizedPath;
-    this._inMemoryTree = nextTree;
+    this._treeIndexes.build(normalizedPath, fileStats);
 
     return fileStats;
   }
 
   /**
    * Search one exact directory root for entries whose paths contain the query substring.
+   *
+   * Unmasked, like {@link getDirectoryStat}: a search inside a composed view's
+   * root is served by {@link RootedFileSystem.search} over that view's index
+   * (charter D3, W4), and this stays only for a root no rooted handle covers
+   * until W12 (D12).
    *
    * @param root - Absolute directory root to search.
    * @param query - Case-insensitive substring to match against relative file paths.
@@ -1749,16 +1780,8 @@ export class WorkspaceFileService {
     query: string,
     options?: { maxResults?: number; includeDirectories?: boolean },
   ): Promise<FileStatEntry[]> {
-    const normalizedRoot = resolveAuthorityPath(root);
-    if (this._inMemoryTree.isBuilt && this._directoryStatRoot === normalizedRoot) {
-      return this._inMemoryTree.searchFiles(query, options);
-    }
-    const { provider, path } = this._resolveProvider(normalizedRoot);
-    const stats = await this._collectDirectoryStatsFromProvider(provider, { walkPath: path, basePath: path });
-    const nextTree = this._createInMemoryTree(stats);
-    this._directoryStatRoot = normalizedRoot;
-    this._inMemoryTree = nextTree;
-    return nextTree.searchFiles(query, options);
+    const index = await this._treeIndexFor(resolveAuthorityPath(root));
+    return index.searchFiles(query, options);
   }
 
   /**
@@ -2116,8 +2139,7 @@ export class WorkspaceFileService {
           await this._deleteProjectDirectory(provider, path, manifest);
         } finally {
           this._filePool?.clear();
-          this._inMemoryTree.clear();
-          this._directoryStatRoot = undefined;
+          this._treeIndexes.clear();
           this._emitChangeEvent({ type: 'directoryChanged', path: authorityParent, backend: scope.backend });
           this._crossTabCoordinator.notifyDirectoryChange(authorityParent, parentAuthority);
         }
@@ -2176,7 +2198,7 @@ export class WorkspaceFileService {
           mutationBegan = true;
           await provider.mkdir(path, { recursive: true });
           this._filePool?.clear();
-          this._inMemoryTreeRemoveDirectory(logicalRoot);
+          this._treeIndexes.removeDirectory(logicalRoot);
 
           for (const [relativePath, descriptor] of files) {
             const logicalPath = `${logicalRoot}/${relativePath}`;
@@ -2210,7 +2232,7 @@ export class WorkspaceFileService {
         } catch (error) {
           if (mutationBegan) {
             this._filePool?.clear();
-            this._inMemoryTreeRemoveDirectory(logicalRoot);
+            this._treeIndexes.removeDirectory(logicalRoot);
             this._crossTabCoordinator.notifyDirectoryChange(logicalRoot, this._scopedPhysicalAuthority(scope, path));
           }
           throw error;
@@ -2334,8 +2356,7 @@ export class WorkspaceFileService {
     }
     this._filePool?.clear();
     this._filePool = undefined;
-    this._inMemoryTree.clear();
-    this._directoryStatRoot = undefined;
+    this._treeIndexes.clear();
     this._projectRoutes.clear();
     this._discoveryRoots = [];
     this._mountTable.dispose();
@@ -2862,13 +2883,7 @@ export class WorkspaceFileService {
         : undefined;
       const mappings = this._logicalMappingsForPhysicalPath(state, physicalPath);
       const knownKinds = new Map(
-        mappings.map(({ path, resolution }) => {
-          const relative = this._toTreeRelative(path);
-          return [
-            resolution.entry,
-            relative === undefined ? undefined : this._inMemoryTree.stat(relative)?.type,
-          ] as const;
-        }),
+        mappings.map(({ path, resolution }) => [resolution.entry, this._treeIndexes.statType(path)] as const),
       );
       return { record, physicalPath, oldPhysicalPath, mappings, knownKinds };
     });
@@ -3119,11 +3134,10 @@ export class WorkspaceFileService {
       }
     }
     // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
-    // ponytail: the tree is dropped whole even for a localized change — InMemoryFileTree
+    // ponytail: the tree is dropped whole even for a localized change — TreeIndex
     // cannot express "this subtree is unknown", and a scoped removal would publish a
     // stale absence. Give it a subtree-invalidation state if the rebuild scan shows up hot.
-    this._inMemoryTree.clear();
-    this._directoryStatRoot = undefined;
+    this._treeIndexes.clear();
   }
 
   /**
@@ -3387,8 +3401,7 @@ export class WorkspaceFileService {
 
     if (isCurrent || isDiscoveryRootChange) {
       this._filePool?.clear();
-      this._inMemoryTree.clear();
-      this._directoryStatRoot = undefined;
+      this._treeIndexes.clear();
     }
 
     if (notification.type === 'directory-change') {
@@ -3478,8 +3491,7 @@ export class WorkspaceFileService {
 
   private _handleRemoteFailure(notification: ChangeNotification, backend?: FileSystemBackend): void {
     this._filePool?.clear();
-    this._inMemoryTree.clear();
-    this._directoryStatRoot = undefined;
+    this._treeIndexes.clear();
     if (notification.type === 'project-unavailable') {
       this._watchRegistry.emitResetAll();
       return;
@@ -3514,8 +3526,7 @@ export class WorkspaceFileService {
 
   private _resetTopologyState(): void {
     this._filePool?.clear();
-    this._inMemoryTree.clear();
-    this._directoryStatRoot = undefined;
+    this._treeIndexes.clear();
     this._watchRegistry.emitResetAll();
   }
 
@@ -3583,37 +3594,6 @@ export class WorkspaceFileService {
       }
     }
     this._eventBus.emit(event);
-  }
-
-  /**
-   * Convert an absolute path to a path relative to {@link _directoryStatRoot} (scan root).
-   * Used so incremental in-memory updates match paths stored by {@link InMemoryFileTree.build}.
-   *
-   * @param absolutePath - Normalized absolute filesystem path.
-   * @returns Path relative to the scan root, `''` for the root itself, or `undefined` if outside the tree.
-   */
-  private _toTreeRelative(absolutePath: string): string | undefined {
-    if (this._directoryStatRoot === undefined) {
-      return undefined;
-    }
-
-    const root = normalizePath(this._directoryStatRoot);
-    const abs = normalizePath(absolutePath);
-
-    if (abs === root) {
-      return '';
-    }
-
-    if (root === '/') {
-      return abs.startsWith('/') ? abs.slice(1) : abs;
-    }
-
-    const rootPrefix = `${root}/`;
-    if (abs.startsWith(rootPrefix)) {
-      return abs.slice(rootPrefix.length);
-    }
-
-    return undefined;
   }
 
   private async _statToTreeNode(
@@ -3713,40 +3693,20 @@ export class WorkspaceFileService {
     return fileStats;
   }
 
-  private _inMemoryTreeAddFile(absolutePath: string, metadata: { size: number } & FileContentMetadata): void {
-    const treeRelativePath = this._toTreeRelative(normalizePath(absolutePath));
-    if (treeRelativePath !== undefined) {
-      this._inMemoryTree.addFile(treeRelativePath, metadata);
+  /**
+   * One root's index, scanned from its provider only when cold (D3).
+   *
+   * @param root - Absolute authority root the index is keyed by.
+   * @returns The warm index for that root.
+   */
+  private async _treeIndexFor(root: string): Promise<TreeIndex> {
+    const warm = this._treeIndexes.get(root);
+    if (warm !== undefined) {
+      return warm;
     }
-  }
-
-  private _inMemoryTreeAddDirectory(absolutePath: string): void {
-    const treeRelativePath = this._toTreeRelative(normalizePath(absolutePath));
-    if (treeRelativePath !== undefined) {
-      this._inMemoryTree.addDirectory(treeRelativePath);
-    }
-  }
-
-  private _inMemoryTreeRename(from: string, to: string): void {
-    const relativeFromPath = this._toTreeRelative(normalizePath(from));
-    const relativeToPath = this._toTreeRelative(normalizePath(to));
-    if (relativeFromPath !== undefined && relativeToPath !== undefined) {
-      this._inMemoryTree.rename(relativeFromPath, relativeToPath);
-    }
-  }
-
-  private _inMemoryTreeRemoveFile(absolutePath: string): void {
-    const treeRelativePath = this._toTreeRelative(normalizePath(absolutePath));
-    if (treeRelativePath !== undefined) {
-      this._inMemoryTree.removeFile(treeRelativePath);
-    }
-  }
-
-  private _inMemoryTreeRemoveDirectory(absolutePath: string): void {
-    const treeRelativePath = this._toTreeRelative(normalizePath(absolutePath));
-    if (treeRelativePath !== undefined) {
-      this._inMemoryTree.removeDirectory(treeRelativePath);
-    }
+    const { provider, path } = this._resolveProvider(root);
+    const stats = await this._collectDirectoryStatsFromProvider(provider, { walkPath: path, basePath: path });
+    return this._treeIndexes.build(root, stats);
   }
 
   private _treeEntriesToNodes(entries: Map<string, TreeEntry>): FileTreeNode[] {
@@ -4026,7 +3986,7 @@ export class WorkspaceFileService {
 
     if (this._isCurrentResolution(path, resolution)) {
       this._filePool?.invalidate(path);
-      this._inMemoryTreeRemoveFile(path);
+      this._treeIndexes.removeFile(path);
     }
     if (resolution.entry !== undefined) {
       this._emitChangeEvent({ type: 'fileWritten', path, backend }, context, { operations: [{ path, resolution }] });
@@ -4065,7 +4025,7 @@ export class WorkspaceFileService {
     const { backend: resolvedBackend } = resolution;
     if (this._isCurrentResolution(path, resolution)) {
       this._filePool?.invalidate(path);
-      this._inMemoryTreeAddFile(path, {
+      this._treeIndexes.addFile(path, {
         size: bytes.byteLength,
         ...getFileContentMetadata(bytes),
       });
@@ -4137,11 +4097,10 @@ export class WorkspaceFileService {
           if (sourceIsCurrent && targetIsCurrent) {
             this._filePool?.invalidate(source);
             this._filePool?.invalidate(target);
-            this._inMemoryTreeRename(source, target);
+            this._treeIndexes.rename(source, target);
           } else if (sourceIsCurrent || targetIsCurrent) {
             this._filePool?.clear();
-            this._inMemoryTree.clear();
-            this._directoryStatRoot = undefined;
+            this._treeIndexes.clear();
           }
 
           const resultingStat = await targetResolution.provider.stat(targetResolution.path);
@@ -4181,8 +4140,7 @@ export class WorkspaceFileService {
             );
             if (globallyVisible) {
               this._filePool?.clear();
-              this._inMemoryTree.clear();
-              this._directoryStatRoot = undefined;
+              this._treeIndexes.clear();
             }
             for (const backend of new Set([sourceResolution.backend, targetResolution.backend])) {
               this._emitChangeEvent({ type: 'backendChanged', backend }, context, { operations, globallyVisible });
@@ -4225,7 +4183,7 @@ export class WorkspaceFileService {
         }
 
         if (this._isCurrentResolution(path, resolution)) {
-          this._inMemoryTreeAddDirectory(path);
+          this._treeIndexes.addDirectory(path);
         }
         this._emitChangeEvent(
           {
@@ -4266,7 +4224,7 @@ export class WorkspaceFileService {
 
           if (this._isCurrentResolution(path, resolution)) {
             this._filePool?.invalidate(path);
-            this._inMemoryTreeRemoveFile(path);
+            this._treeIndexes.removeFile(path);
           }
           this._emitChangeEvent(
             {
@@ -4314,7 +4272,7 @@ export class WorkspaceFileService {
           }
 
           if (this._isCurrentResolution(path, resolution)) {
-            this._inMemoryTreeRemoveDirectory(path);
+            this._treeIndexes.removeDirectory(path);
           }
           this._emitChangeEvent(
             {
@@ -4557,11 +4515,10 @@ export class WorkspaceFileService {
     // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
     // ponytail: full drop, not the path-scoped one `writeFiles` uses. Both callers are
     // half-finished *recursive* directory mutations, so everything under `path` is
-    // untrustworthy — and neither SharedPool nor InMemoryFileTree can drop a subtree.
+    // untrustworthy — and neither SharedPool nor TreeIndex can drop a subtree.
     // Scope it once SharedPool grows a prefix invalidation, if this error path is ever hot.
     this._filePool?.clear();
-    this._inMemoryTree.clear();
-    this._directoryStatRoot = undefined;
+    this._treeIndexes.clear();
     const logicalRoot = resolution.entry?.prefix ?? path;
     const rootResolution =
       resolution.entry === undefined ? resolution : { ...resolution, path: resolution.entry.providerBasePath };
@@ -4571,24 +4528,6 @@ export class WorkspaceFileService {
     if (resolution.entry !== undefined) {
       this._crossTabCoordinator.notifyDirectoryChange(logicalRoot, this._physicalAuthority(resolution));
     }
-  }
-
-  private _createInMemoryTree(fileStats: readonly FileStatEntry[]): InMemoryFileTree {
-    const tree = new InMemoryFileTree();
-    tree.build(
-      fileStats.map((entry) =>
-        entry.type === 'dir'
-          ? { path: entry.path, type: 'dir', size: entry.size, mtimeMs: entry.mtimeMs }
-          : {
-              path: entry.path,
-              type: 'file',
-              size: entry.size,
-              mtimeMs: entry.mtimeMs,
-              ...fileMetadataFields(entry),
-            },
-      ),
-    );
-    return tree;
   }
 
   private async _rmdirRecursive(provider: FileSystemProvider, directoryPath: string): Promise<void> {

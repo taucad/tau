@@ -14,10 +14,8 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { composeView } from '@taucad/filesystem/composed-view';
-import { archive, contents } from '@taucad/filesystem/content-ops';
-import { classify, tauPathPolicy } from '@taucad/filesystem/path-registry';
-import type { WalkOptions } from '@taucad/filesystem/content-ops';
-import { joinRelativePath } from '@taucad/utils/path';
+import { withReadContentOps } from '@taucad/filesystem/content-ops';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { ExposeFileSystemHandle, FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { createTransferredFileSystemBridgeProxy, exposeFileSystem, openFileSystemBridge } from '@taucad/fs-bridge';
 
@@ -87,16 +85,7 @@ const hostOnNode = ({ service, bus }: Workspace): NodeHost => {
       const filesystem = service.createRootedFileSystem(root, context);
       const view =
         consumer === undefined ? filesystem : composeView({ filesystem }, { consumer, policy: tauPathPolicy });
-      const admits = (path: string, versionedOnly?: boolean): WalkOptions =>
-        versionedOnly === true
-          ? { admits: (relative, kind) => kind === 'dir' || classify(joinRelativePath(path, relative)).versioned }
-          : {};
-      return Object.assign(view, {
-        archive: async (path: string, options?: { versionedOnly?: boolean }) =>
-          archive(view, path, admits(path, options?.versionedOnly)),
-        contents: async (path: string, options?: { versionedOnly?: boolean }) =>
-          contents(view, path, admits(path, options?.versionedOnly)),
-      });
+      return withReadContentOps(view, tauPathPolicy);
     },
     messageSource: boundary.port2,
   });
@@ -213,6 +202,37 @@ describe('filesystem bridge authority on a Node host (X8)', () => {
       const archived = await client.proxy.archive('', { versionedOnly: true });
       expect(archived).toBeInstanceOf(Blob);
       expect(archived.size).toBeGreaterThan(0);
+    } finally {
+      client.dispose();
+      host.dispose();
+    }
+  });
+
+  /*
+   * Search and recursive stat are the root's index over the same connection
+   * (charter D3/W4): additive rooted calls, no protocol version bump.
+   */
+  it('serves search and recursive stat over the rooted view, masked', async () => {
+    const workspace = await createWorkspace();
+    for (const [path, body] of Object.entries({
+      'main.ts': 'export default 1;\n',
+      'src/helper.ts': 'export const helper = 1;\n',
+      '.git/HEAD': 'ref: refs/heads/main',
+    })) {
+      // oxlint-disable-next-line no-await-in-loop -- Deterministic seed order keeps the fixture readable.
+      await workspace.service.writeFile(`${projectRoot}/${path}`, body);
+    }
+    const host = hostOnNode(workspace);
+    const client = host.connect(projectRoot, 'user');
+
+    try {
+      await client.proxy.ready;
+
+      await expect(client.proxy.search('.ts')).resolves.toMatchObject([{ path: 'main.ts' }, { path: 'src/helper.ts' }]);
+      /* `HEAD` lives only in the control plane, which the view never descends. */
+      await expect(client.proxy.search('HEAD')).resolves.toEqual([]);
+      await expect(client.proxy.statTree('')).resolves.toMatchObject([{ path: 'main.ts' }, { path: 'src/helper.ts' }]);
+      await expect(client.proxy.statTree('src')).resolves.toMatchObject([{ path: 'helper.ts' }]);
     } finally {
       client.dispose();
       host.dispose();

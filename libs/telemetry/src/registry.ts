@@ -593,6 +593,16 @@ export const TauMetrics = {
     }),
   }),
 
+  billingProviderAccountRefusals: defineCounter({
+    name: 'tau.billing.provider_account.refusals',
+    unit: '{refusal}',
+    description: 'Supplier-account refusals (no credit or not billable) by provider',
+    attributes: z.object({
+      'deployment.environment': z.enum(['development', 'staging', 'prod-us', 'prod-eu']),
+      providerId: z.string(),
+    }),
+  }),
+
   billingFundedOperationDenials: defineCounter({
     name: 'tau.billing.funded_operation.denials',
     unit: '{denial}',

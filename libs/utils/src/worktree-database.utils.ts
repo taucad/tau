@@ -24,6 +24,9 @@ export type WorktreeIdentity = Readonly<{ gitDirectory: string; gitCommonDirecto
 const localHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
 const identifier = /^[a-z0-9_]+$/u;
 const postgresIdentifierLength = 63;
+/** How long a starter waits for a sibling's restore to land, and how often it looks. */
+const forkWait = 60_000;
+const forkPoll = 500;
 
 /**
  * Read the git directories of the checkout containing `cwd`.
@@ -63,6 +66,10 @@ export const worktreeDatabaseName = (base: string, worktree: WorktreeIdentity | 
     .toLowerCase()
     .replaceAll(/[^a-z0-9]+/gu, '_')
     .replaceAll(/^_+|_+$/gu, '');
+  // An explicit fork name for this worktree is already resolved; suffixing it again would fork the fork.
+  if (base.endsWith(`_${id}`)) {
+    return base;
+  }
   return `${base}_${id}`.slice(0, postgresIdentifierLength);
 };
 
@@ -110,8 +117,11 @@ export const localDatabaseName = (fallback = 'tau_dev'): string => {
  *
  * The fork is a `pg_dump | psql` copy of the base database made inside the
  * compose container, which works while the base is in use (a `TEMPLATE` clone
- * refuses a database with open sessions). A copy that fails midway is dropped
- * so the next call retries instead of reading a partial schema.
+ * refuses a database with open sessions). The copy lands in a staging name and
+ * is renamed in one atomic step, so a second starter in the same worktree can
+ * only ever see a complete fork; one that loses the race for the staging name
+ * waits for that rename instead of restoring a second copy. A copy that fails
+ * midway drops its staging database so the next call retries.
  *
  * @param url - A `postgresql://` URL.
  * @param container - The compose Postgres container name.
@@ -129,28 +139,47 @@ export const ensureWorktreeDatabase = (url: string, container = 'tau-postgres'):
   if (![username, base, fork].every((value) => identifier.test(value))) {
     throw new Error(`Cannot fork database "${base}" for user "${username}": unsupported identifier`);
   }
-  const container_ = ['exec', container];
-  const run = (args: readonly string[]): string =>
-    execFileSync('docker', [...container_, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-  const exists = run([
-    'psql',
-    '-qtAX',
-    '-U',
-    username,
-    '-d',
-    'postgres',
-    '-c',
-    `SELECT 1 FROM pg_database WHERE datname = '${fork}'`,
-  ]);
-  if (exists === '1') {
+  const run = (args: readonly string[]): string => {
+    try {
+      return execFileSync('docker', ['exec', container, ...args], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim();
+    } catch (error) {
+      throw new Error(`docker exec ${container} ${args[0] ?? ''} failed; is the compose Postgres up?`, {
+        cause: error,
+      });
+    }
+  };
+  const psql = (statement: string): string =>
+    run(['psql', '-qtAX', '-v', 'ON_ERROR_STOP=1', '-U', username, '-d', 'postgres', '-c', statement]);
+  const forkExists = (): boolean => psql(`SELECT 1 FROM pg_database WHERE datname = '${fork}'`) === '1';
+  if (forkExists()) {
     return resolved;
   }
-  // Ponytail: two concurrent first users race on createdb; the loser's error surfaces and a rerun succeeds.
-  run(['createdb', '-U', username, fork]);
+  // Short enough that the suffix never pushes the name past Postgres's 63-byte identifier limit.
+  const staging = `${fork.slice(0, postgresIdentifierLength - 8)}_forking`;
   try {
-    run(['sh', '-c', `pg_dump -U ${username} ${base} | psql -q -v ON_ERROR_STOP=1 -U ${username} -d ${fork}`]);
+    run(['createdb', '-U', username, staging]);
   } catch (error) {
-    run(['dropdb', '-U', username, '--if-exists', fork]);
+    // Ponytail: a staging database left by a killed restore also lands here; the timeout names it.
+    const deadline = Date.now() + forkWait;
+    while (!forkExists()) {
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `Timed out waiting for "${fork}" to finish forking; drop a stale "${staging}" if no restore is running`,
+          { cause: error },
+        );
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, forkPoll);
+    }
+    return resolved;
+  }
+  try {
+    run(['sh', '-c', `pg_dump -U ${username} ${base} | psql -q -v ON_ERROR_STOP=1 -U ${username} -d ${staging}`]);
+    psql(`ALTER DATABASE "${staging}" RENAME TO "${fork}"`);
+  } catch (error) {
+    run(['dropdb', '-U', username, '--if-exists', staging]);
     throw new Error(`Forking database "${base}" into "${fork}" failed`, { cause: error });
   }
   return resolved;

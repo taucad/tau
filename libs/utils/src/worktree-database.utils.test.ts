@@ -35,6 +35,20 @@ describe('worktreeDatabaseName', () => {
   });
 });
 
+describe('worktreeDatabaseName', () => {
+  it('leaves a name that already carries this worktree suffix alone', () => {
+    expect(worktreeDatabaseName('tau_dev_tau_chat_admission_closeout', linked)).toBe(
+      'tau_dev_tau_chat_admission_closeout',
+    );
+  });
+
+  it('still suffixes a name that carries another worktree suffix', () => {
+    expect(worktreeDatabaseName('tau_dev_tau_git_storage_substrate', linked)).toBe(
+      'tau_dev_tau_git_storage_substrate_tau_chat_admission_closeout',
+    );
+  });
+});
+
 describe('worktreeDatabaseUrl', () => {
   const url = 'postgresql://dev_user:dev_password@localhost:5432/tau_dev';
 

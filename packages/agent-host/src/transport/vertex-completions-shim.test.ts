@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Vertex's OpenAI-compatible wire uses snake_case keys. */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import type { AssistantMessageEvent, Context, Model } from '@earendil-works/pi-ai';
 import type { ModelProviderKind } from '#log/event-types.js';
@@ -92,6 +92,66 @@ const plainStream = sse([
   '[DONE]',
 ]);
 
+/*
+ * Vertex streams ONE tool call across deltas whose `index` increments per delta
+ * while the call id repeats on every delta (live T1: indexes 0..3 for a single
+ * `read_file`; T14: 0..7 for a parallel pair). The signature lands on a later
+ * index than the one that named the call.
+ */
+const incrementingIndexStream = sse([
+  {
+    id: 'c3',
+    choices: [
+      {
+        index: 0,
+        delta: {
+          tool_calls: [{ index: 0, id: 'uMxj91xg', type: 'function', function: { name: 'run', arguments: '{"a"' } }],
+        },
+      },
+    ],
+  },
+  {
+    id: 'c3',
+    choices: [{ index: 0, delta: { tool_calls: [{ index: 1, id: 'uMxj91xg', function: { arguments: ':1' } }] } }],
+  },
+  {
+    id: 'c3',
+    choices: [{ index: 0, delta: { tool_calls: [{ index: 2, id: 'uMxj91xg', function: { arguments: '}' } }] } }],
+  },
+  {
+    id: 'c3',
+    choices: [
+      {
+        index: 0,
+        delta: {
+          tool_calls: [{ index: 3, id: 'uMxj91xg', extra_content: { google: { thought_signature: signature } } }],
+        },
+      },
+    ],
+  },
+  { id: 'c3', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
+  '[DONE]',
+]);
+
+/** A signature on a tool-call delta that never carried an id at any index. */
+const unboundSignatureStream = sse([
+  {
+    id: 'c5',
+    choices: [
+      {
+        index: 0,
+        delta: {
+          tool_calls: [
+            { index: 0, function: { arguments: '{}' }, extra_content: { google: { thought_signature: signature } } },
+          ],
+        },
+      },
+    ],
+  },
+  { id: 'c5', choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }] },
+  '[DONE]',
+]);
+
 /** Feed `text` through the shim in `cuts + 1` chunks split at absolute byte offsets. */
 const throughShim = async (
   text: string,
@@ -147,10 +207,11 @@ const streamThroughPi = async (options: {
   readonly cuts?: readonly number[];
   readonly context: Context;
   readonly onPayload?: (payload: unknown) => unknown;
+  readonly stream?: string;
 }): Promise<AssistantMessageEvent[]> => {
   const fetchImpl = (async (_input: unknown, init?: RequestInit) => {
-    options.bodies.push(JSON.parse(String(init?.body)));
-    const rewritten = await throughShim(geminiStream, options.signatures, options.cuts);
+    options.bodies.push(JSON.parse(init?.body as string));
+    const rewritten = await throughShim(options.stream ?? geminiStream, options.signatures, options.cuts);
     return new Response(encoder.encode(rewritten), {
       status: 200,
       headers: { 'content-type': 'text/event-stream' },
@@ -257,6 +318,29 @@ describe('createVertexResponseShim', () => {
     expect(await textFor('vertexai')).toBe('Building it now.');
   });
 
+  it('should bind a signature arriving at a later index to the repeated call id', async () => {
+    const signatures = new Map<string, string>();
+    const events = await streamThroughPi({ signatures, bodies: [], context, stream: incrementingIndexStream });
+
+    expect([...signatures]).toEqual([['uMxj91xg', signature]]);
+    expect(await throughShim(incrementingIndexStream, new Map())).not.toContain('thought_signature');
+    // The codec falls back to the id when the index misses, so four deltas stay one call.
+    expect(events.find((event) => event.type === 'done')?.message.content).toEqual([
+      expect.objectContaining({ type: 'toolCall', id: 'uMxj91xg', name: 'run', arguments: { a: 1 } }),
+    ]);
+  });
+
+  it('should report a thought signature it cannot bind to a call id instead of dropping it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const signatures = new Map<string, string>();
+
+    await throughShim(unboundSignatureStream, signatures);
+
+    expect([...signatures]).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('thought signature'));
+    warn.mockRestore();
+  });
+
   it('should leave a stream with no thoughts and no signatures byte-identical', async () => {
     const signatures = new Map<string, string>();
     const cut = Math.floor(encoder.encode(plainStream).byteLength / 2);
@@ -302,7 +386,7 @@ describe('echoThoughtSignatures', () => {
     });
 
     const sent = bodies[0] as { readonly messages: ReadonlyArray<Record<string, unknown>> };
-    const echoed = sent.messages.flatMap((message) => (message['tool_calls'] as unknown[]) ?? []);
+    const echoed = sent.messages.flatMap((message) => (message['tool_calls'] as unknown[] | undefined) ?? []);
     expect(echoed).toContainEqual(
       expect.objectContaining({
         id: 'call_1',

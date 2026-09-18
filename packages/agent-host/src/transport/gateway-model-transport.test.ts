@@ -190,6 +190,19 @@ const openBodyFetch = (chunks: readonly string[]) =>
     });
   });
 
+/** Every outbound tool call of a Vertex body as `[id, thought signature]`, in wire order. */
+const toolCallSignatures = (body: unknown): ReadonlyArray<readonly [unknown, unknown]> =>
+  ((body as { readonly messages?: ReadonlyArray<Record<string, unknown>> }).messages ?? [])
+    .flatMap((message) => (message['tool_calls'] as Array<Record<string, unknown>> | undefined) ?? [])
+    .map(
+      (call) =>
+        [
+          call['id'],
+          (call['extra_content'] as { readonly google?: { readonly thought_signature?: unknown } } | undefined)?.google
+            ?.thought_signature,
+        ] as const,
+    );
+
 const heldAnthropicResponse = () => {
   const encoder = new TextEncoder();
   const waiting = Promise.withResolvers<void>();
@@ -517,6 +530,148 @@ describe('createGatewayModelTransport', () => {
   });
 
   /*
+   * Gemini validates the thought signature of the FIRST call of a parallel
+   * batch and tolerates the rest unsigned (live T14–T17), so the echo has to
+   * land on the right call even when two calls share a tool name.
+   */
+  it('should echo a Gemini thought signature onto the first call of a rehydrated parallel batch', async () => {
+    const signature = 'opaque-Gemini+/=signature';
+    let body: unknown;
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(async (_input, init) => {
+        body = JSON.parse(String(init?.body));
+        return responseFromChunks([
+          'data: {"id":"chatcmpl-done","choices":[{"index":0,"delta":{"content":"done"}}]}\n\n',
+          'data: {"id":"chatcmpl-done","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n',
+          'data: [DONE]\n\n',
+        ]);
+      }),
+    });
+
+    await collect(
+      transport.stream(
+        request({
+          messages: [
+            { id: 'user-1', role: 'user', content: 'read both files' },
+            {
+              id: 'assistant-1',
+              role: 'assistant',
+              content: [
+                {
+                  type: 'toolCall',
+                  id: 'call-a',
+                  name: 'read_file',
+                  arguments: { targetFile: 'a.ts' },
+                  thoughtSignature: signature,
+                },
+                { type: 'toolCall', id: 'call-b', name: 'read_file', arguments: { targetFile: 'b.ts' } },
+              ],
+            },
+            {
+              id: 'tool-output-a',
+              role: 'tool-output',
+              toolCallId: 'call-a',
+              toolName: 'read_file',
+              content: 'a',
+              isError: false,
+            },
+            {
+              id: 'tool-output-b',
+              role: 'tool-output',
+              toolCallId: 'call-b',
+              toolName: 'read_file',
+              content: 'b',
+              isError: false,
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(toolCallSignatures(body)).toEqual([
+      ['call-a', signature],
+      ['call-b', undefined],
+    ]);
+  });
+
+  /*
+   * A current-turn function call with no signature is a 400 on Vertex (live
+   * T3/T5/T8/T13), which is what a foreign-provider history or a resume with a
+   * switched model produces. Google accepts the documented dummy in its place
+   * (T21). Calls in earlier, completed turns may stay unsigned (T23), so they
+   * are left exactly as they are.
+   */
+  it('should sign only an unsigned current-turn Gemini tool call with the dummy validator', async () => {
+    let body: unknown;
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(async (_input, init) => {
+        body = JSON.parse(String(init?.body));
+        return responseFromChunks([
+          'data: {"id":"chatcmpl-done","choices":[{"index":0,"delta":{"content":"done"}}]}\n\n',
+          'data: {"id":"chatcmpl-done","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n',
+          'data: [DONE]\n\n',
+        ]);
+      }),
+    });
+
+    await collect(
+      transport.stream(
+        request({
+          messages: [
+            { id: 'user-1', role: 'user', content: 'read a' },
+            {
+              id: 'assistant-1',
+              role: 'assistant',
+              content: [{ type: 'toolCall', id: 'call-old', name: 'read_file', arguments: { targetFile: 'a.ts' } }],
+            },
+            {
+              id: 'tool-output-old',
+              role: 'tool-output',
+              toolCallId: 'call-old',
+              toolName: 'read_file',
+              content: 'a',
+              isError: false,
+            },
+            { id: 'user-2', role: 'user', content: 'now read b and c' },
+            {
+              id: 'assistant-2',
+              role: 'assistant',
+              content: [
+                { type: 'toolCall', id: 'call-new', name: 'read_file', arguments: { targetFile: 'b.ts' } },
+                { type: 'toolCall', id: 'call-next', name: 'read_file', arguments: { targetFile: 'c.ts' } },
+              ],
+            },
+            {
+              id: 'tool-output-new',
+              role: 'tool-output',
+              toolCallId: 'call-new',
+              toolName: 'read_file',
+              content: 'b',
+              isError: false,
+            },
+            {
+              id: 'tool-output-next',
+              role: 'tool-output',
+              toolCallId: 'call-next',
+              toolName: 'read_file',
+              content: 'c',
+              isError: false,
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(toolCallSignatures(body)).toEqual([
+      ['call-old', undefined],
+      ['call-new', 'skip_thought_signature_validator'],
+      ['call-next', undefined],
+    ]);
+  });
+
+  /*
    * The pi model's context window is the *request's*, not the transport's: a
    * host that configures no default row (every client names its own) must still
    * stream, and one whose request names none has nothing to run against.
@@ -677,7 +832,6 @@ describe('createGatewayModelTransport', () => {
           google: {
             thinking_config: { include_thoughts: true, thinking_level: 'MEDIUM' },
             thought_tag_marker: 'think',
-            stream_function_call_arguments: true,
           },
         },
       },
@@ -720,6 +874,12 @@ describe('createGatewayModelTransport', () => {
 
     expect(path).toBe(fixture.expectedPath);
     expect(body).toMatchObject(fixture.expectedBody);
+    // Vertex answers 499 CANCELLED to every function call emitted after the
+    // first assistant message while this flag is set: the second sequential
+    // call in a turn and every call from user turn two on, across all four
+    // catalog models (14/14 live; blueprint Finding 4, RC2, ruling Q2). Its
+    // only product effect was per-delta tool-input granularity on Gemini.
+    expect(JSON.stringify(body)).not.toContain('stream_function_call_arguments');
   });
   /* eslint-enable @typescript-eslint/naming-convention -- End frozen provider wire fixture. */
 

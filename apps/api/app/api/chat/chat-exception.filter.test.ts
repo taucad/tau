@@ -109,6 +109,28 @@ describe('ChatExceptionFilter unknown-error disclosure', () => {
     });
   });
 
+  it('answers a provider-account refusal as a coded 503 the client routes on, not a credits denial', () => {
+    const { host, response } = createMockArgumentsHost();
+    const details = { providerId: 'openai', providerCode: 'credit_balance_exhausted', accountOwner: 'tau' };
+
+    new ChatExceptionFilter().catch(
+      new LlmGatewayError(503, 'PROVIDER_ACCOUNT_EXHAUSTED', "The model provider's account is unavailable.", details),
+      host,
+    );
+
+    expect(response.status).toHaveBeenCalledWith(503);
+    expect(sentError(response)).toMatchObject({
+      // The category follows the status; the card is keyed on the code.
+      category: 'overloaded',
+      code: 'PROVIDER_ACCOUNT_EXHAUSTED',
+      message: "The model provider's account is unavailable.",
+      httpStatus: 503,
+      details,
+      requestId: 'req_test_123',
+    });
+    expect(sentError(response).category).not.toBe('credits');
+  });
+
   it('tells the client when to retry a funded limit and keeps a credit denial shortfall', () => {
     const limited = createMockArgumentsHost();
     new ChatExceptionFilter().catch(new LlmGatewayError(429, 'FUNDED_OPERATION_LIMIT', 'Busy.'), limited.host);

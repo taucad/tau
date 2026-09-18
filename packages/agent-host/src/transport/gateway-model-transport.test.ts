@@ -1505,4 +1505,164 @@ describe('createGatewayModelTransport', () => {
       status: 403,
     });
   });
+
+  it('should carry a provider-account refusal envelope off the 503 body', async () => {
+    const details = {
+      providerId: 'openai',
+      providerCode: 'insufficient_quota',
+      accountOwner: 'operator',
+    };
+    const transport = createGatewayModelTransport({
+      baseUrl: 'https://gateway.example',
+      fetch: vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              type: 'error',
+              error: {
+                type: 'PROVIDER_ACCOUNT_EXHAUSTED',
+                message: 'You exceeded your current quota, please check your plan and billing details.',
+                details,
+              },
+            }),
+            { status: 503, headers: { 'content-type': 'application/json' } },
+          ),
+      ),
+    });
+
+    await expect(collect(transport.stream(request()))).rejects.toMatchObject({
+      name: 'GatewayModelTransportError',
+      code: 'PROVIDER_ACCOUNT_EXHAUSTED',
+      message: 'You exceeded your current quota, please check your plan and billing details.',
+      status: 503,
+      details,
+    });
+  });
+
+  it('should end the run with the coded refusal when the gateway rewrites an in-stream error frame', async () => {
+    const details = {
+      providerId: 'anthropic',
+      providerCode: 'credit_balance_exhausted',
+      accountOwner: 'tau',
+    };
+    const message = "The model provider's account is unavailable.";
+    const refusal = JSON.stringify({
+      type: 'error',
+      code: 'PROVIDER_ACCOUNT_EXHAUSTED',
+      message,
+      error: { type: 'tau_gateway', code: 'PROVIDER_ACCOUNT_EXHAUSTED', message, details },
+    });
+    // The rewritten frame is split mid-payload: the marker lands in one chunk
+    // and the refusal only becomes readable with the next one.
+    const split = refusal.indexOf('"details"');
+    const transport = createGatewayModelTransportWithModel({
+      baseUrl: 'https://gateway.example',
+      model: { contextWindow: 200_000, maxTokens: 8192 },
+      fetch: vi.fn(async () =>
+        responseFromChunks([
+          'data: {"id":"chatcmpl-refused","choices":[{"delta":{"content":"partial"}}]}\n\n',
+          `event: error\ndata: ${refusal.slice(0, split)}`,
+          `${refusal.slice(split)}\n\n`,
+        ]),
+      ),
+    });
+    const file = createMemoryEventLogFile();
+    const log = await file.open();
+    const session = await createAgentSession({
+      chatId: 'chat-refused',
+      runId: 'run-refused',
+      leaderEpoch: 'epoch-refused',
+      systemPrompt: 'system',
+      model: {
+        id: 'fixture-model',
+        providerKind: 'vertexai',
+        contextWindow: 200_000,
+        maxTokens: 8192,
+      },
+      modelTransport: transport,
+      toolRegistry: {
+        list: () => [],
+        invoke: async () => ({ content: null, isError: false }),
+      },
+      eventLog: log,
+      createId: () => 'assistant-refused',
+      now: () => new Date('2026-09-19T00:00:00.000Z'),
+    });
+
+    await session.prompt({ id: 'turn-refused', role: 'user', content: 'run this turn' });
+
+    const snapshot = await session.snapshot();
+    expect(snapshot.state).toBe('failed');
+    expect(snapshot.failure).toEqual({
+      code: 'PROVIDER_ACCOUNT_EXHAUSTED',
+      message,
+      status: 200,
+      details,
+    });
+    await session.close();
+  });
+
+  it('should hand a complete Tau frame that is not a refusal to the SDK with the bytes held behind it', async () => {
+    const transport = createGatewayModelTransportWithModel({
+      baseUrl: 'https://gateway.example',
+      model: { contextWindow: 200_000, maxTokens: 8192 },
+      fetch: vi.fn(async () =>
+        responseFromChunks([
+          'data: {"id":"chatcmpl-tau","choices":[{"index":0,"delta":{"content":"partial"}}]}\n\n',
+          // The marker lands with the frame still open; the transport must
+          // hold, then release these bytes once the frame proves harmless.
+          'data: {"id":"chatcmpl-tau","type":"tau_gateway","choices":[{"index":0,"delta":{"content":" tail"}}]}',
+          '\n\ndata: {"id":"chatcmpl-tau","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n',
+          'data: [DONE]\n\n',
+        ]),
+      ),
+    });
+
+    const events = await collect(transport.stream(request()));
+
+    expect(
+      events
+        .filter((event) => event.type === 'text-delta')
+        .map((event) => event.text)
+        .join(''),
+    ).toBe('partial tail');
+    expect(events.at(-1)?.type).toBe('completed');
+  });
+
+  it('should leave a healthy Responses stream untouched while scanning for the refusal frame', async () => {
+    const events = await collect(
+      createGatewayModelTransport({
+        baseUrl: 'https://gateway.example',
+        fetch: vi.fn(async () => byteSplitResponse(authoritativeGatewayWireFixtures.openAiResponsesToolTurn)),
+      }).stream(request({ providerKind: 'openai' })),
+    );
+
+    expect(events).toEqual([
+      { type: 'tool-input-start', contentIndex: 0, toolCallId: 'call-1|fc_1', toolName: 'read_file' },
+      {
+        type: 'tool-input-delta',
+        contentIndex: 0,
+        toolCallId: 'call-1|fc_1',
+        toolName: 'read_file',
+        delta: '{"target',
+      },
+      {
+        type: 'tool-input-delta',
+        contentIndex: 0,
+        toolCallId: 'call-1|fc_1',
+        toolName: 'read_file',
+        delta: 'File":"main.ts"}',
+      },
+      {
+        type: 'tool-input',
+        contentIndex: 0,
+        toolCallId: 'call-1|fc_1',
+        toolName: 'read_file',
+        input: { targetFile: 'main.ts' },
+      },
+      { type: 'message-metadata', metadata: { responseId: 'resp-fixture' } },
+      { type: 'usage', usage: usage(7, 4, { cacheRead: 5, reasoning: 0 }) },
+      { type: 'completed', stopReason: 'toolUse' },
+    ]);
+  });
 });

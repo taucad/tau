@@ -1,4 +1,5 @@
 import { generateKeyPairSync } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { ConfigService } from '@nestjs/config';
 import { describe, expect, it, vi } from 'vitest';
 import { BillableModelInvocationService } from '#api/billing/billable-model-invocation.service.js';
@@ -17,6 +18,7 @@ import type {
 } from '#api/billing/billable-model-invocation.types.js';
 import type { InputCountCapability } from '#api/billing/billable-model-input-count.js';
 import type { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
+import type { TerminalEvidence } from '#api/billing/credit-ledger.types.js';
 import type { MetricsService } from '#telemetry/metrics.js';
 
 const qualification = (): QualifiedBillableInvocation => ({
@@ -72,6 +74,62 @@ const gatewayErrorType = (error: unknown): string | undefined => {
     return undefined;
   }
   return (error.getResponse() as { error?: { type?: string } }).error?.type;
+};
+
+const exhaustedProviderBody = {
+  error: {
+    type: 'insufficient_quota',
+    code: 'credit_balance_exhausted',
+    message:
+      'You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.',
+    param: null,
+  },
+};
+/* The real 200 stream OpenAI sent on 2026-09-19 with an exhausted organisation balance. */
+const exhaustedCapture = readFileSync(new URL('../llm/provider-account-stream.fixture.sse', import.meta.url), 'utf8');
+
+/** One admitted operation whose supplier answers a provider-account refusal. */
+const exhaustionHarness = (qualified: QualifiedBillableInvocation) => {
+  const metrics = {
+    billingFundedOperationTerminals: { add: vi.fn() },
+    billingProviderAccountRefusals: { add: vi.fn() },
+  };
+  const row = {
+    ...qualified,
+    id: 'operation',
+    accountId: 'account',
+    environment: 'development',
+    activity: 'agent',
+    requestDigest: '',
+    customerState: 'pending',
+    dueAt: new Date(Date.now() + 30_000),
+  };
+  const ledger = {
+    getOperationForAttempt: vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockImplementation(async () => row),
+    issueCurrentPromotion: vi.fn(),
+    admitOperation: vi.fn(async () => ({ status: 'admitted', operationId: 'operation', generation: 0n })),
+    markDispatchIntent: vi.fn(async () => true),
+    markDispatchAccepted: vi.fn(async () => true),
+    getDispatchTimeRemaining: vi.fn(async () => 30_000),
+    recordInvocationEvidence: vi.fn<(input: { readonly evidence: TerminalEvidence }) => Promise<void>>(),
+    terminalizeOperation: vi.fn(),
+  };
+  const service = new BillableModelInvocationService(
+    ledger as unknown as CreditLedgerService,
+    { resolve: () => qualified },
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- environment key
+    new ConfigService({ BILLING_REQUEST_DIGEST_SECRET: 'x'.repeat(32) }),
+    metrics as unknown as MetricsService,
+  );
+  row.requestDigest = (
+    service as unknown as {
+      requestDigest(value: ReturnType<typeof intent>, pins: QualifiedBillableInvocation): string;
+    }
+  ).requestDigest(intent(), qualified);
+  return { ledger, metrics, row, service };
 };
 
 describe('BillableModelInvocationService', () => {
@@ -811,5 +869,83 @@ describe('BillableModelInvocationService', () => {
 
     await expect(service.invoke(intent())).resolves.toEqual({ state: 'pending', operationId: 'operation' });
     expect(qualified.adapter.executeOnce).not.toHaveBeenCalled();
+  });
+  /* R1 pre-stream (Cloud): the supplier's refusal becomes Tau's code, and the operation
+   * settles as provider_rejected, so the customer is charged nothing for it. */
+  it('should refuse with the opaque provider-account code when the supplier account is exhausted before the stream', async () => {
+    const qualified = qualification();
+    const failed = vi.fn(() => ({ kind: 'absorbed_unknown' }) as const);
+    qualified.adapter.createEvidenceCollector = () => ({
+      accept: vi.fn(),
+      complete: () => ({ kind: 'absorbed_unknown' }),
+      failed,
+    });
+    qualified.adapter.executeOnce = vi.fn(
+      async () =>
+        new Response(JSON.stringify(exhaustedProviderBody), {
+          status: 429,
+          headers: { 'content-type': 'application/json' },
+        }),
+    );
+    const { ledger, metrics, service } = exhaustionHarness(qualified);
+
+    try {
+      await service.invoke(intent());
+      expect.fail('The exhausted supplier account should refuse the invocation');
+    } catch (error) {
+      expect(error).toBeInstanceOf(LlmGatewayError);
+      expect((error as LlmGatewayError).getStatus()).toBe(503);
+      expect((error as LlmGatewayError).getResponse()).toEqual({
+        type: 'error',
+        error: {
+          type: 'PROVIDER_ACCOUNT_EXHAUSTED',
+          // The supplier's own sentence never leaves the API.
+          message: "The model provider's account is unavailable.",
+          details: { providerId: 'openai', providerCode: 'credit_balance_exhausted', accountOwner: 'tau' },
+        },
+      });
+    }
+    expect(failed).toHaveBeenCalledWith('provider_rejected');
+    expect(ledger.recordInvocationEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({ evidence: { kind: 'absorbed_unknown' } }),
+    );
+    // W7: the refusal is counted by provider, never by customer or sentence.
+    expect(metrics.billingProviderAccountRefusals.add).toHaveBeenCalledWith(1, {
+      'deployment.environment': 'development',
+      providerId: 'openai',
+    });
+  });
+
+  /* R1 in-stream + V4 (Cloud): the relayed frame carries Tau's code, and the turn that
+   * carried no usage settles absorbed — no meter item, no customer charge. */
+  it('should rewrite the captured in-stream supplier refusal and settle the turn at zero charge', async () => {
+    const qualified = { ...qualification(), maximumResponseBytes: 64 * 1024 };
+    qualified.adapter.createEvidenceCollector = () =>
+      createBillableModelEvidenceCollector('openai-responses', new Set(['uncached_input']), 'openai');
+    qualified.adapter.executeOnce = vi.fn(
+      async () => new Response(exhaustedCapture, { status: 200, headers: { 'content-type': 'text/event-stream' } }),
+    );
+    const { ledger, metrics, service } = exhaustionHarness(qualified);
+
+    const result = await service.invoke(intent());
+    if (result.state !== 'streaming') {
+      throw new Error('The supplier answered 200; the relay did not stream');
+    }
+    const relayed = await result.response.text();
+    await result.completion;
+
+    expect(relayed).toContain(
+      `event: error\ndata: {"type":"error","code":"PROVIDER_ACCOUNT_EXHAUSTED","message":"The model provider's account is unavailable.","error":{"type":"tau_gateway","code":"PROVIDER_ACCOUNT_EXHAUSTED","message":"The model provider's account is unavailable.","details":{"providerId":"openai","providerCode":"credit_balance_exhausted","accountOwner":"tau"}}}\n\n`,
+    );
+    expect(relayed).not.toContain('You have no credits remaining');
+    // No usage was reported, so nothing is metered onto the customer and nothing terminalizes.
+    const recorded = ledger.recordInvocationEvidence.mock.calls.at(-1)?.[0];
+    expect(recorded?.evidence).toMatchObject({ kind: 'absorbed_unknown', executionStatus: 'unknown' });
+    expect(Object.keys(recorded?.evidence ?? {})).not.toContain('meterItems');
+    expect(ledger.terminalizeOperation).not.toHaveBeenCalled();
+    expect(metrics.billingFundedOperationTerminals.add).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({ 'tau.billing.terminal.kind': 'absorbed_unknown' }),
+    );
   });
 });

@@ -89,6 +89,28 @@ export type DirectoryEntry = {
 };
 
 /**
+ * One normalised external-change fact: what a backend that observes its own root
+ * reports to the authority, in the authority's vocabulary rather than its own
+ * (charter D13). Paths are provider-relative, as every other port path is.
+ *
+ * `reset` carries no path: the observer lost track of this root, so every
+ * derivative of it is now untrustworthy. `unknown` names a path whose change the
+ * observer could not describe, and the authority reconciles that subtree.
+ *
+ * @public
+ */
+export type ExternalChangeFact =
+  | {
+      readonly kind: 'created' | 'modified' | 'deleted' | 'moved' | 'unknown';
+      readonly path: string;
+      /** Entry kind, when the observer reported one. */
+      readonly entry?: 'file' | 'dir';
+      /** Previous path of a `moved` entry, when the observer reported one. */
+      readonly from?: string;
+    }
+  | { readonly kind: 'reset' };
+
+/**
  * Backend-agnostic filesystem provider exposing POSIX-like operations.
  * @public
  */
@@ -127,6 +149,17 @@ export type FileSystemProvider = {
    * paths whose subtrees changed to scope the invalidation; omit them to drop everything.
    */
   refresh?(prefixes?: readonly string[]): Promise<void>;
+  /**
+   * Report this root's own external changes. Declared only by a backend that can
+   * observe itself; the authority falls back to bounded snapshot polling for one
+   * that cannot, so capability presence — never backend identity — decides how a
+   * root is watched (charter D13).
+   *
+   * Resolves with a disposer, or with `undefined` when observation exists in
+   * principle but could not be armed here and polling must cover the root. A
+   * rejection means the root has no fallback and its derivatives are stale.
+   */
+  observe?(listener: (facts: readonly ExternalChangeFact[]) => void): Promise<(() => void) | undefined>;
 };
 
 /**

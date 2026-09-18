@@ -7,7 +7,6 @@ import type {
   FileSystemBackend,
 } from '@taucad/types';
 import type {
-  ChangeEvent,
   FileSystemProvider,
   FileTreeNode,
   FileReadStreamOptions,
@@ -27,17 +26,21 @@ import type { ChangeEventBus } from '#change-event-bus.js';
 import { TreeIndexes } from '#tree-index.js';
 import type { TreeIndex } from '#tree-index.js';
 import { WatchRegistry } from '#watch-registry.js';
-import type { NodeFsWatchEvent } from '#backend/node/protocol.js';
 import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-utils.js';
-import { isChromiumSwapArtifactName } from '#backend/fs-access-provider.js';
+/* The scope discriminants are the backend layer's own vocabulary (D13); the
+ * authority reads capabilities and admission answers, never a backend name. */
+import { hasStandaloneTree, matchesProtectedMountScope, scopeForRouteConfig, toScope } from '#backend/scope.js';
 import { CrossTabCoordinator } from '#cross-tab-coordinator.js';
-import type { ChangeNotification, PhysicalAuthority } from '#cross-tab-coordinator.js';
+/* External change and cross-tab receive are their own modules (D13/W9); the
+ * authority keeps the one public poll and owns nothing of either mechanism. */
+import { ExternalChangeIngest } from '#external-change-ingest.js';
+import type { StagedDiscoveryRoot } from '#external-change-ingest.js';
+import { RemoteChanges } from '#remote-changes.js';
 import type { SharedPool } from '@taucad/memory';
 import type {
   CheckoutRootConfig,
   MountTable,
   MountConfig,
-  MountEntry,
   MountResolution,
   ProjectRootConfig,
   ProjectRootConfiguration,
@@ -51,7 +54,7 @@ import type {
 } from '#mount-table.js';
 /* The project-directory lifecycle is its own module (D5/W7); the authority
  * keeps the four public calls and owns nothing of the manifest. */
-import { isNotFoundError, ProjectDirectories } from '#project-directories.js';
+import { ProjectDirectories } from '#project-directories.js';
 import type { ProjectDiscoveryResult, ResolvedDiscoveryRoot } from '#project-directories.js';
 import { assertRootedPath, joinRelativePath, parentDirectory, resolveAuthorityPath } from '@taucad/utils/path';
 import { MissingWorkspaceHandleError, WorkspaceMutationError } from '#workspace-errors.js';
@@ -61,85 +64,6 @@ import { checkoutRoute, nodeModulesRoute, parseRoute, projectRoute } from '#proj
 
 /** Milliseconds. */
 const kernelCoalescingWindow = 75;
-
-/** Concurrent `getFile()` calls per directory while walking an external snapshot. */
-const externalSnapshotConcurrency = 16;
-
-/**
- * Changed-path budget above which a snapshot diff stops being worth scoping:
- * past this many entries the per-path cache sweeps cost more than one full drop.
- */
-const maxLocalizedExternalChanges = 64;
-
-/** Snapshot body published when the walked physical root is absent. */
-const missingExternalSnapshot = '<missing>';
-type NativeFileSystemChangeRecord = {
-  readonly type: 'appeared' | 'disappeared' | 'modified' | 'moved' | 'unknown' | 'errored';
-  readonly changedHandle?: { readonly kind: FileSystemHandle['kind'] };
-  readonly relativePathComponents: readonly string[];
-  readonly relativePathMovedFrom?: readonly string[];
-};
-
-type NativeFileSystemObserver = {
-  observe(handle: FileSystemDirectoryHandle, options: { recursive: boolean }): Promise<void> | void;
-  disconnect(): void;
-};
-
-type NativeFileSystemObserverConstructor = new (
-  callback: (records: readonly NativeFileSystemChangeRecord[]) => void,
-) => NativeFileSystemObserver;
-
-type ObservedExternalRoot = {
-  readonly storageRootKey: string;
-  readonly backend: FileSystemBackend;
-  /** Present for `webaccess` roots only; node roots are addressed by host path. */
-  readonly directoryHandle?: FileSystemDirectoryHandle;
-  readonly provider: FileSystemProvider;
-  observer?: NativeFileSystemObserver;
-  /** Releases a node root's host-side watch subscription. */
-  unwatch?: () => void;
-  nativeActive: boolean;
-  readonly pollSnapshots: Map<string, string>;
-  tail: Promise<void>;
-};
-
-/**
- * A provider that reports its own external changes. Node roots do; browser
- * roots are observed through `FileSystemObserver` plus snapshot polling.
- */
-type SelfObservingProvider = FileSystemProvider & {
-  watch(request: WatchRequest, handler: (event: NodeFsWatchEvent) => void): Promise<() => void>;
-};
-
-const isSelfObserving = (provider: FileSystemProvider): provider is SelfObservingProvider =>
-  typeof (provider as Partial<SelfObservingProvider>).watch === 'function';
-
-/** The kernel's own cache burst must never reach the tree (blueprint Q-R3). */
-const externalWatchExcludes = ['.tau/cache/**'];
-
-/** Translate one host watch event into the record shape the emitters consume. */
-const toExternalRecord = (event: Exclude<NodeFsWatchEvent, { type: 'reset' }>): NativeFileSystemChangeRecord => {
-  const relativePathComponents = event.path === '' ? [] : event.path.split('/');
-  return event.type === 'delete'
-    ? { type: 'disappeared', relativePathComponents }
-    : {
-        type: 'modified',
-        changedHandle: { kind: event.kind === 'dir' ? 'directory' : 'file' },
-        relativePathComponents,
-      };
-};
-
-type ExternalLogicalMapping = {
-  readonly path: string;
-  readonly resolution: MountResolution;
-};
-
-/** One discovery root staged by {@link WorkspaceFileService.configureProjectRoots}. */
-type StagedDiscoveryRoot = {
-  readonly root: ProjectRootConfiguration['roots'][number];
-  readonly scope: WorkspaceScope;
-  readonly storageRootKey: string;
-};
 
 /** One project or checkout route staged for installation, before its provider is resolved. */
 type StagedRouteMount = {
@@ -168,17 +92,6 @@ export class UnboundProjectRouteError extends Error {
     this.name = 'UnboundProjectRouteError';
     this.projectId = projectId;
   }
-}
-
-/**
- * Workspace app state (`<root>/.tau/**`, `.git/**`, …): never a project, never
- * an input to discovery, and never worth an external-change fan-out.
- *
- * @param physicalPath - Canonical provider-relative path.
- * @returns Whether the path lives under a dot-prefixed root child.
- */
-function isWorkspaceStatePath(physicalPath: string): boolean {
-  return physicalPath.split('/')[0]?.startsWith('.') === true;
 }
 
 /**
@@ -237,12 +150,12 @@ export class WorkspaceFileService {
   private readonly _projectRoutes = new Set<string>();
   private readonly _checkoutRoutes = new Set<string>();
   private _projectConfigurationTail: Promise<void> = Promise.resolve();
-  private _remoteChangeTail: Promise<void> = Promise.resolve();
   private _discoveryRoots: readonly ResolvedDiscoveryRoot[] = [];
-  private readonly _observedExternalRoots = new Map<string, ObservedExternalRoot>();
   private readonly _pipeline: MutationPipeline;
   private readonly _rootedViews: RootedViews;
   private readonly _projectDirectories: ProjectDirectories;
+  private readonly _externalChanges: ExternalChangeIngest;
+  private readonly _remoteChanges: RemoteChanges;
 
   /**
    * Create a {@link WorkspaceFileService} with injected dependencies.
@@ -292,17 +205,31 @@ export class WorkspaceFileService {
         this._revokeProjectRoute(path, notifyPeers);
       },
     });
+    this._externalChanges = new ExternalChangeIngest({
+      registry: this._registry,
+      mountTable: this._mountTable,
+      pipeline: this._pipeline,
+      crossTabCoordinator: this._crossTabCoordinator,
+      treeIndexes: this._treeIndexes,
+      filePool: () => this._filePool,
+      disposeStorageRoot: (storageRootKey) => {
+        this.disposeStorageRoot(storageRootKey);
+      },
+    });
+    this._remoteChanges = new RemoteChanges({
+      registry: this._registry,
+      mountTable: this._mountTable,
+      pipeline: this._pipeline,
+      treeIndexes: this._treeIndexes,
+      watchRegistry: this._watchRegistry,
+      filePool: () => this._filePool,
+      discoveryRoots: () => this._discoveryRoots,
+      revokeProjectRoute: (path, notifyPeers) => {
+        this._revokeProjectRoute(path, notifyPeers);
+      },
+    });
     this._crossTabCoordinator.onRemoteChange((notification) => {
-      const predecessor = this._remoteChangeTail;
-      const applyInOrder = async (): Promise<void> => {
-        try {
-          await predecessor;
-          await this._applyRemoteChange(notification);
-        } catch {
-          this._handleRemoteFailure(notification);
-        }
-      };
-      this._remoteChangeTail = applyInOrder();
+      this._remoteChanges.apply(notification);
     });
   }
 
@@ -1054,7 +981,7 @@ export class WorkspaceFileService {
    * @returns Sorted tree nodes (folders first, then alphabetical).
    */
   public async readShallowDirectory(path: string, options?: { scope?: WorkspaceScope }): Promise<FileTreeNode[]> {
-    if (options?.scope?.backend === 'memory') {
+    if (options?.scope !== undefined && !hasStandaloneTree(options.scope)) {
       return [];
     }
 
@@ -1124,24 +1051,7 @@ export class WorkspaceFileService {
    *          delivery, which lets the caller poll on a slow safety-net cadence instead.
    */
   public async pollExternalChanges(root?: string): Promise<boolean> {
-    if (root === undefined) {
-      const states = [...this._observedExternalRoots.values()];
-      await Promise.all(states.map(async (state) => this._pollExternalRoot(state)));
-      return states.length > 0 && states.every(({ nativeActive }) => nativeActive);
-    }
-    const resolution = this._mountTable.resolve(root);
-    const { entry } = resolution;
-    if (entry?.storageRootKey === undefined) {
-      return false;
-    }
-    const state = [...this._observedExternalRoots.values()].find(
-      (candidate) => candidate.provider === resolution.provider && candidate.storageRootKey === entry.storageRootKey,
-    );
-    if (state === undefined) {
-      return false;
-    }
-    await this._pollExternalRoot(state, entry.providerBasePath);
-    return state.nativeActive;
+    return this._externalChanges.poll(root);
   }
 
   // --- Backend management ---
@@ -1238,18 +1148,14 @@ export class WorkspaceFileService {
     if (previewInstance === undefined && canonicalPrefix !== nodeModulesRoute) {
       throw new TypeError(`Dynamic mount prefix is not admitted: ${prefix}`);
     }
-    if (
-      (previewInstance !== undefined &&
-        (config.backend !== 'memory' || config.storageRootKey !== `memory:preview:${previewInstance}`)) ||
-      (canonicalPrefix === nodeModulesRoute && config.backend !== 'opfs')
-    ) {
+    if (!matchesProtectedMountScope(config, previewInstance)) {
       throw new TypeError(`Dynamic mount configuration does not match its protected prefix: ${prefix}`);
     }
     const providerBasePath = assertRootedPath(config.providerBasePath ?? '');
     if (providerBasePath !== (config.providerBasePath ?? '')) {
       throw new TypeError(`Dynamic provider path must already be canonical: ${config.providerBasePath}`);
     }
-    const scope = this._toScope(config);
+    const scope = toScope(config);
     const provider = await this._registry.getProvider(scope);
     const storageRootKey = this._registry.resolveStorageRootKey(scope);
     const existing = this._mountTable.getExactMount(canonicalPrefix);
@@ -1309,7 +1215,7 @@ export class WorkspaceFileService {
    * @param storageRootKey - Stable physical storage-root identity to dispose.
    */
   public disposeStorageRoot(storageRootKey: string): void {
-    this._disconnectExternalRoot(storageRootKey);
+    this._externalChanges.disconnectRoot(storageRootKey);
     let topologyChanged = false;
     for (const mount of this._mountTable.listMounts()) {
       if (mount.storageRootKey === storageRootKey) {
@@ -1331,9 +1237,7 @@ export class WorkspaceFileService {
 
   /** Release all resources: watches, providers, caches, and event bus. */
   public dispose(): void {
-    for (const storageRootKey of this._observedExternalRoots.keys()) {
-      this._disconnectExternalRoot(storageRootKey);
-    }
+    this._externalChanges.dispose();
     this._filePool?.clear();
     this._filePool = undefined;
     this._treeIndexes.clear();
@@ -1361,7 +1265,7 @@ export class WorkspaceFileService {
     const stagedPrefixes = new Set(stagedInputs.map(({ prefix }) => prefix));
     const stagedCheckoutPrefixes = new Set(stagedCheckoutInputs.map(({ prefix }) => prefix));
 
-    await this._evictReplacedWebAccessRoots(stagedRoots);
+    await this._externalChanges.evictReplacedRoots(stagedRoots);
 
     let topologyChanged = await this._installRouteMounts(stagedInputs);
     topologyChanged = (await this._installRouteMounts(stagedCheckoutInputs)) || topologyChanged;
@@ -1380,7 +1284,7 @@ export class WorkspaceFileService {
     if (topologyChanged) {
       this._resetTopologyState();
     }
-    await this._syncExternalRoots(stagedRoots);
+    await this._externalChanges.syncRoots(stagedRoots);
   }
 
   /**
@@ -1397,13 +1301,13 @@ export class WorkspaceFileService {
     const physicalRoots = new Set<string>();
     const webAccessRoots = new Map<string, Extract<StorageRootConfig, { backend: 'webaccess' }>>();
     const stagedRoots = roots.map((root) => {
-      const scope = this._toScope(root);
+      const scope = toScope(root);
       const storageRootKey = this._registry.resolveStorageRootKey(scope);
       if (physicalRoots.has(storageRootKey)) {
         throw new Error(`Duplicate project discovery root: ${storageRootKey}`);
       }
       physicalRoots.add(storageRootKey);
-      if (root.backend === 'webaccess') {
+      if ('workspaceId' in root) {
         webAccessRoots.set(root.workspaceId, root);
       }
       return { root, scope, storageRootKey };
@@ -1512,7 +1416,7 @@ export class WorkspaceFileService {
     physicalRoutes: Set<string>,
   ): StagedRouteMount {
     const { prefix, config, providerBasePath, noun } = route;
-    const scope = this._scopeForRouteConfig(config, webAccessRoots);
+    const scope = scopeForRouteConfig(config, webAccessRoots);
     const storageRootKey = this._registry.resolveStorageRootKey(scope);
     const physicalRoute = `${storageRootKey}\0${providerBasePath}`;
     if (physicalRoutes.has(physicalRoute)) {
@@ -1520,38 +1424,6 @@ export class WorkspaceFileService {
     }
     physicalRoutes.add(physicalRoute);
     return { prefix, config, scope, storageRootKey, providerBasePath };
-  }
-
-  /**
-   * Drop a cached webaccess provider whose root the user re-picked, so staging
-   * never retains a handle for a different directory entry.
-   *
-   * @param stagedRoots - Discovery roots this pass staged.
-   */
-  private async _evictReplacedWebAccessRoots(stagedRoots: readonly StagedDiscoveryRoot[]): Promise<void> {
-    for (const staged of stagedRoots) {
-      if (staged.root.backend !== 'webaccess') {
-        continue;
-      }
-      const observed = this._observedExternalRoots.get(staged.storageRootKey);
-      const observedHandle = observed?.directoryHandle;
-      if (observed === undefined || observedHandle === undefined || observedHandle === staged.root.directoryHandle) {
-        continue;
-      }
-      let sameEntry = false;
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- Provider staging must not retain a handle for a different entry.
-        sameEntry = await observedHandle.isSameEntry(staged.root.directoryHandle);
-      } catch {
-        // A failed identity check cannot prove that the cached provider still owns this root.
-      }
-      if (!sameEntry && this._observedExternalRoots.get(staged.storageRootKey) === observed) {
-        this._disconnectExternalRoot(staged.storageRootKey);
-        // oxlint-disable-next-line no-await-in-loop -- Do not dispose a provider while an admitted root operation uses it.
-        await observed.tail;
-        this.disposeStorageRoot(staged.storageRootKey);
-      }
-    }
   }
 
   /**
@@ -1614,953 +1486,9 @@ export class WorkspaceFileService {
     return topologyChanged;
   }
 
-  /** The storage scope one persisted route names, project or checkout alike. */
-  private _scopeForRouteConfig(
-    config: ProjectRootConfig,
-    webAccessRoots: ReadonlyMap<string, Extract<StorageRootConfig, { backend: 'webaccess' }>>,
-  ): WorkspaceScope {
-    if (config.backend === 'webaccess') {
-      const root = webAccessRoots.get(config.workspaceId);
-      if (root === undefined) {
-        throw new MissingWorkspaceHandleError({ workspaceId: config.workspaceId });
-      }
-      return this._toScope(root);
-    }
-    if (config.backend === 'memory') {
-      return this._toScope({ backend: 'memory', storageRootKey: config.storageRootKey });
-    }
-    return config.backend === 'node'
-      ? this._toScope({ backend: 'node', path: config.path })
-      : this._toScope({ backend: config.backend });
-  }
-
-  private _toScope(config: WorkspaceScope | MountConfig): WorkspaceScope {
-    if (config.backend === 'webaccess') {
-      // Defensive runtime check — the discriminated `MountConfig` makes
-      // this unreachable in well-typed call sites, but structured-clone
-      // deserialisation through the worker bridge is not type-checked.
-      // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- defensive runtime guard against unsafe (untyped RPC / `as any`) callers
-      if (!config.directoryHandle) {
-        throw new MissingWorkspaceHandleError({ workspaceId: config.workspaceId });
-      }
-      return {
-        backend: 'webaccess',
-        directoryHandle: config.directoryHandle,
-        workspaceId: config.workspaceId,
-      };
-    }
-    if (config.backend === 'memory') {
-      return { backend: 'memory', storageRootKey: config.storageRootKey };
-    }
-    return config.backend === 'node' ? { backend: 'node', path: config.path } : { backend: config.backend };
-  }
-
   private _previewInstance(prefix: string): string | undefined {
     const route = parseRoute(prefix);
     return route.kind === 'preview' && route.rest === '' ? route.id : undefined;
-  }
-
-  private async _syncExternalRoots(
-    roots: ReadonlyArray<{
-      root: ProjectRootConfiguration['roots'][number];
-      scope: WorkspaceScope;
-      storageRootKey: string;
-    }>,
-  ): Promise<void> {
-    const webRoots = roots.filter(
-      (
-        entry,
-      ): entry is typeof entry & {
-        root: Extract<StorageRootConfig, { backend: 'webaccess' }>;
-        scope: Extract<WorkspaceScope, { backend: 'webaccess' }>;
-      } => entry.root.backend === 'webaccess' && entry.scope.backend === 'webaccess',
-    );
-    const nodeRoots = roots.filter(
-      (
-        entry,
-      ): entry is typeof entry & {
-        root: Extract<StorageRootConfig, { backend: 'node' }>;
-        scope: Extract<WorkspaceScope, { backend: 'node' }>;
-      } => entry.root.backend === 'node' && entry.scope.backend === 'node',
-    );
-    const retainedKeys = new Set([...webRoots, ...nodeRoots].map(({ storageRootKey }) => storageRootKey));
-    for (const storageRootKey of this._observedExternalRoots.keys()) {
-      if (!retainedKeys.has(storageRootKey)) {
-        this._disconnectExternalRoot(storageRootKey);
-      }
-    }
-    await this._observeNodeRoots(nodeRoots);
-
-    const additions = await Promise.all(
-      webRoots
-        .filter(({ storageRootKey }) => !this._observedExternalRoots.has(storageRootKey))
-        .map(async ({ root, scope, storageRootKey }) => {
-          try {
-            return { root, storageRootKey, provider: await this._registry.getProvider(scope) };
-          } catch {
-            return undefined;
-          }
-        }),
-    );
-    for (const addition of additions) {
-      if (addition === undefined) {
-        continue;
-      }
-      const { root, storageRootKey, provider } = addition;
-      const state: ObservedExternalRoot = {
-        storageRootKey,
-        backend: 'webaccess',
-        directoryHandle: root.directoryHandle,
-        provider,
-        nativeActive: false,
-        pollSnapshots: new Map(),
-        tail: Promise.resolve(),
-      };
-      this._observedExternalRoots.set(storageRootKey, state);
-      const pendingRecords: NativeFileSystemChangeRecord[] = [];
-      const observer = this._createNativeFileSystemObserver((records) => {
-        if (this._observedExternalRoots.get(storageRootKey) !== state) {
-          return;
-        }
-        if (!state.nativeActive) {
-          pendingRecords.push(...records);
-          return;
-        }
-        const activeObserver = state.observer;
-        if (activeObserver === undefined) {
-          return;
-        }
-        // async-iife: Browser observer callbacks cannot await their handler.
-        void this._handleNativeExternalRecords(state, activeObserver, records);
-      });
-      if (observer === undefined) {
-        continue;
-      }
-      state.observer = observer;
-      const observation = async (): Promise<void> => {
-        try {
-          if (this._observedExternalRoots.get(storageRootKey) !== state) {
-            return;
-          }
-          try {
-            await observer.observe(root.directoryHandle, { recursive: true });
-          } catch {
-            observer.disconnect();
-            state.observer = undefined;
-            return;
-          }
-          await this._queueExternalRootOperation(state, async () => {
-            if (this._observedExternalRoots.get(storageRootKey) !== state) {
-              observer.disconnect();
-              return;
-            }
-            state.nativeActive = true;
-            if (pendingRecords.length > 0) {
-              await this._applyNativeExternalRecords(state, pendingRecords.splice(0));
-            }
-          });
-          await this._pollExternalRoot(state);
-        } catch {
-          this._disableNativeObservation(state);
-        }
-      };
-      // async-iife: Browser observers are started after async provider discovery.
-      void observation();
-    }
-  }
-
-  /**
-   * Attach every new node root to its host-side watcher.
-   *
-   * The watcher lives with the bytes in the services utility (substrate
-   * invariant 3); its events land on the same `ChangeEventBus` path the
-   * browser's `FileSystemObserver` records take, so the file tree, the file
-   * pool, and cross-tab coordination need no node-specific arm.
-   */
-  private async _observeNodeRoots(
-    entries: ReadonlyArray<{ scope: Extract<WorkspaceScope, { backend: 'node' }>; storageRootKey: string }>,
-  ): Promise<void> {
-    const additions = await Promise.all(
-      entries
-        .filter(({ storageRootKey }) => !this._observedExternalRoots.has(storageRootKey))
-        .map(async ({ scope, storageRootKey }) => {
-          try {
-            return { storageRootKey, provider: await this._registry.getProvider(scope) };
-          } catch {
-            return undefined;
-          }
-        }),
-    );
-    for (const addition of additions) {
-      if (addition === undefined || !isSelfObserving(addition.provider)) {
-        continue;
-      }
-      const { storageRootKey, provider } = addition;
-      const state: ObservedExternalRoot = {
-        storageRootKey,
-        backend: 'node',
-        provider,
-        nativeActive: true,
-        pollSnapshots: new Map(),
-        tail: Promise.resolve(),
-      };
-      this._observedExternalRoots.set(storageRootKey, state);
-      // async-iife: bootstrap — arming crosses a process boundary; mounting must not block on it.
-      void (async () => {
-        try {
-          const unwatch = await provider.watch(
-            { paths: [''], recursive: true, excludes: externalWatchExcludes },
-            (event) => {
-              if (this._observedExternalRoots.get(storageRootKey) !== state) {
-                return;
-              }
-              if (event.type === 'reset') {
-                // The host lost a watcher: drop every derivative and resummarize,
-                // exactly as a lost browser observer does.
-                this._disableNativeObservation(state);
-                return;
-              }
-              // async-iife: bootstrap — a watch callback cannot await its own serialization.
-              void (async () => {
-                try {
-                  await this._queueExternalRootOperation(state, async () => {
-                    await this._applyNativeExternalRecords(state, [toExternalRecord(event)]);
-                  });
-                } catch {
-                  this._disableNativeObservation(state);
-                }
-              })();
-            },
-          );
-          if (this._observedExternalRoots.get(storageRootKey) === state) {
-            state.unwatch = unwatch;
-          } else {
-            unwatch();
-          }
-        } catch {
-          this._disableNativeObservation(state);
-        }
-      })();
-    }
-  }
-
-  private _createNativeFileSystemObserver(
-    callback: (records: readonly NativeFileSystemChangeRecord[]) => void,
-  ): NativeFileSystemObserver | undefined {
-    const browser = globalThis as typeof globalThis & {
-      FileSystemObserver?: NativeFileSystemObserverConstructor;
-    };
-    return typeof browser.FileSystemObserver === 'function' ? new browser.FileSystemObserver(callback) : undefined;
-  }
-
-  private _disconnectExternalRoot(storageRootKey: string): void {
-    const state = this._observedExternalRoots.get(storageRootKey);
-    this._observedExternalRoots.delete(storageRootKey);
-    state?.unwatch?.();
-    state?.observer?.disconnect();
-    if (state !== undefined) {
-      state.pollSnapshots.clear();
-    }
-  }
-
-  private async _handleNativeExternalRecords(
-    state: ObservedExternalRoot,
-    observer: NativeFileSystemObserver,
-    records: readonly NativeFileSystemChangeRecord[],
-  ): Promise<void> {
-    try {
-      await this._queueExternalRootOperation(state, async () => {
-        if (state.observer !== observer || !state.nativeActive) {
-          return;
-        }
-        await this._applyNativeExternalRecords(state, records);
-      });
-    } catch {
-      this._disableNativeObservation(state);
-    }
-  }
-
-  private async _queueExternalRootOperation(
-    state: ObservedExternalRoot,
-    operation: () => Promise<void>,
-  ): Promise<void> {
-    const predecessor = state.tail;
-    let release: () => void;
-    state.tail = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    try {
-      try {
-        await predecessor;
-      } catch {
-        // A rejected record must not strand later native or polling facts.
-      }
-      if (this._observedExternalRoots.get(state.storageRootKey) !== state) {
-        return;
-      }
-      await operation();
-    } finally {
-      release!();
-    }
-  }
-
-  private async _pollExternalRoot(state: ObservedExternalRoot, providerBasePath?: string): Promise<void> {
-    const scope = providerBasePath ?? '*';
-    const snapshot = await this._createExternalSnapshot(state, providerBasePath);
-    await this._queueExternalRootOperation(state, async () => {
-      await this._applyExternalSnapshot(state, scope, snapshot);
-    });
-  }
-
-  private async _applyNativeExternalRecords(
-    state: ObservedExternalRoot,
-    records: readonly NativeFileSystemChangeRecord[],
-  ): Promise<void> {
-    const admittedRecords = records.filter(
-      (record) =>
-        !this._isChromiumSwapOnlyRecord(record) &&
-        !isWorkspaceStatePath(this._physicalPath(record.relativePathComponents)),
-    );
-    if (admittedRecords.length === 0) {
-      return;
-    }
-    if (admittedRecords.some(({ type }) => type === 'errored')) {
-      this._disableNativeObservation(state);
-      return;
-    }
-    if (admittedRecords.some(({ type }) => type === 'unknown')) {
-      await this._reconcileUnknownExternalRecords(state, admittedRecords);
-      return;
-    }
-
-    const prepared = admittedRecords.map((record) => {
-      const physicalPath = this._physicalPath(record.relativePathComponents);
-      const oldPhysicalPath = Array.isArray(record.relativePathMovedFrom)
-        ? this._physicalPath(record.relativePathMovedFrom)
-        : undefined;
-      const mappings = this._logicalMappingsForPhysicalPath(state, physicalPath);
-      const knownKinds = new Map(
-        mappings.map(({ path, resolution }) => [resolution.entry, this._treeIndexes.statType(path)] as const),
-      );
-      return { record, physicalPath, oldPhysicalPath, mappings, knownKinds };
-    });
-
-    const physicalPaths = prepared.flatMap(({ physicalPath, oldPhysicalPath }) =>
-      oldPhysicalPath === undefined ? [physicalPath] : [physicalPath, oldPhysicalPath],
-    );
-    await state.provider.refresh?.(physicalPaths);
-    if (this._observedExternalRoots.get(state.storageRootKey) !== state) {
-      return;
-    }
-    this._invalidateExternalDerivatives({ state, physicalPaths });
-    let discoveryChanged = false;
-    for (const change of prepared) {
-      const { record, physicalPath, mappings, knownKinds } = change;
-      discoveryChanged ||=
-        mappings.length === 0 ||
-        this._isDiscoveryRelevantPhysicalPath(physicalPath) ||
-        (record.type === 'moved' &&
-          change.oldPhysicalPath !== undefined &&
-          this._isDiscoveryRelevantPhysicalPath(change.oldPhysicalPath));
-      switch (record.type) {
-        case 'appeared': {
-          if (mappings.length === 0 && !this._isDiscoveryRelevantPhysicalPath(physicalPath)) {
-            this._emitExternalRootSummaries(state);
-          }
-          for (const mapping of mappings) {
-            this._emitExternalCreation(mapping, record.changedHandle?.kind);
-          }
-          break;
-        }
-        case 'modified': {
-          if (mappings.length === 0 && !this._isDiscoveryRelevantPhysicalPath(physicalPath)) {
-            this._emitExternalRootSummaries(state);
-          }
-          for (const mapping of mappings) {
-            if (record.changedHandle?.kind === 'file') {
-              this._emitExternalFileWrite(mapping);
-            } else {
-              this._emitExternalDirectorySummary(mapping, mapping.path);
-            }
-          }
-          break;
-        }
-        case 'disappeared': {
-          if (mappings.length === 0) {
-            this._emitExternalRootSummaries(state);
-          }
-          for (const mapping of mappings) {
-            const kind = knownKinds.get(mapping.resolution.entry);
-            if (kind === 'file' || kind === 'dir') {
-              this._emitExternalDeletion(mapping, kind);
-            } else {
-              this._emitExternalDirectorySummary(mapping, parentDirectory(mapping.path));
-            }
-          }
-          break;
-        }
-        case 'moved': {
-          this._emitExternalRootSummaries(state);
-          break;
-        }
-        default: {
-          throw new Error(`Unexpected admitted native record: ${record.type}`);
-        }
-      }
-    }
-    if (discoveryChanged) {
-      this._emitGlobalDiscoveryChange(state);
-    }
-  }
-
-  private _physicalPath(components: readonly string[]): string {
-    return assertRootedPath(components.join('/'));
-  }
-
-  private _isChromiumSwapOnlyRecord(record: NativeFileSystemChangeRecord): boolean {
-    if (record.type === 'unknown' || record.type === 'errored') {
-      return false;
-    }
-    const current = record.relativePathComponents.at(-1);
-    if (current === undefined || !isChromiumSwapArtifactName(current)) {
-      return false;
-    }
-    if (record.type !== 'moved' || record.relativePathMovedFrom === undefined) {
-      return true;
-    }
-    const previous = record.relativePathMovedFrom.at(-1);
-    return previous !== undefined && isChromiumSwapArtifactName(previous);
-  }
-
-  private _logicalMappingsForPhysicalPath(state: ObservedExternalRoot, physicalPath: string): ExternalLogicalMapping[] {
-    const mappings: ExternalLogicalMapping[] = [];
-    for (const entry of this._mountTable.listMounts()) {
-      if (entry.provider !== state.provider || entry.storageRootKey !== state.storageRootKey) {
-        continue;
-      }
-      const base = entry.providerBasePath;
-      if (physicalPath !== base && !(base === '' ? physicalPath !== '' : physicalPath.startsWith(`${base}/`))) {
-        continue;
-      }
-      const suffix = base === '' ? physicalPath : physicalPath === base ? '' : physicalPath.slice(base.length + 1);
-      const path =
-        suffix === ''
-          ? entry.prefix
-          : entry.prefix === '/'
-            ? resolveAuthorityPath(`/${suffix}`)
-            : resolveAuthorityPath(`${entry.prefix}/${suffix}`);
-      mappings.push({
-        path,
-        resolution: { provider: state.provider, path: physicalPath, backend: entry.backend, entry },
-      });
-    }
-    return mappings;
-  }
-
-  private _emitExternalCreation(mapping: ExternalLogicalMapping, kind: FileSystemHandle['kind'] | undefined): void {
-    if (kind === 'file') {
-      this._emitExternalFileWrite(mapping);
-      return;
-    }
-    if (kind === 'directory') {
-      this._pipeline.emitChangeEvent(
-        { type: 'directoryCreated', path: mapping.path, backend: mapping.resolution.backend },
-        undefined,
-        { operations: [mapping] },
-      );
-      this._crossTabCoordinator.notifyMutation({
-        type: 'mkdir',
-        path: mapping.path,
-        authority: this._pipeline.physicalAuthority(mapping.resolution),
-      });
-      return;
-    }
-    this._emitExternalDirectorySummary(mapping, parentDirectory(mapping.path));
-  }
-
-  private _emitExternalFileWrite(mapping: ExternalLogicalMapping): void {
-    this._pipeline.emitChangeEvent(
-      { type: 'fileWritten', path: mapping.path, backend: mapping.resolution.backend },
-      undefined,
-      {
-        operations: [mapping],
-      },
-    );
-    this._crossTabCoordinator.notifyMutation({
-      type: 'write',
-      path: mapping.path,
-      authority: this._pipeline.physicalAuthority(mapping.resolution),
-    });
-  }
-
-  private _emitExternalDeletion(mapping: ExternalLogicalMapping, kind: 'file' | 'dir'): void {
-    this._pipeline.emitChangeEvent(
-      kind === 'file'
-        ? { type: 'fileDeleted', path: mapping.path, backend: mapping.resolution.backend }
-        : { type: 'directoryDeleted', path: mapping.path, backend: mapping.resolution.backend },
-      undefined,
-      { operations: [mapping] },
-    );
-    this._crossTabCoordinator.notifyMutation({
-      type: kind === 'file' ? 'delete' : 'rmdir',
-      path: mapping.path,
-      authority: this._pipeline.physicalAuthority(mapping.resolution),
-    });
-  }
-
-  private _emitExternalDirectorySummary(mapping: ExternalLogicalMapping, logicalPath: string): void {
-    const separator = mapping.resolution.path.lastIndexOf('/');
-    const physicalPath =
-      logicalPath === mapping.path
-        ? mapping.resolution.path
-        : separator === -1
-          ? ''
-          : mapping.resolution.path.slice(0, separator);
-    const resolution = { ...mapping.resolution, path: physicalPath };
-    this._pipeline.emitChangeEvent(
-      { type: 'directoryChanged', path: logicalPath, backend: mapping.resolution.backend },
-      undefined,
-      { operations: [{ path: logicalPath, resolution }] },
-    );
-    this._crossTabCoordinator.notifyDirectoryChange(logicalPath, this._pipeline.physicalAuthority(mapping.resolution));
-  }
-
-  private _emitExternalRootSummaries(state: ObservedExternalRoot, providerBasePath?: string): void {
-    for (const entry of this._mountTable.listMounts()) {
-      if (
-        entry.provider !== state.provider ||
-        entry.storageRootKey !== state.storageRootKey ||
-        (providerBasePath !== undefined && entry.providerBasePath !== providerBasePath)
-      ) {
-        continue;
-      }
-      this._emitExternalDirectorySummary(
-        {
-          path: entry.prefix,
-          resolution: {
-            provider: state.provider,
-            path: entry.providerBasePath,
-            backend: entry.backend,
-            entry,
-          },
-        },
-        entry.prefix,
-      );
-    }
-  }
-
-  private _disableNativeObservation(state: ObservedExternalRoot): void {
-    if (this._observedExternalRoots.get(state.storageRootKey) !== state) {
-      return;
-    }
-    state.observer?.disconnect();
-    state.observer = undefined;
-    state.nativeActive = false;
-    // async-iife: bootstrap — observer callbacks cannot await recovery, but reset facts
-    // must remain serialized behind any native/poll operation already in flight.
-    void (async (): Promise<void> => {
-      try {
-        await this._queueExternalRootOperation(state, async () => {
-          await state.provider.refresh?.();
-          if (this._observedExternalRoots.get(state.storageRootKey) !== state) {
-            return;
-          }
-          this._invalidateExternalDerivatives();
-          this._emitExternalRootSummaries(state);
-          this._emitGlobalDiscoveryChange(state);
-        });
-      } catch {
-        // Polling remains active and can retry after a provider refresh failure.
-      }
-    })();
-  }
-
-  /**
-   * Drop the derivatives an external change invalidated.
-   *
-   * @param scoped - Root and provider-physical paths whose subtrees changed. Omit
-   *                 for a full drop when the change cannot be localized.
-   */
-  private _invalidateExternalDerivatives(scoped?: {
-    state: ObservedExternalRoot;
-    physicalPaths: readonly string[];
-  }): void {
-    if (scoped === undefined) {
-      this._filePool?.clear();
-    } else {
-      for (const physicalPath of scoped.physicalPaths) {
-        for (const { path } of this._logicalMappingsForPhysicalPath(scoped.state, physicalPath)) {
-          this._filePool?.invalidate(path);
-        }
-      }
-    }
-    // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
-    // ponytail: the tree is dropped whole even for a localized change — TreeIndex
-    // cannot express "this subtree is unknown", and a scoped removal would publish a
-    // stale absence. Give it a subtree-invalidation state if the rebuild scan shows up hot.
-    this._treeIndexes.clear();
-  }
-
-  /**
-   * Provider-physical paths whose subtrees differ between two snapshots.
-   *
-   * @param previous - Snapshot captured on the last pass.
-   * @param next - Snapshot captured on this pass.
-   * @returns Changed paths, or `undefined` when the diff cannot be localized.
-   */
-  private _diffExternalSnapshot(previous: string, next: string): string[] | undefined {
-    if (previous === missingExternalSnapshot || next === missingExternalSnapshot) {
-      return undefined;
-    }
-    const rowsByPath = (snapshot: string): Map<string, string> =>
-      new Map(snapshot === '' ? [] : snapshot.split('\n').map((row) => [row.slice(0, row.indexOf('\0')), row]));
-    const previousRows = rowsByPath(previous);
-    const nextRows = rowsByPath(next);
-    // Every snapshot row is relative to the workspace root, rooted or discovery-wide.
-    const changed: string[] = [];
-    for (const [relative, row] of previousRows) {
-      if (nextRows.get(relative) !== row) {
-        changed.push(relative);
-      }
-    }
-    for (const relative of nextRows.keys()) {
-      if (!previousRows.has(relative)) {
-        changed.push(relative);
-      }
-    }
-    return changed.length > maxLocalizedExternalChanges ? undefined : changed;
-  }
-
-  private _emitGlobalDiscoveryChange(state: ObservedExternalRoot): void {
-    this._pipeline.emitChangeEvent({ type: 'directoryChanged', path: '/', backend: state.backend });
-    this._crossTabCoordinator.notifyDirectoryChange('/', {
-      storageRootKey: state.storageRootKey,
-      providerBasePath: '',
-    });
-  }
-
-  private _isDiscoveryRelevantPhysicalPath(path: string): boolean {
-    if (isWorkspaceStatePath(path)) {
-      return false;
-    }
-    const [, child, ...deeper] = path.split('/').filter(Boolean);
-    return child === undefined || (deeper.length === 0 && child === 'tau.json');
-  }
-
-  private async _createExternalSnapshot(state: ObservedExternalRoot, providerBasePath?: string): Promise<string> {
-    const rows: string[] = [];
-    type EntryHandle = FileSystemDirectoryHandle | FileSystemFileHandle;
-    type IterableDirectoryHandle = FileSystemDirectoryHandle & {
-      entries(): AsyncIterableIterator<[string, EntryHandle]>;
-    };
-    const admittedEntries = async (handle: FileSystemDirectoryHandle): Promise<Array<[string, EntryHandle]>> => {
-      const entries: Array<[string, EntryHandle]> = [];
-      for await (const entry of (handle as IterableDirectoryHandle).entries()) {
-        if (!isChromiumSwapArtifactName(entry[0])) {
-          entries.push(entry);
-        }
-      }
-      return entries.toSorted(([left], [right]) => left.localeCompare(right));
-    };
-    // Resolve one row per name in chunks, so metadata reads overlap without unbounded handle pressure.
-    const resolveRows = async <T>(
-      names: readonly T[],
-      toRow: (item: T) => Promise<[name: string, row: string | undefined]>,
-    ): Promise<Map<string, string>> => {
-      const resolved = new Map<string, string>();
-      for (let offset = 0; offset < names.length; offset += externalSnapshotConcurrency) {
-        // oxlint-disable-next-line no-await-in-loop -- Chunked awaits are what bound concurrency to externalSnapshotConcurrency.
-        const chunk = await Promise.all(
-          names.slice(offset, offset + externalSnapshotConcurrency).map(async (item) => toRow(item)),
-        );
-        for (const [name, row] of chunk) {
-          if (row !== undefined) {
-            resolved.set(name, row);
-          }
-        }
-      }
-      return resolved;
-    };
-    const fileRow = async (name: string, relative: string, handle: FileSystemFileHandle): Promise<[string, string]> => {
-      const file = await handle.getFile();
-      return [name, `${relative}\0file\0${file.size}\0${file.lastModified}`];
-    };
-    const walk = async (handle: FileSystemDirectoryHandle, relative: string): Promise<void> => {
-      const entries = await admittedEntries(handle);
-      const childRelative = (name: string): string => (relative === '' ? name : `${relative}/${name}`);
-      const fileRows = await resolveRows(
-        entries.filter((entry): entry is [string, FileSystemFileHandle] => entry[1].kind === 'file'),
-        async ([name, child]) => fileRow(name, childRelative(name), child),
-      );
-      for (const [name, child] of entries) {
-        if (child.kind === 'directory') {
-          rows.push([childRelative(name), 'dir', 0, 0].join('\0'));
-          // oxlint-disable-next-line no-await-in-loop -- Recursive fallback polling is intentionally sequential.
-          await walk(child, childRelative(name));
-        } else {
-          rows.push(fileRows.get(name)!);
-        }
-      }
-    };
-    const rootHandle = state.directoryHandle;
-    if (rootHandle === undefined) {
-      // Snapshot polling exists to cover a browser observer that cannot be
-      // trusted. A node root reports its own changes and never reaches here.
-      throw new Error(`Snapshot polling is unavailable for a ${state.backend} root.`);
-    }
-    try {
-      if (providerBasePath !== undefined) {
-        const parts = providerBasePath.split('/').filter(Boolean);
-        let handle = rootHandle;
-        for (const part of parts) {
-          // oxlint-disable-next-line no-await-in-loop -- Directory-handle traversal is necessarily ordered.
-          handle = await handle.getDirectoryHandle(part);
-        }
-        await walk(handle, parts.join('/'));
-        return rows.join('\n');
-      }
-      // App state under a dot-prefixed root child never feeds discovery (F1).
-      const rootEntries = await admittedEntries(rootHandle);
-      const entries = rootEntries.filter(([name]) => !name.startsWith('.'));
-      const topLevelRows = await resolveRows(entries, async ([name, child]) => {
-        if (child.kind === 'file') {
-          return fileRow(name, name, child);
-        }
-        try {
-          // Project discovery only depends on the immediate directory and its manifest.
-          const manifestHandle = await child.getFileHandle('tau.json');
-          const manifest = await manifestHandle.getFile();
-          return [name, `${name}/tau.json\0file\0${manifest.size}\0${manifest.lastModified}`];
-        } catch (error) {
-          if (!isNotFoundError(error)) {
-            throw error;
-          }
-          return [name, undefined];
-        }
-      });
-      for (const [name, child] of entries) {
-        if (child.kind === 'file') {
-          rows.push(topLevelRows.get(name)!);
-          continue;
-        }
-        rows.push([name, 'dir', 0, 0].join('\0'));
-        const manifestRow = topLevelRows.get(name);
-        if (manifestRow !== undefined) {
-          rows.push(manifestRow);
-        }
-      }
-    } catch (error) {
-      if (isNotFoundError(error)) {
-        return missingExternalSnapshot;
-      }
-      throw error;
-    }
-    return rows.join('\n');
-  }
-
-  private async _reconcileUnknownExternalRecords(
-    state: ObservedExternalRoot,
-    records: readonly NativeFileSystemChangeRecord[],
-  ): Promise<void> {
-    const providerBasePaths = new Set<string>();
-    for (const record of records) {
-      const mappings = this._logicalMappingsForPhysicalPath(state, this._physicalPath(record.relativePathComponents));
-      for (const { resolution } of mappings) {
-        const providerBasePath = resolution.entry?.providerBasePath;
-        if (providerBasePath) {
-          providerBasePaths.add(providerBasePath);
-        }
-      }
-    }
-    if (providerBasePaths.size !== 1) {
-      const next = await this._createExternalSnapshot(state);
-      await this._applyExternalSnapshot(state, '*', next);
-      return;
-    }
-    const providerBasePath = [...providerBasePaths][0]!;
-    const next = await this._createExternalSnapshot(state, providerBasePath);
-    await this._applyExternalSnapshot(state, providerBasePath, next);
-  }
-
-  private async _applyExternalSnapshot(state: ObservedExternalRoot, scope: string, next: string): Promise<void> {
-    if (this._observedExternalRoots.get(state.storageRootKey) !== state) {
-      return;
-    }
-    const previous = state.pollSnapshots.get(scope);
-    if (previous === undefined) {
-      if (state.nativeActive) {
-        await state.provider.refresh?.();
-        if (this._observedExternalRoots.get(state.storageRootKey) !== state) {
-          return;
-        }
-        this._invalidateExternalDerivatives();
-        this._emitExternalRootSummaries(state, scope === '*' ? undefined : scope);
-        this._emitGlobalDiscoveryChange(state);
-      }
-      state.pollSnapshots.set(scope, next);
-      return;
-    }
-    if (previous === next) {
-      return;
-    }
-    const physicalPaths = this._diffExternalSnapshot(previous, next);
-    await state.provider.refresh?.(physicalPaths);
-    if (this._observedExternalRoots.get(state.storageRootKey) !== state) {
-      return;
-    }
-    this._invalidateExternalDerivatives(physicalPaths === undefined ? undefined : { state, physicalPaths });
-    this._emitExternalRootSummaries(state, scope === '*' ? undefined : scope);
-    this._emitGlobalDiscoveryChange(state);
-    state.pollSnapshots.set(scope, next);
-  }
-
-  private async _applyRemoteChange(notification: ChangeNotification): Promise<void> {
-    if (notification.type === 'project-unavailable') {
-      const current = this._mountTable.getExactMount(notification.path);
-      if (
-        current?.storageRootKey !== notification.authority.storageRootKey ||
-        current.providerBasePath !== notification.authority.providerBasePath
-      ) {
-        return;
-      }
-      this._revokeProjectRoute(notification.path, false);
-      return;
-    }
-    const pendingProvider = this._registry.getOwnedProvider(notification.authority.storageRootKey);
-    if (pendingProvider === undefined) {
-      return;
-    }
-    const provider = await pendingProvider;
-    if (this._registry.getOwnedProvider(notification.authority.storageRootKey) !== pendingProvider) {
-      return;
-    }
-    const entry = this._findMountForPhysicalAuthority(notification.path, notification.authority, provider);
-    const isDiscoveryRootChange =
-      notification.type === 'directory-change' &&
-      notification.path === '/' &&
-      notification.authority.providerBasePath === '' &&
-      this._discoveryRoots.some((root) => root.storageRootKey === notification.authority.storageRootKey);
-    if (entry === undefined && !isDiscoveryRootChange) {
-      return;
-    }
-    const backend = this._backendForPhysicalAuthority(notification.authority);
-    try {
-      await provider.refresh?.();
-    } catch {
-      this._handleRemoteFailure(notification, backend);
-      return;
-    }
-
-    const resolution =
-      entry === undefined
-        ? undefined
-        : this._remoteResolution({ path: notification.path, authority: notification.authority, provider, entry });
-    const isCurrent = resolution !== undefined && this._pipeline.isCurrentResolution(notification.path, resolution);
-    if (!isCurrent && !isDiscoveryRootChange) {
-      return;
-    }
-
-    if (isCurrent || isDiscoveryRootChange) {
-      this._filePool?.clear();
-      this._treeIndexes.clear();
-    }
-
-    if (notification.type === 'directory-change') {
-      this._pipeline.emitChangeEvent(
-        { type: 'directoryChanged', path: notification.path, backend },
-        undefined,
-        resolution === undefined ? undefined : { operations: [{ path: notification.path, resolution }] },
-      );
-      return;
-    }
-    if (resolution === undefined) {
-      return;
-    }
-
-    const event: ChangeEvent =
-      notification.type === 'write'
-        ? { type: 'fileWritten', path: notification.path, backend }
-        : notification.type === 'mkdir'
-          ? { type: 'directoryCreated', path: notification.path, backend }
-          : notification.type === 'delete'
-            ? { type: 'fileDeleted', path: notification.path, backend }
-            : { type: 'directoryDeleted', path: notification.path, backend };
-    this._pipeline.emitChangeEvent(event, undefined, {
-      operations: [{ path: notification.path, resolution }],
-    });
-  }
-
-  private _findMountForPhysicalAuthority(
-    path: string,
-    authority: PhysicalAuthority,
-    provider: FileSystemProvider,
-  ): MountEntry | undefined {
-    try {
-      const current = this._mountTable.resolve(path).entry;
-      if (
-        current?.provider === provider &&
-        current.storageRootKey === authority.storageRootKey &&
-        current.providerBasePath === authority.providerBasePath
-      ) {
-        return current;
-      }
-    } catch {
-      // An unroutable notification cannot identify a live projection.
-    }
-    return undefined;
-  }
-
-  private _remoteResolution(options: {
-    path: string;
-    authority: PhysicalAuthority;
-    provider: FileSystemProvider;
-    entry: MountEntry;
-  }): MountResolution {
-    const { path, authority, provider, entry } = options;
-    try {
-      const current = this._mountTable.resolve(path);
-      if (current.entry === entry) {
-        return current;
-      }
-    } catch {
-      // The captured physical entry may no longer be globally routable.
-    }
-    return { provider, path: authority.providerBasePath, backend: entry.backend, entry };
-  }
-
-  private _backendForPhysicalAuthority(authority: PhysicalAuthority): FileSystemBackend {
-    const entry = this._mountTable
-      .listMounts()
-      .find(
-        (mount) =>
-          mount.storageRootKey === authority.storageRootKey && mount.providerBasePath === authority.providerBasePath,
-      );
-    if (entry !== undefined) {
-      return entry.backend;
-    }
-    if (authority.storageRootKey.startsWith('indexeddb:')) {
-      return 'indexeddb';
-    }
-    if (authority.storageRootKey.startsWith('opfs:')) {
-      return 'opfs';
-    }
-    if (authority.storageRootKey.startsWith('webaccess:')) {
-      return 'webaccess';
-    }
-    return 'memory';
-  }
-
-  private _handleRemoteFailure(notification: ChangeNotification, backend?: FileSystemBackend): void {
-    this._filePool?.clear();
-    this._treeIndexes.clear();
-    if (notification.type === 'project-unavailable') {
-      this._watchRegistry.emitResetAll();
-      return;
-    }
-    this._pipeline.emitChangeEvent({
-      type: 'backendChanged',
-      backend: backend ?? this._backendForPhysicalAuthority(notification.authority),
-    });
   }
 
   private _revokeProjectRoute(path: string, notifyPeers: boolean): void {

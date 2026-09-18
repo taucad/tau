@@ -199,3 +199,17 @@ export function isWorkspaceMutationError(error: unknown): error is WorkspaceMuta
   }
   return clonedWorkspaceMutationErrorSchema.safeParse(error).success;
 }
+
+/**
+ * Whether a provider rejected a path because nothing is there.
+ *
+ * @param error - Rejection from a provider read or stat.
+ * @returns Whether the rejection means the path is absent.
+ */
+export function isNotFoundError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  const { code, name } = error as NodeJS.ErrnoException;
+  return code === 'ENOENT' || code === 'ENOTDIR' || name === 'NotFoundError';
+}

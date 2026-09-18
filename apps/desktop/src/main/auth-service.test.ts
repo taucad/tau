@@ -59,8 +59,8 @@ describe('createAuthService — custody', () => {
   });
 });
 
-describe('createAuthService — the loopback handoff', () => {
-  it('opens the system browser at the documented sign-in URL and redeems the token', async () => {
+describe('createAuthService — the tau://auth/callback handoff', () => {
+  it('opens the system browser at the documented sign-in URL, naming no port', async () => {
     const openExternal = vi.fn(async () => undefined);
     const options = baseOptions({ openExternal });
     const service = await signedInService(options);
@@ -70,7 +70,9 @@ describe('createAuthService — the loopback handoff', () => {
     expect(opened.origin + opened.pathname).toBe('http://localhost:3000/auth/sign-in');
     const handoff = new URL(opened.searchParams.get('redirectTo') ?? '', 'http://x');
     expect(handoff.pathname).toBe('/auth/desktop');
-    expect(Number(handoff.searchParams.get('port'))).toBeGreaterThan(0);
+    /* The deep link replaces the loopback listener, so there is no port to name
+     * and no listener for anything on this machine to reach. */
+    expect(handoff.searchParams.get('port')).toBeNull();
     /* The web route refuses anything outside this shape before minting. */
     expect(handoff.searchParams.get('state')).toMatch(/^[\w-]{8,128}$/u);
     service.dispose();
@@ -78,23 +80,13 @@ describe('createAuthService — the loopback handoff', () => {
 
   it('refuses a mismatched state without ever presenting the token to the API', async () => {
     const exchange = vi.fn(async () => new Response(undefined, { status: 200 }));
-    let opened = '';
-    const service = createAuthService(
-      baseOptions({
-        openExternal: async (url) => {
-          opened = url;
-        },
-        fetch: exchange as unknown as typeof globalThis.fetch,
-      }),
-    );
-    /* The failure is captured the moment `signIn` is called: the browser round
-     * trip below takes several ticks, and an unobserved rejection in that
-     * window is reported as an unhandled error even though the test awaits it. */
+    const service = createAuthService(baseOptions({ fetch: exchange as unknown as typeof globalThis.fetch }));
+    /* The failure is captured the moment `signIn` is called: the callback below
+     * takes several ticks, and an unobserved rejection in that window is
+     * reported as an unhandled error even though the test awaits it. */
     const attempt = capture(service.signIn());
-    const port = await loopbackPort(() => opened);
-    const response = await fetch(`http://127.0.0.1:${String(port)}/callback?ott=stolen&state=not-the-nonce`);
+    await service.handleCallback({ oneTimeToken: 'stolen', state: 'not-the-nonce' });
 
-    expect(response.status).toBe(400);
     expect(await attempt).toBeInstanceOf(Error);
     expect(String(await attempt)).toMatch(/state did not match/u);
     expect(exchange).not.toHaveBeenCalled();
@@ -102,20 +94,79 @@ describe('createAuthService — the loopback handoff', () => {
     service.dispose();
   });
 
-  it('fails when the verify response carries no set-auth-token header', async () => {
-    let opened = '';
+  it('refuses a callback that arrives with no sign-in pending', async () => {
+    const exchange = vi.fn(async () => new Response(undefined, { status: 200 }));
+    const service = createAuthService(baseOptions({ fetch: exchange as unknown as typeof globalThis.fetch }));
+
+    await service.handleCallback({ oneTimeToken: 'unsolicited', state: 'aaaaaaaaaa' });
+
+    expect(exchange).not.toHaveBeenCalled();
+    expect(service.token()).toBeUndefined();
+    service.dispose();
+  });
+
+  it('refuses a replay of a callback that already signed in', async () => {
+    const opened: string[] = [];
     const service = createAuthService(
       baseOptions({
         openExternal: async (url) => {
-          opened = url;
+          opened.push(url);
+        },
+        fetch: (async () =>
+          new Response(undefined, {
+            status: 200,
+            headers: { [setAuthTokenHeader]: 'bearer-from-verify' },
+          })) as unknown as typeof globalThis.fetch,
+      }),
+    );
+    const attempt = service.signIn();
+    const state = pendingState(await waitForUrl(opened));
+    await service.handleCallback({ oneTimeToken: 'one-time', state });
+    await attempt;
+    await service.signOut();
+
+    await service.handleCallback({ oneTimeToken: 'one-time', state });
+
+    expect(service.token()).toBeUndefined();
+    service.dispose();
+  });
+
+  it('refuses a callback that arrives after the attempt expired', async () => {
+    const exchange = vi.fn(async () => new Response(undefined, { status: 200 }));
+    const opened: string[] = [];
+    const service = createAuthService(
+      baseOptions({
+        signInTimeout: 10,
+        openExternal: async (url) => {
+          opened.push(url);
+        },
+        fetch: exchange as unknown as typeof globalThis.fetch,
+      }),
+    );
+    const attempt = capture(service.signIn());
+    const state = pendingState(await waitForUrl(opened));
+
+    expect(String(await attempt)).toMatch(/timed out/u);
+    await service.handleCallback({ oneTimeToken: 'late', state });
+
+    expect(exchange).not.toHaveBeenCalled();
+    expect(service.token()).toBeUndefined();
+    service.dispose();
+  });
+
+  it('fails when the verify response carries no set-auth-token header', async () => {
+    const opened: string[] = [];
+    const service = createAuthService(
+      baseOptions({
+        openExternal: async (url) => {
+          opened.push(url);
         },
         fetch: (async () => new Response(undefined, { status: 200 })) as unknown as typeof globalThis.fetch,
       }),
     );
     const attempt = capture(service.signIn());
-    const port = await loopbackPort(() => opened);
-    const state = new URL(new URL(opened).searchParams.get('redirectTo') ?? '', 'http://x').searchParams.get('state');
-    await fetch(`http://127.0.0.1:${String(port)}/callback?ott=t&state=${state ?? ''}`);
+    await service.handleCallback({ oneTimeToken: 't', state: pendingState(await waitForUrl(opened)) });
+
     expect(await attempt).toBeInstanceOf(Error);
     expect(String(await attempt)).toContain(setAuthTokenHeader);
     service.dispose();
@@ -218,29 +269,34 @@ const capture = async (attempt: Promise<void>): Promise<unknown> => {
   }
 };
 
-/** Poll the captured browser URL until `signIn` has bound its listener. */
-const loopbackPort = async (opened: () => string): Promise<number> => {
+/** Poll until `signIn` has opened the system browser. */
+const waitForUrl = async (opened: readonly string[]): Promise<string> => {
   for (let attempt = 0; attempt < 200; attempt++) {
-    const url = opened();
-    if (url) {
-      const redirect = new URL(new URL(url).searchParams.get('redirectTo') ?? '', 'http://x');
-      return Number(redirect.searchParams.get('port'));
+    const url = opened[0];
+    if (url !== undefined) {
+      return url;
     }
     // oxlint-disable-next-line eslint/no-await-in-loop -- deliberate poll
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 5);
     });
   }
-  throw new Error('The sign-in listener never opened a browser URL.');
+  throw new Error('The sign-in attempt never opened a browser URL.');
+};
+
+/** The nonce main is waiting for, read back out of the URL it opened. */
+const pendingState = (openedUrl: string): string => {
+  const handoff = new URL(new URL(openedUrl).searchParams.get('redirectTo') ?? '', 'http://x');
+  return handoff.searchParams.get('state') ?? '';
 };
 
 /** Run one complete sign-in against a stubbed verify endpoint. */
 const signedInService = async (options: AuthServiceOptions) => {
-  let opened = '';
+  const opened: string[] = [];
   const service = createAuthService({
     ...options,
     openExternal: async (url) => {
-      opened = url;
+      opened.push(url);
       await options.openExternal(url);
     },
     fetch: (async (input: string) => {
@@ -249,9 +305,7 @@ const signedInService = async (options: AuthServiceOptions) => {
     }) as unknown as typeof globalThis.fetch,
   });
   const attempt = service.signIn();
-  const port = await loopbackPort(() => opened);
-  const state = new URL(new URL(opened).searchParams.get('redirectTo') ?? '', 'http://x').searchParams.get('state');
-  await fetch(`http://127.0.0.1:${String(port)}/callback?ott=one-time&state=${state ?? ''}`);
+  await service.handleCallback({ oneTimeToken: 'one-time', state: pendingState(await waitForUrl(opened)) });
   await attempt;
   return service;
 };

@@ -21,6 +21,7 @@ import {
   isTauApiUrl,
   lfsRemoteUnsupportedMessage,
   refPatternIsHostLocal,
+  registerProjectFailureMessage,
   remoteCarriesLargeObjects,
   remoteKindOf,
   remoteOf,
@@ -388,5 +389,29 @@ describe('createGitRemoteTransport', () => {
       'has not been told where the Tau API is',
     );
     expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * W5b: a collaborator pressing *Connect* (D27).
+ *
+ * `PUT /v1/projects/:id` needs `owner`, so a `write` collaborator reaching it
+ * is answered `403 PROJECT_ROLE_INSUFFICIENT` — a class this ladder had no rung
+ * for, which made it fall through to "Try again" on a refusal that retrying
+ * cannot fix.
+ */
+describe('registerProjectFailureMessage', () => {
+  it('tells a collaborator the owner alone backs a project up', () => {
+    expect(registerProjectFailureMessage(403, 'PROJECT_ROLE_INSUFFICIENT', 'Forbidden')).toBe(
+      'Only the project owner can back this project up to Tau Cloud.',
+    );
+  });
+
+  it('keeps the classes it already answered', () => {
+    expect(registerProjectFailureMessage(403, 'GIT_SYNC_NOT_ENTITLED')).toBe(
+      'Syncing files to Tau Cloud is a paid plan feature.',
+    );
+    expect(registerProjectFailureMessage(404)).toBe('Tau Cloud has no project with this id for your account.');
+    expect(registerProjectFailureMessage(500)).toBe('Tau Cloud could not register this project. Try again.');
   });
 });

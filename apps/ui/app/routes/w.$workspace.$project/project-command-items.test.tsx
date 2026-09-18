@@ -224,6 +224,33 @@ describe('ProjectCommandPaletteItems', () => {
     expect(registeredItems.find((item) => item.id === 'sync-now')?.visible).toBe(false);
   });
 
+  /*
+   * F1: the palette offers exactly what the Sync region offers.
+   *
+   * `fetchOnly` alone left *Sync now* enabled for a read collaborator, whose
+   * push `PUT /v1/projects/:id` refuses — a command that cannot work is worse
+   * than one that is not there, because it fails after the person has committed
+   * to it.
+   */
+  it('disables Sync now for a read collaborator and for a revoked one', () => {
+    revisionStatusHarness.status = {
+      ...revisionStatusHarness.status,
+      remote: { ...revisionStatusHarness.status.remote, kind: 'tau', phase: 'connected', fetchOnly: false },
+    };
+
+    revisionStatusHarness.role = 'write';
+    const { rerender } = render(<ProjectCommandPaletteItems match={match} />);
+    expect(registeredItems.find((item) => item.id === 'sync-now')?.disabled).toBe(false);
+
+    revisionStatusHarness.role = 'read';
+    rerender(<ProjectCommandPaletteItems match={match} />);
+    expect(registeredItems.find((item) => item.id === 'sync-now')?.disabled).toBe(true);
+
+    revisionStatusHarness.role = 'revoked';
+    rerender(<ProjectCommandPaletteItems match={match} />);
+    expect(registeredItems.find((item) => item.id === 'sync-now')?.disabled).toBe(true);
+  });
+
   it('keeps Kernel hidden unless tauDebug is enabled', () => {
     const { rerender } = render(<ProjectCommandPaletteItems match={match} />);
     expect(registeredItems.find((item) => item.id === 'open-kernel')?.visible).toBe(false);

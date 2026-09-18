@@ -21,6 +21,9 @@ import { formatBytes } from '#lib/format-bytes.js';
 import { ENV } from '#environment.config.js';
 import { Spinner } from '#components/ui/spinner.js';
 import { Switch } from '@taucad/ui/components/switch';
+import { RevisionCollaborators } from '#routes/w.$workspace.$project/revision-collaborators.js';
+import { isSyncReadOnly } from '#hooks/use-cloud-projects.js';
+import type { ProjectAccessRole } from '#hooks/use-cloud-projects.js';
 
 /** Which remote a person can pick. @public */
 export type RemoteChoice = 'none' | 'tau' | 'git';
@@ -74,6 +77,17 @@ export type RevisionSyncRegionProps = {
   readonly onUpgrade?: () => void;
   /** Where *Sign in* goes when the remote answered 401 (N3). */
   readonly signInHref?: string;
+  /**
+   * What this account may do with the Tau Cloud project (D27).
+   *
+   * Read from `GET /v1/projects` by the pane, because a role is an account fact
+   * and not a projection fact. `revoked` is a settled listing that no longer
+   * names the project — an owner took access away while this tab was open.
+   * `undefined` is nothing known at all, and folds every affordance away.
+   */
+  readonly role?: ProjectAccessRole;
+  /** The Tau Cloud project id, which the owner's collaborator surface needs. */
+  readonly projectId?: string;
   readonly className?: string;
 };
 
@@ -306,9 +320,17 @@ export function RevisionSyncRegion({
   canConnectGitHub = true,
   onUpgrade,
   signInHref,
+  role,
+  projectId,
   className,
 }: RevisionSyncRegionProps): React.JSX.Element {
   const busy = remote.phase === 'connecting' || remote.phase === 'disconnecting';
+  /*
+   * A `read` collaborator is fetch-only for exactly the reason a read-only
+   * GitHub link is: the push would be refused. The shared predicate, so this
+   * region and the command palette can never disagree about it (F1).
+   */
+  const readOnly = isSyncReadOnly(remote, role);
   /* The radio is a *choice*, and picking *Git remote* asks a question rather
    * than connecting: there is no remote until an address has been typed. Until
    * somebody picks, the projection is the answer — so a reopened project shows
@@ -493,7 +515,7 @@ export function RevisionSyncRegion({
             <GitBranch aria-hidden className='size-4 text-muted-foreground' />
           )}
           <span className='min-w-0 flex-1 text-sm'>{connectedLabel}</span>
-          {remote.fetchOnly ? <span className='text-xs text-muted-foreground'>Read only</span> : null}
+          {readOnly ? <span className='text-xs text-muted-foreground'>Read only</span> : null}
           {remote.kind === 'tau' ? (
             <span className='flex items-center gap-2'>
               <Switch aria-label='Sync chats' checked={syncChats} onCheckedChange={onSyncChatsChange} />
@@ -506,7 +528,7 @@ export function RevisionSyncRegion({
               <span className='text-xs'>Sync exports</span>
             </span>
           ) : null}
-          {remote.fetchOnly ? null : (
+          {readOnly ? null : (
             <Button variant='outline' size='sm' onClick={onSync}>
               Sync now
             </Button>
@@ -870,6 +892,33 @@ export function RevisionSyncRegion({
             setChangingBackup(true);
           })}
         </div>
+      ) : undefined}
+
+      {/*
+        Access this account no longer has (N1).
+
+        A settled listing that does not name the project is an owner's revoke
+        arriving at a tab that never closed. The row says so in one sentence and
+        `readOnly` has already taken *Sync now* away — a push would be refused,
+        and a button that fails after the gesture is worse than no button.
+      */}
+      {role === 'revoked' && remote.kind === 'tau' ? (
+        <p className='flex items-center gap-2 text-sm'>
+          <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
+          <span>You no longer have access to this project&apos;s cloud copy.</span>
+        </p>
+      ) : undefined}
+
+      {/*
+        Who else may work on this project (D27, charter W5).
+
+        The owner alone: every route behind the panel needs `owner`, so a
+        collaborator would only meet a refusal. Tau Cloud alone, too (N4) — a
+        GitHub-backed project has an owner but no cloud project to invite
+        anybody to, and a project with no remote has neither.
+      */}
+      {role === 'owner' && projectId !== undefined && remote.kind === 'tau' && remote.phase === 'connected' ? (
+        <RevisionCollaborators projectId={projectId} />
       ) : undefined}
     </section>
   );

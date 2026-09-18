@@ -323,8 +323,8 @@ describe('SharedWorkerGate', () => {
 
   /* Connecting is progress, and a route that knows what it is opening says so instead of a blank. */
   it('shows the caller\u2019s placeholder while the worker connects', async () => {
-    /* `Once`, so a pending promise does not leak into the suites below (`clearAllMocks` keeps implementations). */
-    mockWaitForWorkerReady.mockReturnValueOnce(new Promise(() => undefined));
+    /* `Once`, so the pending promise does not leak into the suites below (`clearAllMocks` keeps implementations). */
+    mockWaitForWorkerReady.mockReturnValueOnce(Promise.withResolvers<undefined>().promise);
 
     render(
       <HomeFileManagerProvider rootDirectory='/'>
@@ -340,7 +340,7 @@ describe('SharedWorkerGate', () => {
 
   /* Home's own wait gates the whole app, so it takes the same placeholder. */
   it('shows the placeholder while Home\u2019s storage engine resolves', async () => {
-    mockGetHomeStorageBackend.mockReturnValueOnce(new Promise(() => undefined));
+    mockGetHomeStorageBackend.mockReturnValueOnce(Promise.withResolvers<'indexeddb' | 'opfs'>().promise);
 
     render(
       <HomeFileManagerProvider rootDirectory='/' placeholder={<div>opening</div>}>

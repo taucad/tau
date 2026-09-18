@@ -37,7 +37,12 @@ describe('@taucad/geospec-engine in the browser', () => {
     expect(report.capabilities).not.toContain('createNodeVmFileSystem');
     expect(report.triangles).toBe(12);
     expect(report.watertight).toBe(true);
-    expect(report.tests).toEqual([{ name: 'proves the box mesh is watertight', status: 'passed' }]);
+    // The STEP row is the OCCT wasm's only browser proof: it fails the moment
+    // the adapter's native entry stops resolving inside a bundle.
+    expect(report.tests).toEqual([
+      { name: 'proves the box mesh is watertight', status: 'passed' },
+      { name: 'proves the STEP assembly is an exact BRep', status: 'passed' },
+    ]);
     expect(report.worker.error).toBeUndefined();
     expect(report.worker.analysisDetached).toBe(true);
     expect(report.worker.diagnostics.map((diagnostics) => diagnostics.map(({ code }) => code))).toEqual([

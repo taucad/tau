@@ -30,9 +30,10 @@ const mocks = vi.hoisted(() => {
   const graphicsActor = { send: vi.fn() };
   const interactionLock = { activeRef: { current: false } };
   const themeState = { theme: 'light', isHighContrast: false };
+  const graphicsState = { context: { upDirection: 'z' as 'x' | 'y' | 'z' } };
   const gizmos: Array<{
     camera: unknown;
-    options: { edges: { color: number }; right: { color: number; labelColor: number } };
+    options: { up: 'x' | 'y' | 'z'; edges: { color: number }; right: { color: number; labelColor: number } };
     add: ReturnType<typeof vi.fn>;
     cameraUpdate: ReturnType<typeof vi.fn>;
     dispose: ReturnType<typeof vi.fn>;
@@ -49,6 +50,7 @@ const mocks = vi.hoisted(() => {
     getDriverSnapshot: () => driverSnapshot,
     getRetarget: () => retarget,
     graphicsActor,
+    graphicsState,
     gizmos,
     gl,
     invalidate,
@@ -103,12 +105,16 @@ vi.mock('three-viewport-gizmo', () => ({
     public readonly scale = { multiplyScalar: vi.fn() };
 
     // oxlint-disable-next-line typescript/parameter-properties -- erasableSyntaxOnly forbids constructor parameter properties.
-    public readonly options: { edges: { color: number }; right: { color: number; labelColor: number } };
+    public readonly options: {
+      up: 'x' | 'y' | 'z';
+      edges: { color: number };
+      right: { color: number; labelColor: number };
+    };
 
     public constructor(
       camera: unknown,
       _renderer: unknown,
-      options: { edges: { color: number }; right: { color: number; labelColor: number } },
+      options: { up: 'x' | 'y' | 'z'; edges: { color: number }; right: { color: number; labelColor: number } },
     ) {
       this.camera = camera;
       this.options = options;
@@ -134,6 +140,7 @@ vi.mock('#hooks/use-graphics.js', () => ({
     }, [retarget]);
   },
   useGraphics: () => mocks.graphicsActor,
+  useGraphicsSelector: (selector: (state: typeof mocks.graphicsState) => unknown) => selector(mocks.graphicsState),
 }));
 
 // oxlint-disable-next-line tau-lint/no-hardcoded-color -- Fixed mock value, not rendered application styling.
@@ -179,6 +186,18 @@ describe('ViewportGizmoCube camera retention', () => {
     mocks.syncGizmoFov.mockClear();
     mocks.themeState.theme = 'light';
     mocks.themeState.isHighContrast = false;
+    mocks.graphicsState.context.upDirection = 'z';
+  });
+
+  it('builds the gizmo around the view up axis and rebuilds when it changes', () => {
+    const mounted = render(<ViewportGizmoCube />);
+    expect(mocks.gizmos[0]!.options.up).toBe('z');
+
+    mocks.graphicsState.context.upDirection = 'y';
+    mounted.rerender(<ViewportGizmoCube />);
+    expect(mocks.gizmos).toHaveLength(2);
+    expect(mocks.gizmos[0]!.dispose).toHaveBeenCalledOnce();
+    expect(mocks.gizmos[1]!.options.up).toBe('y');
   });
 
   it('retargets one gizmo and binding without recreation', () => {

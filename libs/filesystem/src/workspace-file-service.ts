@@ -45,6 +45,7 @@ import { CrossTabCoordinator } from '#cross-tab-coordinator.js';
 import type { ChangeNotification, PhysicalAuthority } from '#cross-tab-coordinator.js';
 import type { SharedPool } from '@taucad/memory';
 import type {
+  CheckoutRootConfig,
   MountTable,
   MountConfig,
   MountEntry,
@@ -73,6 +74,7 @@ import { MissingWorkspaceHandleError, WorkspaceMutationError } from '#workspace-
 import { fileMetadataFields } from '#content-metadata.js';
 import { readDirectoryEntries } from '#backend/directory-entries.js';
 import { archive } from '#content-ops/archive.js';
+import { checkoutRoute, nodeModulesRoute, parseRoute, projectRoute } from '#project-routes.js';
 
 /** Milliseconds. */
 const kernelCoalescingWindow = 75;
@@ -82,7 +84,7 @@ const kernelCoalescingWindow = 75;
  * bundled `.d.ts` payloads (see {@link populateBundledTypesMount}).
  * Mirrored by the UI-side `bundledTypesWorkspaceRootSegment` constant.
  */
-const bundledTypesAbsolutePrefix = '/node_modules';
+const bundledTypesAbsolutePrefix = nodeModulesRoute;
 
 /** Concurrent `getFile()` calls per directory while walking an external snapshot. */
 const externalSnapshotConcurrency = 16;
@@ -157,6 +159,22 @@ const toExternalRecord = (event: Exclude<NodeFsWatchEvent, { type: 'reset' }>): 
 type ExternalLogicalMapping = {
   readonly path: string;
   readonly resolution: MountResolution;
+};
+
+/** One discovery root staged by {@link WorkspaceFileService.configureProjectRoots}. */
+type StagedDiscoveryRoot = {
+  readonly root: ProjectRootConfiguration['roots'][number];
+  readonly scope: WorkspaceScope;
+  readonly storageRootKey: string;
+};
+
+/** One project or checkout route staged for installation, before its provider is resolved. */
+type StagedRouteMount = {
+  readonly prefix: string;
+  readonly config: ProjectRootConfig;
+  readonly scope: WorkspaceScope;
+  readonly storageRootKey: string;
+  readonly providerBasePath: string;
 };
 
 /** Raised when a logical project route is used before an exact locator is bound. @public */
@@ -1600,7 +1618,7 @@ export class WorkspaceFileService {
     }
     const scope: StorageRootConfig = { ...input.scope };
     const provider = await this._registry.getProvider(scope);
-    const logicalRoot = `/projects/${projectId}`;
+    const logicalRoot = projectRoute(projectId);
     const physicalLock = `${this._registry.resolveStorageRootKey(scope)}:${path}`;
     const locks = [`project:${projectId}`, physicalLock];
     return this._crossTabCoordinator.withLocks(locks, async () =>
@@ -1659,7 +1677,7 @@ export class WorkspaceFileService {
   ): Promise<CommitPendingProjectDirectoryResult> {
     const { path, files, manifest, scope, storageRootKey, projectId } = this._validatePendingProjectCommit(input);
     const provider = await this._registry.getProvider(scope);
-    const logicalRoot = `/projects/${projectId}`;
+    const logicalRoot = projectRoute(projectId);
     const physicalLock = `${storageRootKey}:${path}`;
     const locks = [`project:${projectId}`, physicalLock];
 
@@ -1748,13 +1766,13 @@ export class WorkspaceFileService {
       throw new TypeError(`Dynamic mount prefix must already be canonical: ${prefix}`);
     }
     const previewInstance = this._previewInstance(canonicalPrefix);
-    if (previewInstance === undefined && canonicalPrefix !== '/node_modules') {
+    if (previewInstance === undefined && canonicalPrefix !== bundledTypesAbsolutePrefix) {
       throw new TypeError(`Dynamic mount prefix is not admitted: ${prefix}`);
     }
     if (
       (previewInstance !== undefined &&
         (config.backend !== 'memory' || config.storageRootKey !== `memory:preview:${previewInstance}`)) ||
-      (canonicalPrefix === '/node_modules' && config.backend !== 'opfs')
+      (canonicalPrefix === bundledTypesAbsolutePrefix && config.backend !== 'opfs')
     ) {
       throw new TypeError(`Dynamic mount configuration does not match its protected prefix: ${prefix}`);
     }
@@ -1796,7 +1814,7 @@ export class WorkspaceFileService {
     const canonicalPrefix = resolveAuthorityPath(prefix);
     if (
       canonicalPrefix !== prefix ||
-      (this._previewInstance(canonicalPrefix) === undefined && canonicalPrefix !== '/node_modules')
+      (this._previewInstance(canonicalPrefix) === undefined && canonicalPrefix !== bundledTypesAbsolutePrefix)
     ) {
       throw new TypeError(`Dynamic mount prefix is not admitted: ${prefix}`);
     }
@@ -1861,9 +1879,55 @@ export class WorkspaceFileService {
   }
 
   private async _configureProjectRoots(configuration: ProjectRootConfiguration): Promise<void> {
+    const { stagedRoots, webAccessRoots } = this._stageDiscoveryRoots(configuration.roots);
+    /* Project and checkout routes share the physical-route set: two logical
+     * routes may not name the same physical directory, whichever kind they are. */
+    const physicalRoutes = new Set<string>();
+    const stagedInputs = this._stageProjectRoutes(configuration.projects, webAccessRoots, physicalRoutes);
+    const stagedCheckoutInputs = this._stageCheckoutRoutes(
+      configuration.checkouts ?? [],
+      webAccessRoots,
+      physicalRoutes,
+    );
+    const stagedPrefixes = new Set(stagedInputs.map(({ prefix }) => prefix));
+    const stagedCheckoutPrefixes = new Set(stagedCheckoutInputs.map(({ prefix }) => prefix));
+
+    await this._evictReplacedWebAccessRoots(stagedRoots);
+
+    let topologyChanged = await this._installRouteMounts(stagedInputs);
+    topologyChanged = (await this._installRouteMounts(stagedCheckoutInputs)) || topologyChanged;
+    topologyChanged = this._adoptRoutes(this._projectRoutes, stagedPrefixes) || topologyChanged;
+    topologyChanged = this._adoptRoutes(this._checkoutRoutes, stagedCheckoutPrefixes) || topologyChanged;
+    if (
+      this._discoveryRoots.length !== configuration.roots.length ||
+      this._discoveryRoots.some((current, index) => {
+        const next = stagedRoots[index];
+        return next === undefined || current.storageRootKey !== next.storageRootKey;
+      })
+    ) {
+      topologyChanged = true;
+    }
+    this._discoveryRoots = stagedRoots;
+    if (topologyChanged) {
+      this._resetTopologyState();
+    }
+    await this._syncExternalRoots(stagedRoots);
+  }
+
+  /**
+   * Stage the discovery roots one configuration names, refusing a duplicate
+   * physical root and indexing the webaccess handles its routes reference.
+   *
+   * @param roots - Persisted discovery roots.
+   * @returns Staged roots in configuration order and the webaccess handle index.
+   */
+  private _stageDiscoveryRoots(roots: ProjectRootConfiguration['roots']): {
+    stagedRoots: StagedDiscoveryRoot[];
+    webAccessRoots: ReadonlyMap<string, Extract<StorageRootConfig, { backend: 'webaccess' }>>;
+  } {
     const physicalRoots = new Set<string>();
-    const webAccessRoots = new Map<string, Extract<(typeof configuration.roots)[number], { backend: 'webaccess' }>>();
-    const stagedRoots = configuration.roots.map((root) => {
+    const webAccessRoots = new Map<string, Extract<StorageRootConfig, { backend: 'webaccess' }>>();
+    const stagedRoots = roots.map((root) => {
       const scope = this._toScope(root);
       const storageRootKey = this._registry.resolveStorageRootKey(scope);
       if (physicalRoots.has(storageRootKey)) {
@@ -1875,14 +1939,28 @@ export class WorkspaceFileService {
       }
       return { root, scope, storageRootKey };
     });
+    return { stagedRoots, webAccessRoots };
+  }
 
+  /**
+   * Stage the project routes one configuration names.
+   *
+   * @param projects - Persisted project routes.
+   * @param webAccessRoots - Webaccess handles the routes reference by workspace id.
+   * @param physicalRoutes - Physical routes already claimed by this pass; extended in place.
+   * @returns One staged mount per project route, in configuration order.
+   */
+  private _stageProjectRoutes(
+    projects: ProjectRootConfiguration['projects'],
+    webAccessRoots: ReadonlyMap<string, Extract<StorageRootConfig, { backend: 'webaccess' }>>,
+    physicalRoutes: Set<string>,
+  ): StagedRouteMount[] {
     const stagedPrefixes = new Set<string>();
-    const physicalRoutes = new Set<string>();
-    const stagedInputs = configuration.projects.map((config) => {
+    return projects.map((config) => {
       if (!projectIdSchema.safeParse(config.projectId).success) {
         throw new TypeError(`Invalid project id: ${JSON.stringify(config.projectId)}`);
       }
-      const prefix = `/projects/${config.projectId}`;
+      const prefix = projectRoute(config.projectId);
       if (resolveAuthorityPath(prefix) !== prefix || stagedPrefixes.has(prefix)) {
         throw new Error(`Duplicate project route: ${prefix}`);
       }
@@ -1896,28 +1974,39 @@ export class WorkspaceFileService {
           `Project provider path must be an immediate child of the workspace root: ${providerBasePath}`,
         );
       }
-      const scope = this._scopeForRouteConfig(config, webAccessRoots);
-      const storageRootKey = this._registry.resolveStorageRootKey(scope);
-      const physicalRoute = `${storageRootKey}\0${providerBasePath}`;
-      if (physicalRoutes.has(physicalRoute)) {
-        throw new Error(`Duplicate physical project route: ${providerBasePath}`);
-      }
-      physicalRoutes.add(physicalRoute);
-      return { prefix, config, scope, storageRootKey, providerBasePath };
+      return this._stageRouteMount(
+        { prefix, config, providerBasePath, noun: 'project' },
+        webAccessRoots,
+        physicalRoutes,
+      );
     });
+  }
 
-    const stagedCheckoutPrefixes = new Set<string>();
-    const stagedCheckoutInputs = (configuration.checkouts ?? []).map((config) => {
+  /**
+   * Stage the linked-checkout routes one configuration names.
+   *
+   * @param checkouts - Persisted checkout routes.
+   * @param webAccessRoots - Webaccess handles the routes reference by workspace id.
+   * @param physicalRoutes - Physical routes already claimed by this pass; extended in place.
+   * @returns One staged mount per checkout route, in configuration order.
+   */
+  private _stageCheckoutRoutes(
+    checkouts: readonly CheckoutRootConfig[],
+    webAccessRoots: ReadonlyMap<string, Extract<StorageRootConfig, { backend: 'webaccess' }>>,
+    physicalRoutes: Set<string>,
+  ): StagedRouteMount[] {
+    const stagedPrefixes = new Set<string>();
+    return checkouts.map((config) => {
       /* `/checkouts/a/b` canonicalizes to itself, so a slashed id would install
        * a route nested under another checkout's prefix. */
       if (config.checkoutId.includes('/')) {
         throw new TypeError(`Checkout id must be one path segment: ${config.checkoutId}`);
       }
-      const prefix = `/checkouts/${config.checkoutId}`;
-      if (resolveAuthorityPath(prefix) !== prefix || stagedCheckoutPrefixes.has(prefix)) {
+      const prefix = checkoutRoute(config.checkoutId);
+      if (resolveAuthorityPath(prefix) !== prefix || stagedPrefixes.has(prefix)) {
         throw new Error(`Duplicate checkout route: ${prefix}`);
       }
-      stagedCheckoutPrefixes.add(prefix);
+      stagedPrefixes.add(prefix);
       const providerBasePath = assertRootedPath(config.providerBasePath);
       if (providerBasePath !== config.providerBasePath) {
         throw new TypeError(`Checkout provider path must already be canonical: ${config.providerBasePath}`);
@@ -1927,16 +2016,50 @@ export class WorkspaceFileService {
       if (!providerBasePath.startsWith('.tau/checkouts/')) {
         throw new TypeError(`Checkout provider path must live under .tau/checkouts: ${providerBasePath}`);
       }
-      const scope = this._scopeForRouteConfig(config, webAccessRoots);
-      const storageRootKey = this._registry.resolveStorageRootKey(scope);
-      const physicalRoute = `${storageRootKey}\0${providerBasePath}`;
-      if (physicalRoutes.has(physicalRoute)) {
-        throw new Error(`Duplicate physical checkout route: ${providerBasePath}`);
-      }
-      physicalRoutes.add(physicalRoute);
-      return { prefix, config, scope, storageRootKey, providerBasePath };
+      return this._stageRouteMount(
+        { prefix, config, providerBasePath, noun: 'checkout' },
+        webAccessRoots,
+        physicalRoutes,
+      );
     });
+  }
 
+  /**
+   * Resolve one staged route's storage scope and claim its physical route.
+   *
+   * @param route - Validated route prefix, configuration, provider directory and kind noun.
+   * @param webAccessRoots - Webaccess handles the routes reference by workspace id.
+   * @param physicalRoutes - Physical routes already claimed by this pass; extended in place.
+   * @returns The staged mount.
+   */
+  private _stageRouteMount(
+    route: {
+      readonly prefix: string;
+      readonly config: ProjectRootConfig;
+      readonly providerBasePath: string;
+      readonly noun: 'project' | 'checkout';
+    },
+    webAccessRoots: ReadonlyMap<string, Extract<StorageRootConfig, { backend: 'webaccess' }>>,
+    physicalRoutes: Set<string>,
+  ): StagedRouteMount {
+    const { prefix, config, providerBasePath, noun } = route;
+    const scope = this._scopeForRouteConfig(config, webAccessRoots);
+    const storageRootKey = this._registry.resolveStorageRootKey(scope);
+    const physicalRoute = `${storageRootKey}\0${providerBasePath}`;
+    if (physicalRoutes.has(physicalRoute)) {
+      throw new Error(`Duplicate physical ${noun} route: ${providerBasePath}`);
+    }
+    physicalRoutes.add(physicalRoute);
+    return { prefix, config, scope, storageRootKey, providerBasePath };
+  }
+
+  /**
+   * Drop a cached webaccess provider whose root the user re-picked, so staging
+   * never retains a handle for a different directory entry.
+   *
+   * @param stagedRoots - Discovery roots this pass staged.
+   */
+  private async _evictReplacedWebAccessRoots(stagedRoots: readonly StagedDiscoveryRoot[]): Promise<void> {
     for (const staged of stagedRoots) {
       if (staged.root.backend !== 'webaccess') {
         continue;
@@ -1960,16 +2083,26 @@ export class WorkspaceFileService {
         this.disposeStorageRoot(staged.storageRootKey);
       }
     }
+  }
 
-    const stagedRoutes = await Promise.all(
-      stagedInputs.map(async (staged) => ({
-        ...staged,
-        provider: await this._registry.getProvider(staged.scope),
-      })),
+  /**
+   * Install one staged route family, leaving a mount that already matches
+   * untouched.
+   *
+   * A project route is the user's authored tree by definition, and a checkout
+   * route is the same authored tree in another place (D4); the derived and
+   * authority-metadata families inside either are named by the revision path
+   * policy, not by a second mount (RC6 / S5 work 2).
+   *
+   * @param staged - Staged mounts for one route family.
+   * @returns Whether any mount changed.
+   */
+  private async _installRouteMounts(staged: readonly StagedRouteMount[]): Promise<boolean> {
+    const resolved = await Promise.all(
+      staged.map(async (entry) => ({ ...entry, provider: await this._registry.getProvider(entry.scope) })),
     );
-
     let topologyChanged = false;
-    for (const { prefix, provider, config, storageRootKey, providerBasePath } of stagedRoutes) {
+    for (const { prefix, provider, config, storageRootKey, providerBasePath } of resolved) {
       const existing = this._mountTable.getExactMount(prefix);
       if (
         existing?.provider !== provider ||
@@ -1977,9 +2110,6 @@ export class WorkspaceFileService {
         existing.storageRootKey !== storageRootKey ||
         existing.providerBasePath !== providerBasePath
       ) {
-        // A project route is the user's authored tree by definition; the
-        // derived and authority-metadata families inside it are named by the
-        // revision path policy, not by a second mount (RC6 / S5 work 2).
         this._mountTable.mount(prefix, provider, {
           backend: config.backend,
           storageRootKey,
@@ -1989,65 +2119,30 @@ export class WorkspaceFileService {
         topologyChanged = true;
       }
     }
-    const stagedCheckouts = await Promise.all(
-      stagedCheckoutInputs.map(async (staged) => ({
-        ...staged,
-        provider: await this._registry.getProvider(staged.scope),
-      })),
-    );
-    for (const { prefix, provider, config, storageRootKey, providerBasePath } of stagedCheckouts) {
-      const existing = this._mountTable.getExactMount(prefix);
-      if (
-        existing?.provider !== provider ||
-        existing.backend !== config.backend ||
-        existing.storageRootKey !== storageRootKey ||
-        existing.providerBasePath !== providerBasePath
-      ) {
-        /* A checkout route is the same authored tree a project route is; only
-         * where it sits differs (D4). */
-        this._mountTable.mount(prefix, provider, {
-          backend: config.backend,
-          storageRootKey,
-          providerBasePath,
-          class: 'authored',
-        });
-        topologyChanged = true;
-      }
-    }
-    for (const prefix of this._projectRoutes) {
-      if (!stagedPrefixes.has(prefix)) {
+    return topologyChanged;
+  }
+
+  /**
+   * Unmount the routes a configuration no longer names and adopt the staged set
+   * as the live one.
+   *
+   * @param live - Route prefixes currently installed for one kind; replaced in place.
+   * @param staged - Route prefixes this configuration names.
+   * @returns Whether any route was unmounted.
+   */
+  private _adoptRoutes(live: Set<string>, staged: ReadonlySet<string>): boolean {
+    let topologyChanged = false;
+    for (const prefix of live) {
+      if (!staged.has(prefix)) {
         this._mountTable.unmount(prefix);
         topologyChanged = true;
       }
     }
-    for (const prefix of this._checkoutRoutes) {
-      if (!stagedCheckoutPrefixes.has(prefix)) {
-        this._mountTable.unmount(prefix);
-        topologyChanged = true;
-      }
+    live.clear();
+    for (const prefix of staged) {
+      live.add(prefix);
     }
-    this._projectRoutes.clear();
-    for (const prefix of stagedPrefixes) {
-      this._projectRoutes.add(prefix);
-    }
-    this._checkoutRoutes.clear();
-    for (const prefix of stagedCheckoutPrefixes) {
-      this._checkoutRoutes.add(prefix);
-    }
-    if (
-      this._discoveryRoots.length !== configuration.roots.length ||
-      this._discoveryRoots.some((current, index) => {
-        const next = stagedRoots[index];
-        return next === undefined || current.storageRootKey !== next.storageRootKey;
-      })
-    ) {
-      topologyChanged = true;
-    }
-    this._discoveryRoots = stagedRoots;
-    if (topologyChanged) {
-      this._resetTopologyState();
-    }
-    await this._syncExternalRoots(stagedRoots);
+    return topologyChanged;
   }
 
   /** The storage scope one persisted route names, project or checkout alike. */
@@ -2092,8 +2187,8 @@ export class WorkspaceFileService {
   }
 
   private _previewInstance(prefix: string): string | undefined {
-    const parts = prefix.split('/').filter(Boolean);
-    return parts.length === 2 && parts[0] === 'previews' && parts[1] !== undefined ? parts[1] : undefined;
+    const route = parseRoute(prefix);
+    return route.kind === 'preview' && route.rest === '' ? route.id : undefined;
   }
 
   private async _syncExternalRoots(
@@ -2679,8 +2774,8 @@ export class WorkspaceFileService {
     if (isWorkspaceStatePath(path)) {
       return false;
     }
-    const segments = path.split('/').filter(Boolean);
-    return segments.length <= 1 || (segments.length === 2 && segments[1] === 'tau.json');
+    const [, child, ...deeper] = path.split('/').filter(Boolean);
+    return child === undefined || (deeper.length === 0 && child === 'tau.json');
   }
 
   private async _createExternalSnapshot(state: ObservedExternalRoot, providerBasePath?: string): Promise<string> {
@@ -3011,7 +3106,7 @@ export class WorkspaceFileService {
       this._pipeline.emitChangeEvent({ type: 'directoryDeleted', path, backend: mount.backend });
     }
     if (notifyPeers) {
-      const projectId = path.split('/')[2];
+      const projectId = parseRoute(path).id;
       if (projectId && mount?.storageRootKey !== undefined) {
         this._crossTabCoordinator.notifyProjectUnavailable(projectId, {
           storageRootKey: mount.storageRootKey,
@@ -3248,14 +3343,12 @@ export class WorkspaceFileService {
   }
 
   private _assertBoundProjectRoute(path: string): void {
-    const normalized = resolveAuthorityPath(path);
-    const segments = normalized.split('/');
-    if (segments[1] !== 'projects' || !segments[2]) {
+    const route = parseRoute(resolveAuthorityPath(path));
+    if (route.kind !== 'project' || route.id === undefined) {
       return;
     }
-    const projectId = segments[2];
-    if (this._mountTable.getExactMount(`/projects/${projectId}`) === undefined) {
-      throw new UnboundProjectRouteError(projectId);
+    if (this._mountTable.getExactMount(projectRoute(route.id))?.kind !== 'project') {
+      throw new UnboundProjectRouteError(route.id);
     }
   }
 

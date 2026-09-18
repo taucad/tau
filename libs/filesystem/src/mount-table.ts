@@ -16,6 +16,8 @@ import type {
 } from '@taucad/types';
 import type { FileSystemProvider } from '#types.js';
 import { assertRootedPath, joinRelativePath, resolveAuthorityPath } from '@taucad/utils/path';
+import type { RouteKind } from '#project-routes.js';
+import { parseRoute } from '#project-routes.js';
 
 /**
  * What the bytes behind one mount are to a revision: `authored` content a
@@ -294,6 +296,12 @@ export type MountMetadata = {
   readonly providerBasePath?: string;
   /** Required; {@link MountTable.mount} refuses an unclassified mount. */
   readonly class: MountPathClass;
+  /**
+   * What this mount is to the product. Defaults to the route its prefix
+   * spells; declare it to install a mount the route grammar would otherwise
+   * claim (charter D10).
+   */
+  readonly kind?: RouteKind;
 };
 
 /**
@@ -307,6 +315,13 @@ export type MountEntry = {
   readonly storageRootKey?: string;
   readonly providerBasePath: string;
   readonly class: MountPathClass;
+  /**
+   * What this mount is to the product, so a classifier reads the kind instead
+   * of re-parsing the prefix (charter D10).
+   */
+  readonly kind: RouteKind;
+  /** Route identity carried by the prefix: project id, checkout id or preview instance. */
+  readonly routeId?: string;
 };
 
 /**
@@ -368,6 +383,7 @@ export class MountTable {
     }
 
     const providerBasePath = assertRootedPath(config.providerBasePath ?? '');
+    const route = parseRoute(normalized);
     this._mounts.push({
       prefix: normalized,
       provider,
@@ -375,6 +391,8 @@ export class MountTable {
       storageRootKey: config.storageRootKey,
       providerBasePath,
       class: config.class,
+      kind: config.kind ?? route.kind,
+      routeId: route.id,
     });
     this._mounts.sort((a, b) => b.prefix.length - a.prefix.length);
   }

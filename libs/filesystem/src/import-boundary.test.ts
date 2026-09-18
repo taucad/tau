@@ -88,7 +88,6 @@ const boundaryRules: readonly BoundaryRule[] = [
  *
  * | Work package | Clears |
  * | --- | --- |
- * | W6 | `route-literals` |
  * | W7 | `project-manifest` |
  * | W9 | `backend-identity` |
  */
@@ -96,8 +95,6 @@ const allowList: ReadonlyArray<readonly [file: string, rule: string, workPackage
   ['mount-table.ts', 'project-manifest', 'W7'],
   ['workspace-file-service.ts', 'project-manifest', 'W7'],
   ['workspace-file-service.ts', 'backend-identity', 'W9'],
-  ['cross-tab-coordinator.ts', 'route-literals', 'W6'],
-  ['workspace-file-service.ts', 'route-literals', 'W6'],
 ];
 
 describe('@taucad/filesystem layer-1 core boundary', () => {

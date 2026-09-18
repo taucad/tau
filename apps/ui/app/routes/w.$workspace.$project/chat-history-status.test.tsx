@@ -40,7 +40,7 @@ vi.mock('#hooks/use-models.js', () => ({
 }));
 
 vi.mock('#hooks/use-project.js', () => ({
-  useProject: () => ({ editorRef: {}, projectId: 'project_test' }),
+  useProject: () => ({ editorRef: {}, projectRef: {}, projectId: 'project_test' }),
 }));
 
 vi.mock('@xstate/react', () => ({
@@ -53,14 +53,20 @@ vi.mock('#hooks/use-chats.js', () => ({
       {
         id: 'chat_test',
         resourceId: 'project_test',
-        name: 'Chat',
+        name: 'Bracket design',
         messages: [],
         createdAt: 1,
         updatedAt: 999,
         recencyAt: 1,
       },
     ],
+    applyGeneratedChatName: vi.fn(),
+    isLoading: false,
   }),
+}));
+
+vi.mock('#routes/w.$workspace.$project/use-active-chat-naming.js', () => ({
+  useActiveChatNaming: () => false,
 }));
 
 vi.mock('#components/icons/svg-icon.js', () => ({
@@ -104,6 +110,11 @@ describe('ChatHistoryStatus — chat-scoped model badge', () => {
   beforeEach(() => {
     chatSelectorState.activeExecution = { kind: 'tau', model: 'manifold-model' };
     chatSelectorState.messages = [];
+  });
+
+  it('renders the active chat name ahead of the relative-time badge', () => {
+    renderStatus();
+    expect(screen.getByText('Bracket design')).toBeTruthy();
   });
 
   it('renders the model badge from a Tau execution even when there are no messages yet', () => {

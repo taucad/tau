@@ -48,7 +48,7 @@ vi.mock('#hooks/use-keyboard.js', () => ({
 vi.mock('#components/ui/sidebar.js', () => ({ useSidebar: () => sidebar }));
 vi.mock('react-router', () => ({ useNavigate: () => navigate }));
 vi.mock('#routes/w.$workspace.$project/chat-history-settings.js', () => ({
-  ChatHistorySettings: () => <button type='button'>Chat settings</button>,
+  ChatHistorySettings: () => <button type='button'>Chat options</button>,
 }));
 vi.mock('@taucad/ui/components/tooltip', () => ({
   Tooltip: ({ children }: { readonly children: ReactNode }) => <div>{children}</div>,
@@ -74,8 +74,8 @@ describe('ChatTitleBar', () => {
   it('shows current-session controls without recreating chat navigation', () => {
     render(<ChatTitleBar closeButton={<button type='button'>Close chat</button>} />);
 
-    expect(screen.getByText('Bracket design').parentElement).toHaveClass('[app-region:drag]');
-    expect(screen.getByRole('button', { name: 'Chat settings' })).toBeInTheDocument();
+    expect(screen.queryByText('Bracket design')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Chat options' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Close chat' })).toBeInTheDocument();
     expect(screen.queryByText(/search chats/i)).not.toBeInTheDocument();
   });

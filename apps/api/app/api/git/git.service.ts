@@ -1,7 +1,7 @@
 /* oxlint-disable new-cap, @typescript-eslint/consistent-type-imports -- NestJS decorators are factories and DI metadata needs runtime class imports */
 import { spawn } from 'node:child_process';
 import type { ChildProcessByStdio } from 'node:child_process';
-import { mkdir, statfs } from 'node:fs/promises';
+import { mkdir, readdir, rm, stat, statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -115,6 +115,46 @@ export type GitLfsReservation =
 
 const gitExecutable = 'git';
 
+/**
+ * Whether a process id still names a running process.
+ *
+ * Signal 0 delivers nothing and only asks the question. `ESRCH` is the one
+ * answer that means "gone"; `EPERM` is somebody else's process, which is very
+ * much alive and must never have its leases swept.
+ *
+ * @param pid - The process id a lease directory is named after.
+ * @returns True unless the kernel says no such process.
+ */
+const processAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+};
+
+/**
+ * Bytes under one directory, for the sweep's log line.
+ *
+ * @param directory - The directory to measure.
+ * @returns The sum of its files' sizes.
+ */
+const directoryBytes = async (directory: string): Promise<number> => {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const sizes = await Promise.all(
+    entries.map(async (entry) => {
+      const held = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        return directoryBytes(held);
+      }
+      const measured = await stat(held);
+      return measured.size;
+    }),
+  );
+  return sizes.reduce((total, size) => total + size, 0);
+};
+
 /** A clone of a large repository is slow; an abandoned child is forever. */
 const rpcTimeoutMilliseconds = 10 * 60 * 1000;
 
@@ -164,7 +204,7 @@ export class GitRepositoryService {
    * admission figure is measured against — never a mounted volume, because
    * there is no longer one.
    */
-  readonly #leaseParent = path.join(tmpdir(), 'tau-git-leases');
+  readonly #leaseParent = path.join(tmpdir(), 'tau-git-leases', String(process.pid));
 
   /**
    * In-flight leases, process-local and deliberately so: this counter bounds
@@ -191,7 +231,12 @@ export class GitRepositoryService {
     private readonly projectAccess: ProjectAccessService,
     @Inject(repositoryStoreKey)
     private readonly store: RepositoryStore,
-  ) {}
+  ) {
+    /* A crash restarts a Machine in place on the same rootfs, so boot is the
+       first chance to give the dead worker's disk back (W10 defect 2). Tracked
+       rather than awaited: nothing may wait on a sweep to serve a request. */
+    this.track(this.sweepAbandonedLeases());
+  }
 
   /**
    * Who may do what with this repository, and what the plan still allows.
@@ -644,6 +689,55 @@ export class GitRepositoryService {
   }
 
   /**
+   * Removes the lease directories of workers that are no longer running (W10
+   * defect 2).
+   *
+   * A worker killed mid-push cannot unlink its own lease, and admission counts
+   * the *free* bytes of the disk those leases sit on — so every crash used to
+   * cost this machine up to `leaseDiskBytesPerLease` of headroom permanently.
+   * Leases therefore live under `tau-git-leases/<pid>/`, and a sibling is only
+   * removed when its pid is gone: two API processes share one `tmpdir` locally
+   * and must never sweep each other.
+   *
+   * Runs on service init *and* before every admission, because a surviving
+   * worker is the only process that will ever boot again after a crash in
+   * place, and admission is the moment the leaked bytes matter.
+   *
+   * ponytail: unthrottled — a `readdir` of a handful of names plus a signal-0
+   * per name. Add a throttle if a machine ever hosts thousands of siblings.
+   */
+  private async sweepAbandonedLeases(): Promise<void> {
+    const root = path.dirname(this.#leaseParent);
+    let siblings: readonly string[];
+    try {
+      siblings = await readdir(root);
+    } catch {
+      /* Nothing has run on this machine yet. */
+      return;
+    }
+    const abandoned = siblings.filter((name) => /^\d+$/u.test(name) && !processAlive(Number(name)));
+    if (abandoned.length === 0) {
+      return;
+    }
+    let reclaimed = 0;
+    for (const name of abandoned) {
+      const held = path.join(root, name);
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one dead worker at a time; the list is tiny and the removal is I/O, not CPU
+        reclaimed += await directoryBytes(held);
+        // oxlint-disable-next-line no-await-in-loop -- as above
+        await rm(held, { recursive: true, force: true });
+      } catch (error) {
+        this.#logger.warn({ err: error, directory: held }, 'A dead worker’s lease directory could not be removed');
+      }
+    }
+    this.#logger.log(
+      { directories: abandoned.length, bytes: reclaimed },
+      'Reclaimed the lease directories of workers that are no longer running',
+    );
+  }
+
+  /**
    * Admits one more lease while this worker's disk can hold it (D33).
    *
    * Concurrent leases × the per-lease reservation against the *free* space of
@@ -656,6 +750,7 @@ export class GitRepositoryService {
    * @throws ServiceUnavailableException When another lease would not fit.
    */
   private async admitLease(): Promise<() => void> {
+    await this.sweepAbandonedLeases();
     await mkdir(this.#leaseParent, { recursive: true });
     const { bavail, bsize } = await statfs(this.#leaseParent);
     const free = bavail * bsize;

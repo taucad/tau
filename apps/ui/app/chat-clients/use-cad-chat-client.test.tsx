@@ -17,7 +17,15 @@ import type { ChatSessionStore } from '#services/chat-session-store.js';
 import type { AgentHostClientOptions, AgentHostClient } from '#services/agent-host-client.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
-import { chatHostBinding, chatHostServices, resetChatHostServices } from '#chat-clients/_internal/chat-host-binding.js';
+import {
+  chatHostBinding,
+  chatHostServices,
+  chatTurnAdmit,
+  resetChatHostServices,
+  resetChatTurnServices,
+} from '#chat-clients/_internal/chat-host-binding.js';
+import type { ChatTurn, ChatTurnGesture } from '#machines/chat-session.machine.js';
+import type { AttachmentReference } from '#utils/attachment.utils.js';
 
 const workspaceHarness = vi.hoisted(() => ({
   current: undefined as
@@ -35,7 +43,10 @@ const browserHostHarness = vi.hoisted(() => ({
   registration: undefined as
     | { createClient: () => Promise<unknown>; markRunId: (runId: string) => Promise<void> }
     | undefined,
-  run: undefined as { runId: string; state: 'paused'; eventCount: number } | undefined,
+  run: undefined as { runId: string; state?: 'paused'; eventCount?: number } | undefined,
+  /** Whether this chat has a browser host registered, and whether its run can be resumed. */
+  placed: false,
+  resumable: false,
   createClient: vi.fn((_options: AgentHostClientOptions): AgentHostClient => {
     const client = Object.create(null) as AgentHostClient;
     client.close = vi.fn(async () => undefined);
@@ -173,6 +184,8 @@ vi.mock('#chat-clients/_internal/browser-agent-host-transport.js', () => ({
     };
   },
   getBrowserAgentHostRun: () => browserHostHarness.run,
+  isBrowserAgentHostPlaced: () => browserHostHarness.placed,
+  isBrowserAgentHostRunResumable: () => browserHostHarness.resumable,
   resolveBrowserAgentHostInterrupt: browserHostHarness.resolveInterrupt,
 }));
 vi.mock('#services/agent-host-client.js', () => ({
@@ -248,17 +261,65 @@ const buildAgent = (overrides: Partial<CadAgentConfigInput> = {}): CadAgentConfi
 type ActionsMock = {
   sendMessage: ReturnType<typeof vi.fn>;
   regenerate: ReturnType<typeof vi.fn>;
-  retryMessage: ReturnType<typeof vi.fn>;
   editMessage: ReturnType<typeof vi.fn>;
   stop: ReturnType<typeof vi.fn>;
   setMessages: ReturnType<typeof vi.fn>;
 };
 
+/** Every turn one row's verbs admitted, in order. */
+const admittedTurns: ChatTurn[] = [];
+
+/**
+ * Admit a turn the way the chat's session actor does.
+ *
+ * The verbs are gestures now (C3): `submit` hands one to `useChatActions`,
+ * which sends it to the chat's session actor, whose `queued` state invokes the
+ * admission `ChatTurnHost` published. These rows stand in for the actor so the
+ * seam under test is the published admission itself.
+ */
+const composeTurn = async (gesture: ChatTurnGesture): Promise<ChatTurn> => {
+  await waitFor(() => {
+    expect(chatTurnAdmit('chat_test')).toBeDefined();
+  });
+  const turn = await chatTurnAdmit('chat_test')!(gesture);
+  admittedTurns.push(turn);
+  return turn;
+};
+
+/** The composed request of the turn a verb admitted. */
+type AdmittedRequest = Record<string, unknown> & { readonly body?: Record<string, unknown> };
+
+const admittedRequest = async (index = 0): Promise<AdmittedRequest> => {
+  await waitFor(() => {
+    expect(admittedTurns.length).toBeGreaterThan(index);
+  });
+  return admittedTurns[index]!.request as unknown as AdmittedRequest;
+};
+
+/** The wire body the admission composed for one turn. */
+const admittedBody = async (index = 0): Promise<Record<string, unknown>> => {
+  const request = await admittedRequest(index);
+  return request.body!;
+};
+
+/** The gesture reaches the chat's admission; a refusal is the row's to assert. */
+const requestTurn = async (gesture: ChatTurnGesture): Promise<void> => {
+  try {
+    await composeTurn(gesture);
+  } catch {
+    /* The refusal is the admission's own; the rows that care assert it there. */
+  }
+};
+
 const buildActions = (): ActionsMock => ({
-  sendMessage: vi.fn(),
-  regenerate: vi.fn(),
-  retryMessage: vi.fn(),
-  editMessage: vi.fn(),
+  sendMessage: vi.fn(async (message: MyUIMessage, options?: { attachments?: readonly AttachmentReference[] }) =>
+    requestTurn({ kind: 'send', message, ...options }),
+  ),
+  regenerate: vi.fn(async () => requestTurn({ kind: 'regenerate' })),
+  editMessage: vi.fn(
+    async (messageId: string, text: string, options?: { attachments?: readonly AttachmentReference[] }) =>
+      requestTurn({ kind: 'edit', messageId, text, ...options }),
+  ),
   stop: vi.fn(),
   setMessages: vi.fn(),
 });
@@ -288,7 +349,7 @@ const installSessionStore = (partial: Partial<ChatSessionStore>): void => {
   /* Merged, not replaced: the chat's turn host is mounted beside every view
    * these rows render, and it calls the store's placement and body seams. */
   vi.mocked(useChatSessionStore).mockReturnValue({
-    setLatestAgentBody: vi.fn(),
+    requestTurn: vi.fn(),
     setTurnPlacement: vi.fn(),
     reattachHostChat,
     ...partial,
@@ -376,9 +437,13 @@ beforeEach(() => {
     binding.stop();
   }
   resetChatHostServices();
+  resetChatTurnServices();
+  admittedTurns.length = 0;
   browserHostHarness.registration = undefined;
   browserHostHarness.registrations = 0;
   browserHostHarness.run = undefined;
+  browserHostHarness.placed = false;
+  browserHostHarness.resumable = false;
   workspaceHarness.listeners.clear();
   workspaceHarness.admissionGate = undefined;
   workspaceHarness.current = {
@@ -405,7 +470,6 @@ beforeEach(() => {
   promoteDraftAttachments = vi.fn(async () => undefined);
   installSessionStore({
     promoteDraftAttachments,
-    setLatestAgentBody: vi.fn(),
     startRun: vi.fn((_chatId: string, body: Readonly<Record<string, unknown>>) => body),
     endRun: vi.fn(),
     reattachHostChat,
@@ -469,10 +533,12 @@ describe('useCadChatClient', () => {
       void result.current.submit({ text: 'commit before dispatch' });
     });
 
-    expect(actions.sendMessage).not.toHaveBeenCalled();
+    /* The gesture reaches the owner at once; what waits for the claim is the
+     * admission the owner invokes, and nothing is dispatched until it lands. */
+    expect(admittedTurns).toEqual([]);
     admission.resolve();
     await waitFor(() => {
-      expect(actions.sendMessage).toHaveBeenCalledOnce();
+      expect(admittedTurns).toHaveLength(1);
     });
   });
 
@@ -505,7 +571,6 @@ describe('useCadChatClient', () => {
   it('surfaces a bounded admission wait on the chat error banner instead of dropping the submit', async () => {
     const send = vi.fn();
     installSessionStore({
-      setLatestAgentBody: vi.fn(),
       startRun: vi.fn((_chatId: string, body: Readonly<Record<string, unknown>>) => body),
       endRun: vi.fn(),
       get: vi.fn(() => ({ persistenceActorRef: { send } })),
@@ -527,7 +592,7 @@ describe('useCadChatClient', () => {
 
       await act(async () => vi.advanceTimersByTimeAsync(20_000));
 
-      expect(actions.sendMessage).not.toHaveBeenCalled();
+      expect(admittedTurns).toEqual([]);
       expect(send).toHaveBeenCalledWith({
         type: 'setPersistedError',
         error: expect.objectContaining({
@@ -602,10 +667,7 @@ describe('useCadChatClient', () => {
     act(() => {
       void result.current.submit({ text: 'Build it.' });
     });
-    await waitFor(() => {
-      expect(actions.sendMessage).toHaveBeenCalled();
-    });
-    const body = actions.sendMessage.mock.calls[0]?.[1]?.body as Record<string, unknown>;
+    const body = await admittedBody();
     // No browser workspace claim was prepared or admitted for this turn...
     expect(workspaceHarness.prepare).not.toHaveBeenCalled();
     // ...so the target names none — only the daemon that writes and the mode
@@ -663,7 +725,7 @@ describe('useCadChatClient', () => {
         routeId: 'openai-gpt-5.5',
       },
     });
-    expect(actions.sendMessage).not.toHaveBeenCalled();
+    expect(admittedTurns).toEqual([]);
     expect(workspaceHarness.prepare).not.toHaveBeenCalled();
     expect(workspaceHarness.current?.admitted).toBe(false);
   });
@@ -681,9 +743,9 @@ describe('useCadChatClient', () => {
     });
 
     await waitFor(() => {
-      expect(actions.sendMessage).toHaveBeenCalled();
+      expect(creditPreflightHarness.calls).toEqual([['openai-gpt-5.5', 'GPT 5.5']]);
     });
-    expect(creditPreflightHarness.calls).toEqual([['openai-gpt-5.5', 'GPT 5.5']]);
+    await admittedRequest();
     expect(persistedErrors).toHaveLength(0);
   });
 
@@ -718,10 +780,7 @@ describe('useCadChatClient', () => {
     act(() => {
       void result.current.submit({ text: 'Build it.' });
     });
-    await waitFor(() => {
-      expect(actions.sendMessage).toHaveBeenCalled();
-    });
-    const body = actions.sendMessage.mock.calls[0]?.[1]?.body as Record<string, unknown>;
+    const body = await admittedBody();
     expect(workspaceHarness.prepare).not.toHaveBeenCalled();
     expect(body['execution']).toEqual({ hostId: 'origin' });
     expect(body['agent']).toMatchObject({ execution: { kind: 'acp', hostId: 'origin', agentId: 'codex' } });
@@ -751,10 +810,7 @@ describe('useCadChatClient', () => {
     act(() => {
       void result.current.submit({ text: 'Build it.' });
     });
-    await waitFor(() => {
-      expect(actions.sendMessage).toHaveBeenCalled();
-    });
-    const body = actions.sendMessage.mock.calls[0]?.[1]?.body as Record<string, unknown>;
+    const body = await admittedBody();
     expect(body['browserHost']).toMatchObject({
       trigger: 'submit',
       agent: { kind: 'acp', id: 'codex', model: 'gpt-5.3-codex-spark' },
@@ -905,15 +961,14 @@ describe('useCadChatClient', () => {
     await waitFor(() => {
       expect(actions.sendMessage).toHaveBeenCalledTimes(1);
     });
-    const [sentMessage, options] = actions.sendMessage.mock.calls[0]! as [
-      MyUIMessage,
-      { body?: Record<string, unknown> } | undefined,
-    ];
+    const [sentMessage] = actions.sendMessage.mock.calls[0]! as [MyUIMessage];
     expect(sentMessage).toMatchObject({
       role: 'user',
       parts: [{ type: 'text', text: 'hello world' }],
     });
-    expect(options).toEqual({ body: expectRunBody() });
+    /* The verb hands over a gesture; the body is the chat admission's answer,
+     * composed once per turn by its owner rather than once per call site. */
+    expect(await admittedRequest()).toEqual({ kind: 'send', message: sentMessage, body: expectRunBody() });
   });
 
   it('should promote draft attachments into the chat before sending a message that references them', async () => {
@@ -984,30 +1039,14 @@ describe('useCadChatClient', () => {
     ]);
   });
 
-  it.each(['submitted', 'streaming'] as const)(
-    'should ignore submit and edit while a %s request is in flight',
-    (status) => {
-      const chat = mock<Chat<MyUIMessage>>();
-      useActiveChatInstanceMock.mockReturnValue(chat);
-      useChatSelectorMock.mockReturnValue(status);
-      const actions = buildActions();
-      installActions(actions);
-
-      const { result } = renderClient();
-
-      act(() => {
-        void result.current.submit({ text: 'double submit' });
-        result.current.edit('msg_edit', { text: 'edit while busy' });
-      });
-
-      expect(actions.sendMessage).not.toHaveBeenCalled();
-      expect(actions.editMessage).not.toHaveBeenCalled();
-      expect(actions.regenerate).not.toHaveBeenCalled();
-      // A refused verb must say so: a silently dropped submit looked to the
-      // operator like the message vanished — no row, no request, no banner.
-      expect(persistedErrors).toHaveLength(2);
-    },
-  );
+  /*
+   * V2: a gesture over a live turn is *queued* by the chat's session actor,
+   * never refused at the verb and never given a second lease. The two policies
+   * that used to disagree — this hook refusing up front while
+   * `chat-persistence` pre-empted — are one owner now, and the rows that pin
+   * it are `chatSessionMachine`'s ("should hold a gesture made over a live
+   * turn until it settles", "should queue a turn requested while finishing").
+   */
 
   it('should still allow stop while a request is in flight', () => {
     const chat = mock<Chat<MyUIMessage>>();
@@ -1025,13 +1064,10 @@ describe('useCadChatClient', () => {
     expect(actions.stop).toHaveBeenCalledTimes(1);
   });
 
-  it('should call actions.editMessage with body.agent and the rebuilt content when edit fires', async () => {
+  it('should call actions.editMessage with the rebuilt content, and admit its own turn, when edit fires', async () => {
     const chat = mock<Chat<MyUIMessage>>();
     useActiveChatInstanceMock.mockReturnValue(chat);
-    const actions = {
-      ...buildActions(),
-      editMessage: vi.fn(),
-    };
+    const actions = buildActions();
     installActions(actions);
 
     const { result } = renderClient();
@@ -1046,6 +1082,12 @@ describe('useCadChatClient', () => {
     // Rewritten for W7: an edit carries attachment references, promoted into the chat first.
     expect(promoteDraftAttachments).toHaveBeenCalledWith('chat_test', [imageAttachment]);
     expect(actions.editMessage).toHaveBeenCalledWith('msg_99', 'edited content', {
+      attachments: [imageAttachment],
+    });
+    expect(await admittedRequest()).toEqual({
+      kind: 'edit',
+      messageId: 'msg_99',
+      content: 'edited content',
       attachments: [imageAttachment],
       body: expectRunBody(),
     });
@@ -1100,47 +1142,38 @@ describe('useCadChatClient', () => {
     expect(secondAgent).toBe(firstAgent);
   });
 
-  it('should publish the latest agent body to the session and leave it owned by the session on view unmount', async () => {
+  it('should publish the chat admission and leave it owned by the session on view unmount', async () => {
     const chat = mock<Chat<MyUIMessage>>();
     useActiveChatInstanceMock.mockReturnValue(chat);
-    const actions = buildActions();
-    installActions(actions);
-    const setLatestAgentBody = vi.fn();
-    installSessionStore({ setLatestAgentBody });
+    installActions(buildActions());
 
     const { unmount } = renderClient();
 
-    await waitFor(() => {
-      expect(setLatestAgentBody).toHaveBeenCalledWith('chat_test', expect.any(Function));
-    });
-    // The published value composes the body (and admits the workspace) at
-    // dispatch time; a snapshot could name a workspace already discarded.
-    const compose = setLatestAgentBody.mock.calls.at(-1)?.[1] as () => Promise<Record<string, unknown>>;
-    await expect(compose()).resolves.toEqual(expectRunBody());
+    // The published admission composes the body (and leases the checkout) when
+    // the owner invokes it; a snapshot could name a workspace already discarded.
+    const turn = await composeTurn({ kind: 'regenerate' });
+    expect(turn.request.body).toEqual(expectRunBody());
     expect(workspaceHarness.current?.admitted).toBe(true);
 
     unmount();
 
-    // The store keeps the factory after the view goes: a run may outlive it.
-    expect(setLatestAgentBody).not.toHaveBeenCalledWith('chat_test', undefined);
+    // The registry keeps the admission after the view goes: a run may outlive it.
+    expect(chatTurnAdmit('chat_test')).toBeDefined();
   });
 
   it('composes a seeded dispatch against the current claim, never a stale prepared snapshot', async () => {
     const chat = mock<Chat<MyUIMessage>>();
     useActiveChatInstanceMock.mockReturnValue(chat);
     installActions(buildActions());
-    const setLatestAgentBody = vi.fn();
     installSessionStore({
-      setLatestAgentBody,
       startRun: vi.fn((_chatId: string, body: Readonly<Record<string, unknown>>) => body),
       endRun: vi.fn(),
     });
 
     renderClient();
     await waitFor(() => {
-      expect(setLatestAgentBody).toHaveBeenCalledWith('chat_test', expect.any(Function));
+      expect(chatTurnAdmit('chat_test')).toBeDefined();
     });
-    const compose = setLatestAgentBody.mock.calls.at(-1)?.[1] as () => Promise<Record<string, unknown>>;
 
     // The claim the composer saw at mount was discarded (a revision-mode switch,
     // a settled run) and `prepare` now mints a different workspace. A body
@@ -1160,7 +1193,8 @@ describe('useCadChatClient', () => {
       return workspaceHarness.current;
     });
 
-    const body = await compose();
+    const turn = await composeTurn({ kind: 'regenerate' });
+    const body = turn.request.body as Record<string, unknown>;
 
     expect(body['execution']).toEqual({
       hostId: 'host_test',
@@ -1177,20 +1211,15 @@ describe('useCadChatClient', () => {
     Object.defineProperty(chat, 'messages', { get: () => messages });
     useActiveChatInstanceMock.mockReturnValue(chat);
     installActions(buildActions());
-    const setLatestAgentBody = vi.fn();
     installSessionStore({
-      setLatestAgentBody,
       startRun: vi.fn((_chatId: string, body: Readonly<Record<string, unknown>>) => body),
       endRun: vi.fn(),
       get: sessionWithPersistedErrors,
     });
 
     renderClient();
-    await waitFor(() => {
-      expect(setLatestAgentBody).toHaveBeenCalledWith('chat_test', expect.any(Function));
-    });
-    const compose = setLatestAgentBody.mock.calls.at(-1)?.[1] as () => Promise<Record<string, unknown>>;
-    return compose();
+    const turn = await composeTurn({ kind: 'regenerate' });
+    return turn.request.body as Record<string, unknown>;
   };
 
   it('admits a seeded first turn as a submit, because an empty durable log has no prefix to retain', async () => {
@@ -1224,72 +1253,56 @@ describe('useCadChatClient', () => {
     });
   });
 
-  it('should republish the agent body under the new chat id when activeChatId changes', async () => {
+  it('should republish the chat admission under the new chat id when activeChatId changes', async () => {
     const chat = mock<Chat<MyUIMessage>>();
     useActiveChatInstanceMock.mockReturnValue(chat);
-    const actions = buildActions();
-    installActions(actions);
-    const setLatestAgentBody = vi.fn();
-    installSessionStore({ setLatestAgentBody });
+    installActions(buildActions());
 
     const { rerender } = renderClient();
 
     await waitFor(() => {
-      expect(setLatestAgentBody).toHaveBeenCalledWith('chat_test', expect.any(Function));
+      expect(chatTurnAdmit('chat_test')).toBeDefined();
     });
 
     installActiveSession('chat_second');
     rerender();
 
     await waitFor(() => {
-      expect(setLatestAgentBody).toHaveBeenCalledWith('chat_second', expect.any(Function));
+      expect(chatTurnAdmit('chat_second')).toBeDefined();
     });
   });
 
   it('should hold a second turn until settlement supplies a fresh workspace', async () => {
     const chat = mock<Chat<MyUIMessage>>();
     useActiveChatInstanceMock.mockReturnValue(chat);
-    const actions = buildActions();
-    installActions(actions);
+    installActions(buildActions());
     mountAgentMock(buildAgent({ kernel: 'replicad' }));
 
-    const { result, rerender } = renderClient();
+    const { rerender } = renderClient();
 
-    act(() => {
-      void result.current.submit({ text: 'first' });
-    });
-    await waitFor(() => {
-      expect(actions.sendMessage).toHaveBeenCalledOnce();
-    });
-    expect(actions.sendMessage.mock.calls.at(-1)?.[1]).toEqual({
-      body: expectRunBody(buildAgent({ kernel: 'replicad' })),
-    });
+    const first = await composeTurn({ kind: 'regenerate' });
+    expect(first.request.body).toEqual(expectRunBody(buildAgent({ kernel: 'replicad' })));
 
     mountAgentMock(buildAgent({ kernel: 'openscad' }));
     rerender();
 
-    act(() => {
-      void result.current.submit({ text: 'second' });
-    });
-
-    expect(actions.sendMessage).toHaveBeenCalledTimes(1);
+    /* The claim the first turn admitted is still held, so the second waits for
+     * it rather than leasing a second checkout. */
+    const second = composeTurn({ kind: 'regenerate' });
+    await Promise.resolve();
+    expect(admittedTurns).toHaveLength(1);
 
     workspaceHarness.current = {
       execution: { hostId: 'host_test', workspaceId: 'workspace_test', baseRevisionId: 'rev_test' },
       admitted: false,
       runId: 'run_workspace_test',
     };
-    act(() => {
-      for (const listener of workspaceHarness.listeners) {
-        listener();
-      }
-    });
+    for (const listener of workspaceHarness.listeners) {
+      listener();
+    }
 
-    await waitFor(() => {
-      expect(actions.sendMessage).toHaveBeenCalledTimes(2);
-    });
-    expect(actions.sendMessage.mock.calls.at(-1)?.[1]).toEqual({
-      body: expectRunBody(buildAgent({ kernel: 'openscad' })),
+    await expect(second).resolves.toMatchObject({
+      request: { body: expectRunBody(buildAgent({ kernel: 'openscad' })) },
     });
   });
 
@@ -1305,9 +1318,7 @@ describe('useCadChatClient', () => {
     workspaceHarness.current = undefined;
     workspaceHarness.prepare.mockImplementation(async () => prepared);
 
-    const setLatestAgentBody = vi.fn();
     installSessionStore({
-      setLatestAgentBody,
       startRun: vi.fn((_chatId: string, body: Readonly<Record<string, unknown>>) => body),
       endRun: vi.fn(),
     });
@@ -1316,9 +1327,8 @@ describe('useCadChatClient', () => {
     await bindChatHost();
     await browserHostHarness.registration!.createClient();
     // 2. the bodyless (seeded) dispatch, which composes and admits on demand.
-    const compose = setLatestAgentBody.mock.calls.at(-1)?.[1] as () => Promise<Record<string, unknown>>;
-    await compose();
-    // 3. the admission path shared by submit / edit / retry / regenerate.
+    await composeTurn({ kind: 'regenerate' });
+    // 3. the admission path shared by submit and edit.
     // No retained claim: the submit must mint one through `prepare` too.
     workspaceHarness.current = undefined;
     act(() => {
@@ -1327,6 +1337,7 @@ describe('useCadChatClient', () => {
     await waitFor(() => {
       expect(actions.sendMessage).toHaveBeenCalledOnce();
     });
+    await admittedRequest(1);
     // 4. the tool-approval resume path.
     await act(async () => result.current.respondToToolApproval('interrupt-1', true));
 
@@ -1337,6 +1348,37 @@ describe('useCadChatClient', () => {
       expect(call[0]).toBe('chat_test');
       expect(call[1] ?? {}).not.toHaveProperty('mode');
     }
+  });
+
+  /*
+   * Moved here from `chat-session-store.test.ts` with C3: whether *Try again*
+   * resumes the stream or runs a new turn is the admission's call, because only
+   * it knows whether the host can still continue the run. A turn the gateway
+   * refused at admission leaves a terminal run and no live stream, so resuming
+   * it replayed the same failure and the banner's Try again looked inert.
+   */
+  it('re-runs the turn when a browser-placed chat has no resumable run, and resumes when it has', async () => {
+    const chat = mock<Chat<MyUIMessage>>();
+    Object.defineProperty(chat, 'messages', { get: () => [] });
+    useActiveChatInstanceMock.mockReturnValue(chat);
+    installActions(buildActions());
+    renderClient();
+
+    browserHostHarness.placed = true;
+    browserHostHarness.resumable = false;
+    await expect(composeTurn({ kind: 'continue' })).resolves.toMatchObject({ request: { kind: 'regenerate' } });
+
+    browserHostHarness.resumable = true;
+    browserHostHarness.run = { runId: 'run_live' };
+    await expect(composeTurn({ kind: 'continue' })).resolves.toMatchObject({
+      runId: 'run_live',
+      request: { kind: 'continue' },
+    });
+
+    // A placement with no browser host answers its own resume over the wire.
+    browserHostHarness.placed = false;
+    browserHostHarness.resumable = false;
+    await expect(composeTurn({ kind: 'continue' })).resolves.toMatchObject({ request: { kind: 'continue' } });
   });
 
   it('carries the placement on the execution target and never on the execution object', async () => {
@@ -1356,7 +1398,7 @@ describe('useCadChatClient', () => {
       expect(actions.sendMessage).toHaveBeenCalledOnce();
     });
 
-    const body = actions.sendMessage.mock.calls[0]?.[1]?.body as {
+    const body = (await admittedBody()) as unknown as {
       readonly agent: CadAgentConfigInput;
       readonly execution: Record<string, unknown>;
     };

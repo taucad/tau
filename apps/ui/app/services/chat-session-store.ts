@@ -34,15 +34,14 @@ import { Topic } from '@taucad/events';
 import { z } from 'zod';
 import { createActor, waitFor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
-import type { CadAgentExecution, Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
+import type { Chat as ChatEntity, MyUIMessage } from '@taucad/chat';
 import { isAnyToolPart } from '@taucad/chat';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
-import type { ChatSessionActorRef } from '#machines/chat-session.machine.js';
+import type { ChatRequest, ChatSessionActorRef, ChatTurnGesture } from '#machines/chat-session.machine.js';
 import type { ProjectSessionActorRef } from '#machines/project-session.machine.js';
 import { chatPersistenceMachine } from '#hooks/chat-persistence.machine.js';
-import type { ChatRequest } from '#hooks/chat-persistence.machine.js';
 import { buildDraftMessage, draftMachine } from '#hooks/draft.machine.js';
 import {
   createComposerRecordActor,
@@ -71,12 +70,12 @@ import {
 import {
   getHostTurnSettlement,
   isBrowserAgentHostPlaced,
-  isBrowserAgentHostRunResumable,
   registerAgentHostRunReset,
   requestBrowserAgentHostResume,
   subscribeHostTurnSettlements,
 } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import type { HostTurnSettlement } from '#chat-clients/_internal/browser-agent-host-transport.js';
+import { clearChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import type { CommitCancelledDraftRestoreInput } from '#types/storage.types.js';
 import { ENV } from '#environment.config.js';
 
@@ -163,23 +162,6 @@ const missingClient = async (): Promise<never> => {
 function editedMessage(original: MyUIMessage, request: Extract<ChatRequest, { kind: 'edit' }>): MyUIMessage {
   const built = buildUserMessage({ text: request.content, attachments: request.attachments });
   return { ...built, id: request.messageId, metadata: { ...original.metadata, ...built.metadata } };
-}
-
-/**
- * Slices the message tail so a subsequent `chat.regenerate(...)` re-runs
- * the assistant turn after the retried message. Model overrides (e.g. "Try
- * with a different model") travel via `request.body.agent.execution` composed
- * by `useCadChatClient.retry`, not by mutating persisted metadata.
- */
-function buildRetryMessages(
-  messages: MyUIMessage[],
-  request: Extract<ChatRequest, { kind: 'retry' }>,
-): MyUIMessage[] | undefined {
-  const messageIndex = messages.findIndex((m) => m.id === request.messageId);
-  if (messageIndex === -1) {
-    return undefined;
-  }
-  return messages.slice(0, messageIndex);
 }
 
 function buildDraftFromUserMessage(message: MyUIMessage): MyUIMessage {
@@ -284,18 +266,6 @@ function hasPendingApproval(messages: readonly MyUIMessage[]): boolean {
 // ChatSessionStore
 // ---------------------------------------------------------------------------
 
-/**
- * Composes one per-request wire body, admitting the chat's durable workspace on
- * the way. Owned by the profile-scoped chat client; called by the store only for
- * dispatches that carry no body of their own.
- *
- * @param execution - Compose the turn from this execution instead of the one
- * the client's React tree currently holds. The seeded first turn passes the
- * execution of the row it just consumed, which the tree has not hydrated yet.
- * @public
- */
-export type LatestAgentBodyFactory = (execution?: CadAgentExecution) => Promise<Readonly<Record<string, unknown>>>;
-
 type InternalSession = ChatSession & {
   /** React/view consumers currently observing this session. */
   viewRefcount: number;
@@ -315,22 +285,12 @@ type InternalSession = ChatSession & {
   /** Immutable wire body for the active logical run, including admission. */
   activeRunBody: Readonly<Record<string, unknown>> | undefined;
   status: ChatStatus;
-  /**
-   * How the active profile-scoped chat client composes a per-request body for
-   * this chat. Published via {@link ChatSessionStore.setLatestAgentBody} from
-   * `useCadChatClient`. The `dispatchRequest` listener calls it when a request
-   * enters the persistence machine without an explicit `body` (the
-   * startup-request hydration regenerate in `loadChatActor`), so the seeded turn
-   * admits the same workspace an explicit submit would — a stored snapshot
-   * could name a workspace that a later `prepare` had already discarded.
-   */
-  latestAgentBody: LatestAgentBodyFactory | undefined;
-  /** Bodyless startup/continue dispatches waiting for the profile client to publish its body factory. */
-  latestAgentBodyWaiters: Set<(compose: LatestAgentBodyFactory | undefined) => void>;
   /** The project this chat belongs to; its session owns the run accounting. */
   projectId: string | undefined;
   /** Where this chat's next turn runs, as its turn host last said. */
   placement: string | undefined;
+  /** The chat machine's turn emits, re-subscribed whenever its actor changes. */
+  turnSubscriptions: Array<{ unsubscribe: () => void }>;
   /** What was last handed to `stateActorRef`, so nothing is sent twice. */
   lastState: {
     phase?: ChatRunPhase;
@@ -726,31 +686,6 @@ export class ChatSessionStore {
   }
 
   /**
-   * Publish how the active profile-scoped chat client (`useCadChatClient`
-   * today, future name/commit clients tomorrow) composes a per-request body for
-   * this chat. The `dispatchRequest` listener inside `#createSession` calls it
-   * when a request hits the persistence machine without an explicit `body`
-   * (notably the startup-request hydration regenerate — see `loadChatActor`).
-   *
-   * A factory, not a snapshot: composing at dispatch time is what makes the
-   * seeded first turn admit the workspace it is about to write to.
-   */
-  public setLatestAgentBody(chatId: string, compose: LatestAgentBodyFactory | undefined): void {
-    const session = this.#sessions.get(chatId);
-    if (!session) {
-      return;
-    }
-    session.latestAgentBody = compose;
-    if (!compose) {
-      return;
-    }
-    for (const resolve of session.latestAgentBodyWaiters) {
-      resolve(compose);
-    }
-    session.latestAgentBodyWaiters.clear();
-  }
-
-  /**
    * Say where this chat's next turn runs.
    *
    * The chat's session actor owns its agent-host binding and re-invokes it on
@@ -770,6 +705,51 @@ export class ChatSessionStore {
     }
     session.placement = placement;
     session.stateActorRef?.send({ type: 'agentConfigChanged', placement });
+  }
+
+  /**
+   * Ask this chat's session actor for a turn.
+   *
+   * Every verb goes through here, and through nothing else: the actor owns the
+   * lease, the run id and the settlement, so it is the only thing that can
+   * refuse a second turn while one is live (V1, V2). A chat with no session
+   * actor yet has no owner to ask, and the gesture is dropped rather than run
+   * unowned.
+   *
+   * @param chatId - The chat the person acted on.
+   * @param gesture - What they did.
+   * @public
+   */
+  public async requestTurn(chatId: string, gesture: ChatTurnGesture): Promise<void> {
+    const session = this.#sessions.get(chatId);
+    if (!session) {
+      return;
+    }
+    /* The banner belongs to the request lifecycle, and the gesture is what
+     * clears it — the dispatch is an admission away. */
+    session.persistenceActorRef.send({ type: 'turnRequested' });
+    const owner = session.stateActorRef;
+    if (owner === undefined) {
+      return;
+    }
+    owner.send({ type: 'requestTurn', gesture });
+    /* S01: the composer stays busy until the turn is admitted or refused, so a
+     * send does not look finished while its checkout is still being leased.
+     * The owner says when that is; nothing here polls it. A gesture queued
+     * behind a live turn never enters `admitting`, and frees the composer at
+     * once. */
+    const admitting = (): boolean => owner.getSnapshot().matches({ run: { queued: 'admitting' } });
+    if (!admitting()) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      const subscription = owner.subscribe(() => {
+        if (!admitting()) {
+          subscription.unsubscribe();
+          resolve();
+        }
+      });
+    });
   }
 
   /**
@@ -836,15 +816,10 @@ export class ChatSessionStore {
       }
       if (ref === undefined) {
         session.stateActorRef = undefined;
+        this.#bindTurnEmits(session);
         continue;
       }
-      ref.send({ type: 'openChat', chatId: session.chatId });
-      session.stateActorRef = ref.getSnapshot().context.chatRefs[session.chatId];
-      /* A chat machine that has just been spawned has never been told where its
-       * turns run, so its host binding would invoke on an empty placement. */
-      if (session.placement !== undefined) {
-        session.stateActorRef?.send({ type: 'agentConfigChanged', placement: session.placement });
-      }
+      this.#bindSessionOwner(session);
       session.lastState = { inFlight: 0, approvals: 0 };
       this.#replayPersistedFailure(session);
       this.#replayPersistedSettlement(session);
@@ -1079,6 +1054,55 @@ export class ChatSessionStore {
   }
 
   /** This project's unread record actor, created and read on first use. */
+  /**
+   * Carry out what the chat's session actor admitted.
+   *
+   * The turn is the actor's; the *request* — one AI SDK stream, its retries and
+   * its stop — stays the persistence machine's. This is the one wire between
+   * them, so a dispatch can no longer originate anywhere else.
+   *
+   * @param session - The chat whose actor was just (re)bound.
+   */
+  #bindTurnEmits(session: InternalSession): void {
+    for (const subscription of session.turnSubscriptions) {
+      subscription.unsubscribe();
+    }
+    const { stateActorRef } = session;
+    if (stateActorRef === undefined || typeof stateActorRef.on !== 'function') {
+      session.turnSubscriptions = [];
+      return;
+    }
+    session.turnSubscriptions = [
+      stateActorRef.on('startTurnRequest', ({ request }) => {
+        session.persistenceActorRef.send({ type: 'startRequest', request });
+      }),
+      stateActorRef.on('stopTurnRequest', () => {
+        session.persistenceActorRef.send({ type: 'preemptRequest' });
+      }),
+    ];
+  }
+
+  /**
+   * Give one chat its session actor, and the actor its turn wiring.
+   *
+   * Called wherever the pair can change: on acquisition, when a project session
+   * registers or unregisters, and when a durable row moves a chat to the
+   * project that actually owns it.
+   *
+   * @param session - The chat to bind.
+   */
+  #bindSessionOwner(session: InternalSession): void {
+    const owner = session.projectId === undefined ? undefined : this.#projectSessions.get(session.projectId);
+    owner?.send({ type: 'openChat', chatId: session.chatId });
+    session.stateActorRef = owner?.getSnapshot().context.chatRefs[session.chatId];
+    this.#bindTurnEmits(session);
+    /* A chat machine that has just been spawned has never been told where its
+     * turns run, so its host binding would invoke on an empty placement. */
+    if (session.placement !== undefined) {
+      session.stateActorRef?.send({ type: 'agentConfigChanged', placement: session.placement });
+    }
+  }
+
   #unreadRecord(projectId: string): UnreadRecord {
     const existing = this.#unreadRecords.get(projectId);
     if (existing) {
@@ -1179,9 +1203,7 @@ export class ChatSessionStore {
     }
     previousOwner?.send({ type: 'chatClosed', chatId: session.chatId });
     session.projectId = projectId;
-    const owner = this.#projectSessions.get(projectId);
-    owner?.send({ type: 'openChat', chatId: session.chatId });
-    session.stateActorRef = owner?.getSnapshot().context.chatRefs[session.chatId];
+    this.#bindSessionOwner(session);
     session.lastState = { inFlight: 0, approvals: 0 };
     this.#replayPersistedFailure(session);
     this.#replayPersistedSettlement(session);
@@ -1314,16 +1336,19 @@ export class ChatSessionStore {
                    * a second stream — a second relay session on rung 2, which a
                    * capacity-1 daemon refuses. */
                   session.seededDispatch = true;
-                  persistenceActorRef.send({
-                    type: 'startRequest',
-                    /* The consumed row's execution rides with the dispatch. The
-                     * `chatRetrieved` event that assigns it to the machine is
-                     * only returned on the next line, and the chat client's
-                     * published factory closes over a React snapshot older still
-                     * — so without this the chat's own `acp` agent (or its
-                     * pinned Tau host/model) is rebuilt from the cookie and the
-                     * first turn silently runs somewhere else. */
-                    request: { kind: 'regenerate', execution: consumedChat.activeExecution },
+                  /* Through the turn's owner, like every other gesture: the
+                   * seeded turn takes a lease and must settle it. The consumed
+                   * row's execution rides with the gesture, because the
+                   * `chatRetrieved` event that assigns it to the machine is
+                   * only returned on the next line and the route's own agent
+                   * config is a render older still — without it the chat's
+                   * `acp` agent (or its pinned Tau host/model) is rebuilt from
+                   * the cookie and the first turn silently runs somewhere
+                   * else. The admission waits for the route to publish, so
+                   * being ahead of it is not a race any more. */
+                  session.stateActorRef?.send({
+                    type: 'requestTurn',
+                    gesture: { kind: 'regenerate', execution: consumedChat.activeExecution },
                   });
 
                   return { type: 'chatRetrieved', chat: { ...consumedChat, error: undefined } };
@@ -1500,39 +1525,26 @@ export class ChatSessionStore {
     // its `chat.messages = sanitized` mutation is observable to the deferred
     // `chat.sendMessage(B)` call when it fires on the next tick.
     const dispatchSubscription = persistenceActorRef.on('dispatchRequest', ({ request }) => {
-      const availableBody = request.body ? this.startRun(chatId, request.body) : session.activeRunBody;
+      /* The turn's owner composed this body; the only bodyless dispatch left is
+       * the persistence machine's own transparent auto-retry, which is a second
+       * *request* in the turn already running and reuses its body. */
+      const requestBody = request.body ? this.startRun(chatId, request.body) : session.activeRunBody;
 
       queueMicrotask(() => {
-        // A bodyless dispatch composes its body *now*, through the chat
-        // client's own admission path. It used to reuse a body snapshot the
-        // client had published at mount, whose `execution` named a workspace
-        // that a later `prepare` had already discarded: the run then executed
-        // against a workspace id no claim on disk carried, nothing ever marked
-        // the claim admitted, and the turn could never settle.
-        const composeBody = async (): Promise<Readonly<Record<string, unknown>> | Error> => {
-          const compose = session.latestAgentBody ?? (await this.#waitForLatestAgentBody(session));
-          if (!compose) {
-            return new Error('No agent configuration is available for this chat.');
-          }
-          try {
-            return await compose(request.kind === 'regenerate' ? request.execution : undefined);
-          } catch (error) {
-            console.error('[ChatSessionStore] durable workspace admission failed for a seeded dispatch', error);
-            return error instanceof Error ? error : new Error(String(error));
-          }
-        };
-        const dispatch = async (): Promise<void> => {
-          const composed = availableBody ?? (await composeBody());
+        const dispatch = (): void => {
           if (this.#sessions.get(chatId) !== session) {
-            // Replaced while composing: its successor owns the chat, and the
-            // request lifecycle went with the actor this session stopped.
+            // Replaced: its successor owns the chat, and the request lifecycle
+            // went with the actor this session stopped.
             return;
           }
-          if (composed instanceof Error) {
-            /* A dispatch that cannot compose used to return silently, leaving
+          if (requestBody === undefined) {
+            /* A dispatch with no body used to return silently, leaving
              * `requestLifecycle` in `invoking` forever with no banner — and,
              * since F3, holding the session with it (F4a). End the request. */
-            persistenceActorRef.send({ type: 'setPersistedError', error: parseErrorForPersistence(composed) });
+            persistenceActorRef.send({
+              type: 'setPersistedError',
+              error: parseErrorForPersistence(new Error('No agent configuration is available for this chat.')),
+            });
             persistenceActorRef.send({
               type: 'requestFinished',
               messages: chat.messages,
@@ -1542,24 +1554,6 @@ export class ChatSessionStore {
             });
             return;
           }
-          const requestBody = availableBody ?? this.startRun(chatId, composed);
-
-          // The chat-client always supplies `request.body` when it dispatches
-          // a verb it originated (submit / retry / regenerateTail / stop). Two
-          // request kinds are *bodyless* by construction:
-          //
-          //   - Startup-request hydration regenerate (see `loadChatActor`),
-          //     which may fire before any client has attached a body.
-          //   - `continue` (manual Try again on a transient-network banner via
-          //     `continueChat`, and the persistence machine's transparent
-          //     auto-retry in `retrying`), which resumes the in-flight stream
-          //     and has no producer that owns the per-turn agent payload.
-          //
-          // Every wire call must still carry the Tau wire shape's top-level
-          // `agent` block (see `chatTurnRequestSchema`), so we fall back to the
-          // latest body the chat-client published via `setLatestAgentBody`. This
-          // keeps the `agent` invariant true for every transport call, not just
-          // the verbs that originated with an explicit body.
           switch (request.kind) {
             case 'send': {
               void chat.sendMessage(request.message, { body: requestBody });
@@ -1582,50 +1576,23 @@ export class ChatSessionStore {
               return;
             }
 
-            case 'retry': {
-              const next = buildRetryMessages(chat.messages, request);
-              if (!next) {
-                return;
-              }
-              chat.messages = next;
-              void chat.regenerate({ body: requestBody });
-              return;
-            }
-
-            // Resume the exact admitted run without slicing chat.messages. The
-            // transport decides whether this attaches to a browser-host log or
-            // the API's resumable stream.
-            //
-            // Reattaching otherwise only recovers a run the host is still
-            // driving: it replays the log and stops where the run stopped. A
-            // turn the gateway refused at admission (rate limit, a dead tool)
-            // leaves a terminal run and no live stream, so resuming it replayed
-            // the same failure and ended — the banner's Resume looked inert.
-            // Dispatch the turn again in that case. Placements that register no
-            // browser host keep the resume path, which is the one their
-            // transport can answer.
-            //
-            // A *credit* refusal is the exception, and the reason the request
-            // above is explicit: the call never reached the provider, so the
-            // host continues that one call from its durable log instead of
-            // regenerating — which would rewind the turn and charge a second
-            // time for the tool work the customer already paid for.
+            /* Resume the exact admitted run without slicing chat.messages.
+             * Whether this turn could be resumed at all was decided by the
+             * chat's admission, which is the only owner that knows; reaching a
+             * second verdict here is how one refusal came to be answered with
+             * a replay of the same failure. */
             case 'continue': {
-              // The one-shot request is only ever consumed by a browser-host
-              // stream. Setting it on a placement that cannot read it leaves it
-              // armed for a later stream this dispatch never asked for.
+              /* The one-shot request is only ever consumed by a browser-host
+               * stream. Arming it on a placement that cannot read it leaves it
+               * set for a later stream this dispatch never asked for. */
               if (isBrowserAgentHostPlaced(chatId)) {
                 requestBrowserAgentHostResume(chatId);
-                if (!isBrowserAgentHostRunResumable(chatId)) {
-                  void chat.regenerate({ body: requestBody });
-                  return;
-                }
               }
               void chat.resumeStream({ body: requestBody });
             }
           }
         };
-        void dispatch();
+        dispatch();
       });
     });
 
@@ -1762,14 +1729,6 @@ export class ChatSessionStore {
       this.#chatTopics.get(chatId)?.emit();
     });
 
-    /* The chat's state machine is a child of the *project session*, never of
-     * this store: every project-scoped resource dies with its session (I23).
-     * Absent a live session — the home route has chats too — the store keeps
-     * its flags and nothing subscribes to a state row. */
-    const owner = projectId === undefined ? undefined : this.#projectSessions.get(projectId);
-    owner?.send({ type: 'openChat', chatId });
-    const stateActorRef = owner?.getSnapshot().context.chatRefs[chatId];
-
     persistenceActorRef.start();
     draftActorRef.start();
     composerRecordRef.start();
@@ -1781,7 +1740,9 @@ export class ChatSessionStore {
       chatId,
       chat,
       projectId,
-      stateActorRef,
+      /* Bound below, once the record exists: `#bindSessionOwner` is the single
+       * place a chat is opened on its project session (I23). */
+      stateActorRef: undefined,
       lastState: { inFlight: 0, approvals: 0 },
       persistenceActorRef,
       draftActorRef,
@@ -1797,14 +1758,13 @@ export class ChatSessionStore {
       seededDispatch: false,
       activeRunBody: undefined,
       status: chat.status,
-      latestAgentBody: undefined,
-      latestAgentBodyWaiters: new Set(),
       placement: undefined,
+      turnSubscriptions: [],
       dispose: () => {
-        for (const resolve of session.latestAgentBodyWaiters) {
-          resolve(undefined);
+        for (const subscription of session.turnSubscriptions) {
+          subscription.unsubscribe();
         }
-        session.latestAgentBodyWaiters.clear();
+        session.turnSubscriptions = [];
         dispatchSubscription.unsubscribe();
         recordLoadedSubscription.unsubscribe();
         stopSubscription.unsubscribe();
@@ -1833,6 +1793,12 @@ export class ChatSessionStore {
       requestLifecycleWasActive = false;
       this.#scheduleRunReleaseIfTerminal(session);
     });
+
+    /* The chat's state machine is a child of the *project session*, never of
+     * this store: every project-scoped resource dies with its session (I23).
+     * Absent a live session — the home route has chats too — the store keeps
+     * its flags and nothing subscribes to a state row. */
+    this.#bindSessionOwner(session);
 
     // Kick off chat hydration only after the session record exists. The load
     // actor may dispatch a startup run, whose non-view hold must be able to
@@ -2048,15 +2014,6 @@ export class ChatSessionStore {
     });
   }
 
-  async #waitForLatestAgentBody(session: InternalSession): Promise<LatestAgentBodyFactory | undefined> {
-    if (session.latestAgentBody) {
-      return session.latestAgentBody;
-    }
-    return new Promise((resolve) => {
-      session.latestAgentBodyWaiters.add(resolve);
-    });
-  }
-
   #scheduleRunReleaseIfTerminal(session: InternalSession): void {
     queueMicrotask(() => {
       if (!session.runHeld || !session.persistenceActorRef.getSnapshot().matches({ requestLifecycle: 'idle' })) {
@@ -2091,6 +2048,7 @@ export class ChatSessionStore {
     /* The session owns the chat machine; asking it to let go is what stops it. */
     this.#sessionOwner(session)?.send({ type: 'chatClosed', chatId: session.chatId });
     this.#sessions.delete(session.chatId);
+    clearChatTurnServices(session.chatId);
     clearLedger(session.chatId);
     this.#disposeChatTopics(session.chatId);
     this.#refreshSnapshot();

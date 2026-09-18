@@ -507,24 +507,28 @@ export function useDraftActions(): DraftActions {
 // Session action surface
 // ---------------------------------------------------------------------------
 
+/*
+ * The verbs are gestures, not dispatches (C3).
+ *
+ * None of them carries a `body` any more: the chat's session actor owns the
+ * turn, so it is the actor's admission that derives the rewind point, leases
+ * the checkout and composes the wire body. A verb that composed its own body
+ * was a second admission policy, and the two disagreed (F10).
+ */
 export type ChatActions = DraftActions & {
-  sendMessage: (message: SendMessageInput, options?: { body?: Readonly<Record<string, unknown>> }) => void;
-  regenerate: (options?: { body?: Readonly<Record<string, unknown>> }) => void;
+  sendMessage: (message: SendMessageInput, options?: { attachments?: readonly AttachmentReference[] }) => Promise<void>;
+  regenerate: () => void;
   /**
-   * Resume an interrupted stream WITHOUT re-running the trailing user
-   * message or slicing any assistant parts that already landed. Use this
-   * for resumable recovery banners such as network drops and account-state
-   * interruptions -- `regenerate()` would destroy partial assistant content.
+   * Re-run the chat's last turn after a failure the person chose to retry.
+   *
+   * A stream the host can still continue is resumed rather than re-run, so
+   * assistant parts that already landed survive; the admission decides which,
+   * because only it knows whether the run is resumable.
    */
   continueChat: () => void;
   stop: () => void;
   setMessages: (messages: MyUIMessage[]) => void;
-  editMessage: (
-    messageId: string,
-    content: string,
-    options?: { attachments?: readonly AttachmentReference[]; body?: Readonly<Record<string, unknown>> },
-  ) => void;
-  retryMessage: (messageId: string, options?: { body?: Readonly<Record<string, unknown>> }) => void;
+  editMessage: (messageId: string, content: string, options?: { attachments?: readonly AttachmentReference[] }) => void;
 };
 
 function warnNoCrossChatSession(action: string, chatId: string): void {
@@ -584,39 +588,34 @@ export function useChatActions(chatId?: string): ChatActions {
 
     return {
       ...draftActions,
-      sendMessage(message: SendMessageInput, options) {
+      async sendMessage(message: SendMessageInput, options) {
         draftActorRef.send({ type: 'clearDraft' });
         void releaseDraftAttachments();
-        const session = requireSession('sendMessage');
-        if (!session) {
+        if (!requireSession('sendMessage')) {
           return;
         }
         // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- AI SDK sendMessage union narrows to MyUIMessage at all call sites
         const outgoingMessage = message as MyUIMessage;
         void store.touchChatRecency(resolvedChatId, outgoingMessage.metadata?.createdAt ?? Date.now());
-        session.persistenceActorRef.send({
-          type: 'startRequest',
-          request: { kind: 'send', message: outgoingMessage, body: options?.body },
+        await store.requestTurn(resolvedChatId, {
+          kind: 'send',
+          message: outgoingMessage,
+          ...(options?.attachments === undefined ? {} : { attachments: options.attachments }),
         });
       },
-      regenerate(options) {
-        const session = requireSession('regenerate');
-        if (!session) {
+      regenerate() {
+        if (!requireSession('regenerate')) {
           return;
         }
         void store.touchChatRecency(resolvedChatId, Date.now());
-        session.persistenceActorRef.send({
-          type: 'startRequest',
-          request: { kind: 'regenerate', body: options?.body },
-        });
+        void store.requestTurn(resolvedChatId, { kind: 'regenerate' });
       },
       continueChat() {
-        const session = requireSession('continueChat');
-        if (!session) {
+        if (!requireSession('continueChat')) {
           return;
         }
         void store.touchChatRecency(resolvedChatId, Date.now());
-        session.persistenceActorRef.send({ type: 'startRequest', request: { kind: 'continue' } });
+        void store.requestTurn(resolvedChatId, { kind: 'continue' });
       },
       stop() {
         const session = requireSession('stop');
@@ -650,30 +649,11 @@ export function useChatActions(chatId?: string): ChatActions {
           return;
         }
         void store.touchChatRecency(resolvedChatId, Date.now());
-        session.persistenceActorRef.send({
-          type: 'startRequest',
-          request: {
-            kind: 'edit',
-            messageId,
-            content,
-            ...(options?.attachments === undefined ? {} : { attachments: options.attachments }),
-            body: options?.body,
-          },
-        });
-      },
-
-      retryMessage(messageId: string, options?) {
-        const session = requireSession('retryMessage');
-        if (!session) {
-          return;
-        }
-        if (!session.chat.messages.some((m) => m.id === messageId)) {
-          return;
-        }
-        void store.touchChatRecency(resolvedChatId, Date.now());
-        session.persistenceActorRef.send({
-          type: 'startRequest',
-          request: { kind: 'retry', messageId, body: options?.body },
+        void store.requestTurn(resolvedChatId, {
+          kind: 'edit',
+          messageId,
+          text: content,
+          ...(options?.attachments === undefined ? {} : { attachments: options.attachments }),
         });
       },
     };

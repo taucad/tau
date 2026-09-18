@@ -14,6 +14,8 @@ import { useChatSnapshot } from '#hooks/use-chat-snapshot.js';
 import { useContextPayload } from '#hooks/use-context-payload.js';
 import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
+import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
+import { chatTurnAdmit, resetChatTurnServices } from '#chat-clients/_internal/chat-host-binding.js';
 import type * as CadAgentConfigModuleShape from '#hooks/use-cad-agent-config.js';
 
 type CadAgentConfigModule = typeof CadAgentConfigModuleShape;
@@ -53,7 +55,7 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   useActiveChatSession: () => ({ activeChatId: 'chat_integration' }),
 }));
 vi.mock('#hooks/chat-session-store-provider.js', () => ({
-  useChatSessionStore: () => ({ setLatestAgentBody: vi.fn() }),
+  useChatSessionStore: () => ({ requestTurn: vi.fn(), setTurnPlacement: vi.fn(), reattachHostChat: vi.fn() }),
 }));
 vi.mock('#hooks/use-project.js', () => ({ useProject: () => ({ projectId: 'proj_integration' }) }));
 /* The turn-start pre-flight (R9) is proved in `use-credit-preflight.test.tsx` and
@@ -84,6 +86,25 @@ vi.mock('#providers/chat-workspace-authority-provider.js', () => ({
 }));
 
 const noop = (): void => undefined;
+
+/** Mount the client beside the chat's one turn host, which owns the admission. */
+const renderClient = (): ReturnType<typeof renderHook<ReturnType<typeof useCadChatClient>, unknown>> =>
+  renderHook(() => useCadChatClient(), {
+    wrapper: ({ children }) => (
+      <>
+        <ChatTurnHost />
+        {children}
+      </>
+    ),
+  });
+
+/** The wire body this chat's admission composes for a fresh turn. */
+const admittedBody = async (): Promise<Record<string, unknown> | undefined> => {
+  const admit = chatTurnAdmit('chat_integration');
+  expect(admit).toBeDefined();
+  const turn = await admit!({ kind: 'regenerate' });
+  return turn.request.body as Record<string, unknown> | undefined;
+};
 
 /**
  * Integration scope for the CAD chat client wire body.
@@ -137,6 +158,7 @@ const installActions = (actions: ActionsMock): void => {
 };
 
 beforeEach(() => {
+  resetChatTurnServices();
   vi.clearAllMocks();
   vi.mocked(useChatComposer).mockReturnValue({
     draftActorRef: { send: vi.fn() },
@@ -173,14 +195,13 @@ describe('useCadChatClient wire integration', () => {
     const actions = buildActions();
     installActions(actions);
 
-    const { result } = renderHook(() => useCadChatClient());
+    const { result } = renderClient();
 
     await act(async () => {
-      result.current.submit({ text: 'design a vase' });
+      void result.current.submit({ text: 'design a vase' });
     });
 
-    const [, options] = actions.sendMessage.mock.calls[0]! as [unknown, { body?: Record<string, unknown> } | undefined];
-    const wireBody = buildWireBody(options?.body);
+    const wireBody = buildWireBody(await admittedBody());
 
     expect(() => chatTurnRequestSchema.parse(wireBody)).not.toThrow();
     const parsed = chatTurnRequestSchema.parse(wireBody);
@@ -205,14 +226,13 @@ describe('useCadChatClient wire integration', () => {
     const actions = buildActions();
     installActions(actions);
 
-    const { result } = renderHook(() => useCadChatClient());
+    const { result } = renderClient();
 
     await act(async () => {
-      result.current.submit({ text: 'iterate' });
+      void result.current.submit({ text: 'iterate' });
     });
 
-    const [, options] = actions.sendMessage.mock.calls[0]! as [unknown, { body?: Record<string, unknown> } | undefined];
-    const wireBody = buildWireBody(options?.body);
+    const wireBody = buildWireBody(await admittedBody());
 
     const parsed = chatTurnRequestSchema.parse(wireBody);
     expect(parsed.agent).toMatchObject({ snapshot, contextPayload });
@@ -224,14 +244,13 @@ describe('useCadChatClient wire integration', () => {
     const actions = buildActions();
     installActions(actions);
 
-    const { result } = renderHook(() => useCadChatClient());
+    const { result } = renderClient();
 
     await act(async () => {
-      result.current.submit({ text: 'guard rail' });
+      void result.current.submit({ text: 'guard rail' });
     });
 
-    const [, options] = actions.sendMessage.mock.calls[0]! as [unknown, { body?: Record<string, unknown> } | undefined];
-    const goodBody = buildWireBody(options?.body) as Record<string, unknown>;
+    const goodBody = buildWireBody(await admittedBody()) as Record<string, unknown>;
     const badBody = { ...goodBody };
     delete badBody['agent'];
 

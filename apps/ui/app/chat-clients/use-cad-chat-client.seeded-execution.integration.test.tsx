@@ -27,6 +27,15 @@ import { ChatSessionStore } from '#services/chat-session-store.js';
 import { ActiveChatProvider, ChatComposerProvider, useChatComposer } from '#hooks/active-chat-provider.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatTurnHost } from '#chat-clients/chat-turn-host.js';
+import { createActor } from 'xstate';
+import { projectSessionMachine } from '#machines/project-session.machine.js';
+import { chatSessionMachine } from '#machines/chat-session.machine.js';
+import {
+  chatTurnAdmission,
+  chatTurnSettlement,
+  publishChatTurnSettlement,
+  resetChatTurnServices,
+} from '#chat-clients/_internal/chat-host-binding.js';
 
 /** The Tau model the cookie holds — what the un-hydrated fallback rebuilds from. */
 const cookieModelId = 'openai-gpt-5.6-luna';
@@ -60,6 +69,7 @@ const harness = vi.hoisted(() => {
   return {
     chats: new Map<string, FakeChat>(),
     store: undefined as unknown as ChatSessionStore,
+    projectSession: undefined as { stop: () => void } | undefined,
     models: {
       selectedModelId: 'openai-gpt-5.6-luna',
       selectedModel: resolveModel('openai-gpt-5.6-luna'),
@@ -217,6 +227,24 @@ const dispatchSeededTurn = async (activeExecution: CadAgentExecution): Promise<R
     commitCancelledDraftRestore: async () => undefined,
     client: harness.client,
   });
+  /* The seeded turn is a turn like any other: its owner is the chat's session
+   * actor under its project's, and the admission it invokes is the one
+   * `ChatTurnHost` publishes below (C3). */
+  const projectSession = createActor(
+    projectSessionMachine.provide({
+      actors: {
+        chatSession: chatSessionMachine.provide({
+          actors: { admitTurn: chatTurnAdmission, settleTurn: chatTurnSettlement },
+        }),
+      },
+    }),
+    { input: { projectId: row.resourceId } },
+  );
+  projectSession.start();
+  harness.projectSession = projectSession;
+  publishChatTurnSettlement(chatId, async () => undefined);
+  store.setFocusedProject(row.resourceId);
+  store.setProjectSession(row.resourceId, projectSession);
 
   function Client(): React.JSX.Element {
     useCadChatClient();
@@ -243,6 +271,9 @@ const dispatchSeededTurn = async (activeExecution: CadAgentExecution): Promise<R
 
 beforeEach(() => {
   harness.chats.clear();
+  harness.projectSession?.stop();
+  harness.projectSession = undefined;
+  resetChatTurnServices();
   vi.clearAllMocks();
 });
 

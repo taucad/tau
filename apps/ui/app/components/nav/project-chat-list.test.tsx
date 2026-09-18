@@ -241,7 +241,7 @@ describe('ProjectChatList', () => {
 
   it('hangs the chats off a rail one slot in', () => {
     render(<ProjectChatList project={project} isProjectActive />);
-    expect(document.querySelector('#project-chats-proj_one')).toHaveClass('ml-3.5', 'border-l', 'pl-1.5', 'gap-0');
+    expect(document.querySelector('#project-chats-proj_one')).toHaveClass('ml-3.5', 'border-l', 'pl-1.5', 'gap-0.5');
   });
 
   it('keeps an empty status column and no sentence for a chat with no state at all', () => {

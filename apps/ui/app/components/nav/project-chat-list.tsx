@@ -81,7 +81,7 @@ export function ProjectChatList({
      * project row never share a column. */
     <SidebarMenuSub
       id={listId}
-      className='mt-0.5 mr-0 ml-3.5 translate-x-0 gap-0 border-l border-sidebar-border py-0 pr-0 pl-1.5'
+      className='mt-0.5 mr-0 ml-3.5 translate-x-0 gap-0.5 border-l border-sidebar-border py-0 pr-0 pl-1.5'
     >
       {isLoading && chats.length === 0
         ? Array.from({ length: 3 }, (_, index) => (

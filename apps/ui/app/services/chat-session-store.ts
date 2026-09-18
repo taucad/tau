@@ -294,6 +294,12 @@ type InternalSession = ChatSession & {
   projectId: string | undefined;
   /** Where this chat's next turn runs, as its turn host last said. */
   placement: string | undefined;
+  /**
+   * A consumed seed whose owner had not bound yet, waiting for
+   * {@link ChatSessionStore.setProjectSession}. The startup request is one-shot:
+   * dropping this gesture loses the prompt for good (V3a).
+   */
+  pendingSeedGesture: ChatTurnGesture | undefined;
   /** The chat machine's turn emits, re-subscribed whenever its actor changes. */
   turnSubscriptions: Array<{ unsubscribe: () => void }>;
   /** What was last handed to `stateActorRef`, so nothing is sent twice. */
@@ -1109,6 +1115,15 @@ export class ChatSessionStore {
     if (session.placement !== undefined) {
       session.stateActorRef?.send({ type: 'agentConfigChanged', placement: session.placement });
     }
+    /* The homepage seed is consumed by the loader on the route's first render,
+     * which is before the effect that registers the project session. The
+     * gesture waited here rather than being dropped on an unbound owner, which
+     * burnt the one-shot request and lost the prompt (V3a). */
+    const seedGesture = session.pendingSeedGesture;
+    if (seedGesture !== undefined && session.stateActorRef !== undefined) {
+      session.pendingSeedGesture = undefined;
+      session.stateActorRef.send({ type: 'requestTurn', gesture: seedGesture });
+    }
     /* A run outlives the view that started it (V5). Navigating away and back
      * gives this chat a new actor while its run is still in flight, and an
      * actor that starts `idle` admits a second turn over the live one — which
@@ -1402,10 +1417,21 @@ export class ChatSessionStore {
                    * the cookie and the first turn silently runs somewhere
                    * else. The admission waits for the route to publish, so
                    * being ahead of it is not a race any more. */
-                  session.stateActorRef?.send({
-                    type: 'requestTurn',
-                    gesture: { kind: 'regenerate', execution: consumedChat.activeExecution },
-                  });
+                  const seedGesture: ChatTurnGesture = {
+                    kind: 'regenerate',
+                    execution: consumedChat.activeExecution,
+                  };
+                  /* The owner is bound by the route's effect, which has not
+                   * necessarily run yet on a chat acquired during the first
+                   * render. An optional chain here dropped the seeded turn
+                   * silently: request consumed, no lease, no banner, nothing on
+                   * reload (V3a). `#bindSessionOwner` flushes it instead, so the
+                   * seed is never lost — only late. */
+                  if (session.stateActorRef === undefined) {
+                    session.pendingSeedGesture = seedGesture;
+                  } else {
+                    session.stateActorRef.send({ type: 'requestTurn', gesture: seedGesture });
+                  }
 
                   return { type: 'chatRetrieved', chat: { ...consumedChat, error: undefined } };
                 }
@@ -1824,6 +1850,7 @@ export class ChatSessionStore {
       activeRunBody: undefined,
       status: chat.status,
       placement: undefined,
+      pendingSeedGesture: undefined,
       turnSubscriptions: [],
       dispose: () => {
         for (const subscription of session.turnSubscriptions) {

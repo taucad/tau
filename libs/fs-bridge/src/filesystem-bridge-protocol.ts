@@ -124,7 +124,26 @@ export type FileSystemBridgeWorkspaceService = Pick<WorkspaceFileService, Worksp
 /** Rooted/runtime bridge calls, including watch registration that may cross an asynchronous authority boundary. @public */
 export type FileSystemBridgeRuntimeService = FileSystemProvider & {
   watch?: (request: WatchRequest, handler: (event: WatchEvent) => void) => (() => void) | Promise<() => void>;
+  /*
+   * Read content operations are the composition site's to serve (charter D2):
+   * a host that hands over a bare provider has no composed view to inherit a
+   * mask from, so it offers neither.
+   */
+  archive?: (path: string, options?: ArchiveOptions) => Promise<Blob>;
+  contents?: (path: string, options?: ArchiveOptions) => Promise<Record<string, Uint8Array<ArrayBuffer>>>;
 };
+
+/**
+ * Caller-owned filter on a read content operation.
+ *
+ * The view's mask is inherited, never re-declared. `versionedOnly` is the
+ * whole-project export's own choice: the registry's `versioned` rows are the
+ * bytes that are the project, so records, caches and generated output stay out
+ * of an archive a person shares.
+ *
+ * @public
+ */
+export type ArchiveOptions = { readonly versionedOnly?: boolean };
 
 type FileSystemBridgeReadFile = {
   (path: string, options: 'utf8' | { readonly encoding: 'utf8'; readonly scope?: WorkspaceScope }): Promise<string>;
@@ -145,6 +164,8 @@ export type FileSystemBridgeService = Omit<FileSystemBridgeWorkspaceService, 're
   Pick<ComposedView, 'provenance' | 'readdirWithStats'> & {
     readFile: FileSystemBridgeReadFile;
     writeFileChecked(input: Omit<CheckedFileWrite, 'signal'>): Promise<CheckedFileWriteResult>;
+    archive(path: string, options?: ArchiveOptions): Promise<Blob>;
+    contents(path: string, options?: ArchiveOptions): Promise<Record<string, Uint8Array<ArrayBuffer>>>;
   };
 
 type FileSystemBridgeCallName = keyof FileSystemBridgeService;
@@ -492,11 +513,8 @@ const voidResult: z.ZodType<void> = z.union([z.undefined(), z.null()]).transform
 const booleanResult = z.boolean();
 const recursiveOptionsSchema = z.looseObject({ recursive: z.boolean().optional() });
 const scopedOptionsSchema = z.looseObject({ scope: workspaceScopeSchema.optional() });
-/** `getZippedDirectory` also takes the whole-project export filter. */
-const zipOptionsSchema = z.looseObject({
-  scope: workspaceScopeSchema.optional(),
-  versionedOnly: z.boolean().optional(),
-});
+/** The rooted read content operations take the caller's own export filter. */
+const archiveOptionsSchema = z.looseObject({ versionedOnly: z.boolean().optional() });
 
 const helloVersionProbeSchema = z.looseObject({ v: z.unknown().optional() });
 const fileSystemBridgeHelloValidator: z.ZodType<FileSystemBridgeHello> = z.preprocess(
@@ -608,7 +626,7 @@ const callSchemas = {
   getDirectoryContents: { args: oneStringArgument, result: directoryContentsSchema },
   duplicateFile: { args: twoStringArgs, result: voidResult },
   copyDirectory: { args: twoStringArgs, result: voidResult },
-  getZippedDirectory: { args: z.tuple([z.string(), zipOptionsSchema.optional()]), result: z.instanceof(Blob) },
+  getZippedDirectory: { args: z.tuple([z.string(), scopedOptionsSchema.optional()]), result: z.instanceof(Blob) },
   mount: { args: z.tuple([z.string(), mountConfigSchema]), result: voidResult },
   unmount: { args: oneStringArgument, result: voidResult },
   configureProjectRoots: { args: z.tuple([projectRootConfigurationSchema]), result: voidResult },
@@ -636,6 +654,8 @@ const callSchemas = {
   rename: { args: twoStringArgs, result: voidResult },
   readdirWithStats: { args: oneStringArgument, result: composedDirectoryRowsSchema },
   provenance: { args: oneStringArgument, result: fileProvenanceSchema },
+  archive: { args: z.tuple([z.string(), archiveOptionsSchema.optional()]), result: z.instanceof(Blob) },
+  contents: { args: z.tuple([z.string(), archiveOptionsSchema.optional()]), result: directoryContentsSchema },
 } satisfies FileSystemBridgeCallSchemas;
 
 const broadcastValidator = z.looseObject({ event: z.literal('fileChanged'), data: changeEventSchema });

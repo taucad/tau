@@ -3,8 +3,9 @@ import { mock } from 'vitest-mock-extended';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { composeView } from '@taucad/filesystem/composed-view';
 import type { ComposedViewOverlay } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createComposedViewClient } from '#composed-view-client.js';
-import type { ComposedViewClient } from '#composed-view-client.js';
+import type { ComposedViewClient, ComposedViewProxy } from '#composed-view-client.js';
 import type { FileSystemClient } from '#file-system-client.js';
 import { WorkspacePathResolver } from '#workspace-path-resolver.js';
 
@@ -55,6 +56,7 @@ const overlay = (): ComposedViewOverlay => {
 
 const authorityMock = (): FileSystemClient =>
   mock<FileSystemClient>({
+    getZippedDirectory: vi.fn().mockResolvedValue(new Blob(['authority'])),
     writeFile: vi.fn().mockResolvedValue(undefined),
     writeFileChecked: vi.fn().mockResolvedValue({ status: 'applied', content: new Uint8Array() }),
     writeFiles: vi.fn().mockResolvedValue(undefined),
@@ -75,16 +77,24 @@ const authorityMock = (): FileSystemClient =>
 
 const harness = async (
   seed?: (provider: MemoryProvider) => Promise<void>,
-): Promise<{ client: ComposedViewClient; authority: FileSystemClient }> => {
+): Promise<{ client: ComposedViewClient; authority: FileSystemClient; view: ComposedViewProxy }> => {
   const provider = new MemoryProvider();
   await provider.writeFile('main.ts', 'export {};\n');
   await seed?.(provider);
   const authority = authorityMock();
+  /* The rooted connection serves the read content operations over the same
+   * composition (charter D2); the worker builds them from `@taucad/filesystem/content-ops`,
+   * so what this package owns is the routing, not the archive bytes. */
+  const view: ComposedViewProxy = Object.assign(
+    composeView({ filesystem: provider }, { consumer: 'user', overlays: [overlay()], policy: tauPathPolicy }),
+    { archive: vi.fn<ComposedViewProxy['archive']>().mockResolvedValue(new Blob(['view'])) },
+  );
   return {
     authority,
+    view,
     client: createComposedViewClient({
       workspace: authority,
-      view: composeView({ filesystem: provider }, { consumer: 'user', overlays: [overlay()] }),
+      view,
       paths: new WorkspacePathResolver(root),
     }),
   };
@@ -272,5 +282,39 @@ describe('createComposedViewClient overrideUnit (north star W4 attempt a2)', () 
     });
     /* And the row is writable again: the guard refused it while the overlay served it. */
     await expect(client.canDelete(`${root}/${skillPath}`)).resolves.toBe(true);
+  });
+});
+
+/*
+ * Reads are the view's, including the whole-subtree ones (charter D2): the
+ * archive a person downloads is composed exactly like the tree they are looking
+ * at, so the control plane is absent by construction rather than by a filter the
+ * authority reapplies over the raw provider.
+ */
+describe('createComposedViewClient read content operations (north star W3)', () => {
+  it('should archive a directory inside the project through the view', async () => {
+    const { client, authority, view } = await harness();
+
+    await expect(client.getZippedDirectory(root, { versionedOnly: true })).resolves.toBeInstanceOf(Blob);
+
+    expect(view.archive).toHaveBeenCalledWith('', { versionedOnly: true });
+    expect(authority.getZippedDirectory).not.toHaveBeenCalled();
+  });
+
+  it('should archive a subfolder at its view-relative path', async () => {
+    const { client, view } = await harness();
+
+    await client.getZippedDirectory(`${root}/exports`);
+
+    expect(view.archive).toHaveBeenCalledWith('exports', undefined);
+  });
+
+  it('should leave an archive outside the project root on the authority', async () => {
+    const { client, authority, view } = await harness();
+
+    await client.getZippedDirectory('/node_modules/three');
+
+    expect(authority.getZippedDirectory).toHaveBeenCalledWith('/node_modules/three', undefined);
+    expect(view.archive).not.toHaveBeenCalled();
   });
 });

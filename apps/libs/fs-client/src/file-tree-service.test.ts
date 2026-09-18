@@ -9,7 +9,9 @@ import { WorkerChangeChannel } from '#worker-change-channel.js';
 import { DirectoryListingErrorCode, DirectoryListingFailedError } from '#directory-listing.js';
 import { WorkspacePathResolver } from '#workspace-path-resolver.js';
 import { createComposedViewClient } from '#composed-view-client.js';
+import type { ComposedViewProxy } from '#composed-view-client.js';
 import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { ComposedViewOverlay } from '@taucad/filesystem/composed-view';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { headlessVisibilityProvider } from '#visibility-provider.js';
@@ -66,7 +68,12 @@ const createComposedProxy = async (): Promise<FileSystemClient> => {
       stat: vi.fn().mockResolvedValue(textStat()),
       getDirectoryStat: vi.fn().mockResolvedValue([]),
     }),
-    view: composeView({ filesystem: provider }, { consumer: 'user', overlays: [skillOverlay()] }),
+    view: Object.assign(
+      composeView({ filesystem: provider }, { consumer: 'user', overlays: [skillOverlay()], policy: tauPathPolicy }),
+      /* The rooted connection also archives a subtree (charter D2); this
+       * harness reads rows. */
+      { archive: vi.fn<ComposedViewProxy['archive']>() },
+    ),
     paths: new WorkspacePathResolver(workspaceRoot),
   });
 };

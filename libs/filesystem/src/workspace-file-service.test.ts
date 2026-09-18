@@ -13,6 +13,10 @@ import { DirectIdbProvider } from '#backend/direct-idb-provider.js';
 import { SharedPool } from '@taucad/memory';
 import type { ChangeEvent, FileSystemProvider, WatchEvent } from '#types.js';
 import { getEventOrigin } from '#event-origin-registry.js';
+import { composeView } from '#composed-view.js';
+import { archive } from '#content-ops/archive.js';
+import { classify, tauPathPolicy } from '#path-registry.js';
+import { joinRelativePath } from '@taucad/utils/path';
 import {
   parseProjectManifestBytes,
   projectManifestSchemaUrl,
@@ -3257,10 +3261,17 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // getZippedDirectory — path registry pruning
+  // archive over the rooted view — the surface a project export now reaches
   // ---------------------------------------------------------------------------
 
-  describe('getZippedDirectory path classification', () => {
+  /*
+   * The whole-project export is served by `archive` over the connection's
+   * composed view (charter D2, W3), so these are the assertions the authority's
+   * own zip used to carry. Nothing filters the control plane here: the view
+   * never enumerates it. `versionedOnly` is the caller's own filter, built the
+   * way the file-manager worker builds it.
+   */
+  describe('archive over the project rooted view', () => {
     const projectId = 'proj_zzzzzzzzzzzzzzzzzzzzz';
     const projectRoute = `/projects/${projectId}`;
 
@@ -3288,6 +3299,24 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
         .sort();
     };
 
+    /** The rooted read content operation exactly as `handlerForRoot` composes it. */
+    const projectArchive = async (path: string, options?: { versionedOnly?: boolean }): Promise<Blob> => {
+      const view = composeView(
+        { filesystem: service.createRootedFileSystem(projectRoute) },
+        { consumer: 'user', policy: tauPathPolicy },
+      );
+      return archive(
+        view,
+        path,
+        options?.versionedOnly === true
+          ? {
+              admits: (relativePath, kind) =>
+                kind === 'dir' || classify(joinRelativePath(path, relativePath)).versioned,
+            }
+          : {},
+      );
+    };
+
     beforeEach(async () => {
       await service.configureProjectRoots({
         projects: [{ projectId, backend: 'memory', storageRootKey: 'memory:0', providerBasePath: 'gear-system' }],
@@ -3302,7 +3331,7 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
     it('should omit control-plane paths from a project archive without reading their bytes', async () => {
       const readFile = vi.spyOn(rootProvider, 'readFile');
 
-      const entries = await zipEntries(await service.getZippedDirectory(projectRoute));
+      const entries = await zipEntries(await projectArchive(''));
 
       expect(entries).toContain('main.ts');
       expect(entries).toContain('.tau/chats/chat_a/log.json');
@@ -3314,15 +3343,24 @@ describe('WorkspaceFileService integration [DirectIDB]', () => {
     });
 
     it('should archive only versioned project bytes when versionedOnly is set', async () => {
-      const entries = await zipEntries(await service.getZippedDirectory(projectRoute, { versionedOnly: true }));
+      const entries = await zipEntries(await projectArchive('', { versionedOnly: true }));
 
       expect(entries).toEqual(['.gitignore', '.tau/parameters/size.json', 'main.ts', 'tau.json']);
     });
 
-    it('should archive an unversioned records folder when that folder is the zip root', async () => {
-      const entries = await zipEntries(await service.getZippedDirectory(`${projectRoute}/exports`));
+    it('should archive an unversioned records folder when that folder is the archive root', async () => {
+      const entries = await zipEntries(await projectArchive('exports'));
 
       expect(entries).toEqual(['part.stl']);
+    });
+
+    /* The registry is asked about project-relative spellings whatever the
+     * archive root is, so a versioned-only export of one folder keeps that
+     * folder's versioned bytes instead of misclassifying every name. */
+    it('should classify project-relative when a versionedOnly archive is rooted at a subfolder', async () => {
+      const entries = await zipEntries(await projectArchive('.tau/parameters', { versionedOnly: true }));
+
+      expect(entries).toEqual(['size.json']);
     });
   });
 

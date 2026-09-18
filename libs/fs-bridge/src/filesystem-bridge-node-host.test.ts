@@ -13,9 +13,15 @@ import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
+import { composeView } from '@taucad/filesystem/composed-view';
+import { archive, contents } from '@taucad/filesystem/content-ops';
+import { classify, tauPathPolicy } from '@taucad/filesystem/path-registry';
+import type { WalkOptions } from '@taucad/filesystem/content-ops';
+import { joinRelativePath } from '@taucad/utils/path';
 import type { ExposeFileSystemHandle, FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { createTransferredFileSystemBridgeProxy, exposeFileSystem, openFileSystemBridge } from '@taucad/fs-bridge';
 
+const encoder = new TextEncoder();
 const projectId = 'proj_aaaaaaaaaaaaaaaaaaaaa';
 const projectRoot = `/projects/${projectId}`;
 
@@ -56,7 +62,10 @@ const createWorkspace = async (): Promise<Workspace> => {
 
 type NodeHost = {
   readonly exposed: ExposeFileSystemHandle;
-  readonly connect: (root?: string) => { proxy: FileSystemBridgeProxy; dispose: () => void };
+  readonly connect: (
+    root?: string,
+    consumer?: 'user' | 'agent',
+  ) => { proxy: FileSystemBridgeProxy; dispose: () => void };
   readonly dispose: () => void;
 };
 
@@ -69,13 +78,35 @@ const hostOnNode = ({ service, bus }: Workspace): NodeHost => {
   const boundary = new MessageChannel();
   const exposed = exposeFileSystem(service, {
     changeEventBus: bus,
-    handlerForRoot: (root, context) => service.createRootedFileSystem(root, context),
+    /*
+     * The composition every host performs (charter D2): the connection's view,
+     * plus the read content operations served over it. The mask comes with the
+     * view, so `versionedOnly` is the only filter left to build.
+     */
+    handlerForRoot: (root, context, consumer) => {
+      const filesystem = service.createRootedFileSystem(root, context);
+      const view =
+        consumer === undefined ? filesystem : composeView({ filesystem }, { consumer, policy: tauPathPolicy });
+      const admits = (path: string, versionedOnly?: boolean): WalkOptions =>
+        versionedOnly === true
+          ? { admits: (relative, kind) => kind === 'dir' || classify(joinRelativePath(path, relative)).versioned }
+          : {};
+      return Object.assign(view, {
+        archive: async (path: string, options?: { versionedOnly?: boolean }) =>
+          archive(view, path, admits(path, options?.versionedOnly)),
+        contents: async (path: string, options?: { versionedOnly?: boolean }) =>
+          contents(view, path, admits(path, options?.versionedOnly)),
+      });
+    },
     messageSource: boundary.port2,
   });
   return {
     exposed,
-    connect(root?: string) {
-      const connection = openFileSystemBridge(boundary.port1, root === undefined ? undefined : { root });
+    connect(root?: string, consumer?: 'user' | 'agent') {
+      const connection = openFileSystemBridge(
+        boundary.port1,
+        root === undefined ? undefined : { root, ...(consumer === undefined ? {} : { consumer }) },
+      );
       const proxy = createTransferredFileSystemBridgeProxy(connection.port);
       return {
         proxy,
@@ -138,6 +169,50 @@ describe('filesystem bridge authority on a Node host (X8)', () => {
       // own `/outside.ts` is simply not addressable from this port.
       await expect(client.proxy.readFile('outside.ts', 'utf8')).rejects.toThrow();
       await expect(client.proxy.readFile('../outside.ts', 'utf8')).rejects.toThrow();
+    } finally {
+      client.dispose();
+      host.dispose();
+    }
+  });
+
+  /*
+   * The archive and the subtree read are the rooted surface's (charter D2/W3):
+   * the same call the palette's whole-project export reaches, over a real
+   * channel, against a project whose control plane is on disk.
+   */
+  it('serves the read content operations over the rooted view, masked and filtered', async () => {
+    const workspace = await createWorkspace();
+    for (const [path, body] of Object.entries({
+      'main.ts': 'export default 1;\n',
+      'tau.json': '{}',
+      'thumbnail.webp': 'webp',
+      '.git/HEAD': 'ref: refs/heads/main',
+    })) {
+      // oxlint-disable-next-line no-await-in-loop -- Deterministic seed order keeps the fixture readable.
+      await workspace.service.writeFile(`${projectRoot}/${path}`, body);
+    }
+    const host = hostOnNode(workspace);
+    const client = host.connect(projectRoot, 'user');
+
+    try {
+      await client.proxy.ready;
+
+      /* The control plane is absent because the view never enumerates it — no
+       * filter argument, and no second copy of the path policy. */
+      await expect(client.proxy.contents('')).resolves.toEqual({
+        'main.ts': encoder.encode('export default 1;\n'),
+        'tau.json': encoder.encode('{}'),
+        'thumbnail.webp': encoder.encode('webp'),
+      });
+      /* The caller's own filter: the registry's `versioned` rows are the project. */
+      await expect(client.proxy.contents('', { versionedOnly: true })).resolves.toEqual({
+        'main.ts': encoder.encode('export default 1;\n'),
+        'tau.json': encoder.encode('{}'),
+      });
+
+      const archived = await client.proxy.archive('', { versionedOnly: true });
+      expect(archived).toBeInstanceOf(Blob);
+      expect(archived.size).toBeGreaterThan(0);
     } finally {
       client.dispose();
       host.dispose();

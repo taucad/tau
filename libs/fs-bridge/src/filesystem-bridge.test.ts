@@ -742,11 +742,12 @@ describe('exposeFileSystem coalesced delivery', () => {
     channel.port1.close();
   });
 
-  it('should carry the whole-project export filter and its archive across the wire', async () => {
+  it('should carry a scoped workspace archive and its blob across the wire', async () => {
     /* The archive is the one workspace call whose result is a `Blob` and whose
      * options bag is read by the authority, not by the proxy: a transport that
-     * dropped either would leave the palette's export silently wrong rather
-     * than failing. */
+     * dropped either would leave the `/files` browser's folder download silently
+     * wrong rather than failing. Every *routed* archive belongs to the rooted
+     * surface now (charter D2); the physical scope no view roots survives here. */
     const getZippedDirectory = vi.fn(async () => new Blob(['PK\u0003\u0004'], { type: 'application/zip' }));
     const handle = exposeFileSystem({ getZippedDirectory });
     const channel = new MessageChannel();
@@ -758,10 +759,11 @@ describe('exposeFileSystem coalesced delivery', () => {
     const proxy = createTransferredFileSystemBridgeProxy(channel.port2);
 
     await proxy.ready;
-    const archive = await proxy.getZippedDirectory('/projects/proj_a', { versionedOnly: true });
+    const scope = { backend: 'memory', storageRootKey: 'memory:files' } satisfies WorkspaceScope;
+    const archive = await proxy.getZippedDirectory('/models', { scope });
 
-    expect(getZippedDirectory).toHaveBeenCalledWith('/projects/proj_a', { versionedOnly: true });
-    expect(archive).toBeInstanceOf(Blob);
+    expect(getZippedDirectory).toHaveBeenCalledWith('/models', { scope });
+    /* `text()` on the result is what proves a real `Blob` survived the wire. */
     await expect(archive.text()).resolves.toBe('PK\u0003\u0004');
 
     proxy.dispose();

@@ -89,6 +89,7 @@ import type {
   WorkbenchPanelId,
   WorkbenchUtilityPanelId,
 } from '#routes/w.$workspace.$project/project-workspace-context.js';
+import { Button } from '@taucad/ui/components/button';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { useRevisions } from '#hooks/use-revisions.js';
 import type { OpenFile } from '#types/editor.types.js';
@@ -614,7 +615,24 @@ export function WorkbenchPlaceholderPanel(
           openPlaceholderFile?.(path, profile === 'shared' || readOnly, placeholder);
         }}
       >
-        <PanelEmptyState icon={FolderOpen} title='Open file' description='Select a file from the workspace tree' />
+        <PanelEmptyState
+          icon={FolderOpen}
+          title='Open file'
+          description={
+            <>
+              Select a file from the{' '}
+              <Button
+                variant='link'
+                className='h-auto p-0 text-sm text-foreground'
+                onClick={() => {
+                  properties.api.updateParameters({ filesOpen: true });
+                }}
+              >
+                workspace tree
+              </Button>
+            </>
+          }
+        />
       </FileWorkbenchPane>
     );
   }

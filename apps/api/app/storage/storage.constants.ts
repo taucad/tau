@@ -14,6 +14,13 @@
  * - `apps/ui/netlify.toml` CSP `connect-src` (origin only; prefix not referenced)
  */
 export const STORAGE_NAMESPACE_PREFIXES = {
+  /**
+   * Authoritative per-tenant state: `tenants/<ownerId>/repos/<projectId>/…`
+   * and `tenants/<ownerId>/lfs/<projectId>/…` (charter D24). Private tier
+   * only — it has no CDN custom domain and therefore needs no zone cache rule,
+   * and no listing under it ever crosses a tenant.
+   */
+  tenants: 'tenants/',
   blobs: 'blobs/',
   derivatives: 'derivatives/',
   'og-images': 'og-images/',

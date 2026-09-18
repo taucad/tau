@@ -23,7 +23,7 @@ import {
 } from '#api/publications/publication-materializer.js';
 import type { MaterializerDependencies } from '#api/publications/publication-materializer.js';
 import { gitLfsObjectKey } from '#api/git/git.constants.js';
-import type { ObjectStorageServiceContract } from '#storage/object-storage.service.js';
+import type { ObjectStorageServiceContract, PutBlobResult } from '#storage/object-storage.service.js';
 import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.js';
 import * as schema from '#database/schema.js';
 
@@ -280,7 +280,11 @@ function createProjectShareService(args: { readonly selectRows: unknown[][] }): 
 
 function createStorageStub(): PublicationsServiceDeps[1] {
   const storage: ObjectStorageServiceContract = {
-    putBlob: vi.fn(async () => ({ etag: 'etag', alreadyExisted: false })),
+    putBlob: vi.fn(async (): Promise<PutBlobResult> => ({ lost: false, etag: 'etag', alreadyExisted: false })),
+    deleteBlobs: vi.fn(async () => ({ deleted: 0 })),
+    listObjects: vi.fn(async function* listObjectsStub() {
+      yield* [];
+    }),
     getBlob: vi.fn(async () => ({
       body: Readable.from([]),
       contentType: 'application/octet-stream',
@@ -491,7 +495,7 @@ describe('PublicationsService.publishFromRevision', () => {
       if (args.namespace === 'derivatives') {
         capturedManifest = JSON.parse(new TextDecoder().decode(args.body)) as Record<string, unknown>;
       }
-      return { etag: 'etag', alreadyExisted: false };
+      return { lost: false, etag: 'etag', alreadyExisted: false };
     });
 
     const repositoryPath = seedRepository(

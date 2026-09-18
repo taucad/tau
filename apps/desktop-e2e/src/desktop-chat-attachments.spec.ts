@@ -91,7 +91,6 @@ test('sends an attached PDF to the provider as a document block with no sentinel
     await expect.poll(() => fixture!.gatewayRequests.length, { timeout: 120_000 }).toBeGreaterThanOrEqual(2);
     await waitForProjectOnDisk(session.homeRoot, slug, { extension: '.scad' });
     const requestsBefore = fixture.gatewayRequests.length;
-    const repliesBefore = await page.getByText(gatewayFixtureFinalText, { exact: true }).count();
 
     /* The composer's own picker input: its `accept` list carries the PDF type
      * only while the selected model reads PDFs (D20), so a model gate that
@@ -130,9 +129,14 @@ test('sends an attached PDF to the provider as a document block with no sentinel
     expect(readFileSync(join(chatDirectory, 'events.jsonl'), 'utf8')).toContain('"file-ref"');
     await expectVisible(page.getByRole('link', { name: 'bracket-spec.pdf' }).first(), 60_000);
 
-    await expect
-      .poll(async () => page.getByText(gatewayFixtureFinalText, { exact: true }).count(), { timeout: 180_000 })
-      .toBeGreaterThan(repliesBefore);
+    /* The transcript is virtualized: submitting pins the new turn to the top
+     * of the viewport, and the seeded turn above it can fall entirely out of
+     * the scroller and be unmounted, so counting reply nodes across the list
+     * is a layout race. Read the reply inside the turn that carries the PDF. */
+    const attachmentTurn = page
+      .locator('[data-item-index]')
+      .filter({ has: page.getByRole('link', { name: 'bracket-spec.pdf' }) });
+    await expectVisible(attachmentTurn.getByText(gatewayFixtureFinalText, { exact: true }), 180_000);
   } catch (error) {
     await session.capture('attachments-failure');
     throw error;

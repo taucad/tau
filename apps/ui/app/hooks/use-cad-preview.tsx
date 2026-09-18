@@ -198,7 +198,6 @@ function CadPreviewPipeline({
 
   const graphicsRef = useActorRef(graphicsMachine, {
     input: {
-      defaultCameraFovAngle: defaultGraphicsSettings.cameraFovAngle,
       measureSnapDistance: 40,
       enableSurfaces: defaultGraphicsSettings.enableSurfaces,
       enableLines: defaultGraphicsSettings.enableLines,
@@ -208,7 +207,7 @@ function CadPreviewPipeline({
       enableMatcap: defaultGraphicsSettings.enableMatcap,
       enablePostProcessing: defaultGraphicsSettings.enablePostProcessing,
       upDirection: defaultGraphicsSettings.upDirection,
-      graphicsBackendPreference: defaultGraphicsSettings.graphicsBackend ?? 'webgl',
+      graphicsBackend: defaultGraphicsSettings.graphicsBackend ?? 'webgl',
     },
   });
 

@@ -24,11 +24,11 @@
 
 /* oxlint-disable eslint/no-await-in-loop, eslint/no-restricted-imports -- this composition suite is the boundary where ordered machine scripts meet their real hooks. */
 
-import { useEffect } from 'react';
+import { createContext, useContext, useEffect } from 'react';
 import { act, render, screen } from '@testing-library/react';
 import { Link, MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router';
-import { createActor, fromCallback } from 'xstate';
-import type { EventObject } from 'xstate';
+import { createActor, fromCallback, fromPromise } from 'xstate';
+import type { ActorRefFrom, EventObject } from 'xstate';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -42,6 +42,7 @@ import type { SessionsMachineEmitted } from '#machines/sessions.machine.js';
 import { projectSessionIdleWindowMilliseconds, projectSessionMachine } from '#machines/project-session.machine.js';
 import { useChatSidebarStatus, useProjectSidebarRow } from '#hooks/use-sidebar-status.js';
 import { useProjectRouteState } from '#routes/w.$workspace.$project/project-route-state.js';
+import { graphicsMachine } from '#machines/graphics.machine.js';
 
 const {
   workerFrames,
@@ -77,7 +78,7 @@ const {
     sync: { state: 'noRemote' as 'backedUp' | 'checking' | 'noRemote', pendingCount: 0 },
   };
   const editorSnapshot = (): unknown => ({
-    context: {},
+    context: { viewSettings: {} },
     status: 'active',
     matches: () => editorState.idle,
   });
@@ -216,25 +217,36 @@ const parameterService = {
   subscribeUnsavedDrafts: () => () => undefined,
 };
 
-vi.mock('#hooks/use-project.js', () => ({
-  ProjectProvider: ({
-    children,
-    projectId,
-    requestedChatId,
-    createdChatId,
-  }: React.PropsWithChildren<{ projectId: string; requestedChatId?: string; createdChatId?: string }>) => {
-    projectProviderInputs.push({ projectId, requestedChatId, createdChatId });
-    return <div>{children}</div>;
-  },
-  useProject: () => ({
+/* One context object and one `viewGraphics` Map per project, both for the life of the suite: the
+ * real provider is per project, and a fresh Map per snapshot read would hand React a new value on
+ * every render. A test that needs a live view puts it in `viewGraphicsOf(projectId)`. */
+const projectContexts = new Map<string, unknown>();
+const viewGraphicsByProject = new Map<string, Map<string, ActorRefFrom<typeof graphicsMachine>>>();
+const viewGraphicsOf = (projectId: string): Map<string, ActorRefFrom<typeof graphicsMachine>> => {
+  const existing = viewGraphicsByProject.get(projectId);
+  if (existing) {
+    return existing;
+  }
+  const created = new Map<string, ActorRefFrom<typeof graphicsMachine>>();
+  viewGraphicsByProject.set(projectId, created);
+  return created;
+};
+const StubProjectContext = createContext('');
+const projectContextOf = (projectId: string): unknown => {
+  const existing = projectContexts.get(projectId);
+  if (existing) {
+    return existing;
+  }
+  const created = {
     projectId: 'unused',
     parameterService,
+    viewGraphics: viewGraphicsOf(projectId),
     projectRef: {
       send: (event: { type: string }) => {
         serviceCalls.push(`project:${event.type}`);
       },
       getSnapshot: () => ({
-        context: { project: { id: 'p' } },
+        context: { project: { id: 'p' }, geometryUnits: new Map(), viewGraphics: viewGraphicsOf(projectId) },
         matches: (value: unknown) => JSON.stringify(value) === JSON.stringify({ ready: { storing: 'idle' } }),
       }),
       subscribe: () => ({ unsubscribe: () => undefined }),
@@ -243,7 +255,25 @@ vi.mock('#hooks/use-project.js', () => ({
      * before the route may leave a project; an editor that never answers is a
      * navigation that never completes. */
     editorRef: editor.ref,
-  }),
+  };
+  projectContexts.set(projectId, created);
+  return created;
+};
+vi.mock('#hooks/use-project.js', () => ({
+  ProjectProvider: ({
+    children,
+    projectId,
+    requestedChatId,
+    createdChatId,
+  }: React.PropsWithChildren<{ projectId: string; requestedChatId?: string; createdChatId?: string }>) => {
+    projectProviderInputs.push({ projectId, requestedChatId, createdChatId });
+    return (
+      <StubProjectContext.Provider value={projectId}>
+        <div>{children}</div>
+      </StubProjectContext.Provider>
+    );
+  },
+  useProject: () => projectContextOf(useContext(StubProjectContext)),
 }));
 vi.mock('#services/project-agent-host-registration.js', () => ({
   registerProjectAgentHost: async () => ({ release: async () => undefined }),
@@ -499,6 +529,9 @@ beforeEach(() => {
   installedCheckoutRoutes.current = '';
   revisionClientLifecycle.length = 0;
   projectProviderInputs.length = 0;
+  for (const views of viewGraphicsByProject.values()) {
+    views.clear();
+  }
   navigateRoute = undefined;
   emitted.length = 0;
   getProjectRouteAccess.mockReset();
@@ -734,6 +767,31 @@ describe('sessions composition', () => {
     /* And the subtree that holds its file manager never unmounted. */
     expect(mounted.filter((entry) => entry.endsWith('pin-a-1'))).toEqual(['mount:pin-a-1']);
     expect(liveProjectIds()).toEqual(['pin-a-1', 'pin-a-2']);
+    view.unmount();
+  });
+
+  /* R6: the write-side host is mounted beside `ProjectPersistenceGuard`, above the `focused ?` gate.
+   * Move it into the gate -- or back into the viewer -- and a project the person navigated away from
+   * silently stops persisting what its own actors hold, with every other row still green. */
+  it('keeps writing the view settings of a live project that is not focused', async () => {
+    const graphicsRef = createActor(
+      graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }),
+      { input: {} },
+    ).start();
+    viewGraphicsOf('pin-unfocused-1').set('view-1', graphicsRef);
+
+    const view = await renderRoute('pin-unfocused-1');
+    await view.rerender('pin-unfocused-2');
+    expect(liveProjectIds()).toEqual(['pin-unfocused-1', 'pin-unfocused-2']);
+    serviceCalls.length = 0;
+
+    await act(async () => {
+      graphicsRef.send({ type: 'setGridVisibility', payload: false });
+      await Promise.resolve();
+    });
+
+    expect(serviceCalls).toContain('editor:updateViewSettings');
+    graphicsRef.stop();
     view.unmount();
   });
 

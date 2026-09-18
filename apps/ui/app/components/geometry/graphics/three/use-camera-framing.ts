@@ -2,7 +2,7 @@ import { useCallback, useLayoutEffect, useMemo, useRef } from 'react';
 import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { CameraBounds, CameraVector } from '@taucad/camera';
-import { useCameraRig, useCameraViewInitialization, useGraphics } from '#hooks/use-graphics.js';
+import { useCameraRig, useGraphics, useViewCameraFraming } from '#hooks/use-graphics.js';
 import type { StageOptions } from '#components/geometry/graphics/three/stage.js';
 import { defaultStageOptions } from '#components/geometry/graphics/three/stage.js';
 import { resolveCameraUp } from '#components/geometry/graphics/three/utils/camera-controls-adapter.js';
@@ -44,7 +44,7 @@ export function useCameraFraming<
   stageOptions = defaultStageOptions,
 }: Options): (options?: { enableConfiguredAngles?: boolean }) => void {
   const rig = useCameraRig();
-  const cameraViewInitialization = useCameraViewInitialization();
+  const framing = useViewCameraFraming();
   const graphicsActor = useGraphics();
   const { size } = useThree();
   const viewportAspect = size.width > 0 && size.height > 0 ? size.width / size.height : 1;
@@ -56,20 +56,11 @@ export function useCameraFraming<
     }),
     [stageOptions],
   );
+  /* Mount-scoped: `undefined` means this Stage has not handled geometry yet. The session's
+   * `framing` record carries the entry-scoped half, so a remount does not re-frame. */
   const previousRadiusRef = useRef<number | undefined>(undefined);
   const previousBoundsRef = useRef<THREE.Box3 | undefined>(undefined);
   const previousAspectRef = useRef(viewportAspect);
-  const hasHomeRef = useRef(false);
-  const cameraViewIdentityRef = useRef(cameraViewInitialization.identity);
-  useLayoutEffect(() => {
-    if (cameraViewIdentityRef.current !== cameraViewInitialization.identity) {
-      cameraViewIdentityRef.current = cameraViewInitialization.identity;
-      previousRadiusRef.current = undefined;
-      previousBoundsRef.current = undefined;
-      previousAspectRef.current = viewportAspect;
-      hasHomeRef.current = false;
-    }
-  }, [cameraViewInitialization.identity, viewportAspect]);
 
   const frame = useCallback(
     (options?: { enableConfiguredAngles?: boolean }) => {
@@ -104,13 +95,35 @@ export function useCameraFraming<
       return;
     }
 
+    const commit = (): void => {
+      previousRadiusRef.current = geometryRadius;
+      previousBoundsRef.current = geometryBounds.clone();
+      previousAspectRef.current = viewportAspect;
+    };
+
+    if (!framing.initialized) {
+      frame({ enableConfiguredAngles: true });
+      rig.actorRef.send({ type: 'saveHome' });
+      if (framing.pendingView) {
+        rig.actorRef.send({ type: 'setView', ...framing.pendingView });
+      }
+      // oxlint-disable-next-line react/immutability -- the framing record is session state the canvas consumes exactly once; its owner is the graphics actor, not this mount.
+      framing.initialized = true;
+      commit();
+      return;
+    }
+
+    if (previousRadiusRef.current === undefined) {
+      // A remount over a camera the person already placed: keep the pose, refresh the bounds only.
+      rig.actorRef.send({ type: 'setBounds', bounds: toCameraBounds(geometryBounds) });
+      commit();
+      return;
+    }
+
     const previousRadius = previousRadiusRef.current;
-    const radiusChange =
-      previousRadius === undefined || previousRadius === 0
-        ? Infinity
-        : Math.abs((geometryRadius - previousRadius) / previousRadius);
+    const radiusChange = previousRadius === 0 ? Infinity : Math.abs((geometryRadius - previousRadius) / previousRadius);
     const previousBounds = previousBoundsRef.current;
-    const scale = Math.max(previousRadius ?? 0, geometryRadius);
+    const scale = Math.max(previousRadius, geometryRadius);
     const boundsChange = previousBounds
       ? Math.max(
           Math.abs(previousBounds.min.x - geometryBounds.min.x),
@@ -123,32 +136,14 @@ export function useCameraFraming<
       : Infinity;
 
     if (radiusChange > significantRadiusChangeRatio || boundsChange > significantRadiusChangeRatio) {
-      if (hasHomeRef.current) {
-        frame({ enableConfiguredAngles: false });
-      } else {
-        const initialization = cameraViewInitialization.begin();
-        if (!initialization.initialize) {
-          rig.actorRef.send({ type: 'setBounds', bounds: toCameraBounds(geometryBounds) });
-          hasHomeRef.current = true;
-          previousRadiusRef.current = geometryRadius;
-          previousBoundsRef.current = geometryBounds.clone();
-          previousAspectRef.current = viewportAspect;
-          return;
-        }
-        frame({ enableConfiguredAngles: true });
-        rig.actorRef.send({ type: 'saveHome' });
-        if (initialization.cameraView) {
-          rig.actorRef.send({ type: 'setView', ...initialization.cameraView });
-        }
-        hasHomeRef.current = true;
-      }
+      frame({ enableConfiguredAngles: false });
       previousRadiusRef.current = geometryRadius;
       previousBoundsRef.current = geometryBounds.clone();
     }
-  }, [cameraViewInitialization, frame, geometryBounds, geometryRadius, rig, viewportAspect]);
+  }, [framing, frame, geometryBounds, geometryRadius, rig, viewportAspect]);
 
   useLayoutEffect(() => {
-    if (!hasHomeRef.current || geometryRadius <= 0) {
+    if (previousRadiusRef.current === undefined || geometryRadius <= 0) {
       previousAspectRef.current = viewportAspect;
       return;
     }

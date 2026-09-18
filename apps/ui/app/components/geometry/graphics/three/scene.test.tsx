@@ -111,7 +111,7 @@ describe('Scene camera lifecycle', () => {
     const samples: SceneSample[] = [];
     const graphicsActor = createActor(
       graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }),
-      { input: { defaultCameraFovAngle: 60, graphicsBackendPreference: 'webgl' } },
+      { input: { graphicsBackend: 'webgl' } },
     );
     graphicsActor.start();
 

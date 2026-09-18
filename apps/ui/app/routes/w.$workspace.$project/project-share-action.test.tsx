@@ -35,9 +35,10 @@ const geometryUnit = {
     value: 'ready',
   }),
 };
+const geometryUnits = new Map([['main.ts', geometryUnit]]);
 const projectRef = {
   getSnapshot: () => ({
-    context: { project, geometryUnits: new Map([['main.ts', geometryUnit]]) },
+    context: { project, geometryUnits },
   }),
   send: projectSend,
 };
@@ -55,11 +56,16 @@ vi.mock('xstate', async (importOriginal) => {
   };
 });
 
+const editorRef = {
+  getSnapshot: () => ({ context: { unitSettings: { 'main.ts': { renderTimeout: 30_000 } } } }),
+};
+
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
     parameterService,
     projectId: project.id,
     projectRef,
+    editorRef,
   }),
 }));
 
@@ -187,6 +193,31 @@ describe('ProjectShareAction', () => {
 });
 
 describe('ProjectShareWorkbenchPanel', () => {
+  /* E1: the entry's CAD actor owns its render timeout, so a unit this panel has to spawn for the
+   * thumbnail is seeded from the durable per-entry record instead of starting on the default. */
+  it('seeds a unit it spawns with the durable render timeout', async () => {
+    const existing = geometryUnits.get('main.ts')!;
+    geometryUnits.delete('main.ts');
+    projectSend.mockClear();
+    try {
+      render(
+        <MemoryRouter initialEntries={['/w/home/share-fixture?chat=chat_1']}>
+          <ProjectShareWorkbenchPanel />
+        </MemoryRouter>,
+      );
+      await capturedPanelProperties!.collectSnapshot!().catch(() => undefined);
+
+      expect(projectSend).toHaveBeenCalledWith({
+        type: 'createGeometryUnit',
+        entryPath: 'main.ts',
+        renderTimeout: 30_000,
+      });
+    } finally {
+      geometryUnits.set('main.ts', existing);
+      projectSend.mockClear();
+    }
+  });
+
   it('stays lazy until an explicit share action and collects the latest self-contained snapshot', async () => {
     render(
       <MemoryRouter initialEntries={['/w/home/share-fixture?chat=chat_1']}>

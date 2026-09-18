@@ -4,6 +4,7 @@ import { createActor, waitFor } from 'xstate';
 import { projectToManifest } from '@taucad/types';
 import type { ProjectManifest } from '@taucad/types';
 import { isProjectContentActivityPath, projectMachine } from '#machines/project.machine.js';
+import { defaultGraphicsSettings } from '#constants/editor.constants.js';
 import type { ProjectContext, ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
@@ -201,6 +202,38 @@ describe('projectMachine', () => {
       actor.start();
       actor.send({ type: 'createViewGraphics', viewId: 'v1' });
       expect(actor.getSnapshot().context.viewGraphics.has('v1')).toBe(true);
+      actor.stop();
+    });
+
+    /* The graphics actor is the live owner of its durable keys (Law 1), and `createViewGraphics` is
+     * the only path the app takes to build a view, so the record has to reach the spawn input. */
+    it('should seed a spawned view graphics actor with every durable key it owns', () => {
+      const actor = createTestActor();
+      actor.start();
+      actor.send({
+        type: 'createViewGraphics',
+        viewId: 'v1',
+        settings: {
+          ...defaultGraphicsSettings,
+          enableGrid: false,
+          sectionView: { active: true, plane: 'xz', pivot: [1, 2, 3], rotation: [0, 0.5, 0], direction: 1 },
+          sectionDisplay: { clipLines: false, clipMesh: false, planeName: 'cartesian' },
+        },
+      });
+
+      const graphics = actor.getSnapshot().context.viewGraphics.get('v1');
+      expect(graphics).toBeDefined();
+      expect(graphics!.getSnapshot().context).toMatchObject({
+        enableGrid: false,
+        isSectionViewActive: true,
+        selectedSectionViewId: 'xz',
+        sectionViewPivot: [1, 2, 3],
+        sectionViewRotation: [0, 0.5, 0],
+        sectionViewDirection: 1,
+        enableClippingLines: false,
+        enableClippingMesh: false,
+        planeName: 'cartesian',
+      });
       actor.stop();
     });
 

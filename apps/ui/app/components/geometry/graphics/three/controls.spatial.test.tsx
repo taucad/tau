@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => {
     renderFrame,
     send: vi.fn(),
     sectionProperties: undefined as Record<string, unknown> | undefined,
+    cameraControlProperties: undefined as Record<string, unknown> | undefined,
   };
 });
 
@@ -48,7 +49,10 @@ vi.mock('#hooks/use-graphics.js', () => ({
 }));
 
 vi.mock('#components/geometry/graphics/three/controls/tau-camera-controls.js', () => ({
-  TauCameraControls: () => null,
+  TauCameraControls: (properties: Record<string, unknown>) => {
+    mocks.cameraControlProperties = properties;
+    return null;
+  },
 }));
 
 vi.mock('#components/geometry/graphics/three/controls/viewport-gizmo-cube.js', () => ({
@@ -81,12 +85,22 @@ describe('Controls spatial section boundary', () => {
   beforeEach(() => {
     mocks.send.mockReset();
     mocks.sectionProperties = undefined;
+    mocks.cameraControlProperties = undefined;
     mocks.context.sectionViewPivot = [10.016, 20, 30];
     mocks.renderFrame = {
       anchorFrameId: 'tau:root',
       originMeters: [10, 20, 30],
       metersPerRenderUnit: 0.001,
     };
+  });
+
+  /* `initialTarget` is a render-unit API that camera-controls writes into the live camera in its own
+   * state initializer, two frames before `ActorBridge` exists. Handing it metres pointed the camera
+   * at a target 1000x away for those frames, which is what a restored view was caught showing. */
+  it('hands the camera controls their initial target in render units', () => {
+    renderControls();
+
+    expect(mocks.cameraControlProperties?.['initialTarget']).toEqual([-10_000, -20_000, -30_000]);
   });
 
   it('maps the physical section pivot into render-local coordinates and inverts drag output', () => {
@@ -116,7 +130,7 @@ describe('Controls spatial section boundary', () => {
     mocks.renderFrame = {
       anchorFrameId: 'tau:root',
       originMeters: [10.01, 20, 30],
-      metersPerRenderUnit: 0.000_001,
+      metersPerRenderUnit: 0.000001,
     };
     view.rerender(<Controls enableGizmo={false} enableDamping={false} enableZoom enablePan zoomSpeed={2} />);
 

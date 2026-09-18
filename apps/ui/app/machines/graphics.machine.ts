@@ -7,7 +7,7 @@ import type { LengthSymbol, UnitSystem } from '#constants/length-units.js';
 import { generatePrefixedId } from '@taucad/utils/id';
 import type {
   GraphicsBackendPreference,
-  PinnedMeasurement,
+  GraphicsOwnedSettings,
   ResolvedGraphicsBackend,
 } from '#constants/editor.constants.js';
 import {
@@ -81,9 +81,33 @@ const addSuppressionReason = <T extends string>(reasons: readonly T[], reason: T
 const removeSuppressionReason = <T extends string>(reasons: readonly T[], reason: T): T[] =>
   reasons.filter((existingReason) => existingReason !== reason);
 
-// Context type definition
+/**
+ * Context type definition.
+ *
+ * Law 4 of the persisted view settings ownership blueprint classifies every field here:
+ *
+ * - **durable** -- in `GraphicsViewSettings`, seeded once at spawn and restored identically by an
+ *   in-app revisit and a page reload: `enableSurfaces`, `enableLines`, `enableGizmo`, `enableGrid`,
+ *   `enableAxes`, `enableMatcap`, `enablePostProcessing`, `upDirection`, `graphicsBackendPreference`,
+ *   the pinned half of `measurements`, and the section view -- `isSectionViewActive`,
+ *   `selectedSectionViewId`, `sectionViewPivot`, `sectionViewRotation`, `sectionViewDirection`
+ *   (entry-scoped) with `enableClippingLines`, `enableClippingMesh` and `planeName` (pane-scoped).
+ * - **session** -- survives an in-app revisit because this actor is retained, and is lost on reload
+ *   by decision: `displayUnits.length` (the grid unit symbol, session-scoped by ruling E4),
+ *   `isGridSizeLocked`, `isMeasureActive`, the unpinned half of `measurements`,
+ *   `currentMeasurementStart` and `modelInteractionUnitId`.
+ * - **ephemeral** -- derived from geometry, the canvas or a pointer on every mount, never seeded:
+ *   `gridSizes`, `gridSizesComputed`, `cadUnits`, `cameraVisibleSpan`, `geometryRadius`,
+ *   `geometryCenter`, `resolvedGraphicsBackend`, `webGpuAvailable`, `availableSectionViews`,
+ *   `hoveredSectionViewId`, `sectionViewVisualization`, `sectionViewTranslation` (the pivot's
+ *   projection on the plane axis), `hoveredMeasurementId`, `measureSnapDistance`, every suppression
+ *   and interaction flag, `pickableMeshesVersion`, `geometry`, `geometryKey` and `gltfPresentation`.
+ *
+ * No field here stores a copy of a value another actor owns; the camera's field of view and pose
+ * belong to the view's camera session, and the render timeout to the entry's CAD actor.
+ */
 export type GraphicsContext = {
-  /** Human-selected display units; lengths remain stored physically in metres. */
+  /** Session-scoped (E4): human-selected display units; lengths remain stored physically in metres. */
   displayUnits: {
     length: {
       symbol: LengthSymbol;
@@ -108,8 +132,6 @@ export type GraphicsContext = {
   /** Whether the grid size should be locked to the computed value */
   isGridSizeLocked: boolean;
 
-  /** Immutable seed used only when the provider constructs its camera actor. */
-  initialCameraFovAngle: number;
   /** Projection-neutral visible vertical span supplied by the active renderer. */
   cameraVisibleSpan: number;
   /** Physical bounding-sphere radius in metres. */
@@ -382,22 +404,12 @@ export type GraphicsEmitted =
   | { type: 'viewResetRequested' }
   | { type: 'geometryRadiusCalculated'; radius: number };
 
-// Input type
-export type GraphicsInput = {
-  defaultCameraFovAngle?: number;
+/**
+ * Create-only seed. The durable half is exactly the keys this machine owns (Law 1), so a new
+ * owned key reaches the actor without a second mapping.
+ */
+export type GraphicsInput = Partial<GraphicsOwnedSettings> & {
   measureSnapDistance?: number; // Default 20px
-  // Per-view initial settings (from persisted GraphicsViewSettings)
-  enableSurfaces?: boolean;
-  enableLines?: boolean;
-  enableGizmo?: boolean;
-  enableGrid?: boolean;
-  enableAxes?: boolean;
-  enableMatcap?: boolean;
-  enablePostProcessing?: boolean;
-  upDirection?: 'x' | 'y' | 'z';
-  /** Saved pinned measurements to restore */
-  pinnedMeasurements?: PinnedMeasurement[];
-  graphicsBackendPreference?: GraphicsBackendPreference;
   modelInteractionRef?: ModelInteractionRef;
 };
 
@@ -497,6 +509,41 @@ function getBaseAxis(planeId: 'xy' | 'xz' | 'yz' | undefined): [number, number, 
 
 function dot(a: [number, number, number], b: [number, number, number]): number {
   return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+}
+
+/**
+ * Create-only section-view seed (E2). The persisted cut is applied to context directly -- replaying
+ * `selectSectionView` would re-derive the pivot and rotation from the geometry centre. The
+ * translation is the pivot's projection on the plane axis, so it is derived rather than restored.
+ */
+function createSectionViewSeed(
+  sectionView: GraphicsOwnedSettings['sectionView'],
+  sectionDisplay: GraphicsOwnedSettings['sectionDisplay'],
+): Pick<
+  GraphicsContext,
+  | 'isSectionViewActive'
+  | 'selectedSectionViewId'
+  | 'planeName'
+  | 'sectionViewTranslation'
+  | 'sectionViewRotation'
+  | 'sectionViewDirection'
+  | 'sectionViewPivot'
+  | 'enableClippingLines'
+  | 'enableClippingMesh'
+> {
+  const plane = sectionView?.plane;
+  const pivot: [number, number, number] = sectionView?.pivot ?? [0, 0, 0];
+  return {
+    isSectionViewActive: sectionView?.active ?? false,
+    selectedSectionViewId: plane,
+    planeName: sectionDisplay?.planeName ?? 'face',
+    sectionViewTranslation: plane ? dot(getBaseAxis(plane), pivot) : 0,
+    sectionViewRotation: sectionView?.rotation ?? [0, 0, 0],
+    sectionViewDirection: sectionView?.direction ?? -1,
+    sectionViewPivot: pivot,
+    enableClippingLines: sectionDisplay?.clipLines ?? true,
+    enableClippingMesh: sectionDisplay?.clipMesh ?? true,
+  };
 }
 
 function scale(v: [number, number, number], s: number): [number, number, number] {
@@ -1509,7 +1556,7 @@ export const graphicsMachine = setup({
   ],
 
   context: ({ input, spawn }) => {
-    const preference = input.graphicsBackendPreference ?? 'webgl';
+    const preference = input.graphicsBackend ?? 'webgl';
     const ownsModelInteractionRef = input.modelInteractionRef === undefined;
     const modelInteractionRef =
       input.modelInteractionRef ??
@@ -1537,7 +1584,6 @@ export const graphicsMachine = setup({
       },
 
       // Camera state
-      initialCameraFovAngle: input.defaultCameraFovAngle ?? 60,
       cameraVisibleSpan: 0.002,
       geometryRadius: 0,
       geometryCenter: [0, 0, 0],
@@ -1555,27 +1601,19 @@ export const graphicsMachine = setup({
       webGpuAvailable: false,
       resolvedGraphicsBackend: resolveGraphicsBackendPreference(preference, false),
 
-      // Clipping plane state
-      isSectionViewActive: false,
+      // Clipping plane state (durable per E2; the cut is entry-scoped, its display pane-scoped)
+      ...createSectionViewSeed(input.sectionView, input.sectionDisplay),
       availableSectionViews: [
         { id: 'xy', normal: [0, 0, 1], constant: 0 },
         { id: 'xz', normal: [0, 1, 0], constant: 0 },
         { id: 'yz', normal: [1, 0, 0], constant: 0 },
       ],
-      selectedSectionViewId: undefined,
-      planeName: 'face',
       hoveredSectionViewId: undefined,
       sectionViewVisualization: {
         stripeColor: '#00ff00',
         stripeSpacing: 0.01,
         stripeWidth: 0.001,
       },
-      sectionViewTranslation: 0,
-      sectionViewRotation: [0, 0, 0],
-      sectionViewDirection: -1,
-      sectionViewPivot: [0, 0, 0],
-      enableClippingLines: true,
-      enableClippingMesh: true,
 
       // Measure state
       isMeasureActive: false,
@@ -1612,6 +1650,13 @@ export const graphicsMachine = setup({
   initial: 'operational',
   states: {
     operational: {
+      /* A seeded cut sets context directly -- replaying `selectSectionView` would reset the pivot and
+       * rotation to geometry-derived values. This raise only re-enters the matching state node. */
+      entry: enqueueActions(({ enqueue, context }) => {
+        if (context.isSectionViewActive) {
+          enqueue.raise({ type: 'setSectionViewActive', payload: true });
+        }
+      }),
       initial: 'ready',
       on: {
         // Grid events

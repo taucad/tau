@@ -18,6 +18,14 @@ export const pushableRefPrefixes = [
   'refs/tau/artifacts/',
 ] as const;
 
+/**
+ * DI token for the `RepositoryStore` port.
+ *
+ * The module binds the S3 adapter to it; nothing that injects the port names a
+ * provider, which is NI14 expressed in the container rather than in prose.
+ */
+export const repositoryStoreKey = Symbol('repositoryStore');
+
 /** The two smart-HTTP services git asks for by name. */
 export const gitServices = ['git-upload-pack', 'git-receive-pack'] as const;
 export type GitService = (typeof gitServices)[number];
@@ -41,11 +49,10 @@ export const storageLimitBytesByTier: Readonly<Record<BillingTier, number>> = {
  * How many projects one account may register on the Tau Hosted Remote (P51,
  * review R5).
  *
- * Before P51, a bare repository could only be created by a publish, which costs
- * a push and a materialization. `PUT /v1/projects/:projectId` makes creation
- * reachable by any signed-in account, so it needs a ceiling: each registration
- * is a row plus `git init --bare`, `update-server-info` and a hook install on
- * the volume.
+ * Before P51, a repository could only come into being through a publish, which
+ * costs a push and a materialization. `PUT /v1/projects/:projectId` makes
+ * registration reachable by any signed-in account, so it needs a ceiling: each
+ * registration is a row, and every row is a tenant prefix a later push fills.
  *
  * One flat number rather than a per-tier table: the plan already bounds what a
  * project may *hold* (`storageLimitBytesByTier`), and a second per-tier
@@ -61,8 +68,7 @@ export const registeredProjectLimitPerOwner = 200;
  * Daily ceiling on `PUT /v1/projects/:projectId` calls per account.
  *
  * Separate from the cap above because the route is idempotent: a caller who is
- * already at the cap can still re-register projects it owns, and each of those
- * calls reconciles hooks on the volume. Set well above any human's day — a
+ * already at the cap can still re-register projects it owns. Set well above any human's day — a
  * person connecting every one of their projects twice over is still inside it —
  * so it only ever catches a script.
  */
@@ -82,8 +88,8 @@ export const gitLfsObjectKey = (projectId: string, oid: string): string =>
 
 /**
  * Slack above the remaining allowance that `receive.maxInputSize` allows the
- * incoming pack to use. The bound exists so a push cannot fill the volume
- * before any hook runs; the slack exists so an ordinary over-quota push is
+ * incoming pack to use. The bound exists so a push cannot fill the lease's
+ * disk before any hook runs; the slack exists so an ordinary over-quota push is
  * still refused by `pre-receive` with the shortfall rather than by git's own
  * blunt "pack exceeds maximum allowed size".
  */
@@ -102,9 +108,9 @@ export const quotaOverrunSlackBytes = 64 * 1024 * 1024;
 export const negotiationInputLimitBytes = quotaOverrunSlackBytes;
 
 /**
- * Project ids are `proj_<nanoid>`; anything else never reaches the filesystem.
- * Bare repositories are `<TAU_GIT_ROOT>/<projectId>.git` and nothing else, so
- * a traversal attempt cannot name a directory.
+ * Project ids are `proj_<nanoid>`; anything else never reaches a storage key.
+ * Both halves of a locator go through this predicate (`store/locator.ts`), so
+ * no separator and no traversal can leave a tenant prefix (NI15).
  */
 export const isProjectRepositoryId = (value: string): boolean => /^[A-Za-z\d][\w-]{0,63}$/u.test(value);
 
@@ -112,31 +118,6 @@ export const isProjectRepositoryId = (value: string): boolean => /^[A-Za-z\d][\w
 export const projectIdFromRepository = (repository: string): string | undefined => {
   const projectId = repository.endsWith('.git') ? repository.slice(0, -4) : repository;
   return isProjectRepositoryId(projectId) ? projectId : undefined;
-};
-
-/**
- * Paths the read-only dumb-HTTP layout serves, kept current by
- * `git update-server-info` in `post-receive`. Everything else under the
- * repository directory (`config`, `hooks/**`, `logs/**`) is refused.
- */
-export const isDumbHttpPath = (path: string): boolean =>
-  !path.includes('..') &&
-  (path === 'HEAD' ||
-    path === 'info/refs' ||
-    path === 'objects/info/packs' ||
-    path === 'objects/info/alternates' ||
-    /^objects\/[\da-f]{2}\/[\da-f]{38,62}$/u.test(path) ||
-    /^objects\/pack\/pack-[\da-f]{40,64}\.(?:pack|idx)$/u.test(path) ||
-    /^refs\/[\w./-]+$/u.test(path));
-
-export const dumbHttpContentType = (path: string): string => {
-  if (path.startsWith('objects/pack/')) {
-    return path.endsWith('.pack') ? 'application/x-git-packed-objects' : 'application/x-git-packed-objects-toc';
-  }
-  if (/^objects\/[\da-f]{2}\//u.test(path)) {
-    return 'application/x-git-loose-object';
-  }
-  return 'text/plain';
 };
 
 /** Responses git must never cache (`git http-backend`'s own header set). */
@@ -153,11 +134,28 @@ export const pktLine = (payload: string): string => `${(payload.length + 4).toSt
 export const serviceAdvertisementPrefix = (service: GitService): string => `${pktLine(`# service=${service}\n`)}0000`;
 
 /**
+ * The fixed first words of D20's ceiling refusal.
+ *
+ * A `pre-receive` refusal carries no HTTP status, so this sentence is the only
+ * thing that tells a client its push was refused for the *repository* ceiling
+ * rather than for a rewind or a host-local ref. `packages/revisions`
+ * (`src/remotes.ts`) matches on it to classify the refusal as
+ * `REMOTE_QUOTA_EXCEEDED` while still showing the hook's own words; it cannot
+ * import this module, so the string is duplicated there with a comment naming
+ * this constant as its source. Changing it changes both.
+ */
+export const ceilingRefusalMarker = 'Tau: repository size limit exceeded';
+
+/**
  * `pre-receive`: the ref allow-list (A39), a fail-closed admission flag,
- * compare-and-swap for every ref family (I7/I9, ruling OQ4), and the quota
- * backstop measured on the quarantine directory receive-pack has already
- * written. A non-zero exit rejects the whole push and git discards the
- * quarantine, so a refusal is never a partial write (D17).
+ * compare-and-swap for every ref family (I7/I9, ruling OQ4), and the two byte
+ * bounds measured on the quarantine directory receive-pack has already written:
+ * the owner's plan headroom, and D20's per-repository ceiling with the file
+ * list that makes it actionable. A non-zero exit rejects the whole push and git
+ * discards the quarantine, so a refusal is never a partial write (D17).
+ *
+ * The lease imports it (`store/lease.ts`); no repository on any disk owns a
+ * copy of it, so a deployment that changes this string changes every push.
  */
 export const preReceiveHookScript = `#!/bin/sh
 # Tau Hosted Remote pre-receive hook — written by apps/api GitService.
@@ -170,6 +168,7 @@ if [ "\${TAU_GIT_PUSH_ADMITTED:-}" != "1" ]; then
 fi
 
 status=0
+arriving=''
 while read -r _old _new ref; do
   case "$ref" in
     refs/heads/sync|refs/heads/sync/?*|refs/remotes|refs/remotes/?*|refs/tau/owners|refs/tau/owners/?*|refs/tau/workspaces|refs/tau/workspaces/?*|refs/tau/revisions|refs/tau/revisions/?*|refs/tau/transactions|refs/tau/transactions/?*|refs/tau/head|refs/tau/head/?*|refs/tau/retention|refs/tau/retention/?*)
@@ -207,50 +206,54 @@ while read -r _old _new ref; do
       fi
       ;;
   esac
+  arriving="$arriving $_new"
 done
 if [ "$status" -ne 0 ]; then
   echo "Tau: pushable refs are ${pushableRefPrefixes.map((prefix) => `${prefix}*`).join(', ')}." >&2
   exit "$status"
 fi
 
+# The blobs this push brings that no existing ref already reaches, largest
+# first. \`rev-list --objects\` prints "<oid> <path>"; \`cat-file --batch-check\`
+# turns each line into "<type> <size> <path>". This is the "affected file list"
+# D20 asks the ceiling refusal to carry — the answer to "what do I remove?".
+arriving_files() {
+  git rev-list --objects $arriving --not --all 2>/dev/null \\
+    | git cat-file --batch-check='%(objecttype) %(objectsize) %(rest)' 2>/dev/null \\
+    | awk '$1 == "blob" && NF > 2 { rest = $0; sub(/^[^ ]+ [^ ]+ /, "", rest); printf "%s %s\\n", $2, rest }' \\
+    | sort -rn \\
+    | head -n 10 \\
+    | awk '{ rest = $0; sub(/^[^ ]+ /, "", rest); printf "Tau:   %s (%s bytes)\\n", rest, $1 }' >&2 || true
+}
+
 remaining="\${TAU_GIT_QUOTA_REMAINING_BYTES:-}"
+ceiling="\${TAU_GIT_CEILING_REMAINING_BYTES:-}"
 quarantine="\${GIT_QUARANTINE_PATH:-}"
-if [ -n "$remaining" ] && [ -n "$quarantine" ] && [ -d "$quarantine" ]; then
+if [ -n "$quarantine" ] && [ -d "$quarantine" ]; then
   incoming=$(du -sk "$quarantine" | cut -f1)
   incoming=$((incoming * 1024))
-  if [ "$incoming" -gt "$remaining" ]; then
+  if [ -n "$remaining" ] && [ "$incoming" -gt "$remaining" ]; then
     echo "Tau: storage quota exceeded — this push needs $((incoming - remaining)) bytes more than the plan allows." >&2
     echo "Tau: nothing was written." >&2
     exit 1
   fi
+  # D20: the per-repository ceiling on non-LFS bytes. A hydration guard rather
+  # than a billing guard — the plan above binds the bill first — so it is a
+  # separate sentence with the file list that makes it actionable.
+  if [ -n "$ceiling" ] && [ "$incoming" -gt "$ceiling" ]; then
+    echo "${ceilingRefusalMarker} — this push needs $((incoming - ceiling)) bytes more than this repository may hold." >&2
+    echo "Tau: the largest files it adds are:" >&2
+    arriving_files
+    echo "Tau: nothing was written." >&2
+    exit 1
+  fi
+elif [ -n "$remaining" ] || [ -n "$ceiling" ]; then
+  # Fail closed, like the admission flag above (review F6): a bound that cannot
+  # measure what is arriving has not been satisfied. Reached only by a git
+  # without object quarantine, which this service does not deploy.
+  echo "Tau: this push cannot be measured — the server refused it rather than guess." >&2
+  echo "Tau: nothing was written." >&2
+  exit 1
 fi
 exit 0
-`;
-
-/** Where \`post-receive\` leaves the names it saw, for the API to drain (S32, W8). */
-export const publishedTagSpoolFile = 'tau-published-tags';
-
-/**
- * \`post-receive\`: the dumb-HTTP layout and the names this push moved.
- *
- * Materialization (S32) attaches here as a **record**, not as work: the hook
- * appends the tag refs it saw and returns. Doing the work here would run it
- * inside the API's git-child budget (32 concurrent, 10-minute lifetime) and a
- * materialization that outlived the push would be killed with it; the API
- * drains this file after \`receive-pack\` exits and runs it in its own
- * background set instead. Storage accounting is the API's for the same reason.
- */
-export const postReceiveHookScript = `#!/bin/sh
-# Tau Hosted Remote post-receive hook — written by apps/api GitService.
-set -eu
-while read -r _old _new ref; do
-  # An all-zero new value is a deletion, and a deleted name cannot be resolved:
-  # spooling it left a publication retrying forever (review C26). Unreachable
-  # since receive-pack runs with receive.denyDeletes, and free to keep.
-  case "$_new" in *[!0]*) ;; *) continue ;; esac
-  case "$ref" in
-    refs/tags/?*) printf '%s\\n' "$ref" >> "\${GIT_DIR:-.}/${publishedTagSpoolFile}" ;;
-  esac
-done
-git update-server-info
 `;

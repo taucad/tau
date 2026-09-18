@@ -31,14 +31,21 @@ import type {
 } from '#api/publications/publications.dto.js';
 import { storedPublicationManifestSchema } from '#api/publications/publications.dto.js';
 import {
-  applyBlobReferences,
+  leaseGitRunner,
   materializePublication,
+  materializePublishedTags,
   releaseManifestBlobs,
 } from '#api/publications/publication-materializer.js';
-import type { MaterializerDependencies } from '#api/publications/publication-materializer.js';
+import type { MaterializedPublication, MaterializerDependencies } from '#api/publications/publication-materializer.js';
 import type { ResolvedViewerIdentity } from '#api/publications/viewer-identity.types.js';
 import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
-import { GitRepositoryService } from '#api/git/git.service.js';
+import { hydrateLease } from '#api/git/store/lease.js';
+import type { RepositoryLease } from '#api/git/store/lease.js';
+import { decodeManifest } from '#api/git/store/manifest.js';
+import { repositoryLocator } from '#api/git/store/locator.js';
+import type { RepositoryStore } from '#api/git/store/port.js';
+import { repositoryStoreKey } from '#api/git/git.constants.js';
+import { resolveLfsObjectLocation } from '#api/git/lfs-keys.js';
 import { DatabaseService } from '#database/database.service.js';
 import { EmailService } from '#email/email.service.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
@@ -105,7 +112,14 @@ export class PublicationsService {
     private readonly metrics: MetricsService,
     private readonly emailService: EmailService,
     @Inject(commercialEntitlementsKey) private readonly entitlementsService: CommercialEntitlementsService,
-    private readonly gitRepositories: GitRepositoryService,
+    /*
+     * The repository store, not the git service: publishing and repairing a
+     * publication both need a lease of their own, and nothing about them needs
+     * the smart-HTTP route that also hydrates one (charter D9). It arrives as
+     * the port under `GitModule`'s token, never as the S3 adapter, because no
+     * code above the adapter names a provider (D25, NI14).
+     */
+    @Inject(repositoryStoreKey) private readonly repositoryStore: RepositoryStore,
   ) {}
 
   /**
@@ -119,9 +133,17 @@ export class PublicationsService {
     return {
       databaseService: this.databaseService,
       storage: this.storage,
-      /* The git service's own runner, so these children are counted by its
-         32-child ceiling rather than escaping it (review R8). */
-      git: async (repositoryPath, args, stdin) => this.gitRepositories.run(args, repositoryPath, stdin),
+      /* This service's children are bounded by the requests that start them —
+         one publish, one repair — rather than by the smart-HTTP route's own
+         ceiling, which is no longer reachable from here (review R8). */
+      git: leaseGitRunner,
+      /* The LFS endpoint's own resolver, so a publication reads an object from
+         wherever that endpoint serves it: the tenant key, or the pre-D24 one
+         for a project the relocation has not reached (W4b). */
+      resolveLfsObject: async (object) => {
+        const held = await resolveLfsObjectLocation(this.storage, object);
+        return held?.location;
+      },
     };
   }
 
@@ -232,121 +254,61 @@ export class PublicationsService {
       });
     }
 
-    const [currentRow] = await db
-      .select()
-      .from(schema.publication)
-      .where(and(eq(schema.publication.projectId, request.projectId), eq(schema.publication.tag, request.tag)))
-      .limit(1);
-    const publicationId = currentRow?.id ?? generatePrefixedId(idPrefix.publication);
+    /* The lease is the repository: it is hydrated from the manifest, read, and
+       disposed here (D9). It stays open across the transaction below because
+       that is where the tagged tree is read and the blobs are written — the
+       reference counts must be taken before any of it (D10). */
+    const published = await this.withLease({ projectId: request.projectId, ownerId }, async (lease) =>
+      db.transaction(async (tx) => {
+        /* One writer of this project's publications at a time, the same lock a
+           read-side repair takes: the row this reads decides which manifest is
+           released below, and two writers reading it before either commits
+           would release that manifest twice (review F2). */
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${request.projectId}, 0))`);
 
-    const materialized = await materializePublication(this.materializer, {
-      publicationId,
-      projectId: request.projectId,
-      repositoryPath: await this.gitRepositories.ensureRepository(request.projectId),
-      tag: request.tag,
-      visibility: request.visibility,
-      entryPath: request.entryPath,
-    });
+        const [currentRow] = await tx
+          .select()
+          .from(schema.publication)
+          .where(and(eq(schema.publication.projectId, request.projectId), eq(schema.publication.tag, request.tag)))
+          .limit(1);
+        const publicationId = currentRow?.id ?? generatePrefixedId(idPrefix.publication);
 
-    /* The row records the revision the server resolved, never the client's
-       claim, and a mismatch is a refusal rather than a silent disagreement
-       between the row and the bytes a viewer is served (review R6). */
-    if (materialized.revisionId !== request.revisionId) {
-      throw new ConflictException({
-        code: publicationApiCode.REVISION_MOVED,
-        message: `${request.tag} now points at a different revision. Publish again to pick it up.`,
-      });
-    }
-
-    await db.transaction(async (tx) => {
-      /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- Drizzle `onConflictDoUpdate.target` column refs */
-      await tx
-        .insert(schema.project)
-        .values({
-          id: request.projectId,
-          ownerId,
-          name: request.projectName,
-          description: request.description,
-          origin: 'local-mirror',
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .onConflictDoUpdate({
-          target: schema.project.id,
-          set: { name: request.projectName, description: request.description, updatedAt: new Date() },
-        });
-
-      await tx
-        .insert(schema.publication)
-        .values({
-          id: publicationId,
-          projectId: request.projectId,
-          ownerId,
-          tag: request.tag,
-          revisionId: materialized.revisionId,
-          visibility: request.visibility,
-          manifestKey: materialized.manifestKey,
-          ogImageKey: defaultOgImageKey,
-          thumbnailKey: materialized.thumbnailKey,
-          runtimePin: materialized.runtimePin,
-          kernels: [...materialized.kernels],
-          entryPath: request.entryPath,
-          title: request.title,
-          description: request.description,
-          ownerSnapshot,
-          createdAt: new Date(),
-        })
-        .onConflictDoUpdate({
-          target: [schema.publication.projectId, schema.publication.tag],
-          set: {
-            revisionId: materialized.revisionId,
+        const version = await materializePublication(
+          this.materializer,
+          {
+            publicationId,
+            projectId: request.projectId,
+            ownerId,
+            directory: lease.directory,
+            tag: request.tag,
             visibility: request.visibility,
-            manifestKey: materialized.manifestKey,
-            thumbnailKey: materialized.thumbnailKey,
-            runtimePin: materialized.runtimePin,
-            kernels: [...materialized.kernels],
             entryPath: request.entryPath,
-            title: request.title,
-            description: request.description,
-            unpublishedAt: null,
           },
-        });
-      /* oxlint-enable @typescript-eslint/no-unsafe-assignment */
+          tx,
+        );
 
-      /* Inside the transaction so a failed publish never leaks reference
-       * counts; the uploaded blobs are content-addressed, harmless orphans. */
-      await applyBlobReferences(tx, materialized.blobRefs);
-
-      await tx
-        .update(schema.project)
-        .set({ currentPublicationId: publicationId, updatedAt: new Date() })
-        .where(eq(schema.project.id, request.projectId));
-
-      if (sharedEmails.length > 0) {
-        await tx
-          .insert(schema.publicationAccess)
-          .values(
-            sharedEmails.map((recipientEmail) => ({
-              id: generatePrefixedId(idPrefix.publicationAccess),
-              publicationId,
-              ownerId,
-              recipientEmail,
-              status: 'active',
-              createdAt: new Date(),
-              revokedAt: null,
-            })),
-          )
-          .onConflictDoUpdate({
-            target: [schema.publicationAccess.publicationId, schema.publicationAccess.recipientEmail],
-            set: { status: 'active', revokedAt: null },
+        /* The row records the revision the server resolved, never the client's
+           claim, and a mismatch is a refusal rather than a silent disagreement
+           between the row and the bytes a viewer is served (review R6). The
+           throw rolls the counts above back with it. */
+        if (version.revisionId !== request.revisionId) {
+          throw new ConflictException({
+            code: publicationApiCode.REVISION_MOVED,
+            message: `${request.tag} now points at a different revision. Publish again to pick it up.`,
           });
-      }
-    });
+        }
+
+        await this.writePublicationRows({ tx, ownerId, request, publicationId, sharedEmails, ownerSnapshot, version });
+        return { version, publicationId, superseded: currentRow?.manifestKey };
+      }),
+    );
+    const { version: materialized, publicationId } = published;
 
     /* The superseded manifest's counts go back only once the row points at the
-     * new one, so a failure above never drops a live reference. */
-    if (currentRow !== undefined && currentRow.manifestKey !== materialized.manifestKey) {
-      await releaseManifestBlobs(this.materializer, currentRow.manifestKey);
+     * new one, so a failure above never drops a live reference. The row it came
+     * from was read under the lock, so no second writer released it too. */
+    if (published.superseded !== undefined && published.superseded !== materialized.manifestKey) {
+      await releaseManifestBlobs(this.materializer, published.superseded);
     }
 
     const viewUrl = buildPublicationViewUrl({ frontendURL: frontendUrl, publicationId });
@@ -790,7 +752,215 @@ export class PublicationsService {
     }
   }
 
+  /**
+   * One lease over this project's repository, disposed however the body ends.
+   *
+   * The publish path and the derived-state repair both read a tagged tree, and
+   * a tagged tree only exists inside a lease: the manifest and the packs it
+   * names are the repository, and this directory is a disposable copy of them
+   * (charter D9, NI1).
+   *
+   * @param args - Whose repository, and which project.
+   * @param body - What to do with the lease.
+   * @returns Whatever the body returned.
+   */
+  private async withLease<T>(
+    args: { readonly projectId: string; readonly ownerId: string },
+    body: (lease: RepositoryLease) => Promise<T>,
+  ): Promise<T> {
+    const lease = await hydrateLease({
+      store: this.repositoryStore,
+      locator: repositoryLocator({ ownerId: args.ownerId, projectId: args.projectId }),
+    });
+    try {
+      return await body(lease);
+    } finally {
+      await lease.dispose();
+    }
+  }
+
+  /**
+   * Re-materialize this project's publications when they are behind the push.
+   *
+   * D19: materialization is derived state, and derived state is repaired by
+   * whoever notices it is stale. A worker killed between committing a manifest
+   * and materializing what it published leaves `derived_generation` behind
+   * `generation`; the next request that reads one of those publications — this
+   * one — re-derives from a lease and then serves. A failure changes nothing,
+   * so the next observation retries: no queue, no sweep.
+   *
+   * Two reads stand between the mismatch and a lease, because the lease is the
+   * expensive part: the marker, and then the manifest's own tag, which says
+   * whether this publication is one of the stale ones. The marker is **not**
+   * advanced here. `GitRepositoryService` owns it, because its repair also
+   * rebuilds accounting and the LFS reachability marks; a publication read that
+   * claimed the marker would leave both of those behind forever.
+   *
+   * @param publication - The publication being read.
+   * @returns Whether anything was re-materialized, so the caller re-reads.
+   */
+  private async rederivePublications(
+    publication: Readonly<{ projectId: string; ownerId: string; tag: string; revisionId: string }>,
+  ): Promise<boolean> {
+    /* W4a hand-off: `generation` and `derived_generation` are W3's columns on
+       `project_git`, landed in lane a's 0043 migration. */
+    const [derived] = await this.databaseService.database
+      .select({
+        generation: schema.projectGit.generation,
+        derivedGeneration: schema.projectGit.derivedGeneration,
+      })
+      .from(schema.projectGit)
+      .where(eq(schema.projectGit.projectId, publication.projectId))
+      .limit(1);
+    if (derived === undefined || derived.derivedGeneration >= derived.generation) {
+      return false;
+    }
+
+    try {
+      const read = await this.repositoryStore.readManifest(
+        repositoryLocator({ ownerId: publication.ownerId, projectId: publication.projectId }),
+      );
+      if (read === undefined) {
+        return false;
+      }
+      const tags = Object.entries(decodeManifest(read.manifest).refs).filter(([ref]) => ref.startsWith('refs/tags/'));
+      const own = tags.find(([ref]) => ref === `refs/tags/${publication.tag}`)?.[1];
+      /* The marker can be behind for work that is not this publication's — the
+         accounting, an LFS mark — so a row already at the manifest's commit is
+         served without hydrating anything. */
+      if (own !== undefined && (own.peeled ?? own.oid) === publication.revisionId) {
+        return false;
+      }
+
+      return await this.withLease(publication, async (lease) => {
+        /* Every tag the manifest holds, not just the ones a push moved: after a
+           crash nobody knows which ones were done, and a tag whose publication
+           already records that oid is skipped without reading a byte. */
+        const materialized = await materializePublishedTags(this.materializer, {
+          projectId: publication.projectId,
+          ownerId: publication.ownerId,
+          directory: lease.directory,
+          tags: tags.map(([ref, value]) => ({ ref, oid: value.oid })),
+        });
+        return materialized.length > 0;
+      });
+    } catch (error) {
+      /* The read still serves what the row points at; nothing moved, and the
+         next observation retries. */
+      this.logger.warn({ err: error, projectId: publication.projectId }, 'Publications could not be re-derived');
+      return false;
+    }
+  }
+
+  /**
+   * The rows one publish writes, inside the transaction that took its counts.
+   *
+   * Extracted only so the publish path reads as what it is: one lease, one
+   * transaction, and the same row writes it always made.
+   *
+   * @param args - The open transaction, the request, and the version written.
+   */
+  private async writePublicationRows(args: {
+    tx: Parameters<Parameters<DatabaseService['database']['transaction']>[0]>[0];
+    ownerId: string;
+    request: PublishRequest;
+    publicationId: string;
+    sharedEmails: readonly string[];
+    /* oxlint-disable-next-line typescript/no-restricted-types -- `loadOwnerSnapshot` answers `null`, as the nullable column does */
+    ownerSnapshot: PublicationOwnerSnapshot | null;
+    version: MaterializedPublication;
+  }): Promise<void> {
+    const { tx, ownerId, request, publicationId, sharedEmails, ownerSnapshot, version } = args;
+    /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- Drizzle `onConflictDoUpdate.target` column refs */
+    await tx
+      .insert(schema.project)
+      .values({
+        id: request.projectId,
+        ownerId,
+        name: request.projectName,
+        description: request.description,
+        origin: 'local-mirror',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: schema.project.id,
+        set: { name: request.projectName, description: request.description, updatedAt: new Date() },
+      });
+
+    await tx
+      .insert(schema.publication)
+      .values({
+        id: publicationId,
+        projectId: request.projectId,
+        ownerId,
+        tag: request.tag,
+        revisionId: version.revisionId,
+        visibility: request.visibility,
+        manifestKey: version.manifestKey,
+        ogImageKey: defaultOgImageKey,
+        thumbnailKey: version.thumbnailKey,
+        runtimePin: version.runtimePin,
+        kernels: [...version.kernels],
+        entryPath: request.entryPath,
+        title: request.title,
+        description: request.description,
+        ownerSnapshot,
+        createdAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: [schema.publication.projectId, schema.publication.tag],
+        set: {
+          revisionId: version.revisionId,
+          visibility: request.visibility,
+          manifestKey: version.manifestKey,
+          thumbnailKey: version.thumbnailKey,
+          runtimePin: version.runtimePin,
+          kernels: [...version.kernels],
+          entryPath: request.entryPath,
+          title: request.title,
+          description: request.description,
+          unpublishedAt: null,
+        },
+      });
+    /* oxlint-enable @typescript-eslint/no-unsafe-assignment */
+
+    await tx
+      .update(schema.project)
+      .set({ currentPublicationId: publicationId, updatedAt: new Date() })
+      .where(eq(schema.project.id, request.projectId));
+
+    if (sharedEmails.length > 0) {
+      await tx
+        .insert(schema.publicationAccess)
+        .values(
+          sharedEmails.map((recipientEmail) => ({
+            id: generatePrefixedId(idPrefix.publicationAccess),
+            publicationId,
+            ownerId,
+            recipientEmail,
+            status: 'active',
+            createdAt: new Date(),
+            revokedAt: null,
+          })),
+        )
+        .onConflictDoUpdate({
+          target: [schema.publicationAccess.publicationId, schema.publicationAccess.recipientEmail],
+          set: { status: 'active', revokedAt: null },
+        });
+    }
+  }
+
   private async loadPublicationOrThrow(publicationId: string): Promise<typeof schema.publication.$inferSelect> {
+    const publication = await this.selectPublicationOrThrow(publicationId);
+    /* Every read of a publication routes through here, which is where D19 puts
+       the repair: a row behind the manifest is re-derived and then re-read, so
+       what this returns is never a version the push already superseded. */
+    return (await this.rederivePublications(publication)) ? this.selectPublicationOrThrow(publicationId) : publication;
+  }
+
+  /** One publication row, refused when it is absent or withdrawn. */
+  private async selectPublicationOrThrow(publicationId: string): Promise<typeof schema.publication.$inferSelect> {
     const rows = await this.databaseService.database
       .select()
       .from(schema.publication)

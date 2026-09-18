@@ -7,11 +7,12 @@ import postgres from 'postgres';
 import { getEnvironment } from '#config/environment.config.js';
 import type { Environment } from '#config/environment.config.js';
 import * as schema from '#database/schema.js';
-import { storageTombstone } from '#database/schema.js';
+import { projectGitLfsObject, storageTombstone } from '#database/schema.js';
 import { ObjectStorageService } from '#storage/object-storage.service.js';
 import type { StorageAccount } from '#storage/object-storage.service.js';
 import { repositoryLocator } from '#api/git/store/locator.js';
 import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
+import { dueCondition, lfsRetirementWindowMilliseconds, retireDueLfsObjects } from '#api/git/lfs-retirement.js';
 import { collectZeroCountBlobs } from '#api/git/maintenance/blob-collector.js';
 import { liveOwnerIds, purgeTombstonedTenants } from '#api/git/maintenance/purge.js';
 import { restoreRepository } from '#api/git/maintenance/restore.js';
@@ -39,6 +40,12 @@ const usage = `Usage: revisions-maintenance <command>
       Rebuild a repository in the primary store from the manifest and packs held
       by the restore source (TAU_S3_RESTORE_*), with a fresh incarnation and a
       higher generation. Nothing in the primary is deleted.
+
+  retire-lfs [--dry-run]
+      Retire every LFS object whose unreachable mark is older than the 30-day
+      window and that a fresh walk of its repository still does not reach. One
+      read-only lease per project that has a candidate; --dry-run lists the
+      candidates and hydrates nothing.
 
   collect-blobs [--dry-run]
       Delete publication blobs whose reference count is zero, in one bounded batch.
@@ -91,7 +98,7 @@ const restoreAccount = (): StorageAccount => ({
   },
 });
 
-// oxlint-disable-next-line max-lines-per-function -- one switch over four subcommands; splitting it hides the argument contract
+// oxlint-disable-next-line max-lines-per-function -- one switch over five subcommands; splitting it hides the argument contract
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const command = args[0] ?? '';
@@ -136,6 +143,25 @@ async function main(): Promise<void> {
           report,
         });
         console.log(JSON.stringify(result));
+        break;
+      }
+      case 'retire-lfs': {
+        const now = new Date();
+        if (args.includes('--dry-run')) {
+          /* The same predicate `retireDueLfsObjects` selects on, imported
+             rather than restated: nothing is hydrated and nothing is deleted. */
+          const due = await database
+            .select({ projectId: projectGitLfsObject.projectId, oid: projectGitLfsObject.oid })
+            .from(projectGitLfsObject)
+            .where(dueCondition(now, lfsRetirementWindowMilliseconds));
+          console.log(JSON.stringify(due));
+          break;
+        }
+        const outcomes = await retireDueLfsObjects(
+          { database, store: new S3RepositoryStore(driver), storage: driver },
+          { now },
+        );
+        console.log(JSON.stringify(outcomes));
         break;
       }
       case 'collect-blobs': {

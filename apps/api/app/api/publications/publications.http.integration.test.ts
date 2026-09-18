@@ -238,8 +238,8 @@ describe('Publications HTTP integration', () => {
 
   /*
    * R1: a traversal `projectId` is refused at the boundary, so nothing composes
-   * a repository path from it. The service-side guard lives in
-   * `GitRepositoryService.repositoryPath`, which every caller routes through.
+   * a storage key from it. The service-side guard lives in `repositoryLocator`,
+   * which every lease this project ever gets is hydrated through (NI15).
    */
   it.each([['../../tmp/evil'], ['proj_1/../../escape'], ['']])(
     'POST /v1/publications refuses projectId %j without reaching the service',

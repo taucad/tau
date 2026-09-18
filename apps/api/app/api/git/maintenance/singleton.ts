@@ -24,7 +24,7 @@ export const assertSingletonProcessGroup = (
   const group = environment['FLY_PROCESS_GROUP'];
   if (group === requestProcessGroup) {
     throw new Error(
-      `Refusing to run maintenance in the '${requestProcessGroup}' process group: charter D21 runs purge, blob collection and restore once, in the '${maintenanceProcessGroup}' group.`,
+      `Refusing to run maintenance in the '${requestProcessGroup}' process group: charter D21 runs purge, LFS retirement, blob collection and restore once, in the '${maintenanceProcessGroup}' group.`,
     );
   }
 };

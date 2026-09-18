@@ -239,6 +239,62 @@ describe('filesystem bridge authority on a Node host (X8)', () => {
     }
   });
 
+  /*
+   * The mutating porcelain over the same connection (charter D4/W5): additive
+   * rooted calls, protocol still 1. No production client sends these yet — W12
+   * migrates the Files pane's copy, duplicate, move and preflights off the
+   * authority — so this row is what keeps them honest until it does.
+   */
+  it('serves the mutating porcelain over the rooted view, mask-checked and wire-shaped', async () => {
+    const workspace = await createWorkspace();
+    for (const [path, body] of Object.entries({
+      'main.ts': 'export default 1;\n',
+      'src/helper.ts': 'export const helper = 1;\n',
+      '.git/HEAD': 'ref: refs/heads/main',
+    })) {
+      // oxlint-disable-next-line no-await-in-loop -- Deterministic seed order keeps the fixture readable.
+      await workspace.service.writeFile(`${projectRoot}/${path}`, body);
+    }
+    const host = hostOnNode(workspace);
+    const client = host.connect(projectRoot, 'user');
+
+    try {
+      await client.proxy.ready;
+
+      /* One batch copy of the whole project: the control plane is not carried,
+       * because the view hands the copy its own mask as the entry filter. */
+      await client.proxy.copyTree('', 'backup');
+      await expect(client.proxy.contents('backup')).resolves.toEqual({
+        'main.ts': encoder.encode('export default 1;\n'),
+        'src/helper.ts': encoder.encode('export const helper = 1;\n'),
+      });
+
+      await client.proxy.duplicate('main.ts', 'main.copy.ts');
+      await expect(client.proxy.readFile('main.copy.ts', 'utf8')).resolves.toBe('export default 1;\n');
+
+      await expect(client.proxy.move('main.ts', 'renamed.ts')).resolves.toMatchObject({ type: 'file' });
+      await client.proxy.writeFiles({ 'batch/a.ts': { content: 'a' }, 'batch/b.ts': { content: 'b' } });
+      await expect(client.proxy.readFile('batch/b.ts', 'utf8')).resolves.toBe('b');
+
+      /* A typed refusal survives the wire as a `WorkspaceMutationError`, both
+       * on a preflight and inside a bulk-move report. */
+      await expect(client.proxy.canCreate('renamed.ts', 'file')).resolves.toMatchObject({ code: 'NAME_EXISTS' });
+      await expect(client.proxy.canDelete('absent.ts')).resolves.toMatchObject({ code: 'NOT_FOUND' });
+      const bulk = await client.proxy.bulkMove([
+        { source: 'renamed.ts', target: 'moved.ts' },
+        { source: 'absent.ts', target: 'nowhere.ts' },
+      ]);
+      expect(bulk.moved.map(({ edit }) => edit.target)).toStrictEqual(['moved.ts']);
+      expect(bulk.failed.map(({ error }) => error.code)).toStrictEqual(['NOT_FOUND']);
+
+      /* The mask refuses a control-plane operand before any provider I/O. */
+      await expect(client.proxy.copyTree('.git', 'stolen')).rejects.toThrow();
+    } finally {
+      client.dispose();
+      host.dispose();
+    }
+  });
+
   it('never imports node:worker_threads anywhere in the library', () => {
     const sources = readdirSync(import.meta.dirname, { recursive: true, encoding: 'utf8' }).filter(
       (entry) => entry.endsWith('.ts') && !entry.includes('.test'),

@@ -130,6 +130,24 @@ export type FileSystemProvider = {
 };
 
 /**
+ * Options for a directory creation.
+ * @public
+ */
+export type MkdirOptions = {
+  recursive?: boolean;
+};
+
+/**
+ * Optional metadata for workspace mutations initiated from a specific client
+ * (e.g. a filesystem bridge port). Observer and direct UI paths omit this.
+ *
+ * @public
+ */
+export type WorkspaceMutationContext = {
+  originClientId?: string;
+};
+
+/**
  * Options for streaming file reads.
  * @public
  */

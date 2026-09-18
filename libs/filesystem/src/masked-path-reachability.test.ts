@@ -139,7 +139,12 @@ describe('masked path reachability through the authority-global surface', () => 
     expect(read).toContain('src/main.ts');
   });
 
-  // W5 (mask-checked copyTree on the rooted surface) flips this to `it`.
+  /*
+   * W5 gave the rooted surface a mask-checked `copyTree` (the two pins below);
+   * this row is the *authority* method the Files pane still reaches through
+   * `client.copyDirectory`, and W12 closes that last bypass by routing the
+   * gesture to the view.
+   */
   it.fails('should not copy control-plane bytes into a duplicated project', async () => {
     await service.copyDirectory(projectRoute, duplicateRoute);
 
@@ -148,5 +153,29 @@ describe('masked path reachability through the authority-global surface', () => 
     const copied = await service.getDirectoryContents(duplicateRoute);
 
     expect(hiddenAmong(Object.keys(copied))).toEqual([]);
+  });
+
+  it('should not copy control-plane bytes through the rooted surface a consumer reaches', async () => {
+    await projectView().copyTree!('', 'backup');
+
+    const copied = Object.keys(await service.getDirectoryContents(`${projectRoute}/backup`));
+
+    expect(hiddenAmong(copied)).toEqual([]);
+    /* And the project's own bytes did arrive, so an empty copy cannot pass. */
+    expect(copied).toContain('src/main.ts');
+  });
+
+  it('should classify a mid-tree copy against the project root, not the copy root', async () => {
+    /* `src/.git/HEAD` is an ordinary authored file: only `.git` directly under
+     * the project is the control plane. A filter that forgot to join the copy
+     * root would drop this row. */
+    await service.writeFile(`${projectRoute}/src/.git/HEAD`, 'not the control plane');
+
+    await projectView().copyTree!('src', 'src-copy');
+
+    const copied = Object.keys(await service.getDirectoryContents(`${projectRoute}/src-copy`));
+
+    expect(copied).toContain('.git/HEAD');
+    expect(copied).toContain('main.ts');
   });
 });

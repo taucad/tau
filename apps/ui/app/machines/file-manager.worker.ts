@@ -279,7 +279,10 @@ exposeFileSystem(fileService, {
     /*
      * The read content operations run here, over the view the connection asked
      * for (charter D2); `search` and `statTree` are already on it, answered from
-     * the root's index and masked by the view itself (D3).
+     * the root's index and masked by the view itself (D3), and so is the
+     * mutating porcelain — `copyTree`, `duplicate`, `move`, `bulkMove`,
+     * `writeFiles` and the four preflights — which the pipeline executes as one
+     * batch and the view mask-checks before any provider I/O (D4).
      */
     return withReadContentOps(view, tauPathPolicy);
   },

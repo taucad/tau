@@ -35,6 +35,8 @@ import type {
   WatchRequest,
 } from '#types.js';
 import type { TreeSearchOptions } from '#tree-index.js';
+import type { RootedPorcelain } from '#rooted-views.js';
+import type { WorkspaceMutationError } from '#workspace-errors.js';
 
 /** Who a view is composed for. The set of paths is the same; the mask is not. @public */
 export type ComposedViewConsumer = 'agent' | 'user';
@@ -107,7 +109,7 @@ type IndexedFileSystem = {
  * @public
  */
 export type ComposedViewCheckout = Readonly<{
-  filesystem: FileSystemProvider & Partial<WatchableFileSystem> & Partial<IndexedFileSystem>;
+  filesystem: FileSystemProvider & Partial<WatchableFileSystem> & Partial<IndexedFileSystem> & Partial<RootedPorcelain>;
   /** Stable checkout id, reported as the `identity` of project entries. */
   id?: string;
 }>;
@@ -129,7 +131,8 @@ export type ComposedViewOptions = Readonly<{
 /** A rooted filesystem with provenance. @public */
 export type ComposedView = FileSystemProvider &
   Partial<WatchableFileSystem> &
-  Partial<IndexedFileSystem> & {
+  Partial<IndexedFileSystem> &
+  Partial<RootedPorcelain> & {
     /** What this view knows about one checkout-relative path. */
     provenance(path: string): Promise<FileProvenance>;
     /** One directory's immediate children with stat metadata and provenance. */
@@ -454,13 +457,113 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
   };
 
   const mutate = async <T>(path: string, apply: (target: string) => Promise<T>): Promise<T> => {
-    const target = writablePath(canonical(path));
-    const route = await routeFor(target);
-    if (route.kind === 'overlay') {
-      refuseOverlay(target);
-    }
-    return apply(target);
+    const [target] = await writableTargets([path]);
+    return apply(target!);
   };
+
+  /**
+   * Every path a batch would write, refused before the batch begins.
+   *
+   * The porcelain below is one operation over many paths, so the mask has to
+   * answer for all of them first: a batch that refused halfway would have
+   * already written the paths before it (Rule 5a's "preflight before the first
+   * mutation").
+   */
+  const writableTargets = async (paths: readonly string[]): Promise<string[]> => {
+    const targets = paths.map((path) => writablePath(canonical(path)));
+    const routes = await Promise.all(targets.map(async (target) => routeFor(target)));
+    for (const [index, route] of routes.entries()) {
+      if (route.kind === 'overlay') {
+        refuseOverlay(targets[index]!);
+      }
+    }
+    return targets;
+  };
+
+  /**
+   * The mask a copy descends with, asked about project-relative spellings.
+   *
+   * A copy root can be any directory, so the source is joined back on before
+   * the policy is asked: `src/.git` is an ordinary directory, `.git` under the
+   * project root is the control plane.
+   */
+  const porcelain = (base: Partial<RootedPorcelain>): Partial<RootedPorcelain> => ({
+    ...(base.copyTree === undefined
+      ? {}
+      : {
+          copyTree: async (source: string, target: string, options?: { admits?: TreeSearchOptions['admits'] }) => {
+            const from = readablePath(canonical(source));
+            const [to] = await writableTargets([target]);
+            return base.copyTree!(from, to!, { admits: admitsVisible(from, options?.admits) });
+          },
+        }),
+    ...(base.duplicate === undefined
+      ? {}
+      : {
+          duplicate: async (source: string, target: string) => {
+            const from = readablePath(canonical(source));
+            const [to] = await writableTargets([target]);
+            return base.duplicate!(from, to!);
+          },
+        }),
+    ...(base.move === undefined
+      ? {}
+      : {
+          move: async (source: string, target: string): Promise<FileStat> => {
+            const [from, to] = await writableTargets([source, target]);
+            return base.move!(from!, to!);
+          },
+        }),
+    ...(base.bulkMove === undefined
+      ? {}
+      : {
+          bulkMove: async (edits: ReadonlyArray<{ source: string; target: string }>) => {
+            await writableTargets(edits.flatMap(({ source, target }) => [source, target]));
+            return base.bulkMove!(edits);
+          },
+        }),
+    ...(base.writeFiles === undefined
+      ? {}
+      : {
+          writeFiles: async (files: Record<string, { content: Uint8Array<ArrayBuffer> | string }>) => {
+            await writableTargets(Object.keys(files));
+            return base.writeFiles!(files);
+          },
+        }),
+    ...(base.canMove === undefined
+      ? {}
+      : {
+          canMove: async (source: string, target: string): Promise<true | WorkspaceMutationError> => {
+            const [from, to] = await writableTargets([source, target]);
+            return base.canMove!(from!, to!);
+          },
+        }),
+    ...(base.canRename === undefined
+      ? {}
+      : {
+          canRename: async (source: string, newName: string): Promise<true | WorkspaceMutationError> => {
+            const from = canonical(source);
+            await writableTargets([from, `${from.slice(0, from.lastIndexOf('/') + 1)}${newName}`]);
+            return base.canRename!(from, newName);
+          },
+        }),
+    ...(base.canCreate === undefined
+      ? {}
+      : {
+          canCreate: async (path: string, kind: 'file' | 'directory'): Promise<true | WorkspaceMutationError> => {
+            const [target] = await writableTargets([path]);
+            return base.canCreate!(target!, kind);
+          },
+        }),
+    ...(base.canDelete === undefined
+      ? {}
+      : {
+          canDelete: async (path: string): Promise<true | WorkspaceMutationError> => {
+            const [target] = await writableTargets([path]);
+            return base.canDelete!(target!);
+          },
+        }),
+  });
 
   return {
     id: `composed-view:${options.consumer}`,
@@ -590,5 +693,11 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
             return base.statTree!(target, { admits: admitsVisible(target, statOptions?.admits) });
           },
         }),
+    /*
+     * The mutating porcelain is a batch in the pipeline below, not N port
+     * writes (charter D4), so the mask answers for every operand of one
+     * operation before any of it runs.
+     */
+    ...porcelain(base),
   };
 };

@@ -396,6 +396,37 @@ const serializeWorkspaceMutationError = (error: WorkspaceMutationError): Workspa
 const serializeMutationResult = (result: true | WorkspaceMutationError): true | WorkspaceMutationError =>
   isWorkspaceMutationError(result) ? serializeWorkspaceMutationError(result) : result;
 
+/**
+ * Wire-shape the porcelain results a rooted connection now answers with.
+ *
+ * {@link bindMutationContextForPort} does this for the workspace port, but a
+ * rooted port must not have a mutation context appended to its calls: the
+ * origin is baked into the view when it is captured. Only the serialization is
+ * shared, so only the serialization is applied here.
+ *
+ * @param handlers - The rooted handler object the host composed.
+ * @returns The same handlers, with any preflight or bulk-move result serialized.
+ */
+const serializeRootedResults = (handlers: StringKeyedObject): StringKeyedObject => {
+  const served = handlers as Record<string, unknown>;
+  const overrides: Record<string, unknown> = {};
+  for (const name of ['canMove', 'canRename', 'canCreate', 'canDelete']) {
+    const preflight = served[name];
+    if (typeof preflight === 'function') {
+      overrides[name] = async (...args: readonly unknown[]): Promise<true | WorkspaceMutationError> =>
+        serializeMutationResult(
+          await (preflight as (...callArgs: readonly unknown[]) => Promise<true | WorkspaceMutationError>)(...args),
+        );
+    }
+  }
+  if (typeof served['bulkMove'] === 'function') {
+    const bulkMove = served['bulkMove'] as (...callArgs: readonly unknown[]) => Promise<BulkMoveResult>;
+    overrides['bulkMove'] = async (...args: readonly unknown[]): Promise<BulkMoveResult> =>
+      serializeBulkMoveResult(await bulkMove(...args));
+  }
+  return Object.keys(overrides).length === 0 ? handlers : { ...handlers, ...overrides };
+};
+
 const serializeBulkMoveResult = (result: BulkMoveResult): BulkMoveResult => ({
   moved: result.moved,
   failed: result.failed.map(({ edit, error }) => ({
@@ -810,7 +841,10 @@ function exposeFileSystemHandlers(
         const rootedHandlers = options?.handlerForRoot?.(requestedRoot, mutationContext, requestedConsumer);
         handlersAvailable = rootedHandlers !== undefined;
         unavailableError = rootedHandlers === undefined ? new RootedFileSystemError('ROOT_UNAVAILABLE') : undefined;
-        portHandlers = rootedHandlers ?? createUnavailableHandlers(unavailableError!);
+        portHandlers =
+          rootedHandlers === undefined
+            ? createUnavailableHandlers(unavailableError!)
+            : serializeRootedResults(rootedHandlers);
       } catch (error) {
         handlersAvailable = false;
         unavailableError =

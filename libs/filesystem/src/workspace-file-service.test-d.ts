@@ -11,7 +11,8 @@
  */
 
 import { describe, expectTypeOf, it } from 'vitest';
-import type { RootedFileSystem, WorkspaceFileService } from '#workspace-file-service.js';
+import type { WorkspaceFileService } from '#workspace-file-service.js';
+import type { RootedFileSystem } from '#rooted-views.js';
 import type { WorkspaceScope } from '#mount-table.js';
 import type { FileStatEntry } from '@taucad/types';
 

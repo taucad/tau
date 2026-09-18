@@ -73,18 +73,28 @@ const requestedResumes = new Set<string>();
 const settlementTimeout = 30_000;
 
 /**
- * Await a settlement, or throw once the bound expires.
+ * Await a promise only a peer can settle, or throw once the bound expires.
+ *
+ * Also the composer's bound, where the peer is the chat row that names the
+ * project a draft is saved in rather than a prior stream.
+ * @see deferredRecordStore
  *
  * @param settling - The settlement to wait out.
  * @param reason - What the user is told when it never lands.
+ * @param code - The {@link AgentHostWorkerError} code to carry; defaults to this file's.
+ * @returns What `settling` resolved with.
  */
-const awaitSettlement = async (settling: Promise<void>, reason: string): Promise<void> => {
+export const awaitSettlement = async <Value>(
+  settling: Promise<Value>,
+  reason: string,
+  code = 'BROWSER_HOST_SETTLEMENT_TIMEOUT',
+): Promise<Value> => {
   const settlementExpiry = Promise.withResolvers<never>();
   const timer = globalThis.setTimeout(() => {
-    settlementExpiry.reject(new AgentHostWorkerError('BROWSER_HOST_SETTLEMENT_TIMEOUT', reason));
+    settlementExpiry.reject(new AgentHostWorkerError(code, reason));
   }, settlementTimeout);
   try {
-    await Promise.race([settling, settlementExpiry.promise]);
+    return await Promise.race([settling, settlementExpiry.promise]);
   } finally {
     globalThis.clearTimeout(timer);
   }

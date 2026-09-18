@@ -10,6 +10,7 @@ import type { MyUIMessage } from '@taucad/chat';
 import type { composerRecordMachine } from '#machines/composer-record.machine.js';
 import type { ComposerRecordStore } from '#db/composer-record-store.js';
 import type { AttachmentStore } from '#db/attachment-store.js';
+import { awaitSettlement } from '#chat-clients/_internal/browser-agent-host-transport.js';
 import { attachmentUrl, isAttachmentUrl } from '#utils/attachment.utils.js';
 import type { AttachmentName } from '#utils/attachment.utils.js';
 
@@ -53,16 +54,30 @@ export type UnreadRecord = {
  * draft lives in memory without a failure to report. Attachment bytes still
  * fail, because a draft cannot hold an attachment it has nowhere to store.
  *
+ * Nothing this store does can outlast {@link awaitSettlement}'s bound. `bound`
+ * is settled by a peer — the chat row that names the owning project, behind a
+ * released predecessor's drain — and an unbounded wait on it left the record
+ * machine in `loading` for the life of the page: the saved draft never came
+ * back, every keystroke queued behind a write that never started, and not one
+ * of them was ever reported. Past the bound the read fails like any other
+ * unreadable record, so the composer turns usable and says so (D7).
+ *
  * @param bound - Settles with the chat's binding, or `undefined` for none.
  * @returns A store that delegates to the bound one.
  */
 export const deferredRecordStore = (bound: Promise<ComposerBinding | undefined>): ComposerRecordStore => {
+  const binding = async (): Promise<ComposerBinding | undefined> =>
+    awaitSettlement(
+      bound,
+      'This chat never found the project its draft is saved in. Reload the page and try again.',
+      'COMPOSER_BINDING_TIMEOUT',
+    );
   const record = async (): Promise<ComposerRecordStore> => {
-    const binding = await bound;
-    if (binding === undefined) {
+    const owner = await binding();
+    if (owner === undefined) {
       throw new Error('This chat belongs to no project, so its composer is not saved.');
     }
-    return binding.record;
+    return owner.record;
   };
   const attachments = async (): Promise<AttachmentStore> => {
     const store = await record();
@@ -70,16 +85,16 @@ export const deferredRecordStore = (bound: Promise<ComposerBinding | undefined>)
   };
   return {
     async read() {
-      const binding = await bound;
-      return binding === undefined ? { status: 'absent' } : binding.record.read();
+      const owner = await binding();
+      return owner === undefined ? { status: 'absent' } : owner.record.read();
     },
     async patch(fields) {
-      const binding = await bound;
-      await binding?.record.patch(fields);
+      const owner = await binding();
+      await owner?.record.patch(fields);
     },
     async remove() {
-      const binding = await bound;
-      await binding?.record.remove();
+      const owner = await binding();
+      await owner?.record.remove();
     },
     attachments: {
       async put(bytes, mediaType, filename) {

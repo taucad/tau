@@ -69,6 +69,7 @@ import {
   getBoundDurableChatRunId,
 } from '#chat-clients/_internal/shared-chat-transport.js';
 import {
+  awaitSettlement,
   getHostTurnSettlement,
   isBrowserAgentHostPlaced,
   isBrowserAgentHostRunResumable,
@@ -1094,7 +1095,17 @@ export class ChatSessionStore {
     chatId: string,
     value: boolean,
   ): Promise<void> {
-    const binding = await composer;
+    let binding: ComposerBinding | undefined;
+    try {
+      binding = await awaitSettlement(
+        composer,
+        'This chat never found the project its unread mark belongs to.',
+        'COMPOSER_BINDING_TIMEOUT',
+      );
+    } catch {
+      // An unread mark nobody can write is not worth a rejection at its fire-and-forget callers.
+      return;
+    }
     if (binding !== undefined) {
       this.#setUnread(binding.projectId, chatId, value);
     }
@@ -1425,7 +1436,11 @@ export class ChatSessionStore {
       }
     };
     const persistRestoredDraft = async (): Promise<void> => {
-      const binding = await composer.promise;
+      const binding = await awaitSettlement(
+        composer.promise,
+        'This chat never found the project its draft is saved in. Reload the page and try again.',
+        'COMPOSER_BINDING_TIMEOUT',
+      );
       if (binding === undefined) {
         return;
       }

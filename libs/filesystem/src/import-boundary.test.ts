@@ -20,6 +20,133 @@ describe('@taucad/filesystem import boundary', () => {
   });
 });
 
+/**
+ * Layer-1 mechanism-core boundary for the filesystem north star (W0).
+ *
+ * Each rule names one dependency the mechanism core must not carry. Today's
+ * violators are listed explicitly so the suite is green while the program runs;
+ * the list may only shrink, and it shrinks truthfully because a stale entry
+ * fails just as loudly as an unlisted violation.
+ */
+
+/** Code with `//` and block comments removed, so a JSDoc example is not a violation. */
+const withoutComments = (source: string): string =>
+  source.replaceAll(/\/\*[\s\S]*?\*\//gu, '').replaceAll(/(^|[^:])\/\/.*$/gmu, '$1');
+
+type BoundaryRule = {
+  /** Allow-list key. */
+  readonly id: string;
+  /** What the rule forbids, for the failure message. */
+  readonly forbids: string;
+  /** Files the rule is checked against, by path relative to `src`. */
+  readonly appliesTo: (relativePath: string) => boolean;
+  /** Matches the forbidden construct in comment-stripped code. */
+  readonly pattern: RegExp;
+};
+
+const boundaryRules: readonly BoundaryRule[] = [
+  {
+    id: 'path-registry',
+    forbids: 'importing the path registry (D6: `PathPolicy` is injected into L4 and capture)',
+    appliesTo: (path) => path !== 'path-registry.ts',
+    pattern: /['"][^'"]*path-registry[^'"]*['"]/u,
+  },
+  {
+    id: 'archive-format',
+    forbids: 'importing `jszip` (D2/D15: ZIP encoding lives in the `archive` content operation)',
+    appliesTo: () => true,
+    pattern: /['"]jszip['"]/u,
+  },
+  {
+    id: 'project-manifest',
+    forbids: 'naming `ProjectManifest` (D5: manifest I/O belongs to `project-directories.ts`)',
+    appliesTo: (path) => path !== 'project-directories.ts',
+    pattern: /\bProjectManifest\b/u,
+  },
+  {
+    id: 'revision-algorithms',
+    forbids: 'importing a revision algorithm module (D9: they move to `@taucad/revisions`)',
+    appliesTo: () => true,
+    pattern: /['"][^'"]*revision-(?:merge|tree|metadata)[^'"]*['"]/u,
+  },
+  {
+    id: 'backend-identity',
+    forbids: 'comparing backend identity (D13: backends declare capabilities instead)',
+    appliesTo: (path) => !path.startsWith('backend/'),
+    pattern: /\bbackend\s*[!=]==\s*['"]/u,
+  },
+  {
+    id: 'route-literals',
+    forbids: 'spelling a product route (D10: `project-routes.ts` is the only speller)',
+    appliesTo: (path) => path !== 'project-routes.ts',
+    pattern: /['"`]\/(?:projects|checkouts|previews|node_modules)\b/u,
+  },
+];
+
+/**
+ * Today's violations, each cleared by the named work package.
+ *
+ * | Work package | Clears |
+ * | --- | --- |
+ * | W3 | `archive-format` |
+ * | W6 | `route-literals` |
+ * | W7 | `project-manifest` |
+ * | W8 | `revision-algorithms` |
+ * | W9 | `backend-identity` |
+ * | W10 | `path-registry` |
+ */
+const allowList: ReadonlyArray<readonly [file: string, rule: string, workPackage: string]> = [
+  ['composed-view.ts', 'path-registry', 'W10'],
+  ['workspace-file-service.ts', 'path-registry', 'W10'],
+  ['workspace-file-service.ts', 'archive-format', 'W3'],
+  ['mount-table.ts', 'project-manifest', 'W7'],
+  ['workspace-file-service.ts', 'project-manifest', 'W7'],
+  ['backend/node/client.ts', 'revision-algorithms', 'W8'],
+  ['backend/node/protocol.ts', 'revision-algorithms', 'W8'],
+  ['backend/node/provider.ts', 'revision-algorithms', 'W8'],
+  ['index.ts', 'revision-algorithms', 'W8'],
+  ['revision-capture.ts', 'revision-algorithms', 'W8'],
+  ['revision-merge.ts', 'revision-algorithms', 'W8'],
+  ['revisions/index.ts', 'revision-algorithms', 'W8'],
+  ['types.ts', 'revision-algorithms', 'W8'],
+  ['workspace-file-service.ts', 'backend-identity', 'W9'],
+  ['cross-tab-coordinator.ts', 'route-literals', 'W6'],
+  ['workspace-file-service.ts', 'route-literals', 'W6'],
+];
+
+describe('@taucad/filesystem layer-1 core boundary', () => {
+  const base = new URL('.', import.meta.url).pathname;
+  const violations = sourceFiles(base)
+    .map((file) => ({ file: file.slice(base.length), code: withoutComments(readFileSync(file, 'utf8')) }))
+    .filter(({ file }) => !file.endsWith('.test.ts') && !file.endsWith('.test-d.ts'))
+    .flatMap(({ file, code }) =>
+      boundaryRules
+        .filter((rule) => rule.appliesTo(file) && rule.pattern.test(code))
+        .map((rule) => `${file} — ${rule.forbids}`),
+    )
+    .sort();
+
+  const allowed = allowList.map(([file, rule, workPackage]) => {
+    const { forbids } = boundaryRules.find((candidate) => candidate.id === rule)!;
+    return { entry: `${file} — ${forbids}`, workPackage };
+  });
+
+  it('should carry no forbidden core dependency outside the allow-list', () => {
+    const allowedEntries = new Set(allowed.map(({ entry }) => entry));
+
+    expect(violations.filter((violation) => !allowedEntries.has(violation))).toEqual([]);
+  });
+
+  it('should carry no allow-list entry that has already been cleared', () => {
+    const current = new Set(violations);
+    const stale = allowed
+      .filter(({ entry }) => !current.has(entry))
+      .map(({ entry, workPackage }) => `${entry} [${workPackage}]`);
+
+    expect(stale).toEqual([]);
+  });
+});
+
 const sourceDirectory = new URL('.', import.meta.url).pathname;
 
 /** Resolve one `#…` or relative specifier to its source file, or `undefined` when external. */

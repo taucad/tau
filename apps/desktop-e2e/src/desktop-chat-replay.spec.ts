@@ -267,10 +267,12 @@ test('renders and replays a legacy log that inlines base64 image bytes', async (
      * (`packages/agent-host/src/node.ts:70-107`); copied along, the legacy chat
      * starts life holding a lock no one will ever release — its attach refuses
      * with `WRITER_LOCKED` ("already has an active Node writer") and no turn
-     * ever reaches the gateway. */
+     * ever reaches the gateway. The store also writes `chat.json` through a
+     * `.chat.json.<pid>.<uuid>.tmp` rename, and a copy that lists the temp file
+     * just before the rename lands throws ENOENT on it, so skip those too. */
     cpSync(join(chatsRoot, chatId), join(chatsRoot, legacyChatId), {
       recursive: true,
-      filter: (source) => !source.endsWith('.lock'),
+      filter: (source) => !source.endsWith('.lock') && !source.endsWith('.tmp'),
     });
     const legacyLog = join(chatsRoot, legacyChatId, 'events.jsonl');
     let inlined = false;

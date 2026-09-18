@@ -10,6 +10,7 @@ import { GitController } from '#api/git/git.controller.js';
 import { GitLfsService } from '#api/git/git-lfs.service.js';
 import { GitProxyController } from '#api/git/git-proxy.controller.js';
 import { GitRepositoryService } from '#api/git/git.service.js';
+import { S3RepositoryStore } from '#api/git/store/s3-repository-store.js';
 
 /**
  * The Tau Hosted Remote. StorageModule is `@Global()`, so `ObjectStorageService`
@@ -18,8 +19,8 @@ import { GitRepositoryService } from '#api/git/git.service.js';
 @Module({
   imports: [DatabaseModule],
   controllers: [GitController, GitProxyController],
-  providers: [GitRepositoryService, GitLfsService, GitBackupService],
-  exports: [GitRepositoryService],
+  providers: [GitRepositoryService, GitLfsService, GitBackupService, S3RepositoryStore],
+  exports: [GitRepositoryService, S3RepositoryStore],
 })
 export class GitModule implements NestModule, OnModuleInit {
   public constructor(private readonly adapterHost: HttpAdapterHost) {}

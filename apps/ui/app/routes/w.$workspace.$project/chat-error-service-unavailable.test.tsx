@@ -42,14 +42,15 @@ describe('ChatErrorServiceUnavailable', () => {
     expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
   });
 
-  it('should call continueChat when Try again is clicked', async () => {
+  it('should resume the paused turn and say that it is saved', async () => {
     const user = userEvent.setup();
     render(<ChatErrorServiceUnavailable />);
 
-    const tryAgain = screen.getByRole('button', { name: /try again/i });
-    expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument();
+    expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
+    expect(screen.getByText('Everything up to here is saved.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /try again/i })).not.toBeInTheDocument();
 
-    await user.click(tryAgain);
+    await user.click(screen.getByRole('button', { name: 'Resume' }));
 
     expect(continueChat).toHaveBeenCalledTimes(1);
     expect(regenerate).not.toHaveBeenCalled();

@@ -1,0 +1,103 @@
+import { memo, useState } from 'react';
+import type React from 'react';
+import type { LucideIcon } from 'lucide-react';
+import { ChevronRight, CircleAlert, Play, Repeat } from 'lucide-react';
+import { Button } from '@taucad/ui/components/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
+import { cn } from '@taucad/ui/utils/cn';
+import { CodeViewer } from '#components/code/code-viewer.js';
+import { ChatModelSelector } from '#components/chat/chat-model-selector.js';
+import { useChatActions } from '#hooks/use-chat.js';
+import { ChatErrorCard, turnSavedSentence } from '#routes/w.$workspace.$project/chat-error-card.js';
+
+type ChatErrorPausedTurnProps = {
+  readonly className?: string;
+  /** The provider's own sentence for what went wrong. */
+  readonly reason: string;
+  /** Overrides the paused-turn heading; the refusal (S6) names itself. */
+  readonly title?: string;
+  readonly icon?: LucideIcon;
+  /** What to change before resuming, said on the same line as the consequence. */
+  readonly guidance?: string;
+  /** Offer the composer's model picker ahead of Resume (S6). */
+  readonly canSwitchModel?: boolean;
+  /** The raw failure payload, kept behind a disclosure below the copy. */
+  readonly raw?: string;
+};
+
+/**
+ * A model call that failed with the turn intact.
+ *
+ * Every coded model-call failure reads the same way: the provider's words, the
+ * promise that the turn is kept, and one **Resume**, which re-issues that one
+ * call with every settled tool result still in the history. The verb states the
+ * behaviour, so nothing here offers *Try again* — that verb belongs to the turn
+ * that never started.
+ */
+export const ChatErrorPausedTurn = memo(function ({
+  className,
+  reason,
+  title = 'Tau paused this turn',
+  icon = CircleAlert,
+  guidance,
+  canSwitchModel = false,
+  raw,
+}: ChatErrorPausedTurnProps): React.JSX.Element {
+  const { continueChat } = useChatActions();
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+
+  return (
+    <ChatErrorCard
+      tone='warning'
+      icon={icon}
+      className={className}
+      title={title}
+      description={
+        <>
+          <p>{reason}</p>
+          <p>{guidance === undefined ? turnSavedSentence : `${turnSavedSentence} ${guidance}`}</p>
+        </>
+      }
+      actions={
+        <>
+          {canSwitchModel ? (
+            /* The composer's picker is the owner, opened here as the credits
+             * card opens it, without claiming its shortcut. */
+            <ChatModelSelector enableShortcut={false} popoverProperties={{ align: 'end' }}>
+              {() => (
+                <Button variant='outline' size='sm'>
+                  <Repeat className='size-3.5' />
+                  Switch model
+                </Button>
+              )}
+            </ChatModelSelector>
+          ) : null}
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={() => {
+              continueChat();
+            }}
+          >
+            <Play className='size-3.5' />
+            Resume
+          </Button>
+        </>
+      }
+    >
+      {raw === undefined ? null : (
+        <Collapsible open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
+          <CollapsibleTrigger asChild>
+            <Button variant='ghost' size='xs' className='-ml-1 text-muted-foreground'>
+              <ChevronRight className={cn('size-3 transition-transform', isDetailsOpen && 'rotate-90')} />
+              Details
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className='overflow-x-auto'>
+            <CodeViewer text={raw} language='json' className='mt-1 text-xs whitespace-pre-wrap' />
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+    </ChatErrorCard>
+  );
+});

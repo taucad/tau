@@ -1,14 +1,14 @@
 import { memo } from 'react';
 import type React from 'react';
-import { RefreshCcw, WifiOff } from 'lucide-react';
+import { Play, WifiOff } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { useChatActions } from '#hooks/use-chat.js';
-import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
+import { ChatErrorCard, turnSavedSentence } from '#routes/w.$workspace.$project/chat-error-card.js';
 
 export const ChatErrorServiceUnavailable = memo(function ({
   className,
   title = 'Unable to reach Tau',
-  description = "We couldn't connect to the Tau service. This could be due to a network issue or the service may be temporarily unavailable. Please check your connection and try again.",
+  description = 'Check your connection.',
 }: {
   readonly className?: string;
   readonly title?: string;
@@ -22,7 +22,12 @@ export const ChatErrorServiceUnavailable = memo(function ({
       icon={WifiOff}
       className={className}
       title={title}
-      description={description}
+      description={
+        <>
+          <p>{description}</p>
+          <p>{turnSavedSentence}</p>
+        </>
+      }
       actions={
         <Button
           variant='outline'
@@ -33,8 +38,8 @@ export const ChatErrorServiceUnavailable = memo(function ({
             continueChat();
           }}
         >
-          <RefreshCcw className='size-3.5' />
-          Try again
+          <Play className='size-3.5' />
+          Resume
         </Button>
       }
     />

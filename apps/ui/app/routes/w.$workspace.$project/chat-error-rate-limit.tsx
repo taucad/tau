@@ -1,14 +1,14 @@
 import { memo } from 'react';
 import type React from 'react';
-import { Clock, RefreshCcw } from 'lucide-react';
+import { Clock, Play } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { useChatActions } from '#hooks/use-chat.js';
-import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
+import { ChatErrorCard, turnSavedSentence } from '#routes/w.$workspace.$project/chat-error-card.js';
 
 export const ChatErrorRateLimit = memo(function ({
   className,
-  title = 'Rate limit exceeded',
-  description = 'Too many requests. Please wait a moment before trying again.',
+  title = 'Rate limit reached',
+  description = 'The model provider asked Tau to wait.',
   retryAfterSeconds,
 }: {
   readonly className?: string;
@@ -30,9 +30,10 @@ export const ChatErrorRateLimit = memo(function ({
           <p>{description}</p>
           {retryAfterSeconds === undefined ? undefined : (
             <p>
-              Try again in {retryAfterSeconds} {retryAfterSeconds === 1 ? 'second' : 'seconds'}.
+              Resume in {retryAfterSeconds} {retryAfterSeconds === 1 ? 'second' : 'seconds'}.
             </p>
           )}
+          <p>{turnSavedSentence}</p>
         </>
       }
       actions={
@@ -40,11 +41,14 @@ export const ChatErrorRateLimit = memo(function ({
           variant='outline'
           size='sm'
           onClick={() => {
+            // The wait interrupted a turn the host still holds whole, so this
+            // re-issues the one refused call rather than rewinding to the
+            // prompt and paying for the tool work again.
             continueChat();
           }}
         >
-          <RefreshCcw className='size-3.5' />
-          Try again
+          <Play className='size-3.5' />
+          Resume
         </Button>
       }
     />

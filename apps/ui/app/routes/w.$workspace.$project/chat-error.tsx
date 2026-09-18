@@ -1,6 +1,6 @@
 import { memo, useState } from 'react';
 import type React from 'react';
-import { ChevronRight, RefreshCcw } from 'lucide-react';
+import { Bot, ChevronRight, CircleAlert, RefreshCcw, WifiOff } from 'lucide-react';
 import { errorCategory } from '@taucad/types/constants';
 import type { ChatError as NormalizedChatError } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
@@ -9,7 +9,10 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/
 import { CodeViewer } from '#components/code/code-viewer.js';
 import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
 import { cn } from '@taucad/ui/utils/cn';
-import { parseErrorForPersistence } from '#utils/error.utils.js';
+import { chatTurnNotStartedCode, parseErrorForPersistence } from '#utils/error.utils.js';
+import { ChatErrorCard } from '#routes/w.$workspace.$project/chat-error-card.js';
+import { ChatErrorPausedTurn } from '#routes/w.$workspace.$project/chat-error-paused-turn.js';
+import { ChatErrorTooLong } from '#routes/w.$workspace.$project/chat-error-too-long.js';
 import { ChatErrorUnauthorized } from '#routes/w.$workspace.$project/chat-error-unauthorized.js';
 import { ChatErrorServiceUnavailable } from '#routes/w.$workspace.$project/chat-error-service-unavailable.js';
 import { ChatErrorCredits } from '#routes/w.$workspace.$project/chat-error-credits.js';
@@ -18,6 +21,26 @@ import { ChatErrorTool } from '#routes/w.$workspace.$project/chat-error-tool.js'
 import { ChatErrorAgentStop } from '#routes/w.$workspace.$project/chat-error-agent-stop.js';
 import { ChatErrorProviderAccount } from '#routes/w.$workspace.$project/chat-error-provider-account.js';
 import { externalAgentStopCodes, externalAgentStopSchema } from '@taucad/agent-host';
+
+/**
+ * Model-call failures that leave the turn whole.
+ *
+ * Every one of these is raised after the run was admitted and before the
+ * provider's reply landed, so no tool ran on the failed call and the history
+ * the host would resume from is complete. The category cannot tell them apart:
+ * the masked in-stream failure arrives on an HTTP 200, which reads as
+ * `generic`, and a 502 reads as `server`.
+ */
+const pausedTurnCodes = new Set([
+  'NETWORK_ERROR',
+  'PROVIDER_UNAVAILABLE',
+  'MALFORMED_RESPONSE',
+  'UPSTREAM_REJECTED',
+  'WORKER_CRASHED',
+]);
+
+/** Refusals only a new conversation clears. */
+const chatTooLongCodes = new Set(['NO_EVICTABLE_HISTORY', 'CIRCUIT_BREAKER_OPEN']);
 
 /**
  * Attempts to format a string as pretty-printed JSON.
@@ -135,6 +158,81 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
         className={cn('min-w-0', className)}
         description={parsedError.message}
         details={parsedError.details}
+      />
+    );
+  }
+
+  // A coded failure names its own recovery; the category cannot, because the
+  // status a failure carries (200 for an in-stream provider failure, none at
+  // all for a host refusal) says nothing about whether the turn survived it.
+  const { code } = parsedError;
+  const rawDetail = parsedError.raw ? tryFormatJson(parsedError.raw) : undefined;
+  if (code !== undefined && pausedTurnCodes.has(code)) {
+    return (
+      <ChatErrorPausedTurn
+        className={cn('min-w-0', className)}
+        reason={parsedError.message}
+        icon={code === 'PROVIDER_UNAVAILABLE' || code === 'UPSTREAM_REJECTED' ? WifiOff : CircleAlert}
+        {...(rawDetail === undefined ? {} : { raw: rawDetail })}
+      />
+    );
+  }
+
+  // A refusal of the request itself resumes once the model or its settings
+  // change; re-issuing it unchanged meets the same refusal, which is honest and
+  // costs nothing.
+  if (code === 'INVALID_REQUEST') {
+    return (
+      <ChatErrorPausedTurn
+        className={cn('min-w-0', className)}
+        title='The model refused this request'
+        reason={parsedError.message}
+        guidance='Change the model or its settings, then resume.'
+        canSwitchModel
+        {...(rawDetail === undefined ? {} : { raw: rawDetail })}
+      />
+    );
+  }
+
+  if (code !== undefined && chatTooLongCodes.has(code)) {
+    return <ChatErrorTooLong className={cn('min-w-0', className)} />;
+  }
+
+  // Another tab holds this chat's log. Taking it back is a leadership protocol,
+  // not an error action (ruling Q6), and reloading already follows that tab.
+  if (code === 'LEADERSHIP_LOST') {
+    return (
+      <ChatErrorCard
+        className={cn('min-w-0', className)}
+        tone='neutral'
+        icon={Bot}
+        title='This chat continued in another tab'
+        description='Keep working there. Reload this page to follow along here.'
+      />
+    );
+  }
+
+  // The one restart that loses nothing: admission refused before a run existed.
+  if (code === chatTurnNotStartedCode) {
+    return (
+      <ChatErrorCard
+        className={cn('min-w-0', className)}
+        tone='destructive'
+        icon={CircleAlert}
+        title='Tau could not start this turn'
+        description={parsedError.message}
+        actions={
+          <Button
+            variant='outline'
+            size='sm'
+            onClick={() => {
+              handleTryAgain();
+            }}
+          >
+            <RefreshCcw className='size-3.5' />
+            Try again
+          </Button>
+        }
       />
     );
   }

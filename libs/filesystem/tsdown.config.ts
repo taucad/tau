@@ -9,7 +9,7 @@ const baseConfig: UserConfig = {
     'src/bundled-types-mount.ts',
     'src/composed-view.ts',
     'src/path-registry.ts',
-    'src/revisions/index.ts',
+    'src/content-ops/index.ts',
     'src/storage-root-key.ts',
   ],
   sourcemap: false,

@@ -78,7 +78,9 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
             <Allotment
               separator={false}
               proportionalLayout={false}
-              className='size-full [--focus-border:var(--primary)] [--sash-hover-transition-duration:0.1s] [&_.sash:before]:[transition-delay:0.5s] [&_.split-view-view:not(:last-child)]:border-r [&_.split-view-view:not(:last-child)]:border-border'
+              /* The lanes land rather than snap in: the skeleton they replace holds the same
+                 background, so a short fade reads as the workspace resolving (soft land). */
+              className='size-full animate-in duration-200 fade-in-50 [--focus-border:var(--primary)] [--sash-hover-transition-duration:0.1s] motion-reduce:animate-none [&_.sash:before]:[transition-delay:0.5s] [&_.split-view-view:not(:last-child)]:border-r [&_.split-view-view:not(:last-child)]:border-border'
               onDragEnd={persistWidths}
             >
               <Allotment.Pane

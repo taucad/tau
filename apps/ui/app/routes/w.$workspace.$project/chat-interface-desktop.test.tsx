@@ -90,6 +90,7 @@ const resizeObserver: ResizeObserver = {
 };
 
 const { ChatInterfaceDesktop, compactWorkspaceWidth } = await import('./chat-interface-desktop.js');
+const { revealDelayMilliseconds } = await import('./workspace-skeleton.js');
 
 const renderDesktop = () =>
   render(
@@ -149,6 +150,8 @@ describe('ChatInterfaceDesktop', () => {
    * persisted widths; the lanes stand in at their defaults, never a blank. */
   it('shows the workspace skeleton instead of a blank while the editor state loads', async () => {
     editorState.isReady = false;
+    /* Inside the load's first blink, where the lanes still ease in. */
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(0);
     renderDesktop();
 
     const skeleton = await screen.findByRole('status', { name: 'Opening project' });
@@ -160,6 +163,28 @@ describe('ChatInterfaceDesktop', () => {
     const workbenchLane = skeleton.querySelector('.border-l');
     expect(workbenchLane).toHaveClass('@min-[1120px]:flex');
     expect(compactWorkspaceWidth).toBe(1120);
+    /* The frame paints at once; its lanes wait out a blink, so a warm load never flashes them. */
+    expect(skeleton).toHaveClass('bg-background');
+    expect(skeleton.querySelector('[data-slot="workspace-skeleton-lanes"]')).toHaveClass(
+      'animate-in',
+      'fade-in',
+      'fill-mode-both',
+      '[animation-delay:300ms]',
+      'motion-reduce:animate-none',
+    );
+    clock.mockRestore();
+  });
+
+  /* Opening a project hands the skeleton from gate to gate. The blink belongs to the load, not to
+   * each mount, or the lanes would fade in again at every handover and spend the wait invisible. */
+  it('spends the blink once per load, so a later gate shows the lanes at once', async () => {
+    editorState.isReady = false;
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(revealDelayMilliseconds);
+    renderDesktop();
+
+    const skeleton = await screen.findByRole('status', { name: 'Opening project' });
+    expect(skeleton.querySelector('[data-slot="workspace-skeleton-lanes"]')).not.toHaveClass('animate-in');
+    clock.mockRestore();
   });
 
   it('reserves fixed-control space inside the chat header without shifting its border', async () => {

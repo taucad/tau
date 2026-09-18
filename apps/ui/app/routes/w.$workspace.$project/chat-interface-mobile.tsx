@@ -31,6 +31,8 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
           'absolute inset-0 size-full',
           '[--nav-height:calc(var(--spacing)*11)]', // 10 units of spacing
           'md:hidden', // Hidden on desktop
+          // The workspace lands over the skeleton's background rather than snapping in.
+          'animate-in duration-200 fade-in-50 motion-reduce:animate-none',
         )}
       >
         {/* Main viewer - always visible */}

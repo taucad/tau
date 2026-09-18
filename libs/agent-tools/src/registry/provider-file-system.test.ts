@@ -67,7 +67,7 @@ describe('createProviderRpcFileSystem', () => {
     });
     /* The browser port's object store is revision evidence (RC6 S5 gate 15):
      * an agent that could write it could forge the account of its own turn. */
-    await expect(fileSystem.writeFile('.tau/revisions/objects/ab/cdef', 'forged')).rejects.toMatchObject({
+    await expect(fileSystem.writeFile('.git/objects/ab/cdef', 'forged')).rejects.toMatchObject({
       code: 'EPERM',
       reason: 'WORKSPACE_MASKED_PATH',
     });

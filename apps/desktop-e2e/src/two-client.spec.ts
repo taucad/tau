@@ -363,7 +363,7 @@ const openHostedShare = async (client: PageClient): Promise<void> => {
 };
 
 const browserHead = async (client: BrowserClient, slug: string): Promise<string | undefined> => {
-  const head = await readBrowserFile(client, slug, ['.tau', 'revisions', 'refs', 'heads', 'main']);
+  const head = await readBrowserFile(client, slug, ['.git', 'refs', 'heads', 'main']);
   return head?.trim();
 };
 
@@ -588,7 +588,7 @@ describe('a project on the browser client', () => {
     const paths = await browserStorePaths(browser, `/${slug}/`);
     expect(projectId).toMatch(/^proj_/u);
     /* W17's shape, on the client's own store: the chat is a file under the
-     * project, not a row anywhere. Whether `.tau/revisions` has been created
+     * project, not a row anywhere. Whether `.git` has been created
      * yet is deliberately not asserted — it appears lazily, and racing it says
      * nothing about where a chat lives. */
     expect(paths).toEqual(expect.arrayContaining([`/${slug}/tau.json`, `/${slug}/main.scad`, `/${slug}/.tau/chats`]));
@@ -1009,10 +1009,10 @@ describe('a project on the browser client', () => {
       })
       .toMatch(/Needs resolution/u);
     expect(
-      await readBrowserFile(client, slug, ['.tau', 'revisions', 'refs', 'heads', 'sync', 'tau', 'main']),
+      await readBrowserFile(client, slug, ['.git', 'refs', 'heads', 'sync', 'tau', 'main']),
       'W13: the conflict must remain reachable from sync/tau/main',
     ).toBeDefined();
-    const checkoutRecords = await browserStorePaths(client, `/${slug}/.tau/revisions/checkouts/`);
+    const checkoutRecords = await browserStorePaths(client, `/${slug}/.git/checkouts/`);
     expect(
       checkoutRecords.filter((path) => path.endsWith('.json')),
       'W10: the conflicted ref must have a checkout record that can project a resolution card',
@@ -1142,7 +1142,7 @@ describe('a project on the browser client', () => {
         .toBeGreaterThanOrEqual(2);
 
       const readSourceChatHead = async (): Promise<string | undefined> => {
-        const value = await readBrowserFile(source, sourceSlug, ['.tau', 'revisions', 'refs', 'tau', 'chats', chatId]);
+        const value = await readBrowserFile(source, sourceSlug, ['.git', 'refs', 'tau', 'chats', chatId]);
         return value?.trim();
       };
       await expect

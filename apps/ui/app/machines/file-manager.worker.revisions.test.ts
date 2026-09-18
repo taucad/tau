@@ -316,7 +316,7 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     expect(first.result.placement.checkoutId).toBe(second.result.placement.checkoutId);
     expect(first.result.placement.root).toBe('/projects/alpha');
 
-    const branches = await project.readdir('.tau/revisions/refs/heads');
+    const branches = await project.readdir('.git/refs/heads');
     expect(branches).toEqual(['main']);
 
     const leases = await project.readdir('.tau/runs');

@@ -2,6 +2,7 @@
 import 'fake-indexeddb/auto';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { FileSystemProvider } from '#types.js';
+import type { RootedPorcelain } from '#rooted-views.js';
 import { ChangeEventBus } from '#change-event-bus.js';
 import { MemoryProvider } from '#backend/memory-provider.js';
 import { MountTable } from '#mount-table.js';
@@ -40,7 +41,7 @@ const seeded = {
 } as const;
 
 type Surface = {
-  readonly port: FileSystemProvider;
+  readonly port: FileSystemProvider & Partial<RootedPorcelain>;
   readonly dispose: () => void;
 };
 
@@ -48,8 +49,29 @@ type Layer = {
   readonly name: string;
   /** Whether the control plane is refused at this layer. */
   readonly masksControlPlane: boolean;
+  /** Whether this layer offers the batch porcelain, which needs a mutation pipeline below it. */
+  readonly hasPorcelain: boolean;
   readonly open: () => Promise<Surface>;
 };
+
+/**
+ * The batch porcelain W5 added, asserted as a set rather than probed per row.
+ *
+ * A layer that claims {@link Layer.hasPorcelain} and lost one method fails the
+ * completeness row below and then throws in every porcelain row, so none of this
+ * can pass by being skipped (review G2).
+ */
+const porcelainMethods = [
+  'copyTree',
+  'duplicate',
+  'move',
+  'bulkMove',
+  'writeFiles',
+  'canMove',
+  'canRename',
+  'canCreate',
+  'canDelete',
+] as const satisfies ReadonlyArray<keyof RootedPorcelain>;
 
 const openServices: WorkspaceFileService[] = [];
 
@@ -82,6 +104,7 @@ const layers: readonly Layer[] = [
   {
     name: 'storage provider',
     masksControlPlane: false,
+    hasPorcelain: false,
     open: async () => {
       const provider = new MemoryProvider();
       for (const [path, content] of Object.entries(seeded)) {
@@ -99,6 +122,7 @@ const layers: readonly Layer[] = [
   {
     name: 'rooted view',
     masksControlPlane: false,
+    hasPorcelain: true,
     open: async () => {
       const service = await seededProject('memory:conformance-rooted');
       return { port: service.createRootedFileSystem(projectRoute), dispose: () => undefined };
@@ -107,6 +131,7 @@ const layers: readonly Layer[] = [
   {
     name: 'composed user view',
     masksControlPlane: true,
+    hasPorcelain: true,
     open: async () => {
       const service = await seededProject('memory:conformance-composed');
       return {
@@ -126,7 +151,7 @@ afterEach(() => {
   }
 });
 
-describe.each(layers)('FileSystemProvider conformance: $name', ({ masksControlPlane, open }) => {
+describe.each(layers)('FileSystemProvider conformance: $name', ({ hasPorcelain, masksControlPlane, open }) => {
   it('should read a file as bytes and as UTF-8', async () => {
     const { port, dispose } = await open();
 
@@ -210,8 +235,8 @@ describe.each(layers)('FileSystemProvider conformance: $name', ({ masksControlPl
   it('should refuse a path that is not canonical and root-relative', async () => {
     const { port, dispose } = await open();
 
-    await expect(port.readFile('/src/main.ts')).rejects.toThrow();
-    await expect(port.readFile('src/../src/main.ts')).rejects.toThrow();
+    await expect(port.readFile('/src/main.ts')).rejects.toMatchObject({ code: 'INVALID_PATH' });
+    await expect(port.readFile('src/../src/main.ts')).rejects.toMatchObject({ code: 'INVALID_PATH' });
     dispose();
   });
 
@@ -234,4 +259,117 @@ describe.each(layers)('FileSystemProvider conformance: $name', ({ masksControlPl
       dispose();
     },
   );
+
+  it(
+    hasPorcelain
+      ? 'should offer every batch porcelain method, because a mutation pipeline is below this layer'
+      : 'should offer no batch porcelain, because a storage provider mutates one path at a time',
+    async () => {
+      const { port, dispose } = await open();
+
+      expect(porcelainMethods.filter((name) => port[name] === undefined)).toStrictEqual(
+        hasPorcelain ? [] : [...porcelainMethods],
+      );
+      dispose();
+    },
+  );
 });
+
+/**
+ * The same porcelain rows on every layer that offers porcelain (review G2).
+ *
+ * The batch surface is where substitution last broke: it was added to the rooted
+ * view and forwarded by the composed one, and nothing asserted that the two
+ * answer alike. These rows are the mask's own row's counterpart — results, errno
+ * and preflight `code`s, identical on both views.
+ */
+describe.each(layers.filter(({ hasPorcelain }) => hasPorcelain))(
+  'FileSystemProvider porcelain conformance: $name',
+  ({ open }) => {
+    it('should copy a subtree onto a fresh path', async () => {
+      const { port, dispose } = await open();
+
+      await port.copyTree!('src', 'backup');
+
+      await expect(port.readFile('backup/main.ts', 'utf8')).resolves.toBe(seeded['src/main.ts']);
+      await expect(port.readFile('backup/lib/helper.ts', 'utf8')).resolves.toBe(seeded['src/lib/helper.ts']);
+      dispose();
+    });
+
+    it('should copy only the entries its caller admits', async () => {
+      const { port, dispose } = await open();
+
+      await port.copyTree!('src', 'backup', { admits: (relativePath) => relativePath !== 'lib' });
+
+      await expect(port.exists('backup/main.ts')).resolves.toBe(true);
+      await expect(port.exists('backup/lib')).resolves.toBe(false);
+      dispose();
+    });
+
+    it('should duplicate one file and answer ENOENT for an absent source', async () => {
+      const { port, dispose } = await open();
+
+      await port.duplicate!('src/main.ts', 'src/copy.ts');
+
+      await expect(port.readFile('src/copy.ts', 'utf8')).resolves.toBe(seeded['src/main.ts']);
+      await expect(port.duplicate!('src/absent.ts', 'src/other.ts')).rejects.toMatchObject({ code: 'ENOENT' });
+      dispose();
+    });
+
+    it('should move a file and answer with the resulting stat', async () => {
+      const { port, dispose } = await open();
+
+      await expect(port.move!('src/main.ts', 'moved.ts')).resolves.toMatchObject({
+        type: 'file',
+        size: seeded['src/main.ts'].length,
+      });
+      await expect(port.exists('src/main.ts')).resolves.toBe(false);
+      dispose();
+    });
+
+    it('should report every completed and failed edit of a bulk move', async () => {
+      const { port, dispose } = await open();
+
+      const result = await port.bulkMove!([
+        { source: 'src/main.ts', target: 'moved.ts' },
+        { source: 'src/absent.ts', target: 'absent-moved.ts' },
+      ]);
+
+      expect(result.moved.map(({ edit }) => edit.target)).toStrictEqual(['moved.ts']);
+      expect(result.failed.map(({ edit, error }) => [edit.source, error.code])).toStrictEqual([
+        ['src/absent.ts', 'NOT_FOUND'],
+      ]);
+      dispose();
+    });
+
+    it('should write many files as one batch', async () => {
+      const { port, dispose } = await open();
+
+      await port.writeFiles!({
+        'batch/one.ts': { content: 'export const one = 1;' },
+        'batch/two.ts': { content: new TextEncoder().encode('export const two = 2;') },
+      });
+
+      await expect(port.readFile('batch/one.ts', 'utf8')).resolves.toBe('export const one = 1;');
+      await expect(port.readFile('batch/two.ts', 'utf8')).resolves.toBe('export const two = 2;');
+      dispose();
+    });
+
+    it('should answer the preflight family with the same typed codes', async () => {
+      const { port, dispose } = await open();
+
+      await expect(port.canMove!('src/main.ts', 'src/moved.ts')).resolves.toBe(true);
+      await expect(port.canMove!('src/absent.ts', 'src/moved.ts')).resolves.toMatchObject({ code: 'NOT_FOUND' });
+      await expect(port.canMove!('src/main.ts', 'tau.json')).resolves.toMatchObject({ code: 'NAME_EXISTS' });
+      await expect(port.canRename!('src/main.ts', 'renamed.ts')).resolves.toBe(true);
+      await expect(port.canRename!('src/main.ts', 'nested/renamed.ts')).resolves.toMatchObject({
+        code: 'INVALID_NAME',
+      });
+      await expect(port.canCreate!('fresh.ts', 'file')).resolves.toBe(true);
+      await expect(port.canCreate!('tau.json', 'file')).resolves.toMatchObject({ code: 'NAME_EXISTS' });
+      await expect(port.canDelete!('tau.json')).resolves.toBe(true);
+      await expect(port.canDelete!('absent.ts')).resolves.toMatchObject({ code: 'NOT_FOUND' });
+      dispose();
+    });
+  },
+);

@@ -1252,20 +1252,16 @@ describe('a project on the browser client', () => {
 
       await openBrowserChat(source, chatId);
       await openBrowserChat(destination, chatId);
-      await requireRenderedOrder(source, {
-        first: browserPrompt,
-        second: desktopPrompt,
-        row: 'V15 browser projection',
-      });
-      await requireRenderedOrder(destination, {
-        first: browserPrompt,
-        second: desktopPrompt,
-        row: 'V15 desktop projection',
-      });
-      expect(await source.page.getByText(gatewayFixtureFinalText, { exact: true }).count()).toBeGreaterThanOrEqual(3);
-      expect(await destination.page.getByText(gatewayFixtureFinalText, { exact: true }).count()).toBeGreaterThanOrEqual(
-        3,
-      );
+      /* Both devices' replies, each inside the turn that asked for it, and the
+       * browser's turn ahead of the desktop's — read off Virtuoso's item
+       * indices, because a whole-page count of `gatewayFixtureFinalText` only
+       * ever saw the turns the scroller happened to be over. */
+      const mergedTurns = {
+        markers: [setupPrompt, browserPrompt, desktopPrompt],
+        reply: gatewayFixtureFinalText,
+      } as const;
+      await requireRenderedOrder(source, { ...mergedTurns, row: 'V15 browser projection' });
+      await requireRenderedOrder(destination, { ...mergedTurns, row: 'V15 desktop projection' });
     } catch (error) {
       await captureAndRethrow(error, 'divergent-device-chat-logs', [source, destination]);
     } finally {

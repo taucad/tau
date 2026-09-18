@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 import type { Browser, BrowserContext, Locator, Page } from 'playwright';
 import { desktopE2EApiUrl, desktopE2EFrontendUrl } from '#support/config.js';
+import { expectVisible } from '#support/scenario.js';
 
 /**
  * The browser half of a two-client run (blueprint S40).
@@ -86,26 +87,99 @@ export const openBrowserChat = async (client: Pick<BrowserClient, 'page'>, chatI
   await client.page.waitForURL((url) => url.searchParams.get('chat') === chatId, { timeout: 60_000 });
 };
 
-/** Require two unique chat markers to render in their recorded order. */
+/** How long the merged transcript has to render every turn it was told to hold. */
+const renderTimeout = 180_000;
+
+/** One turn group in the virtualized transcript, addressed by a marker it renders. */
+const turnGroup = (page: Page, marker: string): Locator =>
+  page
+    .locator('[data-item-index]')
+    .filter({ has: page.getByText(marker, { exact: true }) })
+    .first();
+
+/**
+ * Walk the transcript one screen further and report where the scroller landed,
+ * wrapping back to the top at the end so a turn that renders late still gets
+ * another pass.
+ *
+ * The scroller is reached from a mounted turn rather than by selector: the chat
+ * is not the only `react-virtuoso` list a project route can mount, and only the
+ * transcript's own items carry these markers.
+ */
+const walkTranscript = async (anchor: Locator, from: number): Promise<number> =>
+  anchor.evaluate(
+    (element, previous: number) => {
+      const scroller = element.closest('[data-virtuoso-scroller]');
+      if (!(scroller instanceof HTMLElement)) {
+        throw new Error('The chat transcript is not inside a virtuoso scroller.');
+      }
+      const next = previous + Math.max(1, Math.round(scroller.clientHeight * 0.75));
+      scroller.scrollTop = next >= scroller.scrollHeight ? 0 : next;
+      return scroller.scrollTop;
+    },
+    from,
+    { timeout: 30_000 },
+  );
+
+/**
+ * Require the named chat markers to render, each with its own reply, in the
+ * order they were recorded.
+ *
+ * The transcript is virtualized: react-virtuoso unmounts a turn the scroller is
+ * not over, so neither a `document.body` text scan nor a whole-page node count
+ * can see a turn that happens to be scrolled out (lane B4, `ed8e011b3`). Order
+ * comes off Virtuoso's own `data-item-index` — the turn's position in the data,
+ * not in the DOM — and each marker is looked for while the scroller walks the
+ * whole list, so a turn that is unmounted at one offset is still observed at
+ * another. Reading the reply inside its own group needs no further scrolling:
+ * a mounted node outside the scroll viewport is still visible to Playwright.
+ */
 export const requireRenderedOrder = async (
   client: Pick<BrowserClient, 'page'>,
-  options: Readonly<{ first: string; second: string; row: string }>,
+  options: Readonly<{ markers: readonly string[]; reply: string; row: string }>,
 ): Promise<void> => {
-  const { first, second, row } = options;
-  await client.page.waitForFunction(
-    ({ firstMarker, secondMarker }: { firstMarker: string; secondMarker: string }) => {
-      const text = String(document.body.textContent);
-      const firstIndex = text.indexOf(firstMarker);
-      return firstIndex !== -1 && text.indexOf(secondMarker) > firstIndex;
-    },
-    { firstMarker: first, secondMarker: second },
-    { timeout: 120_000 },
-  );
-  const text = (await client.page.locator('body').textContent()) ?? '';
-  const firstIndex = text.indexOf(first);
-  const secondIndex = text.indexOf(second);
-  if (firstIndex === -1 || secondIndex <= firstIndex) {
-    throw new Error(`${row}: expected the first device reply to render before the second device reply.`);
+  const { markers, reply, row } = options;
+  const { page } = client;
+  /* A replied turn is a chat turn, so it anchors the scroller without assuming
+   * the chat owns the only virtualized list on the route. */
+  const anchor = page
+    .locator('[data-item-index]')
+    .filter({ has: page.getByText(reply, { exact: true }) })
+    .first();
+  await anchor.waitFor({ state: 'attached', timeout: renderTimeout });
+
+  const indices = new Map<string, number>();
+  const deadline = Date.now() + renderTimeout;
+  let offset = 0;
+  while (indices.size < markers.length) {
+    for (const marker of markers.filter((candidate) => !indices.has(candidate))) {
+      const group = turnGroup(page, marker);
+      // oxlint-disable-next-line no-await-in-loop -- the scroller is one shared cursor: every marker has to be read where it currently stands.
+      const index = await group.getAttribute('data-item-index', { timeout: 1000 }).catch(() => undefined);
+      if (index === undefined || index === null) {
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- as above.
+      await expectVisible(group.getByText(reply, { exact: true }), 30_000);
+      indices.set(marker, Number(index));
+    }
+    if (indices.size === markers.length) {
+      break;
+    }
+    if (Date.now() >= deadline) {
+      const missing = markers.filter((marker) => !indices.has(marker));
+      throw new Error(`${row}: the transcript never rendered a replied turn for ${missing.join(', ')}.`);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one scroller, walked a screen at a time.
+    offset = await walkTranscript(anchor, offset);
+  }
+
+  const ordered = markers.map((marker) => indices.get(marker) ?? -1);
+  const inOrder = ordered.every((index, position) => position === 0 || index > (ordered[position - 1] ?? -1));
+  if (!inOrder) {
+    throw new Error(
+      `${row}: expected ${markers.join(' before ')}, but the transcript ordered their turns ${ordered.join(', ')}.`,
+    );
   }
 };
 

@@ -10,6 +10,7 @@ import { BillingAccountClosureService } from '#api/billing/billing-account-closu
 import { BillingPolicyService } from '#api/billing/billing-policy.service.js';
 import { CreditLedgerService } from '#api/billing/credit-ledger.service.js';
 import { fulfillPaidFixture, seedPaidPurchase } from '#testing/billing-payment.fixture.js';
+import { ensureWorktreeDatabase } from '@taucad/utils/worktree-database';
 
 /**
  * Fund or close one developer billing account on the local development ledger.
@@ -58,10 +59,12 @@ const main = async (): Promise<void> => {
   if (process.env.BILLING_ENVIRONMENT !== developmentEnvironment) {
     throw new Error('This entry point runs only against BILLING_ENVIRONMENT=development');
   }
-  const databaseUrl = process.env['BILLING_DATABASE_URL'] ?? process.env['DATABASE_URL'];
-  if (!databaseUrl) {
+  const configuredDatabaseUrl = process.env['BILLING_DATABASE_URL'] ?? process.env.DATABASE_URL;
+  if (!configuredDatabaseUrl) {
     throw new Error('DATABASE_URL is required');
   }
+  // The same worktree fork the development API runs against.
+  const databaseUrl = ensureWorktreeDatabase(configuredDatabaseUrl);
   const { positionals, values } = parseArgs({
     args: process.argv.slice(2),
     allowPositionals: true,

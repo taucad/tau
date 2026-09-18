@@ -54,7 +54,7 @@ const boundaryRules: readonly BoundaryRule[] = [
   {
     id: 'archive-format',
     forbids: 'importing `jszip` (D2/D15: ZIP encoding lives in the `archive` content operation)',
-    appliesTo: () => true,
+    appliesTo: (path) => !path.startsWith('content-ops/'),
     pattern: /['"]jszip['"]/u,
   },
   {

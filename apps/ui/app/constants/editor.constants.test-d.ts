@@ -4,6 +4,7 @@ import type {
   CameraOwnedSettings,
   GraphicsOwnedSettings,
   GraphicsViewSettings,
+  PersistedUnitSettings,
 } from '#constants/editor.constants.js';
 
 /**
@@ -11,9 +12,13 @@ import type {
  * live owner. A durable key added without an owner fails this row, naming the key.
  */
 describe('persisted graphics view settings ownership', () => {
-  it('should partition every durable key across the three live owners', () => {
-    type OwnedKeys = keyof (GraphicsOwnedSettings & CameraOwnedSettings & CadOwnedSettings);
+  it('should partition every durable view key between the graphics actor and the camera', () => {
+    type OwnedViewKeys = keyof (GraphicsOwnedSettings & CameraOwnedSettings);
 
-    expectTypeOf<OwnedKeys>().toEqualTypeOf<keyof Omit<GraphicsViewSettings, 'schemaVersion'>>();
+    expectTypeOf<OwnedViewKeys>().toEqualTypeOf<keyof Omit<GraphicsViewSettings, 'schemaVersion'>>();
+  });
+
+  it('should give every durable per-entry key to the entry CAD actor', () => {
+    expectTypeOf<keyof CadOwnedSettings>().toEqualTypeOf<keyof PersistedUnitSettings>();
   });
 });

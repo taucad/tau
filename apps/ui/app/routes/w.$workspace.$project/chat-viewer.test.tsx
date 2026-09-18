@@ -36,6 +36,7 @@ const mockGraphicsSend = vi.fn();
 let mockGeometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
 let mockViewSettings: Record<string, { entryPath: string; graphicsSettings: GraphicsViewSettings }> = {};
 let mockCameraSeed: unknown;
+let mockUnitSettings: Record<string, { renderTimeout: number }> = {};
 const mockUseViewSettingsSync = vi.fn();
 let mockHoveredComponentId: string | undefined;
 let mockCadViewerSecondaryPointerMode: 'component-hit' | 'suppressed';
@@ -238,7 +239,7 @@ vi.mock('#hooks/use-project.js', () => ({
       send: mockProjectSend,
     },
     editorRef: {
-      getSnapshot: vi.fn(() => ({ context: { viewSettings: mockViewSettings } })),
+      getSnapshot: vi.fn(() => ({ context: { viewSettings: mockViewSettings, unitSettings: mockUnitSettings } })),
       subscribe: vi.fn(() => ({ unsubscribe: vi.fn() })),
       on: vi.fn(() => ({ unsubscribe: vi.fn() })),
       send: mockEditorSend,
@@ -391,6 +392,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockGeometryUnits = new Map();
     mockViewSettings = {};
     mockCameraSeed = undefined;
+    mockUnitSettings = {};
     mockUseViewSettingsSync.mockClear();
     mockHoveredComponentId = undefined;
     mockCadViewerSecondaryPointerMode = 'component-hit';
@@ -570,6 +572,36 @@ describe('ChatViewer reopen-renderer overlay', () => {
     expect(mockUseViewSettingsSync).toHaveBeenCalledWith(expect.objectContaining({ persistCameraView: true }));
   });
 
+  /* Finding 4 / E1: the render timeout is owned per file by the entry's CAD actor and seeded at
+   * spawn. A mount-scoped push would rewrite a live owner from a stale record on every revisit. */
+  it('sends no render timeout from a mount effect and seeds a reopened unit instead', () => {
+    mockViewSettings = {
+      'view-1': {
+        entryPath: helperEntryPath,
+        graphicsSettings: { ...defaultGraphicsSettings },
+      },
+    };
+    mockUnitSettings = { [helperEntryPath]: { renderTimeout: 30_000 } };
+    const cadActor = createMockCadActor();
+    mockGeometryUnits.set(helperEntryPath, cadActor);
+
+    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    expect(cadActor.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setRenderTimeout' }));
+    expect(mockUseViewSettingsSync).toHaveBeenCalledWith(expect.objectContaining({ entryPath: helperEntryPath }));
+
+    mockGeometryUnits.delete(helperEntryPath);
+    mockProjectSend.mockClear();
+    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    fireEvent.click(screen.getAllByRole('button', { name: /reopen renderer/i })[0]!);
+
+    expect(mockProjectSend).toHaveBeenCalledWith({
+      type: 'createGeometryUnit',
+      entryPath: helperEntryPath,
+      renderTimeout: 30_000,
+    });
+  });
+
   it('clears geometry-dependent camera state when the pane switches files', () => {
     const cameraView = {
       frameId: 'tau:root',
@@ -582,7 +614,12 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockViewSettings = {
       'view-1': {
         entryPath: helperEntryPath,
-        graphicsSettings: { ...defaultGraphicsSettings, cameraFovAngle: 42, cameraView },
+        graphicsSettings: {
+          ...defaultGraphicsSettings,
+          cameraFovAngle: 42,
+          cameraView,
+          sectionView: { active: true, plane: 'xz', pivot: [1, 2, 3], rotation: [0, 0, 0], direction: -1 },
+        },
       },
     };
     render(<ChatViewer viewId='view-1' entryPath={undefined} panelApi={mockPanelApi} />);
@@ -598,6 +635,8 @@ describe('ChatViewer reopen-renderer overlay', () => {
           ...defaultGraphicsSettings,
           cameraFovAngle: 42,
           cameraView: undefined,
+          // The cut belongs to the file that was open (E2).
+          sectionView: undefined,
           pinnedMeasurements: undefined,
         },
       },

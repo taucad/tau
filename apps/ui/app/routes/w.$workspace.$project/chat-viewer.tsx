@@ -150,6 +150,7 @@ export const ChatViewer = memo(function ({
 
   // Get the current view settings from editor state for this panel
   const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
+  const unitSettings = useSelector(editorRef, (state) => state.context.unitSettings);
   /* Create-only seed for this view's camera session. The session is built on the first branch that
    * mounts a provider, so every branch passes it -- including the ones with no canvas. */
   const cameraSeed: ViewCameraSeed = {
@@ -165,7 +166,11 @@ export const ChatViewer = memo(function ({
     (path: string) => {
       // Ensure geometry unit exists for the selected file
       if (!geometryUnits.has(path)) {
-        projectRef.send({ type: 'createGeometryUnit', entryPath: path });
+        projectRef.send({
+          type: 'createGeometryUnit',
+          entryPath: path,
+          renderTimeout: unitSettings[path]?.renderTimeout,
+        });
       }
 
       // Preserve existing view settings (FOV, visibility, environment preset, etc.)
@@ -181,6 +186,7 @@ export const ChatViewer = memo(function ({
             ...(existingGraphics ?? defaultGraphicsSettings),
             // Clear geometry-dependent state on file switch
             cameraView: undefined,
+            sectionView: undefined,
             pinnedMeasurements: undefined,
           },
         },
@@ -193,7 +199,7 @@ export const ChatViewer = memo(function ({
       const fileName = path.split('/').pop() ?? path;
       panelApi.setTitle(fileName);
     },
-    [projectRef, editorRef, geometryUnits, viewId, panelApi, viewSettings],
+    [projectRef, editorRef, geometryUnits, viewId, panelApi, viewSettings, unitSettings],
   );
 
   // If no graphics actor yet, render a placeholder
@@ -314,9 +320,14 @@ const ViewerContent = memo(function ({
   // stays open. Surface a "Reopen renderer" overlay so the user can re-spawn
   // the cad actor without having to re-add the panel.
   const isGeometryUnitClosed = !cadRef;
+  const unitSettings = useSelector(editorRef, (state) => state.context.unitSettings);
   const handleReopenRenderer = useCallback(() => {
-    projectRef.send({ type: 'createGeometryUnit', entryPath });
-  }, [projectRef, entryPath]);
+    projectRef.send({
+      type: 'createGeometryUnit',
+      entryPath,
+      renderTimeout: unitSettings[entryPath]?.renderTimeout,
+    });
+  }, [projectRef, entryPath, unitSettings]);
 
   // Bridge geometry data from the headless CadMachine to the per-view GraphicsMachine
   const graphicsActor = useGraphics();
@@ -334,25 +345,12 @@ const ViewerContent = memo(function ({
   // Sync graphics + render timeout settings back to editor state for persistence
   useViewSettingsSync({
     viewId,
+    entryPath,
     graphicsRef: graphicsActor,
     cadRef,
     editorRef,
     persistCameraView: geometry === undefined ? 'pending' : geometry.format === 'gltf',
   });
-
-  // Restore persisted render timeout on mount
-  const viewSettings = useSelector(editorRef, (state) => state.context.viewSettings);
-  const restoredTimeoutRef = useRef(false);
-  useEffect(() => {
-    if (restoredTimeoutRef.current || !cadRef) {
-      return;
-    }
-    const persisted = viewSettings[viewId]?.graphicsSettings.renderTimeout;
-    if (persisted !== undefined) {
-      restoredTimeoutRef.current = true;
-      cadRef.send({ type: 'setRenderTimeout', renderTimeout: persisted });
-    }
-  }, [cadRef, viewId, viewSettings]);
 
   // Select individual primitive values so that useSelector's reference equality
   // check works correctly. An object-returning selector creates a new reference

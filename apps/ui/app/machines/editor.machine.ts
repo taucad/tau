@@ -18,12 +18,14 @@ import type {
   GraphicsViewSettings,
   PersistedModelComponentDisplayState,
   PersistedModelComponentDisplayUnitState,
+  PersistedUnitSettings,
 } from '#constants/editor.constants.js';
 import {
   defaultPanelState,
   omitEmptyComponentDisplayState,
   parseGraphicsViewSettings,
   parseLegacyModelComponentDisplay,
+  readLegacyRenderTimeout,
 } from '#constants/editor.constants.js';
 import { createSourceModelInteractionUnitId } from '#machines/model-interaction.machine.js';
 import { mergePanelState } from '#utils/panel-state.utils.js';
@@ -192,6 +194,57 @@ function rekeyViewSettingsForRename(
   );
 }
 
+/** The per-entry record is keyed by path, so it follows a rename the way `viewSettings.entryPath` does. */
+function rekeyUnitSettingsForRename(
+  unitSettings: Record<string, PersistedUnitSettings>,
+  oldPath: string,
+  newPath: string,
+): Record<string, PersistedUnitSettings> {
+  return Object.fromEntries(
+    Object.entries(unitSettings).map(([entryPath, settings]) => [
+      rewritePathIfMatched(entryPath, oldPath, newPath) ?? entryPath,
+      settings,
+    ]),
+  );
+}
+
+function forgetUnitSettingsForDeletedPath(
+  unitSettings: Record<string, PersistedUnitSettings>,
+  deletedPath: string,
+): Record<string, PersistedUnitSettings> {
+  return Object.fromEntries(
+    Object.entries(unitSettings).filter(([entryPath]) => !pathMatchesPathOrDescendant(entryPath, deletedPath)),
+  );
+}
+
+/**
+ * Schema v11 (E1): `renderTimeout` is owned per file, so it moves out of every view record into one
+ * per-entry record. Two views on one path keep the longer timeout -- it never breaks a render the
+ * shorter one allowed.
+ */
+function hoistRenderTimeoutsIntoUnitSettings(
+  /* Persisted input: a stored entry can be absent or malformed whatever the type says. */
+  loadedUnitSettings: Record<string, PersistedUnitSettings | undefined> | undefined,
+  orderedViewSettings: ReadonlyArray<readonly [string, ViewState]>,
+): Record<string, PersistedUnitSettings> {
+  const unitSettings: Record<string, PersistedUnitSettings> = {};
+  for (const [entryPath, settings] of Object.entries(loadedUnitSettings ?? {})) {
+    if (typeof settings?.renderTimeout === 'number' && Number.isFinite(settings.renderTimeout)) {
+      unitSettings[entryPath] = { renderTimeout: settings.renderTimeout };
+    }
+  }
+  for (const [, viewState] of orderedViewSettings) {
+    const { entryPath } = viewState;
+    const legacy = readLegacyRenderTimeout(viewState.graphicsSettings);
+    if (entryPath === undefined || legacy === undefined) {
+      continue;
+    }
+    const existing = unitSettings[entryPath]?.renderTimeout;
+    unitSettings[entryPath] = { renderTimeout: existing === undefined ? legacy : Math.max(existing, legacy) };
+  }
+  return unitSettings;
+}
+
 /** A view whose file was deleted loses its path, so its viewer panel closes. */
 function forgetViewSettingsForDeletedPath(
   viewSettings: Record<string, ViewState>,
@@ -233,6 +286,8 @@ export type EditorStateContext = {
   viewSettings: Record<string, ViewState>;
   /** Project-scoped model appearance shared by every viewer panel. */
   modelComponentDisplay: PersistedModelComponentDisplayState | undefined;
+  /** Per-entry-path settings whose live owner is that entry's CAD actor (schema v11). */
+  unitSettings: Record<string, PersistedUnitSettings>;
   /** Legacy per-view display data must be rewritten into the canonical top-level field. */
   needsModelComponentDisplayMigration: boolean;
   isLoading: boolean;
@@ -298,6 +353,7 @@ type EditorStateEvent =
   | { type: 'setViewSettings'; viewId: string; viewState: ViewState }
   | { type: 'updateViewSettings'; viewId: string; settings: Partial<GraphicsViewSettings> }
   | { type: 'removeViewSettings'; viewId: string }
+  | { type: 'setUnitSettings'; entryPath: string; settings: PersistedUnitSettings }
   | { type: 'setModelComponentDisplay'; componentDisplay?: PersistedModelComponentDisplayState }
   | { type: 'pruneComponentDisplayForDeletedPath'; path: string }
   // Flush pending state immediately (bypasses debounce, used on tab close)
@@ -430,6 +486,7 @@ export const editorMachine = setup({
       let workbenchLayout: SerializedDockview | undefined;
       let viewerLayout: SerializedDockview | undefined;
       let viewSettings: Record<string, ViewState> = {};
+      let unitSettings: Record<string, PersistedUnitSettings> = {};
       let modelComponentDisplay = loadedState?.modelComponentDisplay;
       let needsModelComponentDisplayMigration = false;
       try {
@@ -450,6 +507,7 @@ export const editorMachine = setup({
             undefined,
         );
         modelComponentDisplay ??= mergeComponentDisplayStates(legacyDisplays);
+        unitSettings = hoistRenderTimeoutsIntoUnitSettings(loadedState?.unitSettings, orderedViewSettings);
         viewSettings = Object.fromEntries(
           orderedViewSettings.map(([viewId, viewState]) => [
             viewId,
@@ -461,6 +519,7 @@ export const editorMachine = setup({
         workbenchLayout = undefined;
         viewerLayout = undefined;
         viewSettings = {};
+        unitSettings = {};
         modelComponentDisplay = undefined;
         needsModelComponentDisplayMigration = false;
       }
@@ -486,6 +545,7 @@ export const editorMachine = setup({
         workbenchLayout,
         viewerLayout,
         viewSettings,
+        unitSettings,
         modelComponentDisplay: omitEmptyComponentDisplayState(modelComponentDisplay),
         needsModelComponentDisplayMigration,
         isLoading: false,
@@ -742,6 +802,7 @@ export const editorMachine = setup({
       enqueue.assign({
         openFiles: updatedOpenFiles,
         viewSettings: rekeyViewSettingsForRename(context.viewSettings, oldPath, newPath),
+        unitSettings: rekeyUnitSettingsForRename(context.unitSettings, oldPath, newPath),
         modelComponentDisplay: rekeyComponentDisplayForRename(context.modelComponentDisplay, oldPath, newPath),
       });
 
@@ -866,6 +927,13 @@ export const editorMachine = setup({
       };
     }),
 
+    setUnitSettingsInContext: assign(({ event, context }) => {
+      assertEvent(event, 'setUnitSettings');
+      return {
+        unitSettings: { ...context.unitSettings, [event.entryPath]: event.settings },
+      };
+    }),
+
     removeViewSettingsInContext: assign(({ event, context }) => {
       assertEvent(event, 'removeViewSettings');
       const { [event.viewId]: _, ...rest } = context.viewSettings;
@@ -885,6 +953,7 @@ export const editorMachine = setup({
       return {
         modelComponentDisplay: pruneComponentDisplayForDeletedPath(context.modelComponentDisplay, event.path),
         viewSettings: forgetViewSettingsForDeletedPath(context.viewSettings, event.path),
+        unitSettings: forgetUnitSettingsForDeletedPath(context.unitSettings, event.path),
       };
     }),
 
@@ -941,6 +1010,7 @@ export const editorMachine = setup({
       workbenchLayout: undefined,
       viewerLayout: undefined,
       viewSettings: {},
+      unitSettings: {},
       modelComponentDisplay: undefined,
       needsModelComponentDisplayMigration: false,
       isLoading: false,
@@ -1146,6 +1216,9 @@ export const editorMachine = setup({
             updateViewSettings: {
               actions: 'updateViewSettingsInContext',
             },
+            setUnitSettings: {
+              actions: 'setUnitSettingsInContext',
+            },
             removeViewSettings: {
               actions: 'removeViewSettingsInContext',
             },
@@ -1175,6 +1248,7 @@ export const editorMachine = setup({
                 setViewSettings: { target: 'pending' },
                 updateViewSettings: { target: 'pending' },
                 removeViewSettings: { target: 'pending' },
+                setUnitSettings: { target: 'pending' },
                 setModelComponentDisplay: { target: 'pending' },
                 pruneComponentDisplayForDeletedPath: { target: 'pending' },
                 registerMaterialiseModel: { target: 'pending' },
@@ -1197,6 +1271,7 @@ export const editorMachine = setup({
                 setViewSettings: { target: 'pending', reenter: true },
                 updateViewSettings: { target: 'pending', reenter: true },
                 removeViewSettings: { target: 'pending', reenter: true },
+                setUnitSettings: { target: 'pending', reenter: true },
                 setModelComponentDisplay: { target: 'pending', reenter: true },
                 pruneComponentDisplayForDeletedPath: { target: 'pending', reenter: true },
                 registerMaterialiseModel: { target: 'pending', reenter: true },
@@ -1218,6 +1293,7 @@ export const editorMachine = setup({
                       workbenchLayout: context.workbenchLayout,
                       viewerLayout: context.viewerLayout,
                       viewSettings: context.viewSettings,
+                      unitSettings: context.unitSettings,
                       modelComponentDisplay: context.modelComponentDisplay,
                     },
                   };

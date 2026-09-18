@@ -353,7 +353,7 @@ describe('editorMachine', () => {
       expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings).not.toHaveProperty(
         'componentDisplay',
       );
-      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings.schemaVersion).toBe(10);
+      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings.schemaVersion).toBe(11);
       actor.stop();
     });
 
@@ -427,6 +427,104 @@ describe('editorMachine', () => {
           [newNestedUnitId]: { isolatedComponentIds: ['component:Gear'] },
         },
       });
+      actor.stop();
+    });
+
+    /* Schema v11 (E1): `renderTimeout` is owned per file by the entry's CAD actor, so two panes on
+     * one path cannot hold two values. The longer timeout never breaks a render the shorter allowed. */
+    it('should hoist the longest per-view render timeout into the per-entry record', async () => {
+      const actor = await startAndLoad({
+        loadResult: {
+          ...stubEditorState,
+          viewSettings: {
+            'view-a': {
+              entryPath: 'src/main.ts',
+              graphicsSettings: { ...defaultGraphicsSettings, schemaVersion: 10, renderTimeout: 30_000 },
+            },
+            'view-b': {
+              entryPath: 'src/main.ts',
+              graphicsSettings: { ...defaultGraphicsSettings, schemaVersion: 10, renderTimeout: 60_000 },
+            },
+            'view-c': {
+              entryPath: 'src/utils.ts',
+              graphicsSettings: { ...defaultGraphicsSettings, schemaVersion: 10, renderTimeout: 45_000 },
+            },
+          },
+        } as unknown as EditorState,
+      });
+
+      expect(actor.getSnapshot().context.unitSettings).toEqual({
+        'src/main.ts': { renderTimeout: 60_000 },
+        'src/utils.ts': { renderTimeout: 45_000 },
+      });
+      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings).not.toHaveProperty('renderTimeout');
+      expect(actor.getSnapshot().context.viewSettings['view-a']?.graphicsSettings.schemaVersion).toBe(11);
+      actor.stop();
+    });
+
+    it('should hoist a legacy seconds-based render timeout as milliseconds', async () => {
+      const actor = await startAndLoad({
+        loadResult: {
+          ...stubEditorState,
+          viewSettings: {
+            view1: {
+              entryPath: 'src/main.ts',
+              graphicsSettings: { ...defaultGraphicsSettings, schemaVersion: undefined, renderTimeout: 30 },
+            },
+          },
+        } as unknown as EditorState,
+      });
+
+      expect(actor.getSnapshot().context.unitSettings['src/main.ts']).toEqual({ renderTimeout: 30_000 });
+      actor.stop();
+    });
+
+    it('should parse a v10 record without a section view into inactive defaults', async () => {
+      const actor = await startAndLoad({
+        loadResult: {
+          ...stubEditorState,
+          viewSettings: {
+            view1: {
+              entryPath: 'src/main.ts',
+              graphicsSettings: { ...defaultGraphicsSettings, schemaVersion: 10, renderTimeout: 30_000 },
+            },
+          },
+        } as unknown as EditorState,
+      });
+
+      const settings = actor.getSnapshot().context.viewSettings['view1']?.graphicsSettings;
+      expect(settings?.sectionView).toBeUndefined();
+      expect(settings?.sectionDisplay).toBeUndefined();
+      actor.stop();
+    });
+
+    it('should keep the per-entry record aligned with renames and deletions', async () => {
+      const actor = await startAndLoad({
+        loadResult: {
+          ...stubEditorState,
+          viewSettings: {
+            view1: {
+              entryPath: 'src/foo/main.ts',
+              graphicsSettings: { ...defaultGraphicsSettings, schemaVersion: 10, renderTimeout: 30_000 },
+            },
+          },
+        } as unknown as EditorState,
+      });
+
+      actor.send({ type: 'renameFile', oldPath: 'src/foo', newPath: 'src/bar' });
+      expect(actor.getSnapshot().context.unitSettings).toEqual({ 'src/bar/main.ts': { renderTimeout: 30_000 } });
+
+      actor.send({ type: 'pruneComponentDisplayForDeletedPath', path: 'src/bar' });
+      expect(actor.getSnapshot().context.unitSettings).toEqual({});
+      actor.stop();
+    });
+
+    it('should record a per-entry render timeout sent by the write side', async () => {
+      const actor = await startAndLoad();
+
+      actor.send({ type: 'setUnitSettings', entryPath: 'src/main.ts', settings: { renderTimeout: 90_000 } });
+
+      expect(actor.getSnapshot().context.unitSettings['src/main.ts']).toEqual({ renderTimeout: 90_000 });
       actor.stop();
     });
 

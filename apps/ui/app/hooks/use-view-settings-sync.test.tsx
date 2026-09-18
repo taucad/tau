@@ -10,6 +10,7 @@ import type { ThreeCameraRig } from '@taucad/three/camera';
 import { GraphicsProvider, useCameraRig } from '#hooks/use-graphics.js';
 import { useViewSettingsSync } from '#hooks/use-view-settings-sync.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
+import type { cadMachine } from '#machines/cad.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
 import { deriveModelInteractionUnitId } from '#machines/model-interaction.machine.js';
 
@@ -65,24 +66,55 @@ function createManifest(): GeometryComponentManifest {
   };
 }
 
+/** Minimal stand-in for the entry's CAD actor: the hook only reads its render timeout. */
+function createRenderTimeoutCad(initialRenderTimeout: number): {
+  ref: ActorRefFrom<typeof cadMachine>;
+  setRenderTimeout: (next: number) => void;
+} {
+  let renderTimeout = initialRenderTimeout;
+  const listeners = new Set<(snapshot: unknown) => void>();
+  const actor = {
+    getSnapshot: () => ({ context: { renderTimeout } }),
+    subscribe: (listener: (snapshot: unknown) => void) => {
+      listeners.add(listener);
+      return { unsubscribe: () => listeners.delete(listener) };
+    },
+    send: vi.fn(),
+  };
+  return {
+    ref: actor as unknown as ActorRefFrom<typeof cadMachine>,
+    setRenderTimeout(next: number) {
+      renderTimeout = next;
+      for (const listener of listeners) {
+        listener(actor.getSnapshot());
+      }
+    },
+  };
+}
+
 function SyncHarness({
   graphicsRef,
   editorRef,
   onRig,
   persistCameraView,
   enabled,
+  cadRef,
+  entryPath,
 }: {
   readonly graphicsRef: ActorRefFrom<typeof graphicsMachine>;
   readonly editorRef: ActorRefFrom<typeof editorMachine>;
   readonly onRig?: (rig: ThreeCameraRig) => void;
   readonly persistCameraView?: boolean | 'pending';
   readonly enabled?: boolean;
+  readonly cadRef?: ActorRefFrom<typeof cadMachine>;
+  readonly entryPath?: string;
 }): React.JSX.Element {
   const cameraRig = useCameraRig();
   useViewSettingsSync({
     viewId: 'view-1',
+    entryPath,
     graphicsRef,
-    cadRef: undefined,
+    cadRef,
     editorRef,
     persistCameraView,
     enabled,
@@ -154,11 +186,86 @@ describe('useViewSettingsSync', () => {
       expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
         type: 'updateViewSettings',
         viewId: 'view-1',
-        settings: { schemaVersion: 10, enableGrid: false },
+        settings: { schemaVersion: 11, enableGrid: false },
       });
     });
     expect(editorSend.mock.calls.at(-1)?.[0]).not.toHaveProperty('settings.componentDisplay');
     expect(editorSend.mock.calls.at(-1)?.[0]).not.toHaveProperty(`settings.${['environment', 'Preset'].join('')}`);
+    graphicsRef.stop();
+  });
+
+  /* E2: the cut and its display preferences are durable, so revisit and reload restore the same
+   * state. Translation is derived from the pivot on every assign and is never written. */
+  it('writes a cut as sectionView and its toggles as sectionDisplay', async () => {
+    const graphicsRef = createActor(
+      graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }),
+      { input: {} },
+    ).start();
+    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
+    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
+
+    render(
+      <GraphicsProvider graphicsRef={graphicsRef}>
+        <SyncHarness graphicsRef={graphicsRef} editorRef={editorRef} />
+      </GraphicsProvider>,
+    );
+
+    act(() => {
+      graphicsRef.send({ type: 'sceneRadiusUpdated', radius: 0.1, centerMeters: [1, 2, 3] });
+      graphicsRef.send({ type: 'setSectionViewActive', payload: true });
+      graphicsRef.send({ type: 'selectSectionView', payload: 'xz' });
+      graphicsRef.send({ type: 'setClippingLinesEnabled', payload: false });
+    });
+
+    await waitFor(() => {
+      expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
+        type: 'updateViewSettings',
+        settings: {
+          sectionView: { active: true, plane: 'xz', pivot: [1, 2, 3], direction: -1 },
+          sectionDisplay: { clipLines: false, clipMesh: true, planeName: 'face' },
+        },
+      });
+    });
+    const lastCall = editorSend.mock.calls.at(-1)?.[0];
+    expect(lastCall).not.toHaveProperty('settings.sectionView.translation');
+    graphicsRef.stop();
+  });
+
+  /* E1: the render timeout is owned per file, so it is written to the entry's record and never into
+   * the per-view one. The value observed at mount is the seed the spawn applied, not a person's edit. */
+  it('writes a render timeout change to the per-entry record and never to the view record', async () => {
+    const graphicsRef = createActor(
+      graphicsMachine.provide({ actors: { probeWebGpu: fromPromise(async () => false) } }),
+      { input: {} },
+    ).start();
+    const editorSend = vi.fn<(event: EditorSendEvent) => void>();
+    const editorRef = mock<ActorRefFrom<typeof editorMachine>>({ send: editorSend });
+    const cad = createRenderTimeoutCad(30_000);
+
+    render(
+      <GraphicsProvider graphicsRef={graphicsRef}>
+        <SyncHarness graphicsRef={graphicsRef} editorRef={editorRef} cadRef={cad.ref} entryPath='src/main.ts' />
+      </GraphicsProvider>,
+    );
+
+    expect(editorSend).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setUnitSettings' }));
+
+    act(() => {
+      cad.setRenderTimeout(90_000);
+    });
+
+    await waitFor(() => {
+      expect(editorSend).toHaveBeenCalledWith({
+        type: 'setUnitSettings',
+        entryPath: 'src/main.ts',
+        settings: { renderTimeout: 90_000 },
+      });
+    });
+    for (const [event] of editorSend.mock.calls) {
+      if (event.type === 'updateViewSettings') {
+        expect(event.settings).not.toHaveProperty('renderTimeout');
+      }
+    }
     graphicsRef.stop();
   });
 
@@ -199,7 +306,7 @@ describe('useViewSettingsSync', () => {
       expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
         type: 'updateViewSettings',
         settings: {
-          schemaVersion: 10,
+          schemaVersion: 11,
           cameraView: {
             target: [3, 4, 5],
             direction: [1, 0, 0],
@@ -341,7 +448,7 @@ describe('useViewSettingsSync', () => {
     await waitFor(() => {
       expect(editorSend.mock.calls.at(-1)?.[0]).toMatchObject({
         type: 'updateViewSettings',
-        settings: { schemaVersion: 10, cameraView: undefined },
+        settings: { schemaVersion: 11, cameraView: undefined },
       });
     });
     graphicsRef.stop();

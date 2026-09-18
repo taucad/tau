@@ -97,13 +97,31 @@ const settlementKinds = async (chatId: string): Promise<readonly string[]> => {
   );
 };
 
+/**
+ * Assert the admission invariant over one chat's log, waiting for it to hold.
+ *
+ * The last run's settlement is written as its turn leaves `finishing`, a moment
+ * after its reply is on screen, so a single read races it: every row of this
+ * file failed with `settlements: 0` on the last run when the machine was
+ * loaded. Waiting cannot hide a missing settlement — a run that never settles
+ * still fails the row, it just takes the timeout to say so.
+ */
 const expectLogInvariant = async (chatId: string, expectedRuns: number): Promise<void> => {
-  const records = await chatLog(chatId);
-  const runIds = [...new Set(records.map((record) => record.runId))];
-  expect(runIds).toHaveLength(expectedRuns);
-  expect(runIds.map((runId) => admissionOrderOf(records, runId))).toEqual(
-    runIds.map((runId) => ({ runId, isAdmitted: true, settlesAfterAdmission: true, settlements: 1 })),
-  );
+  await expect
+    .poll(
+      async () => {
+        const records = await chatLog(chatId);
+        const runIds = [...new Set(records.map((record) => record.runId))];
+        return {
+          runs: runIds.length,
+          violations: runIds
+            .map((runId) => admissionOrderOf(records, runId))
+            .filter((order) => !order.isAdmitted || !order.settlesAfterAdmission || order.settlements !== 1),
+        };
+      },
+      { timeout: 60_000 },
+    )
+    .toEqual({ runs: expectedRuns, violations: [] });
 };
 
 /**
@@ -202,7 +220,12 @@ test('sends a second plain message after a completed turn', async () => {
 
   await sendDraft('Second plain message.');
 
-  await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(2);
+  await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
+  /* One provider call per turn. A third call means the run that was live when
+   * the page left was re-dispatched on return instead of adopted, and it would
+   * silently eat the next scripted reply — so the texts are asserted, not the
+   * count, and the failure names the extra call. */
+  expect(await gatewayUserTexts()).toHaveLength(2);
   await target.expectVisible(selectors.getByText('Reply two.', { exact: true }).last(), 120_000);
   await expectNoAdmissionRefusal();
   await expectLogInvariant(chatId, 2);
@@ -252,7 +275,12 @@ test('sends a second message after reloading a completed chat', async () => {
   await selectModel(pdfModelName);
   await sendDraft('Second plain message.');
 
-  await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(2);
+  await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
+  /* One provider call per turn. A third call means the run that was live when
+   * the page left was re-dispatched on return instead of adopted, and it would
+   * silently eat the next scripted reply — so the texts are asserted, not the
+   * count, and the failure names the extra call. */
+  expect(await gatewayUserTexts()).toHaveLength(2);
   await target.expectVisible(selectors.getByText('Reply two.', { exact: true }).last(), 120_000);
   await expectNoAdmissionRefusal();
   await expectLogInvariant(chatId, 2);
@@ -388,7 +416,12 @@ test('sends again after navigating away mid-turn and back', async () => {
 
   await sendDraft('Second plain message.');
 
-  await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBe(2);
+  await expect.poll(gatewayRequestCount, { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
+  /* One provider call per turn. A third call means the run that was live when
+   * the page left was re-dispatched on return instead of adopted, and it would
+   * silently eat the next scripted reply — so the texts are asserted, not the
+   * count, and the failure names the extra call. */
+  expect(await gatewayUserTexts()).toHaveLength(2);
   await target.expectVisible(selectors.getByText('Reply two.', { exact: true }).last(), 120_000);
   await expectNoAdmissionRefusal();
   await expectLogInvariant(chatId, 2);

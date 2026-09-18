@@ -194,6 +194,16 @@ export const storageTombstone = pgTable(
     purgeAfter: timestamp('purge_after', { withTimezone: true }).notNull(),
     erasure: boolean('erasure').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    /**
+     * What the purge removed, written by the job after the prefixes are gone
+     * (D31: "records what it removed"). A row with `purged_at` set is not
+     * planned again; a run that refused or failed leaves it null and is
+     * retried. Kept here rather than in a log table because one owner is
+     * purged once and the three numbers are the whole record.
+     */
+    purgedAt: timestamp('purged_at', { withTimezone: true }),
+    purgedObjects: bigint('purged_objects', { mode: 'number' }),
+    purgedBytes: bigint('purged_bytes', { mode: 'number' }),
   },
   (table) => [index('storage_tombstone_purge_after_idx').on(table.purgeAfter)],
 );

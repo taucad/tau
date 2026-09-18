@@ -288,6 +288,13 @@
       "when": 1789702357396,
       "tag": "0041_git_storage_substrate",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1789711918787,
+      "tag": "0042_gifted_fantastic_four",
+      "breakpoints": true
     }
   ]
 }

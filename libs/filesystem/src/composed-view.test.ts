@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { FileStatEntry } from '@taucad/types';
+import type { FileStat, FileStatEntry } from '@taucad/types';
 import { MemoryProvider } from '#backend/memory-provider.js';
-import { composeView } from '#composed-view.js';
+import { composeView, maskedPathCode } from '#composed-view.js';
 import { tauPathPolicy } from '#path-registry.js';
 import type { ComposedViewOverlay } from '#composed-view.js';
 
@@ -473,5 +473,125 @@ describe('composeView index-backed reads', () => {
 
     expect(view.search).toBeUndefined();
     expect(view.statTree).toBeUndefined();
+  });
+});
+
+describe('composeView mutating porcelain', () => {
+  type Admits = (relativePath: string, kind: 'file' | 'dir') => boolean;
+
+  /** A rooted surface that records what the view asked of it, and nothing else. */
+  const porcelain = () => {
+    const calls = {
+      copyTree: vi.fn<(source: string, target: string, options?: { admits?: Admits }) => Promise<void>>(
+        async () => undefined,
+      ),
+      duplicate: vi.fn<(source: string, target: string) => Promise<void>>(async () => undefined),
+      move: vi.fn(
+        async (): Promise<FileStat> => ({ type: 'file', size: 0, mtimeMs: 0, contentKind: 'text', lineCount: 0 }),
+      ),
+      bulkMove: vi.fn(async () => ({ moved: [], failed: [] })),
+      writeFiles: vi.fn<(files: Record<string, { content: string | Uint8Array<ArrayBuffer> }>) => Promise<void>>(
+        async () => undefined,
+      ),
+      canMove: vi.fn<(source: string, target: string) => Promise<true>>(async () => true),
+      canRename: vi.fn<(source: string, newName: string) => Promise<true>>(async () => true),
+      canCreate: vi.fn<(path: string, kind: 'file' | 'directory') => Promise<true>>(async () => true),
+      canDelete: vi.fn<(path: string) => Promise<true>>(async () => true),
+    };
+    return Object.assign(new MemoryProvider(), calls);
+  };
+
+  it('should refuse a hidden operand before the rooted surface is asked', async () => {
+    const base = porcelain();
+    const view = composeView({ filesystem: base }, { consumer: 'user', policy: tauPathPolicy });
+
+    await expect(view.copyTree!('.git', 'backup')).rejects.toMatchObject({
+      code: 'EPERM',
+      reason: maskedPathCode,
+    });
+    await expect(view.copyTree!('src', '.git/backup')).rejects.toMatchObject({ code: 'EPERM' });
+    await expect(view.move!('src/main.ts', '.git/main.ts')).rejects.toMatchObject({ code: 'EPERM' });
+    await expect(view.duplicate!('.git/HEAD', 'head.txt')).rejects.toMatchObject({ code: 'EPERM' });
+    await expect(view.bulkMove!([{ source: 'src/a.ts', target: '.git/a.ts' }])).rejects.toMatchObject({
+      code: 'EPERM',
+    });
+    await expect(view.writeFiles!({ '.git/HEAD': { content: 'ref' } })).rejects.toMatchObject({ code: 'EPERM' });
+    await expect(view.canMove!('.git/HEAD', 'head.txt')).rejects.toMatchObject({ code: 'EPERM' });
+    await expect(view.canCreate!('.git/HEAD', 'file')).rejects.toMatchObject({ code: 'EPERM' });
+    await expect(view.canDelete!('.git/HEAD')).rejects.toMatchObject({ code: 'EPERM' });
+
+    expect(base.copyTree).not.toHaveBeenCalled();
+    expect(base.move).not.toHaveBeenCalled();
+    expect(base.duplicate).not.toHaveBeenCalled();
+    expect(base.bulkMove).not.toHaveBeenCalled();
+    expect(base.writeFiles).not.toHaveBeenCalled();
+    expect(base.canMove).not.toHaveBeenCalled();
+    expect(base.canCreate).not.toHaveBeenCalled();
+    expect(base.canDelete).not.toHaveBeenCalled();
+  });
+
+  it('should refuse a records target for an agent and admit it for a host', async () => {
+    const agentBase = porcelain();
+    const hostBase = porcelain();
+
+    await expect(
+      composeView({ filesystem: agentBase }, { consumer: 'agent', policy: tauPathPolicy }).writeFiles!({
+        '.tau/chats/c1.json': { content: '{}' },
+      }),
+    ).rejects.toMatchObject({ code: 'EROFS', reason: maskedPathCode });
+    expect(agentBase.writeFiles).not.toHaveBeenCalled();
+
+    await composeView({ filesystem: hostBase }, { consumer: 'user', policy: tauPathPolicy }).writeFiles!({
+      '.tau/chats/c1.json': { content: '{}' },
+    });
+    expect(hostBase.writeFiles).toHaveBeenCalledOnce();
+  });
+
+  it('should hand the copy its own mask as the entry filter, spelled from the source', async () => {
+    const base = porcelain();
+    const view = composeView({ filesystem: base }, { consumer: 'user', policy: tauPathPolicy });
+
+    await view.copyTree!('', 'backup');
+    const wholeProject = base.copyTree.mock.calls[0]![2]!.admits!;
+    expect(wholeProject('.git', 'dir')).toBe(false);
+    expect(wholeProject('src/main.ts', 'file')).toBe(true);
+
+    await view.copyTree!('src', 'backup');
+    const midTree = base.copyTree.mock.calls[1]![2]!.admits!;
+    /* Project-relative: `src/.git` is not the control plane, `.git` under the
+     * project root is — the filter must join the copy root before it asks. */
+    expect(midTree('.git', 'dir')).toBe(true);
+    expect(midTree('main.ts', 'file')).toBe(true);
+  });
+
+  it('should narrow, never widen, a caller filter on a copy', async () => {
+    const base = porcelain();
+    const view = composeView({ filesystem: base }, { consumer: 'user', policy: tauPathPolicy });
+
+    await view.copyTree!('', 'backup', { admits: (relativePath) => relativePath !== 'src' });
+    const admits = base.copyTree.mock.calls[0]![2]!.admits!;
+
+    expect(admits('src', 'dir')).toBe(false);
+    expect(admits('.git', 'dir')).toBe(false);
+    expect(admits('tau.json', 'file')).toBe(true);
+  });
+
+  it('should refuse a write under an overlay root', async () => {
+    const base = porcelain();
+    const view = composeView(
+      { filesystem: base },
+      { consumer: 'user', policy: tauPathPolicy, overlays: [skillOverlay()] },
+    );
+
+    await expect(view.copyTree!('src', `${skillsRoot}/demo`)).rejects.toMatchObject({ code: 'EROFS' });
+    expect(base.copyTree).not.toHaveBeenCalled();
+  });
+
+  it('should offer no porcelain when the composed filesystem serves none', () => {
+    const view = composeView({ filesystem: provider }, { consumer: 'user', policy: tauPathPolicy });
+
+    expect(view.copyTree).toBeUndefined();
+    expect(view.move).toBeUndefined();
+    expect(view.canMove).toBeUndefined();
   });
 });

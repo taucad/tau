@@ -12,6 +12,8 @@ export type {
   PathPolicy,
   PathWatchPlane,
   ChangeEvent,
+  MkdirOptions,
+  WorkspaceMutationContext,
   FileTreeNode,
   TreeEntry,
   WatchRequest,
@@ -20,12 +22,11 @@ export type {
 export type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 
 export { pendingProjectCommitInputSchema, WorkspaceFileService } from '#workspace-file-service.js';
-export type {
-  BundledTypePackageReplacement,
-  MkdirOptions,
-  RootedFileSystem,
-  WorkspaceMutationContext,
-} from '#workspace-file-service.js';
+export type { BundledTypePackageReplacement } from '#workspace-file-service.js';
+export { MutationPipeline } from '#mutation-pipeline.js';
+export type { BulkMoveEdit, BulkMoveResult } from '#mutation-pipeline.js';
+export { RootedViews } from '#rooted-views.js';
+export type { RootedFileSystem, RootedPorcelain } from '#rooted-views.js';
 
 export { ProviderRegistry } from '#provider-registry.js';
 export type { ProviderRegistryOptions } from '#provider-registry.js';

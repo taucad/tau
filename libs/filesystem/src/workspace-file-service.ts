@@ -19,19 +19,24 @@ import type {
 } from '@taucad/types';
 import type {
   ChangeEvent,
-  DirectoryEntry,
   FileSystemProvider,
   FileTreeNode,
+  FileReadStreamOptions,
+  MkdirOptions,
   TreeEntry,
   WatchRequest,
   WatchEvent,
-  FileReadStreamOptions,
+  WorkspaceMutationContext,
 } from '#types.js';
+import { MutationPipeline, isProjectDirectoryPath } from '#mutation-pipeline.js';
+import type { BulkMoveEdit, BulkMoveResult } from '#mutation-pipeline.js';
+import { RootedViews } from '#rooted-views.js';
+import type { RootedFileSystem } from '#rooted-views.js';
 import type { ProviderRegistry } from '#provider-registry.js';
 import type { ResourceQueue } from '#resource-queue.js';
 import type { ChangeEventBus } from '#change-event-bus.js';
 import { TreeIndexes } from '#tree-index.js';
-import type { TreeIndex, TreeIndexAdmits, TreeSearchOptions } from '#tree-index.js';
+import type { TreeIndex } from '#tree-index.js';
 import { WatchRegistry } from '#watch-registry.js';
 import type { NodeFsWatchEvent } from '#backend/node/protocol.js';
 import { bufferToStream, validateFileReadStreamOptions } from '#backend/stream-utils.js';
@@ -57,18 +62,15 @@ import type {
   StorageRootConfig,
   WorkspaceScope,
 } from '#mount-table.js';
-import { getEventOrigin, tagEventAuthorities, tagEventOrigin } from '#event-origin-registry.js';
 import {
   assertRootedPath,
   isSafeRelativePath,
-  joinPath,
   joinRelativePath,
-  normalizePath,
   parentDirectory,
   resolveAuthorityPath,
 } from '@taucad/utils/path';
-import { MissingWorkspaceHandleError, RootedFileSystemError, WorkspaceMutationError } from '#workspace-errors.js';
-import { fileMetadataFields, getFileContentMetadata } from '#content-metadata.js';
+import { MissingWorkspaceHandleError, WorkspaceMutationError } from '#workspace-errors.js';
+import { fileMetadataFields } from '#content-metadata.js';
 import { readDirectoryEntries } from '#backend/directory-entries.js';
 import { archive } from '#content-ops/archive.js';
 
@@ -96,44 +98,6 @@ const maxLocalizedExternalChanges = 64;
 
 /** Snapshot body published when the walked physical root is absent. */
 const missingExternalSnapshot = '<missing>';
-const maximumCheckedWritePreconditions = 32;
-const maximumCheckedWriteBytes = 8 * 1024 * 1024;
-
-const asBytes = (value: Uint8Array<ArrayBuffer> | string): Uint8Array<ArrayBuffer> =>
-  typeof value === 'string' ? new TextEncoder().encode(value) : new Uint8Array(value);
-
-const bytesEqual = (left: Uint8Array<ArrayBuffer>, right: Uint8Array<ArrayBuffer>): boolean =>
-  left.byteLength === right.byteLength && left.every((value, index) => value === right[index]);
-
-const readFileOrAbsent = async (
-  provider: FileSystemProvider,
-  path: string,
-  // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the public checked-write absence sentinel.
-): Promise<Uint8Array<ArrayBuffer> | null> => {
-  try {
-    return await provider.readFile(path);
-  } catch (error) {
-    const code = (error as { code?: unknown } | undefined)?.code;
-    if (code === 'ENOENT' || code === 'ENOTDIR') {
-      return null;
-    }
-    throw error;
-  }
-};
-
-const checkedWriteFailure = (
-  state: 'known-not-applied' | 'potentially-applied',
-  error: unknown,
-): Error & { applicationState: typeof state } => {
-  const result = error instanceof Error ? error : new Error(String(error));
-  const candidateMetadata = (result as { metadata?: unknown }).metadata;
-  const metadata =
-    candidateMetadata !== null && typeof candidateMetadata === 'object' && !Array.isArray(candidateMetadata)
-      ? candidateMetadata
-      : {};
-  return Object.assign(result, { applicationState: state, metadata: { ...metadata, applicationState: state } });
-};
-
 type NativeFileSystemChangeRecord = {
   readonly type: 'appeared' | 'disappeared' | 'modified' | 'moved' | 'unknown' | 'errored';
   readonly changedHandle?: { readonly kind: FileSystemHandle['kind'] };
@@ -213,19 +177,6 @@ export class UnboundProjectRouteError extends Error {
     this.name = 'UnboundProjectRouteError';
     this.projectId = projectId;
   }
-}
-
-/**
- * A physical project directory is an immediate, non-dot-prefixed child of the
- * workspace root: `<root>/<slug>`. Dot-prefixed children (`.tau`, `.git`) hold
- * app state and are never projects.
- *
- * @param path - Canonical provider-relative path.
- * @returns Whether the path names a project directory.
- */
-function isProjectDirectoryPath(path: string): boolean {
-  const segments = path.split('/').filter(Boolean);
-  return segments.length === 1 && !segments[0]!.startsWith('.');
 }
 
 const directoryHandleSchema = z.custom<FileSystemDirectoryHandle>(
@@ -366,42 +317,6 @@ function isNotFoundError(error: unknown): boolean {
 }
 
 /**
- * Map an arbitrary thrown value into a {@link WorkspaceMutationError}
- * by best-effort sniffing of well-known shapes (`EEXIST`, `ENOENT`,
- * {@link MissingWorkspaceHandleError}). Unknown causes retain a truthful
- * generic failure instead of being mislabeled as absence.
- *
- * @param cause - The thrown value to translate. Typically a node-style
- *                `ErrnoException`, a {@link MissingWorkspaceHandleError},
- *                or an existing {@link WorkspaceMutationError}.
- * @param source - Source path of the failing mutation (used for the
- *                 fall-through `OPERATION_FAILED` carrier).
- * @param target - Target path of the failing mutation (used for the
- *                 `EEXIST → NAME_EXISTS` mapping where the collision is
- *                 at the destination).
- * @returns A {@link WorkspaceMutationError} the worker can return
- *          verbatim across the RPC boundary.
- */
-function causeToMutationError(cause: unknown, source: string, target: string): WorkspaceMutationError {
-  if (cause instanceof WorkspaceMutationError) {
-    return cause;
-  }
-  if (cause instanceof MissingWorkspaceHandleError) {
-    return new WorkspaceMutationError('MISSING_WORKSPACE_HANDLE', source, { cause });
-  }
-  if (typeof cause === 'object' && cause !== null) {
-    const errno = (cause as NodeJS.ErrnoException).code;
-    if (errno === 'EEXIST') {
-      return new WorkspaceMutationError('NAME_EXISTS', target, { target, cause });
-    }
-    if (errno === 'ENOENT') {
-      return new WorkspaceMutationError('NOT_FOUND', source, { cause });
-    }
-  }
-  return new WorkspaceMutationError('OPERATION_FAILED', source, { target, cause });
-}
-
-/**
  * Reject syntactically invalid workspace paths. Used by the `can*`
  * preflights so the explorer can show a typed error before issuing
  * the real mutation RPC.
@@ -423,53 +338,11 @@ function isStructurallyValidWorkspacePath(path: string): boolean {
   }
 }
 
-/**
- * Options for {@link WorkspaceFileService.mkdir}.
- * @public
- */
-export type MkdirOptions = {
-  recursive?: boolean;
-};
-
-/**
- * Optional metadata for workspace mutations initiated from a specific client
- * (e.g. a filesystem bridge port). Observer and direct UI paths omit this.
- *
- * @public
- */
-export type WorkspaceMutationContext = {
-  originClientId?: string;
-};
-
 /** Fully materialized files for one package-root replacement. @public */
 export type BundledTypePackageReplacement = Readonly<{
   packageDirectory: string;
   files: ReadonlyArray<Readonly<{ path: string; content: string }>>;
 }>;
-
-/**
- * Filesystem provider surface issued for one captured mount.
- * @public
- */
-export type RootedFileSystem = Omit<FileSystemProvider, 'writeFileChecked'> & {
-  writeFileChecked(input: CheckedFileWrite): Promise<CheckedFileWriteResult>;
-  watch(request: WatchRequest, handler: (event: WatchEvent) => void): () => void;
-  /**
-   * Search this root's own index, which no other root's queries evict (D3).
-   *
-   * Unmasked here, like every other rooted primitive: the mask belongs to the
-   * composed view above, which passes its policy's answer as `admits` so a
-   * hidden subtree is never descended into and `maxResults` counts only the
-   * rows its consumer may see.
-   *
-   * Optional for the same reason `readdirEntries` is: a rooted surface that is
-   * not the authority's own — a bridge client rooted at someone else's
-   * checkout — holds no index and offers neither read.
-   */
-  search?(query: string, options?: TreeSearchOptions): Promise<FileStatEntry[]>;
-  /** Recursively stat one directory of this root from the same index. */
-  statTree?(path: string, options?: { admits?: TreeIndexAdmits }): Promise<FileStatEntry[]>;
-};
 
 /**
  * Layer 3a UI-side workspace orchestrator.
@@ -500,6 +373,8 @@ export class WorkspaceFileService {
     storageRootKey: string;
   }> = [];
   private readonly _observedExternalRoots = new Map<string, ObservedExternalRoot>();
+  private readonly _pipeline: MutationPipeline;
+  private readonly _rootedViews: RootedViews;
 
   /**
    * Create a {@link WorkspaceFileService} with injected dependencies.
@@ -523,6 +398,20 @@ export class WorkspaceFileService {
     this._crossTabCoordinator = options.crossTabCoordinator ?? new CrossTabCoordinator();
     this._filePool = options.filePool;
     this._mountTable = options.mountTable;
+    this._pipeline = new MutationPipeline({
+      mountTable: this._mountTable,
+      resourceQueue: this._resourceQueue,
+      eventBus: this._eventBus,
+      crossTabCoordinator: this._crossTabCoordinator,
+      treeIndexes: this._treeIndexes,
+      filePool: () => this._filePool,
+    });
+    this._rootedViews = new RootedViews({
+      mountTable: this._mountTable,
+      pipeline: this._pipeline,
+      watchRegistry: this._watchRegistry,
+      treeIndexFor: async (root) => this._treeIndexFor(root),
+    });
     this._crossTabCoordinator.onRemoteChange((notification) => {
       const predecessor = this._remoteChangeTail;
       const applyInOrder = async (): Promise<void> => {
@@ -556,293 +445,7 @@ export class WorkspaceFileService {
    * @returns A writable filesystem whose root is the captured mount.
    */
   public createRootedFileSystem(authorityRoot: string, mutationContext?: WorkspaceMutationContext): RootedFileSystem {
-    const root = resolveAuthorityPath(authorityRoot);
-    const captured = this._mountTable.getExactMount(root);
-    if (captured === undefined) {
-      throw new RootedFileSystemError('ROOT_UNAVAILABLE');
-    }
-
-    const assertCurrent = (): void => {
-      if (this._mountTable.getExactMount(root) !== captured) {
-        throw new RootedFileSystemError('ESTALE');
-      }
-    };
-    const assertMutableRoot = (localPath: string): void => {
-      if (localPath === '') {
-        throw new Error('Cannot remove or rename the rooted filesystem root.');
-      }
-    };
-    const resolveLocal = (
-      localPath: string,
-    ): { authorityPath: string; resolution: MountResolution; localPath: string } => {
-      const canonicalLocalPath = assertRootedPath(localPath);
-      assertCurrent();
-      const authorityPath =
-        canonicalLocalPath === ''
-          ? root
-          : root === '/'
-            ? resolveAuthorityPath(`/${canonicalLocalPath}`)
-            : resolveAuthorityPath(`${root}/${canonicalLocalPath}`);
-      const providerPath = assertRootedPath(joinRelativePath(captured.providerBasePath, canonicalLocalPath));
-      return {
-        authorityPath,
-        localPath: canonicalLocalPath,
-        resolution: { provider: captured.provider, path: providerPath, backend: captured.backend, entry: captured },
-      };
-    };
-    const toLocalPath = (authorityPath: string): string | undefined => {
-      if (root === '/') {
-        return authorityPath === '/' ? '' : authorityPath.startsWith('/') ? authorityPath.slice(1) : undefined;
-      }
-      if (authorityPath === root) {
-        return '';
-      }
-      if (!authorityPath.startsWith(`${root}/`)) {
-        return undefined;
-      }
-      return authorityPath.slice(root.length + 1);
-    };
-    const prefixGlob = (pattern: string): string => {
-      if (pattern.startsWith('/')) {
-        throw new TypeError('A rooted watch glob must not begin with a slash.');
-      }
-      if (pattern === '') {
-        return root;
-      }
-      return root === '/' ? `/${pattern}` : `${root}/${pattern}`;
-    };
-
-    function readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
-    function readFile(path: string, encoding: 'utf8'): Promise<string>;
-    async function readFile(path: string, encoding?: 'utf8'): Promise<string | Uint8Array<ArrayBuffer>> {
-      const { resolution } = resolveLocal(path);
-      return encoding === 'utf8'
-        ? resolution.provider.readFile(resolution.path, 'utf8')
-        : resolution.provider.readFile(resolution.path);
-    }
-
-    const readFileStream = (path: string, options?: FileReadStreamOptions): ReadableStream<Uint8Array<ArrayBuffer>> => {
-      validateFileReadStreamOptions(options);
-      const { resolution } = resolveLocal(path);
-      let reader = resolution.provider.readFileStream?.(resolution.path, options).getReader();
-      const cancelAfterFailure = async (reason: unknown): Promise<void> => {
-        try {
-          await reader?.cancel(reason);
-        } catch {
-          // Preserve the read or staleness failure that required cleanup.
-        }
-      };
-      return new ReadableStream(
-        {
-          async pull(controller) {
-            try {
-              assertCurrent();
-              reader ??= bufferToStream(await resolution.provider.readFile(resolution.path), options).getReader();
-              const result = await reader.read();
-              assertCurrent();
-              if (result.done) {
-                controller.close();
-              } else {
-                controller.enqueue(result.value);
-              }
-            } catch (error) {
-              await cancelAfterFailure(error);
-              throw error;
-            }
-          },
-          cancel: async (reason) => reader?.cancel(reason),
-        },
-        { highWaterMark: 0 },
-      );
-    };
-
-    const readdir = async (path: string): Promise<string[]> => {
-      const { resolution } = resolveLocal(path);
-      return resolution.provider.readdir(resolution.path);
-    };
-    const stat = async (path: string): Promise<FileStat> => {
-      const { resolution } = resolveLocal(path);
-      return resolution.provider.stat(resolution.path);
-    };
-    const readdirEntries = captured.provider.readdirEntries
-      ? async (path: string): Promise<DirectoryEntry[]> => {
-          const { resolution } = resolveLocal(path);
-          return resolution.provider.readdirEntries!(resolution.path);
-        }
-      : undefined;
-    const getFileMode = captured.provider.getFileMode
-      ? async (path: string) => {
-          const { resolution } = resolveLocal(path);
-          return resolution.provider.getFileMode!(resolution.path);
-        }
-      : undefined;
-    const setFileMode = captured.provider.setFileMode
-      ? async (path: string, mode: '100644' | '100755') => {
-          const { resolution } = resolveLocal(path);
-          await resolution.provider.setFileMode!(resolution.path, mode);
-        }
-      : undefined;
-    const writeFile = async (path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> => {
-      const { authorityPath, resolution } = resolveLocal(path);
-      await this._writeFileResolved({ path: authorityPath, resolution, data, context: mutationContext });
-    };
-    const writeFileChecked = async (input: CheckedFileWrite): Promise<CheckedFileWriteResult> => {
-      const target = resolveLocal(input.path);
-      const preconditions = input.preconditions.map((precondition) => {
-        const resolved = resolveLocal(precondition.path);
-        return { ...precondition, path: resolved.authorityPath, resolution: resolved.resolution };
-      });
-      return this._writeFileCheckedResolved({
-        path: target.authorityPath,
-        resolution: target.resolution,
-        data: input.data,
-        preconditions,
-        signal: input.signal,
-        context: mutationContext,
-      });
-    };
-    const appendFile = async (path: string, data: Uint8Array<ArrayBuffer> | string): Promise<void> => {
-      const { authorityPath, resolution } = resolveLocal(path);
-      await this._appendFileResolved({ path: authorityPath, resolution, data, context: mutationContext });
-    };
-    const mkdir = async (path: string, options?: MkdirOptions): Promise<void> => {
-      const { authorityPath, resolution } = resolveLocal(path);
-      await this._mkdirResolved({ path: authorityPath, resolution, options, context: mutationContext });
-    };
-    const unlink = async (path: string): Promise<void> => {
-      const { authorityPath, resolution, localPath } = resolveLocal(path);
-      assertMutableRoot(localPath);
-      await this._unlinkResolved({ path: authorityPath, resolution, context: mutationContext });
-    };
-    const rmdir = async (path: string): Promise<void> => {
-      const { authorityPath, resolution, localPath } = resolveLocal(path);
-      assertMutableRoot(localPath);
-      await this._rmdirResolved({ path: authorityPath, resolution, context: mutationContext });
-    };
-    const rename = async (from: string, to: string): Promise<void> => {
-      const source = resolveLocal(from);
-      const target = resolveLocal(to);
-      assertMutableRoot(source.localPath);
-      assertMutableRoot(target.localPath);
-      await this._moveResolved({
-        source: source.authorityPath,
-        target: target.authorityPath,
-        sourceResolution: source.resolution,
-        targetResolution: target.resolution,
-        context: mutationContext,
-      });
-    };
-    const exists = async (path: string): Promise<boolean> => {
-      const { resolution } = resolveLocal(path);
-      return resolution.provider.exists(resolution.path);
-    };
-    const lstat = async (path: string): Promise<FileStat> => {
-      const { resolution } = resolveLocal(path);
-      return resolution.provider.lstat(resolution.path);
-    };
-    const search = async (query: string, options?: TreeSearchOptions): Promise<FileStatEntry[]> => {
-      assertCurrent();
-      const index = await this._treeIndexFor(root);
-      return index.searchFiles(query, options);
-    };
-    const statTree = async (path: string, options?: { admits?: TreeIndexAdmits }): Promise<FileStatEntry[]> => {
-      const { localPath } = resolveLocal(path);
-      const index = await this._treeIndexFor(root);
-      return index.getDirectoryStat(localPath, options);
-    };
-    const watch = (request: WatchRequest, handler: (event: WatchEvent) => void): (() => void) => {
-      assertCurrent();
-      if (request.paths.length === 0) {
-        throw new TypeError('A rooted watch requires at least one path.');
-      }
-      const paths = request.paths.map((path) => resolveLocal(path).authorityPath);
-      let active = true;
-      let unsubscribe = (): void => undefined;
-      const stop = (): void => {
-        if (!active) {
-          return;
-        }
-        active = false;
-        unsubscribe();
-      };
-      unsubscribe = this._watchRegistry.watch(
-        {
-          ...request,
-          paths,
-          includes: request.includes?.map(prefixGlob),
-          excludes: request.excludes?.map(prefixGlob),
-        },
-        (event) => {
-          if (!active) {
-            return;
-          }
-          try {
-            assertCurrent();
-          } catch (error) {
-            if (error instanceof RootedFileSystemError && error.code === 'ESTALE') {
-              stop();
-              handler({ type: 'reset' });
-              return;
-            }
-            throw error;
-          }
-          if (
-            mutationContext?.originClientId !== undefined &&
-            mutationContext.originClientId === getEventOrigin(event)
-          ) {
-            return;
-          }
-          if (event.type === 'reset') {
-            handler(event);
-            return;
-          }
-          if (event.type === 'rename') {
-            const oldPath = toLocalPath(event.oldPath);
-            const newPath = toLocalPath(event.newPath);
-            if (oldPath !== undefined && newPath !== undefined) {
-              handler({ ...event, oldPath, newPath });
-            } else if (oldPath !== undefined) {
-              handler({ type: 'delete', path: oldPath });
-            } else if (newPath !== undefined) {
-              handler({ type: 'change', path: newPath });
-            }
-            return;
-          }
-          const path = toLocalPath(event.path);
-          if (path !== undefined) {
-            handler({ ...event, path });
-          }
-        },
-        { authority: captured },
-      );
-      return stop;
-    };
-    return {
-      id: 'workspace-root',
-      capabilities: captured.provider.capabilities,
-      dispose() {
-        // The provider and rooted view lifetime remain owned by WorkspaceFileService.
-      },
-      readFile,
-      readFileStream,
-      writeFile,
-      writeFileChecked,
-      appendFile,
-      readdir,
-      readdirEntries,
-      stat,
-      getFileMode,
-      setFileMode,
-      mkdir,
-      unlink,
-      rmdir,
-      rename,
-      exists,
-      lstat,
-      watch,
-      search,
-      statTree,
-    };
+    return this._rootedViews.create(authorityRoot, mutationContext);
   }
 
   // --- Read operations (direct to provider, no serialization) ---
@@ -980,7 +583,7 @@ export class WorkspaceFileService {
     this._assertGenericMutationPath(canonicalPath);
     const resolution = this._resolveProvider(canonicalPath);
     const ownedData = typeof data === 'string' ? data : new Uint8Array(data);
-    return this._writeFileResolved({ path: canonicalPath, resolution, data: ownedData, context });
+    return this._pipeline.writeFileResolved({ path: canonicalPath, resolution, data: ownedData, context });
   }
 
   /** Check current bytes and replace one file inside the canonical mutation fence. */
@@ -996,7 +599,7 @@ export class WorkspaceFileService {
       this._assertGenericMutationPath(preconditionPath);
       return { ...precondition, path: preconditionPath, resolution: this._resolveProvider(preconditionPath) };
     });
-    return this._writeFileCheckedResolved({
+    return this._pipeline.writeFileCheckedResolved({
       path,
       resolution,
       data: input.data,
@@ -1019,11 +622,15 @@ export class WorkspaceFileService {
     this._assertGenericMutationPath(canonicalPath);
     const resolution = this._resolveProvider(canonicalPath);
     const ownedData = typeof data === 'string' ? data : new Uint8Array(data);
-    return this._appendFileResolved({ path: canonicalPath, resolution, data: ownedData, context });
+    return this._pipeline.appendFileResolved({ path: canonicalPath, resolution, data: ownedData, context });
   }
 
   /**
    * Write multiple files through the canonical mutation path.
+   *
+   * The rooted surface serves the same batch over root-relative paths
+   * (charter D4); this authority-global spelling stays until W12 migrates the
+   * cross-root writers.
    *
    * @param files - Map of absolute path to content.
    * @param context - Optional mutation source metadata for change-bus subscribers.
@@ -1033,56 +640,18 @@ export class WorkspaceFileService {
     files: Record<string, { content: Uint8Array<ArrayBuffer> | string }>,
     context?: WorkspaceMutationContext,
   ): Promise<void> {
-    const ownedFiles = Object.entries(files).map(([path, file]) => {
-      const canonicalPath = resolveAuthorityPath(path);
-      this._assertGenericMutationPath(canonicalPath);
-      return {
-        path: canonicalPath,
-        resolution: this._resolveProvider(canonicalPath),
-        content: typeof file.content === 'string' ? file.content : new Uint8Array(file.content),
-      };
-    });
-    const results = await Promise.allSettled(
-      ownedFiles.map(async ({ path, resolution, content }) =>
-        this._writeFileResolved({ path, resolution, data: content, context }),
-      ),
+    return this._pipeline.writeFiles(
+      Object.entries(files).map(([path, file]) => {
+        const canonicalPath = resolveAuthorityPath(path);
+        this._assertGenericMutationPath(canonicalPath);
+        return {
+          path: canonicalPath,
+          resolution: this._resolveProvider(canonicalPath),
+          content: typeof file.content === 'string' ? file.content : new Uint8Array(file.content),
+        };
+      }),
+      context,
     );
-    const firstFailure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
-    if (firstFailure !== undefined) {
-      // Every settled write already recorded itself; only the rejected paths hold
-      // untrustworthy derivatives, so the batch's successes keep their cached state.
-      for (const [index, result] of results.entries()) {
-        if (result.status === 'rejected') {
-          const { path } = ownedFiles[index]!;
-          this._filePool?.invalidate(path);
-          this._treeIndexes.removeFile(path);
-        }
-      }
-      const operationsByBackend = Map.groupBy(
-        ownedFiles.map(({ path, resolution }) => ({ path, resolution })),
-        ({ resolution }) => resolution.backend,
-      );
-      for (const [backend, operations] of operationsByBackend) {
-        this._emitChangeEvent({ type: 'backendChanged', backend }, context, {
-          operations,
-          globallyVisible: operations.some(({ path, resolution }) => this._isCurrentResolution(path, resolution)),
-        });
-      }
-      const notifiedParents = new Set<string>();
-      for (const { path, resolution } of ownedFiles) {
-        const parent = parentDirectory(path);
-        const authority = this._physicalAuthority(resolution);
-        const key = `${authority.storageRootKey}\0${authority.providerBasePath}\0${parent}`;
-        if (!notifiedParents.has(key)) {
-          notifiedParents.add(key);
-          this._crossTabCoordinator.notifyDirectoryChange(parent, authority);
-        }
-      }
-      if (firstFailure.reason instanceof Error) {
-        throw firstFailure.reason;
-      }
-      throw new Error('Batch write failed with a non-Error rejection.', { cause: firstFailure.reason });
-    }
   }
 
   /**
@@ -1097,7 +666,7 @@ export class WorkspaceFileService {
     const canonicalPath = resolveAuthorityPath(path);
     this._assertGenericMutationPath(canonicalPath);
     const resolution = this._resolveProvider(canonicalPath);
-    return this._mkdirResolved({ path: canonicalPath, resolution, options, context });
+    return this._pipeline.mkdirResolved({ path: canonicalPath, resolution, options, context });
   }
 
   /**
@@ -1122,7 +691,7 @@ export class WorkspaceFileService {
     this._assertGenericMutationPath(canonicalTarget, canonicalSource);
     const sourceResolution = this._resolveProvider(canonicalSource);
     const targetResolution = this._resolveProvider(canonicalTarget);
-    return this._moveResolved({
+    return this._pipeline.moveResolved({
       source: canonicalSource,
       target: canonicalTarget,
       sourceResolution,
@@ -1142,7 +711,7 @@ export class WorkspaceFileService {
     const canonicalPath = resolveAuthorityPath(path);
     this._assertGenericMutationPath(canonicalPath);
     const resolution = this._resolveProvider(canonicalPath);
-    return this._unlinkResolved({
+    return this._pipeline.unlinkResolved({
       path: canonicalPath,
       resolution,
       context,
@@ -1168,7 +737,7 @@ export class WorkspaceFileService {
     const canonicalPath = resolveAuthorityPath(path);
     this._assertGenericMutationPath(canonicalPath);
     const resolution = this._resolveProvider(canonicalPath);
-    return this._rmdirResolved({
+    return this._pipeline.rmdirResolved({
       path: canonicalPath,
       resolution,
       options,
@@ -1182,39 +751,24 @@ export class WorkspaceFileService {
    * Move many paths sequentially and report every completed and failed edit.
    * Completed edits are never rolled back over newer peer data.
    *
+   * The rooted surface serves the same sequence over root-relative paths
+   * (charter D4); this spelling stays until W12 migrates the Files pane.
+   *
    * @param edits - Source → target pairs.
    * @param context - Optional mutation source metadata for change-bus subscribers.
    * @returns The {@link BulkMoveResult} describing successes + the failure (if any).
    */
-  public async bulkMove(
-    edits: ReadonlyArray<{ source: string; target: string }>,
-    context?: WorkspaceMutationContext,
-  ): Promise<{
-    moved: ReadonlyArray<{ edit: { source: string; target: string }; stat: FileStat }>;
-    failed: ReadonlyArray<{ edit: { source: string; target: string }; error: WorkspaceMutationError }>;
-  }> {
-    if (edits.length === 0) {
-      return { moved: [], failed: [] };
-    }
-
-    const completed: Array<{ edit: { source: string; target: string }; stat: FileStat }> = [];
-    const failed: Array<{ edit: { source: string; target: string }; error: WorkspaceMutationError }> = [];
-
-    for (const edit of edits) {
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- Result order and dependent edits require sequential moves.
-        const stat = await this.move(edit.source, edit.target, context);
-        completed.push({ edit, stat });
-      } catch (error) {
-        const mutationError = causeToMutationError(error, edit.source, edit.target);
-        failed.push({ edit, error: mutationError });
-      }
-    }
-
-    return { moved: completed, failed };
+  public async bulkMove(edits: readonly BulkMoveEdit[], context?: WorkspaceMutationContext): Promise<BulkMoveResult> {
+    return this._pipeline.bulkMove(async (source, target) => this.move(source, target, context), edits);
   }
 
-  // --- Preflight checks (R6) ---
+  /*
+   * --- Preflight checks (R6) ---
+   *
+   * The rooted surface answers the same four over root-relative paths, with the
+   * view refusing a masked operand before the probe (charter D4). These
+   * authority-global spellings stay until W12 migrates the explorer.
+   */
 
   /**
    * Preflight {@link move}: verifies the source exists, the target does
@@ -1395,6 +949,11 @@ export class WorkspaceFileService {
   /**
    * Copy a single file to a new location, creating parent directories as needed.
    *
+   * Kept under I2 while the Files pane's duplicate gesture still reaches it
+   * through `client.duplicateFile`. The rooted surface serves the same
+   * operation as `duplicate`, mask-checked by the view above it (charter D4);
+   * W12 moves the caller and this method goes with it.
+   *
    * @param sourcePath - Absolute path of the file to copy.
    * @param destinationPath - Absolute path for the new copy.
    * @param context - Optional mutation source metadata for change-bus subscribers.
@@ -1414,6 +973,11 @@ export class WorkspaceFileService {
   /**
    * Recursively copy an entire directory tree to a new location.
    *
+   * Unmasked, which is exactly what W0 pin (d) records: the Files pane's folder
+   * copy still reaches it through `client.copyDirectory`. The rooted surface
+   * serves the same batch as `copyTree`, where the view supplies its mask as
+   * the entry filter (charter D4); W12 moves the caller and closes the bypass.
+   *
    * @param sourcePath - Absolute path of the source directory.
    * @param destinationPath - Absolute path for the destination directory.
    * @param context - Optional mutation source metadata for change-bus subscribers.
@@ -1425,86 +989,15 @@ export class WorkspaceFileService {
     context?: WorkspaceMutationContext,
   ): Promise<void> {
     const source = resolveAuthorityPath(sourcePath);
-    const destination = resolveAuthorityPath(destinationPath);
-    this._assertGenericMutationPath(destination, source);
-    const sourceResolution = this._resolveProvider(source);
-    const destinationResolution = this._resolveProvider(destination);
-    const lockPaths = this._mutationLockPaths([
-      { path: source, resolution: sourceResolution },
-      { path: destination, resolution: destinationResolution },
-    ]);
-    let mutationBegan = false;
-    return this._crossTabCoordinator.withLocks(lockPaths, async () =>
-      this._resourceQueue.queueForMany(lockPaths, async () => {
-        try {
-          await this._refreshMutationProviders([sourceResolution, destinationResolution]);
-          this._assertNoDescendantMounts(source, 'copy');
-          this._assertNoDescendantMounts(destination, 'copy');
-          const snapshot = await this._getDirectoryContentsInternal(sourceResolution.provider, sourceResolution.path);
-          const destinationEntries = ['', ...snapshot.directories].map((relativePath) => {
-            const path = relativePath === '' ? destination : joinPath(destination, relativePath);
-            const resolvedPath =
-              relativePath === ''
-                ? destinationResolution.path
-                : joinRelativePath(destinationResolution.path, relativePath);
-            return { path, resolution: { ...destinationResolution, path: resolvedPath } };
-          });
-          for (const { path, resolution } of destinationEntries) {
-            // oxlint-disable-next-line no-await-in-loop -- Preserve source directory order so parents exist before children.
-            const existed = await resolution.provider.exists(resolution.path);
-            mutationBegan = true;
-            // oxlint-disable-next-line no-await-in-loop -- Preserve source directory order so parents exist before children.
-            await resolution.provider.mkdir(resolution.path, { recursive: true });
-            if (!existed) {
-              if (this._isCurrentResolution(path, resolution)) {
-                this._treeIndexes.addDirectory(path);
-              }
-              this._emitChangeEvent({ type: 'directoryCreated', path, backend: resolution.backend }, context, {
-                operations: [{ path, resolution }],
-              });
-            }
-          }
-          const destinationFiles = Object.entries(snapshot.files).map(([relativePath, content]) => {
-            const path = joinPath(destination, relativePath);
-            const resolvedPath = joinRelativePath(destinationResolution.path, relativePath);
-            return { path, content, resolution: { ...destinationResolution, path: resolvedPath } };
-          });
-          for (const { path, content, resolution } of destinationFiles) {
-            mutationBegan = true;
-            // oxlint-disable-next-line no-await-in-loop -- Preserve deterministic local write ordering.
-            await this._writeFileUnlocked({ path, resolution, data: content, context });
-          }
-          this._emitChangeEvent(
-            {
-              type: 'directoryCopied',
-              sourcePath: source,
-              targetPath: destination,
-              backend: destinationResolution.backend,
-            },
-            context,
-            { operations: [{ path: destination, resolution: destinationResolution }] },
-          );
-          this._crossTabCoordinator.notifyDirectoryChange(destination, this._physicalAuthority(destinationResolution));
-        } catch (error) {
-          if (mutationBegan) {
-            const globallyVisible = this._isCurrentResolution(destination, destinationResolution);
-            if (globallyVisible) {
-              this._filePool?.clear();
-              this._treeIndexes.clear();
-            }
-            this._emitChangeEvent({ type: 'backendChanged', backend: destinationResolution.backend }, context, {
-              operations: [{ path: destination, resolution: destinationResolution }],
-              globallyVisible,
-            });
-            this._crossTabCoordinator.notifyDirectoryChange(
-              destination,
-              this._physicalAuthority(destinationResolution),
-            );
-          }
-          throw error;
-        }
-      }),
-    );
+    const target = resolveAuthorityPath(destinationPath);
+    this._assertGenericMutationPath(target, source);
+    return this._pipeline.copyTree({
+      source,
+      target,
+      sourceResolution: this._resolveProvider(source),
+      targetResolution: this._resolveProvider(target),
+      context,
+    });
   }
 
   /**
@@ -1559,12 +1052,12 @@ export class WorkspaceFileService {
     }
 
     const rootResolution = this._resolveProvider(bundledTypesAbsolutePrefix);
-    const locks = this._mutationLockPaths([{ path: bundledTypesAbsolutePrefix, resolution: rootResolution }]);
+    const locks = this._pipeline.mutationLockPaths([{ path: bundledTypesAbsolutePrefix, resolution: rootResolution }]);
     return this._crossTabCoordinator.withLocks(locks, async () =>
       this._resourceQueue.queueForMany(locks, async () => {
         let mutationBegan = false;
         try {
-          await this._refreshMutationProviders([
+          await this._pipeline.refreshMutationProviders([
             rootResolution,
             ...operations.flatMap(({ packageResolution, files }) => [
               packageResolution,
@@ -1576,35 +1069,35 @@ export class WorkspaceFileService {
             if (await packageResolution.provider.exists(packageResolution.path)) {
               mutationBegan = true;
               // oxlint-disable-next-line no-await-in-loop -- Package replacement is intentionally ordered under one lock.
-              await this._rmdirRecursive(packageResolution.provider, packageResolution.path);
+              await this._pipeline.rmdirRecursive(packageResolution.provider, packageResolution.path);
             }
             this._filePool?.invalidate(packageDirectory);
             this._treeIndexes.removeDirectory(packageDirectory);
             for (const { path, content, resolution } of files) {
               mutationBegan = true;
               // oxlint-disable-next-line no-await-in-loop -- A package root becomes visible as one ordered generation.
-              await this._writeFileUnlocked({ path, resolution, data: content });
+              await this._pipeline.writeFileUnlocked({ path, resolution, data: content });
             }
           }
           if (mutationBegan) {
-            this._emitChangeEvent(
+            this._pipeline.emitChangeEvent(
               { type: 'directoryChanged', path: bundledTypesAbsolutePrefix, backend: rootResolution.backend },
               undefined,
               { operations: [{ path: bundledTypesAbsolutePrefix, resolution: rootResolution }] },
             );
             this._crossTabCoordinator.notifyDirectoryChange(
               bundledTypesAbsolutePrefix,
-              this._physicalAuthority(rootResolution),
+              this._pipeline.physicalAuthority(rootResolution),
             );
           }
         } catch (error) {
           if (mutationBegan) {
             this._filePool?.clear();
             this._treeIndexes.clear();
-            this._emitChangeEvent({ type: 'backendChanged', backend: rootResolution.backend });
+            this._pipeline.emitChangeEvent({ type: 'backendChanged', backend: rootResolution.backend });
             this._crossTabCoordinator.notifyDirectoryChange(
               bundledTypesAbsolutePrefix,
-              this._physicalAuthority(rootResolution),
+              this._pipeline.physicalAuthority(rootResolution),
             );
           }
           throw error;
@@ -1627,7 +1120,7 @@ export class WorkspaceFileService {
    */
   public async getDirectoryContents(path: string): Promise<Record<string, Uint8Array<ArrayBuffer>>> {
     const { provider, path: resolvedPath } = this._resolveProvider(path);
-    const contents = await this._getDirectoryContentsInternal(provider, resolvedPath);
+    const contents = await this._pipeline.directoryContents(provider, resolvedPath);
     return contents.files;
   }
 
@@ -2140,7 +1633,7 @@ export class WorkspaceFileService {
         } finally {
           this._filePool?.clear();
           this._treeIndexes.clear();
-          this._emitChangeEvent({ type: 'directoryChanged', path: authorityParent, backend: scope.backend });
+          this._pipeline.emitChangeEvent({ type: 'directoryChanged', path: authorityParent, backend: scope.backend });
           this._crossTabCoordinator.notifyDirectoryChange(authorityParent, parentAuthority);
         }
         if (await provider.exists(path)) {
@@ -2192,7 +1685,7 @@ export class WorkspaceFileService {
               return { status: 'already-committed' };
             }
             mutationBegan = true;
-            await this._rmdirRecursive(provider, path);
+            await this._pipeline.rmdirRecursive(provider, path);
           }
 
           mutationBegan = true;
@@ -2204,7 +1697,7 @@ export class WorkspaceFileService {
             const logicalPath = `${logicalRoot}/${relativePath}`;
             const providerPath = `${path}/${relativePath}`;
             // oxlint-disable-next-line no-await-in-loop -- deterministic manifest-last transaction
-            await this._writeFileUnlocked({
+            await this._pipeline.writeFileUnlocked({
               path: logicalPath,
               resolution: { provider, path: providerPath, backend: scope.backend },
               data: descriptor.content,
@@ -2216,7 +1709,7 @@ export class WorkspaceFileService {
             }
           }
 
-          await this._writeFileUnlocked({
+          await this._pipeline.writeFileUnlocked({
             path: `${logicalRoot}/tau.json`,
             resolution: { provider, path: `${path}/tau.json`, backend: scope.backend },
             data: manifest,
@@ -3006,7 +2499,7 @@ export class WorkspaceFileService {
       return;
     }
     if (kind === 'directory') {
-      this._emitChangeEvent(
+      this._pipeline.emitChangeEvent(
         { type: 'directoryCreated', path: mapping.path, backend: mapping.resolution.backend },
         undefined,
         { operations: [mapping] },
@@ -3014,7 +2507,7 @@ export class WorkspaceFileService {
       this._crossTabCoordinator.notifyMutation({
         type: 'mkdir',
         path: mapping.path,
-        authority: this._physicalAuthority(mapping.resolution),
+        authority: this._pipeline.physicalAuthority(mapping.resolution),
       });
       return;
     }
@@ -3022,18 +2515,22 @@ export class WorkspaceFileService {
   }
 
   private _emitExternalFileWrite(mapping: ExternalLogicalMapping): void {
-    this._emitChangeEvent({ type: 'fileWritten', path: mapping.path, backend: mapping.resolution.backend }, undefined, {
-      operations: [mapping],
-    });
+    this._pipeline.emitChangeEvent(
+      { type: 'fileWritten', path: mapping.path, backend: mapping.resolution.backend },
+      undefined,
+      {
+        operations: [mapping],
+      },
+    );
     this._crossTabCoordinator.notifyMutation({
       type: 'write',
       path: mapping.path,
-      authority: this._physicalAuthority(mapping.resolution),
+      authority: this._pipeline.physicalAuthority(mapping.resolution),
     });
   }
 
   private _emitExternalDeletion(mapping: ExternalLogicalMapping, kind: 'file' | 'dir'): void {
-    this._emitChangeEvent(
+    this._pipeline.emitChangeEvent(
       kind === 'file'
         ? { type: 'fileDeleted', path: mapping.path, backend: mapping.resolution.backend }
         : { type: 'directoryDeleted', path: mapping.path, backend: mapping.resolution.backend },
@@ -3043,7 +2540,7 @@ export class WorkspaceFileService {
     this._crossTabCoordinator.notifyMutation({
       type: kind === 'file' ? 'delete' : 'rmdir',
       path: mapping.path,
-      authority: this._physicalAuthority(mapping.resolution),
+      authority: this._pipeline.physicalAuthority(mapping.resolution),
     });
   }
 
@@ -3056,12 +2553,12 @@ export class WorkspaceFileService {
           ? ''
           : mapping.resolution.path.slice(0, separator);
     const resolution = { ...mapping.resolution, path: physicalPath };
-    this._emitChangeEvent(
+    this._pipeline.emitChangeEvent(
       { type: 'directoryChanged', path: logicalPath, backend: mapping.resolution.backend },
       undefined,
       { operations: [{ path: logicalPath, resolution }] },
     );
-    this._crossTabCoordinator.notifyDirectoryChange(logicalPath, this._physicalAuthority(mapping.resolution));
+    this._crossTabCoordinator.notifyDirectoryChange(logicalPath, this._pipeline.physicalAuthority(mapping.resolution));
   }
 
   private _emitExternalRootSummaries(state: ObservedExternalRoot, providerBasePath?: string): void {
@@ -3171,7 +2668,7 @@ export class WorkspaceFileService {
   }
 
   private _emitGlobalDiscoveryChange(state: ObservedExternalRoot): void {
-    this._emitChangeEvent({ type: 'directoryChanged', path: '/', backend: state.backend });
+    this._pipeline.emitChangeEvent({ type: 'directoryChanged', path: '/', backend: state.backend });
     this._crossTabCoordinator.notifyDirectoryChange('/', {
       storageRootKey: state.storageRootKey,
       providerBasePath: '',
@@ -3394,7 +2891,7 @@ export class WorkspaceFileService {
       entry === undefined
         ? undefined
         : this._remoteResolution({ path: notification.path, authority: notification.authority, provider, entry });
-    const isCurrent = resolution !== undefined && this._isCurrentResolution(notification.path, resolution);
+    const isCurrent = resolution !== undefined && this._pipeline.isCurrentResolution(notification.path, resolution);
     if (!isCurrent && !isDiscoveryRootChange) {
       return;
     }
@@ -3405,7 +2902,7 @@ export class WorkspaceFileService {
     }
 
     if (notification.type === 'directory-change') {
-      this._emitChangeEvent(
+      this._pipeline.emitChangeEvent(
         { type: 'directoryChanged', path: notification.path, backend },
         undefined,
         resolution === undefined ? undefined : { operations: [{ path: notification.path, resolution }] },
@@ -3424,7 +2921,7 @@ export class WorkspaceFileService {
           : notification.type === 'delete'
             ? { type: 'fileDeleted', path: notification.path, backend }
             : { type: 'directoryDeleted', path: notification.path, backend };
-    this._emitChangeEvent(event, undefined, {
+    this._pipeline.emitChangeEvent(event, undefined, {
       operations: [{ path: notification.path, resolution }],
     });
   }
@@ -3496,7 +2993,7 @@ export class WorkspaceFileService {
       this._watchRegistry.emitResetAll();
       return;
     }
-    this._emitChangeEvent({
+    this._pipeline.emitChangeEvent({
       type: 'backendChanged',
       backend: backend ?? this._backendForPhysicalAuthority(notification.authority),
     });
@@ -3511,7 +3008,7 @@ export class WorkspaceFileService {
       this._resetTopologyState();
     }
     if (mount !== undefined) {
-      this._emitChangeEvent({ type: 'directoryDeleted', path, backend: mount.backend });
+      this._pipeline.emitChangeEvent({ type: 'directoryDeleted', path, backend: mount.backend });
     }
     if (notifyPeers) {
       const projectId = path.split('/')[2];
@@ -3528,72 +3025,6 @@ export class WorkspaceFileService {
     this._filePool?.clear();
     this._treeIndexes.clear();
     this._watchRegistry.emitResetAll();
-  }
-
-  private _notifyMoveParents(options: {
-    source: string;
-    target: string;
-    sourceResolution: MountResolution;
-    targetResolution: MountResolution;
-  }): void {
-    const { source, target, sourceResolution, targetResolution } = options;
-    const notifications = [
-      { path: parentDirectory(source), authority: this._physicalAuthority(sourceResolution) },
-      { path: parentDirectory(target), authority: this._physicalAuthority(targetResolution) },
-    ];
-    const delivered = new Set<string>();
-    for (const { path, authority } of notifications) {
-      const key = `${authority.storageRootKey}\0${authority.providerBasePath}\0${path}`;
-      if (!delivered.has(key)) {
-        delivered.add(key);
-        this._crossTabCoordinator.notifyDirectoryChange(path, authority);
-      }
-    }
-  }
-
-  private _isCurrentResolution(path: string, resolution: MountResolution): boolean {
-    if (resolution.entry === undefined) {
-      return false;
-    }
-    try {
-      const current = this._mountTable.resolve(path);
-      return (
-        current.entry === resolution.entry &&
-        current.provider === resolution.provider &&
-        current.path === resolution.path
-      );
-    } catch {
-      return false;
-    }
-  }
-
-  private _emitChangeEvent(
-    event: ChangeEvent,
-    context?: WorkspaceMutationContext,
-    attribution?: {
-      operations: ReadonlyArray<{ path: string; resolution: MountResolution }>;
-      globallyVisible?: boolean;
-    },
-  ): void {
-    if (context?.originClientId !== undefined) {
-      tagEventOrigin(event, context.originClientId);
-    }
-    if (attribution !== undefined) {
-      const authorities = [
-        ...new Set(
-          attribution.operations.flatMap(({ resolution }) =>
-            resolution.entry === undefined ? [] : [resolution.entry],
-          ),
-        ),
-      ];
-      if (authorities.length > 0) {
-        const globallyVisible =
-          attribution.globallyVisible ??
-          attribution.operations.every(({ path, resolution }) => this._isCurrentResolution(path, resolution));
-        tagEventAuthorities(event, authorities, globallyVisible);
-      }
-    }
-    this._eventBus.emit(event);
   }
 
   private async _statToTreeNode(
@@ -3737,556 +3168,6 @@ export class WorkspaceFileService {
     });
   }
 
-  private async _writeFileResolved({
-    path,
-    resolution,
-    data,
-    context,
-  }: {
-    path: string;
-    resolution: MountResolution;
-    data: Uint8Array<ArrayBuffer> | string;
-    context?: WorkspaceMutationContext;
-  }): Promise<void> {
-    const locks = this._mutationLockPaths([{ path, resolution }]);
-    return this._crossTabCoordinator.withMutationLocks(
-      locks,
-      { type: 'write', path, authority: this._physicalAuthority(resolution) },
-      async () =>
-        this._resourceQueue.queueForMany(locks, async () => {
-          await this._refreshMutationProviders([resolution]);
-          await this._writeFileUnlocked({ path, resolution, data, context });
-        }),
-    );
-  }
-
-  private async _writeFileCheckedResolved({
-    path,
-    resolution,
-    data,
-    preconditions,
-    signal,
-    context,
-  }: {
-    path: string;
-    resolution: MountResolution;
-    data: Uint8Array<ArrayBuffer> | string;
-    preconditions: ReadonlyArray<{
-      path: string;
-      // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the public checked-write absence sentinel.
-      expected: Uint8Array<ArrayBuffer> | string | null;
-      resolution: MountResolution;
-    }>;
-    signal?: AbortSignal;
-    context?: WorkspaceMutationContext;
-  }): Promise<CheckedFileWriteResult> {
-    if (preconditions.length === 0 || preconditions.length > maximumCheckedWritePreconditions) {
-      throw new TypeError(`Checked writes require 1-${String(maximumCheckedWritePreconditions)} preconditions.`);
-    }
-    const ownedData = asBytes(data);
-    const ownedPreconditions = preconditions.map((precondition) => ({
-      ...precondition,
-      expected: precondition.expected === null ? null : asBytes(precondition.expected),
-    }));
-    const expectedBytes = ownedPreconditions.reduce(
-      (total, precondition) => total + (precondition.expected?.byteLength ?? 0),
-      ownedData.byteLength,
-    );
-    if (expectedBytes > maximumCheckedWriteBytes) {
-      throw new TypeError(`Checked write request exceeds ${String(maximumCheckedWriteBytes)} bytes.`);
-    }
-    const targetAuthority = resolution.entry;
-    if (
-      targetAuthority?.storageRootKey === undefined ||
-      ownedPreconditions.some(
-        (precondition) =>
-          precondition.resolution.provider !== resolution.provider ||
-          precondition.resolution.entry?.storageRootKey !== targetAuthority.storageRootKey,
-      )
-    ) {
-      throw new TypeError('Checked write paths must share one admitted physical authority.');
-    }
-    // oxlint-disable-next-line typescript/no-restricted-types -- `null` is the public checked-write absence sentinel.
-    const physical = new Map<string, Uint8Array<ArrayBuffer> | null>();
-    const logicalByPhysical = new Map<string, string>();
-    for (const precondition of ownedPreconditions) {
-      const previous = physical.get(precondition.resolution.path);
-      if (previous !== undefined || physical.has(precondition.resolution.path)) {
-        const same =
-          previous === null
-            ? precondition.expected === null
-            : precondition.expected !== null && bytesEqual(previous!, precondition.expected);
-        if (!same) {
-          throw new TypeError(`Checked write aliases disagree for '${precondition.path}'.`);
-        }
-      } else {
-        physical.set(precondition.resolution.path, precondition.expected);
-        logicalByPhysical.set(precondition.resolution.path, precondition.path);
-      }
-    }
-    if (!physical.has(resolution.path)) {
-      throw new TypeError('Checked writes require a destination precondition.');
-    }
-    if (signal?.aborted) {
-      throw checkedWriteFailure(
-        'known-not-applied',
-        signal.reason instanceof Error ? signal.reason : new DOMException('The operation was aborted.', 'AbortError'),
-      );
-    }
-
-    const operations = [
-      { path, resolution },
-      ...ownedPreconditions.map(({ path, resolution }) => ({ path, resolution })),
-    ];
-    const locks = this._mutationLockPaths(operations);
-    const run = async (): Promise<CheckedFileWriteResult> =>
-      this._resourceQueue.queueForMany(locks, async () => {
-        await this._refreshMutationProviders(operations.map(({ resolution }) => resolution));
-        if (signal?.aborted) {
-          throw checkedWriteFailure(
-            'known-not-applied',
-            signal.reason instanceof Error
-              ? signal.reason
-              : new DOMException('The operation was aborted.', 'AbortError'),
-          );
-        }
-        if (resolution.provider.writeFileChecked !== undefined) {
-          let result: CheckedFileWriteResult;
-          try {
-            result = await resolution.provider.writeFileChecked({
-              path: resolution.path,
-              data: ownedData,
-              preconditions: [...physical].map(([preconditionPath, expected]) => ({
-                path: preconditionPath,
-                expected,
-              })),
-            });
-          } catch (error) {
-            if ((error as { applicationState?: unknown }).applicationState !== undefined) {
-              throw error;
-            }
-            throw checkedWriteFailure('potentially-applied', error);
-          }
-          if (result.status === 'applied') {
-            this._recordCompletedWrite({ path, resolution, bytes: result.content, context });
-          }
-          return result.status === 'conflict'
-            ? {
-                status: 'conflict',
-                conflicts: result.conflicts.map((conflict) => ({
-                  ...conflict,
-                  path: logicalByPhysical.get(conflict.path) ?? conflict.path,
-                })),
-              }
-            : result;
-        }
-        const checkedPaths = [
-          ...new Map(ownedPreconditions.map((precondition) => [precondition.path, precondition])).values(),
-        ];
-        const compared = await Promise.all(
-          checkedPaths.map(async (precondition) => {
-            const actual = await readFileOrAbsent(precondition.resolution.provider, precondition.resolution.path);
-            const matches =
-              actual === null
-                ? precondition.expected === null
-                : precondition.expected !== null && bytesEqual(actual, precondition.expected);
-            return matches ? undefined : { path: precondition.path, actual };
-          }),
-        );
-        const conflicts = compared.filter((conflict) => conflict !== undefined);
-        if (conflicts.length > 0) {
-          return { status: 'conflict', conflicts };
-        }
-        const current = await readFileOrAbsent(resolution.provider, resolution.path);
-        if (current !== null && bytesEqual(current, ownedData)) {
-          return { status: 'unchanged', content: current };
-        }
-        if (signal?.aborted) {
-          throw checkedWriteFailure(
-            'known-not-applied',
-            signal.reason instanceof Error
-              ? signal.reason
-              : new DOMException('The operation was aborted.', 'AbortError'),
-          );
-        }
-        try {
-          await resolution.provider.writeFile(resolution.path, ownedData);
-          this._recordCompletedWrite({ path, resolution, bytes: ownedData, context });
-        } catch (error) {
-          throw checkedWriteFailure('potentially-applied', error);
-        }
-        return { status: 'applied', content: ownedData };
-      });
-    const result = await (resolution.provider.writeFileChecked === undefined
-      ? this._crossTabCoordinator.withRequiredLocks(locks, run)
-      : this._crossTabCoordinator.withLocks(locks, run));
-    if (result.status === 'applied') {
-      this._crossTabCoordinator.notifyMutation({
-        type: 'write',
-        path,
-        authority: this._physicalAuthority(resolution),
-      });
-    }
-    return result;
-  }
-
-  private async _appendFileResolved({
-    path,
-    resolution,
-    data,
-    context,
-  }: {
-    path: string;
-    resolution: MountResolution;
-    data: Uint8Array<ArrayBuffer> | string;
-    context?: WorkspaceMutationContext;
-  }): Promise<void> {
-    const locks = this._mutationLockPaths([{ path, resolution }]);
-    return this._crossTabCoordinator.withMutationLocks(
-      locks,
-      { type: 'write', path, authority: this._physicalAuthority(resolution) },
-      async () =>
-        this._resourceQueue.queueForMany(locks, async () => {
-          await this._refreshMutationProviders([resolution]);
-          await this._appendFileUnlocked({ path, resolution, data, context });
-        }),
-    );
-  }
-
-  private async _appendFileUnlocked({
-    path,
-    resolution,
-    data,
-    context,
-  }: {
-    path: string;
-    resolution: MountResolution;
-    data: Uint8Array<ArrayBuffer> | string;
-    context?: WorkspaceMutationContext;
-  }): Promise<void> {
-    const { provider, path: resolvedPath, backend } = resolution;
-    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
-    if (provider.appendFile === undefined) {
-      let existing: Uint8Array<ArrayBuffer>;
-      try {
-        existing = await provider.readFile(resolvedPath);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-          throw error;
-        }
-        existing = new Uint8Array();
-      }
-      const combined = new Uint8Array(existing.byteLength + bytes.byteLength);
-      combined.set(existing);
-      combined.set(bytes, existing.byteLength);
-      await provider.writeFile(resolvedPath, combined);
-    } else {
-      await provider.appendFile(resolvedPath, bytes);
-    }
-
-    if (this._isCurrentResolution(path, resolution)) {
-      this._filePool?.invalidate(path);
-      this._treeIndexes.removeFile(path);
-    }
-    if (resolution.entry !== undefined) {
-      this._emitChangeEvent({ type: 'fileWritten', path, backend }, context, { operations: [{ path, resolution }] });
-    }
-  }
-
-  private async _writeFileUnlocked({
-    path,
-    resolution,
-    data,
-    context,
-  }: {
-    path: string;
-    resolution: MountResolution;
-    data: Uint8Array<ArrayBuffer> | string;
-    context?: WorkspaceMutationContext;
-  }): Promise<void> {
-    const { provider, path: resolvedPath } = resolution;
-    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
-    await provider.writeFile(resolvedPath, bytes);
-
-    this._recordCompletedWrite({ path, resolution, bytes, context });
-  }
-
-  private _recordCompletedWrite({
-    path,
-    resolution,
-    bytes,
-    context,
-  }: {
-    path: string;
-    resolution: MountResolution;
-    bytes: Uint8Array<ArrayBuffer>;
-    context?: WorkspaceMutationContext;
-  }): void {
-    const { backend: resolvedBackend } = resolution;
-    if (this._isCurrentResolution(path, resolution)) {
-      this._filePool?.invalidate(path);
-      this._treeIndexes.addFile(path, {
-        size: bytes.byteLength,
-        ...getFileContentMetadata(bytes),
-      });
-    }
-    if (resolution.entry !== undefined) {
-      this._emitChangeEvent(
-        {
-          type: 'fileWritten',
-          path,
-          backend: resolvedBackend,
-        },
-        context,
-        { operations: [{ path, resolution }] },
-      );
-    }
-  }
-
-  private async _moveResolved({
-    source,
-    target,
-    sourceResolution,
-    targetResolution,
-    context,
-  }: {
-    source: string;
-    target: string;
-    sourceResolution: MountResolution;
-    targetResolution: MountResolution;
-    context?: WorkspaceMutationContext;
-  }): Promise<FileStat> {
-    const lockPaths = this._mutationLockPaths([
-      { path: source, resolution: sourceResolution },
-      { path: target, resolution: targetResolution },
-    ]);
-    return this._crossTabCoordinator.withLocks(lockPaths, async () =>
-      this._resourceQueue.queueForMany(lockPaths, async () => {
-        let mutationBegan = false;
-        try {
-          await this._refreshMutationProviders([sourceResolution, targetResolution]);
-          this._assertNoDescendantMounts(source, 'move');
-          this._assertNoDescendantMounts(target, 'move');
-          const sourceStat = await sourceResolution.provider.stat(sourceResolution.path);
-          const targetExists = await targetResolution.provider.exists(targetResolution.path);
-          if (targetExists) {
-            const error = new Error(`EEXIST: target already exists '${target}'`);
-            (error as NodeJS.ErrnoException).code = 'EEXIST';
-            throw error;
-          }
-
-          mutationBegan = true;
-          if (sourceResolution.provider === targetResolution.provider) {
-            await sourceResolution.provider.rename(sourceResolution.path, targetResolution.path);
-          } else if (sourceStat.type === 'dir') {
-            await this._copyDirectoryAcrossProviders(
-              sourceResolution.provider,
-              sourceResolution.path,
-              targetResolution.provider,
-              targetResolution.path,
-            );
-            await this._removeRecursive(sourceResolution.provider, sourceResolution.path);
-          } else {
-            const data = await sourceResolution.provider.readFile(sourceResolution.path);
-            await targetResolution.provider.writeFile(targetResolution.path, data);
-            await sourceResolution.provider.unlink(sourceResolution.path);
-          }
-
-          const sourceIsCurrent = this._isCurrentResolution(source, sourceResolution);
-          const targetIsCurrent = this._isCurrentResolution(target, targetResolution);
-          if (sourceIsCurrent && targetIsCurrent) {
-            this._filePool?.invalidate(source);
-            this._filePool?.invalidate(target);
-            this._treeIndexes.rename(source, target);
-          } else if (sourceIsCurrent || targetIsCurrent) {
-            this._filePool?.clear();
-            this._treeIndexes.clear();
-          }
-
-          const resultingStat = await targetResolution.provider.stat(targetResolution.path);
-          this._emitChangeEvent(
-            sourceStat.type === 'dir'
-              ? {
-                  type: 'directoryRenamed',
-                  oldPath: source,
-                  newPath: target,
-                  backend: sourceResolution.backend,
-                }
-              : {
-                  type: 'fileRenamed',
-                  oldPath: source,
-                  newPath: target,
-                  backend: sourceResolution.backend,
-                },
-            context,
-            {
-              operations: [
-                { path: source, resolution: sourceResolution },
-                { path: target, resolution: targetResolution },
-              ],
-            },
-          );
-          this._notifyMoveParents({ source, target, sourceResolution, targetResolution });
-
-          return resultingStat;
-        } catch (error) {
-          if (mutationBegan) {
-            const operations = [
-              { path: source, resolution: sourceResolution },
-              { path: target, resolution: targetResolution },
-            ];
-            const globallyVisible = operations.some((operation) =>
-              this._isCurrentResolution(operation.path, operation.resolution),
-            );
-            if (globallyVisible) {
-              this._filePool?.clear();
-              this._treeIndexes.clear();
-            }
-            for (const backend of new Set([sourceResolution.backend, targetResolution.backend])) {
-              this._emitChangeEvent({ type: 'backendChanged', backend }, context, { operations, globallyVisible });
-            }
-            this._notifyMoveParents({ source, target, sourceResolution, targetResolution });
-          }
-          throw error;
-        }
-      }),
-    );
-  }
-
-  private async _mkdirResolved({
-    path,
-    resolution,
-    options,
-    context,
-  }: {
-    path: string;
-    resolution: MountResolution;
-    options?: MkdirOptions;
-    context?: WorkspaceMutationContext;
-  }): Promise<void> {
-    const locks = this._mutationLockPaths([{ path, resolution }]);
-    return this._crossTabCoordinator.withLocks(locks, async () =>
-      this._resourceQueue.queueForMany(locks, async () => {
-        const { provider, path: resolvedPath, backend: resolvedBackend } = resolution;
-        await this._refreshMutationProviders([resolution]);
-        const alreadyExisted = options?.recursive === true && (await provider.exists(resolvedPath));
-        try {
-          await provider.mkdir(resolvedPath, options?.recursive ? { recursive: true } : undefined);
-        } catch (error) {
-          if (options?.recursive === true) {
-            this._handlePartialMutationFailure(path, resolution, context);
-          }
-          throw error;
-        }
-        if (alreadyExisted) {
-          return;
-        }
-
-        if (this._isCurrentResolution(path, resolution)) {
-          this._treeIndexes.addDirectory(path);
-        }
-        this._emitChangeEvent(
-          {
-            type: 'directoryCreated',
-            path,
-            backend: resolvedBackend,
-          },
-          context,
-          { operations: [{ path, resolution }] },
-        );
-        this._crossTabCoordinator.notifyMutation({
-          type: 'mkdir',
-          path,
-          authority: this._physicalAuthority(resolution),
-        });
-      }),
-    );
-  }
-
-  private async _unlinkResolved({
-    path,
-    resolution,
-    context,
-  }: {
-    path: string;
-    resolution: MountResolution;
-    context?: WorkspaceMutationContext;
-  }): Promise<void> {
-    const locks = this._mutationLockPaths([{ path, resolution }]);
-    return this._crossTabCoordinator.withMutationLocks(
-      locks,
-      { type: 'delete', path, authority: this._physicalAuthority(resolution) },
-      async () =>
-        this._resourceQueue.queueForMany(locks, async () => {
-          const { provider, path: resolvedPath, backend: resolvedBackend } = resolution;
-          await this._refreshMutationProviders([resolution]);
-          await provider.unlink(resolvedPath);
-
-          if (this._isCurrentResolution(path, resolution)) {
-            this._filePool?.invalidate(path);
-            this._treeIndexes.removeFile(path);
-          }
-          this._emitChangeEvent(
-            {
-              type: 'fileDeleted',
-              path,
-              backend: resolvedBackend,
-            },
-            context,
-            { operations: [{ path, resolution }] },
-          );
-        }),
-    );
-  }
-
-  private async _rmdirResolved({
-    path,
-    resolution,
-    options,
-    context,
-  }: {
-    path: string;
-    resolution: MountResolution;
-    options?: { recursive?: boolean };
-    context?: WorkspaceMutationContext;
-  }): Promise<void> {
-    const locks = this._mutationLockPaths([{ path, resolution }]);
-    return this._crossTabCoordinator.withMutationLocks(
-      locks,
-      { type: 'rmdir', path, authority: this._physicalAuthority(resolution) },
-      async () =>
-        this._resourceQueue.queueForMany(locks, async () => {
-          const { provider, path: resolvedPath, backend: resolvedBackend } = resolution;
-          await this._refreshMutationProviders([resolution]);
-
-          if (options?.recursive === true) {
-            this._assertNoDescendantMounts(path, 'recursive remove');
-            try {
-              await this._rmdirRecursive(provider, resolvedPath);
-            } catch (error) {
-              this._handlePartialMutationFailure(path, resolution, context);
-              throw error;
-            }
-          } else {
-            await provider.rmdir(resolvedPath);
-          }
-
-          if (this._isCurrentResolution(path, resolution)) {
-            this._treeIndexes.removeDirectory(path);
-          }
-          this._emitChangeEvent(
-            {
-              type: 'directoryDeleted',
-              path,
-              backend: resolvedBackend,
-            },
-            context,
-            { operations: [{ path, resolution }] },
-          );
-        }),
-    );
-  }
-
   /**
    * Resolve the provider and provider-relative path for an absolute virtual path
    * via the mount table. Throws immediately if no mount matches.
@@ -4378,103 +3259,6 @@ export class WorkspaceFileService {
     }
   }
 
-  /**
-   * Project whose lock a mutation must hold. A logical `/projects/<id>` path
-   * names its project directly; otherwise the mutation may still land inside a
-   * project's physical directory, because flat-layout project directories are
-   * ordinary root children reachable through the workspace-root mount.
-   *
-   * @param logicalPath - Canonical logical mutation path.
-   * @param resolution - Mount resolution carrying the physical target.
-   * @returns Owning project id, or `undefined` when no project owns the bytes.
-   */
-  private _projectLockOwner(logicalPath: string, resolution: MountResolution): string | undefined {
-    const segments = logicalPath.split('/');
-    if (segments[1] === 'projects' && segments[2]) {
-      return segments[2];
-    }
-    const storageRootKey = resolution.entry?.storageRootKey;
-    if (storageRootKey === undefined) {
-      return undefined;
-    }
-    const physicalPath = assertRootedPath(resolution.path);
-    // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
-    // ponytail: linear over mounts, which is one entry per open project. Index
-    // by storage root if a workspace ever mounts projects by the hundred.
-    for (const mount of this._mountTable.listMounts()) {
-      const base = mount.providerBasePath;
-      if (
-        mount.storageRootKey !== storageRootKey ||
-        !isProjectDirectoryPath(base) ||
-        (physicalPath !== base && !physicalPath.startsWith(`${base}/`))
-      ) {
-        continue;
-      }
-      const owner = mount.prefix.split('/');
-      if (owner[1] === 'projects' && owner[2]) {
-        return owner[2];
-      }
-    }
-    return undefined;
-  }
-
-  private _mutationLockPaths(operations: ReadonlyArray<{ path: string; resolution: MountResolution }>): string[] {
-    const locks = new Set<string>();
-    const addAuthorityHierarchy = (path: string, boundary: string, format: (value: string) => string): void => {
-      let current = resolveAuthorityPath(path);
-      const root = resolveAuthorityPath(boundary);
-      if (current !== root && !current.startsWith(`${root === '/' ? '' : root}/`)) {
-        throw new Error(`Mutation path '${current}' is outside its authority root '${root}'.`);
-      }
-      while (current !== '/') {
-        locks.add(format(current));
-        if (current === root) {
-          return;
-        }
-        current = parentDirectory(current);
-      }
-    };
-    const addRootedHierarchy = (path: string, boundary: string, format: (value: string) => string): void => {
-      let current = assertRootedPath(path);
-      const root = assertRootedPath(boundary);
-      if (current !== root && !(root === '' ? current !== '' : current.startsWith(`${root}/`))) {
-        throw new Error(`Mutation path '${current}' is outside its authority root '${root}'.`);
-      }
-      for (;;) {
-        locks.add(format(current));
-        if (current === root) {
-          return;
-        }
-        const separator = current.lastIndexOf('/');
-        current = separator === -1 ? '' : current.slice(0, separator);
-      }
-    };
-
-    for (const { path, resolution } of operations) {
-      const normalized = resolveAuthorityPath(path);
-      addAuthorityHierarchy(normalized, resolution.entry?.prefix ?? normalized, (value) => value);
-      const projectId = this._projectLockOwner(normalized, resolution);
-      if (projectId !== undefined) {
-        locks.add(`project:${projectId}`);
-      }
-      const { entry } = resolution;
-      if (entry?.storageRootKey !== undefined) {
-        addRootedHierarchy(resolution.path, entry.providerBasePath, (value) => `${entry.storageRootKey}:${value}`);
-      }
-    }
-    return [...locks];
-  }
-
-  private _physicalAuthority(resolution: MountResolution): PhysicalAuthority {
-    if (resolution.entry?.storageRootKey === undefined) {
-      throw new Error('Mounted mutation is missing canonical physical authority metadata.');
-    }
-    return {
-      storageRootKey: resolution.entry.storageRootKey,
-      providerBasePath: resolution.entry.providerBasePath,
-    };
-  }
-
   private _scopedPhysicalAuthority(scope: WorkspaceScope, providerBasePath: string): PhysicalAuthority {
     return {
       storageRootKey: this._registry.resolveStorageRootKey(scope),
@@ -4486,58 +3270,6 @@ export class WorkspaceFileService {
     if (isUnderBundledTypesMount(path)) {
       throw new WorkspaceMutationError('BUNDLED_TYPES_WORKSPACE', path, target === undefined ? undefined : { target });
     }
-  }
-
-  private _assertNoDescendantMounts(path: string, operation: string): void {
-    const normalized = normalizePath(path);
-    const prefix = normalized === '/' ? '/' : `${normalized}/`;
-    for (const mount of this._mountTable.listMounts()) {
-      if (mount.prefix === '/' || mount.prefix === normalized) {
-        continue;
-      }
-      if (normalized === '/' || mount.prefix.startsWith(prefix)) {
-        throw new Error(`[WorkspaceFileService] ${operation} would cross mount boundary at '${mount.prefix}'.`);
-      }
-    }
-  }
-
-  private async _refreshMutationProviders(resolutions: readonly MountResolution[]): Promise<void> {
-    const providers = new Set(resolutions.map(({ provider }) => provider));
-    // Ponytail: DirectIDB refresh is O(number of keys); add a durable revision only if measurement shows this lock boundary is hot.
-    await Promise.all([...providers].map(async (provider) => provider.refresh?.()));
-  }
-
-  private _handlePartialMutationFailure(
-    path: string,
-    resolution: MountResolution,
-    context?: WorkspaceMutationContext,
-  ): void {
-    // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
-    // ponytail: full drop, not the path-scoped one `writeFiles` uses. Both callers are
-    // half-finished *recursive* directory mutations, so everything under `path` is
-    // untrustworthy — and neither SharedPool nor TreeIndex can drop a subtree.
-    // Scope it once SharedPool grows a prefix invalidation, if this error path is ever hot.
-    this._filePool?.clear();
-    this._treeIndexes.clear();
-    const logicalRoot = resolution.entry?.prefix ?? path;
-    const rootResolution =
-      resolution.entry === undefined ? resolution : { ...resolution, path: resolution.entry.providerBasePath };
-    this._emitChangeEvent({ type: 'backendChanged', backend: resolution.backend }, context, {
-      operations: [{ path: logicalRoot, resolution: rootResolution }],
-    });
-    if (resolution.entry !== undefined) {
-      this._crossTabCoordinator.notifyDirectoryChange(logicalRoot, this._physicalAuthority(resolution));
-    }
-  }
-
-  private async _rmdirRecursive(provider: FileSystemProvider, directoryPath: string): Promise<void> {
-    const entries = await readDirectoryEntries(provider, directoryPath);
-    for (const entry of entries) {
-      const fullPath = joinRelativePath(directoryPath, entry.name);
-      // oxlint-disable-next-line no-await-in-loop -- Sequential traversal required for recursive deletion
-      await (entry.kind === 'dir' ? this._rmdirRecursive(provider, fullPath) : provider.unlink(fullPath));
-    }
-    await provider.rmdir(directoryPath);
   }
 
   private async _deleteProjectDirectory(
@@ -4553,7 +3285,7 @@ export class WorkspaceFileService {
       }
       const fullPath = joinRelativePath(directoryPath, entry);
       // oxlint-disable-next-line no-await-in-loop -- Preserve the manifest until every sibling is gone.
-      await this._removeRecursive(provider, fullPath);
+      await this._pipeline.removeRecursive(provider, fullPath);
     }
     await provider.unlink(manifestPath);
     try {
@@ -4568,100 +3300,5 @@ export class WorkspaceFileService {
       }
       throw error;
     }
-  }
-
-  /**
-   * Remove either a file or a directory recursively from `provider`. Used to
-   * clear a successfully copied cross-provider move source and to remove
-   * project-directory contents while preserving the manifest until last.
-   *
-   * @param provider - Provider that owns the path being removed.
-   * @param path     - Provider-relative absolute path.
-   */
-  private async _removeRecursive(provider: FileSystemProvider, path: string): Promise<void> {
-    const targetStat = await provider.stat(path);
-    // oxlint-disable-next-line unicorn/prefer-ternary -- explicit if/else preserves the dir-vs-file branch order so call sites can reason about the recursive walk symmetrically.
-    if (targetStat.type === 'dir') {
-      await this._rmdirRecursive(provider, path);
-    } else {
-      await provider.unlink(path);
-    }
-  }
-
-  /**
-   * Recursively copy every file under `sourcePath` (on `sourceProvider`) to
-   * `targetPath` on `targetProvider`. Used by {@link move} when the source
-   * and target resolve to different providers, since neither provider has
-   * native cross-mount semantics.
-   *
-   * @param sourceProvider - Provider that owns the source subtree.
-   * @param sourcePath     - Absolute path of the source directory on `sourceProvider`.
-   * @param targetProvider - Provider that will receive the copy.
-   * @param targetPath     - Absolute path of the destination directory on `targetProvider`.
-   */
-  // oxlint-disable-next-line max-params -- (sourceProvider, sourcePath, targetProvider, targetPath) mirrors the two-side cross-mount semantics; collapsing into a single options bag would obscure that the source and target are independently resolved.
-  private async _copyDirectoryAcrossProviders(
-    sourceProvider: FileSystemProvider,
-    sourcePath: string,
-    targetProvider: FileSystemProvider,
-    targetPath: string,
-  ): Promise<void> {
-    await targetProvider.mkdir(targetPath, { recursive: true });
-    const entries = await readDirectoryEntries(sourceProvider, sourcePath);
-    for (const entry of entries) {
-      const sourceEntry = joinRelativePath(sourcePath, entry.name);
-      const targetEntry = joinRelativePath(targetPath, entry.name);
-      if (entry.kind === 'dir') {
-        // oxlint-disable-next-line no-await-in-loop -- Sequential recursion required
-        await this._copyDirectoryAcrossProviders(sourceProvider, sourceEntry, targetProvider, targetEntry);
-      } else {
-        // oxlint-disable-next-line no-await-in-loop -- Sequential reads required to bound memory
-        const data = await sourceProvider.readFile(sourceEntry);
-        // oxlint-disable-next-line no-await-in-loop -- Sequential writes required for ordered creation
-        await targetProvider.writeFile(targetEntry, data);
-      }
-    }
-  }
-
-  /**
-   * Walk a directory into its files and directories, keyed relative to it.
-   *
-   * @param provider - Provider to enumerate and read through.
-   * @param path     - Provider-relative directory path.
-   * @returns File bytes keyed by relative path, and the relative directories walked.
-   */
-  private async _getDirectoryContentsInternal(
-    provider: {
-      readdir(path: string): Promise<string[]>;
-      stat(path: string): Promise<FileStat>;
-      readdirEntries?(path: string): Promise<DirectoryEntry[]>;
-      readFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
-    },
-    path: string,
-  ): Promise<{
-    files: Record<string, Uint8Array<ArrayBuffer>>;
-    directories: string[];
-  }> {
-    const files: Record<string, Uint8Array<ArrayBuffer>> = {};
-    const directories: string[] = [];
-
-    const collect = async (currentPath: string, basePath: string): Promise<void> => {
-      const entries = await readDirectoryEntries(provider, currentPath);
-      for (const entry of entries) {
-        const fullPath = joinRelativePath(currentPath, entry.name);
-        const relativePath = basePath === '' ? fullPath : fullPath.slice(basePath.length + 1);
-        if (entry.kind === 'file') {
-          // oxlint-disable-next-line no-await-in-loop -- Sequential reads required for recursive collection
-          files[relativePath] = await provider.readFile(fullPath);
-        } else {
-          directories.push(relativePath);
-          // oxlint-disable-next-line no-await-in-loop -- Sequential traversal required for recursive collection
-          await collect(fullPath, basePath);
-        }
-      }
-    };
-
-    await collect(path, path);
-    return { files, directories };
   }
 }

@@ -7,6 +7,7 @@ import type {
   ProjectRootConfig,
   ProjectRootDiscoveryStatus,
   RootedFileSystem,
+  RootedPorcelain,
   MountConfig,
   StorageRootConfig,
   WatchEvent,
@@ -137,7 +138,14 @@ export type FileSystemBridgeRuntimeService = FileSystemProvider & {
    */
   search?: (query: string, options?: SearchOptions) => Promise<FileStatEntry[]>;
   statTree?: (path: string) => Promise<FileStatEntry[]>;
-};
+  /*
+   * The mutating porcelain is the rooted surface's too (charter D4): one batch
+   * in the mutation pipeline, mask-checked by the composed view above it. A
+   * host that hands over a bare provider serves none of it, so every row is
+   * optional — and `copyTree`'s entry filter is the *view's* own, never a
+   * caller's, because a predicate does not cross a wire.
+   */
+} & Partial<RootedPorcelain>;
 
 /**
  * Caller-owned filter on a read content operation.
@@ -184,6 +192,10 @@ export type FileSystemBridgeService = Omit<FileSystemBridgeWorkspaceService, 're
     contents(path: string, options?: ArchiveOptions): Promise<Record<string, Uint8Array<ArrayBuffer>>>;
     search(query: string, options?: SearchOptions): Promise<FileStatEntry[]>;
     statTree(path: string): Promise<FileStatEntry[]>;
+    /* Rooted-only porcelain; the authority spells the same two operations
+     * `copyDirectory` and `duplicateFile` until W12 migrates their callers. */
+    copyTree(source: string, target: string): Promise<void>;
+    duplicate(source: string, target: string): Promise<void>;
   };
 
 type FileSystemBridgeCallName = keyof FileSystemBridgeService;
@@ -683,6 +695,8 @@ const callSchemas = {
     result: fileStatEntriesSchema,
   },
   statTree: { args: oneStringArgument, result: fileStatEntriesSchema },
+  copyTree: { args: twoStringArgs, result: voidResult },
+  duplicate: { args: twoStringArgs, result: voidResult },
 } satisfies FileSystemBridgeCallSchemas;
 
 const broadcastValidator = z.looseObject({ event: z.literal('fileChanged'), data: changeEventSchema });

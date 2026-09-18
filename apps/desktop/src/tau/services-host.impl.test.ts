@@ -1335,26 +1335,58 @@ describe('createServicesHost — the agentHost concern (launcher 2)', () => {
     expect(port.close).toHaveBeenCalled();
   });
 
-  it('refuses a connection before main has sent the configuration', async () => {
+  it('should serve an agent host requested before its config arrives', async () => {
+    /* Main does not await its external-agent discovery (D17), so the window
+       boots beside it and asks for this port first. Refusing the early request
+       closed the renderer's channel, and the page read that as a dead host. */
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-agent-'));
+    workspaces.push(workspaceRoot);
+    const harness = hostHarness();
+    hosts.push(harness.host);
+    harness.host.handleMessage(frame({ type: 'allowRoots', roots: [workspaceRoot] }));
+    const client = connect(harness.host, workspaceRoot);
+
+    harness.host.handleMessage(frame({ type: 'agentHost', config }));
+
+    await expect(client.execute({ type: 'tail', chatId: 'chat-early', cursor: 0, limit: 8 })).resolves.toEqual({
+      type: 'tail',
+      chatId: 'chat-early',
+      batch: { cursor: 0, nextCursor: 0, endCursor: 0, events: [] },
+    });
+    expect(harness.log).not.toHaveBeenCalledWith('agent-host.not-configured', expect.anything());
+  }, 20_000);
+
+  it('should refuse an agent host whose config never arrives', async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-desktop-agent-'));
     workspaces.push(workspaceRoot);
     const { host, log } = hostHarness();
+    hosts.push(host);
     host.handleMessage(frame({ type: 'allowRoots', roots: [workspaceRoot] }));
     const port = stubPort();
-    host.handleMessage(
-      frame(
-        {
-          type: 'concern',
-          concern: 'agentHost',
-          context: { workspaceRoot, nativeTrustFile: '/trust/widget' },
-        },
-        [port],
-      ),
-    );
+    vi.useFakeTimers();
+    try {
+      host.handleMessage(
+        frame(
+          {
+            type: 'concern',
+            concern: 'agentHost',
+            context: { workspaceRoot, nativeTrustFile: '/trust/widget' },
+          },
+          [port],
+        ),
+      );
 
-    expect(log).toHaveBeenCalledWith('agent-host.not-configured', {
-      workspaceRoot,
-    });
-    expect(port.close).toHaveBeenCalled();
+      // Still parked: main's CLI and model probes take seconds, not instants.
+      await vi.advanceTimersByTimeAsync(9000);
+      expect(port.close).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(log).toHaveBeenCalledWith('agent-host.not-configured', {
+        workspaceRoot,
+      });
+      expect(port.close).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

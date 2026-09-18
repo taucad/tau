@@ -63,6 +63,15 @@ import type { createDesktopRuntime } from '#tau/desktop-runtime.factory.js';
  */
 const agentSessionKey = 'tau-agent';
 
+/**
+ * How long a connection waits for main's `agentHost` frame. Milliseconds.
+ *
+ * Main's CLI probe runs on 1.5 s and its model probe on 5 s, and the frame is
+ * posted once both settle — so this is the same 10 s the utility already gives
+ * main to answer a runtime-port request, with room over the slower probe.
+ */
+const agentHostConfigTimeout = 10_000;
+
 /** What `createAcpExternalAgentPort` is handed to offer an agent the `tau` server. */
 type McpBinding = NonNullable<Parameters<typeof createAcpExternalAgentPort>[0]['mcp']>;
 
@@ -300,6 +309,8 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   let quiescence: Promise<void> | undefined;
   let authToken: string | undefined;
   let agentHostConfig: AgentHostConfig | undefined;
+  /** Connections parked until main's `agentHost` frame lands. @see serveAgentHost */
+  const agentHostConfigWaiters = new Set<() => void>();
   let internalAuthorityStopped: Promise<void> | undefined;
   /* V7: the utility's own MCP surface. One loopback listener for the whole
    * utility — mounted *inside* the `agentHost` concern rather than as a member
@@ -528,6 +539,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
            * renderer draws its rows from a different copy of this answer. */
           externalAgents: (agentHostConfig.externalAgents ?? []).map((adapter) => adapter.id),
         });
+        for (const waiting of agentHostConfigWaiters) {
+          waiting();
+        }
         return;
       }
       case 'agent-host-release': {
@@ -557,12 +571,28 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   };
 
   /**
+   * Park until main's `agentHost` frame lands, or until the bound expires.
+   *
+   * @returns Nothing; the caller re-reads {@link agentHostConfig}.
+   */
+  const awaitAgentHostConfig = async (): Promise<void> =>
+    new Promise((resolve) => {
+      const release = (): void => {
+        clearTimeout(configExpiry);
+        agentHostConfigWaiters.delete(release);
+        resolve();
+      };
+      const configExpiry = setTimeout(release, agentHostConfigTimeout);
+      agentHostConfigWaiters.add(release);
+    });
+
+  /**
    * Bind one renderer connection to launcher 2 over the transferred port.
    *
    * @param port - The utility's leg of main's `MessageChannelMain`.
    * @param context - The connection's context; `workspaceRoot` scopes the launcher.
    */
-  const serveAgentHost = (port: UtilityPort, context: Record<string, unknown> | undefined): void => {
+  const serveAgentHost = async (port: UtilityPort, context: Record<string, unknown> | undefined): Promise<void> => {
     const requested = context?.['workspaceRoot'];
     /* Main already refused an ungranted root before minting the port; this is
      * the utility's own copy of the same check, because the utility is the
@@ -571,6 +601,15 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       log('agent-host.untrusted-root', { workspaceRoot: requested });
       port.close();
       return;
+    }
+    if (agentHostConfig === undefined) {
+      /* Main does not await its external-agent discovery (D17), so the window
+       * boots beside it and can ask for this port a second before the
+       * `agentHost` frame arrives. Closing that port answered a request that
+       * was early, not wrong: the renderer's channel client reads a remote
+       * close as a dead host, and the project entered an error state it never
+       * left. Park instead, and refuse only a host nobody ever configured. */
+      await awaitAgentHostConfig();
     }
     if (agentHostConfig === undefined) {
       log('agent-host.not-configured', { workspaceRoot: requested });
@@ -1142,7 +1181,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
           return;
         }
         case 'agentHost': {
-          serveAgentHost(port, context);
+          // async-iife: bootstrap -- a port that outran main's config frame
+          // parks inside; a control frame has no caller to return to.
+          void serveAgentHost(port, context);
           return;
         }
         default: {

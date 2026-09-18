@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState } from 'react';
-import { ChevronRight, Copy, Forward, MoreHorizontal, Pencil, SquarePen, Trash2, X } from 'lucide-react';
+import { ChevronRight, Copy, Forward, EllipsisVertical, Pencil, SquarePen, Trash2, X } from 'lucide-react';
 import { useLocation, useNavigate, useNavigation } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import type { ProjectListItem } from '#types/project.types.js';
@@ -320,7 +320,12 @@ function ProjectNavigationItem({
   return (
     <SidebarMenuItem>
       <SidebarRowContextMenu items={menuItems} isDisabled={isEditing} className='w-48'>
-        <div data-slot='project-trigger' data-active={isActive} className={sidebarRowClass(isEditing)}>
+        <div
+          data-slot='project-trigger'
+          data-active={isActive}
+          className={sidebarRowClass(isEditing)}
+          onDoubleClick={isEditing ? undefined : onRename}
+        >
           <Button
             type='button'
             variant='ghost'
@@ -332,12 +337,18 @@ function ProjectNavigationItem({
             onClick={() => {
               void onToggle();
             }}
+            /* Two quick toggles are a toggle, not a rename. */
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+            }}
           >
             {hasMark || isPending ? (
+              /* A loading row keeps its spinner under the pointer that started
+               * it, so only a mark gives the chevron back on hover. */
               <StatusMark
                 facts={facts}
                 isPending={isPending}
-                className='group-focus-within/row:hidden group-hover/row:hidden'
+                className={cn(!isPending && 'group-focus-within/row:hidden group-hover/row:hidden')}
               />
             ) : null}
             <ChevronRight
@@ -345,7 +356,7 @@ function ProjectNavigationItem({
               className={cn(
                 'size-3.5 transition-transform motion-reduce:transition-none',
                 isExpanded && 'rotate-90',
-                (hasMark || isPending) && 'hidden group-focus-within/row:block group-hover/row:block',
+                isPending ? 'hidden' : hasMark && 'hidden group-focus-within/row:block group-hover/row:block',
               )}
             />
           </Button>
@@ -444,7 +455,7 @@ function ProjectsLabel(): React.JSX.Element {
                 className={sidebarRowButtonClass}
                 aria-label='More actions for projects'
               >
-                <MoreHorizontal aria-hidden className='size-3.5' />
+                <EllipsisVertical aria-hidden className='size-3.5' />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent side='right' align='start' className='w-48'>

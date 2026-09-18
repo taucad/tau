@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readdir, readFile, writeFile, rm } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
+import { setTimeout as wait } from 'node:timers/promises';
 import type { DownloadItem, Event } from 'electron';
 import { _electron as electron } from 'playwright';
 import type { ElectronApplication, Page } from 'playwright';
@@ -343,12 +344,14 @@ export const launchDesktopApp = async (options: {
             });
           })
         : Promise.resolve();
-    await application.close().catch(() => undefined);
     /* `close()` asks the app to quit, and a shell holding a stalled chat run
      * does not always finish quitting. Left alive they accumulate, and the
      * next `electron.launch` in the same vitest process comes back with a
      * window that is already closed — three tests died that way before this
-     * existed. */
+     * existed. The quit is also bounded: a shell still syncing after a failed
+     * row once held `close()` for 17 minutes, so the row reported the 900 s
+     * test timeout instead of its own assertion (lane H4). */
+    await Promise.race([application.close().catch(() => undefined), wait(30_000)]);
     if (child.exitCode === null && child.signalCode === null) {
       child.kill('SIGKILL');
     }

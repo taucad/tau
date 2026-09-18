@@ -118,8 +118,9 @@ test('opens a project without a page-wide editor splash, a blank workspace, or C
   expect(samples.length).toBeGreaterThan(0);
   expect(samples.filter((sample) => sample.splashOutsidePlaceholder)).toEqual([]);
   expect(samples.filter((sample) => sample.emptyWorkspace)).toEqual([]);
-  /* From the first thing that paints on the project URL onwards, something is always on screen:
-   * the gates above the workspace own the skeleton, not a blank window (R3). */
+  /* From the first thing that paints on the project URL onwards, every gate above the workspace
+   * owns the skeleton rather than leaving an unowned window (R3). The skeleton holds its own lanes
+   * back for a blink, so this asserts the frame is mounted throughout, not that lanes are drawn. */
   const projectSamples = samples.filter((sample) => sample.path.startsWith('/w/'));
   const firstPainted = projectSamples.findIndex((sample) => !sample.blank);
   expect(firstPainted).toBeGreaterThanOrEqual(0);

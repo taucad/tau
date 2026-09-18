@@ -3,8 +3,8 @@
  *
  * A checkout's working copy is the bytes; a composed view is what an agent's
  * tools or a Files pane actually see over them: the checkout, plus read-only
- * overlays at fixed paths, plus the path registry's mask for that consumer,
- * plus provenance per entry. Browser worker, `tau serve`, the Electron utility
+ * overlays at fixed paths, plus the {@link PathPolicy}'s mask for that
+ * consumer, plus provenance per entry. Browser worker, `tau serve`, the Electron utility
  * and the CLI call this same function, so the agent's filesystem and the Files
  * pane cannot disagree about one path (blueprint finding 1).
  *
@@ -26,8 +26,14 @@
 
 import type { FileContentMetadata, FileProvenance, FileProvenanceSource, FileStat } from '@taucad/types';
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
-import { classify } from '#path-registry.js';
-import type { DirectoryEntry, FileReadStreamOptions, FileSystemProvider, WatchEvent, WatchRequest } from '#types.js';
+import type {
+  DirectoryEntry,
+  FileReadStreamOptions,
+  FileSystemProvider,
+  PathPolicy,
+  WatchEvent,
+  WatchRequest,
+} from '#types.js';
 
 /** Who a view is composed for. The set of paths is the same; the mask is not. @public */
 export type ComposedViewConsumer = 'agent' | 'user';
@@ -96,6 +102,14 @@ export type ComposedViewCheckout = Readonly<{
 /** Options for {@link composeView}. @public */
 export type ComposedViewOptions = Readonly<{
   consumer: ComposedViewConsumer;
+  /**
+   * The reserved layout this view enforces (D6).
+   *
+   * Required, because a view that guessed one would be a second enforcement
+   * point. Tau's hosts pass `tauPathPolicy`; the example below shows where it
+   * comes from.
+   */
+  policy: PathPolicy;
   overlays?: readonly ComposedViewOverlay[];
 }>;
 
@@ -145,7 +159,7 @@ const ancestorsOf = (path: string): string[] => {
  * Compose one checkout into the view its consumer reads.
  *
  * @param checkout - The checkout's working copy, already rooted.
- * @param options - Which consumer the mask is for, and the overlays to compose.
+ * @param options - Which consumer the mask is for, the path policy it enforces, and the overlays to compose.
  * @returns A rooted filesystem that also answers {@link ComposedView.provenance}.
  * @public
  *
@@ -153,17 +167,22 @@ const ancestorsOf = (path: string): string[] => {
  * ```typescript
  * import { composeView } from '@taucad/filesystem/composed-view';
  * import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+ * import { tauPathPolicy } from '@taucad/filesystem/path-registry';
  *
- * const view = composeView({ filesystem: new NodeFsProvider('/checkouts/main') }, { consumer: 'agent' });
+ * const view = composeView(
+ *   { filesystem: new NodeFsProvider('/checkouts/main') },
+ *   { consumer: 'agent', policy: tauPathPolicy },
+ * );
  * await view.provenance('main.ts'); // { source: 'project', versioned: true, agentAccess: 'read-write' }
  * ```
  */
 export const composeView = (checkout: ComposedViewCheckout, options: ComposedViewOptions): ComposedView => {
   const base = checkout.filesystem;
+  const { classify } = options.policy;
   const overlays = options.overlays ?? [];
   const masked = options.consumer === 'agent';
 
-  /** The registry's answer, refused before any provider I/O: the control plane is in no view (A1, P30). */
+  /** The policy's answer, refused before any provider I/O: the control plane is in no view (A1, P30). */
   const readablePath = (path: string): string => {
     if (classify(path).agentAccess === 'hidden') {
       refuseHidden(path);

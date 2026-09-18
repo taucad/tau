@@ -25,6 +25,7 @@ import { MemoryProvider } from '@taucad/filesystem/backend';
 import { createFileSystemBridgeProxy, exposeFileSystem, openFileSystemBridge } from '@taucad/fs-bridge';
 import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
@@ -85,7 +86,7 @@ const createBrowserHarness = async (): Promise<{
      * composed view, one that does not reads the checkout itself. */
     handlerForRoot: (root, context, consumer) => {
       const filesystem = fileService.createRootedFileSystem(root, context);
-      return consumer === undefined ? filesystem : composeView({ filesystem }, { consumer });
+      return consumer === undefined ? filesystem : composeView({ filesystem }, { consumer, policy: tauPathPolicy });
     },
   });
   const worker = {

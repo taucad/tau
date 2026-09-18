@@ -15,6 +15,11 @@ dockerfile = 'Dockerfile'
 # Protected one-shot migration (B7 R8 / B8 R3): runs under the DDL identity before any new
 # app machine boots; API replicas only assert schema compatibility and never migrate.
 release_command = 'node /app/dist/billing-command.js migrate --environment staging'
+# Rolling, not bluegreen (charter W8): with `app` at two or more Machines a rolling
+# deploy replaces them one at a time and the group never reaches zero, and it replaces
+# a single-Machine group in place — so `revisions-maintenance` is never briefly two
+# Machines, which a bluegreen green set would be and D21 forbids.
+strategy = 'rolling'
 
 [processes]
 app = 'node /app/dist/main.js'
@@ -24,6 +29,31 @@ billing-recovery = 'node /app/dist/billing-command.js recover-llm-worker --envir
 # reloads, cancels closed accounts' subscriptions and runs the scheduled sweeps. Run exactly one
 # Machine: `fly scale count billing-operations=1 billing-recovery=1`.
 billing-operations = 'node /app/dist/billing-command.js billing-operations-worker --environment staging --limit 100 --poll-milliseconds 5000'
+# Charter D21: purge, LFS retirement, blob collection and restore must run once, not
+# in every `app` replica — `assertSingletonProcessGroup` refuses to run in the `app`
+# group at all. Each subcommand is a one-shot that exits, so the group wraps them the
+# way the billing workers poll: do a pass, sleep, do it again. Run exactly one
+# Machine: `fly scale count app=2 revisions-maintenance=1`.
+#
+# All three periodic subcommands are here, and `retire-lfs` is why the list matters:
+# its 30-day window (`lfsRetirementWindowMilliseconds`) has no other caller anywhere
+# in the app — no `@Cron`, no scheduler — so a loop that omits it is a retirement
+# that never happens.
+#
+# `|| exit 1` on each: the command sets a non-zero exit only on a real failure, and
+# without this the shell would swallow it, sleep, and go on looking alive forever.
+# Exiting hands the failure to Fly's restart policy, which is the one signal this
+# group has: it is deliberately outside `[[metrics]]` and has no health check. A
+# refusal is *not* a failure and does not trip this — a purge that skips an owner
+# over the confirmation bound, or a tombstone whose user row is still live, records
+# the outcome and exits 0, so the pass continues to the next subcommand.
+#
+# Restore is operator-invoked on this Machine (`fly ssh console`), and reads the
+# `TAU_S3_RESTORE_*` family — Fly secrets, never values in this file.
+# ponytail: a 24 h sleep keeps one 512 MB Machine up for a nightly pass. If that idle
+# cost matters, give `maintenance-command.ts` a `--poll-milliseconds` mode like the
+# billing workers, or move the group to a scheduled Machine.
+revisions-maintenance = "sh -c 'while true; do node /app/dist/maintenance-command.js purge || exit 1; node /app/dist/maintenance-command.js retire-lfs || exit 1; node /app/dist/maintenance-command.js collect-blobs || exit 1; sleep 86400; done'"
 
 [env]
 NODE_ENV = 'production'
@@ -36,9 +66,6 @@ AUTH_URL = 'https://api.taucad.dev'
 # Browser-facing origin of this API, used to build authenticated publication file
 # proxy URLs. Required by the env schema with no default.
 TAU_API_URL = 'https://api.taucad.dev'
-# Bare repositories of the Tau Hosted Remote live on the volume below
-# (charter EQ13: volume + git binary).
-TAU_GIT_ROOT = '/data/git'
 LOG_SERVICE = 'fly'
 LOG_LEVEL = 'info'
 OTEL_METRICS_PORT = '9464'
@@ -62,30 +89,25 @@ TAU_S3_PUBLIC_BASE_URL = 'https://cdn.taucad.dev'
 TAU_S3_REGION = 'auto'
 TAU_S3_FORCE_PATH_STYLE = 'false'
 
-# One Fly volume per app Machine: a volume attaches to exactly one Machine, so
-# the repositories a Machine serves are the repositories on its own disk. The
-# `app` process must stay single-Machine (or gain request routing by project)
-# until a shared-storage backend exists — see the W11a report's operator items.
+# No `[[mounts]]`. Charter S3/D1: the durable state of the Hosted Remote is the
+# object store, leases are ephemeral working copies under the Machine's own
+# `os.tmpdir()`, and `TAU_GIT_ROOT` now refuses boot. A volume here would attach to
+# exactly one Machine and take the `app` group back to one.
 #
-# Sized against the plan, not against today's usage (ruling OQ1, review C27).
-# Staging carries seeded Pro accounts rather than customers, so it starts at one
-# Pro allowance (10 GiB) and extends; prod starts at five. See `fly.prod.toml`
-# for why this is a volume setting and not a free-disk check in code.
-[[mounts]]
-source = 'tau_git_data'
-destination = '/data'
-initial_size = '10gb'
-auto_extend_size_threshold = 80
-auto_extend_size_increment = '5gb'
-auto_extend_size_limit = '50gb'
-processes = ['app']
+# DG4 must delete the `tau_git_data` volumes by hand after the deploy: `fly deploy`
+# leaves an orphaned volume in place rather than destroying data, and Fly bills its
+# provisioned size. Staging deploys itself on a merge to `main`, so this is the
+# environment where an orphan is easiest to forget.
 
 [http_service]
 internal_port = 3000
 force_https = true
 auto_stop_machines = 'stop'
 auto_start_machines = true
-min_machines_running = 1
+# Charter S2: two or more API processes serve the same repository concurrently, with
+# no shared disk and no cross-process lock. Two is also the floor a rolling deploy
+# needs to keep one Machine serving; the count itself is `fly scale count app=2`.
+min_machines_running = 2
 processes = ['app']
 
 [[http_service.checks]]
@@ -98,8 +120,18 @@ timeout = "2s"
 [[metrics]]
 port = 9464
 path = "/metrics"
+# `revisions-maintenance` is deliberately absent: its command opens no metrics
+# server, so scraping it would only produce a permanently failing target.
 processes = ['app', 'billing-recovery', 'billing-operations']
 
+# The rootfs is now the capacity knob the retired volume used to be: a lease is a
+# temporary working copy under `os.tmpdir()`, and admission refuses one when
+# `concurrent leases × 2.5 GiB` (W0a's measured figure at D20's 1 GiB ceiling)
+# exceeds the free bytes `statfs` reports. On Fly's default 8 GiB rootfs, minus the
+# image and the pruned deploy tree, that is two ceiling-sized leases at once and a
+# third only if the image is smaller than it looks — admission reads the real free
+# bytes, so the number self-corrects and the figure here is not a contract. Raise
+# the rootfs before raising the ceiling.
 [[vm]]
 memory = '1gb'
 cpu_kind = 'shared'
@@ -117,3 +149,12 @@ memory = '256mb'
 cpu_kind = 'shared'
 cpus = 1
 processes = ['billing-operations']
+
+# Restore hydrates a repository through a lease of its own, so this Machine wants the
+# same lease headroom an `app` Machine has; the purge and collector passes stream
+# keys and need almost none.
+[[vm]]
+memory = '512mb'
+cpu_kind = 'shared'
+cpus = 1
+processes = ['revisions-maintenance']

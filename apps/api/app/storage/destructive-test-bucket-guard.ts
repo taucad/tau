@@ -14,8 +14,16 @@
 /**
  * Local MinIO buckets created by `infra/docker-compose.yml`'s bootstrap and
  * named by `apps/api/.env.example`. They hold only development fixtures.
+ *
+ * `tau-content-restore` is the second local bucket W6's restore suite reads a
+ * repository back from (`TAU_S3_RESTORE_*`); it is a development bucket like the
+ * other two, so the suite may clean it by prefix rather than key by key.
  */
-const localDevelopmentBuckets: ReadonlySet<string> = new Set(['tau-content', 'tau-content-private']);
+const localDevelopmentBuckets: ReadonlySet<string> = new Set([
+  'tau-content',
+  'tau-content-private',
+  'tau-content-restore',
+]);
 
 /**
  * The dedicated R2 scratch buckets D32 confines the conformance and burst

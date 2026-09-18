@@ -57,7 +57,9 @@ COPY . .
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     --mount=type=cache,id=nx,target=/app/.nx/cache \
     --mount=type=secret,id=nx_cloud_token,env=NX_CLOUD_ACCESS_TOKEN \
-    pnpm nx build api && pnpm nx run api:build:billing-command
+    pnpm nx build api && \
+    pnpm nx run api:build:billing-command && \
+    pnpm nx run api:build:maintenance-command
 
 # ── Prune to production deploy tree ───────────────────────────────────────
 FROM build AS pruned
@@ -69,13 +71,22 @@ FROM node:${NODE_VERSION}-slim AS runtime
 LABEL fly_launch_runtime="NestJS"
 WORKDIR /app
 
-# The Tau Hosted Remote is git's own binaries behind HTTP (charter EQ13/D15):
-# `git upload-pack|receive-pack --stateless-rpc` serve the bare repositories on
-# the volume, and `git-lfs` is present so a repository written by the API is one
+# The Tau Hosted Remote is git's own binaries behind HTTP (charter D15):
+# `git upload-pack|receive-pack --stateless-rpc` serve a lease hydrated from the
+# object store, and `git-lfs` is present so a repository written by the API is one
 # a stock client can also maintain. Readiness fails by name when either is
 # missing (`git-toolchain-health.indicator.ts`).
+#
+# Pinned (charter W8), because these two binaries decide the bytes of every pack
+# this service writes: an unpinned `apt-get install` means a rebuild of an unchanged
+# commit can ship a different git. Both versions are the bookworm candidates of the
+# `node:24-slim` base. When Debian rolls a point release the old version leaves the
+# index and this build fails loudly — bump the two ARGs, which is the intended
+# maintenance, rather than dropping the pin.
+ARG GIT_VERSION=1:2.39.5-0+deb12u3
+ARG GIT_LFS_VERSION=3.3.0-1+deb12u1
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends git git-lfs && \
+    apt-get install -y --no-install-recommends "git=${GIT_VERSION}" "git-lfs=${GIT_LFS_VERSION}" && \
     rm -rf /var/lib/apt/lists/*
 
 # Create non-root user before COPY so --chown can write directly into the
@@ -83,10 +94,9 @@ RUN apt-get update && \
 RUN groupadd --system --gid 1001 nodejs && \
     useradd --system --uid 1001 --gid nodejs --home /app --shell /usr/sbin/nologin nestjs
 
-# Mount point for the repositories volume ([[mounts]] in fly.*.toml). Created
-# and owned here so the non-root runtime user can write into an empty volume on
-# its first attach.
-RUN mkdir -p /data/git && chown -R nestjs:nodejs /data
+# No `/data`: the repositories volume is gone (charter S3). A lease is a temporary
+# working copy under `os.tmpdir()`, which on this image is the rootfs's own `/tmp`
+# — world-writable, so the non-root user needs nothing prepared here.
 COPY --from=pruned --chown=nestjs:nodejs /pruned /app
 USER nestjs
 

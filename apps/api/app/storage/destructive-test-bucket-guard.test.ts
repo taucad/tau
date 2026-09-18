@@ -6,7 +6,7 @@ import {
 
 describe('destructive-test bucket guard', () => {
   describe('allowed buckets', () => {
-    it.each(['tau-content', 'tau-content-private', 'TAU-Content-Private', '  tau-content  '])(
+    it.each(['tau-content', 'tau-content-private', 'tau-content-restore', 'TAU-Content-Private', '  tau-content  '])(
       'should allow the local MinIO bucket %j',
       (bucket) => {
         expect(isDestructiveTestBucketAllowed(bucket)).toBe(true);
@@ -29,6 +29,7 @@ describe('destructive-test bucket guard', () => {
       'Tau-Staging-Content',
       'tau-prod-content',
       'tau-content-private-2',
+      'tau-content-restore-2',
       '',
     ])('should refuse %j, which is not an allowlisted destructive-test bucket (D32)', (bucket) => {
       expect(isDestructiveTestBucketAllowed(bucket)).toBe(false);

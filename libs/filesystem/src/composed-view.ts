@@ -481,6 +481,23 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
   };
 
   /**
+   * A copy source the view serves itself, refused instead of passed down.
+   *
+   * An overlay's bytes are not in the checkout, so a copy the base performed
+   * would answer ENOENT for a path this view reads perfectly well (review N1).
+   * The read-only filesystem is the honest answer until a copy that stages
+   * overlay bytes exists.
+   */
+  const readableSource = async (path: string): Promise<string> => {
+    const from = readablePath(canonical(path));
+    const route = await routeFor(from);
+    if (route.kind === 'overlay') {
+      refuseOverlay(from);
+    }
+    return from;
+  };
+
+  /**
    * The mask a copy descends with, asked about project-relative spellings.
    *
    * A copy root can be any directory, so the source is joined back on before
@@ -492,7 +509,7 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       ? {}
       : {
           copyTree: async (source: string, target: string, options?: { admits?: TreeSearchOptions['admits'] }) => {
-            const from = readablePath(canonical(source));
+            const from = await readableSource(source);
             const [to] = await writableTargets([target]);
             /* Every entry a copy writes is a target too: `src/.git` is authored
              * where it sits, but copied to the project root it would be the
@@ -511,7 +528,7 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
       ? {}
       : {
           duplicate: async (source: string, target: string) => {
-            const from = readablePath(canonical(source));
+            const from = await readableSource(source);
             const [to] = await writableTargets([target]);
             return base.duplicate!(from, to!);
           },

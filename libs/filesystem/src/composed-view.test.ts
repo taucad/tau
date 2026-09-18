@@ -587,6 +587,22 @@ describe('composeView mutating porcelain', () => {
     expect(base.copyTree).not.toHaveBeenCalled();
   });
 
+  /* Review N1: the overlay's bytes are the view's to serve and the checkout's to
+   * know nothing about, so a copy out of one is refused here rather than handed
+   * down as a path the base can only answer ENOENT for. */
+  it('should refuse an overlay source for a copy and for a duplicate', async () => {
+    const base = porcelain();
+    const view = composeView(
+      { filesystem: base },
+      { consumer: 'user', policy: tauPathPolicy, overlays: [skillOverlay()] },
+    );
+
+    await expect(view.copyTree!(`${skillsRoot}/demo`, 'vendored')).rejects.toMatchObject({ code: 'EROFS' });
+    await expect(view.duplicate!(`${skillsRoot}/demo/SKILL.md`, 'skill.md')).rejects.toMatchObject({ code: 'EROFS' });
+    expect(base.copyTree).not.toHaveBeenCalled();
+    expect(base.duplicate).not.toHaveBeenCalled();
+  });
+
   it('should offer no porcelain when the composed filesystem serves none', () => {
     const view = composeView({ filesystem: provider }, { consumer: 'user', policy: tauPathPolicy });
 

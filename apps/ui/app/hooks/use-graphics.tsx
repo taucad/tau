@@ -11,7 +11,9 @@ import type { modelInteractionMachine } from '#machines/model-interaction.machin
 import {
   acquireViewCameraSession,
   getGraphicsCameraRegistryVersion,
+  getViewCameraSession,
   hasGraphicsCameraRig,
+  notifyViewCameraSession,
   subscribeGraphicsCameraRegistry,
 } from '#services/graphics-camera-registry.js';
 import type {
@@ -19,6 +21,7 @@ import type {
   RenderFrameUpdateHandler,
   ViewCameraFraming,
   ViewCameraSeed,
+  ViewCameraSession,
 } from '#services/graphics-camera-registry.js';
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
@@ -56,6 +59,17 @@ export const useGraphicsCameraRigQuery = (): ((graphicsRef: GraphicsActorRef | u
 };
 
 /**
+ * Returns a view's camera session from outside its provider, re-rendering when one comes or goes.
+ *
+ * The write-side host reads a view whose pane may not be mounted: until some canvas acquires the
+ * session there is no live camera, and the view's camera keys are left as the person left them.
+ */
+export const useViewCameraSession = (graphicsRef: GraphicsActorRef | undefined): ViewCameraSession | undefined => {
+  useCameraRegistryVersion();
+  return getViewCameraSession(graphicsRef);
+};
+
+/**
  * Provider that makes a per-view graphics machine and its capabilities available to all descendants.
  * Binds the view's camera session, whose owner is the graphics actor rather than this mount.
  * Placed in ChatViewer (and standalone viewers like hero-viewer, converter).
@@ -81,6 +95,10 @@ export function GraphicsProvider({
         ? seed?.camera
         : { ...seed?.camera, cameraFovAngle: initialVerticalFieldOfView },
   });
+
+  useLayoutEffect(() => {
+    notifyViewCameraSession(session);
+  }, [session]);
 
   const value = useMemo((): GraphicsContextValue => {
     const { renderFrame, rig } = session;

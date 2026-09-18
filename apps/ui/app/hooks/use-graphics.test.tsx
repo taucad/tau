@@ -10,6 +10,7 @@ import type { RenderFrame } from '@taucad/spatial';
 import {
   GraphicsProvider,
   useCameraRig,
+  useGraphicsCameraRigQuery,
   useRenderFrame,
   useRenderFrameRetarget,
   useSetRenderFrame,
@@ -19,6 +20,7 @@ import {
   acquireViewCameraSession,
   getGraphicsCameraState,
   hasGraphicsCameraRig,
+  notifyViewCameraSession,
 } from '#services/graphics-camera-registry.js';
 import type { ViewCameraFraming } from '#services/graphics-camera-registry.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
@@ -75,6 +77,12 @@ function FramingProbe({ onFraming }: { readonly onFraming: (framing: ViewCameraF
   useLayoutEffect(() => {
     onFraming(framing);
   }, [framing, onFraming]);
+  return undefined;
+}
+
+/** Subscribes to the camera registry store the way the chat and command surfaces do. */
+function RigQueryProbe(): undefined {
+  useGraphicsCameraRigQuery();
   return undefined;
 }
 
@@ -147,7 +155,7 @@ describe('GraphicsProvider camera rig ownership', () => {
     expect(initialQuery(graphicsActor)).toBe(false);
 
     act(() => {
-      acquireViewCameraSession(graphicsActor);
+      notifyViewCameraSession(acquireViewCameraSession(graphicsActor));
     });
     await waitFor(() => {
       expect(result.current(graphicsActor)).toBe(true);
@@ -160,6 +168,35 @@ describe('GraphicsProvider camera rig ownership', () => {
     await waitFor(() => {
       expect(result.current(graphicsActor)).toBe(false);
     });
+  });
+
+  /* Acquiring a session is a render-phase call, so publishing it to the registry's
+   * `useSyncExternalStore` consumers has to wait for the commit phase; React rejects an update to a
+   * component that is not the one rendering. */
+  it('should publish a new session to registry consumers without updating them during render', () => {
+    const graphicsActor = createGraphicsActor();
+    const errors: string[] = [];
+    const consoleError = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+      errors.push(args.map(String).join(' '));
+    });
+
+    try {
+      const mounted = render(<RigQueryProbe />);
+
+      mounted.rerender(
+        <>
+          <RigQueryProbe />
+          <GraphicsProvider graphicsRef={graphicsActor}>
+            <RigProbe onRig={() => undefined} />
+          </GraphicsProvider>
+        </>,
+      );
+
+      expect(errors.filter((message) => message.includes('Cannot update a component'))).toEqual([]);
+      expect(hasGraphicsCameraRig(graphicsActor)).toBe(true);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   /* Law 2: the graphics actor stores no copy of the field of view, so a rig built without a seed
@@ -204,6 +241,8 @@ describe('GraphicsProvider camera rig ownership', () => {
 
     expect(rigs).toHaveLength(1);
     expect(rigs[0]?.actorRef.getSnapshot().context.view.requestedVerticalFieldOfView).toBe(45);
+    // The rig synchronises its cameras on construction, so the seed reaches the THREE camera too.
+    expect(rigs[0]?.perspectiveCamera.fov).toBe(45);
   });
 
   /* Law 3: the camera's owner is the graphics actor, not this mount. A StrictMode double invoke

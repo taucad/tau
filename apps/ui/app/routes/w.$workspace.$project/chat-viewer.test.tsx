@@ -36,8 +36,11 @@ const mockGraphicsSend = vi.fn();
 let mockGeometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
 let mockViewSettings: Record<string, { entryPath: string; graphicsSettings: GraphicsViewSettings }> = {};
 let mockCameraSeed: unknown;
+/** A mounted provider is what acquires the view's camera session (R8). */
+let mockGraphicsProviderMounts = 0;
 let mockUnitSettings: Record<string, { renderTimeout: number }> = {};
-const mockUseViewSettingsSync = vi.fn();
+let mockFileTree: Map<string, { type: 'file' | 'dir'; name: string }>;
+let mockFileContent: { kind: string; text?: string };
 let mockHoveredComponentId: string | undefined;
 let mockCadViewerSecondaryPointerMode: 'component-hit' | 'suppressed';
 let mockCadViewerProps:
@@ -256,14 +259,11 @@ vi.mock('#hooks/use-project.js', () => ({
 // =============================================================================
 
 vi.mock('#hooks/use-file-tree.js', () => ({
-  useFileTreeMap: () =>
-    new Map<string, { type: 'file' | 'dir'; name: string }>([
-      [helperEntryPath, { type: 'file', name: helperEntryPath }],
-    ]),
+  useFileTreeMap: () => mockFileTree,
 }));
 
 vi.mock('#hooks/use-file-content.js', () => ({
-  useFileContent: () => ({ kind: 'text', text: 'cube();' }),
+  useFileContent: () => mockFileContent,
 }));
 
 // =============================================================================
@@ -345,17 +345,12 @@ vi.mock('#components/cad/ar-button.js', () => ({
   ArButton: () => null,
 }));
 
-vi.mock('#hooks/use-view-settings-sync.js', () => ({
-  useViewSettingsSync: (options: unknown) => {
-    mockUseViewSettingsSync(options);
-  },
-}));
-
 // `use-graphics` drags in three.js via screenshot/camera capability machines, so
 // stub the provider/hooks to avoid loading three under jsdom.
 vi.mock('#hooks/use-graphics.js', () => ({
   GraphicsProvider: ({ children, seed }: { children: React.ReactNode; seed?: unknown }) => {
     mockCameraSeed = seed;
+    mockGraphicsProviderMounts += 1;
     return <div>{children}</div>;
   },
   useGraphics: () => mockGraphicsActor,
@@ -392,8 +387,10 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockGeometryUnits = new Map();
     mockViewSettings = {};
     mockCameraSeed = undefined;
+    mockGraphicsProviderMounts = 0;
+    mockFileTree = new Map([[helperEntryPath, { type: 'file', name: helperEntryPath }]]);
+    mockFileContent = { kind: 'text', text: 'cube();' };
     mockUnitSettings = {};
-    mockUseViewSettingsSync.mockClear();
     mockHoveredComponentId = undefined;
     mockCadViewerSecondaryPointerMode = 'component-hit';
     mockCadViewerProps = undefined;
@@ -569,7 +566,29 @@ describe('ChatViewer reopen-renderer overlay', () => {
     render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     expect(mockCameraSeed).toEqual({ identity: helperEntryPath, camera: { cameraFovAngle: 42, cameraView } });
-    expect(mockUseViewSettingsSync).toHaveBeenCalledWith(expect.objectContaining({ persistCameraView: true }));
+  });
+
+  /* R8: a branch with no canvas has nothing to drive a camera, and building one there would latch
+   * the persisted pose against an entry the person never rendered. */
+  it('builds no camera session on the branches that render no canvas', () => {
+    mockViewSettings = {
+      'view-1': { entryPath: helperEntryPath, graphicsSettings: { ...defaultGraphicsSettings } },
+    };
+
+    const noFile = render(<ChatViewer viewId='view-1' entryPath={undefined} panelApi={mockPanelApi} />);
+    expect(mockGraphicsProviderMounts).toBe(0);
+    noFile.unmount();
+
+    mockFileTree = new Map([['src/parts/gear.scad', { type: 'file', name: 'gear.scad' }]]);
+    const directory = render(<ChatViewer viewId='view-1' entryPath='src/parts' panelApi={mockPanelApi} />);
+    expect(mockGraphicsProviderMounts).toBe(0);
+    directory.unmount();
+
+    mockFileTree = new Map();
+    mockFileContent = { kind: 'orphaned' };
+    render(<ChatViewer viewId='view-1' entryPath='gone.scad' panelApi={mockPanelApi} />);
+    expect(mockGraphicsProviderMounts).toBe(0);
+    expect(mockCameraSeed).toBeUndefined();
   });
 
   /* Finding 4 / E1: the render timeout is owned per file by the entry's CAD actor and seeded at
@@ -588,7 +607,6 @@ describe('ChatViewer reopen-renderer overlay', () => {
     render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     expect(cadActor.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'setRenderTimeout' }));
-    expect(mockUseViewSettingsSync).toHaveBeenCalledWith(expect.objectContaining({ entryPath: helperEntryPath }));
 
     mockGeometryUnits.delete(helperEntryPath);
     mockProjectSend.mockClear();
@@ -641,6 +659,9 @@ describe('ChatViewer reopen-renderer overlay', () => {
         },
       },
     });
+    /* Without this the retained actor keeps the cut, and the next publish writes it -- pivoted on
+     * geometry that is no longer open -- straight back into the record the clear just emptied. */
+    expect(mockGraphicsSend).toHaveBeenCalledWith({ type: 'setSectionViewActive', payload: false });
   });
 
   it('lets empty bottom-control overlay space pass pointer events through to the canvas', () => {

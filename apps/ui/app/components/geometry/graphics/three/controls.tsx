@@ -65,6 +65,16 @@ export const Controls = React.memo(function ({
   const hoveredSectionViewId = useGraphicsSelector((state) => state.context.hoveredSectionViewId);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
   const projectionKind = useCameraSelector((state) => selectCameraProjection(state).kind);
+  /* `initialTarget` is read once, in the controls' own state initializer, which writes the live
+   * camera's orientation before `ActorBridge` is mounted. It is a render-unit API, so the actor's
+   * metre target is converted here rather than landing 1/metersPerRenderUnit away for two frames. */
+  const initialTarget = useMemo((): [number, number, number] => {
+    const point = toThreeRenderPoint({
+      renderFrame,
+      pointMeters: cameraRig.actorRef.getSnapshot().context.view.target,
+    });
+    return [point.x, point.y, point.z];
+  }, [cameraRig, renderFrame]);
   const renderPivot = useMemo((): [number, number, number] => {
     const point = toThreeRenderPoint({ renderFrame, pointMeters: pivot });
     return [point.x, point.y, point.z];
@@ -135,7 +145,7 @@ export const Controls = React.memo(function ({
     <>
       <TauCameraControls
         makeDefault
-        initialTarget={cameraRig.actorRef.getSnapshot().context.view.target}
+        initialTarget={initialTarget}
         dollySpeed={dollySpeed}
         truckSpeed={enablePan ? 2 : 0}
         smoothTime={0}

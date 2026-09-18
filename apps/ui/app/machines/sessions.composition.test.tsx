@@ -216,6 +216,9 @@ const parameterService = {
   subscribeUnsavedDrafts: () => () => undefined,
 };
 
+/* One Map for the life of the suite: the write-side host selects it, and a fresh one per snapshot
+ * read would hand React a new value on every render. */
+const viewGraphics = new Map();
 vi.mock('#hooks/use-project.js', () => ({
   ProjectProvider: ({
     children,
@@ -234,7 +237,7 @@ vi.mock('#hooks/use-project.js', () => ({
         serviceCalls.push(`project:${event.type}`);
       },
       getSnapshot: () => ({
-        context: { project: { id: 'p' } },
+        context: { project: { id: 'p' }, viewGraphics },
         matches: (value: unknown) => JSON.stringify(value) === JSON.stringify({ ready: { storing: 'idle' } }),
       }),
       subscribe: () => ({ unsubscribe: () => undefined }),

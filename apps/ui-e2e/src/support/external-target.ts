@@ -12,6 +12,8 @@ export type TargetViewport = {
 };
 export type TargetClickOptions = {
   readonly button?: 'left' | 'middle' | 'right';
+  /** `2` for a double-click; passed straight to Playwright's `locator.click`. */
+  readonly clickCount?: number;
   readonly force?: boolean;
   readonly position?: { readonly x: number; readonly y: number };
   readonly touch?: boolean;

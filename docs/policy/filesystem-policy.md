@@ -3,7 +3,7 @@ title: 'Filesystem Policy'
 description: 'Standards for filesystem access, data transfer, caching, concurrency, and watcher architecture in the Tau application. Covers read/write semantics, bridge RPC, and kernel/UI watch planes.'
 status: active
 created: '2026-03-05'
-updated: '2026-09-05'
+updated: '2026-09-18'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/filesystem-authority-policy.md
@@ -190,7 +190,7 @@ Filesystem packages and UI file facades must not accept options that decide whet
 
 ### Rule 7b: System-artifact visibility is a UI projection
 
-`tau.json`, `thumbnail.webp`, and `.tau/**` are real filesystem entries and remain readable through ordinary APIs. File-tree presentation may hide or decorate them as system artifacts, but must do so in its projection layer. Providers, discovery, copy/export, and publication code must not pretend these files do not exist; callers that omit them do so through explicit artifact filters.
+`tau.json`, `thumbnail.webp`, and `.tau/**` are real filesystem entries and remain readable through ordinary APIs. File-tree presentation may hide or decorate them as system artifacts, but must do so in its projection layer. Providers, discovery, copy/export, and publication code must not pretend these files do not exist; callers that omit them do so through explicit artifact filters. Control-plane exclusion (`.git/**`, `.tau/revisions/**`, the rest of the registry's `hidden` class) is structural — every composed view refuses it (authority policy Rule 16) — while records and cache exclusion, such as a whole-project export carrying only `versioned` bytes, is an explicit caller filter.
 
 ## Tree Refresh Rules
 

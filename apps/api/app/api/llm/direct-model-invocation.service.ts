@@ -9,10 +9,10 @@ import { validateAnthropicHeaders } from '#api/llm/llm-gateway.headers.js';
 import {
   providerBillingUrls,
   providerErrorMessage,
-  readBoundedProviderBody,
   recognizeProviderAccountRefusal,
 } from '#api/llm/provider-account-refusal.js';
 import type { ProviderAccountRefusal } from '#api/llm/provider-account-refusal.js';
+import { classifyUpstreamRefusal, readUpstreamRefusal, upstreamRetryAfterSeconds } from '#api/llm/upstream-refusal.js';
 import { createProviderAccountFrameFilter } from '#api/llm/provider-account-stream.js';
 import type {
   ModelInvocationIntent,
@@ -89,7 +89,19 @@ export class DirectModelInvocationService implements ModelInvocationService {
       signal: intent.signal,
     });
     if (!response.ok) {
-      const body = await readBoundedProviderBody(response);
+      const { body, loggedBody } = await readUpstreamRefusal(response);
+      // The refusal is undiagnosable without the provider's own body, and the body can
+      // name the account behind the key, so it stays here and never joins the envelope.
+      this.logger.warn(
+        {
+          providerId: route.providerId,
+          routeId: parsed.data.model,
+          modelId: route.modelId,
+          upstreamStatus: response.status,
+          upstreamBody: loggedBody,
+        },
+        'Upstream model provider refused the request',
+      );
       const refusal = recognizeProviderAccountRefusal({
         providerId: route.providerId,
         status: response.status,
@@ -98,20 +110,20 @@ export class DirectModelInvocationService implements ModelInvocationService {
       if (refusal) {
         throw this.providerAccountExhausted(route.providerId, refusal);
       }
-      if (response.status >= 500) {
-        throw new LlmGatewayError(
-          HttpStatus.SERVICE_UNAVAILABLE,
-          'PROVIDER_UNAVAILABLE',
-          `Configured provider returned HTTP ${response.status}.`,
-        );
-      }
+      const retryAfterSeconds = upstreamRetryAfterSeconds(response.headers);
+      const classification = classifyUpstreamRefusal({
+        status: response.status,
+        accountOwner: 'operator',
+        ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
+      });
       // The operator owns this key, so the provider's own reason stays in the message.
       // Clamped: the provider's sentence is persisted into the chat's error row.
-      const reason = providerErrorMessage(body)?.slice(0, 500);
+      const reason = response.status >= 500 ? undefined : providerErrorMessage(body)?.slice(0, 500);
       throw new LlmGatewayError(
-        HttpStatus.BAD_GATEWAY,
-        'UPSTREAM_REJECTED',
+        classification.status,
+        classification.type,
         `Configured provider returned HTTP ${response.status}.${reason === undefined ? '' : ` ${reason}`}`,
+        classification.details,
       );
     }
     if (!response.body) {

@@ -139,6 +139,40 @@ describe('HttpExceptionFilter OTEL integration', () => {
     expect(host.response.send).toHaveBeenCalledWith({ type: 'error', error: { type, message: 'refused' } });
   });
 
+  it('should prefer the envelope own retry estimate over the static funded map', () => {
+    const host = createMockArgumentsHost();
+
+    filter.catch(
+      new LlmGatewayError(HttpStatus.TOO_MANY_REQUESTS, 'RATE_LIMITED', 'upstream rate limit', {
+        retryAfterSeconds: 7,
+      }),
+      host as any,
+    );
+
+    expect(host.response.header).toHaveBeenCalledWith('retry-after', '7');
+  });
+
+  /* The interpolated string was eaten by pino-pretty: every `{…}` in a message is read as
+   * a format token, so the envelope logged as `{"type":"error","error":}`. */
+  it('should log the gateway refusal as a structured object rather than an interpolated envelope', () => {
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {
+      // Test-local logger sink.
+    });
+    const host = createMockArgumentsHost();
+    const exception = new LlmGatewayError(
+      HttpStatus.BAD_GATEWAY,
+      'UPSTREAM_REJECTED',
+      'Configured provider returned HTTP 400.',
+    );
+
+    filter.catch(exception, host as any);
+
+    expect(warn).toHaveBeenCalledWith(
+      { gatewayResponse: exception.getResponse(), requestId: 'req_test_123' },
+      'Model gateway refusal',
+    );
+  });
+
   it('should not offer a retry estimate for a funded refusal that retrying cannot clear, and keep its shortfall', () => {
     const host = createMockArgumentsHost();
     const details = {

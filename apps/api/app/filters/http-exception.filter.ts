@@ -26,6 +26,21 @@ export const fundedRetryAfterSeconds: ReadonlyMap<string, number> = new Map<stri
   ['BILLING_RECOVERY_UNAVAILABLE', 60],
 ]);
 
+/**
+ * The retry estimate a gateway refusal answers with: the upstream's own seconds when
+ * the relay carried one, otherwise this file's bound for that refusal type.
+ *
+ * @param error - The typed envelope's `error` member.
+ * @returns Seconds for the `retry-after` header, or undefined when there is no estimate.
+ */
+const gatewayRetryAfterSeconds = (error: { type?: unknown; details?: unknown } | undefined): number | undefined => {
+  const supplied = (error?.details as { retryAfterSeconds?: unknown } | undefined)?.retryAfterSeconds;
+  if (typeof supplied === 'number' && Number.isInteger(supplied) && supplied >= 0) {
+    return supplied;
+  }
+  return typeof error?.type === 'string' ? fundedRetryAfterSeconds.get(error.type) : undefined;
+};
+
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpExceptionFilter.name);
@@ -56,12 +71,15 @@ export class HttpExceptionFilter implements ExceptionFilter {
     if (exception instanceof LlmGatewayError) {
       const gatewayStatus = exception.getStatus();
       const gatewayResponse = exception.getResponse();
-      this.logger.warn(`Model gateway refusal: ${JSON.stringify(gatewayResponse)}`);
+      /* Structured, not interpolated: pino-pretty reads every `{…}` in a message as a
+       * format token, so an interpolated envelope logged as `{"type":"error","error":}`. */
+      this.logger.warn({ gatewayResponse, requestId }, 'Model gateway refusal');
       if (requestId) {
         void response.header(httpHeader.requestId, requestId);
       }
-      const { type } = (gatewayResponse as { error?: { type?: unknown } }).error ?? {};
-      const retryAfter = typeof type === 'string' ? fundedRetryAfterSeconds.get(type) : undefined;
+      const retryAfter = gatewayRetryAfterSeconds(
+        (gatewayResponse as { error?: { type?: unknown; details?: unknown } }).error,
+      );
       if (retryAfter !== undefined) {
         void response.header('retry-after', String(retryAfter));
       }

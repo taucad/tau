@@ -11,3 +11,15 @@ export const inviteCollaboratorSchema = z.object({
   role: z.enum(['read', 'write']),
 });
 export class InviteCollaboratorDto extends createZodDto(inviteCollaboratorSchema) {}
+
+/**
+ * `PATCH /v1/projects/:projectId/collaborators/:email` — the role alone.
+ *
+ * The address is in the path because it is what is being changed, not part of
+ * the change; only the role is a body field, so a request cannot quietly move a
+ * grant from one address to another.
+ */
+export const setCollaboratorRoleSchema = z.object({
+  role: z.enum(['read', 'write']),
+});
+export class SetCollaboratorRoleDto extends createZodDto(setCollaboratorRoleSchema) {}

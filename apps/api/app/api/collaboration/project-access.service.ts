@@ -186,7 +186,7 @@ export class ProjectAccessService {
    * @param userId - The authenticated account accepting.
    * @returns The project and the role now held.
    * @throws NotFoundException When the token is unknown, revoked or expired.
-   * @throws ForbiddenException When the account's email is unverified or not the invited one.
+   * @throws ForbiddenException `INVITATION_EMAIL_UNVERIFIED` when the account holds no verified address, `INVITATION_EMAIL_MISMATCH` when its verified address is not the invited one.
    */
   public async accept(token: string, userId: string): Promise<{ projectId: string; role: 'read' | 'write' }> {
     const { database } = this.databaseService;
@@ -210,10 +210,21 @@ export class ProjectAccessService {
       .from(user)
       .where(eq(user.id, userId))
       .limit(1);
-    if (viewer === undefined || !viewer.emailVerified || normalizeEmail(viewer.email) !== invitation.email) {
+    /* Two refusals, not one, because only the first is the invitee's to fix: an
+       unverified account verifies its address and tries again, while a
+       mismatched one has to sign in as somebody else. An account that no longer
+       exists is answered as unverified — it holds no verified address either,
+       and naming a mismatch would be claiming to know an address it does not. */
+    if (viewer === undefined || !viewer.emailVerified) {
+      throw new ForbiddenException({
+        code: 'INVITATION_EMAIL_UNVERIFIED',
+        message: 'Verify your email address before accepting this invitation.',
+      });
+    }
+    if (normalizeEmail(viewer.email) !== invitation.email) {
       throw new ForbiddenException({
         code: 'INVITATION_EMAIL_MISMATCH',
-        message: 'This invitation was sent to a different, verified email address.',
+        message: 'This invitation was sent to a different email address.',
       });
     }
 
@@ -235,6 +246,53 @@ export class ProjectAccessService {
     });
     this.invalidate(invitation.projectId);
     return { projectId: invitation.projectId, role };
+  }
+
+  /**
+   * Changes the role an address holds, without touching its invitation token.
+   *
+   * A re-invite also updates a role, but it mints a new token and a new expiry,
+   * which invalidates a link the invitee may still be holding. Changing a role
+   * is not re-inviting, so it gets its own write: the invitation keeps its
+   * token and only its `role` moves, and the membership — if the address has
+   * accepted — moves with it. Either one alone is enough: a pending address
+   * accepts at the new role, and an accepted one has it immediately.
+   *
+   * @param args - The project, the address and the role it should now hold.
+   * @returns The address and its new role.
+   * @throws NotFoundException When the address was never invited to this project.
+   */
+  public async setRole(args: {
+    projectId: string;
+    email: string;
+    role: 'read' | 'write';
+  }): Promise<{ email: string; role: 'read' | 'write' }> {
+    const email = normalizeEmail(args.email);
+    const { database } = this.databaseService;
+    const [invitation] = await database
+      .select({ email: projectInvitation.email })
+      .from(projectInvitation)
+      .where(and(eq(projectInvitation.projectId, args.projectId), eq(projectInvitation.email, email)))
+      .limit(1);
+    if (invitation === undefined) {
+      throw new NotFoundException({ code: 'INVITATION_NOT_FOUND', message: 'This address has no invitation' });
+    }
+    const accountId = await this.#accountFor(email);
+
+    await database.transaction(async (transaction) => {
+      await transaction
+        .update(projectInvitation)
+        .set({ role: args.role })
+        .where(and(eq(projectInvitation.projectId, args.projectId), eq(projectInvitation.email, email)));
+      if (accountId !== undefined) {
+        await transaction
+          .update(projectCollaborator)
+          .set({ role: args.role })
+          .where(and(eq(projectCollaborator.projectId, args.projectId), eq(projectCollaborator.userId, accountId)));
+      }
+    });
+    this.invalidate(args.projectId);
+    return { email, role: args.role };
   }
 
   /**

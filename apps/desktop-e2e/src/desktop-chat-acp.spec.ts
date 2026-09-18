@@ -71,6 +71,20 @@ if (turbojetSourcePath !== undefined && !existsSync(turbojetSourcePath)) {
  * resolve beside the app, and its CLI must answer — an adapter whose CLI is
  * missing is never advertised, so there would be no row to click.
  */
+/**
+ * Open a turn's revision card: its Restore button lives inside the collapsed
+ * details since 43884ce6a, so the card is expanded before the button is read.
+ */
+const openRevisionCard = async (page: Page, revision: number): Promise<void> => {
+  const trigger = page
+    .getByRole('button', { name: new RegExp(String.raw`^Rev ${revision}\b.*· revision details$`, 'u') })
+    .first();
+  await trigger.waitFor({ state: 'visible', timeout: 60_000 });
+  if ((await trigger.getAttribute('data-state')) !== 'open') {
+    await trigger.click();
+  }
+};
+
 const codexAvailable = ((): boolean => {
   try {
     createRequire(join(import.meta.dirname, '../../desktop/package.json')).resolve(
@@ -823,6 +837,7 @@ test.skipIf(!codexAvailable)(
        * tree over the other. */
       // Selecting a chat checkout does not move the independently browsed workbench.
       await expectCurrentBranch(page, 'main');
+      await openRevisionCard(page, candidateRevisionNumber);
       await expectVisible(
         page.getByRole('button', { name: `Restore to Revision ${String(candidateRevisionNumber)}`, exact: true }),
         60_000,
@@ -897,6 +912,7 @@ test.skipIf(!codexAvailable)(
       expect(finalizedRevisions(logOf(candidateChatId)).at(-1)?.branch).toBe('main');
 
       /* Restore to the direct turn's revision: the live folder is the seed again. */
+      await openRevisionCard(page, 2);
       await page.getByRole('button', { name: 'Restore to Revision 2', exact: true }).first().click();
       await expect.poll(liveSource, { timeout: 120_000 }).toBe(seededSource);
       await session.capture('rev-branches-after-restore');

@@ -116,6 +116,30 @@ export type GraphicsViewSettings = {
   schemaVersion?: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 };
 
+/**
+ * Durable keys whose live owner is the per-view `graphicsMachine`.
+ * They are seeded once, at actor construction, and the actor is the value afterwards.
+ */
+export type GraphicsOwnedSettings = Pick<
+  GraphicsViewSettings,
+  | 'enableSurfaces'
+  | 'enableLines'
+  | 'enableGizmo'
+  | 'enableGrid'
+  | 'enableAxes'
+  | 'enableMatcap'
+  | 'enablePostProcessing'
+  | 'upDirection'
+  | 'graphicsBackend'
+  | 'pinnedMeasurements'
+>;
+
+/** Durable keys whose live owner is the view's camera actor, held by its `ViewCameraSession`. */
+export type CameraOwnedSettings = Pick<GraphicsViewSettings, 'cameraFovAngle' | 'cameraView'>;
+
+/** Durable keys whose live owner is the entry path's `cadMachine`. */
+export type CadOwnedSettings = Pick<GraphicsViewSettings, 'renderTimeout'>;
+
 // ============================================================================
 // Zod Schemas for Runtime Validation of Persisted State
 // ============================================================================

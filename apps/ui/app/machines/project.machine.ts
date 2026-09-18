@@ -617,7 +617,6 @@ export const projectMachine = setup({
         const gfx = spawn('graphics', {
           id: `graphics-view-${context.projectId}-${event.viewId}`,
           input: {
-            defaultCameraFovAngle: settings.cameraFovAngle,
             measureSnapDistance: 40,
             enableSurfaces: settings.enableSurfaces,
             enableLines: settings.enableLines,
@@ -628,7 +627,7 @@ export const projectMachine = setup({
             enablePostProcessing: settings.enablePostProcessing,
             upDirection: settings.upDirection,
             pinnedMeasurements: settings.pinnedMeasurements,
-            graphicsBackendPreference: settings.graphicsBackend ?? 'webgl',
+            graphicsBackend: settings.graphicsBackend ?? 'webgl',
             modelInteractionRef: context.modelInteractionRef,
           },
         });

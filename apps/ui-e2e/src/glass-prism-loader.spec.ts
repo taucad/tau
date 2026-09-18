@@ -3,13 +3,13 @@ import { page as selectors } from 'vitest/browser';
 import * as target from '#support/external-target.js';
 
 /**
- * Metal morph loader backend evidence (`shader-policy.ts` site `metal-morph-loader`).
+ * Glass prism loader backend evidence (`shader-policy.ts` site `glass-prism-loader`).
  *
- * The `/loader` route exposes `__TAU_METAL_MORPH__` under `TAU_DEBUG`; the spec drives both node-renderer
- * backends through the `?graphicsBackend=` override, reads the generated shader stages, reads a frame back
- * through each backend for a chrome signature (independent of canvas presentation, which headless WebGPU
- * adapters may not provide), samples the presented WebGL canvas, and checks the loop keeps advancing without
- * WebGPU validation noise.
+ * The `/loader/glass` route exposes `__TAU_GLASS_PRISM__` under `TAU_DEBUG`; the spec drives both
+ * node-renderer backends through the `?graphicsBackend=` override, reads the generated shader stages, reads a
+ * frame back through each backend for a glass-and-spectrum signature (independent of canvas presentation,
+ * which headless WebGPU adapters may not provide), samples the presented WebGL canvas, and checks the loop
+ * keeps advancing without WebGPU validation noise.
  */
 
 type LoaderBackend = 'webgl' | 'webgpu';
@@ -24,6 +24,7 @@ type LoaderState = Readonly<{
   isPlaying: boolean;
   nextShape: string;
   phase: 'morph' | 'rest';
+  ribbonCount: number;
   status: 'failed' | 'pending' | 'ready';
   targetFrameRate: number;
   transitionCount: number;
@@ -42,23 +43,13 @@ type LoaderCapture = Readonly<{
   size: number;
 }>;
 
-type SpinnerDiagnostics = Readonly<{
-  activeCount: number;
-  backend: string | undefined;
-  isLooping: boolean;
-  rendererCount: number;
-  sourceSize: number;
-  subscriberCount: number;
-}>;
-
 type LoaderBridge = Readonly<{
   captureFrame: () => Promise<LoaderCapture>;
   getShaderSource: () => Promise<{ readonly fragmentShader: string; readonly vertexShader: string }>;
-  getSpinnerDiagnostics: () => SpinnerDiagnostics;
   getState: () => LoaderState;
 }>;
 
-type LoaderWindow = typeof globalThis & { __TAU_METAL_MORPH__?: LoaderBridge };
+type LoaderWindow = typeof globalThis & { __TAU_GLASS_PRISM__?: LoaderBridge };
 
 /** Document-space rectangle of the stage inside a full-page screenshot. */
 type StageRegion = Readonly<{
@@ -86,12 +77,12 @@ const webgpuValidationPatterns: readonly RegExp[] = [
   /shader compilation error/i,
 ];
 
-const stageName = /liquid metal loader showcase/i;
+const stageName = /glass prism loader showcase/i;
 /** Icosphere at detail 5: `10 * 4^5 + 2`. */
-const expectedVertexCount = 40_962;
+const expectedVertexCount = 10_242;
 
 const readState = async (): Promise<LoaderState | undefined> =>
-  target.evaluate(() => (globalThis as LoaderWindow).__TAU_METAL_MORPH__?.getState());
+  target.evaluate(() => (globalThis as LoaderWindow).__TAU_GLASS_PRISM__?.getState());
 
 const readField = async <Key extends keyof LoaderState>(key: Key): Promise<LoaderState[Key] | undefined> => {
   const state = await readState();
@@ -100,35 +91,13 @@ const readField = async <Key extends keyof LoaderState>(key: Key): Promise<Loade
 
 /** Read the current pose back through the active backend and keep the statistics as a test artifact. */
 const captureStage = async (name: string): Promise<LoaderCapture> => {
-  const capture = await target.evaluate(async () => (globalThis as LoaderWindow).__TAU_METAL_MORPH__?.captureFrame());
+  const capture = await target.evaluate(async () => (globalThis as LoaderWindow).__TAU_GLASS_PRISM__?.captureFrame());
   if (!capture) {
-    throw new Error('The metal morph loader debug bridge is missing.');
+    throw new Error('The glass prism loader debug bridge is missing.');
   }
-  await target.writeArtifact(`metal-morph-capture-${name}.json`, JSON.stringify(capture));
+  await target.writeArtifact(`glass-prism-capture-${name}.json`, JSON.stringify(capture));
   return capture;
 };
-
-const readSpinnerDiagnostics = async (): Promise<SpinnerDiagnostics | undefined> =>
-  target.evaluate(() => (globalThis as LoaderWindow).__TAU_METAL_MORPH__?.getSpinnerDiagnostics());
-
-/** Share of covered pixels on the largest inline spinner, read from the 2D canvas the service paints. */
-const sampleSpinnerCoverage = async (): Promise<number> =>
-  target.evaluate(() => {
-    const canvases = [...document.querySelectorAll<HTMLCanvasElement>('span[data-state] canvas')];
-    const painted = canvases.toSorted((first, second) => second.width - first.width)[0];
-    const context = painted?.getContext('2d');
-    if (!painted || !context || painted.width === 0) {
-      return 0;
-    }
-    const { data } = context.getImageData(0, 0, painted.width, painted.height);
-    let covered = 0;
-    for (let offset = 3; offset < data.length; offset += 4) {
-      if ((data[offset] ?? 0) > 128) {
-        covered += 1;
-      }
-    }
-    return covered / (painted.width * painted.height);
-  });
 
 /** Milliseconds; software adapters prefilter the studio and compile the pipelines slowly. */
 const readyTimeout = 120_000;
@@ -142,7 +111,7 @@ const waitForReady = async (): Promise<LoaderState> => {
   await expect.poll(async () => readField('status'), { timeout: readyTimeout }).toBe('ready');
   const state = await readState();
   if (!state) {
-    throw new Error('The metal morph loader debug bridge is missing.');
+    throw new Error('The glass prism loader debug bridge is missing.');
   }
   return state;
 };
@@ -171,7 +140,7 @@ const analyseStage = async (pngBase64: string, region: StageRegion): Promise<Sta
           resolve();
         });
         image.addEventListener('error', () => {
-          reject(new Error('Metal morph stage screenshot could not be decoded.'));
+          reject(new Error('Glass prism stage screenshot could not be decoded.'));
         });
       });
       image.src = `data:image/png;base64,${encoded}`;
@@ -243,13 +212,13 @@ const analyseStage = async (pngBase64: string, region: StageRegion): Promise<Sta
 const screenshotStage = async (artifactName: string): Promise<{ png: string; region: StageRegion }> => {
   await target.evaluate(() => {
     document
-      .querySelector('[role="img"][aria-label="Liquid metal loader showcase"]')
+      .querySelector('[role="img"][aria-label="Glass prism loader showcase"]')
       ?.scrollIntoView({ block: 'center' });
   });
   await target.delay(300);
   const box = await target.boundingBox(selectors.getByRole('img', { name: stageName }));
   if (!box) {
-    throw new Error('The metal morph stage has no bounding box.');
+    throw new Error('The glass prism stage has no bounding box.');
   }
   const scroll = await target.evaluate(() => ({ x: globalThis.scrollX, y: globalThis.scrollY }));
   const png = await target.screenshot(undefined, artifactName);
@@ -268,7 +237,7 @@ const hasSameShapePairRun = (history: readonly string[]): boolean => {
 
 /** Reduced motion holds the loop at its deterministic first frame, so both backends draw the same pose. */
 const captureRestingStage = async (backend: LoaderBackend): Promise<LoaderCapture> => {
-  await target.navigate(`/loader?graphicsBackend=${backend}`);
+  await target.navigate(`/loader/glass?graphicsBackend=${backend}`);
   const state = await waitForReady();
   expect(state.isPlaying).toBe(false);
   const capture = await captureStage(`resting-${backend}`);
@@ -285,16 +254,16 @@ const expectNoRendererNoise = async (pageErrorStart: number, consoleStart: numbe
   expect(validationNoise).toEqual([]);
 };
 
-test.describe('metal morph loader', () => {
+test.describe('glass prism loader', () => {
   for (const backend of ['webgpu', 'webgl'] as const satisfies readonly LoaderBackend[]) {
-    test(`compiles the liquid metal body through Three ${backend}`, async () => {
+    test(`compiles the glass body through Three ${backend}`, async () => {
       const initial = await target.events();
-      await target.navigate(`/loader?graphicsBackend=${backend}`);
+      await target.navigate(`/loader/glass?graphicsBackend=${backend}`);
       const state = await waitForReady();
       expect(state.backend).toBe(backend === 'webgpu' ? 'webgpu' : 'webgl2');
 
       const source = await target.evaluate(async () =>
-        (globalThis as LoaderWindow).__TAU_METAL_MORPH__?.getShaderSource(),
+        (globalThis as LoaderWindow).__TAU_GLASS_PRISM__?.getShaderSource(),
       );
       expect(source?.vertexShader.length).toBeGreaterThan(1000);
       expect(source?.fragmentShader.length).toBeGreaterThan(1000);
@@ -309,52 +278,49 @@ test.describe('metal morph loader', () => {
       await expectNoRendererNoise(initial.pageErrors.length, initial.consoleMessages.length);
     });
 
-    test(`renders a chrome body with highlights and dark facets through ${backend}`, async () => {
-      await target.navigate(`/loader?graphicsBackend=${backend}`);
+    test(`renders a glass body and a spectrum through ${backend}`, async () => {
+      await target.navigate(`/loader/glass?graphicsBackend=${backend}`);
       const state = await waitForReady();
       expect(state.backend).toBe(backend === 'webgpu' ? 'webgpu' : 'webgl2');
 
       const capture = await captureStage(`body-${backend}`);
       expect(capture.backend).toBe(state.backend);
       expect(capture.size).toBe(256);
-      expect(capture.coverage, `${backend}: the body must fill a fair share of the stage`).toBeGreaterThan(0.08);
-      expect(capture.coverage, `${backend}: the body must leave air around it`).toBeLessThan(0.75);
-      expect(capture.distinctColors, `${backend}: chrome must carry a wide tonal range`).toBeGreaterThan(40);
-      expect(
-        capture.bodyContrast,
-        `${backend}: fillets and flats must alternate highlights and shadows`,
-      ).toBeGreaterThan(0.08);
-      expect(
-        capture.highlightShare + capture.shadowShare,
-        `${backend}: chrome needs both bright and dark regions`,
-      ).toBeGreaterThan(0.05);
+      // The body, the beam and the spectrum together cover a band across the stage and leave air around it.
+      expect(capture.coverage, `${backend}: glass and light must cover part of the stage`).toBeGreaterThan(0.04);
+      expect(capture.coverage, `${backend}: the sheet must leave air above and below`).toBeLessThan(0.7);
+      expect(capture.distinctColors, `${backend}: a spectrum carries many colours`).toBeGreaterThan(40);
+      // The beam dominates the covered pixels: tone-mapped white sits just under the highlight threshold, so
+      // the mean carries the evidence rather than the highlight share.
+      expect(capture.bodyLuminance, `${backend}: the beam lights the covered pixels`).toBeGreaterThan(0.35);
+      expect(capture.bodyContrast, `${backend}: glass alternates rim, light and clear`).toBeGreaterThan(0.06);
     });
 
-    test(`keeps the transparent canvas clear outside the body silhouette through ${backend}`, async () => {
-      await target.navigate(`/loader?graphicsBackend=${backend}`);
+    test(`keeps the transparent canvas clear outside the light sheet through ${backend}`, async () => {
+      await target.navigate(`/loader/glass?graphicsBackend=${backend}`);
       await waitForReady();
 
       const capture = await captureStage(`corners-${backend}`);
       expect(
         capture.cornerAlpha,
-        `${backend}: the readback corners must stay clear of the body and its halo`,
+        `${backend}: the readback corners must stay clear of the sheet and its halo`,
       ).toBeLessThan(0.05);
       if (backend === 'webgl') {
         // The presented canvas composites over the page; WebGL always presents, headless WebGPU may not.
         await dismissCookieBanner();
         await target.delay(300);
-        const { png, region } = await screenshotStage(`metal-morph-page-corners-${backend}.png`);
+        const { png, region } = await screenshotStage(`glass-prism-page-corners-${backend}.png`);
         const stage = await analyseStage(png, region);
-        expect(stage.cornerSpread, 'the page surface must show through the canvas corners').toBeLessThan(0.08);
-        expect(stage.distinctBuckets, 'the presented canvas must carry the chrome').toBeGreaterThan(40);
-        expect(stage.centreContrast, 'the presented canvas must alternate highlights and shadows').toBeGreaterThan(
-          0.08,
-        );
+        // The readback above proves the corners clear; on the presented canvas the spectrum runs to the
+        // edge by design and its halo may brush a corner, so the page-surface check allows for that.
+        expect(stage.cornerSpread, 'the page surface must show through the canvas corners').toBeLessThan(0.15);
+        expect(stage.distinctBuckets, 'the presented canvas must carry the glass and the light').toBeGreaterThan(40);
+        expect(stage.centreContrast, 'the presented canvas must alternate light, rim and clear').toBeGreaterThan(0.06);
       }
     });
 
     test(`advances the sequence under the pair rule and holds when paused through ${backend}`, async () => {
-      await target.navigate(`/loader?graphicsBackend=${backend}`);
+      await target.navigate(`/loader/glass?graphicsBackend=${backend}`);
       await waitForReady();
       await expect
         .poll(async () => readField('transitionCount'), { timeout: sequenceTimeout })
@@ -377,16 +343,18 @@ test.describe('metal morph loader', () => {
     });
   }
 
-  test('renders one body of 40,962 vertices with the bloom chain enabled', async () => {
-    await target.navigate('/loader?graphicsBackend=webgpu');
+  test('renders one body of 10,242 vertices with the light sheet traced', async () => {
+    await target.navigate('/loader/glass?graphicsBackend=webgpu');
     const state = await waitForReady();
     expect(state.vertexCount).toBe(expectedVertexCount);
-    expect(state.isBloomEnabled).toBe(true);
+    // The traced light is bounded: forty rays, seven wavelengths, at most four interactions each.
+    expect(state.ribbonCount).toBeGreaterThan(40);
+    expect(state.ribbonCount).toBeLessThanOrEqual(40 * (1 + 7 * 9));
     expect(state.history).toHaveLength(1);
   });
 
   test('sustains the loop under a bounded frame interval', async () => {
-    await target.navigate('/loader?graphicsBackend=webgpu');
+    await target.navigate('/loader/glass?graphicsBackend=webgpu');
     await waitForReady();
     await target.delay(500);
     const intervals = await target.evaluate(
@@ -411,7 +379,7 @@ test.describe('metal morph loader', () => {
     const p95 = sorted[Math.floor(sorted.length * 0.95)]!;
     const state = await readState();
     await target.writeArtifact(
-      'metal-morph-frame-timing.json',
+      'glass-prism-frame-timing.json',
       JSON.stringify({
         backend: state?.backend,
         median,
@@ -423,41 +391,7 @@ test.describe('metal morph loader', () => {
     expect(median, 'median frame interval in milliseconds').toBeLessThan(400);
   });
 
-  for (const backend of ['webgpu', 'webgl'] as const satisfies readonly LoaderBackend[]) {
-    test(`shares one renderer across the inline spinners through ${backend}`, async () => {
-      await target.navigate(`/loader?graphicsBackend=${backend}`);
-      await waitForReady();
-      await expect
-        .poll(async () => readSpinnerDiagnostics().then((diagnostics) => diagnostics?.subscriberCount))
-        .toBe(0);
-
-      // Force the toggle: the switch sits below a stage that never stops moving, so the harness would wait
-      // for a stability the page does not offer.
-      await target.click(selectors.getByLabelText('Render 40 px and 96 px spinners'), {
-        force: true,
-        timeout: 15_000,
-      });
-
-      // Two spinners, one renderer: the count the browser's sixteen-context cap makes matter.
-      await expect
-        .poll(async () => readSpinnerDiagnostics().then((diagnostics) => diagnostics?.rendererCount), {
-          timeout: readyTimeout,
-        })
-        .toBe(1);
-      const diagnostics = await readSpinnerDiagnostics();
-      expect(diagnostics?.subscriberCount).toBe(2);
-      expect(diagnostics?.sourceSize).toBeGreaterThanOrEqual(32);
-
-      // Pixel evidence read from a spinner's own 2D canvas, which needs no adapter that can present.
-      await expect.poll(async () => sampleSpinnerCoverage(), { timeout: readyTimeout }).toBeGreaterThan(0.02);
-      await target.writeArtifact(
-        `metal-morph-spinner-diagnostics-${backend}.json`,
-        JSON.stringify({ ...(await readSpinnerDiagnostics()), coverage: await sampleSpinnerCoverage() }),
-      );
-    });
-  }
-
-  test('renders the same resting silhouette on both backends', async () => {
+  test('renders the same resting glass on both backends', async () => {
     await target.emulateReducedMotion('reduce');
     try {
       const webgpu = await captureRestingStage('webgpu');

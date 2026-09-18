@@ -1,0 +1,67 @@
+{
+  "blendColor": 0,
+  "color": 16777215,
+  "depthWrite": false,
+  "envMapRotation": [0, 0, 0, "XYZ"],
+  "inputNodes": {
+    "colorNode": "<nodeRef>",
+    "opacityNode": "<nodeRef>",
+    "positionNode": "<nodeRef>"
+  },
+  "metadata": {
+    "generator": "Material.toJSON",
+    "type": "Material",
+    "version": 4.7
+  },
+  "nodes": [
+    {
+      "components": "xyz",
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SplitNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "shaderNode": "<nodeRef>"
+      },
+      "type": "Node"
+    },
+    {
+      "type": "Node"
+    },
+    {
+      "components": "w",
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SplitNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "shaderNode": "<nodeRef>"
+      },
+      "type": "Node"
+    },
+    {
+      "type": "Node"
+    }
+  ],
+  "premultipliedAlpha": true,
+  "reflectivity": 1,
+  "refractionRatio": 0.98,
+  "transparent": true,
+  "type": "MeshBasicNodeMaterial"
+}

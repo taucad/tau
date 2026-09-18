@@ -48,6 +48,7 @@ import { GithubRepositoryPicker } from '#components/github/github-repository-pic
 import type { GithubRepositorySelection } from '#components/github/github-repository-picker.js';
 import { prepareLinkedGithubImport } from '#lib/github-linked-import.js';
 import { githubProjectBinding } from '#lib/github-project-binding.js';
+import { shareOrigin } from '#lib/share-origin.js';
 
 export const handle: Handle = {
   enableOverflowY: true,
@@ -799,7 +800,10 @@ export default function ImportRoute(): React.JSX.Element {
 
                       const queryString = parameters.size > 0 ? `?${parameters.toString()}` : '';
 
-                      return `${globalThis.location.origin}/i/${repoUrl}${queryString}`;
+                      /* Not `location.origin`: on desktop that is `app://tau`,
+                         which nobody can open and which does not even route
+                         `/i/*` (desktop-share-links blueprint, L3). */
+                      return `${shareOrigin()}/i/${repoUrl}${queryString}`;
                     }}
                   />
                 </div>

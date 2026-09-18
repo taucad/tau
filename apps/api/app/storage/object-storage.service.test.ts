@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { Readable as NodeReadable } from 'node:stream';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { CreateBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { Test } from '@nestjs/testing';
 import type { TestingModule } from '@nestjs/testing';
@@ -337,7 +337,7 @@ describe('ObjectStorageService', () => {
           // oxlint-disable-next-line eslint/no-await-in-loop -- multipart order is part of this storage check.
           const response = await fetch(uploadUrl, {
             method: 'PUT',
-            headers: { 'x-amz-checksum-sha256': checksumSha256 },
+            headers: service.uploadPartHeaders(checksumSha256),
             body: bytes,
           });
           expect(response.ok).toBe(true);
@@ -455,7 +455,7 @@ describe('ObjectStorageService', () => {
           // oxlint-disable-next-line eslint/no-await-in-loop -- each part is the durable resume boundary under test.
           const response = await fetch(uploadUrl, {
             method: 'PUT',
-            headers: { 'x-amz-checksum-sha256': checksumSha256 },
+            headers: service.uploadPartHeaders(checksumSha256),
             body: bytes,
           });
           expect(response.ok).toBe(true);
@@ -719,5 +719,97 @@ describe('ObjectStorageService', () => {
       expect(other).not.toBe(service);
       expect(other.account.bucket).toBe('tau-content');
     });
+  });
+
+  // W0b measured this against real R2: `UploadPart` carrying
+  // `x-amz-checksum-sha256` answers `501 NotImplemented`, and
+  // `CreateMultipartUpload` silently drops `ChecksumAlgorithm`. Only genuine
+  // AWS supports per-part SHA-256, so the endpoint class decides.
+  describe('multipart part checksums by endpoint class', () => {
+    const checksum = `${'A'.repeat(43)}=`;
+
+    const driverFor = (id: string, endpoint: string): ObjectStorageService =>
+      service.forAccount({
+        id,
+        endpoint,
+        region: 'auto',
+        bucket: 'tau-content',
+        forcePathStyle: true,
+        credentials: { accessKeyId: 'checksum-key', secretAccessKey: 'checksum-secret' },
+      });
+
+    const r2 = (): ObjectStorageService => driverFor('r2', 'https://account.r2.cloudflarestorage.com');
+    const aws = (): ObjectStorageService => driverFor('aws', 'https://s3.us-east-1.amazonaws.com');
+
+    const partArgs = {
+      namespace: 'blobs',
+      key: 'jobs/test/checksums/part',
+      uploadId: 'upload-1',
+      partNumber: 1,
+      checksumSha256: checksum,
+      expiresInSeconds: 60,
+    } as const;
+
+    /* eslint-disable @typescript-eslint/naming-convention -- AWS SDK command inputs use PascalCase fields */
+    type SentCommand = {
+      input: {
+        ChecksumAlgorithm?: string;
+        MultipartUpload?: { Parts?: ReadonlyArray<Record<string, unknown>> };
+      };
+    };
+
+    // The SDK's `send` overloads defeat spy typing, so the one cast stays here
+    // rather than at every assertion; the prototype is unchanged at runtime.
+    const sendable = S3Client.prototype as unknown as { send: (command: SentCommand) => Promise<unknown> };
+
+    it('should request a part checksum algorithm only on an AWS endpoint', async () => {
+      const send = vi.spyOn(sendable, 'send').mockResolvedValue({ UploadId: 'upload-1' });
+
+      try {
+        const args = { namespace: 'blobs', key: partArgs.key, contentType: 'application/octet-stream' } as const;
+        await r2().createMultipartUpload(args);
+        await aws().createMultipartUpload(args);
+
+        const [onR2, onAws] = send.mock.calls.map(([command]) => command.input);
+
+        expect(onR2).not.toHaveProperty('ChecksumAlgorithm');
+        expect(onAws).toHaveProperty('ChecksumAlgorithm', 'SHA256');
+      } finally {
+        send.mockRestore();
+      }
+    });
+
+    it('should sign a part checksum into the presigned upload URL only on an AWS endpoint', async () => {
+      await expect(r2().presignUploadPart(partArgs)).resolves.not.toContain('checksum-sha256');
+      await expect(aws().presignUploadPart(partArgs)).resolves.toContain('x-amz-checksum-sha256');
+    });
+
+    it('should tell the caller which part headers to send for each endpoint class', () => {
+      expect(r2().uploadPartHeaders(checksum)).toStrictEqual({});
+      expect(aws().uploadPartHeaders(checksum)).toStrictEqual({ 'x-amz-checksum-sha256': checksum });
+    });
+
+    it('should complete a non-AWS multipart upload by ETag alone', async () => {
+      const send = vi.spyOn(sendable, 'send').mockResolvedValue({});
+
+      try {
+        const args = {
+          namespace: 'blobs',
+          key: partArgs.key,
+          uploadId: partArgs.uploadId,
+          parts: [{ partNumber: 1, etag: 'etag-1', checksumSha256: checksum }],
+        } as const;
+        await r2().completeMultipartUpload(args);
+        await aws().completeMultipartUpload(args);
+
+        const [onR2, onAws] = send.mock.calls.map(([command]) => command.input.MultipartUpload?.Parts?.[0]);
+
+        expect(onR2).toStrictEqual({ PartNumber: 1, ETag: 'etag-1' });
+        expect(onAws).toStrictEqual({ PartNumber: 1, ETag: 'etag-1', ChecksumSHA256: checksum });
+      } finally {
+        send.mockRestore();
+      }
+    });
+    /* eslint-enable @typescript-eslint/naming-convention -- end AWS SDK PascalCase inputs scope */
   });
 });

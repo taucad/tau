@@ -208,12 +208,13 @@ const isNoSuchKey = (error: unknown): boolean =>
  *
  * Charter D8 puts every other endpoint on `WHEN_REQUIRED`, which still sends
  * the checksums an operation requires (`DeleteObjects`) and the ones callers
- * pass explicitly (multipart SHA-256, `checksumSha256`), and stops the SDK
+ * pass explicitly (`checksumSha256` on a single-part put), and stops the SDK
  * adding a CRC32 trailer of its own to every request.
  *
- * What is actually established: the local MinIO accepts a default-mode put, so
- * `WHEN_REQUIRED` is not a fix for a reproduced MinIO failure. It is the mode
- * D8 specifies for non-AWS endpoints, and the R2 evidence is owed by W0b.
+ * It also decides per-part multipart checksums. W0b measured real R2: it
+ * silently drops `ChecksumAlgorithm` on `CreateMultipartUpload` and answers
+ * `501 NotImplemented` to an `UploadPart` carrying `x-amz-checksum-sha256`.
+ * MinIO accepts both, so only AWS is treated as supporting them.
  */
 const isAwsEndpoint = (endpoint: string): boolean => {
   try {
@@ -250,6 +251,13 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
   private readonly privateBucket: string;
 
   private readonly publicBaseUrl: string;
+
+  /**
+   * Whether this endpoint supports per-part SHA-256 on a multipart upload.
+   * Only AWS does (see {@link isAwsEndpoint}); elsewhere per-part integrity
+   * rests on the part ETag (MD5) that `CompleteMultipartUpload` verifies.
+   */
+  private readonly supportsPartChecksums: boolean;
 
   // Pnpm currently resolves the presigner and S3 client through two compatible
   // @smithy/types patch versions. Keep that package-manager detail at this
@@ -302,7 +310,9 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
       },
     };
 
-    if (!isAwsEndpoint(endpoint)) {
+    this.supportsPartChecksums = isAwsEndpoint(endpoint);
+
+    if (!this.supportsPartChecksums) {
       clientConfig.requestChecksumCalculation = 'WHEN_REQUIRED';
       clientConfig.responseChecksumValidation = 'WHEN_REQUIRED';
     }
@@ -596,7 +606,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         Bucket: this.resolveBucket(args.tier),
         Key: resolvedKey,
         ContentType: args.contentType,
-        ChecksumAlgorithm: 'SHA256',
+        ...(this.supportsPartChecksums ? { ChecksumAlgorithm: 'SHA256' } : {}),
       }),
     );
     if (!response.UploadId) {
@@ -621,10 +631,18 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         Key: resolvedKey,
         UploadId: args.uploadId,
         PartNumber: args.partNumber,
-        ChecksumSHA256: args.checksumSha256,
+        ...(this.supportsPartChecksums ? { ChecksumSHA256: args.checksumSha256 } : {}),
       }),
       args.expiresInSeconds,
     );
+  }
+
+  /**
+   * The headers a client must send with a URL from {@link presignUploadPart}.
+   * Empty off AWS, where a part checksum is rejected outright.
+   */
+  public uploadPartHeaders(checksumSha256: string): Readonly<Record<string, string>> {
+    return this.supportsPartChecksums ? { 'x-amz-checksum-sha256': checksumSha256 } : {};
   }
 
   public async uploadPart(args: {
@@ -644,7 +662,7 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         UploadId: args.uploadId,
         PartNumber: args.partNumber,
         Body: args.body,
-        ChecksumSHA256: args.checksumSha256,
+        ...(this.supportsPartChecksums ? { ChecksumSHA256: args.checksumSha256 } : {}),
       }),
     );
     return {
@@ -667,10 +685,12 @@ export class ObjectStorageService implements ObjectStorageServiceContract {
         Key: resolvedKey,
         UploadId: args.uploadId,
         MultipartUpload: {
+          // Off AWS the parts list carries ETags only, and the part ETag (MD5)
+          // that CompleteMultipartUpload verifies is the per-part integrity check.
           Parts: args.parts.map((part) => ({
             PartNumber: part.partNumber,
             ETag: part.etag,
-            ChecksumSHA256: part.checksumSha256,
+            ...(this.supportsPartChecksums ? { ChecksumSHA256: part.checksumSha256 } : {}),
           })),
         },
       }),

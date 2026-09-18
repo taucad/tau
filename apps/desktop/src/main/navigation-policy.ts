@@ -166,12 +166,25 @@ export const contentSecurityPolicy = (connectOrigins: readonly string[]): string
  * forgotten picked folder rather than the browser's "this is just a tab"
  * reasoning. The grant stays until wave S4 of
  * `docs/research/host-agnostic-transport-substrate-blueprint.md` relocates the
- * types cache out of OPFS. Everything else (camera, microphone, geolocation,
- * notifications, clipboard read, background sync, …) is refused: nothing in the
- * app asks for one, so a request is either a dependency doing something
- * unexpected or a document that should not have loaded.
+ * types cache out of OPFS.
+ *
+ * `clipboard-sanitized-write` is what Chromium asks for on every
+ * `navigator.clipboard.writeText`/`write`, and the app asks for it in nine
+ * places — the invitation link, the share links, the API-key secret, a file
+ * path, a trace expression, the viewport image. Denying it rejected all nine
+ * with `NotAllowedError: Write permission denied.` (the defect behind
+ * `docs/research/desktop-share-links-blueprint.md`). Sanitized write is text
+ * and image only and Chromium still requires a user gesture, and the renderer
+ * is pinned to `app://tau` by the navigation policy above, so the grant adds no
+ * reachable surface. Clipboard *read* is a different permission and stays
+ * refused: nothing in the app reads the clipboard.
+ *
+ * Everything else (camera, microphone, geolocation, notifications, clipboard
+ * read, background sync, …) is refused: nothing in the app asks for one, so a
+ * request is either a dependency doing something unexpected or a document that
+ * should not have loaded.
  */
-export const grantedPermissions: ReadonlySet<string> = new Set(['persistent-storage']);
+export const grantedPermissions: ReadonlySet<string> = new Set(['persistent-storage', 'clipboard-sanitized-write']);
 
 /**
  * Whether one permission request or check may be granted.

@@ -195,7 +195,7 @@ export function ProjectShareAction(): React.JSX.Element {
         <Button
           variant='ghost'
           size='xs'
-          className='max-md:size-8'
+          className='h-7 px-2 max-md:size-8'
           onClick={() => {
             openPanel('share');
           }}

@@ -445,7 +445,8 @@ function FloatingPanelContentHeaderActions({
   return (
     <div
       className={cn(
-        'flex items-center pl-1 max-md:gap-1.5',
+        // `gap-1` and no inset: the same spacing the Dockview pane-action rows use.
+        'flex items-center max-md:gap-1',
         'md:opacity-0 md:transition-opacity md:duration-150 md:ease-in-out',
         'group-hover/floating-panel:opacity-100',
         className,

@@ -54,7 +54,7 @@ export function RevisionStatusAction(): React.JSX.Element | undefined {
           <Button
             variant='ghost'
             size='sm'
-            className='max-w-full gap-1.5 px-2 text-xs'
+            className='h-7 max-w-full gap-1.5 px-2 text-xs'
             aria-label={`Open Revisions. You are on ${accessibleStatus}.`}
             onClick={() => {
               openPanel('revisions');

@@ -29,11 +29,11 @@ import {
   connectPickedFolder,
   ensureFilesPane,
   expectCount,
+  expectRenderCycleSince,
   expectSignedIn,
   expectVisible,
   fileTreeItemOf,
-  geometryCacheEntries,
-  geometryCacheSnapshot,
+  renderCycleCount,
   selectChatModel,
   selectKernel,
   submitPrompt,
@@ -65,14 +65,6 @@ v 0 ${String(size)} 0
 vn 0 0 1
 f 1//1 2//1 3//1
 `;
-
-const waitForNewGeometry = async (sourcePath: string, before: ReadonlySet<string>): Promise<void> => {
-  await expect
-    .poll(() => geometryCacheEntries(sourcePath).some(({ actionDigest }) => !before.has(actionDigest)), {
-      timeout: 120_000,
-    })
-    .toBe(true);
-};
 
 const openInViewer = async (page: Page, entryPath: string): Promise<void> => {
   await ensureFilesPane(page);
@@ -503,11 +495,11 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
       // opened the read side. Keeping it open with no bytes holds that Promise.
       fifoWriter = await openPendingFifoWriter(blockedMaterialPath);
 
-      const beforeRecovery = geometryCacheSnapshot(modelPath);
+      const beforeRecovery = await renderCycleCount(page);
       // Watcher supersession aborts the held conversion. The new render and
       // export must complete while the cancelled filesystem read is still held.
       writeFileSync(modelPath, objectSource(2, recoveredMaterialEntry), 'utf8');
-      await waitForNewGeometry(modelPath, beforeRecovery);
+      await expectRenderCycleSince(page, beforeRecovery);
 
       const recoveredGlbPath = await exportToProject(page, projectRoot, {
         sourceEntry: modelEntry,
@@ -526,9 +518,9 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
       // that settlement neither resumes stale work nor poisons the client.
       closeFifoWriter();
       unlinkSync(blockedMaterialPath);
-      const beforeRepeat = geometryCacheSnapshot(modelPath);
+      const beforeRepeat = await renderCycleCount(page);
       writeFileSync(modelPath, objectSource(3, finalMaterialEntry), 'utf8');
-      await waitForNewGeometry(modelPath, beforeRepeat);
+      await expectRenderCycleSince(page, beforeRepeat);
       const repeatedPlyPath = await exportToProject(page, projectRoot, {
         sourceEntry: modelEntry,
         extension: 'ply',
@@ -549,10 +541,10 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
       await expectCount(modelLog.getByText('Transcoding glb -> ply', { exact: true }), 2);
       await expectCount(modelLog.getByText('Successfully transcoded to ply', { exact: true }), 2);
 
-      // The cache is project-wide; nested exports do not own an exports/.tau cache.
-      const beforePlyOpen = geometryCacheSnapshot(modelPath);
+      // A nested export renders through the same project runtime as its source.
+      const beforePlyOpen = await renderCycleCount(page);
       await openInViewer(page, 'exports/result.ply');
-      await waitForNewGeometry(modelPath, beforePlyOpen);
+      await expectRenderCycleSince(page, beforePlyOpen);
       await page.reload();
       await expectVisible(page.locator('.dv-tab[aria-label="exports/result.ply"]'), 60_000);
       await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas').first(), 120_000);

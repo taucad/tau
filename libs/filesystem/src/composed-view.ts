@@ -494,7 +494,17 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
           copyTree: async (source: string, target: string, options?: { admits?: TreeSearchOptions['admits'] }) => {
             const from = readablePath(canonical(source));
             const [to] = await writableTargets([target]);
-            return base.copyTree!(from, to!, { admits: admitsVisible(from, options?.admits) });
+            /* Every entry a copy writes is a target too: `src/.git` is authored
+             * where it sits, but copied to the project root it would be the
+             * control plane, and a records row is not the agent's to write. */
+            const writableBelow = (relativePath: string): boolean => {
+              const { agentAccess } = classify(joinRelativePath(to!, relativePath));
+              return agentAccess !== 'hidden' && (!masked || agentAccess === 'read-write');
+            };
+            const visible = admitsVisible(from, options?.admits);
+            return base.copyTree!(from, to!, {
+              admits: (relativePath, kind) => visible(relativePath, kind) && writableBelow(relativePath),
+            });
           },
         }),
     ...(base.duplicate === undefined

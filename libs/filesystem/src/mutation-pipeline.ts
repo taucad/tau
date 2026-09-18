@@ -14,7 +14,8 @@
  * inside them, mutate, then record the completion — shared file pool, per-root
  * tree index, one summary change event, cross-tab notification — or, on a
  * half-finished mutation, drop exactly the derivatives that became
- * untrustworthy. A batch does that once for the batch, not once per file.
+ * untrustworthy. A tree copy does that once for the copy; a batch write
+ * settles per file, so a rejected path costs only its own derivatives.
  *
  * It knows nothing about path classes, routes or project manifests: the mask is
  * the caller's (`admits` is the only filter it takes, and the composed view

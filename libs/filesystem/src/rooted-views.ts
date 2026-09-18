@@ -49,8 +49,9 @@ import { getEventOrigin } from '#event-origin-registry.js';
  * The mutating porcelain a rooted view serves (charter D4).
  *
  * Batch operations, not sugar over N port writes: each one runs in the mutation
- * pipeline with today's semantics — one lock set, one summary event, targeted
- * invalidation (authority Rule 5a) — and is confined to the captured mount.
+ * pipeline with today's semantics (authority Rule 5a) — a copy takes one lock
+ * set and emits one summary event; a batch write settles per file and drops
+ * only the rejected paths' derivatives — and is confined to the captured mount.
  *
  * Unmasked here, like every other rooted primitive. `composeView` mirrors this
  * surface and is where a hidden operand is refused before provider I/O and
@@ -334,6 +335,7 @@ export class RootedViews {
       });
     };
     const duplicate = async (source: string, target: string): Promise<void> => {
+      assertMutableRoot(resolveLocal(target).localPath);
       await writeFile(target, await readFile(source));
     };
     const bulkMove = async (edits: readonly BulkMoveEdit[]): Promise<BulkMoveResult> =>

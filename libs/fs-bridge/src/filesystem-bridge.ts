@@ -102,6 +102,18 @@ const isFileSystemBridgeConnection = (
 /** Milliseconds. */
 const defaultUiCoalescingWindow = 500;
 
+/**
+ * Milliseconds. A pending-project commit outlives the bridge's 30 s default
+ * because it is the one call whose work scales with the project: it waits for
+ * a cross-tab lock, recursively removes a half-written target, then writes
+ * every file and the manifest one at a time before reading the manifest back.
+ * On the slowest backend (Web Access, tens of milliseconds a file) five
+ * minutes covers thousands of files — far past anything Tau creates, imports
+ * or duplicates — so a real commit cannot reach it, while a peer that dies
+ * mid-call now fails project creation instead of wedging it for the session.
+ */
+const pendingProjectCommitTimeout = 300_000;
+
 /** One authority path in a scoped port's own namespace, or `undefined` when it is outside that root. */
 const relativeToRoot = (root: string, path: string): string | undefined => {
   if (root === '/') {
@@ -1089,7 +1101,8 @@ export function createFileSystemBridgeProxy(
     FileSystemBridgeHello
   >(resolvedBridge.port, {
     prepareCallArgs: cloneWriteArgsForTransfer,
-    resolveCallTimeout: (method) => (method === 'commitPendingProjectDirectory' ? 'none' : undefined),
+    resolveCallTimeout: (method) =>
+      method === 'commitPendingProjectDirectory' ? pendingProjectCommitTimeout : undefined,
     protocolSchemas: fileSystemBridgeSchemas,
   });
   let isDisposed = false;

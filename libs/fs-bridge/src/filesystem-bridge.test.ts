@@ -15,6 +15,7 @@ import {
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import type { WatchEvent, WatchRequest, WorkspaceScope } from '@taucad/filesystem';
 import type { ChangeEvent } from '@taucad/types';
+import type { FileSystemBridgeProxy } from '@taucad/fs-bridge';
 import {
   bindMutationContextForPort,
   createFileSystemBridge,
@@ -37,6 +38,32 @@ function fsBridgePort(port: MessagePort, label: string): Port<unknown> {
     wrapped.start();
   }
   return wrapped;
+}
+
+/** A proxy over a bridge server that answers only `commitPendingProjectDirectory`. */
+function pendingCommitBridge(
+  label: string,
+  commitPendingProjectDirectory: (input: unknown) => Promise<unknown>,
+): { proxy: FileSystemBridgeProxy; close: () => void } {
+  const channel = new MessageChannel();
+  createBridgeServer({ commitPendingProjectDirectory }, fsBridgePort(channel.port1, `${label}-server`), {
+    hello: createFileSystemBridgeHello({
+      state: 'ready',
+      capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
+      watchable: false,
+    }),
+    protocolSchemas: fileSystemBridgeSchemas,
+  });
+  const proxy = createFileSystemBridgeProxy({
+    port: fsBridgePort(channel.port2, `${label}-client`),
+    dispose: channel.port2.close.bind(channel.port2),
+  });
+  const close = (): void => {
+    proxy.dispose();
+    channel.port1.close();
+    vi.useRealTimers();
+  };
+  return { proxy, close };
 }
 
 function firstFailedBulkMoveError(result: unknown): unknown {
@@ -616,42 +643,23 @@ describe('createFileSystemBridgeProxy', () => {
     proxy.dispose();
   });
 
-  it('clones pending-commit bytes before transfer and exempts only that method from the bridge deadline', async () => {
+  it('clones pending-commit bytes before transfer and outlives the default bridge deadline', async () => {
     vi.useFakeTimers();
-    const channel = new MessageChannel();
     let resolveCommit!: () => void;
     const commitGate = new Promise<void>((resolve) => {
       resolveCommit = resolve;
     });
     const received = vi.fn();
-    createBridgeServer(
-      {
-        async commitPendingProjectDirectory(input: unknown): Promise<{ status: 'committed' }> {
-          received(input);
-          await commitGate;
-          return { status: 'committed' };
-        },
-      },
-      fsBridgePort(channel.port1, 'fs-bridge-pending-commit-server'),
-      {
-        hello: createFileSystemBridgeHello({
-          state: 'ready',
-          capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
-          watchable: false,
-        }),
-        protocolSchemas: fileSystemBridgeSchemas,
-      },
-    );
-    const proxy = createFileSystemBridgeProxy({
-      port: fsBridgePort(channel.port2, 'fs-bridge-pending-commit-client'),
-      dispose() {
-        channel.port2.close();
-      },
+    const { proxy, close } = pendingCommitBridge('fs-bridge-pending-commit', async (input) => {
+      received(input);
+      await commitGate;
+      return { status: 'committed' };
     });
     const content = new Uint8Array([1, 2, 3]);
     const manifest = new Uint8Array([4, 5, 6]);
 
     try {
+      await proxy.ready;
       const pending = proxy.commitPendingProjectDirectory({
         providerBasePath: 'pending',
         scope: { backend: 'indexeddb' },
@@ -666,9 +674,32 @@ describe('createFileSystemBridgeProxy', () => {
       await expect(pending).resolves.toEqual({ status: 'committed' });
       expect(received).toHaveBeenCalledOnce();
     } finally {
-      proxy.dispose();
-      channel.port1.close();
-      vi.useRealTimers();
+      close();
+    }
+  });
+
+  it('should time out a project commit that never answers', async () => {
+    vi.useFakeTimers();
+    // `Promise.race([])` never settles: the peer accepted the call and died.
+    const { proxy, close } = pendingCommitBridge('fs-bridge-stalled-commit', async () => Promise.race<never>([]));
+
+    try {
+      // `ready` first, or the channel's 30 s hello deadline closes it instead.
+      await proxy.ready;
+      const pending = proxy.commitPendingProjectDirectory({
+        providerBasePath: 'pending',
+        scope: { backend: 'indexeddb' },
+        files: { 'main.ts': { content: new Uint8Array([1, 2, 3]) } },
+        manifest: new Uint8Array([4, 5, 6]),
+      });
+
+      // Attached before the clock moves: an unhandled rejection inside
+      // `advanceTimersByTimeAsync` fails the run.
+      const rejection = expect(pending).rejects.toThrow("Bridge call 'commitPendingProjectDirectory' timed out");
+      await vi.advanceTimersByTimeAsync(300_001);
+      await rejection;
+    } finally {
+      close();
     }
   });
 });

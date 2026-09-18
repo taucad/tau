@@ -24,7 +24,7 @@ import { NotFoundException } from '@nestjs/common';
 import { gitLfsObjectKey } from '#api/git/git.constants.js';
 import { materializePublication, readPublishedTree } from '#api/publications/publication-materializer.js';
 import type { MaterializerDependencies } from '#api/publications/publication-materializer.js';
-import type { ObjectStorageServiceContract } from '#storage/object-storage.service.js';
+import type { ObjectStorageServiceContract, PutBlobResult } from '#storage/object-storage.service.js';
 import { blobKeyFromSha256Hex, sha256HexFromBytes } from '#storage/sha256.utils.js';
 
 /**
@@ -88,9 +88,13 @@ const createRecordingStorage = (
 }> => {
   const written = new Map<string, Uint8Array<ArrayBuffer>>();
   const storage: ObjectStorageServiceContract = {
-    putBlob: vi.fn(async (args) => {
+    putBlob: vi.fn(async (args): Promise<PutBlobResult> => {
       written.set(`${args.namespace}/${args.key}`, new Uint8Array(Buffer.from(args.body as Uint8Array<ArrayBuffer>)));
-      return { etag: 'etag', alreadyExisted: false };
+      return { lost: false, etag: 'etag', alreadyExisted: false };
+    }),
+    deleteBlobs: vi.fn(async () => ({ deleted: 0 })),
+    listObjects: vi.fn(async function* listObjectsStub() {
+      yield* [];
     }),
     getBlob: vi.fn(async (args: Parameters<ObjectStorageServiceContract['getBlob']>[0]) => {
       const stored = lfsObjects.get(args.key) ?? written.get(`${args.namespace}/${args.key}`);

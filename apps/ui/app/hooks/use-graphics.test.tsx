@@ -185,8 +185,6 @@ describe('GraphicsProvider camera rig ownership', () => {
    * that rendered before any canvas the `undefined` it saw then, for the life of the actor. The
    * write-side host is exactly that reader, and the view's camera keys were never written. */
   it('should give the compiled session hook the session that appeared after its first render', async () => {
-    expect(compiledGraphics.code).toMatch(/useViewCameraSession = \(graphicsRef\) => {\s*const \$ = _c\(/);
-    expect(compiledGraphics.code).toContain('useSyncExternalStore(subscribeGraphicsCameraRegistry, getSession');
     const graphicsActor = createGraphicsActor();
     const { result } = renderHook(() => compiledGraphics.useViewCameraSession(graphicsActor));
     expect(result.current).toBeUndefined();

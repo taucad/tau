@@ -10,11 +10,13 @@ This directory owns local service and observability configuration. Deployment/Ia
 
 Keep local MinIO behavior compatible with the application storage contract. Public R2 delivery uses a custom domain and zone cache rules without an extra Worker hop. Private publication data and manifests remain in the private bucket behind application authorization; the old single-public-bucket description is superseded.
 
+Object storage is also where Tau Cloud's git repositories durably live: packs plus one manifest per repository under `tenants/<ownerId>/`, with LFS objects beside them and leases held only in a Machine's own temporary directory. No volume, no `TAU_GIT_ROOT` (boot refuses it) and no nightly bundle. The local bootstrap must create every bucket the suites need, including `tau-content-restore` for the restore path; a bucket that exists only because an old dev volume kept it is not bootstrapped. Operating the deployed substrate is the [revisions cloud handbook](../docs/architecture/revisions-cloud-handbook.md).
+
 Storage namespace changes must reconcile `apps/api/app/storage/storage.constants.ts`, cache-rule prefixes and seeding/readiness checks. Keep the health probe uncached. Readiness must exercise the actual object-storage capability, not just environment-variable presence.
 
 ## Deployment topology
 
-Cloudflare owns DNS; Netlify hosts staging and production UIs with Fly APIs. The committed `apps/ui/netlify.toml` owns build commands and non-sensitive defaults. Managed environments own secrets; do not copy credentials into source, instruction files or logs. Keep staging/production SSR bundling consistent with that build path.
+Cloudflare owns DNS; Netlify hosts staging and production UIs with Fly APIs. The API declares its process groups in `apps/api/fly.*.toml`: `app` runs at two or more stateless Machines with no mount, and jobs that must run once (purge, LFS retirement, blob collection, restore) belong to the single-Machine `revisions-maintenance` group, never to `app`. The committed `apps/ui/netlify.toml` owns build commands and non-sensitive defaults. Managed environments own secrets; do not copy credentials into source, instruction files or logs. Keep staging/production SSR bundling consistent with that build path.
 
 Follow [compatibility policy](../docs/policy/compatibility-policy.md) for cross-origin isolation. Current UI headers use COEP `require-corp`; preserve the required API CORP/CORS contract and same-origin resource routes. Verify the resulting browser capability instead of assuming headers alone are sufficient.
 

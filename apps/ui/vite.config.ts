@@ -118,6 +118,10 @@ const selfHostSourceOverrides = new Map([
     '#routes/w.$workspace.$project/chat-error-credits.self-host.js',
   ],
   [
+    '#routes/w.$workspace.$project/chat-error-provider-account.js',
+    '#routes/w.$workspace.$project/chat-error-provider-account.self-host.js',
+  ],
+  [
     '#routes/w.$workspace.$project/chat-message-data-usage.js',
     '#routes/w.$workspace.$project/chat-message-data-usage.self-host.js',
   ],

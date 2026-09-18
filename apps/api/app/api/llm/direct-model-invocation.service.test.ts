@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- LangChain usage metadata and provider wire fields use snake_case. */
+import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import { AIMessageChunk } from '@langchain/core/messages';
 import { DefaultChatTransport, readUIMessageStream } from 'ai';
@@ -172,6 +173,52 @@ describe('DirectModelInvocationService', () => {
     expect(await result.response.text()).toBe(
       `event: error\ndata: {"type":"error","code":"PROVIDER_ACCOUNT_EXHAUSTED","message":"${providerMessage}","error":{"type":"tau_gateway","code":"PROVIDER_ACCOUNT_EXHAUSTED","message":"${providerMessage}","details":{"providerId":"openai","providerCode":"credit_balance_exhausted","accountOwner":"operator"}}}\n\n`,
     );
+  });
+
+  it.each([
+    [
+      'response.failed',
+      `event: response.failed\ndata: ${JSON.stringify({
+        type: 'response.failed',
+        response: {
+          id: 'resp_1',
+          status: 'failed',
+          error: { code: 'server_error', message: 'The server had an error while processing your request.' },
+        },
+      })}\n\n`,
+      'The server had an error while processing your request.',
+    ],
+    [
+      'an error event',
+      `event: error\ndata: ${JSON.stringify({
+        type: 'error',
+        code: 'context_length_exceeded',
+        message: 'Your input exceeds the context window of this model.',
+      })}\n\n`,
+      'Your input exceeds the context window of this model.',
+    ],
+  ])('should log %s as the direct relay evidence of a terminal upstream failure', async (_label, frame, reason) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(frame, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream', 'x-request-id': 'req_fixture_1' },
+      }),
+    );
+    const logged = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const service = new DirectModelInvocationService(keyedConfig, {} as unknown as ModelService);
+
+    const result = await service.invoke(gatewayIntent());
+    if (result.state !== 'streaming') {
+      throw new Error('Expected stream');
+    }
+
+    // The frame reaches the client byte for byte; only the operator's log is new.
+    expect(await result.response.text()).toBe(frame);
+    expect(logged).toHaveBeenCalledTimes(1);
+    const line = String(logged.mock.calls[0]?.[0]);
+    expect(line).toContain('Provider stream failed for openai');
+    expect(line).toContain('req_fixture_1');
+    expect(line).toContain(reason);
   });
 
   it('should refuse a helper turn before streaming when the provider account is exhausted', async () => {
